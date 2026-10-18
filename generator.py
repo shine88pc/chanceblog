@@ -2,6 +2,7 @@ import os
 import json
 import datetime
 import urllib.request
+import re
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 from datetime import timezone, timedelta
@@ -27,39 +28,49 @@ def save_history(history):
     with open("history.json", "w", encoding="utf-8") as f:
         json.dump(history, f, ensure_ascii=False, indent=2)
 
+def sanitize_folder_name(name):
+    # 폴더명으로 쓰기 부적절한 특수문자 제거 및 공백 정리
+    return re.sub(r'[\\/*?:"<>|]', "", name).strip()
+
 def generate_rss_feed():
     posts = []
     if os.path.exists("_posts"):
-        for filename in os.listdir("_posts"):
-            if filename.endswith(".md"):
-                filepath = os.path.join("_posts", filename)
-                try:
-                    with open(filepath, "r", encoding="utf-8") as f:
-                        content = f.read()
-                        title = filename
-                        date_str = filename[:10]
-                        if content.startswith("---"):
-                            parts = content.split("---", 2)
-                            if len(parts) >= 3:
-                                fm = parts[1]
-                                for line in fm.splitlines():
-                                    if line.startswith("title:"):
-                                        title = line.replace("title:", "").strip().strip('"')
-                        posts.append({"title": title, "filename": filename, "date": date_str})
-                except Exception:
-                    pass
+        # 하위 폴더까지 순회하며 모든 .md 파일 수집
+        for root, dirs, files in os.walk("_posts"):
+            for filename in files:
+                if filename.endswith(".md"):
+                    filepath = os.path.join(root, filename)
+                    try:
+                        with open(filepath, "r", encoding="utf-8") as f:
+                            content = f.read()
+                            title = filename
+                            date_str = filename[:10]
+                            if content.startswith("---"):
+                                parts = content.split("---", 2)
+                                if len(parts) >= 3:
+                                    fm = parts[1]
+                                    for line in fm.splitlines():
+                                        if line.startswith("title:"):
+                                            title = line.replace("title:", "").strip().strip('"')
+                            rel_path = os.path.relpath(filepath, ".").replace("\\", "/")
+                            posts.append({"title": title, "path": rel_path, "filename": filename, "date": date_str})
+                    except Exception:
+                        pass
     
     posts.sort(key=lambda x: x['filename'], reverse=True)
     
     rss_items = ""
     for p in posts[:20]:
-        link = f"https://shine88pc.github.io/chanceblog/#{p['filename']}"
+        link = f"https://shine88pc.github.io/chanceblog/#{p['path']}"
+        post_title = p['title']
+        post_date = p['date']
+        
         rss_items += f"""
         <item>
-            <title><![CDATA[{p['title']]]></title>
+            <title><![CDATA[{post_title}]]></title>
             <link>{link}</link>
             <guid>{link}</guid>
-            <pubDate>{p['date']}</pubDate>
+            <pubDate>{post_date}</pubDate>
         </item>
         """
     
@@ -76,7 +87,7 @@ def generate_rss_feed():
 """
     with open("feed.xml", "w", encoding="utf-8") as f:
         f.write(rss_content.strip())
-    print("RSS feed.xml 최종 빌드 완료")
+    print("RSS feed.xml 하위 폴더 순회 빌드 완료")
 
 def fetch_recent_news():
     url = "https://news.google.com/rss?hl=ko&gl=KR&ceid=KR:ko"
@@ -207,15 +218,24 @@ def generate_hot_topic_post():
         
         os.makedirs("_posts", exist_ok=True)
         
-        kr_filename = f"_posts/{date_str}-KR-{timestamp}.md"
+        # 카테고리별 하위 폴더 생성
+        kr_cat_folder = sanitize_folder_name(data.get("kr_category", "KR - 기타"))
+        en_cat_folder = sanitize_folder_name(data.get("en_category", "EN - Others"))
+        
+        kr_dir = os.path.join("_posts", kr_cat_folder)
+        en_dir = os.path.join("_posts", en_cat_folder)
+        os.makedirs(kr_dir, exist_ok=True)
+        os.makedirs(en_dir, exist_ok=True)
+        
+        kr_filename = os.path.join(kr_dir, f"{date_str}-KR-{timestamp}.md")
         with open(kr_filename, "w", encoding="utf-8") as f:
             f.write(data["kr_content"])
             
-        en_filename = f"_posts/{date_str}-EN-{timestamp}.md"
+        en_filename = os.path.join(en_dir, f"{date_str}-EN-{timestamp}.md")
         with open(en_filename, "w", encoding="utf-8") as f:
             f.write(data["en_content"])
             
-        print(f"개인 블로그 톤 포스트 생성 완료 ({data.get('kr_category')})")
+        print(f"카테고리 폴더별 포스트 생성 완료 ({kr_cat_folder}, {en_cat_folder})")
         
         if data.get("kr_title") not in history:
             history.append(data.get("kr_title"))

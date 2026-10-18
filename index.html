@@ -7,7 +7,6 @@
   <script src="[https://cdn.tailwindcss.com](https://cdn.tailwindcss.com)"></script>
   <script src="[https://cdn.jsdelivr.net/npm/marked/marked.min.js](https://cdn.jsdelivr.net/npm/marked/marked.min.js)"></script>
   <link rel="stylesheet" href="[https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css](https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css)">
-  <!-- FOUC 깜빡임 방지를 위한 즉시 테마 적용 스크립트 -->
   <script>
     (function() {
       const savedTheme = localStorage.getItem('theme') || 'dark';
@@ -207,7 +206,6 @@
     let allPostsData = [];
     let currentFilteredPosts = [];
 
-    // Initialize Theme Variables on Load
     function initTheme() {
       const savedTheme = localStorage.getItem('theme') || 'dark';
       applyThemeVariables(savedTheme);
@@ -263,17 +261,34 @@
       try {
         const res = await fetch(`[https://api.github.com/repos/$](https://api.github.com/repos/$){USER}/${REPO}/contents/${POSTS_DIR}`);
         if(!res.ok) throw new Error('Posts folder not found');
-        const files = await res.json();
+        const items = await res.json();
         
-        const mdFiles = files.filter(f => f.name.endsWith('.md')).reverse();
+        let mdFiles = [];
+        for (const item of items) {
+          if (item.type === 'file' && item.name.endsWith('.md')) {
+            mdFiles.push(item);
+          } else if (item.type === 'dir') {
+            const subRes = await fetch(item.url);
+            if (subRes.ok) {
+              const subItems = await subRes.json();
+              for (const subItem of subItems) {
+                if (subItem.type === 'file' && subItem.name.endsWith('.md')) {
+                  mdFiles.push(subItem);
+                }
+              }
+            }
+          }
+        }
+        
+        mdFiles.reverse();
         
         allPostsData = await Promise.all(mdFiles.map(async (file) => {
           const contentRes = await fetch(file.download_url);
           const rawText = await contentRes.text();
           
           let title = file.name;
-          let category = file.name.includes('-KR-') ? 'KR - 생각정리' : 'EN - Reflections';
-          let lang = file.name.includes('-KR-') ? 'kr' : 'en';
+          let category = file.path.includes('KR') ? 'KR - 생각정리' : 'EN - Reflections';
+          let lang = file.path.includes('KR') ? 'kr' : 'en';
           let image = '[https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1000&q=80](https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1000&q=80)';
           let tags = [];
 

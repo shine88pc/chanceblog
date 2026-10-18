@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<rss version="2.0">
+<channel>
+    <title>Chance_Blog</title>
+    <link>https://shine88pc.github.io/chanceblog/</link>
+    <description>Chance의 테크 &amp; AI 에세이 노트</description>
+    <language>ko</language>
+    
+        <item>
+            <title><![CDATA[국가직 전환 5년 차의 그늘: 순직 소방관 증가와 '이원화된 재정 구조' 논란]]></title>
+            <link>https://shine88pc.github.io/chanceblog/#2026-10-18-KR-225949.md</link>
+            <guid>https://shine88pc.github.io/chanceblog/#2026-10-18-KR-225949.md</guid>
+            <pubDate>2026-10-18</pubDate>
+        </item>
+        
+        <item>
+            <title><![CDATA[National Rank, Local Budget: The Dangerous Fiscal Divide Fueling South Korea's Firefighter Casualties]]></title>
+            <link>https://shine88pc.github.io/chanceblog/#2026-10-18-EN-225949.md</link>
+            <guid>https://shine88pc.github.io/chanceblog/#2026-10-18-EN-225949.md</guid>
+            <pubDate>2026-10-18</pubDate>
+        </item>
+        
+</channel>
+</rss>
