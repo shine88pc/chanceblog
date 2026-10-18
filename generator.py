@@ -1,15 +1,15 @@
 import os
 import json
 import datetime
-import google.generativeai as genai
+from google import genai
 
 # 1. 환경 변수에서 Gemini API 키 가져오기
 API_KEY = os.environ.get("GEMINI_API_KEY")
 if not API_KEY:
     raise ValueError("GEMINI_API_KEY 환경 변수가 설정되지 않았습니다.")
 
-# 공식 라이브러리에 API 키 설정
-genai.configure(api_key=API_KEY)
+# 최신 구글 공식 클라이언트 초기화
+client = genai.Client(api_key=API_KEY)
 
 # 2. 주제 풀 (Pool) 설정
 TOPIC_POOL = [
@@ -40,10 +40,7 @@ def select_topic(history):
     return TOPIC_POOL[len(history) % len(TOPIC_POOL)]
 
 def generate_blog_post(topic):
-    """구글 공식 SDK를 이용해 안정적으로 블로그 글 생성"""
-    # 가장 안정적인 최신 플래시 모델 지정
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    
+    """최신 google-genai SDK를 이용해 블로그 글 생성"""
     prompt = f"""
     당신은 전문 블로거입니다. 다음 주제에 대해 독자에게 유익하고 가독성이 좋은 블로그 포스팅을 작성해 주세요.
     
@@ -61,7 +58,11 @@ def generate_blog_post(topic):
     4. 친근하고 전문적인 어조를 사용할 것.
     """
     
-    response = model.generate_content(prompt)
+    # 최신 권장 모델 사용 (gemini-2.5-flash)
+    response = client.models.generate_content(
+        model='gemini-2.5-flash',
+        contents=prompt,
+    )
     return response.text
 
 def main():
