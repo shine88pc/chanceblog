@@ -76,7 +76,7 @@ def generate_rss_feed():
 """
     with open("feed.xml", "w", encoding="utf-8") as f:
         f.write(rss_content.strip())
-    print("RSS feed.xml 자동 생성 완료")
+    print("RSS feed.xml 최종 빌드 완료")
 
 def fetch_recent_news():
     url = "https://news.google.com/rss?hl=ko&gl=KR&ceid=KR:ko"
@@ -182,13 +182,13 @@ def generate_hot_topic_post():
       "kr_category": "KR - 카테고리명",
       "kr_tags": ["키워드1", "키워드2"],
       "kr_image": "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1000&q=80",
-      "kr_content": "---\\nlayout: post\\ntitle: \\"자연스러운 한글 블로그 제목\\"\\ncategory: \\"KR - 카테고리명\\"\\ntags: [\\'키워드1\\', \\'키워드2\\']\\nlang: kr\\nimage: \\"https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1000&q=80\\"\\n---\\n\\n![Thumbnail](https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1000&q=80)\\n\\n# 자연스러운 한글 블로그 제목\\n\\n깊이있는 본문 에세이 내용...",
+      "kr_content": "---\\nlayout: post\\ntitle: \\"자연스러운 한글 블로그 제목\\"\\ncategory: \\"KR - 카테고리명\\"\\ntags: [\\'키워드1\\', \\'키워드2\\']\\nlang: kr\\nimage: \\"https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1000&q=80\\"---\\n\\n![Thumbnail](https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1000&q=80)\\n\\n# 자연스러운 한글 블로그 제목\\n\\n깊이있는 본문 에세이 내용...",
       
       "en_title": "Engaging Personal English Title",
       "en_category": "EN - CategoryName",
       "en_tags": ["Keyword1", "Keyword2"],
       "en_image": "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1000&q=80",
-      "en_content": "---\\nlayout: post\\ntitle: \\"Engaging Personal English Title\\"\\ncategory: \\"EN - CategoryName\\"\\ntags: [\\'Keyword1\\', \\'Keyword2\\']\\nlang: en\\nimage: \\"https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1000&q=80\\"\\n---\\n\\n![Thumbnail](https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1000&q=80)\\n\\n# Engaging Personal English Title\\n\\nDetailed essay content..."
+      "en_content": "---\\nlayout: post\\ntitle: \\"Engaging Personal English Title\\"\\ncategory: \\"EN - CategoryName\\"\\ntags: [\\'Keyword1\\', \\'Keyword2\\']\\nlang: en\\nimage: \\"https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1000&q=80\\"---\\n\\n![Thumbnail](https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1000&q=80)\\n\\n# Engaging Personal English Title\\n\\nDetailed essay content..."
     }}
     """
     

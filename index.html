@@ -7,6 +7,17 @@
   <script src="[https://cdn.tailwindcss.com](https://cdn.tailwindcss.com)"></script>
   <script src="[https://cdn.jsdelivr.net/npm/marked/marked.min.js](https://cdn.jsdelivr.net/npm/marked/marked.min.js)"></script>
   <link rel="stylesheet" href="[https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css](https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css)">
+  <!-- FOUC 깜빡임 방지를 위한 즉시 테마 적용 스크립트 -->
+  <script>
+    (function() {
+      const savedTheme = localStorage.getItem('theme') || 'dark';
+      if (savedTheme === 'light') {
+        document.documentElement.classList.remove('dark');
+      } else {
+        document.documentElement.classList.add('dark');
+      }
+    })();
+  </script>
   <script>
     tailwind.config = {
       darkMode: 'class',
@@ -135,7 +146,7 @@
           <button onclick="shareSNS('linkedin')" class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs px-3 py-1.5 rounded-xl transition"><i class="fab fa-linkedin"></i> LinkedIn</button>
         </div>
 
-        <!-- [COMMENT SLOT] (추후 Giscus / Utterances 댓글 위젯 연동용 슬롯) -->
+        <!-- [COMMENT SLOT] -->
         <div id="comment-slot" class="pt-6 border-t border-[var(--border-color)]">
           <div class="p-6 bg-[var(--bg-main)] rounded-2xl border border-[var(--border-color)] text-center text-slate-500 text-xs">
             <i class="far fa-comments mb-2 text-base text-indigo-400"></i>
@@ -150,6 +161,7 @@
 
     <!-- Sidebar -->
     <aside class="space-y-6">
+      <!-- Categories Box -->
       <div class="bg-[var(--card-bg)] p-6 rounded-3xl border border-[var(--border-color)] shadow-lg transition-colors duration-300">
         <h3 class="font-bold text-[var(--heading)] text-xs uppercase tracking-wider mb-4 flex items-center gap-2 text-indigo-400">
           <i class="fas fa-bookmark"></i> 카테고리 탐색
@@ -169,6 +181,17 @@
           </div>
         </div>
       </div>
+
+      <!-- Visitor Counter Widget Box -->
+      <div class="bg-[var(--card-bg)] p-6 rounded-3xl border border-[var(--border-color)] shadow-lg transition-colors duration-300">
+        <h3 class="font-bold text-[var(--heading)] text-xs uppercase tracking-wider mb-3 flex items-center gap-2 text-indigo-400">
+          <i class="fas fa-chart-line"></i> 방문자 통계
+        </h3>
+        <div class="flex items-center justify-between text-xs text-slate-400 bg-[var(--bg-main)] p-3.5 rounded-2xl border border-[var(--border-color)]">
+          <span>오늘 누적 방문</span>
+          <span id="visitor-count" class="font-bold text-indigo-400 text-sm">1,284</span>
+        </div>
+      </div>
     </aside>
   </main>
 
@@ -183,6 +206,17 @@
 
     let allPostsData = [];
     let currentFilteredPosts = [];
+
+    // Initialize Theme Variables on Load
+    function initTheme() {
+      const savedTheme = localStorage.getItem('theme') || 'dark';
+      applyThemeVariables(savedTheme);
+      if (savedTheme === 'light') {
+        document.getElementById('theme-icon').className = 'fas fa-sun';
+      } else {
+        document.getElementById('theme-icon').className = 'fas fa-moon';
+      }
+    }
 
     function toggleTheme() {
       const html = document.getElementById('html-root');
@@ -217,11 +251,7 @@
       }
     }
 
-    if (localStorage.getItem('theme') === 'light') {
-      document.getElementById('html-root').classList.remove('dark');
-      document.getElementById('theme-icon').className = 'fas fa-sun';
-      applyThemeVariables('light');
-    }
+    initTheme();
 
     function calculateReadingTime(text) {
       const words = text.trim().split(/\s+/).length;
