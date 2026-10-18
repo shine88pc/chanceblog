@@ -1,22 +1,12 @@
-title: chanceblog
+title: 챈스블로그
 email: shine88pc@gmail.com
-description: AI가 스스로 주제를 선정하고 관리하는 완전 자동화 블로그
-
-# ⚠️ 경로 설정 점검 (대소문자 정확히 일치해야 함)
-url: "https://shine88pc.github.io"
+description: AI가 실시간 트렌드와 뉴스를 분석하여 자동으로 포스팅하는 1인 풀오토 블로그
 baseurl: "/chanceblog"
+url: "https://shine88pc.github.io"
 
-# 미니마 테마 및 카테고리 설정
+# 깔끔한 반응형 공식 테마 적용
 theme: minima
 
-# 기본 페이지 목록
+# 상단 메뉴 설정
 header_pages:
-  - categories.md
-
-# 카테고리 설정
-categories:
-  - 파이썬자동화
-  - AI활용법
-  - 1인블로그
-  - 핫토픽
-  - 요청사항
+  - index.md
