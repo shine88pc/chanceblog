@@ -11,204 +11,358 @@
   <!-- FontAwesome Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <script>
-    (function() {
-      const savedTheme = localStorage.getItem('theme') || 'dark';
-      if (savedTheme === 'light') {
-        document.documentElement.classList.remove('dark');
-      } else {
-        document.documentElement.classList.add('dark');
-      }
-    })();
-  </script>
-  <script>
     tailwind.config = {
       darkMode: 'class',
       theme: {
         extend: {
           colors: {
-            softbg: { dark: '#0b0f19', light: '#f8fafc' },
-            cardbg: { dark: '#161e2e', light: '#ffffff' },
-            bordercol: { dark: '#273548', light: '#e2e8f0' },
-            textcolor: { dark: '#cbd5e1', light: '#334155' },
-            headingcolor: { dark: '#f8fafc', light: '#0f172a' }
+            brand: {
+              50: '#fffbeb',
+              100: '#fef3c7',
+              400: '#fbbf24',
+              500: '#f59e0b',
+              600: '#d97706'
+            }
           }
         }
       }
     }
   </script>
   <style>
-    .prose p { margin-bottom: 1.6em; line-height: 1.9; font-size: 1.05rem; }
-    .dark .prose p { color: #cbd5e1; }
-    :not(.dark) .prose p { color: #334155; }
-    
-    .prose h1, .prose h2, .prose h3 { margin-top: 2em; margin-bottom: 0.8em; font-weight: 800; letter-spacing: -0.025em; }
-    .dark .prose h1, .dark .prose h2, .dark .prose h3 { color: #f8fafc; }
-    :not(.dark) .prose h1, :not(.dark) .prose h2, :not(.dark) .prose h3 { color: #0f172a; }
-    
-    .prose h1 { font-size: 1.8rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.4em; }
-    .prose h2 { font-size: 1.4rem; }
-    .prose ul, .prose ol { margin-bottom: 1.5em; padding-left: 1.5em; }
-    .prose li { margin-bottom: 0.6em; }
-    .prose img { margin: 2em 0; width: 100%; max-height: 420px; object-fit: cover; border-radius: 1rem; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2); }
-    .prose strong { font-weight: 700; }
-    .dark .prose strong { color: #f1f5f9; }
-    :not(.dark) .prose strong { color: #0f172a; }
-    .prose blockquote { border-left: 4px solid #6366f1; padding-left: 1rem; font-style: italic; margin: 1.5em 0; color: #94a3b8; }
+    .markdown-body h1 { font-size: 1.875rem; font-weight: 800; margin-top: 1.5rem; margin-bottom: 1rem; }
+    .markdown-body h2 { font-size: 1.5rem; font-weight: 700; margin-top: 1.25rem; margin-bottom: 0.75rem; }
+    .markdown-body h3 { font-size: 1.25rem; font-weight: 600; margin-top: 1rem; margin-bottom: 0.5rem; }
+    .markdown-body p { margin-bottom: 1rem; line-height: 1.75; }
+    .markdown-body ul { list-style-type: disc; padding-left: 1.5rem; margin-bottom: 1rem; }
+    .markdown-body ol { list-style-type: decimal; padding-left: 1.5rem; margin-bottom: 1rem; }
+    .markdown-body li { margin-bottom: 0.25rem; }
+    .markdown-body blockquote { border-left: 4px solid #f59e0b; padding-left: 1rem; font-style: italic; margin-bottom: 1rem; color: #a1a1aa; }
+    .markdown-body code { background-color: rgba(255, 255, 255, 0.1); padding: 0.2rem 0.4rem; border-radius: 0.25rem; font-size: 0.875em; }
+    .markdown-body pre { background-color: #18181b; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; margin-bottom: 1rem; border: 1px solid #27272a; }
+    .markdown-body pre code { background-color: transparent; padding: 0; }
+    .markdown-body img { border-radius: 0.75rem; max-width: 100%; height: auto; margin: 1.5rem 0; }
   </style>
 </head>
-<body class="bg-[var(--bg-main)] text-[var(--text-main)] font-sans antialiased min-h-screen flex flex-col selection:bg-indigo-500 selection:text-white transition-colors duration-300" 
-      style="--bg-main:#0b0f19; --card-bg:#161e2e; --border-color:#273548; --text-main:#cbd5e1; --heading:#f8fafc;">
+<body class="bg-zinc-950 text-zinc-100 min-h-screen flex flex-col font-sans transition-colors duration-200">
 
-  <!-- Header -->
-  <header class="bg-[var(--card-bg)]/80 backdrop-blur-xl border-b border-[var(--border-color)] sticky top-0 z-50 transition-colors duration-300">
-    <div class="max-w-5xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
-      <a href="./" class="flex items-center space-x-3 group">
-        <div class="w-9 h-9 bg-gradient-to-tr from-indigo-600 to-violet-500 rounded-xl flex items-center justify-center text-white font-black shadow-md group-hover:scale-105 transition">&lt;&gt;</div>
-        <span class="text-xl font-black bg-gradient-to-r from-blue-400 via-indigo-300 to-purple-400 bg-clip-text text-transparent">Chance_Blog</span>
+  <!-- Top Header -->
+  <header class="sticky top-0 z-40 w-full backdrop-blur-md bg-zinc-950/80 border-b border-zinc-800/80 transition-colors duration-200">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <!-- Header Logo with ⚡ -->
+      <a href="#" onclick="resetFilter(); return false;" class="flex items-center space-x-3 group">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 via-yellow-400 to-amber-300 flex items-center justify-center text-xl shadow-lg shadow-yellow-500/20 group-hover:scale-105 transition-transform duration-200">
+          <span class="select-none">⚡</span>
+        </div>
+        <div class="flex items-center">
+          <span class="text-xl font-black tracking-tight text-white group-hover:text-yellow-400 transition-colors">Chance<span class="text-yellow-400">_</span>Blog</span>
+          <span class="hidden sm:inline-block text-[11px] px-2 py-0.5 ml-2.5 font-semibold rounded-full bg-yellow-400/10 text-yellow-400 border border-yellow-400/25 tracking-wide">TECH & AI</span>
+        </div>
       </a>
+
+      <!-- Nav & Utility Actions -->
       <div class="flex items-center space-x-3">
-        <button onclick="toggleTheme()" class="text-slate-400 hover:text-white p-2 rounded-xl bg-[var(--card-bg)] border border-[var(--border-color)] transition" title="테마 전환">
-          <i id="theme-icon" class="fas fa-moon"></i>
+        <a href="https://github.com/shine88pc/chanceblog" target="_blank" rel="noopener noreferrer" class="p-2 text-zinc-400 hover:text-white transition-colors">
+          <i class="fa-brands fa-github text-lg"></i>
+        </a>
+        <button id="theme-toggle" onclick="toggleTheme()" class="p-2 text-zinc-400 hover:text-yellow-400 transition-colors rounded-lg bg-zinc-900 border border-zinc-800">
+          <i id="theme-icon" class="fa-solid fa-moon text-base"></i>
         </button>
-        <a href="./feed.xml" target="_blank" class="text-slate-400 hover:text-white p-2 rounded-xl bg-[var(--card-bg)] border border-[var(--border-color)] transition" title="RSS 피드">
-          <i class="fas fa-rss"></i>
-        </a>
-        <a href="https://github.com/shine88pc/chanceblog" target="_blank" class="text-slate-400 hover:text-white p-2 rounded-xl bg-[var(--card-bg)] border border-[var(--border-color)] transition" title="GitHub Repository">
-          <i class="fab fa-github"></i>
-        </a>
       </div>
     </div>
   </header>
 
-  <!-- Hero Profile Banner -->
-  <section class="border-b border-[var(--border-color)] bg-gradient-to-b from-slate-900/40 to-[var(--bg-main)] py-12 transition-colors duration-300">
-    <div class="max-w-5xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center gap-6">
-      <div class="w-20 h-20 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-2xl flex items-center justify-center text-white text-3xl font-black shadow-xl shadow-indigo-500/10 shrink-0 border border-indigo-400/20">
-        &lt;&gt;
+  <!-- Hero Banner with ⚡ -->
+  <section class="relative py-16 sm:py-20 px-4 overflow-hidden border-b border-zinc-800/80 bg-gradient-to-b from-zinc-900/70 via-zinc-950 to-zinc-950">
+    <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,_var(--tw-gradient-stops))] from-yellow-500/10 via-transparent to-transparent pointer-events-none"></div>
+    <div class="max-w-4xl mx-auto text-center relative z-10">
+      <!-- Hero Lightning Icon Badge -->
+      <div class="inline-flex items-center justify-center mb-6">
+        <div class="relative group cursor-pointer" onclick="resetFilter()">
+          <div class="absolute -inset-1 rounded-2xl bg-gradient-to-r from-yellow-400 to-amber-500 opacity-60 blur-lg group-hover:opacity-100 transition-opacity duration-300"></div>
+          <div class="relative w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-zinc-900 border border-yellow-400/40 flex items-center justify-center text-4xl sm:text-5xl shadow-2xl transition-transform duration-200 group-hover:scale-105">
+            <span class="select-none">⚡</span>
+          </div>
+        </div>
       </div>
-      <div class="text-center sm:text-left space-y-1">
-        <h1 class="text-2xl sm:text-3xl font-extrabold text-[var(--heading)] tracking-tight">기술과 일상을 기록하는 공간 👋</h1>
-        <p class="text-slate-400 text-sm sm:text-base leading-relaxed">급변하는 AI 트렌드와 개발 인사이트를 깊이 있는 에세이 형식으로 풀어냅니다.</p>
+      
+      <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-yellow-400/10 border border-yellow-400/25 text-yellow-400 text-xs sm:text-sm font-semibold mb-4">
+        <span>⚡ Real-Time Tech & AI Insight Engine</span>
       </div>
+      
+      <h1 class="text-3xl sm:text-5xl font-black tracking-tight text-white mb-4">
+        기술과 생각의 스파크, <span class="text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 via-amber-300 to-yellow-500">Chance_Blog</span>
+      </h1>
+      <p class="max-w-xl mx-auto text-sm sm:text-base text-zinc-400 leading-relaxed">
+        AI가 글로벌 테크 이슈, 미래 컴퓨팅, 정책 담론을 실시간 분석하고 기록하는 1인 풀오토 인사이트 노트
+      </p>
     </div>
   </section>
 
-  <!-- Main Content Container -->
-  <main class="max-w-5xl mx-auto px-4 sm:px-6 py-10 flex-1 w-full grid grid-cols-1 lg:grid-cols-3 gap-8">
-    
-    <!-- Post List & Article Detail -->
-    <div class="lg:col-span-2 space-y-6" id="app-content">
-      
-      <!-- Search Bar & Title Header -->
-      <div class="flex flex-col sm:flex-row items-center justify-between gap-4 border-b border-[var(--border-color)] pb-4">
-        <h2 class="text-lg font-bold text-[var(--heading)] flex items-center gap-2.5 w-full sm:w-auto" id="current-category-title">
-          <i class="fas fa-feather-alt text-indigo-400"></i> 최근 작성한 글
-        </h2>
-        <div class="relative w-full sm:w-64">
-          <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
-            <i class="fas fa-search text-xs"></i>
-          </span>
-          <input type="text" id="search-input" oninput="handleSearch(this.value)" placeholder="포스트 검색..." 
-                 class="w-full pl-9 pr-4 py-1.5 text-xs bg-[var(--card-bg)] border border-[var(--border-color)] rounded-xl text-[var(--text-main)] focus:outline-none focus:border-indigo-500 transition">
-        </div>
+  <!-- Main Content Area -->
+  <main class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 flex-grow w-full">
+    <!-- Search & Filter Controls -->
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+      <!-- Category Buttons -->
+      <div class="flex flex-wrap gap-2" id="category-filters">
+        <button onclick="filterCategory('ALL')" class="cat-btn px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-medium bg-yellow-400 text-zinc-950 font-semibold shadow-sm transition-all" data-cat="ALL">전체보기</button>
+        <button onclick="filterCategory('KR')" class="cat-btn px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-medium bg-zinc-900 text-zinc-300 hover:text-white border border-zinc-800 hover:border-zinc-700 transition-all" data-cat="KR">🇰🇷 한국어</button>
+        <button onclick="filterCategory('EN')" class="cat-btn px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-medium bg-zinc-900 text-zinc-300 hover:text-white border border-zinc-800 hover:border-zinc-700 transition-all" data-cat="EN">🌐 English</button>
       </div>
 
-      <!-- Article Cards Container -->
-      <div id="post-list" class="space-y-5">
-        <div class="py-16 text-center text-slate-500">
-          <i class="fas fa-spinner fa-spin text-3xl mb-3 text-indigo-500"></i>
-          <p>포스트를 불러오는 중입니다...</p>
-        </div>
-      </div>
-
-      <!-- Post Detail Content View -->
-      <div id="post-detail" class="hidden bg-[var(--card-bg)] p-6 sm:p-10 rounded-3xl shadow-2xl border border-[var(--border-color)] space-y-6 transition-colors duration-300">
-        <div class="flex items-center justify-between pb-4 border-b border-[var(--border-color)]">
-          <button onclick="closePost()" class="inline-flex items-center gap-2 text-sm font-semibold text-indigo-400 hover:text-indigo-300 transition">
-            <i class="fas fa-arrow-left"></i> 목록으로 돌아가기
-          </button>
-          <button onclick="copyPostLink()" class="inline-flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-white bg-[var(--bg-main)] border border-[var(--border-color)] px-3 py-1.5 rounded-xl transition">
-            <i class="fas fa-link"></i> 링크 복사
-          </button>
-        </div>
-        
-        <!-- SEO Tags Container -->
-        <div id="post-tags-container" class="flex flex-wrap gap-2 pt-2"></div>
-
-        <article id="markdown-body" class="prose max-w-none pt-2"></article>
-
-        <!-- Social Share Buttons -->
-        <div class="flex flex-wrap items-center gap-2 pt-4 border-t border-[var(--border-color)]">
-          <span class="text-xs text-slate-400 font-semibold mr-2">소셜 공유:</span>
-          <button onclick="shareSNS('twitter')" class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs px-3 py-1.5 rounded-xl transition"><i class="fab fa-twitter"></i> X (Twitter)</button>
-          <button onclick="shareSNS('facebook')" class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs px-3 py-1.5 rounded-xl transition"><i class="fab fa-facebook"></i> Facebook</button>
-          <button onclick="shareSNS('linkedin')" class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs px-3 py-1.5 rounded-xl transition"><i class="fab fa-linkedin"></i> LinkedIn</button>
-        </div>
-
-        <!-- [COMMENT SLOT] -->
-        <div id="comment-slot" class="pt-6 border-t border-[var(--border-color)]">
-          <div class="p-6 bg-[var(--bg-main)] rounded-2xl border border-[var(--border-color)] text-center text-slate-500 text-xs">
-            <i class="far fa-comments mb-2 text-base text-indigo-400"></i>
-            <p>독자 소통 공간 (GitHub Discussions 연동 슬롯)</p>
-          </div>
-        </div>
+      <!-- Search Input -->
+      <div class="relative max-w-xs w-full">
+        <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400 text-xs"></i>
+        <input type="text" id="search-input" oninput="handleSearch()" placeholder="제목 또는 태그 검색..." class="w-full pl-9 pr-4 py-1.5 text-xs sm:text-sm bg-zinc-900 border border-zinc-800 rounded-xl text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-yellow-400/50 transition-colors" />
       </div>
     </div>
 
-    <!-- Sidebar -->
-    <aside class="space-y-6">
-      <div class="bg-[var(--card-bg)] p-6 rounded-3xl border border-[var(--border-color)] shadow-lg transition-colors duration-300">
-        <h3 class="font-bold text-[var(--heading)] text-xs uppercase tracking-wider mb-4 flex items-center gap-2 text-indigo-400">
-          <i class="fas fa-bookmark"></i> 카테고리 탐색
-        </h3>
-        <div class="space-y-4 text-sm">
-          <button onclick="filterCategory('ALL')" class="w-full text-left font-bold text-indigo-400 hover:text-indigo-300 py-2.5 px-3.5 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 transition flex justify-between items-center group">
-            <span><i class="fas fa-th-large mr-2"></i> 전체 글 보기</span>
-            <span id="total-count-badge" class="text-xs bg-indigo-500/20 text-indigo-300 px-2.5 py-0.5 rounded-full font-bold">0</span>
-          </button>
-          <div>
-            <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2.5 px-1">🇰🇷 한글 에세이</p>
-            <ul class="space-y-1.5 text-[var(--text-main)]" id="kr-categories"></ul>
-          </div>
-          <div class="pt-4 border-t border-[var(--border-color)]">
-            <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2.5 px-1">🇺🇸 English Articles</p>
-            <ul class="space-y-1.5 text-[var(--text-main)]" id="en-categories"></ul>
-          </div>
-        </div>
+    <!-- Posts Grid -->
+    <div id="posts-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6">
+      <!-- Loading Placeholder -->
+      <div class="col-span-full py-16 text-center text-zinc-500">
+        <i class="fa-solid fa-circle-notch fa-spin text-2xl mb-3 text-yellow-400"></i>
+        <p class="text-sm">포스트를 불러오는 중입니다...</p>
       </div>
-
-      <!-- Visitor Counter Widget Box -->
-      <div class="bg-[var(--card-bg)] p-6 rounded-3xl border border-[var(--border-color)] shadow-lg transition-colors duration-300">
-        <h3 class="font-bold text-[var(--heading)] text-xs uppercase tracking-wider mb-3 flex items-center gap-2 text-indigo-400">
-          <i class="fas fa-chart-line"></i> 방문자 통계
-        </h3>
-        <div class="flex items-center justify-between text-xs text-slate-400 bg-[var(--bg-main)] p-3.5 rounded-2xl border border-[var(--border-color)]">
-          <span>오늘 누적 방문</span>
-          <span id="visitor-count" class="font-bold text-indigo-400 text-sm">1,284</span>
-        </div>
-      </div>
-    </aside>
+    </div>
   </main>
 
-  <footer class="bg-[var(--card-bg)] border-t border-[var(--border-color)] py-8 text-center text-xs text-slate-400 mt-auto transition-colors duration-300">
-    <p>© 2026 Chance_Blog. All rights reserved. Powered by GitHub Actions & Gemini API.</p>
+  <!-- Article Modal -->
+  <div id="post-modal" class="fixed inset-0 z-50 hidden bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto" onclick="closeModal(event)">
+    <div class="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-3xl w-full max-h-[90vh] flex flex-col shadow-2xl relative overflow-hidden my-auto" onclick="event.stopPropagation()">
+      <div class="flex items-center justify-between p-4 sm:p-6 border-b border-zinc-800 bg-zinc-950/60">
+        <span id="modal-category" class="px-2.5 py-1 rounded-full text-xs font-semibold bg-yellow-400/10 text-yellow-400 border border-yellow-400/20"></span>
+        <button onclick="closeModal()" class="text-zinc-400 hover:text-white p-1 rounded-lg hover:bg-zinc-800 transition-colors">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+      <div class="p-6 sm:p-8 overflow-y-auto space-y-4">
+        <h2 id="modal-title" class="text-2xl sm:text-3xl font-extrabold text-white leading-tight"></h2>
+        <div class="flex items-center gap-3 text-xs text-zinc-400 pb-2 border-b border-zinc-800/60">
+          <span id="modal-date"><i class="fa-regular fa-clock mr-1"></i></span>
+          <span id="modal-lang"><i class="fa-solid fa-globe mr-1"></i></span>
+        </div>
+        <div id="modal-image-container" class="hidden rounded-xl overflow-hidden border border-zinc-800">
+          <img id="modal-image" src="" alt="" class="w-full max-h-80 object-cover" />
+        </div>
+        <div id="modal-content" class="markdown-body text-zinc-300 text-sm sm:text-base"></div>
+        <div id="modal-tags" class="flex flex-wrap gap-1.5 pt-4 border-t border-zinc-800"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer class="border-t border-zinc-800/80 bg-zinc-950 py-8 px-4 text-center text-xs text-zinc-500">
+    <div class="flex items-center justify-center gap-2 mb-2">
+      <span class="text-yellow-400 font-bold text-sm">⚡ Chance_Blog</span>
+      <span>&bull;</span>
+      <span>Full-Auto Tech Journal</span>
+    </div>
+    <p>&copy; 2026 Chance. Powered by Gemini AI & GitHub Actions.</p>
   </footer>
 
   <script>
-    const USER = 'shine88pc';
-    const REPO = 'chanceblog';
-    const POSTS_DIR = '_posts';
+    let posts = [];
+    let currentCategory = 'ALL';
+    let currentQuery = '';
 
-    let allPostsData = [];
-    let currentFilteredPosts = [];
+    const fallbackPosts = [
+      "_posts/KR - 테크 이야기/2026-10-18-KR-233513.md",
+      "_posts/EN - Space & Robotics/2026-10-18-EN-233513.md",
+      "_posts/2026-10-18-KR-225949.md",
+      "_posts/2026-10-18-EN-225949.md"
+    ];
 
-    function initTheme() {
-      const savedTheme = localStorage.getItem('theme') || 'dark';
-      applyThemeVariables(savedTheme);
-      if (savedTheme === 'light') {
-        document.getElementById('theme-icon').className = 'fas fa-sun';
+    function parseFrontMatter(text) {
+      const fmRegex = /^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/;
+      const match = text.match(fmRegex);
+      if (!match) return { meta: {}, content: text };
+      const yaml = match[1];
+      const content = match[2];
+      const meta = {};
+      yaml.split(/\r?\n/).forEach(line => {
+        const colonIdx = line.indexOf(':');
+        if (colonIdx !== -1) {
+          const key = line.slice(0, colonIdx).trim();
+          let val = line.slice(colonIdx + 1).trim();
+          if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+            val = val.slice(1, -1);
+          } else if (val.startsWith('[') && val.endsWith(']')) {
+            try {
+              val = JSON.parse(val.replace(/'/g, '"'));
+            } catch (e) {
+              val = val.slice(1, -1).split(',').map(s => s.trim().replace(/['"]/g, ''));
+            }
+          }
+          meta[key] = val;
+        }
+      });
+      return { meta, content };
+    }
+
+    async function loadPosts() {
+      let postPaths = [];
+      try {
+        const res = await fetch('https://api.github.com/repos/shine88pc/chanceblog/git/trees/main?recursive=1');
+        if (res.ok) {
+          const data = await res.json();
+          postPaths = data.tree
+            .filter(item => item.path.startsWith('_posts/') && item.path.endsWith('.md'))
+            .map(item => item.path);
+        }
+      } catch (e) {
+        console.warn('GitHub API failed, using fallback list', e);
+      }
+
+      if (!postPaths || postPaths.length === 0) {
+        postPaths = fallbackPosts;
+      }
+
+      const loadedPosts = await Promise.all(
+        postPaths.map(async (path) => {
+          try {
+            const r = await fetch(encodeURI(path));
+            if (!r.ok) return null;
+            const rawText = await r.text();
+            const { meta, content } = parseFrontMatter(rawText);
+            const filename = path.split('/').pop().replace('.md', '');
+            const dateMatch = filename.match(/^(\d{4}-\d{2}-\d{2})/);
+            const date = dateMatch ? dateMatch[1] : (meta.date || '2026-10-18');
+            return {
+              path,
+              title: meta.title || filename,
+              category: meta.category || 'Tech',
+              tags: Array.isArray(meta.tags) ? meta.tags : [],
+              lang: meta.lang || (path.includes('KR') ? 'kr' : 'en'),
+              image: meta.image || '',
+              date,
+              content
+            };
+          } catch (err) {
+            return null;
+          }
+        })
+      );
+
+      posts = loadedPosts.filter(Boolean).sort((a, b) => b.date.localeCompare(a.date));
+      renderPosts();
+    }
+
+    function renderPosts() {
+      const container = document.getElementById('posts-grid');
+      let filtered = posts.filter(post => {
+        const matchCat = currentCategory === 'ALL' 
+          || (currentCategory === 'KR' && post.lang === 'kr')
+          || (currentCategory === 'EN' && post.lang === 'en');
+        
+        const q = currentQuery.toLowerCase();
+        const matchQuery = !q 
+          || post.title.toLowerCase().includes(q)
+          || (post.tags && post.tags.some(t => t.toLowerCase().includes(q)))
+          || post.category.toLowerCase().includes(q);
+        
+        return matchCat && matchQuery;
+      });
+
+      if (filtered.length === 0) {
+        container.innerHTML = `
+          <div class="col-span-full py-16 text-center text-zinc-500">
+            <span class="text-3xl block mb-2">⚡</span>
+            <p class="text-sm">검색 결과 또는 등록된 포스트가 없습니다.</p>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = filtered.map((post, index) => {
+        const tagBadges = (post.tags || []).slice(0, 3).map(tag => 
+          `<span class="text-[11px] font-medium text-zinc-400 bg-zinc-800/80 px-2 py-0.5 rounded">#${tag}</span>`
+        ).join(' ');
+
+        const thumbImg = post.image 
+          ? `<div class="h-44 w-full overflow-hidden border-b border-zinc-800">
+               <img src="${post.image}" alt="${post.title}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy" />
+             </div>`
+          : `<div class="h-24 w-full bg-gradient-to-r from-zinc-900 to-zinc-800 flex items-center justify-end px-6 border-b border-zinc-800/60">
+               <span class="text-3xl opacity-20">⚡</span>
+             </div>`;
+
+        return `
+          <article onclick="openPostModal(${index})" class="group bg-zinc-900 border border-zinc-800 hover:border-yellow-400/50 rounded-2xl overflow-hidden cursor-pointer shadow-lg hover:shadow-yellow-500/5 transition-all duration-200 flex flex-col justify-between">
+            <div>
+              ${thumbImg}
+              <div class="p-5 sm:p-6">
+                <div class="flex items-center justify-between gap-2 mb-2.5">
+                  <span class="text-xs font-bold text-yellow-400 px-2.5 py-0.5 rounded-full bg-yellow-400/10 border border-yellow-400/20">${post.category}</span>
+                  <span class="text-xs text-zinc-500">${post.date}</span>
+                </div>
+                <h3 class="text-lg sm:text-xl font-bold text-white group-hover:text-yellow-400 transition-colors line-clamp-2 mb-2">${post.title}</h3>
+                <p class="text-xs sm:text-sm text-zinc-400 line-clamp-2 mb-4 leading-relaxed">${post.content.replace(/[#*`_>\[\]]/g, '').trim().slice(0, 150)}...</p>
+              </div>
+            </div>
+            <div class="px-5 sm:px-6 pb-5 pt-0 flex items-center justify-between border-t border-zinc-800/50 mt-auto">
+              <div class="flex flex-wrap gap-1.5 pt-3">${tagBadges}</div>
+              <span class="text-xs text-yellow-400 font-semibold flex items-center gap-1 group-hover:translate-x-1 transition-transform pt-3">읽기 <i class="fa-solid fa-arrow-right text-[10px]"></i></span>
+            </div>
+          </article>
+        `;
+      }).join('');
+    }
+
+    function filterCategory(cat) {
+      currentCategory = cat;
+      document.querySelectorAll('.cat-btn').forEach(btn => {
+        if (btn.getAttribute('data-cat') === cat) {
+          btn.className = 'cat-btn px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-semibold bg-yellow-400 text-zinc-950 shadow-sm transition-all';
+        } else {
+          btn.className = 'cat-btn px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-medium bg-zinc-900 text-zinc-300 hover:text-white border border-zinc-800 hover:border-zinc-700 transition-all';
+        }
+      });
+      renderPosts();
+    }
+
+    function resetFilter() {
+      currentCategory = 'ALL';
+      currentQuery = '';
+      document.getElementById('search-input').value = '';
+      filterCategory('ALL');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function handleSearch() {
+      currentQuery = document.getElementById('search-input').value;
+      renderPosts();
+    }
+
+    function openPostModal(index) {
+      const post = posts[index];
+      if (!post) return;
+      document.getElementById('modal-title').textContent = post.title;
+      document.getElementById('modal-category').textContent = post.category;
+      document.getElementById('modal-date').innerHTML = `<i class="fa-regular fa-clock mr-1"></i> ${post.date}`;
+      document.getElementById('modal-lang').innerHTML = `<i class="fa-solid fa-globe mr-1"></i> ${post.lang.toUpperCase()}`;
+      
+      const imgContainer = document.getElementById('modal-image-container');
+      const imgEl = document.getElementById('modal-image');
+      if (post.image) {
+        imgEl.src = post.image;
+        imgContainer.classList.remove('hidden');
       } else {
-        document.getElementById('theme-icon').className = 'fas fa-moon';
+        imgContainer.classList.add('hidden');
+      }
+
+      document.getElementById('modal-content').innerHTML = marked.parse(post.content);
+      
+      const tagsEl = document.getElementById('modal-tags');
+      tagsEl.innerHTML = (post.tags || []).map(t => `<span class="text-xs bg-zinc-800 text-zinc-300 px-2.5 py-1 rounded-md">#${t}</span>`).join('');
+      
+      document.getElementById('post-modal').classList.remove('hidden');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeModal(event) {
+      if (!event || event.target.id === 'post-modal' || !event.target.closest('#post-modal > div')) {
+        document.getElementById('post-modal').classList.add('hidden');
+        document.body.style.overflow = '';
       }
     }
 
@@ -217,239 +371,14 @@
       const icon = document.getElementById('theme-icon');
       if (html.classList.contains('dark')) {
         html.classList.remove('dark');
-        icon.className = 'fas fa-sun';
-        localStorage.setItem('theme', 'light');
-        applyThemeVariables('light');
+        icon.className = 'fa-solid fa-sun text-base text-yellow-500';
       } else {
         html.classList.add('dark');
-        icon.className = 'fas fa-moon';
-        localStorage.setItem('theme', 'dark');
-        applyThemeVariables('dark');
+        icon.className = 'fa-solid fa-moon text-base text-zinc-400';
       }
     }
 
-    function applyThemeVariables(theme) {
-      const root = document.body;
-      if (theme === 'light') {
-        root.style.setProperty('--bg-main', '#f8fafc');
-        root.style.setProperty('--card-bg', '#ffffff');
-        root.style.setProperty('--border-color', '#e2e8f0');
-        root.style.setProperty('--text-main', '#334155');
-        root.style.setProperty('--heading', '#0f172a');
-      } else {
-        root.style.setProperty('--bg-main', '#0b0f19');
-        root.style.setProperty('--card-bg', '#161e2e');
-        root.style.setProperty('--border-color', '#273548');
-        root.style.setProperty('--text-main', '#cbd5e1');
-        root.style.setProperty('--heading', '#f8fafc');
-      }
-    }
-
-    initTheme();
-
-    function calculateReadingTime(text) {
-      const words = text.trim().split(/\s+/).length;
-      const minutes = Math.ceil(words / 200);
-      return `약 ${minutes}분 소요`;
-    }
-
-    async function fetchPostList() {
-      try {
-        const res = await fetch(`https://api.github.com/repos/${USER}/${REPO}/contents/${POSTS_DIR}`);
-        if(!res.ok) throw new Error('Posts folder not found');
-        const items = await res.json();
-        
-        let mdFiles = [];
-        
-        // Recursive helper to fetch markdown files from folders and subfolders
-        async function traverse(contentsUrl) {
-          try {
-            const subRes = await fetch(contentsUrl);
-            if (!subRes.ok) return;
-            const subItems = await subRes.json();
-            for (const item of subItems) {
-              if (item.type === 'file' && item.name.endsWith('.md')) {
-                mdFiles.push(item);
-              } else if (item.type === 'dir') {
-                await traverse(item.url);
-              }
-            }
-          } catch(e) { console.error(e); }
-        }
-
-        for (const item of items) {
-          if (item.type === 'file' && item.name.endsWith('.md')) {
-            mdFiles.push(item);
-          } else if (item.type === 'dir') {
-            await traverse(item.url);
-          }
-        }
-        
-        mdFiles.reverse();
-        
-        allPostsData = await Promise.all(mdFiles.map(async (file) => {
-          const contentRes = await fetch(file.download_url);
-          const rawText = await contentRes.text();
-          
-          let title = file.name;
-          let category = file.path.includes('KR') ? 'KR - 생각정리' : 'EN - Reflections';
-          let lang = file.path.includes('KR') ? 'kr' : 'en';
-          let image = 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1000&q=80';
-          let tags = [];
-
-          const frontmatterMatch = rawText.match(/^---[\s\S]*?---/);
-          if (frontmatterMatch) {
-            const fm = frontmatterMatch[0];
-            const titleMatch = fm.match(/title:\s*"(.*?)"/);
-            const catMatch = fm.match(/category:\s*"(.*?)"/);
-            const langMatch = fm.match(/lang:\s*(kr|en)/);
-            const imgMatch = fm.match(/image:\s*"(.*?)"/);
-            const tagsMatch = fm.match(/tags:\s*\[(.*?)\]/);
-            
-            if (titleMatch) title = titleMatch[1];
-            if (catMatch) category = catMatch[1];
-            if (langMatch) lang = langMatch[1];
-            if (imgMatch) image = imgMatch[1];
-            if (tagsMatch) {
-              tags = tagsMatch[1].split(',').map(t => t.trim().replace(/['"]/g, ''));
-            }
-          }
-
-          const readingTime = calculateReadingTime(rawText);
-          return { file, title, category, lang, image, rawText, readingTime, tags };
-        }));
-
-        currentFilteredPosts = allPostsData;
-        document.getElementById('total-count-badge').innerText = allPostsData.length;
-        renderCategories();
-        renderPostList(allPostsData);
-
-      } catch (err) {
-        console.error(err);
-        document.getElementById('post-list').innerHTML = `<div class="py-12 text-center text-red-400">포스트를 불러오는 중 오류가 발생했습니다.</div>`;
-      }
-    }
-
-    function renderCategories() {
-      const krCats = {};
-      const enCats = {};
-
-      allPostsData.forEach(p => {
-        if (p.lang === 'kr' || p.category.startsWith('KR')) {
-          krCats[p.category] = (krCats[p.category] || 0) + 1;
-        } else {
-          enCats[p.category] = (enCats[p.category] || 0) + 1;
-        }
-      });
-
-      const krUl = document.getElementById('kr-categories');
-      krUl.innerHTML = '';
-      for (const [cat, count] of Object.entries(krCats)) {
-        krUl.innerHTML += `<li onclick="filterCategory('${cat}')" class="cursor-pointer hover:text-indigo-400 py-1.5 px-2.5 rounded-xl hover:bg-indigo-500/10 transition flex items-center justify-between text-xs"><span>▪ ${cat}</span> <span class="bg-[var(--bg-main)] text-slate-400 text-[10px] px-2 py-0.5 rounded-full font-semibold">${count}</span></li>`;
-      }
-
-      const enUl = document.getElementById('en-categories');
-      enUl.innerHTML = '';
-      for (const [cat, count] of Object.entries(enCats)) {
-        enUl.innerHTML += `<li onclick="filterCategory('${cat}')" class="cursor-pointer hover:text-indigo-400 py-1.5 px-2.5 rounded-xl hover:bg-indigo-500/10 transition flex items-center justify-between text-xs"><span>▪ ${cat}</span> <span class="bg-[var(--bg-main)] text-slate-400 text-[10px] px-2 py-0.5 rounded-full font-semibold">${count}</span></li>`;
-      }
-    }
-
-    function renderPostList(posts) {
-      const container = document.getElementById('post-list');
-      container.innerHTML = '';
-
-      if (posts.length === 0) {
-        container.innerHTML = `<div class="py-12 text-center text-slate-500">검색 결과가 없습니다.</div>`;
-        return;
-      }
-
-      posts.forEach(p => {
-        const card = document.createElement('div');
-        card.className = "bg-[var(--card-bg)] rounded-3xl border border-[var(--border-color)] hover:border-indigo-500/50 hover:shadow-xl transition cursor-pointer overflow-hidden flex flex-col sm:flex-row group";
-        
-        const langBadge = p.lang === 'kr' 
-          ? '<span class="bg-red-500/10 text-red-400 border border-red-500/20 text-[11px] px-2.5 py-0.5 rounded-full font-bold">KOREAN</span>' 
-          : '<span class="bg-blue-500/10 text-blue-400 border border-blue-500/20 text-[11px] px-2.5 py-0.5 rounded-full font-bold">ENGLISH</span>';
-
-        card.innerHTML = `
-          <div class="sm:w-1/3 h-48 sm:h-auto shrink-0 overflow-hidden relative">
-            <img src="${p.image}" class="w-full h-full object-cover group-hover:scale-105 transition duration-500">
-          </div>
-          <div class="p-6 flex flex-col justify-between flex-1">
-            <div>
-              <div class="flex items-center justify-between mb-3">
-                ${langBadge}
-                <span class="text-slate-400 text-xs">${p.category}</span>
-              </div>
-              <h3 class="font-bold text-[var(--heading)] text-lg leading-snug group-hover:text-indigo-400 transition mb-2">${p.title}</h3>
-            </div>
-            <div class="mt-4 pt-3 border-t border-[var(--border-color)] flex items-center justify-between text-xs text-slate-400">
-              <span class="flex items-center gap-1.5"><i class="far fa-clock"></i> ${p.readingTime}</span>
-              <span class="text-indigo-400 font-semibold flex items-center gap-1 group-hover:translate-x-1 transition">읽기 <i class="fas fa-chevron-right text-[10px]"></i></span>
-            </div>
-          </div>
-        `;
-        card.onclick = () => loadPostContent(p);
-        container.appendChild(card);
-      });
-    }
-
-    function filterCategory(cat) {
-      document.getElementById('current-category-title').innerText = cat === 'ALL' ? ' 최근 작성한 글' : ` ${cat}`;
-      if (cat === 'ALL') {
-        currentFilteredPosts = allPostsData;
-      } else {
-        currentFilteredPosts = allPostsData.filter(p => p.category === cat);
-      }
-      renderPostList(currentFilteredPosts);
-    }
-
-    function handleSearch(query) {
-      const keyword = query.toLowerCase().trim();
-      if (!keyword) {
-        renderPostList(currentFilteredPosts);
-        return;
-      }
-      const searched = currentFilteredPosts.filter(p => 
-        p.title.toLowerCase().includes(keyword) || p.rawText.toLowerCase().includes(keyword)
-      );
-      renderPostList(searched);
-    }
-
-    function loadPostContent(post) {
-      let text = post.rawText.replace(/^---[\s\S]*?---/, '');
-      document.getElementById('post-list').classList.add('hidden');
-      const detailView = document.getElementById('post-detail');
-      detailView.classList.remove('hidden');
-      
-      const tagsContainer = document.getElementById('post-tags-container');
-      tagsContainer.innerHTML = '';
-      if (post.tags && post.tags.length > 0) {
-        post.tags.forEach(tag => {
-          const tagBadge = document.createElement('span');
-          tagBadge.className = "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-xs px-3 py-1 rounded-full font-medium";
-          tagBadge.innerText = `#${tag}`;
-          tagsContainer.appendChild(tagBadge);
-        });
-      }
-
-      document.getElementById('markdown-body').innerHTML = marked.parse(text);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-
-    function closePost() {
-      document.getElementById('post-detail').classList.add('hidden');
-      document.getElementById('post-list').classList.remove('hidden');
-    }
-
-    function copyPostLink() {
-      navigator.clipboard.writeText(window.location.href).then(() => {
-        alert('블로그 링크가 클립보드에 복사되었습니다!');
-      });
-    }
-
-    fetchPostList();
+    window.addEventListener('DOMContentLoaded', loadPosts);
   </script>
 </body>
 </html>
