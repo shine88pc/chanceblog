@@ -53,7 +53,6 @@ def fetch_recent_news():
 
 def handle_natural_language_issue():
     print(f"모바일 이슈 제어 접수 - 제목: {issue_title}")
-    print(f"상세 본문:\n{issue_body}")
     
     files_data = {}
     for root, dirs, files in os.walk("."):
@@ -76,9 +75,9 @@ def handle_natural_language_issue():
     
     [현재 레포지토리 파일 현황]: {json.dumps({k: v[:500] for k, v in files_data.items()}, ensure_ascii=False)}
     
-    [응답 규칙]: 반드시 아래 JSON 형식으로만 순수하게 응답하세요 (마크다운 백틱 ```json 등은 생략).
+    [응답 규칙]: 반드시 아래 JSON 형식으로만 순수하게 응답하세요 (마크다운 백틱 생략).
     {{
-      "target_file": "생성 또는 수정할 파일 경로 (예: _posts/2026-06-07-title.md 또는 index.html 등)",
+      "target_file": "생성 또는 수정할 파일 경로 (예: _posts/2026-10-18-title.md 또는 index.html 등)",
       "file_content": "파일에 들어갈 전체 내용",
       "delete_file": false
     }}
@@ -89,10 +88,8 @@ def handle_natural_language_issue():
     
     if result_text.startswith("```"):
         lines = result_text.splitlines()
-        if lines[0].startswith("```"): 
-            lines = lines[1:]
-        if lines and lines[-1].startswith("```"): 
-            lines = lines[:-1]
+        if lines[0].startswith("```"): lines = lines[1:]
+        if lines and lines[-1].startswith("```"): lines = lines[:-1]
         result_text = "\n".join(lines)
         
     try:
@@ -110,8 +107,7 @@ def handle_natural_language_issue():
                 f.write(file_content)
             print(f"파일 생성/수정 완료: {target_file}")
     except Exception as e:
-        print(f"이슈 처리 중 파싱 오류 발생: {e}")
-        print(f"AI 응답 원본: {result_text}")
+        print(f"이슈 처리 중 오류: {e}")
 
 def generate_hot_topic_post():
     history = load_history()
@@ -119,34 +115,62 @@ def generate_hot_topic_post():
     news_text = "\n---\n".join(news_pool) if news_pool else "최근 트렌드 뉴스 없음"
 
     prompt = f"""
-    최근 24시간 실시간 뉴스를 분석하여 독창적인 블로그 글 1개를 작성하세요.
+    최근 24시간 실시간 뉴스를 분석하여 [한글 버전]과 [영문 버전] 블로그 글 2개를 동시에 생성하세요.
+    
     [이전 주제 목록 (중복 금지)]: {json.dumps(history, ensure_ascii=False)}
     [뉴스 데이터]: {news_text}
-    [조건]:
-    1. 마크다운 형식 작성.
-    2. 독창적이고 유익한 가독성 높은 분석 글.
+    
+    [작성 규격]:
+    1. 반드시 아래 JSON 양식으로만 출력하세요.
+    2. 마크다운 단락 간 줄바꿈(\\n\\n)을 명확히 하여 가독성을 극대화하세요.
+    3. 한글 카테고리 예시: "KR - IT/테크", "KR - AI/딥러닝", "KR - 트렌드/뉴스"
+    4. 영문 카테고리 예시: "EN - IT/Tech", "EN - AI/Deep Learning", "EN - Trend/News"
+    
+    {{
+      "kr_title": "한글 제목 (예: AI 기술의 최신 동향 분석)",
+      "kr_category": "KR - 카테고리명",
+      "kr_content": "---\\nlayout: post\\ntitle: \\"한글 제목\\"\\ncategory: \\"KR - 카테고리명\\"\\nlang: kr\\n---\\n\\n# 한글 제목\\n\\n본문 내용...",
+      
+      "en_title": "영문 제목 (예: Latest AI Technology Trend Analysis)",
+      "en_category": "EN - Category Name",
+      "en_content": "---\\nlayout: post\\ntitle: \\"English Title\\"\\ncategory: \\"EN - Category Name\\"\\nlang: en\\n---\\n\\n# English Title\\n\\nBody content..."
+    }}
     """
+    
     response = client.models.generate_content(model='gemini-3.8-flash', contents=prompt)
-    post_content = response.text
-
-    topic_title = "실시간 트렌드 핫토픽 분석"
-    lines = post_content.splitlines()
-    for line in lines:
-        if line.startswith("# "):
-            topic_title = line.replace("# ", "").strip()
-            break
-
-    date_str = datetime.datetime.now().strftime('%Y-%m-%d')
-    safe_title = "".join(c if c.isalnum() else "_" for c in topic_title)[:15]
-    file_name = f"_posts/{date_str}-{safe_title}.md"
-
-    os.makedirs("_posts", exist_ok=True)
-    with open(file_name, "w", encoding="utf-8") as f:
-        f.write(post_content)
-
-    if topic_title not in history:
-        history.append(topic_title)
-        save_history(history)
+    result_text = response.text.strip()
+    
+    if result_text.startswith("```"):
+        lines = result_text.splitlines()
+        if lines[0].startswith("```"): lines = lines[1:]
+        if lines and lines[-1].startswith("```"): lines = lines[:-1]
+        result_text = "\n".join(lines)
+        
+    try:
+        data = json.loads(result_text)
+        date_str = datetime.datetime.now().strftime('%Y-%m-%d')
+        timestamp = datetime.datetime.now().strftime('%H%M%S')
+        
+        os.makedirs("_posts", exist_ok=True)
+        
+        # 1. 한글 포스팅 저장
+        kr_filename = f"_posts/{date_str}-KR-{timestamp}.md"
+        with open(kr_filename, "w", encoding="utf-8") as f:
+            f.write(data["kr_content"])
+            
+        # 2. 영문 포스팅 저장
+        en_filename = f"_posts/{date_str}-EN-{timestamp}.md"
+        with open(en_filename, "w", encoding="utf-8") as f:
+            f.write(data["en_content"])
+            
+        print(f"한글/영문 포스트 생성 성공: {kr_filename}, {en_filename}")
+        
+        if data.get("kr_title") not in history:
+            history.append(data.get("kr_title"))
+            save_history(history)
+            
+    except Exception as e:
+        print(f"포스트 생성 및 파싱 실패: {e}\n응답 원본: {result_text}")
 
 def main():
     if event_name == "issues" and issue_title:
