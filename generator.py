@@ -58,9 +58,9 @@ def generate_blog_post(topic):
     4. 친근하고 전문적인 어조를 사용할 것.
     """
     
-    # 최신 권장 모델 사용 (gemini-2.5-flash)
+    # 최신 권장 모델로 업데이트 (gemini-3.8-flash)
     response = client.models.generate_content(
-        model='gemini-2.5-flash',
+        model='gemini-3.8-flash',
         contents=prompt,
     )
     return response.text
