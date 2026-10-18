@@ -54,10 +54,12 @@
         <span class="text-xl font-black bg-gradient-to-r from-blue-400 via-indigo-300 to-purple-400 bg-clip-text text-transparent">Chance_Blog</span>
       </a>
       <div class="flex items-center space-x-3">
-        <!-- Theme Toggle Button -->
         <button onclick="toggleTheme()" class="text-slate-400 hover:text-white p-2 rounded-xl bg-[var(--card-bg)] border border-[var(--border-color)] transition" title="테마 전환">
           <i id="theme-icon" class="fas fa-moon"></i>
         </button>
+        <a href="./feed.xml" target="_blank" class="text-slate-400 hover:text-white p-2 rounded-xl bg-[var(--card-bg)] border border-[var(--border-color)] transition" title="RSS 피드">
+          <i class="fas fa-rss"></i>
+        </a>
         <a href="[https://github.com/shine88pc/chanceblog](https://github.com/shine88pc/chanceblog)" target="_blank" class="text-slate-400 hover:text-white p-2 rounded-xl bg-[var(--card-bg)] border border-[var(--border-color)] transition" title="GitHub Repository">
           <i class="fab fa-github"></i>
         </a>
@@ -98,10 +100,8 @@
         </div>
       </div>
 
-      <!-- [AD SLOT - HEADER / TOP BANNER] (추후 광고 스크립트 삽입용 확장 슬롯) -->
-      <div id="ad-slot-header" class="hidden">
-        <!-- Google AdSense or Custom Banner Slot -->
-      </div>
+      <!-- [AD SLOT - HEADER] -->
+      <div id="ad-slot-header" class="hidden"></div>
 
       <!-- Article Cards Container -->
       <div id="post-list" class="space-y-5">
@@ -122,15 +122,29 @@
           </button>
         </div>
         
-        <!-- Post SEO Tags Container -->
+        <!-- SEO Tags Container -->
         <div id="post-tags-container" class="flex flex-wrap gap-2 pt-2"></div>
 
         <article id="markdown-body" class="prose max-w-none pt-2"></article>
 
-        <!-- [AD SLOT - FOOTER / BOTTOM BANNER] (추후 본문 하단 광고 확장 슬롯) -->
-        <div id="ad-slot-footer" class="pt-6 border-t border-[var(--border-color)] text-center text-xs text-slate-500">
-          <!-- Future Ad Slot -->
+        <!-- Social Share Buttons -->
+        <div class="flex flex-wrap items-center gap-2 pt-4 border-t border-[var(--border-color)]">
+          <span class="text-xs text-slate-400 font-semibold mr-2">소셜 공유:</span>
+          <button onclick="shareSNS('twitter')" class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs px-3 py-1.5 rounded-xl transition"><i class="fab fa-twitter"></i> X (Twitter)</button>
+          <button onclick="shareSNS('facebook')" class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs px-3 py-1.5 rounded-xl transition"><i class="fab fa-facebook"></i> Facebook</button>
+          <button onclick="shareSNS('linkedin')" class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs px-3 py-1.5 rounded-xl transition"><i class="fab fa-linkedin"></i> LinkedIn</button>
         </div>
+
+        <!-- [COMMENT SLOT] (추후 Giscus / Utterances 댓글 위젯 연동용 슬롯) -->
+        <div id="comment-slot" class="pt-6 border-t border-[var(--border-color)]">
+          <div class="p-6 bg-[var(--bg-main)] rounded-2xl border border-[var(--border-color)] text-center text-slate-500 text-xs">
+            <i class="far fa-comments mb-2 text-base text-indigo-400"></i>
+            <p>독자 소통 공간 (GitHub Discussions 연동 슬롯)</p>
+          </div>
+        </div>
+
+        <!-- [AD SLOT - FOOTER] -->
+        <div id="ad-slot-footer" class="pt-6 border-t border-[var(--border-color)] text-center text-xs text-slate-500"></div>
       </div>
     </div>
 
@@ -170,7 +184,6 @@
     let allPostsData = [];
     let currentFilteredPosts = [];
 
-    // Theme Management
     function toggleTheme() {
       const html = document.getElementById('html-root');
       const icon = document.getElementById('theme-icon');
@@ -204,7 +217,6 @@
       }
     }
 
-    // Initialize Theme from Storage
     if (localStorage.getItem('theme') === 'light') {
       document.getElementById('html-root').classList.remove('dark');
       document.getElementById('theme-icon').className = 'fas fa-sun';
@@ -362,7 +374,6 @@
       const detailView = document.getElementById('post-detail');
       detailView.classList.remove('hidden');
       
-      // Render SEO Tags
       const tagsContainer = document.getElementById('post-tags-container');
       tagsContainer.innerHTML = '';
       if (post.tags && post.tags.length > 0) {
@@ -387,6 +398,20 @@
       navigator.clipboard.writeText(window.location.href).then(() => {
         alert('블로그 링크가 클립보드에 복사되었습니다!');
       });
+    }
+
+    function shareSNS(platform) {
+      const url = encodeURIComponent(window.location.href);
+      const text = encodeURIComponent(document.title);
+      let shareUrl = '';
+      if (platform === 'twitter') {
+        shareUrl = `[https://twitter.com/intent/tweet?url=$](https://twitter.com/intent/tweet?url=$){url}&text=${text}`;
+      } else if (platform === 'facebook') {
+        shareUrl = `[https://www.facebook.com/sharer/sharer.php?u=$](https://www.facebook.com/sharer/sharer.php?u=$){url}`;
+      } else if (platform === 'linkedin') {
+        shareUrl = `[https://www.linkedin.com/sharing/share-offsite/?url=$](https://www.linkedin.com/sharing/share-offsite/?url=$){url}`;
+      }
+      if (shareUrl) window.open(shareUrl, '_blank', 'width=600,height=400');
     }
 
     fetchPostList();

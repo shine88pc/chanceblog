@@ -27,6 +27,57 @@ def save_history(history):
     with open("history.json", "w", encoding="utf-8") as f:
         json.dump(history, f, ensure_ascii=False, indent=2)
 
+def generate_rss_feed():
+    posts = []
+    if os.path.exists("_posts"):
+        for filename in os.listdir("_posts"):
+            if filename.endswith(".md"):
+                filepath = os.path.join("_posts", filename)
+                try:
+                    with open(filepath, "r", encoding="utf-8") as f:
+                        content = f.read()
+                        title = filename
+                        date_str = filename[:10]
+                        if content.startswith("---"):
+                            parts = content.split("---", 2)
+                            if len(parts) >= 3:
+                                fm = parts[1]
+                                for line in fm.splitlines():
+                                    if line.startswith("title:"):
+                                        title = line.replace("title:", "").strip().strip('"')
+                        posts.append({"title": title, "filename": filename, "date": date_str})
+                except Exception:
+                    pass
+    
+    posts.sort(key=lambda x: x['filename'], reverse=True)
+    
+    rss_items = ""
+    for p in posts[:20]:
+        link = f"https://shine88pc.github.io/chanceblog/#{p['filename']}"
+        rss_items += f"""
+        <item>
+            <title><![CDATA[{p['title']]]></title>
+            <link>{link}</link>
+            <guid>{link}</guid>
+            <pubDate>{p['date']}</pubDate>
+        </item>
+        """
+    
+    rss_content = f"""<?xml version="1.0" encoding="UTF-8" ?>
+<rss version="2.0">
+<channel>
+    <title>Chance_Blog</title>
+    <link>https://shine88pc.github.io/chanceblog/</link>
+    <description>Chance의 테크 &amp; AI 에세이 노트</description>
+    <language>ko</language>
+    {rss_items}
+</channel>
+</rss>
+"""
+    with open("feed.xml", "w", encoding="utf-8") as f:
+        f.write(rss_content.strip())
+    print("RSS feed.xml 자동 생성 완료")
+
 def fetch_recent_news():
     url = "https://news.google.com/rss?hl=ko&gl=KR&ceid=KR:ko"
     try:
@@ -53,7 +104,6 @@ def fetch_recent_news():
 
 def handle_natural_language_issue():
     print(f"모바일 이슈 제어 접수 - 제목: {issue_title}")
-    
     files_data = {}
     for root, dirs, files in os.walk("."):
         if ".git" in root or "__pycache__" in root or "downloads" in root:
@@ -80,7 +130,6 @@ def handle_natural_language_issue():
       "delete_file": false
     }}
     """
-    
     response = client.models.generate_content(model='gemini-3.8-flash', contents=prompt)
     result_text = response.text.strip()
     if result_text.startswith("```"):
@@ -118,11 +167,11 @@ def generate_hot_topic_post():
     
     [WRITING STYLE & GUIDELINES]:
     1. Write like a HUMAN TECH BLOGGER sharing insightful thoughts, not an AI summarizer.
-    2. Make the posts LONG, IN-DEPTH, and DETAILED (3-4 comprehensive sections). Include background context, key analytical points, and personal takeaways.
+    2. Make the posts LONG, IN-DEPTH, and DETAILED (3-4 comprehensive sections).
     3. Category guidelines:
        - Korean Category MUST start with "KR - " (e.g., "KR - 테크 이야기", "KR - AI인사이트")
        - English Category MUST start with "EN - " (e.g., "EN - Tech Stories", "EN - AI Insights")
-    4. Provide 3~5 SEO keywords/tags for search engines (e.g. ["인공지능", "테크", "트렌드"]).
+    4. Provide 3~5 SEO keywords/tags for search engines.
     5. Include an Unsplash copyright-free image thumbnail URL.
     
     [CRITICAL FORMAT RULE]:
@@ -131,7 +180,7 @@ def generate_hot_topic_post():
     {{
       "kr_title": "자연스러운 한글 블로그 제목",
       "kr_category": "KR - 카테고리명",
-      "kr_tags": ["키워드1", "키워드2", "키워드3"],
+      "kr_tags": ["키워드1", "키워드2"],
       "kr_image": "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1000&q=80",
       "kr_content": "---\\nlayout: post\\ntitle: \\"자연스러운 한글 블로그 제목\\"\\ncategory: \\"KR - 카테고리명\\"\\ntags: [\\'키워드1\\', \\'키워드2\\']\\nlang: kr\\nimage: \\"https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1000&q=80\\"\\n---\\n\\n![Thumbnail](https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1000&q=80)\\n\\n# 자연스러운 한글 블로그 제목\\n\\n깊이있는 본문 에세이 내용...",
       
@@ -145,7 +194,6 @@ def generate_hot_topic_post():
     
     response = client.models.generate_content(model='gemini-3.8-flash', contents=prompt)
     result_text = response.text.strip()
-    
     if result_text.startswith("```"):
         lines = result_text.splitlines()
         if lines[0].startswith("```"): lines = lines[1:]
@@ -173,6 +221,8 @@ def generate_hot_topic_post():
             history.append(data.get("kr_title"))
             save_history(history)
             
+        generate_rss_feed()
+            
     except Exception as e:
         print(f"포스트 생성 실패: {e}\n응답 원본: {result_text}")
 
@@ -181,6 +231,7 @@ def main():
         handle_natural_language_issue()
     else:
         generate_hot_topic_post()
+        generate_rss_feed()
 
 if __name__ == "__main__":
     main()
