@@ -2,248 +2,320 @@ import os
 import json
 import datetime
 import urllib.request
-import urllib.parse
-import re
 import xml.etree.ElementTree as ET
+import requests
+import re
+from email.utils import parsedate_to_datetime
 from datetime import timezone, timedelta
-from pathlib import Path
 from google import genai
+from pathlib import Path
 
-# ============================================================
-# 환경 설정
-# ============================================================
+# 환경 변수
 API_KEY = os.environ.get("GEMINI_API_KEY")
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
+GITHUB_REPOSITORY = os.environ.get("GITHUB_REPOSITORY", "shine88pc/chanceblog")
+EVENT_NAME = os.environ.get("EVENT_NAME", "").lower()
+ISSUE_TITLE = os.environ.get("ISSUE_TITLE", "")
+ISSUE_BODY = os.environ.get("ISSUE_BODY", "")
+ISSUE_NUMBER = os.environ.get("ISSUE_NUMBER")
+
 if not API_KEY:
-    raise RuntimeError(
-        "GEMINI_API_KEY 환경 변수가 없습니다. "
-        "GitHub 저장소 Settings > Secrets and variables > Actions 에 등록해주세요."
-    )
+    raise RuntimeError("GEMINI_API_KEY 환경 변수가 없습니다.")
+
+client = genai.Client(api_key=API_KEY)
+
+# 경로
+ROOT = Path(".")
+POSTS_DIR = ROOT / "_posts"
+HISTORY_FILE = ROOT / "history.json"
+
+# 이미지 풀 (필요 시 확장)
+IMAGE_POOL = [
+    "https://images.unsplash.com/photo-1591488320449-011701bb6704?auto=format&fit=crop&w=1000&q=80",
+    "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?auto=format&fit=crop&w=1000&q=80",
+    "https://images.unsplash.com/photo-1555680202-c86f0e12f086?auto=format&fit=crop&w=1000&q=80",
+    "https://images.unsplash.com/photo-1563770660941-20978e870e26?auto=format&fit=crop&w=1000&q=80",
+    "https://images.unsplash.com/photo-1677442136019-21780ecad985?auto=format&fit=crop&w=1000&q=80",
+]
 
 KST = timezone(timedelta(hours=9))
-POSTS_DIR = Path("_posts")
-HISTORY_FILE = Path("history.json")
 
-# ============================================================
-# 주제별 관련 Unsplash 고화질 이미지 풀
-# ============================================================
-TOPIC_IMAGE_POOLS = {
-    "firefighter": [
-        "https://images.unsplash.com/photo-1582139329536-e7284fece509?auto=format&fit=crop&w=1000&q=80",  # 소방관 현장 진압
-        "https://images.unsplash.com/photo-1543083477-4f785aeafaa9?auto=format&fit=crop&w=1000&q=80",  # 소방 장비 및 소방차
-        "https://images.unsplash.com/photo-1527786356703-4b100091cd2c?auto=format&fit=crop&w=1000&q=80",  # 소방관 헬멧과 장구
-    ],
-    "rendering_ai": [
-        "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1000&q=80",  # 3D 레이트레이싱 그래픽 아트
-        "https://images.unsplash.com/photo-1633493106185-3ac82312d8a5?auto=format&fit=crop&w=1000&q=80",  # 컴퓨팅 연산 비주얼
-        "https://images.unsplash.com/photo-1677442136019-21780efad99a?auto=format&fit=crop&w=1000&q=80",  # 차세대 AI 신경망 그래픽
-    ],
-    "hardware": [
-        "https://images.unsplash.com/photo-1591488320449-011701bb6704?auto=format&fit=crop&w=1000&q=80",  # GPU 그래픽카드 기판
-        "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1000&q=80",  # 반도체 프로세서
-        "https://images.unsplash.com/photo-1555680202-c86f0e12f086?auto=format&fit=crop&w=1000&q=80",  # 마이크로칩 회로도
-    ],
-    "space": [
-        "https://images.unsplash.com/photo-1614728894747-a83421e2b9c9?auto=format&fit=crop&w=1000&q=80",  # 화성 및 행성 탐사
-        "https://images.unsplash.com/photo-1541185933-ef5d8ed016c2?auto=format&fit=crop&w=1000&q=80",  # 우주 로켓 궤도 발사
-        "https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=1000&q=80",  # 위성 궤도 통신망
-    ],
-    "security": [
-        "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?auto=format&fit=crop&w=1000&q=80",  # 사이버 보안 및 코드
-        "https://images.unsplash.com/photo-1563986768609-322da13575f3?auto=format&fit=crop&w=1000&q=80",  # 보안 네트워크
-    ],
-    "policy_society": [
-        "https://images.unsplash.com/photo-1450133064473-71024230f91b?auto=format&fit=crop&w=1000&q=80",  # 정부/정책/재정 문서
-        "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=1000&q=80",  # 공공 인프라 건물
-    ],
-    "default": [
-        "https://images.unsplash.com/photo-1488590528505-98d2b5aba04b?auto=format&fit=crop&w=1000&q=80",  # 테크놀로지 전반
-        "https://images.unsplash.com/photo-1504639725590-34d0984388bd?auto=format&fit=crop&w=1000&q=80",  # 개발 및 프로그래밍
-    ]
-}
+# 유틸리티
 
-def select_relevant_image(text: str, used_images: set = None) -> str:
-    """글의 제목 및 본문 키워드를 분석하여 내용과 가장 부합하는 고유 이미지를 반환합니다."""
-    lower = text.lower()
-    used_images = used_images or set()
+def load_history():
+    if not HISTORY_FILE.exists():
+        return []
+    try:
+        return json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return []
 
-    if any(k in lower for k in ["소방관", "순직", "화재", "firefighter", "first responder", "소방공무원"]):
-        topic = "firefighter"
-    elif any(k in lower for k in ["레이 재구성", "레이트레이싱", "ai 렌더링", "ray reconstruction", "dlss", "렌더링"]):
-        topic = "rendering_ai"
-    elif any(k in lower for k in ["vbios", "오버클럭", "그래픽카드", "rtx", "엔비디아", "라데온", "반도체", "하드웨어", "gpu"]):
-        topic = "hardware"
-    elif any(k in lower for k in ["starlink", "starshield", "jaxa", "phobos", "우주", "로봇", "위성", "행성", "space", "robotics"]):
-        topic = "space"
-    elif any(k in lower for k in ["해킹", "보안", "취약점", "security", "firmware"]):
-        topic = "security"
-    elif any(k in lower for k in ["정책", "재정", "국가직", "예산", "지자체", "법안", "society", "policy"]):
-        topic = "policy_society"
-    else:
-        topic = "default"
 
-    pool = TOPIC_IMAGE_POOLS.get(topic, TOPIC_IMAGE_POOLS["default"])
-    for img in pool:
-        if img not in used_images:
-            return img
-    return pool[0]
+def save_history(history):
+    HISTORY_FILE.write_text(json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8")
 
-# ============================================================
-# 기존 포스트 이미지 개선 및 중복 해결
-# ============================================================
-def fix_existing_posts():
-    """기존 등록된 게시글 중 소방관 글 이미지 보완 및 중복 이미지를 내용에 맞게 교체합니다."""
+
+def fetch_recent_news():
+    url = "https://news.google.com/rss?hl=ko&gl=KR&ceid=KR:ko"
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=15) as response:
+            xml_data = response.read()
+        root = ET.fromstring(xml_data)
+        recent_items = []
+        now = datetime.datetime.now(timezone.utc)
+        for item in root.findall('.//item'):
+            title = item.find('title').text if item.find('title') is not None else ""
+            desc = item.find('description').text if item.find('description') is not None else ""
+            pub_date_str = item.find('pubDate').text if item.find('pubDate') is not None else ""
+            try:
+                pub_date = parsedate_to_datetime(pub_date_str)
+                if now - pub_date <= timedelta(hours=24):
+                    recent_items.append(f"{title} - {desc}")
+            except Exception:
+                recent_items.append(f"{title} - {desc}")
+        return recent_items[:40]
+    except Exception as e:
+        print(f"뉴스 수집 오류: {e}")
+        return []
+
+
+def normalize_text(s):
+    return re.sub(r"\s+", " ", (s or "").strip()).casefold()
+
+
+def get_used_image_ids():
+    used = set()
     if not POSTS_DIR.exists():
-        return
-
-    posts = list(POSTS_DIR.rglob("*.md"))
-    used_urls = set()
-
-    for p in posts:
-        try:
-            content = p.read_text(encoding="utf-8")
-        except Exception:
-            continue
-
-        modified = False
-
-        # 1. 소방관 관련 포스트 (이미지 누락 보완 및 소방관 관련 이미지 적용)
-        if "소방관" in content or "Firefighter" in content:
-            firefighter_img = TOPIC_IMAGE_POOLS["firefighter"][0]
-            if "image:" not in content:
-                content = re.sub(r"^---\s*\n", f"---\nimage: \"{firefighter_img}\"\n", content, count=1)
-                content = re.sub(r"(---\s*\n\s*\n?)(# )", f"\1![Thumbnail]({firefighter_img})\n\n\2", content, count=1)
-                modified = True
-            elif any(fb in content for fb in ["photo-1591488320449-011701bb6704", "photo-1541185933-ef5d8ed016c2"]):
-                content = re.sub(r"https://images\.unsplash\.com/photo-[^\s\"\)]+", firefighter_img, content)
-                modified = True
-            used_urls.add(firefighter_img)
-
-        # 2. 레이 재구성 / AI 렌더링 글에 들어간 하드웨어 중복 이미지 교체
-        elif "레이 재구성" in content or "Ray Reconstruction" in content or "AI 렌더링" in content:
-            rendering_img = TOPIC_IMAGE_POOLS["rendering_ai"][0]
-            if "photo-1591488320449-011701bb6704" in content:
-                content = content.replace("https://images.unsplash.com/photo-1591488320449-011701bb6704?auto=format&fit=crop&w=1000&q=80", rendering_img)
-                modified = True
-            used_urls.add(rendering_img)
-
-        if modified:
-            p.write_text(content, encoding="utf-8")
-            print(f"[Image Fixed] Updated post: {p}")
-
-# ============================================================
-# 뉴스 수집 및 히스토리 관리
-# ============================================================
-def load_history() -> list:
-    if HISTORY_FILE.exists():
-        try:
-            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return []
-    return []
-
-def save_history(history: list):
-    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-        json.dump(history, f, ensure_ascii=False, indent=2)
-
-def fetch_rss_items() -> list:
-    urls = [
-        "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=ko&gl=KR&ceid=KR:ko",
-        "https://news.google.com/rss/search?q=AI+반도체+하드웨어&hl=ko&gl=KR&ceid=KR:ko",
-        "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=en-US&gl=US&ceid=US:en",
-    ]
-    items = []
-    for u in urls:
-        try:
-            req = urllib.request.Request(u, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                root = ET.fromstring(resp.read())
-                for item in root.findall(".//item")[:5]:
-                    title = item.findtext("title") or ""
-                    link = item.findtext("link") or ""
-                    if title:
-                        items.append({"title": title, "link": link})
-        except Exception as e:
-            print(f"RSS fetch failed ({u}): {e}")
-    return items
-
-# ============================================================
-# 포스팅 생성
-# ============================================================
-def generate_post():
-    client = genai.Client(api_key=API_KEY)
-    history = load_history()
-    feed_items = fetch_rss_items()
-
-    # 이미 작성된 토픽 제외
-    candidates = [it for it in feed_items if not any(h in it["title"] for h in history)]
-    target = candidates[0] if candidates else (feed_items[0] if feed_items else {"title": "AI와 차세대 컴퓨팅 혁신"})
-
-    now = datetime.datetime.now(KST)
-    timestamp_str = now.strftime("%Y-%m-%d-%H%M%S")
-    date_str = now.strftime("%Y-%m-%d")
-
-    # 기존에 사용된 이미지 파악
-    existing_images = set()
+        return used
     for p in POSTS_DIR.rglob("*.md"):
         try:
-            m = re.findall(r"image:\s*\"(https://[^\"]+)\"", p.read_text(encoding="utf-8"))
-            existing_images.update(m)
+            txt = p.read_text(encoding="utf-8")
+            matches = re.findall(r'https://images\.unsplash\.com/[^)"\s]+', txt)
+            for m in matches:
+                used.add(m)
         except Exception:
-            pass
+            continue
+    return used
 
-    rel_img = select_relevant_image(target["title"], used_images=existing_images)
+
+def select_unique_image(used_set):
+    for url in IMAGE_POOL:
+        if url not in used_set:
+            used_set.add(url)
+            return url
+    # fallback: return first with timestamp sig to reduce exact duplicates
+    ts = int(datetime.datetime.now().timestamp())
+    return IMAGE_POOL[0] + f"&sig={ts}"
+
+
+def safe_filename(title):
+    # Jekyll _posts 규칙: YYYY-MM-DD-title.md
+    safe = re.sub(r"[^0-9A-Za-z-_ ]", "", title)
+    safe = "-".join(safe.split())
+    safe = safe[:50]
+    date_str = datetime.datetime.now().strftime("%Y-%m-%d")
+    return f"{date_str}-{safe}.md"
+
+
+def write_post_file(filename, content):
+    POSTS_DIR.mkdir(parents=True, exist_ok=True)
+    path = POSTS_DIR / filename
+    tmp = path.with_suffix('.md.tmp')
+    tmp.write_text(content, encoding='utf-8')
+    tmp.replace(path)
+    print(f"파일 생성/수정: {path}")
+    return path
+
+
+# Gemini 호출(간단한 wrapper)
+def call_gemini(prompt, model='gemini-3.8-flash'):
+    try:
+        resp = client.models.generate_content(model=model, contents=prompt)
+        return getattr(resp, 'text', '')
+    except Exception as e:
+        print(f"Gemini 호출 실패: {e}")
+        return ''
+
+
+# 자동 포스트 생성
+
+def generate_hot_topic_post():
+    history = load_history()
+    normalized = {normalize_text(h): h for h in history}
+    news_pool = fetch_recent_news()
+    news_text = '\n---\n'.join(news_pool) if news_pool else '최근 트렌드 뉴스 없음'
 
     prompt = f"""
-당신은 수준 높은 기술 블로그 'Chance Blog'의 수석 테크 에디터입니다.
-주제: "{target['title']}"
-
-요구사항:
-1. 한국어 심층 분석 포스트(KR)를 작성하세요.
-2. 기술적 깊이와 사회적/산업적 맥락을 포괄하는 흥미로운 인사이트를 담으세요.
-3. 응답은 오직 Jekyll 마크다운 본문만 출력하세요 (코드블록 ```markdown 사용 금지).
-4. 카테고리는 KR - 테크 이야기, KR - 하드웨어 인사이트, KR - 사회/정책 중 가장 적합한 것을 선택하세요.
-
-Frontmatter 형식:
----
-layout: post
-title: "선정된 매력적인 제목"
-category: "선정된 카테고리"
-tags: ['태그1', '태그2', '태그3']
-lang: kr
-image: "{rel_img}"
----
-
-![Thumbnail]({rel_img})
-
-# 본문 시작...
+최근 24시간 실시간 뉴스를 분석하여 독창적인 블로그 글 1개를 작성하세요.
+[이전 주제 목록 (중복 금지)]: {history}
+[뉴스 데이터]: {news_text}
+[조건]:
+1. 마크다운 형식 작성(Front Matter 포함).
+2. 제목은 # 으로 시작.
+3. Front Matter에 layout, title, category, tags, lang, image 를 포함.
+4. 제목이 기존 기록과 중복되는 경우 다른 주제를 선택하세요.
 """
+    resp = call_gemini(prompt)
+    if not resp:
+        print("Gemini 응답 없음 — 생성 건너뜀")
+        return
 
+    # 제목 추출
+    title = None
+    for line in resp.splitlines():
+        if line.startswith('# '):
+            title = line.replace('# ', '').strip()
+            break
+    if not title:
+        title = f"실시간 트렌드 {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}"
+
+    if normalize_text(title) in normalized:
+        print("제목이 이전 기록과 중복되어 생성하지 않습니다.")
+        return
+
+    # 이미지 선택
+    used = get_used_image_ids()
+    image = select_unique_image(used)
+
+    # Ensure front matter contains image and title
+    if resp.lstrip().startswith('---'):
+        content = resp
+        if 'image:' not in resp:
+            # insert image into front matter
+            content = re.sub(r'---\n(.*?)\n---', lambda m: f"---\n{m.group(1)}\nimage: \"{image}\"\n---", resp, flags=re.S)
+    else:
+        # add front matter
+        content = f"---\nlayout: post\ntitle: \"{title}\"\ncategory: General\ntags: []\nlang: kr\nimage: \"{image}\"\n---\n\n" + resp
+
+    filename = safe_filename(title)
+    path = write_post_file(filename, content)
+
+    # update history
+    history.append(title)
+    save_history(history)
+
+
+# 이슈 처리 (AI에게 명령 전달하여 파일 수정/삭제)
+
+def handle_issue_with_params(title, body, issue_number=None):
+    print(f"이슈 처리: {title}")
+    files_data = {}
+    for root, dirs, files in os.walk('.'):
+        if any(x in root for x in ['.git', '__pycache__']):
+            continue
+        for f in files:
+            if f.endswith(('.py', '.yml', '.md', '.json', '.html')):
+                p = os.path.join(root, f)
+                try:
+                    with open(p, 'r', encoding='utf-8') as fh:
+                        files_data[p] = fh.read()[:600]
+                except Exception:
+                    continue
+
+    prompt = f"""
+당신은 Chance_Blog 수석 관리자 AI입니다. 사용자의 이슈 지시를 분석하여 저장소 내부 파일을 생성, 수정 또는 삭제하세요.
+[이슈 제목]: {title}
+[이슈 본문]: {body}
+[레포지토리 파일 샘플]: {json.dumps(files_data, ensure_ascii=False)}
+[응답 규칙]: 오직 JSON 객체만 반환하세요.
+{{
+  "target_file": "_posts/2026-xx-xx-example.md",
+  "file_content": "파일 전체 내용 (마크다운, Front Matter 포함)",
+  "delete_file": false
+}}
+"""
+    resp = call_gemini(prompt)
+    if not resp:
+        print("Gemini 응답 없음 - 이슈 처리 실패")
+        return
+
+    # attempt to extract JSON
     try:
-        res = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
-        text = res.text.strip()
-        if text.startswith("```"):
-            text = re.sub(r"^```[a-zA-Z]*\n", "", text)
-            text = re.sub(r"\n```$", "", text)
-
-        cat_match = re.search(r'category:\s*"?([^"\n]+)"?', text)
-        category = cat_match.group(1).strip() if cat_match else "KR - 테크 이야기"
-        
-        save_dir = POSTS_DIR / category
-        save_dir.mkdir(parents=True, exist_ok=True)
-
-        file_path = save_dir / f"{date_str}-KR-{timestamp_str[-6:]}.md"
-        file_path.write_text(text, encoding="utf-8")
-        print(f"[Generated] Successfully created {file_path}")
-
-        history.append(target["title"])
-        save_history(history[-50:])
+        obj_text = re.search(r'\{.*\}', resp, re.S).group(0)
+        data = json.loads(obj_text)
     except Exception as e:
-        print(f"Post generation failed: {e}")
+        print(f"AI 응답 파싱 실패: {e}")
+        return
 
-if __name__ == "__main__":
-    # 1. 기존 게시글들의 소방관 관련 이미지 개선 및 중복 이미지 교체
-    fix_existing_posts()
-    # 2. 신규 포스트 생성 (필요 시)
-    if os.environ.get("RUN_GENERATION") == "true":
-        generate_post()
+    target = data.get('target_file')
+    content = data.get('file_content')
+    delete_flag = data.get('delete_file', False)
+
+    if delete_flag and target and os.path.exists(target):
+        os.remove(target)
+        print(f"파일 삭제: {target}")
+    elif target and content:
+        # ensure it's within repo and in _posts or allowed paths
+        # if target is under _posts subdir, normalize to root _posts
+        if target.startswith('_posts/') and '/' in target[7:]:
+            # move to root _posts
+            base = os.path.basename(target)
+            target = f"_posts/{base}"
+        # write file
+        p = Path(target)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding='utf-8')
+        print(f"파일 생성/수정: {p}")
+
+    # 댓글 및 이슈 닫기
+    if issue_number and GITHUB_TOKEN:
+        headers = {'Authorization': f'token {GITHUB_TOKEN}', 'Accept': 'application/vnd.github+json'}
+        repo = GITHUB_REPOSITORY
+        comment_url = f"https://api.github.com/repos/{repo}/issues/{issue_number}/comments"
+        close_url = f"https://api.github.com/repos/{repo}/issues/{issue_number}"
+        try:
+            requests.post(comment_url, headers=headers, json={"body": "이슈를 반영해서 파일을 수정했습니다. 페이지 반영 확인 후 문제가 있으면 다시 알려주세요."})
+            requests.patch(close_url, headers=headers, json={"state": "closed"})
+            print(f"이슈 댓글 작성 및 닫기 완료: {issue_number}")
+        except Exception as e:
+            print(f"이슈 처리 후 댓글/닫기 실패: {e}")
+
+
+# 오픈된 이미지 관련 이슈 자동 처리
+
+def process_open_control_issues():
+    if not GITHUB_TOKEN:
+        print("GITHUB_TOKEN 없음: 오픈 이슈 자동 처리 불가")
+        return
+    headers = {'Authorization': f'token {GITHUB_TOKEN}', 'Accept': 'application/vnd.github+json'}
+    repo = GITHUB_REPOSITORY
+    issues_url = f"https://api.github.com/repos/{repo}/issues?state=open&per_page=100"
+    try:
+        resp = requests.get(issues_url, headers=headers, timeout=15)
+        items = resp.json()
+    except Exception as e:
+        print(f"이슈 목록 조회 실패: {e}")
+        return
+
+    for it in items:
+        title = it.get('title','')
+        number = it.get('number')
+        body = it.get('body','') or ''
+        if title and '[Control]' in title and ('이미지' in title or '이미지' in body):
+            try:
+                handle_issue_with_params(title, body, issue_number=number)
+            except Exception as e:
+                print(f"이슈 처리 중 오류 ({number}): {e}")
+
+
+def main():
+    try:
+        # 이벤트 기반 실행
+        if EVENT_NAME == 'issues' and ISSUE_TITLE:
+            # when triggered by an issue event, workflow provides ISSUE_NUMBER
+            num = ISSUE_NUMBER
+            handle_issue_with_params(ISSUE_TITLE, ISSUE_BODY, issue_number=num)
+            return
+
+        # For schedule/push/workflow_dispatch: generate post and process open control issues
+        generate_hot_topic_post()
+        process_open_control_issues()
+
+    except Exception as exc:
+        print(f"작업 실패: {type(exc).__name__}: {exc}")
+        raise
+
+
+if __name__ == '__main__':
+    main()
