@@ -4,8 +4,6 @@ on:
   push:
     branches: [main]
   schedule:
-    # KST 기준: 02:00, 05:00, 08:00, 13:00, 18:00, 22:00
-    # UTC 기준: 17:00, 20:00, 23:00, 04:00, 09:00, 13:00
     - cron: '0 17,20,23,4,9,13 * * *'
   workflow_dispatch:
   issues:
