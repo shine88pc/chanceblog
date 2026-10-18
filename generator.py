@@ -40,7 +40,7 @@ def select_topic(history):
     return TOPIC_POOL[len(history) % len(TOPIC_POOL)]
 
 def generate_blog_post(topic):
-    """최신 google-genai SDK를 이용해 블로그 글 생성"""
+    """서버 과부하(503) 시 대체 모델을 순서대로 시도하는 안전 장치 적용"""
     prompt = f"""
     당신은 전문 블로거입니다. 다음 주제에 대해 독자에게 유익하고 가독성이 좋은 블로그 포스팅을 작성해 주세요.
     
@@ -58,12 +58,25 @@ def generate_blog_post(topic):
     4. 친근하고 전문적인 어조를 사용할 것.
     """
     
-    # 최신 권장 모델로 업데이트 (gemini-3.8-flash)
-    response = client.models.generate_content(
-        model='gemini-3.8-flash',
-        contents=prompt,
-    )
-    return response.text
+    # 시도할 모델 리스트 (앞 모델이 503 에러 등으로 막히면 다음 모델로 자동 전환)
+    models_to_try = ['gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-1.5-flash']
+    
+    last_error = None
+    for model_name in models_to_try:
+        try:
+            print(f"시도 중인 AI 모델: {model_name}")
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+            )
+            if response and response.text:
+                return response.text
+        except Exception as e:
+            print(f"모델 {model_name} 실패: {e}")
+            last_error = e
+            continue
+            
+    raise Exception(f"모든 Gemini 모델 호출에 실패했습니다. 마지막 에러: {last_error}")
 
 def main():
     history = load_history()
