@@ -4,9 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Chance_Blog | 테크 & AI 에세이 노트</title>
-  <script src="[https://cdn.tailwindcss.com](https://cdn.tailwindcss.com)"></script>
-  <script src="[https://cdn.jsdelivr.net/npm/marked/marked.min.js](https://cdn.jsdelivr.net/npm/marked/marked.min.js)"></script>
-  <link rel="stylesheet" href="[https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css](https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css)">
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Marked.js for Markdown Parsing -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <script>
     (function() {
       const savedTheme = localStorage.getItem('theme') || 'dark';
@@ -70,7 +73,7 @@
         <a href="./feed.xml" target="_blank" class="text-slate-400 hover:text-white p-2 rounded-xl bg-[var(--card-bg)] border border-[var(--border-color)] transition" title="RSS 피드">
           <i class="fas fa-rss"></i>
         </a>
-        <a href="[https://github.com/shine88pc/chanceblog](https://github.com/shine88pc/chanceblog)" target="_blank" class="text-slate-400 hover:text-white p-2 rounded-xl bg-[var(--card-bg)] border border-[var(--border-color)] transition" title="GitHub Repository">
+        <a href="https://github.com/shine88pc/chanceblog" target="_blank" class="text-slate-400 hover:text-white p-2 rounded-xl bg-[var(--card-bg)] border border-[var(--border-color)] transition" title="GitHub Repository">
           <i class="fab fa-github"></i>
         </a>
       </div>
@@ -109,9 +112,6 @@
                  class="w-full pl-9 pr-4 py-1.5 text-xs bg-[var(--card-bg)] border border-[var(--border-color)] rounded-xl text-[var(--text-main)] focus:outline-none focus:border-indigo-500 transition">
         </div>
       </div>
-
-      <!-- [AD SLOT - HEADER] -->
-      <div id="ad-slot-header" class="hidden"></div>
 
       <!-- Article Cards Container -->
       <div id="post-list" class="space-y-5">
@@ -152,15 +152,11 @@
             <p>독자 소통 공간 (GitHub Discussions 연동 슬롯)</p>
           </div>
         </div>
-
-        <!-- [AD SLOT - FOOTER] -->
-        <div id="ad-slot-footer" class="pt-6 border-t border-[var(--border-color)] text-center text-xs text-slate-500"></div>
       </div>
     </div>
 
     <!-- Sidebar -->
     <aside class="space-y-6">
-      <!-- Categories Box -->
       <div class="bg-[var(--card-bg)] p-6 rounded-3xl border border-[var(--border-color)] shadow-lg transition-colors duration-300">
         <h3 class="font-bold text-[var(--heading)] text-xs uppercase tracking-wider mb-4 flex items-center gap-2 text-indigo-400">
           <i class="fas fa-bookmark"></i> 카테고리 탐색
@@ -259,7 +255,7 @@
 
     async function fetchPostList() {
       try {
-        const res = await fetch(`[https://api.github.com/repos/$](https://api.github.com/repos/$){USER}/${REPO}/contents/${POSTS_DIR}`);
+        const res = await fetch(`https://api.github.com/repos/${USER}/${REPO}/contents/${POSTS_DIR}`);
         if(!res.ok) throw new Error('Posts folder not found');
         const items = await res.json();
         
@@ -289,7 +285,7 @@
           let title = file.name;
           let category = file.path.includes('KR') ? 'KR - 생각정리' : 'EN - Reflections';
           let lang = file.path.includes('KR') ? 'kr' : 'en';
-          let image = '[https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1000&q=80](https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1000&q=80)';
+          let image = 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1000&q=80';
           let tags = [];
 
           const frontmatterMatch = rawText.match(/^---[\s\S]*?---/);
@@ -443,20 +439,6 @@
       navigator.clipboard.writeText(window.location.href).then(() => {
         alert('블로그 링크가 클립보드에 복사되었습니다!');
       });
-    }
-
-    function shareSNS(platform) {
-      const url = encodeURIComponent(window.location.href);
-      const text = encodeURIComponent(document.title);
-      let shareUrl = '';
-      if (platform === 'twitter') {
-        shareUrl = `[https://twitter.com/intent/tweet?url=$](https://twitter.com/intent/tweet?url=$){url}&text=${text}`;
-      } else if (platform === 'facebook') {
-        shareUrl = `[https://www.facebook.com/sharer/sharer.php?u=$](https://www.facebook.com/sharer/sharer.php?u=$){url}`;
-      } else if (platform === 'linkedin') {
-        shareUrl = `[https://www.linkedin.com/sharing/share-offsite/?url=$](https://www.linkedin.com/sharing/share-offsite/?url=$){url}`;
-      }
-      if (shareUrl) window.open(shareUrl, '_blank', 'width=600,height=400');
     }
 
     fetchPostList();
