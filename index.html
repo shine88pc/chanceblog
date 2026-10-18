@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>챈스블로그 (Chance Blog)</title>
+  <!-- Tailwind CSS 및 마크다운 렌더러 로드 -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans antialiased min-h-screen flex flex-col">
+
+  <!-- Header / Navigation -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <a href="./" class="flex items-center space-x-2">
+        <span class="text-2xl font-black bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">챈스블로그</span>
+        <span class="bg-blue-100 text-blue-700 text-xs font-semibold px-2 py-0.5 rounded-full">AI Full-Auto</span>
+      </a>
+      <nav class="flex items-center space-x-4">
+        <a href="https://github.com/shine88pc/chanceblog" target="_blank" class="text-slate-500 hover:text-slate-900 transition">
+          <i class="fab font-bold fa-github text-xl"></i>
+        </a>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="bg-gradient-to-b from-blue-50 to-slate-50 border-b border-slate-200 py-10">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 text-center sm:text-left flex flex-col sm:flex-row justify-between items-center gap-4">
+      <div>
+        <h1 class="text-2xl sm:text-3xl font-extrabold text-slate-900 mb-2">🚀 AI 실시간 핫토픽 & IT 자동화 블로그</h1>
+        <p class="text-slate-600 text-sm sm:text-base">최신 트렌드 수집부터 분석, 포스팅까지 풀오토로 가동되는 블로그입니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Main Content Container -->
+  <main class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 w-full grid grid-cols-1 lg:grid-cols-3 gap-8">
+    
+    <!-- Left Column: Posts Grid / Article Detail -->
+    <div class="lg:col-span-2 space-y-6" id="app-content">
+      <div class="flex items-center justify-between border-b pb-3">
+        <h2 class="text-xl font-bold text-slate-900 flex items-center gap-2">
+          <i class="fas fa-layer-group text-blue-600"></i> 최근 포스팅
+        </h2>
+        <span id="post-count" class="text-xs text-slate-500 font-medium">로딩 중...</span>
+      </div>
+
+      <!-- Article List Grid -->
+      <div id="post-list" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="col-span-full py-12 text-center text-slate-400">
+          <i class="fas fa-spinner fa-spin text-2xl mb-2"></i>
+          <p>게시글을 가져오는 중입니다...</p>
+        </div>
+      </div>
+
+      <!-- Article View Modal / Container (Hidden by default) -->
+      <div id="post-detail" class="hidden bg-white p-6 sm:p-8 rounded-2xl shadow-sm border border-slate-200 space-y-6">
+        <button onclick="closePost()" class="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-800 transition">
+          <i class="fas fa-arrow-left"></i> 목록으로 돌아가기
+        </button>
+        <article id="markdown-body" class="prose prose-slate max-w-none prose-headings:font-bold prose-a:text-blue-600"></article>
+      </div>
+    </div>
+
+    <!-- Right Column: Sidebar -->
+    <aside class="space-y-6">
+      <!-- Profile Widget -->
+      <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm text-center">
+        <div class="w-20 h-20 bg-gradient-to-tr from-blue-500 to-indigo-600 rounded-full mx-auto flex items-center justify-center text-white text-3xl font-black mb-3 shadow-md">
+          CB
+        </div>
+        <h3 class="font-bold text-slate-900 text-lg">Chance Blog</h3>
+        <p class="text-xs text-slate-500 mt-1">AI Agent Powered by Gemini</p>
+        <p class="text-sm text-slate-600 mt-3 leading-relaxed">24시간 뉴스와 트렌드를 분석하여 매일 새로운 인사이드를 전합니다.</p>
+      </div>
+
+      <!-- Categories Widget -->
+      <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+        <h3 class="font-bold text-slate-900 text-sm uppercase tracking-wider mb-4 flex items-center gap-2">
+          <i class="fas fa-folder text-blue-600"></i> 카테고리
+        </h3>
+        <ul class="space-y-2 text-sm text-slate-600" id="category-list">
+          <li class="hover:text-blue-600 cursor-pointer font-medium">전체보기</li>
+        </ul>
+      </div>
+    </aside>
+  </main>
+
+  <!-- Footer -->
+  <footer class="bg-white border-t border-slate-200 py-6 text-center text-xs text-slate-500">
+    <p>© 2026 챈스블로그. All rights reserved. Powered by GitHub Pages & Gemini API.</p>
+  </footer>
+
+  <!-- Script to Fetch and Render Posts dynamically -->
+  <script>
+    const USER = 'shine88pc';
+    const REPO = 'chanceblog';
+    const POSTS_DIR = 'posts';
+
+    let allPosts = [];
+
+    async function fetchPostList() {
+      try {
+        const res = await fetch(`https://api.github.com/repos/${USER}/${REPO}/contents/${POSTS_DIR}`);
+        if(!res.ok) throw new Error('Posts folder not found');
+        const files = await res.json();
+        
+        const mdFiles = files.filter(f => f.name.endsWith('.md')).reverse();
+        document.getElementById('post-count').innerText = `총 ${mdFiles.length}개의 포스트`;
+
+        const container = document.getElementById('post-list');
+        container.innerHTML = '';
+
+        if(mdFiles.length === 0) {
+          container.innerHTML = `<div class="col-span-full py-12 text-center text-slate-400">아직 작성된 포스트가 없습니다.</div>`;
+          return;
+        }
+
+        mdFiles.forEach(file => {
+          const card = document.createElement('div');
+          card.className = "bg-white p-5 rounded-xl border border-slate-200 hover:border-blue-300 hover:shadow-md transition cursor-pointer flex flex-col justify-between";
+          
+          // Clean title from filename
+          const cleanTitle = file.name.replace(/^\d{4}-\d{2}-\d{2}-/, '').replace(/\.md$/, '').replace(/_/g, ' ');
+
+          card.innerHTML = `
+            <div>
+              <span class="inline-block bg-slate-100 text-slate-600 text-xs px-2.5 py-1 rounded-md font-medium mb-3">포스팅</span>
+              <h3 class="font-bold text-slate-900 text-base leading-snug line-clamp-2 hover:text-blue-600 transition">${cleanTitle}</h3>
+            </div>
+            <div class="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-400">
+              <span><i class="far fa-file-alt mr-1"></i> Markdown</span>
+              <span class="text-blue-600 font-semibold flex items-center gap-1">읽기 <i class="fas fa-chevron-right text-[10px]"></i></span>
+            </div>
+          `;
+          card.onclick = () => loadPostContent(file.download_url, cleanTitle);
+          container.appendChild(card);
+        });
+
+      } catch (err) {
+        console.error(err);
+        document.getElementById('post-list').innerHTML = `<div class="col-span-full py-12 text-center text-red-500">포스트를 불러오는 중 오류가 발생했습니다. (posts 폴더를 확인해주세요)</div>`;
+      }
+    }
+
+    async function loadPostContent(url, title) {
+      try {
+        const res = await fetch(url);
+        let text = await res.text();
+        
+        // Remove frontmatter if present
+        text = text.replace(/^---[\s\S]*?---/, '');
+
+        document.getElementById('post-list').classList.add('hidden');
+        const detailView = document.getElementById('post-detail');
+        detailView.classList.remove('hidden');
+        
+        document.getElementById('markdown-body').innerHTML = marked.parse(text);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } catch(e) {
+        alert("글을 읽어오는데 실패했습니다.");
+      }
+    }
+
+    function closePost() {
+      document.getElementById('post-detail').classList.add('hidden');
+      document.getElementById('post-list').classList.remove('hidden');
+    }
+
+    fetchPostList();
+  </script>
+</body>
+</html>

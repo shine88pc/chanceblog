@@ -48,17 +48,17 @@ def fetch_recent_news():
                 recent_items.append(f"제목: {title}\n요약: {desc}")
         return recent_items[:20]
     except Exception as e:
-        print(f"뉴스 RSS 수집 오류: {e}")
+        print(f"뉴스 수집 오류: {e}")
         return []
 
 def handle_natural_language_issue():
-    print(f"모바일 이슈 감지: {issue_title}")
+    print(f"모바일 이슈 제어: {issue_title}")
     files_data = {}
     for root, dirs, files in os.walk("."):
-        if ".git" in root or "__pycache__" in root or "_site" in root:
+        if ".git" in root or "__pycache__" in root:
             continue
         for file in files:
-            if file.endswith((".py", ".yml", ".md", ".json")):
+            if file.endswith((".py", ".yml", ".md", ".json", ".html")):
                 filepath = os.path.join(root, file)
                 try:
                     with open(filepath, "r", encoding="utf-8") as f:
@@ -67,13 +67,13 @@ def handle_natural_language_issue():
                     pass
 
     prompt = f"""
-    당신은 100% 자동화 블로그 관리 AI입니다. 사용자의 이슈 요청에 따라 코드, 분류, 글 파일을 수정/생성/삭제하세요.
-    [요청]: 제목: {issue_title} / 본문: {issue_body}
-    [파일 목록 요약]: {json.dumps({k: v[:600] for k, v in files_data.items()}, ensure_ascii=False)}
-    [규칙]: 순수 JSON으로만 응답 (마크다운 코드블록 금지).
+    당신은 블로그 수석 관리자 AI입니다. 사용자의 이슈 지시에 맞게 코드/글/설정을 관리하세요.
+    [사용자 지시]: 제목: {issue_title} / 본문: {issue_body}
+    [파일 데이터]: {json.dumps({k: v[:600] for k, v in files_data.items()}, ensure_ascii=False)}
+    [응답 규칙]: 순수 JSON 응답만 반환
     {{
-      "target_file": "파일 경로",
-      "file_content": "전체 내용",
+      "target_file": "파일명",
+      "file_content": "내용",
       "delete_file": false
     }}
     """
@@ -96,33 +96,29 @@ def handle_natural_language_issue():
             with open(target_file, "w", encoding="utf-8") as f:
                 f.write(file_content)
     except Exception as e:
-        print(f"이슈 처리 에러: {e}")
+        print(f"이슈 처리 오류: {e}")
 
 def generate_hot_topic_post():
     history = load_history()
     news_pool = fetch_recent_news()
-    news_text = "\n---\n".join(news_pool) if news_pool else "최근 뉴스 없음"
+    news_text = "\n---\n".join(news_pool) if news_pool else "최근 트렌드 뉴스 없음"
 
     prompt = f"""
-    최근 24시간 실시간 뉴스 데이터를 분석하여 새로운 핫토픽 블로그 글 1개를 작성하세요.
+    최근 24시간 실시간 뉴스를 분석하여 독창적인 블로그 글 1개를 작성하세요.
     [이전 주제 목록 (중복 금지)]: {json.dumps(history, ensure_ascii=False)}
     [뉴스 데이터]: {news_text}
     [조건]:
-    1. 마크다운 형식으로 작성.
-    2. 상단 프론트매터:
-       ---
-       title: "핫토픽 제목"
-       date: "{datetime.datetime.now().strftime('%Y-%m-%d')}"
-       ---
-    3. 서론 - 본문 - 결론 구조.
+    1. 마크다운 형식 작성.
+    2. 독창적이고 유익한 가독성 높은 분석 글.
     """
     response = client.models.generate_content(model='gemini-3.8-flash', contents=prompt)
     post_content = response.text
 
-    topic_title = "핫토픽 트렌드 분석"
-    for line in post_content.splitlines():
-        if line.startswith("title:"):
-            topic_title = line.split(":", 1)[1].strip().strip('"\'')
+    topic_title = "실시간 트렌드 핫토픽 분석"
+    lines = post_content.splitlines()
+    for line in lines:
+        if line.startswith("# "):
+            topic_title = line.replace("# ", "").strip()
             break
 
     date_str = datetime.datetime.now().strftime('%Y-%m-%d')
@@ -145,4 +141,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
