@@ -1,0 +1,38 @@
+name: Chance_Blog 제어 센터
+description: 모바일에서 클릭과 입력만으로 블로그를 관리합니다.
+title: "[블로그 관리]: "
+labels: ["blog-control"]
+body:
+  - type: dropdown
+    id: action_type
+    attributes:
+      label: 🛠️ 작업 종류 선택
+      description: 수행할 작업을 선택하세요.
+      options:
+        - 새로운 포스트 직접 생성하기
+        - 기존 포스트 수정 / 삭제하기
+        - 블로그 코드 또는 설정 변경하기
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: 📁 카테고리 선택
+      description: 포스팅이나 글이 속할 카테고리를 선택하세요. (코드 변경 시 무관)
+      options:
+        - IT / 테크
+        - AI / 딥러닝
+        - 일상 / 생각
+        - 기타
+    validations:
+      required: true
+
+  - type: textarea
+    id: content
+    attributes:
+      label: 📝 상세 내용 및 지시사항
+      description: AI에게 요청할 내용이나 작성할 글의 주제, 수정할 내용을 적어주세요.
+      placeholder: 예: 최신 클라우드 컴퓨팅 트렌드에 대한 유익한 글을 작성해줘.
+    validations:
+      required: true
