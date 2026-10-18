@@ -1,15 +1,14 @@
-name: Jekyll GitHub Pages & Full-Auto Master
+name: Auto Blog Master
 
 on:
   schedule:
-    - cron: '0 0 * * *' # 매일 자동 핫토픽 실행
+    - cron: '0 0 * * *'
   workflow_dispatch:
   issues:
-    types: [opened, edited] # 모바일 이슈 자연어 제어
+    types: [opened, edited]
 
 jobs:
-  # 1단계: AI가 글을 쓰거나 이슈를 처리하는 잡
-  ai_process:
+  build:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -29,7 +28,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install google-genai requests
 
-      - name: Run Master AI Script
+      - name: Run Master Script
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           EVENT_NAME: ${{ github.event_name }}
@@ -38,37 +37,10 @@ jobs:
         run: |
           python generator.py
 
-      - name: Commit changes if any
+      - name: Commit and push changes
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git commit -m "🤖 AI 자동 작업 반영 (글생성/코드수정 등)" || echo "No changes to commit"
+          git commit -m "🤖 자동 포스팅 및 자연어 제어 반영" || echo "No changes to commit"
           git push
-
-  # 2단계: Jekyll 블로그 테마를 웹사이트로 완벽하게 빌드 및 배포하는 잡
-  build_and_deploy:
-    needs: ai_process # AI 작업이 끝난 후에 실행
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
-        
-      - name: Build with Jekyll
-        uses: actions/jekyll-build-pages@v1
-        
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
