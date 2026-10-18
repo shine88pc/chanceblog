@@ -43,9 +43,9 @@ def fetch_recent_news():
             try:
                 pub_date = parsedate_to_datetime(pub_date_str)
                 if now - pub_date <= timedelta(hours=24):
-                    recent_items.append(f"제목: {title}\n요약: {desc}")
+                    recent_items.append(f"Title: {title}\nSummary: {desc}")
             except Exception:
-                recent_items.append(f"제목: {title}\n요약: {desc}")
+                recent_items.append(f"Title: {title}\nSummary: {desc}")
         return recent_items[:20]
     except Exception as e:
         print(f"뉴스 수집 오류: {e}")
@@ -68,24 +68,20 @@ def handle_natural_language_issue():
                     pass
 
     prompt = f"""
-    당신은 Chance_Blog 수석 관리자 AI입니다. 사용자가 모바일 이슈 템플릿을 통해 보낸 요청을 분석하여 블로그 파일(코드, 포스트 등)을 생성, 수정 또는 삭제하세요.
-    
-    [이슈 제목]: {issue_title}
-    [이슈 본문 (사용자 선택 및 지시사항)]: {issue_body}
-    
-    [현재 레포지토리 파일 현황]: {json.dumps({k: v[:500] for k, v in files_data.items()}, ensure_ascii=False)}
-    
-    [응답 규칙]: 반드시 아래 JSON 형식으로만 순수하게 응답하세요 (마크다운 백틱 생략).
+    You are the lead manager AI of Chance_Blog. Analyze the user's mobile issue request and create, update, or delete blog files accordingly.
+    [Issue Title]: {issue_title}
+    [Issue Body]: {issue_body}
+    [File Data]: {json.dumps({k: v[:500] for k, v in files_data.items()}, ensure_ascii=False)}
+    [Response Rule]: Return ONLY a pure JSON object without markdown formatting.
     {{
-      "target_file": "생성 또는 수정할 파일 경로 (예: _posts/2026-10-18-title.md 또는 index.html 등)",
-      "file_content": "파일에 들어갈 전체 내용",
+      "target_file": "file path",
+      "file_content": "file content",
       "delete_file": false
     }}
     """
     
     response = client.models.generate_content(model='gemini-3.8-flash', contents=prompt)
     result_text = response.text.strip()
-    
     if result_text.startswith("```"):
         lines = result_text.splitlines()
         if lines[0].startswith("```"): lines = lines[1:]
@@ -100,40 +96,38 @@ def handle_natural_language_issue():
         
         if is_delete and target_file and os.path.exists(target_file):
             os.remove(target_file)
-            print(f"파일 삭제 완료: {target_file}")
         elif target_file and file_content:
             os.makedirs(os.path.dirname(target_file), exist_ok=True) if "/" in target_file else None
             with open(target_file, "w", encoding="utf-8") as f:
                 f.write(file_content)
-            print(f"파일 생성/수정 완료: {target_file}")
     except Exception as e:
-        print(f"이슈 처리 중 오류: {e}")
+        print(f"이슈 처리 오류: {e}")
 
 def generate_hot_topic_post():
     history = load_history()
     news_pool = fetch_recent_news()
-    news_text = "\n---\n".join(news_pool) if news_pool else "최근 트렌드 뉴스 없음"
+    news_text = "\n---\n".join(news_pool) if news_pool else "No recent trend news"
 
     prompt = f"""
-    최근 24시간 실시간 뉴스를 분석하여 [한글 버전]과 [영문 버전] 블로그 글 2개를 동시에 생성하세요.
+    Analyze the recent 24-hour real-time news trends and generate TWO distinct blog posts: one in KOREAN and one in ENGLISH.
     
-    [이전 주제 목록 (중복 금지)]: {json.dumps(history, ensure_ascii=False)}
-    [뉴스 데이터]: {news_text}
+    [Previous Topics (Do not duplicate)]: {json.dumps(history, ensure_ascii=False)}
+    [News Data]: {news_text}
     
-    [작성 규격]:
-    1. 반드시 아래 JSON 양식으로만 출력하세요.
-    2. 마크다운 단락 간 줄바꿈(\\n\\n)을 명확히 하여 가독성을 극대화하세요.
-    3. 한글 카테고리 예시: "KR - IT/테크", "KR - AI/딥러닝", "KR - 트렌드/뉴스"
-    4. 영문 카테고리 예시: "EN - IT/Tech", "EN - AI/Deep Learning", "EN - Trend/News"
+    [CRITICAL INSTRUCTIONS]:
+    1. Output MUST be a pure JSON object ONLY. No markdown code blocks.
+    2. 'kr_content' MUST be 100% written in natural Korean. Category must start with "KR - ".
+    3. 'en_content' MUST be 100% written in natural English. Category must start with "EN - ".
+    4. Format Markdown headers and paragraphs with clear spacing (\\n\\n).
     
     {{
-      "kr_title": "한글 제목 (예: AI 기술의 최신 동향 분석)",
-      "kr_category": "KR - 카테고리명",
-      "kr_content": "---\\nlayout: post\\ntitle: \\"한글 제목\\"\\ncategory: \\"KR - 카테고리명\\"\\nlang: kr\\n---\\n\\n# 한글 제목\\n\\n본문 내용...",
+      "kr_title": "한글 제목",
+      "kr_category": "KR - IT/테크",
+      "kr_content": "---\\nlayout: post\\ntitle: \\"한글 제목\\"\\ncategory: \\"KR - IT/테크\\"\\nlang: kr\\n---\\n\\n# 한글 제목\\n\\n본문 내용...",
       
-      "en_title": "영문 제목 (예: Latest AI Technology Trend Analysis)",
-      "en_category": "EN - Category Name",
-      "en_content": "---\\nlayout: post\\ntitle: \\"English Title\\"\\ncategory: \\"EN - Category Name\\"\\nlang: en\\n---\\n\\n# English Title\\n\\nBody content..."
+      "en_title": "English Title",
+      "en_category": "EN - IT/Tech",
+      "en_content": "---\\nlayout: post\\ntitle: \\"English Title\\"\\ncategory: \\"EN - IT/Tech\\"\\nlang: en\\n---\\n\\n# English Title\\n\\nBody content..."
     }}
     """
     
@@ -148,29 +142,28 @@ def generate_hot_topic_post():
         
     try:
         data = json.loads(result_text)
+        # 현재 연도(2026년) 기준 타임스탬프 적용
         date_str = datetime.datetime.now().strftime('%Y-%m-%d')
         timestamp = datetime.datetime.now().strftime('%H%M%S')
         
         os.makedirs("_posts", exist_ok=True)
         
-        # 1. 한글 포스팅 저장
         kr_filename = f"_posts/{date_str}-KR-{timestamp}.md"
         with open(kr_filename, "w", encoding="utf-8") as f:
             f.write(data["kr_content"])
             
-        # 2. 영문 포스팅 저장
         en_filename = f"_posts/{date_str}-EN-{timestamp}.md"
         with open(en_filename, "w", encoding="utf-8") as f:
             f.write(data["en_content"])
             
-        print(f"한글/영문 포스트 생성 성공: {kr_filename}, {en_filename}")
+        print(f"포스트 생성 완료: {kr_filename}, {en_filename}")
         
         if data.get("kr_title") not in history:
             history.append(data.get("kr_title"))
             save_history(history)
             
     except Exception as e:
-        print(f"포스트 생성 및 파싱 실패: {e}\n응답 원본: {result_text}")
+        print(f"포스트 생성 실패: {e}\n응답 원본: {result_text}")
 
 def main():
     if event_name == "issues" and issue_title:

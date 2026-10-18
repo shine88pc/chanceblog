@@ -1,31 +1,45 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="ko" class="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Chance_Blog</title>
+  <title>Chance_Blog | AI Global Tech & Trends</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            darkbg: '#0f172a',
+            cardbg: '#1e293b',
+            bordercol: '#334155'
+          }
+        }
+      }
+    }
+  </script>
   <style>
-    /* 마크다운 본문 줄바꿈 및 가독성 스타일 강화 */
-    .prose p { margin-bottom: 1.25em; line-height: 1.8; }
-    .prose h1, .prose h2, .prose h3 { margin-top: 1.5em; margin-bottom: 0.5em; font-weight: 800; }
-    .prose ul, .prose ol { margin-bottom: 1.25em; padding-left: 1.5em; }
+    .prose p { margin-bottom: 1.25em; line-height: 1.8; color: #94a3b8; }
+    .prose h1, .prose h2, .prose h3 { color: #f8fafc; margin-top: 1.5em; margin-bottom: 0.5em; font-weight: 800; }
+    .prose ul, .prose ol { margin-bottom: 1.25em; padding-left: 1.5em; color: #94a3b8; }
     .prose li { margin-bottom: 0.5em; }
+    .prose strong { color: #f1f5f9; }
   </style>
 </head>
-<body class="bg-slate-50 text-slate-800 font-sans antialiased min-h-screen flex flex-col">
+<body class="bg-darkbg text-slate-100 font-sans antialiased min-h-screen flex flex-col selection:bg-blue-500 selection:text-white">
 
   <!-- Header -->
-  <header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+  <header class="bg-cardbg/80 backdrop-blur-md border-b border-bordercol sticky top-0 z-50">
     <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
       <a href="./" class="flex items-center space-x-2">
-        <span class="text-2xl font-black bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">Chance_Blog</span>
-        <span class="bg-blue-100 text-blue-700 text-xs font-semibold px-2 py-0.5 rounded-full">Dual-Lang AI</span>
+        <span class="text-2xl font-black bg-gradient-to-r from-blue-400 to-indigo-400 bg-clip-text text-transparent">Chance_Blog</span>
+        <span class="bg-blue-500/20 text-blue-400 text-xs font-semibold px-2.5 py-0.5 rounded-full border border-blue-500/30">PRO AI</span>
       </a>
       <nav class="flex items-center space-x-4">
-        <a href="https://github.com/shine88pc/chanceblog" target="_blank" class="text-slate-500 hover:text-slate-900 transition">
+        <a href="https://github.com/shine88pc/chanceblog" target="_blank" class="text-slate-400 hover:text-white transition">
           <i class="fab fa-github text-xl"></i>
         </a>
       </nav>
@@ -33,75 +47,76 @@
   </header>
 
   <!-- Hero Section -->
-  <section class="bg-gradient-to-b from-blue-50 to-slate-50 border-b border-slate-200 py-8">
-    <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-      <h1 class="text-2xl sm:text-3xl font-extrabold text-slate-900 mb-2">🚀 AI 글로벌 핫토픽 블로그 (KR / EN)</h1>
-      <p class="text-slate-600 text-sm sm:text-base">실시간 트렌드를 분석하여 한글과 영문 버전으로 자동 포스팅합니다.</p>
+  <section class="bg-gradient-to-b from-slate-900 to-darkbg border-b border-bordercol py-12">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 text-center sm:text-left">
+      <h1 class="text-3xl sm:text-4xl font-extrabold text-white mb-3 tracking-tight">🚀 AI Global Trend & Tech Hub</h1>
+      <p class="text-slate-400 text-sm sm:text-base max-w-2xl">실시간 트렌드를 분석하여 한글과 영문(KR / EN) 인사이트를 프리미엄 다크모드로 제공합니다.</p>
     </div>
   </section>
 
   <!-- Main Container -->
-  <main class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 w-full grid grid-cols-1 lg:grid-cols-3 gap-8">
+  <main class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 flex-1 w-full grid grid-cols-1 lg:grid-cols-3 gap-8">
     
     <!-- Post List & Article Container -->
     <div class="lg:col-span-2 space-y-6" id="app-content">
-      <div class="flex items-center justify-between border-b pb-3">
-        <h2 class="text-xl font-bold text-slate-900 flex items-center gap-2" id="current-category-title">
-          <i class="fas fa-layer-group text-blue-600"></i> 최근 포스팅 (전체)
+      <div class="flex items-center justify-between border-b border-bordercol pb-4">
+        <h2 class="text-xl font-bold text-white flex items-center gap-2" id="current-category-title">
+          <i class="fas fa-layer-group text-blue-400"></i> Recent Posts (All)
         </h2>
-        <span id="post-count" class="text-xs text-slate-500 font-medium">로딩 중...</span>
+        <span id="post-count" class="text-xs text-slate-400 font-medium bg-cardbg px-3 py-1 rounded-full border border-bordercol">Loading...</span>
       </div>
 
       <!-- Post Cards Grid -->
-      <div id="post-list" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div class="col-span-full py-12 text-center text-slate-400">
-          <i class="fas fa-spinner fa-spin text-2xl mb-2"></i>
-          <p>게시글을 가져오는 중입니다...</p>
+      <div id="post-list" class="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <div class="col-span-full py-16 text-center text-slate-500">
+          <i class="fas fa-spinner fa-spin text-3xl mb-3 text-blue-500"></i>
+          <p>포스트를 안전하게 불러오는 중입니다...</p>
         </div>
       </div>
 
       <!-- Post Detail Content View -->
-      <div id="post-detail" class="hidden bg-white p-6 sm:p-8 rounded-2xl shadow-sm border border-slate-200 space-y-6">
-        <button onclick="closePost()" class="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-800 transition">
-          <i class="fas fa-arrow-left"></i> 목록으로 돌아가기
+      <div id="post-detail" class="hidden bg-cardbg p-6 sm:p-10 rounded-2xl shadow-xl border border-bordercol space-y-6">
+        <button onclick="closePost()" class="inline-flex items-center gap-2 text-sm font-semibold text-blue-400 hover:text-blue-300 transition">
+          <i class="fas fa-arrow-left"></i> Back to List
         </button>
-        <article id="markdown-body" class="prose prose-slate max-w-none"></article>
+        <article id="markdown-body" class="prose max-w-none pt-4"></article>
       </div>
     </div>
 
     <!-- Sidebar -->
     <aside class="space-y-6">
-      <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm text-center">
-        <div class="w-16 h-16 bg-gradient-to-tr from-blue-500 to-indigo-600 rounded-full mx-auto flex items-center justify-center text-white text-2xl font-black mb-3 shadow-md">
+      <div class="bg-cardbg p-6 rounded-2xl border border-bordercol shadow-lg text-center">
+        <div class="w-16 h-16 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-2xl mx-auto flex items-center justify-center text-white text-2xl font-black mb-3 shadow-md shadow-blue-500/20">
           CB
         </div>
-        <h3 class="font-bold text-slate-900 text-lg">Chance_Blog</h3>
-        <p class="text-xs text-slate-500 mt-1">AI Agent Powered by Gemini</p>
+        <h3 class="font-bold text-white text-lg">Chance_Blog</h3>
+        <p class="text-xs text-slate-400 mt-1">Autonomous AI Publishing System</p>
       </div>
 
       <!-- Category Filter Widget -->
-      <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-        <h3 class="font-bold text-slate-900 text-sm uppercase tracking-wider mb-4 flex items-center gap-2">
-          <i class="fas fa-folder text-blue-600"></i> 카테고리
+      <div class="bg-cardbg p-6 rounded-2xl border border-bordercol shadow-lg">
+        <h3 class="font-bold text-white text-sm uppercase tracking-wider mb-4 flex items-center gap-2">
+          <i class="fas fa-folder-open text-blue-400"></i> Categories
         </h3>
-        <div class="space-y-4 text-sm" id="category-container">
+        <div class="space-y-5 text-sm" id="category-container">
           <div>
-            <p class="text-xs font-bold text-slate-400 uppercase mb-2">🇰🇷 한글 카테고리</p>
-            <ul class="space-y-1 text-slate-600 pl-2" id="kr-categories">
-              <li onclick="filterCategory('ALL')" class="cursor-pointer hover:text-blue-600 font-medium py-1">전체보기</li>
-            </ul>
+            <button onclick="filterCategory('ALL')" class="w-full text-left font-bold text-blue-400 hover:text-blue-300 py-1.5 px-3 rounded-lg bg-blue-500/10 transition mb-3">
+              <i class="fas fa-globe mr-2"></i> 전체 보기 (All Posts)
+            </button>
+            <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 px-1">🇰🇷 한글 카테고리</p>
+            <ul class="space-y-1 text-slate-300 pl-2" id="kr-categories"></ul>
           </div>
-          <div class="pt-2 border-t border-slate-100">
-            <p class="text-xs font-bold text-slate-400 uppercase mb-2">🇺🇸 English Categories</p>
-            <ul class="space-y-1 text-slate-600 pl-2" id="en-categories"></ul>
+          <div class="pt-3 border-t border-bordercol">
+            <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 px-1">🇺🇸 English Categories</p>
+            <ul class="space-y-1 text-slate-300 pl-2" id="en-categories"></ul>
           </div>
         </div>
       </div>
     </aside>
   </main>
 
-  <footer class="bg-white border-t border-slate-200 py-6 text-center text-xs text-slate-500">
-    <p>© 2026 Chance_Blog. All rights reserved. Powered by GitHub Pages & Gemini API.</p>
+  <footer class="bg-cardbg border-t border-bordercol py-8 text-center text-xs text-slate-400">
+    <p>© 2026 Chance_Blog. All rights reserved. Powered by GitHub Pages & Gemini API (Dark Mode).</p>
   </footer>
 
   <script>
@@ -119,13 +134,12 @@
         
         const mdFiles = files.filter(f => f.name.endsWith('.md')).reverse();
         
-        // Fetch frontmatter and metadata for each post
         allPostsData = await Promise.all(mdFiles.map(async (file) => {
           const contentRes = await fetch(file.download_url);
           const rawText = await contentRes.text();
           
           let title = file.name;
-          let category = '기타';
+          let category = file.name.includes('-KR-') ? 'KR - General' : 'EN - General';
           let lang = file.name.includes('-KR-') ? 'kr' : 'en';
 
           const frontmatterMatch = rawText.match(/^---[\s\S]*?---/);
@@ -133,8 +147,10 @@
             const fm = frontmatterMatch[0];
             const titleMatch = fm.match(/title:\s*"(.*?)"/);
             const catMatch = fm.match(/category:\s*"(.*?)"/);
+            const langMatch = fm.match(/lang:\s*(kr|en)/);
             if (titleMatch) title = titleMatch[1];
             if (catMatch) category = catMatch[1];
+            if (langMatch) lang = langMatch[1];
           }
 
           return { file, title, category, lang, rawText };
@@ -145,7 +161,7 @@
 
       } catch (err) {
         console.error(err);
-        document.getElementById('post-list').innerHTML = `<div class="col-span-full py-12 text-center text-red-500">포스트를 불러오는 중 오류가 발생했습니다. (_posts 폴더를 확인해주세요)</div>`;
+        document.getElementById('post-list').innerHTML = `<div class="col-span-full py-12 text-center text-red-400">포스트를 불러오는 중 오류가 발생했습니다. (_posts 폴더를 확인해주세요)</div>`;
       }
     }
 
@@ -154,51 +170,54 @@
       const enCats = new Set();
 
       allPostsData.forEach(p => {
-        if (p.category.startsWith('KR')) krCats.add(p.category);
-        else if (p.category.startsWith('EN')) enCats.add(p.category);
-        else krCats.add(p.category);
+        if (p.lang === 'kr' || p.category.startsWith('KR')) krCats.add(p.category);
+        else enCats.add(p.category);
       });
 
       const krUl = document.getElementById('kr-categories');
-      krUl.innerHTML = `<li onclick="filterCategory('ALL')" class="cursor-pointer hover:text-blue-600 font-medium py-1">전체보기</li>`;
+      krUl.innerHTML = '';
+      if(krCats.size === 0) krUl.innerHTML = `<li class="text-slate-500 text-xs px-2 py-1">No posts yet</li>`;
       krCats.forEach(cat => {
-        krUl.innerHTML += `<li onclick="filterCategory('${cat}')" class="cursor-pointer hover:text-blue-600 py-1">▪ ${cat}</li>`;
+        krUl.innerHTML += `<li onclick="filterCategory('${cat}')" class="cursor-pointer hover:text-white py-1.5 px-2 rounded hover:bg-slate-800 transition flex items-center justify-between"><span>▪ ${cat}</span></li>`;
       });
 
       const enUl = document.getElementById('en-categories');
       enUl.innerHTML = '';
+      if(enCats.size === 0) enUl.innerHTML = `<li class="text-slate-500 text-xs px-2 py-1">No posts yet</li>`;
       enCats.forEach(cat => {
-        enUl.innerHTML += `<li onclick="filterCategory('${cat}')" class="cursor-pointer hover:text-blue-600 py-1">▪ ${cat}</li>`;
+        enUl.innerHTML += `<li onclick="filterCategory('${cat}')" class="cursor-pointer hover:text-white py-1.5 px-2 rounded hover:bg-slate-800 transition flex items-center justify-between"><span>▪ ${cat}</span></li>`;
       });
     }
 
     function renderPostList(posts) {
-      document.getElementById('post-count').innerText = `총 ${posts.length}개의 포스트`;
+      document.getElementById('post-count').innerText = `Total ${posts.length} Posts`;
       const container = document.getElementById('post-list');
       container.innerHTML = '';
 
       if (posts.length === 0) {
-        container.innerHTML = `<div class="col-span-full py-12 text-center text-slate-400">해당 카테고리에 게시글이 없습니다.</div>`;
+        container.innerHTML = `<div class="col-span-full py-12 text-center text-slate-500">해당 카테고리에 게시글이 없습니다.</div>`;
         return;
       }
 
       posts.forEach(p => {
         const card = document.createElement('div');
-        card.className = "bg-white p-5 rounded-xl border border-slate-200 hover:border-blue-300 hover:shadow-md transition cursor-pointer flex flex-col justify-between";
+        card.className = "bg-cardbg p-6 rounded-2xl border border-bordercol hover:border-blue-500/50 hover:shadow-xl transition cursor-pointer flex flex-col justify-between group";
         
-        const langBadge = p.lang === 'kr' ? '<span class="bg-red-50 text-red-600 text-xs px-2 py-0.5 rounded font-bold">KR</span>' : '<span class="bg-blue-50 text-blue-600 text-xs px-2 py-0.5 rounded font-bold">EN</span>';
+        const langBadge = p.lang === 'kr' 
+          ? '<span class="bg-red-500/10 text-red-400 border border-red-500/20 text-xs px-2.5 py-0.5 rounded-full font-bold">KOREAN</span>' 
+          : '<span class="bg-blue-500/10 text-blue-400 border border-blue-500/20 text-xs px-2.5 py-0.5 rounded-full font-bold">ENGLISH</span>';
 
         card.innerHTML = `
           <div>
-            <div class="flex items-center gap-2 mb-3">
+            <div class="flex items-center justify-between mb-3">
               ${langBadge}
-              <span class="text-slate-500 text-xs font-medium">${p.category}</span>
+              <span class="text-slate-400 text-xs">${p.category}</span>
             </div>
-            <h3 class="font-bold text-slate-900 text-base leading-snug line-clamp-2 hover:text-blue-600 transition">${p.title}</h3>
+            <h3 class="font-bold text-white text-base leading-snug line-clamp-2 group-hover:text-blue-400 transition">${p.title}</h3>
           </div>
-          <div class="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-400">
-            <span><i class="far fa-file-alt mr-1"></i> Article</span>
-            <span class="text-blue-600 font-semibold flex items-center gap-1">읽기 <i class="fas fa-chevron-right text-[10px]"></i></span>
+          <div class="mt-5 pt-3 border-t border-bordercol/50 flex items-center justify-between text-xs text-slate-400">
+            <span><i class="far fa-calendar-alt mr-1"></i> 2026</span>
+            <span class="text-blue-400 font-semibold flex items-center gap-1 group-hover:translate-x-1 transition">Read Article <i class="fas fa-chevron-right text-[10px]"></i></span>
           </div>
         `;
         card.onclick = () => loadPostContent(p);
@@ -207,7 +226,7 @@
     }
 
     function filterCategory(cat) {
-      document.getElementById('current-category-title').innerText = cat === 'ALL' ? ' 최근 포스팅 (전체)' : ` ${cat}`;
+      document.getElementById('current-category-title').innerText = cat === 'ALL' ? ' Recent Posts (All)' : ` ${cat}`;
       if (cat === 'ALL') {
         renderPostList(allPostsData);
       } else {
