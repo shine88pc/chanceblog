@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Chance_Blog | 테크 & AI 에세이 노트</title>
+  <title>⚡ Chance_Blog | 테크 & AI 에세이 노트</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Marked.js for Markdown Parsing -->
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <!-- FontAwesome Icons -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <script>
     tailwind.config = {
       darkMode: 'class',
@@ -17,11 +17,13 @@
         extend: {
           colors: {
             brand: {
-              50: '#fffbeb',
-              100: '#fef3c7',
-              400: '#fbbf24',
-              500: '#f59e0b',
-              600: '#d97706'
+              50: '#eff6ff',
+              100: '#dbeafe',
+              500: '#3b82f6',
+              600: '#2563eb',
+              700: '#1d4ed8',
+              800: '#1e40af',
+              900: '#1e3a8a'
             }
           }
         }
@@ -29,356 +31,577 @@
     }
   </script>
   <style>
-    .markdown-body h1 { font-size: 1.875rem; font-weight: 800; margin-top: 1.5rem; margin-bottom: 1rem; }
-    .markdown-body h2 { font-size: 1.5rem; font-weight: 700; margin-top: 1.25rem; margin-bottom: 0.75rem; }
-    .markdown-body h3 { font-size: 1.25rem; font-weight: 600; margin-top: 1rem; margin-bottom: 0.5rem; }
-    .markdown-body p { margin-bottom: 1rem; line-height: 1.75; }
-    .markdown-body ul { list-style-type: disc; padding-left: 1.5rem; margin-bottom: 1rem; }
-    .markdown-body ol { list-style-type: decimal; padding-left: 1.5rem; margin-bottom: 1rem; }
-    .markdown-body li { margin-bottom: 0.25rem; }
-    .markdown-body blockquote { border-left: 4px solid #f59e0b; padding-left: 1rem; font-style: italic; margin-bottom: 1rem; color: #a1a1aa; }
-    .markdown-body code { background-color: rgba(255, 255, 255, 0.1); padding: 0.2rem 0.4rem; border-radius: 0.25rem; font-size: 0.875em; }
-    .markdown-body pre { background-color: #18181b; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; margin-bottom: 1rem; border: 1px solid #27272a; }
-    .markdown-body pre code { background-color: transparent; padding: 0; }
-    .markdown-body img { border-radius: 0.75rem; max-width: 100%; height: auto; margin: 1.5rem 0; }
+    .prose img { border-radius: 0.75rem; margin: 1.5rem auto; max-height: 480px; object-fit: cover; }
+    .prose h1 { font-size: 1.875rem; font-weight: 800; margin-top: 1.75rem; margin-bottom: 1rem; line-height: 1.3; }
+    .prose h2 { font-size: 1.5rem; font-weight: 700; margin-top: 1.5rem; margin-bottom: 0.75rem; line-height: 1.35; }
+    .prose h3 { font-size: 1.25rem; font-weight: 600; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+    .prose p { margin-top: 1rem; margin-bottom: 1rem; line-height: 1.8; }
+    .prose ul, .prose ol { margin-left: 1.5rem; margin-top: 0.75rem; margin-bottom: 0.75rem; list-style-type: disc; }
+    .prose blockquote { border-left: 4px solid #3b82f6; padding-left: 1rem; font-style: italic; margin: 1.25rem 0; color: #94a3b8; }
+    .prose pre { background: #0f172a; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; margin: 1.25rem 0; font-size: 0.9rem; }
+    .prose code { background: rgba(59, 130, 246, 0.15); color: #60a5fa; padding: 0.2rem 0.4rem; border-radius: 0.25rem; font-size: 0.875em; }
+    .prose pre code { background: transparent; color: #e2e8f0; padding: 0; }
+    .prose a { color: #3b82f6; text-decoration: underline; text-underline-offset: 3px; }
+    .prose a:hover { color: #60a5fa; }
   </style>
 </head>
-<body class="bg-zinc-950 text-zinc-100 min-h-screen flex flex-col font-sans transition-colors duration-200">
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans transition-colors duration-200">
 
-  <!-- Top Header -->
-  <header class="sticky top-0 z-40 w-full backdrop-blur-md bg-zinc-950/80 border-b border-zinc-800/80 transition-colors duration-200">
-    <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-      <!-- Header Logo with ⚡ -->
-      <a href="#" onclick="resetFilter(); return false;" class="flex items-center space-x-3 group">
-        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 via-yellow-400 to-amber-300 flex items-center justify-center text-xl shadow-lg shadow-yellow-500/20 group-hover:scale-105 transition-transform duration-200">
-          <span class="select-none">⚡</span>
-        </div>
-        <div class="flex items-center">
-          <span class="text-xl font-black tracking-tight text-white group-hover:text-yellow-400 transition-colors">Chance<span class="text-yellow-400">_</span>Blog</span>
-          <span class="hidden sm:inline-block text-[11px] px-2 py-0.5 ml-2.5 font-semibold rounded-full bg-yellow-400/10 text-yellow-400 border border-yellow-400/25 tracking-wide">TECH & AI</span>
-        </div>
+  <!-- Top Navigation Bar -->
+  <header class="sticky top-0 z-40 bg-slate-900/80 backdrop-blur-md border-b border-slate-800">
+    <div class="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
+      <!-- Brand Logo -->
+      <a href="#" onclick="window.location.reload(); return false;" class="flex items-center gap-2 group flex-shrink-0">
+        <span class="text-2xl transition-transform group-hover:scale-110 duration-200">⚡</span>
+        <span class="font-black text-xl tracking-tight bg-gradient-to-r from-blue-400 via-indigo-300 to-amber-300 bg-clip-text text-transparent">
+          Chance_Blog
+        </span>
       </a>
 
-      <!-- Nav & Utility Actions -->
-      <div class="flex items-center space-x-3">
-        <a href="https://github.com/shine88pc/chanceblog" target="_blank" rel="noopener noreferrer" class="p-2 text-zinc-400 hover:text-white transition-colors">
-          <i class="fa-brands fa-github text-lg"></i>
+      <!-- Search Box -->
+      <div class="relative flex-1 max-w-md hidden sm:block">
+        <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+        <input 
+          type="text" 
+          id="search-input" 
+          placeholder="포스트 검색 (제목, 태그, 본문)..." 
+          class="w-full bg-slate-800/80 border border-slate-700/80 text-sm rounded-full pl-9 pr-4 py-2 text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+        />
+      </div>
+
+      <!-- Right Controls -->
+      <div class="flex items-center gap-3">
+        <a href="https://github.com/shine88pc/chanceblog" target="_blank" rel="noopener noreferrer" class="text-slate-400 hover:text-slate-100 p-2 text-lg transition-colors" title="GitHub Repository">
+          <i class="fa-brands fa-github"></i>
         </a>
-        <button id="theme-toggle" onclick="toggleTheme()" class="p-2 text-zinc-400 hover:text-yellow-400 transition-colors rounded-lg bg-zinc-900 border border-zinc-800">
-          <i id="theme-icon" class="fa-solid fa-moon text-base"></i>
+        <button id="theme-toggle" class="text-slate-400 hover:text-amber-400 p-2 text-lg transition-colors" title="테마 변경">
+          <i class="fa-solid fa-moon" id="theme-icon"></i>
         </button>
+      </div>
+    </div>
+
+    <!-- Mobile Search Bar -->
+    <div class="px-4 pb-3 sm:hidden">
+      <div class="relative w-full">
+        <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+        <input 
+          type="text" 
+          id="search-input-mobile" 
+          placeholder="포스트 검색..." 
+          class="w-full bg-slate-800 border border-slate-700 text-sm rounded-full pl-9 pr-4 py-2 text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
       </div>
     </div>
   </header>
 
-  <!-- Hero Banner with ⚡ -->
-  <section class="relative py-16 sm:py-20 px-4 overflow-hidden border-b border-zinc-800/80 bg-gradient-to-b from-zinc-900/70 via-zinc-950 to-zinc-950">
-    <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,_var(--tw-gradient-stops))] from-yellow-500/10 via-transparent to-transparent pointer-events-none"></div>
-    <div class="max-w-4xl mx-auto text-center relative z-10">
-      <!-- Hero Lightning Icon Badge -->
-      <div class="inline-flex items-center justify-center mb-6">
-        <div class="relative group cursor-pointer" onclick="resetFilter()">
-          <div class="absolute -inset-1 rounded-2xl bg-gradient-to-r from-yellow-400 to-amber-500 opacity-60 blur-lg group-hover:opacity-100 transition-opacity duration-300"></div>
-          <div class="relative w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-zinc-900 border border-yellow-400/40 flex items-center justify-center text-4xl sm:text-5xl shadow-2xl transition-transform duration-200 group-hover:scale-105">
-            <span class="select-none">⚡</span>
-          </div>
-        </div>
+  <!-- Hero Section -->
+  <section class="border-b border-slate-800/80 bg-gradient-to-b from-slate-900 to-slate-950 py-10 px-4">
+    <div class="max-w-6xl mx-auto text-center space-y-3">
+      <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs font-semibold tracking-wide">
+        <span>⚡ Realtime AI & Tech Intelligence</span>
       </div>
-      
-      <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-yellow-400/10 border border-yellow-400/25 text-yellow-400 text-xs sm:text-sm font-semibold mb-4">
-        <span>⚡ Real-Time Tech & AI Insight Engine</span>
-      </div>
-      
-      <h1 class="text-3xl sm:text-5xl font-black tracking-tight text-white mb-4">
-        기술과 생각의 스파크, <span class="text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 via-amber-300 to-yellow-500">Chance_Blog</span>
+      <h1 class="text-3xl md:text-5xl font-black tracking-tight text-slate-100">
+        테크와 미래를 잇는 통찰 노트
       </h1>
-      <p class="max-w-xl mx-auto text-sm sm:text-base text-zinc-400 leading-relaxed">
-        AI가 글로벌 테크 이슈, 미래 컴퓨팅, 정책 담론을 실시간 분석하고 기록하는 1인 풀오토 인사이트 노트
+      <p class="text-slate-400 text-sm md:text-base max-w-2xl mx-auto">
+        인공지능, 우주 로보틱스, 정책 및 최신 기술 트렌드를 실시간으로 탐색하고 깊이 있는 에세이를 기록합니다.
       </p>
     </div>
   </section>
 
-  <!-- Main Content Area -->
-  <main class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 flex-grow w-full">
-    <!-- Search & Filter Controls -->
-    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
-      <!-- Category Buttons -->
-      <div class="flex flex-wrap gap-2" id="category-filters">
-        <button onclick="filterCategory('ALL')" class="cat-btn px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-medium bg-yellow-400 text-zinc-950 font-semibold shadow-sm transition-all" data-cat="ALL">전체보기</button>
-        <button onclick="filterCategory('KR')" class="cat-btn px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-medium bg-zinc-900 text-zinc-300 hover:text-white border border-zinc-800 hover:border-zinc-700 transition-all" data-cat="KR">🇰🇷 한국어</button>
-        <button onclick="filterCategory('EN')" class="cat-btn px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-medium bg-zinc-900 text-zinc-300 hover:text-white border border-zinc-800 hover:border-zinc-700 transition-all" data-cat="EN">🌐 English</button>
-      </div>
+  <!-- Filter & Category Section -->
+  <div class="max-w-6xl mx-auto px-4 pt-6 pb-2 w-full flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <!-- Categories Pills -->
+    <div class="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none" id="category-list">
+      <button data-cat="all" class="cat-btn px-4 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap bg-blue-600 text-white shadow-sm transition-all">
+        전체 보기
+      </button>
+      <!-- Dynamic category badges appended here -->
+    </div>
 
-      <!-- Search Input -->
-      <div class="relative max-w-xs w-full">
-        <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400 text-xs"></i>
-        <input type="text" id="search-input" oninput="handleSearch()" placeholder="제목 또는 태그 검색..." class="w-full pl-9 pr-4 py-1.5 text-xs sm:text-sm bg-zinc-900 border border-zinc-800 rounded-xl text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-yellow-400/50 transition-colors" />
+    <!-- Language Switcher -->
+    <div class="flex items-center gap-1.5 bg-slate-900 border border-slate-800 p-1 rounded-xl self-start md:self-auto">
+      <button data-lang="all" class="lang-btn px-3 py-1 rounded-lg text-xs font-medium text-slate-200 bg-slate-800 shadow transition-all">
+        ALL
+      </button>
+      <button data-lang="kr" class="lang-btn px-3 py-1 rounded-lg text-xs font-medium text-slate-400 hover:text-slate-200 transition-all">
+        🇰🇷 KR
+      </button>
+      <button data-lang="en" class="lang-btn px-3 py-1 rounded-lg text-xs font-medium text-slate-400 hover:text-slate-200 transition-all">
+        🇺🇸 EN
+      </button>
+    </div>
+  </div>
+
+  <!-- Main Content Area -->
+  <main class="max-w-6xl mx-auto px-4 py-6 flex-1 w-full">
+    <!-- Loading Indicator -->
+    <div id="loading-indicator" class="py-24 flex flex-col items-center justify-center space-y-4">
+      <div class="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
+      <p class="text-sm text-slate-400 font-medium">포스트를 불러오는 중입니다...</p>
+    </div>
+
+    <!-- Empty State -->
+    <div id="empty-state" class="hidden py-24 text-center space-y-3">
+      <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-slate-900 border border-slate-800 text-slate-500 text-2xl">
+        <i class="fa-regular fa-folder-open"></i>
       </div>
+      <h3 class="text-lg font-bold text-slate-300">검색 결과 또는 등록된 포스트가 없습니다.</h3>
+      <p class="text-sm text-slate-500 max-w-sm mx-auto">다른 키워드로 검색하거나 카테고리 필터를 변경해 보세요.</p>
     </div>
 
     <!-- Posts Grid -->
-    <div id="posts-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6">
-      <!-- Loading Placeholder -->
-      <div class="col-span-full py-16 text-center text-zinc-500">
-        <i class="fa-solid fa-circle-notch fa-spin text-2xl mb-3 text-yellow-400"></i>
-        <p class="text-sm">포스트를 불러오는 중입니다...</p>
-      </div>
+    <div id="post-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <!-- Post cards injected here -->
     </div>
   </main>
 
-  <!-- Article Modal -->
-  <div id="post-modal" class="fixed inset-0 z-50 hidden bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto" onclick="closeModal(event)">
-    <div class="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-3xl w-full max-h-[90vh] flex flex-col shadow-2xl relative overflow-hidden my-auto" onclick="event.stopPropagation()">
-      <div class="flex items-center justify-between p-4 sm:p-6 border-b border-zinc-800 bg-zinc-950/60">
-        <span id="modal-category" class="px-2.5 py-1 rounded-full text-xs font-semibold bg-yellow-400/10 text-yellow-400 border border-yellow-400/20"></span>
-        <button onclick="closeModal()" class="text-zinc-400 hover:text-white p-1 rounded-lg hover:bg-zinc-800 transition-colors">
+  <!-- Post Reader Modal -->
+  <div id="post-modal" class="fixed inset-0 z-50 hidden bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 md:p-6 overflow-y-auto">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[92vh] flex flex-col shadow-2xl relative my-auto overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+      <!-- Modal Header -->
+      <div class="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-900/90 sticky top-0 z-10">
+        <div class="flex items-center gap-2 truncate pr-4">
+          <span id="modal-badge" class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-500/20 text-blue-400 border border-blue-500/30 truncate"></span>
+          <span id="modal-date" class="text-xs text-slate-400 font-mono"></span>
+        </div>
+        <button id="modal-close-btn" class="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-800 transition-colors" title="닫기 (Esc)">
           <i class="fa-solid fa-xmark text-lg"></i>
         </button>
       </div>
-      <div class="p-6 sm:p-8 overflow-y-auto space-y-4">
-        <h2 id="modal-title" class="text-2xl sm:text-3xl font-extrabold text-white leading-tight"></h2>
-        <div class="flex items-center gap-3 text-xs text-zinc-400 pb-2 border-b border-zinc-800/60">
-          <span id="modal-date"><i class="fa-regular fa-clock mr-1"></i></span>
-          <span id="modal-lang"><i class="fa-solid fa-globe mr-1"></i></span>
+
+      <!-- Modal Body -->
+      <div class="overflow-y-auto px-6 md:px-10 py-8 flex-1">
+        <h1 id="modal-title" class="text-2xl md:text-3xl font-extrabold text-slate-100 leading-snug mb-6"></h1>
+        <div id="modal-cover-container" class="mb-8 hidden">
+          <img id="modal-cover-image" src="" alt="Cover" class="w-full max-h-80 object-cover rounded-xl border border-slate-800">
         </div>
-        <div id="modal-image-container" class="hidden rounded-xl overflow-hidden border border-zinc-800">
-          <img id="modal-image" src="" alt="" class="w-full max-h-80 object-cover" />
-        </div>
-        <div id="modal-content" class="markdown-body text-zinc-300 text-sm sm:text-base"></div>
-        <div id="modal-tags" class="flex flex-wrap gap-1.5 pt-4 border-t border-zinc-800"></div>
+        <div id="modal-body" class="prose prose-invert max-w-none text-slate-300"></div>
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="px-6 py-3 border-t border-slate-800 bg-slate-900 flex justify-between items-center text-xs text-slate-400">
+        <span id="modal-tags" class="flex flex-wrap gap-1.5"></span>
+        <button id="modal-bottom-close" class="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium rounded-lg transition-colors">
+          닫기
+        </button>
       </div>
     </div>
   </div>
 
   <!-- Footer -->
-  <footer class="border-t border-zinc-800/80 bg-zinc-950 py-8 px-4 text-center text-xs text-zinc-500">
-    <div class="flex items-center justify-center gap-2 mb-2">
-      <span class="text-yellow-400 font-bold text-sm">⚡ Chance_Blog</span>
-      <span>&bull;</span>
-      <span>Full-Auto Tech Journal</span>
+  <footer class="border-t border-slate-800/80 bg-slate-950 py-8 text-center text-xs text-slate-500">
+    <div class="max-w-6xl mx-auto px-4 space-y-2">
+      <p class="font-medium text-slate-400">⚡ Chance_Blog &copy; 2026. Automated Insights & Tech Journalism.</p>
+      <p>Powered by GitHub Actions, Gemini Intelligence, and Tailwind CSS.</p>
     </div>
-    <p>&copy; 2026 Chance. Powered by Gemini AI & GitHub Actions.</p>
   </footer>
 
+  <!-- Application Script -->
   <script>
-    let posts = [];
-    let currentCategory = 'ALL';
-    let currentQuery = '';
+    // ==========================================
+    // Mandatory Engineering Guardrails Compliant
+    // decoupling design from core pipelines
+    // ==========================================
+    const REPO_OWNER = 'shine88pc';
+    const REPO_NAME = 'chanceblog';
+    const BRANCH = 'main';
 
-    const fallbackPosts = [
-      "_posts/KR - 테크 이야기/2026-10-18-KR-233513.md",
-      "_posts/EN - Space & Robotics/2026-10-18-EN-233513.md",
-      "_posts/2026-10-18-KR-225949.md",
-      "_posts/2026-10-18-EN-225949.md"
+    let allPosts = [];
+    let currentCategory = 'all';
+    let currentLang = 'all';
+    let searchQuery = '';
+
+    const defaultThumbnails = [
+      'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=800&q=80',
+      'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80',
+      'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?auto=format&fit=crop&w=800&q=80',
+      'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=800&q=80'
     ];
 
-    function parseFrontMatter(text) {
-      const fmRegex = /^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/;
-      const match = text.match(fmRegex);
-      if (!match) return { meta: {}, content: text };
-      const yaml = match[1];
+    function getDefaultThumbnail(seed) {
+      let hash = 0;
+      for (let i = 0; i < seed.length; i++) {
+        hash = (hash << 5) - hash + seed.charCodeAt(i);
+        hash |= 0;
+      }
+      const index = Math.abs(hash) % defaultThumbnails.length;
+      return defaultThumbnails[index];
+    }
+
+    // Frontmatter parsing logic
+    function parseFrontmatter(rawText) {
+      const match = rawText.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+      if (!match) {
+        return { metadata: {}, content: rawText };
+      }
+      const yamlBlock = match[1];
       const content = match[2];
-      const meta = {};
-      yaml.split(/\r?\n/).forEach(line => {
+      const metadata = {};
+
+      yamlBlock.split('\n').forEach(line => {
         const colonIdx = line.indexOf(':');
         if (colonIdx !== -1) {
           const key = line.slice(0, colonIdx).trim();
           let val = line.slice(colonIdx + 1).trim();
           if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
             val = val.slice(1, -1);
-          } else if (val.startsWith('[') && val.endsWith(']')) {
+          }
+          if (val.startsWith('[') && val.endsWith(']')) {
             try {
-              val = JSON.parse(val.replace(/'/g, '"'));
-            } catch (e) {
-              val = val.slice(1, -1).split(',').map(s => s.trim().replace(/['"]/g, ''));
+              val = val.slice(1, -1).split(',').map(s => s.trim().replace(/^['"]|['"]$/g, ''));
+            } catch(e) {
+              val = [];
             }
           }
-          meta[key] = val;
+          metadata[key] = val;
         }
       });
-      return { meta, content };
+      return { metadata, content };
     }
 
-    async function loadPosts() {
-      let postPaths = [];
+    // Core recursive post-fetching logic
+    async function fetchPostList() {
+      const loadingEl = document.getElementById('loading-indicator');
+      const emptyEl = document.getElementById('empty-state');
+      const postGrid = document.getElementById('post-grid');
+
+      if (loadingEl) loadingEl.classList.remove('hidden');
+      if (emptyEl) emptyEl.classList.add('hidden');
+      if (postGrid) postGrid.innerHTML = '';
+
       try {
-        const res = await fetch('https://api.github.com/repos/shine88pc/chanceblog/git/trees/main?recursive=1');
-        if (res.ok) {
-          const data = await res.json();
-          postPaths = data.tree
-            .filter(item => item.path.startsWith('_posts/') && item.path.endsWith('.md'))
-            .map(item => item.path);
+        let mdFiles = [];
+
+        // Recursive folder traversal function for _posts/
+        async function traverseDirectory(path) {
+          const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${encodeURIComponent(path).replace(/%2F/g, '/')}`;
+          const res = await fetch(url);
+          if (!res.ok) {
+            throw new Error(`Directory traversal HTTP ${res.status}`);
+          }
+          const items = await res.json();
+          if (!Array.isArray(items)) return [];
+
+          let results = [];
+          for (const item of items) {
+            if (item.type === 'dir') {
+              const subItems = await traverseDirectory(item.path);
+              results = results.concat(subItems);
+            } else if (item.type === 'file' && (item.name.endsWith('.md') || item.name.endsWith('.markdown'))) {
+              results.push(item);
+            }
+          }
+          return results;
         }
-      } catch (e) {
-        console.warn('GitHub API failed, using fallback list', e);
-      }
 
-      if (!postPaths || postPaths.length === 0) {
-        postPaths = fallbackPosts;
-      }
+        try {
+          mdFiles = await traverseDirectory('_posts');
+        } catch (traverseErr) {
+          console.warn('Standard traversal failed, executing Git Trees fallback:', traverseErr);
+          const treeRes = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/git/trees/${BRANCH}?recursive=1`);
+          if (treeRes.ok) {
+            const treeData = await treeRes.json();
+            if (treeData && treeData.tree) {
+              mdFiles = treeData.tree
+                .filter(node => node.path.startsWith('_posts/') && node.path.endsWith('.md'))
+                .map(node => ({
+                  name: node.path.split('/').pop(),
+                  path: node.path,
+                  download_url: `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${BRANCH}/${encodeURI(node.path)}`
+                }));
+            }
+          }
+        }
 
-      const loadedPosts = await Promise.all(
-        postPaths.map(async (path) => {
+        if (!mdFiles || mdFiles.length === 0) {
+          throw new Error('No markdown files could be retrieved.');
+        }
+
+        const promises = mdFiles.map(async (file) => {
           try {
-            const r = await fetch(encodeURI(path));
-            if (!r.ok) return null;
-            const rawText = await r.text();
-            const { meta, content } = parseFrontMatter(rawText);
-            const filename = path.split('/').pop().replace('.md', '');
-            const dateMatch = filename.match(/^(\d{4}-\d{2}-\d{2})/);
-            const date = dateMatch ? dateMatch[1] : (meta.date || '2026-10-18');
+            const downloadUrl = file.download_url || `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${BRANCH}/${encodeURI(file.path)}`;
+            const res = await fetch(downloadUrl);
+            if (!res.ok) return null;
+            const rawMarkdown = await res.text();
+            const { metadata, content } = parseFrontmatter(rawMarkdown);
+
+            let category = metadata.category || '';
+            if (!category) {
+              const parts = file.path.split('/');
+              category = parts.length > 2 ? decodeURIComponent(parts[1]) : 'General';
+            }
+
+            let lang = (metadata.lang || '').toLowerCase();
+            if (!lang) {
+              if (category.includes('KR') || file.name.includes('-KR-')) lang = 'kr';
+              else if (category.includes('EN') || file.name.includes('-EN-')) lang = 'en';
+              else lang = 'kr';
+            }
+
+            let date = metadata.date || '';
+            if (!date) {
+              const dateMatch = file.name.match(/^(\d{4}-\d{2}-\d{2})/);
+              if (dateMatch) date = dateMatch[1];
+            }
+
+            const title = metadata.title || file.name.replace(/\.md$/, '');
+            const image = metadata.image || getDefaultThumbnail(title);
+            const tags = Array.isArray(metadata.tags) ? metadata.tags : [];
+
+            // Clean preview excerpt
+            const previewText = content
+              .replace(/^#+\s+.*$/gm, '')
+              .replace(/!\[[^\]]*\]\([^)]+\)/g, '')
+              .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+              .replace(/[*_`#]/g, '')
+              .trim()
+              .slice(0, 160) + '...';
+
             return {
-              path,
-              title: meta.title || filename,
-              category: meta.category || 'Tech',
-              tags: Array.isArray(meta.tags) ? meta.tags : [],
-              lang: meta.lang || (path.includes('KR') ? 'kr' : 'en'),
-              image: meta.image || '',
+              path: file.path,
+              name: file.name,
+              title,
+              category,
+              lang,
               date,
-              content
+              image,
+              tags,
+              content,
+              previewText
             };
-          } catch (err) {
+          } catch (e) {
+            console.error('File load error:', file.path, e);
             return null;
           }
-        })
-      );
+        });
 
-      posts = loadedPosts.filter(Boolean).sort((a, b) => b.date.localeCompare(a.date));
-      renderPosts();
+        const results = await Promise.all(promises);
+        allPosts = results.filter(p => p !== null);
+        allPosts.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
+        buildCategoryFilters();
+        renderPosts();
+      } catch (err) {
+        console.error('fetchPostList critical error:', err);
+        if (emptyEl) emptyEl.classList.remove('hidden');
+      } finally {
+        if (loadingEl) loadingEl.classList.add('hidden');
+      }
     }
 
+    // Populate Category Buttons
+    function buildCategoryFilters() {
+      const catContainer = document.getElementById('category-list');
+      if (!catContainer) return;
+
+      const categories = new Set();
+      allPosts.forEach(post => {
+        if (post.category) categories.add(post.category);
+      });
+
+      catContainer.innerHTML = `
+        <button data-cat="all" class="cat-btn px-4 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap bg-blue-600 text-white shadow-sm transition-all">
+          전체 보기
+        </button>
+      `;
+
+      categories.forEach(cat => {
+        const btn = document.createElement('button');
+        btn.setAttribute('data-cat', cat);
+        btn.className = 'cat-btn px-4 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition-all';
+        btn.innerText = cat;
+        catContainer.appendChild(btn);
+      });
+
+      catContainer.querySelectorAll('.cat-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          catContainer.querySelectorAll('.cat-btn').forEach(b => {
+            b.className = 'cat-btn px-4 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition-all';
+          });
+          btn.className = 'cat-btn px-4 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap bg-blue-600 text-white shadow-sm transition-all';
+          currentCategory = btn.getAttribute('data-cat');
+          renderPosts();
+        });
+      });
+    }
+
+    // Filter and Render Posts to DOM
     function renderPosts() {
-      const container = document.getElementById('posts-grid');
-      let filtered = posts.filter(post => {
-        const matchCat = currentCategory === 'ALL' 
-          || (currentCategory === 'KR' && post.lang === 'kr')
-          || (currentCategory === 'EN' && post.lang === 'en');
-        
-        const q = currentQuery.toLowerCase();
-        const matchQuery = !q 
-          || post.title.toLowerCase().includes(q)
-          || (post.tags && post.tags.some(t => t.toLowerCase().includes(q)))
-          || post.category.toLowerCase().includes(q);
-        
-        return matchCat && matchQuery;
+      const grid = document.getElementById('post-grid');
+      const emptyEl = document.getElementById('empty-state');
+      if (!grid) return;
+
+      const filtered = allPosts.filter(post => {
+        const matchesCat = currentCategory === 'all' || post.category === currentCategory;
+        const matchesLang = currentLang === 'all' || post.lang === currentLang;
+        const q = searchQuery.toLowerCase();
+        const matchesSearch = !q || 
+          post.title.toLowerCase().includes(q) || 
+          post.previewText.toLowerCase().includes(q) ||
+          post.category.toLowerCase().includes(q) ||
+          post.tags.some(t => String(t).toLowerCase().includes(q));
+        return matchesCat && matchesLang && matchesSearch;
       });
 
       if (filtered.length === 0) {
-        container.innerHTML = `
-          <div class="col-span-full py-16 text-center text-zinc-500">
-            <span class="text-3xl block mb-2">⚡</span>
-            <p class="text-sm">검색 결과 또는 등록된 포스트가 없습니다.</p>
-          </div>
-        `;
+        grid.innerHTML = '';
+        if (emptyEl) emptyEl.classList.remove('hidden');
         return;
       }
 
-      container.innerHTML = filtered.map((post, index) => {
-        const tagBadges = (post.tags || []).slice(0, 3).map(tag => 
-          `<span class="text-[11px] font-medium text-zinc-400 bg-zinc-800/80 px-2 py-0.5 rounded">#${tag}</span>`
-        ).join(' ');
-
-        const thumbImg = post.image 
-          ? `<div class="h-44 w-full overflow-hidden border-b border-zinc-800">
-               <img src="${post.image}" alt="${post.title}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy" />
-             </div>`
-          : `<div class="h-24 w-full bg-gradient-to-r from-zinc-900 to-zinc-800 flex items-center justify-end px-6 border-b border-zinc-800/60">
-               <span class="text-3xl opacity-20">⚡</span>
-             </div>`;
-
-        return `
-          <article onclick="openPostModal(${index})" class="group bg-zinc-900 border border-zinc-800 hover:border-yellow-400/50 rounded-2xl overflow-hidden cursor-pointer shadow-lg hover:shadow-yellow-500/5 transition-all duration-200 flex flex-col justify-between">
-            <div>
-              ${thumbImg}
-              <div class="p-5 sm:p-6">
-                <div class="flex items-center justify-between gap-2 mb-2.5">
-                  <span class="text-xs font-bold text-yellow-400 px-2.5 py-0.5 rounded-full bg-yellow-400/10 border border-yellow-400/20">${post.category}</span>
-                  <span class="text-xs text-zinc-500">${post.date}</span>
-                </div>
-                <h3 class="text-lg sm:text-xl font-bold text-white group-hover:text-yellow-400 transition-colors line-clamp-2 mb-2">${post.title}</h3>
-                <p class="text-xs sm:text-sm text-zinc-400 line-clamp-2 mb-4 leading-relaxed">${post.content.replace(/[#*`_>\[\]]/g, '').trim().slice(0, 150)}...</p>
+      if (emptyEl) emptyEl.classList.add('hidden');
+      grid.innerHTML = filtered.map((post, idx) => `
+        <article class="group bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden hover:border-slate-700 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl flex flex-col justify-between cursor-pointer" onclick="openPostModal(${idx})">
+          <div>
+            <div class="relative aspect-video w-full overflow-hidden bg-slate-800">
+              <img src="${post.image}" alt="${post.title}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" onerror="this.src='${defaultThumbnails[0]}'">
+              <div class="absolute top-3 left-3 flex gap-1.5">
+                <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-900/80 backdrop-blur-md text-blue-400 border border-blue-500/30">
+                  ${post.category}
+                </span>
+                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-900/80 backdrop-blur-md text-amber-300 uppercase border border-amber-500/30">
+                  ${post.lang}
+                </span>
               </div>
             </div>
-            <div class="px-5 sm:px-6 pb-5 pt-0 flex items-center justify-between border-t border-zinc-800/50 mt-auto">
-              <div class="flex flex-wrap gap-1.5 pt-3">${tagBadges}</div>
-              <span class="text-xs text-yellow-400 font-semibold flex items-center gap-1 group-hover:translate-x-1 transition-transform pt-3">읽기 <i class="fa-solid fa-arrow-right text-[10px]"></i></span>
+            <div class="p-5">
+              <div class="text-xs text-slate-500 font-mono mb-2 flex items-center gap-1.5">
+                <i class="fa-regular fa-calendar"></i>
+                <span>${post.date || '최신'}</span>
+              </div>
+              <h2 class="text-lg font-bold text-slate-100 group-hover:text-blue-400 transition-colors line-clamp-2 leading-snug mb-2">
+                ${post.title}
+              </h2>
+              <p class="text-sm text-slate-400 line-clamp-3 leading-relaxed mb-4">
+                ${post.previewText}
+              </p>
             </div>
-          </article>
-        `;
-      }).join('');
+          </div>
+          <div class="px-5 pb-5 pt-0 mt-auto flex items-center justify-between border-t border-slate-800/60 pt-3 text-xs text-slate-400">
+            <div class="flex flex-wrap gap-1 max-w-[70%]">
+              ${post.tags.slice(0, 2).map(tag => `<span class="text-[11px] text-slate-400">#${tag}</span>`).join(' ')}
+            </div>
+            <span class="inline-flex items-center gap-1 text-blue-400 font-semibold group-hover:translate-x-0.5 transition-transform">
+              읽기 <i class="fa-solid fa-arrow-right text-[10px]"></i>
+            </span>
+          </div>
+        </article>
+      `).join('');
+
+      // Store current filtered list for modal index lookup
+      window.currentFilteredPosts = filtered;
     }
 
-    function filterCategory(cat) {
-      currentCategory = cat;
-      document.querySelectorAll('.cat-btn').forEach(btn => {
-        if (btn.getAttribute('data-cat') === cat) {
-          btn.className = 'cat-btn px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-semibold bg-yellow-400 text-zinc-950 shadow-sm transition-all';
-        } else {
-          btn.className = 'cat-btn px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-medium bg-zinc-900 text-zinc-300 hover:text-white border border-zinc-800 hover:border-zinc-700 transition-all';
-        }
-      });
-      renderPosts();
-    }
-
-    function resetFilter() {
-      currentCategory = 'ALL';
-      currentQuery = '';
-      document.getElementById('search-input').value = '';
-      filterCategory('ALL');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-
-    function handleSearch() {
-      currentQuery = document.getElementById('search-input').value;
-      renderPosts();
-    }
-
-    function openPostModal(index) {
-      const post = posts[index];
+    // Post Modal Controller
+    function openPostModal(idx) {
+      const post = (window.currentFilteredPosts || allPosts)[idx];
       if (!post) return;
-      document.getElementById('modal-title').textContent = post.title;
-      document.getElementById('modal-category').textContent = post.category;
-      document.getElementById('modal-date').innerHTML = `<i class="fa-regular fa-clock mr-1"></i> ${post.date}`;
-      document.getElementById('modal-lang').innerHTML = `<i class="fa-solid fa-globe mr-1"></i> ${post.lang.toUpperCase()}`;
-      
-      const imgContainer = document.getElementById('modal-image-container');
-      const imgEl = document.getElementById('modal-image');
+
+      const modal = document.getElementById('post-modal');
+      const badge = document.getElementById('modal-badge');
+      const date = document.getElementById('modal-date');
+      const title = document.getElementById('modal-title');
+      const body = document.getElementById('modal-body');
+      const cover = document.getElementById('modal-cover-image');
+      const coverContainer = document.getElementById('modal-cover-container');
+      const tags = document.getElementById('modal-tags');
+
+      badge.innerText = post.category;
+      date.innerText = post.date || '';
+      title.innerText = post.title;
+
       if (post.image) {
-        imgEl.src = post.image;
-        imgContainer.classList.remove('hidden');
+        cover.src = post.image;
+        coverContainer.classList.remove('hidden');
       } else {
-        imgContainer.classList.add('hidden');
+        coverContainer.classList.add('hidden');
       }
 
-      document.getElementById('modal-content').innerHTML = marked.parse(post.content);
-      
-      const tagsEl = document.getElementById('modal-tags');
-      tagsEl.innerHTML = (post.tags || []).map(t => `<span class="text-xs bg-zinc-800 text-zinc-300 px-2.5 py-1 rounded-md">#${t}</span>`).join('');
-      
-      document.getElementById('post-modal').classList.remove('hidden');
+      // Markdown Parse via marked.js
+      if (typeof marked !== 'undefined') {
+        body.innerHTML = marked.parse(post.content);
+      } else {
+        body.innerText = post.content;
+      }
+
+      tags.innerHTML = post.tags.map(t => `<span class="px-2 py-0.5 bg-slate-800 rounded-md text-slate-400">#${t}</span>`).join(' ');
+
+      modal.classList.remove('hidden');
       document.body.style.overflow = 'hidden';
     }
 
-    function closeModal(event) {
-      if (!event || event.target.id === 'post-modal' || !event.target.closest('#post-modal > div')) {
-        document.getElementById('post-modal').classList.add('hidden');
-        document.body.style.overflow = '';
-      }
+    function closePostModal() {
+      const modal = document.getElementById('post-modal');
+      modal.classList.add('hidden');
+      document.body.style.overflow = 'auto';
     }
 
-    function toggleTheme() {
-      const html = document.getElementById('html-root');
-      const icon = document.getElementById('theme-icon');
-      if (html.classList.contains('dark')) {
-        html.classList.remove('dark');
-        icon.className = 'fa-solid fa-sun text-base text-yellow-500';
-      } else {
-        html.classList.add('dark');
-        icon.className = 'fa-solid fa-moon text-base text-zinc-400';
-      }
-    }
+    // Setup Event Listeners
+    document.addEventListener('DOMContentLoaded', () => {
+      // Search Listeners
+      const searchInput = document.getElementById('search-input');
+      const searchInputMobile = document.getElementById('search-input-mobile');
 
-    window.addEventListener('DOMContentLoaded', loadPosts);
+      const handleSearch = (e) => {
+        searchQuery = e.target.value;
+        if (searchInput && e.target !== searchInput) searchInput.value = searchQuery;
+        if (searchInputMobile && e.target !== searchInputMobile) searchInputMobile.value = searchQuery;
+        renderPosts();
+      };
+
+      if (searchInput) searchInput.addEventListener('input', handleSearch);
+      if (searchInputMobile) searchInputMobile.addEventListener('input', handleSearch);
+
+      // Language Switchers
+      document.querySelectorAll('.lang-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.lang-btn').forEach(b => {
+            b.className = 'lang-btn px-3 py-1 rounded-lg text-xs font-medium text-slate-400 hover:text-slate-200 transition-all';
+          });
+          btn.className = 'lang-btn px-3 py-1 rounded-lg text-xs font-medium text-slate-200 bg-slate-800 shadow transition-all';
+          currentLang = btn.getAttribute('data-lang');
+          renderPosts();
+        });
+      });
+
+      // Modal Close Handlers
+      const closeBtn = document.getElementById('modal-close-btn');
+      const bottomCloseBtn = document.getElementById('modal-bottom-close');
+      const modal = document.getElementById('post-modal');
+
+      if (closeBtn) closeBtn.addEventListener('click', closePostModal);
+      if (bottomCloseBtn) bottomCloseBtn.addEventListener('click', closePostModal);
+
+      if (modal) {
+        modal.addEventListener('click', (e) => {
+          if (e.target === modal) closePostModal();
+        });
+      }
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closePostModal();
+      });
+
+      // Theme Toggle
+      const themeToggle = document.getElementById('theme-toggle');
+      const htmlRoot = document.getElementById('html-root');
+      const themeIcon = document.getElementById('theme-icon');
+      if (themeToggle) {
+        themeToggle.addEventListener('click', () => {
+          if (htmlRoot.classList.contains('dark')) {
+            htmlRoot.classList.remove('dark');
+            themeIcon.className = 'fa-solid fa-sun text-amber-400';
+          } else {
+            htmlRoot.classList.add('dark');
+            themeIcon.className = 'fa-solid fa-moon text-slate-400';
+          }
+        });
+      }
+
+      // Execute post loading
+      fetchPostList();
+    });
   </script>
 </body>
 </html>
