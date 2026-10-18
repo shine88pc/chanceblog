@@ -114,20 +114,27 @@ def generate_hot_topic_post():
     [Previous Topics (Do not duplicate)]: {json.dumps(history, ensure_ascii=False)}
     [News Data]: {news_text}
     
+    [CATEGORY SELECTION RULE]:
+    - Analyze the main topic of the news (e.g. AI, Economy, Semiconductor, Entertainment, Science, Culture, Mobile, EV, etc.).
+    - Dynamically create a specific, accurate category name that perfectly fits the topic.
+    - Korean Category MUST start with "KR - " (e.g., "KR - AI/테크", "KR - 경제/금융", "KR - 모빌리티/EV", "KR - 과학/우주", "KR - 엔터/문화").
+    - English Category MUST start with "EN - " (e.g., "EN - AI/Tech", "EN - Economy/Finance", "EN - Mobility/EV", "EN - Science/Space", "EN - Culture/Entertainment").
+    - NEVER default to "기타" or "General" if a more specific category can be assigned.
+
     [CRITICAL INSTRUCTIONS]:
     1. Output MUST be a pure JSON object ONLY. No markdown code blocks.
-    2. 'kr_content' MUST be 100% written in natural Korean. Category must start with "KR - ".
-    3. 'en_content' MUST be 100% written in natural English. Category must start with "EN - ".
-    4. Format Markdown headers and paragraphs with clear spacing (\\n\\n).
+    2. 'kr_content' MUST be 100% written in natural Korean.
+    3. 'en_content' MUST be 100% written in natural English.
+    4. Format Markdown headers and paragraphs with clear double-line spacing (\\n\\n).
     
     {{
       "kr_title": "한글 제목",
-      "kr_category": "KR - IT/테크",
-      "kr_content": "---\\nlayout: post\\ntitle: \\"한글 제목\\"\\ncategory: \\"KR - IT/테크\\"\\nlang: kr\\n---\\n\\n# 한글 제목\\n\\n본문 내용...",
+      "kr_category": "KR - 주제맞춤카테고리명",
+      "kr_content": "---\\nlayout: post\\ntitle: \\"한글 제목\\"\\ncategory: \\"KR - 주제맞춤카테고리명\\"\\nlang: kr\\n---\\n\\n# 한글 제목\\n\\n본문 내용...",
       
       "en_title": "English Title",
-      "en_category": "EN - IT/Tech",
-      "en_content": "---\\nlayout: post\\ntitle: \\"English Title\\"\\ncategory: \\"EN - IT/Tech\\"\\nlang: en\\n---\\n\\n# English Title\\n\\nBody content..."
+      "en_category": "EN - SpecificCategoryName",
+      "en_content": "---\\nlayout: post\\ntitle: \\"English Title\\"\\ncategory: \\"EN - SpecificCategoryName\\"\\nlang: en\\n---\\n\\n# English Title\\n\\nBody content..."
     }}
     """
     
@@ -142,7 +149,6 @@ def generate_hot_topic_post():
         
     try:
         data = json.loads(result_text)
-        # 현재 연도(2026년) 기준 타임스탬프 적용
         date_str = datetime.datetime.now().strftime('%Y-%m-%d')
         timestamp = datetime.datetime.now().strftime('%H%M%S')
         
@@ -156,7 +162,7 @@ def generate_hot_topic_post():
         with open(en_filename, "w", encoding="utf-8") as f:
             f.write(data["en_content"])
             
-        print(f"포스트 생성 완료: {kr_filename}, {en_filename}")
+        print(f"포스트 생성 완료 ({data.get('kr_category')} / {data.get('en_category')}): {kr_filename}, {en_filename}")
         
         if data.get("kr_title") not in history:
             history.append(data.get("kr_title"))

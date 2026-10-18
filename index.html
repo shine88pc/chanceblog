@@ -50,7 +50,7 @@
   <section class="bg-gradient-to-b from-slate-900 to-darkbg border-b border-bordercol py-12">
     <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 text-center sm:text-left">
       <h1 class="text-3xl sm:text-4xl font-extrabold text-white mb-3 tracking-tight">🚀 AI Global Trend & Tech Hub</h1>
-      <p class="text-slate-400 text-sm sm:text-base max-w-2xl">실시간 트렌드를 분석하여 한글과 영문(KR / EN) 인사이트를 프리미엄 다크모드로 제공합니다.</p>
+      <p class="text-slate-400 text-sm sm:text-base max-w-2xl">실시간 트렌드를 주제별 카테고리로 자동 분류하여 한글 및 영문(KR / EN) 포스팅을 제공합니다.</p>
     </div>
   </section>
 
@@ -96,12 +96,13 @@
       <!-- Category Filter Widget -->
       <div class="bg-cardbg p-6 rounded-2xl border border-bordercol shadow-lg">
         <h3 class="font-bold text-white text-sm uppercase tracking-wider mb-4 flex items-center gap-2">
-          <i class="fas fa-folder-open text-blue-400"></i> Categories
+          <i class="fas fa-folder-open text-blue-400"></i> Auto Categories
         </h3>
         <div class="space-y-5 text-sm" id="category-container">
           <div>
-            <button onclick="filterCategory('ALL')" class="w-full text-left font-bold text-blue-400 hover:text-blue-300 py-1.5 px-3 rounded-lg bg-blue-500/10 transition mb-3">
-              <i class="fas fa-globe mr-2"></i> 전체 보기 (All Posts)
+            <button onclick="filterCategory('ALL')" class="w-full text-left font-bold text-blue-400 hover:text-blue-300 py-1.5 px-3 rounded-lg bg-blue-500/10 transition mb-3 flex justify-between items-center">
+              <span><i class="fas fa-globe mr-2"></i> 전체 보기</span>
+              <span id="total-count-badge" class="text-xs bg-blue-500/20 px-2 py-0.5 rounded-full">0</span>
             </button>
             <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 px-1">🇰🇷 한글 카테고리</p>
             <ul class="space-y-1 text-slate-300 pl-2" id="kr-categories"></ul>
@@ -116,7 +117,7 @@
   </main>
 
   <footer class="bg-cardbg border-t border-bordercol py-8 text-center text-xs text-slate-400">
-    <p>© 2026 Chance_Blog. All rights reserved. Powered by GitHub Pages & Gemini API (Dark Mode).</p>
+    <p>© 2026 Chance_Blog. All rights reserved. Powered by GitHub Pages & Gemini API.</p>
   </footer>
 
   <script>
@@ -139,7 +140,7 @@
           const rawText = await contentRes.text();
           
           let title = file.name;
-          let category = file.name.includes('-KR-') ? 'KR - General' : 'EN - General';
+          let category = file.name.includes('-KR-') ? 'KR - 일반/소식' : 'EN - General/News';
           let lang = file.name.includes('-KR-') ? 'kr' : 'en';
 
           const frontmatterMatch = rawText.match(/^---[\s\S]*?---/);
@@ -156,6 +157,7 @@
           return { file, title, category, lang, rawText };
         }));
 
+        document.getElementById('total-count-badge').innerText = allPostsData.length;
         renderCategories();
         renderPostList(allPostsData);
 
@@ -166,27 +168,30 @@
     }
 
     function renderCategories() {
-      const krCats = new Set();
-      const enCats = new Set();
+      const krCats = {};
+      const enCats = {};
 
       allPostsData.forEach(p => {
-        if (p.lang === 'kr' || p.category.startsWith('KR')) krCats.add(p.category);
-        else enCats.add(p.category);
+        if (p.lang === 'kr' || p.category.startsWith('KR')) {
+          krCats[p.category] = (krCats[p.category] || 0) + 1;
+        } else {
+          enCats[p.category] = (enCats[p.category] || 0) + 1;
+        }
       });
 
       const krUl = document.getElementById('kr-categories');
       krUl.innerHTML = '';
-      if(krCats.size === 0) krUl.innerHTML = `<li class="text-slate-500 text-xs px-2 py-1">No posts yet</li>`;
-      krCats.forEach(cat => {
-        krUl.innerHTML += `<li onclick="filterCategory('${cat}')" class="cursor-pointer hover:text-white py-1.5 px-2 rounded hover:bg-slate-800 transition flex items-center justify-between"><span>▪ ${cat}</span></li>`;
-      });
+      if(Object.keys(krCats).length === 0) krUl.innerHTML = `<li class="text-slate-500 text-xs px-2 py-1">카테고리 없음</li>`;
+      for (const [cat, count] of Object.entries(krCats)) {
+        krUl.innerHTML += `<li onclick="filterCategory('${cat}')" class="cursor-pointer hover:text-white py-1.5 px-2 rounded hover:bg-slate-800 transition flex items-center justify-between text-xs"><span>▪ ${cat}</span> <span class="bg-slate-800 text-slate-400 text-[10px] px-2 py-0.5 rounded-full">${count}</span></li>`;
+      }
 
       const enUl = document.getElementById('en-categories');
       enUl.innerHTML = '';
-      if(enCats.size === 0) enUl.innerHTML = `<li class="text-slate-500 text-xs px-2 py-1">No posts yet</li>`;
-      enCats.forEach(cat => {
-        enUl.innerHTML += `<li onclick="filterCategory('${cat}')" class="cursor-pointer hover:text-white py-1.5 px-2 rounded hover:bg-slate-800 transition flex items-center justify-between"><span>▪ ${cat}</span></li>`;
-      });
+      if(Object.keys(enCats).length === 0) enUl.innerHTML = `<li class="text-slate-500 text-xs px-2 py-1">No categories yet</li>`;
+      for (const [cat, count] of Object.entries(enCats)) {
+        enUl.innerHTML += `<li onclick="filterCategory('${cat}')" class="cursor-pointer hover:text-white py-1.5 px-2 rounded hover:bg-slate-800 transition flex items-center justify-between text-xs"><span>▪ ${cat}</span> <span class="bg-slate-800 text-slate-400 text-[10px] px-2 py-0.5 rounded-full">${count}</span></li>`;
+      }
     }
 
     function renderPostList(posts) {
@@ -211,7 +216,7 @@
           <div>
             <div class="flex items-center justify-between mb-3">
               ${langBadge}
-              <span class="text-slate-400 text-xs">${p.category}</span>
+              <span class="text-slate-400 text-xs font-medium">${p.category}</span>
             </div>
             <h3 class="font-bold text-white text-base leading-snug line-clamp-2 group-hover:text-blue-400 transition">${p.title}</h3>
           </div>
