@@ -52,10 +52,12 @@ def fetch_recent_news():
         return []
 
 def handle_natural_language_issue():
-    print(f"모바일 이슈 제어: {issue_title}")
+    print(f"모바일 이슈 제어 접수 - 제목: {issue_title}")
+    print(f"상세 본문:\n{issue_body}")
+    
     files_data = {}
     for root, dirs, files in os.walk("."):
-        if ".git" in root or "__pycache__" in root:
+        if ".git" in root or "__pycache__" in root or "downloads" in root:
             continue
         for file in files:
             if file.endswith((".py", ".yml", ".md", ".json", ".html")):
@@ -67,36 +69,49 @@ def handle_natural_language_issue():
                     pass
 
     prompt = f"""
-    당신은 블로그 수석 관리자 AI입니다. 사용자의 이슈 지시에 맞게 코드/글/설정을 관리하세요.
-    [사용자 지시]: 제목: {issue_title} / 본문: {issue_body}
-    [파일 데이터]: {json.dumps({k: v[:600] for k, v in files_data.items()}, ensure_ascii=False)}
-    [응답 규칙]: 순수 JSON 응답만 반환
+    당신은 Chance_Blog 수석 관리자 AI입니다. 사용자가 모바일 이슈 템플릿을 통해 보낸 요청을 분석하여 블로그 파일(코드, 포스트 등)을 생성, 수정 또는 삭제하세요.
+    
+    [이슈 제목]: {issue_title}
+    [이슈 본문 (사용자 선택 및 지시사항)]: {issue_body}
+    
+    [현재 레포지토리 파일 현황]: {json.dumps({k: v[:500] for k, v in files_data.items()}, ensure_ascii=False)}
+    
+    [응답 규칙]: 반드시 아래 JSON 형식으로만 순수하게 응답하세요 (마크다운 백틱 ```json 등은 생략).
     {{
-      "target_file": "파일명",
-      "file_content": "내용",
+      "target_file": "생성 또는 수정할 파일 경로 (예: _posts/2026-06-07-title.md 또는 index.html 등)",
+      "file_content": "파일에 들어갈 전체 내용",
       "delete_file": false
     }}
     """
+    
     response = client.models.generate_content(model='gemini-3.8-flash', contents=prompt)
     result_text = response.text.strip()
+    
     if result_text.startswith("```"):
         lines = result_text.splitlines()
-        if lines[0].startswith("```"): lines = lines[1:]
-        if lines and lines[-1].startswith("```"): lines = lines[:-1]
+        if lines[0].startswith("```"): 
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"): 
+            lines = lines[:-1]
         result_text = "\n".join(lines)
+        
     try:
         action_data = json.loads(result_text)
         target_file = action_data.get("target_file")
         file_content = action_data.get("file_content")
         is_delete = action_data.get("delete_file", False)
+        
         if is_delete and target_file and os.path.exists(target_file):
             os.remove(target_file)
+            print(f"파일 삭제 완료: {target_file}")
         elif target_file and file_content:
             os.makedirs(os.path.dirname(target_file), exist_ok=True) if "/" in target_file else None
             with open(target_file, "w", encoding="utf-8") as f:
                 f.write(file_content)
+            print(f"파일 생성/수정 완료: {target_file}")
     except Exception as e:
-        print(f"이슈 처리 오류: {e}")
+        print(f"이슈 처리 중 파싱 오류 발생: {e}")
+        print(f"AI 응답 원본: {result_text}")
 
 def generate_hot_topic_post():
     history = load_history()
@@ -123,9 +138,9 @@ def generate_hot_topic_post():
 
     date_str = datetime.datetime.now().strftime('%Y-%m-%d')
     safe_title = "".join(c if c.isalnum() else "_" for c in topic_title)[:15]
-    file_name = f"posts/{date_str}-{safe_title}.md"
+    file_name = f"_posts/{date_str}-{safe_title}.md"
 
-    os.makedirs("posts", exist_ok=True)
+    os.makedirs("_posts", exist_ok=True)
     with open(file_name, "w", encoding="utf-8") as f:
         f.write(post_content)
 
