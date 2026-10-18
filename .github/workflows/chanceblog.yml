@@ -2,14 +2,14 @@ name: Auto Blog Generator
 
 on:
   schedule:
-    - cron: '0 0 * * *' # 매일 UTC 기준 0시 (한국 시간 오전 9시)에 실행
-  workflow_dispatch: # 수동으로도 실행 가능
+    - cron: '0 0 * * *'
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # 깃허브 레포지토리에 커밋/푸시 권한 부여
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -20,7 +20,7 @@ jobs:
         with:
           python-version: '3.10'
 
-     - name: Install dependencies
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install google-genai
