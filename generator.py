@@ -114,6 +114,32 @@ def fix_existing_duplicate_images():
                 except Exception as e:
                     print(f"Error inspecting {fpath}: {e}")
 
+def call_gemini_with_fallback(prompt):
+    """여러 모델 후보를 순회하며 사용 가능한 모델을 찾아 콘텐츠를 생성하는 안전 함수"""
+    model_candidates = [
+        "gemini-3.8-flash",
+        "gemini-2.5-flash",
+        "gemini-1.5-flash",
+        "gemini-pro"
+    ]
+    
+    response = None
+    for model_name in model_candidates:
+        try:
+            print(f"시도 중인 Gemini 모델: {model_name}")
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt
+            )
+            if response and response.text:
+                print(f"성공적으로 연결된 모델: {model_name}")
+                return response
+        except Exception as e:
+            print(f"모델 {model_name} 호출 실패, 다음 모델 시도 중... (에러: {e})")
+            continue
+            
+    raise RuntimeError("모든 Gemini 모델(3.8, 2.5, 1.5, pro) 호출에 실패했습니다.")
+
 def handle_issue_event():
     files_data = {}
     for root, dirs, files in os.walk("."):
@@ -141,11 +167,8 @@ def handle_issue_event():
     }}
     """
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt
-    )
-    text = response.text.strip()
+    resp = call_gemini_with_fallback(prompt)
+    text = resp.text.strip()
     match = re.search(r'\{.*\}', text, re.DOTALL)
     if match:
         data = json.loads(match.group(0))
@@ -226,10 +249,7 @@ def generate_blog_posts():
 }}
 """
 
-    resp = client.models.generate_content(
-        model="gemini-3.8-flash",
-        contents=post_prompt
-    )
+    resp = call_gemini_with_fallback(post_prompt)
     raw_json = resp.text.strip()
     match = re.search(r'\{.*\}', raw_json, re.DOTALL)
     if not match:
