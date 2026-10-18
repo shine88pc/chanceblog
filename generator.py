@@ -68,13 +68,14 @@ def handle_natural_language_issue():
                     pass
 
     prompt = f"""
-    You are the lead manager AI of Chance_Blog. Analyze the user's mobile issue request and create, update, or delete blog files accordingly.
+    You are Chance, a passionate personal tech blogger. Analyze the user's mobile issue request and manage the blog repository files.
     [Issue Title]: {issue_title}
     [Issue Body]: {issue_body}
-    [File Data]: {json.dumps({k: v[:500] for k, v in files_data.items()}, ensure_ascii=False)}
-    [Response Rule]: Return ONLY a pure JSON object without markdown formatting.
+    [Files Data]: {json.dumps({k: v[:500] for k, v in files_data.items()}, ensure_ascii=False)}
+    
+    Return ONLY a pure JSON object without markdown formatting.
     {{
-      "target_file": "file path",
+      "target_file": "path/to/file",
       "file_content": "file content",
       "delete_file": false
     }}
@@ -109,32 +110,36 @@ def generate_hot_topic_post():
     news_text = "\n---\n".join(news_pool) if news_pool else "No recent trend news"
 
     prompt = f"""
-    Analyze the recent 24-hour real-time news trends and generate TWO distinct blog posts: one in KOREAN and one in ENGLISH.
+    You are 'Chance', a seasoned tech enthusiast and writer running a personal blog.
+    Write TWO in-depth, engaging personal blog posts (one in Korean, one in English) based on real-time news trends.
     
-    [Previous Topics (Do not duplicate)]: {json.dumps(history, ensure_ascii=False)}
+    [Previous Topics (Avoid exact repetition)]: {json.dumps(history, ensure_ascii=False)}
     [News Data]: {news_text}
     
-    [CATEGORY SELECTION RULE]:
-    - Analyze the main topic of the news (e.g. AI, Economy, Semiconductor, Entertainment, Science, Culture, Mobile, EV, etc.).
-    - Dynamically create a specific, accurate category name that perfectly fits the topic.
-    - Korean Category MUST start with "KR - " (e.g., "KR - AI/테크", "KR - 경제/금융", "KR - 모빌리티/EV", "KR - 과학/우주", "KR - 엔터/문화").
-    - English Category MUST start with "EN - " (e.g., "EN - AI/Tech", "EN - Economy/Finance", "EN - Mobility/EV", "EN - Science/Space", "EN - Culture/Entertainment").
-    - NEVER default to "기타" or "General" if a more specific category can be assigned.
-
-    [CRITICAL INSTRUCTIONS]:
-    1. Output MUST be a pure JSON object ONLY. No markdown code blocks.
-    2. 'kr_content' MUST be 100% written in natural Korean.
-    3. 'en_content' MUST be 100% written in natural English.
-    4. Format Markdown headers and paragraphs with clear double-line spacing (\\n\\n).
+    [WRITING STYLE & GUIDELINES]:
+    1. Write like a HUMAN TECH BLOGGER sharing insightful thoughts, not an AI summarizer.
+    2. Make the posts LONG, IN-DEPTH, and DETAILED (3-4 comprehensive sections). Include background context, key analytical points, and personal takeaways.
+    3. Category guidelines:
+       - Korean Category MUST start with "KR - " (e.g., "KR - 테크 이야기", "KR - AI인사이트")
+       - English Category MUST start with "EN - " (e.g., "EN - Tech Stories", "EN - AI Insights")
+    4. Provide 3~5 SEO keywords/tags for search engines (e.g. ["인공지능", "테크", "트렌드"]).
+    5. Include an Unsplash copyright-free image thumbnail URL.
+    
+    [CRITICAL FORMAT RULE]:
+    Output MUST be a pure JSON object ONLY without markdown code blocks (` ```json `).
     
     {{
-      "kr_title": "한글 제목",
-      "kr_category": "KR - 주제맞춤카테고리명",
-      "kr_content": "---\\nlayout: post\\ntitle: \\"한글 제목\\"\\ncategory: \\"KR - 주제맞춤카테고리명\\"\\nlang: kr\\n---\\n\\n# 한글 제목\\n\\n본문 내용...",
+      "kr_title": "자연스러운 한글 블로그 제목",
+      "kr_category": "KR - 카테고리명",
+      "kr_tags": ["키워드1", "키워드2", "키워드3"],
+      "kr_image": "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1000&q=80",
+      "kr_content": "---\\nlayout: post\\ntitle: \\"자연스러운 한글 블로그 제목\\"\\ncategory: \\"KR - 카테고리명\\"\\ntags: [\\'키워드1\\', \\'키워드2\\']\\nlang: kr\\nimage: \\"https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1000&q=80\\"\\n---\\n\\n![Thumbnail](https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1000&q=80)\\n\\n# 자연스러운 한글 블로그 제목\\n\\n깊이있는 본문 에세이 내용...",
       
-      "en_title": "English Title",
-      "en_category": "EN - SpecificCategoryName",
-      "en_content": "---\\nlayout: post\\ntitle: \\"English Title\\"\\ncategory: \\"EN - SpecificCategoryName\\"\\nlang: en\\n---\\n\\n# English Title\\n\\nBody content..."
+      "en_title": "Engaging Personal English Title",
+      "en_category": "EN - CategoryName",
+      "en_tags": ["Keyword1", "Keyword2"],
+      "en_image": "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1000&q=80",
+      "en_content": "---\\nlayout: post\\ntitle: \\"Engaging Personal English Title\\"\\ncategory: \\"EN - CategoryName\\"\\ntags: [\\'Keyword1\\', \\'Keyword2\\']\\nlang: en\\nimage: \\"https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1000&q=80\\"\\n---\\n\\n![Thumbnail](https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1000&q=80)\\n\\n# Engaging Personal English Title\\n\\nDetailed essay content..."
     }}
     """
     
@@ -162,7 +167,7 @@ def generate_hot_topic_post():
         with open(en_filename, "w", encoding="utf-8") as f:
             f.write(data["en_content"])
             
-        print(f"포스트 생성 완료 ({data.get('kr_category')} / {data.get('en_category')}): {kr_filename}, {en_filename}")
+        print(f"개인 블로그 톤 포스트 생성 완료 ({data.get('kr_category')})")
         
         if data.get("kr_title") not in history:
             history.append(data.get("kr_title"))

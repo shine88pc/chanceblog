@@ -1,64 +1,78 @@
 <!DOCTYPE html>
-<html lang="ko" class="dark">
+<html lang="ko" class="dark" id="html-root">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Chance_Blog | 테크 & AI 에세이 노트</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="[https://cdn.tailwindcss.com](https://cdn.tailwindcss.com)"></script>
+  <script src="[https://cdn.jsdelivr.net/npm/marked/marked.min.js](https://cdn.jsdelivr.net/npm/marked/marked.min.js)"></script>
+  <link rel="stylesheet" href="[https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css](https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css)">
   <script>
     tailwind.config = {
       darkMode: 'class',
       theme: {
         extend: {
           colors: {
-            softbg: '#0b0f19',
-            cardbg: '#161e2e',
-            bordercol: '#273548',
-            accent: '#6366f1'
+            softbg: { dark: '#0b0f19', light: '#f8fafc' },
+            cardbg: { dark: '#161e2e', light: '#ffffff' },
+            bordercol: { dark: '#273548', light: '#e2e8f0' },
+            textcolor: { dark: '#cbd5e1', light: '#334155' },
+            headingcolor: { dark: '#f8fafc', light: '#0f172a' }
           }
         }
       }
     }
   </script>
   <style>
-    .prose p { margin-bottom: 1.6em; line-height: 1.9; color: #cbd5e1; font-size: 1.05rem; }
-    .prose h1, .prose h2, .prose h3 { color: #f8fafc; margin-top: 2em; margin-bottom: 0.8em; font-weight: 800; letter-spacing: -0.025em; }
-    .prose h1 { font-size: 1.8rem; border-bottom: 1px solid #273548; padding-bottom: 0.4em; }
+    .prose p { margin-bottom: 1.6em; line-height: 1.9; font-size: 1.05rem; }
+    .dark .prose p { color: #cbd5e1; }
+    :not(.dark) .prose p { color: #334155; }
+    
+    .prose h1, .prose h2, .prose h3 { margin-top: 2em; margin-bottom: 0.8em; font-weight: 800; letter-spacing: -0.025em; }
+    .dark .prose h1, .dark .prose h2, .dark .prose h3 { color: #f8fafc; }
+    :not(.dark) .prose h1, :not(.dark) .prose h2, :not(.dark) .prose h3 { color: #0f172a; }
+    
+    .prose h1 { font-size: 1.8rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.4em; }
     .prose h2 { font-size: 1.4rem; }
-    .prose ul, .prose ol { margin-bottom: 1.5em; padding-left: 1.5em; color: #cbd5e1; }
+    .prose ul, .prose ol { margin-bottom: 1.5em; padding-left: 1.5em; }
     .prose li { margin-bottom: 0.6em; }
-    .prose img { margin: 2em 0; border: 1px solid #273548; width: 100%; max-height: 420px; object-fit: cover; border-radius: 1rem; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3); }
-    .prose strong { color: #f1f5f9; font-weight: 700; }
-    .prose blockquote { border-left: 4px solid #6366f1; padding-left: 1rem; color: #94a3b8; font-style: italic; margin: 1.5em 0; }
+    .prose img { margin: 2em 0; width: 100%; max-height: 420px; object-fit: cover; border-radius: 1rem; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2); }
+    .prose strong { font-weight: 700; }
+    .dark .prose strong { color: #f1f5f9; }
+    :not(.dark) .prose strong { color: #0f172a; }
+    .prose blockquote { border-left: 4px solid #6366f1; padding-left: 1rem; font-style: italic; margin: 1.5em 0; color: #94a3b8; }
   </style>
 </head>
-<body class="bg-softbg text-slate-100 font-sans antialiased min-h-screen flex flex-col selection:bg-indigo-500 selection:text-white">
+<body class="bg-[var(--bg-main)] text-[var(--text-main)] font-sans antialiased min-h-screen flex flex-col selection:bg-indigo-500 selection:text-white transition-colors duration-300" 
+      style="--bg-main:#0b0f19; --card-bg:#161e2e; --border-color:#273548; --text-main:#cbd5e1; --heading:#f8fafc;">
 
   <!-- Header -->
-  <header class="bg-cardbg/80 backdrop-blur-xl border-b border-bordercol sticky top-0 z-50">
+  <header class="bg-[var(--card-bg)]/80 backdrop-blur-xl border-b border-[var(--border-color)] sticky top-0 z-50 transition-colors duration-300">
     <div class="max-w-5xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
       <a href="./" class="flex items-center space-x-3 group">
         <div class="w-9 h-9 bg-gradient-to-tr from-indigo-600 to-violet-500 rounded-xl flex items-center justify-center text-white font-black shadow-md group-hover:scale-105 transition">C</div>
         <span class="text-xl font-black bg-gradient-to-r from-blue-400 via-indigo-300 to-purple-400 bg-clip-text text-transparent">Chance_Blog</span>
       </a>
-      <nav class="flex items-center space-x-4">
-        <a href="https://github.com/shine88pc/chanceblog" target="_blank" class="text-slate-400 hover:text-white transition p-2 rounded-lg hover:bg-slate-800" title="GitHub Repository">
-          <i class="fab fa-github text-xl"></i>
+      <div class="flex items-center space-x-3">
+        <!-- Theme Toggle Button -->
+        <button onclick="toggleTheme()" class="text-slate-400 hover:text-white p-2 rounded-xl bg-[var(--card-bg)] border border-[var(--border-color)] transition" title="테마 전환">
+          <i id="theme-icon" class="fas fa-moon"></i>
+        </button>
+        <a href="[https://github.com/shine88pc/chanceblog](https://github.com/shine88pc/chanceblog)" target="_blank" class="text-slate-400 hover:text-white p-2 rounded-xl bg-[var(--card-bg)] border border-[var(--border-color)] transition" title="GitHub Repository">
+          <i class="fab fa-github"></i>
         </a>
-      </nav>
+      </div>
     </div>
   </header>
 
   <!-- Hero Profile Banner -->
-  <section class="border-b border-bordercol bg-gradient-to-b from-slate-900/60 to-softbg py-12">
+  <section class="border-b border-[var(--border-color)] bg-gradient-to-b from-slate-900/40 to-[var(--bg-main)] py-12 transition-colors duration-300">
     <div class="max-w-5xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center gap-6">
       <div class="w-20 h-20 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-2xl flex items-center justify-center text-white text-3xl font-black shadow-xl shadow-indigo-500/10 shrink-0 border border-indigo-400/20">
         C
       </div>
       <div class="text-center sm:text-left space-y-1">
-        <h1 class="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">기술과 일상을 기록하는 공간 👋</h1>
+        <h1 class="text-2xl sm:text-3xl font-extrabold text-[var(--heading)] tracking-tight">기술과 일상을 기록하는 공간 👋</h1>
         <p class="text-slate-400 text-sm sm:text-base leading-relaxed">급변하는 AI 트렌드와 개발 인사이트를 깊이 있는 에세이 형식으로 풀어냅니다.</p>
       </div>
     </div>
@@ -69,11 +83,24 @@
     
     <!-- Post List & Article Detail -->
     <div class="lg:col-span-2 space-y-6" id="app-content">
-      <div class="flex items-center justify-between border-b border-bordercol pb-4">
-        <h2 class="text-lg font-bold text-white flex items-center gap-2.5" id="current-category-title">
+      
+      <!-- Search Bar & Title Header -->
+      <div class="flex flex-col sm:flex-row items-center justify-between gap-4 border-b border-[var(--border-color)] pb-4">
+        <h2 class="text-lg font-bold text-[var(--heading)] flex items-center gap-2.5 w-full sm:w-auto" id="current-category-title">
           <i class="fas fa-feather-alt text-indigo-400"></i> 최근 작성한 글
         </h2>
-        <span id="post-count" class="text-xs text-slate-400 font-medium bg-cardbg px-3 py-1 rounded-full border border-bordercol">로딩 중...</span>
+        <div class="relative w-full sm:w-64">
+          <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+            <i class="fas fa-search text-xs"></i>
+          </span>
+          <input type="text" id="search-input" oninput="handleSearch(this.value)" placeholder="포스트 검색..." 
+                 class="w-full pl-9 pr-4 py-1.5 text-xs bg-[var(--card-bg)] border border-[var(--border-color)] rounded-xl text-[var(--text-main)] focus:outline-none focus:border-indigo-500 transition">
+        </div>
+      </div>
+
+      <!-- [AD SLOT - HEADER / TOP BANNER] (추후 광고 스크립트 삽입용 확장 슬롯) -->
+      <div id="ad-slot-header" class="hidden">
+        <!-- Google AdSense or Custom Banner Slot -->
       </div>
 
       <!-- Article Cards Container -->
@@ -85,23 +112,32 @@
       </div>
 
       <!-- Post Detail Content View -->
-      <div id="post-detail" class="hidden bg-cardbg p-6 sm:p-10 rounded-3xl shadow-2xl border border-bordercol space-y-6">
-        <div class="flex items-center justify-between pb-4 border-b border-bordercol">
+      <div id="post-detail" class="hidden bg-[var(--card-bg)] p-6 sm:p-10 rounded-3xl shadow-2xl border border-[var(--border-color)] space-y-6 transition-colors duration-300">
+        <div class="flex items-center justify-between pb-4 border-b border-[var(--border-color)]">
           <button onclick="closePost()" class="inline-flex items-center gap-2 text-sm font-semibold text-indigo-400 hover:text-indigo-300 transition">
             <i class="fas fa-arrow-left"></i> 목록으로 돌아가기
           </button>
-          <button onclick="copyPostLink()" class="inline-flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-white bg-slate-800/80 hover:bg-slate-800 border border-bordercol px-3 py-1.5 rounded-xl transition">
+          <button onclick="copyPostLink()" class="inline-flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-white bg-[var(--bg-main)] border border-[var(--border-color)] px-3 py-1.5 rounded-xl transition">
             <i class="fas fa-link"></i> 링크 복사
           </button>
         </div>
+        
+        <!-- Post SEO Tags Container -->
+        <div id="post-tags-container" class="flex flex-wrap gap-2 pt-2"></div>
+
         <article id="markdown-body" class="prose max-w-none pt-2"></article>
+
+        <!-- [AD SLOT - FOOTER / BOTTOM BANNER] (추후 본문 하단 광고 확장 슬롯) -->
+        <div id="ad-slot-footer" class="pt-6 border-t border-[var(--border-color)] text-center text-xs text-slate-500">
+          <!-- Future Ad Slot -->
+        </div>
       </div>
     </div>
 
     <!-- Sidebar -->
     <aside class="space-y-6">
-      <div class="bg-cardbg p-6 rounded-3xl border border-bordercol shadow-lg">
-        <h3 class="font-bold text-white text-xs uppercase tracking-wider mb-4 flex items-center gap-2 text-indigo-300">
+      <div class="bg-[var(--card-bg)] p-6 rounded-3xl border border-[var(--border-color)] shadow-lg transition-colors duration-300">
+        <h3 class="font-bold text-[var(--heading)] text-xs uppercase tracking-wider mb-4 flex items-center gap-2 text-indigo-400">
           <i class="fas fa-bookmark"></i> 카테고리 탐색
         </h3>
         <div class="space-y-4 text-sm">
@@ -111,18 +147,18 @@
           </button>
           <div>
             <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2.5 px-1">🇰🇷 한글 에세이</p>
-            <ul class="space-y-1.5 text-slate-300" id="kr-categories"></ul>
+            <ul class="space-y-1.5 text-[var(--text-main)]" id="kr-categories"></ul>
           </div>
-          <div class="pt-4 border-t border-bordercol">
+          <div class="pt-4 border-t border-[var(--border-color)]">
             <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2.5 px-1">🇺🇸 English Articles</p>
-            <ul class="space-y-1.5 text-slate-300" id="en-categories"></ul>
+            <ul class="space-y-1.5 text-[var(--text-main)]" id="en-categories"></ul>
           </div>
         </div>
       </div>
     </aside>
   </main>
 
-  <footer class="bg-cardbg border-t border-bordercol py-8 text-center text-xs text-slate-400 mt-auto">
+  <footer class="bg-[var(--card-bg)] border-t border-[var(--border-color)] py-8 text-center text-xs text-slate-400 mt-auto transition-colors duration-300">
     <p>© 2026 Chance_Blog. All rights reserved. Powered by GitHub Actions & Gemini API.</p>
   </footer>
 
@@ -132,6 +168,48 @@
     const POSTS_DIR = '_posts';
 
     let allPostsData = [];
+    let currentFilteredPosts = [];
+
+    // Theme Management
+    function toggleTheme() {
+      const html = document.getElementById('html-root');
+      const icon = document.getElementById('theme-icon');
+      if (html.classList.contains('dark')) {
+        html.classList.remove('dark');
+        icon.className = 'fas fa-sun';
+        localStorage.setItem('theme', 'light');
+        applyThemeVariables('light');
+      } else {
+        html.classList.add('dark');
+        icon.className = 'fas fa-moon';
+        localStorage.setItem('theme', 'dark');
+        applyThemeVariables('dark');
+      }
+    }
+
+    function applyThemeVariables(theme) {
+      const root = document.body;
+      if (theme === 'light') {
+        root.style.setProperty('--bg-main', '#f8fafc');
+        root.style.setProperty('--card-bg', '#ffffff');
+        root.style.setProperty('--border-color', '#e2e8f0');
+        root.style.setProperty('--text-main', '#334155');
+        root.style.setProperty('--heading', '#0f172a');
+      } else {
+        root.style.setProperty('--bg-main', '#0b0f19');
+        root.style.setProperty('--card-bg', '#161e2e');
+        root.style.setProperty('--border-color', '#273548');
+        root.style.setProperty('--text-main', '#cbd5e1');
+        root.style.setProperty('--heading', '#f8fafc');
+      }
+    }
+
+    // Initialize Theme from Storage
+    if (localStorage.getItem('theme') === 'light') {
+      document.getElementById('html-root').classList.remove('dark');
+      document.getElementById('theme-icon').className = 'fas fa-sun';
+      applyThemeVariables('light');
+    }
 
     function calculateReadingTime(text) {
       const words = text.trim().split(/\s+/).length;
@@ -141,7 +219,7 @@
 
     async function fetchPostList() {
       try {
-        const res = await fetch(`https://api.github.com/repos/${USER}/${REPO}/contents/${POSTS_DIR}`);
+        const res = await fetch(`[https://api.github.com/repos/$](https://api.github.com/repos/$){USER}/${REPO}/contents/${POSTS_DIR}`);
         if(!res.ok) throw new Error('Posts folder not found');
         const files = await res.json();
         
@@ -154,7 +232,8 @@
           let title = file.name;
           let category = file.name.includes('-KR-') ? 'KR - 생각정리' : 'EN - Reflections';
           let lang = file.name.includes('-KR-') ? 'kr' : 'en';
-          let image = 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1000&q=80';
+          let image = '[https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1000&q=80](https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1000&q=80)';
+          let tags = [];
 
           const frontmatterMatch = rawText.match(/^---[\s\S]*?---/);
           if (frontmatterMatch) {
@@ -163,16 +242,22 @@
             const catMatch = fm.match(/category:\s*"(.*?)"/);
             const langMatch = fm.match(/lang:\s*(kr|en)/);
             const imgMatch = fm.match(/image:\s*"(.*?)"/);
+            const tagsMatch = fm.match(/tags:\s*\[(.*?)\]/);
+            
             if (titleMatch) title = titleMatch[1];
             if (catMatch) category = catMatch[1];
             if (langMatch) lang = langMatch[1];
             if (imgMatch) image = imgMatch[1];
+            if (tagsMatch) {
+              tags = tagsMatch[1].split(',').map(t => t.trim().replace(/['"]/g, ''));
+            }
           }
 
           const readingTime = calculateReadingTime(rawText);
-          return { file, title, category, lang, image, rawText, readingTime };
+          return { file, title, category, lang, image, rawText, readingTime, tags };
         }));
 
+        currentFilteredPosts = allPostsData;
         document.getElementById('total-count-badge').innerText = allPostsData.length;
         renderCategories();
         renderPostList(allPostsData);
@@ -198,13 +283,13 @@
       const krUl = document.getElementById('kr-categories');
       krUl.innerHTML = '';
       for (const [cat, count] of Object.entries(krCats)) {
-        krUl.innerHTML += `<li onclick="filterCategory('${cat}')" class="cursor-pointer hover:text-white py-1.5 px-2.5 rounded-xl hover:bg-slate-800/80 transition flex items-center justify-between text-xs"><span>▪ ${cat}</span> <span class="bg-slate-800 text-slate-400 text-[10px] px-2 py-0.5 rounded-full font-semibold">${count}</span></li>`;
+        krUl.innerHTML += `<li onclick="filterCategory('${cat}')" class="cursor-pointer hover:text-indigo-400 py-1.5 px-2.5 rounded-xl hover:bg-indigo-500/10 transition flex items-center justify-between text-xs"><span>▪ ${cat}</span> <span class="bg-[var(--bg-main)] text-slate-400 text-[10px] px-2 py-0.5 rounded-full font-semibold">${count}</span></li>`;
       }
 
       const enUl = document.getElementById('en-categories');
       enUl.innerHTML = '';
       for (const [cat, count] of Object.entries(enCats)) {
-        enUl.innerHTML += `<li onclick="filterCategory('${cat}')" class="cursor-pointer hover:text-white py-1.5 px-2.5 rounded-xl hover:bg-slate-800/80 transition flex items-center justify-between text-xs"><span>▪ ${cat}</span> <span class="bg-slate-800 text-slate-400 text-[10px] px-2 py-0.5 rounded-full font-semibold">${count}</span></li>`;
+        enUl.innerHTML += `<li onclick="filterCategory('${cat}')" class="cursor-pointer hover:text-indigo-400 py-1.5 px-2.5 rounded-xl hover:bg-indigo-500/10 transition flex items-center justify-between text-xs"><span>▪ ${cat}</span> <span class="bg-[var(--bg-main)] text-slate-400 text-[10px] px-2 py-0.5 rounded-full font-semibold">${count}</span></li>`;
       }
     }
 
@@ -214,13 +299,13 @@
       container.innerHTML = '';
 
       if (posts.length === 0) {
-        container.innerHTML = `<div class="py-12 text-center text-slate-500">해당 카테고리에 등록된 글이 없습니다.</div>`;
+        container.innerHTML = `<div class="py-12 text-center text-slate-500">검색 결과가 없습니다.</div>`;
         return;
       }
 
       posts.forEach(p => {
         const card = document.createElement('div');
-        card.className = "bg-cardbg rounded-3xl border border-bordercol hover:border-indigo-500/50 hover:shadow-xl transition cursor-pointer overflow-hidden flex flex-col sm:flex-row group";
+        card.className = "bg-[var(--card-bg)] rounded-3xl border border-[var(--border-color)] hover:border-indigo-500/50 hover:shadow-xl transition cursor-pointer overflow-hidden flex flex-col sm:flex-row group";
         
         const langBadge = p.lang === 'kr' 
           ? '<span class="bg-red-500/10 text-red-400 border border-red-500/20 text-[11px] px-2.5 py-0.5 rounded-full font-bold">KOREAN</span>' 
@@ -236,9 +321,9 @@
                 ${langBadge}
                 <span class="text-slate-400 text-xs">${p.category}</span>
               </div>
-              <h3 class="font-bold text-white text-lg leading-snug group-hover:text-indigo-300 transition mb-2">${p.title}</h3>
+              <h3 class="font-bold text-[var(--heading)] text-lg leading-snug group-hover:text-indigo-400 transition mb-2">${p.title}</h3>
             </div>
-            <div class="mt-4 pt-3 border-t border-bordercol/60 flex items-center justify-between text-xs text-slate-400">
+            <div class="mt-4 pt-3 border-t border-[var(--border-color)] flex items-center justify-between text-xs text-slate-400">
               <span class="flex items-center gap-1.5"><i class="far fa-clock"></i> ${p.readingTime}</span>
               <span class="text-indigo-400 font-semibold flex items-center gap-1 group-hover:translate-x-1 transition">읽기 <i class="fas fa-chevron-right text-[10px]"></i></span>
             </div>
@@ -252,11 +337,23 @@
     function filterCategory(cat) {
       document.getElementById('current-category-title').innerText = cat === 'ALL' ? ' 최근 작성한 글' : ` ${cat}`;
       if (cat === 'ALL') {
-        renderPostList(allPostsData);
+        currentFilteredPosts = allPostsData;
       } else {
-        const filtered = allPostsData.filter(p => p.category === cat);
-        renderPostList(filtered);
+        currentFilteredPosts = allPostsData.filter(p => p.category === cat);
       }
+      renderPostList(currentFilteredPosts);
+    }
+
+    function handleSearch(query) {
+      const keyword = query.toLowerCase().trim();
+      if (!keyword) {
+        renderPostList(currentFilteredPosts);
+        return;
+      }
+      const searched = currentFilteredPosts.filter(p => 
+        p.title.toLowerCase().includes(keyword) || p.rawText.toLowerCase().includes(keyword)
+      );
+      renderPostList(searched);
     }
 
     function loadPostContent(post) {
@@ -265,6 +362,18 @@
       const detailView = document.getElementById('post-detail');
       detailView.classList.remove('hidden');
       
+      // Render SEO Tags
+      const tagsContainer = document.getElementById('post-tags-container');
+      tagsContainer.innerHTML = '';
+      if (post.tags && post.tags.length > 0) {
+        post.tags.forEach(tag => {
+          const tagBadge = document.createElement('span');
+          tagBadge.className = "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-xs px-3 py-1 rounded-full font-medium";
+          tagBadge.innerText = `#${tag}`;
+          tagsContainer.appendChild(tagBadge);
+        });
+      }
+
       document.getElementById('markdown-body').innerHTML = marked.parse(text);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
