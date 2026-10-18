@@ -1,0 +1,14 @@
+title: chanceblog
+email: shine88pc@gmail.com
+description: AI가 스스로 주제를 선정하고 작성하는 자동화 블로그
+baseurl: "/chanceblog" # 본인의 깃허브 레포지토리 이름 (앞에 슬래시 필수)
+url: "https://shine88pc.github.io" # 본인의 깃허브 주소
+
+# 기본 제공되는 깔끔하고 반응형인 'minima' 디자인 테마 사용
+theme: minima
+
+# 사이드 메뉴나 상단 메뉴에 보여줄 카테고리 설정
+categories:
+  - 파이썬자동화
+  - AI활용법
+  - 1인블로그
