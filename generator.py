@@ -1,14 +1,17 @@
 import os
 import json
 import datetime
-import requests
+import google.generativeai as genai
 
 # 1. 환경 변수에서 Gemini API 키 가져오기
 API_KEY = os.environ.get("GEMINI_API_KEY")
 if not API_KEY:
     raise ValueError("GEMINI_API_KEY 환경 변수가 설정되지 않았습니다.")
 
-# 2. 주제 풀 (Pool) 설정 (원하는 카테고리나 키워드로 수정 가능)
+# 공식 라이브러리에 API 키 설정
+genai.configure(api_key=API_KEY)
+
+# 2. 주제 풀 (Pool) 설정
 TOPIC_POOL = [
     "초보자를 위한 파이썬 자동화 팁 3가지",
     "직장인 업무 효율을 2배 높여주는 AI 활용법",
@@ -34,12 +37,12 @@ def select_topic(history):
     for topic in TOPIC_POOL:
         if topic not in history:
             return topic
-    # 모든 주제를 다 썼다면 순환
     return TOPIC_POOL[len(history) % len(TOPIC_POOL)]
 
 def generate_blog_post(topic):
-    """Gemini API를 이용해 마크다운 형식의 블로그 글 생성"""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={API_KEY}"
+    """구글 공식 SDK를 이용해 안정적으로 블로그 글 생성"""
+    # 가장 안정적인 최신 플래시 모델 지정
+    model = genai.GenerativeModel('gemini-1.5-flash')
     
     prompt = f"""
     당신은 전문 블로거입니다. 다음 주제에 대해 독자에게 유익하고 가독성이 좋은 블로그 포스팅을 작성해 주세요.
@@ -58,23 +61,8 @@ def generate_blog_post(topic):
     4. 친근하고 전문적인 어조를 사용할 것.
     """
     
-    payload = {
-        "contents": [{
-            "parts": [{"text": prompt}]
-        }]
-    }
-    
-    headers = {"Content-Type": "application/json"}
-    
-    response = requests.post(url, json=payload, headers=headers)
-    if response.status_code == 200:
-        result = response.json()
-        try:
-            return result['candidates'][0]['content']['parts'][0]['text']
-        except (KeyError, IndexError):
-            raise Exception("Gemini 응답 구조가 올바르지 않습니다.")
-    else:
-        raise Exception(f"API 호출 실패: {response.status_code} - {response.text}")
+    response = model.generate_content(prompt)
+    return response.text
 
 def main():
     history = load_history()
@@ -84,9 +72,9 @@ def main():
     # 블로그 글 생성
     post_content = generate_blog_post(topic)
     
-    # 파일명 생성 (날짜 + 주제 키워드 기반)
+    # 파일명 생성
     date_str = datetime.datetime.now().strftime('%Y-%m-%d')
-    file_name = f"posts/{date_str}-{hash(topic) % 10000}.md"
+    file_name = f"posts/{date_str}-{abs(hash(topic)) % 10000}.md"
     
     os.makedirs("posts", exist_ok=True)
     with open(file_name, "w", encoding="utf-8") as f:
