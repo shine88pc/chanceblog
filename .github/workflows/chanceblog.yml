@@ -2,7 +2,9 @@ name: Chance_Blog Full-Auto Engine
 
 on:
   schedule:
-    - cron: '0 17,20,23,4,9,13 * * *'
+    # 매시 17분(UTC). 게시 시각(KST 8/13/18/22시)은 generator.py의 SLOT_HOURS로 판단하며,
+    # 실행이 지연/누락돼도 다음 시간 실행이 해당 시각 글을 보충한다.
+    - cron: '17 * * * *'
   issues:
     types: [opened]
   workflow_dispatch:
@@ -27,10 +29,12 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # 승인된 저장소 멤버가 연 이슈만 실행해 불필요한 외부 요청을 막습니다.
+    timeout-minutes: 20
+    # 이슈는 제목이 [Control]로 시작하고, 저장소 소유자/멤버/협업자가 연 것만 처리
     if: >-
       github.event_name != 'issues' ||
-      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)
+      (startsWith(github.event.issue.title, '[Control]') &&
+       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association))
     steps:
       - uses: actions/checkout@v4
 
@@ -51,9 +55,9 @@ jobs:
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
           ISSUE_AUTHOR_ASSOCIATION: ${{ github.event.issue.author_association }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '1' || '0' }}
           FIX_IMAGES: ${{ github.event_name == 'workflow_dispatch' && inputs.fix_images && '1' || '0' }}
         run: python generator.py
@@ -63,7 +67,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add _posts history.json
+          git add -A
           if git diff --cached --quiet; then
             echo "커밋할 변경 없음"
           else
