@@ -18,7 +18,7 @@ Chance_Blog(이하 “사이트”)는 방문자에게 글과 페이지를 제�
 
 ## 쿠키, 광고와 맞춤 광고 선택
 
-현재 이 사이트에는 Google AdSense 광고가 게시되어 있지 않습니다. 광고가 승인되어 활성화되면 Google 및 제3자 광고 제공자가 광고 제공·측정·중복 노출 방지와 설정에 따라 개인화 광고를 위해 쿠키, 웹 비콘, IP 주소 또는 유사 식별자를 사용할 수 있습니다. 광고 설정은 [Google 광고 설정](https://adssettings.google.com/)에서 관리할 수 있고, 일부 제3자 사업자의 맞춤 광고 선택은 [aboutads.info](https://www.aboutads.info/choices/)에서 확인할 수 있습니다.
+현재 이 사이트에는 Google AdSense 광고가 게시되어 있지 않습니다. 광고가 활성화되면 Google을 포함한 제3자 광고 제공업체가 이 사이트 또는 다른 사이트를 방문한 기록을 바탕으로 광고를 제공하기 위해 쿠키를 사용할 수 있습니다. Google 광고 쿠키는 Google과 파트너가 방문자의 이 사이트 및 다른 사이트 방문 정보를 바탕으로 개인화 광고를 제공하는 데 쓰일 수 있습니다. 광고 제공·측정·중복 노출 방지 및 설정을 위해 쿠키, 웹 비콘, IP 주소 또는 유사 식별자가 처리될 수도 있습니다. 맞춤 광고는 [Google 광고 설정](https://adssettings.google.com/)에서 관리할 수 있고, 일부 제3자 사업자의 맞춤 광고 선택은 [aboutads.info](https://www.aboutads.info/choices/)에서 확인할 수 있습니다.
 
 Google이 파트너 사이트 이용 정보를 처리하는 방법은 [Google의 파트너 사이트 및 앱 데이터 사용 안내](https://policies.google.com/technologies/partner-sites?hl=ko)에서 확인할 수 있습니다. 광고를 도입할 때 적용 지역의 동의 요건과 Google의 사용자 동의 정책을 다시 확인하고, 필요한 동의 관리 도구를 설정하겠습니다.
 
