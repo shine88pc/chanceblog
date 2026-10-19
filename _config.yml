@@ -1,8 +1,13 @@
 title: 챈스블로그
 email: shine88pc@gmail.com
-description: AI가 실시간 트렌드와 뉴스를 분석하여 자동으로 포스팅하는 1인 풀오토 블로그
+description: 인공지능, 하드웨어, 우주·로보틱스와 기술 정책의 최신 변화를 출처와 맥락을 바탕으로 쉽게 설명합니다.
 baseurl: "/chanceblog"
 url: "https://shine88pc.github.io"
+permalink: /posts/:year/:month/:day/:title/
+
+plugins:
+  - jekyll-seo-tag
+  - jekyll-sitemap
 
 # 깔끔한 반응형 공식 테마 적용
 theme: minima

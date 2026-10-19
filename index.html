@@ -1,10 +1,26 @@
+---
+layout: null
+---
 <!DOCTYPE html>
 <html lang="ko" class="dark" id="html-root">
 <head>
   <meta name="naver-site-verification" content="3faf012d0ddfdde4fd75fa30219150948df41c18" />
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>⚡ Chance_Blog | 테크 & AI 에세이 노트</title>
+  <meta name="description" content="인공지능, 우주·로보틱스, 하드웨어와 기술 정책의 최신 변화를 출처와 맥락을 바탕으로 쉽게 설명합니다.">
+  <link rel="canonical" href="{{ '/' | absolute_url }}">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Chance_Blog">
+  <meta property="og:title" content="Chance_Blog | 테크·AI 분석 노트">
+  <meta property="og:description" content="인공지능, 우주·로보틱스, 하드웨어와 기술 정책의 최신 변화를 출처와 맥락을 바탕으로 쉽게 설명합니다.">
+  <meta property="og:url" content="{{ '/' | absolute_url }}">
+  {% assign featured_post = site.posts.first %}
+  {% if featured_post.image %}<meta property="og:image" content="{{ featured_post.image | escape }}">{% endif %}
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Chance_Blog | 테크·AI 분석 노트">
+  <meta name="twitter:description" content="인공지능, 우주·로보틱스, 하드웨어와 기술 정책의 최신 변화를 출처와 맥락을 바탕으로 쉽게 설명합니다.">
+  <link rel="alternate" type="application/rss+xml" title="Chance_Blog RSS" href="{{ '/feed.xml' | relative_url }}">
+  <title>⚡ Chance_Blog | 테크·AI 분석 노트</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Marked.js for Markdown Parsing -->
@@ -99,13 +115,13 @@
   <section class="border-b border-slate-800/80 bg-gradient-to-b from-slate-900 to-slate-950 py-10 px-4">
     <div class="max-w-6xl mx-auto text-center space-y-3">
       <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs font-semibold tracking-wide">
-        <span>⚡ Realtime AI & Tech Intelligence</span>
+        <span>⚡ Technology, Explained with Context</span>
       </div>
       <h1 class="text-3xl md:text-5xl font-black tracking-tight text-slate-100">
-        테크와 미래를 잇는 통찰 노트
+        기술 뉴스의 맥락을 읽는 노트
       </h1>
       <p class="text-slate-400 text-sm md:text-base max-w-2xl mx-auto">
-        인공지능, 우주 로보틱스, 정책 및 최신 기술 트렌드를 실시간으로 탐색하고 깊이 있는 에세이를 기록합니다.
+        인공지능, 하드웨어, 우주·로보틱스와 기술 정책의 변화가 무엇을 의미하는지 출처와 함께 살펴봅니다.
       </p>
     </div>
   </section>
@@ -193,8 +209,7 @@
    <!-- Footer -->
   <footer class="border-t border-slate-800/80 bg-slate-950 py-8 text-center text-xs text-slate-500">
     <div class="max-w-6xl mx-auto px-4 space-y-2">
-      <p class="font-medium text-slate-400">⚡ Chance_Blog &copy; 2026. Automated Insights & Tech Journalism.</p>
-      <p>Powered by GitHub Actions, Gemini Intelligence, and Tailwind CSS.</p>
+      <p class="font-medium text-slate-400">⚡ Chance_Blog &copy; 2026. 기술 변화의 맥락을 출처와 함께 설명합니다.</p>
       <p id="visit-counter">
         방문자 수 (세션·경로 기준):
         <span id="visit-count" class="font-semibold text-slate-300">불러오는 중...</span>
@@ -427,6 +442,8 @@
           const title = String(post.title || post.name || '제목 없는 게시글');
           return {
             path: String(post.path || ''),
+            url: String(post.url || ''),
+            absoluteUrl: String(post.absoluteUrl || ''),
             name: String(post.name || ''),
             title,
             category: String(post.category || 'General'),
@@ -513,9 +530,9 @@
 
       if (emptyEl) emptyEl.classList.add('hidden');
       grid.innerHTML = filtered.map((post, idx) => `
-        <article class="group bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden hover:border-slate-700 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl flex flex-col justify-between cursor-pointer" onclick="openPostModal(${idx})">
+        <article class="group bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden hover:border-slate-700 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl flex flex-col justify-between">
           <div>
-            <div class="relative aspect-video w-full overflow-hidden bg-slate-800">
+            <a href="${post.url}" class="relative aspect-video w-full overflow-hidden bg-slate-800 block" aria-label="${post.title} 글 읽기">
               <img src="${post.image}" alt="${post.title}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" onerror="this.src='${defaultThumbnails[0]}'">
               <div class="absolute top-3 left-3 flex gap-1.5">
                 <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-900/80 backdrop-blur-md text-blue-400 border border-blue-500/30">
@@ -525,14 +542,14 @@
                   ${post.lang}
                 </span>
               </div>
-            </div>
+            </a>
             <div class="p-5">
               <div class="text-xs text-slate-500 font-mono mb-2 flex items-center gap-1.5">
                 <i class="fa-regular fa-calendar"></i>
                 <span>${post.date || '최신'}</span>
               </div>
               <h2 class="text-lg font-bold text-slate-100 group-hover:text-blue-400 transition-colors line-clamp-2 leading-snug mb-2">
-                ${post.title}
+                <a href="${post.url}" class="hover:text-blue-400">${post.title}</a>
               </h2>
               <p class="text-sm text-slate-400 line-clamp-3 leading-relaxed mb-4">
                 ${post.previewText}
@@ -543,9 +560,12 @@
             <div class="flex flex-wrap gap-1 max-w-[70%]">
               ${post.tags.slice(0, 2).map(tag => `<span class="text-[11px] text-slate-400">#${tag}</span>`).join(' ')}
             </div>
-            <span class="inline-flex items-center gap-1 text-blue-400 font-semibold group-hover:translate-x-0.5 transition-transform">
-              읽기 <i class="fa-solid fa-arrow-right text-[10px]"></i>
-            </span>
+            <div class="inline-flex items-center gap-3">
+              <button type="button" onclick="openPostModal(${idx})" class="text-slate-400 hover:text-slate-200">빠른 보기</button>
+              <a href="${post.url}" class="inline-flex items-center gap-1 text-blue-400 font-semibold group-hover:translate-x-0.5 transition-transform">
+                전체 글 <i class="fa-solid fa-arrow-right text-[10px]"></i>
+              </a>
+            </div>
           </div>
         </article>
       `).join('');

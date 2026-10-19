@@ -1,0 +1,84 @@
+---
+layout: default
+---
+<style>
+  body, .site-header, .site-footer { background: #020617; color: #e2e8f0; }
+  .site-header, .site-footer { border-color: #1e293b; }
+  .site-title, .site-title:visited, .site-nav .page-link { color: #e2e8f0; }
+  .page-content { padding: 2rem 0 4rem; }
+  .wrapper { max-width: 900px; }
+  .chance-post { background: #0f172a; border: 1px solid #1e293b; border-radius: 1rem; padding: clamp(1.25rem, 4vw, 3rem); }
+  .chance-post a { color: #60a5fa; }
+  .chance-post h1, .chance-post h2, .chance-post h3 { color: #f8fafc; line-height: 1.35; }
+  .chance-post h1 { font-size: clamp(1.8rem, 5vw, 2.7rem); margin: .75rem 0 1.25rem; }
+  .chance-post h2 { margin-top: 2rem; }
+  .chance-post p, .chance-post li { line-height: 1.85; }
+  .chance-post img { max-width: 100%; height: auto; border-radius: .75rem; }
+  .chance-post blockquote { border-left: 4px solid #3b82f6; color: #94a3b8; padding-left: 1rem; }
+  .chance-post pre { overflow-x: auto; background: #020617; padding: 1rem; border-radius: .75rem; }
+  .chance-post .post-meta { color: #94a3b8; font-size: .9rem; }
+  .chance-post .post-tags a { display: inline-block; margin: .25rem .35rem .25rem 0; }
+  .chance-post .related-posts { border-top: 1px solid #334155; margin-top: 2.5rem; padding-top: 1.5rem; }
+  @media (max-width: 600px) { .site-title { font-size: 1.1rem; } }
+</style>
+
+<article class="chance-post">
+  <nav aria-label="Breadcrumb" class="post-meta">
+    <a href="{{ '/' | relative_url }}">⚡ Chance_Blog</a>
+    {% if page.category %}<span aria-hidden="true"> / </span>{{ page.category | escape }}{% endif %}
+  </nav>
+  <header>
+    <h1>{{ page.title | escape }}</h1>
+    <p class="post-meta">
+      <time datetime="{{ page.date | date_to_xmlschema }}">{{ page.date | date: "%Y-%m-%d" }}</time>
+      {% if page.lang %}<span> · {{ page.lang | upcase }}</span>{% endif %}
+    </p>
+    {% if page.tags and page.tags.size > 0 %}
+      <p class="post-tags" aria-label="Tags">
+        {% for tag in page.tags %}<span>#{{ tag | escape }}</span>{% endfor %}
+      </p>
+    {% endif %}
+  </header>
+
+  <p><button type="button" id="share-post" class="post-meta">글 공유하기</button></p>
+
+  <div class="post-content">
+    {{ content }}
+  </div>
+
+  {% if page.source_url %}
+    <p class="post-meta">참고 출처: <a href="{{ page.source_url | escape }}" rel="noopener noreferrer">{{ page.source_name | default: "원문" | escape }}</a></p>
+  {% endif %}
+
+  {% assign related_count = 0 %}
+  {% for related_post in site.posts %}
+    {% if related_post.url != page.url and related_post.lang == page.lang and related_post.category == page.category %}
+      {% if related_count == 0 %}<aside class="related-posts"><h2>같은 분야의 글</h2><ul>{% endif %}
+      <li><a href="{{ related_post.url | relative_url }}">{{ related_post.title | escape }}</a></li>
+      {% assign related_count = related_count | plus: 1 %}
+      {% if related_count >= 3 %}{% break %}{% endif %}
+    {% endif %}
+  {% endfor %}
+  {% if related_count > 0 %}</ul></aside>{% endif %}
+
+  <p><a href="{{ '/' | relative_url }}">← 전체 글 목록으로</a></p>
+</article>
+
+<script>
+  (() => {
+    const button = document.getElementById('share-post');
+    if (!button) return;
+    button.addEventListener('click', async () => {
+      const shareData = { title: document.title, url: window.location.href };
+      try {
+        if (navigator.share) await navigator.share(shareData);
+        else {
+          await navigator.clipboard.writeText(shareData.url);
+          button.textContent = '링크를 복사했습니다';
+        }
+      } catch (error) {
+        if (error && error.name !== 'AbortError') button.textContent = '주소창에서 글 주소를 복사해 주세요';
+      }
+    });
+  })();
+</script>

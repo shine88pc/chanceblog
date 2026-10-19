@@ -863,7 +863,7 @@ def fetch_news_items():
                 continue
             summary = "" if src.get("google") else it["summary"]
             kept.append({"title": title, "source": src["name"],
-                         "summary": summary, "published": pub})
+                         "link": it["link"], "summary": summary, "published": pub})
         kept.sort(key=lambda x: x["published"] or EPOCH, reverse=True)
         print(f"  소스 {src['name']}: {len(parsed)}건 중 {len(kept)}건 사용")
         per_source.append(kept[:10])
@@ -905,6 +905,10 @@ def build_post_prompt(item, recent_titles, category_hint="", allow_skip=False):
         topic_text = item["title"]
         if item.get("source"):
             topic_text += f"\n[출처] {item['source']}"
+        if item.get("link"):
+            topic_text += f"\n[원문 URL] {item['link']}"
+        if item.get("published"):
+            topic_text += f"\n[원문 게시 시각] {item['published'].isoformat()}"
         if item.get("summary"):
             topic_text += ("\n[기사 요약 - 참고만 하고 문장을 그대로 옮기지 마세요]\n"
                            + item["summary"])
@@ -913,8 +917,10 @@ def build_post_prompt(item, recent_titles, category_hint="", allow_skip=False):
                       "새로운 주제를 직접 하나 선정하세요.")
     skip_rule = ('- 이 주제가 [최근 다룬 주제/제목]과 같은 사건이나 소재라면 글을 쓰지 말고 '
                  '{"skip": true, "reason": "..."} 만 반환하세요.\n') if allow_skip else ""
-    source_rule = ("- 글 마지막에 참고한 출처 이름을 한 줄('참고: 출처명')로 표기하세요.\n"
-                   if item and item.get("source") else "")
+    source_rule = ("- 제공된 원문 링크를 사실 확인의 출발점으로 삼고, 확인된 사실과 분석·전망을 구분하세요.\n"
+                   "- 제공되지 않은 수치, 인용, 다른 출처의 URL을 만들지 마세요.\n"
+                   if item and item.get("link") else
+                   "- 사실 주장과 전망을 구분하고, 확인할 수 없는 수치·인용·출처를 만들지 마세요.\n")
     hint = f"[카테고리 힌트] {category_hint}\n" if category_hint else ""
     return f"""
 당신은 개인 기술 전문 블로거 'Chance'입니다.
@@ -928,6 +934,9 @@ def build_post_prompt(item, recent_titles, category_hint="", allow_skip=False):
 
 [중요 지침]
 {skip_rule}- 제목, 카테고리, 태그를 주제에 맞게 작성하세요.
+- 독자가 실제로 궁금해할 질문에 먼저 답하고, 제목은 핵심 검색어와 글의 결론을 정확하게 담으세요. 과장·낚시성 표현은 피하세요.
+- 첫 문단에서 핵심 결론과 왜 중요한지 설명하고, 본문에는 배경, 확인된 사실, 영향, 한계 또는 반론을 구분해 담으세요.
+- 소스 요약을 문단별로 바꾸어 쓰는 데 그치지 말고, 독자에게 유용한 비교·맥락·실행 가능한 시사점을 제공하세요. 근거가 부족하면 추측으로 채우지 말고 skip을 반환하세요.
 - 한국어/영어 글은 각 언어에 자연스럽게 쓰고 단순 직역은 피하세요.
 - 확인되지 않은 수치, 인용문, 발표 사실을 지어내지 마세요. 기사 문장을 그대로 옮기지 마세요.
 {source_rule}- 본문은 충분한 설명과 분석을 포함하고 Markdown으로 작성하세요.
@@ -1005,6 +1014,51 @@ def validate_post_data(data, kr_image, en_image):
                 f"![Thumbnail]({image_url})", content, count=1)
         data[f"{prefix}_content"] = content.rstrip() + "\n"
     return data
+
+
+def _front_matter_set(content, key, value):
+    """Set one safely quoted scalar in an existing Markdown front matter block."""
+    content = str(content or "").lstrip("\ufeff")
+    match = re.match(r"\A---\s*\n(.*?)\n---\s*\n(.*)\Z", content, re.S)
+    if not match:
+        return content
+    front, body = match.groups()
+    line = f"{key}: {json.dumps(str(value), ensure_ascii=False)}"
+    pattern = re.compile(rf"(?m)^{re.escape(key)}\s*:\s*.*$")
+    if pattern.search(front):
+        front = pattern.sub(lambda _: line, front, count=1)
+    else:
+        front = front.rstrip() + "\n" + line
+    return f"---\n{front}\n---\n\n{body.lstrip()}"
+
+
+def _description_from_markdown(content, max_chars=155):
+    text = re.sub(r"\A---\s*\n.*?\n---\s*\n", "", str(content or ""), count=1, flags=re.S)
+    for paragraph in re.split(r"\n\s*\n", text):
+        paragraph = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", paragraph)
+        paragraph = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", paragraph)
+        paragraph = re.sub(r"(?m)^\s{0,3}(?:#{1,6}\s*|>\s*)", "", paragraph)
+        paragraph = re.sub(r"[*_`~]", "", paragraph)
+        paragraph = re.sub(r"<[^>]+>", " ", paragraph)
+        paragraph = re.sub(r"\s+", " ", paragraph).strip()
+        if len(paragraph) >= 60:
+            if len(paragraph) > max_chars:
+                paragraph = paragraph[:max_chars].rsplit(" ", 1)[0].rstrip(" ,;:") + "…"
+            return paragraph
+    return ""
+
+
+def add_discovery_metadata(content, source=None):
+    description = _description_from_markdown(content)
+    if description:
+        content = _front_matter_set(content, "description", description)
+    if source:
+        source_url = str(source.get("link") or "").strip()
+        parsed = urllib.parse.urlparse(source_url)
+        if parsed.scheme in {"http", "https"} and parsed.netloc:
+            content = _front_matter_set(content, "source_name", source.get("source") or "원문")
+            content = _front_matter_set(content, "source_url", source_url)
+    return content
 
 
 def safe_category_dir(category, prefix):
@@ -1094,6 +1148,8 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
 
     now = now_kst()
     date_str, time_str = now.strftime("%Y-%m-%d"), now.strftime("%H%M%S")
+    data["kr_content"] = add_discovery_metadata(data["kr_content"], selected_item)
+    data["en_content"] = add_discovery_metadata(data["en_content"], selected_item)
     kr_path = safe_category_dir(data["kr_category"], "KR") / f"{date_str}-KR-{time_str}.md"
     en_path = safe_category_dir(data["en_category"], "EN") / f"{date_str}-EN-{time_str}.md"
 
@@ -1110,6 +1166,7 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
         "kr_title": data["kr_title"], "en_title": data["en_title"],
         "kr_image": kr_image, "en_image": en_image, "slot": slot,
         "source": (selected_item or {}).get("source", ""),
+        "source_url": (selected_item or {}).get("link", ""),
     })
     write_history(history)
     trigger_download(kr_image)

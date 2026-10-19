@@ -1,5 +1,6 @@
 ---
 layout: null
+sitemap: false
 ---
 [
 {% assign visible_posts = site.posts %}
@@ -24,6 +25,8 @@ layout: null
 {% endif %}
   {
     "path": {{ post.path | jsonify }},
+    "url": {{ post.url | relative_url | jsonify }},
+    "absoluteUrl": {{ post.url | absolute_url | jsonify }},
     "name": {{ post_name | jsonify }},
     "title": {{ post.title | default: post_name | jsonify }},
     "category": {{ category | jsonify }},
