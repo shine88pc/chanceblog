@@ -844,6 +844,31 @@ NEWS_SOURCES = [
     {"name": "블로터", "lane": "technology", "url": "https://www.bloter.net/feed"},
 ]
 
+# 게시 후보에 사용할 수 있는 출처 도메인. 도메인 이름은 끝 경계까지 비교합니다.
+# 보도자료·검색 결과·커뮤니티 링크만으로는 글을 발행하지 않습니다.
+TRUSTED_SOURCE_DOMAINS = {
+    "science": ("nature.com", "science.org", "pnas.org", "cell.com", "who.int",
+                "nih.gov", "noaa.gov", "nasa.gov", "ipcc.ch", "jpl.nasa.gov",
+                "reuters.com", "apnews.com", "bbc.com", "bbc.co.uk"),
+    "economy": ("oecd.org", "imf.org", "worldbank.org", "federalreserve.gov",
+                "bls.gov", "bok.or.kr", "kostat.go.kr", "kdi.re.kr",
+                "reuters.com", "apnews.com", "ft.com", "bloomberg.com",
+                "bbc.com", "bbc.co.uk"),
+    "society": ("oecd.org", "un.org", "unesco.org", "unicef.org", "korea.kr",
+                "kostat.go.kr", "kdi.re.kr", "reuters.com", "apnews.com",
+                "bbc.com", "bbc.co.uk", "theguardian.com"),
+    "technology": ("nist.gov", "acm.org", "ieee.org", "arxiv.org", "nature.com",
+                   "science.org", "technologyreview.com", "arstechnica.com",
+                   "reuters.com", "apnews.com", "bbc.com", "bbc.co.uk",
+                   "aitimes.com", "etnews.com"),
+    "culture": ("unesco.org", "pewresearch.org", "reuters.com", "apnews.com",
+                "bbc.com", "bbc.co.uk", "theguardian.com", "variety.com",
+                "nytimes.com"),
+    "daily_life": ("who.int", "nih.gov", "nhs.uk", "cdc.gov", "apa.org",
+                   "kostat.go.kr", "korea.kr", "reuters.com", "apnews.com",
+                   "bbc.com", "bbc.co.uk"),
+}
+
 
 def _clean_text(s, limit=300):
     s = html.unescape(re.sub(r"<[^>]+>", " ", s or ""))
@@ -866,6 +891,50 @@ def _parse_date(text):
     return dt_
 
 
+def _host(url):
+    try:
+        return (urllib.parse.urlparse(url).hostname or "").lower().rstrip(".")
+    except (TypeError, ValueError):
+        return ""
+
+
+def _trusted_domain(host, lane):
+    return any(host == domain or host.endswith("." + domain)
+               for domain in TRUSTED_SOURCE_DOMAINS.get(lane, ()))
+
+
+def _resolve_article_url(url):
+    """Google News 리디렉션을 따라가 게시자 원문 URL을 얻습니다."""
+    if not url:
+        return ""
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": UA})
+        with urllib.request.urlopen(req, timeout=12) as response:
+            resolved = response.geturl()
+        parsed = urllib.parse.urlparse(resolved)
+        return resolved if parsed.scheme in {"http", "https"} and parsed.hostname else ""
+    except Exception:
+        return ""
+
+
+def _fetch_source_excerpt(url):
+    """원문 페이지의 게시자 요약을 가져옵니다. 본문 전문은 수집하지 않습니다."""
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": UA})
+        with urllib.request.urlopen(req, timeout=12) as response:
+            raw = response.read(700_000).decode("utf-8", errors="replace")
+        for pattern in (
+            r'<meta[^>]+(?:property|name)=["\'](?:og:description|description)["\'][^>]+content=["\']([^"\']+)',
+            r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\'](?:og:description|description)',
+        ):
+            match = re.search(pattern, raw, re.I)
+            if match:
+                return _clean_text(match.group(1), 1200)
+    except Exception:
+        pass
+    return ""
+
+
 def parse_feed(data):
     """RSS 2.0(item)와 Atom(entry)을 모두 처리."""
     root = ET.fromstring(data)
@@ -881,15 +950,22 @@ def parse_feed(data):
             return ""
 
         link = ""
+        publisher_name = ""
+        publisher_url = ""
         for child in node:
-            if child.tag.split("}")[-1] == "link":
+            tag = child.tag.split("}")[-1]
+            if tag == "link" and not link:
                 link = child.get("href") or (child.text or "").strip()
-                break
+            elif tag == "source":
+                publisher_name = _clean_text(child.text or "", 120)
+                publisher_url = child.get("url") or ""
         items.append({
             "title": _clean_text(text_of("title"), 300),
             "published": _parse_date(text_of("pubDate", "published", "updated", "date")),
             "summary": _clean_text(text_of("description", "summary", "content", "encoded")),
             "link": link,
+            "publisher_name": publisher_name,
+            "publisher_url": publisher_url,
         })
     return items
 
@@ -911,10 +987,16 @@ def fetch_news_items(editorial_lane=None):
             print(f"  소스 {src['name']}: 수집 실패 ({type(exc).__name__}: {exc})")
             continue
         kept = []
+        resolved_count = 0
         for it in parsed:
             title = it["title"]
+            publisher = it.get("publisher_name") or ""
+            publisher_url = it.get("publisher_url") or ""
             if src.get("google"):
-                title = re.sub(r"\s+-\s+[^-]+$", "", title).strip()
+                if not publisher:
+                    match = re.match(r"^(.*)\s+-\s+([^-]+)$", title)
+                    if match:
+                        title, publisher = match.group(1).strip(), match.group(2).strip()
             if not title:
                 continue
             if src.get("tech_filter") and not is_tech_title(title):
@@ -922,9 +1004,30 @@ def fetch_news_items(editorial_lane=None):
             pub = it["published"]
             if pub and now - pub > max_age:
                 continue
-            summary = "" if src.get("google") else it["summary"]
-            kept.append({"title": title, "source": src["name"],
-                         "link": it["link"], "summary": summary, "published": pub})
+            publisher_host = _host(publisher_url)
+            if publisher_host and not _trusted_domain(publisher_host, editorial_lane):
+                continue
+            if resolved_count >= 5:
+                continue
+            article_url = _resolve_article_url(it["link"]) if src.get("google") else it["link"]
+            resolved_count += 1
+            publisher_host = publisher_host or _host(article_url)
+            if not article_url or not _trusted_domain(publisher_host, editorial_lane):
+                continue
+            article_host = _host(article_url)
+            same_publisher = (article_host == publisher_host
+                              or article_host.endswith("." + publisher_host)
+                              or publisher_host.endswith("." + article_host))
+            if not same_publisher or not _trusted_domain(article_host, editorial_lane):
+                continue
+            summary = it["summary"]
+            if len(summary) < 100:
+                summary = _fetch_source_excerpt(article_url)
+            if len(summary) < 100:
+                continue
+            kept.append({"title": title, "source": publisher or src["name"],
+                         "link": article_url, "publisher_domain": publisher_host,
+                         "summary": summary, "published": pub})
         kept.sort(key=lambda x: x["published"] or EPOCH, reverse=True)
         print(f"  소스 {src['name']}: {len(parsed)}건 중 {len(kept)}건 사용")
         per_source.append(kept[:10])
@@ -944,8 +1047,7 @@ def fetch_news_items(editorial_lane=None):
 
 
 def pick_topic_candidates(titles, allow_auto_topic=True, editorial_lane=None):
-    """기존 글과 비슷하지 않은 기사 최대 MAX_ATTEMPTS개.
-    하나도 없으면: allow_auto_topic이면 [None](Gemini 자동 선정), 아니면 [](쓸 내용 없음)."""
+    """신뢰 출처 검증과 중복 검사를 통과한 기사 후보만 반환합니다."""
     picked = []
     for it in fetch_news_items(editorial_lane):
         if is_similar_to_any(it["title"], titles, 0.6):
@@ -953,8 +1055,7 @@ def pick_topic_candidates(titles, allow_auto_topic=True, editorial_lane=None):
         picked.append(it)
         if len(picked) >= MAX_ATTEMPTS:
             break
-    if not picked and allow_auto_topic:
-        picked.append(None)
+    # 출처 검증을 통과한 기사가 없으면 AI가 근거 없이 주제를 고르지 않습니다.
     return picked
 
 
@@ -995,14 +1096,15 @@ def build_post_prompt(item, recent_titles, category_hint="", allow_skip=False,
             topic_text += ("\n[기사 요약 - 참고만 하고 문장을 그대로 옮기지 마세요]\n"
                            + item["summary"])
     else:
-        topic_text = (f"최신 {lane['label']} 흐름 중 아래 제외 목록과 겹치지 않는 "
-                      "확인 가능한 새 주제를 직접 하나 선정하세요.")
+        topic_text = "검증된 출처가 제공되지 않았습니다. 반드시 skip을 반환하세요."
     skip_rule = ('- 이 주제가 [최근 다룬 주제/제목]과 같은 사건이나 소재라면 글을 쓰지 말고 '
                  '{"skip": true, "reason": "..."} 만 반환하세요.\n') if allow_skip else ""
-    source_rule = ("- 제공된 원문 링크를 사실 확인의 출발점으로 삼고, 확인된 사실과 분석·전망을 구분하세요.\n"
-                   "- 제공되지 않은 수치, 인용, 다른 출처의 URL을 만들지 마세요.\n"
-                   if item and item.get("link") else
-                   "- 사실 주장과 전망을 구분하고, 확인할 수 없는 수치·인용·출처를 만들지 마세요.\n")
+    source_rule = ("- 제공된 검증 게시자 원문만 사실 근거로 쓰세요. 원문에서 확인되지 않는 주장·수치·인용·날짜·인과관계는 쓰지 마세요.\n"
+                   "- 학술 연구는 동료심사 여부를 명시하고 표본·범위·한계를 설명하세요. arXiv 등의 프리프린트를 동료심사 연구처럼 표현하지 마세요.\n"
+                   "- 중요한 사실 문장에는 제공된 원문 URL을 Markdown 인라인 인용으로 붙이세요. 사실과 해석·전망을 명확히 구분하세요.\n"
+                   "- 제목·저자·학술지명·DOI·통계·인용문이나 출처를 추정해 만들지 마세요. 근거가 부족하면 skip을 반환하세요.\n"
+                   if item and item.get("link") and item.get("source") else
+                   "- 검증된 출처가 없으면 글을 만들지 말고 skip을 반환하세요.\n")
     hint = f"[카테고리 힌트] {category_hint}\n" if category_hint else ""
     return f"""
 당신은 기술, 경제, 사회, 과학, 문화와 일상을 함께 읽는 교양형 매거진 'Chance_Blog'의 편집자입니다.
@@ -1019,7 +1121,7 @@ def build_post_prompt(item, recent_titles, category_hint="", allow_skip=False,
 {skip_rule}- 제목, 카테고리, 태그를 주제에 맞게 작성하세요.
 - 이 매거진은 IT 전문 매체가 아닙니다. 이번 편집 축의 주제를 중심에 두고, 기술·경제·사회·문화·환경·교육·일상 중 실제로 연결되는 다른 관점 하나를 함께 설명하세요. 억지로 연결하지 말고, 관련이 약하면 주제 자체를 더 적합한 것으로 고르세요.
 - 사람들의 선택과 생활에 어떤 차이가 생기는지 구체적으로 설명하고, 누가 이익을 얻거나 비용을 부담하는지 살펴보세요. 한 분야의 전문성은 유지하되 독자가 다른 분야와 연결해 생각할 수 있게 하세요.
-{category_rule}- 글은 한 편 안에서 독립적으로 이해되어야 하며, 출처 링크와 근거를 본문 끝에 제공합니다.
+{category_rule}- 글은 한 편 안에서 독립적으로 이해되어야 하며, 중요한 사실 근거를 본문에 링크하고 끝에 출처 목록을 제공합니다.
 - 독자가 실제로 궁금해할 질문에 먼저 답하고, 제목은 핵심 검색어와 글의 결론을 정확하게 담으세요. 과장·낚시성 표현은 피하세요.
 - 첫 문단에서 핵심 결론과 왜 중요한지 설명하고, 본문에는 배경, 확인된 사실, 영향, 한계 또는 반론을 구분해 담으세요.
 - 소스 요약을 문단별로 바꾸어 쓰는 데 그치지 말고, 독자에게 유용한 비교·맥락·실행 가능한 시사점을 제공하세요. 근거가 부족하면 추측으로 채우지 말고 skip을 반환하세요.
@@ -1143,9 +1245,16 @@ def add_discovery_metadata(content, source=None):
     if source:
         source_url = str(source.get("link") or "").strip()
         parsed = urllib.parse.urlparse(source_url)
-        if parsed.scheme in {"http", "https"} and parsed.netloc:
+        if (parsed.scheme in {"http", "https"} and parsed.netloc
+                and source.get("source") and source.get("publisher_domain")):
             content = _front_matter_set(content, "source_name", source.get("source") or "원문")
             content = _front_matter_set(content, "source_url", source_url)
+            content = _front_matter_set(content, "source_domain", source["publisher_domain"])
+            body_match = re.match(r"\A---\s*\n.*?\n---\s*\n(.*)\Z", content, re.S)
+            body = body_match.group(1) if body_match else content
+            if source_url not in body:
+                heading = "\n\n## 출처\n" if re.search(r"[가-힣]", body) else "\n\n## Sources\n"
+                content = content.rstrip() + f"{heading}- [{source['source']}: {source.get('title', '원문 기사')}]({source_url})\n"
     return content
 
 
@@ -1194,7 +1303,13 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
     recent_titles = titles[-30:]
     data, selected, selected_item = None, None, None
     if topic_override:
-        candidates = [{"title": topic_override, "source": "", "summary": ""}]
+        verified = fetch_news_items(editorial_lane)
+        matched = next((it for it in verified
+                        if is_similar_to_any(topic_override, [it["title"]], 0.35)), None)
+        if not matched:
+            print("요청 주제와 직접 연결되고 출처 검증을 통과한 기사가 없습니다. 발행을 중단합니다.")
+            return None
+        candidates = [dict(matched, title=topic_override)]
     else:
         candidates = pick_topic_candidates(titles, allow_auto_topic, editorial_lane)
     if not candidates:
@@ -1227,6 +1342,9 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
             return None
         raise RuntimeError("기존 글과 겹치지 않는 주제를 만들지 못했습니다.")
 
+    if not selected_item or not selected_item.get("link") or not selected_item.get("publisher_domain"):
+        raise RuntimeError("검증된 게시자 원문이 없어 글을 저장하지 않습니다.")
+
     queries = [q for q in data.get("image_queries", []) if isinstance(q, str)]
     if not queries:
         queries = ["technology", "computer hardware"]
@@ -1239,6 +1357,7 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
 
     now = now_kst()
     date_str, time_str = now.strftime("%Y-%m-%d"), now.strftime("%H%M%S")
+    selected_item["title"] = selected_item.get("title") or selected or "원문 기사"
     data["kr_content"] = add_discovery_metadata(data["kr_content"], selected_item)
     data["en_content"] = add_discovery_metadata(data["en_content"], selected_item)
     kr_path = safe_category_dir(data["kr_category"], "KR") / f"{date_str}-KR-{time_str}.md"
