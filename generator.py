@@ -3,13 +3,13 @@ import json
 import datetime
 import urllib.request
 import xml.etree.ElementTree as ET
-import requests
 import re
 from email.utils import parsedate_to_datetime
 from datetime import timezone, timedelta
 from google import genai
 from pathlib import Path
 
+# 환경 변수
 API_KEY = os.environ.get("GEMINI_API_KEY")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 GITHUB_REPOSITORY = os.environ.get("GITHUB_REPOSITORY", "shine88pc/chanceblog")
@@ -37,6 +37,7 @@ IMAGE_POOL = [
 
 KST = timezone(timedelta(hours=9))
 
+
 def load_history():
     if not HISTORY_FILE.exists():
         return []
@@ -45,11 +46,10 @@ def load_history():
     except Exception:
         return []
 
+
 def save_history(history):
     HISTORY_FILE.write_text(json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8")
 
-def normalize_text(s):
-    return re.sub(r"\s+", " ", (s or "").strip()).casefold()
 
 def fetch_recent_news():
     url = "https://news.google.com/rss?hl=ko&gl=KR&ceid=KR:ko"
@@ -59,7 +59,7 @@ def fetch_recent_news():
             xml_data = response.read()
         root = ET.fromstring(xml_data)
         recent_items = []
-        now = datetime.datetime.now(timezone.utc)
+        now = datetime.datetime.now(datetime.timezone.utc)
         for item in root.findall('.//item'):
             title = item.find('title').text if item.find('title') is not None else ""
             desc = item.find('description').text if item.find('description') is not None else ""
@@ -75,18 +75,25 @@ def fetch_recent_news():
         print(f"뉴스 수집 오류: {e}")
         return []
 
-def get_used_image_ids():
+
+def normalize_text(s):
+    return re.sub(r"\s+", " ", (s or "").strip()).casefold()
+
+
+def get_used_images():
     used = set()
     if not POSTS_DIR.exists():
         return used
     for p in POSTS_DIR.rglob("*.md"):
         try:
             txt = p.read_text(encoding="utf-8")
-            matches = re.findall(r'https://images\\.unsplash\\.com/[^)\"\\s]+', txt)
-            used.update(matches)
+            matches = re.findall(r'https://images\.unsplash\.com/[^)"\s]+', txt)
+            for m in matches:
+                used.add(m)
         except Exception:
             continue
     return used
+
 
 def select_unique_image(used_set):
     for url in IMAGE_POOL:
@@ -96,20 +103,24 @@ def select_unique_image(used_set):
     ts = int(datetime.datetime.now().timestamp())
     return IMAGE_POOL[0] + f"&sig={ts}"
 
+
+def safe_filename(title):
+    safe = re.sub(r"[^0-9A-Za-z-_ ]", "", title)
+    safe = "-".join(safe.split())
+    safe = safe[:50] if safe else datetime.datetime.now().strftime("%H%M%S")
+    date_str = datetime.datetime.now().strftime("%Y-%m-%d")
+    return f"{date_str}-{safe}.md"
+
+
 def write_post_file(filename, content):
     POSTS_DIR.mkdir(parents=True, exist_ok=True)
     path = POSTS_DIR / filename
     tmp = path.with_suffix('.md.tmp')
     tmp.write_text(content, encoding='utf-8')
     tmp.replace(path)
+    print(f"파일 생성/수정: {path}")
     return path
 
-def safe_filename(title):
-    safe = re.sub(r"[^0-9A-Za-z-_ ]", "", title)
-    safe = "-".join(safe.split())
-    safe = safe[:50]
-    date_str = datetime.datetime.now().strftime("%Y-%m-%d")
-    return f"{date_str}-{safe}.md"
 
 def call_gemini(prompt, model='gemini-3.8-flash'):
     try:
@@ -118,6 +129,7 @@ def call_gemini(prompt, model='gemini-3.8-flash'):
     except Exception as e:
         print(f"Gemini 호출 실패: {e}")
         return ''
+
 
 def generate_hot_topic_post():
     history = load_history()
@@ -152,26 +164,35 @@ def generate_hot_topic_post():
         print("제목이 이전 기록과 중복되어 생성하지 않습니다.")
         return
 
-    used = get_used_image_ids()
+    used = get_used_images()
     image = select_unique_image(used)
 
-    if resp.lstrip().startswith('---'):
-        content = resp
-        if 'image:' not in resp:
-            content = re.sub(r'---\\n(.*?)\\n---', lambda m: f\"---\\n{m.group(1)}\\nimage: \\\"{image}\\\"\\n---\", resp, flags=re.S)
+    content = resp
+    # front matter 보장: 만약 front matter가 없으면 추가
+    if not content.lstrip().startswith('---'):
+        fm = f"---\nlayout: post\ntitle: \"{title}\"\ncategory: General\ntags: []\nlang: kr\nimage: \"{image}\"\n---\n\n"
+        content = fm + content
     else:
-        content = f"---\\nlayout: post\\ntitle: \\\"{title}\\\"\\ncategory: General\\ntags: []\\nlang: kr\\nimage: \\\"{image}\\\"\\n---\\n\\n" + resp
+        # front matter가 있으나 image가 없으면 삽입
+        m = re.search(r'^---\n(.*?)\n---', content, flags=re.S)
+        if m:
+            fm_body = m.group(1)
+            if 'image:' not in fm_body:
+                new_fm = fm_body + f"\nimage: \"{image}\""
+                content = content.replace(m.group(0), '---\n' + new_fm + '\n---')
 
     filename = safe_filename(title)
     write_post_file(filename, content)
     history.append(title)
     save_history(history)
 
+
 def handle_issue_with_params(title, body, issue_number=None):
     print(f"이슈 처리: {title}")
     files_data = {}
     for root, dirs, files in os.walk('.'):
-        if any(x in root for x in ['.git', '__pycache__']):\n            continue
+        if any(x in root for x in ['.git', '__pycache__']):
+            continue
         for f in files:
             if f.endswith(('.py', '.yml', '.md', '.json', '.html')):
                 p = os.path.join(root, f)
@@ -220,7 +241,9 @@ def handle_issue_with_params(title, body, issue_number=None):
         p.write_text(content, encoding='utf-8')
         print(f"파일 생성/수정: {p}")
 
+    # 이슈에 댓글 및 닫기
     if issue_number and GITHUB_TOKEN:
+        import requests
         headers = {'Authorization': f'token {GITHUB_TOKEN}', 'Accept': 'application/vnd.github+json'}
         repo = GITHUB_REPOSITORY
         comment_url = f"https://api.github.com/repos/{repo}/issues/{issue_number}/comments"
@@ -232,11 +255,12 @@ def handle_issue_with_params(title, body, issue_number=None):
         except Exception as e:
             print(f"이슈 처리 후 댓글/닫기 실패: {e}")
 
+
 def process_open_control_issues():
     if not GITHUB_TOKEN:
         print("GITHUB_TOKEN 없음: 오픈 이슈 자동 처리 불가")
         return
-
+    import requests
     headers = {'Authorization': f'token {GITHUB_TOKEN}', 'Accept': 'application/vnd.github+json'}
     repo = GITHUB_REPOSITORY
     issues_url = f"https://api.github.com/repos/{repo}/issues?state=open&per_page=100"
@@ -257,17 +281,19 @@ def process_open_control_issues():
             except Exception as e:
                 print(f"이슈 처리 중 오류 ({number}): {e}")
 
+
 def main():
     try:
         if EVENT_NAME == 'issues' and ISSUE_TITLE:
             handle_issue_with_params(ISSUE_TITLE, ISSUE_BODY, issue_number=ISSUE_NUMBER)
             return
-
+        # scheduled / push / workflow_dispatch
         generate_hot_topic_post()
         process_open_control_issues()
     except Exception as exc:
         print(f"작업 실패: {type(exc).__name__}: {exc}")
         raise
 
-if __name__ == "__main__":
+
+if __name__ == '__main__':
     main()
