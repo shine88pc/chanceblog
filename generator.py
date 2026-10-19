@@ -11,8 +11,10 @@ import os
 import re
 import json
 import zlib
+import html
 import difflib
 import datetime
+from email.utils import parsedate_to_datetime
 import urllib.parse
 import urllib.request
 import urllib.error
@@ -37,9 +39,6 @@ EVENT_NAME = os.environ.get("EVENT_NAME", "").strip().lower()
 ISSUE_TITLE = os.environ.get("ISSUE_TITLE", "")
 ISSUE_BODY = os.environ.get("ISSUE_BODY", "")
 ISSUE_ASSOC = os.environ.get("ISSUE_AUTHOR_ASSOCIATION", "").strip().upper()
-GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
-GITHUB_REPOSITORY = os.environ.get("GITHUB_REPOSITORY", "")
-ISSUE_NUMBER = os.environ.get("ISSUE_NUMBER", "")
 
 STUB_GEMINI = not API_KEY
 STUB_UNSPLASH = not UNSPLASH_KEY
@@ -49,6 +48,9 @@ POSTS_DIR = Path("_posts")
 HISTORY_FILE = Path("history.json")
 UA = "Mozilla/5.0 (compatible; ChanceBlogBot/2.0)"
 MAX_ATTEMPTS = 3
+# 자동 게시 시각(KST, 시 단위). 환경변수 POST_HOURS_KST="2,5,8,13,18,22" 로 변경 가능
+SLOT_HOURS = sorted({int(x) for x in os.environ.get("POST_HOURS_KST", "2,5,8,13,18,22").split(",")
+                     if x.strip().isdigit() and 0 <= int(x) <= 23})
 
 MODEL_CANDIDATES = [
     "gemini-3.8-flash",
@@ -194,24 +196,22 @@ def call_gemini_with_fallback(prompt):
     raise RuntimeError("모든 Gemini 모델 호출 실패\n" + "\n".join(errors))
 
 
-def issue_comment(message):
-    """Post a status comment for the current GitHub issue, when configured."""
-    if not (GITHUB_TOKEN and GITHUB_REPOSITORY and ISSUE_NUMBER):
-        print(f"이슈 댓글 전송 설정이 없습니다: {message}")
-        return False
-    url = (f"https://api.github.com/repos/{GITHUB_REPOSITORY}/issues/"
-           f"{ISSUE_NUMBER}/comments")
-    payload = json.dumps({"body": message}).encode("utf-8")
-    req = urllib.request.Request(url, data=payload, method="POST", headers={
-        "Authorization": f"Bearer {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-        "Content-Type": "application/json",
-        "User-Agent": UA,
-    })
-    with urllib.request.urlopen(req, timeout=15) as response:
-        print(f"이슈 댓글 등록 완료 (HTTP {response.status})")
-    return True
+def safe_repo_path(raw_path):
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        raise ValueError("target_file 값이 비어 있습니다.")
+    candidate = Path(raw_path.strip())
+    if candidate.is_absolute():
+        raise ValueError("절대 경로는 허용되지 않습니다.")
+    root = Path(".").resolve()
+    target = (root / candidate).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        raise ValueError("저장소 외부 경로는 허용되지 않습니다.")
+    forbidden = {".git", ".github", "node_modules", "_site", ".jekyll-cache"}
+    if forbidden.intersection(candidate.parts):
+        raise ValueError("보호된 디렉터리는 수정할 수 없습니다.")
+    return target
 
 
 # ============================================================
@@ -452,12 +452,16 @@ def repair(post, used):
 # ============================================================
 # FIX_IMAGES 모드
 # ============================================================
-def fix_images():
+def fix_images(keyword=None):
     posts = load_posts()
     print(f"검사 대상 글: {len(posts)}개 (오래된 글의 이미지를 우선 유지)")
     used, targets = set(), []
     for post in posts:
         problem = diagnose(post, used)
+        if not problem and keyword:
+            haystack = f"{post['title']} {post['tags']} {post['path']}".lower()
+            if keyword.lower() in haystack:
+                problem = "requested"
         if problem:
             targets.append((post, problem))
             print(f"- 문제({problem}): {post['path']}  image={post['image'] or '(없음)'}")
@@ -483,192 +487,229 @@ def fix_images():
         write_text_atomic(post["path"], apply_image(post["text"], post["image"], new_url))
         trigger_download(new_url)
         fixed += 1
-    print(f"완료: 문제 {len(targets)}건 / 교체 {fixed}건 / 건너뜀 {skipped}건"
-          + (" (DRY_RUN: 실제 변경 없음)" if DRY_RUN else ""))
+    summary = (f"완료: 문제 {len(targets)}건 / 교체 {fixed}건 / 건너뜀 {skipped}건"
+               + (" (DRY_RUN: 실제 변경 없음)" if DRY_RUN else ""))
+    print(summary)
+    return "이미지 점검: " + summary
 
 
 # ============================================================
-# Issue 처리
+# Issue 처리 (패치 방식, 보호 파일, 결과 댓글)
 # ============================================================
-def issue_field(labels):
-    """Read one labeled value from a GitHub issue form body."""
-    for label in labels:
-        match = re.search(
-            rf"(?ims)^###\s*{re.escape(label)}\s*\r?\n+(.+?)(?=\r?\n###\s|\Z)",
-            ISSUE_BODY,
-        )
-        if match:
-            value = match.group(1).strip()
-            if value and value.lower() not in {"_no response_", "해당 없음"}:
-                return value
-    return ""
+PROTECTED_NAMES = {"generator.py", "history.json"}
+PROTECTED_DIRS = {".git", ".github", "node_modules", "_site", ".jekyll-cache",
+                  ".venv", "venv", "__pycache__"}
+EDITABLE_SUFFIXES = {".html", ".css", ".js", ".md", ".txt", ".yml", ".yaml", ".json"}
+MAX_EDIT_CHARS = 80000
 
 
-def resolve_issue_post(target):
-    """Resolve exactly one _posts Markdown file from a filename, title, or post URL."""
-    if not target:
-        return None, "대상 게시글 입력란이 비어 있습니다. 게시글 주소, 제목, 또는 파일명을 지정해 주세요."
-    normalized = target.strip().replace("\\", "/")
-    is_url = "://" in normalized
-    url_path = urllib.parse.urlsplit(normalized).path if is_url else normalized
-    segments = [urllib.parse.unquote(part) for part in url_path.rstrip("/").split("/") if part]
-    leaf = segments[-1] if segments else ""
+def comment_issue(text, close=False):
+    token = os.environ.get("GITHUB_TOKEN")
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    number = os.environ.get("ISSUE_NUMBER")
+    if DRY_RUN or not (token and repo and number):
+        print(f"[이슈 댓글{' + 닫기' if close else ''}]\n{text}")
+        return
+    base = f"https://api.github.com/repos/{repo}/issues/{number}"
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
+               "User-Agent": UA, "Content-Type": "application/json"}
 
-    def key(value):
-        value = urllib.parse.unquote(str(value or "")).casefold()
-        value = re.sub(r"\.(?:html?|md)$", "", value)
-        return re.sub(r"[^\w]", "", value, flags=re.UNICODE)
+    def call(url, payload, method):
+        req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"),
+                                     headers=headers, method=method)
+        urllib.request.urlopen(req, timeout=15).read()
 
-    posts = [p for p in POSTS_DIR.rglob("*.md") if p.is_file()]
-    direct_path = normalized.lstrip("./")
-    matches = [p for p in posts if p.as_posix() == direct_path]
-    if not matches and leaf:
-        leaf_key = key(leaf)
-        matches = [p for p in posts if key(p.name) == leaf_key]
-    if not matches and leaf:
-        # Published Jekyll URLs usually end in a title slug, while source files
-        # are date/timestamp named. Match the decoded URL slug to the post title.
-        leaf_key = key(leaf)
-        matches = []
-        for p in posts:
+    try:
+        call(base + "/comments", {"body": text}, "POST")
+        if close:
+            call(base, {"state": "closed"}, "PATCH")
+    except Exception as exc:
+        print(f"이슈 댓글/닫기 실패 (워크플로 permissions에 issues: write 필요): {exc}")
+
+
+def parse_issue_body(body):
+    sections = {}
+    for chunk in re.split(r"(?m)^###\s+", body or ""):
+        if not chunk.strip():
+            continue
+        head, _, rest = chunk.partition("\n")
+        sections[head.strip()] = rest.strip()
+
+    def find(prefix):
+        for key, value in sections.items():
+            if key.startswith(prefix):
+                return "" if value.strip().lower() in {"_no response_", "no response"} else value
+        return ""
+
+    task, category, details = find("작업 종류"), find("카테고리"), find("상세")
+    if not sections:
+        details = (body or "").strip()
+    return task, category, details
+
+
+def safe_edit_path(raw):
+    target = safe_repo_path(raw)
+    rel = target.relative_to(Path(".").resolve())
+    if rel.name in PROTECTED_NAMES or rel.suffix.lower() not in EDITABLE_SUFFIXES:
+        raise ValueError(f"수정할 수 없는 파일입니다: {rel}")
+    if not target.is_file():
+        raise ValueError(f"파일이 없습니다: {rel}")
+    return target, rel
+
+
+def list_editable_files():
+    out = []
+    for root, dirs, files in os.walk("."):
+        dirs[:] = [d for d in dirs if d not in PROTECTED_DIRS and d != "_posts"]
+        for name in files:
+            p = Path(root) / name
+            if name in PROTECTED_NAMES or p.suffix.lower() not in EDITABLE_SUFFIXES:
+                continue
             try:
-                fm, _ = split_front_matter(p.read_text(encoding="utf-8"))
+                out.append(f"{p} ({p.stat().st_size} bytes)")
             except OSError:
                 continue
-            if key(fm_get(fm, "title")) == leaf_key:
-                matches.append(p)
-    if is_url and matches:
-        # Use a date embedded in the public URL to disambiguate same-title posts.
-        date_parts = [part for part in segments if re.fullmatch(r"\d{4}-\d{2}-\d{2}", part)]
-        if not date_parts:
-            date_parts = ["-".join(segments[i:i + 3]) for i in range(len(segments) - 2)
-                          if (re.fullmatch(r"\d{4}", segments[i])
-                              and re.fullmatch(r"\d{1,2}", segments[i + 1])
-                              and re.fullmatch(r"\d{1,2}", segments[i + 2]))]
-        if date_parts:
-            wanted_date = date_parts[-1]
-            narrowed = [p for p in matches if date_of(p) == wanted_date]
-            if narrowed:
-                matches = narrowed
-    if len(matches) != 1:
-        reason = "대상 게시글을 찾지 못했습니다." if not matches else "여러 게시글이 일치합니다."
-        return None, (f"{reason} 공개 게시글 주소, 게시글 제목, 또는 정확한 파일명을 하나만 지정해 주세요. "
-                      "파일명은 게시글 화면의 제목 아래 저장소에서 확인할 수 있습니다.")
-    candidate = matches[0].resolve()
-    root = Path(".").resolve()
-    try:
-        relative = candidate.relative_to(root)
-    except ValueError:
-        return None, "선택된 경로가 저장소 내부가 아닙니다. 변경하지 않았습니다."
-    if not relative.parts or relative.parts[0] != "_posts" or candidate.suffix.lower() != ".md":
-        return None, "대상은 `_posts` 안의 `.md` 게시글이어야 합니다. 변경하지 않았습니다."
-    return (Path(*relative.parts), None)
+    return sorted(out)
 
 
-def image_change_queries(post, request):
-    """Ask Gemini only for Unsplash search terms; it cannot select/edit files."""
-    fallback = [post["title"], "technology editorial photo"]
-    if STUB_GEMINI:
-        return [q for q in fallback if q]
-    prompt = f"""게시글 이미지 검색용 Unsplash 영어 검색어 3개만 만드세요.
-파일 경로, 파일 내용, 수정 제안은 절대 반환하지 마세요.
-게시글 제목: {post['title']}
-사용자 이미지 요청: {request[:1500]}
-JSON 객체만 반환: {{"image_queries": ["...", "...", "..."]}}"""
-    try:
-        data = extract_json_object(call_gemini_with_fallback(prompt).text)
-        queries = [q.strip() for q in data.get("image_queries", [])
-                   if isinstance(q, str) and q.strip()]
-        return queries[:4] or [q for q in fallback if q]
-    except Exception as exc:
-        print(f"이미지 검색어 생성 실패, 게시글 제목 기반으로 진행: {exc}")
-        return [q for q in fallback if q]
+def plan_actions(task, details):
+    posts = load_posts()[-60:]
+    post_lines = [f"{p['path']} | {p['title']}" for p in posts]
+    prompt = f"""
+당신은 정적 블로그 저장소의 관리 도우미입니다. 아래 요청을 처리할 작업 목록을 JSON으로 만드세요.
+
+사용 가능한 작업 type:
+- fix_images: 기존 글의 누락/깨진/중복 이미지를 글 내용에 맞는 새 이미지로 교체합니다.
+  특정 주제의 글만 바꾸려면 keyword에 그 글들의 제목/태그에 들어 있을 단어를 넣으세요. 아니면 생략.
+- edit_file: [수정 가능 파일] 또는 [최근 글] 중 하나를 수정합니다. target_file과,
+  무엇을 어떻게 바꿀지 구체적인 instruction이 필요합니다.
+- delete_post: _posts 안의 글 하나를 삭제합니다. target_file 필요.
+
+규칙: 작업은 최대 3개. generator.py, history.json, .github 는 수정할 수 없습니다.
+코드로 처리할 수 없거나 요청이 불명확하면 actions를 비우고 reason에 사유를 한국어로 쓰세요.
+
+[작업 종류] {task}
+[요청 내용]
+{details}
+
+[수정 가능 파일]
+{chr(10).join(list_editable_files()[:80])}
+
+[최근 글]
+{chr(10).join(post_lines)}
+
+JSON 객체만 반환:
+{{"actions": [{{"type": "fix_images", "keyword": ""}},
+  {{"type": "edit_file", "target_file": "...", "instruction": "..."}}],
+ "reason": ""}}
+"""
+    data = extract_json_object(call_gemini_with_fallback(prompt).text)
+    actions = data.get("actions")
+    if not isinstance(actions, list):
+        actions = []
+    return actions[:3], str(data.get("reason") or "")
 
 
-def replace_post_image(text, new_url):
-    """Change front matter image and only the first Markdown body image URL."""
-    fm, body = split_front_matter(text)
-    if fm is None:
-        raise ValueError("게시글에 유효한 front matter가 없어 수정하지 않았습니다.")
-    image_line = re.compile(r"(?m)^image:[ \t]*.*$")
-    if image_line.search(fm):
-        fm = image_line.sub(f'image: "{new_url}"', fm, count=1)
+def edit_file_with_patches(raw_path, instruction):
+    target, rel = safe_edit_path(raw_path)
+    original = target.read_text(encoding="utf-8")
+    if len(original) > MAX_EDIT_CHARS:
+        raise ValueError(f"{rel}: 파일이 너무 커서({len(original)}자) 자동 수정하지 않습니다.")
+    prompt = f"""
+아래 파일을 요청대로 수정하기 위한 '부분 패치'를 JSON으로 만드세요.
+- 파일 전체를 다시 쓰지 말고, 바꿀 부분만 old/new 쌍으로 주세요.
+- old는 파일에서 글자 하나까지 정확히 복사한 문자열이며 파일 안에서 정확히 한 번만 나와야 합니다.
+  유일하지 않으면 앞뒤 문맥을 더 포함하세요.
+- 패치는 최대 10개, 각각 작게 유지하세요.
+- 수정이 불가능하면 patches를 비우세요.
+
+[파일] {rel}
+[수정 지시]
+{instruction}
+
+[파일 전체 내용]
+{original}
+
+JSON 객체만 반환: {{"patches": [{{"old": "...", "new": "..."}}]}}
+"""
+    data = extract_json_object(call_gemini_with_fallback(prompt).text)
+    patches = data.get("patches")
+    if not isinstance(patches, list) or not patches:
+        raise ValueError(f"{rel}: 적용할 패치가 없습니다 (요청을 코드 수정으로 옮기지 못함).")
+    text = original
+    for i, patch in enumerate(patches[:10], 1):
+        old = patch.get("old") if isinstance(patch, dict) else None
+        new = patch.get("new") if isinstance(patch, dict) else None
+        if not isinstance(old, str) or not old or not isinstance(new, str):
+            raise ValueError(f"{rel}: 패치 {i} 형식이 올바르지 않습니다.")
+        count = text.count(old)
+        if count != 1:
+            raise ValueError(f"{rel}: 패치 {i}의 대상 문구가 {count}곳에서 발견되어 "
+                             "적용하지 않았습니다. (파일은 변경되지 않음)")
+        text = text.replace(old, new, 1)
+    if len(text) < len(original) * 0.5:
+        raise ValueError(f"{rel}: 수정 후 파일이 절반 이하로 줄어 적용하지 않았습니다.")
+    if rel.suffix.lower() == ".json":
+        json.loads(text)
+    write_text_atomic(target, text)
+    return f"`{rel}` {len(patches)}곳 수정"
+
+
+def delete_post(raw_path):
+    target = safe_repo_path(raw_path)
+    rel = target.relative_to(Path(".").resolve())
+    if not (rel.parts and rel.parts[0] == "_posts" and rel.suffix == ".md"):
+        raise ValueError("글 삭제는 _posts 안의 .md 파일만 가능합니다.")
+    if not target.is_file():
+        raise ValueError(f"삭제할 파일이 없습니다: {rel}")
+    if DRY_RUN:
+        print(f"[DRY_RUN] 삭제 생략: {rel}")
     else:
-        fm = fm.rstrip() + f'\nimage: "{new_url}"'
-    markdown_image = re.compile(r"(!\[[^\]]*\]\()([^)]*)(\))")
-    body, count = markdown_image.subn(
-        lambda m: m.group(1) + new_url + m.group(3), body, count=1)
-    return f"---\n{fm}\n---\n{body}", count > 0
+        target.unlink()
+    return f"`{rel}` 삭제"
 
 
 def handle_issue_event():
     if ISSUE_ASSOC not in {"OWNER", "MEMBER", "COLLABORATOR"}:
-        message = f"이슈 작성자 권한({ISSUE_ASSOC or '알 수 없음'})이 없어 자동 처리하지 않았습니다. 저장소 관리자에게 문의해 주세요."
-        print(message)
-        issue_comment(message)
+        print(f"이슈 작성자 권한({ISSUE_ASSOC or '알 수 없음'})이 없어 처리하지 않습니다.")
         return
-    action = issue_field(["작업 종류 선택"])
-    request_text = issue_field(["원하는 이미지 설명", "상세 내용 및 지시사항"])
-    image_action = bool(re.search(r"이미지 변경|기존 게시글 이미지|thumbnail", action or "", re.I))
-    image_intent = bool(re.search(r"이미지|image|썸네일|thumbnail",
-                                  f"{ISSUE_TITLE}\n{request_text}\n{ISSUE_BODY}", re.I))
-    if not (image_action or image_intent):
-        message = ("이슈 자동 처리에서 지원하는 작업은 기존 게시글 이미지 변경뿐입니다. "
-                   "다른 파일/설정/디자인 변경은 자동 수정하지 않았습니다.")
-        print(message)
-        issue_comment(message)
-        return
-    target_value = issue_field([
-        "게시글 주소 또는 제목",
-        "대상 게시글 파일명 또는 URL", "대상 게시글 파일명/URL",
-        "대상 게시글 파일명 또는 게시글 URL", "게시글 파일명 또는 URL",
-    ])
-    post_path, error = resolve_issue_post(target_value)
-    if error:
-        print(f"이슈 이미지 변경 중단: {error}")
-        issue_comment(f"이미지 변경을 진행하지 않았습니다. {error}")
-        return
-    post_path = Path(post_path)
-    # Re-check the resolved path immediately before reading/writing.
-    resolved = post_path.resolve()
-    root = Path(".").resolve()
-    relative = resolved.relative_to(root)
-    if not relative.parts or relative.parts[0] != "_posts" or resolved.suffix.lower() != ".md":
-        message = "검증된 대상이 `_posts` 안의 `.md`가 아니어서 변경하지 않았습니다."
-        print(message)
-        issue_comment(message)
-        return
-    old_text = resolved.read_text(encoding="utf-8")
-    fm, _ = split_front_matter(old_text)
-    post = {"path": post_path, "text": old_text, "title": fm_get(fm, "title"),
-            "image": fm_get(fm, "image"), "tags": fm_get(fm, "tags"),
-            "category": fm_get(fm, "category")}
-    used = used_keys_from_posts(load_posts(), exclude_path=post_path)
-    new_candidates = pick_images(image_change_queries(post, request_text or ISSUE_BODY),
-                                 used | {image_key(post["image"])}, 1, allow_pool=False)
-    if not new_candidates:
-        message = f"`{post_path.as_posix()}`에 사용할 새 이미지를 찾지 못했습니다. 변경하지 않았습니다."
-        print(message)
-        issue_comment(message)
-        return
-    new_url = new_candidates[0]
-    updated, changed_thumbnail = replace_post_image(old_text, new_url)
-    if updated == old_text:
-        message = f"`{post_path.as_posix()}`의 이미지 값이 이미 같아 변경하지 않았습니다."
-        print(message)
-        issue_comment(message)
-        return
-    if DRY_RUN:
-        print(f"[DRY_RUN] 변경 경로: {post_path.as_posix()}")
-    else:
-        write_text_atomic(resolved, updated)
-        trigger_download(new_url)
-    changed = ["대표 이미지(image)"] + (["본문 첫 이미지 주소"] if changed_thumbnail else [])
-    detail = (f"이미지 변경 완료: `{post_path.as_posix()}`\n"
-              f"- 변경 항목: {', '.join(changed)}\n"
-              f"- 이전 URL: {post['image'] or '(없음)'}\n- 새 URL: {new_url}")
-    print(detail)
-    issue_comment(detail)
+
+    task, category, details = parse_issue_body(ISSUE_BODY)
+    print(f"이슈 접수 - 제목: {ISSUE_TITLE} / 작업 종류: {task or '(없음)'}")
+    results, notes = [], ""
+    try:
+        if "새로운 포스트" in task or "새 포스트" in task:
+            kr_path, en_path = generate_blog_posts(
+                topic_override=details or ISSUE_TITLE, category_hint=category)
+            results.append(f"새 글 생성: `{kr_path}`, `{en_path}`")
+        else:
+            actions, notes = plan_actions(task, details)
+            if not actions:
+                comment_issue("⚠️ 자동으로 처리하지 못했습니다.\n\n사유: "
+                              + (notes or "처리 가능한 작업으로 바꾸지 못했습니다.")
+                              + "\n\n요청을 더 구체적으로(대상 파일, 바꿀 내용) 적어 새 이슈로 올려주세요.")
+                return
+            for act in actions:
+                kind = act.get("type")
+                if kind == "fix_images":
+                    kw = (act.get("keyword") or "").strip() or None
+                    results.append(fix_images(keyword=kw))
+                elif kind == "edit_file":
+                    results.append(edit_file_with_patches(
+                        act.get("target_file"), act.get("instruction") or details))
+                elif kind == "delete_post":
+                    results.append(delete_post(act.get("target_file")))
+                else:
+                    raise ValueError(f"지원하지 않는 작업: {kind}")
+    except Exception as exc:
+        comment_issue(f"❌ 처리 실패 (변경 사항은 저장소에 반영되지 않았습니다)\n\n"
+                      f"`{type(exc).__name__}`: {exc}\n\n"
+                      "요청을 더 구체적으로 적어 새 이슈로 올리거나 Actions 로그를 확인하세요.")
+        raise
+
+    comment_issue("✅ 처리 결과\n\n" + "\n".join(f"- {r}" for r in results)
+                  + "\n\n사이트 반영까지 1~2분 걸릴 수 있습니다. 문제가 있으면 새 이슈로 알려주세요.",
+                  close=True)
 
 
 # ============================================================
@@ -712,41 +753,146 @@ def is_tech_title(title):
     return any(k in low for k in TECH_KO) or bool(TECH_EN.search(title))
 
 
-def fetch_news_items():
-    rss_urls = [
-        "https://news.google.com/rss/search?q=AI+%ED%85%8C%ED%81%AC+%EA%B8%B0%EC%88%A0&hl=ko&gl=KR&ceid=KR:ko",
-        "https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGRqTVhZU0FtdHZHZ0pMVWlnQVAB?hl=ko&gl=KR&ceid=KR:ko",
-    ]
-    items, seen = [], set()
-    for url in rss_urls:
+NEWS_MAX_AGE_HOURS = 36
+EPOCH = datetime.datetime.min.replace(tzinfo=timezone.utc)
+
+_GN_KO = "https://news.google.com/rss/search?q={q}&hl=ko&gl=KR&ceid=KR:ko"
+_GN_EN = "https://news.google.com/rss/search?q={q}&hl=en-US&gl=US&ceid=US:en"
+
+# 소스는 실패해도 건너뛰기만 합니다. 로그의 '소스 ...: N건' 줄로 동작 여부를 확인하고,
+# 계속 0건/실패인 소스는 이 목록에서 지우세요. (직접 RSS 주소는 사이트 사정으로 바뀔 수 있음)
+NEWS_SOURCES = [
+    # Google News 검색 (국내/해외, 가장 안정적인 기반)
+    {"name": "Google뉴스 KR AI·테크", "google": True,
+     "url": _GN_KO.format(q="AI+%ED%85%8C%ED%81%AC+%EA%B8%B0%EC%88%A0")},
+    {"name": "Google뉴스 KR 과학기술 토픽", "google": True, "tech_filter": True,
+     "url": "https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGRqTVhZU0FtdHZHZ0pMVWlnQVAB?hl=ko&gl=KR&ceid=KR:ko"},
+    {"name": "Google뉴스 US AI", "google": True,
+     "url": _GN_EN.format(q="artificial+intelligence+when%3A1d")},
+    {"name": "Google뉴스 US 반도체·로봇·우주", "google": True,
+     "url": _GN_EN.format(q="semiconductor+OR+robotics+OR+spaceflight+when%3A1d")},
+    # 해외 직접 RSS
+    {"name": "TechCrunch", "url": "https://techcrunch.com/feed/"},
+    {"name": "The Verge", "url": "https://www.theverge.com/rss/index.xml"},
+    {"name": "Ars Technica", "url": "https://feeds.arstechnica.com/arstechnica/index"},
+    {"name": "MIT Technology Review", "url": "https://www.technologyreview.com/feed/"},
+    {"name": "IEEE Spectrum", "url": "https://spectrum.ieee.org/feeds/feed.rss"},
+    {"name": "Hacker News", "url": "https://news.ycombinator.com/rss"},
+    {"name": "BBC Technology", "url": "https://feeds.bbci.co.uk/news/technology/rss.xml"},
+    # 국내 직접 RSS
+    {"name": "AI타임스", "url": "https://www.aitimes.com/rss/allArticle.xml"},
+    {"name": "전자신문", "url": "https://rss.etnews.com/Section901.xml"},
+    {"name": "블로터", "url": "https://www.bloter.net/feed"},
+]
+
+
+def _clean_text(s, limit=300):
+    s = html.unescape(re.sub(r"<[^>]+>", " ", s or ""))
+    return re.sub(r"\s+", " ", s).strip()[:limit]
+
+
+def _parse_date(text):
+    if not text:
+        return None
+    text = text.strip()
+    try:
+        dt_ = parsedate_to_datetime(text)
+    except Exception:
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": UA})
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                root = ET.fromstring(resp.read())
-            for item in root.findall(".//item"):
-                node = item.find("title")
-                if node is None or not node.text:
-                    continue
-                title = re.sub(r"\s*-\s*[^-]+$", "", node.text).strip()
-                key = title.casefold()
-                if title and key not in seen and is_tech_title(title):
-                    items.append(title)
-                    seen.add(key)
-        except Exception as exc:
-            print(f"RSS 수집 실패 ({url}): {exc}")
+            dt_ = datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except Exception:
+            return None
+    if dt_ is not None and dt_.tzinfo is None:
+        dt_ = dt_.replace(tzinfo=timezone.utc)
+    return dt_
+
+
+def parse_feed(data):
+    """RSS 2.0(item)와 Atom(entry)을 모두 처리."""
+    root = ET.fromstring(data)
+    items = []
+    for node in root.iter():
+        if node.tag.split("}")[-1] not in ("item", "entry"):
+            continue
+
+        def text_of(*names):
+            for child in node:
+                if child.tag.split("}")[-1] in names and (child.text or "").strip():
+                    return child.text.strip()
+            return ""
+
+        link = ""
+        for child in node:
+            if child.tag.split("}")[-1] == "link":
+                link = child.get("href") or (child.text or "").strip()
+                break
+        items.append({
+            "title": _clean_text(text_of("title"), 300),
+            "published": _parse_date(text_of("pubDate", "published", "updated", "date")),
+            "summary": _clean_text(text_of("description", "summary", "content", "encoded")),
+            "link": link,
+        })
     return items
 
 
-def pick_topic_candidates(titles):
-    """기존 글과 비슷하지 않은 뉴스 제목 최대 MAX_ATTEMPTS개. 부족하면 None(자동 선정) 추가."""
-    picked = []
-    for t in fetch_news_items():
-        if is_similar_to_any(t, titles, 0.6):
+def fetch_news_items():
+    """여러 소스에서 최근 기사 후보를 모아, 소스를 번갈아 섞은 목록으로 반환."""
+    now = datetime.datetime.now(timezone.utc)
+    max_age = timedelta(hours=NEWS_MAX_AGE_HOURS)
+    per_source, ok_count = [], 0
+    for src in NEWS_SOURCES:
+        try:
+            req = urllib.request.Request(src["url"], headers={"User-Agent": UA})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                parsed = parse_feed(resp.read())
+            ok_count += 1
+        except Exception as exc:
+            print(f"  소스 {src['name']}: 수집 실패 ({type(exc).__name__}: {exc})")
             continue
-        picked.append(t)
+        kept = []
+        for it in parsed:
+            title = it["title"]
+            if src.get("google"):
+                title = re.sub(r"\s+-\s+[^-]+$", "", title).strip()
+            if not title:
+                continue
+            if src.get("tech_filter") and not is_tech_title(title):
+                continue
+            pub = it["published"]
+            if pub and now - pub > max_age:
+                continue
+            summary = "" if src.get("google") else it["summary"]
+            kept.append({"title": title, "source": src["name"],
+                         "summary": summary, "published": pub})
+        kept.sort(key=lambda x: x["published"] or EPOCH, reverse=True)
+        print(f"  소스 {src['name']}: {len(parsed)}건 중 {len(kept)}건 사용")
+        per_source.append(kept[:10])
+
+    if ok_count == 0:
+        print("::warning::모든 뉴스 소스 수집에 실패했습니다. 네트워크/소스 주소를 확인하세요.")
+    merged, seen = [], set()
+    for rank in range(10):
+        for lst in per_source:
+            if rank < len(lst):
+                it = lst[rank]
+                key = it["title"].casefold()
+                if key not in seen:
+                    seen.add(key)
+                    merged.append(it)
+    return merged
+
+
+def pick_topic_candidates(titles, allow_auto_topic=True):
+    """기존 글과 비슷하지 않은 기사 최대 MAX_ATTEMPTS개.
+    하나도 없으면: allow_auto_topic이면 [None](Gemini 자동 선정), 아니면 [](쓸 내용 없음)."""
+    picked = []
+    for it in fetch_news_items():
+        if is_similar_to_any(it["title"], titles, 0.6):
+            continue
+        picked.append(it)
         if len(picked) >= MAX_ATTEMPTS:
             break
-    if len(picked) < MAX_ATTEMPTS:
+    if not picked and allow_auto_topic:
         picked.append(None)
     return picked
 
@@ -754,9 +900,22 @@ def pick_topic_candidates(titles):
 # ============================================================
 # 글 생성
 # ============================================================
-def build_post_prompt(topic, recent_titles):
-    topic_text = topic or ("최신 AI/기술 트렌드 중 아래 제외 목록과 겹치지 않는 "
-                           "새로운 주제를 직접 하나 선정하세요.")
+def build_post_prompt(item, recent_titles, category_hint="", allow_skip=False):
+    if item:
+        topic_text = item["title"]
+        if item.get("source"):
+            topic_text += f"\n[출처] {item['source']}"
+        if item.get("summary"):
+            topic_text += ("\n[기사 요약 - 참고만 하고 문장을 그대로 옮기지 마세요]\n"
+                           + item["summary"])
+    else:
+        topic_text = ("최신 AI/기술 트렌드 중 아래 제외 목록과 겹치지 않는 "
+                      "새로운 주제를 직접 하나 선정하세요.")
+    skip_rule = ('- 이 주제가 [최근 다룬 주제/제목]과 같은 사건이나 소재라면 글을 쓰지 말고 '
+                 '{"skip": true, "reason": "..."} 만 반환하세요.\n') if allow_skip else ""
+    source_rule = ("- 글 마지막에 참고한 출처 이름을 한 줄('참고: 출처명')로 표기하세요.\n"
+                   if item and item.get("source") else "")
+    hint = f"[카테고리 힌트] {category_hint}\n" if category_hint else ""
     return f"""
 당신은 개인 기술 전문 블로거 'Chance'입니다.
 아래 주제를 바탕으로 독창적이고 사실에 신중한 블로그 글을 한국어와 영어로 각각 작성하세요.
@@ -764,14 +923,14 @@ def build_post_prompt(topic, recent_titles):
 [주제]
 {topic_text}
 
-[최근 다룬 주제/제목 - 같은 소재와 관점 금지]
+{hint}[최근 다룬 주제/제목 - 같은 소재와 관점 금지]
 {json.dumps(recent_titles, ensure_ascii=False)}
 
 [중요 지침]
-- 제목, 카테고리, 태그를 주제에 맞게 작성하세요.
+{skip_rule}- 제목, 카테고리, 태그를 주제에 맞게 작성하세요.
 - 한국어/영어 글은 각 언어에 자연스럽게 쓰고 단순 직역은 피하세요.
-- 확인되지 않은 수치, 인용문, 발표 사실을 지어내지 마세요.
-- 본문은 충분한 설명과 분석을 포함하고 Markdown으로 작성하세요.
+- 확인되지 않은 수치, 인용문, 발표 사실을 지어내지 마세요. 기사 문장을 그대로 옮기지 마세요.
+{source_rule}- 본문은 충분한 설명과 분석을 포함하고 Markdown으로 작성하세요.
 - 각 글의 Front Matter에 layout, title, category, tags, lang을 포함하세요.
 - image는 쓰지 마세요. 대표 이미지는 시스템이 따로 채웁니다.
 - image_queries: 이 글의 대표 이미지를 Unsplash에서 찾을 영어 검색어 3개.
@@ -857,7 +1016,27 @@ def safe_category_dir(category, prefix):
     return POSTS_DIR / category
 
 
-def generate_blog_posts():
+def now_kst():
+    return datetime.datetime.now(KST)
+
+
+def current_due_slot(history, now):
+    """지금 시각 기준으로 '이미 시작됐지만 아직 글이 없는' 가장 최근 슬롯 시각을 반환.
+    스케줄 실행이 지연/누락돼도 다음 시간별 실행이 같은 슬롯을 보충한다.
+    (오래된 슬롯을 한꺼번에 몰아서 만들지는 않는다)"""
+    started = [h for h in SLOT_HOURS if now.hour >= h]
+    if not started:
+        return None
+    slot = max(started)
+    today = now.strftime("%Y-%m-%d")
+    for item in history:
+        if isinstance(item, dict) and item.get("date") == today and item.get("slot") == slot:
+            return None
+    return slot
+
+
+def generate_blog_posts(topic_override=None, category_hint="", slot=None,
+                        allow_auto_topic=True):
     posts = load_posts()
     history = read_history()
     titles = existing_titles(history, posts)
@@ -869,21 +1048,38 @@ def generate_blog_posts():
                     used.add(image_key(item[k]))
 
     recent_titles = titles[-30:]
-    data, selected = None, None
-    for topic in pick_topic_candidates(titles):
-        print(f"주제 시도: {topic or '(자동 선정)'}")
+    data, selected, selected_item = None, None, None
+    if topic_override:
+        candidates = [{"title": topic_override, "source": "", "summary": ""}]
+    else:
+        candidates = pick_topic_candidates(titles, allow_auto_topic)
+    if not candidates:
+        print("쓸 만한 새 기사가 없습니다. 글을 만들지 않습니다.")
+        return None
+    for item in candidates:
+        topic = item["title"] if item else None
+        src_label = f" [{item['source']}]" if item and item.get("source") else ""
+        print(f"주제 시도: {topic or '(자동 선정)'}{src_label}")
         if STUB_GEMINI:
             candidate = stub_post_data(topic)
         else:
-            resp = call_gemini_with_fallback(build_post_prompt(topic, recent_titles))
+            resp = call_gemini_with_fallback(build_post_prompt(
+                item, recent_titles, category_hint, allow_skip=not topic_override))
             candidate = extract_json_object(resp.text)
+        if candidate.get("skip") is True:
+            print(f"  Gemini가 중복 주제로 판단해 건너뜀: {candidate.get('reason', '')}")
+            continue
         kr_t, en_t = str(candidate.get("kr_title", "")), str(candidate.get("en_title", ""))
-        if is_similar_to_any(kr_t, titles, 0.7) or is_similar_to_any(en_t, titles, 0.7):
+        if not topic_override and (is_similar_to_any(kr_t, titles, 0.7)
+                                   or is_similar_to_any(en_t, titles, 0.7)):
             print(f"  생성된 제목이 기존 글과 비슷해 폐기: {kr_t} / {en_t}")
             continue
-        data, selected = candidate, topic
+        data, selected, selected_item = candidate, topic, item
         break
     if data is None:
+        if not topic_override and not allow_auto_topic:
+            print("겹치지 않는 주제를 찾지 못했습니다. 글을 만들지 않습니다.")
+            return None
         raise RuntimeError("기존 글과 겹치지 않는 주제를 만들지 못했습니다.")
 
     queries = [q for q in data.get("image_queries", []) if isinstance(q, str)]
@@ -896,7 +1092,7 @@ def generate_blog_posts():
     kr_image, en_image = images
     data = validate_post_data(data, kr_image, en_image)
 
-    now = datetime.datetime.now(KST)
+    now = now_kst()
     date_str, time_str = now.strftime("%Y-%m-%d"), now.strftime("%H%M%S")
     kr_path = safe_category_dir(data["kr_category"], "KR") / f"{date_str}-KR-{time_str}.md"
     en_path = safe_category_dir(data["en_category"], "EN") / f"{date_str}-EN-{time_str}.md"
@@ -912,7 +1108,8 @@ def generate_blog_posts():
     history.append({
         "date": date_str, "topic": selected or "(자동 선정)",
         "kr_title": data["kr_title"], "en_title": data["en_title"],
-        "kr_image": kr_image, "en_image": en_image,
+        "kr_image": kr_image, "en_image": en_image, "slot": slot,
+        "source": (selected_item or {}).get("source", ""),
     })
     write_history(history)
     trigger_download(kr_image)
@@ -920,6 +1117,7 @@ def generate_blog_posts():
     print("블로그 글 생성 완료:")
     print(f"- KR: {kr_path}\n- EN: {en_path}\n- 주제: {selected or '(자동 선정)'}")
     print(f"- 이미지: {kr_image}\n         {en_image}")
+    return kr_path, en_path
 
 
 # ============================================================
@@ -937,6 +1135,18 @@ def main():
         fix_images()
     elif EVENT_NAME == "issues" or ISSUE_TITLE.strip():
         handle_issue_event()
+    elif EVENT_NAME == "schedule":
+        now = now_kst()
+        slot = current_due_slot(read_history(), now)
+        if slot is None:
+            print(f"[스케줄] {now:%Y-%m-%d %H:%M} KST - 지금 만들 글이 없습니다 "
+                  f"(게시 시각 KST {SLOT_HOURS}시, 해당 시각 글은 이미 있거나 아직 전).")
+            return
+        print(f"[스케줄] {now:%Y-%m-%d %H:%M} KST - {slot}시 슬롯 글을 생성합니다.")
+        result = generate_blog_posts(slot=slot, allow_auto_topic=False)
+        if result is None:
+            print(f"[스케줄] {slot}시 슬롯: 쓸 내용이 없어 건너뜁니다. "
+                  "다음 시간 실행에서 다시 시도합니다.")
     else:
         generate_blog_posts()
 
@@ -946,13 +1156,4 @@ if __name__ == "__main__":
         main()
     except Exception as exc:
         print(f"작업 실패: {type(exc).__name__}: {exc}")
-        if EVENT_NAME == "issues":
-            try:
-                issue_comment(
-                    f"요청을 처리하지 못했습니다 ({type(exc).__name__}). "
-                    "파일은 성공적으로 처리된 것으로 간주하지 않았습니다. "
-                    "대상 게시글과 요청 내용을 확인한 뒤 다시 제출해 주세요."
-                )
-            except Exception as comment_exc:
-                print(f"실패 안내 댓글 등록도 실패: {type(comment_exc).__name__}: {comment_exc}")
         raise
