@@ -1,0 +1,12 @@
+{% if page.source_url and page.lang %}
+  {% assign current_language = page.lang | downcase %}
+  {% if current_language == "kr" %}{% assign current_language = "ko" %}{% endif %}
+  <link rel="alternate" hreflang="{{ current_language | escape }}" href="{{ page.url | absolute_url }}">
+  {% for translated_page in site.posts %}
+    {% if translated_page.url != page.url and translated_page.source_url == page.source_url and translated_page.lang != page.lang %}
+      {% assign alternate_language = translated_page.lang | downcase %}
+      {% if alternate_language == "kr" %}{% assign alternate_language = "ko" %}{% endif %}
+      <link rel="alternate" hreflang="{{ alternate_language | escape }}" href="{{ translated_page.url | absolute_url }}">
+    {% endif %}
+  {% endfor %}
+{% endif %}

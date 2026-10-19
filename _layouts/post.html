@@ -45,6 +45,22 @@ layout: default
     {% endif %}
   </header>
 
+  {% assign translated_post = nil %}
+  {% if page.source_url %}
+    {% for candidate in site.posts %}
+      {% if candidate.url != page.url and candidate.source_url == page.source_url and candidate.lang != page.lang %}
+        {% assign translated_post = candidate %}
+        {% break %}
+      {% endif %}
+    {% endfor %}
+  {% endif %}
+  {% if translated_post %}
+    <p class="post-meta language-alternative">
+      {% if translated_post.lang == "en" %}{% assign language_label = "Read this article in English" %}{% else %}{% assign language_label = "한국어로 읽기" %}{% endif %}
+      <span>다른 언어 버전:</span> <a href="{{ translated_post.url | relative_url }}">{{ language_label | escape }} · {{ translated_post.title | escape }}</a>
+    </p>
+  {% endif %}
+
   <nav class="reading-tools" aria-label="읽기 도구">
     <a href="{{ '/' | relative_url }}">← 글 목록</a>
     <span class="post-meta">읽는 시간 약 <span id="reading-time">계산 중</span></span>

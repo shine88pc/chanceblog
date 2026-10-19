@@ -23,6 +23,8 @@ sitemap: false
     {% assign lang = 'kr' %}
   {% endif %}
 {% endif %}
+{% assign feed_lang = lang | downcase %}
+{% if feed_lang == 'ko' %}{% assign feed_lang = 'kr' %}{% endif %}
   {
     "path": {{ post.path | jsonify }},
     "url": {{ post.url | relative_url | jsonify }},
@@ -30,7 +32,7 @@ sitemap: false
     "name": {{ post_name | jsonify }},
     "title": {{ post.title | default: post_name | jsonify }},
     "category": {{ category | jsonify }},
-    "lang": {{ lang | downcase | jsonify }},
+    "lang": {{ feed_lang | jsonify }},
     "date": {{ post.date | date: "%Y-%m-%d" | jsonify }},
     "image": {{ post.image | default: "" | jsonify }},
     "tags": {{ post.tags | default: empty | jsonify }},

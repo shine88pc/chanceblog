@@ -474,14 +474,6 @@ def fix_images(keyword=None):
         else:
             used.add(image_key(post["image"]))
 
-    # lang: ko -> kr 정규화 (프런트엔드 필터와 맞추기 위함)
-    for post in posts:
-        fixed_text = re.sub(r"(?m)^lang:[ \t]*[\"']?ko[\"']?[ \t]*$", "lang: kr", post["text"], count=1)
-        if fixed_text != post["text"]:
-            print(f"- lang ko -> kr: {post['path']}")
-            write_text_atomic(post["path"], fixed_text)
-            post["text"] = fixed_text
-
     fixed = skipped = 0
     for post, problem in targets:
         new_url = repair(post, used)
@@ -1220,6 +1212,7 @@ def validate_post_data(data, kr_image, en_image, verified_source_url=None):
         data[key] = [str(t).strip() for t in data[key] if str(t).strip()]
 
     for prefix, image_url in (("kr", kr_image), ("en", en_image)):
+        html_lang = "ko" if prefix == "kr" else "en"
         content = data[f"{prefix}_content"]
         if not content.lstrip().startswith("---"):
             content = (
@@ -1227,7 +1220,7 @@ def validate_post_data(data, kr_image, en_image, verified_source_url=None):
                 f"title: {json.dumps(data[f'{prefix}_title'], ensure_ascii=False)}\n"
                 f"category: {json.dumps(data[f'{prefix}_category'], ensure_ascii=False)}\n"
                 f"tags: {json.dumps(data[f'{prefix}_tags'], ensure_ascii=False)}\n"
-                f"lang: {prefix}\nimage: {json.dumps(image_url)}\n---\n\n" + content
+                f"lang: {html_lang}\nimage: {json.dumps(image_url)}\n---\n\n" + content
             )
         else:
             end = content.find("\n---", 3)
@@ -1237,7 +1230,7 @@ def validate_post_data(data, kr_image, en_image, verified_source_url=None):
                 front = re.sub(r"(?m)^image:\s*.*$", "", front)
                 front = re.sub(r"(?m)^lang:\s*.*$", "", front)
                 front = re.sub(r"\n{2,}", "\n", front).rstrip()
-                front += f'\nlang: {prefix}\nimage: "{image_url}"'
+                front += f'\nlang: {html_lang}\nimage: "{image_url}"'
                 content = f"---{front}\n---\n\n{body}"
 
         content = _front_matter_set(content, "category", data[f"{prefix}_category"])
