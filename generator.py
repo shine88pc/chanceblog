@@ -50,6 +50,9 @@ HISTORY_FILE = Path("history.json")
 EDITORIAL_TEMPLATE_FILE = Path(__file__).resolve().parent / ".github/editorial/CHANCE_BLOG_TEMPLATE.md"
 UA = "Mozilla/5.0 (compatible; ChanceBlogBot/2.0)"
 MAX_ATTEMPTS = 3
+# Minimum body length before source lists and thumbnails. This is a floor against
+# thin drafts, not a target or a substitute for editorial review.
+MIN_BODY_CHARS = {"kr": 1000, "en": 1500}
 # 자동 게시 시각(KST, 시 단위). 출처 확인과 충분한 편집 가치를 위해 하루 2회로 운영합니다.
 # 환경변수 POST_HOURS_KST="9,18" 로 변경 가능
 SLOT_HOURS = sorted({int(x) for x in os.environ.get("POST_HOURS_KST", "9,18").split(",")
@@ -1185,7 +1188,28 @@ def stub_post_data(topic):
     }
 
 
-def validate_post_data(data, kr_image, en_image):
+def _validate_editorial_body(content, lang, verified_source_url):
+    """Reject thin drafts or drafts that cite their source only in a source list."""
+    match = re.match(r"\A---\s*\n.*?\n---\s*\n(.*)\Z", content, re.S)
+    body = match.group(1) if match else content
+    story = re.split(r"(?im)^##\s*(?:출처|참고 자료|sources)\s*$", body, maxsplit=1)[0]
+    readable = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", story)
+    readable = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", readable)
+    readable = re.sub(r"<[^>]+>|[`*_>#|~]", " ", readable)
+    readable = re.sub(r"\s+", "", readable)
+    minimum = MIN_BODY_CHARS.get(lang, MIN_BODY_CHARS["en"])
+    if len(readable) < minimum:
+        raise ValueError(
+            f"{lang.upper()} 본문이 최소 편집 분량({minimum}자)에 미달합니다: "
+            f"{len(readable)}자. 억지로 늘리지 말고 근거가 부족하면 발행을 보류하세요."
+        )
+    if not verified_source_url or verified_source_url not in story:
+        raise ValueError(
+            f"{lang.upper()} 본문에 검증된 원문 링크를 뒷받침되는 주장 가까이에 인용해야 합니다."
+        )
+
+
+def validate_post_data(data, kr_image, en_image, verified_source_url=None):
     for key in ("kr_category", "kr_title", "kr_content",
                 "en_category", "en_title", "en_content"):
         if not isinstance(data.get(key), str) or not data[key].strip():
@@ -1217,6 +1241,7 @@ def validate_post_data(data, kr_image, en_image):
                 content = f"---{front}\n---\n\n{body}"
 
         content = _front_matter_set(content, "category", data[f"{prefix}_category"])
+        _validate_editorial_body(content, prefix, verified_source_url)
 
         if not re.search(r"(?m)^!\[[^\]]*\]\(", content):
             content = content.rstrip() + f"\n\n![Thumbnail]({image_url})\n"
@@ -1375,7 +1400,10 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
         raise RuntimeError("사용 가능한 대표 이미지를 2개 확보하지 못했습니다. "
                            "글을 저장하지 않습니다.")
     kr_image, en_image = images
-    data = validate_post_data(data, kr_image, en_image)
+    data = validate_post_data(
+        data, kr_image, en_image,
+        verified_source_url=(selected_item or {}).get("link"),
+    )
 
     now = now_kst()
     date_str, time_str = now.strftime("%Y-%m-%d"), now.strftime("%H%M%S")
