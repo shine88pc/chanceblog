@@ -12,6 +12,16 @@ Do not invent a human author’s personal memories, experiments, interviews, cre
 
 Before drafting, state the reader’s main question and the article’s answer in one sentence. Choose the most useful form for the material, such as a reported development, explainer, comparison, case study, research summary, or practical guide. Do not force every article into the same sequence of headings. Use only headings that help navigation; vary their number and phrasing. Do not add a generic “Conclusion” that repeats the article.
 
+Use these forms as options, not as fill-in-the-blanks templates:
+
+- **A reported development:** what changed, who announced or observed it, what the evidence establishes, and what remains unknown.
+- **An explainer:** the reader’s question, the mechanism or terms needed to answer it, and a concrete example grounded in the sources.
+- **A comparison:** the decision or difference readers need to understand, the criteria that matter, and where the comparison stops being fair.
+- **A research summary:** who or what was studied, what the researchers found, how they measured it, and the limits of applying it elsewhere.
+- **A practical guide:** the situation it covers, steps readers can take, exceptions or risks, and where to check current official guidance.
+
+Pick one main form and borrow another only when the material calls for it. A post does not need every form’s sections. Change the opening, paragraph lengths, heading count, and ending to fit the evidence. Avoid producing a sequence of articles that all open with a broad trend, use three numbered sections, and close with a prediction.
+
 A useful article usually does the following, in an order suited to the subject:
 
 1. Answer the reader’s question early and explain why the answer matters now.
@@ -42,3 +52,5 @@ Before returning a draft, read it from the reader’s point of view. Check that 
 ## Updating an existing post
 
 Read the whole post and its source links before editing. Keep facts that remain supported; correct dates and stale descriptions; add context and limitations; remove unsupported claims and fabricated first-person narration. Preserve the subject and useful original analysis. If a central claim cannot be verified, mark the post unpublished until it can be rewritten responsibly. Do not change images or unrelated files during an editorial rewrite.
+
+For a style-only pass, preserve the claims, names, dates, figures, quotations, and link destinations. Remove stock transitions, repeated conclusions, inflated significance, fake personal experience, and paragraphs that merely restate the source. For a factual correction, change only what the evidence supports and place the supporting source near the corrected claim. Keep an existing post’s language and voice where they already work; this guide is an editing standard, not a demand to make every article sound alike.

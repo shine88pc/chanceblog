@@ -613,6 +613,19 @@ def edit_file_with_patches(raw_path, instruction):
     original = target.read_text(encoding="utf-8")
     if len(original) > MAX_EDIT_CHARS:
         raise ValueError(f"{rel}: 파일이 너무 커서({len(original)}자) 자동 수정하지 않습니다.")
+    is_post = len(rel.parts) >= 2 and rel.parts[0] == "_posts" and rel.suffix.lower() == ".md"
+    post_rules = ""
+    if is_post:
+        post_rules = f"""
+이 파일은 기존 게시글입니다. 아래 Chance_Blog 편집 템플릿을 적용하세요.
+- 요청이 말투/가독성 수정이면 주장, 고유명사, 날짜, 수치, 직접 인용, 출처 링크와 이미지 표기를 보존하세요.
+- 사실 수정 요청이면 요청에 근거 자료가 포함되지 않은 한 사실 주장을 바꾸지 말고 패치를 반환하지 마세요.
+- AI가 쓴 글임을 숨기거나 탐지기를 피하려 하지 말고, 과장·상투어·가짜 개인 경험·반복 요약만 근거를 해치지 않는 범위에서 다듬으세요.
+- Front Matter와 이미지 URL은 수정하지 마세요. 문서 전체를 다시 쓰지 말고 필요한 최소 부분만 패치하세요.
+
+[Chance_Blog 편집 템플릿]
+{load_editorial_template()}
+"""
     prompt = f"""
 아래 파일을 요청대로 수정하기 위한 '부분 패치'를 JSON으로 만드세요.
 - 파일 전체를 다시 쓰지 말고, 바꿀 부분만 old/new 쌍으로 주세요.
@@ -624,6 +637,7 @@ def edit_file_with_patches(raw_path, instruction):
 [파일] {rel}
 [수정 지시]
 {instruction}
+{post_rules}
 
 [파일 전체 내용]
 {original}
@@ -645,6 +659,28 @@ JSON 객체만 반환: {{"patches": [{{"old": "...", "new": "..."}}]}}
             raise ValueError(f"{rel}: 패치 {i}의 대상 문구가 {count}곳에서 발견되어 "
                              "적용하지 않았습니다. (파일은 변경되지 않음)")
         text = text.replace(old, new, 1)
+    if is_post:
+        def front_matter(value):
+            match = re.match(r"\A(---\s*\n.*?\n---\s*\n)", value, re.S)
+            return match.group(1) if match else ""
+
+        def urls(value):
+            return re.findall(r"https?://[^\s)\]>]+", value)
+
+        def numbers(value):
+            return re.findall(r"(?<!\w)\d+(?:[.,]\d+)*(?:%|\w)?", value)
+
+        def image_markup(value):
+            return re.findall(r"!\[[^\]]*\]\([^)]+\)", value)
+
+        if front_matter(text) != front_matter(original):
+            raise ValueError(f"{rel}: 편집 템플릿은 Front Matter 변경을 허용하지 않습니다. (파일은 변경되지 않음)")
+        if urls(text) != urls(original):
+            raise ValueError(f"{rel}: 출처/링크 주소가 바뀌어 적용하지 않았습니다. (파일은 변경되지 않음)")
+        if numbers(text) != numbers(original):
+            raise ValueError(f"{rel}: 날짜·수치가 바뀌어 적용하지 않았습니다. (파일은 변경되지 않음)")
+        if image_markup(text) != image_markup(original):
+            raise ValueError(f"{rel}: 이미지 표기가 바뀌어 적용하지 않았습니다. (파일은 변경되지 않음)")
     if len(text) < len(original) * 0.5:
         raise ValueError(f"{rel}: 수정 후 파일이 절반 이하로 줄어 적용하지 않았습니다.")
     if rel.suffix.lower() == ".json":
@@ -858,8 +894,9 @@ TRUSTED_SOURCE_DOMAINS = {
                 "bbc.com", "bbc.co.uk", "theguardian.com", "variety.com",
                 "nytimes.com"),
     "daily_life": ("who.int", "nih.gov", "nhs.uk", "cdc.gov", "apa.org",
-                   "kostat.go.kr", "korea.kr", "reuters.com", "apnews.com",
-                   "bbc.com", "bbc.co.uk"),
+                   "kostat.go.kr", "korea.kr", "mfds.go.kr",
+                   "foodsafetykorea.go.kr", "kca.go.kr", "consumer.go.kr",
+                   "reuters.com", "apnews.com", "bbc.com", "bbc.co.uk"),
 }
 
 
@@ -1136,9 +1173,11 @@ def build_post_prompt(item, recent_titles, category_hint="", allow_skip=False,
 - 이 매거진은 IT 전문 매체가 아닙니다. 이번 편집 축의 주제를 중심에 두고, 기술·경제·사회·문화·환경·교육·일상 중 실제로 연결되는 다른 관점 하나를 함께 설명하세요. 억지로 연결하지 말고, 관련이 약하면 주제 자체를 더 적합한 것으로 고르세요.
 - 사람들의 선택과 생활에 어떤 차이가 생기는지 구체적으로 설명하고, 누가 이익을 얻거나 비용을 부담하는지 살펴보세요. 한 분야의 전문성은 유지하되 독자가 다른 분야와 연결해 생각할 수 있게 하세요.
 {category_rule}- 글은 한 편 안에서 독립적으로 이해되어야 하며, 중요한 사실 근거를 본문에 링크하고 끝에 출처 목록을 제공합니다.
-- 독자가 실제로 궁금해할 질문에 먼저 답하고, 제목은 핵심 검색어와 글의 결론을 정확하게 담으세요. 과장·낚시성 표현은 피하세요.
-- 첫 문단에서 핵심 결론과 왜 중요한지 설명하고, 본문에는 배경, 확인된 사실, 영향, 한계 또는 반론을 구분해 담으세요.
-- 소스 요약을 문단별로 바꾸어 쓰는 데 그치지 말고, 독자에게 유용한 비교·맥락·실행 가능한 시사점을 제공하세요. 근거가 부족하면 추측으로 채우지 말고 skip을 반환하세요.
+- 독자가 이 주제에서 실제로 알고 싶어 할 질문에 답하고, 제목은 핵심 내용과 근거의 범위를 정확히 나타내세요. 과장·낚시성 표현은 피하세요.
+- 독자에게 가장 필요한 형식(사건 설명, 해설, 비교, 연구 요약, 실용 안내 등)을 고르고, 그 형식에 맞춰 글을 구성하세요. 매번 같은 도입, 3개 소제목, 전망형 결말을 반복하지 마세요. 소제목 수와 문단 길이는 자료와 주제에 맞추고, 필요 없는 결론 요약은 생략하세요.
+- 첫 문단은 주제를 자연스럽게 소개하고 독자가 얻을 답이나 핵심 사실을 분명히 보여 주세요. 본문에서 확인된 사실, 출처의 주장, 편집자의 해석과 전망을 구분하세요.
+- 소스 요약을 문단별로 바꾸어 쓰는 데 그치지 말고, 근거가 허용하는 비교·맥락·한계 또는 실행 가능한 시사점을 제공하세요. 근거가 부족하면 추측으로 채우지 말고 skip을 반환하세요.
+- 관용적인 AI 문구, 중요성을 부풀리는 표현, 반복되는 요약, 억지로 넣은 3단 나열은 덜어내세요. 자연스러움은 구체적인 근거와 명료한 문장에서 나오게 하세요. 오탈자·속어·가짜 개인 경험을 추가하거나 AI 사용 사실을 숨기려 하지 마세요.
 - 한국어/영어 글은 각 언어에 자연스럽게 쓰고 단순 직역은 피하세요.
 - 확인되지 않은 수치, 인용문, 발표 사실을 지어내지 마세요. 기사 문장을 그대로 옮기지 마세요.
 {source_rule}- 본문은 충분한 설명과 분석을 포함하고 Markdown으로 작성하세요.
