@@ -17,4 +17,3 @@ permalink: /categories/
       </ul>
     </li>
   {% endfor %}
-endloop

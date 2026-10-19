@@ -2,7 +2,7 @@ name: Chance_Blog Full-Auto Engine
 
 on:
   schedule:
-    # 매시 17분(UTC). 게시 시각(KST 8/13/18/22시)은 generator.py의 SLOT_HOURS로 판단하며,
+    # 매시 17분(UTC). 게시 시각(KST 9/18시)은 generator.py의 SLOT_HOURS로 판단하며,
     # 실행이 지연/누락돼도 다음 시간 실행이 해당 시각 글을 보충한다.
     - cron: '17 * * * *'
   issues:

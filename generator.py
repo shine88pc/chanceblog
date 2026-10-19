@@ -49,8 +49,9 @@ POSTS_DIR = Path("_posts")
 HISTORY_FILE = Path("history.json")
 UA = "Mozilla/5.0 (compatible; ChanceBlogBot/2.0)"
 MAX_ATTEMPTS = 3
-# 자동 게시 시각(KST, 시 단위). 환경변수 POST_HOURS_KST="2,5,8,13,18,22" 로 변경 가능
-SLOT_HOURS = sorted({int(x) for x in os.environ.get("POST_HOURS_KST", "2,5,8,13,18,22").split(",")
+# 자동 게시 시각(KST, 시 단위). 출처 확인과 충분한 편집 가치를 위해 하루 2회로 운영합니다.
+# 환경변수 POST_HOURS_KST="9,18" 로 변경 가능
+SLOT_HOURS = sorted({int(x) for x in os.environ.get("POST_HOURS_KST", "9,18").split(",")
                      if x.strip().isdigit() and 0 <= int(x) <= 23})
 
 MODEL_CANDIDATES = [

@@ -1,0 +1,45 @@
+---
+layout: null
+---
+<!doctype html>
+<html lang="ko" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="{{ page.description | default: site.description | escape }}">
+  <link rel="canonical" href="{{ page.url | absolute_url }}">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Chance_Blog">
+  <meta property="og:title" content="{{ page.title | escape }} · Chance_Blog">
+  <meta property="og:description" content="{{ page.description | default: site.description | escape }}">
+  <meta property="og:url" content="{{ page.url | absolute_url }}">
+  <title>{{ page.title | escape }} · Chance_Blog</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-100 antialiased">
+  <header class="border-b border-slate-800 bg-slate-900/80">
+    <nav class="mx-auto flex max-w-4xl flex-wrap items-center justify-between gap-4 px-4 py-4" aria-label="주 메뉴">
+      <a href="{{ '/' | relative_url }}" class="font-black tracking-tight text-white">⚡ Chance_Blog</a>
+      <div class="flex flex-wrap gap-x-4 gap-y-2 text-sm text-slate-300">
+        <a class="hover:text-white" href="{{ '/about/' | relative_url }}">소개·편집 원칙</a>
+        <a class="hover:text-white" href="{{ '/privacy/' | relative_url }}">개인정보처리방침</a>
+        <a class="hover:text-white" href="{{ '/contact/' | relative_url }}">문의·정정</a>
+      </div>
+    </nav>
+  </header>
+  <main class="mx-auto max-w-4xl px-4 py-10 md:py-16">
+    <article class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-2xl shadow-blue-950/10 md:p-10">
+      <p class="mb-3 text-xs font-bold uppercase tracking-[.18em] text-blue-300">Chance_Blog · 안내</p>
+      <h1 class="mb-8 text-3xl font-black tracking-tight text-white md:text-4xl">{{ page.title | escape }}</h1>
+      <div class="space-y-5 text-sm leading-8 text-slate-300 md:text-base">
+        {{ content }}
+      </div>
+      <p class="mt-10 border-t border-slate-800 pt-5 text-sm"><a class="font-semibold text-blue-300 hover:text-blue-200" href="{{ '/' | relative_url }}">← 글 목록으로 돌아가기</a></p>
+    </article>
+  </main>
+  <footer class="border-t border-slate-800 px-4 py-6 text-center text-xs text-slate-500">
+    <p>© 2026 Chance_Blog</p>
+    <p class="mt-2"><a class="hover:text-slate-300" href="{{ '/about/' | relative_url }}">소개</a> · <a class="hover:text-slate-300" href="{{ '/privacy/' | relative_url }}">개인정보처리방침</a> · <a class="hover:text-slate-300" href="{{ '/contact/' | relative_url }}">문의·정정</a></p>
+  </footer>
+</body>
+</html>
