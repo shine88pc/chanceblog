@@ -240,6 +240,32 @@ layout: null
         </div>
       </div>
     </section>
+    <section id="daily-publishing-monitor" class="mb-9 overflow-hidden rounded-2xl border border-blue-300/10 bg-slate-900/70 shadow-lg shadow-blue-950/10" aria-labelledby="daily-publishing-title" aria-live="polite">
+      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 px-4 py-4 md:px-6">
+        <div>
+          <h2 id="daily-publishing-title" class="text-base font-bold text-slate-100">오늘의 발행 현황</h2>
+          <p class="mt-1 text-xs text-slate-400"><span id="daily-publishing-date"></span> · 한국시간 00:00 기준</p>
+        </div>
+        <div class="flex items-center gap-3 text-xs text-slate-400">
+          <span class="inline-flex items-center gap-1.5"><span class="h-1.5 w-1.5 rounded-full bg-emerald-400"></span>1분마다 갱신</span>
+          <span id="daily-publishing-updated" aria-label="마지막 갱신 시간">집계 중</span>
+          <button id="daily-publishing-refresh" type="button" class="rounded-lg border border-white/10 px-2.5 py-1.5 text-slate-300 transition hover:bg-white/5" aria-label="발행 현황 새로고침">새로고침</button>
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full min-w-[420px] text-left text-sm">
+          <caption class="sr-only">오늘 한국시간 자정 이후 게시된 글의 분야별 및 언어별 수</caption>
+          <thead class="bg-white/[.025] text-xs text-slate-400">
+            <tr><th scope="col" class="px-4 py-3 font-semibold md:px-6">분야</th><th scope="col" class="px-4 py-3 text-right font-semibold">전체</th><th scope="col" class="px-4 py-3 text-right font-semibold">🇰🇷 KR</th><th scope="col" class="px-4 py-3 text-right font-semibold">🇺🇸 EN</th></tr>
+          </thead>
+          <tbody id="daily-publishing-body" class="divide-y divide-white/5 text-slate-200">
+            <tr><td colspan="4" class="px-4 py-5 text-center text-slate-400">게시글 목록을 불러오고 있습니다.</td></tr>
+          </tbody>
+          <tfoot class="border-t border-white/10 bg-white/[.025] font-bold text-slate-100"><tr><th scope="row" class="px-4 py-3 md:px-6">오늘 합계</th><td id="daily-publishing-total" class="px-4 py-3 text-right">0</td><td id="daily-publishing-kr-total" class="px-4 py-3 text-right">0</td><td id="daily-publishing-en-total" class="px-4 py-3 text-right">0</td></tr></tfoot>
+        </table>
+      </div>
+      <p id="daily-publishing-status" class="px-4 py-2.5 text-[11px] text-slate-500 md:px-6">게시글 목록 기준으로 집계합니다.</p>
+    </section>
     <!-- Loading Indicator -->
     <div id="loading-indicator" class="py-24 flex flex-col items-center justify-center space-y-4">
       <div class="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
@@ -454,6 +480,107 @@ layout: null
     let currentCategory = 'all';
     let currentLang = 'all';
     let searchQuery = '';
+    let dailyStatsRequestInFlight = false;
+
+    const dailyCategoryOrder = ['과학·환경', '경제·일', '사회·정책', '기술·미래', '문화·미디어', '일상·마음'];
+    const dailyCategoryAliases = new Map([
+      ['science & environment', '과학·환경'], ['science', '과학·환경'], ['과학·환경', '과학·환경'], ['science/environment', '과학·환경'],
+      ['economy & work', '경제·일'], ['economy', '경제·일'], ['economics', '경제·일'], ['경제·일', '경제·일'], ['경제/일', '경제·일'],
+      ['society & policy', '사회·정책'], ['policy/society', '사회·정책'], ['society', '사회·정책'], ['사회·정책', '사회·정책'], ['사회/정책', '사회·정책'],
+      ['technology & future', '기술·미래'], ['technology', '기술·미래'], ['tech', '기술·미래'], ['기술·미래', '기술·미래'], ['테크', '기술·미래'], ['industrial ai', '기술·미래'],
+      ['culture & media', '문화·미디어'], ['culture', '문화·미디어'], ['media', '문화·미디어'], ['문화·미디어', '문화·미디어'],
+      ['everyday life', '일상·마음'], ['life & mind', '일상·마음'], ['일상·마음', '일상·마음']
+    ]);
+
+    function getKstDateKey(date = new Date()) {
+      const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date);
+      const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+      return `${values.year}-${values.month}-${values.day}`;
+    }
+
+    function getPostKstDate(postDate) {
+      const value = String(postDate || '');
+      if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+      const parsed = new Date(value);
+      return Number.isNaN(parsed.getTime()) ? value.slice(0, 10) : getKstDateKey(parsed);
+    }
+
+    function getDailyCategory(rawCategory) {
+      const category = String(rawCategory || '기타').trim();
+      const normalized = category.toLocaleLowerCase();
+      if (dailyCategoryAliases.has(normalized)) return dailyCategoryAliases.get(normalized);
+      if (/space|robot|science|environment|우주|로봇|과학|환경/i.test(category)) return '과학·환경';
+      if (/econom|business|work|finance|market|경제|금융|산업/i.test(category)) return '경제·일';
+      if (/policy|society|politic|geopolitic|사회|정책|정치/i.test(category)) return '사회·정책';
+      if (/tech|ai|hardware|gaming|기술|테크|인공지능|하드웨어/i.test(category)) return '기술·미래';
+      if (/culture|media|art|문화|미디어|예술/i.test(category)) return '문화·미디어';
+      if (/everyday|life|mind|일상|마음|생활/i.test(category)) return '일상·마음';
+      return category || '기타';
+    }
+
+    function renderDailyPublishingStats(posts) {
+      const body = document.getElementById('daily-publishing-body');
+      if (!body) return;
+      const today = getKstDateKey();
+      const todayLabel = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: 'long', day: 'numeric' }).format(new Date());
+      document.getElementById('daily-publishing-date').textContent = todayLabel;
+      const counts = new Map(dailyCategoryOrder.map(category => [category, { total: 0, kr: 0, en: 0 }]));
+      posts.forEach(post => {
+        if (getPostKstDate(post.date) !== today) return;
+        const category = getDailyCategory(post.category);
+        if (!counts.has(category)) counts.set(category, { total: 0, kr: 0, en: 0 });
+        const count = counts.get(category);
+        const lang = String(post.lang || 'kr').toLowerCase() === 'en' ? 'en' : 'kr';
+        count.total += 1;
+        count[lang] += 1;
+      });
+      const visibleCategories = [...dailyCategoryOrder, ...[...counts.keys()].filter(category => !dailyCategoryOrder.includes(category)).sort((a, b) => a.localeCompare(b))];
+      const fragment = document.createDocumentFragment();
+      visibleCategories.forEach(category => {
+        const count = counts.get(category);
+        const row = document.createElement('tr');
+        const name = document.createElement('th');
+        name.scope = 'row';
+        name.className = 'px-4 py-3 font-medium text-slate-300 md:px-6';
+        name.textContent = category;
+        row.appendChild(name);
+        ['total', 'kr', 'en'].forEach(key => {
+          const cell = document.createElement('td');
+          cell.className = 'px-4 py-3 text-right tabular-nums';
+          cell.textContent = String(count[key]);
+          row.appendChild(cell);
+        });
+        fragment.appendChild(row);
+      });
+      body.replaceChildren(fragment);
+      const totals = [...counts.values()].reduce((result, count) => ({ total: result.total + count.total, kr: result.kr + count.kr, en: result.en + count.en }), { total: 0, kr: 0, en: 0 });
+      document.getElementById('daily-publishing-total').textContent = String(totals.total);
+      document.getElementById('daily-publishing-kr-total').textContent = String(totals.kr);
+      document.getElementById('daily-publishing-en-total').textContent = String(totals.en);
+      document.getElementById('daily-publishing-updated').textContent = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date()) + ' 갱신';
+    }
+
+    async function refreshDailyPublishingStats() {
+      if (dailyStatsRequestInFlight) return;
+      dailyStatsRequestInFlight = true;
+      const status = document.getElementById('daily-publishing-status');
+      try {
+        const indexUrl = new URL('posts.json', document.baseURI);
+        indexUrl.searchParams.set('_monitor', String(Date.now()));
+        const response = await fetch(indexUrl, { cache: 'no-store' });
+        if (!response.ok) throw new Error(`Post index HTTP ${response.status}`);
+        const posts = await response.json();
+        if (!Array.isArray(posts)) throw new Error('Invalid post index');
+        renderDailyPublishingStats(posts.map(post => ({ date: post.date, category: post.category, lang: post.lang })));
+        if (status) status.textContent = '게시글 목록 기준 집계 · 1분마다 자동 갱신';
+      } catch (error) {
+        console.warn('Daily publishing stats refresh failed:', error);
+        renderDailyPublishingStats(allPosts);
+        if (status) status.textContent = '최신 목록을 불러오지 못해 마지막으로 불러온 게시글 기준으로 표시 중입니다.';
+      } finally {
+        dailyStatsRequestInFlight = false;
+      }
+    }
 
     const defaultThumbnails = [
       'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=800&q=80',
@@ -550,6 +677,7 @@ layout: null
 
         buildCategoryFilters();
         renderPosts();
+        renderDailyPublishingStats(allPosts);
       } catch (err) {
         console.error('fetchPostList critical error:', err);
         if (emptyEl) emptyEl.classList.remove('hidden');
@@ -828,6 +956,13 @@ layout: null
 
       // Execute post loading
       fetchPostList();
+      document.getElementById('daily-publishing-refresh')?.addEventListener('click', refreshDailyPublishingStats);
+      window.setInterval(() => {
+        if (document.visibilityState === 'visible') refreshDailyPublishingStats();
+      }, 60000);
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') refreshDailyPublishingStats();
+      });
     });
   </script>
 </body>
