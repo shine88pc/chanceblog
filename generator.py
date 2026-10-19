@@ -47,6 +47,7 @@ STUB_UNSPLASH = not UNSPLASH_KEY
 KST = timezone(timedelta(hours=9))
 POSTS_DIR = Path("_posts")
 HISTORY_FILE = Path("history.json")
+EDITORIAL_TEMPLATE_FILE = Path(__file__).resolve().parent / ".github/editorial/CHANCE_BLOG_TEMPLATE.md"
 UA = "Mozilla/5.0 (compatible; ChanceBlogBot/2.0)"
 MAX_ATTEMPTS = 3
 # 자동 게시 시각(KST, 시 단위). 출처 확인과 충분한 편집 가치를 위해 하루 2회로 운영합니다.
@@ -1081,6 +1082,17 @@ def choose_editorial_lane(slot, history):
 # ============================================================
 # 글 생성
 # ============================================================
+def load_editorial_template():
+    """Load the repository's reviewed writing and revision guide; fail closed if missing."""
+    try:
+        template = EDITORIAL_TEMPLATE_FILE.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise RuntimeError(f"편집 템플릿을 읽을 수 없습니다: {EDITORIAL_TEMPLATE_FILE}") from exc
+    if not template:
+        raise RuntimeError("편집 템플릿이 비어 있어 게시글 생성을 중단합니다.")
+    return template
+
+
 def build_post_prompt(item, recent_titles, category_hint="", allow_skip=False,
                       editorial_lane="technology"):
     lane = EDITORIAL_LANES.get(editorial_lane, EDITORIAL_LANES["technology"])
@@ -1111,6 +1123,7 @@ def build_post_prompt(item, recent_titles, category_hint="", allow_skip=False,
                    if item and item.get("link") and item.get("source") else
                    "- 검증된 출처가 없으면 글을 만들지 말고 skip을 반환하세요.\n")
     hint = f"[카테고리 힌트] {category_hint}\n" if category_hint else ""
+    editorial_template = load_editorial_template()
     return f"""
 당신은 기술, 경제, 사회, 과학, 문화와 일상을 함께 읽는 교양형 매거진 'Chance_Blog'의 편집자입니다.
 선택된 편집 축은 [{lane['label']}]이며, 이번 축의 중심 범위는 다음과 같습니다: {lane['focus']}.
@@ -1124,6 +1137,7 @@ def build_post_prompt(item, recent_titles, category_hint="", allow_skip=False,
 
 [중요 지침]
 {skip_rule}- 제목, 카테고리, 태그를 주제에 맞게 작성하세요.
+- 아래 [편집 템플릿]을 실제 작성과 최종 자가 편집에 모두 적용하세요. 자연스러운 글을 위해 개인 경험이나 사람인 척하는 문장을 만들어 넣지 마세요. AI 사용을 감추거나 탐지기를 속이려 하지 마세요.
 - 이 매거진은 IT 전문 매체가 아닙니다. 이번 편집 축의 주제를 중심에 두고, 기술·경제·사회·문화·환경·교육·일상 중 실제로 연결되는 다른 관점 하나를 함께 설명하세요. 억지로 연결하지 말고, 관련이 약하면 주제 자체를 더 적합한 것으로 고르세요.
 - 사람들의 선택과 생활에 어떤 차이가 생기는지 구체적으로 설명하고, 누가 이익을 얻거나 비용을 부담하는지 살펴보세요. 한 분야의 전문성은 유지하되 독자가 다른 분야와 연결해 생각할 수 있게 하세요.
 {category_rule}- 글은 한 편 안에서 독립적으로 이해되어야 하며, 중요한 사실 근거를 본문에 링크하고 끝에 출처 목록을 제공합니다.
@@ -1141,6 +1155,9 @@ def build_post_prompt(item, recent_titles, category_hint="", allow_skip=False,
 - kr_content, en_content에는 완전한 Markdown(Front Matter 포함)을 넣으세요.
 - JSON 문자열 안의 줄바꿈과 따옴표는 유효한 JSON 규칙을 지키세요.
 - JSON 객체만 반환하고 코드 펜스는 쓰지 마세요.
+
+[편집 템플릿]
+{editorial_template}
 
 {{
   "kr_category": "{lane['kr_category']}",
