@@ -190,14 +190,153 @@
     </div>
   </div>
 
-  <!-- Footer -->
+   <!-- Footer -->
   <footer class="border-t border-slate-800/80 bg-slate-950 py-8 text-center text-xs text-slate-500">
     <div class="max-w-6xl mx-auto px-4 space-y-2">
       <p class="font-medium text-slate-400">⚡ Chance_Blog &copy; 2026. Automated Insights & Tech Journalism.</p>
       <p>Powered by GitHub Actions, Gemini Intelligence, and Tailwind CSS.</p>
+      <p id="visit-counter">
+        방문자 수 (세션·경로 기준):
+        <span id="visit-count" class="font-semibold text-slate-300">불러오는 중...</span>
+      </p>
     </div>
   </footer>
 
+  <!-- Visitor Counter -->
+  <script>
+  (function () {
+    'use strict';
+
+    if (window.__chanceVisitCounterInitialized) return;
+    window.__chanceVisitCounterInitialized = true;
+
+    const counterEl = document.getElementById('visit-count');
+    if (!counterEl) return;
+
+    const API_BASE = 'https://countapi.mileshilliard.com/api/v1';
+    const COUNTER_KEY = 'shine88pc_chanceblog_page_views_v1';
+    const sessionKey =
+      'chance_visit_counted_v1:' + location.pathname;
+
+    function showCount(value) {
+      const count = Number(value);
+
+      if (!Number.isSafeInteger(count) || count < 0) {
+        throw new Error('Invalid counter value');
+      }
+
+      counterEl.textContent = count.toLocaleString();
+    }
+
+    async function requestCount(endpoint) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+
+      try {
+        const response = await fetch(
+          API_BASE + '/' + endpoint + '/' +
+            encodeURIComponent(COUNTER_KEY),
+          {
+            method: 'GET',
+            signal: controller.signal,
+            cache: 'no-store'
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error('Counter API HTTP ' + response.status);
+        }
+
+        const data = await response.json();
+
+        if (!data || data.value === undefined || data.value === null) {
+          throw new Error('Counter API response has no value');
+        }
+
+        const value = Number(data.value);
+
+        if (!Number.isSafeInteger(value) || value < 0) {
+          throw new Error('Counter API returned an invalid value');
+        }
+
+        return value;
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+
+    async function initCounter() {
+      let alreadyCounted;
+
+      // 세션 저장소가 정상적으로 작동하는지 확인한다.
+      try {
+        sessionStorage.setItem('__chance_counter_probe', '1');
+        sessionStorage.removeItem('__chance_counter_probe');
+
+        alreadyCounted = sessionStorage.getItem(sessionKey) === '1';
+      } catch (error) {
+        console.warn(
+          'Visit counter: sessionStorage unavailable.',
+          error
+        );
+
+        // 저장소 사용이 불가능하면 신규 집계 없이 조회만 수행한다.
+        try {
+          showCount(await requestCount('get'));
+        } catch (readError) {
+          console.warn('Visit counter read failed.', readError);
+          counterEl.textContent = '-';
+        }
+
+        return;
+      }
+
+      // 같은 세션에서 같은 경로를 이미 집계 시도했다면 조회만 한다.
+      if (alreadyCounted) {
+        try {
+          showCount(await requestCount('get'));
+        } catch (error) {
+          console.warn('Visit counter read failed.', error);
+          counterEl.textContent = '-';
+        }
+
+        return;
+      }
+
+      // HIT 요청 전에 세션 표시를 저장해 중복 재시도를 방지한다.
+      try {
+        sessionStorage.setItem(sessionKey, '1');
+      } catch (error) {
+        console.warn(
+          'Visit counter marker could not be saved.',
+          error
+        );
+
+        counterEl.textContent = '-';
+        return;
+      }
+
+      // 기본 API만 집계한다.
+      // 실패 시 다른 서비스에 HIT를 보내지 않는다.
+      try {
+        showCount(await requestCount('hit'));
+      } catch (error) {
+        console.warn('Visit counter increment failed.', error);
+        counterEl.textContent = '-';
+      }
+    }
+
+    initCounter().catch(function (error) {
+      console.warn(
+        'Visit counter initialization failed.',
+        error
+      );
+
+      counterEl.textContent = '-';
+    });
+  })();
+  </script>
+  
   <!-- Application Script -->
   <script>
     // ==========================================
