@@ -281,8 +281,15 @@ layout: null
       <p class="text-sm text-slate-500 max-w-sm mx-auto">다른 키워드로 검색하거나 카테고리 필터를 변경해 보세요.</p>
     </div>
 
-    <!-- Posts Grid -->
-    <div id="post-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+    <div id="post-carousel-controls" class="mb-3 flex items-center justify-between gap-3" aria-label="게시글 가로 목록 탐색">
+      <p id="post-carousel-hint" class="text-xs text-slate-500">좌우로 넘겨 더 많은 글을 살펴보세요</p>
+      <div class="flex items-center gap-2">
+        <button id="post-carousel-prev" type="button" class="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-700 bg-slate-900 text-slate-200 transition hover:border-blue-400/50 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40" aria-label="이전 게시글 보기" disabled><i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button>
+        <button id="post-carousel-next" type="button" class="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-700 bg-slate-900 text-slate-200 transition hover:border-blue-400/50 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40" aria-label="다음 게시글 보기" disabled><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button>
+      </div>
+    </div>
+    <!-- Horizontal Posts Carousel -->
+    <div id="post-grid" class="flex snap-x snap-mandatory gap-5 overflow-x-auto scroll-smooth pb-5" tabindex="0" aria-label="게시글 목록. 좌우로 스크롤할 수 있습니다.">
       <!-- Post cards injected here -->
     </div>
   </main>
@@ -750,6 +757,7 @@ layout: null
 
       if (filtered.length === 0) {
         grid.innerHTML = '';
+        updatePostCarouselControls();
         if (featuredEl) {
           featuredEl.innerHTML = '';
           featuredEl.classList.add('hidden');
@@ -781,7 +789,7 @@ layout: null
       }
       const visiblePosts = featuredPost ? filtered.slice(1) : filtered;
       grid.innerHTML = visiblePosts.map((post, idx) => `
-        <article class="group bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden hover:border-slate-700 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl flex flex-col justify-between">
+        <article class="group min-w-[84%] max-w-[84%] shrink-0 snap-start bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden hover:border-slate-700 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl flex flex-col justify-between sm:min-w-[48%] sm:max-w-[48%] xl:min-w-[32%] xl:max-w-[32%]">
           <div>
             <a href="${post.url}" class="relative aspect-video w-full overflow-hidden bg-slate-800 block" aria-label="${post.title} 글 읽기">
               <img src="${post.image}" alt="${post.title}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" onerror="this.src='${defaultThumbnails[0]}'">
@@ -823,6 +831,28 @@ layout: null
 
       // Store current filtered list for modal index lookup
       window.currentFilteredPosts = filtered;
+      grid.scrollTo({ left: 0, behavior: 'auto' });
+      updatePostCarouselControls();
+    }
+
+    function updatePostCarouselControls() {
+      const grid = document.getElementById('post-grid');
+      const previous = document.getElementById('post-carousel-prev');
+      const next = document.getElementById('post-carousel-next');
+      const hint = document.getElementById('post-carousel-hint');
+      if (!grid || !previous || !next) return;
+      const maxScroll = Math.max(0, grid.scrollWidth - grid.clientWidth);
+      previous.disabled = grid.scrollLeft <= 2;
+      next.disabled = grid.scrollLeft >= maxScroll - 2;
+      if (hint) hint.textContent = maxScroll > 2 ? '좌우로 스와이프하거나 화살표를 눌러 더 많은 글을 살펴보세요' : `${grid.children.length}개의 게시글`;
+    }
+
+    function movePostCarousel(direction) {
+      const grid = document.getElementById('post-grid');
+      const firstCard = grid?.firstElementChild;
+      if (!grid || !firstCard) return;
+      const gap = Number.parseFloat(getComputedStyle(grid).columnGap) || 0;
+      grid.scrollBy({ left: direction * (firstCard.getBoundingClientRect().width + gap), behavior: 'smooth' });
     }
 
     // Post Modal Controller
@@ -956,6 +986,10 @@ layout: null
 
       // Execute post loading
       fetchPostList();
+      document.getElementById('post-carousel-prev')?.addEventListener('click', () => movePostCarousel(-1));
+      document.getElementById('post-carousel-next')?.addEventListener('click', () => movePostCarousel(1));
+      document.getElementById('post-grid')?.addEventListener('scroll', updatePostCarouselControls, { passive: true });
+      window.addEventListener('resize', updatePostCarouselControls);
       document.getElementById('daily-publishing-refresh')?.addEventListener('click', refreshDailyPublishingStats);
       window.setInterval(() => {
         if (document.visibilityState === 'visible') refreshDailyPublishingStats();
