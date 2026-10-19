@@ -12,6 +12,7 @@ import re
 import json
 import zlib
 import html
+import random
 import difflib
 import datetime
 from email.utils import parsedate_to_datetime
@@ -756,7 +757,7 @@ def is_tech_title(title):
 NEWS_MAX_AGE_HOURS = 36
 EPOCH = datetime.datetime.min.replace(tzinfo=timezone.utc)
 
-# 기술을 포함하되 한 분야에 고정되지 않도록, 게시 슬롯별 편집 축을 순환합니다.
+# 기술을 포함하되 한 분야에 고정되지 않도록, 여러 편집 축의 후보를 둡니다.
 EDITORIAL_LANES = {
     "science": {
         "label": "과학·환경", "kr_category": "과학·환경",
@@ -789,11 +790,6 @@ EDITORIAL_LANES = {
         "focus": "일상생활, 심리, 건강, 가족, 도시와 사람들이 매일 겪는 변화",
     },
 }
-SLOT_EDITORIAL_LANES = {
-    2: "science", 5: "economy", 8: "society",
-    13: "technology", 18: "culture", 22: "daily_life",
-}
-
 _GN_KO = "https://news.google.com/rss/search?q={q}&hl=ko&gl=KR&ceid=KR:ko"
 _GN_EN = "https://news.google.com/rss/search?q={q}&hl=en-US&gl=US&ceid=US:en"
 
@@ -1060,17 +1056,25 @@ def pick_topic_candidates(titles, allow_auto_topic=True, editorial_lane=None):
 
 
 def choose_editorial_lane(slot, history):
-    """슬롯별 분야를 고정하고, 수동 실행은 최근 사용량이 적은 분야를 고른다."""
-    if slot in SLOT_EDITORIAL_LANES:
-        return SLOT_EDITORIAL_LANES[slot]
-    counts = {lane: 0 for lane in EDITORIAL_LANES}
-    for item in history:
-        if isinstance(item, dict) and item.get("lane") in counts:
-            counts[item["lane"]] += 1
+    """최근 발행 편중을 줄이면서 슬롯별로 재현 가능한 확률 선택을 합니다."""
     lanes = list(EDITORIAL_LANES)
-    start = datetime.datetime.now(KST).date().toordinal() % len(lanes)
-    tie_order = lanes[start:] + lanes[:start]
-    return min(tie_order, key=lambda lane: counts[lane])
+    recent = [item.get("lane") for item in history[-12:]
+              if isinstance(item, dict) and item.get("lane") in EDITORIAL_LANES]
+    counts = {lane: recent.count(lane) for lane in lanes}
+    weights = {}
+    for lane in lanes:
+        # 최근 자주 나온 분야의 확률을 낮추되 0으로 만들지 않아 유행 분야도 계속 후보로 둡니다.
+        weights[lane] = 1.0 / (1.0 + counts[lane] * 0.65)
+        if recent and recent[-1] == lane:
+            weights[lane] *= 0.25
+        elif len(recent) > 1 and recent[-2] == lane:
+            weights[lane] *= 0.6
+
+    now = now_kst()
+    latest = history[-1] if history else None
+    latest_key = (latest.get("date", ""), latest.get("topic", "")) if isinstance(latest, dict) else str(latest or "")
+    seed = f"{now:%Y-%m-%d}|{slot}|{len(history)}|{latest_key}"
+    return random.Random(seed).choices(lanes, weights=[weights[lane] for lane in lanes], k=1)[0]
 
 
 # ============================================================
