@@ -756,33 +756,92 @@ def is_tech_title(title):
 NEWS_MAX_AGE_HOURS = 36
 EPOCH = datetime.datetime.min.replace(tzinfo=timezone.utc)
 
+# 기술을 포함하되 한 분야에 고정되지 않도록, 게시 슬롯별 편집 축을 순환합니다.
+EDITORIAL_LANES = {
+    "science": {
+        "label": "과학·환경", "kr_category": "과학·환경",
+        "en_category": "Science & Environment",
+        "focus": "과학적 발견, 기후·환경, 공중보건과 그것이 사람과 지역사회에 미치는 변화",
+    },
+    "economy": {
+        "label": "경제·일", "kr_category": "경제·일",
+        "en_category": "Economy & Work",
+        "focus": "경제, 산업, 소비, 주거, 노동과 일의 변화",
+    },
+    "society": {
+        "label": "사회·정책", "kr_category": "사회·정책",
+        "en_category": "Society & Policy",
+        "focus": "사회 변화, 공공정책, 교육, 노동권과 공동체",
+    },
+    "technology": {
+        "label": "기술·미래", "kr_category": "기술·미래",
+        "en_category": "Technology & Future",
+        "focus": "인공지능, 디지털 서비스, 하드웨어, 우주와 신기술",
+    },
+    "culture": {
+        "label": "문화·미디어", "kr_category": "문화·미디어",
+        "en_category": "Culture & Media",
+        "focus": "문화, 대중매체, 게임, 창작과 콘텐츠 산업",
+    },
+    "daily_life": {
+        "label": "일상·마음", "kr_category": "일상·마음",
+        "en_category": "Everyday Life",
+        "focus": "일상생활, 심리, 건강, 가족, 도시와 사람들이 매일 겪는 변화",
+    },
+}
+SLOT_EDITORIAL_LANES = {
+    2: "science", 5: "economy", 8: "society",
+    13: "technology", 18: "culture", 22: "daily_life",
+}
+
 _GN_KO = "https://news.google.com/rss/search?q={q}&hl=ko&gl=KR&ceid=KR:ko"
 _GN_EN = "https://news.google.com/rss/search?q={q}&hl=en-US&gl=US&ceid=US:en"
 
 # 소스는 실패해도 건너뛰기만 합니다. 로그의 '소스 ...: N건' 줄로 동작 여부를 확인하고,
 # 계속 0건/실패인 소스는 이 목록에서 지우세요. (직접 RSS 주소는 사이트 사정으로 바뀔 수 있음)
 NEWS_SOURCES = [
+    # 분야별 Google News 검색. 실행 슬롯은 해당 분야의 소스만 읽습니다.
+    {"name": "Google뉴스 KR 과학·환경", "google": True, "lane": "science",
+     "url": _GN_KO.format(q=urllib.parse.quote_plus("과학 기후 환경 보건 연구 when:2d"))},
+    {"name": "Google뉴스 US Science & Climate", "google": True, "lane": "science",
+     "url": _GN_EN.format(q=urllib.parse.quote_plus("science climate environment public health research when:2d"))},
+    {"name": "Google뉴스 KR 경제·일", "google": True, "lane": "economy",
+     "url": _GN_KO.format(q=urllib.parse.quote_plus("경제 소비 일자리 산업 주거 when:2d"))},
+    {"name": "Google뉴스 US Economy & Work", "google": True, "lane": "economy",
+     "url": _GN_EN.format(q=urllib.parse.quote_plus("economy jobs wages housing cost of living when:2d"))},
+    {"name": "Google뉴스 KR 사회·정책", "google": True, "lane": "society",
+     "url": _GN_KO.format(q=urllib.parse.quote_plus("사회 정책 교육 노동 공동체 when:2d"))},
+    {"name": "Google뉴스 US Society & Policy", "google": True, "lane": "society",
+     "url": _GN_EN.format(q=urllib.parse.quote_plus("education labor public policy social change when:2d"))},
+    {"name": "Google뉴스 KR 문화·미디어", "google": True, "lane": "culture",
+     "url": _GN_KO.format(q=urllib.parse.quote_plus("문화 콘텐츠 미디어 게임 출판 when:2d"))},
+    {"name": "Google뉴스 US Culture & Media", "google": True, "lane": "culture",
+     "url": _GN_EN.format(q=urllib.parse.quote_plus("culture media entertainment games publishing when:2d"))},
+    {"name": "Google뉴스 KR 일상·마음", "google": True, "lane": "daily_life",
+     "url": _GN_KO.format(q=urllib.parse.quote_plus("생활 건강 심리 가족 도시 when:2d"))},
+    {"name": "Google뉴스 US Everyday Life", "google": True, "lane": "daily_life",
+     "url": _GN_EN.format(q=urllib.parse.quote_plus("everyday life psychology health family cities when:2d"))},
     # Google News 검색 (국내/해외, 가장 안정적인 기반)
-    {"name": "Google뉴스 KR AI·테크", "google": True,
+    {"name": "Google뉴스 KR AI·테크", "google": True, "lane": "technology",
      "url": _GN_KO.format(q="AI+%ED%85%8C%ED%81%AC+%EA%B8%B0%EC%88%A0")},
-    {"name": "Google뉴스 KR 과학기술 토픽", "google": True, "tech_filter": True,
+    {"name": "Google뉴스 KR 과학기술 토픽", "google": True, "lane": "technology", "tech_filter": True,
      "url": "https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGRqTVhZU0FtdHZHZ0pMVWlnQVAB?hl=ko&gl=KR&ceid=KR:ko"},
-    {"name": "Google뉴스 US AI", "google": True,
+    {"name": "Google뉴스 US AI", "google": True, "lane": "technology",
      "url": _GN_EN.format(q="artificial+intelligence+when%3A1d")},
-    {"name": "Google뉴스 US 반도체·로봇·우주", "google": True,
+    {"name": "Google뉴스 US 반도체·로봇·우주", "google": True, "lane": "technology",
      "url": _GN_EN.format(q="semiconductor+OR+robotics+OR+spaceflight+when%3A1d")},
     # 해외 직접 RSS
-    {"name": "TechCrunch", "url": "https://techcrunch.com/feed/"},
-    {"name": "The Verge", "url": "https://www.theverge.com/rss/index.xml"},
-    {"name": "Ars Technica", "url": "https://feeds.arstechnica.com/arstechnica/index"},
-    {"name": "MIT Technology Review", "url": "https://www.technologyreview.com/feed/"},
-    {"name": "IEEE Spectrum", "url": "https://spectrum.ieee.org/feeds/feed.rss"},
-    {"name": "Hacker News", "url": "https://news.ycombinator.com/rss"},
-    {"name": "BBC Technology", "url": "https://feeds.bbci.co.uk/news/technology/rss.xml"},
+    {"name": "TechCrunch", "lane": "technology", "url": "https://techcrunch.com/feed/"},
+    {"name": "The Verge", "lane": "technology", "url": "https://www.theverge.com/rss/index.xml"},
+    {"name": "Ars Technica", "lane": "technology", "url": "https://feeds.arstechnica.com/arstechnica/index"},
+    {"name": "MIT Technology Review", "lane": "technology", "url": "https://www.technologyreview.com/feed/"},
+    {"name": "IEEE Spectrum", "lane": "technology", "url": "https://spectrum.ieee.org/feeds/feed.rss"},
+    {"name": "Hacker News", "lane": "technology", "url": "https://news.ycombinator.com/rss"},
+    {"name": "BBC Technology", "lane": "technology", "url": "https://feeds.bbci.co.uk/news/technology/rss.xml"},
     # 국내 직접 RSS
-    {"name": "AI타임스", "url": "https://www.aitimes.com/rss/allArticle.xml"},
-    {"name": "전자신문", "url": "https://rss.etnews.com/Section901.xml"},
-    {"name": "블로터", "url": "https://www.bloter.net/feed"},
+    {"name": "AI타임스", "lane": "technology", "url": "https://www.aitimes.com/rss/allArticle.xml"},
+    {"name": "전자신문", "lane": "technology", "url": "https://rss.etnews.com/Section901.xml"},
+    {"name": "블로터", "lane": "technology", "url": "https://www.bloter.net/feed"},
 ]
 
 
@@ -835,12 +894,14 @@ def parse_feed(data):
     return items
 
 
-def fetch_news_items():
+def fetch_news_items(editorial_lane=None):
     """여러 소스에서 최근 기사 후보를 모아, 소스를 번갈아 섞은 목록으로 반환."""
     now = datetime.datetime.now(timezone.utc)
     max_age = timedelta(hours=NEWS_MAX_AGE_HOURS)
     per_source, ok_count = [], 0
     for src in NEWS_SOURCES:
+        if editorial_lane and src.get("lane") != editorial_lane:
+            continue
         try:
             req = urllib.request.Request(src["url"], headers={"User-Agent": UA})
             with urllib.request.urlopen(req, timeout=15) as resp:
@@ -882,11 +943,11 @@ def fetch_news_items():
     return merged
 
 
-def pick_topic_candidates(titles, allow_auto_topic=True):
+def pick_topic_candidates(titles, allow_auto_topic=True, editorial_lane=None):
     """기존 글과 비슷하지 않은 기사 최대 MAX_ATTEMPTS개.
     하나도 없으면: allow_auto_topic이면 [None](Gemini 자동 선정), 아니면 [](쓸 내용 없음)."""
     picked = []
-    for it in fetch_news_items():
+    for it in fetch_news_items(editorial_lane):
         if is_similar_to_any(it["title"], titles, 0.6):
             continue
         picked.append(it)
@@ -897,10 +958,31 @@ def pick_topic_candidates(titles, allow_auto_topic=True):
     return picked
 
 
+def choose_editorial_lane(slot, history):
+    """슬롯별 분야를 고정하고, 수동 실행은 최근 사용량이 적은 분야를 고른다."""
+    if slot in SLOT_EDITORIAL_LANES:
+        return SLOT_EDITORIAL_LANES[slot]
+    counts = {lane: 0 for lane in EDITORIAL_LANES}
+    for item in history:
+        if isinstance(item, dict) and item.get("lane") in counts:
+            counts[item["lane"]] += 1
+    lanes = list(EDITORIAL_LANES)
+    start = datetime.datetime.now(KST).date().toordinal() % len(lanes)
+    tie_order = lanes[start:] + lanes[:start]
+    return min(tie_order, key=lambda lane: counts[lane])
+
+
 # ============================================================
 # 글 생성
 # ============================================================
-def build_post_prompt(item, recent_titles, category_hint="", allow_skip=False):
+def build_post_prompt(item, recent_titles, category_hint="", allow_skip=False,
+                      editorial_lane="technology"):
+    lane = EDITORIAL_LANES.get(editorial_lane, EDITORIAL_LANES["technology"])
+    category_rule = (
+        f"- 요청된 카테고리 힌트 [{category_hint}]를 우선 사용하되, 주제와 다르면 억지로 적용하지 마세요.\n"
+        if category_hint else
+        f"- 본문 카테고리는 한국어에서 \"{lane['kr_category']}\", 영어에서 \"{lane['en_category']}\"를 사용하세요. 글의 핵심 주제가 편집 축과 맞지 않으면 다른 주제로 다시 고르세요.\n"
+    )
     if item:
         topic_text = item["title"]
         if item.get("source"):
@@ -913,8 +995,8 @@ def build_post_prompt(item, recent_titles, category_hint="", allow_skip=False):
             topic_text += ("\n[기사 요약 - 참고만 하고 문장을 그대로 옮기지 마세요]\n"
                            + item["summary"])
     else:
-        topic_text = ("최신 AI/기술 트렌드 중 아래 제외 목록과 겹치지 않는 "
-                      "새로운 주제를 직접 하나 선정하세요.")
+        topic_text = (f"최신 {lane['label']} 흐름 중 아래 제외 목록과 겹치지 않는 "
+                      "확인 가능한 새 주제를 직접 하나 선정하세요.")
     skip_rule = ('- 이 주제가 [최근 다룬 주제/제목]과 같은 사건이나 소재라면 글을 쓰지 말고 '
                  '{"skip": true, "reason": "..."} 만 반환하세요.\n') if allow_skip else ""
     source_rule = ("- 제공된 원문 링크를 사실 확인의 출발점으로 삼고, 확인된 사실과 분석·전망을 구분하세요.\n"
@@ -923,7 +1005,8 @@ def build_post_prompt(item, recent_titles, category_hint="", allow_skip=False):
                    "- 사실 주장과 전망을 구분하고, 확인할 수 없는 수치·인용·출처를 만들지 마세요.\n")
     hint = f"[카테고리 힌트] {category_hint}\n" if category_hint else ""
     return f"""
-당신은 개인 기술 전문 블로거 'Chance'입니다.
+당신은 기술, 경제, 사회, 과학, 문화와 일상을 함께 읽는 교양형 매거진 'Chance_Blog'의 편집자입니다.
+선택된 편집 축은 [{lane['label']}]이며, 이번 축의 중심 범위는 다음과 같습니다: {lane['focus']}.
 아래 주제를 바탕으로 독창적이고 사실에 신중한 블로그 글을 한국어와 영어로 각각 작성하세요.
 
 [주제]
@@ -934,6 +1017,9 @@ def build_post_prompt(item, recent_titles, category_hint="", allow_skip=False):
 
 [중요 지침]
 {skip_rule}- 제목, 카테고리, 태그를 주제에 맞게 작성하세요.
+- 이 매거진은 IT 전문 매체가 아닙니다. 이번 편집 축의 주제를 중심에 두고, 기술·경제·사회·문화·환경·교육·일상 중 실제로 연결되는 다른 관점 하나를 함께 설명하세요. 억지로 연결하지 말고, 관련이 약하면 주제 자체를 더 적합한 것으로 고르세요.
+- 사람들의 선택과 생활에 어떤 차이가 생기는지 구체적으로 설명하고, 누가 이익을 얻거나 비용을 부담하는지 살펴보세요. 한 분야의 전문성은 유지하되 독자가 다른 분야와 연결해 생각할 수 있게 하세요.
+{category_rule}- 글은 한 편 안에서 독립적으로 이해되어야 하며, 출처 링크와 근거를 본문 끝에 제공합니다.
 - 독자가 실제로 궁금해할 질문에 먼저 답하고, 제목은 핵심 검색어와 글의 결론을 정확하게 담으세요. 과장·낚시성 표현은 피하세요.
 - 첫 문단에서 핵심 결론과 왜 중요한지 설명하고, 본문에는 배경, 확인된 사실, 영향, 한계 또는 반론을 구분해 담으세요.
 - 소스 요약을 문단별로 바꾸어 쓰는 데 그치지 말고, 독자에게 유용한 비교·맥락·실행 가능한 시사점을 제공하세요. 근거가 부족하면 추측으로 채우지 말고 skip을 반환하세요.
@@ -950,11 +1036,11 @@ def build_post_prompt(item, recent_titles, category_hint="", allow_skip=False):
 - JSON 객체만 반환하고 코드 펜스는 쓰지 마세요.
 
 {{
-  "kr_category": "KR - 카테고리명",
+  "kr_category": "{lane['kr_category']}",
   "kr_title": "한국어 제목",
   "kr_tags": ["태그1", "태그2"],
   "kr_content": "한국어 Markdown 전체",
-  "en_category": "EN - CategoryName",
+  "en_category": "{lane['en_category']}",
   "en_title": "English Title",
   "en_tags": ["Tag1", "Tag2"],
   "en_content": "English Markdown full content",
@@ -1005,6 +1091,8 @@ def validate_post_data(data, kr_image, en_image):
                 front = re.sub(r"\n{2,}", "\n", front).rstrip()
                 front += f'\nlang: {prefix}\nimage: "{image_url}"'
                 content = f"---{front}\n---\n\n{body}"
+
+        content = _front_matter_set(content, "category", data[f"{prefix}_category"])
 
         if not re.search(r"(?m)^!\[[^\]]*\]\(", content):
             content = content.rstrip() + f"\n\n![Thumbnail]({image_url})\n"
@@ -1093,6 +1181,8 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
                         allow_auto_topic=True):
     posts = load_posts()
     history = read_history()
+    editorial_lane = choose_editorial_lane(slot, history)
+    print(f"편집 축: {EDITORIAL_LANES[editorial_lane]['label']}")
     titles = existing_titles(history, posts)
     used = used_keys_from_posts(posts)
     for item in history:
@@ -1106,7 +1196,7 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
     if topic_override:
         candidates = [{"title": topic_override, "source": "", "summary": ""}]
     else:
-        candidates = pick_topic_candidates(titles, allow_auto_topic)
+        candidates = pick_topic_candidates(titles, allow_auto_topic, editorial_lane)
     if not candidates:
         print("쓸 만한 새 기사가 없습니다. 글을 만들지 않습니다.")
         return None
@@ -1118,7 +1208,8 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
             candidate = stub_post_data(topic)
         else:
             resp = call_gemini_with_fallback(build_post_prompt(
-                item, recent_titles, category_hint, allow_skip=not topic_override))
+                item, recent_titles, category_hint, allow_skip=not topic_override,
+                editorial_lane=editorial_lane))
             candidate = extract_json_object(resp.text)
         if candidate.get("skip") is True:
             print(f"  Gemini가 중복 주제로 판단해 건너뜀: {candidate.get('reason', '')}")
@@ -1165,6 +1256,7 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
         "date": date_str, "topic": selected or "(자동 선정)",
         "kr_title": data["kr_title"], "en_title": data["en_title"],
         "kr_image": kr_image, "en_image": en_image, "slot": slot,
+        "lane": editorial_lane,
         "source": (selected_item or {}).get("source", ""),
         "source_url": (selected_item or {}).get("link", ""),
     })
@@ -1172,7 +1264,7 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
     trigger_download(kr_image)
     trigger_download(en_image)
     print("블로그 글 생성 완료:")
-    print(f"- KR: {kr_path}\n- EN: {en_path}\n- 주제: {selected or '(자동 선정)'}")
+    print(f"- KR: {kr_path}\n- EN: {en_path}\n- 편집 축: {EDITORIAL_LANES[editorial_lane]['label']}\n- 주제: {selected or '(자동 선정)'}")
     print(f"- 이미지: {kr_image}\n         {en_image}")
     return kr_path, en_path
 

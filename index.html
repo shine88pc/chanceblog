@@ -7,20 +7,20 @@ layout: null
   <meta name="naver-site-verification" content="3faf012d0ddfdde4fd75fa30219150948df41c18" />
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="인공지능, 우주·로보틱스, 하드웨어와 기술 정책의 최신 변화를 출처와 맥락을 바탕으로 쉽게 설명합니다.">
+  <meta name="description" content="기술, 경제, 사회, 과학, 문화와 일상의 변화를 연결해 맥락과 근거를 설명합니다.">
   <link rel="canonical" href="{{ '/' | absolute_url }}">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Chance_Blog">
-  <meta property="og:title" content="Chance_Blog | 테크·AI 분석 노트">
-  <meta property="og:description" content="인공지능, 우주·로보틱스, 하드웨어와 기술 정책의 최신 변화를 출처와 맥락을 바탕으로 쉽게 설명합니다.">
+  <meta property="og:title" content="Chance_Blog | 여러 분야를 잇는 관점 노트">
+  <meta property="og:description" content="기술, 경제, 사회, 과학, 문화와 일상의 변화를 연결해 맥락과 근거를 설명합니다.">
   <meta property="og:url" content="{{ '/' | absolute_url }}">
   {% assign featured_post = site.posts.first %}
   {% if featured_post.image %}<meta property="og:image" content="{{ featured_post.image | escape }}">{% endif %}
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Chance_Blog | 테크·AI 분석 노트">
-  <meta name="twitter:description" content="인공지능, 우주·로보틱스, 하드웨어와 기술 정책의 최신 변화를 출처와 맥락을 바탕으로 쉽게 설명합니다.">
+  <meta name="twitter:title" content="Chance_Blog | 여러 분야를 잇는 관점 노트">
+  <meta name="twitter:description" content="기술, 경제, 사회, 과학, 문화와 일상의 변화를 연결해 맥락과 근거를 설명합니다.">
   <link rel="alternate" type="application/rss+xml" title="Chance_Blog RSS" href="{{ '/feed.xml' | relative_url }}">
-  <title>⚡ Chance_Blog | 테크·AI 분석 노트</title>
+  <title>⚡ Chance_Blog | 여러 분야를 잇는 관점 노트</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Marked.js for Markdown Parsing -->
@@ -124,22 +124,31 @@ layout: null
     <div class="mx-auto grid max-w-6xl items-center gap-7 md:grid-cols-[1.02fr_.98fr] md:gap-5">
       <div class="relative z-10 space-y-4 text-center md:text-left">
         <div class="chance-kicker editorial-label inline-flex items-center gap-2 rounded-full border border-blue-400/25 px-3 py-1.5 text-[10px] font-bold uppercase text-blue-200 md:text-xs">
-          <span class="text-amber-300">✦</span><span>Technology field notes</span>
+          <span class="text-amber-300">✦</span><span>Ideas across fields</span>
         </div>
         <h1 class="text-3xl font-black leading-tight tracking-tight text-slate-50 md:text-5xl lg:text-[3.35rem]">
-          기술의 다음 장면을<br><span class="bg-gradient-to-r from-blue-300 via-indigo-300 to-amber-200 bg-clip-text text-transparent">먼저 읽습니다.</span>
+          세상은 한 분야로만<br><span class="bg-gradient-to-r from-blue-300 via-indigo-300 to-amber-200 bg-clip-text text-transparent">움직이지 않으니까.</span>
         </h1>
         <p class="mx-auto max-w-xl text-sm leading-7 text-slate-300 md:mx-0 md:text-base">
-          AI부터 우주·로보틱스까지, 뉴스 한 줄 너머의 변화와 맥락을 출처와 함께 살펴봅니다.
+          기술·경제·사회·과학·문화와 일상. 한 분야의 깊이와 여러 분야를 잇는 시선으로 변화의 맥락을 읽습니다.
         </p>
         <div class="flex flex-wrap items-center justify-center gap-3 pt-1 md:justify-start">
           <a href="#post-grid" class="inline-flex items-center gap-2 rounded-xl bg-blue-500 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-blue-950/50 transition hover:bg-blue-400">최신 글 둘러보기 <i class="fa-solid fa-arrow-down text-xs"></i></a>
-          <span class="text-xs text-slate-400"><i class="fa-solid fa-book-open mr-1.5 text-indigo-300"></i>짧게 훑고, 깊게 읽는 기술 노트</span>
+          <span class="text-xs text-slate-400"><i class="fa-solid fa-book-open mr-1.5 text-indigo-300"></i>짧게 훑고, 넓게 연결하는 관점 노트</span>
         </div>
       </div>
       <div class="relative mx-auto w-full max-w-[540px] md:max-w-none">
-        <img src="{{ '/assets/chance-orbit.svg' | relative_url }}" alt="행성과 데이터 궤도를 그린 Chance Blog 기술 탐사 일러스트" class="chance-hero-art mx-auto block w-full" width="760" height="560" fetchpriority="high">
+        <img src="{{ '/assets/chance-ideas-map.svg' | relative_url }}" alt="과학, 경제, 사회, 기술, 문화와 일상을 상징하는 여섯 관점이 하나로 연결되는 일러스트" class="chance-hero-art mx-auto block w-full" width="760" height="560" fetchpriority="high">
         <span class="pointer-events-none absolute -right-2 top-8 hidden rounded-full border border-white/10 bg-slate-900/75 px-3 py-2 text-[10px] font-semibold tracking-widest text-cyan-200 shadow-xl backdrop-blur sm:block">EXPLORE WHAT'S NEXT</span>
+      </div>
+      <div class="col-span-full flex flex-wrap items-center justify-center gap-2 border-t border-white/10 pt-4 text-[11px] md:justify-start">
+        <span class="mr-1 font-semibold text-slate-500">읽는 관점</span>
+        <span class="rounded-full border border-cyan-200/10 bg-cyan-200/5 px-3 py-1.5 text-cyan-100">과학 · 환경</span>
+        <span class="rounded-full border border-emerald-200/10 bg-emerald-200/5 px-3 py-1.5 text-emerald-100">경제 · 일</span>
+        <span class="rounded-full border border-blue-200/10 bg-blue-200/5 px-3 py-1.5 text-blue-100">사회 · 정책</span>
+        <span class="rounded-full border border-violet-200/10 bg-violet-200/5 px-3 py-1.5 text-violet-100">기술 · 미래</span>
+        <span class="rounded-full border border-pink-200/10 bg-pink-200/5 px-3 py-1.5 text-pink-100">문화 · 미디어</span>
+        <span class="rounded-full border border-amber-200/10 bg-amber-200/5 px-3 py-1.5 text-amber-100">일상 · 마음</span>
       </div>
     </div>
   </section>
@@ -180,7 +189,7 @@ layout: null
         <div class="order-2 p-6 md:order-1 md:p-9 lg:p-11">
           <div class="editorial-label mb-4 inline-flex items-center gap-2 rounded-full border border-cyan-200/20 bg-cyan-200/5 px-3 py-1.5 text-[10px] font-bold uppercase text-cyan-200"><span class="h-1.5 w-1.5 rounded-full bg-cyan-300 shadow-[0_0_12px_#67e8f9]"></span>AI SHORTS · SERIES CONCEPT</div>
           <h2 id="shorts-title" class="mb-3 text-2xl font-black leading-tight text-white md:text-3xl">사람 대신, 상상의 동물이 묻습니다.</h2>
-          <p class="mb-5 max-w-xl text-sm leading-7 text-slate-300">가상 여우 기자가 AI 결정체를 인터뷰하는 짧은 기술 탐사. 현실인 척하지 않는 AI의 비주얼과, 확인 가능한 기술 이야기를 한 편에 담습니다.</p>
+          <p class="mb-5 max-w-xl text-sm leading-7 text-slate-300">가상 여우 기자가 AI 결정체를 인터뷰하는 짧은 탐사. 기술뿐 아니라 일·돈·문화·삶의 변화를, 현실인 척하지 않는 AI의 비주얼과 확인 가능한 근거로 풀어냅니다.</p>
           <div class="mb-6 grid gap-2 text-xs sm:grid-cols-3">
             <div class="rounded-xl border border-white/5 bg-white/[.035] p-3"><span class="mb-1 block text-cyan-200">01 · 질문</span><span class="text-slate-400">AI는 답을 어떻게 찾을까?</span></div>
             <div class="rounded-xl border border-white/5 bg-white/[.035] p-3"><span class="mb-1 block text-violet-200">02 · 비유</span><span class="text-slate-400">30초 안에 쉽게 풀기</span></div>

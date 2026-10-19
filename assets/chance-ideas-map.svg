@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 560" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">여섯 관점이 만나는 Chance Blog</title>
+  <desc id="desc">과학, 경제, 사회, 기술, 문화와 일상을 상징하는 여섯 장면이 빛나는 연결선으로 이어진 편집 일러스트</desc>
+  <defs>
+    <linearGradient id="back" x1="68" y1="34" x2="690" y2="537" gradientUnits="userSpaceOnUse"><stop stop-color="#182645"/><stop offset=".53" stop-color="#121B32"/><stop offset="1" stop-color="#251D36"/></linearGradient>
+    <linearGradient id="core" x1="300" y1="199" x2="467" y2="376" gradientUnits="userSpaceOnUse"><stop stop-color="#FFE29A"/><stop offset=".44" stop-color="#FFAF78"/><stop offset="1" stop-color="#D582D9"/></linearGradient>
+    <linearGradient id="link" x1="148" y1="155" x2="616" y2="427" gradientUnits="userSpaceOnUse"><stop stop-color="#73E5D3"/><stop offset=".48" stop-color="#A4A7FF"/><stop offset="1" stop-color="#F3BE7A"/></linearGradient>
+    <radialGradient id="ambient" cx="0" cy="0" r="1" gradientTransform="matrix(0 265 -349 0 380 273)" gradientUnits="userSpaceOnUse"><stop stop-color="#6879EF" stop-opacity=".2"/><stop offset="1" stop-color="#6879EF" stop-opacity="0"/></radialGradient>
+    <filter id="blur" x="218" y="120" width="325" height="324" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feGaussianBlur stdDeviation="30"/></filter>
+    <filter id="shadow" x="15" y="18" width="730" height="526" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#050918" flood-opacity=".45"/></filter>
+    <clipPath id="frame"><rect x="18" y="18" width="724" height="524" rx="34"/></clipPath>
+  </defs>
+  <g clip-path="url(#frame)">
+    <rect x="18" y="18" width="724" height="524" rx="34" fill="url(#back)"/>
+    <rect x="18" y="18" width="724" height="524" fill="url(#ambient)"/>
+    <path d="M18 418h724M18 458h724M18 498h724M78 18v524M138 18v524M198 18v524M258 18v524M318 18v524M378 18v524M438 18v524M498 18v524M558 18v524M618 18v524M678 18v524" stroke="#B4C3F7" stroke-opacity=".055"/>
+    <g stroke="url(#link)" stroke-width="2" stroke-dasharray="4 8" stroke-linecap="round" opacity=".72">
+      <path d="m380 274-213-119M380 274l213-119M380 274l-242 123M380 274l242 123M380 274l-78 182M380 274l78 182"/>
+    </g>
+    <circle cx="380" cy="283" r="128" fill="#827BE9" fill-opacity=".4" filter="url(#blur)"/>
+    <g filter="url(#shadow)">
+      <circle cx="168" cy="153" r="65" fill="#132B3B" stroke="#70D9CA" stroke-opacity=".64" stroke-width="2"/>
+      <circle cx="168" cy="153" r="48" fill="#1B4650" fill-opacity=".58"/>
+      <path d="M167 181c-27-24-29-49-12-64 11-10 24-2 25 7 3-8 14-13 23-4 15 16 3 39-36 61Z" fill="#77DEC4"/>
+      <path d="M165 178c9-18 16-31 31-45" stroke="#E7F7CC" stroke-width="3" stroke-linecap="round"/>
+      <path d="M147 195h43" stroke="#77DEC4" stroke-opacity=".6" stroke-width="3" stroke-linecap="round"/>
+
+      <circle cx="592" cy="153" r="65" fill="#28253C" stroke="#D795DE" stroke-opacity=".68" stroke-width="2"/>
+      <circle cx="592" cy="153" r="48" fill="#49324C" fill-opacity=".58"/>
+      <path d="M565 180h54M573 180v-25h11v25M590 180v-39h11v39M607 180v-17h10v17" stroke="#F0B7D9" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="m570 150 17-12 14 5 16-17" stroke="#FFE09A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><circle cx="617" cy="126" r="4" fill="#FFE09A"/>
+
+      <circle cx="138" cy="397" r="65" fill="#262942" stroke="#8CAEFF" stroke-opacity=".68" stroke-width="2"/>
+      <circle cx="138" cy="397" r="48" fill="#344468" fill-opacity=".58"/>
+      <circle cx="124" cy="381" r="10" fill="#AFD4FF"/><circle cx="152" cy="379" r="10" fill="#F1C4A4"/>
+      <path d="M105 425c1-19 7-31 19-31 13 0 20 12 21 31M134 425c1-20 7-32 19-32 13 0 19 12 20 32" fill="#96B9F4" fill-opacity=".75"/>
+      <path d="M116 406h45" stroke="#E2ECFF" stroke-width="2" stroke-linecap="round"/>
+
+      <circle cx="622" cy="397" r="65" fill="#252538" stroke="#F4BE76" stroke-opacity=".68" stroke-width="2"/>
+      <circle cx="622" cy="397" r="48" fill="#493A43" fill-opacity=".58"/>
+      <path d="M596 416h51M601 416v-29l21-18 21 18v29M613 416v-18h17v18" stroke="#FFD38A" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
+      <path d="M604 375h10M629 375h10" stroke="#FFF2D4" stroke-width="3" stroke-linecap="round"/>
+
+      <circle cx="302" cy="456" r="52" fill="#182B3F" stroke="#7DD3F3" stroke-opacity=".67" stroke-width="2"/>
+      <circle cx="302" cy="456" r="38" fill="#29495A" fill-opacity=".58"/>
+      <path d="M282 439h40v35h-40z" stroke="#A0E8F5" stroke-width="3"/><path d="M292 439v35M312 439v35M282 450h40M282 463h40" stroke="#A0E8F5" stroke-opacity=".8" stroke-width="2"/>
+      <circle cx="292" cy="450" r="3" fill="#FFE29A"/>
+
+      <circle cx="458" cy="456" r="52" fill="#2E253C" stroke="#E9A2D5" stroke-opacity=".68" stroke-width="2"/>
+      <circle cx="458" cy="456" r="38" fill="#563A55" fill-opacity=".58"/>
+      <path d="M438 435h17c7 0 11 4 11 10v32c0-7 4-10 11-10h3v-32h-14c-7 0-11 3-11 10 0-7-4-10-11-10h-6ZM455 445v31" stroke="#F3C1E4" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+
+      <circle cx="380" cy="278" r="83" fill="#1C2440" stroke="#E9C5A0" stroke-opacity=".48" stroke-width="2"/>
+      <circle cx="380" cy="278" r="68" fill="url(#core)" fill-opacity=".16" stroke="url(#core)" stroke-opacity=".8" stroke-width="2"/>
+      <path d="M380 229c-16 19-26 33-26 47a26 26 0 0 0 52 0c0-14-10-28-26-47Z" fill="url(#core)"/>
+      <path d="m355 313 25 13 25-13M364 329h32" stroke="#FFE5B4" stroke-opacity=".8" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="380" cy="278" r="5" fill="#FFF5D9"/>
+    </g>
+    <g font-family="Arial, sans-serif" fill="#D6E0FF">
+      <text x="65" y="73" font-size="11" font-weight="700" letter-spacing="2.8" fill="#B8C8FF">CHANCE_BLOG · IDEAS ACROSS FIELDS</text>
+      <text x="65" y="508" font-size="10" letter-spacing="2.1" fill="#A7B8E2">SCIENCE  ·  ECONOMY  ·  SOCIETY  ·  CULTURE  ·  EVERYDAY LIFE</text>
+    </g>
+    <rect x="18.75" y="18.75" width="722.5" height="522.5" rx="33.25" stroke="#BBC9FF" stroke-opacity=".19" stroke-width="1.5"/>
+  </g>
+</svg>
