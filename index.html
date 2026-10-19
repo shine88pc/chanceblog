@@ -400,7 +400,8 @@
       return { metadata, content };
     }
 
-    // Core recursive post-fetching logic
+    // Load the Jekyll-generated same-origin post index. This avoids making
+    // several GitHub API calls from every visitor's browser.
     async function fetchPostList() {
       const loadingEl = document.getElementById('loading-indicator');
       const emptyEl = document.getElementById('empty-state');
@@ -411,113 +412,33 @@
       if (postGrid) postGrid.innerHTML = '';
 
       try {
-        let mdFiles = [];
-
-        // Recursive folder traversal function for _posts/
-        async function traverseDirectory(path) {
-          const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${encodeURIComponent(path).replace(/%2F/g, '/')}`;
-          const res = await fetch(url);
-          if (!res.ok) {
-            throw new Error(`Directory traversal HTTP ${res.status}`);
-          }
-          const items = await res.json();
-          if (!Array.isArray(items)) return [];
-
-          let results = [];
-          for (const item of items) {
-            if (item.type === 'dir') {
-              const subItems = await traverseDirectory(item.path);
-              results = results.concat(subItems);
-            } else if (item.type === 'file' && (item.name.endsWith('.md') || item.name.endsWith('.markdown'))) {
-              results.push(item);
-            }
-          }
-          return results;
+        const indexUrl = new URL('posts.json', document.baseURI);
+        const response = await fetch(indexUrl, { cache: 'no-store' });
+        if (!response.ok) {
+          throw new Error(`Post index HTTP ${response.status}`);
         }
 
-        try {
-          mdFiles = await traverseDirectory('_posts');
-        } catch (traverseErr) {
-          console.warn('Standard traversal failed, executing Git Trees fallback:', traverseErr);
-          const treeRes = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/git/trees/${BRANCH}?recursive=1`);
-          if (treeRes.ok) {
-            const treeData = await treeRes.json();
-            if (treeData && treeData.tree) {
-              mdFiles = treeData.tree
-                .filter(node => node.path.startsWith('_posts/') && node.path.endsWith('.md'))
-                .map(node => ({
-                  name: node.path.split('/').pop(),
-                  path: node.path,
-                  download_url: `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${BRANCH}/${encodeURI(node.path)}`
-                }));
-            }
-          }
+        const posts = await response.json();
+        if (!Array.isArray(posts) || posts.length === 0) {
+          throw new Error('The generated post index is empty or invalid.');
         }
 
-        if (!mdFiles || mdFiles.length === 0) {
-          throw new Error('No markdown files could be retrieved.');
-        }
-
-        const promises = mdFiles.map(async (file) => {
-          try {
-            const downloadUrl = file.download_url || `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${BRANCH}/${encodeURI(file.path)}`;
-            const res = await fetch(downloadUrl);
-            if (!res.ok) return null;
-            const rawMarkdown = await res.text();
-            const { metadata, content } = parseFrontmatter(rawMarkdown);
-
-            let category = metadata.category || '';
-            if (!category) {
-              const parts = file.path.split('/');
-              category = parts.length > 2 ? decodeURIComponent(parts[1]) : 'General';
-            }
-
-            let lang = (metadata.lang || '').toLowerCase();
-            if (!lang) {
-              if (category.includes('KR') || file.name.includes('-KR-')) lang = 'kr';
-              else if (category.includes('EN') || file.name.includes('-EN-')) lang = 'en';
-              else lang = 'kr';
-            }
-
-            let date = metadata.date || '';
-            if (!date) {
-              const dateMatch = file.name.match(/^(\d{4}-\d{2}-\d{2})/);
-              if (dateMatch) date = dateMatch[1];
-            }
-
-            const title = metadata.title || file.name.replace(/\.md$/, '');
-            const image = metadata.image || getDefaultThumbnail(title);
-            const tags = Array.isArray(metadata.tags) ? metadata.tags : [];
-
-            // Clean preview excerpt
-            const previewText = content
-              .replace(/^#+\s+.*$/gm, '')
-              .replace(/!\[[^\]]*\]\([^)]+\)/g, '')
-              .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-              .replace(/[*_`#]/g, '')
-              .trim()
-              .slice(0, 160) + '...';
-
-            return {
-              path: file.path,
-              name: file.name,
-              title,
-              category,
-              lang,
-              date,
-              image,
-              tags,
-              content,
-              previewText
-            };
-          } catch (e) {
-            console.error('File load error:', file.path, e);
-            return null;
-          }
+        allPosts = posts.map(post => {
+          const title = String(post.title || post.name || '제목 없는 게시글');
+          return {
+            path: String(post.path || ''),
+            name: String(post.name || ''),
+            title,
+            category: String(post.category || 'General'),
+            lang: String(post.lang || 'kr').toLowerCase(),
+            date: String(post.date || ''),
+            image: String(post.image || getDefaultThumbnail(title)),
+            tags: Array.isArray(post.tags) ? post.tags.map(String) : [],
+            content: String(post.content || ''),
+            contentIsHtml: post.contentIsHtml === true,
+            previewText: String(post.previewText || '')
+          };
         });
-
-        const results = await Promise.all(promises);
-        allPosts = results.filter(p => p !== null);
         allPosts.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 
         buildCategoryFilters();
@@ -658,8 +579,11 @@
         coverContainer.classList.add('hidden');
       }
 
-      // Markdown Parse via marked.js
-      if (typeof marked !== 'undefined') {
+      // The generated index contains Jekyll-rendered HTML. Keep the Markdown
+      // parser for any legacy index entry that still contains raw Markdown.
+      if (post.contentIsHtml) {
+        body.innerHTML = post.content;
+      } else if (typeof marked !== 'undefined') {
         body.innerHTML = marked.parse(post.content);
       } else {
         body.innerText = post.content;
