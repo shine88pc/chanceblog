@@ -12,6 +12,3 @@ plugins:
 # 깔끔한 반응형 공식 테마 적용
 theme: minima
 
-# 상단 메뉴 설정
-header_pages:
-  - index.md
