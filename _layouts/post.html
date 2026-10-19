@@ -19,10 +19,15 @@ layout: default
   .chance-post .post-meta { color: #94a3b8; font-size: .9rem; }
   .chance-post .post-tags a { display: inline-block; margin: .25rem .35rem .25rem 0; }
   .chance-post .related-posts { border-top: 1px solid #334155; margin-top: 2.5rem; padding-top: 1.5rem; }
+  .chance-reading-progress { position: fixed; inset: 0 auto auto 0; z-index: 60; height: 3px; width: 0; background: linear-gradient(90deg, #3b82f6, #fbbf24); }
+  .chance-post .reading-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; margin: 1.25rem 0 2rem; padding-bottom: 1rem; border-bottom: 1px solid #1e293b; }
+  .chance-post .reading-tools a, .chance-post .reading-tools button { border: 1px solid #334155; border-radius: .6rem; padding: .5rem .75rem; background: #0f172a; color: #cbd5e1; text-decoration: none; font: inherit; cursor: pointer; }
+  .chance-post .reading-tools a:hover, .chance-post .reading-tools button:hover { border-color: #3b82f6; color: #fff; }
   @media (max-width: 600px) { .site-title { font-size: 1.1rem; } }
 </style>
 
 <article class="chance-post">
+  <div class="chance-reading-progress" id="reading-progress" aria-hidden="true"></div>
   <nav aria-label="Breadcrumb" class="post-meta">
     <a href="{{ '/' | relative_url }}">⚡ Chance_Blog</a>
     {% if page.category %}<span aria-hidden="true"> / </span>{{ page.category | escape }}{% endif %}
@@ -40,7 +45,11 @@ layout: default
     {% endif %}
   </header>
 
-  <p><button type="button" id="share-post" class="post-meta">글 공유하기</button></p>
+  <nav class="reading-tools" aria-label="읽기 도구">
+    <a href="{{ '/' | relative_url }}">← 글 목록</a>
+    <span class="post-meta">읽는 시간 약 <span id="reading-time">계산 중</span></span>
+    <button type="button" id="share-post">글 공유하기</button>
+  </nav>
 
   <div class="post-content">
     {{ content }}
@@ -59,6 +68,16 @@ layout: default
       {% if related_count >= 3 %}{% break %}{% endif %}
     {% endif %}
   {% endfor %}
+  {% if related_count == 0 %}
+    {% for related_post in site.posts %}
+      {% if related_post.url != page.url and related_post.lang == page.lang %}
+        {% if related_count == 0 %}<aside class="related-posts"><h2>이어서 읽기</h2><ul>{% endif %}
+        <li><a href="{{ related_post.url | relative_url }}">{{ related_post.title | escape }}</a></li>
+        {% assign related_count = related_count | plus: 1 %}
+        {% if related_count >= 3 %}{% break %}{% endif %}
+      {% endif %}
+    {% endfor %}
+  {% endif %}
   {% if related_count > 0 %}</ul></aside>{% endif %}
 
   <p><a href="{{ '/' | relative_url }}">← 전체 글 목록으로</a></p>
@@ -66,6 +85,23 @@ layout: default
 
 <script>
   (() => {
+    const article = document.querySelector('.chance-post .post-content');
+    const progress = document.getElementById('reading-progress');
+    const readingTime = document.getElementById('reading-time');
+    if (article && readingTime) {
+      const words = (article.innerText || '').trim().split(/\s+/).filter(Boolean).length;
+      readingTime.textContent = `${Math.max(1, Math.ceil(words / 220))}분`;
+    }
+    const updateProgress = () => {
+      if (!article || !progress) return;
+      const articleTop = article.getBoundingClientRect().top + window.scrollY;
+      const distance = article.offsetHeight - window.innerHeight;
+      const percent = distance <= 0 ? 100 : Math.min(100, Math.max(0, ((window.scrollY - articleTop) / distance) * 100));
+      progress.style.width = `${percent}%`;
+    };
+    window.addEventListener('scroll', updateProgress, { passive: true });
+    window.addEventListener('resize', updateProgress);
+    updateProgress();
     const button = document.getElementById('share-post');
     if (!button) return;
     button.addEventListener('click', async () => {

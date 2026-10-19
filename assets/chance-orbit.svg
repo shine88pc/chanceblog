@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 560" fill="none" role="img" aria-labelledby="title description">
+  <title id="title">Chance Blog 기술 탐사 일러스트</title>
+  <desc id="description">빛나는 행성, 데이터 궤도와 기술 신호를 표현한 벡터 일러스트</desc>
+  <defs>
+    <linearGradient id="panel" x1="120" y1="42" x2="650" y2="520" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#142449"/><stop offset=".58" stop-color="#0B1632"/><stop offset="1" stop-color="#090F20"/>
+    </linearGradient>
+    <linearGradient id="planet" x1="290" y1="168" x2="493" y2="390" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFDA7A"/><stop offset=".32" stop-color="#F5A75B"/><stop offset=".72" stop-color="#E36F7C"/><stop offset="1" stop-color="#7D55CE"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="160" y1="280" x2="630" y2="330" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#54D9F3" stop-opacity="0"/><stop offset=".27" stop-color="#54D9F3"/><stop offset=".68" stop-color="#9B8CFF"/><stop offset="1" stop-color="#F7C96C" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="beam" x1="376" y1="215" x2="558" y2="440" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#70E4FF" stop-opacity=".7"/><stop offset="1" stop-color="#70E4FF" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="matrix(0 220 -270 0 390 286)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5678FF" stop-opacity=".22"/><stop offset="1" stop-color="#5678FF" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="softGlow" x="220" y="95" width="350" height="370" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="25"/>
+    </filter>
+    <clipPath id="clip"><rect x="22" y="22" width="716" height="516" rx="36"/></clipPath>
+  </defs>
+  <g clip-path="url(#clip)">
+    <rect x="22" y="22" width="716" height="516" rx="36" fill="url(#panel)"/>
+    <rect x="22" y="22" width="716" height="516" fill="url(#glow)"/>
+    <path d="M22 412h716M22 442h716M22 472h716M22 502h716M92 22v516M152 22v516M212 22v516M272 22v516M332 22v516M392 22v516M452 22v516M512 22v516M572 22v516M632 22v516M692 22v516" stroke="#8DA8FF" stroke-opacity=".07"/>
+    <circle cx="109" cy="104" r="2" fill="#D4E5FF"/><circle cx="191" cy="75" r="1.5" fill="#D4E5FF"/><circle cx="617" cy="92" r="2" fill="#D4E5FF"/><circle cx="667" cy="199" r="1.5" fill="#D4E5FF"/><circle cx="92" cy="279" r="1.5" fill="#D4E5FF"/><circle cx="625" cy="359" r="2" fill="#D4E5FF"/><circle cx="178" cy="367" r="1.5" fill="#D4E5FF"/><circle cx="558" cy="117" r="1.2" fill="#D4E5FF"/>
+    <path d="M139 319c74-129 183-198 293-170 96 24 162 124 166 217" stroke="#6BAAFB" stroke-opacity=".22" stroke-width="1.5" stroke-dasharray="5 9"/>
+    <path d="M177 365c84-56 183-83 284-66 67 12 123 40 163 81" stroke="url(#ring)" stroke-width="2.5"/>
+    <ellipse cx="390" cy="301" rx="230" ry="88" transform="rotate(-17 390 301)" stroke="url(#ring)" stroke-width="2"/>
+    <ellipse cx="390" cy="301" rx="281" ry="121" transform="rotate(-17 390 301)" stroke="#96A9FF" stroke-opacity=".18" stroke-width="1.2" stroke-dasharray="3 9"/>
+    <circle cx="390" cy="287" r="133" fill="#5D55D9" opacity=".4" filter="url(#softGlow)"/>
+    <path d="M395 187c-46 0-84 37-84 83 0 72 81 147 81 147s88-76 88-147c0-46-38-83-85-83Z" fill="url(#planet)"/>
+    <path d="M319 239c27-25 72-39 118-31M316 261c37-23 95-29 151-10M327 291c41-19 89-18 139 1M346 323c36-13 72-11 105 2M372 356c25-7 48-6 69 2" stroke="#FFF1D0" stroke-opacity=".35" stroke-width="7" stroke-linecap="round"/>
+    <path d="M331 216c19-16 42-24 67-25" stroke="#FFF7DF" stroke-opacity=".75" stroke-width="4" stroke-linecap="round"/>
+    <circle cx="202" cy="354" r="12" fill="#101B39" stroke="#61E4F5" stroke-width="2"/><circle cx="202" cy="354" r="4" fill="#61E4F5"/>
+    <circle cx="592" cy="249" r="9" fill="#101B39" stroke="#B3A3FF" stroke-width="2"/><circle cx="592" cy="249" r="3" fill="#B3A3FF"/>
+    <path d="m470 357 94 93" stroke="url(#beam)" stroke-width="18" stroke-linecap="round"/>
+    <path d="m486 372 68 68" stroke="#9EEBFF" stroke-opacity=".65" stroke-width="1.5"/>
+    <g transform="translate(83 116)">
+      <rect width="142" height="76" rx="16" fill="#111D3C" fill-opacity=".9" stroke="#5D79C6" stroke-opacity=".55"/>
+      <circle cx="22" cy="23" r="5" fill="#6EE7F5"/><path d="M37 23h77" stroke="#B9CAFF" stroke-opacity=".55" stroke-width="3" stroke-linecap="round"/>
+      <path d="M17 53h28l10-13 11 17 11-10h49" stroke="#7A9BFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <g transform="translate(536 371)">
+      <rect width="125" height="90" rx="17" fill="#111D3C" fill-opacity=".94" stroke="#756BD2" stroke-opacity=".65"/>
+      <path d="M18 63h89" stroke="#52658E" stroke-width="1"/>
+      <path d="M23 57V43h12v14M47 57V28h12v29M71 57V36h12v21M95 57V20h7v37" fill="#7C86F8" fill-opacity=".8"/>
+      <path d="m22 35 27-14 23 7 32-16" stroke="#F6CB72" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="49" cy="21" r="3" fill="#F6CB72"/><circle cx="72" cy="28" r="3" fill="#F6CB72"/>
+    </g>
+    <g fill="#B9C7F4" font-family="Arial, sans-serif">
+      <text x="79" y="483" font-size="11" letter-spacing="2.7" opacity=".7">SIGNALS · IDEAS · WHAT'S NEXT</text>
+      <text x="80" y="507" font-size="9" letter-spacing="1.8" opacity=".48">A FIELD GUIDE TO EMERGING TECHNOLOGY</text>
+    </g>
+    <path d="M22 22h716v516H22z" stroke="#AFC1FF" stroke-opacity=".18" stroke-width="1.5"/>
+  </g>
+</svg>

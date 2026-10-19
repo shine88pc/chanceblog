@@ -48,6 +48,11 @@ layout: null
     }
   </script>
   <style>
+    .chance-hero { position: relative; isolation: isolate; overflow: hidden; }
+    .chance-hero::before { content: ''; position: absolute; z-index: -1; width: 32rem; height: 32rem; left: 50%; top: -24rem; border-radius: 50%; background: #315bce; filter: blur(120px); opacity: .2; }
+    .chance-hero-art { filter: drop-shadow(0 28px 60px rgba(15, 23, 42, .55)); }
+    .chance-kicker { background: linear-gradient(120deg, rgba(59,130,246,.16), rgba(139,92,246,.12)); }
+    .editorial-label { letter-spacing: .16em; }
     .prose img { border-radius: 0.75rem; margin: 1.5rem auto; max-height: 480px; object-fit: cover; }
     .prose h1 { font-size: 1.875rem; font-weight: 800; margin-top: 1.75rem; margin-bottom: 1rem; line-height: 1.3; }
     .prose h2 { font-size: 1.5rem; font-weight: 700; margin-top: 1.5rem; margin-bottom: 0.75rem; line-height: 1.35; }
@@ -112,22 +117,32 @@ layout: null
   </header>
 
   <!-- Hero Section -->
-  <section class="border-b border-slate-800/80 bg-gradient-to-b from-slate-900 to-slate-950 py-10 px-4">
-    <div class="max-w-6xl mx-auto text-center space-y-3">
-      <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs font-semibold tracking-wide">
-        <span>⚡ Technology, Explained with Context</span>
+  <section class="chance-hero border-b border-slate-800/80 bg-gradient-to-br from-slate-900 via-[#0d1730] to-slate-950 px-4 py-8 md:py-12">
+    <div class="mx-auto grid max-w-6xl items-center gap-7 md:grid-cols-[1.02fr_.98fr] md:gap-5">
+      <div class="relative z-10 space-y-4 text-center md:text-left">
+        <div class="chance-kicker editorial-label inline-flex items-center gap-2 rounded-full border border-blue-400/25 px-3 py-1.5 text-[10px] font-bold uppercase text-blue-200 md:text-xs">
+          <span class="text-amber-300">✦</span><span>Technology field notes</span>
+        </div>
+        <h1 class="text-3xl font-black leading-tight tracking-tight text-slate-50 md:text-5xl lg:text-[3.35rem]">
+          기술의 다음 장면을<br><span class="bg-gradient-to-r from-blue-300 via-indigo-300 to-amber-200 bg-clip-text text-transparent">먼저 읽습니다.</span>
+        </h1>
+        <p class="mx-auto max-w-xl text-sm leading-7 text-slate-300 md:mx-0 md:text-base">
+          AI부터 우주·로보틱스까지, 뉴스 한 줄 너머의 변화와 맥락을 출처와 함께 살펴봅니다.
+        </p>
+        <div class="flex flex-wrap items-center justify-center gap-3 pt-1 md:justify-start">
+          <a href="#post-grid" class="inline-flex items-center gap-2 rounded-xl bg-blue-500 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-blue-950/50 transition hover:bg-blue-400">최신 글 둘러보기 <i class="fa-solid fa-arrow-down text-xs"></i></a>
+          <span class="text-xs text-slate-400"><i class="fa-solid fa-book-open mr-1.5 text-indigo-300"></i>짧게 훑고, 깊게 읽는 기술 노트</span>
+        </div>
       </div>
-      <h1 class="text-3xl md:text-5xl font-black tracking-tight text-slate-100">
-        기술 뉴스의 맥락을 읽는 노트
-      </h1>
-      <p class="text-slate-400 text-sm md:text-base max-w-2xl mx-auto">
-        인공지능, 하드웨어, 우주·로보틱스와 기술 정책의 변화가 무엇을 의미하는지 출처와 함께 살펴봅니다.
-      </p>
+      <div class="relative mx-auto w-full max-w-[540px] md:max-w-none">
+        <img src="{{ '/assets/chance-orbit.svg' | relative_url }}" alt="행성과 데이터 궤도를 그린 Chance Blog 기술 탐사 일러스트" class="chance-hero-art mx-auto block w-full" width="760" height="560" fetchpriority="high">
+        <span class="pointer-events-none absolute -right-2 top-8 hidden rounded-full border border-white/10 bg-slate-900/75 px-3 py-2 text-[10px] font-semibold tracking-widest text-cyan-200 shadow-xl backdrop-blur sm:block">EXPLORE WHAT'S NEXT</span>
+      </div>
     </div>
   </section>
 
   <!-- Filter & Category Section -->
-  <div class="max-w-6xl mx-auto px-4 pt-6 pb-2 w-full flex flex-col md:flex-row md:items-center justify-between gap-4">
+  <div class="max-w-6xl mx-auto px-4 pt-4 pb-2 w-full flex flex-col md:flex-row md:items-center justify-between gap-3">
     <!-- Categories Pills -->
     <div class="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none" id="category-list">
       <button data-cat="all" class="cat-btn px-4 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap bg-blue-600 text-white shadow-sm transition-all">
@@ -152,6 +167,11 @@ layout: null
 
   <!-- Main Content Area -->
   <main class="max-w-6xl mx-auto px-4 py-6 flex-1 w-full">
+    <section id="featured-post" class="hidden mb-8" aria-label="추천 글"></section>
+    <div class="mb-4 flex items-center justify-between gap-3 text-sm">
+      <p id="results-summary" class="text-slate-400" aria-live="polite">글 목록을 준비하고 있습니다...</p>
+      <button id="reset-filters" type="button" class="hidden shrink-0 text-blue-400 hover:text-blue-300">필터 초기화</button>
+    </div>
     <!-- Loading Indicator -->
     <div id="loading-indicator" class="py-24 flex flex-col items-center justify-center space-y-4">
       <div class="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
@@ -421,10 +441,12 @@ layout: null
       const loadingEl = document.getElementById('loading-indicator');
       const emptyEl = document.getElementById('empty-state');
       const postGrid = document.getElementById('post-grid');
+      const featured = document.getElementById('featured-post');
 
       if (loadingEl) loadingEl.classList.remove('hidden');
       if (emptyEl) emptyEl.classList.add('hidden');
       if (postGrid) postGrid.innerHTML = '';
+      if (featured) featured.classList.add('hidden');
 
       try {
         const indexUrl = new URL('posts.json', document.baseURI);
@@ -522,14 +544,47 @@ layout: null
         return matchesCat && matchesLang && matchesSearch;
       });
 
+      const summary = document.getElementById('results-summary');
+      const resetButton = document.getElementById('reset-filters');
+      const hasActiveFilter = currentCategory !== 'all' || currentLang !== 'all' || Boolean(searchQuery);
+      if (summary) summary.textContent = `${filtered.length}개의 글${hasActiveFilter ? '을 찾았습니다' : '을 만나보세요'}`;
+      if (resetButton) resetButton.classList.toggle('hidden', !hasActiveFilter);
+      const featuredPost = !hasActiveFilter ? filtered[0] : null;
+      const featuredEl = document.getElementById('featured-post');
+
       if (filtered.length === 0) {
         grid.innerHTML = '';
+        if (featuredEl) {
+          featuredEl.innerHTML = '';
+          featuredEl.classList.add('hidden');
+        }
         if (emptyEl) emptyEl.classList.remove('hidden');
         return;
       }
 
       if (emptyEl) emptyEl.classList.add('hidden');
-      grid.innerHTML = filtered.map((post, idx) => `
+      if (featuredPost && featuredEl) {
+        featuredEl.innerHTML = `
+          <article class="relative overflow-hidden rounded-3xl border border-blue-400/20 bg-gradient-to-br from-blue-950/70 via-slate-900 to-slate-900 shadow-xl">
+            <div class="grid md:grid-cols-2">
+              <a href="${featuredPost.url}" class="min-h-52 md:min-h-72 overflow-hidden" aria-label="추천 글 읽기: ${featuredPost.title}">
+                <img src="${featuredPost.image}" alt="${featuredPost.title}" class="h-full w-full object-cover transition-transform duration-500 hover:scale-105" loading="eager" onerror="this.src='${defaultThumbnails[0]}'">
+              </a>
+              <div class="flex flex-col justify-center p-6 md:p-9">
+                <div class="mb-3 flex flex-wrap items-center gap-2 text-xs font-semibold text-blue-300"><span class="rounded-full border border-blue-400/30 bg-blue-400/10 px-3 py-1">오늘의 추천</span><span>${featuredPost.category}</span><span>·</span><span>${featuredPost.date || '최신 글'}</span></div>
+                <h2 class="mb-3 text-2xl font-black leading-snug text-white md:text-3xl"><a href="${featuredPost.url}" class="hover:text-blue-300">${featuredPost.title}</a></h2>
+                <p class="mb-6 line-clamp-3 text-sm leading-7 text-slate-300">${featuredPost.previewText || '핵심 기술 흐름과 그 의미를 살펴보세요.'}</p>
+                <a href="${featuredPost.url}" class="inline-flex w-fit items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-blue-500">이 글 읽기 <i class="fa-solid fa-arrow-right text-xs"></i></a>
+              </div>
+            </div>
+          </article>`;
+        featuredEl.classList.remove('hidden');
+      } else if (featuredEl) {
+        featuredEl.innerHTML = '';
+        featuredEl.classList.add('hidden');
+      }
+      const visiblePosts = featuredPost ? filtered.slice(1) : filtered;
+      grid.innerHTML = visiblePosts.map((post, idx) => `
         <article class="group bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden hover:border-slate-700 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl flex flex-col justify-between">
           <div>
             <a href="${post.url}" class="relative aspect-video w-full overflow-hidden bg-slate-800 block" aria-label="${post.title} 글 읽기">
@@ -561,7 +616,7 @@ layout: null
               ${post.tags.slice(0, 2).map(tag => `<span class="text-[11px] text-slate-400">#${tag}</span>`).join(' ')}
             </div>
             <div class="inline-flex items-center gap-3">
-              <button type="button" onclick="openPostModal(${idx})" class="text-slate-400 hover:text-slate-200">빠른 보기</button>
+              <button type="button" onclick="openPostModal(${idx + (featuredPost ? 1 : 0)})" class="text-slate-400 hover:text-slate-200">빠른 보기</button>
               <a href="${post.url}" class="inline-flex items-center gap-1 text-blue-400 font-semibold group-hover:translate-x-0.5 transition-transform">
                 전체 글 <i class="fa-solid fa-arrow-right text-[10px]"></i>
               </a>
@@ -636,6 +691,26 @@ layout: null
 
       if (searchInput) searchInput.addEventListener('input', handleSearch);
       if (searchInputMobile) searchInputMobile.addEventListener('input', handleSearch);
+
+      const resetFilters = document.getElementById('reset-filters');
+      if (resetFilters) resetFilters.addEventListener('click', () => {
+        currentCategory = 'all';
+        currentLang = 'all';
+        searchQuery = '';
+        if (searchInput) searchInput.value = '';
+        if (searchInputMobile) searchInputMobile.value = '';
+        document.querySelectorAll('.cat-btn').forEach(b => {
+          b.className = b.getAttribute('data-cat') === 'all'
+            ? 'cat-btn px-4 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap bg-blue-600 text-white shadow-sm transition-all'
+            : 'cat-btn px-4 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition-all';
+        });
+        document.querySelectorAll('.lang-btn').forEach(b => {
+          b.className = b.getAttribute('data-lang') === 'all'
+            ? 'lang-btn px-3 py-1 rounded-lg text-xs font-medium text-slate-200 bg-slate-800 shadow transition-all'
+            : 'lang-btn px-3 py-1 rounded-lg text-xs font-medium text-slate-400 hover:text-slate-200 transition-all';
+        });
+        renderPosts();
+      });
 
       // Language Switchers
       document.querySelectorAll('.lang-btn').forEach(btn => {
