@@ -37,6 +37,9 @@ EVENT_NAME = os.environ.get("EVENT_NAME", "").strip().lower()
 ISSUE_TITLE = os.environ.get("ISSUE_TITLE", "")
 ISSUE_BODY = os.environ.get("ISSUE_BODY", "")
 ISSUE_ASSOC = os.environ.get("ISSUE_AUTHOR_ASSOCIATION", "").strip().upper()
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
+GITHUB_REPOSITORY = os.environ.get("GITHUB_REPOSITORY", "")
+ISSUE_NUMBER = os.environ.get("ISSUE_NUMBER", "")
 
 STUB_GEMINI = not API_KEY
 STUB_UNSPLASH = not UNSPLASH_KEY
@@ -191,22 +194,24 @@ def call_gemini_with_fallback(prompt):
     raise RuntimeError("모든 Gemini 모델 호출 실패\n" + "\n".join(errors))
 
 
-def safe_repo_path(raw_path):
-    if not isinstance(raw_path, str) or not raw_path.strip():
-        raise ValueError("target_file 값이 비어 있습니다.")
-    candidate = Path(raw_path.strip())
-    if candidate.is_absolute():
-        raise ValueError("절대 경로는 허용되지 않습니다.")
-    root = Path(".").resolve()
-    target = (root / candidate).resolve()
-    try:
-        target.relative_to(root)
-    except ValueError:
-        raise ValueError("저장소 외부 경로는 허용되지 않습니다.")
-    forbidden = {".git", ".github", "node_modules", "_site", ".jekyll-cache"}
-    if forbidden.intersection(candidate.parts):
-        raise ValueError("보호된 디렉터리는 수정할 수 없습니다.")
-    return target
+def issue_comment(message):
+    """Post a status comment for the current GitHub issue, when configured."""
+    if not (GITHUB_TOKEN and GITHUB_REPOSITORY and ISSUE_NUMBER):
+        print(f"이슈 댓글 전송 설정이 없습니다: {message}")
+        return False
+    url = (f"https://api.github.com/repos/{GITHUB_REPOSITORY}/issues/"
+           f"{ISSUE_NUMBER}/comments")
+    payload = json.dumps({"body": message}).encode("utf-8")
+    req = urllib.request.Request(url, data=payload, method="POST", headers={
+        "Authorization": f"Bearer {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "Content-Type": "application/json",
+        "User-Agent": UA,
+    })
+    with urllib.request.urlopen(req, timeout=15) as response:
+        print(f"이슈 댓글 등록 완료 (HTTP {response.status})")
+    return True
 
 
 # ============================================================
@@ -485,92 +490,185 @@ def fix_images():
 # ============================================================
 # Issue 처리
 # ============================================================
-def handle_issue_event():
-    if ISSUE_ASSOC not in {"OWNER", "MEMBER", "COLLABORATOR"}:
-        print(f"이슈 작성자 권한({ISSUE_ASSOC or '알 수 없음'})이 없어 처리하지 않습니다.")
-        return
+def issue_field(labels):
+    """Read one labeled value from a GitHub issue form body."""
+    for label in labels:
+        match = re.search(
+            rf"(?ims)^###\s*{re.escape(label)}\s*\r?\n+(.+?)(?=\r?\n###\s|\Z)",
+            ISSUE_BODY,
+        )
+        if match:
+            value = match.group(1).strip()
+            if value and value.lower() not in {"_no response_", "해당 없음"}:
+                return value
+    return ""
 
-    excluded = {".git", ".github", "_site", "node_modules", ".jekyll-cache",
-                ".venv", "venv", "__pycache__"}
-    files_data = {}
-    for root, dirs, files in os.walk("."):
-        dirs[:] = [d for d in dirs if d not in excluded]
-        for name in files:
-            fp = Path(root) / name
-            if name in {".env", "credentials.json"}:
-                continue
-            if fp.suffix.lower() not in {".md", ".html", ".yml", ".yaml",
-                                         ".json", ".css", ".js", ".py", ".txt"}:
-                continue
+
+def resolve_issue_post(target):
+    """Resolve exactly one _posts Markdown file from a filename, title, or post URL."""
+    if not target:
+        return None, "대상 게시글 입력란이 비어 있습니다. 게시글 주소, 제목, 또는 파일명을 지정해 주세요."
+    normalized = target.strip().replace("\\", "/")
+    is_url = "://" in normalized
+    url_path = urllib.parse.urlsplit(normalized).path if is_url else normalized
+    segments = [urllib.parse.unquote(part) for part in url_path.rstrip("/").split("/") if part]
+    leaf = segments[-1] if segments else ""
+
+    def key(value):
+        value = urllib.parse.unquote(str(value or "")).casefold()
+        value = re.sub(r"\.(?:html?|md)$", "", value)
+        return re.sub(r"[^\w]", "", value, flags=re.UNICODE)
+
+    posts = [p for p in POSTS_DIR.rglob("*.md") if p.is_file()]
+    direct_path = normalized.lstrip("./")
+    matches = [p for p in posts if p.as_posix() == direct_path]
+    if not matches and leaf:
+        leaf_key = key(leaf)
+        matches = [p for p in posts if key(p.name) == leaf_key]
+    if not matches and leaf:
+        # Published Jekyll URLs usually end in a title slug, while source files
+        # are date/timestamp named. Match the decoded URL slug to the post title.
+        leaf_key = key(leaf)
+        matches = []
+        for p in posts:
             try:
-                files_data[str(fp)] = fp.read_text(encoding="utf-8", errors="replace")[:500]
+                fm, _ = split_front_matter(p.read_text(encoding="utf-8"))
             except OSError:
                 continue
+            if key(fm_get(fm, "title")) == leaf_key:
+                matches.append(p)
+    if is_url and matches:
+        # Use a date embedded in the public URL to disambiguate same-title posts.
+        date_parts = [part for part in segments if re.fullmatch(r"\d{4}-\d{2}-\d{2}", part)]
+        if not date_parts:
+            date_parts = ["-".join(segments[i:i + 3]) for i in range(len(segments) - 2)
+                          if (re.fullmatch(r"\d{4}", segments[i])
+                              and re.fullmatch(r"\d{1,2}", segments[i + 1])
+                              and re.fullmatch(r"\d{1,2}", segments[i + 2]))]
+        if date_parts:
+            wanted_date = date_parts[-1]
+            narrowed = [p for p in matches if date_of(p) == wanted_date]
+            if narrowed:
+                matches = narrowed
+    if len(matches) != 1:
+        reason = "대상 게시글을 찾지 못했습니다." if not matches else "여러 게시글이 일치합니다."
+        return None, (f"{reason} 공개 게시글 주소, 게시글 제목, 또는 정확한 파일명을 하나만 지정해 주세요. "
+                      "파일명은 게시글 화면의 제목 아래 저장소에서 확인할 수 있습니다.")
+    candidate = matches[0].resolve()
+    root = Path(".").resolve()
+    try:
+        relative = candidate.relative_to(root)
+    except ValueError:
+        return None, "선택된 경로가 저장소 내부가 아닙니다. 변경하지 않았습니다."
+    if not relative.parts or relative.parts[0] != "_posts" or candidate.suffix.lower() != ".md":
+        return None, "대상은 `_posts` 안의 `.md` 게시글이어야 합니다. 변경하지 않았습니다."
+    return (Path(*relative.parts), None)
 
-    prompt = f"""
-당신은 Chance 기술 블로그 저장소의 파일 편집 도우미입니다.
-Issue 요청에 필요한 파일 하나를 수정하거나 삭제할 변경안을 JSON으로 반환하세요.
-파일 경로는 저장소 내부의 상대 경로만 사용하세요.
-보호된 .git, .github, node_modules, _site 디렉터리는 수정하지 마세요.
-기존 형식과 프로젝트 구조를 유지하세요.
-글을 새로 만들 때 front matter의 image는 비워 두세요 (시스템이 채웁니다).
 
-[Issue Title]
-{ISSUE_TITLE}
+def image_change_queries(post, request):
+    """Ask Gemini only for Unsplash search terms; it cannot select/edit files."""
+    fallback = [post["title"], "technology editorial photo"]
+    if STUB_GEMINI:
+        return [q for q in fallback if q]
+    prompt = f"""게시글 이미지 검색용 Unsplash 영어 검색어 3개만 만드세요.
+파일 경로, 파일 내용, 수정 제안은 절대 반환하지 마세요.
+게시글 제목: {post['title']}
+사용자 이미지 요청: {request[:1500]}
+JSON 객체만 반환: {{"image_queries": ["...", "...", "..."]}}"""
+    try:
+        data = extract_json_object(call_gemini_with_fallback(prompt).text)
+        queries = [q.strip() for q in data.get("image_queries", [])
+                   if isinstance(q, str) and q.strip()]
+        return queries[:4] or [q for q in fallback if q]
+    except Exception as exc:
+        print(f"이미지 검색어 생성 실패, 게시글 제목 기반으로 진행: {exc}")
+        return [q for q in fallback if q]
 
-[Issue Body]
-{ISSUE_BODY}
 
-[Repository File Samples]
-{json.dumps(files_data, ensure_ascii=False)}
+def replace_post_image(text, new_url):
+    """Change front matter image and only the first Markdown body image URL."""
+    fm, body = split_front_matter(text)
+    if fm is None:
+        raise ValueError("게시글에 유효한 front matter가 없어 수정하지 않았습니다.")
+    image_line = re.compile(r"(?m)^image:[ \t]*.*$")
+    if image_line.search(fm):
+        fm = image_line.sub(f'image: "{new_url}"', fm, count=1)
+    else:
+        fm = fm.rstrip() + f'\nimage: "{new_url}"'
+    markdown_image = re.compile(r"(!\[[^\]]*\]\()([^)]*)(\))")
+    body, count = markdown_image.subn(
+        lambda m: m.group(1) + new_url + m.group(3), body, count=1)
+    return f"---\n{fm}\n---\n{body}", count > 0
 
-JSON 객체만 반환하세요. 마크다운 코드 펜스 금지.
-{{
-  "target_file": "relative/path/to/file",
-  "file_content": "전체 파일 내용 또는 삭제 시 빈 문자열",
-  "delete_file": false
-}}
-"""
-    data = extract_json_object(call_gemini_with_fallback(prompt).text)
-    target = safe_repo_path(data.get("target_file"))
-    delete_file = data.get("delete_file", False)
-    if not isinstance(delete_file, bool):
-        raise ValueError("delete_file은 true/false여야 합니다.")
 
-    if delete_file:
-        if target.exists() and target.is_file():
-            if DRY_RUN:
-                print(f"[DRY_RUN] 삭제 생략: {target}")
-            else:
-                target.unlink()
-                print(f"파일 삭제 완료: {target}")
-        else:
-            print(f"삭제 대상 파일이 없습니다: {target}")
+def handle_issue_event():
+    if ISSUE_ASSOC not in {"OWNER", "MEMBER", "COLLABORATOR"}:
+        message = f"이슈 작성자 권한({ISSUE_ASSOC or '알 수 없음'})이 없어 자동 처리하지 않았습니다. 저장소 관리자에게 문의해 주세요."
+        print(message)
+        issue_comment(message)
         return
-
-    content = data.get("file_content")
-    if not isinstance(content, str):
-        raise ValueError("file_content가 문자열이 아닙니다.")
-    write_text_atomic(target, content)
-    print(f"파일 저장 완료: {target}")
-
-    # _posts 글이면 이미지 검증 (로컬 경로/누락/중복/깨짐이면 교체)
-    rel = target.relative_to(Path(".").resolve())
-    if rel.parts and rel.parts[0] == "_posts" and rel.suffix == ".md" and not DRY_RUN:
-        post_path = Path(*rel.parts)
-        posts = load_posts()
-        mine = next((p for p in posts if p["path"] == post_path), None)
-        if mine:
-            used = used_keys_from_posts(posts, exclude_path=post_path)
-            problem = diagnose(mine, used)
-            if problem:
-                print(f"이슈로 만든 글의 이미지 문제({problem}) - 교체 시도")
-                new_url = repair(mine, used)
-                if new_url:
-                    write_text_atomic(post_path, apply_image(mine["text"], mine["image"], new_url))
-                    trigger_download(new_url)
-                else:
-                    print("교체 후보가 없어 이미지를 그대로 둡니다.")
+    action = issue_field(["작업 종류 선택"])
+    request_text = issue_field(["원하는 이미지 설명", "상세 내용 및 지시사항"])
+    image_action = bool(re.search(r"이미지 변경|기존 게시글 이미지|thumbnail", action or "", re.I))
+    image_intent = bool(re.search(r"이미지|image|썸네일|thumbnail",
+                                  f"{ISSUE_TITLE}\n{request_text}\n{ISSUE_BODY}", re.I))
+    if not (image_action or image_intent):
+        message = ("이슈 자동 처리에서 지원하는 작업은 기존 게시글 이미지 변경뿐입니다. "
+                   "다른 파일/설정/디자인 변경은 자동 수정하지 않았습니다.")
+        print(message)
+        issue_comment(message)
+        return
+    target_value = issue_field([
+        "게시글 주소 또는 제목",
+        "대상 게시글 파일명 또는 URL", "대상 게시글 파일명/URL",
+        "대상 게시글 파일명 또는 게시글 URL", "게시글 파일명 또는 URL",
+    ])
+    post_path, error = resolve_issue_post(target_value)
+    if error:
+        print(f"이슈 이미지 변경 중단: {error}")
+        issue_comment(f"이미지 변경을 진행하지 않았습니다. {error}")
+        return
+    post_path = Path(post_path)
+    # Re-check the resolved path immediately before reading/writing.
+    resolved = post_path.resolve()
+    root = Path(".").resolve()
+    relative = resolved.relative_to(root)
+    if not relative.parts or relative.parts[0] != "_posts" or resolved.suffix.lower() != ".md":
+        message = "검증된 대상이 `_posts` 안의 `.md`가 아니어서 변경하지 않았습니다."
+        print(message)
+        issue_comment(message)
+        return
+    old_text = resolved.read_text(encoding="utf-8")
+    fm, _ = split_front_matter(old_text)
+    post = {"path": post_path, "text": old_text, "title": fm_get(fm, "title"),
+            "image": fm_get(fm, "image"), "tags": fm_get(fm, "tags"),
+            "category": fm_get(fm, "category")}
+    used = used_keys_from_posts(load_posts(), exclude_path=post_path)
+    new_candidates = pick_images(image_change_queries(post, request_text or ISSUE_BODY),
+                                 used | {image_key(post["image"])}, 1, allow_pool=False)
+    if not new_candidates:
+        message = f"`{post_path.as_posix()}`에 사용할 새 이미지를 찾지 못했습니다. 변경하지 않았습니다."
+        print(message)
+        issue_comment(message)
+        return
+    new_url = new_candidates[0]
+    updated, changed_thumbnail = replace_post_image(old_text, new_url)
+    if updated == old_text:
+        message = f"`{post_path.as_posix()}`의 이미지 값이 이미 같아 변경하지 않았습니다."
+        print(message)
+        issue_comment(message)
+        return
+    if DRY_RUN:
+        print(f"[DRY_RUN] 변경 경로: {post_path.as_posix()}")
+    else:
+        write_text_atomic(resolved, updated)
+        trigger_download(new_url)
+    changed = ["대표 이미지(image)"] + (["본문 첫 이미지 주소"] if changed_thumbnail else [])
+    detail = (f"이미지 변경 완료: `{post_path.as_posix()}`\n"
+              f"- 변경 항목: {', '.join(changed)}\n"
+              f"- 이전 URL: {post['image'] or '(없음)'}\n- 새 URL: {new_url}")
+    print(detail)
+    issue_comment(detail)
 
 
 # ============================================================
@@ -848,4 +946,13 @@ if __name__ == "__main__":
         main()
     except Exception as exc:
         print(f"작업 실패: {type(exc).__name__}: {exc}")
+        if EVENT_NAME == "issues":
+            try:
+                issue_comment(
+                    f"요청을 처리하지 못했습니다 ({type(exc).__name__}). "
+                    "파일은 성공적으로 처리된 것으로 간주하지 않았습니다. "
+                    "대상 게시글과 요청 내용을 확인한 뒤 다시 제출해 주세요."
+                )
+            except Exception as comment_exc:
+                print(f"실패 안내 댓글 등록도 실패: {type(comment_exc).__name__}: {comment_exc}")
         raise

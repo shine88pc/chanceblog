@@ -18,6 +18,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 concurrency:
   group: chanceblog
@@ -26,7 +27,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # 이슈는 저장소 소유자/멤버/협업자가 연 것만 처리
+    # 승인된 저장소 멤버가 연 이슈만 실행해 불필요한 외부 요청을 막습니다.
     if: >-
       github.event_name != 'issues' ||
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)
@@ -50,6 +51,9 @@ jobs:
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
           ISSUE_AUTHOR_ASSOCIATION: ${{ github.event.issue.author_association }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '1' || '0' }}
           FIX_IMAGES: ${{ github.event_name == 'workflow_dispatch' && inputs.fix_images && '1' || '0' }}
         run: python generator.py
