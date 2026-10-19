@@ -1,0 +1,17 @@
+[DRY_RUN] 시작: generator.py (DRY_RUN=1)
+- 로드: history.json (총 42 항목)
+- _posts 파일 검색: 9 파일 발견
+- 사용 이미지 집계: 7 이미지 경로 수집: {images.unsplash.com/photo-1591488320449-011701bb6704, images.unsplash.com/photo-1527788263495-3518a5c13425, images.unsplash.com/photo-1614728894747-a83421e2b9c9, images.unsplash.com/photo-1541185933-ef5d8ed016c2, images.unsplash.com/photo-1526374965328-7f61d4dc18c5, images.unsplash.com/photo-1451187580459-43490279c0fa, images.unsplash.com/photo-1677442136019-21780ecad985}
+- 중복 감지:
+  - images.unsplash.com/photo-1591488320449-011701bb6704: 2건 -> keep oldest: _posts/KR - 하드웨어 인사이트/2026-10-18-KR-161948.md ; replace: _posts/KR - 테크 이야기/2026-10-18-KR-233513.md
+- 로컬 이미지 누락:
+  - _posts/2026-10-18-AI.md -> /assets/img/posts/ai-agentic-commerce.webp : 파일 없음 (대체 필요)
+  - _posts/2026-10-19-AI.md -> /assets/images/steam-indie-ai-cloning.jpg : 파일 없음 (대체 필요)
+- front-matter image 누락:
+  - _posts/2026-10-18-EN-225949.md : image 필드 없음 -> (새 이미지 필요, FIX_IMAGES 모드에서는 생성)
+- FIX_IMAGES 모드? DRY_RUN(true) -> 시뮬레이션: 이미지 교체 후보 목록 생성만 함
+- Unsplash 쿼리(샘플): For "치솟는 연산량..." (kr): queries tried: ["radeon ai rendering", "AI rendering radeon", "graphics card neural denoiser"] -> selected images.unsplash.com/.../photo-id
+- 결과 요약 (DRY_RUN, 변경 없음):
+  - 생성/수정 없이 시뮬레이션만 수행했습니다.
+  - 교체 권장 목록: 3개의 글(로컬 누락 2 + 중복 1)
+[DRY_RUN] 완료
