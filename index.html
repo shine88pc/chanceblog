@@ -400,8 +400,8 @@
       return { metadata, content };
     }
 
-    // Load the Jekyll-generated same-origin post index. This avoids making
-    // several GitHub API calls from every visitor's browser.
+    // Load the Jekyll-generated same-origin post index from posts.json.
+    // This avoids GitHub API rate limits and keeps post loading on this site.
     async function fetchPostList() {
       const loadingEl = document.getElementById('loading-indicator');
       const emptyEl = document.getElementById('empty-state');
