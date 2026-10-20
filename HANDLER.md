@@ -11,11 +11,29 @@
 
 ---
 
+## 0. 현재 상태 한눈에 (2026-10-20 갱신)
+
+> **다른 PC에서 이어받는 경우 → §10부터.** 파일을 메일·USB로 꺼낼 수 없어도 되도록 모든 작업물과 진행 기록은 이 저장소(`main`)에 있다.
+
+| 영역 | 상태 |
+|------|------|
+| 저장소·폴더 | 작업 PC는 `shine88pc/chanceblog` 공식 clone 1개로 정리 완료 (P0 ✅) |
+| Chance_Blog | 자동 생성 운영 중 (`chanceblog.yml` 매시 17분 실행, 게시 슬롯 KST 9·18시). AdSense 검토 대기 |
+| Blogger 코드 | 완료 (프롬프트·`blogger_generator.py`·`blogger.yml`·API 게시 함수) |
+| Blogger 실게시 | ⏳ 미완료 — refresh token 발급 + GitHub Secrets(`BLOGGER_*`) 등록 필요 (§3 P1) |
+| Blogger 워크플로 | 스케줄 실행 이력 없음. 첫 실행은 2026-10-21 02:00 UTC(KST 11시) 예정 |
+| 비밀 파일 | `client_secret.json`은 저장소에 없음 (`.gitignore`로 차단) |
+| 자동 push 스크립트 | `auto_sync.bat` 제거됨. 같은 동작 재도입 금지 |
+| 오래된 브랜치 | `feature/image-fix-20261019-0000` 병합 금지 (§11) |
+
+---
+
 ## 1. 프로젝트 한눈에
 
 | 항목 | 내용 |
 |------|------|
-| 저장소 | `shine88pc/chanceblog` (유일한 공식 소스) |
+| 저장소 | `shine88pc/chanceblog` (글·블로그의 유일한 공식 소스) |
+| 루트 랜딩 저장소 | `shine88pc/shine88pc.github.io` → https://shine88pc.github.io/ — `index.html`·`README.md`·`robots.txt`뿐인 별도 저장소. 같은 호스트의 chanceblog에서 최신 글 목록을 읽어 온다. Google Ads 스크립트가 들어 있으므로 AdSense 관련 변경 금지 |
 | Chance_Blog | https://shine88pc.github.io/chanceblog/ — 교양·분석형 |
 | Blogger | https://macat0722.blogspot.com/ — 건강·생활 실용형 |
 | 전략 | C 방향 + **균형 성장** (한쪽만 우선 금지) |
@@ -41,19 +59,26 @@
 | 6 | Blogger API 가이드 `BLOGGER_API_SETUP.md` | ✅ |
 | 7 | `scripts/get_blogger_token.py` | ✅ |
 | 8 | 초안 폴더 `_blogger_drafts/` 저장 | ✅ |
+| 9 | 로컬 작업 폴더를 공식 clone으로 정리 (P0, 작업 PC 기준) | ✅ |
+| 10 | `.gitignore` 추가 (`client_secret*.json`·`token*.json`·`.env` 커밋 방지) | ✅ |
+| 11 | `auto_sync.bat` 제거 (검토 없는 자동 push 위험) | ✅ |
+| 12 | 다른 PC에서 이어받기 절차·브랜치 현황 문서화 (§10·§11) | ✅ |
 
 ### Blogger API 실게시
 
 - **코드는 완료**, **Secrets 등록은 사용자 진행 중**
-- 로컬에 `client_secret.json`까지 받은 상태 (커밋 금지)
-- refresh token 발급은 PC에서 `get_blogger_token.py` 실행 필요
+- `client_secret.json`은 작업 PC에만 있고 **저장소에는 없다** (공개 저장소 — `.gitignore`로 차단). 다른 PC에서는 Google Cloud에서 다시 받는다 (§10)
+- refresh token **미발급** — `scripts/get_blogger_token.py` 실행 필요 (브라우저 Google 동의가 필요해 사용자가 직접)
+- `blogger.yml` 첫 스케줄 실행은 2026-10-21 02:00 UTC(KST 11시) 예정, 지금까지 실행 이력 없음 → 첫 실행 결과 확인 필요 (Secrets가 없으면 생성·초안 저장만 하고 게시는 건너뜀)
 - 결제/Cloud 체험이 부담이면 → 초안 수동 게시 또는 이메일 게시 유지 가능
 
 ---
 
 ## 3. 지금 조치해야 할 사항 (우선순위)
 
-### P0 — 로컬 폴더 통합 (긴급)
+### P0 — 로컬 폴더 통합 ✅ 작업 PC 완료 (2026-10-20)
+
+> 작업 PC는 공식 clone 1개로 정리됨. **다른 PC에서는 아래 절차를 새로 적용**하고, 이어받기는 §10을 따른다. 이전 로컬 사본과 오래된 브랜치 주의사항은 §11.
 
 **문제**
 - AI·도구마다 다른 로컬 폴더를 열어 작업함
@@ -92,11 +117,15 @@ Secrets (API 선택 시):
 - `BLOGGER_REFRESH_TOKEN`
 - (기존) `GEMINI_API_KEY`
 
+**현재 상태**: 게시 경로 미확정, refresh token 미발급. 이어서 할 일은 §10 5번.
+
 ### P2 — 이후 구현
 
 - 주제 충돌 방지 (Chance_Blog history ↔ Blogger history)
 - 초안 품질 점검 / 샘플 테스트
 - AdSense 승인 모니터링 (Chance_Blog 최우선 유지)
+- `Blogger Generate` 첫 실행 결과 확인 (Actions 탭 → Run workflow, 처음에는 `dry_run` 체크)
+- `feature/image-fix-20261019-0000`·`backup/issue-template-$TS` 브랜치를 지울지 결정 (사용자) — §11
 
 ---
 
@@ -162,15 +191,18 @@ VS Code:
 - 설정에서 Git: Autofetch 켜기 권장
 - 원격과 어긋나면 무조건 pull 먼저
 - 충돌 시 HANDLER/WORKLOG 기준으로 수동 병합, 추측으로 덮지 말 것
+- 봇(`chanceblog.yml`, 앞으로 `blogger.yml`)이 `main`에 직접 커밋한다 → 작업 전 항상 `git pull --rebase origin main`
+- `auto_sync.bat` 같은 자동 commit/push 스크립트·예약 작업 금지 (사용자 확인 없이 push 금지)
+- Windows는 시스템 설정 `core.autocrlf=true`가 기본이다 — 끄지 말 것 (끄면 거의 모든 파일이 수정으로 보인다)
 
 ---
 
-## 8. GPT에게 전달할 인수인계 문 (복붙용)
+## 8. 다음 AI에게 전달할 인수인계 문 (복붙용)
 
-아래 블록을 GPT 세션 첫 메시지에 붙여 넣으면 된다.
+아래 블록을 새 AI 세션(GPT·Grok·Claude 등) 첫 메시지에 붙여 넣으면 된다.
 
 ```text
-[Chance_Blog + Blogger 인수인계 — GPT용]
+[Chance_Blog + Blogger 인수인계 — AI 공통]
 
 저장소: https://github.com/shine88pc/chanceblog
 작업 시작 전 반드시 순서대로 읽을 것:
@@ -181,8 +213,9 @@ VS Code:
 요약:
 - 듀얼 블로그: Chance_Blog(교양·분석) + Blogger(실용·건강·생활), 동일 콘텐츠 금지, 균형 성장.
 - Blogger 쪽: 프롬프트·blogger_generator.py·workflow·API 코드까지 완료. 실게시는 GitHub Secrets(BLOGGER_*) 등록 후.
-- 사용자는 client_secret.json까지 확보. refresh token은 PC에서 scripts/get_blogger_token.py 실행 필요.
-- 로컬에 폴더가 여러 개로 갈라져 있음 → 공식 clone 폴더 하나만 쓰고 VS Code도 그 폴더만 연 뒤 git pull/push로 동기화할 것.
+- client_secret.json은 저장소에 없음(공개 저장소). refresh token 미발급 — 새 PC에서는 Google Cloud에서 JSON을 다시 받아 루트에 client_secret.json으로 두고 scripts/get_blogger_token.py 실행 → 출력값을 GitHub Secrets에 등록 (HANDLER.md §10).
+- 이전 로컬 사본은 쓰지 말고 새로 git clone한 폴더 하나만 사용(VS Code도 그 폴더만). 작업 전 git pull --rebase origin main, 자동 push 스크립트(auto_sync 등) 금지.
+- feature/image-fix-20261019-0000 브랜치는 낡았음(index.html 대폭 축소) → 병합 금지 (HANDLER.md §11).
 - Cloud 결제 부담 시 API 대신 초안(_blogger_drafts) 수동 게시 또는 Blogger 이메일 게시 가능.
 - Chance_Blog AdSense 승인 대기 중 → index.html 광고·privacy 함부로 변경 금지.
 
@@ -204,7 +237,46 @@ VS Code:
 | Chance 편집 기준 | `.github/editorial/CHANCE_BLOG_TEMPLATE.md` |
 | 생성기 | `blogger_generator.py` / `generator.py` |
 | 워크플로 | `.github/workflows/blogger.yml` / `chanceblog.yml` |
+| 이슈 기반 이미지 수정 | `인수인계/이슈_기반_게시글_이미지_수정_인수인계.md` |
 
 ---
 
-*마지막 갱신: 2026-10-20 Grok — 핸들러 최초 작성, 폴더 통합·VS Code 동기화·GPT 인수인계 포함*
+## 10. 다른 PC(외부 로컬)에서 이어받기
+
+작업 PC의 파일을 메일·USB 등으로 꺼낼 수 없는 경우를 전제로, **모든 작업물과 진행 기록은 이 저장소(`main`)에 있다.** 새 PC에서는 아래 순서로 이어받는다.
+
+1. Git과 Python 3.10 이상을 설치한다.
+2. **새 폴더에 clone**한다. 이전 로컬 사본을 열어서 pull/push 하지 않는다 (§11).
+
+   ```bash
+   git clone https://github.com/shine88pc/chanceblog.git
+   ```
+
+3. 이 저장소 한정으로 작성자 정보를 설정한다 (`git config user.name "..."`, `git config user.email "..."`).
+4. `HANDLER.md` → `AI_COLLAB.md` → `WORKLOG.md` 최신 3~5개를 읽는다. AI에게 시킬 때는 §8 블록을 첫 메시지로 전달한다.
+5. Blogger 실게시를 이어갈 때만 (§3 P1의 남은 일):
+   1. `client_secret.json`은 저장소에 없다. Google Cloud Console → 사용자 인증 정보에서 **데스크톱 앱 OAuth 클라이언트** JSON을 받아(필요하면 새로 만든다) 저장소 **루트**에 `client_secret.json`으로 저장한다. 절차는 `.github/editorial/BLOGGER_API_SETUP.md`.
+   2. `pip install google-auth-oauthlib` 후 `python scripts/get_blogger_token.py`를 실행한다 (브라우저에서 Google 동의).
+   3. 출력된 `BLOGGER_CLIENT_ID`·`BLOGGER_CLIENT_SECRET`·`BLOGGER_REFRESH_TOKEN`과 Blogger 설정의 `BLOGGER_BLOG_ID`를 GitHub **Settings → Secrets and variables → Actions**에 등록한다. 값은 채팅·저장소·메일에 남기지 않는다.
+   4. Actions → **Blogger Generate** → Run workflow로 첫 실행을 확인한다. 처음에는 `publish`를 체크하지 말고 초안 결과부터 본다.
+6. 작업 중에는 `git add`를 파일을 지정해서 하고, push 전에 `git status`로 비밀 파일이 없는지 확인한다. `.gitignore`가 `client_secret*.json`·`token*.json`·`.env`를 막아 준다.
+7. 작업 후: WORKLOG.md 최상단 기록 → 커밋(AI 이름·대상 명시) → `git pull --rebase origin main` → push.
+
+**저장소에 없는 것**: `client_secret.json`, refresh token, API 키. `GEMINI_API_KEY`·`UNSPLASH_ACCESS_KEY`·`BLOGGER_*`는 GitHub Secrets에만 있으며, 새 PC에서 필요하면 다시 준비한다.
+
+---
+
+## 11. 브랜치·이전 사본 현황 (2026-10-20 확인)
+
+| 대상 | 상태 | 지침 |
+|------|------|------|
+| `main` | 유일한 기준. 봇이 직접 커밋한다 | 항상 여기서 시작, 작업 전 `git pull --rebase origin main` |
+| `feature/image-fix-20261019-0000` | 2커밋(a9db840·e8b66b0), 확인 시점에 main보다 64커밋 뒤. `generator.py`(+459/−138)·`chanceblog.yml`(+1/−51)을 오래된 기준으로 바꾼 스냅샷이고 **`index.html`은 +1/−608줄로 사실상 비워져 있음** | **병합 금지.** 필요한 변경만 cherry-pick |
+| `backup/issue-template-$TS` | main의 옛 지점(51defed)과 동일, 고유 커밋 없음. 이름에 `$`가 있어 셸에서는 작은따옴표로 감쌀 것 | 무시해도 됨 (삭제는 사용자 결정) |
+| 이전 로컬 사본(OneDrive 아래 `chanceblog`) | `generator.py`·`chanceblog.yml`·`index.html`의 미커밋 변경과 `files.zip` 미추적 파일이 있었다고 기록됨 (`인수인계/이슈_기반_게시글_이미지_수정_인수인계.md`) | 열어서 pull/push 금지. 이름을 바꿔 보관(`chanceblog-old-날짜`)하고 새로 clone. 보관본의 변경이 필요하면 새 clone과 diff로 비교해 필요한 부분만 가져오기 |
+
+이슈로 게시글 이미지를 바꾸는 자동화의 현재 규칙은 `인수인계/이슈_기반_게시글_이미지_수정_인수인계.md`를 본다.
+
+---
+
+*마지막 갱신: 2026-10-20 Claude — P0 완료 반영, §0 현재 상태·§10 다른 PC 이어받기·§11 브랜치 현황 추가 (최초 작성: Grok)*
