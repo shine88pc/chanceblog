@@ -21,8 +21,9 @@ on:
 permissions:
   contents: read
 
+# 이슈마다 따로 줄을 세운다(공용 그룹이면 대기 중인 이슈가 코멘트 없이 취소된다)
 concurrency:
-  group: issue-edit
+  group: issue-edit-${{ github.event.issue.number || inputs.issue_number }}
   cancel-in-progress: false
 
 jobs:

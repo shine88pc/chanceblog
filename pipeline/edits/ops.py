@@ -35,13 +35,18 @@ class InfraError(RuntimeError):
 # ----------------------------------------------------------------------------
 # 기본 교체
 # ----------------------------------------------------------------------------
-def replace_exact(text, before, after, max_occurrences=1):
-    count = text.count(before)
+def replace_exact(text, before, after, max_occurrences=1, url_boundary=False):
+    """before 를 after 로 바꾼다. url_boundary 면 before 가 더 긴 주소의 앞부분(…/x 가 …/xyz 안)인 곳은 건드리지 않는다."""
+    if url_boundary:
+        rx = re.compile(re.escape(before) + r"(?![\w\-])")
+        count = len(rx.findall(text))
+    else:
+        rx, count = None, text.count(before)
     if count == 0:
         raise EditError("'변경 전' 문구를 페이지에서 찾지 못했습니다. 페이지 원문(마크다운/HTML)과 글자 하나까지 같게 붙여 넣어 주세요.")
     if count > max_occurrences:
         raise EditError(f"'변경 전' 문구가 {count}곳에서 발견되어 어느 것을 바꿀지 알 수 없습니다. 앞뒤 문맥을 더 포함해 유일하게 만들어 주세요.")
-    return text.replace(before, after)
+    return rx.sub(lambda _m: after, text) if rx else text.replace(before, after)
 
 
 def op_text(text, fields, cfg, llm=None):
@@ -67,7 +72,7 @@ def op_link(text, fields):
         raise EditError("링크는 한 줄이어야 합니다.")
     if not safe_link(after):
         raise EditError("'변경 후' 링크는 https:// 주소, /로 시작하는 사이트 내 경로, #앵커, mailto: 중 하나여야 합니다(javascript:·data:·http:// 불가).")
-    return replace_exact(text, before, after, MAX_LINK_OCCURRENCES), "링크 교체"
+    return replace_exact(text, before, after, MAX_LINK_OCCURRENCES, url_boundary=True), "링크 교체"
 
 
 # ----------------------------------------------------------------------------
@@ -85,7 +90,9 @@ def parse_field_lines(after, only_fields):
         m = _FIELD_LINE_RE.match(raw)
         if not m:
             raise EditError("SEO 메타는 줄마다 `title: 새 제목` 또는 `description: 새 설명` 형식으로 적어 주세요.")
-        key, value = m.group(1), m.group(2).strip().strip("\"'")
+        key, value = m.group(1), m.group(2).strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":  # 감싼 따옴표 한 쌍만 벗긴다(값 속 따옴표는 보존)
+            value = value[1:-1].strip()
         if key not in only_fields:
             raise EditError(f"수정할 수 없는 항목입니다: {key} (허용: {', '.join(only_fields)})")
         if not value:

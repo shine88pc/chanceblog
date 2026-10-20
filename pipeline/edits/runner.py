@@ -12,6 +12,7 @@ CLI: python -m pipeline.edits.runner --issue-file issue.json --out DIR [--dry-ru
 import argparse
 import json
 import os
+import posixpath
 import re
 import subprocess
 import sys
@@ -63,11 +64,8 @@ class Request:
 # 보조
 # ----------------------------------------------------------------------------
 def protected_paths(root):
-    """광고 표면(ad_surface=true 블로그)의 보호 경로 목록."""
-    try:
-        reg = registry_mod.load_registry(Path(root) / "pipeline" / "blogs.json")
-    except registry_mod.RegistryError:
-        return []
+    """광고 표면(ad_surface=true 블로그)의 보호 경로 목록. 레지스트리를 못 읽으면 RegistryError(호출부가 요청을 거부한다 — fail closed)."""
+    reg = registry_mod.load_registry(Path(root) / "pipeline" / "blogs.json")
     out = []
     for raw in reg.get("blogs", []):
         blog = registry_mod.merged_blog(reg, raw)
@@ -77,7 +75,13 @@ def protected_paths(root):
 
 
 def is_protected(path, protected):
-    return any(path == p or (p.endswith("/") and path.startswith(p)) for p in protected)
+    """`./about.md`·`a//b` 같은 표기 차이로 비교를 우회하지 못하게 양쪽을 정규화한다."""
+    path = posixpath.normpath(str(path).replace("\\", "/"))
+    for p in protected:
+        norm = posixpath.normpath(str(p).replace("\\", "/"))
+        if path == norm or (str(p).endswith("/") and path.startswith(norm + "/")):
+            return True
+    return False
 
 
 def _slug(text, limit=30):
@@ -85,7 +89,13 @@ def _slug(text, limit=30):
 
 
 def _one_line(text, limit=90):
-    return re.sub(r"\s+", " ", str(text)).strip()[:limit]
+    """한 줄로 접고 자르며 멘션(@)을 무력화한다(커밋 제목·PR 제목·사유 문장용)."""
+    return re.sub(r"\s+", " ", str(text)).strip()[:limit].replace("@", "@​")
+
+
+def _code(text, limit=90):
+    """신뢰할 수 없는 문자열을 한 줄 코드 스팬으로(마크다운·멘션·줄 시작 트레일러·워크플로 명령을 무력화)."""
+    return "`" + re.sub(r"[`\s]+", " ", str(text)).strip()[:limit] + "`"
 
 
 def _fence(text):
@@ -95,8 +105,8 @@ def _fence(text):
 
 
 def _reject(reasons, hint="", edit_type="", target=""):
-    reasons = [str(r) for r in reasons]
-    comment = "⚠️ **수정하지 않았습니다.**\n\n사유:\n" + "\n".join(f"- {r}" for r in reasons)
+    reasons = [_one_line(r, 400) for r in reasons]
+    comment ="⚠️ **수정하지 않았습니다.**\n\n사유:\n" + "\n".join(f"- {r}" for r in reasons)
     if hint:
         comment += f"\n\n{hint}"
     comment += "\n\n(저장소는 변경되지 않았습니다. 내용을 고쳐 새 이슈로 올려 주세요.)"
@@ -104,7 +114,8 @@ def _reject(reasons, hint="", edit_type="", target=""):
 
 
 def _error(message, exit_code=EXIT_INFRA):
-    comment = f"❌ **처리 중 오류가 발생했습니다.**\n\n- {message}\n\n저장소는 변경되지 않았습니다. Actions 로그를 확인하세요."
+    message = _one_line(message, 400)
+    comment =f"❌ **처리 중 오류가 발생했습니다.**\n\n- {message}\n\n저장소는 변경되지 않았습니다. Actions 로그를 확인하세요."
     return Result("error", message=message, reasons=[message], comment=comment, exit_code=exit_code)
 
 
@@ -217,7 +228,11 @@ def resolve_request(issue, root):
     if not spec_mod.path_allowed(path, patterns):
         return _reject([f"{path} 은(는) 이 수정 항목으로 고칠 수 없는 경로입니다."], edit_type=edit_key, target=path)
 
-    ad_surface = is_protected(path, protected_paths(root))
+    try:
+        protected = protected_paths(root)
+    except registry_mod.RegistryError as exc:
+        return _error(f"블로그 레지스트리를 읽을 수 없어 광고 표면 여부를 확인할 수 없습니다: {exc}", EXIT_CONFIG)
+    ad_surface = is_protected(path, protected)
     if ad_surface and assoc != "OWNER":
         return _reject([f"{path} 는 광고 심사 대상 페이지라 저장소 소유자(OWNER)의 요청만 처리합니다."], edit_type=edit_key, target=path)
 
@@ -271,7 +286,7 @@ def process_issue(issue, root, env=None, llm=None, image_picker=None, dry_run=Fa
         return _error(str(exc))
 
     reasons = checks.verify_changes({path: (text, new_text)}, req.patterns, limits, mode=check_mode(cfg),
-                                    only_fields=cfg.get("only_fields"))
+                                    only_fields=cfg.get("only_fields"), ai_patch=(how == "AI 최소 패치"))
     if reasons:
         return _reject(reasons, edit_type=req.edit_key, target=path)
 
@@ -282,7 +297,7 @@ def process_issue(issue, root, env=None, llm=None, image_picker=None, dry_run=Fa
     branch = f"{req.spec['output']['branch_prefix']}{number}-{_slug(target['id'])}" + (f"-r{run_no}" if run_no else "")
     lines = checks.changed_line_count(text, new_text)
     diff = checks.unified_diff(text, new_text, path)
-    summary = (f"- 대상: `{path}` ({_one_line(target['title'])})\n- 수정 항목: {cfg['label']} (`{req.edit_key}`, 방식: {how})\n"
+    summary = (f"- 대상: `{path}` ({_code(target['title'])})\n- 수정 항목: {cfg['label']} (`{req.edit_key}`, 방식: {_code(how, 120)})\n"
                f"- 바뀐 줄: {lines}줄")
     trailer = f"\nAd-Surface-Approved: 이슈 #{number} @{login}(OWNER) 요청 — {path}" if req.ad_surface else ""
     commit = (f"fix: [이슈 #{number}] {_one_line(target['title'], 40)} {cfg['label']} (issue-edit 봇) [대상: Chance_Blog]\n\n"
@@ -353,10 +368,10 @@ def main(argv=None):
     else:
         result = process_issue(issue, root, dry_run=dry)
     write_outputs(result, args.out)
-    print(f"[issue-edit] status={result.status} edit={result.edit_type or '-'} target={result.target or '-'} "
-          f"{'(dry-run) ' if dry else ''}{result.message}")
+    print(f"[issue-edit] status={result.status} edit={_one_line(result.edit_type or '-', 60)} "
+          f"target={_one_line(result.target or '-', 120)} {'(dry-run) ' if dry else ''}{_one_line(result.message, 300)}")
     for r in result.reasons:
-        print(f"  - {r}")
+        print(f"  - {_one_line(r, 300)}")
     return result.exit_code
 
 

@@ -65,6 +65,8 @@ def normalize_path(path):
     if not isinstance(path, str) or not path.strip():
         raise ValueError("경로가 비어 있습니다.")
     raw = path.strip().replace("\\", "/")
+    if re.search(r"[\x00-\x1f\x7f]", raw):
+        raise ValueError("경로에 제어 문자(개행 등)가 들어 있습니다.")
     if re.match(r"^[A-Za-z]:", raw) or raw.startswith("/"):
         raise ValueError(f"절대 경로는 허용되지 않습니다: {path}")
     parts = [p for p in PurePosixPath(raw).parts if p not in ("", ".")]

@@ -33,7 +33,7 @@ def parse_front_matter(fm_text):
         return None
     try:
         data = yaml.safe_load(fm_text)
-    except yaml.YAMLError:
+    except (yaml.YAMLError, ValueError):  # date: 2026-02-30 같은 값은 YAMLError 가 아니라 ValueError 를 낸다
         return None
     if data is None:
         return {}

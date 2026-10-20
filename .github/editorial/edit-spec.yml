@@ -5,7 +5,8 @@
 #  - 요청한 edit_type 의 allowed_paths 밖 파일은 절대 수정하지 않는다.
 #  - 명세가 무엇을 허용하든 pipeline/edits/spec.py 의 NEVER_ALLOW(워크플로·코드·레이아웃·설정·광고 표면·규칙 문서 등)는
 #    수정할 수 없다. 명세가 이를 허용하면 검증(scripts/validate_repo.py SPEC-1)이 실패한다.
-#  - 결과는 main 직접 push 가 아니라 항상 PR 이다. 병합은 사람이 한다.
+#  - 사람이 요청한 수정은 main 직접 push 가 아니라 항상 PR 이다. 병합은 사람이 한다.
+#    (pages.json 과 이슈 양식 드롭다운은 자동 생성물이라 sync-issue-form 워크플로가 main 에 직접 커밋한다.)
 #
 # 수정 항목을 추가하는 방법: edit_types 에 항목을 추가 → python scripts/sync_issue_form.py → 테스트 추가
 # 설명: docs/ISSUE_EDITS.md

@@ -133,8 +133,9 @@ def replace_marker_block(text, name, options):
     if not options:
         raise FormError(f"{name} 드롭다운에 넣을 항목이 하나도 없습니다(양식이 무효가 됩니다).")
     lines = text.split("\n")
-    start = next((i for i, l in enumerate(lines) if f"# {name}:START" in l), None)
-    end = next((i for i, l in enumerate(lines) if f"# {name}:END" in l), None)
+    # 마커는 '줄의 첫 내용'일 때만 인정한다(옵션 문자열 안에 `# NAME:START` 를 심어 마커를 위조하지 못하게)
+    start = next((i for i, l in enumerate(lines) if re.match(rf"^\s*# {name}:START\b", l)), None)
+    end = next((i for i, l in enumerate(lines) if re.match(rf"^\s*# {name}:END\b", l)), None)
     if start is None or end is None or end <= start:
         raise FormError(f"양식에서 '# {name}:START' / '# {name}:END' 마커를 찾을 수 없습니다.")
     indent = re.match(r"\s*", lines[start]).group(0)
@@ -142,8 +143,13 @@ def replace_marker_block(text, name, options):
     return "\n".join(lines[:start + 1] + body + lines[end:])
 
 
+def _flat_title(title):
+    """드롭다운 항목에 들어갈 제목: 한 줄로 접고 자른다(줄바꿈·긴 문자열로 양식 구조를 흔들지 못하게)."""
+    return re.sub(r"\s+", " ", str(title)).strip()[:80]
+
+
 def page_options(pages):
-    return [f"{p['id']} | {p['title']}" for p in pages]
+    return [f"{p['id']} | {_flat_title(p['title'])}" for p in pages]
 
 
 def edit_options(spec):

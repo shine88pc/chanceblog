@@ -27,7 +27,12 @@ from pipeline.console import safe_output
 from pipeline.edits import checks, frontmatter, ops, runner, spec as spec_mod
 
 MARKER = "<!-- issue-edit-scope-check -->"
-_ISSUE_RE = re.compile(r"(?i)\b(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?)\s*:?\s+#(\d+)")
+_ISSUE_RE = re.compile(r"(?i)\b(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?)\s*:?\s+#(\d{1,9})\b")
+
+
+def _flat(text, limit=400):
+    """코멘트·로그에 들어가는 문장을 한 줄로 접는다(줄 시작 워크플로 명령·마크다운 구조 주입 방지)."""
+    return re.sub(r"\s+", " ", str(text)).strip()[:limit]
 
 
 @dataclass
@@ -43,7 +48,7 @@ class Report:
                 "FAIL": "❌ **요청 범위 밖 변경이 있습니다.** 병합하지 말고 수정을 요청하세요(예: \"요청한 부분만 바꾸고 나머지는 되돌려 주세요\").",
                 "SKIP": "ℹ️ 이슈 양식으로 접수된 수정 요청이 아니라 범위 검증을 건너뜁니다."}[self.verdict]
         out = [MARKER, f"### 🔎 요청 범위 검증{(' — ' + self.title) if self.title else ''}", "", head, ""]
-        out += [f"- {sym} {text}" for sym, text in self.items]
+        out += [f"- {sym} {_flat(text)}" for sym, text in self.items]
         for block in self.details:
             out += ["", "```diff", block, "```"]
         return "\n".join(out) + "\n"
@@ -122,8 +127,11 @@ def check_pull(issue, root, base, head, changes=None, show=None):
         return Report("FAIL", items + [("❌", f"`{path}` 의 이전/이후 내용을 읽을 수 없습니다.")], title)
     items.append(("✅" if not others else "ℹ️", f"대상 파일 `{path}` 이(가) 변경되었습니다."))
 
+    # 요청만으로 기대 결과를 계산할 수 없는 텍스트 수정은 AI 가 쓴 변경으로 보고 더 엄격하게 본다
+    want = None if req.cfg["method"] == "image" else expected_after(req, before)
+    ai_patch = req.cfg["method"] != "image" and want is None
     reasons = checks.verify_changes({path: (before, after)}, req.patterns, req.spec["limits"],
-                                    mode=runner.check_mode(req.cfg), only_fields=req.cfg.get("only_fields"))
+                                    mode=runner.check_mode(req.cfg), only_fields=req.cfg.get("only_fields"), ai_patch=ai_patch)
     if reasons:
         fail = True
         items += [("❌", r) for r in reasons]
@@ -142,7 +150,6 @@ def check_pull(issue, root, base, head, changes=None, show=None):
             fail = True
             items.append(("❌", "이미지 교체 외의 변경이 있거나 새 이미지가 Unsplash 주소가 아닙니다."))
     else:
-        want = expected_after(req, before)
         if want is not None:
             if after == want:
                 items.append(("✅", "요청한 교체와 정확히 일치하는 변경입니다(그 밖의 글자는 하나도 바뀌지 않았습니다)."))
@@ -182,15 +189,15 @@ def main(argv=None):
         base, head = pr["base"]["sha"], pr["head"]["sha"]
         report = check_pull(issue, root, base, head)
     except (OSError, KeyError, json.JSONDecodeError, subprocess.CalledProcessError, spec_mod.SpecError) as exc:
-        print(f"[오류] {type(exc).__name__}: {exc}")
+        print(f"[오류] {type(exc).__name__}: {_flat(exc)}")
         return 2
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     (out / "report.md").write_text(report.markdown(), encoding="utf-8")
     (out / "verdict.txt").write_text(report.verdict + "\n", encoding="utf-8")
-    print(f"[scope-check] {report.verdict} {report.title}")
+    print(f"[scope-check] {report.verdict} {_flat(report.title)}")
     for sym, text in report.items:
-        print(f"  {sym} {text}")
+        print(f"  {sym} {_flat(text)}")
     return 1 if report.verdict == "FAIL" else 0
 
 
