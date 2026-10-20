@@ -1,0 +1,55 @@
+name: "고정 페이지 수정"
+description: "about / contact / privacy 등 고정 페이지의 특정 항목만 수정합니다. (게시글 이미지 변경은 별도 양식)"
+title: "[페이지 수정] "
+labels: ["blog-control", "edit:page"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        이 양식은 **고정 페이지의 지정 항목 수정 전용**입니다.
+        선택한 수정 항목 밖의 내용은 변경하지 않습니다.
+
+  - type: dropdown
+    id: target_page
+    attributes:
+      label: "대상 페이지"
+      description: "페이지가 추가되면 목록이 자동으로 갱신됩니다."
+      options:
+        # PAGES:START (sync_issue_form.py가 pages.json 기준으로 자동 갱신 - 수동 편집 금지)
+        - about
+        - contact
+        - privacy
+        - categories
+        # PAGES:END
+    validations:
+      required: true
+
+  - type: dropdown
+    id: edit_type
+    attributes:
+      label: "수정 항목"
+      options:
+        # EDITS:START (edit-spec.yml 기준 자동 갱신)
+        - text_change | 문구 수정
+        - seo_meta | SEO 메타(title/description)
+        - layout | 섹션/레이아웃 변경
+        - link_change | 링크 변경
+        # EDITS:END
+    validations:
+      required: true
+
+  - type: textarea
+    id: before
+    attributes:
+      label: "변경 전 (선택)"
+      description: "문구 수정/링크 변경일 때 현재 내용을 그대로 붙여 넣으세요."
+    validations:
+      required: false
+
+  - type: textarea
+    id: after
+    attributes:
+      label: "변경 후 / 요청 내용"
+      description: "원하는 결과를 구체적으로 적어주세요."
+    validations:
+      required: true
