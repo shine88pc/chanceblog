@@ -99,7 +99,9 @@ Blogger 자동화는 **Chance_Blog 기존 엔진의 연장선**으로 설계한�
 | ②-A Chance_Blog | 근거·맥락·분석 중심 KR/EN 생성 | 기존 유지 |
 | ②-B Blogger | 같은 큰 주제 → 실용 버전으로 완전 재작성 | 신규 |
 
-### 3.3 Blogger용 생성 규칙
+### 3.3 Blogger용 생성 규칙 (확정)
+
+**상세 프롬프트**: [`.github/editorial/BLOGGER_PROMPT.md`](./.github/editorial/BLOGGER_PROMPT.md) 참고
 
 - **대상 명시**: 반드시 `대상: Blogger`
 - **톤**: 친근하고 실용적 (학술·분석 톤 금지)
@@ -125,9 +127,9 @@ Blogger 자동화는 **Chance_Blog 기존 엔진의 연장선**으로 설계한�
 chanceblog/
 ├── generator.py                 # 기존 (Chance_Blog 전용)
 ├── blogger_generator.py         # 신규: Blogger 분기 생성 + 게시
-├── shared/                      # (선택) 공통 로직
-│   ├── topics.py
-│   └── prompts.py
+├── .github/editorial/
+│   ├── CHANCE_BLOG_TEMPLATE.md  # Chance_Blog 편집 기준
+│   └── BLOGGER_PROMPT.md        # Blogger 분기 프롬프트 (확정)
 ├── .github/workflows/
 │   ├── chanceblog.yml           # 기존
 │   └── blogger.yml              # 신규 또는 기존에 통합
@@ -143,7 +145,7 @@ chanceblog/
 
 ### 3.7 구현 우선순위
 
-1. 공통 주제 → Blogger용 분기 프롬프트 확정
+1. ~~공통 주제 → Blogger용 분기 프롬프트 확정~~ ✅ 완료 (BLOGGER_PROMPT.md)
 2. `blogger_generator.py` 초안 (Gemini로 실용 버전 생성)
 3. 게시 방식 확정 (단기 Sheets → 중기 Blogger API)
 4. GitHub Actions 연동
@@ -163,6 +165,7 @@ chanceblog/
 | `about.md`, `privacy.md`, `contact.md` | 정책/소개 페이지 |
 | `generator.py` | Chance_Blog 글 생성/동기화 스크립트 |
 | `blogger_generator.py` | (예정) Blogger용 분기 생성 스크립트 |
+| `.github/editorial/BLOGGER_PROMPT.md` | Blogger 분기 프롬프트 (확정) |
 | `AI_COLLAB.md` | 이 파일 (필수 지침) |
 | `WORKLOG.md` | 작업 이력 및 인수인계 로그 |
 | `README.md` | 저장소 최상단 안내 (AI 강제 읽기 포함) |
@@ -220,7 +223,8 @@ chanceblog/
 - 존재하지 않는 개인 경험·인터뷰를 지어내지 않음
 - AI 사용 사실을 숨기지 않음 (about 페이지에 공개)
 
-Blogger용 글은 위 원칙을 기본으로 하되, 더 실용적이고 읽기 쉬운 형식을 우선한다.
+Blogger용 글은 위 원칙을 기본으로 하되, 더 실용적이고 읽기 쉬운 형식을 우선한다.  
+Blogger 프롬프트는 `.github/editorial/BLOGGER_PROMPT.md`를 따른다.
 
 ---
 
@@ -236,7 +240,7 @@ Blogger용 글은 위 원칙을 기본으로 하되, 더 실용적이고 읽기 
 
 1. **Chance_Blog AdSense 승인 유지 및 통과** (단기 최우선)
 2. **두 블로그 콘텐츠의 균형 있는 생산** (중기)
-3. **Blogger 자동화 파이프라인 구축** (설계 완료 → 구현 단계)
+3. **Blogger 자동화 파이프라인 구축** (프롬프트 확정 ✅ → 다음: blogger_generator.py)
 4. 콘텐츠 품질·다양성·SEO 지속 개선
 
 이 문서는 필요에 따라 업데이트합니다. 중요한 규칙 변경 시 `WORKLOG.md`에도 기록하세요.
