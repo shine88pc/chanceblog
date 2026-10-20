@@ -1,0 +1,67 @@
+{
+  "_doc": "블로그 레지스트리 v1. 새 블로그는 blogs[]에 항목을 추가한다(docs/ARCHITECTURE.md '블로그 추가 플레이북'). 시크릿 '값'은 절대 쓰지 말고 환경변수/Secrets '이름'만 적는다.",
+  "schema_version": 1,
+  "shared_secrets": ["GEMINI_API_KEY"],
+  "defaults": {
+    "mode": "draft",
+    "timezone": "Asia/Seoul",
+    "llm": {
+      "models": ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"],
+      "max_retries": 2
+    },
+    "limits": {"max_posts_per_day": 1},
+    "ad_surface": false,
+    "protected_paths": [],
+    "health": {"max_gap_hours": 48, "max_failure_streak": 3}
+  },
+  "blogs": [
+    {
+      "key": "chance",
+      "name": "Chance_Blog",
+      "platform": "jekyll-git",
+      "url": "https://shine88pc.github.io/chanceblog/",
+      "role": "교양·분석형 매거진 (출처 기반, KR/EN)",
+      "languages": ["ko", "en"],
+      "mode": "auto",
+      "workflow": ".github/workflows/chanceblog.yml",
+      "entrypoint": "generator.py",
+      "prompt": ".github/editorial/CHANCE_BLOG_TEMPLATE.md",
+      "profile": null,
+      "state": {"history": "history.json", "content_dir": "_posts"},
+      "schedule": {"cron": "17 * * * *", "slots_kst": [9, 18]},
+      "limits": {"max_posts_per_day": 2},
+      "secrets": {"llm_api_key": "GEMINI_API_KEY", "unsplash_key": "UNSPLASH_ACCESS_KEY"},
+      "ad_surface": true,
+      "protected_paths": [
+        "index.html", "privacy.md", "about.md", "contact.md", "robots.txt", "ads.txt",
+        "_config.yml", "_includes/", "_layouts/",
+        "googlee86895dfeddcdd45.html", "naver8e7a71b78d49e6f323e7ad60ffb862a8.html"
+      ],
+      "health": {"max_gap_hours": 36, "max_failure_streak": 3}
+    },
+    {
+      "key": "blogger_macat",
+      "name": "Blogger (macat0722)",
+      "platform": "blogger",
+      "url": "https://macat0722.blogspot.com/",
+      "role": "건강·음식·생활 실용형 (KR)",
+      "languages": ["ko"],
+      "mode": "auto",
+      "workflow": ".github/workflows/blogger.yml",
+      "entrypoint": "blogger_generator.py",
+      "prompt": ".github/editorial/BLOGGER_PROMPT.md",
+      "profile": "blogger_practical_ko",
+      "state": {"history": "blogger_history.json", "content_dir": "_blogger_drafts"},
+      "schedule": {"cron": "0 2 * * *"},
+      "limits": {"max_posts_per_day": 1},
+      "secrets": {
+        "llm_api_key": "GEMINI_API_KEY",
+        "blog_id": "BLOGGER_BLOG_ID",
+        "client_id": "BLOGGER_CLIENT_ID",
+        "client_secret": "BLOGGER_CLIENT_SECRET",
+        "refresh_token": "BLOGGER_REFRESH_TOKEN"
+      },
+      "health": {"max_gap_hours": 50, "max_failure_streak": 3, "max_unpublished_days": 3}
+    }
+  ]
+}
