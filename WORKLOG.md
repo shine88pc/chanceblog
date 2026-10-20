@@ -7,6 +7,41 @@
 
 ---
 
+## [2026-10-20] Grok – Blogger 분기 프롬프트 확정
+
+**작업자**: Grok  
+**대상**: Blogger  
+**목적**: Chance_Blog와 명확히 분리된 Blogger용 콘텐츠 생성 프롬프트를 확정하고 공식 문서로 등록
+
+### 변경 사항
+- `.github/editorial/BLOGGER_PROMPT.md` 신규 생성 (확정본)
+  - 기본 프롬프트 (복붙용)
+  - 주제 유형별 세부 가이드
+  - Chance_Blog와의 차별점 표
+  - 제목 규칙 및 주의사항
+- `AI_COLLAB.md` 업데이트
+  - 프롬프트 파일 링크 추가
+  - 구현 우선순위 1번 완료 표시
+
+### 프롬프트 핵심
+- 톤: 친근·실용 (학술·분석 금지)
+- 구조: 도입 → 팁 3~5개 → 체크리스트 → 마무리
+- 길이: 1,200~2,000자
+- 출력: 제목 / 라벨 / HTML 내용
+
+### 다음 AI에게 남기는 주의사항
+1. Blogger 글 생성 시 반드시 `.github/editorial/BLOGGER_PROMPT.md`를 따를 것
+2. `대상: Blogger` 명시 필수
+3. 다음 단계는 `blogger_generator.py` 초안 작성
+
+### 남은 이슈 / 다음 단계
+- `blogger_generator.py` 초안 작성
+- 게시 방식 확정 (Sheets vs Blogger API)
+- GitHub Actions 연동
+- Chance_Blog AdSense 승인 모니터링
+
+---
+
 ## [2026-10-20] Grok – Blogger 자동화 구조 설계 완료
 
 **작업자**: Grok  
