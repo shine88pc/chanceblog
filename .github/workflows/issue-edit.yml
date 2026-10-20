@@ -1,0 +1,133 @@
+name: Issue Edit
+
+# 이슈 양식('고정 페이지 수정' · '기존 게시글 이미지 변경')으로 접수된 수정 요청을 처리해 **PR 로** 올린다.
+# main 에 직접 push 하지 않는다. 결과는 사람이 검토·병합한다. 설명: docs/ISSUE_EDITS.md
+# 수정 범위·검증은 .github/editorial/edit-spec.yml 과 pipeline/edits/ 가 정한다.
+
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: '처리할 이슈 번호'
+        required: true
+        type: string
+      dry_run:
+        description: 'DRY_RUN (파일·PR·코멘트 없이 로그만)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue-edit
+  cancel-in-progress: false
+
+jobs:
+  edit:
+    # 소유자·멤버·협업자가 연 제어 이슈만 처리한다(수동 실행은 항상 허용). 작성자 권한은 처리 코드에서 한 번 더 확인한다.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association) &&
+       (contains(github.event.issue.labels.*.name, 'blog-control') ||
+        startsWith(github.event.issue.title, '[페이지 수정]') ||
+        startsWith(github.event.issue.title, '[이미지 변경]')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      actions: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue_number }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-edits.txt
+
+      # 이슈 양식의 라벨은 저장소에 이미 있어야 적용된다. 없으면 만든다(있으면 갱신).
+      - name: 처리 경로 라벨 보장
+        if: env.DRY_RUN != 'true'
+        run: |
+          set -euo pipefail
+          gh label create "blog-control" --color 0e8a16 --description "블로그 수정 요청" --force
+          gh label create "edit:page" --color 1d76db --description "고정 페이지 수정 요청" --force
+          gh label create "edit:image" --color 5319e7 --description "게시글 이미지 변경 요청" --force
+
+      # 이슈 본문은 신뢰할 수 없는 입력이다: 셸에 보간하지 않고 API 로 파일에 받아 코드가 읽는다.
+      - name: 이슈 내용 가져오기
+        run: gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" > "${RUNNER_TEMP}/issue.json"
+
+      - name: 요청 해석·검증·수정
+        id: edit
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
+        run: python -m pipeline.edits.runner --issue-file "${RUNNER_TEMP}/issue.json" --out "${RUNNER_TEMP}/issue-edit"
+
+      - name: 브랜치·커밋·PR 생성
+        if: steps.edit.outcome == 'success' && env.DRY_RUN != 'true'
+        run: |
+          set -euo pipefail
+          out="${RUNNER_TEMP}/issue-edit"
+          if [ "$(cat "$out/status.txt")" != "ok" ]; then echo "수정안 없음 — PR 을 만들지 않습니다"; exit 0; fi
+          branch="$(cat "$out/branch.txt")"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          while IFS= read -r f; do git add -- "$f"; done < "$out/files.txt"
+          python -m pipeline.edits.runner --verify-staged "$out/files.txt"
+          git commit -F "$out/commit_msg.txt"
+          git push origin "$branch"
+          if gh pr create --base "$DEFAULT_BRANCH" --head "$branch" --title "$(cat "$out/pr_title.txt")" --body-file "$out/pr_body.md" > "$out/pr_url.txt"; then
+            echo "PR: $(cat "$out/pr_url.txt")"
+          else
+            echo "PR 자동 생성 실패 — 저장소 설정 'Allow GitHub Actions to create and approve pull requests' 를 확인하세요." >&2
+            echo "https://github.com/${GITHUB_REPOSITORY}/compare/${DEFAULT_BRANCH}...${branch}?expand=1" > "$out/compare_url.txt"
+          fi
+          gh workflow run guardrails.yml --ref "$branch"
+
+      - name: 이슈에 결과 코멘트
+        if: always() && env.DRY_RUN != 'true'
+        run: |
+          set -euo pipefail
+          out="${RUNNER_TEMP}/issue-edit"
+          status="$(cat "$out/status.txt" 2>/dev/null || echo missing)"
+          final="$out/final_comment.md"
+          case "$status" in
+            ok)
+              if [ -s "$out/pr_url.txt" ]; then
+                { echo "✅ **수정안을 PR 로 만들었습니다.** 검토 후 병합하면 반영됩니다."; echo; echo "- PR: $(cat "$out/pr_url.txt")"; cat "$out/summary.md"; } > "$final"
+              elif [ -s "$out/compare_url.txt" ]; then
+                { echo "✅ **수정 브랜치를 만들었습니다.** PR 자동 생성 권한이 없어 아래 링크에서 'Create pull request' 를 눌러 주세요."; echo; echo "- $(cat "$out/compare_url.txt")"; cat "$out/summary.md"; } > "$final"
+              else
+                echo "❌ 수정안은 만들었지만 브랜치·PR 단계에서 실패했습니다. Actions 로그를 확인하세요." > "$final"
+              fi ;;
+            rejected|error) cp "$out/comment.md" "$final" ;;
+            ignored) echo "처리 대상이 아니어서 코멘트하지 않습니다."; exit 0 ;;
+            *) echo "❌ 처리 결과를 만들지 못했습니다. Actions 로그를 확인하세요." > "$final" ;;
+          esac
+          gh issue comment "$ISSUE_NUMBER" --body-file "$final"
+
+      - name: DRY_RUN 결과 출력
+        if: always() && env.DRY_RUN == 'true'
+        run: |
+          out="${RUNNER_TEMP}/issue-edit"
+          for f in status.txt files.txt comment.md summary.md pr_body.md; do
+            if [ -f "$out/$f" ]; then echo "----- $f"; cat "$out/$f"; fi
+          done

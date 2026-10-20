@@ -3,7 +3,7 @@
 모드
 - 기본: 뉴스 주제를 골라 KR/EN 글 한 쌍을 생성
 - FIX_IMAGES=1: 새 글 없이 기존 글의 깨진/누락/중복 이미지만 교체
-- Issue 이벤트: 저장소 관리자가 올린 이슈로 파일 수정 (경로 제한 적용)
+- (이슈 기반 수정은 issue-edit.yml / pipeline/edits 가 처리한다. 옛 LLM 파일 편집 핸들러는 제거됨: D-01)
 - DRY_RUN=1: 파일 쓰기/커밋 없이 계획만 로그로 출력
   (API 키가 없으면 Gemini/Unsplash는 스텁으로 동작)
 """
@@ -37,9 +37,6 @@ def _flag(name):
 DRY_RUN = _flag("DRY_RUN")
 FIX_IMAGES = _flag("FIX_IMAGES")
 EVENT_NAME = os.environ.get("EVENT_NAME", "").strip().lower()
-ISSUE_TITLE = os.environ.get("ISSUE_TITLE", "")
-ISSUE_BODY = os.environ.get("ISSUE_BODY", "")
-ISSUE_ASSOC = os.environ.get("ISSUE_AUTHOR_ASSOCIATION", "").strip().upper()
 
 STUB_GEMINI = not API_KEY
 STUB_UNSPLASH = not UNSPLASH_KEY
@@ -200,24 +197,6 @@ def call_gemini_with_fallback(prompt):
             errors.append(f"{model_name}: {exc}")
             print(f"Gemini 모델 호출 실패: {model_name} - {exc}")
     raise RuntimeError("모든 Gemini 모델 호출 실패\n" + "\n".join(errors))
-
-
-def safe_repo_path(raw_path):
-    if not isinstance(raw_path, str) or not raw_path.strip():
-        raise ValueError("target_file 값이 비어 있습니다.")
-    candidate = Path(raw_path.strip())
-    if candidate.is_absolute():
-        raise ValueError("절대 경로는 허용되지 않습니다.")
-    root = Path(".").resolve()
-    target = (root / candidate).resolve()
-    try:
-        target.relative_to(root)
-    except ValueError:
-        raise ValueError("저장소 외부 경로는 허용되지 않습니다.")
-    forbidden = {".git", ".github", "node_modules", "_site", ".jekyll-cache"}
-    if forbidden.intersection(candidate.parts):
-        raise ValueError("보호된 디렉터리는 수정할 수 없습니다.")
-    return target
 
 
 # ============================================================
@@ -489,261 +468,6 @@ def fix_images(keyword=None):
                + (" (DRY_RUN: 실제 변경 없음)" if DRY_RUN else ""))
     print(summary)
     return "이미지 점검: " + summary
-
-
-# ============================================================
-# Issue 처리 (패치 방식, 보호 파일, 결과 댓글)
-# ============================================================
-PROTECTED_NAMES = {"generator.py", "history.json"}
-PROTECTED_DIRS = {".git", ".github", "node_modules", "_site", ".jekyll-cache",
-                  ".venv", "venv", "__pycache__"}
-EDITABLE_SUFFIXES = {".html", ".css", ".js", ".md", ".txt", ".yml", ".yaml", ".json"}
-MAX_EDIT_CHARS = 80000
-
-
-def comment_issue(text, close=False):
-    token = os.environ.get("GITHUB_TOKEN")
-    repo = os.environ.get("GITHUB_REPOSITORY")
-    number = os.environ.get("ISSUE_NUMBER")
-    if DRY_RUN or not (token and repo and number):
-        print(f"[이슈 댓글{' + 닫기' if close else ''}]\n{text}")
-        return
-    base = f"https://api.github.com/repos/{repo}/issues/{number}"
-    headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
-               "User-Agent": UA, "Content-Type": "application/json"}
-
-    def call(url, payload, method):
-        req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"),
-                                     headers=headers, method=method)
-        urllib.request.urlopen(req, timeout=15).read()
-
-    try:
-        call(base + "/comments", {"body": text}, "POST")
-        if close:
-            call(base, {"state": "closed"}, "PATCH")
-    except Exception as exc:
-        print(f"이슈 댓글/닫기 실패 (워크플로 permissions에 issues: write 필요): {exc}")
-
-
-def parse_issue_body(body):
-    sections = {}
-    for chunk in re.split(r"(?m)^###\s+", body or ""):
-        if not chunk.strip():
-            continue
-        head, _, rest = chunk.partition("\n")
-        sections[head.strip()] = rest.strip()
-
-    def find(prefix):
-        for key, value in sections.items():
-            if key.startswith(prefix):
-                return "" if value.strip().lower() in {"_no response_", "no response"} else value
-        return ""
-
-    task, category, details = find("작업 종류"), find("카테고리"), find("상세")
-    if not sections:
-        details = (body or "").strip()
-    return task, category, details
-
-
-def safe_edit_path(raw):
-    target = safe_repo_path(raw)
-    rel = target.relative_to(Path(".").resolve())
-    if rel.name in PROTECTED_NAMES or rel.suffix.lower() not in EDITABLE_SUFFIXES:
-        raise ValueError(f"수정할 수 없는 파일입니다: {rel}")
-    if not target.is_file():
-        raise ValueError(f"파일이 없습니다: {rel}")
-    return target, rel
-
-
-def list_editable_files():
-    out = []
-    for root, dirs, files in os.walk("."):
-        dirs[:] = [d for d in dirs if d not in PROTECTED_DIRS and d != "_posts"]
-        for name in files:
-            p = Path(root) / name
-            if name in PROTECTED_NAMES or p.suffix.lower() not in EDITABLE_SUFFIXES:
-                continue
-            try:
-                out.append(f"{p} ({p.stat().st_size} bytes)")
-            except OSError:
-                continue
-    return sorted(out)
-
-
-def plan_actions(task, details):
-    posts = load_posts()[-60:]
-    post_lines = [f"{p['path']} | {p['title']}" for p in posts]
-    prompt = f"""
-당신은 정적 블로그 저장소의 관리 도우미입니다. 아래 요청을 처리할 작업 목록을 JSON으로 만드세요.
-
-사용 가능한 작업 type:
-- fix_images: 기존 글의 누락/깨진/중복 이미지를 글 내용에 맞는 새 이미지로 교체합니다.
-  특정 주제의 글만 바꾸려면 keyword에 그 글들의 제목/태그에 들어 있을 단어를 넣으세요. 아니면 생략.
-- edit_file: [수정 가능 파일] 또는 [최근 글] 중 하나를 수정합니다. target_file과,
-  무엇을 어떻게 바꿀지 구체적인 instruction이 필요합니다.
-- delete_post: _posts 안의 글 하나를 삭제합니다. target_file 필요.
-
-규칙: 작업은 최대 3개. generator.py, history.json, .github 는 수정할 수 없습니다.
-코드로 처리할 수 없거나 요청이 불명확하면 actions를 비우고 reason에 사유를 한국어로 쓰세요.
-
-[작업 종류] {task}
-[요청 내용]
-{details}
-
-[수정 가능 파일]
-{chr(10).join(list_editable_files()[:80])}
-
-[최근 글]
-{chr(10).join(post_lines)}
-
-JSON 객체만 반환:
-{{"actions": [{{"type": "fix_images", "keyword": ""}},
-  {{"type": "edit_file", "target_file": "...", "instruction": "..."}}],
- "reason": ""}}
-"""
-    data = extract_json_object(call_gemini_with_fallback(prompt).text)
-    actions = data.get("actions")
-    if not isinstance(actions, list):
-        actions = []
-    return actions[:3], str(data.get("reason") or "")
-
-
-def edit_file_with_patches(raw_path, instruction):
-    target, rel = safe_edit_path(raw_path)
-    original = target.read_text(encoding="utf-8")
-    if len(original) > MAX_EDIT_CHARS:
-        raise ValueError(f"{rel}: 파일이 너무 커서({len(original)}자) 자동 수정하지 않습니다.")
-    is_post = len(rel.parts) >= 2 and rel.parts[0] == "_posts" and rel.suffix.lower() == ".md"
-    post_rules = ""
-    if is_post:
-        post_rules = f"""
-이 파일은 기존 게시글입니다. 아래 Chance_Blog 편집 템플릿을 적용하세요.
-- 요청이 말투/가독성 수정이면 주장, 고유명사, 날짜, 수치, 직접 인용, 출처 링크와 이미지 표기를 보존하세요.
-- 사실 수정 요청이면 요청에 근거 자료가 포함되지 않은 한 사실 주장을 바꾸지 말고 패치를 반환하지 마세요.
-- AI가 쓴 글임을 숨기거나 탐지기를 피하려 하지 말고, 과장·상투어·가짜 개인 경험·반복 요약만 근거를 해치지 않는 범위에서 다듬으세요.
-- Front Matter와 이미지 URL은 수정하지 마세요. 문서 전체를 다시 쓰지 말고 필요한 최소 부분만 패치하세요.
-
-[Chance_Blog 편집 템플릿]
-{load_editorial_template()}
-"""
-    prompt = f"""
-아래 파일을 요청대로 수정하기 위한 '부분 패치'를 JSON으로 만드세요.
-- 파일 전체를 다시 쓰지 말고, 바꿀 부분만 old/new 쌍으로 주세요.
-- old는 파일에서 글자 하나까지 정확히 복사한 문자열이며 파일 안에서 정확히 한 번만 나와야 합니다.
-  유일하지 않으면 앞뒤 문맥을 더 포함하세요.
-- 패치는 최대 10개, 각각 작게 유지하세요.
-- 수정이 불가능하면 patches를 비우세요.
-
-[파일] {rel}
-[수정 지시]
-{instruction}
-{post_rules}
-
-[파일 전체 내용]
-{original}
-
-JSON 객체만 반환: {{"patches": [{{"old": "...", "new": "..."}}]}}
-"""
-    data = extract_json_object(call_gemini_with_fallback(prompt).text)
-    patches = data.get("patches")
-    if not isinstance(patches, list) or not patches:
-        raise ValueError(f"{rel}: 적용할 패치가 없습니다 (요청을 코드 수정으로 옮기지 못함).")
-    text = original
-    for i, patch in enumerate(patches[:10], 1):
-        old = patch.get("old") if isinstance(patch, dict) else None
-        new = patch.get("new") if isinstance(patch, dict) else None
-        if not isinstance(old, str) or not old or not isinstance(new, str):
-            raise ValueError(f"{rel}: 패치 {i} 형식이 올바르지 않습니다.")
-        count = text.count(old)
-        if count != 1:
-            raise ValueError(f"{rel}: 패치 {i}의 대상 문구가 {count}곳에서 발견되어 "
-                             "적용하지 않았습니다. (파일은 변경되지 않음)")
-        text = text.replace(old, new, 1)
-    if is_post:
-        def front_matter(value):
-            match = re.match(r"\A(---\s*\n.*?\n---\s*\n)", value, re.S)
-            return match.group(1) if match else ""
-
-        def urls(value):
-            return re.findall(r"https?://[^\s)\]>]+", value)
-
-        def numbers(value):
-            return re.findall(r"(?<!\w)\d+(?:[.,]\d+)*(?:%|\w)?", value)
-
-        def image_markup(value):
-            return re.findall(r"!\[[^\]]*\]\([^)]+\)", value)
-
-        if front_matter(text) != front_matter(original):
-            raise ValueError(f"{rel}: 편집 템플릿은 Front Matter 변경을 허용하지 않습니다. (파일은 변경되지 않음)")
-        if urls(text) != urls(original):
-            raise ValueError(f"{rel}: 출처/링크 주소가 바뀌어 적용하지 않았습니다. (파일은 변경되지 않음)")
-        if numbers(text) != numbers(original):
-            raise ValueError(f"{rel}: 날짜·수치가 바뀌어 적용하지 않았습니다. (파일은 변경되지 않음)")
-        if image_markup(text) != image_markup(original):
-            raise ValueError(f"{rel}: 이미지 표기가 바뀌어 적용하지 않았습니다. (파일은 변경되지 않음)")
-    if len(text) < len(original) * 0.5:
-        raise ValueError(f"{rel}: 수정 후 파일이 절반 이하로 줄어 적용하지 않았습니다.")
-    if rel.suffix.lower() == ".json":
-        json.loads(text)
-    write_text_atomic(target, text)
-    return f"`{rel}` {len(patches)}곳 수정"
-
-
-def delete_post(raw_path):
-    target = safe_repo_path(raw_path)
-    rel = target.relative_to(Path(".").resolve())
-    if not (rel.parts and rel.parts[0] == "_posts" and rel.suffix == ".md"):
-        raise ValueError("글 삭제는 _posts 안의 .md 파일만 가능합니다.")
-    if not target.is_file():
-        raise ValueError(f"삭제할 파일이 없습니다: {rel}")
-    if DRY_RUN:
-        print(f"[DRY_RUN] 삭제 생략: {rel}")
-    else:
-        target.unlink()
-    return f"`{rel}` 삭제"
-
-
-def handle_issue_event():
-    if ISSUE_ASSOC not in {"OWNER", "MEMBER", "COLLABORATOR"}:
-        print(f"이슈 작성자 권한({ISSUE_ASSOC or '알 수 없음'})이 없어 처리하지 않습니다.")
-        return
-
-    task, category, details = parse_issue_body(ISSUE_BODY)
-    print(f"이슈 접수 - 제목: {ISSUE_TITLE} / 작업 종류: {task or '(없음)'}")
-    results, notes = [], ""
-    try:
-        if "새로운 포스트" in task or "새 포스트" in task:
-            kr_path, en_path = generate_blog_posts(
-                topic_override=details or ISSUE_TITLE, category_hint=category)
-            results.append(f"새 글 생성: `{kr_path}`, `{en_path}`")
-        else:
-            actions, notes = plan_actions(task, details)
-            if not actions:
-                comment_issue("⚠️ 자동으로 처리하지 못했습니다.\n\n사유: "
-                              + (notes or "처리 가능한 작업으로 바꾸지 못했습니다.")
-                              + "\n\n요청을 더 구체적으로(대상 파일, 바꿀 내용) 적어 새 이슈로 올려주세요.")
-                return
-            for act in actions:
-                kind = act.get("type")
-                if kind == "fix_images":
-                    kw = (act.get("keyword") or "").strip() or None
-                    results.append(fix_images(keyword=kw))
-                elif kind == "edit_file":
-                    results.append(edit_file_with_patches(
-                        act.get("target_file"), act.get("instruction") or details))
-                elif kind == "delete_post":
-                    results.append(delete_post(act.get("target_file")))
-                else:
-                    raise ValueError(f"지원하지 않는 작업: {kind}")
-    except Exception as exc:
-        comment_issue(f"❌ 처리 실패 (변경 사항은 저장소에 반영되지 않았습니다)\n\n"
-                      f"`{type(exc).__name__}`: {exc}\n\n"
-                      "요청을 더 구체적으로 적어 새 이슈로 올리거나 Actions 로그를 확인하세요.")
-        raise
-
-    comment_issue("✅ 처리 결과\n\n" + "\n".join(f"- {r}" for r in results)
-                  + "\n\n사이트 반영까지 1~2분 걸릴 수 있습니다. 문제가 있으면 새 이슈로 알려주세요.",
-                  close=True)
 
 
 # ============================================================
@@ -1483,8 +1207,6 @@ def main():
               f"Unsplash={'스텁' if STUB_UNSPLASH else '실제'}) - 파일은 변경되지 않습니다.")
     if FIX_IMAGES:
         fix_images()
-    elif EVENT_NAME == "issues" or ISSUE_TITLE.strip():
-        handle_issue_event()
     elif EVENT_NAME == "schedule":
         now = now_kst()
         slot = current_due_slot(read_history(), now)

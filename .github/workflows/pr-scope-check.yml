@@ -1,0 +1,71 @@
+name: PR Scope Check
+
+# 이슈 양식으로 접수된 수정 요청을 처리하는 PR(Copilot·사람·봇 누구든)이 요청 범위를 지켰는지 검증하고,
+# 결과(통과/확인 필요/범위 밖)를 PR 코멘트로 남긴다. 개발 지식이 없어도 diff 를 읽지 않고 판단할 수 있게 하는 장치다.
+# 검증 도구는 항상 기본 브랜치의 코드로 실행하고 PR 쪽 파일은 읽기만 한다(PR 이 고친 코드를 실행하지 않는다).
+# 설명: docs/ISSUE_EDITS.md, docs/COPILOT_GUIDE.md
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: '검증할 PR 번호'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-scope-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  scope:
+    # 같은 저장소의 브랜치에서 온 PR 만(포크 코드·시크릿 노출 방지)
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 의존성 설치
+        run: python -m pip install -r requirements-edits.txt
+
+      - name: PR 과 연결된 이슈 찾기
+        id: info
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" > "${RUNNER_TEMP}/pr.json"
+          n="$(python -m pipeline.edits.scope_check --find-issue "${RUNNER_TEMP}/pr.json")"
+          echo "issue=${n}" >> "$GITHUB_OUTPUT"
+          if [ -n "$n" ]; then gh api "repos/${GITHUB_REPOSITORY}/issues/${n}" > "${RUNNER_TEMP}/issue.json"; fi
+
+      - name: 요청 범위 검증
+        id: scope
+        if: steps.info.outputs.issue != ''
+        run: python -m pipeline.edits.scope_check --pr-file "${RUNNER_TEMP}/pr.json" --issue-file "${RUNNER_TEMP}/issue.json" --out "${RUNNER_TEMP}/scope"
+
+      - name: PR 에 결과 코멘트
+        if: always() && steps.info.outputs.issue != ''
+        run: |
+          set -euo pipefail
+          out="${RUNNER_TEMP}/scope"
+          if [ ! -f "$out/report.md" ] || [ "$(cat "$out/verdict.txt")" = "SKIP" ]; then echo "코멘트할 결과 없음"; exit 0; fi
+          gh pr comment "$PR_NUMBER" --body-file "$out/report.md" --edit-last --create-if-none

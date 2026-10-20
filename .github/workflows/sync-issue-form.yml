@@ -1,0 +1,57 @@
+name: Sync Issue Form
+
+# pages.json(고정 페이지 레지스트리)과 이슈 양식의 '대상 페이지'·'수정 항목' 드롭다운을 자동으로 최신화한다.
+# 새 페이지는 front matter 에 `editable: true` 만 넣으면 이 워크플로가 목록에 반영한다. 설명: docs/ISSUE_EDITS.md
+# 커밋은 pages.json 과 page-edit.yml 두 파일만 한다(GITHUB_TOKEN push 는 워크플로를 다시 일으키지 않아 반복되지 않는다).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/editorial/edit-spec.yml'
+      - '.github/ISSUE_TEMPLATE/page-edit.yml'
+      - 'pages.json'
+      - '*.md'
+      - '*.html'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-issue-form
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 의존성 설치
+        run: python -m pip install -r requirements-edits.txt
+
+      - name: pages.json 과 이슈 양식 동기화
+        run: |
+          python scripts/build_pages_registry.py
+          python scripts/sync_issue_form.py
+
+      - name: 변경 커밋
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- pages.json .github/ISSUE_TEMPLATE/page-edit.yml
+          if git diff --cached --quiet; then echo "변경 없음"; exit 0; fi
+          git commit -m "chore: pages.json·이슈 양식 자동 동기화 (github-actions) [대상: 공통]"
+          for i in 1 2 3; do
+            if git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}"; then exit 0; fi
+            sleep $((i * 5))
+          done
+          echo "push 실패" >&2
+          exit 1
