@@ -69,7 +69,7 @@ AI가 글을 생성하거나 수정할 때, 작업 대상이 무엇인지 명확
 
 ---
 
-## 3. Blogger 자동화 구조 (2026-10-20 설계)
+## 3. Blogger 자동화 구조 (2026-10-20 설계·확정)
 
 Blogger 자동화는 **Chance_Blog 기존 엔진의 연장선**으로 설계한다. 독립적인 별도 시스템이 아니라, 공통 주제에서 분기하는 구조다.
 
@@ -87,8 +87,8 @@ Blogger 자동화는 **Chance_Blog 기존 엔진의 연장선**으로 설계한�
   (교양·분석형)        (실용·실행형)
         │               │
         ▼               ▼
-   _posts/ 저장      Blogger 게시
-   (기존 방식)       (API 또는 중간 저장)
+   _posts/ 저장      blogger_generator.py
+   (기존 방식)       → 생성 + (목표) 게시
 ```
 
 ### 3.2 단계별 역할
@@ -97,7 +97,7 @@ Blogger 자동화는 **Chance_Blog 기존 엔진의 연장선**으로 설계한�
 |------|------|------|
 | ① 공통 주제 발굴 | 기존 generator.py 로직 재사용 또는 공통 주제 풀 유지 | 건강·생활 연결 가능한 주제 우선 |
 | ②-A Chance_Blog | 근거·맥락·분석 중심 KR/EN 생성 | 기존 유지 |
-| ②-B Blogger | 같은 큰 주제 → 실용 버전으로 완전 재작성 | 신규 |
+| ②-B Blogger | 같은 큰 주제 → 실용 버전으로 완전 재작성 | blogger_generator.py |
 
 ### 3.3 Blogger용 생성 규칙 (확정)
 
@@ -106,33 +106,45 @@ Blogger 자동화는 **Chance_Blog 기존 엔진의 연장선**으로 설계한�
 - **대상 명시**: 반드시 `대상: Blogger`
 - **톤**: 친근하고 실용적 (학술·분석 톤 금지)
 - **길이**: 1,200~2,000자
-- **필수 구조**:
-  1. 일상 고민으로 시작하는 도입
-  2. 실천 가능한 팁 3~5개
-  3. 체크리스트 또는 “오늘부터 해볼 것”
-  4. 가벼운 마무리
+- **필수 구조**: 도입 → 팁 3~5개 → 체크리스트 → 마무리
 - **금지**: Chance_Blog 글 복사·약간 수정, 의학적 진단·치료 효과 단정, 과도한 클릭베이트
 
-### 3.4 게시 방식 (단계적 적용)
+### 3.4 게시 방식 (2026-10-20 확정)
 
-| 단계 | 방식 | 설명 |
+**공식 결정: GitHub Actions + Blogger API**
+
+| 단계 | 방식 | 상태 |
 |------|------|------|
-| 단기 | Google Sheets + Apps Script | 생성 결과를 Sheets에 기록 후 Apps Script로 게시 |
-| 중기 | GitHub Actions + Blogger API | chanceblog 워크플로에서 직접 게시 (목표) |
-| 대안 | Blogger Post-by-Email | 서식 제어가 약해 보조 수단으로만 사용 |
+| **현재 (1단계)** | `blogger_generator.py`로 생성 → `blogger_history.json`에 기록. 수동 게시 또는 임시 복붙 | 운영 중 |
+| **목표 (2단계)** | GitHub Actions에서 생성 후 **Blogger API로 자동 게시** | 다음 구현 대상 |
+| 보조 | Blogger Post-by-Email | 서식 약함, 비상용만 |
 
-### 3.5 파일/모듈 구조 (목표)
+**선택 이유**
+- Chance_Blog와 동일한 실행 환경(GitHub Actions) 유지
+- 한 저장소에서 듀얼 블로그 파이프라인 관리 가능
+- Sheets 경유 시 시스템 분리·수동 개입 증가 → 장기적으로 비효율
+- Blogger API는 OAuth refresh token을 GitHub Secrets에 저장하면 자동 게시 가능
+
+**2단계 구현에 필요한 Secrets**
+- `GEMINI_API_KEY` (이미 사용 중)
+- `BLOGGER_BLOG_ID`
+- `BLOGGER_CLIENT_ID`
+- `BLOGGER_CLIENT_SECRET`
+- `BLOGGER_REFRESH_TOKEN`
+
+### 3.5 파일/모듈 구조
 
 ```
 chanceblog/
-├── generator.py                 # 기존 (Chance_Blog 전용)
-├── blogger_generator.py         # 신규: Blogger 분기 생성 + 게시
+├── generator.py                 # Chance_Blog 전용
+├── blogger_generator.py         # Blogger 분기 생성 (초안 완료)
+├── blogger_history.json         # 생성 로그 (런타임)
 ├── .github/editorial/
-│   ├── CHANCE_BLOG_TEMPLATE.md  # Chance_Blog 편집 기준
-│   └── BLOGGER_PROMPT.md        # Blogger 분기 프롬프트 (확정)
+│   ├── CHANCE_BLOG_TEMPLATE.md
+│   └── BLOGGER_PROMPT.md        # 확정
 ├── .github/workflows/
 │   ├── chanceblog.yml           # 기존
-│   └── blogger.yml              # 신규 또는 기존에 통합
+│   └── blogger.yml              # (예정) Blogger 전용 또는 통합
 ├── AI_COLLAB.md
 └── WORKLOG.md
 ```
@@ -141,15 +153,16 @@ chanceblog/
 
 - Chance_Blog: 기존 유지 (하루 2회 수준)
 - Blogger: 하루 1회 (예: KST 11시 또는 20시)
-- 같은 날 같은 세부 주제를 양쪽에 쓰지 않도록 기록으로 충돌 방지
+- 같은 날 같은 세부 주제 충돌 방지: `blogger_history.json` + Chance_Blog history 교차 확인
 
 ### 3.7 구현 우선순위
 
-1. ~~공통 주제 → Blogger용 분기 프롬프트 확정~~ ✅ 완료 (BLOGGER_PROMPT.md)
-2. `blogger_generator.py` 초안 (Gemini로 실용 버전 생성)
-3. 게시 방식 확정 (단기 Sheets → 중기 Blogger API)
-4. GitHub Actions 연동
-5. AI_COLLAB / WORKLOG 지속 업데이트
+1. ~~분기 프롬프트 확정~~ ✅
+2. ~~blogger_generator.py 초안~~ ✅
+3. ~~게시 방식 확정~~ ✅ (GitHub Actions + Blogger API)
+4. Blogger API 인증 준비 + 게시 함수 구현
+5. GitHub Actions 워크플로 (`blogger.yml`) 추가
+6. 주제 충돌 방지 로직 보강
 
 ---
 
@@ -159,88 +172,81 @@ chanceblog/
 |------|------|
 | `index.html` | 메인 랜딩 페이지 (가장 중요, 광고 코드 포함) |
 | `_config.yml` | Jekyll 설정 |
-| `_layouts/` | 레이아웃 (`post.html`, `info.html`) |
-| `_includes/` | head, custom-head 등 |
-| `_posts/` | 게시글 (한국어/영어 카테고리별) |
-| `about.md`, `privacy.md`, `contact.md` | 정책/소개 페이지 |
-| `generator.py` | Chance_Blog 글 생성/동기화 스크립트 |
-| `blogger_generator.py` | (예정) Blogger용 분기 생성 스크립트 |
-| `.github/editorial/BLOGGER_PROMPT.md` | Blogger 분기 프롬프트 (확정) |
-| `AI_COLLAB.md` | 이 파일 (필수 지침) |
-| `WORKLOG.md` | 작업 이력 및 인수인계 로그 |
-| `README.md` | 저장소 최상단 안내 (AI 강제 읽기 포함) |
+| `_layouts/` | 레이아웃 |
+| `_includes/` | head 등 |
+| `_posts/` | 게시글 |
+| `about.md`, `privacy.md`, `contact.md` | 정책/소개 |
+| `generator.py` | Chance_Blog 글 생성 |
+| `blogger_generator.py` | Blogger 분기 생성 (초안) |
+| `.github/editorial/BLOGGER_PROMPT.md` | Blogger 프롬프트 |
+| `AI_COLLAB.md` | 이 파일 |
+| `WORKLOG.md` | 인수인계 로그 |
+| `README.md` | AI 강제 읽기 안내 |
 
 ---
 
 ## 5. AI 작업 전 필수 체크리스트
 
-1. [ ] `AI_COLLAB.md` (이 파일) 전체 읽기
-2. [ ] `WORKLOG.md`의 최신 항목 3~5개 읽기
-3. [ ] 현재 작업이 Chance_Blog용인지, Blogger용인지, 공통인지 확인
-4. [ ] AdSense 관련 작업인지 확인 (승인 대기 중 주의)
-5. [ ] 수정하려는 파일이 최근에 다른 AI에 의해 변경되었는지 확인
-6. [ ] 작업 범위를 명확히 정의 (한 세션에서 너무 많은 파일을 건드리지 않기)
+1. [ ] `AI_COLLAB.md` 전체 읽기
+2. [ ] `WORKLOG.md` 최신 항목 3~5개 읽기
+3. [ ] 작업 대상(Chance_Blog / Blogger / 공통) 확인
+4. [ ] AdSense 관련 여부 확인
+5. [ ] 최근 다른 AI 변경 여부 확인
+6. [ ] 작업 범위 명확화
 
 ---
 
 ## 6. 작업 규칙 (충돌 방지)
 
 ### 6.1 파일 수정 원칙
-- **한 번에 하나의 주요 목표**에만 집중한다.
-- `index.html`은 매우 큰 파일이므로, 수정 시 **어떤 부분을 왜 바꾸는지** 명확히 기록한다.
-- 광고 관련 코드(`adsbygoogle`, AdSense client ID 등)는 함부로 삭제하거나 위치를 바꾸지 않는다.
+- 한 번에 하나의 주요 목표에만 집중
+- `index.html` 수정 시 변경 범위 명확 기록
+- 광고 코드 함부로 삭제/이동 금지
 
 ### 6.2 금지 사항
-- 다른 AI가 최근 작업한 내용을 확인하지 않고 덮어쓰기
-- AdSense 승인 대기 중에 불필요한 대규모 UI 개편
-- 출처 없는 사실 추가, 허위 개인 경험 서술
-- 두 블로그에 동일한 콘텐츠 게시
+- 다른 AI 작업 확인 없이 덮어쓰기
+- AdSense 승인 대기 중 불필요한 대규모 UI 개편
+- 출처 없는 사실, 허위 개인 경험
+- 두 블로그 동일 콘텐츠 게시
 
 ### 6.3 권장 사항
-- 작은 단위로 커밋하고, 커밋 메시지에 AI 이름과 작업 목적·대상을 명시
-- 작업 후 반드시 `WORKLOG.md`를 업데이트
-- Blogger 관련 작업도 이 로그에 기록 (Blogger는 별도 저장소가 없으므로 여기서 추적)
+- 작은 단위 커밋, 메시지에 AI 이름·대상 명시
+- 작업 후 `WORKLOG.md` 업데이트
+- Blogger 작업도 이 로그에 기록
 
 ---
 
 ## 7. AdSense 관련 현재 상태 (2026-10-20 기준)
 
-- AdSense 광고 스크립트가 `index.html` head에 삽입되어 있음
-  - client ID: `ca-pub-6035749437698387`
+- AdSense 스크립트 삽입됨 (`ca-pub-6035749437698387`)
 - 검토 요청 상태
-- `privacy.md`에 광고 관련 안내가 작성되어 있음 (아직 광고 미게시 상태 명시)
+- `privacy.md`에 광고 안내 있음
 
-**주의**: AdSense 승인 전까지는 광고 배치를 과도하게 바꾸거나, 정책 위반 소지가 있는 콘텐츠를 추가하지 말 것.
+**주의**: 승인 전 광고 배치·정책 위반 소지 콘텐츠 추가 금지.
 
 ---
 
-## 8. 편집 원칙 요약 (Chance_Blog)
+## 8. 편집 원칙 요약
 
-자세한 내용은 `.github/editorial/CHANCE_BLOG_TEMPLATE.md`를 참고하세요.
-
-- 확인 가능한 출처를 우선
-- 사실과 해석을 구분
-- 존재하지 않는 개인 경험·인터뷰를 지어내지 않음
-- AI 사용 사실을 숨기지 않음 (about 페이지에 공개)
-
-Blogger용 글은 위 원칙을 기본으로 하되, 더 실용적이고 읽기 쉬운 형식을 우선한다.  
-Blogger 프롬프트는 `.github/editorial/BLOGGER_PROMPT.md`를 따른다.
+- Chance_Blog: `.github/editorial/CHANCE_BLOG_TEMPLATE.md`
+- Blogger: `.github/editorial/BLOGGER_PROMPT.md`
+- 사실과 해석 구분, 허위 경험 금지, AI 사용 사실 공개
 
 ---
 
 ## 9. 작업 후 필수 절차
 
-1. `WORKLOG.md`에 새 항목 추가 (날짜, AI 이름, 작업 대상(Chance_Blog/Blogger/공통), 내용, 남은 이슈)
-2. 커밋 메시지에 작업 요약을 명확히 작성
-3. 다음 AI가 알아야 할 주의사항을 로그에 남김
+1. `WORKLOG.md`에 새 항목 추가
+2. 커밋 메시지에 요약 작성
+3. 다음 AI 주의사항 기록
 
 ---
 
 ## 10. 우선순위
 
 1. **Chance_Blog AdSense 승인 유지 및 통과** (단기 최우선)
-2. **두 블로그 콘텐츠의 균형 있는 생산** (중기)
-3. **Blogger 자동화 파이프라인 구축** (프롬프트 확정 ✅ → 다음: blogger_generator.py)
-4. 콘텐츠 품질·다양성·SEO 지속 개선
+2. **두 블로그 콘텐츠 균형 생산** (중기)
+3. **Blogger 자동화** (프롬프트·생성기·게시방식 확정 ✅ → 다음: API 연동)
+4. 콘텐츠 품질·SEO 지속 개선
 
 이 문서는 필요에 따라 업데이트합니다. 중요한 규칙 변경 시 `WORKLOG.md`에도 기록하세요.
