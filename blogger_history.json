@@ -1,0 +1,24 @@
+[
+  {
+    "v": 1,
+    "blog": "blogger_macat",
+    "date": "2026-10-21",
+    "generated_at": "2026-10-21T01:03:39.091290+09:00",
+    "status": "generated_unpublished",
+    "topic": "피곤할 때 에너지 올리는 간단한 방법",
+    "topic_source": "seed",
+    "title": "점심만 지나면 골골? 피곤할 때 에너지를 올리는 간단한 습관 4가지",
+    "labels": [
+      "건강",
+      "생활습관",
+      "피로회복"
+    ],
+    "url": "",
+    "post_id": "",
+    "model": "gemini-3.6-flash",
+    "attempts": 2,
+    "reasons": [
+      "[SECRETS] 게시 시크릿 미등록: blog_id, client_id, client_secret, refresh_token"
+    ]
+  }
+]
