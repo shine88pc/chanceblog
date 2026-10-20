@@ -7,6 +7,42 @@
 
 ---
 
+## [2026-10-20] Grok – Blogger 자동화 구조 설계 완료
+
+**작업자**: Grok  
+**대상**: 공통 (Blogger 자동화 설계)  
+**목적**: Chance_Blog 기존 자동화의 연장선으로 Blogger 자동화 파이프라인 구조를 공식 설계하고 AI_COLLAB.md에 반영
+
+### 변경 사항
+- `AI_COLLAB.md`에 **§3. Blogger 자동화 구조** 신규 섹션 추가
+  - 전체 파이프라인 (공통 주제 → Chance_Blog / Blogger 분기)
+  - Blogger용 생성 규칙 (톤, 구조, 금지 사항)
+  - 게시 방식 단계적 적용 (단기 Sheets → 중기 Blogger API)
+  - 목표 파일/모듈 구조 (`blogger_generator.py` 등)
+  - 스케줄 제안 및 구현 우선순위
+- 우선순위 항목을 “설계 완료 → 구현 단계”로 업데이트
+
+### 설계 요약
+1. Blogger는 독립 시스템이 아니라 **Chance_Blog 엔진의 연장선**
+2. 공통 주제 선정 후 관점·형식·깊이를 다르게 분기
+3. 단기: Sheets + Apps Script / 중기: GitHub Actions + Blogger API
+4. 하루 1회 수준 스케줄 권장, 주제 충돌 방지 기록 필요
+
+### 다음 AI에게 남기는 주의사항
+1. Blogger 관련 작업 시 반드시 `대상: Blogger` 명시
+2. Chance_Blog 글을 복사·수정해서 Blogger에 올리는 행위 금지
+3. 다음 구현 단계는 `blogger_generator.py` 초안 또는 분기 프롬프트 확정
+4. AdSense 승인 대기 중이므로 Chance_Blog 쪽 광고/정책 변경은 신중히
+
+### 남은 이슈 / 다음 단계
+- Blogger용 분기 프롬프트 확정
+- `blogger_generator.py` 초안 작성
+- 게시 방식 최종 선택 (Sheets vs Blogger API)
+- GitHub Actions 연동 설계
+- Chance_Blog AdSense 승인 모니터링
+
+---
+
 ## [2026-10-20] Grok – 듀얼 블로그 전략 확정 (Chance_Blog + Blogger)
 
 **작업자**: Grok  
