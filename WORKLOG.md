@@ -40,7 +40,7 @@
 6. 작업 PC의 파일은 지워도 된다: 모든 작업물이 `main`에 있다(HANDLER §10). 저장소에 없는 것은 `client_secret.json`(Blogger OAuth)과 각종 키뿐이며, 필요하면 Google Cloud Console·GitHub Secrets에서 다시 준비한다
 
 ### 남은 이슈 / 확인할 점
-- **독립 검증 미완료**: `pipeline/edits`·워크플로는 보안 경계(T2/T3 성격)라 구현자와 다른 세션의 검토가 필요하다. 서브에이전트 검토를 시작했으나 PC 강제 재부팅 일정(23:00)이 있어 결과를 기다리지 않고 먼저 push했다. 이 항목에 검토 결과가 적혀 있지 않다면 아직 검증이 끝나지 않은 것이다 — 다음 AI가 `docs/ENGINEERING_GUIDE.md` §9 체크리스트로 `pipeline/edits/`·`issue-edit.yml`·`pr-scope-check.yml`을 새로 읽고 확인한다
+- **독립 검증 수행(서브에이전트, 2026-10-20)**: 익명 공격 경로는 찾지 못했다(작성자 권한 확인·기본 브랜치 체크아웃·`pull_request_target` 미사용·워크플로 주입 없음·경로 이탈 없음은 유지). 다만 요청자 텍스트와 AI 패치가 사후 검사를 통과하는 경로가 있어 **D-17(높음)~D-23**으로 등록했다. 수정 진행 상황은 `docs/DEFECT_REGISTER.md`의 각 행 상태를 본다. 상태가 "열림"인 항목은 아직 고치지 않은 것이다
 - D-03(Chance 봇 글 0건) 원인은 아직 미확인(Actions 로그 필요). D-11(OAuth 7일)·D-08(내부 문서 공개)·D-09(오래된 브랜치)는 사용자 조치
 
 ---
