@@ -1,69 +1,124 @@
 name: Blogger Generate
 
+# 레지스트리(pipeline/blogs.json)의 platform=blogger 블로그를 모두 처리한다.
+# 블로그를 추가하면 이 파일을 고치지 않고 레지스트리와 Secrets 만 추가하면 된다.
+# schedule.cron 은 레지스트리 값과 같아야 한다(scripts/validate_repo.py 가 확인).
+
 on:
   schedule:
-    # KST 11:00 ≈ UTC 02:00 — 기본은 생성만 (게시 Secrets 있을 때만 자동 게시)
+    # KST 11:00 = UTC 02:00
     - cron: '0 2 * * *'
   workflow_dispatch:
     inputs:
+      blog:
+        description: '특정 블로그 key만 실행 (비우면 blogger 전체)'
+        required: false
+        type: string
       topic:
         description: '특정 주제 (비우면 자동 선택)'
         required: false
         type: string
       dry_run:
-        description: 'DRY_RUN (Gemini 스텁)'
+        description: 'DRY_RUN (스텁 LLM, 파일·게시 없음)'
         type: boolean
         default: false
       publish:
-        description: 'Blogger API로 게시 (Secrets 필요)'
+        description: 'Blogger 에 게시 (체크하지 않으면 초안만 저장)'
         type: boolean
         default: false
 
 permissions:
-  contents: write
-
-concurrency:
-  group: blogger-generate
-  cancel-in-progress: false
+  contents: read
 
 jobs:
-  generate:
+  plan:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      count: ${{ steps.plan.outputs.count }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.12'
+
+      - name: 실행 대상 계산 (레지스트리 검증 포함)
+        id: plan
+        env:
+          ONLY_BLOG: ${{ github.event.inputs.blog }}
+        run: |
+          set -euo pipefail
+          args=(--platform blogger)
+          if [ -n "${ONLY_BLOG:-}" ]; then args+=(--only "$ONLY_BLOG"); fi
+          echo "matrix=$(python -m pipeline.plan "${args[@]}")" >> "$GITHUB_OUTPUT"
+          echo "count=$(python -m pipeline.plan "${args[@]}" --count)" >> "$GITHUB_OUTPUT"
+
+  generate:
+    needs: plan
+    if: needs.plan.outputs.count != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    concurrency:
+      group: blogger-${{ matrix.key }}
+      cancel-in-progress: false
+    env:
+      # 킬 스위치: 저장소 Settings > Variables 에 PIPELINE_PAUSE=true 를 넣으면 전부 멈춘다
+      PIPELINE_PAUSE: ${{ vars.PIPELINE_PAUSE }}
+      DRY_RUN: ${{ github.event.inputs.dry_run == 'true' && 'true' || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
       - name: 의존성 설치
         run: |
           python -m pip install --upgrade pip
-          pip install google-genai google-auth google-auth-oauthlib google-api-python-client
+          python -m pip install -r requirements-pipeline.txt
 
-      - name: Blogger 글 생성 (및 선택적 게시)
+      - name: 생성 → 검증 → 게시/초안
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          BLOG_KEY: ${{ matrix.key }}
           BLOGGER_TOPIC: ${{ github.event.inputs.topic }}
-          DRY_RUN: ${{ github.event.inputs.dry_run == true && '1' || '0' }}
-          # 스케줄 실행: Secrets가 있으면 게시, 수동은 publish 입력 따름
-          BLOGGER_PUBLISH: ${{ github.event_name == 'schedule' && '1' || (github.event.inputs.publish == true && '1' || '0') }}
-          BLOGGER_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
-          BLOGGER_CLIENT_ID: ${{ secrets.BLOGGER_CLIENT_ID }}
-          BLOGGER_CLIENT_SECRET: ${{ secrets.BLOGGER_CLIENT_SECRET }}
-          BLOGGER_REFRESH_TOKEN: ${{ secrets.BLOGGER_REFRESH_TOKEN }}
-        run: python blogger_generator.py
+          # 스케줄: 비움(레지스트리 mode 를 따름) / 수동: 체크하면 on, 아니면 off
+          BLOGGER_PUBLISH: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.publish == 'true' && 'on' || 'off') || '' }}
+          # 블로그마다 다른 Secrets 이름을 역할 이름으로 넘긴다(값은 로그에 마스킹됨)
+          PIPELINE_SECRET_LLM_API_KEY: ${{ secrets[matrix.secret_llm_api_key] }}
+          PIPELINE_SECRET_BLOG_ID: ${{ secrets[matrix.secret_blog_id] }}
+          PIPELINE_SECRET_CLIENT_ID: ${{ secrets[matrix.secret_client_id] }}
+          PIPELINE_SECRET_CLIENT_SECRET: ${{ secrets[matrix.secret_client_secret] }}
+          PIPELINE_SECRET_REFRESH_TOKEN: ${{ secrets[matrix.secret_refresh_token] }}
+        run: python -m pipeline.run --blog "$BLOG_KEY"
 
+      # 생성 단계가 실패해도(llm_failed/publish_failed) 기록과 초안은 남긴다
       - name: 변경 사항 커밋
+        if: ${{ !cancelled() }}
+        env:
+          BLOG_KEY: ${{ matrix.key }}
+          HISTORY_FILE: ${{ matrix.history }}
+          CONTENT_DIR: ${{ matrix.content_dir }}
         run: |
+          set -euo pipefail
+          if [ "${DRY_RUN:-false}" = "true" ]; then echo "DRY_RUN — 커밋 생략"; exit 0; fi
           git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add blogger_history.json _blogger_drafts || true
-          if git diff --cached --quiet; then
-            echo "커밋할 변경 없음"
-          else
-            git commit -m "🤖 Blogger 생성/게시 로그"
-            git pull --rebase origin "${GITHUB_REF_NAME}" || true
-            git push
-          fi
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for p in "$HISTORY_FILE" "$CONTENT_DIR"; do
+            if [ -e "$p" ]; then git add -- "$p"; fi
+          done
+          if git diff --cached --quiet; then echo "커밋할 변경 없음"; exit 0; fi
+          git commit -m "🤖 [${BLOG_KEY}] 생성/게시 기록"
+          for i in 1 2 3; do
+            if git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}"; then exit 0; fi
+            sleep $((i * 5))
+          done
+          echo "push 실패" >&2
+          exit 1

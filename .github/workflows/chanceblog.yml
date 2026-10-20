@@ -21,6 +21,7 @@ on:
 permissions:
   contents: write
   issues: write
+  actions: write  # 새 커밋이 생기면 Pages 배포 워크플로를 dispatch 하기 위해 필요
 
 concurrency:
   group: chanceblog
@@ -45,7 +46,7 @@ jobs:
       - name: 의존성 설치
         run: |
           python -m pip install --upgrade pip
-          pip install google-genai
+          pip install "google-genai>=2,<3"
 
       - name: AI 블로그 제너레이터 실행
         env:
@@ -63,6 +64,7 @@ jobs:
         run: python generator.py
 
       - name: 변경 사항 커밋
+        id: commit
         if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
         run: |
           git config user.name "github-actions[bot]"
@@ -74,4 +76,13 @@ jobs:
             git commit -m "🤖 자동 포스팅/이미지 수정"
             git pull --rebase origin "${GITHUB_REF_NAME}"
             git push
+            echo "pushed=true" >> "$GITHUB_OUTPUT"
           fi
+
+      # GITHUB_TOKEN 으로 push 한 커밋은 push 이벤트를 만들지 않아 pages.yml 이 자동 실행되지 않는다.
+      # (workflow_dispatch 는 예외라서 직접 실행시킨다. docs/DEFECT_REGISTER.md D-02)
+      - name: Pages 배포 실행 (새 커밋이 있을 때만)
+        if: steps.commit.outputs.pushed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run pages.yml --ref "${GITHUB_REF_NAME}"
