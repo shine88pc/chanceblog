@@ -38,6 +38,7 @@
 | R11 | 파일을 **통째로 덮어쓰지 않는다** | 최소 diff. 생성물은 생성기만 쓴다 |
 | R12 | 새 플랫폼은 **어댑터**로 | 기존 블로그 코드를 복사하지 않는다([`ARCHITECTURE.md`](./ARCHITECTURE.md) §7) |
 | R13 | CLI는 **어떤 콘솔에서도 죽지 않게** | 진입점 `main()` 첫 줄에 `pipeline.console.safe_output()`. Windows 한국어 콘솔(cp949)은 `—`·이모지를 출력하면 예외로 멈춘다(CI의 Linux는 UTF-8이라 드러나지 않는다) |
+| R14 | 게시되는 문서(`.md`)에 **Liquid 구문을 쓰지 않는다** | GitHub Pages는 front matter 없는 `.md`도 Liquid로 처리해, 중괄호-퍼센트 태그 예시가 사이트 빌드를 깨뜨렸다(D-24). 예시는 문장으로 풀어 쓴다. 검증기 **LIQUID-1** |
 
 ## 3. 워크플로 작성 원칙
 
