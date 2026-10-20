@@ -35,6 +35,10 @@
 | [`docs/ENGINEERING_GUIDE.md`](./docs/ENGINEERING_GUIDE.md) | How to write code and verify it |
 | [`docs/SECURITY_GUARDRAILS.md`](./docs/SECURITY_GUARDRAILS.md) | Security and policy guardrails, incident playbooks |
 | [`docs/DEFECT_REGISTER.md`](./docs/DEFECT_REGISTER.md) | Verified known defects and their status |
+| [`docs/ISSUE_EDITS.md`](./docs/ISSUE_EDITS.md) | Issue-form based edit requests → PR (spec, security model) |
+| [`docs/COPILOT_GUIDE.md`](./docs/COPILOT_GUIDE.md) | How to use Copilot/AI precisely without coding knowledge |
+| [`docs/REQUEST_BRIEFING.md`](./docs/REQUEST_BRIEFING.md) | Briefing to paste into an AI that cannot see the repo (e.g. mobile Claude) so it writes task requests that fit this program; requests go in `인수인계/작업요청/` |
+| [`docs/ANALYTICS_PLAN.md`](./docs/ANALYTICS_PLAN.md) | Proposal: one dashboard for visitors, top posts and per-site AdSense revenue (awaiting owner decision) |
 | `.github/editorial/BLOGGER_PROMPT.md` | Blogger tone/structure |
 | `.github/editorial/BLOGGER_API_SETUP.md` | Blogger API setup |
 | `.github/editorial/CHANCE_BLOG_TEMPLATE.md` | Chance_Blog editorial standards |

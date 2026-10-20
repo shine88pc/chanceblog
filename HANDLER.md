@@ -24,7 +24,10 @@
 | Blogger 실게시 | ⏳ 미완료 — ① OAuth 동의 화면 **"프로덕션"** 전환(테스트 상태면 토큰 7일 만료, D-11) ② refresh token 발급 ③ GitHub Secrets(`BLOGGER_*`) 등록 (§3 P1, §10) |
 | 풀오토 가이드 체계 | `AGENTS.md`(상시 규칙) · `docs/CHARTER`·`ARCHITECTURE`·`ENGINEERING_GUIDE`·`SECURITY_GUARDRAILS` · `docs/DEFECT_REGISTER`. 총괄 역할: Claude(2026-10-20) |
 | 가드레일 자동화 | `scripts/validate_repo.py` + `guardrails.yml`(CI) + `watchdog.yml`(문제일 때만 이슈 알림) |
-| 알려진 결함 | D-01 이슈 이미지 흐름 회귀 · D-03 봇 글 0건(원인 미확인) · D-11 OAuth 7일 — 상세는 `docs/DEFECT_REGISTER.md` |
+| 이슈로 수정 요청 | 이슈 양식(고정 페이지 수정·게시글 이미지 변경) → `issue-edit.yml`이 **PR로** 올림, `pr-scope-check.yml`이 Copilot 등 모든 PR의 요청 범위를 검증. 사용법 `docs/COPILOT_GUIDE.md`, 구조 `docs/ISSUE_EDITS.md` (첫 실행 관측 필요) |
+| 작업요청서 | 저장소를 볼 수 없는 AI(모바일 Claude 등)에게 `docs/REQUEST_BRIEFING.md`를 통째로 붙여 넣으면 이 프로그램에 맞는 요청서를 만든다. 요청서는 `인수인계/작업요청/`에 올리거나 채팅에 붙여 넣는다. 처리 규칙은 그 폴더의 README |
+| 통합 성과 대시보드 | **제안 단계 — 사용자 결정 대기.** 블로그별 방문자·인기 글·AdSense 사이트별 수익을 한곳에서 보는 방안(Looker Studio 먼저). 검토 결과·결정 항목은 `docs/ANALYTICS_PLAN.md` §7. 결정 전에는 사이트에 GA 등을 설치하지 않는다(T3) |
+| 알려진 결함 | D-03 봇 글 0건(원인 미확인) · D-11 OAuth 7일 · D-08 내부 문서 공개 · D-15/D-16 Copilot PR 승인·PR 생성 설정(사용자 조치) — 상세는 `docs/DEFECT_REGISTER.md` (D-01 이슈 이미지 흐름은 `issue-edit`로 대체, 관측 대기) |
 | Blogger 워크플로 | 스케줄 실행 이력 없음. 첫 실행은 2026-10-21 02:00 UTC(KST 11시) 예정 |
 | 비밀 파일 | `client_secret.json`은 저장소에 없음 (`.gitignore`로 차단) |
 | 자동 push 스크립트 | `auto_sync.bat` 제거됨. 같은 동작 재도입 금지 |
@@ -70,6 +73,7 @@
 | 13 | 풀오토 코어 `pipeline/`(레지스트리·게이트·어댑터·러너)와 테스트, Blogger 파이프라인 대체 | ✅ |
 | 14 | 가드레일: 저장소 검증기·워치독·Guardrails CI, `chanceblog.yml` 배포 dispatch(D-02) | ✅ 코드 / 관측 필요 |
 | 15 | 가이드 체계 문서화(AGENTS·CHARTER·ARCHITECTURE·ENGINEERING_GUIDE·SECURITY_GUARDRAILS·DEFECT_REGISTER) | ✅ |
+| 16 | 이슈 기반 정규화된 수정 요청 시스템(양식·명세·처리기·PR 범위 검증·Copilot 지침) + 옛 LLM 이슈 핸들러 제거(D-01) | ✅ 코드 / 관측 필요 |
 
 ### Blogger API 실게시
 
@@ -135,7 +139,9 @@ Secrets (API 선택 시):
 - `Blogger Generate` 첫 실행 결과 확인 (Actions 탭 → Run workflow, 처음에는 `dry_run` 체크)
 - `feature/image-fix-20261019-0000`·`backup/issue-template-$TS` 브랜치를 지울지 결정 (사용자) — §11
 - 풀오토 로드맵(Phase 1~4)과 완료 기준: `docs/ARCHITECTURE.md` §8
-- 결함 D-01(이슈 이미지 흐름 복구)·D-03(봇 글 0건 원인)·D-08(내부 문서 공개): `docs/DEFECT_REGISTER.md`
+- 결함 D-03(봇 글 0건 원인)·D-08(내부 문서 공개): `docs/DEFECT_REGISTER.md`
+- 이슈 수정 시스템 첫 실행 관측 + 저장소 설정 1회(Allow GitHub Actions to create and approve pull requests): `docs/ISSUE_EDITS.md` §6
+- 통합 성과 대시보드: 사용자 결정(`docs/ANALYTICS_PLAN.md` §7) 후 Phase A(Looker Studio, 코드 없음) → 필요하면 Phase B(비공개 저장소 수집기). 수익·방문 수치는 공개 저장소에 올리지 않는다(G-O7)
 
 ---
 
@@ -256,6 +262,10 @@ VS Code:
 | 보안 가드레일·사고 대응 | `docs/SECURITY_GUARDRAILS.md` |
 | 결함 레지스터 | `docs/DEFECT_REGISTER.md` |
 | 블로그 레지스트리 | `pipeline/blogs.json` |
+| 이슈 기반 수정 시스템 | `docs/ISSUE_EDITS.md` · 명세 `.github/editorial/edit-spec.yml` |
+| Copilot·AI 활용 안내(사용자용) | `docs/COPILOT_GUIDE.md` |
+| 통합 성과 대시보드 검토(제안) | `docs/ANALYTICS_PLAN.md` |
+| 모바일 Claude용 브리핑 + 작업요청서 양식 | `docs/REQUEST_BRIEFING.md` · 요청서 보관·처리 규칙 `인수인계/작업요청/README.md` |
 
 ---
 
@@ -298,4 +308,17 @@ VS Code:
 
 ---
 
-*마지막 갱신: 2026-10-20 Claude — P0 완료 반영, §0 현재 상태·§10 다른 PC 이어받기·§11 브랜치 현황, 풀오토 가이드 체계(`AGENTS.md`, `docs/`) 연결 (최초 작성: Grok)*
+## 12. 이슈로 수정 요청하기 (개발 지식 없이)
+
+저장소 → **Issues → New issue** → **"고정 페이지 수정"** 또는 **"기존 게시글 이미지 변경"** 양식을 고른다. 결과는 **PR로** 올라오며 사람이 병합해야 반영된다.
+
+- 문구를 바꿀 때: 화면에서 바꿀 문장을 복사해 `변경 전`에, 바뀔 문장을 `변경 후`에 적으면 **AI 없이 그대로 교체**된다.
+- 링크·SEO(title/description)·이미지 변경도 같은 양식에서 고른다. 자세한 사용법은 `docs/COPILOT_GUIDE.md`.
+- **새 페이지를 목록에 넣으려면** 페이지 파일 맨 위 front matter에 `editable: true` 를 넣고 push한다(드롭다운과 `pages.json`이 자동 갱신된다).
+- **수정 항목을 추가하려면** `.github/editorial/edit-spec.yml`에 항목을 추가하고 `python scripts/sync_issue_form.py` 를 실행한다(T2, `docs/ISSUE_EDITS.md` §6).
+- Copilot에게 맡길 때도 같은 양식으로 이슈를 쓰고, PR에 달리는 **"요청 범위 검증"** 코멘트(✅/⚠️/❌)를 확인한다.
+- 양식으로 안 되는 큰 요청(새 기능·새 블로그·정책 변경·아이디어)은 `docs/REQUEST_BRIEFING.md` **전체**를 모바일 Claude 등 저장소를 못 보는 AI에 붙여 넣어 작업요청서를 만들고, `인수인계/작업요청/`에 올리거나 Claude Code 채팅에 붙여 넣는다(처리 규칙은 그 폴더의 README).
+
+---
+
+*마지막 갱신: 2026-10-20 Claude — P0 완료 반영, §0 현재 상태·§10 다른 PC 이어받기·§11 브랜치 현황·§12 이슈로 수정 요청하기·작업요청서, 풀오토 가이드 체계(`AGENTS.md`, `docs/`) 연결, 통합 성과 대시보드 제안·작업요청서 브리핑 (최초 작성: Grok)*

@@ -15,6 +15,7 @@
 | 블로그 드라이런 | `python -m pipeline.run --blog blogger_macat --dry-run` |
 | 매트릭스 확인 | `python -m pipeline.plan --platform blogger` |
 | 워치독 드라이런 | `python scripts/watchdog.py` (토큰이 없으면 출력만) |
+| 이슈 수정 시스템 동기화 검사 | `python scripts/build_pages_registry.py --check` · `python scripts/sync_issue_form.py --check` (갱신은 `--check` 없이) |
 
 - Python **3.10 이상** 문법만 쓴다(CI는 3.10과 3.12). 이 PC처럼 3.12만 있어도 3.10 전용 기능 금지.
 - Windows는 시스템 `core.autocrlf=true`가 기본이다. 끄지 않는다(끄면 거의 모든 파일이 수정으로 보인다).
@@ -36,6 +37,7 @@
 | R10 | **손상된 상태는 덮어쓰지 않는다** | 이력 파일이 깨졌으면 종료 코드 1(`StateError`). 빈 목록으로 초기화하면 중복 방지가 무너진다 |
 | R11 | 파일을 **통째로 덮어쓰지 않는다** | 최소 diff. 생성물은 생성기만 쓴다 |
 | R12 | 새 플랫폼은 **어댑터**로 | 기존 블로그 코드를 복사하지 않는다([`ARCHITECTURE.md`](./ARCHITECTURE.md) §7) |
+| R13 | CLI는 **어떤 콘솔에서도 죽지 않게** | 진입점 `main()` 첫 줄에 `pipeline.console.safe_output()`. Windows 한국어 콘솔(cp949)은 `—`·이모지를 출력하면 예외로 멈춘다(CI의 Linux는 UTF-8이라 드러나지 않는다) |
 
 ## 3. 워크플로 작성 원칙
 
