@@ -1,0 +1,94 @@
+name: Blogger Generate (Draft Only)
+
+on:
+  schedule:
+    # KST 11:00 ≈ UTC 02:00
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      topic:
+        description: '특정 주제 (비우면 자동 선택)'
+        required: false
+        type: string
+      dry_run:
+        description: 'DRY_RUN (Gemini 호출 없이 스텁)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: blogger-generate
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install google-genai
+
+      - name: Blogger 글 생성
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          BLOGGER_TOPIC: ${{ github.event.inputs.topic }}
+          DRY_RUN: ${{ github.event.inputs.dry_run == 'true' && '1' || '0' }}
+        run: |
+          python blogger_generator.py
+
+      - name: 초안 폴더 정리 및 커밋
+        run: |
+          mkdir -p _blogger_drafts
+          # blogger_history.json 이 있으면 최신 항목을 초안 파일로도 남김
+          if [ -f blogger_history.json ]; then
+            python - <<'PY'
+          import json
+          from pathlib import Path
+          from datetime import datetime
+          p = Path("blogger_history.json")
+          if not p.exists():
+              raise SystemExit(0)
+          data = json.loads(p.read_text(encoding="utf-8"))
+          if not data:
+              raise SystemExit(0)
+          last = data[-1]
+          ts = datetime.now().strftime("%Y-%m-%d-%H%M")
+          title = (last.get("title") or "draft").replace("/", "-")[:60]
+          out = Path("_blogger_drafts") / f"{ts}-{title}.md"
+          body = f"""---
+title: {last.get('title','')}
+labels: {last.get('labels','')}
+topic: {last.get('topic','')}
+generated_at: {last.get('generated_at','')}
+status: draft
+---
+
+> 대상: Blogger  
+> 이 파일은 자동 생성 초안입니다. Blogger에 수동 게시하거나 API 연동 후 사용하세요.
+
+"""
+          # content는 generator가 history에 안 넣을 수 있으므로 title 위주
+          out.write_text(body, encoding="utf-8")
+          print(f"초안 파일: {out}")
+          PY
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add blogger_history.json _blogger_drafts || true
+          if git diff --cached --quiet; then
+            echo "커밋할 변경 없음"
+          else
+            git commit -m "🤖 Blogger 초안 자동 생성"
+            git pull --rebase origin "${GITHUB_REF_NAME}" || true
+            git push
+          fi
