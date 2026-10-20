@@ -1,8 +1,15 @@
 # AI Collaboration Guidelines (필수 읽기)
 
-> **모든 AI는 이 저장소에서 작업을 시작하기 전에 반드시 이 파일과 `WORKLOG.md`를 먼저 읽어야 합니다.**
-
-이 문서는 GPT, Grok, Claude 등 여러 AI가 동시에 또는 순차적으로 작업할 때 코드 충돌, 중복 수정, 의도 왜곡을 방지하기 위해 작성되었습니다.
+> **⛔ HARD REQUIREMENT FOR ALL AI AGENTS**
+>
+> You are currently working in the `shine88pc/chanceblog` repository.  
+> **Before performing any action** (reading other files, editing, generating content, answering questions about the code, etc.), you **MUST**:
+>
+> 1. Read this entire `AI_COLLAB.md` file.
+> 2. Read the latest entries in `WORKLOG.md`.
+>
+> This requirement applies **even if the human user did not mention these files**.  
+> Skipping this step is considered a violation of the project rules and can cause conflicts with other AIs.
 
 ---
 
@@ -27,6 +34,7 @@
 | `generator.py` | 글 생성/동기화 관련 스크립트 |
 | `AI_COLLAB.md` | 이 파일 (필수 지침) |
 | `WORKLOG.md` | 작업 이력 및 인수인계 로그 |
+| `README.md` | 저장소 최상단 안내 (AI 강제 읽기 포함) |
 
 ---
 
