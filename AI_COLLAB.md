@@ -10,6 +10,9 @@
 >
 > This requirement applies **even if the human user did not mention these files**.  
 > Skipping this step is considered a violation of the project rules and can cause conflicts with other AIs.
+>
+> **상위 문서**: 블로그가 늘어나도 적용되는 규칙은 [`AGENTS.md`](./AGENTS.md)와 `docs/`(`CHARTER`·`ARCHITECTURE`·`ENGINEERING_GUIDE`·`SECURITY_GUARDRAILS`)에 있다.
+> 충돌하면 `SECURITY_GUARDRAILS` > `CHARTER` > 이 문서 순서로 따른다. 이 문서는 듀얼 블로그(Chance_Blog·Blogger)의 **콘텐츠 규칙**이다.
 
 ---
 
@@ -70,6 +73,9 @@ AI가 글을 생성하거나 수정할 때, 작업 대상이 무엇인지 명확
 ---
 
 ## 3. Blogger 자동화 구조 (2026-10-20 설계·확정)
+
+> **갱신(2026-10-20)**: 이 절은 설계 당시의 기록이다. 현재 구현은 `pipeline/`(레지스트리·게이트·어댑터)이며,
+> 구조의 기준은 [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md), 현황은 [`HANDLER.md`](./HANDLER.md) §0이다. 아래 "예정"·"1단계" 표기는 옛 상태다.
 
 Blogger 자동화는 **Chance_Blog 기존 엔진의 연장선**으로 설계한다. 독립적인 별도 시스템이 아니라, 공통 주제에서 분기하는 구조다.
 

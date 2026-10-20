@@ -6,6 +6,7 @@
 > 2. `AI_COLLAB.md` 전체 읽기
 > 3. `WORKLOG.md` **최신 항목 3~5개** 읽기
 > 4. 아래 **작업 전 체크리스트** 확인 후 작업 시작
+> 5. 코드·워크플로·프롬프트를 고칠 거면 `AGENTS.md`, `docs/ENGINEERING_GUIDE.md`, `docs/SECURITY_GUARDRAILS.md`도 읽기
 >
 > 사용자가 따로 말하지 않아도 위 순서를 지킨다.
 
@@ -19,8 +20,11 @@
 |------|------|
 | 저장소·폴더 | 작업 PC는 `shine88pc/chanceblog` 공식 clone 1개로 정리 완료 (P0 ✅) |
 | Chance_Blog | 자동 생성 운영 중 (`chanceblog.yml` 매시 17분 실행, 게시 슬롯 KST 9·18시). AdSense 검토 대기 |
-| Blogger 코드 | 완료 (프롬프트·`blogger_generator.py`·`blogger.yml`·API 게시 함수) |
-| Blogger 실게시 | ⏳ 미완료 — refresh token 발급 + GitHub Secrets(`BLOGGER_*`) 등록 필요 (§3 P1) |
+| Blogger 코드 | 완료 — `pipeline/`(레지스트리·게이트·어댑터·러너) + `blogger.yml` 매트릭스. 테스트·`actionlint` 통과 |
+| Blogger 실게시 | ⏳ 미완료 — ① OAuth 동의 화면 **"프로덕션"** 전환(테스트 상태면 토큰 7일 만료, D-11) ② refresh token 발급 ③ GitHub Secrets(`BLOGGER_*`) 등록 (§3 P1, §10) |
+| 풀오토 가이드 체계 | `AGENTS.md`(상시 규칙) · `docs/CHARTER`·`ARCHITECTURE`·`ENGINEERING_GUIDE`·`SECURITY_GUARDRAILS` · `docs/DEFECT_REGISTER`. 총괄 역할: Claude(2026-10-20) |
+| 가드레일 자동화 | `scripts/validate_repo.py` + `guardrails.yml`(CI) + `watchdog.yml`(문제일 때만 이슈 알림) |
+| 알려진 결함 | D-01 이슈 이미지 흐름 회귀 · D-03 봇 글 0건(원인 미확인) · D-11 OAuth 7일 — 상세는 `docs/DEFECT_REGISTER.md` |
 | Blogger 워크플로 | 스케줄 실행 이력 없음. 첫 실행은 2026-10-21 02:00 UTC(KST 11시) 예정 |
 | 비밀 파일 | `client_secret.json`은 저장소에 없음 (`.gitignore`로 차단) |
 | 자동 push 스크립트 | `auto_sync.bat` 제거됨. 같은 동작 재도입 금지 |
@@ -63,6 +67,9 @@
 | 10 | `.gitignore` 추가 (`client_secret*.json`·`token*.json`·`.env` 커밋 방지) | ✅ |
 | 11 | `auto_sync.bat` 제거 (검토 없는 자동 push 위험) | ✅ |
 | 12 | 다른 PC에서 이어받기 절차·브랜치 현황 문서화 (§10·§11) | ✅ |
+| 13 | 풀오토 코어 `pipeline/`(레지스트리·게이트·어댑터·러너)와 테스트, Blogger 파이프라인 대체 | ✅ |
+| 14 | 가드레일: 저장소 검증기·워치독·Guardrails CI, `chanceblog.yml` 배포 dispatch(D-02) | ✅ 코드 / 관측 필요 |
+| 15 | 가이드 체계 문서화(AGENTS·CHARTER·ARCHITECTURE·ENGINEERING_GUIDE·SECURITY_GUARDRAILS·DEFECT_REGISTER) | ✅ |
 
 ### Blogger API 실게시
 
@@ -117,7 +124,8 @@ Secrets (API 선택 시):
 - `BLOGGER_REFRESH_TOKEN`
 - (기존) `GEMINI_API_KEY`
 
-**현재 상태**: 게시 경로 미확정, refresh token 미발급. 이어서 할 일은 §10 5번.
+**현재 상태**: 결정 — **A(풀오토 API 게시)**로 진행. refresh token 미발급. 순서: ① OAuth 동의 화면 "프로덕션" 전환(미전환 시 7일 만료, D-11) → ② token 발급 → ③ Secrets 등록 → ④ 첫 실행 확인. 자세한 절차는 §10 5번.
+스케줄에 따라 매일 02:00 UTC에 `blogger.yml`이 돌아 Secrets가 없으면 초안(`_blogger_drafts/`)만 저장한다. 3일 연속 미게시이면 워치독이 이슈로 알린다.
 
 ### P2 — 이후 구현
 
@@ -126,6 +134,8 @@ Secrets (API 선택 시):
 - AdSense 승인 모니터링 (Chance_Blog 최우선 유지)
 - `Blogger Generate` 첫 실행 결과 확인 (Actions 탭 → Run workflow, 처음에는 `dry_run` 체크)
 - `feature/image-fix-20261019-0000`·`backup/issue-template-$TS` 브랜치를 지울지 결정 (사용자) — §11
+- 풀오토 로드맵(Phase 1~4)과 완료 기준: `docs/ARCHITECTURE.md` §8
+- 결함 D-01(이슈 이미지 흐름 복구)·D-03(봇 글 0건 원인)·D-08(내부 문서 공개): `docs/DEFECT_REGISTER.md`
 
 ---
 
@@ -216,6 +226,7 @@ VS Code:
 - client_secret.json은 저장소에 없음(공개 저장소). refresh token 미발급 — 새 PC에서는 Google Cloud에서 JSON을 다시 받아 루트에 client_secret.json으로 두고 scripts/get_blogger_token.py 실행 → 출력값을 GitHub Secrets에 등록 (HANDLER.md §10).
 - 이전 로컬 사본은 쓰지 말고 새로 git clone한 폴더 하나만 사용(VS Code도 그 폴더만). 작업 전 git pull --rebase origin main, 자동 push 스크립트(auto_sync 등) 금지.
 - feature/image-fix-20261019-0000 브랜치는 낡았음(index.html 대폭 축소) → 병합 금지 (HANDLER.md §11).
+- 규칙 정본은 AGENTS.md. 코드·워크플로 작업 전 docs/ENGINEERING_GUIDE.md·docs/SECURITY_GUARDRAILS.md를 읽고, 변경 후 python scripts/validate_repo.py 와 python -m unittest discover -s tests 통과가 완료 조건. 광고 표면·비밀·자동 push는 사용자 승인 없이 금지.
 - Cloud 결제 부담 시 API 대신 초안(_blogger_drafts) 수동 게시 또는 Blogger 이메일 게시 가능.
 - Chance_Blog AdSense 승인 대기 중 → index.html 광고·privacy 함부로 변경 금지.
 
@@ -238,6 +249,13 @@ VS Code:
 | 생성기 | `blogger_generator.py` / `generator.py` |
 | 워크플로 | `.github/workflows/blogger.yml` / `chanceblog.yml` |
 | 이슈 기반 이미지 수정 | `인수인계/이슈_기반_게시글_이미지_수정_인수인계.md` |
+| 상시 규칙(모든 AI) | `AGENTS.md` |
+| 헌장·협업·변경 등급 | `docs/CHARTER.md` |
+| 아키텍처·블로그 추가 플레이북 | `docs/ARCHITECTURE.md` |
+| 코드·검증 가이드 | `docs/ENGINEERING_GUIDE.md` |
+| 보안 가드레일·사고 대응 | `docs/SECURITY_GUARDRAILS.md` |
+| 결함 레지스터 | `docs/DEFECT_REGISTER.md` |
+| 블로그 레지스트리 | `pipeline/blogs.json` |
 
 ---
 
@@ -253,8 +271,9 @@ VS Code:
    ```
 
 3. 이 저장소 한정으로 작성자 정보를 설정한다 (`git config user.name "..."`, `git config user.email "..."`).
-4. `HANDLER.md` → `AI_COLLAB.md` → `WORKLOG.md` 최신 3~5개를 읽는다. AI에게 시킬 때는 §8 블록을 첫 메시지로 전달한다.
+4. `HANDLER.md` → `AI_COLLAB.md` → `WORKLOG.md` 최신 3~5개를 읽는다. AI에게 시킬 때는 §8 블록을 첫 메시지로 전달한다. 코드를 고치기 전에는 `AGENTS.md`와 `docs/ENGINEERING_GUIDE.md`도 읽고, 작업 후 `python scripts/validate_repo.py`와 `python -m unittest discover -s tests`를 실행한다.
 5. Blogger 실게시를 이어갈 때만 (§3 P1의 남은 일):
+   0. **먼저** Google Cloud Console → OAuth 동의 화면의 게시 상태를 **"프로덕션"**으로 바꾼다. 테스트 상태로 두면 refresh token이 7일 뒤 만료되어 풀오토가 멈춘다(D-11).
    1. `client_secret.json`은 저장소에 없다. Google Cloud Console → 사용자 인증 정보에서 **데스크톱 앱 OAuth 클라이언트** JSON을 받아(필요하면 새로 만든다) 저장소 **루트**에 `client_secret.json`으로 저장한다. 절차는 `.github/editorial/BLOGGER_API_SETUP.md`.
    2. `pip install google-auth-oauthlib` 후 `python scripts/get_blogger_token.py`를 실행한다 (브라우저에서 Google 동의).
    3. 출력된 `BLOGGER_CLIENT_ID`·`BLOGGER_CLIENT_SECRET`·`BLOGGER_REFRESH_TOKEN`과 Blogger 설정의 `BLOGGER_BLOG_ID`를 GitHub **Settings → Secrets and variables → Actions**에 등록한다. 값은 채팅·저장소·메일에 남기지 않는다.
@@ -279,4 +298,4 @@ VS Code:
 
 ---
 
-*마지막 갱신: 2026-10-20 Claude — P0 완료 반영, §0 현재 상태·§10 다른 PC 이어받기·§11 브랜치 현황 추가 (최초 작성: Grok)*
+*마지막 갱신: 2026-10-20 Claude — P0 완료 반영, §0 현재 상태·§10 다른 PC 이어받기·§11 브랜치 현황, 풀오토 가이드 체계(`AGENTS.md`, `docs/`) 연결 (최초 작성: Grok)*

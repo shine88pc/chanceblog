@@ -7,6 +7,7 @@
 > 1. **[`HANDLER.md`](./HANDLER.md)** — 현황·조치사항·폴더 규칙·GPT 인수인계
 > 2. **[`AI_COLLAB.md`](./AI_COLLAB.md)** — 듀얼 블로그 규칙
 > 3. **[`WORKLOG.md`](./WORKLOG.md)** — 최신 항목 3~5개
+> 4. **[`AGENTS.md`](./AGENTS.md)** — 모든 AI 공통 상시 규칙 (코드·워크플로 작업이면 `docs/ENGINEERING_GUIDE.md`, `docs/SECURITY_GUARDRAILS.md`도)
 >
 > Do **not** skip these steps even if the user did not explicitly tell you to read them.  
 > This is a hard requirement to prevent conflicts between multiple AIs and divergent local folders.
@@ -28,6 +29,12 @@
 | **[`HANDLER.md`](./HANDLER.md)** | Multi-AI handler — status, actions, folder sync, GPT handoff |
 | **[`AI_COLLAB.md`](./AI_COLLAB.md)** | Dual-blog rules — read before any work |
 | **[`WORKLOG.md`](./WORKLOG.md)** | Continuous handoff log |
+| **[`AGENTS.md`](./AGENTS.md)** | Standing rules for every AI (guardrails, verification) |
+| [`docs/CHARTER.md`](./docs/CHARTER.md) | Goal, roles, change tiers (T0–T3), multi-AI protocol |
+| [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) | Full-auto pipeline, blog registry, how to add a blog |
+| [`docs/ENGINEERING_GUIDE.md`](./docs/ENGINEERING_GUIDE.md) | How to write code and verify it |
+| [`docs/SECURITY_GUARDRAILS.md`](./docs/SECURITY_GUARDRAILS.md) | Security and policy guardrails, incident playbooks |
+| [`docs/DEFECT_REGISTER.md`](./docs/DEFECT_REGISTER.md) | Verified known defects and their status |
 | `.github/editorial/BLOGGER_PROMPT.md` | Blogger tone/structure |
 | `.github/editorial/BLOGGER_API_SETUP.md` | Blogger API setup |
 | `.github/editorial/CHANCE_BLOG_TEMPLATE.md` | Chance_Blog editorial standards |
