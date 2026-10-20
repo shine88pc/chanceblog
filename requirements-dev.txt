@@ -1,0 +1,3 @@
+# 검증 도구(CI·로컬). actionlint-py 는 actionlint 바이너리를 받아 오는 래퍼라 정확한 버전으로 고정한다.
+pyyaml>=6,<7
+actionlint-py==1.7.12.25

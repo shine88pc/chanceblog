@@ -1,0 +1,38 @@
+name: Watchdog
+
+# 풀오토가 조용히 멈추는 것을 막는다. 문제가 있을 때만 [Watchdog] 이슈를 열어 알리고, 해소되면 닫는다.
+# 판단 규칙: pipeline/health.py / 입출력: scripts/watchdog.py
+
+on:
+  schedule:
+    # UTC 03:30 = KST 12:30 (blogger 11시 실행 이후)
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+concurrency:
+  group: watchdog
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 감시
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python scripts/watchdog.py
