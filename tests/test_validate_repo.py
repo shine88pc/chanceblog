@@ -1,4 +1,5 @@
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -7,6 +8,7 @@ import unittest
 from pathlib import Path
 
 import _bootstrap  # noqa: F401
+from edits_helpers import make_edit_root
 from test_run import make_root
 
 sys.path.insert(0, str(_bootstrap.ROOT / "scripts"))
@@ -227,8 +229,10 @@ class RegistryContractTest(TmpCase):
 
 
 class IssueContractTest(TmpCase):
+    CONTROL = 'name: t\ntitle: "[이미지 변경] "\nlabels: ["blog-control"]\nbody: []\n'
+
     def test_prefix_mismatch_is_flagged_and_match_is_not(self):
-        write(self.root, ".github/ISSUE_TEMPLATE/t.yml", 'name: t\ntitle: "[이미지 변경] "\nbody: []\n')
+        write(self.root, ".github/ISSUE_TEMPLATE/t.yml", self.CONTROL)
         write(self.root, ".github/workflows/w.yml",
               "name: w\non: issues\njobs:\n  j:\n    if: startsWith(github.event.issue.title, '[Control]')\n")
         found = vr.check_issue_contract(self.root, vr.list_files(self.root))
@@ -236,6 +240,65 @@ class IssueContractTest(TmpCase):
         write(self.root, ".github/workflows/w.yml",
               "name: w\non: issues\njobs:\n  j:\n    if: startsWith(github.event.issue.title, '[이미지 변경]')\n")
         self.assertEqual(vr.check_issue_contract(self.root, vr.list_files(self.root)), [])
+
+    def test_any_of_several_prefixes_is_enough_and_non_control_templates_are_ignored(self):
+        write(self.root, ".github/ISSUE_TEMPLATE/t.yml", self.CONTROL)
+        write(self.root, ".github/ISSUE_TEMPLATE/bug.yml", 'name: bug\ntitle: "[버그] "\nlabels: ["bug"]\nbody: []\n')
+        write(self.root, ".github/workflows/w.yml",
+              "name: w\non: issues\njobs:\n  j:\n    if: >-\n      startsWith(github.event.issue.title, '[페이지 수정]') ||\n"
+              "      startsWith(github.event.issue.title, '[이미지 변경]')\n")
+        self.assertEqual(vr.check_issue_contract(self.root, vr.list_files(self.root)), [])
+
+    def test_real_repository_contract_holds(self):
+        self.assertEqual(vr.check_issue_contract(REAL, vr.list_files(REAL)), [])
+
+
+class EditSystemTest(TmpCase):
+    def setUp(self):
+        super().setUp()
+        self.repo = make_edit_root(self.root)
+
+    def run_check(self):
+        return vr.check_edit_system(self.repo, vr.list_files(self.repo))
+
+    def test_consistent_system_is_clean(self):
+        self.assertEqual(self.run_check(), [])
+
+    def test_spec_granting_forbidden_paths_is_an_error(self):
+        spec = self.repo / ".github" / "editorial" / "edit-spec.yml"
+        text = spec.read_text(encoding="utf-8").replace('allowed_paths: ["{page.path}"]\n    forbidden: ["front matter", "광고 코드", "링크 주소"]',
+                                                      'allowed_paths: ["{page.path}", "_layouts/**"]\n    forbidden: ["front matter"]', 1)
+        self.assertNotEqual(text, spec.read_text(encoding="utf-8"))
+        spec.write_text(text, encoding="utf-8")
+        self.assertIn("SPEC-1", checks(self.run_check()))
+
+    def test_new_editable_page_makes_registry_stale_warning_only(self):
+        write(self.repo, "faq.md", "---\ntitle: 자주 묻는 질문\neditable: true\n---\n")
+        found = self.run_check()
+        self.assertEqual(levels(found, "SYNC-1"), ["WARN"])
+        self.assertEqual([f for f in found if f.level == "ERROR"], [])
+
+    def test_stale_form_dropdown_is_a_warning(self):
+        tpl = self.repo / ".github" / "ISSUE_TEMPLATE" / "page-edit.yml"
+        tpl.write_text(tpl.read_text(encoding="utf-8").replace("about | 소개와 편집 원칙", "about | 옛 제목"), encoding="utf-8")
+        found = self.run_check()
+        self.assertEqual(levels(found, "SYNC-1"), ["WARN"])
+        self.assertIn("드롭다운", found[0].message)
+
+    def test_missing_control_template_for_a_spec_label_is_an_error(self):
+        tpl = self.repo / ".github" / "ISSUE_TEMPLATE" / "blog_control.yml"
+        tpl.write_text(tpl.read_text(encoding="utf-8").replace('"edit:image"', '"other"'), encoding="utf-8")
+        found = self.run_check()
+        self.assertIn("SPEC-2", checks(found))
+        self.assertTrue(any(f.level == "ERROR" for f in found if f.check == "SPEC-2"))
+
+    def test_repository_without_spec_is_skipped(self):
+        (self.repo / ".github" / "editorial" / "edit-spec.yml").unlink()
+        self.assertEqual(self.run_check(), [])
+
+    def test_real_repository_edit_system_is_consistent(self):
+        found = vr.check_edit_system(REAL, vr.list_files(REAL))
+        self.assertEqual([f.line() for f in found], [])
 
 
 class DataAndDocsTest(TmpCase):
@@ -326,6 +389,42 @@ class AdSurfaceTest(TmpCase):
         git(root, "add", "-A")
         git(root, "commit", "-q", "-m", "layout")
         self.assertEqual(levels(vr.check_ad_surface(root, base), "AD-1"), ["ERROR"])
+
+
+class BriefingTest(TmpCase):
+    FULL = "`chance` `blogger_macat` `alpha.yml` `beta.yaml` `text_change` `link_change`\n"
+
+    def build(self, briefing):
+        (self.root / "pipeline").mkdir()
+        shutil.copy(REAL / "pipeline" / "blogs.json", self.root / "pipeline" / "blogs.json")
+        write(self.root, ".github/workflows/alpha.yml", "name: a\n")
+        write(self.root, ".github/workflows/beta.yaml", "name: b\n")
+        write(self.root, ".github/editorial/edit-spec.yml", "version: 1\nedit_types:\n  text_change: {}\n  link_change: {}\n")
+        if briefing is not None:
+            write(self.root, "docs/REQUEST_BRIEFING.md", briefing)
+        return vr.check_briefing(self.root, vr.list_files(self.root))
+
+    def test_complete_briefing_is_clean(self):
+        self.assertEqual(self.build(self.FULL), [])
+
+    def test_missing_items_are_reported_by_name(self):
+        found = self.build("`chance` `alpha.yml` `text_change`\n")
+        self.assertEqual([(f.check, f.level) for f in found], [("BRIEF-1", "WARN")])
+        for missing in ("블로그 blogger_macat", "워크플로 beta.yaml", "수정 항목 link_change"):
+            self.assertIn(missing, found[0].message)
+        for present in ("블로그 chance,", "alpha.yml", "text_change"):
+            self.assertNotIn(present, found[0].message)
+
+    def test_mention_without_backticks_does_not_count(self):
+        found = self.build("chance blogger_macat alpha.yml beta.yaml text_change link_change\n")
+        self.assertEqual([f.check for f in found], ["BRIEF-1"])
+
+    def test_missing_briefing_file_warns(self):
+        found = self.build(None)
+        self.assertEqual([(f.check, f.level) for f in found], [("BRIEF-1", "WARN")])
+
+    def test_real_briefing_covers_current_repository(self):
+        self.assertEqual(vr.check_briefing(REAL, vr.list_files(REAL)), [])
 
 
 class CliTest(TmpCase):

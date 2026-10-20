@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "pages": [
+    {
+      "id": "about",
+      "title": "소개와 편집 원칙",
+      "path": "about.md",
+      "url": "/about/"
+    },
+    {
+      "id": "categories",
+      "title": "카테고리",
+      "path": "categories.md",
+      "url": "/categories/"
+    },
+    {
+      "id": "contact",
+      "title": "문의와 정정 요청",
+      "path": "contact.md",
+      "url": "/contact/"
+    },
+    {
+      "id": "privacy",
+      "title": "개인정보처리방침",
+      "path": "privacy.md",
+      "url": "/privacy/"
+    }
+  ]
+}

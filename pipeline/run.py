@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from pipeline import gates
+from pipeline.console import safe_output
 from pipeline.llm import LLMError, make_gemini_llm, mask
 from pipeline.publishers.base import PublishError
 from pipeline.registry import (ROOT, RegistryError, get_blog, load_profile, load_registry,
@@ -285,6 +286,7 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
 
 
 def main(argv=None):
+    safe_output()
     return run(argv)
 
 

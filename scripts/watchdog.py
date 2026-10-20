@@ -16,6 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from pipeline.console import safe_output  # noqa: E402
 from pipeline.health import Finding, evaluate  # noqa: E402
 from pipeline.registry import ROOT, enabled_blogs, load_registry, validate_registry  # noqa: E402
 from pipeline.state import StateError, read_json_list  # noqa: E402
@@ -125,6 +126,7 @@ def collect_findings(reg, root, now, client=None):
 
 
 def main():
+    safe_output()
     reg = load_registry()
     errors = validate_registry(reg, ROOT)
     if errors:

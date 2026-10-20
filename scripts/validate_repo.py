@@ -29,6 +29,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from pipeline import registry as reg_mod  # noqa: E402
+from pipeline.console import safe_output  # noqa: E402
+from pipeline.secret_patterns import SECRET_PATTERNS  # noqa: E402
 
 TEXT_EXT = {".md", ".py", ".yml", ".yaml", ".json", ".html", ".htm", ".js", ".css", ".txt", ".xml",
             ".bat", ".sh", ".toml", ".cfg", ".ini", ".csv", ".svg", ".gitignore"}
@@ -101,21 +103,6 @@ _FORBIDDEN_FILES = [
     (re.compile(r".*(?:credentials|service[-_]?account).*\.json$", re.I), "자격 증명 JSON"),
 ]
 
-_SECRET_PATTERNS = [
-    ("Google API 키", re.compile(r"AIza[0-9A-Za-z_\-]{35}")),
-    ("Google OAuth 클라이언트 시크릿", re.compile(r"GOCSPX-[0-9A-Za-z_\-]{20,}")),
-    ("Google refresh token", re.compile(r"\b1//0[0-9A-Za-z_\-]{40,}")),
-    ("Google access token", re.compile(r"\bya29\.[0-9A-Za-z_\-]{30,}")),
-    ("GitHub 토큰", re.compile(r"\bgh[pousr]_[0-9A-Za-z]{36,}")),
-    ("GitHub PAT", re.compile(r"\bgithub_pat_[0-9A-Za-z_]{40,}")),
-    ("개인 키 블록", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY(?: BLOCK)?-----")),
-    ("Slack 토큰", re.compile(r"\bxox[baprs]-[0-9A-Za-z\-]{10,}")),
-    ("AWS 액세스 키", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
-    ("sk- 형식 API 키", re.compile(r"\bsk-[A-Za-z0-9]{32,}\b")),
-    # 값이 환경변수 이름(대문자_숫자_밑줄)이면 시크릿이 아니라 레지스트리의 '이름 매핑'이다
-    ("client_secret JSON 값", re.compile(r'"client_secret"\s*:\s*"(?![A-Z][A-Z0-9_]*")[^"]{8,}"')),
-    ("키/토큰 할당", re.compile(r"""(?i)\b(?:api[_-]?key|secret|token|passwd|password)\b\s*[:=]\s*['"][A-Za-z0-9_\-/+=]{24,}['"]""")),
-]
 ALLOW_MARKER = "validate-repo: allow"
 
 
@@ -139,7 +126,7 @@ def check_secret_patterns(root, files):
         for lineno, line in enumerate(text.splitlines(), 1):
             if ALLOW_MARKER in line:
                 continue
-            for label, rx in _SECRET_PATTERNS:
+            for label, rx in SECRET_PATTERNS:
                 match = rx.search(line)
                 if match:
                     shown = match.group(0)[:4] + "***"
@@ -288,7 +275,11 @@ def check_registry(root, files):
 
 
 def check_issue_contract(root, files):
-    """이슈 양식 제목 접두사와 워크플로의 이슈 조건이 맞는지(D-01 재발 방지)."""
+    """제어용 이슈 양식(blog-control 라벨)의 제목이 이슈 처리 워크플로의 제목 조건과 맞는지(D-01 재발 방지).
+
+    워크플로가 startsWith(github.event.issue.title, '…') 조건을 가지면, 제어용 양식의 제목은 그중 하나로 시작해야
+    이슈를 만들었을 때 워크플로가 실행된다(라벨 조건이 함께 있으면 안전망이 되지만 제목도 맞춰 둔다).
+    """
     if yaml is None:
         return []
     out = []
@@ -299,16 +290,56 @@ def check_issue_contract(root, files):
                 data = _load_yaml(read_text(root, rel) or "")
             except yaml.YAMLError:
                 continue
-            if isinstance(data, dict) and isinstance(data.get("title"), str):
+            if isinstance(data, dict) and isinstance(data.get("title"), str) and "blog-control" in (data.get("labels") or []):
                 templates[rel] = data["title"]
     for rel in _workflow_files(files):
         text = read_text(root, rel) or ""
         prefixes = re.findall(r"startsWith\(github\.event\.issue\.title,\s*'([^']*)'\)", text)
-        for prefix in prefixes:
-            for tpl, title in templates.items():
-                if not title.startswith(prefix):
-                    out.append(warn("CONTRACT-1", f"이슈 양식 {tpl} 의 제목 '{title}' 이(가) 워크플로 조건 '{prefix}' 로 시작하지 않아 "
-                                                  "이슈로 워크플로가 실행되지 않습니다 (D-01)", rel))
+        if not prefixes:
+            continue
+        for tpl, title in templates.items():
+            if not any(title.startswith(p) for p in prefixes):
+                out.append(warn("CONTRACT-1", f"이슈 양식 {tpl} 의 제목 '{title}' 이(가) 워크플로 조건 {prefixes} 중 어느 것으로도 시작하지 않아 "
+                                              "이슈로 워크플로가 실행되지 않을 수 있습니다 (D-01)", rel))
+    return out
+
+
+def check_edit_system(root, files):
+    """이슈 기반 수정 시스템: 명세가 금지 경로를 허용하지 않는지(SPEC-1), 양식·명세 일관성(SPEC-2), 자동 생성물 최신 여부(SYNC-1)."""
+    spec_path = ".github/editorial/edit-spec.yml"
+    if yaml is None or spec_path not in files:
+        return []
+    from pipeline.edits import forms, pages, spec as spec_mod  # noqa: PLC0415 - PyYAML 이 있을 때만 필요
+    try:
+        spec = spec_mod.load_spec(root)
+    except spec_mod.SpecError as exc:
+        return [err("SPEC-1", str(exc), spec_path)]
+    problems = spec_mod.validate_spec(spec)
+    if problems:
+        return [err("SPEC-1", p, spec_path) for p in problems]
+    out = []
+    try:
+        templates = forms.load_templates(root)
+        forms.label_map(templates)
+    except forms.FormError as exc:
+        return [err("SPEC-2", str(exc), ".github/ISSUE_TEMPLATE")]
+    control_labels = {lab for t in forms.control_templates(templates) for lab in t["labels"]}
+    for label in spec_mod.issue_labels(spec):
+        if label not in control_labels:
+            out.append(err("SPEC-2", f"명세의 처리 경로 라벨 {label} 을(를) 쓰는 제어용 이슈 양식이 없습니다", spec_path))
+    spec_labels = set(spec_mod.issue_labels(spec))
+    for tpl in forms.control_templates(templates):
+        for label in tpl["labels"]:
+            if label.startswith("edit:") and label not in spec_labels:
+                out.append(warn("SPEC-2", f"양식 {tpl['file']} 의 라벨 {label} 은(는) 명세에 없는 처리 경로입니다", ".github/ISSUE_TEMPLATE"))
+    try:
+        for message in pages.check_registry(root, spec):
+            out.append(warn("SYNC-1", message, "pages.json"))
+        if forms.sync_page_form(root, spec, pages.load_registry(root), write=False):
+            out.append(warn("SYNC-1", "이슈 양식 드롭다운이 최신이 아닙니다 (python scripts/sync_issue_form.py)",
+                            ".github/ISSUE_TEMPLATE/page-edit.yml"))
+    except (pages.PagesError, forms.FormError, OSError) as exc:
+        out.append(err("SPEC-2", f"페이지 레지스트리·양식을 확인할 수 없습니다: {exc}", "pages.json"))
     return out
 
 
@@ -359,6 +390,37 @@ def check_doc_links(root, files):
                     maker = err if _STRICT_DOCS.match(rel) else warn
                     out.append(maker("DOC-1", f"깨진 링크: {target}", f"{rel}:{lineno}"))
     return out
+
+
+_BRIEFING = "docs/REQUEST_BRIEFING.md"
+
+
+def check_briefing(root, files):
+    """저장소를 볼 수 없는 AI에게 주는 브리핑이 현재 블로그·워크플로·수정 항목을 빠뜨리지 않았는지(드리프트 경고).
+
+    항목 이름이 `백틱`으로 적혀 있어야 인정한다(문장 속 우연한 일치를 막는다)."""
+    if _BRIEFING not in files:
+        return [warn("BRIEF-1", "저장소를 볼 수 없는 AI에게 주는 브리핑 문서가 없습니다", _BRIEFING)]
+    text = read_text(root, _BRIEFING) or ""
+    expected = []
+    try:
+        reg = reg_mod.load_registry(Path(root) / "pipeline" / "blogs.json")
+        expected += [("블로그", b["key"]) for b in reg.get("blogs", []) if isinstance(b, dict) and b.get("key")]
+    except reg_mod.RegistryError:
+        pass  # 레지스트리 오류는 REG-* 가 알린다
+    expected += [("워크플로", Path(f).name) for f in _workflow_files(files)]
+    spec_path = ".github/editorial/edit-spec.yml"
+    if yaml is not None and spec_path in files:
+        try:
+            spec = _load_yaml(read_text(root, spec_path) or "") or {}
+            expected += [("수정 항목", k) for k in (spec.get("edit_types") or {})] if isinstance(spec, dict) else []
+        except yaml.YAMLError:
+            pass  # 명세 오류는 SPEC-1 이 알린다
+    missing = [f"{kind} {name}" for kind, name in expected if f"`{name}`" not in text]
+    if missing:
+        return [warn("BRIEF-1", "브리핑에 현재 항목이 빠져 있습니다 — " + ", ".join(missing)
+                     + " (docs/REQUEST_BRIEFING.md 갱신)", _BRIEFING)]
+    return []
 
 
 _AGENT_FILES = ["AGENTS.md", "CLAUDE.md", "GEMINI.md", ".github/copilot-instructions.md"]
@@ -463,10 +525,12 @@ def run_checks(root, base=None):
     findings += check_workflows(root, files)
     findings += check_registry(root, files)
     findings += check_issue_contract(root, files)
+    findings += check_edit_system(root, files)
     findings += check_python(root, files)
     findings += check_json(root, files)
     findings += check_doc_links(root, files)
     findings += check_agent_files(root, files)
+    findings += check_briefing(root, files)
     findings += check_exposure(root, files)
     findings += check_dependencies(root, files)
     findings += check_ad_surface(root, base)
@@ -474,6 +538,7 @@ def run_checks(root, base=None):
 
 
 def main(argv=None):
+    safe_output()
     parser = argparse.ArgumentParser(description="저장소 가드레일 검증기")
     parser.add_argument("--root", default=str(ROOT))
     parser.add_argument("--base", default=os.environ.get("VALIDATE_BASE"))

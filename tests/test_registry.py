@@ -1,5 +1,4 @@
 import copy
-import json
 import unittest
 
 import _bootstrap  # noqa: F401

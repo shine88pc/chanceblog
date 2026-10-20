@@ -1,7 +1,7 @@
 name: "기존 게시글 이미지 변경"
-description: "게시글 주소와 원하는 이미지 장면을 적으면 해당 글의 이미지만 바꿉니다."
+description: "게시글 주소와 원하는 이미지 장면을 적으면 해당 글의 이미지만 바꾸는 PR 을 만듭니다. 검토 후 병합하면 반영됩니다."
 title: "[이미지 변경] "
-labels: ["blog-control"]
+labels: ["blog-control", "edit:image"]
 body:
   - type: markdown
     attributes:

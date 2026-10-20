@@ -1,0 +1,32 @@
+"""비밀 값으로 보이는 문자열 패턴(단일 원천).
+
+저장소 검증기(scripts/validate_repo.py)와 이슈 수정 사후 검증(pipeline/edits/checks.py)이 함께 쓴다.
+패턴을 추가·수정하면 두 곳 모두에 적용된다.
+"""
+import re
+
+SECRET_PATTERNS = [
+    ("Google API 키", re.compile(r"AIza[0-9A-Za-z_\-]{35}")),
+    ("Google OAuth 클라이언트 시크릿", re.compile(r"GOCSPX-[0-9A-Za-z_\-]{20,}")),
+    ("Google refresh token", re.compile(r"\b1//0[0-9A-Za-z_\-]{40,}")),
+    ("Google access token", re.compile(r"\bya29\.[0-9A-Za-z_\-]{30,}")),
+    ("GitHub 토큰", re.compile(r"\bgh[pousr]_[0-9A-Za-z]{36,}")),
+    ("GitHub PAT", re.compile(r"\bgithub_pat_[0-9A-Za-z_]{40,}")),
+    ("개인 키 블록", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY(?: BLOCK)?-----")),
+    ("Slack 토큰", re.compile(r"\bxox[baprs]-[0-9A-Za-z\-]{10,}")),
+    ("AWS 액세스 키", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+    ("sk- 형식 API 키", re.compile(r"\bsk-[A-Za-z0-9]{32,}\b")),
+    # 값이 환경변수 이름(대문자_숫자_밑줄)이면 시크릿이 아니라 레지스트리의 '이름 매핑'이다
+    ("client_secret JSON 값", re.compile(r'"client_secret"\s*:\s*"(?![A-Z][A-Z0-9_]*")[^"]{8,}"')),
+    ("키/토큰 할당", re.compile(r"""(?i)\b(?:api[_-]?key|secret|token|passwd|password)\b\s*[:=]\s*['"][A-Za-z0-9_\-/+=]{24,}['"]""")),
+]
+
+
+def find_secrets(text):
+    """text 안에서 비밀로 보이는 값의 (라벨, 마스킹된 미리보기) 목록. 값 전체는 돌려주지 않는다."""
+    found = []
+    for label, rx in SECRET_PATTERNS:
+        match = rx.search(text or "")
+        if match:
+            found.append((label, match.group(0)[:4] + "***"))
+    return found

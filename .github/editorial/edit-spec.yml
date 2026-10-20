@@ -1,0 +1,78 @@
+# 이슈 기반 수정 요청 명세 (v1)
+# 처리 모듈(pipeline/edits)이 이 명세로 이슈를 검증하고, 수정 범위를 제한하고, 결과를 PR 로 올린다.
+#
+# 규칙
+#  - 요청한 edit_type 의 allowed_paths 밖 파일은 절대 수정하지 않는다.
+#  - 명세가 무엇을 허용하든 pipeline/edits/spec.py 의 NEVER_ALLOW(워크플로·코드·레이아웃·설정·광고 표면·규칙 문서 등)는
+#    수정할 수 없다. 명세가 이를 허용하면 검증(scripts/validate_repo.py SPEC-1)이 실패한다.
+#  - 결과는 main 직접 push 가 아니라 항상 PR 이다. 병합은 사람이 한다.
+#
+# 수정 항목을 추가하는 방법: edit_types 에 항목을 추가 → python scripts/sync_issue_form.py → 테스트 추가
+# 설명: docs/ISSUE_EDITS.md
+
+version: 1
+
+targets:
+  page:      # 고정 페이지: pages.json(자동 생성)의 id 로 선택
+    registry: pages.json
+    discover:
+      # 기존 페이지는 파일을 고치지 않도록 여기서 지정한다. 새 페이지는 front matter 에 `editable: true` 만 넣으면 자동으로 목록에 나타난다.
+      include: [about.md, contact.md, privacy.md, categories.md]
+      exclude: [index.html, README.md]
+  post:      # 게시글: 공개 URL·파일명·제목을 입력 → _posts 를 스캔해 한 편으로 매칭 (모호하면 반려)
+    source: _posts
+
+edit_types:
+  image_change:
+    label: 게시글 이미지 변경
+    issue_label: "edit:image"
+    target: post
+    method: image             # AI 는 이미지 검색어만 제안, 대표 이미지(front matter image)와 본문 이미지 URL 만 교체
+    required: [target_post, user_prompt]
+    allowed_paths: ["{post.path}"]
+    forbidden: ["본문 텍스트", "레이아웃", "코드", "설정"]
+
+  text_change:
+    label: 문구 수정
+    issue_label: "edit:page"
+    target: page
+    method: text              # '변경 전'이 있으면 문자 그대로 교체, 없으면 AI 가 최소 패치를 만든다
+    required: [target_page, after]
+    allowed_paths: ["{page.path}"]
+    forbidden: ["front matter", "광고 코드", "링크 주소"]
+
+  seo_meta:
+    label: SEO 메타 수정 (title/description)
+    issue_label: "edit:page"
+    target: page
+    method: front_matter      # `title: …` / `description: …` 줄만 인식, 그 밖의 front matter·본문은 불변
+    required: [target_page, after]
+    allowed_paths: ["{page.path}"]
+    only_fields: [title, description]
+
+  layout:
+    label: 섹션/레이아웃 변경 (해당 페이지 안에서만)
+    issue_label: "edit:page"
+    target: page
+    method: llm_patch         # 해당 페이지 파일 안의 구조만. _layouts/·_includes/ 는 이슈 자동화 범위 밖(T3)
+    required: [target_page, after]
+    allowed_paths: ["{page.path}"]
+    forbidden: ["front matter", "광고 코드", "<script>", "외부 링크 추가"]
+
+  link_change:
+    label: 링크 변경
+    issue_label: "edit:page"
+    target: page
+    method: link              # '변경 전' URL → '변경 후' URL (https·사이트 내 경로·#앵커·mailto 만)
+    required: [target_page, before, after]
+    allowed_paths: ["{page.path}"]
+
+limits:
+  max_changed_files: 1
+  max_changed_lines: 80
+  max_file_chars: 80000
+
+output:
+  mode: pull_request          # main 직접 push 금지
+  branch_prefix: "issue-edit/"
+  comment_on_reject: true     # 필수 항목 누락·대상 모호·허용 범위 위반 시 이슈에 사유 코멘트

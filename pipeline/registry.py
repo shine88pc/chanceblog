@@ -12,6 +12,8 @@ import re
 import sys
 from pathlib import Path, PurePosixPath
 
+from pipeline.console import safe_output
+
 ROOT = Path(__file__).resolve().parent.parent
 REGISTRY_PATH = Path(__file__).resolve().parent / "blogs.json"
 PROFILE_DIR = Path(__file__).resolve().parent / "profiles"
@@ -278,6 +280,7 @@ def validate_registry(reg, root=None):
 
 
 def main(argv=None):
+    safe_output()
     try:
         reg = load_registry()
     except RegistryError as exc:

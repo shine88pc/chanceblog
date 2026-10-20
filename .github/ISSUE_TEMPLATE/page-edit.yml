@@ -1,0 +1,60 @@
+name: "고정 페이지 수정"
+description: "about / contact / privacy 등 고정 페이지의 지정 항목만 수정합니다. 결과는 PR 로 올라가며 검토 후 병합됩니다. (게시글 이미지 변경은 별도 양식)"
+title: "[페이지 수정] "
+labels: ["blog-control", "edit:page"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        이 양식은 **고정 페이지의 지정 항목 수정 전용**입니다. 선택한 수정 항목 밖의 내용은 바꾸지 않으며,
+        결과는 **PR 로 올라가 사람이 검토·병합**합니다(main 에 바로 반영되지 않습니다).
+        광고 심사 대상 페이지(about·contact·privacy 등)는 저장소 소유자의 요청만 처리합니다.
+
+  - type: dropdown
+    id: target_page
+    attributes:
+      label: "대상 페이지"
+      description: "페이지가 추가되면 목록이 자동으로 갱신됩니다."
+      options:
+        # PAGES:START (scripts/sync_issue_form.py 가 pages.json 기준으로 자동 갱신 - 수동 편집 금지)
+        - "about | 소개와 편집 원칙"
+        - "categories | 카테고리"
+        - "contact | 문의와 정정 요청"
+        - "privacy | 개인정보처리방침"
+        # PAGES:END
+    validations:
+      required: true
+
+  - type: dropdown
+    id: edit_type
+    attributes:
+      label: "수정 항목"
+      options:
+        # EDITS:START (edit-spec.yml 기준 자동 갱신 - 수동 편집 금지)
+        - "text_change | 문구 수정"
+        - "seo_meta | SEO 메타 수정 (title/description)"
+        - "layout | 섹션/레이아웃 변경 (해당 페이지 안에서만)"
+        - "link_change | 링크 변경"
+        # EDITS:END
+    validations:
+      required: true
+
+  - type: textarea
+    id: before
+    attributes:
+      label: "변경 전 (선택)"
+      description: "문구 수정·링크 변경일 때 현재 내용을 페이지 원문 그대로 붙여 넣으세요. 링크 변경은 필수입니다."
+    validations:
+      required: false
+
+  - type: textarea
+    id: after
+    attributes:
+      label: "변경 후 / 요청 내용"
+      description: |
+        - 문구 수정: '변경 전'을 적었다면 **바뀔 문구 그대로** 적어 주세요(그대로 교체합니다). 비웠다면 원하는 결과를 구체적으로 설명하세요(AI 가 최소한만 수정).
+        - SEO 메타: 줄마다 `title: 새 제목` 또는 `description: 새 설명`
+        - 링크 변경: 새 URL (https:// 주소, /로 시작하는 사이트 내 경로, #앵커, mailto:)
+        - 섹션/레이아웃 변경: 원하는 결과를 구체적으로
+    validations:
+      required: true

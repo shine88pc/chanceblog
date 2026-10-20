@@ -4,7 +4,7 @@
 받아 사람이 개입해야 하는 상황만 Finding 으로 돌려준다. 이슈 생성은 scripts/watchdog.py 가 맡는다.
 """
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 
 from pipeline.state import KST
 

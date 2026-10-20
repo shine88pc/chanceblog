@@ -10,6 +10,7 @@ import argparse
 import json
 import sys
 
+from pipeline.console import safe_output
 from pipeline.registry import ROOT, RegistryError, enabled_blogs, load_registry, validate_registry
 
 _SECRET_ROLES = ("llm_api_key", "blog_id", "client_id", "client_secret", "refresh_token")
@@ -35,6 +36,7 @@ def build_matrix(reg, platform=None, only=None):
 
 
 def main(argv=None):
+    safe_output()
     parser = argparse.ArgumentParser(prog="python -m pipeline.plan")
     parser.add_argument("--platform", default=None)
     parser.add_argument("--only", default=None, help="이 key 의 블로그만 (수동 실행용)")
