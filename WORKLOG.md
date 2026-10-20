@@ -24,11 +24,12 @@
 - **문서**: SECURITY_GUARDRAILS(G-L1 과거형, G-L7·G-O7, 검사 매핑), CHARTER §6.2, ARCHITECTURE(수정 요청 흐름, Phase 2·5), DEFECT_REGISTER(D-01 상태, D-14~16, 관측 체크리스트), ENGINEERING_GUIDE R13, HANDLER(§0·§9·P2·§12), AGENTS, README
 
 ### 검증 증거
-- `python -m unittest discover -s tests`: **275개 통과** (Python 3.12, 로컬 Windows — cp949 콘솔과 UTF-8 모드 모두). CI의 3.10/3.12는 push 후 확인
+- `python -m unittest discover -s tests`: **275개 통과** (Python 3.12, 로컬 Windows — cp949 콘솔과 UTF-8 모드 모두). 새로 clone한 사본(GitHub `main` c660c71)에서도 검증기 오류 0·테스트 275개 통과
+- GitHub Actions(Actions API로 확인): push `6316566`·`c660c71` 모두 **Guardrails(3.10·3.12)·Deploy GitHub Pages·Sync Issue Form 성공**. Sync Issue Form은 변경 커밋 없이 끝남(pages.json·양식이 이미 최신) — 새 수정 시스템의 첫 Actions 관측
 - `python scripts/validate_repo.py`: 오류 0건, 경고 1건(EXPOSE-1, D-08 — 의도적으로 열림)
 - `actionlint` 1.7.12: 워크플로 8개 0건. `pyflakes`: 실제 오류 없음(`_bootstrap` 부수효과 임포트·재수출 경고만). `vermin`: Python 3.10과 호환
 - 이슈→수정안 흐름은 가짜 저장소 스냅샷 기반 테스트 + 실제 git 1건 테스트까지. **GitHub Actions에서의 실행은 이 환경에서 할 수 없어 미관측**
-- 실행하지 못한 것: Issue Edit(dry-run·실제 이슈), Sync Issue Form, PR Scope Check, Blogger Generate 첫 스케줄, Pages 배포 dispatch — `docs/DEFECT_REGISTER.md` 하단 관측 체크리스트
+- 실행하지 못한 것: Issue Edit(dry-run·실제 이슈), PR Scope Check, Blogger Generate 첫 스케줄, 봇 커밋 뒤 Pages 배포 dispatch — `docs/DEFECT_REGISTER.md` 하단 관측 체크리스트
 
 ### 다음 AI에게 남기는 주의사항
 1. push 후 Actions 결과를 먼저 확인한다: **Guardrails**(3.10·3.12), **Sync Issue Form**(변경 없음이 정상), **Deploy GitHub Pages**. 이슈 수정은 Actions → **Issue Edit** → Run workflow(`dry_run` 체크)로 시험한다

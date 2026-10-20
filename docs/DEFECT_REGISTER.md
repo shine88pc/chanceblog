@@ -27,11 +27,11 @@
 
 | 시점 | 확인 | 정상 |
 |------|------|------|
-| 푸시 직후 | Actions → **Guardrails** | 3.10·3.12 모두 초록(경고는 허용) |
+| 푸시 직후 | Actions → **Guardrails** | 3.10·3.12 모두 초록(경고는 허용). ✅ 2026-10-20 관측: `f52662d`·`6316566`·`c660c71` 모두 성공 |
 | 2026-10-21 02:00 UTC | Actions → **Blogger Generate** 첫 스케줄 실행 | 초록. `_blogger_drafts/`·`blogger_history.json` 커밋. 시크릿이 없으면 `generated_unpublished` |
 | 2026-10-21 03:30 UTC | Actions → **Watchdog** | 이슈 없음 또는 `[Watchdog]` 이슈의 내용이 현재 상태와 일치 |
 | 다음 봇 글 커밋 | Actions → **Deploy GitHub Pages** | `workflow_dispatch`로 실행됨(D-02 검증) |
-| 푸시 직후 | Actions → **Sync Issue Form** (수동 실행 또는 `pages.json`·`_posts`·명세 변경 시) | 초록. 변경이 없으면 커밋 없음, 있으면 `pages.json`·양식 두 파일만 커밋(사이트 화면에는 영향이 없어 배포 dispatch는 하지 않는다) |
+| 푸시 직후 | Actions → **Sync Issue Form** (수동 실행 또는 `pages.json`·`_posts`·명세 변경 시) | 초록. 변경이 없으면 커밋 없음, 있으면 `pages.json`·양식 두 파일만 커밋(사이트 화면에는 영향이 없어 배포 dispatch는 하지 않는다). ✅ 2026-10-20 관측: `6316566`·`c660c71` push에서 성공, 변경 커밋 없음 |
 | 푸시 직후 | Actions → **Issue Edit** → Run workflow(`issue_number`, `dry_run` 체크) | 초록. 로그에 대상 파일·수정 방식·사후 검증 결과가 나오고 파일·PR·코멘트는 생기지 않음(D-01) |
 | 이슈 양식 첫 사용 | 이슈 양식(고정 페이지 수정)으로 작은 문구 교체 1건 | 브랜치 `issue-edit/<번호>-…`와 PR(`Fixes #번호`) 생성, 이슈에 코멘트. "PR 생성 허용" 설정이 꺼져 있으면 비교 링크가 옴(D-16) |
 | 이슈 요청 PR 생성 직후 | PR 하단 **PR Scope Check** 코멘트 | PASS/WARN/FAIL 중 하나가 달림. 안 보이면 Copilot PR은 "Approve and run workflows"(D-15) |
