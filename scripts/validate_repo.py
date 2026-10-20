@@ -392,6 +392,26 @@ def check_doc_links(root, files):
     return out
 
 
+def check_liquid_in_docs(root, files):
+    """front matter 없는 .md 도 GitHub Pages(jekyll-optional-front-matter)가 Liquid 로 처리한다.
+
+    문서 속 Liquid 구문(중괄호-퍼센트 태그)은 빌드를 깨뜨려 사이트 배포가 멈춘다(2026-10-20 Pages 배포 실패 사례).
+    이중 중괄호는 빌드를 깨지는 않지만 빈 칸으로 렌더링돼 내용이 사라진다. 숨김 폴더(.github 등)와 `_` 폴더는 게시되지 않는다."""
+    out = []
+    for rel in files:
+        if not rel.endswith(".md") or any(part.startswith((".", "_")) for part in rel.split("/")):
+            continue
+        text = read_text(root, rel) or ""
+        if text.startswith("---"):  # front matter 가 있는 페이지는 Liquid 가 정상 용도다
+            continue
+        if "{%" in text:
+            out.append(err("LIQUID-1", "front matter 없는 문서에 Liquid 태그(중괄호-퍼센트)가 있습니다 — Pages 빌드가 실행·해석해 "
+                                       "배포가 실패할 수 있습니다. 문장으로 풀어 쓰거나 raw 블록으로 감싸세요", rel))
+        elif "{{" in text:
+            out.append(warn("LIQUID-1", "front matter 없는 문서에 이중 중괄호가 있습니다 — Liquid 출력 구문으로 처리돼 내용이 사라질 수 있습니다", rel))
+    return out
+
+
 _BRIEFING = "docs/REQUEST_BRIEFING.md"
 
 
@@ -531,6 +551,7 @@ def run_checks(root, base=None):
     findings += check_doc_links(root, files)
     findings += check_agent_files(root, files)
     findings += check_briefing(root, files)
+    findings += check_liquid_in_docs(root, files)
     findings += check_exposure(root, files)
     findings += check_dependencies(root, files)
     findings += check_ad_surface(root, base)

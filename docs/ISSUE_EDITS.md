@@ -46,7 +46,7 @@ push(*.md, spec 등) ─► sync-issue-form.yml ─► pages.json · 양식 드�
 | 텍스트 칸에 가짜 항목 제목을 심어 대상을 바꿈 | 양식에 정의된 라벨만 경계로 인정, **중복 제목은 거부** | `forms.parse_issue_body` |
 | 권한 없는 사용자의 요청 | job `if` + 코드에서 `author_association` 재확인 | 워크플로·`runner` |
 | AI가 임의 파일을 고름·삭제함 | AI는 파일 경로를 고르지 못함(대상은 코드가 결정), **절대 금지 경로**(`.github/`·`pipeline/`·`scripts/`·`_layouts/`·`_includes/`·`_config.yml`·`index.html`·`*.py`·`*.yml`·`*.json` 등)는 명세가 허용해도 수정 불가 | `spec.NEVER_ALLOW`, 검증기 SPEC-1 |
-| AI가 요청 밖을 고치거나 광고 코드를 건드림 | 사후 검증(엔티티를 풀고 공백·제어 문자를 접은 텍스트 기준): 허용 경로, 바뀐 줄 ≤ 80(AI 패치는 파일의 30% 또는 12줄 중 큰 값 이하), 광고 스니펫 개수와 `<script>`·`<ins>` 블록 전체 불변, Liquid 태그(`{% %}`·`{{ }}`) 증가 금지, `javascript:`·`data:`·위험 태그(`<script>`·`<iframe>`·`<style>`·`<link>`·`<base>`·`<meta>`·`<svg>` 등)·이벤트 속성 증가 금지, AI 패치의 새 외부 링크 금지, front matter 불변, 새 비밀·`http://` 링크 금지 | `checks.verify_changes` (D-17·D-18) |
+| AI가 요청 밖을 고치거나 광고 코드를 건드림 | 사후 검증(엔티티를 풀고 공백·제어 문자를 접은 텍스트 기준): 허용 경로, 바뀐 줄 ≤ 80(AI 패치는 파일의 30% 또는 12줄 중 큰 값 이하), 광고 스니펫 개수와 `<script>`·`<ins>` 블록 전체 불변, Liquid 태그(중괄호-퍼센트 구문과 이중 중괄호 출력 구문) 증가 금지, `javascript:`·`data:`·위험 태그(`<script>`·`<iframe>`·`<style>`·`<link>`·`<base>`·`<meta>`·`<svg>` 등)·이벤트 속성 증가 금지, AI 패치의 새 외부 링크 금지, front matter 불변, 새 비밀·`http://` 링크 금지 | `checks.verify_changes` (D-17·D-18) |
 | 레지스트리를 못 읽거나 경로 표기가 다름 | 광고 표면 OWNER 가드는 fail closed(요청 거부), 경로는 정규화해서 비교 | `runner.protected_paths`·`is_protected` (D-19) |
 | 광고 심사 페이지 무단 변경 | **OWNER만** 요청 가능, PR로만 반영(병합=승인), 커밋에 `Ad-Surface-Approved: 이슈 #N …` | `runner`, 검증기 AD-1 |
 | 사용자 입력이 PR 본문·코멘트·커밋·로그에서 멘션·마크다운·트레일러·워크플로 명령(`::warning::`)으로 탈출 | 요청 내용은 코드 펜스, 제목·방식 등은 한 줄 코드 스팬, 사유·로그는 한 줄로 접고 `@` 무력화 | `runner._fence`·`_code`·`_one_line` (D-20) |

@@ -391,6 +391,21 @@ class AdSurfaceTest(TmpCase):
         self.assertEqual(levels(vr.check_ad_surface(root, base), "AD-1"), ["ERROR"])
 
 
+class LiquidInDocsTest(TmpCase):
+    def test_liquid_tags_in_plain_markdown_break_the_pages_build(self):
+        write(self.root, "docs/a.md", "설명 {" + "% include_relative x.html %" + "} 끝\n")
+        write(self.root, "docs/b.md", "표현식 ${" + "{ github.event.issue.body }" + "}\n")
+        write(self.root, "docs/ok.md", "Liquid 는 중괄호-퍼센트 구문이다.\n")
+        write(self.root, "page.md", "---\ntitle: t\n---\n{" + "% for x in y %" + "}z{" + "% endfor %" + "}\n")  # front matter 가 있는 페이지는 정상
+        write(self.root, ".github/instructions/i.md", "{" + "% x %" + "}\n")                                   # 숨김 폴더는 게시되지 않는다
+        found = vr.check_liquid_in_docs(self.root, vr.list_files(self.root))
+        self.assertEqual(sorted((f.path, f.level) for f in found), [("docs/a.md", "ERROR"), ("docs/b.md", "WARN")])
+
+    def test_real_repository_docs_have_no_liquid_tags(self):
+        found = [f.line() for f in vr.check_liquid_in_docs(REAL, vr.list_files(REAL)) if f.level == "ERROR"]
+        self.assertEqual(found, [])
+
+
 class BriefingTest(TmpCase):
     FULL = "`chance` `blogger_macat` `alpha.yml` `beta.yaml` `text_change` `link_change`\n"
 
