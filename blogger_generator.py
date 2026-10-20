@@ -1,12 +1,12 @@
-"""Blogger 분기 생성기 (초안)
+"""Blogger 분기 생성기
 
 Chance_Blog 자동화의 연장선으로, 공통 주제에서 실용·실행형 글을 생성한다.
 - 대상: Blogger (macat0722.blogspot.com)
 - 프롬프트: .github/editorial/BLOGGER_PROMPT.md
-- 현재 단계: 글 생성 + 로컬/로그 출력 (게시 API는 추후 연동)
+- 현재 단계: 글 생성 + 초안 저장 + 로그 (게시 API는 추후 연동)
 
 환경변수
-- GEMINI_API_KEY : 필수
+- GEMINI_API_KEY : 필수 (DRY_RUN 제외)
 - BLOGGER_TOPIC  : 지정 시 해당 주제 사용, 없으면 내장 목록에서 선택
 - DRY_RUN=1      : API 호출 없이 스텁 응답
 """
@@ -27,8 +27,8 @@ TOPIC_OVERRIDE = os.environ.get("BLOGGER_TOPIC", "").strip()
 
 PROMPT_FILE = Path(__file__).resolve().parent / ".github/editorial/BLOGGER_PROMPT.md"
 LOG_FILE = Path("blogger_history.json")
+DRAFT_DIR = Path("_blogger_drafts")
 
-# Chance_Blog와 겹치지 않도록 실용 각도 주제 위주
 DEFAULT_TOPICS = [
     "잠이 안 올 때 바로 해볼 수 있는 간단한 방법",
     "아침에 일어나기 힘든 사람을 위한 가벼운 루틴",
@@ -49,11 +49,7 @@ MODEL_CANDIDATES = [
 ]
 
 
-# ============================================================
-# 유틸
-# ============================================================
 def load_prompt_template():
-    """BLOGGER_PROMPT.md에서 기본 프롬프트 블록을 추출한다."""
     if not PROMPT_FILE.exists():
         return _fallback_prompt()
     text = PROMPT_FILE.read_text(encoding="utf-8")
@@ -177,9 +173,36 @@ def append_log(entry: dict):
     )
 
 
-# ============================================================
-# 메인
-# ============================================================
+def save_draft(result: dict) -> Path:
+    """초안 마크다운 파일로 저장 (수동 게시용)."""
+    DRAFT_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.datetime.now(
+        datetime.timezone(datetime.timedelta(hours=9))
+    ).strftime("%Y-%m-%d-%H%M")
+    safe_title = re.sub(r'[\\/:*?"<>|]', "-", result["title"])[:60]
+    path = DRAFT_DIR / f"{ts}-{safe_title}.md"
+
+    body = f"""---
+title: "{result['title']}"
+labels: {result['labels']}
+topic: {result['topic']}
+generated_at: {result['generated_at']}
+status: draft
+target: Blogger
+---
+
+> **대상: Blogger**  
+> 자동 생성 초안입니다. Blogger에 복사해 게시하거나, 나중에 API 연동 후 사용하세요.
+
+# {result['title']}
+
+{result['content']}
+"""
+    path.write_text(body, encoding="utf-8")
+    print(f"초안 저장: {path}")
+    return path
+
+
 def generate_blogger_post(topic: str | None = None) -> dict:
     topic = topic or choose_topic()
     template = load_prompt_template()
@@ -200,6 +223,7 @@ def generate_blogger_post(topic: str | None = None) -> dict:
         "generated_at": result["generated_at"],
         "status": "generated",
     })
+    save_draft(result)
 
     print("=== 생성 결과 ===")
     print(f"제목: {result['title']}")
@@ -209,10 +233,8 @@ def generate_blogger_post(topic: str | None = None) -> dict:
 
 
 def main():
-    result = generate_blogger_post()
-    # 추후: Blogger API 게시 로직 추가
-    # post_to_blogger(result["title"], result["content"], result["labels"])
-    print("완료. (게시는 아직 미연동)")
+    generate_blogger_post()
+    print("완료. (게시는 아직 미연동 — 초안은 _blogger_drafts/ 참고)")
 
 
 if __name__ == "__main__":
