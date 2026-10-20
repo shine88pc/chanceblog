@@ -7,35 +7,46 @@
 
 ---
 
-## [2026-10-20] Grok – Blogger 생성 전용 워크플로 + 초안 저장 (API 미연동)
+## [2026-10-20] Grok – Blogger API 코드 연동 완료 (Secrets 대기)
 
 **작업자**: Grok  
 **대상**: Blogger  
-**목적**: API 연동 전에 스케줄 생성·초안 저장이 돌아가도록 구성
+**목적**: Blogger API 게시 경로를 코드·워크플로·가이드까지 구현. 실제 게시는 사용자 Secrets 등록 후 가능.
 
 ### 변경 사항
-- `.github/workflows/blogger.yml` 신규
-  - 매일 UTC 02:00 (KST 11:00) 스케줄
-  - workflow_dispatch로 수동 실행·주제 지정·DRY_RUN 가능
-  - `blogger_generator.py` 실행 후 `blogger_history.json` / `_blogger_drafts/` 커밋
-- `blogger_generator.py` 개선
-  - `_blogger_drafts/`에 제목·본문 포함 마크다운 초안 저장
-  - 수동 게시용으로 바로 사용 가능
+- `.github/editorial/BLOGGER_API_SETUP.md` — OAuth·Secrets 설정 가이드
+- `scripts/get_blogger_token.py` — 로컬에서 refresh token 1회 발급
+- `blogger_generator.py` — `post_to_blogger()` 추가, `BLOGGER_PUBLISH=1` 시 게시
+- `.github/workflows/blogger.yml` — 게시 옵션·API 패키지·Secrets 연결
 
-### 사용 방법
-1. Actions → **Blogger Generate (Draft Only)** → Run workflow
-2. 또는 스케줄 대기 (매일 KST 11시)
-3. 생성된 초안: `_blogger_drafts/*.md` → Blogger에 복사 게시
+### 사용자가 해야 할 일 (1회)
+1. Google Cloud에서 Blogger API 활성화 + 데스크톱 OAuth 클라이언트 생성
+2. `python scripts/get_blogger_token.py` 로 refresh token 발급
+3. GitHub Secrets 등록:
+   - `BLOGGER_BLOG_ID`
+   - `BLOGGER_CLIENT_ID`
+   - `BLOGGER_CLIENT_SECRET`
+   - `BLOGGER_REFRESH_TOKEN`
+4. Actions에서 publish 체크 후 실행, 또는 스케줄(Secrets 있으면 자동 게시 시도)
 
 ### 다음 AI에게 남기는 주의사항
-1. **Blogger API는 의도적으로 미루어 둔 상태** — 요청 있을 때만 진행
-2. `GEMINI_API_KEY` 시크릿이 있어야 실제 생성 가능 (없으면 DRY_RUN/스텁)
-3. 주제 충돌 방지·API 게시는 아직 미구현
+1. Secrets 없으면 생성·초안만 동작 (정상)
+2. API 코드는 완료 — 인증 값은 사용자가 넣어야 함
+3. 다음 우선: 주제 충돌 방지, 초안 품질 점검
 
 ### 남은 이슈 / 다음 단계
-- 주제 충돌 방지 (Chance_Blog history와 교차 확인)
-- Blogger API 연동 (보류 중)
+- 사용자 Secrets 등록 (블로거 API 실게시 활성화)
+- 주제 충돌 방지
+- 초안 품질 점검 / 샘플 테스트
 - AdSense 승인 모니터링
+
+---
+
+## [2026-10-20] Grok – Blogger 생성 전용 워크플로 + 초안 저장
+
+**작업자**: Grok  
+**대상**: Blogger  
+**목적**: API 없이 스케줄 생성·초안 저장
 
 ---
 
@@ -43,49 +54,13 @@
 
 **작업자**: Grok  
 **대상**: Blogger  
-**목적**: 공식 경로 = GitHub Actions + Blogger API (현재는 생성만)
+**목적**: GitHub Actions + Blogger API 공식 경로
 
 ---
 
-## [2026-10-20] Grok – blogger_generator.py 초안 추가
+## [2026-10-20] Grok – blogger_generator.py / 프롬프트 / 구조 설계
 
-**작업자**: Grok  
-**대상**: Blogger  
-**목적**: 분기 글 생성 스크립트
-
----
-
-## [2026-10-20] Grok – Blogger 분기 프롬프트 확정
-
-**작업자**: Grok  
-**대상**: Blogger  
-**목적**: BLOGGER_PROMPT.md
-
----
-
-## [2026-10-20] Grok – Blogger 자동화 구조 설계 완료
-
-**작업자**: Grok  
-**대상**: 공통
-
----
-
-## [2026-10-20] Grok – 듀얼 블로그 전략 확정
-
-**작업자**: Grok  
-**목적**: 방향 C + 균형 성장
-
----
-
-## [2026-10-20] Grok – AI 자동 읽기 강제 체계 강화
-
-**작업자**: Grok
-
----
-
-## [2026-10-20] Grok – AI 협업 체계 구축
-
-**작업자**: Grok
+이전 항목 요약: 생성기·BLOGGER_PROMPT·듀얼 전략·AI 협업 체계 구축 완료.
 
 ---
 
