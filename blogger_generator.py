@@ -3,12 +3,19 @@
 Chance_Blog 자동화의 연장선으로, 공통 주제에서 실용·실행형 글을 생성한다.
 - 대상: Blogger (macat0722.blogspot.com)
 - 프롬프트: .github/editorial/BLOGGER_PROMPT.md
-- 현재 단계: 글 생성 + 초안 저장 + 로그 (게시 API는 추후 연동)
+- 생성 + 초안 저장 + (선택) Blogger API 게시
 
 환경변수
-- GEMINI_API_KEY : 필수 (DRY_RUN 제외)
-- BLOGGER_TOPIC  : 지정 시 해당 주제 사용, 없으면 내장 목록에서 선택
-- DRY_RUN=1      : API 호출 없이 스텁 응답
+- GEMINI_API_KEY          : 글 생성 (필수, DRY_RUN 제외)
+- BLOGGER_TOPIC           : 지정 시 해당 주제 사용
+- DRY_RUN=1               : Gemini 스텁
+- BLOGGER_PUBLISH=1       : 게시 시도 (기본 0이면 생성만)
+- BLOGGER_BLOG_ID         : 블로그 ID
+- BLOGGER_CLIENT_ID       : OAuth 클라이언트 ID
+- BLOGGER_CLIENT_SECRET   : OAuth 시크릿
+- BLOGGER_REFRESH_TOKEN   : refresh token
+
+인증 설정: .github/editorial/BLOGGER_API_SETUP.md
 """
 
 import os
@@ -18,12 +25,15 @@ import random
 import datetime
 from pathlib import Path
 
-# ============================================================
-# 설정
-# ============================================================
 API_KEY = os.environ.get("GEMINI_API_KEY")
 DRY_RUN = os.environ.get("DRY_RUN", "0").strip().lower() in {"1", "true", "yes"}
 TOPIC_OVERRIDE = os.environ.get("BLOGGER_TOPIC", "").strip()
+PUBLISH = os.environ.get("BLOGGER_PUBLISH", "0").strip().lower() in {"1", "true", "yes"}
+
+BLOG_ID = os.environ.get("BLOGGER_BLOG_ID", "").strip()
+CLIENT_ID = os.environ.get("BLOGGER_CLIENT_ID", "").strip()
+CLIENT_SECRET = os.environ.get("BLOGGER_CLIENT_SECRET", "").strip()
+REFRESH_TOKEN = os.environ.get("BLOGGER_REFRESH_TOKEN", "").strip()
 
 PROMPT_FILE = Path(__file__).resolve().parent / ".github/editorial/BLOGGER_PROMPT.md"
 LOG_FILE = Path("blogger_history.json")
@@ -126,29 +136,15 @@ def _stub_response():
 
 
 def parse_response(raw: str) -> dict:
-    title = ""
-    labels = ""
-    content = ""
-
     title_m = re.search(r"제목:\s*(.+)", raw)
     labels_m = re.search(r"라벨:\s*(.+)", raw)
     content_m = re.search(r"내용:\s*([\s\S]+)", raw)
 
-    if title_m:
-        title = title_m.group(1).strip()
-    if labels_m:
-        labels = labels_m.group(1).strip()
-    if content_m:
-        content = content_m.group(1).strip()
-    else:
-        content = raw
+    title = title_m.group(1).strip() if title_m else "제목 없음"
+    labels = labels_m.group(1).strip() if labels_m else "건강,생활"
+    content = content_m.group(1).strip() if content_m else raw
 
-    return {
-        "title": title or "제목 없음",
-        "labels": labels or "건강,생활",
-        "content": content,
-        "raw": raw,
-    }
+    return {"title": title, "labels": labels, "content": content, "raw": raw}
 
 
 def choose_topic() -> str:
@@ -173,8 +169,7 @@ def append_log(entry: dict):
     )
 
 
-def save_draft(result: dict) -> Path:
-    """초안 마크다운 파일로 저장 (수동 게시용)."""
+def save_draft(result: dict, status: str = "draft") -> Path:
     DRAFT_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.datetime.now(
         datetime.timezone(datetime.timedelta(hours=9))
@@ -182,17 +177,17 @@ def save_draft(result: dict) -> Path:
     safe_title = re.sub(r'[\\/:*?"<>|]', "-", result["title"])[:60]
     path = DRAFT_DIR / f"{ts}-{safe_title}.md"
 
+    url_line = f"url: {result.get('url', '')}\n" if result.get("url") else ""
     body = f"""---
 title: "{result['title']}"
 labels: {result['labels']}
 topic: {result['topic']}
 generated_at: {result['generated_at']}
-status: draft
+status: {status}
 target: Blogger
----
+{url_line}---
 
-> **대상: Blogger**  
-> 자동 생성 초안입니다. Blogger에 복사해 게시하거나, 나중에 API 연동 후 사용하세요.
+> **대상: Blogger**
 
 # {result['title']}
 
@@ -201,6 +196,50 @@ target: Blogger
     path.write_text(body, encoding="utf-8")
     print(f"초안 저장: {path}")
     return path
+
+
+def blogger_credentials_ready() -> bool:
+    return bool(BLOG_ID and CLIENT_ID and CLIENT_SECRET and REFRESH_TOKEN)
+
+
+def post_to_blogger(title: str, content: str, labels_str: str = "") -> dict:
+    """Blogger API로 게시. refresh token 사용."""
+    if not blogger_credentials_ready():
+        raise RuntimeError(
+            "Blogger Secrets 부족: BLOGGER_BLOG_ID, CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN 필요"
+        )
+
+    from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request
+    from googleapiclient.discovery import build
+
+    creds = Credentials(
+        token=None,
+        refresh_token=REFRESH_TOKEN,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=CLIENT_ID,
+        client_secret=CLIENT_SECRET,
+        scopes=["https://www.googleapis.com/auth/blogger"],
+    )
+    creds.refresh(Request())
+
+    service = build("blogger", "v3", credentials=creds, cache_discovery=False)
+    labels = [x.strip() for x in labels_str.split(",") if x.strip()] if labels_str else []
+
+    body = {
+        "kind": "blogger#post",
+        "title": title,
+        "content": content,
+    }
+    if labels:
+        body["labels"] = labels
+
+    result = service.posts().insert(blogId=BLOG_ID, body=body, isDraft=False).execute()
+    return {
+        "id": result.get("id"),
+        "url": result.get("url"),
+        "title": result.get("title"),
+    }
 
 
 def generate_blogger_post(topic: str | None = None) -> dict:
@@ -216,25 +255,47 @@ def generate_blogger_post(topic: str | None = None) -> dict:
         datetime.timezone(datetime.timedelta(hours=9))
     ).isoformat()
 
+    status = "generated"
+    post_info = None
+
+    if PUBLISH and blogger_credentials_ready():
+        try:
+            print("Blogger API 게시 시도...")
+            post_info = post_to_blogger(
+                result["title"], result["content"], result["labels"]
+            )
+            result["url"] = post_info.get("url", "")
+            status = "posted"
+            print(f"게시 성공: {result['url']}")
+        except Exception as e:
+            print(f"게시 실패 (초안만 저장): {e}")
+            status = "generate_ok_publish_failed"
+    elif PUBLISH:
+        print("BLOGGER_PUBLISH=1 이지만 Secrets 부족 → 게시 생략")
+    else:
+        print("BLOGGER_PUBLISH 미설정 → 생성·초안만 수행")
+
     append_log({
         "topic": topic,
         "title": result["title"],
         "labels": result["labels"],
         "generated_at": result["generated_at"],
-        "status": "generated",
+        "status": status,
+        "url": result.get("url", ""),
     })
-    save_draft(result)
+    save_draft(result, status=status)
 
     print("=== 생성 결과 ===")
     print(f"제목: {result['title']}")
     print(f"라벨: {result['labels']}")
+    print(f"상태: {status}")
     print(f"내용 길이: {len(result['content'])}자")
     return result
 
 
 def main():
     generate_blogger_post()
-    print("완료. (게시는 아직 미연동 — 초안은 _blogger_drafts/ 참고)")
+    print("완료.")
 
 
 if __name__ == "__main__":
