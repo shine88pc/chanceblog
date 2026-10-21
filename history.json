@@ -21,5 +21,17 @@
     "en_image": "https://images.unsplash.com/photo-1637002722490-5f8ceed9774c?auto=format&fit=crop&w=1000&q=80",
     "slot": null,
     "source": "Google뉴스 KR AI·테크"
+  },
+  {
+    "date": "2026-10-21",
+    "topic": "It’s a bird, it’s a plane … it’s a robo-puffin?",
+    "kr_title": "공기와 물을 넘나드는 생체 모방 로봇: MIT와 EPFL의 하이브리드 비행·잠수 연구",
+    "en_title": "Crossing Air and Water: How MIT and EPFL Are Translating Seabird Physics into Bio-Robotics",
+    "kr_image": "https://images.unsplash.com/photo-1644088379091-d574269d422f?auto=format&fit=crop&w=1000&q=80",
+    "en_image": "https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=1000&q=80",
+    "slot": 9,
+    "lane": "technology",
+    "source": "MIT Technology Review",
+    "source_url": "https://www.technologyreview.com/2026/10/20/1145205/its-a-bird-its-a-plane-its-a-robo-puffin/"
   }
 ]
