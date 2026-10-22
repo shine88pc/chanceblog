@@ -20,5 +20,27 @@
     "reasons": [
       "[SECRETS] 게시 시크릿 미등록: blog_id, client_id, client_secret, refresh_token"
     ]
+  },
+  {
+    "v": 1,
+    "blog": "blogger_macat",
+    "date": "2026-10-22",
+    "generated_at": "2026-10-22T16:15:16.920357+09:00",
+    "status": "generated_unpublished",
+    "topic": "감사 메모 3줄 쓰기로 하루 마무리하는 방법",
+    "topic_source": "seed",
+    "title": "잠들기 전 3분, 마음을 편안하게 정리하는 감사 메모 3줄 쓰기 방법",
+    "labels": [
+      "마음건강",
+      "수면습관",
+      "라이프스타일"
+    ],
+    "url": "",
+    "post_id": "",
+    "model": "gemini-3.8-flash",
+    "attempts": 1,
+    "reasons": [
+      "[SECRETS] 게시 시크릿 미등록: blog_id, client_id, client_secret, refresh_token"
+    ]
   }
 ]
