@@ -64,5 +64,27 @@
     "reasons": [
       "[SECRETS] 게시 시크릿 미등록: blog_id, client_id, client_secret, refresh_token"
     ]
+  },
+  {
+    "v": 1,
+    "blog": "blogger_macat",
+    "date": "2026-10-24",
+    "generated_at": "2026-10-24T15:57:51.427286+09:00",
+    "status": "generated_unpublished",
+    "topic": "잠이 안 올 때 바로 해볼 수 있는 간단한 방법",
+    "topic_source": "seed",
+    "title": "잠이 안 올 때 침대에서 바로 해보는 4가지 간단한 방법",
+    "labels": [
+      "수면팁",
+      "생활습관",
+      "건강"
+    ],
+    "url": "",
+    "post_id": "",
+    "model": "gemini-3.8-flash",
+    "attempts": 1,
+    "reasons": [
+      "[SECRETS] 게시 시크릿 미등록: blog_id, client_id, client_secret, refresh_token"
+    ]
   }
 ]
