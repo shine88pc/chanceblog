@@ -17,6 +17,7 @@ METHODS = {"image", "text", "link", "front_matter", "llm_patch"}
 TARGETS = {"page", "post"}
 FRONT_MATTER_FIELDS = {"title", "description"}
 PLACEHOLDERS = {"{page.path}", "{post.path}"}
+OUTPUT_KEYS = {"mode", "branch_prefix"}   # 명세 output 에서 코드가 읽는 키(그 밖의 키는 SPEC-1 오류)
 ALLOWED_ASSOCIATIONS = ("OWNER", "MEMBER", "COLLABORATOR")
 
 # 이슈 자동화가 어떤 경우에도 고칠 수 없는 경로(글로브). 대소문자 구분 없이 비교한다.
@@ -193,6 +194,15 @@ def validate_spec(spec):
             errors.append(f"limits.{key} 는 양의 정수여야 합니다.")
 
     output = spec.get("output") or {}
+    if not isinstance(output, dict):
+        errors.append("output 은 객체여야 합니다.")
+        output = {}
+    # 코드가 읽지 않는 키를 받아들이지 않는다: 읽지도 않는 스위치(예: comment_on_reject: false)는 조용한 실패를 부른다.
+    # 새 키를 지원하려면 OUTPUT_KEYS 와 이 검증을 같은 변경에서 고친다(런타임도 이 검증을 쓴다).
+    unknown = sorted(str(k) for k in output if k not in OUTPUT_KEYS)
+    if unknown:
+        errors.append(f"output 에 지원하지 않는 키가 있습니다: {', '.join(unknown)} (지원: {', '.join(sorted(OUTPUT_KEYS))}). "
+                      "거부·오류는 항상 이슈에 사유를 코멘트하며 끌 수 없습니다.")
     if output.get("mode") != "pull_request":
         errors.append("output.mode 는 pull_request 여야 합니다(main 직접 push 금지).")
     prefix = output.get("branch_prefix", "")

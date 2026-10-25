@@ -15,8 +15,23 @@ except ImportError:  # pragma: no cover
 FM_RE = re.compile(r"\A---[ \t]*\n(.*?)\n---[ \t]*(?:\n|\Z)", re.S)
 
 
+class LineEndingError(ValueError):
+    """파일의 줄 끝이 한 가지(LF 또는 CRLF)가 아니라 줄 끝을 보존한 채 고칠 수 없을 때."""
+
+
 def normalize_newlines(text):
     return (text or "").replace("\r\n", "\n").replace("\r", "\n")
+
+
+def line_ending_kind(text):
+    """줄 끝 유형: 'lf' · 'crlf' · 'cr'(CR 단독) · 'mixed'(둘 이상이 섞임) · 'none'(줄바꿈 없음). 정규화 전 원본에 쓴다."""
+    crlf = text.count("\r\n")
+    cr = text.count("\r") - crlf
+    lf = text.count("\n") - crlf
+    kinds = [name for name, count in (("lf", lf), ("crlf", crlf), ("cr", cr)) if count]
+    if not kinds:
+        return "none"
+    return kinds[0] if len(kinds) == 1 else "mixed"
 
 
 def split_front_matter(text):
@@ -40,9 +55,15 @@ def parse_front_matter(fm_text):
     return data if isinstance(data, dict) else None
 
 
-def read_file(path):
-    """(LF 정규화 텍스트, 원래 줄 끝 '\\n' 또는 '\\r\\n')."""
+def read_file(path, strict=False):
+    """(LF 정규화 텍스트, 원래 줄 끝 '\\n' 또는 '\\r\\n').
+
+    strict 이면 줄 끝이 섞였거나(LF+CRLF) CR 단독인 파일을 LineEndingError 로 거부한다. 그런 파일을 한 가지 줄 끝으로
+    다시 쓰면 요청하지 않은 줄 끝 변경이 파일 전체에 생기므로, 수정하는 쪽(runner)은 strict 로 읽는다(fail closed)."""
     raw = Path(path).read_bytes().decode("utf-8")
+    kind = line_ending_kind(raw)
+    if strict and kind in ("mixed", "cr"):
+        raise LineEndingError(kind)
     newline = "\r\n" if "\r\n" in raw else "\n"
     return normalize_newlines(raw), newline
 
