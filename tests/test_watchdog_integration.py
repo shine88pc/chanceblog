@@ -287,6 +287,33 @@ class DryRunTest(MainCase):
         self.assertIn("| chance | auto |", res.summary)
 
 
+class AlertSurvivalTest(MainCase):
+    """담당자 지정 거부(F-9)와 새 이슈 상한(F-13)이 알림을 잃게 만들지 않는다."""
+
+    def test_a_rejected_assignee_does_not_lose_the_alerts(self):
+        times, _ = self.stale()
+        fake = FakeGitHub(runs={}, reject_assignees=True)     # STALE + PAGES_NOT_DEPLOYED 둘 다 새 심각 건
+        res = self.run_main(fake, times=times)
+        self.assertEqual(fake.verbs(), ["create-rejected", "create", "create-rejected", "create"])
+        self.assertEqual(fake.open_issue_titles(), ["[Watchdog] chance: PAGES_NOT_DEPLOYED", "[Watchdog] chance: STALE"])
+        for issue in fake.issues.values():
+            self.assertEqual(issue["assignees"], [])
+            self.assertTrue(issue["body"].startswith(f"@{OWNER} "))      # 담당자는 못 붙여도 @멘션으로 알림은 간다
+        self.assertEqual(sum(1 for ln in res.out.splitlines() if ln.startswith("::warning::담당자")), 2)
+        self.assertEqual(res.code, 1)                                    # 새 심각 건이라 여전히 빨강
+
+    def test_a_critical_finding_is_not_pushed_behind_warnings_by_the_new_issue_cap(self):
+        warnings = [Finding(f"w{i}", "UNPUBLISHED", "warning", "초안만 남김") for i in range(5)]
+        critical = Finding("chance", "STALE", "critical", "마지막 활동 이후 65시간 경과")
+        fake = FakeGitHub()
+        res = self.run_main(fake, findings=warnings + [critical])
+        self.assertEqual(len(fake.open_issue_titles()), 5)               # 기본 상한 5건
+        self.assertEqual(watchdog.MAX_NEW_ISSUES_PER_RUN, 5)
+        self.assertIn(critical.title, fake.open_issue_titles())
+        self.assertEqual(res.code, 1)                                    # 심각 건이 밀리지 않았으니 빨강
+        self.assertIn(f"::warning::새 이슈가 한 번에 너무 많아 다음 실행으로 미룹니다: {warnings[-1].title}", res.out)
+
+
 class ShallowCloneTest(unittest.TestCase):
     """F-14: 얕은 복제에서는 가장 위 커밋이 모든 파일을 '새로 추가'한 것처럼 보인다 — 새 글로 오인하지 않는다."""
 

@@ -19,6 +19,7 @@ import os
 import re
 import subprocess
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -38,6 +39,7 @@ MAX_NEW_ISSUES_PER_RUN = 5   # 한 번에 이슈가 쏟아지는 것을 막는�
 PAGES_WORKFLOW = "pages.yml"
 PAGES_BRANCH = "main"        # 다른 ref 에서 workflow_dispatch 로 돌린 성공 실행은 '사이트 배포됨'이 아니다
 _NOTIFIED_RX = re.compile(r"<!--\s*watchdog:notified=(\S+?)\s*-->")
+_SEVERITY_RANK = {"critical": 0, "warning": 1}   # 새 이슈를 만드는 순서(작을수록 먼저)
 
 
 def _oneline(text):
@@ -128,13 +130,26 @@ def _notified_at(issue):
     return None
 
 
+def _create_issue(client, title, body, owner, out):
+    """이슈를 만든다. 담당자 지정이 거부되면(HTTP 422) 담당자 없이 한 번 더 만든다 — 담당자 하나 때문에
+    알림 자체가 사라지면 안 된다(본문의 @멘션으로 알림은 간다). 그 밖의 오류는 그대로 올려 실행을 빨갛게 한다."""
+    try:
+        return client.create_issue(title, body, assignees=[owner] if owner else None)
+    except urllib.error.HTTPError as exc:
+        if not owner or exc.code != 422:
+            raise
+        out(f"::warning::담당자({owner}) 지정이 거부되어(HTTP 422) 담당자 없이 이슈를 만듭니다: {title}")
+    return client.create_issue(title, body, assignees=None)
+
+
 def sync_issues(findings, open_issues, client, dry=False, out=print, owner=None, now=None,
                 renotify_hours=RENOTIFY_HOURS, max_new=MAX_NEW_ISSUES_PER_RUN):
     """열려야 할 이슈는 만들고(담당자·@멘션), 열린 이슈는 본문을 갱신하며, 해소된 이슈는 닫는다.
     같은 제목의 이슈는 중복 생성하지 않는다. 돌려주는 값: (created, closed, renotified, new_critical).
-    new_critical 은 이번 실행에서 처음 만든 심각 건의 제목 — 워크플로를 빨갛게 만드는 기준이다."""
+    new_critical 은 이번 실행에서 처음 만든 심각 건의 제목 — 워크플로를 빨갛게 만드는 기준이다.
+    새 이슈는 심각한 것부터(critical → 그 밖) 만든다: 상한(max_new)에 걸려 미뤄지는 쪽은 덜 심각한 건이다."""
     now = now or datetime.now(timezone.utc)
-    want = {f.title: f for f in findings}
+    want = {f.title: f for f in sorted(findings, key=lambda f: _SEVERITY_RANK.get(f.severity, 2))}
     have = {i["title"]: i for i in open_issues if str(i.get("title", "")).startswith(TITLE_PREFIX)}
     created, closed, renotified, new_critical, deferred = [], [], [], [], []
     for title, finding in want.items():
@@ -145,8 +160,8 @@ def sync_issues(findings, open_issues, client, dry=False, out=print, owner=None,
                 continue
             out(f"[알림 생성] {title}")
             if not dry:
-                client.create_issue(title, issue_body(finding, owner, now.isoformat(timespec="seconds")),
-                                    assignees=[owner] if owner else None)
+                _create_issue(client, title, issue_body(finding, owner, now.isoformat(timespec="seconds")),
+                              owner, out)
             created.append(title)
             if finding.severity == "critical":
                 new_critical.append(title)

@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import urllib.error
 from contextlib import redirect_stdout
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -171,6 +172,37 @@ class ExistingIssueTest(unittest.TestCase):
         self.assertEqual(len(client.updated), 1)
 
 
+class NewIssueOrderTest(unittest.TestCase):
+    """F-13: 새 이슈가 상한을 넘으면 경고가 먼저 만들어져 심각 건이 다음 실행으로 밀리고, 그 실행이 초록이 된다."""
+
+    def test_critical_is_created_first_even_when_listed_after_the_warnings(self):
+        warnings = [Finding(f"w{i}", "UNPUBLISHED", "warning", "x") for i in range(5)]
+        critical = Finding("chance", "STALE", "critical", "y")
+        client, (created, _, _, new_critical) = sync(warnings + [critical], [])     # 기본 상한 5건
+        self.assertEqual(len(created), 5)
+        self.assertEqual(created[0], critical.title)
+        self.assertEqual(new_critical, [critical.title])                         # 실행이 빨갛게 끝나는 근거
+
+    def test_the_finding_that_gets_deferred_is_the_least_severe_one(self):
+        findings = [Finding("w0", "UNPUBLISHED", "warning", "x"), Finding("w1", "UNPUBLISHED", "warning", "x"),
+                    Finding("c0", "STALE", "critical", "y"), Finding("c1", "STALE", "critical", "y")]
+        lines = []
+        client = FakeClient()
+        created, _, _, new_critical = watchdog.sync_issues(findings, [], client, owner=OWNER, now=NOW, max_new=3,
+                                                           out=lines.append)
+        self.assertEqual(created, [findings[2].title, findings[3].title, findings[0].title])   # 같은 등급 안에서는 원래 순서
+        self.assertEqual(new_critical, [findings[2].title, findings[3].title])
+        self.assertEqual([ln for ln in lines if ln.startswith("::warning::")],
+                         [f"::warning::새 이슈가 한 번에 너무 많아 다음 실행으로 미룹니다: {findings[1].title}"])
+
+    def test_existing_issues_are_still_updated_when_new_ones_are_deferred(self):
+        newer = Finding("chance", "STALE", "critical", "마지막 활동 이후 70시간 경과")
+        warnings = [Finding(f"w{i}", "UNPUBLISHED", "warning", "x") for i in range(3)]
+        client, (created, _, _, _) = sync(warnings + [newer], [open_issue(CRIT, notified_hours_ago=2)], max_new=1)
+        self.assertEqual(created, [warnings[0].title])
+        self.assertEqual([n for n, _ in client.updated], [5])
+
+
 class NotifiedAtTest(unittest.TestCase):
     """_notified_at: 표식 → 이슈를 연 시각 → None. 읽을 수 없는 값은 건너뛴다."""
 
@@ -248,6 +280,82 @@ class MarkerAndInertTextTest(unittest.TestCase):
 
     def test_ordinary_messages_are_unchanged(self):
         self.assertIn("마지막 활동 이후 65시간 경과", watchdog.issue_body(CRIT, OWNER))
+
+
+class AssigneeRejectingClient(FakeClient):
+    """담당자가 있는 이슈 생성을 거절하는 클라이언트(예: 저장소에서 지정할 수 없는 사용자 → HTTP 422)."""
+
+    def __init__(self, code=422, always=False):
+        super().__init__()
+        self.code, self.always, self.attempts = code, always, []
+
+    def create_issue(self, title, body, assignees=None):
+        self.attempts.append((title, assignees))
+        if assignees or self.always:
+            raise urllib.error.HTTPError("https://api.github.com/repos/o/r/issues", self.code, "error", {},
+                                         io.BytesIO(b"{}"))
+        super().create_issue(title, body, assignees)
+
+
+class AssigneeFallbackTest(unittest.TestCase):
+    """F-9: 담당자 지정이 거부돼도 이슈는 만든다(담당자 없이, 경고와 함께). 그 밖의 오류는 그대로 올린다(실행이 빨갛게 된다)."""
+
+    def run_sync(self, client, findings=(CRIT,), **kwargs):
+        lines = []
+        kwargs.setdefault("owner", OWNER)
+        result = watchdog.sync_issues(list(findings), [], client, now=NOW, out=lines.append, **kwargs)
+        return result, lines
+
+    def test_a_rejected_assignee_retries_without_one_and_warns(self):
+        client = AssigneeRejectingClient()
+        (created, _, _, new_critical), lines = self.run_sync(client)
+        self.assertEqual(created, [CRIT.title])
+        self.assertEqual(new_critical, [CRIT.title])
+        self.assertEqual(client.attempts, [(CRIT.title, [OWNER]), (CRIT.title, None)])
+        self.assertEqual(client.assignees, [None])
+        self.assertIn(f"@{OWNER}", client.created[0][1])             # 담당자는 못 붙여도 @멘션으로 알림은 간다
+        self.assertEqual([ln for ln in lines if ln.startswith("::warning::")],
+                         [f"::warning::담당자({OWNER}) 지정이 거부되어(HTTP 422) 담당자 없이 이슈를 만듭니다: {CRIT.title}"])
+
+    def test_every_new_issue_gets_the_fallback_not_only_the_first(self):
+        client = AssigneeRejectingClient()
+        (created, _, _, _), _ = self.run_sync(client, findings=(CRIT, WARN))
+        self.assertEqual(sorted(created), sorted([CRIT.title, WARN.title]))
+        self.assertEqual(len(client.created), 2)
+
+    def test_other_http_errors_are_not_swallowed(self):
+        for code in (400, 401, 403, 404, 500, 503):
+            with self.subTest(code=code):
+                client = AssigneeRejectingClient(code=code)
+                with self.assertRaises(urllib.error.HTTPError) as ctx:
+                    self.run_sync(client)
+                self.assertEqual(ctx.exception.code, code)
+                self.assertEqual(len(client.attempts), 1)             # 재시도하지 않는다
+
+    def test_non_http_errors_are_not_swallowed(self):
+        class Down(FakeClient):
+            def create_issue(self, title, body, assignees=None):
+                raise OSError("network down")
+        with self.assertRaises(OSError):
+            self.run_sync(Down())
+
+    def test_a_422_without_an_assignee_is_not_an_assignee_problem(self):
+        client = AssigneeRejectingClient(always=True)
+        with self.assertRaises(urllib.error.HTTPError):
+            self.run_sync(client, owner=None)
+        self.assertEqual(client.attempts, [(CRIT.title, None)])
+
+    def test_a_422_on_the_retry_is_raised(self):
+        client = AssigneeRejectingClient(always=True)
+        with self.assertRaises(urllib.error.HTTPError):
+            self.run_sync(client)
+        self.assertEqual(client.attempts, [(CRIT.title, [OWNER]), (CRIT.title, None)])
+
+    def test_dry_run_does_not_call_the_api_at_all(self):
+        client = AssigneeRejectingClient()
+        (created, _, _, _), lines = self.run_sync(client, dry=True)
+        self.assertEqual((created, client.attempts), ([CRIT.title], []))
+
 
 class CommitTimesTest(unittest.TestCase):
     def git(self, root, *args, date=None):
