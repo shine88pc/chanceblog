@@ -50,7 +50,7 @@
 | W4 | `\|\| true`, `continue-on-error`로 실패를 숨기지 않는다. 필요한 재시도는 명시적 루프로 | **WF-6** |
 | W5 | 외부 액션은 SHA 고정, 패키지는 버전 범위 | **WF-5**·**DEP-1** |
 | W6 | 커밋을 push하는 워크플로가 사이트를 바꾼다면 **배포를 dispatch**한다 | **WF-10** |
-| W7 | `schedule.cron`은 레지스트리와 같게. 수동 실행 입력(`dry_run`, `publish`, 대상 블로그)을 제공한다 | **REG-2** |
+| W7 | `schedule.cron`은 레지스트리와 같게. 수동 실행 입력(`dry_run`, `publish`(off·draft·publish 3택, 기본 draft), 대상 블로그·주제)을 제공한다 | **REG-2** |
 | W8 | 시크릿은 `secrets[...]` → `env`로만. `echo` 금지 | **WF-9**·**REG-3** |
 | W9 | 변경 후 `actionlint`가 0건이어야 한다 | CI |
 | W10 | 워크플로·job 이름(`name`)은 **한글**로, 이름만 보고 자동인지 수동인지·무엇을 하는지 짐작할 수 있게 짓는다(예: `사이트 자동 배포`, `Chance 기존 글 이미지 교체(수동)`). 이름 하나로 설명되지 않는 서로 다른 기능이 한 워크플로에 묶이면 나눈다(예: 글 작성과 이미지 교체). `run-name`에는 정기/수동·번호·불리언만 쓰고 이슈·PR 제목 같은 외부 문자열은 넣지 않는다. 외부 워크플로 템플릿을 복사해 넣을 때는 영문 `name`을 한글로 바꾼다. 이름 표는 [`ARCHITECTURE.md`](./ARCHITECTURE.md) §2-1. **어디서 강제하나**: 검증기 WF-11은 워크플로 `name`(오류)과 job `name`(경고)만 본다. 그러나 job `name`은 단위 테스트 `test_real_repository_workflow_and_job_names_are_korean`이 경고도 실패로 취급하므로 새 job에도 한글 이름이 사실상 필요하다. 입력 `description`·단계 `name`·`run-name`의 한글과 run-name이 쓸 수 있는 값은 검증기가 아니라 단위 테스트(`tests/test_workflow_names.py`)가 요구한다 | **WF-11**(워크플로 name 은 오류, job name 은 경고) + 단위 테스트 |
@@ -87,7 +87,7 @@
 | **L0 정적** | 문법·보안 규칙·설정 일관성 | `python scripts/validate_repo.py` · `actionlint` · `python -m pipeline.registry` | 오류 0건 |
 | **L1 단위** | 로직(성공+실패 경로) | `python -m unittest discover -s tests` | 전부 통과, 네트워크 없음 |
 | **L2 드라이런** | 전체 흐름(스텁 LLM, 파일·게시 없음) | `python -m pipeline.run --blog <key> --dry-run` 또는 Actions `dry_run` 체크 | 종료 코드 0, 변경 파일 없음. 예외: Chance 드라이런은 모든 분야에 검증된 기사가 없거나 소스에 접속하지 못하면 종료 1이다(이상 신호, `docs/ARCHITECTURE.md` §4-1) — 실행 요약의 탈락 사유를 확인하고 기사가 있을 때 다시 실행한다 |
-| **L3 초안** | 실제 LLM·게이트·초안 저장, **게시 없음** | Actions → `Blogger 글 자동 작성` → Run workflow(`publish` 미체크) | `draft` 기록(게시 대상이 아닌 실행에서만. 게시 대상인데 시크릿이 없으면 종료 2), 초안 내용 확인 |
+| **L3 초안** | 실제 LLM·게이트, Blogger **초안함** 업로드 또는 저장소 초안 저장(공개 게시 없음) | Actions → `Blogger 글 자동 작성` → Run workflow(`연습 실행` 체크를 풀고 `publish`=`draft`. 시크릿 등록 전이면 `off`) | `draft_uploaded`(`mode: draft` + 게시용 시크릿 4종: 초안함에 올라감) 또는 `draft`(`off`이거나 시크릿이 하나도 없을 때: 저장소 파일만), 초안 내용 확인. 시크릿이 일부만 있으면 종료 2 |
 | **L4 카나리** | 실제 게시 소량 관찰 | `mode: auto`, 상한 1건/일, 3일 이상 | `posted` 연속, 워치독 이슈 0, 게시글 확인 |
 | **L5 운영** | 지속 감시 | 워치독 일 2회, Actions 실패 메일 | 이슈 0건 |
 

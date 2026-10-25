@@ -24,7 +24,7 @@ on:
         type: boolean
         default: false
       publish:
-        description: '글을 어디까지 보낼지 고릅니다(정기 실행은 이 선택을 쓰지 않고 레지스트리 mode를 따름). off = 저장소 파일에만 저장하고 Blogger는 건드리지 않음 / draft(기본) = Blogger 초안함에 업로드하며 공개되지 않고, 운영자가 Blogger 화면에서 확인한 뒤 직접 게시(게시용 시크릿 4종이 모두 있어야 올라가고, 하나도 없으면 저장소 파일에만 저장, 일부만 있으면 빨강) / publish = Blogger에 즉시 게시(게시용 시크릿이 없으면 빨강). 연습 실행을 체크하면 어느 쪽이든 아무것도 저장·업로드·게시하지 않음'
+        description: '글을 어디까지: off=저장소 파일만 / draft=Blogger 초안함(기본) / publish=즉시 게시. 정기 실행은 mode를 따름. 자세히: BLOGGER_API_SETUP.md'
         type: choice
         default: 'draft'
         options:
@@ -33,7 +33,7 @@ on:
           - 'draft'
           - 'publish'
       auth_check:
-        description: '인증 점검만 실행(기본 꺼짐). 글을 만들지 않고(Gemini 호출 0회) Blogger 인증만 확인합니다: 토큰 갱신, 블로그 조회, 돌려준 블로그 주소가 레지스트리(pipeline/blogs.json)의 url과 같은지(쓰기 없음, 저장소에 커밋도 없음). 게시용 시크릿 4종이 있어야 하며 없으면 "시크릿 없음"으로 빨강으로 끝납니다. 정지(mode off) 중에도, 연습 실행이 체크돼 있어도 실제로 점검합니다(쓰기가 없으므로). 시크릿을 등록한 직후와 토큰을 새로 받은 뒤에 1회 실행해 확인하세요. 체크하면 publish·topic 선택은 쓰이지 않습니다'
+        description: '인증 점검만 실행(기본 꺼짐): 글·Gemini 없이 토큰·블로그·주소만 확인(쓰기 없음). 자세히: BLOGGER_API_SETUP.md'
         type: boolean
         default: false
 

@@ -207,6 +207,10 @@ def validate_registry(reg, root=None):
             errors.append(f"{label}: languages는 문자열 배열이어야 합니다.")
         if blog.get("mode") not in MODES:
             errors.append(f"{label}: mode는 {MODES} 중 하나여야 합니다.")
+        if "mode" not in raw:
+            # defaults.mode 를 물려받는 블로그는 defaults 가 auto 일 때 시크릿만 등록하면 곧바로 자동 게시된다. 모드는 항목마다 직접 적게 한다
+            errors.append(f"{label}: mode를 이 항목에 직접 적어야 합니다(defaults.mode 를 물려받으면 새 블로그가 의도하지 않은 모드로 "
+                          "바로 동작할 수 있습니다. 새 블로그는 off 로 시작하세요).")
 
         for field in ("workflow", "entrypoint", "prompt"):
             value = blog.get(field)

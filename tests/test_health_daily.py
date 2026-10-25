@@ -66,7 +66,7 @@ class NoPostsDayTest(unittest.TestCase):
         self.assertIn("NO_POSTS_DAY", found)
 
     def test_blogger_draft_uploaded_counts_as_a_real_post_on_its_day(self):
-        """draft_uploaded 는 Blogger 초안 모드(후속 작업)용 예약 상태 이름이다. 그 상태의 항목이 있는 날이 '글이 있는 날'이어야 하고,
+        """draft_uploaded 는 Blogger 초안함 업로드 모드(mode draft + BLOGGER 시크릿 4개)가 남기는 이력 상태다. 그 상태의 항목이 있는 날이 '글이 있는 날'이어야 하고,
         상수에서 빼면 이 테스트가 실패해야 한다(예전 단언은 항목 하나만 두고 []를 기대해서, 빼도 통과하는 공허한 테스트였다)."""
         older = entry("posted", 5)        # 이전 글이 있어야 '글이 하루도 없는 블로그'(NO_ACTIVITY 쪽)로 빠지지 않는다
         self.assertEqual(health.evaluate(AUTO, [older, entry("draft_uploaded", 1)], NOW), [])    # 어제 글 있음

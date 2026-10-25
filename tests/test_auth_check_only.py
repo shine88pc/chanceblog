@@ -23,8 +23,8 @@ from pipeline import auth_check as ac
 from pipeline import plan, registry
 from pipeline import run as run_mod
 from pipeline.publishers.base import PublishError
-from test_draft_upload import (ALL_ENV, AUTH_STAGE, EVERY_SECRET_VALUE, SECRET_NAMES, SECRET_VALUES, TODAY_ENTRY,
-                               Runner, must_not_be_called, raising_factory)
+from test_draft_upload import (ALL_ENV, AUTH_STAGE, EVERY_SECRET_VALUE, PROJECT_NUMBER, SECRET_NAMES, SECRET_VALUES,
+                               TODAY_ENTRY, Runner, must_not_be_called, raising_factory)
 from test_plan_and_watchdog import plan_step_script
 from test_run import NOW, FakePublisher, make_root
 
@@ -86,7 +86,9 @@ class ScenarioTest(unittest.TestCase):
         self.assertEqual((normal.code, normal.skips), (2, ["SECRETS_MISSING"]))      # 대조: 같은 환경의 일반 실행은 막힌다
 
     def test_the_environment_variable_is_the_same_as_the_command_line_option(self):
-        for value, expected in (("1", True), ("true", True), ("yes", True), ("on", True), ("0", False), ("", False), ("no", False)):
+        for value, expected in (("1", True), ("true", True), ("True", True), ("TRUE", True), ("yes", True), ("YES", True), ("on", True),
+                                ("On", True), (" true ", True), ("\tOn\n", True),
+                                ("0", False), ("", False), ("   ", False), ("no", False), ("false", False), ("2", False), ("truee", False)):
             with self.subTest(value):
                 pub = FakePublisher()
                 res = self.r.run("off", {**ALL_ENV, "BLOGGER_AUTH_CHECK": value}, pub)
@@ -202,6 +204,20 @@ class ScenarioTest(unittest.TestCase):
                 self.assertNotIn("\r", res.out)
                 self.assertEqual(len([line for line in res.lines if line.lstrip().startswith(("::", "##["))]), 1, res.out)
                 self.assertNotIn("위조된", res.annotations[0])
+
+    def test_the_cloud_project_number_never_reaches_the_output_of_the_standalone_check_either(self):
+        """403 'Blogger API has not been used in project <번호>' 문구의 프로젝트 번호(클라이언트 ID 앞 12자리)도 가린다(V-10)."""
+        text = f"Blogger API has not been used in project {PROJECT_NUMBER} before or it is disabled."
+        for code in ("auth_failed", "api_error"):
+            with self.subTest(code):
+                res = self.r.run("draft", ALL_ENV, FakePublisher(check=PublishError(text, code=code)), extra=["--auth-check"])
+                self.assertNotEqual(res.code, 0)
+                self.assertNotIn(PROJECT_NUMBER, res.everything())
+        res = self.r.run("draft", ALL_ENV, FakePublisher(check=RuntimeError(text)), extra=["--auth-check"])
+        self.assertNotIn(PROJECT_NUMBER, res.everything())
+        # 일반 실행의 인증 점검과 같은 목록을 쓴다
+        self.assertEqual(run_mod._secret_values(registry.get_blog(registry.load_registry(REAL / "pipeline" / "blogs.json"), "blogger_macat"),
+                                                ALL_ENV)[-1], PROJECT_NUMBER)
 
     def test_unknown_blog_and_other_platforms_are_config_errors(self):
         root = self.r.roots["draft"]
@@ -414,9 +430,17 @@ class WorkflowAuthCheckInputTest(unittest.TestCase):
     def test_the_input_is_an_off_by_default_boolean_with_a_precise_korean_description(self):
         spec = self.inputs["auth_check"]
         self.assertEqual((spec["type"], spec["default"]), ("boolean", False))
-        for word in ("인증 점검", "기본 꺼짐", "Gemini 호출 0회", "쓰기 없음", "시크릿 없음", "mode off", "연습 실행"):
+        for word in ("인증 점검", "기본 꺼짐", "Gemini", "쓰기 없음", "BLOGGER_API_SETUP.md"):     # 자세한 설명은 문서로(V-16)
             self.assertIn(word, spec["description"])
         self.assertRegex(spec["description"], r"[가-힣]")
+        self.assertLessEqual(len(spec["description"]), 120, "실행 대화상자에서 읽히도록 한 줄 요약 + 문서 링크로 둔다")
+
+    def test_the_details_the_short_description_dropped_are_in_the_setup_guide(self):
+        """입력 설명에서 뺀 동작(시크릿 없음·정지 중·연습 실행·입력 무시)은 BLOGGER_API_SETUP.md 에 있다."""
+        setup = (REAL / ".github" / "editorial" / "BLOGGER_API_SETUP.md").read_text(encoding="utf-8")
+        bullet = next(line for line in setup.splitlines() if line.startswith("- **`인증 점검만 실행` 체크"))
+        for word in ("시크릿 없음", "`mode: off`", "`연습 실행`", "`publish`", "`topic`", "Gemini 호출 0회"):
+            self.assertIn(word, bullet)
 
     def test_the_input_reaches_the_runner_and_the_plan_step_only_through_environment_variables(self):
         for step in self.data["jobs"]["generate"]["steps"] + self.data["jobs"]["plan"]["steps"]:

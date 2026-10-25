@@ -113,7 +113,7 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 자동인지 수동인지,
 |------|------|------|------|------|
 | 정상 건너뜀 | 지금 할 일이 아님 | 초록 + 로그 한 줄(Blogger의 `PAUSED`·`MODE_OFF`·`DAILY_CAP`·`UPLOAD_SKIPPED`는 `::notice::` 주석도) | 0 | `OUT_OF_WINDOW`(첫 게시 시각 전), `ALREADY_PUBLISHED`(그 슬롯 글이 이미 있음), `PAUSED`(`PIPELINE_PAUSE`), `MODE_OFF`(레지스트리 mode off), `DAILY_CAP`(Blogger 하루 상한 소진), `DRY_RUN`(연습 실행), Blogger: `UPLOAD_SKIPPED`(Blogger 초안함에 올릴 차례인데 게시용 시크릿이 하나도 없어 **저장소 파일에만 저장** — 글은 만들어지고 이력은 `draft`, 요약에 등록할 시크릿 **이름**이 남는다) |
 | 경고 | 게시하려 했는데 못 했지만 다음 실행에서 다시 시도 | 초록 + `::warning::`(노란 주석) + 요약 | 0 | `ALL_REJECTED`(후보는 있었으나 Gemini 건너뜀·제목 유사·본문 검증 탈락으로 전부 탈락. 수동 실행은 예외로 빨강), `ALL_DUPLICATES`(검증된 기사는 있었지만 모두 이미 쓴 글과 비슷 — 뉴스가 뜸한 때), `NO_CANDIDATES`(시간 상한으로 일부 분야만 시도하고 후보 없음), `NO_MATCH`(수동 주제 요청과 연결되는 검증된 기사 없음), Blogger: `NO_TOPIC`(시드·확장 후에도 쓸 주제 없음), `GATE_REJECTED`(재작성 끝에도 게이트 탈락) |
-| 실패 | 발행하려던 실행이 0건으로 끝난 이상 신호 | **빨강** + `::error::` + 요약 | 1 | `ALL_LANES_EMPTY`(모든 분야에 검증을 통과한 기사가 한 건도 없음), `SOURCES_UNREACHABLE`(시도한 뉴스 소스가 모두 수집 실패 — 네트워크·소스 장애), Blogger: `LLM_FAILED`·`EXPAND_FAILED`(주제 확장 실패)·`PUBLISH_FAILED`(게시·초안함 업로드 실패. 어댑터가 분류하지 못한 예외도 포함, `reason=`으로 분류하고 `target=draft`/`publish`로 구분)·`AUTH_CHECK_FAILED`(인증 점검 실패 중 종료 1인 분류: `auth_expired`·`network`·`bad_response`·`api_error`·`unexpected` — 아래 분류표) |
+| 실패 | 발행하려던 실행이 0건으로 끝난 이상 신호 | **빨강** + `::error::` + 요약 | 1 | `ALL_LANES_EMPTY`(모든 분야에 검증을 통과한 기사가 한 건도 없음), `SOURCES_UNREACHABLE`(시도한 뉴스 소스가 모두 수집 실패 — 네트워크·소스 장애), Blogger: `LLM_FAILED`·`EXPAND_FAILED`(주제 확장 실패)·`PUBLISH_FAILED`(게시·초안함 업로드 실패. 어댑터가 분류하지 못한 예외도 포함, `reason=`으로 분류하고 `target=draft`/`publish`로 구분)·`HISTORY_WRITE_FAILED`(업로드·게시는 끝났는데 이력 파일을 쓰지 못함 — 글 ID·주소는 로그와 요약에 남고, 같은 날 다시 실행하기 전에 Blogger를 확인)·`AUTH_CHECK_FAILED`(인증 점검 실패 중 종료 1인 분류: `auth_expired`·`network`·`bad_response`·`api_error`·`unexpected` — 아래 분류표) |
 | 설정 오류 | 사람이 고쳐야 하는 설정 | **빨강** + `::error::` + 요약 | **2** | Blogger `SECRETS_MISSING`(즉시 게시인데 게시용 시크릿이 없거나, 초안함 업로드인데 **일부만** 있음 — 글을 만들기 전에 멈춘다, 초안·이력 없음, 시크릿 **이름**만 표시)·`INVALID_PUBLISH`(`BLOGGER_PUBLISH` 값을 알 수 없음)·`AUTH_CHECK_FAILED`(인증 점검 실패 중 종료 2인 분류: `auth_failed`·`blog_mismatch`)·레지스트리 검증 실패 |
 
 **Blogger 실행(`pipeline/run.py`)의 처리 순서**: `PIPELINE_PAUSE` → `mode: off` → `BLOGGER_PUBLISH` 값 검사(알 수 없으면 종료 2) → 게시용 시크릿 점검(즉시 게시인데 없거나 초안함 업로드인데 일부만 있으면 종료 2, 초안함 업로드인데 하나도 없으면 `UPLOAD_SKIPPED`로 저장소 파일에만 저장) → 이력 읽기(손상이면 종료 1) → 하루 상한(`--topic` 지정은 우회) → LLM 키(없으면 종료 2) → **인증 점검**(업로드·게시일 때만, 실패하면 종료 1 또는 2) → 주제 → 생성·게이트 → 연습 실행/즉시 게시/초안함 업로드/저장소 초안. 인증 점검을 글 생성 앞에 둔 이유: 인증이 깨진 날 무료 Gemini 호출을 쓰지 않고, 같은 계정의 다른 블로그 ID 를 넣은 사고를 글을 만들기 전에 막는다.
@@ -130,18 +130,18 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 자동인지 수동인지,
 
 초안함에 올리는 글은 공개되지 않는다. 운영자가 Blogger 화면에서 확인한 뒤 직접 게시한다. 저장소의 `_blogger_drafts/` 사본은 어느 전달 방식에서도 그대로 남는다. 연습 실행(`dry_run`)은 어느 쪽이든 Blogger에 접속하지 않는다.
 
-게시 대상 실행이 이유·기록 없이 초록으로 끝나는 경로는 없다(조건 12,960가지 열거로 확인한 독립 검증, 2026-10-25. 초안함 업로드 모드를 넣은 뒤에는 `tests/test_draft_upload.py`가 모드×입력×시크릿×하루 상한 격자와 인증 점검→글 생성→게시 단계 경로를 기준 모델과 비교하며 같은 불변식을 확인한다). 하루 상한은 게시되지 않은 초안과 초안함에 올린 초안도 센다(`posted`·`draft`·`draft_uploaded`·`generated_unpublished`. 실패·탈락한 실행은 세지 않는다. `BLOGGER_PUBLISH=off` 수동 실행은 같은 날 정기 게시를 `DAILY_CAP`으로 건너뛰게 한다 — 상한의 의미 유지는 T3). 같은 날 같은 글이 두 번 올라가는 것은 이력으로 막는다(상한과 제목 중복 게이트 DUP_SAME; 운영자가 Blogger에서 초안을 지웠는지는 알 수 없다). 로그·요약에 쓰는 외부·AI 유래 문자열(제목·사유·예외 문구)은 `pipeline/console.py`의 `one_line()`(한 줄로 접고 `::`·`##[`를 위치와 상관없이 무력화)·`md_cell()`(요약 표용 마크다운 이스케이프)을 거치고, `::warning::`·`::error::` 주석에는 고정 문장만 쓴다. 오류 문구에서는 비밀 모양 패턴과 이 실행이 가진 실제 시크릿 값(블로그 ID·클라이언트 ID·시크릿·refresh token)을 글자 그대로 가린다(`pipeline/publishers/base.py` `redact()`).
+게시 대상 실행이 이유·기록 없이 초록으로 끝나는 경로는 없다(조건 12,960가지 열거로 확인한 독립 검증, 2026-10-25. 초안함 업로드 모드를 넣은 뒤에는 `tests/test_draft_upload.py`가 모드×입력×시크릿×하루 상한 격자와 인증 점검→글 생성→게시 단계 경로를 기준 모델과 비교하며 같은 불변식을 확인한다). 하루 상한은 게시되지 않은 초안과 초안함에 올린 초안도 센다(`posted`·`draft`·`draft_uploaded`·`generated_unpublished`. 실패·탈락한 실행은 세지 않는다. `BLOGGER_PUBLISH=off` 수동 실행은 같은 날 정기 게시를 `DAILY_CAP`으로 건너뛰게 한다 — 상한의 의미 유지는 T3). 같은 글이 두 번 올라가는 것은 이력(하루 상한과 제목 중복 게이트 DUP_SAME)으로 막는다. 그래서 업로드·게시가 끝나면 **이력을 먼저 쓰고** 저장소 초안 파일(감사용 사본)을 나중에 쓴다: 사본 저장이 실패해도 이력은 남고(`::warning::`, 올라간 글이 없는 저장소 파일 전용 실행이면 빨강), 이력 쓰기가 실패하면 예외로 죽지 않고 글 ID·주소를 로그와 요약에 남긴 채 빨강(종료 1, `HISTORY_WRITE_FAILED`)으로 끝나며 같은 날 다시 실행하기 전에 Blogger를 확인하라고 알린다(이 경우에는 이력이 없어 상한이 막아 주지 못한다). 운영자가 Blogger에서 초안을 지웠는지는 알 수 없다. `mode: draft`여도 수동 실행에서 `publish` 입력을 `publish`로 고르면 즉시 게시한다(기존 동작이며, 막을지는 T3 결정). 로그·요약에 쓰는 외부·AI 유래 문자열(제목·사유·예외 문구)은 `pipeline/console.py`의 `one_line()`(한 줄로 접고 `::`·`##[`를 위치와 상관없이 무력화)·`md_cell()`(요약 표용 마크다운 이스케이프)을 거치고, `::warning::`·`::error::` 주석에는 고정 문장만 쓴다. 오류 문구에서는 비밀 모양 패턴과 이 실행이 가진 실제 시크릿 값(블로그 ID·클라이언트 ID·시크릿·refresh token)을 글자 그대로 가린다(`pipeline/publishers/base.py` `redact()`).
 
 **인증 점검 실패의 분류와 종료 코드**(`pipeline/auth_check.py`, [`ENGINEERING_GUIDE.md`](./ENGINEERING_GUIDE.md) R6의 '설정 오류 2 / 인프라 실패 1'): 2는 사람이 설정(블로그 ID·계정 권한·클라이언트 값)을 고쳐야 하고 다시 실행해도 같은 결과인 실패, 1은 시간이 지나 생기는 외부 상태(토큰 만료·폐기)나 일시 오류(네트워크·API 오류)다. 로그에는 `[SKIP] code=AUTH_CHECK_FAILED reason=<분류> exit=<종료 코드>`와 고정 문장의 `::error::`가, 이력에는 `publish_failed`(분류가 `reasons[0]`)가 남고 Gemini·업로드·게시는 하지 않는다. 블로그 주소가 다를 때 응답의 주소·이름은 같은 계정의 다른 블로그 정보가 공개 로그에 남지 않도록 출력하지 않는다.
 
 | 분류(`reason=`) | 뜻 | 종료 | 사람이 할 일 |
 |-----------------|----|------|--------------|
 | `auth_expired` | 토큰 갱신이 `invalid_grant`·만료·폐기로 거부됨 | 1 | OAuth 동의 화면이 'In production'인지 확인하고 토큰을 새로 받아 `BLOGGER_REFRESH_TOKEN` 시크릿을 갱신 |
-| `auth_failed` | 토큰 갱신의 그 밖의 거부(클라이언트 ID·시크릿 불일치 등) 또는 `blogs.get`의 401·403·404(권한 없음·블로그 없음) | 2 | `BLOGGER_BLOG_ID`·`BLOGGER_CLIENT_ID`·`BLOGGER_CLIENT_SECRET` 시크릿, Blogger API 사용 설정, 로그인한 계정의 블로그 권한을 확인 |
+| `auth_failed` | 토큰 갱신의 그 밖의 거부(클라이언트 ID·시크릿 불일치 등) 또는 `blogs.get`의 400(블로그 ID 형식 오류로 보임)·401·403·404(권한 없음·블로그 없음) | 2 | `BLOGGER_BLOG_ID`·`BLOGGER_CLIENT_ID`·`BLOGGER_CLIENT_SECRET` 시크릿, Blogger API 사용 설정, 로그인한 계정의 블로그 권한을 확인 |
 | `blog_mismatch` | 인증은 통과했지만 돌려준 블로그 주소가 레지스트리 `url`과 다름(스킴·`www.`·끝 슬래시·국가별 blogspot 도메인 차이는 무시) | 2 | `BLOGGER_BLOG_ID`가 이 블로그의 ID인지 확인(커스텀 도메인이면 레지스트리 `url`을 고친다) |
 | `network` | 연결 실패·시간 초과(재시도 2회 뒤에도) | 1 | 잠시 뒤 다시 실행 |
 | `bad_response` | 응답에 필요한 값이 없음(`blogs.get`에 `url` 없음 등) | 1 | 로그를 확인하고 다시 실행 |
-| `api_error` | 그 밖의 HTTP 오류(429·5xx는 재시도 2회 뒤에도)나 알 수 없는 분류 | 1 | 로그를 확인하고 다시 실행 |
+| `api_error` | 그 밖의 HTTP 오류(429·5xx는 재시도 2회 뒤에도), 403이지만 사유가 호출 한도(쿼터·속도 제한: `rateLimitExceeded` 등)인 것, 알 수 없는 분류 | 1 | 로그를 확인하고 다시 실행 |
 | `unexpected` | 어댑터 밖의 예외(라이브러리 미설치 등) | 1 | 로그를 확인 |
 
 게시 단계의 실패(`PUBLISH_FAILED`)는 같은 분류 이름을 쓰지만 종료 코드는 항상 1이다(글을 올리다 실패한 것은 인프라 실패로 본다).
@@ -187,7 +187,7 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 자동인지 수동인지,
 | `NO_ACTIVITY` | 경고 | 발행·초안 기록이 전혀 없음 |
 | `NO_POSTS_DAY` | 경고 / 심각 | mode auto: 닫힌 한국시간 하루 기준 어제 새 글 0건이면 경고, 그제도 0건이면 심각(오늘 새 글이 나왔으면 회복. `STALE`이 울리면 중복 알림 안 함) |
 | `FAIL_STREAK` / `REJECT_STREAK` | 심각 / 경고 | 최근 N회 연속 실패 / 5회 연속 게이트 탈락 |
-| `UNPUBLISHED` | 경고 | mode auto인데 가장 최근 실행이 게시 없이 저장소 초안만 남김(이력의 사유를 인용). Blogger 가시화 변경(별도 PR)이 병합된 뒤에는 새로 생기지 않는다(게시 시크릿이 없으면 종료 2로 빨강) |
+| `UNPUBLISHED` | 경고 | mode auto인데 가장 최근 실행이 게시 없이 저장소 초안만 남김(이력의 사유를 인용). 게시 대상인데 게시 시크릿이 없으면 종료 2로 빨강이라 지금은 새로 생기지 않는다. `mode: draft`의 `draft_uploaded`(Blogger 초안함에 올림)는 게시 없는 초안이 아니라 '글이 나온 날'로 센다 |
 | `PAGES_NOT_DEPLOYED` | 심각 | 글 커밋 뒤 30분(+시계 오차 여유 120초)이 지났는데 main 브랜치의 성공한 사이트 배포 실행이 없음 |
 | `PAGES_FAILED` | 경고 | 가장 최근 사이트 배포 실행이 실패 |
 | `RUN_FAIL_STREAK` | 심각 | 워크플로가 최근 N회 연속 실패 |
@@ -198,7 +198,7 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 자동인지 수동인지,
 
 - **이력 스키마 v1**: `v`, `blog`, `date`(KST `YYYY-MM-DD`), `generated_at`(ISO, KST), `status`, `topic`, `topic_source`(`seed`·`llm`·`override`), `title`, `labels`, `url`, `post_id`, `model`, `attempts`, `reasons[]`.
   `status`: `posted`(즉시 게시) · `draft_uploaded`(Blogger 초안함에 업로드 — `post_id`·`url`은 API 응답, 블로그 ID는 기록하지 않는다) · `draft`(저장소 파일에만 저장) · `generated_unpublished`(옛 기록: 게시 시크릿이 없던 때의 초안 — 지금은 게시 대상이 시크릿이 없으면 종료 2로 멈추고 기록하지 않는다) · `rejected` · `publish_failed`(게시·업로드·인증 점검 실패 — 인증 점검 실패는 글을 만들기 전이라 `topic`이 비어 있다) · `llm_failed` · `skipped_no_topic`.
-- **일일 상한**: `posted`·`draft`·`draft_uploaded`·`generated_unpublished` 건수가 `max_posts_per_day`에 도달하면 건너뛴다(`publish_failed`·`rejected` 등 글이 안 나온 실행은 세지 않는다). 워치독은 `posted`·`draft_uploaded`를 '글이 나온 날'로 센다.
+- **일일 상한**: `posted`·`draft`·`draft_uploaded`·`generated_unpublished` 건수가 `max_posts_per_day`에 도달하면 건너뛴다(`rejected`·`llm_failed` 등 글이 안 나온 실행은 세지 않는다). 예외로 `publish_failed`는 **응답에서 글 ID(`post_id`)를 읽은 것만** 센다 — 올리다 실패했어도 초안·글이 이미 Blogger에 만들어졌을 수 있어, 세지 않으면 같은 날 재실행이 초안을 또 만든다. 글 ID가 없는 실패(인증·네트워크 등)는 세지 않는다. 이 이유는 `DAILY_CAP` 주석과 요약에 적히고, 운영자는 Blogger 초안함·글 목록을 확인한다(`topic` 입력은 상한을 건너뛴다). 워치독은 `posted`·`draft_uploaded`를 '글이 나온 날'로 센다.
 - **쿨다운**: 프로필 `topic_cooldown_days` 안에 같은 주제(유사도 0.8 이상)는 다시 쓰지 않는다.
 - **교차 중복**: 다른 블로그의 이력 제목과 유사도 `other_blogs`(0.6) 이상이면 주제·제목 모두 탈락. (Chance 이력은 문자열·객체 혼합이라 `state.entry_titles`가 모두 처리한다.)
 - **멱등 게시**: 게시 재시도 전에 같은 제목 글이 방금 올라갔는지 확인한다(응답만 실패한 경우의 중복 방지).
@@ -218,7 +218,7 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 자동인지 수동인지,
 |---|------|-------|
 | 1 | 사용자 | Blogger 블로그 생성, 블로그 ID 확인, Google OAuth 클라이언트 준비(**동의 화면 "프로덕션"** — 테스트 상태는 7일 후 토큰 만료, D-11), refresh token 발급 |
 | 2 | 사용자 | GitHub Secrets 등록: 블로그 전용 이름 4종(예: `BLOGGER2_BLOG_ID`, `BLOGGER2_CLIENT_ID`, `BLOGGER2_CLIENT_SECRET`, `BLOGGER2_REFRESH_TOKEN`). LLM 키는 `GEMINI_API_KEY` 공유 |
-| 3 | AI (T3 승인 후) | `blogs.json`에 항목 추가: `mode: "draft"`, 고유 `key`, `secrets` 이름, `state`(전용 history·content_dir), 프로필·프롬프트 |
+| 3 | AI (T3 승인 후) | `blogs.json`에 항목 추가: **`mode`를 항목에 직접 적는다**(예: `"draft"`. 적지 않으면 검증기 `REG-1` 오류 — `defaults.mode`를 물려받은 새 블로그가 의도하지 않은 모드로, 예를 들어 기본값이 `auto`일 때 시크릿 등록만으로 바로 자동 게시되는 일을 막는다), 고유 `key`, `secrets` 이름, `state`(전용 history·content_dir), 프로필·프롬프트 |
 | 4 | AI | `python -m pipeline.registry` · `python scripts/validate_repo.py` · `python -m unittest discover -s tests` |
 | 5 | AI/사용자 | Actions → `Blogger 글 자동 작성` → Run workflow(`blog=<key>`, `publish=draft`)로 Blogger 초안함에서 글 확인(시크릿을 등록하기 전이면 `publish=off`로 저장소 초안만) |
 | 6 | 워치독 | `draft` 상태로 3일 이상 운영하며 `rejected`·실패 이슈가 없는지 본다 (카나리) |
