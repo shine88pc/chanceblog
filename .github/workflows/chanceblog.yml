@@ -78,6 +78,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # 오래된 gh 는 터미널이 아니면 실행 주소를 출력하지 않는다 → 비어 있어도 요약이 끊기지 않게 한다.
           deploy=$(gh workflow run pages.yml --ref "${GITHUB_REF_NAME}")
           echo "$deploy"
-          echo "- Pages 배포 실행 요청: ${deploy}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Pages 배포 실행 요청: ${deploy:-요청함}" >> "$GITHUB_STEP_SUMMARY"

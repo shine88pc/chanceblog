@@ -4,10 +4,12 @@
 시도하지 않고 정상 종료했고 (2) 왜 0건인지 기록이 없었기 때문이다. 이 테스트는 그 둘을 고정한다.
 """
 import io
+import json
 import os
 import random
 import tempfile
 import unittest
+from collections import Counter
 from contextlib import redirect_stdout
 from datetime import datetime, timedelta, timezone
 from email.utils import format_datetime
@@ -84,9 +86,9 @@ def long_post(topic, link):
 
 class SkipLineTest(unittest.TestCase):
     def test_single_line_with_code_and_fields(self):
-        line = g.skip_line("NO_CANDIDATES", lane="economy", fetched=71,
+        line = g.skip_line("LANE_EMPTY", lane="economy", fetched=71,
                            reasons={"UNTRUSTED": 60, "AGE": 11})
-        self.assertEqual(line, "[SKIP] code=NO_CANDIDATES lane=economy fetched=71 reasons=AGE:11,UNTRUSTED:60")
+        self.assertEqual(line, "[SKIP] code=LANE_EMPTY lane=economy fetched=71 reasons=AGE:11,UNTRUSTED:60")
         self.assertNotIn("\n", line)
 
     def test_empty_reasons_are_dashed(self):
@@ -208,28 +210,55 @@ class LaneOrderTest(unittest.TestCase):
         orders = {tuple(self.order(slot)) for slot in (3, 9, 18, 21)}
         self.assertGreater(len(orders), 1)
 
+    def test_every_order_is_a_permutation_of_all_lanes(self):
+        for slot in range(1, 40):
+            with self.subTest(slot=slot):
+                self.assertEqual(sorted(self.order(slot)), sorted(g.EDITORIAL_LANES))
 
-def fake_pick_factory(lane_results):
-    """lane_results: {lane: [후보...]} — 요청된 분야 순서를 기록하는 pick_topic_candidates 대역."""
+    def test_fallback_order_is_a_weighted_draw_not_a_fixed_sort(self):
+        tails = [self.order(slot)[1:] for slot in range(1, 40)]
+        self.assertTrue(any(tail != sorted(tail) for tail in tails))
+        self.assertTrue(any(tail != sorted(tail, reverse=True) for tail in tails))
+        self.assertGreater(len({tuple(tail) for tail in tails}), 5)
+
+    def test_recently_used_lanes_are_drawn_first_less_often(self):
+        history = [{"date": f"2026-10-{20 + i % 5}", "topic": f"t{i}", "lane": "economy"} for i in range(10)]
+        firsts = Counter(self.order(slot, history)[0] for slot in range(1, 400))
+        others = min(firsts[lane] for lane in g.EDITORIAL_LANES if lane != "economy")
+        self.assertLess(firsts["economy"], others)
+
+
+def fake_pick_factory(lane_results, errors=(), time_skipped=()):
+    """lane_results: {lane: [후보...]} — 요청된 분야 순서와 넘겨받은 마감 인자를 기록하는 pick_topic_candidates 대역.
+    errors: 소스 수집이 모두 실패한 것으로 꾸밀 분야. time_skipped: 마감 때문에 소스를 건너뛴 것으로 꾸밀 분야."""
     calls = []
 
-    def fake(titles, allow_auto_topic=True, editorial_lane=None, stats=None):
+    def fake(titles, allow_auto_topic=True, editorial_lane=None, stats=None, **kwargs):
         calls.append(editorial_lane)
+        fake.kwargs.append(kwargs)
         found = lane_results.get(editorial_lane, [])
         if stats is not None:
-            stats["sources"] = [{"name": f"{editorial_lane}-소스", "fetched": 5 if not found else 8,
-                                 "kept": len(found), "drops": {} if found else {"UNTRUSTED": 5}}]
+            if editorial_lane in errors:
+                stats["sources"] = [{"name": f"{editorial_lane}-소스", "fetched": 0, "kept": 0,
+                                     "drops": {}, "error": "URLError"}]
+            else:
+                stats["sources"] = [{"name": f"{editorial_lane}-소스", "fetched": 5 if not found else 8,
+                                     "kept": len(found), "drops": {} if found else {"UNTRUSTED": 5}}]
+            if editorial_lane in time_skipped:
+                stats["time_skipped"] = 2
             stats["candidates"] = len(found)
         return found
 
+    fake.kwargs = []
     return fake, calls
 
 
 class CollectCandidatesTest(unittest.TestCase):
     ORDER = ["economy", "culture", "technology", "society", "science", "daily_life"]
 
-    def collect(self, lane_results, **kwargs):
-        fake, calls = fake_pick_factory(lane_results)
+    def collect(self, lane_results, errors=(), time_skipped=(), **kwargs):
+        fake, calls = fake_pick_factory(lane_results, errors, time_skipped)
+        self.fake = fake
         report = {"lanes": []}
         with mock.patch.object(g, "pick_topic_candidates", fake):
             (found, lane), out = run_captured(
@@ -250,8 +279,9 @@ class CollectCandidatesTest(unittest.TestCase):
         self.assertEqual(lane, "technology")
         self.assertEqual(calls, ["economy", "culture", "technology"])  # 후보가 나온 뒤에는 멈춘다
         self.assertEqual([r["lane"] for r in report["lanes"]], calls)
-        self.assertIn("[SKIP] code=NO_CANDIDATES lane=economy", out)
-        self.assertIn("[SKIP] code=NO_CANDIDATES lane=culture", out)
+        self.assertIn("[SKIP] code=LANE_EMPTY lane=economy", out)
+        self.assertIn("[SKIP] code=LANE_EMPTY lane=culture", out)
+        self.assertNotIn("code=NO_CANDIDATES", out)  # 이 코드는 '실행 결과'에만 쓴다
         self.assertIn("::notice::", out)
         self.assertIn("기술·미래", out)
 
@@ -260,12 +290,13 @@ class CollectCandidatesTest(unittest.TestCase):
         self.assertEqual(found, [])
         self.assertEqual(lane, "economy")  # 처음 추첨된 분야
         self.assertEqual(calls, self.ORDER)
-        self.assertEqual(out.count("[SKIP] code=NO_CANDIDATES"), len(self.ORDER))
+        self.assertEqual(out.count("[SKIP] code=LANE_EMPTY"), len(self.ORDER))
         self.assertNotIn("budget_exceeded", report)
+        self.assertFalse(report["sources_unreachable"])
 
     def test_skip_line_carries_the_drop_reasons(self):
         _, _, _, report, out = self.collect({})
-        self.assertIn("reasons=UNTRUSTED:5", out)
+        self.assertIn("sources=1 failed=0 fetched=5 passed=0 reasons=UNTRUSTED:5", out)
         self.assertEqual(report["lanes"][0]["drops"], {"UNTRUSTED": 5})
         self.assertEqual(report["lanes"][0]["fetched"], 5)
 
@@ -279,6 +310,38 @@ class CollectCandidatesTest(unittest.TestCase):
         self.assertEqual(calls, ["economy"])
         self.assertTrue(report["budget_exceeded"])
         self.assertIn("::warning::분야 대체 시도를", out)
+
+    def test_lane_empty_line_reports_how_many_sources_failed(self):
+        _, _, _, report, out = self.collect({}, errors={"economy"})
+        line = next(row for row in out.splitlines() if "[SKIP]" in row and "lane=economy" in row)
+        self.assertIn("code=LANE_EMPTY", line)
+        self.assertIn("sources=1 failed=1", line)
+        self.assertEqual(report["lanes"][0]["failed_sources"], 1)
+
+    def test_every_attempted_source_failing_is_flagged_unreachable(self):
+        _, _, _, report, _ = self.collect({}, errors=set(self.ORDER))
+        self.assertTrue(report["sources_unreachable"])
+
+    def test_one_reachable_source_is_enough_to_not_be_unreachable(self):
+        _, _, _, report, _ = self.collect({}, errors=set(self.ORDER[:-1]))
+        self.assertFalse(report["sources_unreachable"])
+
+    def test_unreachable_is_decided_on_what_was_attempted_even_when_the_budget_cut_the_search(self):
+        ticks = iter([0, 10_000, 10_000])
+        _, _, calls, report, _ = self.collect({}, errors={"economy"}, clock=lambda: next(ticks))
+        self.assertEqual(calls, ["economy"])
+        self.assertTrue(report["budget_exceeded"])
+        self.assertTrue(report["sources_unreachable"])
+
+    def test_deadline_and_clock_reach_the_source_loop(self):
+        clock = lambda: 100  # noqa: E731
+        self.collect({"economy": [candidate()]}, clock=clock)
+        self.assertEqual(self.fake.kwargs[0], {"deadline": 100 + g.LANE_SEARCH_BUDGET_SECONDS, "clock": clock})
+
+    def test_a_lane_cut_short_inside_the_deadline_marks_the_budget(self):
+        _, _, calls, report, _ = self.collect({}, time_skipped={"economy"})
+        self.assertTrue(report["budget_exceeded"])
+        self.assertEqual(calls, self.ORDER)  # 실제 시계는 상한 전이므로 다음 분야는 계속 시도한다
 
 
 class FetchNewsStatsTest(unittest.TestCase):
@@ -353,6 +416,7 @@ class FetchNewsStatsTest(unittest.TestCase):
         merged, stats, out = self.run_fetch([], sources=sources)
         self.assertEqual(merged, [])
         self.assertIn("수집 실패", out)
+        self.assertIn("::warning::모든 뉴스 소스 수집에 실패", out)
         self.assertEqual(stats["sources"][0]["error"], "AssertionError")
 
     def test_stats_are_optional_and_the_result_is_the_same(self):
@@ -367,6 +431,56 @@ class FetchNewsStatsTest(unittest.TestCase):
                 mock.patch.object(g, "_resolve_article_url", side_effect=resolver):
             without_stats, _ = run_captured(g.fetch_news_items, "economy")
         self.assertEqual([m["title"] for m in with_stats], [m["title"] for m in without_stats])
+
+    def test_untrusted_publisher_found_only_after_resolution_is_counted(self):
+        # <source url> 이 없으면 원문 주소를 해석한 뒤에야 게시자를 알 수 있다(두 번째 UNTRUSTED 관문).
+        summary = "요약 문장입니다. " * 20
+        items = [("출처 표시 없는 기사", "https://news.example/9", self.fresh(), summary, "")]
+        merged, stats, out = self.run_fetch(items, resolve=lambda url: "https://untrusted.example/a")
+        self.assertEqual(merged, [])
+        self.assertEqual(stats["sources"][0]["drops"], {"UNTRUSTED": 1})
+
+    SOURCES3 = [{"name": f"소스{i}", "lane": "economy", "url": f"https://feed.test/{i}"} for i in range(3)]
+
+    def run_with_deadline(self, deadline, ticks):
+        stats, requested = {}, []
+
+        def fake_urlopen(req, timeout=0):
+            requested.append(getattr(req, "full_url", req))
+            return FakeResponse(rss([]))
+
+        clock = iter(ticks)
+        with mock.patch.object(g, "NEWS_SOURCES", self.SOURCES3), \
+                mock.patch.object(g.urllib.request, "urlopen", fake_urlopen):
+            _, out = run_captured(g.fetch_news_items, "economy", stats=stats,
+                                  deadline=deadline, clock=lambda: next(clock))
+        return stats, requested, out
+
+    def test_sources_after_the_deadline_are_skipped_and_counted(self):
+        stats, requested, out = self.run_with_deadline(deadline=100, ticks=[0, 200, 200])
+        self.assertEqual(requested, ["https://feed.test/0"])
+        self.assertEqual(stats["time_skipped"], 2)
+        self.assertIn("시간 상한으로 소스 2개를 시도하지 않았습니다", out)
+        self.assertNotIn("모든 뉴스 소스 수집에 실패", out)  # 시도한 첫 소스는 성공했다
+
+    def test_nothing_attempted_because_of_the_deadline_is_not_a_collection_failure(self):
+        stats, requested, out = self.run_with_deadline(deadline=100, ticks=[500, 500, 500])
+        self.assertEqual(requested, [])
+        self.assertEqual(stats["time_skipped"], 3)
+        self.assertNotIn("sources", stats)
+        self.assertNotIn("모든 뉴스 소스 수집에 실패", out)
+
+    def test_failure_text_is_folded_so_it_cannot_start_a_workflow_command(self):
+        sources = [{"name": "소스", "lane": "economy", "url": "https://dead.test/feed"}]
+
+        def boom(req, timeout=0):
+            raise OSError("연결 거부\n::error::가짜 실패 알림")
+
+        with mock.patch.object(g, "NEWS_SOURCES", sources), \
+                mock.patch.object(g.urllib.request, "urlopen", boom):
+            _, out = run_captured(g.fetch_news_items, "economy")
+        self.assertFalse(any(line.startswith("::error::") for line in out.splitlines()))
+        self.assertIn("연결 거부 ::error::가짜 실패 알림", out)
 
 
 class PickTopicStatsTest(unittest.TestCase):
@@ -384,6 +498,31 @@ class PickTopicStatsTest(unittest.TestCase):
     def test_default_call_keeps_the_old_signature(self):
         with mock.patch.object(g, "fetch_news_items", return_value=[candidate("하나")]):
             self.assertEqual(len(g.pick_topic_candidates([], True, "economy")), 1)
+
+    def test_deadline_and_clock_are_forwarded_to_the_fetch(self):
+        seen = {}
+
+        def fake_fetch(lane=None, stats=None, deadline=None, clock=None):
+            seen.update(deadline=deadline, clock=clock)
+            return []
+
+        clock = lambda: 1  # noqa: E731
+        with mock.patch.object(g, "fetch_news_items", fake_fetch):
+            g.pick_topic_candidates([], True, "economy", deadline=5, clock=clock)
+        self.assertEqual(seen, {"deadline": 5, "clock": clock})
+
+
+class LaneReportTest(unittest.TestCase):
+    def test_duplicates_join_the_lane_drops_and_counts_sum_over_sources(self):
+        stats = {"sources": [{"name": "a", "fetched": 10, "kept": 3, "drops": {"UNTRUSTED": 5, "AGE": 2}},
+                             {"name": "b", "fetched": 4, "kept": 1, "drops": {"UNTRUSTED": 3}},
+                             {"name": "c", "fetched": 0, "kept": 0, "drops": {}, "error": "URLError"}],
+                 "duplicates": 2}
+        report = g._lane_report("economy", stats, [])
+        self.assertEqual(report["drops"], {"UNTRUSTED": 8, "AGE": 2, "DUPLICATE": 2})
+        self.assertEqual((report["sources"], report["failed_sources"], report["fetched"], report["passed"]),
+                         (3, 1, 14, 4))
+        self.assertEqual(report["candidates"], 0)
 
 
 class GenerateWithFallbackTest(unittest.TestCase):
@@ -407,22 +546,26 @@ class GenerateWithFallbackTest(unittest.TestCase):
                          if g.editorial_lane_order(s, [])[0] != "technology")
         self.order = g.editorial_lane_order(self.slot, [])
 
-    def fake_fetch(self, results):
-        def fake(editorial_lane=None, stats=None):
+    def fake_fetch(self, results, errors=False):
+        def fake(editorial_lane=None, stats=None, deadline=None, clock=None):
             found = results.get(editorial_lane, [])
             if stats is not None:
-                stats.setdefault("sources", []).append(
-                    {"name": f"{editorial_lane}", "fetched": 4, "kept": len(found),
-                     "drops": {} if found else {"UNTRUSTED": 4}})
+                if errors:
+                    entry = {"name": f"{editorial_lane}", "fetched": 0, "kept": 0, "drops": {},
+                             "error": "URLError"}
+                else:
+                    entry = {"name": f"{editorial_lane}", "fetched": 4, "kept": len(found),
+                             "drops": {} if found else {"UNTRUSTED": 4}}
+                stats.setdefault("sources", []).append(entry)
             return found
         return fake
 
     LINK = "https://www.reuters.com/a"
 
-    def generate(self, results, **kwargs):
+    def generate(self, results, errors=False, **kwargs):
         report = {}
-        with mock.patch.object(g, "fetch_news_items", self.fake_fetch(results)), \
-                mock.patch.object(g, "stub_post_data", lambda topic: long_post(topic, self.LINK)):
+        with mock.patch.object(g, "fetch_news_items", self.fake_fetch(results, errors)), \
+                mock.patch.object(g, "stub_post_data", lambda topic, link=None: long_post(topic, self.LINK)):
             value, out = run_captured(g.generate_blog_posts, slot=self.slot, report=report, **kwargs)
         return value, report, out
 
@@ -442,14 +585,67 @@ class GenerateWithFallbackTest(unittest.TestCase):
         self.assertIsNone(value)
         self.assertEqual(report["outcome"], "ALL_LANES_EMPTY")
         self.assertEqual(len(report["lanes"]), len(g.EDITORIAL_LANES))
-        self.assertEqual(out.count("[SKIP] code=NO_CANDIDATES"), len(g.EDITORIAL_LANES))
+        self.assertEqual(out.count("[SKIP] code=LANE_EMPTY"), len(g.EDITORIAL_LANES))
+
+    def test_unreachable_sources_are_reported_as_an_outage_not_as_empty_lanes(self):
+        value, report, out = self.generate({}, errors=True, allow_auto_topic=False)
+        self.assertIsNone(value)
+        self.assertEqual(report["outcome"], "SOURCES_UNREACHABLE")
+        self.assertIn("failed=1", out)
+
+    def test_verified_articles_that_are_all_already_written_are_all_duplicates(self):
+        known = "이미 쓴 기사 제목 반도체"
+        results = {lane: [candidate(known, self.LINK)] for lane in g.EDITORIAL_LANES}
+        with mock.patch.object(g, "existing_titles", return_value=[known]):
+            value, report, out = self.generate(results, allow_auto_topic=False)
+        self.assertIsNone(value)
+        self.assertEqual(report["outcome"], "ALL_DUPLICATES")
+        self.assertEqual(report["lanes"][0]["drops"], {"DUPLICATE": 1})
+
+    def test_a_budget_stop_is_reported_as_no_candidates(self):
+        with mock.patch.object(g, "LANE_SEARCH_BUDGET_SECONDS", -1):
+            value, report, out = self.generate({}, allow_auto_topic=False)
+        self.assertIsNone(value)
+        self.assertEqual(report["outcome"], "NO_CANDIDATES")
+        self.assertEqual(len(report["lanes"]), 1)
+        self.assertIn("::warning::분야 대체 시도를", out)
+
+    def test_fallback_lane_is_what_the_prompt_and_the_history_use(self):
+        results = {"technology": [candidate("기술 기사", self.LINK)]}
+        seen = {}
+
+        def fake_prompt(item, recent_titles, category_hint="", allow_skip=False, editorial_lane=None):
+            seen["prompt_lane"] = editorial_lane
+            return "PROMPT"
+
+        class Response:
+            text = json.dumps(long_post("기술 기사", self.LINK), ensure_ascii=False)
+
+        with mock.patch.object(g, "STUB_GEMINI", False), \
+                mock.patch.object(g, "build_post_prompt", fake_prompt), \
+                mock.patch.object(g, "call_gemini_with_fallback", lambda prompt: Response()), \
+                mock.patch.object(g, "fetch_news_items", self.fake_fetch(results)), \
+                mock.patch.object(g, "write_history", lambda history: seen.update(history=list(history))):
+            value, _ = run_captured(g.generate_blog_posts, slot=self.slot, allow_auto_topic=False, report={})
+        self.assertIsNotNone(value)
+        self.assertNotEqual(self.order[0], "technology")  # 이 슬롯은 정말로 폴백을 거친다
+        self.assertEqual(seen["prompt_lane"], "technology")
+        self.assertEqual(seen["history"][-1]["lane"], "technology")
+
+    def test_real_stub_body_passes_validation_so_a_keyless_dry_run_completes(self):
+        results = {"technology": [candidate("기술 기사", self.LINK)]}
+        report = {}
+        with mock.patch.object(g, "fetch_news_items", self.fake_fetch(results)):  # stub_post_data 는 실물
+            value, _ = run_captured(g.generate_blog_posts, slot=self.slot, allow_auto_topic=False, report=report)
+        self.assertIsNotNone(value)
+        self.assertEqual(report["outcome"], "PUBLISHED")
 
     def test_candidates_all_rejected_is_all_rejected_in_schedule_mode(self):
         link = "https://www.reuters.com/a"
         results = {self.order[0]: [candidate("기사", link)]}
         report = {}
         with mock.patch.object(g, "fetch_news_items", self.fake_fetch(results)), \
-                mock.patch.object(g, "stub_post_data", lambda topic: {"skip": True, "reason": "중복"}):
+                mock.patch.object(g, "stub_post_data", lambda topic, link=None: {"skip": True, "reason": "중복"}):
             value, out = run_captured(g.generate_blog_posts, slot=self.slot,
                                       allow_auto_topic=False, report=report)
         self.assertIsNone(value)
@@ -460,16 +656,25 @@ class GenerateWithFallbackTest(unittest.TestCase):
         results = {self.order[0]: [candidate("기사", link)]}
         report = {}
         with mock.patch.object(g, "fetch_news_items", self.fake_fetch(results)), \
-                mock.patch.object(g, "stub_post_data", lambda topic: {"skip": True, "reason": "중복"}):
+                mock.patch.object(g, "stub_post_data", lambda topic, link=None: {"skip": True, "reason": "중복"}):
             with self.assertRaises(RuntimeError):
                 run_captured(g.generate_blog_posts, slot=None, allow_auto_topic=True, report=report)
         self.assertEqual(report["outcome"], "ALL_REJECTED")
+
+    def test_requested_topic_without_a_matching_verified_article_is_no_match(self):
+        results = {lane: [candidate("전혀 상관없는 후보 기사", self.LINK)] for lane in g.EDITORIAL_LANES}
+        report = {}
+        with mock.patch.object(g, "fetch_news_items", self.fake_fetch(results)):
+            value, _ = run_captured(g.generate_blog_posts, topic_override="양자컴퓨터 상용화 일정",
+                                    slot=None, report=report)
+        self.assertIsNone(value)
+        self.assertEqual(report["outcome"], "NO_MATCH")
 
     def test_report_is_optional(self):
         link = "https://www.reuters.com/a"
         results = {"technology": [candidate("기술 기사", link)]}
         with mock.patch.object(g, "fetch_news_items", self.fake_fetch(results)), \
-                mock.patch.object(g, "stub_post_data", lambda topic: long_post(topic, link)):
+                mock.patch.object(g, "stub_post_data", lambda topic, link=None: long_post(topic, link)):
             value, _ = run_captured(g.generate_blog_posts, slot=self.slot, allow_auto_topic=False)
         self.assertIsNotNone(value)
 
@@ -590,6 +795,128 @@ class MainPolicyTest(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 run_captured(g.main)
 
+    def test_pause_accepts_every_value_the_blogger_runner_accepts(self):
+        from pipeline import run as blogger_run
+        for value in sorted(blogger_run._TRUE) + [" TRUE ", "On"]:
+            with self.subTest(value=value), mock.patch.dict(os.environ, {"PIPELINE_PAUSE": value}):
+                self.assertTrue(g._pause_on())
+        for value in ("", "0", "false", "no", "off"):
+            with self.subTest(value=value), mock.patch.dict(os.environ, {"PIPELINE_PAUSE": value}):
+                self.assertFalse(g._pause_on())
+
+    def test_pause_wins_over_a_missing_api_key(self):
+        with mock.patch.object(g, "STUB_GEMINI", True), mock.patch.dict(os.environ, {"PIPELINE_PAUSE": "on"}):
+            value, out = run_captured(g.main)
+        self.assertIsNone(value)
+        self.assertIn("[SKIP] code=PAUSED", out)
+
+    def test_slot_zero_is_reported_as_a_slot_not_a_manual_run(self):
+        value, out = run_captured(g.finish_run, None, {"outcome": "ALL_LANES_EMPTY", "lanes": []},
+                                  "schedule", at(0, 30), 0)
+        self.assertIsInstance(value, SystemExit)
+        self.assertIn("::error::0시 슬롯", out)
+        self.assertIn("0시 슬롯", self.summary_text())
+
+    def test_source_outage_is_red_even_though_it_is_not_an_empty_lane(self):
+        value, out = self.run_main("schedule", at(10, 12),
+                                   generate=self.fake_generate("SOURCES_UNREACHABLE"))
+        self.assertIsInstance(value, SystemExit)
+        self.assertEqual(value.code, 1)
+        self.assertIn("::error::9시 슬롯", out)
+        self.assertIn("[SKIP] code=SOURCES_UNREACHABLE", out)
+
+    def test_all_duplicates_is_a_warning_because_it_means_a_quiet_news_day(self):
+        value, out = self.run_main("schedule", at(10, 12),
+                                   generate=self.fake_generate("ALL_DUPLICATES"))
+        self.assertIsNone(value)
+        self.assertIn("::warning::9시 슬롯", out)
+        self.assertNotIn("::error::", out)
+
+    def test_summary_is_safe_to_publish_when_the_title_comes_from_the_model(self):
+        hostile = "제목 | 열\n# 가짜 제목\n[클릭](http://evil.example) `x` <img src=x>"
+        report = {"outcome": "PUBLISHED", "title": hostile, "source": "A|B\n[x]", "lane_label": "경제·일",
+                  "paths": ["_posts/a`b.md"], "lanes": []}
+        text = g.render_run_summary("schedule", at(10), 9, report)
+        title_line = next(line for line in text.splitlines() if line.startswith("- 제목:"))
+        for ch in "|`<>[]":
+            self.assertNotIn(ch, title_line.split(":", 1)[1])
+        self.assertNotIn("\n# 가짜 제목", text)
+        source_line = next(line for line in text.splitlines() if line.startswith("- 편집 축:"))
+        self.assertNotIn("|", source_line)
+        self.assertNotIn("[", source_line)
+
+    def test_summary_explains_the_drop_codes_it_uses(self):
+        report = {"outcome": "ALL_LANES_EMPTY",
+                  "lanes": [{"lane": "economy", "label": "경제·일", "sources": 2, "failed_sources": 0,
+                             "fetched": 70, "passed": 0, "candidates": 0,
+                             "drops": {"UNTRUSTED": 60, "AGE": 10}}]}
+        text = g.render_run_summary("schedule", at(10), 9, report)
+        self.assertIn(f"UNTRUSTED={g.DROP_LABELS['UNTRUSTED']}", text)
+        self.assertIn(f"AGE={g.DROP_LABELS['AGE']}", text)
+        self.assertNotIn("NOT_TECH=", text)  # 쓰이지 않은 코드는 범례에 넣지 않는다
+
+
+class SanitizeTest(unittest.TestCase):
+    def test_one_line_folds_newlines_and_runs_of_whitespace(self):
+        self.assertEqual(g._one_line("a\n\n  b\r\nc"), "a b c")
+
+    def test_one_line_never_starts_with_a_workflow_command(self):
+        self.assertFalse(g._one_line("::error::x").startswith("::"))
+        self.assertFalse(g._one_line("\n::error::x").startswith("::"))
+
+    def test_one_line_neutralises_group_markers(self):
+        self.assertNotIn("##[", g._one_line("##[error]x"))
+
+    def test_one_line_limits_the_length(self):
+        self.assertEqual(len(g._one_line("a" * 1000, 50)), 50)
+
+    def test_md_cell_escapes_table_and_link_syntax(self):
+        cell = g._md_cell("제목 | 열\n[링크](http://evil.example) `코드` <b>x</b>")
+        for ch in "|\n`<>[]":
+            self.assertNotIn(ch, cell)
+
+    def test_image_query_failure_text_is_folded(self):
+        with mock.patch.object(g, "STUB_GEMINI", False), \
+                mock.patch.object(g, "call_gemini_with_fallback",
+                                  side_effect=RuntimeError("실패\n::error::가짜")):
+            value, out = run_captured(g.make_image_queries, "제목", [], "카테고리")
+        self.assertEqual(value, ["technology", "computer hardware"])
+        self.assertFalse(any(line.startswith("::error::") for line in out.splitlines()))
+        self.assertIn("실패 ::error::가짜", out)
+
+    def test_unsplash_failure_text_is_folded(self):
+        def boom(req, timeout=0):
+            raise OSError("연결 거부\n::error::가짜")
+
+        with mock.patch.object(g, "STUB_UNSPLASH", False), mock.patch.object(g, "UNSPLASH_KEY", "k"), \
+                mock.patch.object(g.urllib.request, "urlopen", boom):
+            value, out = run_captured(g.search_unsplash, "query")
+        self.assertEqual(value, [])
+        self.assertFalse(any(line.startswith("::error::") for line in out.splitlines()))
+        self.assertIn("연결 거부 ::error::가짜", out)
+
+
+class StubPostTest(unittest.TestCase):
+    LINK = "https://www.reuters.com/a"
+
+    def test_stub_passes_the_same_validation_as_a_real_post(self):
+        data = g.stub_post_data("주제", self.LINK)
+        out = g.validate_post_data(data, "https://img.test/a.jpg", "https://img.test/b.jpg",
+                                   verified_source_url=self.LINK)
+        self.assertIn(self.LINK, out["kr_content"])
+        self.assertIn(self.LINK, out["en_content"])
+
+    def test_stub_without_a_link_keeps_the_old_call_form(self):
+        data = g.stub_post_data("주제")
+        self.assertNotIn("http", data["kr_content"])
+
+
+class IntEnvTest(unittest.TestCase):
+    def test_reads_an_integer_and_ignores_garbage(self):
+        for raw, expected in (("42", 42), ("0", 0), ("abc", 7), ("", 7), ("  9 ", 9)):
+            with self.subTest(raw=raw), mock.patch.dict(os.environ, {"X_TEST_INT": raw}):
+                self.assertEqual(g._int_env("X_TEST_INT", 7), expected)
+
 
 class SourceListTest(unittest.TestCase):
     def test_dead_bloter_feed_is_gone(self):
@@ -604,6 +931,11 @@ class SourceListTest(unittest.TestCase):
         for code in ("NO_TITLE", "NOT_TECH", "AGE", "UNTRUSTED", "UNCHECKED", "UNRESOLVED",
                      "HOST_MISMATCH", "SHORT_SUMMARY", "DUPLICATE"):
             self.assertIn(code, g.DROP_LABELS)
+
+    def test_every_outcome_the_engine_can_report_has_a_text(self):
+        for code in ("PUBLISHED", "ALL_LANES_EMPTY", "SOURCES_UNREACHABLE", "ALL_DUPLICATES",
+                     "NO_CANDIDATES", "ALL_REJECTED", "NO_MATCH"):
+            self.assertIn(code, g.OUTCOME_TEXT)
 
 
 if __name__ == "__main__":
