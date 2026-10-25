@@ -37,6 +37,7 @@
 | [`docs/DEFECT_REGISTER.md`](./docs/DEFECT_REGISTER.md) | Verified known defects and their status |
 | [`docs/ISSUE_EDITS.md`](./docs/ISSUE_EDITS.md) | Issue-form based edit requests → PR (spec, security model) |
 | [`docs/COPILOT_GUIDE.md`](./docs/COPILOT_GUIDE.md) | How to use Copilot/AI precisely without coding knowledge |
+| [`docs/ACTIONS_GUIDE.md`](./docs/ACTIONS_GUIDE.md) | Operator guide for the Actions tab (phone-friendly): what each workflow does, when to press Run workflow, what to do on a red run |
 | [`docs/REQUEST_BRIEFING.md`](./docs/REQUEST_BRIEFING.md) | Briefing to paste into an AI that cannot see the repo (e.g. mobile Claude) so it writes task requests that fit this program; requests go in `인수인계/작업요청/` |
 | [`docs/ANALYTICS_PLAN.md`](./docs/ANALYTICS_PLAN.md) | Proposal: one dashboard for visitors, top posts and per-site AdSense revenue (awaiting owner decision) |
 | `.github/editorial/BLOGGER_PROMPT.md` | Blogger tone/structure |
