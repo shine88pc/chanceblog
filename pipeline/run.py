@@ -162,14 +162,20 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
         out(f"[설정 오류] {exc}")
         return EXIT_CONFIG
 
+    # 정지는 일부러 켜는 것이라 종료 코드는 0이다. 대신 ::notice:: 로 Actions 화면(실행 요약 위쪽 주석)에 남겨,
+    # 변수를 켜 놓고 잊어도 "왜 아무것도 안 올라오지?" 할 때 눈에 띄게 한다.
     if _flag(environ, "PIPELINE_PAUSE"):
         out(skip_line("PAUSED", blog=blog["key"], var="PIPELINE_PAUSE"))
         out("[일시정지] PIPELINE_PAUSE 가 켜져 있어 실행하지 않습니다.")
+        out(f"::notice::[{blog['key']}] 저장소 변수 PIPELINE_PAUSE 가 켜져 있어 이번 실행을 건너뜁니다. 계속 멈춰 둘 것이 아니라면 "
+            "Settings > Secrets and variables > Actions > Variables 에서 PIPELINE_PAUSE 를 지우세요.")
         _summarize(environ, blog, "PAUSED", "저장소 변수 PIPELINE_PAUSE 가 켜져 있습니다.")
         return EXIT_OK
     if blog["mode"] == "off":
         out(skip_line("MODE_OFF", blog=blog["key"]))
         out(f"[{blog['key']}] mode=off — 실행하지 않습니다.")
+        out(f"::notice::[{blog['key']}] 레지스트리(pipeline/blogs.json)에서 mode=off 로 정지된 블로그라 이번 실행을 건너뜁니다. "
+            "다시 켜려면 mode 를 draft 또는 auto 로 바꾸세요.")
         _summarize(environ, blog, "MODE_OFF", "레지스트리(pipeline/blogs.json)에서 mode=off 로 정지된 블로그입니다.")
         return EXIT_OK
 

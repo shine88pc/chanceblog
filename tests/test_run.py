@@ -342,19 +342,30 @@ class VisibilityTest(RunBase):
             json.dumps([{"topic": t, "date": "2026-10-20", "status": "posted"} for t in seeds], ensure_ascii=False),
             encoding="utf-8")
 
-    def test_pause_leaves_a_skip_line_and_a_summary(self):
+    def test_pause_leaves_a_skip_line_a_notice_and_a_summary(self):
         code, out = self.go(env=self.env(**FULL_ENV, PIPELINE_PAUSE="true"), publisher=FakePublisher())
         self.assertEqual(code, 0)
         self.assertIn("[SKIP] code=PAUSED", out)
         self.assertIn("PAUSED", self.summary())
+        # 변수를 켜 놓고 잊어도 Actions 화면에 보이도록 ::notice:: 한 줄(어떤 변수를 어디서 지우는지 포함)
+        notices = [line for line in out.splitlines() if line.startswith("::")]
+        self.assertEqual(len(notices), 1, notices)
+        self.assertTrue(notices[0].startswith("::notice::[blogger_macat]"), notices[0])
+        self.assertIn("PIPELINE_PAUSE", notices[0])
+        self.assertIn("Variables", notices[0])
 
-    def test_mode_off_leaves_a_skip_line_and_a_summary(self):
+    def test_mode_off_leaves_a_skip_line_a_notice_and_a_summary(self):
         root = make_root(tempfile.mkdtemp(), mode="off")
         self.addCleanup(shutil.rmtree, str(root), True)
         code, out = self.go(env=self.env(**FULL_ENV), publisher=FakePublisher(), root=root)
         self.assertEqual(code, 0)
         self.assertIn("[SKIP] code=MODE_OFF", out)
         self.assertIn("MODE_OFF", self.summary())
+        notices = [line for line in out.splitlines() if line.startswith("::")]
+        self.assertEqual(len(notices), 1, notices)
+        self.assertTrue(notices[0].startswith("::notice::[blogger_macat]"), notices[0])
+        self.assertIn("mode=off", notices[0])
+        self.assertIn("pipeline/blogs.json", notices[0])
 
     def test_daily_cap_summary_says_unpublished_drafts_count(self):
         self.go(env=self.env(**NO_PUBLISH))
