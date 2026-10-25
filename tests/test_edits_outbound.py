@@ -96,9 +96,9 @@ class SensitiveKindsTest(unittest.TestCase):
             self.assertEqual(safety.sensitive_kinds(text), ["카드번호 모양"], text)
 
     def test_every_known_grouping_is_recognised_with_spaces_and_hyphens(self):
-        """`_CARD_SHAPES` 의 모든 묶음(4-4-4-4·4-4-4-4-1~3·4-6-5·4-6-4·4-4-4-1)을 Luhn 이 맞는 번호로 만들어 확인한다."""
+        """`_CARD_SHAPES` 의 모든 묶음(4-4-4-4·4-4-4-4-1~3·4-6-5·4-4-4-3·4-6-4·4-4-4-2·4-4-4-1)을 Luhn 이 맞는 번호로 만들어 확인한다."""
         issuer = {13: "4", 14: "36", 15: "37", 16: "4", 17: "6", 18: "6", 19: "6"}
-        self.assertEqual(sorted(sum(shape) for shape in safety._CARD_SHAPES), [13, 14, 15, 16, 17, 18, 19])
+        self.assertEqual(sorted(sum(shape) for shape in safety._CARD_SHAPES), [13, 14, 14, 15, 15, 16, 17, 18, 19])
         for shape in sorted(safety._CARD_SHAPES):
             total = sum(shape)
             body = with_luhn((issuer[total] + "1234567890123456789")[:total - 1])
@@ -110,6 +110,19 @@ class SensitiveKindsTest(unittest.TestCase):
             for separator in (" ", "-", " - "):
                 text = f"카드 {separator.join(groups)} 끝"
                 self.assertEqual(safety.sensitive_kinds(text), ["카드번호 모양"], (shape, text))
+
+    def test_amex_and_diners_written_in_groups_of_four_are_recognised(self):
+        """검증자 N-1: Amex 15자리를 4-4-4-3 으로, Diners 14자리를 4-4-4-2 로 적은 꼴(표준 시험 번호). 접두사 규칙(Amex 는 34·37 등, Diners 는 30·36·38·39)이 오탐을 막는다."""
+        for text in ("3782 8224 6310 005", "3714-4963-5398-431", "3056 9309 0259 04", "3852-0000-0232-37", "카드 3782 8224 6310 005 끝"):
+            self.assertEqual(safety.sensitive_kinds(text), ["카드번호 모양"], text)
+        for text in ("3782 8224 6310 006", "3056 9309 0259 05"):                       # Luhn 이 틀리다
+            self.assertEqual(safety.sensitive_kinds(text), [], text)
+        for number in (with_luhn("1782822463100"), with_luhn("2026102512345")):         # 같은 묶음이어도 접두사가 카드사가 아니다(14자리)
+            groups = f"{number[:4]} {number[4:8]} {number[8:12]} {number[12:]}"
+            self.assertEqual(safety.sensitive_kinds(groups), [], groups)
+        fifteen = with_luhn("1" + "78282246310005"[:13])                                # 15자리, 1 로 시작
+        self.assertEqual(len(fifteen), 15)
+        self.assertEqual(safety.sensitive_kinds(f"{fifteen[:4]} {fifteen[4:8]} {fifteen[8:12]} {fifteen[12:]}"), [])
 
     def test_numbers_that_fail_luhn_or_are_too_long_are_not_card_numbers(self):
         for text in ("4111111111111112", "12345678901234567890", "010-1234-5678", "2026-10-25 12:34:56", with_luhn("4111111111111111111")):   # 마지막은 20자리
@@ -160,6 +173,31 @@ class SensitiveKindsTest(unittest.TestCase):
         self.assertEqual(safety.sensitive_kinds(f"ca-pub-{publisher}"), [])
         self.assertEqual(safety.sensitive_kinds(f"google.com, pub-{publisher}, DIRECT, f08c47fec0942fa0"), [])
         self.assertEqual(safety.sensitive_kinds(f"id {publisher}"), ["카드번호 모양"])         # 대조: 접두사가 없으면 카드번호 모양이다
+
+    def test_a_publisher_id_is_not_cut_into_a_shorter_card_like_run_from_its_second_digit(self):
+        """검증자 S12: `pub-` 바로 뒤의 첫 숫자에서는 시작하지 못해도, 숫자 덩어리 한가운데(둘째 자리)에서 15자리가 새로 시작하면 카드번호 모양이 될 수 있다."""
+        tail = with_luhn("3" + "5" * 13)                                          # 15자리, 3 으로 시작, Luhn 통과
+        publisher = "6" + tail                                                    # 16자리 게시자 id(둘째 자리부터가 위의 15자리)
+        self.assertEqual(len(tail), 15)
+        self.assertEqual(safety.sensitive_kinds(f"id {tail}"), ["카드번호 모양"])        # 대조: 따로 있으면 카드번호 모양
+        self.assertEqual(safety.sensitive_kinds(f"ca-pub-{publisher}"), [])
+
+    def test_the_separator_between_groups_is_at_most_three_characters(self):
+        """검증자 S10: 묶음 사이는 공백·하이픈 1~3자까지만 이어진 것으로 본다. 넓게 띄운 숫자들은 한 번호가 아니다."""
+        card = "4111111111111111"
+        groups = [card[i:i + 4] for i in range(0, 16, 4)]
+        for width in (1, 2, 3):
+            self.assertEqual(safety.sensitive_kinds((" " * width).join(groups)), ["카드번호 모양"], width)
+            self.assertEqual(safety.sensitive_kinds(("-" * width).join(groups)), ["카드번호 모양"], width)
+        for width in (4, 6, 10):
+            self.assertEqual(safety.sensitive_kinds((" " * width).join(groups)), [], width)
+            self.assertEqual(safety.sensitive_kinds(("-" * width).join(groups)), [], width)
+        self.assertEqual(safety.sensitive_kinds("카드 4111      1111      1111      1111 끝"), [])
+
+    def test_a_card_number_right_after_a_date_is_still_found(self):
+        """검증자 X11: 날짜(8자리) 뒤에 공백·하이픈으로 이어진 연속 16자리 카드번호. 숫자 묶음의 모든 시작점을 본다."""
+        for text in ("20261025 4111111111111111", "20261025-4111111111111111", "2026-10-25 4111111111111111", "주문 20261025 4111111111111111 끝"):
+            self.assertEqual(safety.sensitive_kinds(text), ["카드번호 모양"], text)
 
     def test_a_long_digit_list_is_judged_quickly(self):
         started = time.monotonic()
@@ -394,15 +432,76 @@ class PromptDelimiterTest(unittest.TestCase):
     DEEP = ["R<<_<<Q<<>R A>><<<PAGE>>>>", "\tAPAGE\t>>Q>E RPAGEREQUEST>>>>>>>>>Q", "Q_<<B>PAGE>Q<<<QA>REQUESTE>>A>>>>>>>>>>\t"]
 
     def test_inputs_that_need_three_or_more_passes_are_fully_stripped(self):
-        """무작위 탐색으로 찾은 입력(3·4·5번 되풀이해야 끝난다): 두 번만 지우면 구분자가 남는다."""
+        """무작위 탐색으로 찾은 입력(3·4·5번 되풀이해야 끝난다): 두 번만 지우면 구분자가 남는다. 상한(8번) 안이라 대체 문자 없이 깨끗이 지워진다."""
         for text in self.DEEP:
             twice = text
             for _ in range(2):
-                twice = safety._DELIMITER.sub("", twice)
+                twice = safety._strip_once(twice)
             self.assertIsNotNone(safety._DELIMITER.search(twice), text)             # 두 번으로는 부족한 입력이다
             out = safety.strip_delimiters(text)
             self.assertIsNone(safety._DELIMITER.search(out), (text, out))
+            self.assertNotRegex(out, "[‹›]")                              # 대체 문자가 끼지 않았다
             self.assertEqual(safety.strip_delimiters(out), out)
+
+    # 언덕 오르기로 찾은, 9번 되풀이해야 끝나는 입력(상한 8번을 넘는다): 끝까지 지우면 '>Q' 만 남는다
+    NINE_PASSES = "PAGE>PAGE_>>PAGE>>PAGE XAR>>E>>A>>A<<<RPAGEREQUEST>>>>RA>><<<REQUESTQ>>>>>>>>>>>Q"
+
+    def passes_needed(self, text):
+        count = 0
+        while True:
+            stripped = safety._strip_once(text)
+            if stripped == text:
+                return count
+            text, count = stripped, count + 1
+
+    def test_the_pass_limit_ends_with_the_remaining_triple_brackets_replaced(self):
+        """검증자 N-2: 되풀이에 상한(MAX_STRIP_PASSES)을 두고, 상한에 닿고도 남으면 남은 `<<<`·`>>>` 를 다른 문자로 바꿔 구분자가 될 수 없게 한다."""
+        self.assertEqual(safety.MAX_STRIP_PASSES, 8)
+        self.assertEqual(self.passes_needed(self.NINE_PASSES), 9)                   # 상한을 넘는 입력이다
+        out = safety.strip_delimiters(self.NINE_PASSES)
+        self.assertIsNone(safety._DELIMITER.search(out), out)
+        self.assertNotIn("<<<", out)
+        self.assertNotIn(">>>", out)
+        self.assertIn("\N{SINGLE RIGHT-POINTING ANGLE QUOTATION MARK}" * 3, out)    # 바꾼 자리
+        self.assertEqual(safety.strip_delimiters(out), out)                         # 고정점
+        with mock.patch.object(safety, "MAX_STRIP_PASSES", 1):                      # 상한을 줄이면 3·4·5번짜리도 같은 경로로 안전하게 끝난다
+            for text in self.DEEP + self.REASSEMBLING:
+                result = safety.strip_delimiters(text)
+                self.assertIsNone(safety._DELIMITER.search(result), (text, result))
+        with mock.patch.object(safety, "MAX_STRIP_PASSES", 2):                      # 두 번에 딱 끝나는 입력은 상한에 닿아도 이미 깨끗하다 → 남은 꺾쇠를 건드리지 않는다
+            self.assertEqual(safety.strip_delimiters("REQUEST<<<A>>>>>>"), ">>>")
+            self.assertEqual(safety.strip_delimiters("RE<<<A<<<B>>>>>>QUEST>>>"), ">>>")
+
+    def test_the_replacement_cannot_be_reassembled_into_a_delimiter(self):
+        """바꾸는 문자열은 `<`·`>` 가 아니고, str.replace 는 왼쪽부터 겹치지 않게 바꿔 연속한 꺾쇠가 둘 이하만 남는다.
+        (구분자가 남아 있어 대체 경로로 들어간 입력은 `<<<`·`>>>` 가 하나도 남지 않는다.)"""
+        with mock.patch.object(safety, "MAX_STRIP_PASSES", 0):                      # 첫 지우기 없이 바로 대체 경로
+            for body in ("<<<<<<<<<", "<<<<<", "<<<<<<", ">>>>>>>>", "AB<<>>>CD<<<", "<<" + ">>>" + "<", "R<<<>>>E", "<><><>", "<<><<>>>>>>"):
+                out = safety.strip_delimiters(body + " REQUEST>>>")                 # 구분자가 하나는 있어야 대체 경로로 들어간다
+                self.assertIsNone(safety._DELIMITER.search(out), (body, out))
+                self.assertNotRegex(out, "<{3}|>{3}")
+
+    def test_strip_keeps_underscores_in_front_of_a_name_and_old_and_new_patterns_agree(self):
+        """앵커를 단 새 정규식은 옛 정규식(`[A-Z][A-Z_]*[ \\t]*>>>`)과 한 번 지운 결과·판정이 같다(`_REQUEST>>>` 의 밑줄은 이름이 아니라 남는다)."""
+        self.assertEqual(safety.strip_delimiters("_REQUEST>>>"), "_")
+        self.assertEqual(safety.strip_delimiters("a__PAGE>>>b"), "a__b")
+        self.assertEqual(safety.strip_delimiters("x_<<<REQUEST_y"), "x_y")
+        self.assertEqual(safety.strip_delimiters("__>>>"), "__>>>")                 # 이름이 없으면 닫는 꺾쇠만으로는 지울 것이 없다
+        old = re.compile(r"<<<[ \t]*[A-Z][A-Z_]*|[A-Z][A-Z_]*[ \t]*>>>")           # 예전 정규식(대문자가 길게 이어지면 제곱 시간)
+        rng = random.Random(5)
+        pieces = ["A", "B", "Q", "R", "E", "_", "__", " ", "\t", "<<<", ">>>", "<", ">", "<<", ">>", "x", "a", "REQUEST", "PAGE", "\n", "1", "-"]
+        for _ in range(20000):
+            text = "".join(rng.choice(pieces) for _ in range(rng.randint(1, 18)))
+            self.assertEqual(safety._strip_once(text), old.sub("", text), repr(text))
+            self.assertEqual(bool(safety._DELIMITER.search(text)), bool(old.search(text)), repr(text))
+
+    def test_long_runs_of_capital_letters_are_stripped_in_linear_time(self):
+        """검증자 N-2: 옛 정규식은 대문자·밑줄이 이어진 덩어리의 모든 글자에서 다시 시도해 제곱 시간이었다(5000자 0.25초, 30000자 약 9초). 한 번에 지우는 시간도 선형이어야 한다."""
+        started = time.monotonic()
+        for text in ("A" * 30000, "A_" * 15000, "A" * 20000 + self.DEEP[2], ("A" * 3000 + "<<<") * 10, " ".join(["A" * 5000] * 4)):
+            out = safety.strip_delimiters(text)
+            self.assertIsNone(safety._DELIMITER.search(out))
+        self.assertLess(time.monotonic() - started, 3.0)                          # 느린 PC·병렬 실행에서도 안 흔들리는 상한(옛 정규식은 수십 초)
 
     def test_random_marker_soup_never_leaves_a_delimiter(self):
         rng = random.Random(7)
