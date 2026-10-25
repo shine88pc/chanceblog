@@ -3,7 +3,8 @@
   python -m pipeline.plan --platform blogger           # {"include":[...]} 한 줄 JSON
   python -m pipeline.plan --platform blogger --count   # 대상 블로그 수
 
-레지스트리 검증에 실패하면 종료 코드 1(워크플로가 잘못된 설정으로 돌지 않게 한다).
+레지스트리 검증에 실패하거나 --only 가 레지스트리에 없는 key 면 종료 코드 1(워크플로가 잘못된 설정으로 돌지 않게 한다).
+mode=off 로 정지된 블로그는 정상적으로 대상에서 빠진다(대상 0개는 오류가 아니다. 워크플로가 알림을 남긴다).
 매트릭스에는 시크릿 '이름'만 들어간다. 값은 워크플로가 secrets[...] 로 직접 읽는다.
 """
 import argparse
@@ -50,6 +51,12 @@ def main(argv=None):
     errors = validate_registry(reg, ROOT)
     if errors:
         print("[오류] 레지스트리 검증 실패:\n  - " + "\n  - ".join(errors), file=sys.stderr)
+        return 1
+    keys = [b["key"] for b in reg["blogs"]]
+    if args.only and args.only not in keys:
+        # 오타 하나로 대상이 0개가 되어 generate 잡이 통째로 건너뛰어지면(초록) 아무도 모른다 → 즉시 실패
+        print(f"[오류] --only {args.only!r} 는 레지스트리에 없는 key 입니다. 유효한 key: {', '.join(keys)}",
+              file=sys.stderr)
         return 1
     matrix = build_matrix(reg, args.platform, args.only)
     print(len(matrix["include"]) if args.count else json.dumps(matrix, ensure_ascii=False, separators=(",", ":")))

@@ -52,8 +52,18 @@ jobs:
           set -euo pipefail
           args=(--platform blogger)
           if [ -n "${ONLY_BLOG:-}" ]; then args+=(--only "$ONLY_BLOG"); fi
-          echo "matrix=$(python -m pipeline.plan "${args[@]}")" >> "$GITHUB_OUTPUT"
-          echo "count=$(python -m pipeline.plan "${args[@]}" --count)" >> "$GITHUB_OUTPUT"
+          # 명령 치환을 echo 안에 넣으면 plan 이 실패해도 단계가 초록으로 지나가므로(E21) 먼저 변수에 받는다
+          matrix=$(python -m pipeline.plan "${args[@]}")
+          count=$(python -m pipeline.plan "${args[@]}" --count)
+          echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
+          echo "count=${count}" >> "$GITHUB_OUTPUT"
+          if [ "$count" = "0" ]; then
+            echo "::notice::실행할 Blogger 블로그가 없습니다(레지스트리에서 mode=off 로 정지된 상태). generate 잡은 건너뜁니다."
+            {
+              echo "### Blogger Generate"
+              echo "- 결과: **대상 0개** — pipeline/blogs.json 에서 platform=blogger 블로그가 모두 mode=off(정지)입니다. 글은 만들지 않았습니다."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   generate:
     needs: plan

@@ -3,9 +3,11 @@ import json
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timezone
 from pathlib import Path
+
+from unittest import mock
 
 import _bootstrap  # noqa: F401
 from pipeline import plan, registry
@@ -15,9 +17,17 @@ sys.path.insert(0, str(_bootstrap.ROOT / "scripts"))
 import watchdog  # noqa: E402
 
 
+def registry_all_auto():
+    """실제 레지스트리의 모든 블로그를 켜 둔 사본. 운영 중 일시 정지(mode off)와 무관하게 로직을 시험한다."""
+    reg = registry.load_registry()
+    for blog in reg["blogs"]:
+        blog["mode"] = "auto"
+    return reg
+
+
 class PlanTest(unittest.TestCase):
     def test_matrix_for_blogger(self):
-        matrix = plan.build_matrix(registry.load_registry(), "blogger")
+        matrix = plan.build_matrix(registry_all_auto(), "blogger")
         self.assertEqual(len(matrix["include"]), 1)
         item = matrix["include"][0]
         self.assertEqual(item["key"], "blogger_macat")
@@ -26,27 +36,53 @@ class PlanTest(unittest.TestCase):
         self.assertNotIn("value", json.dumps(item))  # 이름만 있고 값은 없다
 
     def test_only_filters_to_one_blog(self):
-        reg = registry.load_registry()
+        reg = registry_all_auto()
         self.assertEqual([i["key"] for i in plan.build_matrix(reg, "blogger", only="blogger_macat")["include"]],
                          ["blogger_macat"])
         self.assertEqual(plan.build_matrix(reg, "blogger", only="nope")["include"], [])
 
     def test_matrix_excludes_off_and_filters_platform(self):
-        reg = registry.load_registry()
+        reg = registry_all_auto()
         self.assertEqual([i["key"] for i in plan.build_matrix(reg)["include"]], ["chance", "blogger_macat"])
         reg["blogs"][1]["mode"] = "off"
         self.assertEqual(plan.build_matrix(reg, "blogger")["include"], [])
 
     def test_cli_outputs_compact_json_and_count(self):
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            self.assertEqual(plan.main(["--platform", "blogger"]), 0)
-        self.assertEqual(json.loads(buf.getvalue())["include"][0]["key"], "blogger_macat")
-        self.assertNotIn("\n", buf.getvalue().strip())
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            plan.main(["--platform", "blogger", "--count"])
-        self.assertEqual(buf.getvalue().strip(), "1")
+        with mock.patch.object(plan, "load_registry", return_value=registry_all_auto()):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                self.assertEqual(plan.main(["--platform", "blogger"]), 0)
+            self.assertEqual(json.loads(buf.getvalue())["include"][0]["key"], "blogger_macat")
+            self.assertNotIn("\n", buf.getvalue().strip())
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                plan.main(["--platform", "blogger", "--count"])
+            self.assertEqual(buf.getvalue().strip(), "1")
+
+    def test_unknown_only_key_is_an_error_not_an_empty_matrix(self):
+        """오타로 대상이 0개가 되어 generate 잡이 조용히 건너뛰어지던 문제(E8)."""
+        with mock.patch.object(plan, "load_registry", return_value=registry_all_auto()):
+            err = io.StringIO()
+            with redirect_stderr(err), redirect_stdout(io.StringIO()):
+                code = plan.main(["--platform", "blogger", "--only", "blogger_macta"])
+        self.assertEqual(code, 1)
+        self.assertIn("blogger_macta", err.getvalue())
+        self.assertIn("blogger_macat", err.getvalue())   # 유효한 key 안내
+        self.assertIn("chance", err.getvalue())
+
+    def test_paused_blog_is_zero_targets_without_error(self):
+        """mode=off 로 정지한 블로그는 오류가 아니라 대상 0개다(워크플로가 notice 를 남긴다)."""
+        reg = registry_all_auto()
+        reg["blogs"][1]["mode"] = "off"
+        with mock.patch.object(plan, "load_registry", return_value=reg):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                self.assertEqual(plan.main(["--platform", "blogger", "--count"]), 0)
+            self.assertEqual(buf.getvalue().strip(), "0")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                self.assertEqual(plan.main(["--platform", "blogger", "--only", "blogger_macat", "--count"]), 0)
+            self.assertEqual(buf.getvalue().strip(), "0")
 
 
 class FakeClient:
@@ -102,7 +138,7 @@ class CollectFindingsTest(unittest.TestCase):
         self.assertIn(("chance", "STATE_CORRUPT"), [(f.blog, f.code) for f in findings])
 
     def test_empty_repo_reports_no_activity(self):
-        reg = registry.load_registry()
+        reg = registry_all_auto()
         with tempfile.TemporaryDirectory() as tmp:
             findings = watchdog.collect_findings(reg, tmp, datetime(2026, 10, 22, tzinfo=timezone.utc))
         self.assertEqual(sorted((f.blog, f.code) for f in findings),
