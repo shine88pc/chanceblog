@@ -85,7 +85,9 @@ jobs:
       - name: 이슈 내용 가져오기
         run: gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" > "${RUNNER_TEMP}/issue.json"
 
-      # 한 이슈는 한 번만 처리한다: 이 이슈 번호로 만든 브랜치만 찾는다(앞부분을 고정한 전체 ref 패턴이라 1·12·120 이 섞이지 않는다).
+      # 한 이슈는 한 번만 처리한다: 이 이슈 번호로 만든 브랜치를 찾는다. 패턴에 refs/heads/ 부터 번호와 하이픈까지 적어 1·12·120 이 섞이지 않는다.
+      # (git ls-remote 패턴은 ref 이름의 처음 또는 `/` 뒤부터 맞는 꼬리 일치라 `x/refs/heads/issue-edit/12-y` 꼴의 별난 ref 도 돌려줄 수 있다.
+      #  패턴을 앞부분에 고정해 주는 것이 아니므로, 러너가 refs/heads/issue-edit/<번호>- 전체 접두사로 한 번 더 걸러 판단한다.)
       # 일치하는 것이 없어도 종료 코드는 0 이고, 러너가 이 목록과 이슈의 표식 라벨(issue-edit-done)로 이미 처리했는지 판단한다.
       - name: 이 이슈의 기존 브랜치 조회
         run: git ls-remote --heads origin "refs/heads/issue-edit/${ISSUE_NUMBER}-*" > "${RUNNER_TEMP}/remote_refs.txt"

@@ -1,10 +1,12 @@
 """한 이슈는 한 번만 처리한다 — 계획 보고 항목 5, docs/DEFECT_REGISTER.md D-37.
 
 - 이슈 번호 형식 검사(워크플로 첫 단계와 러너가 같은 규칙)
-- 이미 처리한 이슈 판단(순수 함수): 원격 브랜치 `refs/heads/issue-edit/<번호>-*`(앞부분 고정) 또는 표식 라벨
+- 이미 처리한 이슈 판단(순수 함수): 원격 브랜치 `refs/heads/issue-edit/<번호>-*`(러너가 전체 접두사로 비교 — git ls-remote 패턴은 꼬리 일치라 앞부분을 고정해 주지 않는다) 또는 표식 라벨
 - 이미 처리했다면 코멘트만, 새 브랜치·PR 없음(dry_run 은 예외)
 - 워크플로 YAML 회귀 테스트: 트리거는 issues opened 뿐, 이슈별 concurrency, 번호 검사가 첫 단계
+- 워크플로 보안 필드 고정(IssueEditWorkflowSecurityTest): 권한·작성자 목록·dry-run 방어·`always()` 단계·라벨 조건
 """
+import json
 import re
 import subprocess
 import tempfile
@@ -322,10 +324,131 @@ class IssueEditWorkflowTest(unittest.TestCase):
                         120: ["issue-edit/120-about-r9"], 3: []}
             for number, want in expected.items():
                 lines = ls_remote(template.replace("${ISSUE_NUMBER}", str(number)))
-                self.assertEqual(sorted(line.split("\t")[1][len("refs/heads/"):] for line in lines), want, number)   # git 자체가 이미 고정
+                self.assertEqual(sorted(line.split("\t")[1][len("refs/heads/"):] for line in lines), want, number)   # refs/heads/ 부터 적은 패턴이라 다른 경로가 안 섞인다
                 self.assertEqual(list(runner.already_processed(number, lines).branches), want, number)               # 러너의 판단도 같다
-            unanchored = ls_remote("issue-edit/12-*")                                                                  # 대조: 고정하지 않으면
+            unanchored = ls_remote("issue-edit/12-*")                                                                  # 대조: refs/heads/ 를 빼면
             self.assertIn("refs/heads/feature/issue-edit/12-trap", [line.split("\t")[1] for line in unanchored])
+
+    def test_ls_remote_is_a_tail_match_so_the_runner_filters_with_the_full_prefix(self):
+        """검증자 F-12: git ls-remote 패턴은 ref 이름의 처음 또는 `/` 뒤부터 맞는 꼬리 일치라 앞부분을 고정해 주지 않는다.
+        `x/refs/heads/issue-edit/12-y` 꼴의 별난 ref 도 돌려주므로 판단은 러너의 전체 접두사 비교(refs/heads/issue-edit/<번호>-)가 맡는다."""
+        template = re.search(r'"(refs/heads/issue-edit/\$\{ISSUE_NUMBER\}-\*)"', self.steps[self.step_index("git ls-remote")]["run"]).group(1)
+        trap, real = "x/refs/heads/issue-edit/12-trap", "issue-edit/12-about-r5"
+        stream = b"commit refs/heads/main\ncommitter t <t@example.com> 1700000000 +0000\ndata 1\nx\nM 100644 inline a.txt\ndata 1\na\n\n"
+        for name in (trap, real):
+            stream += b"reset refs/heads/%s\nfrom refs/heads/main\n\n" % name.encode()
+        with tempfile.TemporaryDirectory() as tmp:
+            subprocess.run(["git", "init", "-q"], cwd=tmp, check=True, capture_output=True)
+            subprocess.run(["git", "fast-import", "--quiet"], cwd=tmp, input=stream, check=True, capture_output=True)
+            out = subprocess.run(["git", "ls-remote", "--heads", Path(tmp).as_posix(), template.replace("${ISSUE_NUMBER}", "12")],
+                                 check=True, capture_output=True)
+        lines = out.stdout.decode("utf-8").splitlines()
+        returned = sorted(line.split("\t")[1] for line in lines)
+        self.assertEqual(returned, sorted([f"refs/heads/{trap}", f"refs/heads/{real}"]))           # git 은 별난 ref 도 돌려준다
+        self.assertEqual(runner.already_processed(12, lines).branches, (real,))                    # 러너는 전체 접두사로 한 번 더 걸러 진짜만 센다
+        self.assertFalse(runner.already_processed(12, [line for line in lines if real not in line]))   # 별난 ref 만 있으면 처리한 이슈가 아니다
+
+
+class IssueEditWorkflowSecurityTest(unittest.TestCase):
+    """issue-edit.yml 의 권한·실행 조건·dry-run 방어·라벨 처리를 yaml.safe_load 로 읽어 고정한다.
+
+    검증자 F-4: 아래 줄들은 바뀌어도 다른 테스트가 알려 주지 않았다(변이 V29 `--force` 제거 · V30 거부·오류에도 라벨 부착 · V31 job `id-token: write` ·
+    V32 작성자 목록에 CONTRIBUTOR·NONE · V33 최상위 `contents: write` · V109·V110 `always()` 제거가 전체 테스트를 통과했다).
+    워크플로의 이름 줄(`name:`) 같은 겉 모양은 일부러 고정하지 않는다."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.wf = yaml.safe_load((REAL / ".github" / "workflows" / "issue-edit.yml").read_text(encoding="utf-8"))
+        cls.job = next(iter(cls.wf["jobs"].values()))
+        cls.steps = cls.job["steps"]
+
+    @staticmethod
+    def flat(expression):
+        return " ".join(str(expression).split())
+
+    def step_with(self, fragment):
+        matches = [step for step in self.steps if fragment in str(step.get("run", ""))]
+        self.assertEqual(len(matches), 1, f"{fragment!r} 를 실행하는 단계가 하나여야 한다")
+        return matches[0]
+
+    def test_there_is_exactly_one_job(self):
+        self.assertEqual(len(self.wf["jobs"]), 1)          # 쓰기 토큰 노출을 줄이려고 job 을 나누면(D-23) 아래 권한 테스트를 job 별로 고친다
+
+    def test_permissions_are_read_at_the_top_and_exactly_the_four_writes_in_the_job(self):
+        self.assertEqual(self.wf["permissions"], {"contents": "read"})
+        self.assertEqual(self.job["permissions"], {"contents": "write", "issues": "write", "pull-requests": "write", "actions": "write"})
+
+    def test_the_job_only_runs_for_owner_member_collaborator_authors(self):
+        cond = self.flat(self.job["if"])
+        match = re.fullmatch(r"github\.event_name == 'workflow_dispatch' \|\| \(contains\(fromJSON\('(\[[^']*\])'\), "
+                             r"github\.event\.issue\.author_association\) && \((.+)\)\)", cond)
+        self.assertTrue(match, cond)
+        self.assertEqual(json.loads(match.group(1)), list(spec_mod.ALLOWED_ASSOCIATIONS))          # 처리 코드가 다시 확인하는 권한 목록과 같다
+        trigger = match.group(2)
+        self.assertNotIn("&&", trigger)
+        for fragment in ("'blog-control'", "startsWith(github.event.issue.title, '[페이지 수정]')", "startsWith(github.event.issue.title, '[이미지 변경]')"):
+            self.assertIn(fragment, trigger)
+
+    def test_dry_run_never_reaches_a_step_that_writes(self):
+        self.assertEqual(self.flat(self.job["env"]["DRY_RUN"]), "${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}")
+        writers = ("git commit", "git push", "gh pr create", "gh label create", "gh issue comment", "gh issue edit", "gh workflow run")
+        writing = [step for step in self.steps if any(w in str(step.get("run", "")) for w in writers)]
+        self.assertEqual(len(writing), 3, [step.get("name") for step in writing])             # 라벨 보장 · 브랜치·커밋·PR · 결과 코멘트
+        for step in writing:
+            self.assertIn("env.DRY_RUN != 'true'", str(step.get("if", "")), step.get("name"))
+
+    def test_the_pr_step_needs_a_successful_edit_step_and_no_dry_run(self):
+        self.assertEqual(self.flat(self.step_with("gh pr create")["if"]), "steps.edit.outcome == 'success' && env.DRY_RUN != 'true'")
+        self.assertEqual(self.step_with("pipeline.edits.runner --issue-file").get("id"), "edit")
+
+    def test_result_comment_and_dry_run_output_still_run_after_a_failure(self):
+        """오류로 끝나도 이슈에 사유 코멘트가 남고(always), dry-run 이면 산출물을 로그로 보여 준다."""
+        self.assertEqual(self.flat(self.step_with('gh issue comment "$ISSUE_NUMBER"')["if"]), "always() && env.DRY_RUN != 'true'")
+        self.assertEqual(self.flat(self.step_with("--show-output")["if"]), "always() && env.DRY_RUN == 'true'")
+
+    def test_labels_are_created_with_force_and_include_the_marker_label(self):
+        step = self.step_with("gh label create")
+        self.assertEqual(self.flat(step["if"]), "env.DRY_RUN != 'true'")
+        script = step["run"]
+        self.assertIn("set -euo pipefail", script)
+        creates = [line.strip() for line in script.splitlines() if line.strip().startswith("gh label create")]
+        names = [re.match(r'gh label create "([^"]+)"', line).group(1) for line in creates]
+        self.assertEqual(sorted(names), sorted({"blog-control", runner.DONE_LABEL} | set(spec_mod.issue_labels(spec_mod.load_spec(REAL)))))
+        for line in creates:
+            self.assertRegex(line, r'--color [0-9a-f]{6} --description "[^"]+" --force$')           # 있으면 갱신(--force) — 없으면 실패하지 않게
+
+    def test_the_marker_label_is_added_only_for_a_finished_ok_result_and_after_the_comment(self):
+        script = self.step_with('gh issue comment "$ISSUE_NUMBER"')["run"]
+        self.assertEqual(script.count("--add-label"), 1)
+        block = re.search(r'if \[ "\$status" = "ok" \] && \{ \[ -s "\$out/pr_url\.txt" \] \|\| \[ -s "\$out/compare_url\.txt" \]; \}; then\n'
+                          r'\s+(gh issue edit "\$ISSUE_NUMBER" --add-label "[^"]+")\n\s*fi\b', script)
+        self.assertTrue(block, script)
+        self.assertEqual(block.group(1), f'gh issue edit "$ISSUE_NUMBER" --add-label "{runner.DONE_LABEL}"')
+        self.assertLess(script.index("gh issue comment"), block.start())                             # 코멘트를 먼저 남겨 라벨 실패가 알림을 막지 않는다
+
+    def test_only_the_edit_step_gets_the_api_keys_and_the_job_env_is_exactly_what_is_needed(self):
+        edit = self.step_with("pipeline.edits.runner --issue-file")
+        self.assertEqual(set(edit["env"]), {"GEMINI_API_KEY", "UNSPLASH_ACCESS_KEY"})
+        self.assertEqual(set(self.job["env"]), {"GH_TOKEN", "ISSUE_NUMBER", "DRY_RUN", "DEFAULT_BRANCH"})
+        self.assertEqual(self.job["env"]["GH_TOKEN"], "${{ secrets.GITHUB_TOKEN }}")
+        for step in self.steps:
+            if step is not edit:
+                self.assertNotIn("secrets.", json.dumps(step, ensure_ascii=False), step.get("name"))
+
+    def test_the_code_that_runs_is_always_the_default_branch(self):
+        checkout = next(step for step in self.steps if str(step.get("uses", "")).startswith("actions/checkout"))
+        self.assertEqual(checkout["with"]["ref"], "${{ github.event.repository.default_branch }}")
+
+    def test_the_pr_step_stages_only_the_listed_files_verifies_them_and_never_force_pushes(self):
+        script = self.step_with("gh pr create")["run"]
+        self.assertIn("set -euo pipefail", script)
+        self.assertIn('while IFS= read -r f; do git add -- "$f"; done < "$out/files.txt"', script)
+        self.assertNotRegex(script, r"git add\s+(?:-A|--all|-u|\.)")
+        self.assertLess(script.index("--verify-staged"), script.index("git commit"))
+        self.assertLess(script.index("git commit"), script.index("git push"))
+        self.assertEqual(script.count("git push"), 1)
+        self.assertIn('git push origin "$branch"', script)
+        self.assertNotRegex(script, r"git push[^\n]*(?:--force|--mirror|--delete|\s-f\b|\s\+)")
 
 
 if __name__ == "__main__":
