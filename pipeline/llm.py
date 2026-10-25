@@ -6,6 +6,8 @@
 import re
 import time
 
+from pipeline.secret_patterns import SECRET_PATTERNS
+
 
 class LLMError(RuntimeError):
     """모든 모델/재시도가 실패했을 때."""
@@ -16,7 +18,11 @@ _SECRET_RX = re.compile(r"(AIza[0-9A-Za-z_\-]{20,}|ya29\.[0-9A-Za-z_\-]{20,}|1//
 
 
 def mask(text):
-    return _SECRET_RX.sub("***", str(text))
+    """로그·이력에 쓰기 전에 비밀로 보이는 값을 가린다. 저장소 공용 패턴(secret_patterns)을 함께 쓴다(D-31)."""
+    out = _SECRET_RX.sub("***", str(text))
+    for _label, rx in SECRET_PATTERNS:
+        out = rx.sub("***", out)
+    return out
 
 
 def _is_transient(exc):

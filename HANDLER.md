@@ -12,14 +12,14 @@
 
 ---
 
-## 0. 현재 상태 한눈에 (2026-10-20 갱신)
+## 0. 현재 상태 한눈에 (2026-10-20 갱신, Chance 행·알려진 결함은 2026-10-25)
 
 > **다른 PC에서 이어받는 경우 → §10부터.** 파일을 메일·USB로 꺼낼 수 없어도 되도록 모든 작업물과 진행 기록은 이 저장소(`main`)에 있다.
 
 | 영역 | 상태 |
 |------|------|
 | 저장소·폴더 | 작업 PC는 `shine88pc/chanceblog` 공식 clone 1개로 정리 완료 (P0 ✅) |
-| Chance_Blog | 자동 생성 운영 중 (`chanceblog.yml` 매시 17분 실행, 게시 슬롯 KST 9·18시). AdSense 검토 대기 |
+| Chance_Blog | 자동 생성 운영 중 (`chanceblog.yml` 매시 17분 실행, 게시 슬롯 KST 9·18시). AdSense 검토 대기. 슬롯 시각이 된 실행 13회 중 2회만 글이 나왔고(10-20~25, D-03) 분야 폴백·건너뜀 사유 기록·종료 정책으로 완화했다 — 병합 뒤 첫 슬롯 실행에서 확인(`docs/DEFECT_REGISTER.md` 하단 체크리스트). 비기술 분야가 계속 비면 글은 기술·미래 분야에서만 나온다 |
 | Blogger 코드 | 완료 — `pipeline/`(레지스트리·게이트·어댑터·러너) + `blogger.yml` 매트릭스. 테스트·`actionlint` 통과 |
 | Blogger 실게시 | ⏳ 미완료 — ① OAuth 동의 화면 **"프로덕션"** 전환(테스트 상태면 토큰 7일 만료, D-11) ② refresh token 발급 ③ GitHub Secrets(`BLOGGER_*`) 등록 (§3 P1, §10) |
 | 풀오토 가이드 체계 | `AGENTS.md`(상시 규칙) · `docs/CHARTER`·`ARCHITECTURE`·`ENGINEERING_GUIDE`·`SECURITY_GUARDRAILS` · `docs/DEFECT_REGISTER`. 총괄 역할: Claude(2026-10-20) |
@@ -27,7 +27,7 @@
 | 이슈로 수정 요청 | 이슈 양식(고정 페이지 수정·게시글 이미지 변경) → `issue-edit.yml`이 **PR로** 올림, `pr-scope-check.yml`이 Copilot 등 모든 PR의 요청 범위를 검증. 사용법 `docs/COPILOT_GUIDE.md`, 구조 `docs/ISSUE_EDITS.md` (첫 실행 관측 필요) |
 | 작업요청서 | 저장소를 볼 수 없는 AI(모바일 Claude 등)에게 `docs/REQUEST_BRIEFING.md`를 통째로 붙여 넣으면 이 프로그램에 맞는 요청서를 만든다. 요청서는 `인수인계/작업요청/`에 올리거나 채팅에 붙여 넣는다. 처리 규칙은 그 폴더의 README |
 | 통합 성과 대시보드 | **제안 단계 — 사용자 결정 대기.** 블로그별 방문자·인기 글·AdSense 사이트별 수익을 한곳에서 보는 방안(Looker Studio 먼저). 검토 결과·결정 항목은 `docs/ANALYTICS_PLAN.md` §7. 결정 전에는 사이트에 GA 등을 설치하지 않는다(T3) |
-| 알려진 결함 | D-03 봇 글 0건(원인 미확인) · D-11 OAuth 7일 · D-08 내부 문서 공개 · D-15/D-16 Copilot PR 승인·PR 생성 설정(사용자 조치) — 상세는 `docs/DEFECT_REGISTER.md` (D-01 이슈 이미지 흐름은 `issue-edit`로 대체, 관측 대기) |
+| 알려진 결함 | D-03 봇 글이 슬롯 대부분에서 안 나옴(원인: 비기술 분야 후보 0건 + 대체 분야 시도 없음 → 폴백으로 완화, 비기술 분야 후보 부족은 열림) · D-11 OAuth 7일 · D-08 내부 문서 공개 · D-15/D-16 Copilot PR 승인·PR 생성 설정(사용자 조치) — 상세는 `docs/DEFECT_REGISTER.md` (D-01 이슈 이미지 흐름은 `issue-edit`로 대체, 관측 대기) |
 | Blogger 워크플로 | 스케줄 실행 이력 없음. 첫 실행은 2026-10-21 02:00 UTC(KST 11시) 예정 |
 | 비밀 파일 | `client_secret.json`은 저장소에 없음 (`.gitignore`로 차단) |
 | 자동 push 스크립트 | `auto_sync.bat` 제거됨. 같은 동작 재도입 금지 |
@@ -139,7 +139,7 @@ Secrets (API 선택 시):
 - `Blogger Generate` 첫 실행 결과 확인 (Actions 탭 → Run workflow, 처음에는 `dry_run` 체크)
 - `feature/image-fix-20261019-0000`·`backup/issue-template-$TS` 브랜치를 지울지 결정 (사용자) — §11
 - 풀오토 로드맵(Phase 1~4)과 완료 기준: `docs/ARCHITECTURE.md` §8
-- 결함 D-03(봇 글 0건 원인)·D-08(내부 문서 공개): `docs/DEFECT_REGISTER.md`
+- 결함 D-03(봇 글이 안 나온 원인과 완화)·D-08(내부 문서 공개): `docs/DEFECT_REGISTER.md`
 - 이슈 수정 시스템 첫 실행 관측 + 저장소 설정 1회(Allow GitHub Actions to create and approve pull requests): `docs/ISSUE_EDITS.md` §6
 - 통합 성과 대시보드: 사용자 결정(`docs/ANALYTICS_PLAN.md` §7) 후 Phase A(Looker Studio, 코드 없음) → 필요하면 Phase B(비공개 저장소 수집기). 수익·방문 수치는 공개 저장소에 올리지 않는다(G-O7)
 
@@ -289,7 +289,7 @@ VS Code:
    2. `pip install google-auth-oauthlib` 후 `python scripts/get_blogger_token.py`를 실행한다 (브라우저에서 Google 동의).
    3. 출력된 `BLOGGER_CLIENT_ID`·`BLOGGER_CLIENT_SECRET`·`BLOGGER_REFRESH_TOKEN`과 Blogger 설정의 `BLOGGER_BLOG_ID`를 GitHub **Settings → Secrets and variables → Actions**에 등록한다. 값은 채팅·저장소·메일에 남기지 않는다.
    4. Actions → **Blogger Generate** → Run workflow로 첫 실행을 확인한다. 처음에는 `publish`를 체크하지 말고 초안 결과부터 본다.
-6. 작업 중에는 `git add`를 파일을 지정해서 하고, push 전에 `git status`로 비밀 파일이 없는지 확인한다. `.gitignore`가 `client_secret*.json`·`token*.json`·`.env`를 막아 준다.
+6. 작업 중에는 `git add`를 파일을 지정해서 하고, push 전에 `git status`로 비밀 파일이 없는지 확인한다. `.gitignore`가 `client_secret*.json`·`token*.json`·`.env*`·키 파일(`*.pem`·`*.key` 등)·서비스 계정 JSON을 막아 준다(이름 규칙이라 `123.txt` 같은 일반 이름은 못 막는다 — CI의 검증기 SEC-2가 사후에 잡는다).
 7. 작업 후: WORKLOG.md 최상단 기록 → 커밋(AI 이름·대상 명시) → `git pull --rebase origin main` → push.
 
 **저장소에 없는 것**: `client_secret.json`, refresh token, API 키. `GEMINI_API_KEY`·`UNSPLASH_ACCESS_KEY`·`BLOGGER_*`는 GitHub Secrets에만 있으며, 새 PC에서 필요하면 다시 준비한다.

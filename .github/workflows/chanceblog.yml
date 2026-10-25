@@ -2,8 +2,9 @@ name: Chance_Blog Full-Auto Engine
 
 on:
   schedule:
-    # 매시 17분(UTC). 게시 시각(KST 9/18시)은 generator.py의 SLOT_HOURS로 판단하며,
-    # 실행이 지연/누락돼도 다음 시간 실행이 해당 시각 글을 보충한다.
+    # 매시 17분(UTC)으로 지정하지만 GitHub 스케줄은 지연·누락이 잦아 실제로는 하루 5회 안팎(실측 3~6시간 간격)이다.
+    # 게시 시각(KST 9/18시)은 generator.py의 SLOT_HOURS로 판단하며, 실행이 늦거나 빠져도
+    # 다음 실행이 그 시각 글을 보충한다.
     - cron: '17 * * * *'
   # 이슈 기반 수정 요청은 issue-edit.yml 이 처리한다(D-01: 옛 LLM 파일 편집 핸들러는 제거함)
   workflow_dispatch:
@@ -48,6 +49,8 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '1' || '0' }}
           FIX_IMAGES: ${{ github.event_name == 'workflow_dispatch' && inputs.fix_images && '1' || '0' }}
+          # 킬 스위치: 저장소 Settings > Variables 에 PIPELINE_PAUSE=true 를 넣으면 글 생성을 멈춘다(blogger.yml 과 같은 변수)
+          PIPELINE_PAUSE: ${{ vars.PIPELINE_PAUSE }}
         run: python generator.py
 
       - name: 변경 사항 커밋
@@ -59,11 +62,13 @@ jobs:
           git add -A
           if git diff --cached --quiet; then
             echo "커밋할 변경 없음"
+            echo "- 커밋: 없음(변경된 파일이 없습니다)" >> "$GITHUB_STEP_SUMMARY"
           else
             git commit -m "🤖 자동 포스팅/이미지 수정"
             git pull --rebase origin "${GITHUB_REF_NAME}"
             git push
             echo "pushed=true" >> "$GITHUB_OUTPUT"
+            echo "- 커밋: $(git rev-parse --short HEAD) — ${GITHUB_REF_NAME} 브랜치에 push함" >> "$GITHUB_STEP_SUMMARY"
           fi
 
       # GITHUB_TOKEN 으로 push 한 커밋은 push 이벤트를 만들지 않아 pages.yml 이 자동 실행되지 않는다.
@@ -72,4 +77,8 @@ jobs:
         if: steps.commit.outputs.pushed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh workflow run pages.yml --ref "${GITHUB_REF_NAME}"
+        run: |
+          # 오래된 gh 는 터미널이 아니면 실행 주소를 출력하지 않는다 → 비어 있어도 요약이 끊기지 않게 한다.
+          deploy=$(gh workflow run pages.yml --ref "${GITHUB_REF_NAME}")
+          echo "$deploy"
+          echo "- Pages 배포 실행 요청: ${deploy:-요청함}" >> "$GITHUB_STEP_SUMMARY"
