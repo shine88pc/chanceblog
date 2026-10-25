@@ -5,6 +5,7 @@
 - AI 실패 원인은 마스킹·300자 제한으로 러너 로그에만(공개 코멘트·result.json 에는 없다)
 - 공개 코멘트에 되풀이되는 AI·요청 유래 텍스트는 코드 스팬, PR 본문 diff 는 내용보다 긴 틸드 펜스
 """
+import ast
 import contextlib
 import inspect
 import io
@@ -21,7 +22,7 @@ from unittest import mock
 
 import _bootstrap  # noqa: F401
 import generator
-from edits_helpers import ABOUT, image_body, img, issue, make_edit_root, page_body, post_text, write
+from edits_helpers import ABOUT, REAL, image_body, img, issue, make_edit_root, page_body, post_text, write
 from pipeline.edits import checks, ops, runner, safety, scope_check
 from test_edits_runner import NEW_SENTENCE, OLD_SENTENCE, RunnerBase, llm_returning
 
@@ -98,6 +99,15 @@ class NeutralizeTest(unittest.TestCase):
                 self.assertLessEqual(len(out), limit, (text[:12], limit))
                 self.assertEqual(bad_lines(out), [])
         self.assertEqual(len(safety.log_text("a" * 296 + "##[b", 300)), 300)
+
+    def test_default_length_limits(self):
+        """검증자 X07·X08·C05: 호출부가 한도를 적지 않을 때의 기본 한도(one_line·code 90, log_text 300, scope_check._flat 400)."""
+        self.assertEqual(len(safety.one_line("가" * 500)), 90)
+        self.assertEqual(len(safety.code("가" * 500)), 90 + 2)                    # 코드 스팬의 백틱 두 개는 한도 밖
+        self.assertEqual(len(safety.log_text("가" * 1000)), 300)
+        self.assertEqual(len(scope_check._flat("가" * 1000)), 400)
+        self.assertEqual(len(safety.clip("가" * 1000, 77)), 77)
+        self.assertEqual(len(scope_check._flat("가" * 1000, 120)), 120)
 
     def test_a_secret_cut_by_the_length_limit_is_still_hidden(self):
         """검증자 V16: 자른 뒤에 가리면 경계에 걸린 키의 앞부분(패턴이 못 알아보는 길이)이 그대로 남는다. 먼저 가리고 자른다."""
@@ -471,6 +481,63 @@ class UnexpectedFailureTest(RunnerBase):
                 with self.assertRaises(type(exc)):
                     run_main(self.root, issue(page_body(before=OLD_SENTENCE, after=NEW_SENTENCE)))
 
+    def test_assertions_and_skips_raised_inside_a_test_pass_through_the_catch_all(self):
+        """검증자 N-8: 러너를 거치는 시험의 단언·건너뛰기가 '처리 중 오류' 결과로 가려지면 시험이 실패·건너뜀을 보지 못한다."""
+        class MyAssertion(AssertionError):
+            pass
+        for exc in (AssertionError("단언"), MyAssertion("하위 클래스"), unittest.SkipTest("건너뜀")):
+            with mock.patch.object(runner, "process_issue", side_effect=exc):
+                with self.assertRaises(type(exc), msg=repr(exc)):
+                    run_main(self.root, issue(page_body(before=OLD_SENTENCE, after=NEW_SENTENCE)))
+        for exc in (RuntimeError("x"), ValueError("x"), KeyError("x"), OSError("x"), ZeroDivisionError("x")):     # 그 밖의 예외는 여전히 오류 결과로
+            with mock.patch.object(runner, "process_issue", side_effect=exc):
+                code, _out, files = run_main(self.root, issue(page_body(before=OLD_SENTENCE, after=NEW_SENTENCE)))
+            self.assertEqual((code, files["status.txt"].strip()), (runner.EXIT_INFRA, "error"), repr(exc))
+
+    def test_the_edit_pipeline_code_uses_no_assert_statements(self):
+        """N-8 의 맞교환: 러너가 AssertionError 를 다시 던지므로 운영 코드의 assert 가 실패하면 오류 결과가 아니라 트레이스백(요청 유래 문구가 섞일 수 있다)이 나간다.
+        그래서 이 파이프라인의 코드에는 assert 문을 쓰지 않는다(조건이 틀리면 예외를 직접 던진다)."""
+        found = []
+        for path in sorted((REAL / "pipeline" / "edits").glob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            found += [f"{path.name}:{node.lineno}" for node in ast.walk(tree) if isinstance(node, ast.Assert)]
+        self.assertEqual(found, [], "pipeline/edits 의 운영 코드에 assert 문이 있다 — 예외를 직접 던질 것")
+
+    def test_the_crash_site_is_logged_without_the_exception_message(self):
+        """검증자 N-5: 클래스 이름만으로는 원인 추적이 어렵다 — 난 곳(파일:줄 함수)을 러너 로그에만 낸다. 예외 문구는 싣지 않는다."""
+        def exploding(*args, **kwargs):
+            raise RuntimeError(self.BOOM)
+        with mock.patch.object(runner, "process_issue", exploding):
+            code, out, files = run_main(self.root, issue(page_body(before=OLD_SENTENCE, after=NEW_SENTENCE)))
+        self.assertEqual(code, runner.EXIT_INFRA)
+        detail = [line for line in out.splitlines() if "원인(로그 전용)" in line]
+        self.assertEqual(len(detail), 1, out)
+        self.assertRegex(detail[0], r"원인\(로그 전용\): RuntimeError 난 곳 \S*test_edits_logging\.py:\d+ exploding ← \S*runner\.py:\d+ main")
+        for fragment in (FAKE_KEY, "요청문 전문", "evil.example", "::warning::", "##[", "AIza"):
+            self.assertNotIn(fragment, detail[0])
+        self.assertNotRegex(detail[0].split("난 곳 ", 1)[1], r"(?:^|\s)(?:[A-Za-z]:)?[\\/]")   # 절대 경로(`/home/…`·`C:\…`)가 아니다
+        for name, text in files.items():                                           # 공개 코멘트·산출물에는 위치도 없다
+            self.assertNotIn("test_edits_logging.py", text, name)
+            self.assertNotIn("exploding", text, name)
+
+    def test_crash_site_uses_repo_relative_paths_and_only_the_innermost_frames(self):
+        def level(n):
+            if n == 0:
+                raise ValueError("문구는 싣지 않는다 ::warning::x")
+            level(n - 1)
+        try:
+            level(8)
+        except ValueError as exc:
+            site = runner._crash_site(exc, REAL)
+            few = runner._crash_site(exc, REAL, limit=2)
+        self.assertTrue(site.startswith("ValueError 난 곳 tests/test_edits_logging.py:"), site)
+        self.assertEqual(site.count(" ← "), 3)                                      # 가장 안쪽 4개 프레임
+        self.assertEqual(few.count(" ← "), 1)
+        self.assertEqual(site.count(" level"), 4)
+        self.assertNotIn("문구", site)
+        self.assertNotIn("::warning::", site)
+        self.assertNotRegex(site, r"(?:^|\s)(?:[A-Za-z]:)?[\\/]")                  # 절대 경로(`/home/…`·`C:\…`)가 아니다
+
     def test_malformed_post_addresses_are_rejected_not_crashes(self):
         """검증자 F-6: 게시글 주소 `http://[::1`·`https://[` 는 urlsplit 이 ValueError 를 내 러너가 트레이스백으로 죽었다."""
         for address in ("http://[::1", "https://[", "http://[", "https://example.com\N{FULLWIDTH SOLIDUS}path", "http://\N{ACCOUNT OF}/"):
@@ -701,23 +768,48 @@ class ImagePickerLogTest(RunnerBase):
         self.assertEqual(len(two), 2)                                             # 같은 코드는 한 번만, 다른 코드는 따로
         self.assertTrue(two[0].startswith("Unsplash API 오류 403") and two[1].startswith("Unsplash API 오류 429"))
 
-    def test_picker_is_silent_and_restores_stdout_even_when_the_search_raises(self):
-        notes, outer = [], io.StringIO()
+    def test_picker_is_silent_and_restores_stdout_and_stderr_even_when_the_search_raises(self):
+        notes, out_outer, err_outer = [], io.StringIO(), io.StringIO()
         with mock.patch.dict(os.environ, {"UNSPLASH_ACCESS_KEY": FAKE_UNSPLASH_KEY}):
             def noisy(queries, used, count=1, allow_pool=False):
                 print("  이미지 선택 (query='##[error]x'): https://images.unsplash.com/photo-1")
+                print("::warning::stderr 경고 ##[error]y", file=sys.stderr)
                 raise RuntimeError("boom")
-            with mock.patch.object(generator, "pick_images", noisy), contextlib.redirect_stdout(outer):
+            with mock.patch.object(generator, "pick_images", noisy), contextlib.redirect_stdout(out_outer), contextlib.redirect_stderr(err_outer):
                 picker = runner.default_image_picker(notes)
-                inner_stdout = sys.stdout
+                inner_stdout, inner_stderr = sys.stdout, sys.stderr
                 with self.assertRaises(RuntimeError):
                     picker(["q"], set())
                 self.assertIs(sys.stdout, inner_stdout)                             # 가둔 뒤 되돌려 놓았다
+                self.assertIs(sys.stderr, inner_stderr)
             quiet = runner.default_image_picker()                                    # notes 를 받지 않아도 조용하다
-            with mock.patch.object(generator, "pick_images", lambda *a, **k: print("x ##[y]") or []), contextlib.redirect_stdout(outer):
+
+            def chatty(*args, **kwargs):
+                print("x ##[y]")
+                print("::warning::z", file=sys.stderr)
+                return []
+            with mock.patch.object(generator, "pick_images", chatty), contextlib.redirect_stdout(out_outer), contextlib.redirect_stderr(err_outer):
                 self.assertIsNone(quiet(["q"], set()))
-        self.assertEqual(outer.getvalue(), "")
-        self.assertEqual(len(notes), 1)                                              # 실패 직전까지 나온 출력은 요약되어 남는다
+        self.assertEqual((out_outer.getvalue(), err_outer.getvalue()), ("", ""))
+        self.assertEqual(len(notes), 1)                                              # 실패 직전까지 나온 stdout·stderr 두 줄은 한 줄 요약으로 남는다
+        self.assertIn("그 밖의 출력 2줄", notes[0])
+
+    def test_stderr_of_the_search_never_reaches_the_runner_log_either(self):
+        """검증자 N-3: generator(또는 그것이 부르는 라이브러리)가 stderr 로 쓰는 `::warning::` 줄이 태그 없이 새는 합성 시나리오."""
+        def noisy(queries, used, count=1, allow_pool=False):
+            print("::warning::stdout 에서 온 경고")
+            print("::warning::stderr 에서 온 경고 ##[add-mask]NOTASECRET @everyone", file=sys.stderr)
+            return [self.PHOTO]
+        iss = issue(image_body("첫 번째 글 제목입니다", self.DESCRIPTION), labels=("blog-control", "edit:image"), title="[이미지 변경] x")
+        err = io.StringIO()
+        with mock.patch.object(generator, "pick_images", noisy), mock.patch.object(generator, "trigger_download", lambda url: None), \
+                contextlib.redirect_stderr(err):
+            code, out, _files = run_main(self.root, iss, ["--dry-run"], env={"UNSPLASH_ACCESS_KEY": FAKE_UNSPLASH_KEY})
+        self.assertEqual(code, 0, out)
+        self.assertEqual(err.getvalue(), "")                                         # 진짜 stderr 로 아무것도 나가지 않았다
+        self.assertTrue(out.splitlines()[0].startswith(f"{self.TAG} status=ok"), out)
+        self.assertQuiet(out)
+        self.assertTrue(any("그 밖의 출력 2줄" in line for line in out.splitlines()), out)
 
 
 if __name__ == "__main__":

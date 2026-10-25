@@ -8,12 +8,12 @@ CLI: python -m pipeline.edits.runner --issue-file issue.json --out DIR [--dry-ru
      python -m pipeline.edits.runner --verify-staged DIR/files.txt   (스테이징 목록 == 허용 목록 확인)
      python -m pipeline.edits.runner --show-output DIR                (DRY_RUN: 산출물을 워크플로 명령이 먹히지 않게 로그에 출력)
 로그 정책: 이슈를 처리하는 단계(--issue-file)가 내는 줄은 모두 `issue=#N author=@login(권한)` 으로 시작하고, 요청 원문·페이지 원문·프롬프트·비밀·예외 원문은 내지 않는다.
-(이미지 선택기가 부르는 레거시 엔진 generator.py 는 검색어를 print 하므로 호출 동안 stdout 을 가두고 `image_search_notes` 의 요약만 이 형식으로 낸다.)
+(이미지 선택기가 부르는 레거시 엔진 generator.py 는 검색어를 print 하므로 호출 동안 stdout·stderr 를 가두고 `image_search_notes` 의 요약만 이 형식으로 낸다.)
 
 한 이슈는 한 번만 처리한다: --remote-refs 에 이 이슈 번호의 원격 브랜치가 있거나 이슈에 표식 라벨(issue-edit-done)이 있으면
 새 브랜치·PR 없이 코멘트용 결과(duplicate)만 만든다(dry-run 은 예외).
 
-종료 코드: 0 처리 끝(ok·rejected·ignored·duplicate 포함) / 1 인프라 실패(AI·네트워크) / 2 설정·명세 오류
+종료 코드: 0 처리 끝(ok·rejected·ignored·duplicate 포함) / 1 인프라 실패(AI·네트워크)와 예상하지 못한 오류(`main` 이 잡아 status=error 로 남긴다) / 2 설정·명세 오류
 """
 import argparse
 import contextlib
@@ -25,6 +25,7 @@ import re
 import secrets
 import subprocess
 import sys
+import traceback
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from urllib.parse import quote
@@ -141,6 +142,25 @@ def _error(message, exit_code=EXIT_INFRA, log_detail=""):
     message = _one_line(message, 400, markdown=True)
     comment =f"❌ **처리 중 오류가 발생했습니다.**\n\n- {message}\n\n저장소는 변경되지 않았습니다. Actions 로그를 확인하세요."
     return Result("error", message=message, reasons=[message], comment=comment, exit_code=exit_code, log_detail=log_detail)
+
+
+def _is_test_signal(exc):
+    """시험(unittest)이 러너를 거치며 던지는 단언·건너뛰기·중단 신호인지. 이것까지 '처리 중 오류'로 바꾸면 시험이 실패·건너뜀을 보지 못한다.
+    unittest 를 import 하지 않고 예외 클래스가 정의된 모듈로 알아본다(SkipTest·_ShouldStop·_UnexpectedSuccess 는 모두 unittest.case)."""
+    return isinstance(exc, AssertionError) or type(exc).__module__ == "unittest.case"
+
+
+def _crash_site(exc, root, limit=4):
+    """예상하지 못한 예외가 난 곳: `예외종류 난 곳 파일:줄 함수 ← …`(가장 안쪽 limit 개 프레임). 러너 로그 전용이다.
+    예외 문구는 요청 유래 텍스트가 섞일 수 있어 싣지 않는다 — 파일 경로·줄 번호·함수 이름은 소스 코드의 것이다."""
+    sites = []
+    for frame in reversed(traceback.extract_tb(exc.__traceback__)[-limit:]):
+        try:
+            where = Path(frame.filename).resolve().relative_to(Path(root).resolve()).as_posix()
+        except (ValueError, OSError):    # 저장소 밖의 파일(표준 라이브러리 등)은 끝의 두 경로 조각만
+            where = "/".join(Path(frame.filename).parts[-2:])
+        sites.append(f"{where}:{frame.lineno} {frame.name}")
+    return f"{type(exc).__name__} 난 곳 " + " ← ".join(sites)
 
 
 def _clean_token(value, allowed, limit):
@@ -285,7 +305,8 @@ def default_image_picker(notes=None):
     """레거시 엔진의 Unsplash 검색을 재사용한다(Phase 3에서 pipeline 으로 이관).
 
     generator.py 는 검색어·후보 주소를 print 한다. 그 줄은 `issue=#N` 머리가 없고 `##[` 도 막지 못하며 검색어에 요청 원문이 그대로 들어갈 수
-    있다(AI 가 없으면 검색어 = 요청문). 그래서 호출 동안 stdout 을 가두고, 로그에는 `image_search_notes` 가 요약한 문장만 notes 로 넘긴다."""
+    있다(AI 가 없으면 검색어 = 요청문). 그래서 호출 동안 stdout·stderr 를 가두고(stderr 로 나가는 `::warning::` 같은 줄도 같은 경로), 로그에는
+    `image_search_notes` 가 요약한 문장만 notes 로 넘긴다."""
     if not (os.environ.get("UNSPLASH_ACCESS_KEY") or "").strip():
         return None
     import generator  # noqa: PLC0415 - 환경변수를 읽는 모듈이라 키 확인 뒤에만 import
@@ -293,7 +314,7 @@ def default_image_picker(notes=None):
     def pick(queries, used):
         captured = io.StringIO()
         try:
-            with contextlib.redirect_stdout(captured):
+            with contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):
                 picked = generator.pick_images(queries, set(used), 1, allow_pool=False)
                 if picked:
                     generator.trigger_download(picked[0])
@@ -594,9 +615,11 @@ def main(argv=None):
             try:
                 result = process_issue(issue, root, dry_run=dry, remote_refs=refs)
             except Exception as exc:  # noqa: BLE001 - 예상 못 한 입력으로 처리기가 죽어도 트레이스백 대신 오류 결과를 남긴다
+                if _is_test_signal(exc):
+                    raise    # 러너를 거치는 시험의 단언·건너뛰기는 오류 결과로 가리지 않는다
                 # 트레이스백에는 요청 유래 문구(예: urlsplit 의 값)가 섞일 수 있고 status.txt 도 없어 워크플로가 코멘트를 남기지 못한다.
-                # 예외 문구는 쓰지 않고 종류(클래스 이름)만 낸다.
-                result = _error(f"이슈를 처리하다 예상하지 못한 오류가 발생했습니다: {type(exc).__name__}")
+                # 예외 문구는 쓰지 않고 종류(클래스 이름)만 공개 코멘트에 내고, 난 곳(파일:줄 함수)은 러너 로그에만 낸다.
+                result = _error(f"이슈를 처리하다 예상하지 못한 오류가 발생했습니다: {type(exc).__name__}", log_detail=_crash_site(exc, root))
     write_outputs(result, args.out)
     # 이슈 처리 단계가 내는 모든 줄은 `issue=#N author=@login(권한)` 으로 시작하고, 신뢰할 수 없는 문자열은 한 줄로 접어 비밀을 가리고
     # 워크플로 명령 모양(`::`·`##[`)을 무력화한 것만 쓴다.
