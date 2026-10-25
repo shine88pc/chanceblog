@@ -4,12 +4,15 @@ git·PR 은 이 모듈이 하지 않는다(워크플로가 한다). 이 모듈�
 워크플로가 쓸 파일(result.json, files.txt, commit_msg.txt, pr_title.txt, pr_body.md, comment.md …)을 --out 폴더에 쓴다.
 `resolve_request` 는 '요청이 무엇을 허용하는가'만 해석하므로 PR 범위 검증(scope_check)도 같은 기준을 쓴다.
 
-CLI: python -m pipeline.edits.runner --issue-file issue.json --out DIR [--dry-run]
+CLI: python -m pipeline.edits.runner --issue-file issue.json --out DIR [--dry-run] [--remote-refs refs.txt]
      python -m pipeline.edits.runner --verify-staged DIR/files.txt   (스테이징 목록 == 허용 목록 확인)
      python -m pipeline.edits.runner --show-output DIR                (DRY_RUN: 산출물을 워크플로 명령이 먹히지 않게 로그에 출력)
 로그 정책: 러너가 내는 줄은 모두 `issue=#N author=@login(권한)` 으로 시작하고, 요청 원문·페이지 원문·프롬프트·비밀·예외 원문은 내지 않는다.
 
-종료 코드: 0 처리 끝(ok·rejected·ignored 포함) / 1 인프라 실패(AI·네트워크) / 2 설정·명세 오류
+한 이슈는 한 번만 처리한다: --remote-refs 에 이 이슈 번호의 원격 브랜치가 있거나 이슈에 표식 라벨(issue-edit-done)이 있으면
+새 브랜치·PR 없이 코멘트용 결과(duplicate)만 만든다(dry-run 은 예외).
+
+종료 코드: 0 처리 끝(ok·rejected·ignored·duplicate 포함) / 1 인프라 실패(AI·네트워크) / 2 설정·명세 오류
 """
 import argparse
 import json
@@ -21,6 +24,7 @@ import subprocess
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from urllib.parse import quote
 
 from pipeline import registry as registry_mod
 from pipeline.console import safe_output
@@ -28,11 +32,17 @@ from pipeline.edits import checks, forms, frontmatter, ops, pages, safety, spec 
 
 MAX_FIELD_CHARS = 5000
 EXIT_OK, EXIT_INFRA, EXIT_CONFIG = 0, 1, 2
+# 이슈 번호: 1~999999999, 앞자리 0 없음. 워크플로 첫 단계의 정규식(`^…$`)과 같아야 한다(테스트가 대조).
+# 앞자리 0 을 허용하면 `012` 로는 브랜치 패턴 `issue-edit/012-*` 가 `issue-edit/12-…` 와 맞지 않아 재처리 확인을 우회한다.
+ISSUE_NUMBER_PATTERN = r"[1-9][0-9]{0,8}"
+DONE_LABEL = "issue-edit-done"         # 처리를 끝낸(브랜치·PR 을 만든) 이슈에 붙이는 표식 라벨(브랜치는 병합 뒤 지워질 수 있어 지속 표식)
+REF_HEADS = "refs/heads/"
+DEFAULT_BRANCH_PREFIX = "issue-edit/"
 
 
 @dataclass
 class Result:
-    status: str                       # ok | rejected | ignored | error
+    status: str                       # ok | rejected | ignored | error | duplicate(이미 처리한 이슈 — 코멘트만)
     message: str = ""
     reasons: list = field(default_factory=list)
     exit_code: int = EXIT_OK
@@ -48,6 +58,16 @@ class Result:
     comment: str = ""
     notes: list = field(default_factory=list)   # 러너 로그에만 쓰는 참고 문장(공개 코멘트에는 쓰지 않는다)
     log_detail: str = ""                        # 러너 로그에만 쓰는 (마스킹된) 실패 원인. result.json 에도 쓰지 않는다
+
+
+@dataclass(frozen=True)
+class Processed:
+    """이미 처리한 이슈라는 근거: 기존 브랜치 이름들과 표식 라벨 유무. 근거가 하나라도 있으면 참이다."""
+    branches: tuple = ()
+    labeled: bool = False
+
+    def __bool__(self):
+        return bool(self.branches) or self.labeled
 
 
 @dataclass
@@ -139,6 +159,79 @@ def issue_tag(issue):
     return f"issue=#{n} author=@{_login(issue)}({_clean_token(issue.get('author_association'), 'A-Za-z_', 30).upper()})"
 
 
+# ----------------------------------------------------------------------------
+# 한 이슈는 한 번만 (재처리 방지)
+# ----------------------------------------------------------------------------
+def valid_issue_number(value):
+    """이슈 번호 형식이 올바르면 정수, 아니면 None(정수 또는 숫자 문자열만, bool 불가)."""
+    if isinstance(value, bool):
+        return None
+    text = str(value) if isinstance(value, int) else value
+    if isinstance(text, str) and re.fullmatch(ISSUE_NUMBER_PATTERN, text):
+        return int(text)
+    return None
+
+
+def already_processed(number, refs=(), labels=(), prefix=DEFAULT_BRANCH_PREFIX, done_label=DONE_LABEL):
+    """이 이슈를 이미 처리했는지(순수 함수, I/O 없음) → Processed(참이면 이미 처리함).
+
+    근거 둘 중 하나면 처리한 것이다: ① 원격 브랜치 `refs/heads/<prefix><번호>-…` 가 있다 ② 표식 라벨(done_label)이 붙어 있다
+    (브랜치는 병합 뒤 지워질 수 있어 라벨이 지속 표식이다).
+    refs 는 `git ls-remote --heads` 출력 줄(`<sha>\\t<ref>`) 또는 ref 이름의 목록(문자열 하나도 가능). 앞부분을 고정한 전체 접두사
+    (`refs/heads/issue-edit/12-`)로만 비교하므로 번호 경계(1·12·120)와 다른 경로(`feature/issue-edit/12-…`·태그)를 구분한다."""
+    n = valid_issue_number(number)
+    if n is None:
+        return Processed()
+    if isinstance(refs, str):
+        refs = refs.splitlines()
+    wanted = f"{REF_HEADS}{prefix}{n}-"
+    branches = set()
+    for line in refs or ():
+        parts = str(line).split()
+        if parts and parts[-1].startswith(wanted):
+            branches.add(parts[-1][len(REF_HEADS):])
+    names = {(item.get("name") if isinstance(item, dict) else str(item)) for item in (labels or ())}
+    return Processed(tuple(sorted(branches)), done_label in names)
+
+
+def _branch_prefix(root):
+    """명세의 브랜치 접두사(읽을 수 없으면 기본값 — 명세 오류는 이어지는 resolve_request 가 알린다)."""
+    try:
+        prefix = spec_mod.load_spec(root).get("output", {}).get("branch_prefix")
+    except spec_mod.SpecError:
+        prefix = None
+    return prefix if isinstance(prefix, str) and prefix else DEFAULT_BRANCH_PREFIX
+
+
+def _duplicate(issue, done, env):
+    """이미 처리한 이슈: 새 브랜치·PR 없이 이슈에 알리는 결과(status=duplicate)."""
+    items = []
+    repo, base = str(env.get("GITHUB_REPOSITORY", "")), str(env.get("DEFAULT_BRANCH", ""))
+    can_link = bool(re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo) and re.fullmatch(r"[A-Za-z0-9_./-]{1,100}", base))
+    for branch in done.branches[:5]:
+        item = f"- 기존 브랜치: {_code(branch, 120)}"
+        if can_link:
+            item += f" — [비교·PR 만들기](https://github.com/{repo}/compare/{base}...{quote(branch, safe='/-._~')}?expand=1)"
+        items.append(item)
+    if done.labeled:
+        items.append(f"- 처리 표식 라벨 {_code(DONE_LABEL)} 이(가) 붙어 있습니다.")
+    message = "같은 이슈를 두 번 처리하지 않으므로 새 브랜치·PR 을 만들지 않았습니다."
+    comment = (f"ℹ️ **이미 처리한 이슈입니다.** {message}\n\n" + "\n".join(items) + "\n\n"
+               "PR 은 이슈 화면의 연결된 PR 이나 Pull requests 탭에서 위 브랜치 이름으로 찾을 수 있습니다. "
+               "이슈를 고쳐 쓰거나 다시 열어도 다시 처리되지 않습니다 — 수정이 더 필요하면 새 이슈로 올려 주세요.")
+    return Result("duplicate", message=message, reasons=[message], comment=comment)
+
+
+def _ignored(issue):
+    """처리 대상이 아닌 이슈(PR·권한 없는 작성자)면 ignored 결과, 아니면 None."""
+    if "pull_request" in issue:
+        return Result("ignored", message="PR 은 처리하지 않습니다.")
+    assoc = str(issue.get("author_association") or "").upper()
+    if assoc not in spec_mod.ALLOWED_ASSOCIATIONS:
+        return Result("ignored", message=f"작성자 권한({assoc or '알 수 없음'})이 없어 처리하지 않습니다.")
+    return None
+
+
 def build_llm(env, registry_models_):
     key = (env.get("GEMINI_API_KEY") or "").strip()
     if not key:
@@ -177,10 +270,9 @@ def resolve_request(issue, root):
     root = Path(root)
     login = _login(issue)   # 허용 문자만 남긴 값(커밋·PR 본문·로그에 그대로 들어가므로)
     assoc = str(issue.get("author_association") or "").upper()
-    if "pull_request" in issue:
-        return Result("ignored", message="PR 은 처리하지 않습니다.")
-    if assoc not in spec_mod.ALLOWED_ASSOCIATIONS:
-        return Result("ignored", message=f"작성자 권한({assoc or '알 수 없음'})이 없어 처리하지 않습니다.")
+    skipped = _ignored(issue)
+    if skipped:
+        return skipped
 
     try:
         spec = spec_mod.load_spec(root)
@@ -267,9 +359,28 @@ def check_mode(cfg):
 # ----------------------------------------------------------------------------
 # 본 처리
 # ----------------------------------------------------------------------------
-def process_issue(issue, root, env=None, llm=None, image_picker=None, dry_run=False):
+def process_issue(issue, root, env=None, llm=None, image_picker=None, dry_run=False, remote_refs=None):
+    """이슈 한 건을 처리한다. 이미 처리한 이슈(기존 브랜치·표식 라벨)면 코멘트용 결과(duplicate)만 돌려주고 아무것도 만들지 않는다.
+    dry_run 은 예외다(시험 반복용) — 처리는 계속하고 로그에 참고 문장만 남긴다. remote_refs: `git ls-remote --heads` 출력 줄 목록."""
     env = os.environ if env is None else env
     root = Path(root)
+    skipped = _ignored(issue)
+    if skipped:
+        return skipped
+    number = valid_issue_number(issue.get("number"))
+    if number is None:
+        return _error("이슈 번호가 올바르지 않습니다(1~999999999 의 숫자).", EXIT_CONFIG)
+    done = already_processed(number, remote_refs, issue.get("labels"), prefix=_branch_prefix(root))
+    if done and not dry_run:
+        return _duplicate(issue, done, env)
+    result = _process(issue, root, env, llm, image_picker, dry_run)
+    if done:
+        result.notes.append("이미 처리한 이슈이지만 dry-run 이라 처리를 계속했습니다"
+                            + (f"(기존 브랜치: {', '.join(done.branches)})" if done.branches else "(표식 라벨)"))
+    return result
+
+
+def _process(issue, root, env, llm, image_picker, dry_run):
     req = resolve_request(issue, root)
     if isinstance(req, Result):
         return req
@@ -411,6 +522,7 @@ def main(argv=None):
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--verify-staged")
     parser.add_argument("--show-output")
+    parser.add_argument("--remote-refs")   # `git ls-remote --heads origin 'refs/heads/issue-edit/<번호>-*'` 출력 파일(재처리 확인)
     args = parser.parse_args(argv)
     root = Path(args.root).resolve() if args.root else Path(__file__).resolve().parents[2]
 
@@ -430,7 +542,12 @@ def main(argv=None):
         issue = {}
         result = _error(f"이슈 데이터를 읽을 수 없습니다: {type(exc).__name__}", EXIT_CONFIG)
     else:
-        result = process_issue(issue, root, dry_run=dry)
+        try:
+            refs = Path(args.remote_refs).read_text(encoding="utf-8").splitlines() if args.remote_refs else None
+        except (OSError, UnicodeDecodeError) as exc:   # 목록을 못 읽으면 이미 처리했는지 알 수 없다 → 처리하지 않는다(fail closed)
+            result = _error(f"원격 브랜치 목록을 읽을 수 없습니다: {type(exc).__name__}", EXIT_CONFIG)
+        else:
+            result = process_issue(issue, root, dry_run=dry, remote_refs=refs)
     write_outputs(result, args.out)
     # 러너가 내는 모든 줄은 `issue=#N author=@login(권한)` 으로 시작하고, 신뢰할 수 없는 문자열은 한 줄로 접어 비밀을 가리고
     # 워크플로 명령 모양(`::`·`##[`)을 무력화한 것만 쓴다.
