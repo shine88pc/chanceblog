@@ -1,5 +1,6 @@
 import json
 import random
+import re
 import shutil
 import tempfile
 import unittest
@@ -8,7 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 import _bootstrap  # noqa: F401
-from pipeline import gates
+from pipeline import gates, registry
 from pipeline import run as run_mod
 from pipeline.llm import LLMError
 from pipeline.publishers.base import PublishError, PublishResult
@@ -18,6 +19,13 @@ REAL = _bootstrap.ROOT
 NOW = datetime(2026, 10, 21, 2, 0, tzinfo=timezone.utc)  # KST 2026-10-21 11:00
 FULL_ENV = {"GEMINI_API_KEY": "k", "BLOGGER_BLOG_ID": "123", "BLOGGER_CLIENT_ID": "cid",
             "BLOGGER_CLIENT_SECRET": "cs", "BLOGGER_REFRESH_TOKEN": "rt"}
+# 실제 워크플로(.github/workflows/blogger.yml)가 넘기는 이름. 레지스트리의 역할 이름(llm_api_key·blog_id·client_id·
+# client_secret·refresh_token)에 PIPELINE_SECRET_ 을 붙인 것이고, 값은 FULL_ENV 와 같다. BLOGGER_*·GEMINI_* 는 없다.
+WORKFLOW_ENV = {"PIPELINE_SECRET_LLM_API_KEY": FULL_ENV["GEMINI_API_KEY"],
+                "PIPELINE_SECRET_BLOG_ID": FULL_ENV["BLOGGER_BLOG_ID"],
+                "PIPELINE_SECRET_CLIENT_ID": FULL_ENV["BLOGGER_CLIENT_ID"],
+                "PIPELINE_SECRET_CLIENT_SECRET": FULL_ENV["BLOGGER_CLIENT_SECRET"],
+                "PIPELINE_SECRET_REFRESH_TOKEN": FULL_ENV["BLOGGER_REFRESH_TOKEN"]}
 # 게시하지 않고 초안만 만드는 실행(수동 실행에서 publish 를 끈 것과 같다). 게시용 시크릿이 필요 없다.
 NO_PUBLISH = {"BLOGGER_PUBLISH": "0"}
 PUBLISH_SECRET_NAMES = ("BLOGGER_BLOG_ID", "BLOGGER_CLIENT_ID", "BLOGGER_CLIENT_SECRET", "BLOGGER_REFRESH_TOKEN")
@@ -95,6 +103,34 @@ class FlowTest(RunBase):
         self.assertEqual((entry["blog"], entry["date"], entry["v"]), ("blogger_macat", "2026-10-21", 1))
         self.assertEqual(len(self.drafts()), 1)
         self.assertIn("status: posted", self.drafts()[0].read_text(encoding="utf-8"))
+
+    def test_workflow_secret_names_alone_are_enough_to_publish(self):
+        """실제 워크플로는 BLOGGER_*·GEMINI_API_KEY 가 아니라 PIPELINE_SECRET_<역할> 이름으로만 시크릿을 넘긴다. 그 이름만으로
+        사전 점검·LLM 키·게시자 생성이 모두 통과해 게시까지 가야 한다(다른 run 테스트는 전부 BLOGGER_* 이름을 직접 넣는다)."""
+        workflow = (REAL / ".github" / "workflows" / "blogger.yml").read_text(encoding="utf-8")
+        passed = set(re.findall(r"^\s+(PIPELINE_SECRET_[A-Z_]+):", workflow, re.M))
+        roles = registry.get_blog(registry.load_registry(REAL / "pipeline" / "blogs.json"), "blogger_macat")["secrets"]
+        self.assertEqual(passed, {"PIPELINE_SECRET_" + role.upper() for role in roles})  # 워크플로가 넘기는 이름 = 러너가 읽는 이름
+        self.assertEqual(passed, set(WORKFLOW_ENV))
+        seen, created = {}, []
+
+        class SpyPublisher(FakePublisher):
+            def __init__(self, blog_id, client_id, client_secret, refresh_token):
+                super().__init__()
+                seen["publisher"] = (blog_id, client_id, client_secret, refresh_token)
+                created.append(self)
+
+        def spy_llm_factory(api_key, models, max_retries=2):
+            seen["llm_key"] = api_key
+            return stub_llm
+        with mock.patch("pipeline.publishers.blogger.BloggerPublisher", SpyPublisher), \
+                mock.patch.object(run_mod, "make_gemini_llm", spy_llm_factory):
+            code, out = self.go(env=WORKFLOW_ENV, llm=None)     # llm=None: 러너가 키로 Gemini 호출 객체를 직접 만든다
+        self.assertEqual(code, 0, out)
+        self.assertEqual(seen["llm_key"], FULL_ENV["GEMINI_API_KEY"])
+        self.assertEqual(seen["publisher"], tuple(FULL_ENV[name] for name in PUBLISH_SECRET_NAMES))
+        self.assertEqual(len(created[0].published), 1)
+        self.assertEqual(self.history()[-1]["status"], "posted")
 
     def test_publish_target_without_publish_secrets_fails_before_any_llm_call(self):
         """D-25: 게시 대상인데 게시용 시크릿이 없으면 글을 만들기 전에 종료 2(빨강). 예전에는 초안만 저장하고 초록이었다."""
@@ -436,6 +472,81 @@ class VisibilityTest(RunBase):
         self.assertIn("SECRETS_MISSING", text)
         for name in PUBLISH_SECRET_NAMES:
             self.assertIn(name, text)
+
+    def test_missing_publish_secrets_are_reported_even_when_the_daily_cap_is_reached(self):
+        """사전 점검은 일일 상한보다 앞이다. 상한에 걸린 날은 초록으로 끝나 시크릿 누락이 가려지기 때문이다."""
+        (self.root / "blogger_history.json").write_text(
+            json.dumps([{"topic": "오늘 이미 만든 주제", "date": "2026-10-21", "status": "draft"}], ensure_ascii=False),
+            encoding="utf-8")
+        code, out = self.go(env=self.env(**FULL_ENV), publisher=FakePublisher())
+        self.assertIn("[SKIP] code=DAILY_CAP", out)                  # 전제: 시크릿이 있었다면 상한 도달로 건너뛴다
+        code, out = self.go(env=self.env(GEMINI_API_KEY="k"))
+        self.assertEqual(code, 2)
+        self.assertIn("[SKIP] code=SECRETS_MISSING", out)
+        self.assertNotIn("DAILY_CAP", out)
+
+    def test_missing_publish_secrets_stop_the_run_before_topic_expansion_calls_the_llm(self):
+        """시드를 다 써서 주제 확장 LLM 호출이 필요한 상황에서도 시크릿이 없으면 LLM 호출 0회로 종료 2."""
+        self.use_all_seeds()
+        calls = []
+
+        def spy(prompt):
+            calls.append(prompt)
+            return stub_llm(prompt)
+        code, out = self.go(env=self.env(GEMINI_API_KEY="k"), llm=spy)
+        self.assertEqual((code, calls), (2, []))
+        self.assertIn("[SKIP] code=SECRETS_MISSING", out)
+
+    def test_explicit_topic_does_not_bypass_the_publish_secret_check(self):
+        """--topic·BLOGGER_TOPIC(수동 지정)은 일일 상한만 건너뛴다. 게시 시크릿 점검은 그대로 한다."""
+        topic = "수동으로 지정한 오늘의 생활 습관 주제"
+        for label, extra, env in (("--topic", ["--topic", topic], {}), ("BLOGGER_TOPIC", [], {"BLOGGER_TOPIC": topic})):
+            with self.subTest(label):
+                pub = FakePublisher()
+                code, out = self.go(env=self.env(GEMINI_API_KEY="k", **env), publisher=pub, extra=extra)
+                self.assertEqual(code, 2)
+                self.assertIn("[SKIP] code=SECRETS_MISSING", out)
+                self.assertEqual((pub.published, self.history()), ([], []))
+
+    def test_missing_publish_secrets_are_reported_before_the_history_file_is_read(self):
+        """설정 오류(시크릿 누락)는 상태 파일(이력)을 읽기 전에 알린다. 이력이 깨져 있어도 같은 오류가 먼저 보인다."""
+        (self.root / "blogger_history.json").write_text("{not json", encoding="utf-8")
+        code, out = self.go(env=self.env(GEMINI_API_KEY="k"))
+        self.assertEqual(code, 2)
+        self.assertIn("[SKIP] code=SECRETS_MISSING", out)
+        self.assertEqual((self.root / "blogger_history.json").read_text(encoding="utf-8"), "{not json")  # 덮어쓰지 않음
+
+    def test_missing_llm_key_leaves_a_summary_with_the_secret_name(self):
+        out = []
+        code = run_mod.run(["--blog", "blogger_macat", "--root", str(self.root)], environ=self.env(**NO_PUBLISH), now=NOW,
+                           llm=None, rng=random.Random(1), out=out.append)
+        self.assertEqual(code, 2)
+        self.assertIn("SECRETS_MISSING", self.summary())
+        self.assertIn("GEMINI_API_KEY", self.summary())
+
+    def test_publish_failure_message_is_masked_in_the_log_the_history_and_the_summary(self):
+        leaked = ["ya29." + "x" * 30, "1//" + "y" * 30]  # 런타임에 조합한다(실제 비밀처럼 보이는 리터럴 금지)
+        pub = FakePublisher(fail=PublishError(f"token refresh failed: {leaked[0]} / {leaked[1]}", code="auth_failed"))
+        code, out = self.go(env=self.env(**FULL_ENV), publisher=pub)
+        self.assertEqual(code, 1)
+        self.assertIn("auth_failed", self.history()[-1]["reasons"][0])   # 원인 분류는 남는다
+        shown = out + json.dumps(self.history(), ensure_ascii=False) + self.summary()
+        for secret in leaked:
+            self.assertNotIn(secret, shown)
+
+    def test_gate_warning_annotation_is_a_fixed_sentence_without_the_rejection_reasons(self):
+        """탈락 사유(LLM 글에서 나온 문자열이 섞일 수 있다)는 로그 본문·요약·이력에만 두고 ::warning:: 주석에는 넣지 않는다."""
+        def short(prompt):
+            return "제목: 충분히 긴 제목입니다 정말로\n라벨: 가\n내용:\n<p>너무 짧음</p>", "m"
+        code, out = self.go(env=self.env(**FULL_ENV), llm=short, publisher=FakePublisher())
+        reasons = self.history()[-1]["reasons"]
+        self.assertTrue(reasons)
+        self.assertIn("LEN_SHORT", out)                                   # 사유는 로그 본문에는 있다
+        annotations = [line for line in out.splitlines() if line.startswith("::")]
+        self.assertEqual(len(annotations), 1, annotations)
+        for reason in reasons:
+            self.assertNotIn(reason, annotations[0])
+            self.assertNotIn(reason.split("]", 1)[0].lstrip("["), annotations[0])  # 사유 코드(LEN_SHORT 등)도 없다
 
     def test_dry_run_summary(self):
         code, out = self.go(env=self.env(**FULL_ENV), publisher=FakePublisher(), extra=["--dry-run"])
