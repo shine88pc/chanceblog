@@ -44,7 +44,26 @@ jobs:
     permissions:
       pages: write
       id-token: write
+    outputs:
+      page_url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+  # 배포 성공 != 공개 반영. 저장소의 가장 새 글이 공개 사이트(posts.json)에 있고 주소가 열리는지 확인한다.
+  # 몇 분 기다려도 안 보이면 이 실행이 실패(빨강)가 되어 워치독이 알린다. docs/DEFECT_REGISTER.md D-37
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: deploy
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: 공개 사이트에 최신 글이 올라왔는지 확인
+        env:
+          PAGE_URL: ${{ needs.deploy.outputs.page_url }}
+        run: python3 scripts/verify_pages_deploy.py --base "$PAGE_URL"
