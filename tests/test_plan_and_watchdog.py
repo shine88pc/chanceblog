@@ -69,7 +69,7 @@ class PlanTest(unittest.TestCase):
             self.assertEqual(buf.getvalue().strip(), "1")
 
     def test_unknown_only_key_is_an_error_not_an_empty_matrix(self):
-        """오타로 대상이 0개가 되어 generate 잡이 조용히 건너뛰어지던 문제(E8)."""
+        """--only 에 오타를 내면 대상이 0개가 되어 generate 잡이 조용히 건너뛰어지던(초록) 문제."""
         with mock.patch.object(plan, "load_registry", return_value=registry_all_auto()):
             err = io.StringIO()
             with redirect_stderr(err), redirect_stdout(io.StringIO()):

@@ -421,7 +421,7 @@ class VisibilityTest(RunBase):
         self.assertIn("NO_TOPIC", self.summary())
 
     def test_topic_expansion_llm_failure_is_an_infra_failure(self):
-        """시드를 다 쓴 뒤 주제 확장 호출이 실패하면 '주제 없음'(초록)이 아니라 인프라 실패(종료 1)다(E12)."""
+        """시드를 다 쓴 뒤 주제 확장 호출이 실패하면 '주제 없음'(초록)이 아니라 인프라 실패(종료 1)다."""
         self.use_all_seeds()
 
         def down(prompt):

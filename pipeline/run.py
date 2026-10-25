@@ -254,7 +254,8 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
         return entry
 
     if not topic and source == "expand_failed":
-        # 시드를 다 쓴 뒤 LLM에게 새 주제를 받는 호출이 실패했다. '주제 없음'이 아니라 인프라 실패다(E12).
+        # 시드를 다 쓴 뒤 LLM에게 새 주제를 받는 호출이 실패했다. '주제 없음'(초록)으로 넘기면 LLM 키·할당량 문제가
+        # 가려지므로 인프라 실패(종료 1)로 다룬다.
         message = "주제 확장 LLM 호출이 실패했습니다. LLM 키·할당량·모델 이름을 확인하세요."
         out(skip_line("EXPAND_FAILED", blog=blog["key"]))
         out(f"::error::[{blog['key']}] {message}")
