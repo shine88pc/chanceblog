@@ -129,7 +129,7 @@ Secrets (API 선택 시):
 - (기존) `GEMINI_API_KEY`
 
 **현재 상태**: 결정 — **A(풀오토 API 게시)**로 진행. refresh token 미발급. 순서: ① OAuth 동의 화면 "프로덕션" 전환(미전환 시 7일 만료, D-11) → ② token 발급 → ③ Secrets 등록 → ④ 첫 실행 확인. 자세한 절차는 §10 5번.
-스케줄에 따라 매일 02:00 UTC에 `blogger.yml`이 돌아 Secrets가 없으면 초안(`_blogger_drafts/`)만 저장한다. 3일 연속 미게시이면 워치독이 이슈로 알린다.
+스케줄에 따라 매일 02:00 UTC에 `blogger.yml`이 돌아 Secrets가 없으면 초안(`_blogger_drafts/`)만 저장한다. 미게시 상태가 이력에 남으면 워치독이 첫 점검부터 경고 이슈로 알린다(`UNPUBLISHED`, `docs/ARCHITECTURE.md` §4-2).
 
 ### P2 — 이후 구현
 

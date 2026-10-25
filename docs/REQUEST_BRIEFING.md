@@ -61,7 +61,7 @@
 주제 선정 → AI가 글 생성 → 게이트(자동 검사) → 게시 → 기록
                               └ 통과하지 못하면 게시하지 않는다 (의심스러우면 안 올리는 것이 원칙)
 
-관측  워치독: 하루 1회 점검, 문제가 있을 때만 GitHub 이슈로 알림 · Actions 실패 알림 메일
+관측  워치독: 하루 2회 점검, 문제가 있을 때만 GitHub 이슈로 알림(담당자 지정·@멘션) · Actions 실패 알림 메일
 제어  블로그별 모드(off 중지 / draft 초안만 / auto 자동 게시) · 긴급 정지 스위치 · 하루 상한 · 같은 주제 쿨다운
 수정  이슈 양식 → 자동 수정안 → PR(변경 제안서) → 범위 자동 검사 → 사람이 병합
 ```
@@ -78,7 +78,7 @@
 | Blogger Generate | `blogger.yml` | Blogger 글 생성·게시(블로그가 늘면 자동으로 작업이 늘어남) |
 | Deploy GitHub Pages | `pages.yml` | Chance 사이트 배포 |
 | Guardrails | `guardrails.yml` | 저장소가 규칙을 어기지 않았는지 자동 검사 |
-| Watchdog | `watchdog.yml` | 게시가 멈췄는지 하루 1회 점검, 문제 때만 이슈로 알림 |
+| Watchdog | `watchdog.yml` | 게시가 멈췄는지·사이트 배포가 됐는지 하루 2회 점검, 문제 때만 이슈로 알림 |
 | Issue Edit | `issue-edit.yml` | 이슈 양식으로 접수된 수정 요청을 PR로 만듦 |
 | Sync Issue Form | `sync-issue-form.yml` | 이슈 양식의 페이지 목록을 자동 갱신 |
 | PR Scope Check | `pr-scope-check.yml` | PR이 요청 범위를 지켰는지 검사해 코멘트(Copilot이 만든 PR 포함) |
