@@ -28,7 +28,7 @@ push(*.md, spec 등) ─► sync-issue-form.yml ─► pages.json · 양식 드�
 | `pages.json` | 고정 페이지 레지스트리(자동 생성, 결정적 출력). `python scripts/build_pages_registry.py [--check]` (`--check` 는 제목 차이를 보지 않는다 — 아래 "제목을 바꾸는 수정") |
 | `scripts/sync_issue_form.py` | 양식 드롭다운 동기화 `[--check]` |
 | `pipeline/edits/` | `spec`(명세·경로 규칙) · `pages` · `forms`(양식·본문 파서) · `targets`(게시글 매칭) · `ops`(수정 방식) · `checks`(사후 검증) · `safety`(로그·코멘트 정제, 외부 전송 전 점검) · `runner`(처리) · `scope_check`(PR 검증) |
-| `.github/workflows/` | `issue-edit.yml` · `sync-issue-form.yml` · `pr-scope-check.yml` |
+| `.github/workflows/` | `issue-edit.yml`(Actions 이름 `이슈 수정 요청 처리(수정안 PR 만들기)`) · `sync-issue-form.yml`(`이슈 양식 페이지 목록 갱신`) · `pr-scope-check.yml`(`PR 변경 범위 검사`) |
 
 ## 3. 수정 항목
 
@@ -108,9 +108,9 @@ push(*.md, spec 등) ─► sync-issue-form.yml ─► pages.json · 양식 드�
 페이지 파일(루트 `.md`/`.html`)의 front matter에 `editable: true`를 넣고 push하면 `sync-issue-form.yml`이 `pages.json`과 양식 드롭다운을 갱신한다(수동 실행 가능). 이름이 영문·숫자·`_-`가 아니면 `edit_id: faq`를 front matter에 지정한다. 기존 페이지는 명세 `targets.page.discover.include`에 적는다(파일을 고치지 않는다).
 
 ### 제목을 바꾸는 수정은 pages.json 을 같이 고치지 않는다
-`pages.json` 과 양식 드롭다운의 페이지 제목은 각 페이지 front matter 의 `title` 에서 온다. 그래서 제목을 바꾸는 수정(이슈 수정의 SEO 메타 등)의 PR 은 요청한 파일 한 개(`categories.md` 등)만 바꾸고, `pages.json`·`page-edit.yml` 은 **병합 뒤** Sync Issue Form 이 새 제목으로 갱신한다(그 사이에는 드롭다운에 옛 제목이 보인다).
-- PR 단계의 검사(Guardrails 의 `pages.check_registry` 단위 테스트와 검증기 SYNC-1)는 이 때문에 **제목 차이를 보지 않고** 구조 — 페이지가 추가·삭제·이동됐는지, id·url 이 바뀌었는지, 파일이 손상됐는지 — 만 글자 단위로 비교한다. 구조가 어긋나면 계속 경고·실패한다(D-40).
-- 제목까지 완전히 같은지는 병합 뒤 Sync Issue Form 이 만든 상태에서만 성립한다(`pages.check_registry(…, strict_titles=True)`). 제목 변경 PR 의 Guardrails 가 빨강이면 이 규칙이 깨진 것이다.
+`pages.json` 과 양식 드롭다운의 페이지 제목은 각 페이지 front matter 의 `title` 에서 온다. 그래서 제목을 바꾸는 수정(이슈 수정의 SEO 메타 등)의 PR 은 요청한 파일 한 개(`categories.md` 등)만 바꾸고, `pages.json`·`page-edit.yml` 은 **병합 뒤** `이슈 양식 페이지 목록 갱신`이 새 제목으로 갱신한다(그 사이에는 드롭다운에 옛 제목이 보인다).
+- PR 단계의 검사(`저장소 규칙·테스트 자동 검사`의 `pages.check_registry` 단위 테스트와 검증기 SYNC-1)는 이 때문에 **제목 차이를 보지 않고** 구조 — 페이지가 추가·삭제·이동됐는지, id·url 이 바뀌었는지, 파일이 손상됐는지 — 만 글자 단위로 비교한다. 구조가 어긋나면 계속 경고·실패한다(D-40).
+- 제목까지 완전히 같은지는 병합 뒤 `이슈 양식 페이지 목록 갱신`이 만든 상태에서만 성립한다(`pages.check_registry(…, strict_titles=True)`). 제목 변경 PR 의 `저장소 규칙·테스트 자동 검사`가 빨강이면 이 규칙이 깨진 것이다.
 
 ### 수정 항목 추가하기 (T2)
 1. `edit-spec.yml`의 `edit_types`에 항목 추가(`method`는 `text`·`link`·`front_matter`·`llm_patch`·`image` 중 선택, `allowed_paths`에 `{page.path}`/`{post.path}` 필수).
@@ -119,7 +119,7 @@ push(*.md, spec 등) ─► sync-issue-form.yml ─► pages.json · 양식 드�
 4. `python scripts/validate_repo.py`(SPEC-1·SPEC-2·SYNC-1) · `python -m unittest discover -s tests`.
 
 ### 동작 확인 (L2/L3)
-Actions → **Issue Edit** → Run workflow(`issue_number`, `dry_run` 체크)로 실제 이슈를 파일·PR·코멘트 없이 검증하고 로그로 결과를 본다.
+Actions → **이슈 수정 요청 처리(수정안 PR 만들기)** → Run workflow(`issue_number`, `dry_run`=`연습 실행` 체크)로 실제 이슈를 파일·PR·코멘트 없이 검증하고 로그로 결과를 본다. 실행 목록의 제목은 `이슈 #번호 수정 요청 처리 · 수동(연습: PR·코멘트 안 만듦)`처럼 보인다.
 
 ### 한 이슈는 한 번만 처리한다
 - 수동 실행의 `issue_number` 는 숫자(1~999999999, 앞자리 0 불가)여야 한다. 아니면 첫 단계(체크아웃 전)에서 바로 실패한다. dry-run 의 산출물은 로그의 "DRY_RUN 결과 출력" 단계에 가드(`::stop-commands::`)로 감싸 출력된다.
@@ -138,15 +138,15 @@ Actions → **Issue Edit** → Run workflow(`issue_number`, `dry_run` 체크)로
 ### 문제 해결
 | 증상 | 원인·조치 |
 |------|-----------|
-| 이슈를 만들었는데 아무 일도 없음 | 작성자가 OWNER/MEMBER/COLLABORATOR가 아니거나 제어 이슈(라벨·제목)가 아님. Actions 탭에서 Issue Edit 실행 여부 확인 |
+| 이슈를 만들었는데 아무 일도 없음 | 작성자가 OWNER/MEMBER/COLLABORATOR가 아니거나 제어 이슈(라벨·제목)가 아님. Actions 탭에서 `이슈 수정 요청 처리(수정안 PR 만들기)` 실행 여부 확인 |
 | "항목 제목이 중복되었습니다" | 본문 안에 양식 제목과 같은 줄(`### 대상 페이지` 등)이 있음 |
 | "'변경 전' 문구를 찾지 못했습니다" | 페이지 원문(마크다운/HTML)과 글자까지 같게 붙여 넣어야 함. 화면 텍스트가 아니라 파일 원문 기준 |
 | PR 대신 비교 링크만 옴 | 위의 "PR 생성 허용" 설정 확인 |
-| 드롭다운에 새 페이지가 없음 | `editable: true` 확인 후 Sync Issue Form 실행 |
+| 드롭다운에 새 페이지가 없음 | `editable: true` 확인 후 `이슈 양식 페이지 목록 갱신` 실행 |
 | "이미 처리한 이슈입니다" 코멘트만 달림 | 같은 이슈를 두 번 처리하지 않는다. 코멘트의 브랜치·PR 을 확인하고, 더 고칠 것이 있으면 새 이슈로 올린다 |
 | "AI·이미지 검색으로 보내지 않았습니다" | 요청·변경 전·페이지 원문에 키·주민등록번호·카드번호 모양이 있다. **이슈는 공개이므로 붙여 넣은 키는 이미 노출된 것 — 폐기·재발급**하고, 그 부분을 지운 새 이슈로 올린다(값은 코멘트에 적지 않는다) |
 | "줄 끝이 LF·CRLF 혼합…이라 수정하지 않았습니다"(오류) | 대상 파일의 줄 끝이 섞여 있다. 줄 끝을 한 가지로 통일하는 수정이 먼저 필요하다(저장소 관리자·AI 에게 요청) |
-| PR Scope Check 가 "줄 끝 형식이 바뀌었습니다" | PR 이 파일 전체의 줄 끝(LF/CRLF)을 바꿨다. 요청한 부분만 바꾸고 줄 끝은 원래대로 되돌리게 한다 |
+| `PR 변경 범위 검사`가 "줄 끝 형식이 바뀌었습니다" | PR 이 파일 전체의 줄 끝(LF/CRLF)을 바꿨다. 요청한 부분만 바꾸고 줄 끝은 원래대로 되돌리게 한다 |
 | Run workflow 가 첫 단계에서 실패 | `issue_number` 가 숫자(1~999999999, 앞자리 0 불가)가 아니다 |
 
 ## 7. 한계
@@ -154,7 +154,7 @@ Actions → **Issue Edit** → Run workflow(`issue_number`, `dry_run` 체크)로
 - 문자 그대로 교체·링크·SEO·이미지 교체 외에는 AI가 쓴 내용의 **정확성**을 자동으로 증명하지 못한다(범위만 보장).
 - 이미지 검색은 현재 레거시 엔진(`generator.py`)의 Unsplash 함수를 재사용한다(Phase 3에서 `pipeline/`으로 이관).
 - 한 요청은 한 파일만 고친다(`limits.max_changed_files: 1`).
-- 알려진 열린 항목(D-23): `issue-edit.yml` 전체에 쓰기 토큰이 환경변수로 노출된다(job 분리 예정). 줄 끝(LF/CRLF) 변경은 PR Scope Check 가 FAIL 로 잡고 러너는 줄 끝이 섞인 파일을 거부하도록 고쳤고(2026-10-25), 명세의 `output.comment_on_reject` 는 구현하지 않고 제거했다(거부·오류는 항상 코멘트, `output` 의 지원하지 않는 키는 SPEC-1 오류).
+- 알려진 열린 항목(D-23): `issue-edit.yml` 전체에 쓰기 토큰이 환경변수로 노출된다(job 분리 예정). 줄 끝(LF/CRLF) 변경은 `PR 변경 범위 검사`가 FAIL 로 잡고 러너는 줄 끝이 섞인 파일을 거부하도록 고쳤고(2026-10-25), 명세의 `output.comment_on_reject` 는 구현하지 않고 제거했다(거부·오류는 항상 코멘트, `output` 의 지원하지 않는 키는 SPEC-1 오류).
 - 재처리 방지·이미지 주소 검증·로그 정제는 Actions 에서만 확인되는 부분(라벨 생성, `git ls-remote`, 가드 출력)이 있어 푸시 후 관측이 필요하다 → 관측 체크리스트.
 - 비밀 모양 점검은 AI·Unsplash 로 나가는 값만 본다. 문자 그대로 교체·링크·SEO 는 AI 를 쓰지 않아 요청문의 주민등록번호·카드번호 모양을 막지 않는다(새 비밀·`http://` 링크는 사후 검증이 막는다).
 - 주민등록번호 모양은 13자리 연속 숫자(생년월일이 유효하고 앞뒤에 영문·숫자·밑줄·하이픈이 붙지 않음)를 포함해 점검하고, 카드번호 모양은 15~19자리+Luhn 으로 점검한다. 형식이 다른 식별자나 변형 표기는 놓칠 수 있다.

@@ -1,4 +1,5 @@
-name: Blogger Generate
+name: Blogger 글 자동 작성
+run-name: "Blogger 글 작성 · ${{ github.event_name == 'workflow_dispatch' && (inputs.dry_run && '수동(연습: 저장·게시 안 함)' || (inputs.publish && '수동(게시)' || '수동(초안만 저장)')) || '정기' }}"
 
 # 레지스트리(pipeline/blogs.json)의 platform=blogger 블로그를 모두 처리한다.
 # 블로그를 추가하면 이 파일을 고치지 않고 레지스트리와 Secrets 만 추가하면 된다.
@@ -11,19 +12,19 @@ on:
   workflow_dispatch:
     inputs:
       blog:
-        description: '특정 블로그 key만 실행 (비우면 blogger 전체)'
+        description: '실행할 블로그 key (비우면 Blogger 블로그 전체)'
         required: false
         type: string
       topic:
-        description: '특정 주제 (비우면 자동 선택)'
+        description: '직접 정할 주제 (비우면 자동 선택)'
         required: false
         type: string
       dry_run:
-        description: 'DRY_RUN (스텁 LLM, 파일·게시 없음)'
+        description: '연습 실행(가짜 AI 응답 사용, 파일·게시 없이 로그만). 기본은 꺼짐 — 체크하지 않으면 초안이 저장소에 커밋되고 그날 하루 상한을 씁니다'
         type: boolean
         default: false
       publish:
-        description: 'Blogger 에 게시 (체크하지 않으면 초안만 저장)'
+        description: 'Blogger에 실제 게시(체크하지 않으면 초안만 저장)'
         type: boolean
         default: false
 
@@ -32,6 +33,7 @@ permissions:
 
 jobs:
   plan:
+    name: 대상 블로그 계획
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -63,12 +65,13 @@ jobs:
           if [ "$count" = "0" ]; then
             echo "::notice::실행할 Blogger 블로그가 없습니다(대상이 모두 mode=off 로 정지됐거나 platform=blogger 블로그가 없음). generate 잡은 건너뜁니다."
             {
-              echo "### Blogger Generate"
+              echo "### Blogger 글 자동 작성"
               echo "- 결과: **대상 0개** — pipeline/blogs.json 에서 대상(수동 실행이면 지정한 블로그, 아니면 platform=blogger 블로그 전체)이 모두 mode=off(정지)이거나 없습니다. 글은 만들지 않았습니다."
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
   generate:
+    name: 글 생성 (${{ matrix.key }})
     needs: plan
     if: needs.plan.outputs.count != '0'
     runs-on: ubuntu-latest

@@ -8,7 +8,7 @@
 
 결과(pages.json)는 결정적이다(시각 등 변하는 값 없음) → `--check` 로 최신 여부를 검사할 수 있다.
 `--check` 는 제목(title) 차이는 보지 않는다: 제목만 고치는 PR 이 pages.json 을 같이 고치지 않아도 검사가 통과해야 하고,
-제목은 병합 뒤 Sync Issue Form 이 반영한다(페이지 추가·삭제·이동은 계속 잡는다).
+제목은 병합 뒤 '이슈 양식 페이지 목록 갱신' 워크플로가 반영한다(페이지 추가·삭제·이동은 계속 잡는다).
 CLI: python -m pipeline.edits.pages [--check]
 """
 import json
@@ -118,8 +118,8 @@ def check_registry(root, spec, strict_titles=False):
     """pages.json 이 최신이 아니면 사유 목록, 최신이면 빈 목록.
 
     페이지 제목(front matter 의 title)은 기본적으로 비교하지 않는다. 제목만 고치는 수정 PR(이슈 수정의 SEO 메타 등)은 pages.json·이슈 양식
-    드롭다운을 같이 고치지 않고, 그 반영은 병합 뒤 Sync Issue Form 워크플로가 한다. 제목 차이를 낡음으로 보면 제목을 바꾸는 모든 PR 의
-    Guardrails 가 빨강이 된다(2026-10-25 실제 Actions 기준선 시험). 그 밖의 모든 것 — 페이지 추가·삭제, id·path·url 변경, 파일 서식·키 순서 —
+    드롭다운을 같이 고치지 않고, 그 반영은 병합 뒤 이슈 양식 페이지 목록 갱신 워크플로가 한다. 제목 차이를 낡음으로 보면 제목을 바꾸는 모든 PR 의
+    '저장소 규칙·테스트 자동 검사' 워크플로가 빨강이 된다(2026-10-25 실제 Actions 기준선 시험). 그 밖의 모든 것 — 페이지 추가·삭제, id·path·url 변경, 파일 서식·키 순서 —
     은 글자 단위로 비교하므로 계속 잡힌다. strict_titles=True 면 제목까지 생성기 결과와 같은지 본다(병합 뒤 상태).
     """
     pages = discover_pages(root, spec)

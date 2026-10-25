@@ -1,8 +1,8 @@
-"""제목만 바꾸는 이슈 수정 PR 도 Guardrails 가 초록이어야 한다 — pages.json 이 낡았는지는 '구조'(id·path·url)로만 판단한다.
+"""제목만 바꾸는 이슈 수정 PR 도 '저장소 규칙·테스트 자동 검사' 워크플로가 초록이어야 한다 — pages.json 이 낡았는지는 '구조'(id·path·url)로만 판단한다.
 
-실제 Actions 기준선 시험(2026-10-25): 이슈 양식으로 categories 의 SEO 제목을 바꾸자 PR 이 만들어졌지만(2줄 변경), 그 브랜치의 Guardrails 가
+실제 Actions 기준선 시험(2026-10-25): 이슈 양식으로 categories 의 SEO 제목을 바꾸자 PR 이 만들어졌지만(2줄 변경), 그 브랜치의 '저장소 규칙·테스트 자동 검사' 실행이
 `pages.json 가 최신이 아닙니다` 로 실패했다(test_real_repository_registry_is_current · 검증기 SYNC-1). pages.json 의 title 이 front matter 에서 와서,
-제목을 고치는 PR 은 pages.json 을 같이 고치지 않기 때문이다. 제목은 병합 뒤 Sync Issue Form 이 pages.json·양식 드롭다운에 반영한다.
+제목을 고치는 PR 은 pages.json 을 같이 고치지 않기 때문이다. 제목은 병합 뒤 '이슈 양식 페이지 목록 갱신' 워크플로가 pages.json·양식 드롭다운에 반영한다.
 페이지가 추가·삭제·이동되거나 id·url 이 바뀌는 불일치는 계속 잡아야 한다.
 """
 import json
@@ -38,7 +38,7 @@ class RegistryCase(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         root = make_edit_root(tmp.name, extra_pages={"faq.md": FAQ})
         spec = spec_mod.load_spec(root)
-        forms.sync_page_form(root, spec, pages.load_registry(root), write=True)     # faq 가 들어간 상태로 양식 드롭다운도 맞춘다(Sync Issue Form 이 한 뒤)
+        forms.sync_page_form(root, spec, pages.load_registry(root), write=True)     # faq 가 들어간 상태로 양식 드롭다운도 맞춘다('이슈 양식 페이지 목록 갱신' 워크플로가 한 뒤)
         return root, spec
 
     def setUp(self):
@@ -76,7 +76,7 @@ class TitleOnlyChangesTest(RegistryCase):
         self.assertEqual(len(self.stale(strict_titles=True)), 1)
 
     def test_after_the_sync_workflow_runs_everything_is_strictly_current(self):
-        """병합 뒤: Sync Issue Form 이 pages.json 과 양식 드롭다운을 새 제목으로 다시 쓴다."""
+        """병합 뒤: '이슈 양식 페이지 목록 갱신' 워크플로가 pages.json 과 양식 드롭다운을 새 제목으로 다시 쓴다."""
         retitle(self.root, "categories.md", "카테고리 (기준선 시험)")
         pages.write_registry(self.root, self.spec)
         self.assertTrue(forms.sync_page_form(self.root, self.spec, pages.load_registry(self.root), write=True))
@@ -187,10 +187,10 @@ class TitleChangePullRequestScenarioTest(RegistryCase):
                                    self.root, env={"GITHUB_RUN_NUMBER": "1"})
         self.assertEqual((res.status, res.files, res.branch), ("ok", ["categories.md"], "issue-edit/12-categories-r1"))
         self.assertIn('title: "카테고리 (기준선 시험)"', (self.root / "categories.md").read_text(encoding="utf-8"))
-        # 수정 PR 은 요청한 파일 한 개만 바꾼다: 레지스트리·양식은 그대로(병합 뒤 Sync Issue Form 이 갱신)
+        # 수정 PR 은 요청한 파일 한 개만 바꾼다: 레지스트리·양식은 그대로(병합 뒤 '이슈 양식 페이지 목록 갱신' 워크플로가 갱신)
         self.assertEqual((self.root / "pages.json").read_bytes(), registry_before)
         self.assertEqual(form.read_bytes(), form_before)
-        # Guardrails 의 두 검사: 단위 테스트(pages.check_registry)와 검증기(SYNC-1)
+        # '저장소 규칙·테스트 자동 검사' 워크플로가 보는 두 가지: 단위 테스트(pages.check_registry)와 검증기(SYNC-1)
         self.assertEqual(self.stale(), [])
         self.assertEqual([f.line() for f in vr.check_edit_system(self.root, vr.list_files(self.root))], [])
 
