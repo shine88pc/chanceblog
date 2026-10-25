@@ -62,6 +62,15 @@ class NeutralizeTest(unittest.TestCase):
         self.assertNotIn("@everyone", safety.one_line("@everyone 안녕"))
         self.assertEqual(safety.one_line("정상 문장입니다."), "정상 문장입니다.")
 
+    def test_log_text_never_exceeds_its_limit_even_after_neutralizing(self):
+        """무력화(`##[`→`# #[`, 줄 시작 `::`→`: :`)가 글자를 늘려도 로그 한 줄은 limit 자를 넘지 않는다(AI 실패 원인은 300자 제한)."""
+        for text in ("a" * 296 + "##[b", "::" + "a" * 400, "a" * 295 + "##[##[x", "x" * 1000):
+            for limit in (300, 120):
+                out = safety.log_text(text, limit)
+                self.assertLessEqual(len(out), limit, (text[:12], limit))
+                self.assertEqual(bad_lines(out), [])
+        self.assertEqual(len(safety.log_text("a" * 296 + "##[b", 300)), 300)
+
     def test_redact_hides_secret_shaped_values(self):
         for secret in (FAKE_KEY, FAKE_TOKEN, "sk-" + "d" * 40, "k" + "ey=" + "e" * 30):
             self.assertNotIn(secret, safety.redact(f"앞 {secret} 뒤"), secret)

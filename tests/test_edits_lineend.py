@@ -172,6 +172,13 @@ class LineEndingJudgementTest(unittest.TestCase):
         report = self.judge("한 줄 " + OLD_SENTENCE, "한 줄 " + NEW_SENTENCE)
         self.assertNotIn("줄 끝", report.markdown())
 
+    def test_going_from_or_to_no_newline_at_all_is_not_a_line_ending_change(self):
+        """줄바꿈이 하나도 없던 파일에 끝 줄바꿈이 생기거나 그 반대인 것은 '줄 끝 형식 변경'이 아니다(다른 검사가 판단한다)."""
+        for before, after in (("한 줄 " + OLD_SENTENCE, "한 줄 " + NEW_SENTENCE + "\n"), ("한 줄 " + OLD_SENTENCE + "\n", "한 줄 " + NEW_SENTENCE),
+                              ("한 줄 " + OLD_SENTENCE, "한 줄 " + NEW_SENTENCE + "\r\n")):
+            text = self.judge(before, after).markdown()
+            self.assertNotIn("줄 끝", text, (before, after))
+
 
 if __name__ == "__main__":
     unittest.main()
