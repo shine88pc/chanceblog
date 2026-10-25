@@ -46,9 +46,9 @@ class OneLineTest(unittest.TestCase):
     """외부 유래 문자열(LLM 제목, 피드에서 온 다른 블로그 이력 제목, API 오류 문구)을 로그에 넣기 전의 정화."""
 
     def test_every_line_break_and_control_character_becomes_one_space(self):
-        raw = "가\n나\r다\r\n라 마 바\x85사\t아\x0b자\x0c차\x1b카\x00타"
+        raw = "가\n나\r다\r\n라\u2028마\u2029바\x85사\t아\x0b자\x0c차\x1b카\x00타"
         self.assertEqual(one_line(raw), "가 나 다 라 마 바 사 아 자 차 카 타")
-        self.assertEqual(one_line("  앞뒤   공백  정리  "), "앞뒤 공백 정리")
+        self.assertEqual(one_line("  앞뒤   공백\u00a0\u00a0정리  "), "앞뒤 공백 정리")
 
     def test_workflow_command_markers_are_defanged_wherever_they_appear(self):
         # 러너는 줄 맨 앞(앞 공백은 무시)의 '::' 를 명령으로 읽는다. 앞에 공백을 붙이는 방식으로는 막을 수 없다.

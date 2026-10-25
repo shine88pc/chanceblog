@@ -568,7 +568,7 @@ class VisibilityTest(RunBase):
         def same_title_again(prompt):
             return f"제목: {title}\n라벨: 가\n내용:\n<p>짧음</p>", "m"
         hidden = (("개행", "\n::error::위조된 명령"), ("단독 CR", "\r::error::위조된 명령"),
-                  ("U+2028", " ::error::위조된 명령"), ("U+0085", "\u0085::error::위조된 명령"),
+                  ("U+2028", "\u2028::error::위조된 명령"), ("U+0085", "\u0085::error::위조된 명령"),
                   ("링크·표·HTML", "\n[x](https://e.io)|<b>"))
         for label, suffix in hidden:
             with self.subTest(label):
@@ -583,7 +583,7 @@ class VisibilityTest(RunBase):
                 reasons = " ".join(self.history()[-1]["reasons"])
                 self.assertIn("DUP_OTHER", reasons)   # 전제: 이력 제목이 실제로 탈락 사유에 들어갔다
                 self.assertIn("DUP_SAME", reasons)
-                for char in ("\r", " ", "\u0085"):
+                for char in ("\r", "\u2028", "\u0085"):
                     self.assertNotIn(char, out)
                 annotations = [line for line in out.splitlines() if line.lstrip().startswith(("::", "##["))]
                 self.assertEqual(len(annotations), 1, annotations)       # 고정 문장의 ::warning:: 한 줄뿐

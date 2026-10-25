@@ -188,7 +188,7 @@ class CheckPostTest(unittest.TestCase):
         """비교 대상 제목은 이력 파일(다른 블로그는 피드·LLM 유래)에서 온다. 개행·단독 CR·U+2028 로 줄을 바꾸거나
         '::' 로 워크플로 명령을 흉내 내도 사유는 한 줄이고, 길이도 제한된다."""
         post, stats = good_post()
-        evil = post["title"] + "\n::error::위조\r::notice::x ##[error]y"
+        evil = post["title"] + "\n::error::위조\r::notice::x\u2028##[error]y"
         result = run_check(post, stats, recent=[evil], other=[evil])
         self.assertTrue({"DUP_SAME", "DUP_OTHER"} <= set(result.codes()), result.reasons)  # 전제: 사유에 제목이 실제로 들어간다
         for reason in result.reasons:
