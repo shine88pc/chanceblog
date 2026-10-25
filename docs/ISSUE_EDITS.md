@@ -26,7 +26,7 @@ push(*.md, spec 등) ─► sync-issue-form.yml ─► pages.json · 양식 드�
 | `pages.json` | 고정 페이지 레지스트리(자동 생성, 결정적 출력). `python scripts/build_pages_registry.py [--check]` |
 | `scripts/sync_issue_form.py` | 양식 드롭다운 동기화 `[--check]` |
 | `pipeline/edits/` | `spec`(명세·경로 규칙) · `pages` · `forms`(양식·본문 파서) · `targets`(게시글 매칭) · `ops`(수정 방식) · `checks`(사후 검증) · `runner`(처리) · `scope_check`(PR 검증) |
-| `.github/workflows/` | `issue-edit.yml` · `sync-issue-form.yml` · `pr-scope-check.yml` |
+| `.github/workflows/` | `issue-edit.yml`(Actions 이름 `이슈 수정 요청 처리(수정안 PR 만들기)`) · `sync-issue-form.yml`(`이슈 양식 페이지 목록 갱신`) · `pr-scope-check.yml`(`PR 변경 범위 검사`) |
 
 ## 3. 수정 항목
 
@@ -82,7 +82,7 @@ push(*.md, spec 등) ─► sync-issue-form.yml ─► pages.json · 양식 드�
 4. `python scripts/validate_repo.py`(SPEC-1·SPEC-2·SYNC-1) · `python -m unittest discover -s tests`.
 
 ### 동작 확인 (L2/L3)
-Actions → **Issue Edit** → Run workflow(`issue_number`, `dry_run` 체크)로 실제 이슈를 파일·PR·코멘트 없이 검증하고 로그로 결과를 본다.
+Actions → **이슈 수정 요청 처리(수정안 PR 만들기)** → Run workflow(`issue_number`, `dry_run`=`연습 실행` 체크)로 실제 이슈를 파일·PR·코멘트 없이 검증하고 로그로 결과를 본다. 실행 목록의 제목은 `이슈 #번호 수정 요청 처리 · 수동(연습: PR·코멘트 안 만듦)`처럼 보인다.
 
 ### 저장소에서 1회 설정해야 하는 것
 | 설정 | 이유 |
@@ -94,17 +94,17 @@ Actions → **Issue Edit** → Run workflow(`issue_number`, `dry_run` 체크)로
 ### 문제 해결
 | 증상 | 원인·조치 |
 |------|-----------|
-| 이슈를 만들었는데 아무 일도 없음 | 작성자가 OWNER/MEMBER/COLLABORATOR가 아니거나 제어 이슈(라벨·제목)가 아님. Actions 탭에서 Issue Edit 실행 여부 확인 |
+| 이슈를 만들었는데 아무 일도 없음 | 작성자가 OWNER/MEMBER/COLLABORATOR가 아니거나 제어 이슈(라벨·제목)가 아님. Actions 탭에서 `이슈 수정 요청 처리(수정안 PR 만들기)` 실행 여부 확인 |
 | "항목 제목이 중복되었습니다" | 본문 안에 양식 제목과 같은 줄(`### 대상 페이지` 등)이 있음 |
 | "'변경 전' 문구를 찾지 못했습니다" | 페이지 원문(마크다운/HTML)과 글자까지 같게 붙여 넣어야 함. 화면 텍스트가 아니라 파일 원문 기준 |
 | PR 대신 비교 링크만 옴 | 위의 "PR 생성 허용" 설정 확인 |
-| 드롭다운에 새 페이지가 없음 | `editable: true` 확인 후 Sync Issue Form 실행 |
+| 드롭다운에 새 페이지가 없음 | `editable: true` 확인 후 `이슈 양식 페이지 목록 갱신` 실행 |
 
 ## 7. 한계
 
 - 문자 그대로 교체·링크·SEO·이미지 교체 외에는 AI가 쓴 내용의 **정확성**을 자동으로 증명하지 못한다(범위만 보장).
 - 이미지 검색은 현재 레거시 엔진(`generator.py`)의 Unsplash 함수를 재사용한다(Phase 3에서 `pipeline/`으로 이관).
 - 한 요청은 한 파일만 고친다(`limits.max_changed_files: 1`).
-- 알려진 열린 항목(D-23): 줄 끝(LF→CRLF)만 바뀐 PR이 PR Scope Check에서 PASS로 보일 수 있고, `issue-edit.yml` 전체에 쓰기 토큰이 환경변수로 노출되며(단계별 분리 예정), 명세의 `output.comment_on_reject`는 코드가 읽지 않는다(거부 시 항상 코멘트).
+- 알려진 열린 항목(D-23): 줄 끝(LF→CRLF)만 바뀐 PR이 `PR 변경 범위 검사`에서 PASS로 보일 수 있고, `issue-edit.yml` 전체에 쓰기 토큰이 환경변수로 노출되며(단계별 분리 예정), 명세의 `output.comment_on_reject`는 코드가 읽지 않는다(거부 시 항상 코멘트).
 - 독립 검토(2026-10-20)는 익명 공격 경로를 찾지 못했다. 요청자는 OWNER/MEMBER/COLLABORATOR로 한정되고, 사후 검사는 위 표의 범위를 기계로 확인한다. 그래도 AI가 쓴 문장의 정확성은 사람이 PR에서 확인해야 한다.
 - Actions 실행 결과(첫 이슈 처리, PR 생성, 라벨 생성)는 푸시 후 처음 관측된다 → `docs/DEFECT_REGISTER.md` 관측 체크리스트.

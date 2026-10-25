@@ -58,8 +58,8 @@
 | 장치 | 역할 |
 |------|------|
 | 이슈 양식(`page-edit.yml`, `blog_control.yml`) | 요청을 정형화. 대상 페이지 목록은 새 페이지가 생기면 자동 갱신 |
-| `issue-edit.yml` | 양식으로 접수된 요청을 해석·검증·수정해 **PR로** 올림 (main 직접 반영 없음) |
-| `pr-scope-check.yml` | 사람·Copilot이 만든 PR이 요청 범위를 지켰는지 자동 검증 후 코멘트 (`issue-edit`이 만든 PR은 만들기 전에 같은 검사를 이미 통과한다) |
+| `issue-edit.yml` (Actions 탭 이름: **이슈 수정 요청 처리(수정안 PR 만들기)**) | 양식으로 접수된 요청을 해석·검증·수정해 **PR로** 올림 (main 직접 반영 없음) |
+| `pr-scope-check.yml` (Actions 탭 이름: **PR 변경 범위 검사**) | 사람·Copilot이 만든 PR이 요청 범위를 지켰는지 자동 검증 후 코멘트 (`issue-edit`이 만든 PR은 만들기 전에 같은 검사를 이미 통과한다) |
 | Copilot 지침 파일 | Copilot이 읽는 규칙(파일 전체 읽기, 최소 수정, 모르면 멈춤) |
 | 사후 검증 | 광고 코드(`adsbygoogle`)·front matter·위험한 코드(`<script>` 등)·비밀 값이 바뀌지 않았는지 기계가 확인 |
 

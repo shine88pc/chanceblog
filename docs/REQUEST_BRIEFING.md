@@ -2,7 +2,7 @@
 
 > **저장소를 볼 수 없는 AI(모바일 Claude, ChatGPT·Gemini 앱 등)에게 통째로 붙여 넣는 문서**입니다.
 > 이 프로그램을 모르는 AI가 **실제와 맞는 작업요청서**를 쓰도록, 필요한 사실과 양식을 담았습니다.
-> 기준일 2026-10-20 · 브리핑 버전 1 · 정본은 GitHub 저장소 `shine88pc/chanceblog`의 `main`입니다. 이 문서는 요약이라 **실제 파일과 다르면 실제 파일이 이깁니다.**
+> 기준일 2026-10-20(§3 워크플로 표는 2026-10-25) · 브리핑 버전 2 · 정본은 GitHub 저장소 `shine88pc/chanceblog`의 `main`입니다. 이 문서는 요약이라 **실제 파일과 다르면 실제 파일이 이깁니다.**
 
 ## 사용 방법 (사용자용)
 
@@ -70,18 +70,22 @@
 - **게이트**는 길이·형식·금지 주제·중복·위험한 HTML·출처 같은 규칙을 기계가 검사합니다. 같은 제목은 두 블로그에 걸쳐서도 막습니다.
 - **콘텐츠 규칙**: AI 사용 사실을 숨기지 않습니다(Chance는 소개 페이지에 공개, Blogger는 글마다 면책·AI 사용 문구 자동 첨부). 가짜 개인 경험·인물·인터뷰는 쓰지 않습니다. Blogger는 일반적인 생활 정보만 다루며 질병·약·보충제·진단·임신·영유아·체중 감량은 주제 단계에서 거릅니다.
 
-### 이미 자동으로 돌고 있는 것
+### 이미 자동으로 돌고 있는 것 (GitHub Actions 탭의 이름, 2026-10-25 기준)
 
-| 이름(GitHub Actions) | 파일 | 하는 일 |
-|----------------------|------|---------|
-| Chance_Blog Full-Auto Engine | `chanceblog.yml` | Chance 글 생성·게시 |
-| Blogger Generate | `blogger.yml` | Blogger 글 생성·게시(블로그가 늘면 자동으로 작업이 늘어남) |
-| Deploy GitHub Pages | `pages.yml` | Chance 사이트 배포 |
-| Guardrails | `guardrails.yml` | 저장소가 규칙을 어기지 않았는지 자동 검사 |
-| Watchdog | `watchdog.yml` | 게시가 멈췄는지 하루 1회 점검, 문제 때만 이슈로 알림 |
-| Issue Edit | `issue-edit.yml` | 이슈 양식으로 접수된 수정 요청을 PR로 만듦 |
-| Sync Issue Form | `sync-issue-form.yml` | 이슈 양식의 페이지 목록을 자동 갱신 |
-| PR Scope Check | `pr-scope-check.yml` | PR이 요청 범위를 지켰는지 검사해 코멘트(Copilot이 만든 PR 포함) |
+이름은 2026-10-25에 이름만 보고 자동/수동과 하는 일을 알 수 있게 한글로 바꿨습니다. 옛 영문 이름을 쓴 문서·요청서를 만났다면 아래 표로 대응시키세요. 파일 이름은 그대로입니다.
+
+| 옛 이름 | 새 이름 (Actions 탭) | 파일 | 하는 일 | 자동/수동 |
+|---------|----------------------|------|---------|-----------|
+| Chance_Blog Full-Auto Engine | `Chance 글 자동 작성·게시` | `chanceblog.yml` | Chance 글 생성·검증·게시 | 자동(매시 17분, 게시 시각은 코드가 판단) + 수동 |
+| (옛 `chanceblog.yml`의 `fix_images` 입력) | `Chance 기존 글 이미지 교체(수동)` | `chance-fix-images.yml` | 기존 글의 깨진·누락·중복 이미지만 교체(새 글 없음) | 수동 전용 |
+| Blogger Generate | `Blogger 글 자동 작성` | `blogger.yml` | Blogger 글 생성·검증 후 초안 저장 또는 게시(블로그가 늘면 자동으로 작업이 늘어남) | 자동(매일 02:00 UTC) + 수동 |
+| Deploy GitHub Pages | `사이트 자동 배포` | `pages.yml` | Chance 사이트(GitHub Pages) 배포 | 자동(main에 push될 때) + 수동 |
+| Guardrails | `저장소 규칙·테스트 자동 검사` | `guardrails.yml` | 저장소가 규칙을 어기지 않았는지 자동 검사(비밀·워크플로 규칙·광고 표면·단위 테스트) | 자동(push·PR) + 수동 |
+| Watchdog | `발행 중단 감시·알림` | `watchdog.yml` | 게시가 멈췄는지 정해진 시각에 점검, 문제 때만 이슈로 알림 | 자동(매일, 시각은 `watchdog.yml`의 cron) + 수동 |
+| Issue Edit | `이슈 수정 요청 처리(수정안 PR 만들기)` | `issue-edit.yml` | 이슈 양식으로 접수된 수정 요청을 PR로 만듦 | 자동(제어 이슈가 열릴 때) + 수동 |
+| Sync Issue Form | `이슈 양식 페이지 목록 갱신` | `sync-issue-form.yml` | 이슈 양식의 페이지 목록을 자동 갱신 | 자동(관련 파일 push) + 수동 |
+| PR Scope Check | `PR 변경 범위 검사` | `pr-scope-check.yml` | PR이 요청 범위를 지켰는지 검사해 코멘트(Copilot이 만든 PR 포함) | 자동(PR이 열리거나 갱신될 때) + 수동 |
+| (GitHub 내장) | `pages-build-deployment` | 파일 없음 | GitHub Pages가 스스로 만드는 실행. 이름을 바꿀 수 없고 누르지 않는다 | GitHub 내장 |
 
 ## 4. 일이 처리되는 길
 
