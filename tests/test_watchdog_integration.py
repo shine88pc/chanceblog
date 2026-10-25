@@ -245,6 +245,29 @@ class MainEndToEndTest(MainCase):
         self.assertNotIn("@", issue["body"])
 
 
+class IssueLifecycleTest(MainCase):
+    def test_issue_is_left_alone_while_ongoing_and_closes_on_recovery(self):
+        for crlf in (False, True):          # 사람이 웹에서 본문을 고치면 줄 끝이 CRLF 가 된다(F-7)
+            with self.subTest(crlf=crlf):
+                times, runs = self.stale()
+                fake = FakeGitHub(runs=runs, crlf=crlf)
+                first = self.run_main(fake, times=times)
+                self.assertEqual((first.code, fake.verbs()), (1, ["create"]))
+                fake.calls.clear()
+                second = self.run_main(fake, times=times)    # 같은 상태: 지속 중인 건은 초록, 이슈를 건드리지 않는다
+                self.assertEqual((second.code, fake.verbs()), (0, []))
+                self.assertIn("열려 있는 워치독 이슈: #", second.summary)
+                times.append(datetime.now(timezone.utc))      # 복구: 새 글이 올라왔다
+                fake.calls.clear()
+                third = self.run_main(fake, times=times)
+                self.assertEqual((third.code, fake.verbs()), (0, ["comment", "close"]))
+                self.assertEqual(fake.open_issue_titles(), [])
+                comment = list(fake.issues.values())[0]["comments"][0]
+                self.assertIn("조건이 해소되었거나 다른 알림(예: STALE)으로 대체되어 자동으로 닫습니다.", comment)
+                self.assertIn("이슈 해소: [Watchdog] chance: STALE", third.summary)
+                self.assertNotIn("열려 있는 워치독 이슈", third.summary)    # 방금 닫은 이슈는 열린 목록에서 뺀다(F-15)
+
+
 class DryRunTest(MainCase):
     """드라이런(WATCHDOG_DRY_RUN 또는 토큰 없음)은 이슈를 만들지도 고치지도 닫지도 않고, 실패(exit 1)로 끝나지도 않는다."""
 

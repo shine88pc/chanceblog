@@ -172,6 +172,24 @@ class ExistingIssueTest(unittest.TestCase):
         self.assertEqual(len(client.updated), 1)
 
 
+class ClosingCommentTest(unittest.TestCase):
+    """F-12: 해소 코멘트가 '조건이 해소되어'뿐이면 NO_POSTS_DAY 경고가 STALE 로 대체되어 닫힐 때 오해를 준다."""
+
+    PHRASE = "조건이 해소되었거나 다른 알림(예: STALE)으로 대체되어 자동으로 닫습니다."
+
+    def test_comment_says_resolved_or_replaced(self):
+        client, _ = sync([], [open_issue(WARN, number=6)])
+        self.assertEqual(client.comments, [(6, self.PHRASE)])
+
+    def test_a_no_posts_warning_replaced_by_stale_is_closed_with_that_explanation(self):
+        nopost = Finding("chance", "NO_POSTS_DAY", "warning", "어제 새 글이 0건입니다")
+        stale = Finding("chance", "STALE", "critical", "마지막 활동 이후 65시간 경과")
+        client, (created, closed, _, new_critical) = sync([stale], [open_issue(nopost, number=6)])
+        self.assertEqual((created, closed, new_critical), ([stale.title], [nopost.title], [stale.title]))
+        self.assertEqual(client.comments, [(6, self.PHRASE)])
+        self.assertEqual(client.closed, [6])
+
+
 class NewIssueOrderTest(unittest.TestCase):
     """F-13: 새 이슈가 상한을 넘으면 경고가 먼저 만들어져 심각 건이 다음 실행으로 밀리고, 그 실행이 초록이 된다."""
 
@@ -280,6 +298,31 @@ class MarkerAndInertTextTest(unittest.TestCase):
 
     def test_ordinary_messages_are_unchanged(self):
         self.assertIn("마지막 활동 이후 65시간 경과", watchdog.issue_body(CRIT, OWNER))
+
+
+class BodyComparisonTest(unittest.TestCase):
+    """F-7: 사람이 웹에서 고쳐 본문이 CRLF 로 저장돼도 내용이 같으면 매 실행 PATCH 하지 않는다."""
+
+    def test_a_crlf_copy_of_the_same_body_is_not_patched_again(self):
+        issue = open_issue(CRIT, notified_hours_ago=2)
+        issue["body"] = issue["body"].replace("\n", "\r\n")
+        client, _ = sync([CRIT], [issue])
+        self.assertEqual(client.updated, [])
+
+    def test_a_crlf_body_with_changed_content_is_still_patched_with_an_lf_body(self):
+        issue = open_issue(CRIT, notified_hours_ago=2)
+        issue["body"] = issue["body"].replace("\n", "\r\n")
+        newer = Finding("chance", "STALE", "critical", "마지막 활동 이후 70시간 경과")
+        client, _ = sync([newer], [issue])
+        self.assertEqual([n for n, _ in client.updated], [5])
+        self.assertNotIn("\r", client.updated[0][1])
+        self.assertIn("70시간", client.updated[0][1])
+
+    def test_trailing_whitespace_alone_does_not_trigger_a_patch(self):
+        issue = open_issue(CRIT, notified_hours_ago=2)
+        issue["body"] = issue["body"] + "\r\n\r\n"
+        client, _ = sync([CRIT], [issue])
+        self.assertEqual(client.updated, [])
 
 
 class AssigneeRejectingClient(FakeClient):
@@ -636,6 +679,24 @@ class MainPolicyTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("이상 없음", out)
 
+    def test_issue_closed_in_this_run_is_not_listed_as_open_in_the_summary(self):
+        code, out, client, summary = self.run_main([], open_issues=[open_issue(WARN, number=9)])
+        self.assertEqual(client.closed, [9])
+        self.assertIn(f"이슈 해소: {WARN.title}", summary)
+        self.assertNotIn("열려 있는 워치독 이슈", summary)
+
+    def test_issues_that_stay_open_are_still_listed_in_the_summary(self):
+        keep, gone = open_issue(CRIT, number=5, notified_hours_ago=2), open_issue(WARN, number=9)
+        code, out, client, summary = self.run_main([CRIT], open_issues=[keep, gone])
+        self.assertEqual(client.closed, [9])
+        self.assertIn(f"열려 있는 워치독 이슈: #5 {CRIT.title}", summary)
+        self.assertNotIn("#9", summary)
+
+    def test_dry_run_still_lists_an_issue_it_would_have_closed(self):
+        code, out, client, summary = self.run_main([], open_issues=[open_issue(WARN, number=9)],
+                                                   env={"WATCHDOG_DRY_RUN": "1"})
+        self.assertEqual((code, client.closed), (0, []))      # 실제로는 닫지 않았으니 아직 열려 있다
+        self.assertIn("#9", summary)
 
     def test_finding_text_cannot_start_a_workflow_command_on_its_own_line(self):
         """사유처럼 이력에서 인용한 텍스트에 줄바꿈이 있어도 '::error::' 같은 줄이 새로 생기지 않는다(F-6)."""

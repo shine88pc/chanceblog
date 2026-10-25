@@ -55,6 +55,11 @@ def _inert(text):
     return str(text).replace("@", "\N{FULLWIDTH COMMERCIAL AT}").replace("<", "\N{FULLWIDTH LESS-THAN SIGN}")
 
 
+def _same_text(text):
+    """본문 비교용: 줄 끝을 \\n 으로 통일하고 앞뒤 공백을 뗀다(웹에서 고치면 CRLF 로 저장된다)."""
+    return re.sub(r"\r\n?", "\n", str(text or "")).strip()
+
+
 class GitHubClient:
     def __init__(self, token, repo, opener=urllib.request.urlopen):
         self.token, self.repo, self._open = token, repo, opener
@@ -180,7 +185,8 @@ def sync_issues(findings, open_issues, client, dry=False, out=print, owner=None,
                 client.comment(issue["number"], f"{mention}아직 해결되지 않았습니다(마지막 알림 {days}일 전). "
                                                 f"{_inert(finding.message)}")
             renotified.append(title)
-        if due or str(issue.get("body") or "").strip() != body.strip():
+        # 줄 끝(CRLF)·앞뒤 공백 차이만으로는 본문을 다시 쓰지 않는다(사람이 웹에서 고치면 CRLF 로 저장된다).
+        if due or _same_text(issue.get("body")) != _same_text(body):
             if not dry and hasattr(client, "update_body"):
                 client.update_body(issue["number"], body)
     for title, issue in have.items():
@@ -188,7 +194,7 @@ def sync_issues(findings, open_issues, client, dry=False, out=print, owner=None,
             continue
         out(f"[알림 해소] {title}")
         if not dry:
-            client.comment(issue["number"], "조건이 해소되어 자동으로 닫습니다.")
+            client.comment(issue["number"], "조건이 해소되었거나 다른 알림(예: STALE)으로 대체되어 자동으로 닫습니다.")
             client.close(issue["number"])
         closed.append(title)
     for title in deferred:
@@ -365,7 +371,9 @@ def main():
     open_issues = client.list_open_issues()
     created, closed, renotified, new_critical = sync_issues(findings, open_issues, client, dry=dry,
                                                             owner=owner, now=now)
-    _write_summary(render_summary(stats, findings, created, closed, renotified, open_issues))
+    # 이번 실행에서 막 닫은 이슈는 '열려 있는' 목록에서 뺀다(dry-run 에서는 실제로 닫지 않았으므로 그대로 둔다).
+    still_open = open_issues if dry else [i for i in open_issues if i.get("title") not in closed]
+    _write_summary(render_summary(stats, findings, created, closed, renotified, still_open))
     for f in findings:
         if f.severity == "warning":
             print(f"::warning::{f.title}: {_oneline(f.message)[:200]}")
