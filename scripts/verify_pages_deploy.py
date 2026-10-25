@@ -594,7 +594,7 @@ def interpret(att):
             ages.append(int(age))
     if ages:
         return (f"마지막 응답에 `Age` {max(ages)}초가 있어 공개 CDN 이 이전 응답을 들고 있는 '캐시 지연'일 수 있습니다"
-                "(Pages 응답은 `max-age=600`). 다음 배포 확인이나 몇 분 뒤 직접 열어 보면 풀립니다.")
+                "(200 응답은 `max-age=600`이고 404도 몇 분 보관된다 — 실측). 보관이 끝나면 풀리니 몇 분 뒤 직접 열어 봅니다.")
     if all(r.status == 404 for r in failed):
         return ("`Age` 가 없거나 0 이라 CDN 보관이 아니라 원본의 답으로 보입니다. '진짜 미반영'(빌드 산출물에 글이 없음 — "
                 "`published`·`date`·permalink 와 build 로그 확인) 가능성이 큽니다.")
