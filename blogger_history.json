@@ -86,5 +86,25 @@
     "reasons": [
       "[SECRETS] 게시 시크릿 미등록: blog_id, client_id, client_secret, refresh_token"
     ]
+  },
+  {
+    "v": 1,
+    "blog": "blogger_macat",
+    "date": "2026-10-25",
+    "generated_at": "2026-10-25T10:36:04.942204+09:00",
+    "status": "draft",
+    "topic": "계단 오르기로 일상에 움직임 더하는 방법",
+    "topic_source": "seed",
+    "title": "바쁜 하루, 계단 오르기로 가볍게 움직임 채우는 4가지 방법",
+    "labels": [
+      "운동습관",
+      "건강관리",
+      "일상루틴"
+    ],
+    "url": "",
+    "post_id": "",
+    "model": "gemini-3.8-flash",
+    "attempts": 1,
+    "reasons": []
   }
 ]
