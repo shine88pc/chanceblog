@@ -121,6 +121,17 @@ def plan_step_script():
     return next(step["run"] for step in workflow["jobs"]["plan"]["steps"] if step.get("id") == "plan")
 
 
+@unittest.skipUnless(yaml is not None, "PyYAML(requirements-dev.txt)이 필요합니다(CI 에서는 항상 실행됩니다)")
+class WorkflowGenerateJobTest(unittest.TestCase):
+    def test_generate_runs_unless_plan_found_zero_targets(self):
+        """generate 잡은 plan 이 찾은 대상이 0개일 때만 건너뛴다. 이 조건이 사라지거나 '!= 1' 로 틀어지면(독립 검증의 변이)
+        대상이 1개일 때 generate 가 건너뛰어져 [SKIP]·notice 없이 초록으로 끝난다."""
+        workflow = yaml.safe_load((_bootstrap.ROOT / ".github" / "workflows" / "blogger.yml").read_text(encoding="utf-8"))
+        job = workflow["jobs"]["generate"]
+        self.assertEqual(job["needs"], "plan")
+        self.assertEqual(job["if"], "needs.plan.outputs.count != '0'")
+
+
 @unittest.skipUnless(yaml is not None and shutil.which("bash"),
                      "PyYAML(requirements-dev.txt)과 bash 가 필요합니다(CI 의 Linux 에서는 항상 실행됩니다)")
 class WorkflowPlanStepTest(unittest.TestCase):

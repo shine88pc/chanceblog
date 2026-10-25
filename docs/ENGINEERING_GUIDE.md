@@ -33,7 +33,7 @@
 | R6 | 오류를 **분류**한다 | 설정 오류 2 / 인프라 실패 1 / 정상 건너뜀 0. 예외를 삼키지 말고, 삼켜야 하면 이유를 주석과 이력에 남긴다 |
 | R7 | **멱등·재시도 안전** | 쓰기 전 존재 확인, 재시도 전 중복 확인, 파일은 임시 파일→교체(`state.write_json_atomic`) |
 | R8 | 시간은 **UTC aware**, 날짜 경계만 KST | naive `datetime` 금지. 테스트에서는 `now`를 주입한다 |
-| R9 | 로그는 사람이 읽는 한 줄 + **시크릿 마스킹** | 토큰·키·프롬프트 전문·예외의 원문 응답을 그대로 출력하지 않는다(`llm.mask`) |
+| R9 | 로그는 사람이 읽는 한 줄 + **시크릿 마스킹** | 토큰·키·프롬프트 전문·예외의 원문 응답을 그대로 출력하지 않는다(`llm.mask`). 외부·AI 유래 문자열(제목·사유·예외 문구)은 로그·요약에 쓰기 전에 `pipeline.console.one_line()`·`md_cell()`로 한 줄로 접고(`::`·`##[` 무력화, 마크다운 이스케이프), `::warning::`·`::error::` 주석에는 고정 문장만 쓴다 |
 | R10 | **손상된 상태는 덮어쓰지 않는다** | 이력 파일이 깨졌으면 종료 코드 1(`StateError`). 빈 목록으로 초기화하면 중복 방지가 무너진다 |
 | R11 | 파일을 **통째로 덮어쓰지 않는다** | 최소 diff. 생성물은 생성기만 쓴다 |
 | R12 | 새 플랫폼은 **어댑터**로 | 기존 블로그 코드를 복사하지 않는다([`ARCHITECTURE.md`](./ARCHITECTURE.md) §7) |
@@ -85,7 +85,7 @@
 | **L0 정적** | 문법·보안 규칙·설정 일관성 | `python scripts/validate_repo.py` · `actionlint` · `python -m pipeline.registry` | 오류 0건 |
 | **L1 단위** | 로직(성공+실패 경로) | `python -m unittest discover -s tests` | 전부 통과, 네트워크 없음 |
 | **L2 드라이런** | 전체 흐름(스텁 LLM, 파일·게시 없음) | `python -m pipeline.run --blog <key> --dry-run` 또는 Actions `dry_run` 체크 | 종료 코드 0, 변경 파일 없음. 예외: Chance 드라이런은 모든 분야에 검증된 기사가 없거나 소스에 접속하지 못하면 종료 1이다(이상 신호, `docs/ARCHITECTURE.md` §4-1) — 실행 요약의 탈락 사유를 확인하고 기사가 있을 때 다시 실행한다 |
-| **L3 초안** | 실제 LLM·게이트·초안 저장, **게시 없음** | Actions → Blogger Generate → Run workflow(`publish` 미체크) | `draft`/`generated_unpublished` 기록, 초안 내용 확인 |
+| **L3 초안** | 실제 LLM·게이트·초안 저장, **게시 없음** | Actions → Blogger Generate → Run workflow(`publish` 미체크) | `draft` 기록(게시 대상이 아닌 실행에서만. 게시 대상인데 시크릿이 없으면 종료 2), 초안 내용 확인 |
 | **L4 카나리** | 실제 게시 소량 관찰 | `mode: auto`, 상한 1건/일, 3일 이상 | `posted` 연속, 워치독 이슈 0, 게시글 확인 |
 | **L5 운영** | 지속 감시 | 워치독 일 2회, Actions 실패 메일 | 이슈 0건 |
 

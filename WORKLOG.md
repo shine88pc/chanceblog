@@ -7,6 +7,45 @@
 
 ---
 
+## [2026-10-25] Claude – Blogger 가시화: 시크릿 미등록·정지·상한 건너뜀을 숨기지 않고, 로그·요약 정화, macat0722 정지 반영 (발행 복구 2/4, 총괄)
+
+**작업자**: Claude (총괄 역할)  
+**대상**: Blogger  
+**등급**: T2 (실행 규약·종료 코드·워크플로 plan 단계). `blogger_macat`을 `mode: off`로 둔 것은 운영자 결정(2026-10-25, 영문 블로그인데 프로필이 한글 → 영문 프로필 준비 전까지 정지). 독립 검증은 별도 세션이 새 clone에서 두 번 수행(아래)  
+**목적**: D-25(게시용 시크릿이 없어도 실행이 초록 — 초안이 저장소 파일로만 쌓이고 Blogger에는 한 번도 안 감), D-26(하루 상한 건너뜀이 조용함), D-32(영문 블로그에 한글 글이 갈 위험)와, 검증 중 발견한 로그 위조 경로(다른 블로그 이력 제목의 개행으로 `::error::` 줄을 만들 수 있음)
+
+### 변경 사항
+- **`pipeline/run.py`**: 게시 대상인데 게시용 시크릿이 없으면 **글을 만들기 전에** 종료 2 + `::error::`(시크릿 **이름**만) + `[SKIP] code=SECRETS_MISSING` + 요약. 이 점검은 하루 상한·주제 선정·이력 읽기보다 앞선다(`--topic` 지정도 우회 못 함, DRY_RUN은 경고만). `PIPELINE_PAUSE`·`mode: off`·하루 상한 건너뜀에는 `[SKIP]` 줄과 요약에 더해 `::notice::`(Actions 화면 위쪽 주석)를 남긴다. 주제 없음·게이트 탈락은 경고 주석, LLM·주제 확장·게시 실패는 종료 1. 로그·요약에 쓰는 외부·AI 유래 문자열은 `one_line()`으로 접고, `::warning::`·`::error::` 주석에는 고정 문장만 쓴다
+- **`pipeline/plan.py`**: `--only`를 두 단계로 검사(레지스트리에 없는 key·`--platform`과 다른 플랫폼의 key는 종료 1과 유효 key 안내). 대상이 모두 정지거나 없으면 대상 0개로 초록 + notice
+- **`pipeline/console.py`**(신규 함수): `one_line()`(개행·단독 CR·U+2028·U+2029·U+0085·제어 문자를 공백 하나로, 길이 제한, `::`·`##[` 위치와 상관없이 무력화 — 러너가 `TrimStart()` 뒤에 `::`를 검사하고 `##[`는 줄 어디서든 해석하므로 줄 머리 공백 방식은 쓰지 않았다), `md_cell()`(요약 표용 마크다운 이스케이프)
+- **`pipeline/gates.py`**: 중복 사유에 넣는 비교 대상 제목을 한 줄·100자로 접는다(판정·코드는 불변 — 유사도는 원문 전체로 계산)
+- **`.github/workflows/blogger.yml`**: plan 단계가 실패하면 단계도 빨강(예전에는 `matrix=`가 빈 채 초록이라 오타 key가 흔적 없이 건너뜀), 대상 0개 notice와 요약, `ONLY_BLOG`는 `env:`로만 받아 셸 주입을 막음
+- **`pipeline/blogs.json`**: `blogger_macat`을 `mode: off`로(운영자 결정). 정지 중에도 매일 02:00 UTC 실행은 돌고 초록 + notice로 끝난다. 워치독은 정지 블로그를 평가하지 않아 #10(UNPUBLISHED)은 정지 효과로 닫힌다
+- **문서**: ARCHITECTURE(Plan·Topic 행, §4-1 코드표에 Blogger 코드와 종료 2 행, 처리 순서 단락, 상태 이름), HANDLER(현황 표, 재개 절차, 첫 실행 안내), ENGINEERING_GUIDE R9·L3, SECURITY_GUARDRAILS G-L2, REQUEST_BRIEFING, DEFECT_REGISTER(D-25 해결·관측 필요, D-26 완화, D-48 신규)
+
+### 검증 증거
+- **L0**: `python scripts/validate_repo.py` 오류 0·경고 2(LIQUID-1, EXPOSE-1 — main과 동일), actionlint 0건(로컬에 shellcheck 없음 — CI), pyflakes 신규 0, vermin 3.10 호환, 3.12 전용 문법 스캔 0건. 비밀 모양 리터럴 0건(테스트의 가짜 키는 런타임 조합)
+- **L1**: 이 브랜치 단독 332개 통과(main 297 + 신규 35), main(c834c2d)과 합친 트리 593개 통과. 소켓 차단 상태에서도 통과(네트워크 시도 0)
+- **1차 독립 검증**(b154fa5·4698bb1): 조건부 병합 가능, 높음 0건. 변이 45개 중 34개 탐지, 11개 생존(사전 점검 위치 4곳·`--topic` 우회·게시 실패 마스킹·`PIPELINE_SECRET_*` 계약 등 — 코드는 맞고 테스트가 못 잡음). 지적 F-1~F-10
+- **수정 반영**(커밋 ecbd82e~4006aa1): F-3(코드가 인용하던 설명 없는 내부 번호를 평문으로)·F-4(`--only` 두 단계 + plan 단계를 실제 `bash -e`로 돌리는 테스트)·F-6(`one_line`·`md_cell` + 개행·CR·U+2028·`::`·링크·표를 숨긴 이력 제목 테스트)·F-7a(워크플로가 넘기는 `PIPELINE_SECRET_*` 이름만으로 게시 성공까지 가는 테스트)·F-7b(생존 변이 9개를 잡는 테스트)·F-10(PAUSED·MODE_OFF notice). 되돌리면 실패하는지 22종 확인, 1차 생존 변이 9개 모두 탐지
+- **2차 독립 검증**(4006aa1): **병합 가능**. 지적 6건 모두 해소. 새 로직 표적 변이 65개 중 60개 탐지(생존 5: 동등·문구 3, 테스트 보강 권장 2 → N-1·N-2는 이번 변경에 테스트로 추가해 변이로 확인). 게시 대상 실행이 이유 없이 초록으로 끝나는 경로가 없음을 **12,960가지 조건 열거**로 확인(위반 0). 옛 gates와 새 gates를 제목 66개×프로필 2개로 132번 비교해 판정·코드 차이 0건. 워크플로 plan 단계 시나리오 9개(정상·정지·오타·다른 플랫폼·주입 시도 등)를 실제 bash로 실행, 다른 플랫폼 key가 이전에는 초록+틀린 notice였다가 이제 종료 1. 다른 열린 브랜치(워치독·보안·Pages 확인)와 시험 병합 충돌 없음
+- **실행하지 못한 것**: 실제 GitHub Actions 실행(`generate` 잡이 대상 0개에서 matrix 오류 없이 건너뛰어지는지, notice·요약이 화면에 어떻게 보이는지), Linux 러너의 Python 3.10, shellcheck, L3(실제 Gemini 초안)·실제 게시, 단독 CR을 Actions 러너가 줄바꿈으로 처리하는지
+
+### 다음 AI에게 남기는 주의사항
+1. **병합 직후 Actions → Blogger Generate를 입력 없이 수동 1회 실행**한다. 기대: plan 단계가 `::notice::실행할 Blogger 블로그가 없습니다 …`를 남기고 `generate` 잡이 건너뛰어진 채 초록(요약에 "대상 0개"). 이 확인은 로컬에서 재현할 수 없다
+2. **macat0722는 정지(mode off) 상태다 — 되살리지 말 것.** 재개 절차는 `HANDLER.md` §3 P1: 영문 프로필(T3) → `mode: draft`(T3) → L2·L3 → 시크릿 등록 → `auto`(T3). 정지 중에는 `--dry-run`도 `MODE_OFF`로 막히므로 시험은 mode를 켠 사본에서 한다. 재개 직후에는 마지막 활동이 오래돼 워치독 STALE(50시간)이 바로 걸릴 수 있다. 정지로 #10이 닫혀도 시크릿 미등록·영문 프로필 문제가 풀린 것은 아니다
+3. `BLOGGER_PUBLISH=off` 수동 실행도 하루 상한을 쓴다(KST 11시 정기 게시 전에 하면 `DAILY_CAP`으로 건너뜀). 상한의 의미 유지는 T3 판단이다(게시 대상 실행에서는 `posted`만 세기, 연습 실행은 상한 검사 건너뛰기를 선택지로 남김 — D-26)
+4. MODE_OFF notice는 "다시 켜려면 mode를 draft 또는 auto로"라고 안내하지만, AI가 mode를 올리는 것은 SECURITY_GUARDRAILS §3 상 운영자 승인 대상이다(사람이 읽는 안내라 그대로 둠)
+5. Chance 엔진(`generator.py _one_line`, 줄 머리 `::`를 `→ ` 접두로 막음)과 Blogger(`console.one_line`, 위치와 무관하게 `::`를 풀어 놓음)의 정화 방식이 다르다. 둘 다 호출 위치에서는 안전하며 통일 여부는 후속 판단
+6. `게시 성공: {url}`·성공 요약의 `URL:`은 Blogger API 응답이라 접지 않았다. `topics.clean_topic`은 `gates`와의 순환 import 때문에 재사용하지 않았다
+7. 시험을 PowerShell로 돌리면 `WorkflowPlanStepTest`가 bash가 없어 skip된다(Git Bash는 전부 실행). WSL 런처만 PATH에 있는 Windows에서는 실패할 수 있다(D-48 N-3)
+
+### 남은 이슈 / 확인할 점
+- D-48(낮음): N-3 bash 탐지, N-4 `md_cell`이 맨 URL·`*`·`_`를 그대로 둠, N-5 `::error::` 줄의 `exc.code` 무접기, N-6·N-7 사소한 것
+- 운영자: 영문 프로필 준비 시점과 draft 재개 시점(T3), BLOGGER_* 시크릿은 초안 저장 모드(후속 PR) 이후
+
+---
+
 ## [2026-10-25] Claude – 워치독 보강: 하루 단위 판정·글 파일 기준 STALE·사이트 배포 점검·담당자 지정·새 심각 건에만 빨강 (발행 복구 3/4, 총괄)
 
 **작업자**: Claude (총괄 역할)  

@@ -203,6 +203,15 @@ class CheckPostTest(unittest.TestCase):
         self.assertLess(len(dup[0]), 200)
         self.assertTrue(dup[0].endswith("…"))
 
+    def test_long_history_titles_are_compared_in_full_and_only_displayed_folded(self):
+        """사유에 넣는 제목만 한 줄·100자로 접는다. 유사도 계산은 원문 전체로 한다(접힌 제목으로 계산하면 꼬리가 잘려
+        거의 같은 제목으로 오판한다 — 독립 검증의 변이)."""
+        post, stats = good_post()
+        loose = copy.deepcopy(PROFILE)
+        loose["similarity"] = {"same_blog": 0.4, "other_blogs": 0.4}
+        other = post["title"] + " " + "가" * 250
+        self.assertNotIn("DUP_OTHER", run_check(post, stats, other=[other], profile=loose).codes())
+
     def test_sanitize_warning_is_reported_but_not_blocking(self):
         post, _ = good_post()
         result = run_check(post, {"dropped_blocks": 1, "unwrapped_tags": 0, "links_removed": 0})
