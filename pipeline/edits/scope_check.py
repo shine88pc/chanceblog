@@ -32,8 +32,9 @@ _ISSUE_RE = re.compile(r"(?i)\b(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?)\s*:?\s+
 
 
 def _flat(text, limit=400):
-    """코멘트·로그에 들어가는 문장을 한 줄로 접는다(줄 시작 `::`·줄 어디서든 `##[` 워크플로 명령 모양과 마크다운 구조 주입 방지)."""
-    return safety.neutralize(re.sub(r"\s+", " ", str(text)).strip()[:limit])
+    """코멘트·로그에 들어가는 문장을 한 줄로 접는다(줄 시작 `::`·줄 어디서든 `##[` 워크플로 명령 모양과 마크다운 구조 주입 방지).
+    자른 지점이 코드 스팬(`…`) 안이면 열린 스팬을 통째로 뺀다 — 닫는 백틱이 잘려 나가면 뒤의 글자가 마크다운으로 살아난다."""
+    return safety.neutralize(safety.clip(text, limit, markdown=True))
 
 
 @dataclass
@@ -51,7 +52,7 @@ class Report:
         out = [MARKER, f"### 🔎 요청 범위 검증{(' — ' + self.title) if self.title else ''}", "", head, ""]
         out += [f"- {sym} {_flat(text)}" for sym, text in self.items]
         for block in self.details:
-            out += ["", "```diff", block, "```"]
+            out += ["", safety.fenced(block, "diff")]   # 백틱 펜스는 기본 파일의 ``` 줄이 닫아 버린다 → 내용보다 긴 틸드 펜스
         return "\n".join(out) + "\n"
 
 

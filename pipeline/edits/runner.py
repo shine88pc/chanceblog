@@ -8,6 +8,7 @@ CLI: python -m pipeline.edits.runner --issue-file issue.json --out DIR [--dry-ru
      python -m pipeline.edits.runner --verify-staged DIR/files.txt   (스테이징 목록 == 허용 목록 확인)
      python -m pipeline.edits.runner --show-output DIR                (DRY_RUN: 산출물을 워크플로 명령이 먹히지 않게 로그에 출력)
 로그 정책: 이슈를 처리하는 단계(--issue-file)가 내는 줄은 모두 `issue=#N author=@login(권한)` 으로 시작하고, 요청 원문·페이지 원문·프롬프트·비밀·예외 원문은 내지 않는다.
+(이미지 선택기가 부르는 레거시 엔진 generator.py 는 검색어를 print 하므로 호출 동안 stdout 을 가두고 `image_search_notes` 의 요약만 이 형식으로 낸다.)
 
 한 이슈는 한 번만 처리한다: --remote-refs 에 이 이슈 번호의 원격 브랜치가 있거나 이슈에 표식 라벨(issue-edit-done)이 있으면
 새 브랜치·PR 없이 코멘트용 결과(duplicate)만 만든다(dry-run 은 예외).
@@ -15,6 +16,8 @@ CLI: python -m pipeline.edits.runner --issue-file issue.json --out DIR [--dry-ru
 종료 코드: 0 처리 끝(ok·rejected·ignored·duplicate 포함) / 1 인프라 실패(AI·네트워크) / 2 설정·명세 오류
 """
 import argparse
+import contextlib
+import io
 import json
 import os
 import posixpath
@@ -120,12 +123,12 @@ _code = safety.code
 
 def _fence(text):
     """사용자 입력을 코드 펜스 안에 안전하게 넣는다(펜스 탈출·멘션 방지)."""
-    clean = frontmatter.normalize_newlines(text).replace("~~~", "~ ~ ~").replace("@", "@​")
+    clean = frontmatter.normalize_newlines(text).replace("~~~", "~ ~ ~").replace("@", "@\N{ZERO WIDTH SPACE}")
     return f"~~~~text\n{clean}\n~~~~"
 
 
 def _reject(reasons, hint="", edit_type="", target=""):
-    reasons = [_one_line(r, 400) for r in reasons]
+    reasons = [_one_line(r, 400, markdown=True) for r in reasons]   # 코드 스팬 한가운데에서 잘려 닫는 백틱이 사라지지 않게(마크다운 코멘트)
     comment ="⚠️ **수정하지 않았습니다.**\n\n사유:\n" + "\n".join(f"- {r}" for r in reasons)
     if hint:
         comment += f"\n\n{hint}"
@@ -135,7 +138,7 @@ def _reject(reasons, hint="", edit_type="", target=""):
 
 def _error(message, exit_code=EXIT_INFRA, log_detail=""):
     """처리 오류. message 는 공개 코멘트에도 들어가므로 원인 상세(log_detail)는 따로 두고 러너 로그에만 낸다."""
-    message = _one_line(message, 400)
+    message = _one_line(message, 400, markdown=True)
     comment =f"❌ **처리 중 오류가 발생했습니다.**\n\n- {message}\n\n저장소는 변경되지 않았습니다. Actions 로그를 확인하세요."
     return Result("error", message=message, reasons=[message], comment=comment, exit_code=exit_code, log_detail=log_detail)
 
@@ -249,16 +252,54 @@ def registry_models(root):
         return ["gemini-3.8-flash"]
 
 
-def default_image_picker():
-    """레거시 엔진의 Unsplash 검색을 재사용한다(Phase 3에서 pipeline 으로 이관)."""
+# 레거시 엔진(generator.py)이 이미지를 고르며 print 하는 줄 중 요청 유래 텍스트(검색어 = AI 가 만든 검색어이거나 AI 가 없으면 요청 원문) 없이
+# 알릴 수 있는 것만 참고 문장으로 옮긴다. 이 문구 목록은 generator.py 의 출력과 같아야 한다(테스트가 대조).
+_IMAGE_SEARCH_NOTES = (
+    (re.compile(r"\s*Unsplash API 오류 (\d{3})\b"), "Unsplash API 오류 {0} (403·429 이면 시간당 호출 한도 초과일 수 있습니다)"),
+    (re.compile(r"\s*Unsplash 호출 실패\b"), "Unsplash 호출 실패(원인은 검색어가 섞여 있어 로그에 내지 않았습니다)"),
+    (re.compile(r"\s*UNSPLASH_ACCESS_KEY 없음"), "UNSPLASH_ACCESS_KEY 없음: 이미지 검색을 건너뛰었습니다"),
+)
+
+
+def image_search_notes(output):
+    """이미지 선택기가 낸 출력에서 로그에 남길 참고 문장 목록. 알려진 줄만 요약하고, 나머지는 줄 수만 알린다(요청 유래 텍스트·`##[` 를 싣지 않는다)."""
+    notes, others = [], 0
+    for line in str(output).splitlines():
+        if not line.strip():
+            continue
+        for rx, template in _IMAGE_SEARCH_NOTES:
+            match = rx.match(line)
+            if match:
+                note = template.format(*match.groups())
+                if note not in notes:
+                    notes.append(note)
+                break
+        else:
+            others += 1
+    if others:
+        notes.append(f"이미지 검색기가 낸 그 밖의 출력 {others}줄은 요청 유래 텍스트가 섞여 있어 로그에 내지 않았습니다")
+    return notes
+
+
+def default_image_picker(notes=None):
+    """레거시 엔진의 Unsplash 검색을 재사용한다(Phase 3에서 pipeline 으로 이관).
+
+    generator.py 는 검색어·후보 주소를 print 한다. 그 줄은 `issue=#N` 머리가 없고 `##[` 도 막지 못하며 검색어에 요청 원문이 그대로 들어갈 수
+    있다(AI 가 없으면 검색어 = 요청문). 그래서 호출 동안 stdout 을 가두고, 로그에는 `image_search_notes` 가 요약한 문장만 notes 로 넘긴다."""
     if not (os.environ.get("UNSPLASH_ACCESS_KEY") or "").strip():
         return None
     import generator  # noqa: PLC0415 - 환경변수를 읽는 모듈이라 키 확인 뒤에만 import
 
     def pick(queries, used):
-        picked = generator.pick_images(queries, set(used), 1, allow_pool=False)
-        if picked:
-            generator.trigger_download(picked[0])
+        captured = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(captured):
+                picked = generator.pick_images(queries, set(used), 1, allow_pool=False)
+                if picked:
+                    generator.trigger_download(picked[0])
+        finally:
+            if notes is not None:
+                notes.extend(image_search_notes(captured.getvalue()))
         return picked[0] if picked else None
     return pick
 
@@ -374,14 +415,16 @@ def process_issue(issue, root, env=None, llm=None, image_picker=None, dry_run=Fa
     done = already_processed(number, remote_refs, issue.get("labels"), prefix=_branch_prefix(root))
     if done and not dry_run:
         return _duplicate(issue, done, env)
-    result = _process(issue, root, env, llm, image_picker, dry_run)
+    search_notes = []   # 이미지 선택기(레거시 엔진)가 낸 출력의 요약 — 결과의 참고 문장으로 러너 로그에 `issue=#N …` 머리를 달고 나간다
+    result = _process(issue, root, env, llm, image_picker, dry_run, search_notes)
+    result.notes.extend(search_notes)
     if done:
         result.notes.append("이미 처리한 이슈이지만 dry-run 이라 처리를 계속했습니다"
                             + (f"(기존 브랜치: {', '.join(done.branches)})" if done.branches else "(표식 라벨)"))
     return result
 
 
-def _process(issue, root, env, llm, image_picker, dry_run):
+def _process(issue, root, env, llm, image_picker, dry_run, search_notes):
     req = resolve_request(issue, root)
     if isinstance(req, Result):
         return req
@@ -405,7 +448,7 @@ def _process(issue, root, env, llm, image_picker, dry_run):
         if method in ("text", "llm_patch", "image") and llm is None:
             llm = build_llm(env, registry_models(root))
         if method == "image" and image_picker is None:
-            image_picker = default_image_picker()
+            image_picker = default_image_picker(search_notes)
         if method == "text":
             new_text, how = ops.op_text(text, fields, cfg, llm)
         elif method == "link":
@@ -548,7 +591,12 @@ def main(argv=None):
         except (OSError, UnicodeDecodeError) as exc:   # 목록을 못 읽으면 이미 처리했는지 알 수 없다 → 처리하지 않는다(fail closed)
             result = _error(f"원격 브랜치 목록을 읽을 수 없습니다: {type(exc).__name__}", EXIT_CONFIG)
         else:
-            result = process_issue(issue, root, dry_run=dry, remote_refs=refs)
+            try:
+                result = process_issue(issue, root, dry_run=dry, remote_refs=refs)
+            except Exception as exc:  # noqa: BLE001 - 예상 못 한 입력으로 처리기가 죽어도 트레이스백 대신 오류 결과를 남긴다
+                # 트레이스백에는 요청 유래 문구(예: urlsplit 의 값)가 섞일 수 있고 status.txt 도 없어 워크플로가 코멘트를 남기지 못한다.
+                # 예외 문구는 쓰지 않고 종류(클래스 이름)만 낸다.
+                result = _error(f"이슈를 처리하다 예상하지 못한 오류가 발생했습니다: {type(exc).__name__}")
     write_outputs(result, args.out)
     # 이슈 처리 단계가 내는 모든 줄은 `issue=#N author=@login(권한)` 으로 시작하고, 신뢰할 수 없는 문자열은 한 줄로 접어 비밀을 가리고
     # 워크플로 명령 모양(`::`·`##[`)을 무력화한 것만 쓴다.

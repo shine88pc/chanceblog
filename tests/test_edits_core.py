@@ -63,6 +63,12 @@ class SpecTest(unittest.TestCase):
                 self.assertHas(errors, key)
         self.assertHas(self.errors(lambda s: s.update(output=["pull_request"])), "output 은 객체")
 
+    def test_output_rejects_keys_that_are_not_even_strings(self):
+        """검증자 V02: YAML 은 `1: x`·`true: x`·`null: x` 같은 문자열이 아닌 키도 만든다. 그것도 지원하지 않는 키다."""
+        for key in (1, True, None, 3.5):
+            errors = self.errors(lambda s, k=key: s["output"].update({k: "x"}))
+            self.assertHas(errors, "지원하지 않는 키")
+
     def test_real_spec_has_exactly_the_keys_the_code_reads(self):
         self.assertEqual(set(real_spec()["output"]), spec_mod.OUTPUT_KEYS)
         self.assertEqual(spec_mod.validate_spec(real_spec()), [])
@@ -280,6 +286,13 @@ class TargetsTest(unittest.TestCase):
     def test_invalid_queries(self):
         for q in ("", "   ", "줄\n바꿈", "x" * 400):
             self.assertEqual(targets.match_post(q, self.index)[1], "invalid")
+
+    def test_addresses_urlsplit_cannot_parse_are_invalid_not_exceptions(self):
+        """검증자 F-6: `http://[::1`·`https://[` 는 urlsplit 이 ValueError 를 낸다(전각 슬래시 같은 NFKC 문제도 같다). 예외가 새면 러너가 죽는다."""
+        for q in ("http://[::1", "https://[", "http://[", "HTTPS://[::1", "https://example.com\N{FULLWIDTH SOLIDUS}path",
+                  "http://\N{ACCOUNT OF}/", "http://a\N{FULLWIDTH COMMERCIAL AT}b/x"):
+            self.assertEqual(targets.match_post(q, self.index), ([], "invalid"), q)
+        self.assertEqual(targets.match_post("/[::1", self.index)[1], "none")        # 상대 경로는 urlsplit 을 쓰지 않는다
 
 
 if __name__ == "__main__":

@@ -34,7 +34,7 @@ COMPACT_DANGEROUS = [
 LIQUID = re.compile(r"\{%|\{\{")
 _AD_BLOCK = re.compile(r"(?is)<\s*script\b.*?(?:<\s*/\s*script\s*>|\Z)|<\s*ins\b[^>]*>")
 _EXTERNAL_HOST = re.compile(r"""(?i)\bhttps?://([^/\s)"'<>?#:\\]+)""")
-_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f​-‏  ﻿]")
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u200b-\u200f\u2028\u2029\ufeff]")
 _HTTP_LINK = re.compile(r"""\bhttp://[^\s)"'<>]+""", re.I)
 MIN_SHRINK_BASE = 500
 AI_MIN_LINES, AI_MAX_RATIO = 12, 0.3   # AI 패치는 작은 파일에서도 '일부'만 바꿔야 한다(절대 한도 80줄은 작은 페이지에서 무의미)

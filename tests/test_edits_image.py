@@ -36,6 +36,13 @@ BAD_URLS = [
     "https://images.unsplash.com/photo-1?", "https://images.unsplash.com/photo-1?x=%zz", "https://images.unsplash.com/photo-1?x=<script>",
     "https://images.unsplash.com/../photo-1", "https://images.unsplash.com/photo-1?a=b c",
     "https://images.unsplash.com/photo-" + "1" * 65, "https://images.unsplash.com/photo-1?" + "a" * 301,
+    # 'unsplash.com 으로 끝나는 호스트'가 아니라 images.unsplash.com 하나만 허용한다(검증자 V09)
+    "https://plus.unsplash.com/photo-1", "https://unsplash.com/photo-1", "https://api.unsplash.com/photo-1", "https://evilunsplash.com/photo-1",
+    "https://ximages.unsplash.com/photo-1", "https://images.unsplash.com.evil.example/photo-1",
+    # 질의에는 영숫자와 _ . = & - 와 %XX 만(검증자 V10): 경로·사용자 정보·쉼표·세미콜론으로 이어 붙이는 값은 거부
+    "https://images.unsplash.com/photo-1?a=b:c", "https://images.unsplash.com/photo-1?a=b/c", "https://images.unsplash.com/photo-1?a=b@c",
+    "https://images.unsplash.com/photo-1?a=b+c", "https://images.unsplash.com/photo-1?a=b,c", "https://images.unsplash.com/photo-1?a=b;c",
+    "https://images.unsplash.com/photo-1?a=b(c)", "https://images.unsplash.com/photo-1?a=b%", "https://images.unsplash.com/photo-1?a=b%4",
     "", None, 123, ["https://images.unsplash.com/photo-1"],
 ]
 
@@ -128,6 +135,14 @@ class VerifyImageChangeTest(unittest.TestCase):
         self.assertTrue(checks.verify_image_change(bare, added.replace("본문 문장입니다.", "본문 변경")))
         self.assertTrue(checks.verify_image_change(bare, added + f"\n![x]({NEW})\n"))        # 본문에 이미지를 끼워 넣는 것은 범위 밖
         self.assertTrue(checks.verify_image_change(bare, added.replace("category: x", "category: y")))
+
+    def test_a_front_matter_line_that_merely_mentions_image_is_still_compared(self):
+        """검증자 V11: 이미지 줄을 빼고 비교할 때 `image:` 로 시작하는 줄만 뺀다 — 줄 중간에 `image:` 가 든 다른 항목(description 등)의 변경은 잡아야 한다."""
+        bare = '---\nlayout: post\ntitle: "이미지 없는 글"\ndescription: "see image: a"\ncategory: x\n---\n\n본문 문장입니다.\n'
+        added = bare.replace("category: x\n", f'category: x\nimage: "{NEW}"\n')
+        self.assertEqual(checks.verify_image_change(bare, added), [])
+        changed = added.replace("see image: a", "see image: CHANGED")
+        self.assertTrue(any("주소 외의 내용" in r for r in checks.verify_image_change(bare, changed)))
 
     def test_front_matter_must_be_readable(self):
         self.assertTrue(checks.verify_image_change("front matter 없음\n", f"---\nimage: {NEW}\n---\n"))

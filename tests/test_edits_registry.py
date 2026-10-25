@@ -124,7 +124,15 @@ class StructuralChangesStillCaughtTest(RegistryCase):
 
     def test_missing_or_damaged_registry_files(self):
         data = self.registry()
+        raw = json.dumps(data, ensure_ascii=False, indent=2)
+        put = lambda text: (self.root / "pages.json").write_bytes(text.encode("utf-8"))  # noqa: E731
         variants = {
+            "끝 개행 없음": lambda: put(raw),                      # 앞뒤 공백·개행 차이도 '최신 아님'이다(비교에서 strip 하지 않는다)
+            "끝 개행 두 개": lambda: put(raw + "\n\n"),
+            "앞에 빈 줄": lambda: put("\n" + raw + "\n"),
+            "끝에 공백": lambda: put(raw + " \n"),
+            "title 키가 없는 항목": lambda: self.write_registry({**data, "pages": [{k: v for k, v in data["pages"][0].items() if k != "title"}, *data["pages"][1:]]}),
+            "항목이 객체가 아님": lambda: self.write_registry({**data, "pages": ["about", *data["pages"][1:]]}),
             "들여쓰기 변경": lambda: self.write_registry(data, indent=4),
             "페이지에 키 추가": lambda: self.write_registry({**data, "pages": [{**data["pages"][0], "x": 1}, *data["pages"][1:]]}),
             "순서 변경": lambda: self.write_registry({**data, "pages": list(reversed(data["pages"]))}),

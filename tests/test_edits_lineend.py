@@ -168,6 +168,15 @@ class LineEndingJudgementTest(unittest.TestCase):
             self.assertEqual(report.verdict, "FAIL", report.items)
             self.assertIn("혼합", report.markdown())
 
+    def test_cr_only_files_cannot_be_proven_even_when_both_sides_are_cr_only(self):
+        """검증자 V05: 유형이 달라서가 아니라 CR 단독 자체가 문제다 — 같은 CR 단독끼리의 변경도 줄 단위로 증명할 수 없어 거부한다."""
+        before = ABOUT.replace("\n", "\r")
+        report = self.judge(before, before.replace(OLD_SENTENCE, NEW_SENTENCE))
+        self.assertEqual(report.verdict, "FAIL", report.items)
+        self.assertIn("CR 단독", report.markdown())
+        report = self.judge(ABOUT, before.replace(OLD_SENTENCE, NEW_SENTENCE))             # LF → CR 단독은 유형 변경이기도 하다
+        self.assertEqual(report.verdict, "FAIL", report.items)
+
     def test_files_without_any_newline_are_not_flagged(self):
         report = self.judge("한 줄 " + OLD_SENTENCE, "한 줄 " + NEW_SENTENCE)
         self.assertNotIn("줄 끝", report.markdown())
