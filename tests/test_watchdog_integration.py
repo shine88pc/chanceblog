@@ -125,6 +125,13 @@ class CollectWiringTest(unittest.TestCase):
         self.assertEqual(findings, [])            # 오늘 글 있음 + 배포됨
         self.assertEqual(stats[0]["last_post"], self.committed)
 
+    def test_only_main_branch_runs_count_as_a_deployment(self):
+        """다른 ref 에서 workflow_dispatch 로 돌린 성공은 사이트 배포가 아니다(F-10)."""
+        gh = self.pages(run_record("success", self.committed + timedelta(minutes=2), head_branch="feature/x"))
+        findings, _, _ = collect(self.recent_post, self.now, gh)
+        self.assertEqual(summarize(findings), [("PAGES_NOT_DEPLOYED", "critical")])
+        self.assertIn((watchdog.PAGES_WORKFLOW, "main"), gh.runs_asked)
+
     def test_workflow_run_history_reaches_the_evaluation(self):
         gh = FakeGitHub(runs={
             "pages.yml": [run_record("success", self.committed + timedelta(minutes=2))],

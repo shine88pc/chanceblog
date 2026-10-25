@@ -17,6 +17,7 @@ from unittest import mock
 import _bootstrap  # noqa: F401
 from pipeline.health import Finding
 from watchdog_helpers import build_repo
+from watchdog_helpers import FakeGitHub, canned_commit_times
 
 sys.path.insert(0, str(_bootstrap.ROOT / "scripts"))
 import watchdog  # noqa: E402
@@ -364,7 +365,7 @@ class CollectTest(unittest.TestCase):
 
     def test_pages_runs_lookup_failure_only_skips_the_deploy_check(self):
         class BrokenClient:
-            def workflow_runs(self, name):
+            def workflow_runs(self, name, branch=None):
                 raise OSError("network down")
         reg = {"blogs": [{"key": "chance", "platform": "jekyll-git", "mode": "auto",
                           "workflow": ".github/workflows/chanceblog.yml",
@@ -378,6 +379,82 @@ class CollectTest(unittest.TestCase):
             with redirect_stdout(buf):
                 findings, _ = watchdog.collect(reg, tmp, NOW, client=BrokenClient())
         self.assertIn("조회 실패", buf.getvalue())
+        self.assertNotIn("PAGES_NOT_DEPLOYED", [f.code for f in findings])
+        # 검사가 꺼진 채 초록이 이어지지 않도록 Actions 화면에 경고 주석으로도 올라간다(F-10)
+        warnings = [ln for ln in buf.getvalue().splitlines() if ln.startswith("::warning::")]
+        self.assertEqual(len(warnings), 1, buf.getvalue())
+        self.assertIn("Pages", warnings[0])
+        self.assertIn("조회 실패", warnings[0])
+
+
+class _Reply(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class RecordingOpener:
+    """urllib.request.urlopen 대용: 요청의 메서드·주소를 기록하고 빈 실행 목록을 돌려준다."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, req, timeout=None):
+        self.calls.append((req.get_method(), req.full_url))
+        return _Reply(b'{"workflow_runs": []}')
+
+
+JEKYLL_REG = {"blogs": [{"key": "chance", "name": "C", "platform": "jekyll-git", "mode": "auto",
+                         "workflow": ".github/workflows/chanceblog.yml",
+                         "state": {"history": "history.json", "content_dir": "_posts"},
+                         "health": {"max_gap_hours": 36, "max_failure_streak": 3}}], "defaults": {}}
+
+
+class PagesLookupTest(unittest.TestCase):
+    """F-10: Pages 실행 이력은 main 브랜치 것만 본다. 조회가 실패하면 Actions 화면에 경고 주석으로 올린다."""
+
+    def collect(self, client):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(watchdog, "enabled_blogs", return_value=JEKYLL_REG["blogs"]), \
+                mock.patch.object(watchdog, "commit_times", canned_commit_times([NOW - timedelta(hours=2)])):
+            (Path(tmp) / "history.json").write_text("[]", encoding="utf-8")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                findings, _ = watchdog.collect(JEKYLL_REG, tmp, NOW, client=client)
+        return findings, buf.getvalue()
+
+    def test_github_client_can_restrict_runs_to_a_branch(self):
+        opener = RecordingOpener()
+        client = watchdog.GitHubClient("t", "o/r", opener=opener)
+        client.workflow_runs("pages.yml", branch="main")
+        client.workflow_runs("chanceblog.yml")
+        (_, pages_url), (_, other_url) = opener.calls
+        self.assertTrue(pages_url.startswith("https://api.github.com/repos/o/r/actions/workflows/pages.yml/runs?"))
+        self.assertIn("status=completed", pages_url)
+        self.assertTrue(pages_url.endswith("&branch=main"), pages_url)
+        self.assertNotIn("branch=", other_url)                 # 블로그 엔진 실행 이력은 브랜치로 거르지 않는다
+
+    def test_branch_name_is_url_quoted(self):
+        opener = RecordingOpener()
+        watchdog.GitHubClient("t", "o/r", opener=opener).workflow_runs("pages.yml", branch="feature/x y&z")
+        self.assertTrue(opener.calls[0][1].endswith("&branch=feature%2Fx%20y%26z"), opener.calls[0][1])
+
+    def test_collect_asks_for_the_main_branch_runs_of_the_pages_workflow(self):
+        gh = FakeGitHub()
+        self.collect(gh)
+        self.assertEqual(gh.runs_asked[0], (watchdog.PAGES_WORKFLOW, "main"))
+        self.assertEqual(watchdog.PAGES_BRANCH, "main")
+
+    def test_a_multiline_error_text_cannot_start_a_workflow_command(self):
+        class Evil:
+            def workflow_runs(self, name, branch=None):
+                raise OSError("down\n::error::pwned\r\n::notice::q\u2028::warning::z\x85::set-output name=a::b")
+        findings, out = self.collect(Evil())
+        commands = [ln for ln in out.splitlines() if ln.startswith("::")]
+        self.assertEqual(len(commands), 1, out)                # 의도한 ::warning:: 한 줄뿐
+        self.assertTrue(commands[0].startswith("::warning::Pages 워크플로 실행 이력 조회 실패"), commands[0])
         self.assertNotIn("PAGES_NOT_DEPLOYED", [f.code for f in findings])
 
 

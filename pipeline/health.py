@@ -20,6 +20,9 @@ REAL_POST_STATUSES = {"posted", "draft_uploaded"}
 FAIL_STATUSES = {"publish_failed", "llm_failed"}
 REJECT_STREAK = 5
 PAGES_GRACE_MINUTES = 30
+# 글 커밋 시각은 러너 시계, Pages 실행 생성 시각은 GitHub 서버 시계다. 정상 배포는 커밋 2~3초 뒤에 시작하므로 두 시계가
+# 2초만 어긋나도 '배포가 커밋보다 먼저'로 보여 PAGES_NOT_DEPLOYED(심각)를 오판한다. 비교에 이만큼 여유를 둔다.
+PAGES_CLOCK_SKEW_SECONDS = 120
 
 
 @dataclass(frozen=True)
@@ -162,7 +165,9 @@ def evaluate(blog, history, now, last_content_commit=None, recent_runs=(), post_
         if last_content_commit is not None:
             committed = _aware(last_content_commit)
             if now - committed > timedelta(minutes=PAGES_GRACE_MINUTES):
-                deployed = any(r["conclusion"] == "success" and (_parse_utc(r.get("created_at")) or now) >= committed
+                # created_at 을 읽을 수 없는 성공 실행은 '지금'으로 본다(응답 형식 문제로 정상 배포를 미배포로 오판하지 않는다).
+                earliest = committed - timedelta(seconds=PAGES_CLOCK_SKEW_SECONDS)
+                deployed = any(r["conclusion"] == "success" and (_parse_utc(r.get("created_at")) or now) >= earliest
                                for r in runs)
                 if not deployed:
                     findings.append(Finding(key, "PAGES_NOT_DEPLOYED", "critical",

@@ -217,6 +217,10 @@ def run(conclusion, hours_ago):
     return {"conclusion": conclusion, "created_at": created}
 
 
+def run_at(created, conclusion="success"):
+    return {"conclusion": conclusion, "created_at": created.strftime("%Y-%m-%dT%H:%M:%SZ")}
+
+
 class PagesDeployTest(unittest.TestCase):
     POST_DAYS = {date(2026, 10, 25), date(2026, 10, 24)}
 
@@ -243,6 +247,30 @@ class PagesDeployTest(unittest.TestCase):
     def test_cancelled_runs_are_ignored(self):
         self.assertEqual(self.evaluate([run("cancelled", 4.8), run("success", 4.7)]), [])
 
+    def test_clock_skew_between_runner_and_github_is_not_a_missing_deploy(self):
+        """글 커밋 시각은 러너 시계, Pages 실행 생성 시각은 GitHub 서버 시계다. 정상 배포는 커밋 2~3초 뒤에 시작하지만
+        시계가 어긋나면 '배포가 커밋보다 먼저'로 보여 PAGES_NOT_DEPLOYED(심각)를 오판했다(F-11)."""
+        committed = NOW - timedelta(hours=5)
+        for seconds_before in (2, 3, 60, 119):
+            with self.subTest(seconds_before=seconds_before):
+                self.assertEqual(self.evaluate([run_at(committed - timedelta(seconds=seconds_before))]), [])
+
+    def test_a_deploy_started_well_before_the_commit_is_not_that_commits_deploy(self):
+        committed = NOW - timedelta(hours=5)
+        for seconds_before in (121, 300, 3600):
+            with self.subTest(seconds_before=seconds_before):
+                findings = self.evaluate([run_at(committed - timedelta(seconds=seconds_before))])
+                self.assertEqual([(f.code, f.severity) for f in findings], [("PAGES_NOT_DEPLOYED", "critical")])
+
+    def test_a_deploy_just_after_the_commit_is_healthy(self):
+        committed = NOW - timedelta(hours=5)
+        self.assertEqual(self.evaluate([run_at(committed + timedelta(seconds=3))]), [])
+        self.assertEqual(health.PAGES_CLOCK_SKEW_SECONDS, 120)
+
+    def test_a_failed_run_inside_the_skew_window_does_not_count_as_a_deploy(self):
+        committed = NOW - timedelta(hours=5)
+        findings = self.evaluate([run_at(committed + timedelta(seconds=3), "failure")])
+        self.assertEqual(sorted(f.code for f in findings), ["PAGES_FAILED", "PAGES_NOT_DEPLOYED"])
 
     def test_a_success_run_without_a_readable_created_at_counts_as_deployed(self):
         """응답 형식 문제로 created_at 이 없거나 읽을 수 없는 성공 실행은 '지금'으로 본다 — 정상 배포를 미배포(심각)로

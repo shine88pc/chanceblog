@@ -19,6 +19,7 @@ import os
 import re
 import subprocess
 import sys
+import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -35,6 +36,7 @@ TITLE_PREFIX = "[Watchdog]"
 RENOTIFY_HOURS = 48          # 심각 건이 이만큼 지나도 열려 있으면 코멘트로 다시 알린다
 MAX_NEW_ISSUES_PER_RUN = 5   # 한 번에 이슈가 쏟아지는 것을 막는다(나머지는 다음 실행에서)
 PAGES_WORKFLOW = "pages.yml"
+PAGES_BRANCH = "main"        # 다른 ref 에서 workflow_dispatch 로 돌린 성공 실행은 '사이트 배포됨'이 아니다
 _NOTIFIED_RX = re.compile(r"<!--\s*watchdog:notified=(\S+?)\s*-->")
 
 
@@ -85,9 +87,12 @@ class GitHubClient:
     def close(self, number):
         return self._request("PATCH", f"/repos/{self.repo}/issues/{number}", {"state": "closed"})
 
-    def workflow_runs(self, workflow_file):
-        res = self._request(
-            "GET", f"/repos/{self.repo}/actions/workflows/{workflow_file}/runs?per_page=10&status=completed")
+    def workflow_runs(self, workflow_file, branch=None):
+        """워크플로의 최근 완료 실행(최신순). branch 를 주면 그 브랜치에서 돈 실행만 받는다."""
+        path = f"/repos/{self.repo}/actions/workflows/{workflow_file}/runs?per_page=10&status=completed"
+        if branch:
+            path += f"&branch={urllib.parse.quote(branch, safe='')}"
+        res = self._request("GET", path)
         return (res or {}).get("workflow_runs", [])
 
 
@@ -234,9 +239,11 @@ def collect(reg, root, now, client=None):
     pages_runs = None
     if client is not None:
         try:
-            pages_runs = client.workflow_runs(PAGES_WORKFLOW)
+            # main 브랜치의 실행만: 다른 ref 에서 workflow_dispatch 로 돌린 성공을 '배포됨'으로 세지 않는다.
+            pages_runs = client.workflow_runs(PAGES_WORKFLOW, branch=PAGES_BRANCH)
         except Exception as exc:  # noqa: BLE001 - 조회 실패는 배포 검사만 건너뛰고 다른 검사를 막지 않는다
-            print(f"[참고] Pages 워크플로 실행 이력 조회 실패(배포 검사 건너뜀): {exc}")
+            # 검사가 꺼진 채로 초록이 이어지지 않게 Actions 화면에 경고 주석으로 올린다.
+            print(f"::warning::Pages 워크플로 실행 이력 조회 실패(배포 검사 건너뜀): {_oneline(exc)}")
     for blog in enabled_blogs(reg):
         try:
             history = read_json_list(Path(root) / blog["state"]["history"])
