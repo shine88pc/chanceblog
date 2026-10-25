@@ -220,6 +220,40 @@ def check_workflows(root, files):
     return out
 
 
+_HANGUL_RX = re.compile(r"[가-힣ㄱ-ㅎㅏ-ㅣ]")  # 한글 음절 + 호환 자모
+
+
+def _has_hangul(value):
+    return isinstance(value, str) and bool(_HANGUL_RX.search(value))
+
+
+def check_workflow_names(root, files):
+    """WF-11: 워크플로 name 과 job name 에 한글을 쓴다(운영자가 Actions 탭에서 이름만 보고 하는 일을 짐작하게).
+
+    워크플로 name 이 없거나 한글이 없으면 오류, job name 이 없거나 한글이 없으면 경고.
+    YAML 문법 오류는 WF-0 이 알리므로 여기서는 건너뛴다. 규칙: docs/ENGINEERING_GUIDE.md W10."""
+    if yaml is None:
+        return []  # PyYAML 이 없다는 경고는 WF-0(check_workflows)이 이미 낸다
+    out = []
+    for rel in _workflow_files(files):
+        try:
+            data = _load_yaml(read_text(root, rel) or "")
+        except yaml.YAMLError:
+            continue
+        if not isinstance(data, dict):
+            continue
+        name = data.get("name")
+        if not _has_hangul(name):
+            problem = "에 name 이 없습니다" if name is None else f" name '{str(name)[:40]}' 에 한글이 없습니다"
+            out.append(err("WF-11", f"워크플로{problem} — Actions 탭에서 이름만 보고 하는 일을 짐작할 수 있게 "
+                                    "한글로 지으세요(예: '사이트 자동 배포'). 외부 템플릿을 복사해 넣을 때는 한글 name 을 붙이세요", rel))
+        jobs = data.get("jobs")
+        for job_id, job in (jobs.items() if isinstance(jobs, dict) else []):
+            if isinstance(job, dict) and not _has_hangul(job.get("name")):
+                out.append(warn("WF-11", f"job '{job_id}' 에 name 이 없거나 한글이 없습니다 — 한글 이름을 붙이세요(예: '글 작성·게시')", rel))
+    return out
+
+
 def _workflow_crons(root, rel):
     if yaml is None:
         return None
@@ -543,6 +577,7 @@ def run_checks(root, base=None):
     findings += check_forbidden_files(files)
     findings += check_secret_patterns(root, files)
     findings += check_workflows(root, files)
+    findings += check_workflow_names(root, files)
     findings += check_registry(root, files)
     findings += check_issue_contract(root, files)
     findings += check_edit_system(root, files)

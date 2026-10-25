@@ -7,6 +7,8 @@ import io
 import json
 import os
 import random
+import subprocess
+import sys
 import tempfile
 import unittest
 from collections import Counter
@@ -1014,6 +1016,74 @@ class MainPolicyTest(unittest.TestCase):
         self.assertIn(f"UNTRUSTED={g.DROP_LABELS['UNTRUSTED']}", text)
         self.assertIn(f"AGE={g.DROP_LABELS['AGE']}", text)
         self.assertNotIn("NOT_TECH=", text)  # 쓰이지 않은 코드는 범례에 넣지 않는다
+
+    # --- FIX_IMAGES 계약: 기존 글 이미지 교체는 chance-fix-images.yml(FIX_IMAGES=1)만 부른다 ---------------------------------
+    # 분리 전에는 chanceblog.yml 의 입력이었다. 두 워크플로가 이 스위치로 갈라지므로 generator.py 의 현재 동작을 고정한다.
+
+    def test_fix_images_switch_runs_only_the_image_repair_path(self):
+        """FIX_IMAGES 가 켜지면 main() 은 기존 글의 이미지 교체만 한다. 새 글 생성(run_main 의 기본 generate 는 호출되면
+        AssertionError)도 정기 슬롯 판정(slot_state)도 하지 않는다. 이벤트가 schedule 이어도 교체 스위치가 먼저다."""
+        for event in ("workflow_dispatch", "schedule"):
+            with self.subTest(event=event):
+                self.summary.write_text("", encoding="utf-8")
+                calls = []
+
+                def fake_fix(keyword=None):
+                    calls.append(keyword)
+                    return "이미지 점검: 완료: 문제 2건 / 교체 2건 / 건너뜀 0건 (DRY_RUN: 실제 변경 없음)"
+
+                def no_slot_judgement(*args, **kwargs):
+                    raise AssertionError("이미지 교체 실행은 슬롯 판정을 하지 않습니다")
+
+                with mock.patch.object(g, "FIX_IMAGES", True), mock.patch.object(g, "fix_images", fake_fix), \
+                        mock.patch.object(g, "slot_state", no_slot_judgement):
+                    value, out = self.run_main(event, at(10, 12))
+                self.assertIsNone(value)
+                self.assertEqual(calls, [None])  # 한 번만, 검색어 없이
+                text = self.summary_text()
+                self.assertIn("### Chance_Blog 실행 요약", text)
+                self.assertIn("- 이미지 점검: 완료: 문제 2건 / 교체 2건", text)
+                self.assertNotIn("[SKIP]", out)  # 슬롯 건너뜀 줄이 없다
+
+    def test_without_the_switch_main_never_repairs_images(self):
+        """FIX_IMAGES 가 꺼져 있으면(chanceblog.yml 에는 이제 이 스위치가 없다) 정기·수동 어느 실행도 기존 글의 이미지를 건드리지
+        않고 글 작성 경로(슬롯 판정·생성)만 탄다."""
+        def boom_fix(*args, **kwargs):
+            raise AssertionError("FIX_IMAGES 가 꺼져 있는데 이미지 교체를 시도했습니다")
+
+        made = []
+        base = self.fake_generate("PUBLISHED", result=("a", "b"), lanes=1)
+
+        def generate(slot=None, allow_auto_topic=True, report=None, **kwargs):
+            made.append((slot, allow_auto_topic))
+            return base(slot=slot, allow_auto_topic=allow_auto_topic, report=report, **kwargs)
+
+        with mock.patch.object(g, "fix_images", boom_fix):
+            value, out = self.run_main("schedule", at(8, 54))  # 첫 슬롯 전: 정상 건너뜀
+            self.assertIsNone(value)
+            self.assertIn("[SKIP] code=OUT_OF_WINDOW", out)
+            self.assertEqual(made, [])
+            value, _ = self.run_main("schedule", at(10, 12), generate=generate)  # 9시 슬롯: 글 작성
+            self.assertIsNone(value)
+            self.assertEqual(made, [(9, False)])
+            value, _ = self.run_main("workflow_dispatch", at(10, 12), generate=generate)  # 수동: 글 작성
+            self.assertIsNone(value)
+            self.assertEqual(made, [(9, False), (None, True)])
+
+    def test_fix_images_flag_comes_only_from_the_environment_and_is_off_when_unset(self):
+        """chance-fix-images.yml 만 FIX_IMAGES: '1' 을 넘기고 chanceblog.yml 은 아무것도 넘기지 않는다. 환경변수가 없으면 꺼져 있어야
+        정기 실행이 이미지를 건드리지 않는다. 모듈이 읽히는 순간의 값을 보려고 새 프로세스에서 import 한다."""
+        base = {k: v for k, v in os.environ.items() if k != "FIX_IMAGES"}
+        cases = [(None, "False"), ("", "False"), ("0", "False"), ("false", "False"), ("no", "False"),
+                 ("1", "True"), ("true", "True"), ("yes", "True"), (" TRUE ", "True")]
+        for value, expected in cases:
+            with self.subTest(value=value):
+                env = dict(base)
+                if value is not None:
+                    env["FIX_IMAGES"] = value
+                proc = subprocess.run([sys.executable, "-c", "import generator; print(generator.FIX_IMAGES)"],
+                                      cwd=str(_bootstrap.ROOT), env=env, capture_output=True, text=True, timeout=60)
+                self.assertEqual(proc.stdout.strip(), expected, proc.stderr)
 
 
 class GeminiCallCountTest(unittest.TestCase):

@@ -10,4 +10,5 @@ applyTo: ".github/workflows/**"
 - `${{ github.event.* }}`·`inputs`를 `run:`에 직접 넣지 말고 `env:`로 받아 `"$VAR"`로 쓴다.
 - 외부 액션은 커밋 SHA로 고정한다. `|| true`·`continue-on-error`로 실패를 숨기지 않는다.
 - 모든 job에 `timeout-minutes`, 스케줄 워크플로에는 `concurrency`를 둔다.
+- 워크플로 `name`과 job `name`은 한글로, 이름만 보고 자동인지 수동인지·무엇을 하는지 짐작할 수 있게 짓는다(예: `사이트 자동 배포`). 서로 다른 기능이 한 워크플로에 묶이면 나눈다. `run-name`에는 정기/수동·번호·불리언만 쓰고 이슈·PR 제목 같은 외부 문자열은 넣지 않는다. 외부 워크플로 템플릿을 복사해 넣을 때는 한글 `name`을 붙인다. 새 워크플로는 `docs/ARCHITECTURE.md` §2-1과 `docs/REQUEST_BRIEFING.md`의 이름 표에도 한 줄씩 넣는다(검증기 WF-11, 단위 테스트 `tests/test_workflow_names.py`).
 - 수정 후 `actionlint`와 `python scripts/validate_repo.py`를 통과시킨다.
