@@ -1,4 +1,4 @@
-name: Guardrails
+name: 저장소 규칙·테스트 자동 검사
 
 # 모든 변경(사람·AI 공통)에 대한 자동 점검: 비밀 유출, 워크플로 보안 규칙, 문서·설정 드리프트,
 # 광고 표면 무단 변경, 단위 테스트, 워크플로 정적 분석. 설명: docs/ENGINEERING_GUIDE.md
@@ -18,6 +18,7 @@ concurrency:
 
 jobs:
   validate:
+    name: 검사 (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:

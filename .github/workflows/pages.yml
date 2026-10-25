@@ -1,4 +1,4 @@
-name: Deploy GitHub Pages
+name: 사이트 자동 배포
 
 on:
   push:
@@ -14,27 +14,29 @@ concurrency:
 
 jobs:
   build:
+    name: 사이트 빌드
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout repository
+      - name: 저장소 내려받기
         uses: actions/checkout@v6
 
-      - name: Configure GitHub Pages
+      - name: GitHub Pages 설정
         uses: actions/configure-pages@v5
 
-      - name: Build Jekyll site
+      - name: Jekyll 사이트 빌드
         uses: actions/jekyll-build-pages@v1
         with:
           source: ./
           destination: ./_site
 
-      - name: Upload Pages artifact
+      - name: Pages 산출물 업로드
         uses: actions/upload-pages-artifact@v4
         with:
           path: ./_site
 
   deploy:
+    name: 사이트 게시
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -45,6 +47,6 @@ jobs:
       pages: write
       id-token: write
     steps:
-      - name: Deploy to GitHub Pages
+      - name: GitHub Pages에 배포
         id: deployment
         uses: actions/deploy-pages@v4
