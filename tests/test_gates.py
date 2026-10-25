@@ -184,6 +184,34 @@ class CheckPostTest(unittest.TestCase):
         self.assertIn("DUP_OTHER", run_check(post, stats, other=[post["title"]]).codes())
         self.assertTrue(run_check(post, stats, recent=["전혀 다른 주제의 오래된 글 제목입니다"]).ok)
 
+    def test_duplicate_reasons_fold_the_compared_title_into_one_safe_line(self):
+        """비교 대상 제목은 이력 파일(다른 블로그는 피드·LLM 유래)에서 온다. 개행·단독 CR·U+2028 로 줄을 바꾸거나
+        '::' 로 워크플로 명령을 흉내 내도 사유는 한 줄이고, 길이도 제한된다."""
+        post, stats = good_post()
+        evil = post["title"] + "\n::error::위조\r::notice::x\u2028##[error]y"
+        result = run_check(post, stats, recent=[evil], other=[evil])
+        self.assertTrue({"DUP_SAME", "DUP_OTHER"} <= set(result.codes()), result.reasons)  # 전제: 사유에 제목이 실제로 들어간다
+        for reason in result.reasons:
+            self.assertEqual(reason.splitlines(), [reason])   # 한 줄(개행·CR·U+2028·U+0085 모두 없음)
+            self.assertNotIn("::", reason)
+            self.assertNotIn("##[", reason)
+        loose = copy.deepcopy(PROFILE)
+        loose["similarity"] = {"same_blog": 0.01, "other_blogs": 0.01}  # 아주 긴 제목도 '비슷함'으로 잡히게 문턱을 낮춘다
+        reasons = run_check(post, stats, other=[post["title"] + " " + "가" * 500], profile=loose).reasons
+        dup = [r for r in reasons if r.startswith("[DUP_OTHER]")]
+        self.assertEqual(len(dup), 1)
+        self.assertLess(len(dup[0]), 200)
+        self.assertTrue(dup[0].endswith("…"))
+
+    def test_long_history_titles_are_compared_in_full_and_only_displayed_folded(self):
+        """사유에 넣는 제목만 한 줄·100자로 접는다. 유사도 계산은 원문 전체로 한다(접힌 제목으로 계산하면 꼬리가 잘려
+        거의 같은 제목으로 오판한다 — 독립 검증의 변이)."""
+        post, stats = good_post()
+        loose = copy.deepcopy(PROFILE)
+        loose["similarity"] = {"same_blog": 0.4, "other_blogs": 0.4}
+        other = post["title"] + " " + "가" * 250
+        self.assertNotIn("DUP_OTHER", run_check(post, stats, other=[other], profile=loose).codes())
+
     def test_sanitize_warning_is_reported_but_not_blocking(self):
         post, _ = good_post()
         result = run_check(post, {"dropped_blocks": 1, "unwrapped_tags": 0, "links_removed": 0})

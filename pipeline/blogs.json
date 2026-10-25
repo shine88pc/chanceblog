@@ -46,7 +46,7 @@
       "url": "https://macat0722.blogspot.com/",
       "role": "건강·음식·생활 실용형 (KR)",
       "languages": ["ko"],
-      "mode": "auto",
+      "mode": "off",
       "workflow": ".github/workflows/blogger.yml",
       "entrypoint": "blogger_generator.py",
       "prompt": ".github/editorial/BLOGGER_PROMPT.md",

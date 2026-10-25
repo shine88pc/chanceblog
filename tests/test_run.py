@@ -1,12 +1,15 @@
 import json
 import random
+import re
 import shutil
 import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest import mock
 
 import _bootstrap  # noqa: F401
+from pipeline import gates, registry
 from pipeline import run as run_mod
 from pipeline.llm import LLMError
 from pipeline.publishers.base import PublishError, PublishResult
@@ -16,6 +19,16 @@ REAL = _bootstrap.ROOT
 NOW = datetime(2026, 10, 21, 2, 0, tzinfo=timezone.utc)  # KST 2026-10-21 11:00
 FULL_ENV = {"GEMINI_API_KEY": "k", "BLOGGER_BLOG_ID": "123", "BLOGGER_CLIENT_ID": "cid",
             "BLOGGER_CLIENT_SECRET": "cs", "BLOGGER_REFRESH_TOKEN": "rt"}
+# 실제 워크플로(.github/workflows/blogger.yml)가 넘기는 이름. 레지스트리의 역할 이름(llm_api_key·blog_id·client_id·
+# client_secret·refresh_token)에 PIPELINE_SECRET_ 을 붙인 것이고, 값은 FULL_ENV 와 같다. BLOGGER_*·GEMINI_* 는 없다.
+WORKFLOW_ENV = {"PIPELINE_SECRET_LLM_API_KEY": FULL_ENV["GEMINI_API_KEY"],
+                "PIPELINE_SECRET_BLOG_ID": FULL_ENV["BLOGGER_BLOG_ID"],
+                "PIPELINE_SECRET_CLIENT_ID": FULL_ENV["BLOGGER_CLIENT_ID"],
+                "PIPELINE_SECRET_CLIENT_SECRET": FULL_ENV["BLOGGER_CLIENT_SECRET"],
+                "PIPELINE_SECRET_REFRESH_TOKEN": FULL_ENV["BLOGGER_REFRESH_TOKEN"]}
+# 게시하지 않고 초안만 만드는 실행(수동 실행에서 publish 를 끈 것과 같다). 게시용 시크릿이 필요 없다.
+NO_PUBLISH = {"BLOGGER_PUBLISH": "0"}
+PUBLISH_SECRET_NAMES = ("BLOGGER_BLOG_ID", "BLOGGER_CLIENT_ID", "BLOGGER_CLIENT_SECRET", "BLOGGER_REFRESH_TOKEN")
 
 
 def make_root(tmp, mode="auto"):
@@ -91,13 +104,73 @@ class FlowTest(RunBase):
         self.assertEqual(len(self.drafts()), 1)
         self.assertIn("status: posted", self.drafts()[0].read_text(encoding="utf-8"))
 
-    def test_without_publish_secrets_only_a_draft_is_saved(self):
-        code, out = self.go(env={})
+    def test_workflow_secret_names_alone_are_enough_to_publish(self):
+        """실제 워크플로는 BLOGGER_*·GEMINI_API_KEY 가 아니라 PIPELINE_SECRET_<역할> 이름으로만 시크릿을 넘긴다. 그 이름만으로
+        사전 점검·LLM 키·게시자 생성이 모두 통과해 게시까지 가야 한다(다른 run 테스트는 전부 BLOGGER_* 이름을 직접 넣는다)."""
+        workflow = (REAL / ".github" / "workflows" / "blogger.yml").read_text(encoding="utf-8")
+        passed = set(re.findall(r"^\s+(PIPELINE_SECRET_[A-Z_]+):", workflow, re.M))
+        roles = registry.get_blog(registry.load_registry(REAL / "pipeline" / "blogs.json"), "blogger_macat")["secrets"]
+        self.assertEqual(passed, {"PIPELINE_SECRET_" + role.upper() for role in roles})  # 워크플로가 넘기는 이름 = 러너가 읽는 이름
+        self.assertEqual(passed, set(WORKFLOW_ENV))
+        seen, created = {}, []
+
+        class SpyPublisher(FakePublisher):
+            def __init__(self, blog_id, client_id, client_secret, refresh_token):
+                super().__init__()
+                seen["publisher"] = (blog_id, client_id, client_secret, refresh_token)
+                created.append(self)
+
+        def spy_llm_factory(api_key, models, max_retries=2):
+            seen["llm_key"] = api_key
+            return stub_llm
+        with mock.patch("pipeline.publishers.blogger.BloggerPublisher", SpyPublisher), \
+                mock.patch.object(run_mod, "make_gemini_llm", spy_llm_factory):
+            code, out = self.go(env=WORKFLOW_ENV, llm=None)     # llm=None: 러너가 키로 Gemini 호출 객체를 직접 만든다
+        self.assertEqual(code, 0, out)
+        self.assertEqual(seen["llm_key"], FULL_ENV["GEMINI_API_KEY"])
+        self.assertEqual(seen["publisher"], tuple(FULL_ENV[name] for name in PUBLISH_SECRET_NAMES))
+        self.assertEqual(len(created[0].published), 1)
+        self.assertEqual(self.history()[-1]["status"], "posted")
+
+    def test_publish_target_without_publish_secrets_fails_before_any_llm_call(self):
+        """D-25: 게시 대상인데 게시용 시크릿이 없으면 글을 만들기 전에 종료 2(빨강). 예전에는 초안만 저장하고 초록이었다."""
+        calls = []
+
+        def spy(prompt):
+            calls.append(prompt)
+            return stub_llm(prompt)
+        code, out = self.go(env={"GEMINI_API_KEY": "k"}, llm=spy)
+        self.assertEqual(code, 2)
+        self.assertEqual(calls, [])                      # Gemini 호출(= 무료 한도)을 쓰지 않는다
+        self.assertEqual(self.history(), [])             # 미게시 초안으로 하루 상한을 소진하지 않는다
+        self.assertEqual(self.drafts(), [])
+        self.assertIn("[SKIP] code=SECRETS_MISSING", out)
+        self.assertIn("::error::[blogger_macat]", out)
+        for name in PUBLISH_SECRET_NAMES:                # 시크릿 '이름'을 안내한다
+            self.assertIn(name, out)
+        self.assertNotIn("GEMINI_API_KEY", out)          # LLM 키는 있으므로 목록에 없다
+
+    def test_missing_secret_names_never_include_values(self):
+        env = {"GEMINI_API_KEY": "gemini-secret-value", "BLOGGER_BLOG_ID": "blog-secret-value"}
+        code, out = self.go(env=env)
+        self.assertEqual(code, 2)
+        self.assertNotIn("gemini-secret-value", out)
+        self.assertNotIn("blog-secret-value", out)
+        self.assertNotIn("BLOGGER_BLOG_ID,", out.replace(" ", ""))  # 등록된 것은 누락 목록에 없다
+
+    def test_dry_run_only_warns_about_missing_publish_secrets(self):
+        """등록 점검용: DRY_RUN 은 시크릿이 없어도 끝까지 가고 경고만 한다."""
+        code, out = self.go(env={}, extra=["--dry-run"])
         self.assertEqual(code, 0)
-        self.assertEqual(self.history()[-1]["status"], "generated_unpublished")
-        self.assertIn("SECRETS", json.dumps(self.history()[-1], ensure_ascii=False))
+        self.assertIn("::warning::[blogger_macat] (DRY_RUN이라 계속합니다)", out)
+        self.assertEqual(self.history(), [])
+
+    def test_publish_off_needs_no_publish_secrets(self):
+        code, out = self.go(env=NO_PUBLISH)
+        self.assertEqual(code, 0)
+        self.assertEqual(self.history()[-1]["status"], "draft")
         self.assertEqual(len(self.drafts()), 1)
-        self.assertIn("시크릿이 없어", out)
+        self.assertIn("draft/off", out)
 
     def test_draft_mode_never_publishes(self):
         root = make_root(tempfile.mkdtemp(), mode="draft")
@@ -131,19 +204,22 @@ class FlowTest(RunBase):
         self.assertEqual(len(self.drafts()), 1)
 
     def test_daily_cap_blocks_second_run_but_manual_topic_bypasses(self):
-        self.go(env={})
-        code, out = self.go(env={})
+        self.go(env=NO_PUBLISH)
+        code, out = self.go(env=NO_PUBLISH)
         self.assertEqual(code, 0)
         self.assertIn("상한", out)
+        self.assertIn("[SKIP] code=DAILY_CAP", out)
+        self.assertIn("::notice::", out)
+        self.assertIn("draft", out)                      # 어떤 기록이 상한을 채웠는지 보인다
         self.assertEqual(len(self.history()), 1)
-        self.go(env={}, extra=["--topic", "수동으로 지정한 오늘의 생활 습관 주제"])
+        self.go(env=NO_PUBLISH, extra=["--topic", "수동으로 지정한 오늘의 생활 습관 주제"])
         self.assertEqual(len(self.history()), 2)
         self.assertEqual(self.history()[-1]["topic_source"], "override")
 
     def test_next_day_runs_again(self):
-        self.go(env={})
+        self.go(env=NO_PUBLISH)
         later = datetime(2026, 10, 22, 2, 0, tzinfo=timezone.utc)
-        self.go(env={}, now=later)
+        self.go(env=NO_PUBLISH, now=later)
         self.assertEqual([e["date"] for e in self.history()], ["2026-10-21", "2026-10-22"])
         self.assertNotEqual(self.history()[0]["topic"], self.history()[1]["topic"])  # 쿨다운으로 같은 주제 반복 안 함
 
@@ -211,7 +287,7 @@ class GateIntegrationTest(RunBase):
         seeds = json.loads((REAL / "pipeline" / "profiles" / "blogger_practical_ko.json").read_text(encoding="utf-8"))["seed_topics"]
         # Chance 이력에 시드 하나만 빼고 전부 이미 있다 → 남은 하나만 선택돼야 한다
         (self.root / "history.json").write_text(json.dumps(seeds[:-1], ensure_ascii=False), encoding="utf-8")
-        self.go(env={})
+        self.go(env=NO_PUBLISH)
         self.assertEqual(self.history()[-1]["topic"], seeds[-1])
 
 
@@ -241,10 +317,13 @@ class GuardTest(RunBase):
 
     def test_missing_llm_key_is_a_config_error(self):
         out = []
-        code = run_mod.run(["--blog", "blogger_macat", "--root", str(self.root)], environ={}, now=NOW,
+        code = run_mod.run(["--blog", "blogger_macat", "--root", str(self.root)], environ=dict(NO_PUBLISH), now=NOW,
                            llm=None, rng=random.Random(1), out=out.append)
         self.assertEqual(code, 2)
-        self.assertIn("GEMINI_API_KEY", "\n".join(out))
+        text = "\n".join(out)
+        self.assertIn("GEMINI_API_KEY", text)
+        self.assertIn("::error::", text)
+        self.assertIn("[SKIP] code=SECRETS_MISSING", text)
 
     def test_corrupt_history_fails_closed(self):
         (self.root / "blogger_history.json").write_text("{not json", encoding="utf-8")
@@ -273,8 +352,313 @@ class GuardTest(RunBase):
     def test_history_is_trimmed(self):
         many = [{"topic": f"옛 주제 {i}", "date": "2020-01-01", "status": "posted"} for i in range(250)]
         (self.root / "blogger_history.json").write_text(json.dumps(many, ensure_ascii=False), encoding="utf-8")
-        self.go(env={})
+        self.go(env=NO_PUBLISH)
         self.assertEqual(len(self.history()), run_mod.HISTORY_KEEP)
+
+
+class VisibilityTest(RunBase):
+    """초록인데 아무 일도 안 일어나는 경로마다 [SKIP] 한 줄·알림 주석·실행 요약이 남는지(D-25~D-27)."""
+
+    def setUp(self):
+        super().setUp()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.summary_path = Path(tmp.name) / "summary.md"
+
+    def env(self, **extra):
+        return {"GITHUB_STEP_SUMMARY": str(self.summary_path), **extra}
+
+    def summary(self):
+        return self.summary_path.read_text(encoding="utf-8") if self.summary_path.exists() else ""
+
+    def use_all_seeds(self):
+        seeds = json.loads((REAL / "pipeline" / "profiles" / "blogger_practical_ko.json").read_text(
+            encoding="utf-8"))["seed_topics"]
+        (self.root / "blogger_history.json").write_text(
+            json.dumps([{"topic": t, "date": "2026-10-20", "status": "posted"} for t in seeds], ensure_ascii=False),
+            encoding="utf-8")
+
+    def test_pause_leaves_a_skip_line_a_notice_and_a_summary(self):
+        code, out = self.go(env=self.env(**FULL_ENV, PIPELINE_PAUSE="true"), publisher=FakePublisher())
+        self.assertEqual(code, 0)
+        self.assertIn("[SKIP] code=PAUSED", out)
+        self.assertIn("PAUSED", self.summary())
+        # 변수를 켜 놓고 잊어도 Actions 화면에 보이도록 ::notice:: 한 줄(어떤 변수를 어디서 지우는지 포함)
+        notices = [line for line in out.splitlines() if line.startswith("::")]
+        self.assertEqual(len(notices), 1, notices)
+        self.assertTrue(notices[0].startswith("::notice::[blogger_macat]"), notices[0])
+        self.assertIn("PIPELINE_PAUSE", notices[0])
+        self.assertIn("Variables", notices[0])
+
+    def test_mode_off_leaves_a_skip_line_a_notice_and_a_summary(self):
+        root = make_root(tempfile.mkdtemp(), mode="off")
+        self.addCleanup(shutil.rmtree, str(root), True)
+        code, out = self.go(env=self.env(**FULL_ENV), publisher=FakePublisher(), root=root)
+        self.assertEqual(code, 0)
+        self.assertIn("[SKIP] code=MODE_OFF", out)
+        self.assertIn("MODE_OFF", self.summary())
+        notices = [line for line in out.splitlines() if line.startswith("::")]
+        self.assertEqual(len(notices), 1, notices)
+        self.assertTrue(notices[0].startswith("::notice::[blogger_macat]"), notices[0])
+        self.assertIn("mode=off", notices[0])
+        self.assertIn("pipeline/blogs.json", notices[0])
+
+    def test_daily_cap_summary_says_unpublished_drafts_count(self):
+        self.go(env=self.env(**NO_PUBLISH))
+        self.summary_path.unlink()
+        code, out = self.go(env=self.env(**NO_PUBLISH))
+        self.assertEqual(code, 0)
+        self.assertIn("DAILY_CAP", self.summary())
+        self.assertIn("게시되지 않은 초안도 상한에 포함", self.summary())
+
+    def test_exhausted_topics_is_a_warning_not_a_failure(self):
+        self.use_all_seeds()
+        code, out = self.go(env=self.env(**FULL_ENV), llm=lambda prompt: ("[]", "m"))
+        self.assertEqual(code, 0)
+        self.assertIn("[SKIP] code=NO_TOPIC", out)
+        self.assertIn("::warning::[blogger_macat]", out)
+        self.assertEqual(self.history()[-1]["status"], "skipped_no_topic")
+        self.assertIn("NO_TOPIC", self.summary())
+
+    def test_topic_expansion_llm_failure_is_an_infra_failure(self):
+        """시드를 다 쓴 뒤 주제 확장 호출이 실패하면 '주제 없음'(초록)이 아니라 인프라 실패(종료 1)다."""
+        self.use_all_seeds()
+
+        def down(prompt):
+            raise LLMError("all models failed")
+        code, out = self.go(env=self.env(**FULL_ENV), llm=down)
+        self.assertEqual(code, 1)
+        self.assertIn("[SKIP] code=EXPAND_FAILED", out)
+        self.assertIn("::error::[blogger_macat]", out)
+        entry = self.history()[-1]
+        self.assertEqual(entry["status"], "llm_failed")
+        self.assertIn("expand_failed", json.dumps(entry["reasons"]))
+        self.assertIn("EXPAND_FAILED", self.summary())
+
+    def test_llm_failure_is_an_error_annotation_and_the_message_is_masked(self):
+        leaked = "AIza" + "x" * 30  # 런타임에 조합한다(실제 비밀처럼 보이는 리터럴 금지)
+
+        def down(prompt):
+            raise LLMError(f"request failed for {leaked}")
+        code, out = self.go(env=self.env(**FULL_ENV), llm=down)
+        self.assertEqual(code, 1)
+        self.assertIn("[SKIP] code=LLM_FAILED", out)
+        self.assertIn("::error::[blogger_macat]", out)
+        self.assertNotIn(leaked, out)
+        self.assertNotIn(leaked, json.dumps(self.history(), ensure_ascii=False))
+        self.assertIn("LLM_FAILED", self.summary())
+
+    def test_gate_rejection_is_a_warning_with_a_summary(self):
+        def short(prompt):
+            return "제목: 충분히 긴 제목입니다 정말로\n라벨: 가\n내용:\n<p>너무 짧음</p>", "m"
+        code, out = self.go(env=self.env(**FULL_ENV), llm=short, publisher=FakePublisher())
+        self.assertEqual(code, 0)
+        self.assertIn("[SKIP] code=GATE_REJECTED", out)
+        self.assertIn("::warning::[blogger_macat]", out)
+        self.assertIn("GATE_REJECTED", self.summary())
+
+    def test_publish_failure_is_an_error_annotation(self):
+        pub = FakePublisher(fail=PublishError("token expired", code="auth_expired"))
+        code, out = self.go(env=self.env(**FULL_ENV), publisher=pub)
+        self.assertEqual(code, 1)
+        self.assertIn("[SKIP] code=PUBLISH_FAILED", out)
+        self.assertIn("reason=auth_expired", out)
+        self.assertIn("::error::[blogger_macat] 게시에 실패했습니다(auth_expired)", out)
+
+    def test_missing_publish_secrets_leave_a_summary_with_names_only(self):
+        code, out = self.go(env=self.env(GEMINI_API_KEY="k"))
+        self.assertEqual(code, 2)
+        text = self.summary()
+        self.assertIn("SECRETS_MISSING", text)
+        for name in PUBLISH_SECRET_NAMES:
+            self.assertIn(name, text)
+
+    def test_missing_publish_secrets_are_reported_even_when_the_daily_cap_is_reached(self):
+        """사전 점검은 일일 상한보다 앞이다. 상한에 걸린 날은 초록으로 끝나 시크릿 누락이 가려지기 때문이다."""
+        (self.root / "blogger_history.json").write_text(
+            json.dumps([{"topic": "오늘 이미 만든 주제", "date": "2026-10-21", "status": "draft"}], ensure_ascii=False),
+            encoding="utf-8")
+        code, out = self.go(env=self.env(**FULL_ENV), publisher=FakePublisher())
+        self.assertIn("[SKIP] code=DAILY_CAP", out)                  # 전제: 시크릿이 있었다면 상한 도달로 건너뛴다
+        code, out = self.go(env=self.env(GEMINI_API_KEY="k"))
+        self.assertEqual(code, 2)
+        self.assertIn("[SKIP] code=SECRETS_MISSING", out)
+        self.assertNotIn("DAILY_CAP", out)
+
+    def test_missing_publish_secrets_stop_the_run_before_topic_expansion_calls_the_llm(self):
+        """시드를 다 써서 주제 확장 LLM 호출이 필요한 상황에서도 시크릿이 없으면 LLM 호출 0회로 종료 2."""
+        self.use_all_seeds()
+        calls = []
+
+        def spy(prompt):
+            calls.append(prompt)
+            return stub_llm(prompt)
+        code, out = self.go(env=self.env(GEMINI_API_KEY="k"), llm=spy)
+        self.assertEqual((code, calls), (2, []))
+        self.assertIn("[SKIP] code=SECRETS_MISSING", out)
+
+    def test_explicit_topic_does_not_bypass_the_publish_secret_check(self):
+        """--topic·BLOGGER_TOPIC(수동 지정)은 일일 상한만 건너뛴다. 게시 시크릿 점검은 그대로 한다."""
+        topic = "수동으로 지정한 오늘의 생활 습관 주제"
+        for label, extra, env in (("--topic", ["--topic", topic], {}), ("BLOGGER_TOPIC", [], {"BLOGGER_TOPIC": topic})):
+            with self.subTest(label):
+                pub = FakePublisher()
+                code, out = self.go(env=self.env(GEMINI_API_KEY="k", **env), publisher=pub, extra=extra)
+                self.assertEqual(code, 2)
+                self.assertIn("[SKIP] code=SECRETS_MISSING", out)
+                self.assertEqual((pub.published, self.history()), ([], []))
+
+    def test_missing_publish_secrets_are_reported_before_the_history_file_is_read(self):
+        """설정 오류(시크릿 누락)는 상태 파일(이력)을 읽기 전에 알린다. 이력이 깨져 있어도 같은 오류가 먼저 보인다."""
+        (self.root / "blogger_history.json").write_text("{not json", encoding="utf-8")
+        code, out = self.go(env=self.env(GEMINI_API_KEY="k"))
+        self.assertEqual(code, 2)
+        self.assertIn("[SKIP] code=SECRETS_MISSING", out)
+        self.assertEqual((self.root / "blogger_history.json").read_text(encoding="utf-8"), "{not json")  # 덮어쓰지 않음
+
+    def test_missing_llm_key_leaves_a_summary_with_the_secret_name(self):
+        out = []
+        code = run_mod.run(["--blog", "blogger_macat", "--root", str(self.root)], environ=self.env(**NO_PUBLISH), now=NOW,
+                           llm=None, rng=random.Random(1), out=out.append)
+        self.assertEqual(code, 2)
+        self.assertIn("SECRETS_MISSING", self.summary())
+        self.assertIn("GEMINI_API_KEY", self.summary())
+
+    def test_publish_failure_message_is_masked_in_the_log_the_history_and_the_summary(self):
+        leaked = ["ya29." + "x" * 30, "1//" + "y" * 30]  # 런타임에 조합한다(실제 비밀처럼 보이는 리터럴 금지)
+        pub = FakePublisher(fail=PublishError(f"token refresh failed: {leaked[0]} / {leaked[1]}", code="auth_failed"))
+        code, out = self.go(env=self.env(**FULL_ENV), publisher=pub)
+        self.assertEqual(code, 1)
+        self.assertIn("auth_failed", self.history()[-1]["reasons"][0])   # 원인 분류는 남는다
+        shown = out + json.dumps(self.history(), ensure_ascii=False) + self.summary()
+        for secret in leaked:
+            self.assertNotIn(secret, shown)
+
+    def test_gate_warning_annotation_is_a_fixed_sentence_without_the_rejection_reasons(self):
+        """탈락 사유(LLM 글에서 나온 문자열이 섞일 수 있다)는 로그 본문·요약·이력에만 두고 ::warning:: 주석에는 넣지 않는다."""
+        def short(prompt):
+            return "제목: 충분히 긴 제목입니다 정말로\n라벨: 가\n내용:\n<p>너무 짧음</p>", "m"
+        code, out = self.go(env=self.env(**FULL_ENV), llm=short, publisher=FakePublisher())
+        reasons = self.history()[-1]["reasons"]
+        self.assertTrue(reasons)
+        self.assertIn("LEN_SHORT", out)                                   # 사유는 로그 본문에는 있다
+        annotations = [line for line in out.splitlines() if line.startswith("::")]
+        self.assertEqual(len(annotations), 1, annotations)
+        for reason in reasons:
+            self.assertNotIn(reason, annotations[0])
+            self.assertNotIn(reason.split("]", 1)[0].lstrip("["), annotations[0])  # 사유 코드(LEN_SHORT 등)도 없다
+
+    def test_dry_run_summary(self):
+        code, out = self.go(env=self.env(**FULL_ENV), publisher=FakePublisher(), extra=["--dry-run"])
+        self.assertEqual(code, 0)
+        self.assertIn("DRY_RUN", self.summary())
+
+    def test_warning_annotations_never_embed_llm_text(self):
+        """게이트 탈락 사유(LLM 글·이력 파일에서 나온 문자열)가 ::workflow-command:: 줄이나 요약의 새 줄이 되면 안 된다."""
+        def evil(prompt):
+            return "제목: ::error::위조된 명령 제목입니다 충분히 길게\n라벨: 가\n내용:\n<p>짧음</p>", "m"
+        code, out = self.go(env=self.env(**FULL_ENV), llm=evil, publisher=FakePublisher())
+        for line in out.splitlines():
+            if line.startswith("::"):
+                self.assertNotIn("위조된 명령", line)
+
+        # 비교 대상 이력(다른 블로그는 피드·LLM 유래)의 제목에 줄 바꿈 문자로 명령·제목·링크를 숨긴 경우
+        title = "충분히 긴 제목입니다 정말로 위조 테스트"
+
+        def same_title_again(prompt):
+            return f"제목: {title}\n라벨: 가\n내용:\n<p>짧음</p>", "m"
+        hidden = (("개행", "\n::error::위조된 명령"), ("단독 CR", "\r::error::위조된 명령"),
+                  ("U+2028", "\u2028::error::위조된 명령"), ("U+0085", "\u0085::error::위조된 명령"),
+                  ("링크·표·HTML", "\n[x](https://e.io)|<b>"))
+        for label, suffix in hidden:
+            with self.subTest(label):
+                (self.root / "history.json").write_text(
+                    json.dumps([{"title": title + suffix}], ensure_ascii=False), encoding="utf-8")        # 다른 블로그 이력
+                (self.root / "blogger_history.json").write_text(
+                    json.dumps([{"title": title + suffix, "date": "2026-10-19", "status": "posted"}], ensure_ascii=False),
+                    encoding="utf-8")                                                                      # 이 블로그 이력
+                self.summary_path.unlink(missing_ok=True)
+                code, out = self.go(env=self.env(**FULL_ENV), llm=same_title_again, publisher=FakePublisher())
+                self.assertEqual(code, 0)
+                reasons = " ".join(self.history()[-1]["reasons"])
+                self.assertIn("DUP_OTHER", reasons)   # 전제: 이력 제목이 실제로 탈락 사유에 들어갔다
+                self.assertIn("DUP_SAME", reasons)
+                for char in ("\r", "\u2028", "\u0085"):
+                    self.assertNotIn(char, out)
+                annotations = [line for line in out.splitlines() if line.lstrip().startswith(("::", "##["))]
+                self.assertEqual(len(annotations), 1, annotations)       # 고정 문장의 ::warning:: 한 줄뿐
+                self.assertTrue(annotations[0].startswith("::warning::[blogger_macat] 게이트를"))
+                self.assertNotIn("위조된 명령", annotations[0])
+                self.assertIn(title, out)                                 # 어떤 제목과 겹쳤는지는 로그에 남는다
+                summary_lines = self.summary().splitlines()
+                self.assertEqual(len(summary_lines), 2, summary_lines)    # '### 키' 와 '- 결과' 두 줄뿐(끼워 넣은 줄 없음)
+                for char in "|<>`":
+                    self.assertNotIn(char, summary_lines[1])
+                self.assertNotIn("](", summary_lines[1])
+
+    def test_summary_and_log_never_get_line_breaks_or_markdown_from_the_llm_title(self):
+        """LLM 제목의 단독 CR·링크·표·HTML 문법이 실행 요약(마크다운)과 로그에 그대로 들어가면 안 된다."""
+        def evil(prompt):
+            text, model = stub_llm(prompt)
+            first_line = text.split("\n", 1)[0]
+            return text.replace(first_line, "제목: [클릭](https://evil.example)|<b>굵게</b>\r::error::위조된 제목 줄", 1), model
+        pub = FakePublisher()
+        code, out = self.go(env=self.env(**FULL_ENV), llm=evil, publisher=pub)
+        self.assertEqual(code, 0)
+        self.assertIn("위조된 제목 줄", pub.published[0]["title"])        # 전제: 위조 문구가 제목에 실제로 들어갔다
+        lines = self.summary().splitlines()
+        self.assertEqual(len(lines), 3, lines)                           # '### 키', '- 결과', '- URL' 세 줄뿐
+        self.assertEqual([line for line in lines if line.startswith("#")], ["### blogger_macat"])
+        for char in "|<>`":
+            self.assertNotIn(char, lines[1])
+        self.assertNotIn("](", self.summary())
+        self.assertIn("클릭", lines[1])                                   # 제목 내용은 읽을 수 있게 남는다
+        self.assertIn("https://macat.example/p1", lines[2])               # 게시된 글 주소는 그대로
+
+        self.summary_path.unlink()
+        (self.root / "blogger_history.json").unlink()   # 방금 게시한 기록이 있으면 하루 상한에 걸린다
+        code, out = self.go(env=self.env(**FULL_ENV), llm=evil, publisher=FakePublisher(), extra=["--dry-run"])
+        self.assertEqual(code, 0)
+        self.assertIn("[DRY_RUN]", out)
+        self.assertNotIn("\r", out)
+        self.assertEqual([line for line in out.splitlines() if line.lstrip().startswith(("::", "##["))], [])
+        self.assertIn("위조된 제목 줄", out)                               # 로그에는 접힌 제목이 보인다
+        lines = self.summary().splitlines()
+        self.assertEqual(len(lines), 2, lines)
+        self.assertNotIn("](", self.summary())
+
+    def test_api_error_text_is_folded_into_one_line_before_it_reaches_the_log(self):
+        """LLM·Blogger API 오류 문구(외부 유래)에 단독 CR·개행으로 숨긴 '::error::' 가 로그의 새 줄이 되면 안 된다."""
+        def down(prompt):
+            raise LLMError("quota exceeded\r::error::위조된 LLM 줄\n## 가짜")
+        pub = FakePublisher(fail=PublishError("HTTP 500\r::error::위조된 게시 줄\n## 가짜", code="api_error"))
+        for label, kwargs, forged in (("LLM", {"llm": down}, "위조된 LLM 줄"), ("게시", {"publisher": pub}, "위조된 게시 줄")):
+            with self.subTest(label):
+                (self.root / "blogger_history.json").unlink(missing_ok=True)
+                code, out = self.go(env=self.env(**FULL_ENV), **kwargs)
+                self.assertEqual(code, 1)
+                self.assertIn(forged, out)                                # 원인은 접힌 한 줄로 보인다
+                self.assertNotIn("\r", out)
+                annotations = [line for line in out.splitlines() if line.lstrip().startswith(("::", "##["))]
+                self.assertEqual(len(annotations), 1, annotations)        # 고정 문장의 ::error:: 한 줄뿐
+                self.assertNotIn("위조된", annotations[0])
+
+    def test_log_and_summary_fold_whatever_the_gate_reports(self):
+        """사유를 만드는 쪽(gates)이 접어 주더라도, 로그·요약을 쓰는 run 도 받은 사유를 다시 한 줄로 접어 쓴다."""
+        forged = "[NEW_GATE] 사유\r::error::위조된 명령\n## 가짜 제목\n[x](https://e.io)"
+        rejected = gates.GateResult(ok=False, reasons=[forged])
+        with mock.patch.object(run_mod.gates, "check_post", return_value=rejected):
+            code, out = self.go(env=self.env(**FULL_ENV), publisher=FakePublisher())
+        self.assertEqual(code, 0)
+        self.assertEqual(self.history()[-1]["status"], "rejected")
+        self.assertNotIn("\r", out)
+        annotations = [line for line in out.splitlines() if line.lstrip().startswith(("::", "##["))]
+        self.assertEqual(len(annotations), 1, annotations)               # 고정 문장의 ::warning:: 한 줄뿐
+        self.assertNotIn("위조된 명령", annotations[0])
+        lines = self.summary().splitlines()
+        self.assertEqual(len(lines), 2, lines)
+        self.assertNotIn("](", self.summary())
+        self.assertIn("위조된 명령", lines[1])                              # 사유 내용은 읽을 수 있게 남는다
 
 
 class PolicyTest(unittest.TestCase):
