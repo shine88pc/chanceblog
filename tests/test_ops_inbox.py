@@ -158,7 +158,7 @@ class DocumentedDefaultsTest(unittest.TestCase):
 
     def test_defaults(self):
         expected = {"RUN_WINDOW_HOURS": 48, "RUNS_PER_FILE": 10, "ANNOTATION_RUNS_PER_FILE": 3, "PR_STALE_DAYS": 3, "DRAFT_WAIT_DAYS": 7,
-                    "APPROVAL_ITEMS_MAX": 5, "WARNING_MESSAGES_MAX": 3, "BODY_LIMIT": 60000, "SUMMARY_LIMIT": 500000,
+                    "APPROVAL_ITEMS_MAX": 5, "WARNING_MESSAGES_MAX": 3, "BODY_LIMIT": 58000, "SUMMARY_LIMIT": 500000,
                     "COMMENT_ITEMS_MAX": 8, "MARKER_IDS_MAX": 80, "TITLE_MAX": 110, "DETAIL_MAX": 420, "HINT_MAX": 260, "MESSAGE_MAX": 150}
         for name, value in expected.items():
             self.assertEqual(getattr(inbox, name), value, name)
@@ -318,6 +318,15 @@ class PullItemsTest(unittest.TestCase):
         self.assertEqual(item.url, f"{URL}/pull/15")
         self.assertIn("Merge pull request", item.hint)
 
+    def test_the_ready_hint_asks_to_check_the_scope_check_result_first(self):
+        item = one(self.build(h.make_pull(15)))
+        self.assertIn("PR 코멘트의 변경 범위 검사 결과를 먼저 확인하세요", item.hint)       # 경고는 종료 0 이라 초록으로 보인다
+        self.assertIn("Merge pull request", item.hint)
+        self.assertLessEqual(len(item.hint), inbox.HINT_MAX)
+        for state, (_label, _message, hint) in inbox._PULL_COPY.items():
+            if state != "ready":
+                self.assertNotIn("변경 범위 검사", hint, state)
+
     def test_ci_failure_is_action(self):
         item = one(self.build(h.make_pull(16, ci="fail", mergeable=True, state="unstable")))
         self.assertEqual((item.id, item.level), ("pr:16:ci_fail", "action"))
@@ -437,8 +446,13 @@ def runs_for(file, *runs):
 
 
 class RunFailureTest(unittest.TestCase):
-    def build(self, runs_by_file, annotations=None):
-        return inbox.run_items(runs_by_file, annotations or {}, NOW, URL)
+    NAMES = {"chanceblog.yml": "Chance 글 작성"}        # 스크립트가 워크플로 파일의 최상위 name 에서 읽어 오는 이름(읽지 못한 파일은 빠진다)
+    # 실행(run)의 name 은 run-name 이라 실행마다 다르다. 옛 이름은 이름을 바꾸기 전에 만든 실행의 name 이 이력에 남은 것이다.
+    RUN_NAME_VARIANTS = ("Chance 기존 글 이미지 교체 · 연습(저장 안 함)", "이슈 #12 수정 요청 처리 · 수동(연습: PR·코멘트 안 만듦)",
+                         "Blogger Generate", "", None)       # Blogger Generate = Blogger 글 자동 작성 의 옛 이름
+
+    def build(self, runs_by_file, annotations=None, names=None):
+        return inbox.run_items(runs_by_file, annotations or {}, NOW, URL, names=self.NAMES if names is None else names)
 
     def test_latest_completed_failure_is_action_with_link(self):
         runs = runs_for("chanceblog.yml", h.make_run(2, ago(hours=1), "failure"), h.make_run(1, ago(hours=4), "success"))
@@ -459,7 +473,7 @@ class RunFailureTest(unittest.TestCase):
             self.assertIn(word, item.detail)
 
     def test_cancelled_skipped_and_neutral_runs_are_ignored_when_picking_the_latest(self):
-        for ignored in ("cancelled", "skipped", "neutral", "stale"):
+        for ignored in ("cancelled", "skipped", "neutral", "stale", "action_required"):
             runs = runs_for("a.yml", h.make_run(3, ago(minutes=30), ignored), h.make_run(2, ago(hours=1), "failure"))
             self.assertEqual(one(self.build(runs)).level, "action", ignored)         # 취소 앞에 있어도 실패는 그대로
             runs = runs_for("a.yml", h.make_run(3, ago(minutes=30), ignored), h.make_run(2, ago(hours=1), "success"))
@@ -512,9 +526,11 @@ class RunFailureTest(unittest.TestCase):
         self.assertEqual(sorted(i.id for i in items), ["run:blogger.yml:failed", "run:pr_scope_check.yml:failed"])
 
     def test_workflow_name_falls_back_to_the_file_name(self):
-        run = h.make_run(1, ago(hours=1), "failure")
-        run["name"] = None
-        self.assertIn("a.yml", one(self.build(runs_for("a.yml", run))).title)
+        run = h.make_run(1, ago(hours=1), "failure", name="실행 이름은 쓰지 않는다")
+        for names in ({}, {"a.yml": ""}, {"a.yml": None}, {"b.yml": "다른 파일의 이름"}):
+            item = one(self.build(runs_for("a.yml", run), names=names))
+            self.assertEqual(item.title, "워크플로 실패 — a.yml", names)
+        self.assertEqual(one(inbox.run_items(runs_for("a.yml", run), {}, NOW, URL)).title, "워크플로 실패 — a.yml")      # names 를 아예 안 주어도
 
     def test_garbage_runs_do_not_crash(self):
         self.assertEqual(self.build({"a.yml": [None, 5, {}, {"created_at": "x"}, {"created_at": ago(hours=1)}]}), [])
@@ -525,12 +541,94 @@ class RunFailureTest(unittest.TestCase):
         run["html_url"] = "https://evil.example/phish"
         self.assertEqual(one(self.build(runs_for("a.yml", run))).url, f"{URL}/actions/runs/7")
 
+    # --- 이름은 실행이 아니라 워크플로 파일의 name 에서(F1)
+    def test_the_title_shows_the_workflow_files_name_whatever_the_run_name_says(self):
+        for variant in self.RUN_NAME_VARIANTS:
+            runs = runs_for("chanceblog.yml", h.make_run(2, ago(hours=1), "failure", name=variant), h.make_run(1, ago(hours=4), "success", name="다른 변형"))
+            item = one(self.build(runs))
+            self.assertEqual(item.title, "워크플로 실패 — Chance 글 작성", variant)
+            if variant:
+                self.assertNotIn(variant, " ".join((item.title, item.detail, item.hint)))
+
+    def test_every_run_name_variant_gives_exactly_the_same_item(self):
+        results = [self.build(runs_for("chanceblog.yml", h.make_run(2, ago(hours=1), "failure", name=variant),
+                                       h.make_run(1, ago(hours=4), "failure", name="옛 변형"))) for variant in self.RUN_NAME_VARIANTS]
+        self.assertTrue(all(result == results[0] for result in results), results)
+        self.assertIn("연속 2회", one(results[0]).detail)
+
+    def test_the_title_ignores_how_the_other_runs_of_the_file_are_named(self):
+        old_first = runs_for("chanceblog.yml", h.make_run(2, ago(hours=1), "failure", name="이름 A"), h.make_run(1, ago(hours=4), "success", name=self.RUN_NAME_VARIANTS[2]))
+        new_first = runs_for("chanceblog.yml", h.make_run(2, ago(hours=1), "failure", name=self.RUN_NAME_VARIANTS[2]), h.make_run(1, ago(hours=4), "success", name="이름 A"))
+        self.assertEqual(self.build(old_first), self.build(new_first))
+
+    def test_the_workflow_name_is_clipped_and_neutralised_like_any_other_text(self):
+        names = {"a.yml": "@모두 <b>굵게</b> ::error::가짜 [링크](http://e.example) " + "가" * 100}
+        item = one(self.build(runs_for("a.yml", h.make_run(1, ago(hours=1), "failure")), names=names))
+        for raw in ("@", "<", "::", "](", "["):
+            self.assertNotIn(raw, item.title, raw)
+        self.assertEqual(len(item.title), len("워크플로 실패 — ") + 60)
+
+    # --- 포크 PR 실행과 승인 대기 실행은 main 의 판단에 섞이지 않는다(F4)
+    def fork_run(self, run_id, hours, conclusion, event="pull_request", **kw):
+        return h.make_run(run_id, ago(hours=hours), conclusion, event=event, head_repo="stranger/blog", **kw)
+
+    def test_a_newer_fork_pull_request_run_neither_creates_nor_hides_a_failure(self):
+        for event in ("pull_request", "pull_request_target"):
+            own_ok, own_bad = h.make_run(1, ago(hours=5)), h.make_run(1, ago(hours=5), "failure")
+            self.assertEqual(self.build(runs_for("a.yml", self.fork_run(2, 1, "failure", event), own_ok)), [], event)     # 포크의 실패는 만들지 않는다
+            kept = one(self.build(runs_for("a.yml", self.fork_run(2, 1, "success", event), own_bad)))                    # 포크의 성공은 가리지 않는다
+            self.assertEqual(kept.id, "run:a.yml:failed", event)
+            self.assertEqual(kept.url, f"{URL}/actions/runs/1", event)
+
+    def test_fork_runs_do_not_extend_or_cut_the_failure_streak(self):
+        runs = runs_for("a.yml", h.make_run(4, ago(hours=1), "failure"), self.fork_run(3, 2, "success"), h.make_run(2, ago(hours=3), "failure"),
+                        self.fork_run(1, 4, "failure"))
+        item = one(self.build(runs))
+        self.assertIn("연속 2회", item.detail)
+        self.assertEqual(item.since, NOW - timedelta(hours=3))
+
+    def test_pull_request_runs_of_this_repository_still_count(self):
+        run = h.make_run(2, ago(hours=1), "failure", event="pull_request", head_repo=h.REPO)
+        self.assertEqual(one(self.build(runs_for("a.yml", run))).id, "run:a.yml:failed")
+        shouting = h.make_run(2, ago(hours=1), "failure", event="pull_request", head_repo=h.REPO.upper())         # 저장소 이름의 대소문자는 가리지 않는다
+        self.assertEqual(one(self.build(runs_for("a.yml", shouting))).id, "run:a.yml:failed")
+
+    def test_a_pull_request_run_whose_head_repository_is_unknown_is_treated_as_foreign(self):
+        for head in (None, {}, {"full_name": None}, {"full_name": ""}, "문자열", 5):
+            run = h.make_run(2, ago(hours=1), "failure", event="pull_request")
+            run["head_repository"] = head
+            self.assertEqual(self.build(runs_for("a.yml", run)), [], head)
+        run = h.make_run(2, ago(hours=1), "failure", event="pull_request_target")
+        del run["head_repository"]
+        self.assertEqual(self.build(runs_for("a.yml", run)), [])
+
+    def test_other_events_are_judged_by_their_conclusion_even_without_a_head_repository(self):
+        for event in ("schedule", "push", "workflow_dispatch", "issues", None):
+            run = h.make_run(2, ago(hours=1), "failure", event=event)
+            del run["head_repository"]
+            self.assertEqual(one(self.build(runs_for("a.yml", run))).id, "run:a.yml:failed", event)
+            other = h.make_run(2, ago(hours=1), "failure", event=event, head_repo="stranger/blog")        # 이벤트가 풀 리퀘스트가 아니면 head 저장소를 보지 않는다
+            self.assertEqual(one(self.build(runs_for("a.yml", other))).id, "run:a.yml:failed", event)
+
+    def test_a_newest_action_required_run_does_not_hide_an_earlier_failure(self):
+        waiting = h.make_run(3, ago(minutes=20), "action_required")             # 상태 completed + 결론 action_required (승인 대기)
+        failed = runs_for("a.yml", waiting, h.make_run(2, ago(hours=1), "failure"))
+        self.assertEqual(one(self.build(failed)).id, "run:a.yml:failed")
+        self.assertEqual(self.build(runs_for("a.yml", waiting, h.make_run(2, ago(hours=1), "success"))), [])
+        streak = runs_for("a.yml", h.make_run(4, ago(minutes=10), "failure"), waiting, h.make_run(2, ago(hours=1), "failure"))
+        self.assertIn("연속 2회", one(self.build(streak)).detail)             # 승인 대기는 연속 실패를 끊지도 늘리지도 않는다
+
+    def test_warnings_of_fork_runs_are_not_shown(self):
+        fork = self.fork_run(1, 1, "success")
+        self.assertEqual(self.build(runs_for("a.yml", fork), {1: [h.make_annotation("포크의 경고"), h.make_annotation(REAL_NODE_WARNING)]}), [])
+
 
 class RunWarningTest(unittest.TestCase):
     FILE = "chanceblog.yml"
+    NAMES = {FILE: "Chance 글 작성"}        # 스크립트가 워크플로 파일의 최상위 name 에서 읽어 오는 이름
 
     def build(self, runs, annotations):
-        return inbox.run_items({self.FILE: runs}, annotations, NOW, URL)
+        return inbox.run_items({self.FILE: runs}, annotations, NOW, URL, names=self.NAMES)
 
     def warn_item(self, items):
         return by_id(items)[f"run:{self.FILE}:warn"]
@@ -543,6 +641,11 @@ class RunWarningTest(unittest.TestCase):
         self.assertEqual(item.url, f"{URL}/actions/runs/1")
         self.assertIn("성공 실행 1회 중 1회", item.detail)
         self.assertIn("Chance 글 작성", item.title)
+
+    def test_the_warning_title_uses_the_workflow_files_name_not_the_run_name(self):
+        runs = [h.make_run(1, ago(hours=1), name="Chance 기존 글 이미지 교체 · 연습(저장 안 함)")]
+        item = self.warn_item(self.build(runs, {1: [h.make_annotation("경고 문구")]}))
+        self.assertEqual(item.title, "실행은 성공했지만 경고가 있습니다 — Chance 글 작성")
 
     def test_only_warning_level_counts(self):
         runs = [h.make_run(1, ago(hours=1))]
@@ -662,15 +765,53 @@ class PlatformNoticeTest(unittest.TestCase):
         self.assertIn("액션 버전 갱신 필요", item.title)
         self.assertIn("당장은 발행에 영향 없음", item.title)
 
-    def test_the_item_names_the_actions_the_workflows_and_links_the_newest_run(self):
+    def test_the_item_names_the_actions_and_links_the_actions_page(self):
         item = one(self.items())
         self.assertIn("액션: actions/checkout v4, actions/setup-python v5 ·", item.detail)       # 문장 끝 마침표는 버전이 아니고, @ 는 멘션으로 읽힐 수 있어 공백으로 쓴다
         self.assertNotIn("@", item.detail)
-        for name in ("chanceblog.yml 이름", "blogger.yml 이름", "watchdog.yml 이름"):
-            self.assertIn(name, item.detail)
-        self.assertEqual(item.url, f"{URL}/actions/runs/1")                  # 가장 최근에 시작한 실행(1시간 전 + run_id 0.01 시간)
+        self.assertEqual(item.url, f"{URL}/actions")                         # 저장소 Actions 화면(고정 주소): 어느 실행이 가장 최근인지에 따라 바뀌지 않는다
         self.assertIn("AI에게", item.hint)
         self.assertIn("지금 할 일은 없습니다", item.hint)
+
+    def test_the_item_names_no_workflow_and_no_run(self):
+        item = one(self.items())
+        for text in ("chanceblog.yml 이름", "blogger.yml 이름", "watchdog.yml 이름", "워크플로"):
+            self.assertNotIn(text, item.detail)
+            self.assertNotIn(text, item.title)
+        self.assertNotIn("/runs/", item.url)
+        self.assertIsNone(item.since)
+
+    def test_no_workflow_list_or_remainder_text_whatever_the_number_of_workflows(self):
+        for count in (1, 4, 5, 9):
+            item = one(self.items(files=tuple(f"w{n}.yml" for n in range(count)), runs_each=1))
+            self.assertNotIn(" 이름", item.detail)
+            self.assertNotIn("외 ", item.detail.split("예:")[0])
+            self.assertEqual(item.url, f"{URL}/actions")
+
+    def test_the_rendered_text_is_byte_identical_when_only_other_workflows_ran(self):
+        """다른 워크플로가 돌 때마다 이 줄이 바뀌면 이슈 본문을 계속 다시 쓰게 된다(알림은 없어도 수정 이력·쓰기 호출이 늘고 '바로 한 번 더 실행하면 변경 없음'이 틀어진다)."""
+        runs_a, notes_a = self.world(files=("a.yml", "b.yml"), runs_each=2)
+        runs_b, notes_b = self.world(files=("a.yml", "b.yml"), runs_each=2)
+        runs_b["c.yml"] = [h.make_run(90, ago(minutes=3), name="Chance 기존 글 이미지 교체 · 연습(저장 안 함)", path=".github/workflows/c.yml"),
+                           h.make_run(91, ago(hours=30), name="Blogger Generate", path=".github/workflows/c.yml")]   # Blogger Generate = Blogger 글 자동 작성 의 옛 이름
+        notes_b[90] = [h.make_annotation(REAL_UBUNTU_NOTICE, "notice"), h.make_annotation(REAL_NODE_WARNING)]          # 다른 순서로 달린 같은 안내
+        notes_b[91] = [h.make_annotation(REAL_NODE_WARNING)]
+        runs_b["a.yml"] = runs_b["a.yml"][:1]                                                                          # a.yml 의 이전 실행은 없다
+        texts = []
+        for runs, notes in ((runs_a, notes_a), (runs_b, notes_b)):
+            snap = inbox.Snapshot(now=NOW, repo=h.REPO, runs=runs, annotations=notes)
+            texts.append(inbox.render(inbox.build_items(snap), URL))
+        self.assertIn("GitHub Actions 플랫폼 경고 2종", texts[0])
+        self.assertEqual(texts[0].encode("utf-8"), texts[1].encode("utf-8"))
+        self.assertEqual(inbox.body_hash(texts[0]), inbox.body_hash(texts[1]))
+
+    def test_the_item_does_not_depend_on_which_message_came_first(self):
+        first = [(REAL_NODE_WARNING, "warning"), (REAL_UBUNTU_NOTICE, "notice")]
+        self.assertEqual(one(self.items(messages=first)), one(self.items(messages=list(reversed(first)))))
+        shouted = REAL_NODE_WARNING.replace("deprecated", "DEPRECATED")              # 대소문자만 다른 같은 문구는 같은 종류 — 어느 쪽을 보여 줄지도 순서와 무관해야 한다
+        pair = [(REAL_NODE_WARNING, "warning"), (shouted, "warning")]
+        self.assertEqual(one(self.items(messages=pair)), one(self.items(messages=list(reversed(pair)))))
+        self.assertIn("1종", one(self.items(messages=pair)).title)
 
     def test_it_never_becomes_a_new_action_notification(self):
         runs_by_file, annotations = self.world()
@@ -719,22 +860,11 @@ class PlatformNoticeTest(unittest.TestCase):
         self.assertEqual(items["run:a.yml:warn"].level, "check")
         self.assertEqual(items["run:platform_notice"].level, "info")
 
-    def test_exactly_four_workflows_need_no_remainder(self):
-        item = one(self.items(files=tuple(f"w{n}.yml" for n in range(4)), runs_each=1))
-        self.assertNotIn("외", item.detail.split("예:")[0])
-        self.assertEqual(item.detail.count(" 이름"), 4)
-
-    def test_workflow_names_are_limited_to_four_with_the_rest_counted(self):
-        item = one(self.items(files=tuple(f"w{n}.yml" for n in range(6)), runs_each=1))
-        self.assertIn("외 2개", item.detail)
-        self.assertEqual(item.detail.count(" 이름"), 4)
-        self.assertNotIn("외", one(self.items(files=("a.yml", "b.yml"), runs_each=1)).detail.split("예:")[0])
-
-    def test_the_link_goes_to_the_newest_run_that_carried_a_platform_notice(self):
+    def test_the_link_is_the_same_whichever_run_carried_the_platform_notice(self):
         old = h.make_run(1, ago(hours=9))
         new_clean = h.make_run(2, ago(hours=1))
         item = one(inbox.run_items({"a.yml": [new_clean, old]}, {1: [h.make_annotation(REAL_NODE_WARNING)], 2: [h.make_annotation("정보", "notice")]}, NOW, URL))
-        self.assertEqual(item.url, f"{URL}/actions/runs/1")
+        self.assertEqual(item.url, f"{URL}/actions")
 
     def test_each_pattern_is_pinned_by_a_sample_only_it_matches(self):
         self.assertEqual(len(self.ONLY_PATTERN_SAMPLES), len(inbox.PLATFORM_NOISE))
@@ -745,6 +875,42 @@ class PlatformNoticeTest(unittest.TestCase):
     def test_our_own_messages_match_no_pattern(self):
         for text in self.OWN_WARNINGS:
             self.assertFalse(inbox._is_noise(text), text)
+
+    # 우리 스크립트(generator.py·pipeline/run.py·scripts/watchdog.py)가 ::warning:: 으로 남기는 실제 문구 13개(값은 예시)
+    OUR_REAL_WARNINGS = (
+        "모든 뉴스 소스 수집에 실패했습니다. 네트워크/소스 주소를 확인하세요.",
+        "분야 대체 시도를 시간 상한(480초)에서 멈춥니다. 2개 분야는 시도하지 못했습니다.",
+        "9시 슬롯: 후보는 있었지만 전부 탈락했습니다(Gemini 건너뜀, 제목이 기존 글과 비슷, 또는 본문 검증 탈락). 다음 실행에서 다시 시도합니다.",
+        "수동 실행: 검증된 기사는 있었지만 모두 이미 쓴 글과 비슷해 새 글감이 없습니다(뉴스가 뜸한 때). 다음 실행에서 다시 시도합니다.",
+        "수동 실행: 시간 상한으로 일부 분야만 시도했고 후보를 찾지 못했습니다. 다음 실행에서 다시 시도합니다.",
+        "수동 실행: 요청 주제와 연결되는 검증된 기사가 없습니다. 다음 실행에서 다시 시도합니다.",
+        "[blogger_macat] 고를 주제가 없습니다(seed_exhausted). 시드 주제를 보강하세요. 건너뜁니다.",
+        "[blogger_macat] 게이트를 3번 모두 통과하지 못해 게시하지 않았습니다. 다음 실행에서 다시 시도합니다.",
+        "[blogger_macat] (DRY_RUN이라 계속합니다) 게시용 시크릿이 등록되어 있지 않습니다: BLOGGER_BLOG_ID, BLOGGER_CLIENT_ID "
+        "(저장소 Settings > Secrets and variables > Actions). 등록하기 전에는 이 블로그를 mode=draft 또는 off 로 두세요.",
+        "담당자(octo) 지정이 거부되어(HTTP 422) 담당자 없이 이슈를 만듭니다: [Watchdog] chance: STALE",
+        "새 이슈가 한 번에 너무 많아 다음 실행으로 미룹니다: [Watchdog] blogger_macat: UNPUBLISHED",
+        "얕은 복제라 git 이력으로 글 커밋 시각을 판정할 수 없어 건너뜁니다(워크플로 checkout 에 fetch-depth: 0 이 필요합니다).",
+        "Pages 워크플로 실행 이력 조회 실패(배포 검사 건너뜀): URLError: timed out",
+    )
+    # 버전 숫자만 들어 있는 우리 쪽 문구(Node 18 같은 것)는 'Node.js 20 is deprecated' 류의 플랫폼 소음이 아니다
+    OUR_NODE_TEXTS = ("Node 18 이하에서는 지원하지 않습니다", "[chance] node 20 으로 올립니다", "Node18 필요", "NODE 22 설치 확인")
+
+    def test_our_real_warning_texts_are_never_platform_noise_and_stay_check_items(self):
+        self.assertEqual(len(self.OUR_REAL_WARNINGS), 13)
+        for text in self.OUR_REAL_WARNINGS:
+            self.assertFalse(inbox._is_noise(text), text)
+            items = by_id(self.items(files=("a.yml",), runs_each=1, messages=[(text, "warning")]))
+            self.assertEqual(list(items), ["run:a.yml:warn"], text)
+            self.assertEqual(items["run:a.yml:warn"].level, "check")
+
+    def test_a_plain_node_version_is_not_platform_noise_but_node_js_is(self):
+        for text in self.OUR_NODE_TEXTS:
+            self.assertFalse(inbox._is_noise(text), text)
+            items = by_id(self.items(files=("a.yml",), runs_each=1, messages=[(text, "warning")]))
+            self.assertEqual(list(items), ["run:a.yml:warn"], text)
+        for text in ("Node.js 20 is deprecated", "node.js 24", "forced to run on NODE.JS 24 now", "Node.js24"):
+            self.assertTrue(inbox._is_noise(text), text)
 
     def test_the_pattern_list_and_levels_are_single_constants(self):
         self.assertIsInstance(inbox.PLATFORM_NOISE, tuple)
@@ -777,6 +943,23 @@ class ApprovalItemsTest(unittest.TestCase):
         self.assertIn("copilot/fix", item.detail)
         self.assertEqual(item.url, f"{URL}/actions/runs/7")
         self.assertIn("모르는 사람", item.hint)
+
+    def test_workflow_names_come_from_the_workflow_file_when_it_is_known(self):
+        runs = [self.pending(1, name="PR 제목이 실린 실행 이름", path=".github/workflows/guardrails.yml"),
+                self.pending(2, name="다른 변형", path=".github/workflows/pr-scope-check.yml@refs/pull/7/merge"),
+                self.pending(3, name="알 수 없는 파일의 실행 이름", path=".github/workflows/unknown.yml")]
+        names = {"guardrails.yml": "저장소 규칙·테스트 자동 검사", "pr-scope-check.yml": "PR 변경 범위 검사"}
+        detail = one(inbox.approval_items(runs, URL, names=names)).detail
+        self.assertIn("저장소 규칙·테스트 자동 검사", detail)
+        self.assertIn("PR 변경 범위 검사", detail)
+        self.assertIn("알 수 없는 파일의 실행 이름", detail)               # 파일을 모르면 지금까지처럼 실행의 이름
+        for text in ("PR 제목이 실린", "다른 변형"):
+            self.assertNotIn(text, detail)
+
+    def test_workflow_file_is_read_from_the_run_path(self):
+        for path, expected in ((".github/workflows/a.yml", "a.yml"), (".github/workflows/a.yaml@refs/heads/main", "a.yaml"), ("b.yml", "b.yml"),
+                               ("", ""), (None, ""), (".github/workflows/", ""), ("x/y.txt", ""), (".github/workflows/a b.yml", ""), (5, "")):
+            self.assertEqual(inbox.workflow_file(path), expected, path)
 
     def test_conclusion_form_is_also_recognised(self):
         run = h.make_run(8, ago(hours=1), "action_required", "completed", sha="c" * 40)
@@ -1144,6 +1327,16 @@ class BuildItemsTest(unittest.TestCase):
     def test_empty_snapshot_has_no_items(self):
         self.assertEqual(inbox.build_items(sample_snapshot()), [])
 
+    def test_workflow_names_of_the_snapshot_reach_the_run_and_approval_rules(self):
+        snap = sample_snapshot(
+            runs={"a.yml": [h.make_run(1, ago(hours=1), "failure", name="실행 이름")]},
+            approvals=[h.make_run(2, ago(hours=1), None, "action_required", sha="e" * 40, name="실행 이름", path=".github/workflows/guardrails.yml")],
+            workflow_names={"a.yml": "에이 워크플로", "guardrails.yml": "저장소 규칙·테스트 자동 검사"})
+        items = by_id(inbox.build_items(snap))
+        self.assertEqual(items["run:a.yml:failed"].title, "워크플로 실패 — 에이 워크플로")
+        self.assertIn("저장소 규칙·테스트 자동 검사", items["approve:eeeeeee"].detail)
+        self.assertEqual(inbox.Snapshot(now=NOW, repo=h.REPO).workflow_names, {})
+
     def test_bad_repository_name_is_rejected(self):
         for bad in ("", "no-slash", "a/b/c", "a b/c", "../x", "-a/b", "a/..", "a/.", "a/b c", "a/<b>", None):
             with self.assertRaises(ValueError, msg=bad):
@@ -1289,6 +1482,19 @@ class RenderTest(unittest.TestCase):
         items = [inbox.Item(f"pr:{n}:ready", "action", "가" * 110, "나" * 420, f"{URL}/pull/{n}", "다" * 260) for n in range(1, 700)]
         body = inbox.build_body(inbox.render(items, URL), [i.id for i in items])
         self.assertLess(len(body), 65000)
+
+    def test_the_worst_case_body_with_a_full_marker_fits_the_github_limit(self):
+        """보이는 본문이 한도까지 차고 표식이 가장 긴 경우(알린 id 80개 × id 최대 80자)에도 이슈 본문(표식 포함)이 65,536자를 넘지 않는다."""
+        ids = [("x" * 77 + f"{n:03d}") for n in range(inbox.MARKER_IDS_MAX)]
+        self.assertTrue(all(len(i) == 80 for i in ids))
+        items = [inbox.Item(i, "action", "가" * 110, "나" * 420, f"{URL}/pull/{n}", "다" * 260) for n, i in enumerate(ids)]
+        items += [inbox.Item(f"stat:{n}", "info", "라" * 110, "마" * 420) for n in range(300)]
+        visible = inbox.render(items, URL)
+        self.assertGreater(len(visible), inbox.BODY_LIMIT - 1500)                 # 시험이 헛돌지 않게: 정말 한도 근처까지 찼다
+        body = inbox.build_body(visible, ids)
+        self.assertEqual(len(inbox.parse_marker(body).items), inbox.MARKER_IDS_MAX)
+        self.assertLessEqual(len(body), 65536)
+        self.assertGreater(len(body), 65536 - 8000)                               # 한도를 필요 이상으로 낮추지도 않았다
 
     def test_summary_limit_renders_everything_the_issue_would_cut(self):
         items = [inbox.Item(f"pr:{n}:ready", "action", "가" * 100, "나" * 400, f"{URL}/pull/{n}", "다" * 200) for n in range(1, 401)]

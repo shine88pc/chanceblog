@@ -74,10 +74,10 @@ def make_check(name, conclusion="success", status="completed"):
 
 
 def make_run(run_id, created=None, conclusion="success", status="completed", name="Chance 글 작성", path=".github/workflows/chanceblog.yml",
-             event="schedule", branch="main", sha=SHA, title=None):
+             event="schedule", branch="main", sha=SHA, title=None, head_repo=REPO):
     return {"id": run_id, "name": name, "display_title": title or name, "path": path, "status": status, "conclusion": conclusion,
             "event": event, "head_branch": branch, "head_sha": sha, "created_at": created or ago(hours=3),
-            "html_url": f"{REPO_URL}/actions/runs/{run_id}"}
+            "head_repository": {"full_name": head_repo}, "html_url": f"{REPO_URL}/actions/runs/{run_id}"}
 
 
 def make_annotation(message, level="warning", title=""):
@@ -115,7 +115,7 @@ class FakeGitHub:
         self.log = []                  # [(method, path, params 또는 payload)]
         self.issues = []               # 이슈·PR(pull=True) dict
         self.pulls = []                # 목록용 PR dict (make_pull_raw)
-        self.details = {}              # PR 번호 → 상세 dict
+        self.details = {}              # PR 번호 → 상세 dict (목록이면 호출마다 차례로 돌려주고 마지막 것을 반복, 예외 값이면 그 호출에서 낸다)
         self.check_runs = {}           # sha → check run 목록
         self.runs = {}                 # 워크플로 파일 → 실행 목록(없는 파일은 404)
         self.approvals = []
@@ -164,7 +164,12 @@ class FakeGitHub:
         if match:
             if int(match.group(1)) not in self.details:
                 raise ops_inbox.ApiError("HTTP 404", status=404)
-            return copy.deepcopy(self.details[int(match.group(1))])
+            detail = self.details[int(match.group(1))]
+            if isinstance(detail, list):
+                detail = detail.pop(0) if len(detail) > 1 else detail[0]
+            if isinstance(detail, BaseException):
+                raise detail
+            return copy.deepcopy(detail)
         match = re.fullmatch(r"/commits/([0-9a-f]{40})/check-runs", path)
         if match:
             runs = self.check_runs.get(match.group(1), [])
@@ -246,13 +251,15 @@ SYNTHETIC_REGISTRY = json.dumps({
 
 
 def make_root(tmp, histories=None, workflows=("chanceblog.yml", "blogger.yml", "watchdog.yml", "guardrails.yml"), blogs_json=None):
-    """레지스트리·이력·워크플로 이름만 있는 임시 저장소 폴더. histories: {파일 이름: 목록 또는 원문 문자열}."""
+    """레지스트리·이력·워크플로 파일만 있는 임시 저장소 폴더. histories: {파일 이름: 목록 또는 원문 문자열}.
+    workflows: 파일 이름 목록(내용은 'name: x') 또는 {파일 이름: 파일 내용}."""
     root = Path(tmp)
     (root / "pipeline").mkdir(parents=True, exist_ok=True)
     (root / "pipeline" / "blogs.json").write_text(SYNTHETIC_REGISTRY if blogs_json is None else blogs_json, encoding="utf-8")
     for name, content in (histories or {}).items():
         (root / name).write_text(content if isinstance(content, str) else json.dumps(content, ensure_ascii=False), encoding="utf-8")
     (root / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
-    for name in workflows:
-        (root / ".github" / "workflows" / name).write_text("name: x\n", encoding="utf-8")
+    contents = workflows if isinstance(workflows, dict) else {name: "name: x\n" for name in workflows}
+    for name, text in contents.items():
+        (root / ".github" / "workflows" / name).write_text(text, encoding="utf-8")
     return root

@@ -47,7 +47,7 @@ PR_STALE_DAYS = 3              # 이보다 오래 열린 PR 은 수준을 check 
 DRAFT_WAIT_DAYS = 7            # Blogger 초안함에 올라간 글은 7일 안의 것만 '게시 대기'로 센다
 APPROVAL_ITEMS_MAX = 5
 WARNING_MESSAGES_MAX = 3       # 워크플로 하나의 경고 문구는 서로 다른 것 3개까지만 나열한다
-BODY_LIMIT = 60000             # 이슈 본문(표식 포함)은 GitHub 한도(65,536자) 안에서 이 길이로 자른다
+BODY_LIMIT = 58000             # 보이는 본문은 이 길이까지만. 뒤에 붙는 표식(알린 id 80개 × 80자 + 구분자 ≈ 6,530자)을 더해도 GitHub 이슈 본문 한도(65,536자) 안이다
 SUMMARY_LIMIT = 500000         # 실행 요약은 사실상 자르지 않는다(같은 마크다운)
 COMMENT_ITEMS_MAX = 8
 MARKER_IDS_MAX = 80
@@ -55,7 +55,8 @@ MARKER_IDS_MAX = 80
 TITLE_MAX, DETAIL_MAX, HINT_MAX, MESSAGE_MAX = 110, 420, 260, 150
 
 PUBLISH_STAGE = ("posted", "draft", "generated_unpublished", "publish_failed", "draft_uploaded")
-IGNORED_CONCLUSIONS = ("cancelled", "skipped", "neutral", "stale")     # 최근 완료 실행을 고를 때 건너뛴다
+IGNORED_CONCLUSIONS = ("cancelled", "skipped", "neutral", "stale", "action_required")     # 최근 완료 실행을 고를 때 건너뛴다(승인 대기는 성공도 실패도 아니다)
+PULL_EVENTS = ("pull_request", "pull_request_target")     # 이 이벤트의 실행은 head 저장소가 이 저장소일 때만 센다(포크 PR 의 head 브랜치가 main 이어도 섞이지 않게)
 FAILED_CONCLUSIONS = ("failure", "timed_out", "startup_failure")
 _CONCLUSION_LABELS = {"failure": "실패", "timed_out": "시간 초과", "startup_failure": "시작 실패"}
 _CI_LABELS = {"pass": "통과", "fail": "실패", "pending": "진행 중", "none": "기록 없음", "unknown": "알 수 없음"}
@@ -76,7 +77,7 @@ SOURCE_PREFIXES = {
 # run on Node.js 24: actions/checkout@v4, actions/setup-python@v5 …" / notice "The ubuntu-latest label will migrate to Ubuntu 26
 # beginning October 19, 2026 …". 새 종류가 소음으로 보이면 여기에 정규식을 더하고 tests/test_ops_inbox.py 의 PlatformNoticeTest 에 그 문구를 넣는다.
 PLATFORM_NOISE = (
-    re.compile(r"(?i)\bnode(?:\.js)?\s*\d+\b"),                 # Node.js 20 is deprecated … forced to run on Node.js 24
+    re.compile(r"(?i)\bnode\.js\s*\d+\b"),                      # Node.js 20 is deprecated … forced to run on Node.js 24 ('Node 18' 처럼 .js 가 없는 우리 쪽 문구는 소음이 아니다)
     re.compile(r"(?i)\bwill migrate\b"),                        # The ubuntu-latest label will migrate to Ubuntu 26 …
     re.compile(r"github\.blog/changelog/"),                     # GitHub 공지(changelog) 링크
     re.compile(r"actions/runner-images"),                       # 러너 이미지 공지 링크
@@ -225,6 +226,7 @@ class Snapshot:
     histories: dict = field(default_factory=dict)           # 블로그 key → 이력 목록
     failures: list = field(default_factory=list)            # [(소스 이름, 사유)] 조회 실패
     notes: list = field(default_factory=list)               # [(id, 문구)] 참고 안내(예: 일부만 확인함)
+    workflow_names: dict = field(default_factory=dict)      # 워크플로 파일 이름 → 그 파일의 최상위 name(체크아웃한 파일에서 읽음). 실행(run)의 name 은 run-name 이라 쓰지 않는다
 
 
 # ----------------------------------------------------------------------------
@@ -310,7 +312,7 @@ def normalize_pull(raw, detail=None, check_runs=None, error=""):
 
 _PULL_COPY = {
     "ready": ("병합하면 됩니다", "검사(CI)가 모두 통과했고 충돌이 없습니다.",
-              "변경 내용을 훑어본 뒤 'Merge pull request'를 누르세요."),
+              "PR 코멘트의 변경 범위 검사 결과를 먼저 확인하세요(경고여도 검사는 초록으로 보입니다). 이상이 없고 변경 내용도 훑어봤다면 'Merge pull request'를 누르세요."),
     "conflict": ("충돌을 풀어야 합니다", "main 브랜치와 충돌합니다.",
                  "PR을 만든 AI(또는 Copilot)에게 '충돌을 해결해 달라'고 요청하세요."),
     "ci_fail": ("검사(CI) 실패", "자동 검사가 실패했습니다.",
@@ -395,26 +397,48 @@ def _is_noise(message):
 
 
 _ACTION_REF_RE = re.compile(r"\b([A-Za-z0-9][\w.-]*/[\w.-]+)@([\w.-]*\w)")   # actions/checkout@v4 → ('actions/checkout', 'v4')
+_WORKFLOW_FILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,80}\.ya?ml$")
 
 
-def _platform_item(seen, repo_url):
-    """플랫폼 안내성 주석(문구, 워크플로 파일, 워크플로 이름, 실행)을 한 줄로 합친다: 몇 종인지, 어떤 액션·워크플로인지, 가장 최근 실행 링크."""
-    kinds, actions, workflows, newest = {}, set(), {}, None
-    for text, file, name, run in seen:
-        kinds.setdefault(fold(text, 400).lower(), text)
+def workflow_file(path):
+    """실행의 path(예: .github/workflows/pages.yml, 끝에 @refs/… 가 붙기도 한다) → 파일 이름(pages.yml). 알 수 없으면 빈 문자열."""
+    base = str(path or "").split("@", 1)[0].rsplit("/", 1)[-1]
+    return base if _WORKFLOW_FILE_RE.fullmatch(base) else ""
+
+
+def _repo_of(repo_url):
+    return str(repo_url).rpartition("github.com/")[2]
+
+
+def foreign_pull_run(run, repo):
+    """저장소 밖(포크)에서 온 풀 리퀘스트가 일으킨 실행인가: event 가 pull_request·pull_request_target 이고 head 저장소가 이 저장소가 아니거나 알 수 없다.
+    포크 PR 의 head 브랜치가 main 이면 'main 브랜치의 실행'에 섞여 들 수 있어(API 가 막아 주는지는 확인하지 못했다) 방어적으로 거른다.
+    다른 이벤트(schedule·push·workflow_dispatch 등)는 head 저장소를 보지 않는다."""
+    if not isinstance(run, dict) or run.get("event") not in PULL_EVENTS:
+        return False
+    head = run.get("head_repository")
+    name = head.get("full_name") if isinstance(head, dict) else None
+    return not (isinstance(name, str) and name.lower() == str(repo).lower())
+
+
+def _platform_item(texts, repo_url):
+    """플랫폼 안내성 주석(문구 목록)을 한 줄로 합친다: 몇 종인지, 어떤 액션인지, 예시 문구 하나.
+
+    어느 워크플로·어느 실행에서 나왔는지는 싣지 않고 링크도 저장소의 Actions 화면(고정 주소)으로 둔다 — 싣는 순간 다른 워크플로가 돌 때마다
+    본문이 바뀌어 이슈를 계속 다시 쓰게 된다(알림은 없어도 수정 이력·쓰기 호출이 늘고 '바로 한 번 더 실행하면 변경 없음'이 깨진다).
+    같은 문구 집합이면 입력 순서와 상관없이 항상 같은 항목이다(같은 종류의 문구는 글자 순으로 앞선 것, 예시는 접은 문구 순으로 가장 앞의 것)."""
+    kinds, actions = {}, set()
+    for text in texts:
+        key = fold(text, 400).lower()
+        kinds[key] = min(kinds[key], text) if key in kinds else text
         actions.update(_ACTION_REF_RE.findall(text))
-        workflows.setdefault(file, name)
-        if newest is None or _run_time(run) > _run_time(newest):
-            newest = run
-    names = [workflows[f] for f in sorted(workflows)]
     parts = []
     if actions:
         # '@' 는 멘션으로 읽힐 수 있어 공백으로 쓰고, 커밋 해시(40자)로 고정된 액션은 앞 7자만 보인다
         parts.append("액션: " + ", ".join(f"{ext(repo, 40)} {ref[:7] if _SHA_RE.fullmatch(ref) else ext(ref, 12)}" for repo, ref in sorted(actions)))
-    parts.append(f"워크플로: {', '.join(names[:4])}" + (f" 외 {len(names) - 4}개" if len(names) > 4 else ""))
-    parts.append(f"예: “{ext(next(iter(kinds.values())), 110)}”")
+    parts.append(f"예: “{ext(kinds[min(kinds)], 110)}”")
     return Item(
-        id="run:platform_notice", level=LEVEL_INFO, url=f"{repo_url}/actions/runs/{_as_int(newest.get('id')) or 0}",
+        id="run:platform_notice", level=LEVEL_INFO, url=f"{repo_url}/actions",
         title=f"GitHub Actions 플랫폼 경고 {len(kinds)}종 — {'액션 버전 갱신 필요' if actions else '플랫폼 변경 예고'}, 당장은 발행에 영향 없음",
         detail=" · ".join(parts),
         hint="우리 스크립트가 남긴 경고가 아니라 GitHub 가 모든 실행에 붙이는 안내입니다. 액션 버전을 올리는 변경을 AI에게 요청하면 됩니다(지금 할 일은 없습니다).")
@@ -424,23 +448,30 @@ def _run_time(run):
     return parse_time(run.get("created_at"))
 
 
-def run_items(runs_by_file, annotations, now, repo_url, own=OWN_WORKFLOW):
-    """워크플로 파일마다 main 브랜치의 최근 실행(48시간 창)을 보고 항목을 만든다. 이 모음 자신의 실행·취소·건너뜀은 무시한다.
+def run_items(runs_by_file, annotations, now, repo_url, own=OWN_WORKFLOW, names=None):
+    """워크플로 파일마다 main 브랜치의 최근 실행(48시간 창)을 보고 항목을 만든다. 이 모음 자신의 실행·취소·건너뜀·승인 대기는 무시한다.
 
+    - 항목 제목의 워크플로 이름은 names(파일 이름 → 그 파일의 최상위 name)에서 가져온다. 실행(run)의 name 은 run-name 이라 실행마다 다르고
+      (연습 여부·이슈 번호 등), 이름을 바꾸기 전에 만든 실행의 옛 이름도 이력에 섞여 있다. 이름을 읽지 못한 파일은 파일 이름으로 보인다.
+    - 포크 PR 이 일으킨 실행(foreign_pull_run)은 판단에서 뺀다(그 head 브랜치가 main 이어도 main 의 실패·성공으로 섞이지 않게).
     - 가장 최근 완료 실행이 failure/timed_out/startup_failure → action(연속 실패 횟수와 시작 시각 포함)
     - 성공 실행의 주석(annotations)에 warning 수준 문구가 있으면 → check(서로 다른 문구 3개까지, 한 줄로 접어서). 주석을 읽은
       실행(annotations 에 id 가 있는 실행)만 본다.
     - 플랫폼이 붙이는 안내성 주석(PLATFORM_NOISE, warning·notice 수준)은 check 가 아니라 모든 워크플로를 통틀어 info 한 줄로 합친다
-      (몇 종인지·어떤 액션·워크플로인지). info 라서 새 action 알림 대상이 아니다. 우리 쪽 notice 는 무시한다."""
+      (몇 종인지·어떤 액션인지·예시 문구). 어느 워크플로·실행인지는 싣지 않는다(다른 워크플로가 돌 때마다 본문이 바뀌므로). info 라서 새 action 알림 대상이
+      아니다. 우리 쪽 notice 는 무시한다."""
     items, platform = [], []
+    names = names if isinstance(names, dict) else {}
+    repo = _repo_of(repo_url)
     for file in sorted(runs_by_file):
         if file == own:
             continue
         runs = [r for r in (runs_by_file.get(file) or [])
-                if isinstance(r, dict) and _run_time(r) is not None and now - _run_time(r) <= timedelta(hours=RUN_WINDOW_HOURS)]
+                if isinstance(r, dict) and _run_time(r) is not None and now - _run_time(r) <= timedelta(hours=RUN_WINDOW_HOURS)
+                and not foreign_pull_run(r, repo)]
         runs.sort(key=_run_time, reverse=True)
         completed = [r for r in runs if r.get("status") == "completed" and r.get("conclusion") not in IGNORED_CONCLUSIONS]
-        name = ext(next((r.get("name") for r in runs if r.get("name")), "") or file, 60)
+        name = ext(names.get(file) or file, 60)
         slug = _slug(file)
 
         if completed and completed[0].get("conclusion") in FAILED_CONCLUSIONS:
@@ -468,7 +499,7 @@ def run_items(runs_by_file, annotations, now, repo_url, own=OWN_WORKFLOW):
                 if not text:
                     continue
                 if _is_noise(text):
-                    platform.append((text, file, name, run))
+                    platform.append(text)
                 elif level == "warning":
                     messages.append(text)
             if messages:
@@ -491,8 +522,10 @@ def run_items(runs_by_file, annotations, now, repo_url, own=OWN_WORKFLOW):
     return items
 
 
-def approval_items(runs, repo_url, own=OWN_WORKFLOW):
-    """승인 대기(action_required) 실행 → action 'Approve and run'. 같은 커밋의 실행은 한 항목으로 묶고 최대 5개만 보여 준다."""
+def approval_items(runs, repo_url, own=OWN_WORKFLOW, names=None):
+    """승인 대기(action_required) 실행 → action 'Approve and run'. 같은 커밋의 실행은 한 항목으로 묶고 최대 5개만 보여 준다.
+    워크플로 이름은 실행의 path 가 가리키는 파일의 최상위 name(names)을 먼저 쓰고, 그 파일을 모르면 실행의 name 을 쓴다."""
+    names = names if isinstance(names, dict) else {}
     groups = {}
     for run in runs:
         if not isinstance(run, dict) or _as_int(run.get("id")) is None:
@@ -514,13 +547,13 @@ def approval_items(runs, repo_url, own=OWN_WORKFLOW):
     items = []
     for key in keys[:APPROVAL_ITEMS_MAX]:
         group = sorted(groups[key], key=lambda r: r["id"])
-        names = ", ".join(sorted({ext(r.get("name") or r.get("path") or "워크플로", 40) for r in group})[:3])
+        titles = ", ".join(sorted({ext(names.get(workflow_file(r.get("path"))) or r.get("name") or r.get("path") or "워크플로", 40) for r in group})[:3])
         first = group[0]
         label = ext(first.get("display_title") or first.get("head_branch") or "이름 없음", 70)
         times = [t for t in (_run_time(r) for r in group) if t]
         items.append(Item(
             id=f"approve:{key}", level=LEVEL_ACTION, title=f"승인 대기(Approve and run) — {label}",
-            detail=f"워크플로 {names}가 승인을 기다립니다(브랜치 {ext(first.get('head_branch'), 40)}). 승인 전에는 검사가 시작되지 않습니다.",
+            detail=f"워크플로 {titles}가 승인을 기다립니다(브랜치 {ext(first.get('head_branch'), 40)}). 승인 전에는 검사가 시작되지 않습니다.",
             url=f"{repo_url}/actions/runs/{first['id']}", since=min(times) if times else None,
             hint="실행 화면의 'Approve and run workflows'를 누르면 시작됩니다. 모르는 사람이 올린 코드라면 읽어 보기 전에는 승인하지 마세요."))
     if len(keys) > APPROVAL_ITEMS_MAX:
@@ -734,7 +767,8 @@ def build_items(snap):
     repo_url = f"https://github.com/{snap.repo}"
     now = _aware(snap.now)
     items = (watchdog_items(snap.issues, repo_url) + pull_items(snap.pulls, now, repo_url)
-             + run_items(snap.runs, snap.annotations, now, repo_url) + approval_items(snap.approvals, repo_url)
+             + run_items(snap.runs, snap.annotations, now, repo_url, names=snap.workflow_names)
+             + approval_items(snap.approvals, repo_url, names=snap.workflow_names)
              + pause_items(snap.paused, repo_url) + blog_items(snap.blogs, snap.histories, now, repo_url)
              + stats_items(snap.blogs, snap.histories, now) + failure_items(snap.failures, repo_url)
              + note_items(snap.notes))
