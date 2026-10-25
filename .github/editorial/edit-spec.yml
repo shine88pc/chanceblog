@@ -76,4 +76,5 @@ limits:
 output:
   mode: pull_request          # main 직접 push 금지
   branch_prefix: "issue-edit/"
-  comment_on_reject: true     # 필수 항목 누락·대상 모호·허용 범위 위반 시 이슈에 사유 코멘트
+  # 필수 항목 누락·대상 모호·허용 범위 위반 같은 거부와 처리 오류는 항상 이슈에 사유를 코멘트한다(끌 수 없다 — 조용한 실패 금지).
+  # 코드가 읽는 키는 위 두 개뿐이며, output 에 다른 키를 넣으면 검증(SPEC-1)이 실패한다.

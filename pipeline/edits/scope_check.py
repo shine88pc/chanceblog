@@ -24,15 +24,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from pipeline.console import safe_output
-from pipeline.edits import checks, frontmatter, ops, runner, spec as spec_mod
+from pipeline.edits import checks, frontmatter, ops, runner, safety, spec as spec_mod
 
 MARKER = "<!-- issue-edit-scope-check -->"
+_EOL_NAMES = {"lf": "LF", "crlf": "CRLF", "cr": "CR 단독", "mixed": "LF·CRLF 혼합", "none": "줄바꿈 없음"}
 _ISSUE_RE = re.compile(r"(?i)\b(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?)\s*:?\s+#(\d{1,9})\b")
 
 
 def _flat(text, limit=400):
-    """코멘트·로그에 들어가는 문장을 한 줄로 접는다(줄 시작 워크플로 명령·마크다운 구조 주입 방지)."""
-    return re.sub(r"\s+", " ", str(text)).strip()[:limit]
+    """코멘트·로그에 들어가는 문장을 한 줄로 접는다(줄 시작 `::`·줄 어디서든 `##[` 워크플로 명령 모양과 마크다운 구조 주입 방지).
+    자른 지점이 코드 스팬(`…`) 안이면 열린 스팬을 통째로 뺀다 — 닫는 백틱이 잘려 나가면 뒤의 글자가 마크다운으로 살아난다."""
+    return safety.neutralize(safety.clip(text, limit, markdown=True))
 
 
 @dataclass
@@ -50,7 +52,7 @@ class Report:
         out = [MARKER, f"### 🔎 요청 범위 검증{(' — ' + self.title) if self.title else ''}", "", head, ""]
         out += [f"- {sym} {_flat(text)}" for sym, text in self.items]
         for block in self.details:
-            out += ["", "```diff", block, "```"]
+            out += ["", safety.fenced(block, "diff")]   # 백틱 펜스는 기본 파일의 ``` 줄이 닫아 버린다 → 내용보다 긴 틸드 펜스
         return "\n".join(out) + "\n"
 
 
@@ -75,8 +77,9 @@ def git_changed(root, base, head):
 
 
 def git_show(root, sha, path):
+    """파일 원본(줄 끝 보존). 줄 끝(LF/CRLF) 비교가 필요해서 여기서는 정규화하지 않는다 — 정규화는 check_pull 이 한다."""
     try:
-        return frontmatter.normalize_newlines(_git(root, "show", f"{sha}:{path}").decode("utf-8"))
+        return _git(root, "show", f"{sha}:{path}").decode("utf-8")
     except subprocess.CalledProcessError:
         return None
 
@@ -122,10 +125,25 @@ def check_pull(issue, root, base, head, changes=None, show=None):
     if all(p != path for _, p in changes):
         return Report("FAIL", items + [("❌", f"대상 파일 `{path}` 이(가) 바뀌지 않았습니다.")], title)
 
-    before, after = show(base, path), show(head, path)
-    if before is None or after is None:
+    raw_before, raw_after = show(base, path), show(head, path)
+    if raw_before is None or raw_after is None:
         return Report("FAIL", items + [("❌", f"`{path}` 의 이전/이후 내용을 읽을 수 없습니다.")], title)
     items.append(("✅" if not others else "ℹ️", f"대상 파일 `{path}` 이(가) 변경되었습니다."))
+
+    # 줄 끝(LF/CRLF) 형식은 원본으로 비교한다. 정규화한 텍스트만 비교하면 '줄 끝만 바뀐 PR'이나 '교체 + 파일 전체의 줄 끝 변경'이
+    # 글자 하나 안 바뀐 것처럼 보인다(D-23). 형식이 섞인 파일은 줄 단위로 무엇이 바뀌었는지 증명할 수 없어 같은 이유로 거부한다.
+    kind_before, kind_after = frontmatter.line_ending_kind(raw_before), frontmatter.line_ending_kind(raw_after)
+    before, after = frontmatter.normalize_newlines(raw_before), frontmatter.normalize_newlines(raw_after)
+    eol_problem = ("mixed" in (kind_before, kind_after) or "cr" in (kind_before, kind_after)
+                   or (kind_before != kind_after and "none" not in (kind_before, kind_after)))
+    if eol_problem:
+        fail = True
+        names = f"{_EOL_NAMES[kind_before]} → {_EOL_NAMES[kind_after]}"
+        if before == after and raw_before != raw_after:
+            return Report("FAIL", items + [("❌", f"줄 끝(LF/CRLF)만 바뀌었습니다({names}) — 글자는 그대로이고 줄 끝 형식만 달라진 변경입니다. "
+                                                 "줄 끝을 원래대로 되돌려 주세요.")], title)
+        items.append(("❌", f"줄 끝 형식이 바뀌었거나({names}) 형식이 섞여 있어 바뀐 범위를 증명할 수 없습니다. "
+                            "줄 끝은 원래대로 두고 요청한 부분만 바꿔 주세요."))
 
     # 요청만으로 기대 결과를 계산할 수 없는 텍스트 수정은 AI 가 쓴 변경으로 보고 더 엄격하게 본다
     want = None if req.cfg["method"] == "image" else expected_after(req, before)
@@ -140,18 +158,22 @@ def check_pull(issue, root, base, head, changes=None, show=None):
 
     proven = False
     if req.cfg["method"] == "image":
-        fm = frontmatter.parse_front_matter(frontmatter.split_front_matter(after)[0]) or {}
-        old_fm = frontmatter.parse_front_matter(frontmatter.split_front_matter(before)[0]) or {}
-        old_url, new_url = str(old_fm.get("image") or ""), str(fm.get("image") or "")
-        if new_url.startswith(ops.UNSPLASH_PREFIX) and old_url and after == before.replace(old_url, new_url):
-            items.append(("✅", "대표 이미지 URL 만 새 이미지로 바뀌었고 나머지는 그대로입니다."))
+        # 생성 직후 검증(runner)과 같은 함수: 허용 호스트·엄격한 주소 형식, 주소 외의 내용은 그대로
+        image_reasons = checks.verify_image_change(before, after)
+        if image_reasons:
+            fail = True
+            items += [("❌", r) for r in image_reasons]
+        elif not checks.front_matter_image(before)[0]:
+            items.append(("✅", "이미지가 없던 글에 대표 이미지(front matter image)만 추가되었고 나머지는 그대로입니다."))
             proven = True
         else:
-            fail = True
-            items.append(("❌", "이미지 교체 외의 변경이 있거나 새 이미지가 Unsplash 주소가 아닙니다."))
+            items.append(("✅", "대표 이미지 URL 만 새 이미지로 바뀌었고 나머지는 그대로입니다."))
+            proven = True
     else:
         if want is not None:
-            if after == want:
+            if after == want and eol_problem:
+                items.append(("ℹ️", "줄 끝을 제외한 글자는 요청한 교체와 일치합니다(줄 끝 문제는 위에 따로 적었습니다)."))
+            elif after == want:
                 items.append(("✅", "요청한 교체와 정확히 일치하는 변경입니다(그 밖의 글자는 하나도 바뀌지 않았습니다)."))
                 proven = True
             else:

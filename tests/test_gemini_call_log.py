@@ -160,6 +160,15 @@ def gemini_lines(text):
     return [line for line in text.splitlines() if line.startswith("[GEMINI]")]
 
 
+TAG = "[issue-edit] issue=#12 author=@shine88pc(OWNER)"        # 이슈 수정 러너의 모든 로그 줄 머리(하드닝 #19 규칙)
+
+
+def runner_gemini_lines(text):
+    """이슈 수정 러너는 요청 줄에도 머리를 달고 300자로 자른다: `머리   * [GEMINI] …` 의 `[GEMINI] …` 부분만 돌려준다."""
+    marker = TAG + "   * "
+    return [line[len(marker):] for line in text.splitlines() if line.startswith(marker + "[GEMINI]")]
+
+
 # ----------------------------------------------------------------------------
 # 1) 실패 분류와 실패 사유(마스킹·한 줄·600자)
 # ----------------------------------------------------------------------------
@@ -1269,10 +1278,13 @@ class EditsRunnerCallLogTest(unittest.TestCase):
         code, out = self.run_main()
         self.assertEqual(code, 0, out)
         self.assertEqual(len(client.models.calls), 1)
-        self.assertIn("[issue-edit] Gemini 호출: 1회(실패 0회)", out)
-        lines = gemini_lines(out)
+        self.assertIn(TAG + "   * Gemini 호출: 1회(실패 0회)", out.splitlines())
+        lines = runner_gemini_lines(out)
         self.assertEqual(len(lines), 1)
         self.assertTrue(lines[0].startswith("[GEMINI] label=issue-edit purpose=patch model=gemini-3.8-flash result=ok "), lines[0])
+        self.assertEqual(gemini_lines(out), [])                       # 머리 없는 요청 줄은 없다
+        for line in out.splitlines():                                  # 하드닝의 규칙: 이 단계가 내는 모든 줄은 머리로 시작한다
+            self.assertTrue(line.startswith(TAG), line)
         text = self.summary()
         self.assertIn("### 이슈 수정 요청 처리 요약\n- 결과: **ok**\n- Gemini 호출: 1회(실패 0회)", text)
         self.assertIn("- Gemini 토큰(응답에 값이 있는 호출만): 입력 500 · 출력 40 · 합계 540", text)
@@ -1282,9 +1294,9 @@ class EditsRunnerCallLogTest(unittest.TestCase):
         self.write_issue(page_body(before="두 번째 문단입니다.", after="두 번째 문단을 고쳤습니다."))
         code, out = self.run_main()
         self.assertEqual(code, 0, out)
-        self.assertIn("[issue-edit] Gemini 호출: 0회(실패 0회)", out)
-        self.assertEqual(gemini_lines(out), [])
-        self.assertIn("- Gemini 호출: 0회(실패 0회)", self.summary())
+        self.assertNotIn("Gemini", out)                              # AI 를 부르지 않은 처리는 로그 줄을 늘리지 않는다
+        self.assertEqual(len(out.splitlines()), 1)                   # 상태 줄 하나뿐(하드닝 시험이 줄 수를 세는 것과 같은 조건)
+        self.assertIn("- Gemini 호출: 0회(실패 0회)", self.summary())  # 0회는 실행 요약에만 남는다
 
     def test_every_model_failing_leaves_the_count_and_the_failure_kind_in_the_summary(self):
         client = self.fake_gemini([ApiError(429, quota_body())] * 12)
@@ -1296,8 +1308,23 @@ class EditsRunnerCallLogTest(unittest.TestCase):
         self.assertIn("**error**", text)
         self.assertIn("- Gemini 호출: 12회(실패 12회)", text)
         self.assertIn("- Gemini 실패 내역: 429(한도 초과) 12회", text)
-        self.assertEqual(len(gemini_lines(out)), 12)
-        self.assertTrue(all(f"quotaId={DAY_QUOTA_ID}" in line for line in gemini_lines(out)))
+        lines = runner_gemini_lines(out)
+        self.assertEqual(len(lines), 12)
+        self.assertTrue(all(f"quotaId={DAY_QUOTA_ID}" in line and "retryDelay=37s" in line for line in lines))   # 300자 안에 한도 구분 필드가 남는다
+        self.assertTrue(all(len(line) <= 300 for line in lines))
+        self.assertIn(TAG + "   * Gemini 호출: 12회(실패 12회)", out.splitlines())
+        for line in out.splitlines():
+            self.assertTrue(line.startswith(TAG), line)
+
+    def test_secrets_and_commands_in_failures_stay_out_of_the_runner_log(self):
+        body = quota_body(message=f"키 {FAKE_KEY} {FAKE_TOKEN} ::error::위조 ##[group]위조")
+        self.fake_gemini([ApiError(429, body)] * 12)
+        self.write_issue(page_body(edit=self.LAYOUT, after="둘째 문단 아래에 강조 문장을 넣어 주세요"))
+        code, out = self.run_main()
+        for secret in (FAKE_KEY, FAKE_TOKEN, FAKE_KEY[:20], FAKE_TOKEN[:20]):
+            self.assertNotIn(secret, out)
+        self.assertNotIn("##[", out)
+        self.assertEqual([line for line in out.splitlines() if line.lstrip().startswith("::")], [])
 
     def test_image_query_requests_get_their_own_purpose(self):
         self.fake_gemini([Resp(json.dumps({"image_queries": ["fire rescue", "firefighter"]}))])
@@ -1337,7 +1364,12 @@ class EditsRunnerCallLogTest(unittest.TestCase):
         self.summary_path = folder                                    # 파일이 아니라 폴더라 열기에 실패한다
         code, out = self.run_main()
         self.assertEqual(code, 0)
-        self.assertIn("실행 요약 쓰기 실패(처리 결과에는 영향 없음)", out)
+        notes = [line for line in out.splitlines() if "실행 요약 쓰기 실패(처리 결과에는 영향 없음)" in line]
+        self.assertEqual(len(notes), 1, out)
+        self.assertTrue(notes[0].startswith(TAG + "   * "), notes[0])
+        self.assertTrue(notes[0].endswith(("PermissionError", "IsADirectoryError")), notes[0])          # 예외 종류만, 원문은 없다
+        for line in out.splitlines():
+            self.assertTrue(line.startswith(TAG), line)
 
     def test_without_the_summary_variable_nothing_is_written(self):
         self.fake_gemini([])
@@ -1349,12 +1381,13 @@ class EditsRunnerCallLogTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertFalse(self.summary_path.exists())
 
-    def test_a_broken_issue_file_still_prints_the_zero_call_line(self):
+    def test_a_broken_issue_file_still_leaves_the_zero_call_summary(self):
         self.issue_path.write_text("{깨진 json", encoding="utf-8")
         code, out = self.run_main()
         self.assertEqual(code, runner.EXIT_CONFIG)
-        self.assertIn("Gemini 호출: 0회(실패 0회)", out)
+        self.assertNotIn("Gemini", out)
         self.assertIn("**error**", self.summary())
+        self.assertIn("- Gemini 호출: 0회(실패 0회)", self.summary())
 
     def test_hostile_status_text_cannot_inject_markdown_into_the_summary(self):
         self.write_issue(page_body(before="두 번째 문단입니다.", after="두 번째 문단을 고쳤습니다."))
