@@ -25,7 +25,7 @@ import xml.etree.ElementTree as ET
 from datetime import timezone, timedelta
 from pathlib import Path
 
-from pipeline.llm import CallLog, mask  # Gemini 요청 기록·시크릿 마스킹은 Blogger·이슈 수정과 같은 코드를 쓴다(D-52)
+from pipeline.llm import CallLog, scrub  # Gemini 요청 기록·시크릿 가리기는 Blogger·이슈 수정과 같은 코드를 쓴다(D-52)
 
 # ============================================================
 # 환경 설정
@@ -188,8 +188,13 @@ def extract_json_object(raw_text):
 # 이번 실행의 Gemini 모델 호출 횟수. 무료 한도(프로젝트 단위)를 나눠 쓰기 위한 측정값이며 동작에는 영향이 없다.
 GEMINI_CALLS = {"attempts": 0, "failed": 0}
 # 요청별 기록(요청 모델·응답 모델·결과 종류·소요·토큰, 실패 때는 코드·상태·본문 600자). 로그 한 줄씩 남기고 실행 요약에서 접어 쓴다.
-# 장부 파일은 만들지 않는다. 호출 수는 위 GEMINI_CALLS 가 세고, 이 기록은 그 내역이다.
-CALL_LOG = CallLog(label="chance", purpose="post", out=print)
+# 장부 파일은 만들지 않는다. 호출 수는 위 GEMINI_CALLS 가 세고, 이 기록은 그 내역이다. 이 실행의 Gemini 키는 로그에 글자 그대로 나가지 않는다.
+CALL_LOG = CallLog(label="chance", purpose="post", out=print, secrets=(API_KEY,))
+
+
+def _scrub(text):
+    """로그·예외 문구에 쓰기 전에 비밀을 가린다: 비밀 패턴(mask) + 프로젝트 번호 + 이 실행의 Gemini 키(글자 그대로)."""
+    return scrub(text, (API_KEY,))
 
 
 def call_gemini_with_fallback(prompt):
@@ -217,8 +222,8 @@ def call_gemini_with_fallback(prompt):
             CALL_LOG.empty(model_name, elapsed, response)
         else:
             GEMINI_CALLS["failed"] += 1
-            errors.append(f"{model_name}: {failure}")
-            print(f"Gemini 모델 호출 실패: {model_name} - {_one_line(mask(failure))}")
+            errors.append(f"{model_name}: {_scrub(failure)}")   # 이 문구는 예외 메시지(트레이스백·`작업 실패` 줄)로 나가므로 가린 것을 쓴다
+            print(f"Gemini 모델 호출 실패: {model_name} - {_one_line(_scrub(failure))}")
             CALL_LOG.failure(model_name, elapsed, failure)
     raise RuntimeError("모든 Gemini 모델 호출 실패\n" + "\n".join(errors))
 
@@ -1505,6 +1510,7 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
 # ============================================================
 # 진입점
 # ============================================================
+PRACTICE_PUBLISHED_TEXT = "연습으로 글을 만들어 봤습니다(저장하지 않았습니다)"   # 연습 실행의 PUBLISHED: 아무것도 저장하지 않았는데 발행된 것처럼 읽히지 않게
 OUTCOME_TEXT = {
     "PUBLISHED": "글을 만들었습니다",
     "ALL_LANES_EMPTY": "모든 분야를 시도했지만 검증을 통과한 기사가 한 건도 없습니다",
@@ -1532,9 +1538,7 @@ def _unsplash_line(rate):
 
 def usage_lines():
     """지금까지의 Gemini·Unsplash 사용량 줄. 정상 종료 요약(finish_run)이 아닌 경로 — 예외로 끝난 실행, 이미지 교체 — 에서도 쓴다."""
-    lines = []
-    if GEMINI_CALLS["attempts"]:
-        lines.append(_gemini_count_line(GEMINI_CALLS))
+    lines = [_gemini_count_line(GEMINI_CALLS)]   # 0회도 적는다: 줄이 없으면 '호출 안 함'과 '이 기능이 없는 옛 요약'을 구분할 수 없다
     lines += CALL_LOG.detail_lines()
     unsplash = _unsplash_line(UNSPLASH_RATE)
     if unsplash:
@@ -1555,9 +1559,10 @@ def render_run_summary(event, now, slot, report):
     mode = "스케줄" if event == "schedule" else "수동"
     if DRY_RUN:
         mode += " (DRY_RUN: 파일·기록 저장 안 함)"
+    outcome_text = PRACTICE_PUBLISHED_TEXT if DRY_RUN and outcome == "PUBLISHED" else OUTCOME_TEXT.get(outcome, "알 수 없음")
     lines = ["### Chance_Blog 실행 요약",
              f"- 실행: {mode} · {now:%Y-%m-%d %H:%M} KST" + (f" · {slot}시 슬롯" if slot is not None else ""),
-             f"- 결과: **{outcome}** — {OUTCOME_TEXT.get(outcome, '알 수 없음')}"]
+             f"- 결과: **{outcome}** — {outcome_text}"]
     if DRY_RUN:  # 연습 실행이 한도를 썼는지 요약에서 바로 보이게 한다(기본은 가짜 응답, 실제 호출은 real_ai 체크)
         lines.append("- AI 응답: " + ("가짜(스텁) — Gemini를 호출하지 않았습니다(실제 호출로 연습하려면 수동 실행에서 real_ai 를 체크)"
                                       if STUB_GEMINI else "실제 Gemini 호출 — 연습 실행이지만 무료 한도를 씁니다"))
@@ -1569,8 +1574,8 @@ def render_run_summary(event, now, slot, report):
         lines.append(f"- 제목: {_md_cell(report.get('title', ''))}")
         lines.append(f"- 편집 축: {report.get('lane_label', '')} · 출처: {_md_cell(report.get('source', ''), 60)}")
         lines.append("- 파일: " + ", ".join(f"`{str(p).replace(chr(96), '')}`" for p in report.get("paths", [])))
-    calls = report.get("gemini_calls") or {}
-    if calls.get("attempts"):
+    calls = report.get("gemini_calls")
+    if isinstance(calls, dict) and "attempts" in calls:   # 0회도 적는다(finish_run 이 항상 넣는다). 항목 자체가 없으면 값을 지어내지 않는다
         lines.append(f"- {_gemini_count_line(calls)}")
     lines += [f"- {note}" for note in report.get("gemini_notes", [])]
     unsplash = _unsplash_line(report.get("unsplash_rate"))
@@ -1692,7 +1697,7 @@ def run_cli():
     try:
         main()
     except Exception as exc:
-        print(f"작업 실패: {type(exc).__name__}: {_one_line(exc, 600)}")
+        print(f"작업 실패: {type(exc).__name__}: {_one_line(_scrub(exc), 600)}")
         write_step_summary(failure_summary(exc))
         raise
 

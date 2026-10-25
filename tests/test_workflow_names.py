@@ -143,6 +143,11 @@ class _Parser:
         return value
 
     def eq(self):
+        # 한계(독립 검증 V-09): GitHub 는 종류가 다른 두 값을 `==`·`!=` 로 비교할 때 둘을 숫자로 바꿔 비교한다(문서: "If the types do not
+        # match, GitHub coerces the type to a number" — 예: '1' == 1, true == 1, null == 0, '' == 0, '0' == false). 이 해석기는 같은 종류끼리만
+        # GitHub 처럼 비교하고(문자열은 대소문자 무시), 종류가 다르면 파이썬의 `==` 를 써서 그 형 변환을 구현하지 않았다 — 검증자의 대조에서
+        # 144쌍 중 20쌍이 GitHub 와 다르다. 지금 워크플로의 식은 문자열 비교(`github.event_name == '…'`·`… == 'true'`)뿐이라 영향이 없다.
+        # 숫자·불리언을 `==` 로 비교하는 식을 새로 쓰게 되면 그 전에 이 해석기에 형 변환을 구현한다.
         value = self.unary()
         while self.peek() in (("op", "=="), ("op", "!=")):
             op = self.take()[1]

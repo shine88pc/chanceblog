@@ -16,7 +16,7 @@ on:
         type: boolean
         default: true
       real_ai:
-        description: '연습 실행에서도 실제 Gemini를 호출(무료 한도를 씁니다). 기본은 꺼짐 — 꺼 두면 가짜 AI 응답으로만 연습해 한도를 쓰지 않습니다. 연습 실행을 푼 실제 게시에는 영향이 없습니다(항상 실제 호출)'
+        description: '연습 실행에서도 실제 Gemini를 호출(무료 한도를 씁니다). 기본은 꺼짐 — 꺼 두면 가짜 AI 응답으로만 연습해 Gemini 한도를 쓰지 않습니다. 연습 실행을 푼 실제 게시에는 영향이 없습니다(항상 실제 호출). 연습도 Unsplash 이미지 검색은 실제로 합니다 — 시간당 한도를 정기 글과 나눠 씁니다'
         type: boolean
         default: false
 

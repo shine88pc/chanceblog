@@ -306,7 +306,7 @@ def image_queries(request, title, tags, llm=None):
     try:
         with purpose(llm, "image-queries"):
             raw, _ = llm(prompt)
-        queries =[q.strip() for q in extract_json_object(raw).get("image_queries", []) if isinstance(q, str) and q.strip()]
+        queries = [q.strip() for q in extract_json_object(raw).get("image_queries", []) if isinstance(q, str) and q.strip()]
     except Exception:  # noqa: BLE001 - 검색어 제안 실패는 요청 문구로 대체한다
         queries = []
     return (queries[:3] + fallback) if queries else fallback

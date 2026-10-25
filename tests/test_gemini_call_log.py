@@ -10,11 +10,15 @@ import contextlib
 import enum
 import inspect
 import io
+import itertools
 import json
 import os
 import random
+import subprocess
+import sys
 import tempfile
 import time
+import types
 import unittest
 import urllib.error
 from datetime import datetime
@@ -26,9 +30,9 @@ import generator as g
 from edits_helpers import image_body, issue, make_edit_root, page_body
 from pipeline import llm as llm_mod
 from pipeline import run as run_mod
-from pipeline.edits import runner
-from pipeline.llm import (CallLog, LLMError, call_line, classify_failure, empty_detail, failure_code, failure_detail,
-                          make_gemini_llm, purpose, served_model, token_usage)
+from pipeline.edits import runner, safety
+from pipeline.llm import (CallLog, CallRecord, LLMError, call_line, classify_failure, empty_detail, failure_code,
+                          failure_detail, make_gemini_llm, purpose, scrub, served_model, token_usage)
 from pipeline.stubs import stub_llm
 from test_run import RunBase
 
@@ -207,6 +211,20 @@ class ClassifyFailureTest(unittest.TestCase):
         self.assertEqual(failure_code(RuntimeError("  503 later")), 503)
         self.assertIsNone(failure_code(RuntimeError("abc 503")))
 
+    def test_code_wins_over_status_code_and_status_code_is_only_the_fallback(self):
+        """google-genai 의 APIError 는 code, 다른 클라이언트는 status_code 를 쓴다. 둘이 다르면 code 가 이긴다(독립 검증 M004)."""
+        both = RuntimeError("x")
+        both.code, both.status_code = 429, 500
+        self.assertEqual((failure_code(both), classify_failure(both)), (429, "429"))
+        both.code, both.status_code = 500, 429
+        self.assertEqual((failure_code(both), classify_failure(both)), (500, "5xx"))
+        only_rest = RuntimeError("x")
+        only_rest.status_code = 503
+        self.assertEqual(failure_code(only_rest), 503)
+        invalid_code = RuntimeError("x")
+        invalid_code.code, invalid_code.status_code = "abc", 429          # code 가 정수가 아니면 status_code 를 본다
+        self.assertEqual(failure_code(invalid_code), 429)
+
     def test_bool_negative_and_mock_codes_are_not_status_codes(self):
         for bad in (True, False, -429, "429", 4.29, mock.Mock()):
             err = RuntimeError("no leading code")
@@ -275,6 +293,19 @@ class FailureDetailTest(unittest.TestCase):
         self.assertEqual(failure_detail(RuntimeError("짧은 오류")), "RuntimeError | 짧은 오류")
         self.assertNotIn("…", failure_detail(RuntimeError("짧은 오류")))
 
+    def test_a_text_exactly_at_the_limit_is_kept_whole_and_one_more_is_cut(self):
+        """경계값(독립 검증 M026): 길이가 정확히 limit 이면 자르지 않는다."""
+        self.assertEqual(llm_mod._head_tail("x" * 30, 30), "x" * 30)
+        cut = llm_mod._head_tail("x" * 31, 30)
+        self.assertEqual(len(cut), 30)
+        self.assertIn(" … ", cut)
+        body = "나" * 100
+        prefix = "RuntimeError"
+        exact = failure_detail(RuntimeError(body), limit=len(prefix) + 3 + len(body))        # 본문이 남은 칸에 딱 맞는다
+        self.assertEqual(exact, f"{prefix} | {body}")
+        self.assertNotIn("…", exact)
+        self.assertIn("…", failure_detail(RuntimeError(body), limit=len(prefix) + 3 + len(body) - 1))
+
     def test_secrets_are_masked_everywhere_including_the_hints_and_the_tail(self):
         for secret in (FAKE_KEY, FAKE_TOKEN, FAKE_NEW_KEY):
             body = quota_body(message=f"앞 {secret} 중간 " + "나" * 900 + f" 뒤 key={secret}")
@@ -308,13 +339,18 @@ class FailureDetailTest(unittest.TestCase):
             self.assertNotIn("quotaId=", detail)
 
     def test_hint_values_are_deduplicated_capped_and_ordered_by_importance(self):
-        violations = [{"quotaId": f"Q{i}", "quotaMetric": f"M{i}"} for i in range(5)]
+        """한 키마다 5개까지(실제 429 는 위반이 3개까지 나와 2개로는 일 한도 id 가 잘렸다). 순서: 일 한도 id(…PerDay…) → 재시도 대기 →
+        나머지 id → 지표. 같은 값은 한 번만."""
+        violations = [{"quotaId": f"Q{i}", "quotaMetric": f"M{i}"} for i in range(8)]
+        violations[5]["quotaId"] = "Q5PerDay"
         body = {"error": {"status": "RESOURCE_EXHAUSTED", "details": [
             {"violations": violations}, {"retryDelay": "5s"}, {"retryDelay": "5s"}, {"retryDelay": 7}]}}
         err = ApiError(429, body)
         head = failure_detail(err).split(" | ", 1)[0]
-        self.assertIn("quotaId=Q0 quotaId=Q1 retryDelay=5s retryDelay=7 quotaMetric=M0 quotaMetric=M1", head)
-        self.assertNotIn("Q2", head)
+        self.assertIn("quotaId=Q5PerDay retryDelay=5s retryDelay=7 quotaId=Q0 quotaId=Q1 quotaId=Q2 quotaId=Q3 "
+                      "quotaMetric=M0 quotaMetric=M1 quotaMetric=M2 quotaMetric=M3 quotaMetric=M4", head)
+        for left_out in ("Q4", "Q6", "Q7", "M5", "M6", "M7"):
+            self.assertNotIn(left_out, head)
         self.assertEqual(head.count("retryDelay=5s"), 1)
 
     def test_a_very_long_hint_value_is_shortened(self):
@@ -351,6 +387,15 @@ class ResponseFieldsTest(unittest.TestCase):
         self.assertEqual(served_model({"model_version": "  ", "modelVersion": "gemini-3.5-flash-lite"}), "gemini-3.5-flash-lite")
         self.assertEqual(served_model(Resp()), "")
         self.assertEqual(served_model(None), "")
+
+    def test_served_model_prefers_the_sdk_name_when_both_names_exist(self):
+        """독립 검증 M038: 두 이름이 다 있으면 SDK 이름(model_version)이 이긴다. 앞의 값이 비면 다음 이름을 본다."""
+        self.assertEqual(served_model({"model_version": "sdk-name", "modelVersion": "rest-name"}), "sdk-name")
+        both = mock.Mock(spec=["model_version", "modelVersion"])
+        both.model_version, both.modelVersion = "sdk-name", "rest-name"
+        self.assertEqual(served_model(both), "sdk-name")
+        self.assertEqual(served_model({"model_version": "", "modelVersion": "rest-name"}), "rest-name")
+        self.assertEqual(served_model({"model_version": None, "modelVersion": "rest-name"}), "rest-name")
 
     def test_served_model_ignores_non_strings_and_folds_hostile_text(self):
         self.assertEqual(served_model(mock.Mock(text="응답")), "")          # Mock 의 자동 속성은 값이 아니다
@@ -397,6 +442,15 @@ class ResponseFieldsTest(unittest.TestCase):
         self.assertEqual(empty_detail(Resp(text="", candidates=[Candidate(7)])), "빈 응답")
         self.assertEqual(empty_detail(mock.Mock(text="")), "빈 응답")
         self.assertEqual(empty_detail(None), "빈 응답")
+
+    def test_empty_detail_reads_the_first_candidate_only(self):
+        """독립 검증 M035: 후보가 둘 이상이어도 사유는 첫 후보의 것이다(둘째·마지막 후보의 값을 읽지 않는다)."""
+        two = Resp(text="", candidates=[Candidate(FinishReason.SAFETY), Candidate(FinishReason.STOP)])
+        self.assertEqual(empty_detail(two), "빈 응답 finish_reason=SAFETY")
+        three = Resp(text="", candidates=[Candidate(None), Candidate(FinishReason.SAFETY), Candidate(FinishReason.STOP)])
+        self.assertEqual(empty_detail(three), "빈 응답")                 # 첫 후보에 사유가 없으면 뒤 후보를 뒤지지 않는다
+        as_tuple = Resp(text="", candidates=(Candidate("MAX_TOKENS"), Candidate("STOP")))
+        self.assertEqual(empty_detail(as_tuple), "빈 응답 finish_reason=MAX_TOKENS")
 
 
 # ----------------------------------------------------------------------------
@@ -664,6 +718,16 @@ class MakeGeminiLlmTest(unittest.TestCase):
         self.assertEqual(call("p"), ("본문", "a"))
         self.assertEqual(sleeps, [2, 4])
         self.assertEqual([r.outcome for r in call.call_log.records], ["5xx", "5xx", "ok"])
+
+    def test_every_request_of_a_run_is_timed_on_its_own(self):
+        """독립 검증 N007: 요청마다 자기 시작·끝 시각으로 소요를 잰다 — 재시도·폴백의 둘째 요청부터도 첫 요청의 시작에 이어 붙지 않는다."""
+        call, _, _ = build([ApiError(503), ApiError(503), Resp("본문")], models=("a",), step=0.25)
+        call("p")
+        self.assertEqual([r.seconds for r in call.call_log.records], [0.25, 0.25, 0.25])
+        call, _, _ = build([ApiError(400), Resp(""), Resp("본문")], models=("a", "b", "c"), step=0.25)
+        call("p")
+        self.assertEqual([r.seconds for r in call.call_log.records], [0.25, 0.25, 0.25])
+        self.assertEqual([r.outcome for r in call.call_log.records], ["other", "empty", "ok"])
 
     def test_an_empty_answer_moves_to_the_next_model_without_retrying(self):
         empty = Resp("", candidates=[Candidate(FinishReason.SAFETY)])
@@ -963,6 +1027,23 @@ class ChanceCallRecordTest(ChanceBase):
         self.assertIn("served=gemini-3.7-flash tokens=in:1,out:2,total:3", lines[1])
         self.assertEqual([r.outcome for r in self.log.records], ["429", "ok"])
 
+    def test_each_request_line_carries_its_own_duration(self):
+        """독립 검증 N027·N028: 성공·빈 응답·실패 어느 경우든 `sec=` 는 그 요청의 소요이고 요청마다 따로 잰다."""
+        clock = Clock(0.25)
+        self.fake_client([ApiError(503), Resp(""), Resp("본문")])
+        with mock.patch.object(g, "time", types.SimpleNamespace(monotonic=clock)), \
+                mock.patch.object(g, "MODEL_CANDIDATES", ["a", "b", "c"]):
+            _, out = capture(g.call_gemini_with_fallback, "프롬프트")
+        self.assertEqual([r.seconds for r in self.log.records], [0.25, 0.25, 0.25])
+        self.assertEqual([r.outcome for r in self.log.records], ["5xx", "empty", "ok"])
+        self.assertEqual([line.split()[5] for line in gemini_lines(out)], ["sec=0.2", "sec=0.2", "sec=0.2"])   # 0.25 → 한 자리 반올림(짝수로)
+        clock = Clock(1.5)
+        self.fake_client([ApiError(503), Resp("본문")])
+        with mock.patch.object(g, "time", types.SimpleNamespace(monotonic=clock)), \
+                mock.patch.object(g, "MODEL_CANDIDATES", ["a", "b"]):
+            _, out = capture(g.call_gemini_with_fallback, "프롬프트")
+        self.assertEqual([line.split()[5] for line in gemini_lines(out)], ["sec=1.5", "sec=1.5"])
+
     def test_all_models_failing_raises_the_same_error_and_records_every_request(self):
         self.fake_client([ApiError(429, quota_body())] * 4)
         with self.assertRaises(RuntimeError) as ctx:
@@ -1070,10 +1151,26 @@ class ChanceSummaryTest(ChanceBase):
         report = {"outcome": "ALL_LANES_EMPTY", "lanes": [], "unsplash_rate": {"remaining": 0, "limit": 50}}
         self.assertIn("- Unsplash 남은 호출: 0회(시간당 한도 50회)", g.render_run_summary("schedule", self.now(), 9, report))
 
-    def test_no_calls_means_no_gemini_lines_as_before(self):
+    def test_no_calls_says_zero_explicitly_like_blogger_and_issue_edit(self):
+        """독립 검증 F-09: 호출이 없던 실행도 `0회`를 적는다 — 줄이 없으면 '호출 안 함'과 '이 기능이 없는 옛 요약'을 구분할 수 없다.
+        (이전에는 0회면 줄을 생략했다. Blogger·이슈 수정은 처음부터 0회를 적었다.) 보충 줄(실패 내역·토큰 …)은 호출이 있을 때만 나온다."""
         text = g.render_run_summary("schedule", self.now(), 9, {"outcome": "ALL_LANES_EMPTY", "lanes": [],
                                                                 "gemini_calls": {"attempts": 0, "failed": 0}, "gemini_notes": []})
-        self.assertNotIn("Gemini", text)
+        self.assertIn("- Gemini 호출: 0회(실패 0회)", text)
+        self.assertEqual([line for line in text.splitlines() if "Gemini" in line], ["- Gemini 호출: 0회(실패 0회)"])
+
+    def test_a_summary_built_without_the_call_count_has_no_gemini_line(self):
+        """finish_run 이 아닌 곳(시험 등)에서 보고서에 호출 수 항목 자체가 없으면 줄을 만들지 않는다(없는 값을 0으로 지어내지 않는다)."""
+        for report in ({"outcome": "ALL_LANES_EMPTY", "lanes": []},
+                       {"outcome": "ALL_LANES_EMPTY", "lanes": [], "gemini_calls": {}},
+                       {"outcome": "ALL_LANES_EMPTY", "lanes": [], "gemini_calls": None}):
+            self.assertNotIn("Gemini", g.render_run_summary("schedule", self.now(), 9, report))
+
+    def test_finish_run_writes_the_zero_line_for_a_run_that_never_called_gemini(self):
+        report = {"outcome": "ALL_REJECTED", "lanes": []}
+        with mock.patch.object(g, "write_step_summary") as write:
+            capture(g.finish_run, None, report, "schedule", self.now(), 9)
+        self.assertIn("- Gemini 호출: 0회(실패 0회)", write.call_args[0][0])
 
     def test_failure_summary_keeps_the_call_count_when_every_model_failed(self):
         """모든 모델이 실패해 RuntimeError 로 끝난 실행: 예전 요약에는 '실패 — RuntimeError' 한 줄뿐이라 호출 수가 사라졌다."""
@@ -1085,9 +1182,11 @@ class ChanceSummaryTest(ChanceBase):
         self.assertIn("- Gemini 호출: 4회(실패 4회)", text)
         self.assertIn("- Gemini 실패 내역: 429(한도 초과) 4회", text)
 
-    def test_failure_summary_without_any_call_is_the_old_two_lines(self):
+    def test_failure_summary_without_any_call_adds_only_the_zero_line(self):
+        """Gemini 를 부르기 전에 죽은 실행(예: 뉴스 수집 예외)도 `0회`를 적어 '호출은 없었다'가 요약에서 보이게 한다(F-09)."""
         self.assertEqual(g.failure_summary(ValueError("x")),
-                         "### Chance_Blog 실행 요약\n- 결과: **실패** — ValueError (원인은 이 단계의 로그를 보세요)")
+                         "### Chance_Blog 실행 요약\n- 결과: **실패** — ValueError (원인은 이 단계의 로그를 보세요)\n"
+                         "- Gemini 호출: 0회(실패 0회)")
 
     def test_run_cli_writes_the_failure_summary_with_the_calls_and_reraises(self):
         self.fake_client([ApiError(503)] * 4)
@@ -1207,6 +1306,18 @@ class UnsplashRateTest(ChanceBase):
             self.search(FakeUnsplashResponse({"X-Ratelimit-Remaining": bad, "X-Ratelimit-Limit": bad}))
             self.assertEqual(g.UNSPLASH_RATE, {"remaining": None, "limit": None}, repr(bad))
 
+    def test_values_with_three_to_seven_digits_are_read_whole(self):
+        """독립 검증 M081: 승격된 앱은 시간당 5000회처럼 네 자리 한도를 받는다. 7자리까지 읽고 8자리부터는 버린다(앞뒤 공백은 무시)."""
+        for text, number in (("5000", 5000), ("4999", 4999), ("12345", 12345), ("100", 100), ("1000000", 1000000),
+                             ("9999999", 9999999), ("007", 7), ("0", 0), (" 4200 ", 4200)):
+            g.UNSPLASH_RATE.update(remaining=None, limit=None)
+            self.search(FakeUnsplashResponse({"X-Ratelimit-Remaining": text, "X-Ratelimit-Limit": "5000"}))
+            self.assertEqual(g.UNSPLASH_RATE, {"remaining": number, "limit": 5000}, repr(text))
+        g.UNSPLASH_RATE.update(remaining=None, limit=None)
+        self.search(FakeUnsplashResponse({"X-Ratelimit-Remaining": "10000000", "X-Ratelimit-Limit": "50000000"}))
+        self.assertEqual(g.UNSPLASH_RATE, {"remaining": None, "limit": None})
+        self.assertEqual(g._unsplash_line({"remaining": 4999, "limit": 5000}), "Unsplash 남은 호출: 4999회(시간당 한도 5000회)")
+
     def test_an_error_response_still_tells_how_many_calls_are_left(self):
         error = urllib.error.HTTPError("https://api.unsplash.com/x", 403, "Rate Limit Exceeded",
                                        {"X-Ratelimit-Remaining": "0", "X-Ratelimit-Limit": "50"}, io.BytesIO(b""))
@@ -1316,6 +1427,27 @@ class EditsRunnerCallLogTest(unittest.TestCase):
         for line in out.splitlines():
             self.assertTrue(line.startswith(TAG), line)
 
+    def test_a_three_violation_429_keeps_the_day_limit_and_the_wait_in_every_runner_line(self):
+        """독립 검증 F-01: 러너의 요청 줄은 300자로 잘린다. 실제 모양(위반 3개)의 429 에서도 일 한도 id 와 재시도 대기가 줄 안에 남아야 한다."""
+        client = self.fake_gemini([ClientError(429, three_violation_body())] * 12)
+        self.write_issue(page_body(edit=self.LAYOUT, after="둘째 문단 아래에 강조 문장을 넣어 주세요"))
+        code, out = self.run_main()
+        self.assertEqual(len(client.models.calls), 12)
+        lines = runner_gemini_lines(out)
+        self.assertEqual(len(lines), 12)
+        for line in lines:
+            self.assertIn(f"quotaId={DAY_QUOTA_ID} retryDelay=55s", line)
+            self.assertLessEqual(len(line), 300)
+
+    def test_the_api_key_from_the_environment_is_replaced_in_the_gemini_lines(self):
+        """독립 검증 F-05: 환경의 GEMINI_API_KEY 값은 비밀 패턴에 걸리지 않는 모양이어도 요청 줄에서 글자 그대로 가려진다."""
+        self.fake_gemini([RuntimeError("credential fake-llm-key rejected")] * 4)       # 일시 오류가 아니라 모델마다 한 번씩만 시도한다
+        self.write_issue(page_body(edit=self.LAYOUT, after="둘째 문단 아래에 강조 문장을 넣어 주세요"))
+        code, out = self.run_main()
+        lines = runner_gemini_lines(out)
+        self.assertEqual(len(lines), 4)
+        self.assertTrue(all("credential *** rejected" in line and "fake-llm-key" not in line for line in lines), lines[0])
+
     def test_secrets_and_commands_in_failures_stay_out_of_the_runner_log(self):
         body = quota_body(message=f"키 {FAKE_KEY} {FAKE_TOKEN} ::error::위조 ##[group]위조")
         self.fake_gemini([ApiError(429, body)] * 12)
@@ -1400,6 +1532,715 @@ class EditsRunnerCallLogTest(unittest.TestCase):
         self.assertIn("ok", lines[1])
         for ch in "|<>[]":
             self.assertNotIn(ch, lines[1])
+
+
+# ----------------------------------------------------------------------------
+# 8) 독립 검증(2026-10-25) 지적 반영: 한도 구분 필드 보존(F-01) · 기록 실패가 호출을 바꾸지 않음(F-02) · 마스킹(F-03~F-06)
+# ----------------------------------------------------------------------------
+TOKENS_QUOTA_ID = "GenerateContentInputTokensPerModelPerMinute-FreeTier"
+THREE_MESSAGE = (
+    "You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: "
+    "https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/usage?tab=rate-limit. \n"
+    "* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 250000, "
+    "model: gemini-2.5-flash\n"
+    "* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-2.5-flash\n"
+    "* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-2.5-flash\n"
+    "Please retry in 55.2s.")
+
+
+def violation(metric, quota_id, value):
+    return {"quotaMetric": "generativelanguage.googleapis.com/" + metric, "quotaId": quota_id,
+            "quotaDimensions": {"location": "global", "model": "gemini-2.5-flash"}, "quotaValue": value}
+
+
+THREE_VIOLATIONS = {
+    "tokens": violation("generate_content_free_tier_input_token_count", TOKENS_QUOTA_ID, "250000"),
+    "rpm": violation("generate_content_free_tier_requests", MINUTE_QUOTA_ID, "5"),
+    "rpd": violation("generate_content_free_tier_requests", DAY_QUOTA_ID, "20"),
+}
+
+
+def three_violation_body(order=("tokens", "rpm", "rpd"), retry="55s"):
+    """실제 429 의 모양: 한도 위반이 여러 개(분당 토큰 → 분당 요청 → 일 요청: 공개된 gemini-cli 이슈의 표본 순서)이고
+    재시도 대기는 RetryInfo 에 따로 있다. 이 모양에서 위반 수를 2개로 자르면 마지막(일 한도)이 사라졌다."""
+    body = quota_body(message=THREE_MESSAGE, retry=retry)
+    body["error"]["details"][1]["violations"] = [dict(THREE_VIOLATIONS[key]) for key in order]
+    return body
+
+
+class ClientError(ApiError):
+    """google-genai 의 4xx 오류 클래스 이름(로그 줄 머리의 길이를 실제와 같게 맞춘다)."""
+
+
+class QuotaHintsTest(unittest.TestCase):
+    """독립 검증 F-01: 위반이 3개인 실제 모양의 429 에서도 일 한도 id 와 재시도 대기가 두 가지 로그 줄(Blogger 600자·이슈 수정 300자)에 남는다."""
+
+    def head(self, order=("tokens", "rpm", "rpd")):
+        return failure_detail(ClientError(429, three_violation_body(order))).split(" | ", 1)[0]
+
+    def test_the_day_limit_id_and_the_wait_survive_in_every_order_of_the_violations(self):
+        for order in itertools.permutations(("tokens", "rpm", "rpd")):
+            head = self.head(order)
+            self.assertIn(f"quotaId={DAY_QUOTA_ID}", head, order)
+            self.assertIn("retryDelay=55s", head, order)
+
+    def test_the_head_lists_the_day_limit_then_the_wait_then_the_other_limits_then_the_metrics(self):
+        head = self.head()
+        parts = (f"quotaId={DAY_QUOTA_ID}", "retryDelay=55s", f"quotaId={TOKENS_QUOTA_ID}", f"quotaId={MINUTE_QUOTA_ID}", "quotaMetric=")
+        positions = [head.index(part) for part in parts]
+        self.assertEqual(positions, sorted(positions), head)
+        self.assertTrue(head.startswith(f"ClientError code=429 status=RESOURCE_EXHAUSTED quotaId={DAY_QUOTA_ID} retryDelay=55s "), head)
+
+    def test_a_single_violation_shows_the_id_the_wait_and_the_metric(self):
+        day = failure_detail(ClientError(429, quota_body(DAY_QUOTA_ID, retry="37s"))).split(" | ", 1)[0]
+        self.assertEqual(day, f"ClientError code=429 status=RESOURCE_EXHAUSTED quotaId={DAY_QUOTA_ID} retryDelay=37s "
+                              "quotaMetric=generativelanguage.googleapis.com/generate_content_free_tier_requests")
+        minute = failure_detail(ClientError(429, quota_body(MINUTE_QUOTA_ID, retry="9s"))).split(" | ", 1)[0]
+        self.assertEqual(minute, "ClientError code=429 status=RESOURCE_EXHAUSTED retryDelay=9s "
+                                 f"quotaId={MINUTE_QUOTA_ID} "
+                                 "quotaMetric=generativelanguage.googleapis.com/generate_content_free_tier_requests")
+
+    def test_two_day_limit_ids_both_come_first(self):
+        body = three_violation_body(("rpm", "rpd", "tokens"))
+        body["error"]["details"][1]["violations"].append(violation("generate_content_free_tier_requests",
+                                                                   "GenerateContentTokensPerDayPerModel-FreeTier", "1000000"))
+        head = failure_detail(ClientError(429, body)).split(" | ", 1)[0]
+        order = [head.index(f"quotaId={DAY_QUOTA_ID}"), head.index("quotaId=GenerateContentTokensPerDayPerModel-FreeTier"),
+                 head.index("retryDelay=55s"), head.index(f"quotaId={MINUTE_QUOTA_ID}")]
+        self.assertEqual(order, sorted(order), head)
+
+    def test_the_day_mark_is_matched_without_regard_to_case_and_only_for_ids(self):
+        body = {"error": {"status": "RESOURCE_EXHAUSTED", "details": [
+            {"violations": [{"quotaId": "ReqPerMinute-A", "quotaMetric": "perday-metric"}, {"quotaId": "reqperday-b"}]}]}}
+        head = failure_detail(ApiError(429, body)).split(" | ", 1)[0]
+        self.assertLess(head.index("quotaId=reqperday-b"), head.index("quotaId=ReqPerMinute-A"))
+        self.assertIn("quotaMetric=perday-metric", head)             # 지표 이름에 perday 가 있어도 순서는 id 만 본다
+        upper = {"error": {"status": "RESOURCE_EXHAUSTED", "details": [{"violations": [{"quotaId": "A-PERDAY-X"}, {"quotaId": "B-PerMinute"}]}]}}
+        head = failure_detail(ApiError(429, upper)).split(" | ", 1)[0]
+        self.assertEqual(head.count("quotaId=A-PERDAY-X"), 1)        # 일 한도 id 는 한 번만(나머지 목록에 다시 들어가지 않는다)
+        self.assertLess(head.index("quotaId=A-PERDAY-X"), head.index("quotaId=B-PerMinute"))
+
+    def test_only_the_first_twenty_distinct_values_of_a_key_are_scanned(self):
+        ids = [{"quotaId": f"Q{i}"} for i in range(30)]
+        ids[19]["quotaId"] = "Q19PerDay"            # 스무 번째까지는 읽는다
+        ids[20]["quotaId"] = "Q20PerDay"            # 스물한 번째부터는 읽지 않는다
+        ids[25]["quotaId"] = "Q25PerDay"
+        head = failure_detail(ApiError(429, {"error": {"status": "X", "details": [{"violations": ids}]}})).split(" | ", 1)[0]
+        self.assertIn("quotaId=Q19PerDay", head)
+        self.assertNotIn("Q20PerDay", head)
+        self.assertNotIn("Q25PerDay", head)
+        self.assertEqual(head.count("quotaId="), 5)
+
+    def test_the_head_may_use_three_fifths_of_the_limit_before_it_is_cut(self):
+        """앞쪽 요약은 limit 의 3/5(600자면 360자)까지 자르지 않는다: 335자짜리는 그대로, 3/5 를 넘으면 `…` 로 자른다."""
+        body = {"error": {"status": "X", "details": [{"retryDelay": "9" * 60}, {"violations": [{"quotaId": c * 70} for c in "ABC"]}]}}
+        head = failure_detail(ApiError(429, body)).split(" | ", 1)[0]
+        self.assertEqual(len(head), 335)
+        self.assertNotIn("…", head)
+        longer = {"error": {"status": "X", "details": [{"retryDelay": "9" * 60}, {"violations": [{"quotaId": c * 70} for c in "ABCDE"]}]}}
+        cut = failure_detail(ApiError(429, longer)).split(" | ", 1)[0]
+        self.assertEqual(len(cut), 360)
+        self.assertTrue(cut.endswith("…"))
+
+    def test_at_most_five_values_per_key_are_shown(self):
+        body = {"error": {"status": "X", "details": [{"violations": [{"quotaId": f"Q{i}", "quotaMetric": f"M{i}"} for i in range(9)]},
+                                                      {"retryDelay": "1s"}, {"retryDelay": "2s"}, {"retryDelay": "3s"}, {"retryDelay": "4s"},
+                                                      {"retryDelay": "5s"}, {"retryDelay": "6s"}, {"retryDelay": "7s"}]}}
+        head = failure_detail(ApiError(429, body)).split(" | ", 1)[0]
+        self.assertEqual((head.count("quotaId="), head.count("retryDelay="), head.count("quotaMetric=")), (5, 5, 5))
+
+    def test_the_blogger_line_of_600_characters_keeps_both(self):
+        log = CallLog(label="blogger_macat", purpose="generate")
+        rec = log.failure("gemini-3.8-flash", 0.4, ClientError(429, three_violation_body()))
+        self.assertLessEqual(len(rec.detail), 600)
+        self.assertIn(f"quotaId={DAY_QUOTA_ID} retryDelay=55s", call_line(rec))
+
+    def test_the_issue_edit_line_of_300_characters_keeps_both_with_the_longest_label_purpose_and_model(self):
+        """이슈 수정 러너는 요청마다 `safety.log_text(call_line(…), 300)` 으로 자른다. 용도와 모델 이름이 가장 긴 경우에도 들어와야 한다."""
+        longest_model = max(runner.registry_models(REAL), key=len)
+        for purpose_name in ("patch", "image-queries"):
+            log = CallLog(label="issue-edit", purpose=purpose_name)
+            rec = log.failure(longest_model, 12.3, ClientError(429, three_violation_body()))
+            capped = safety.log_text(call_line(rec), 300)
+            self.assertIn(f"quotaId={DAY_QUOTA_ID} retryDelay=55s", capped, purpose_name)
+            self.assertLessEqual(len(capped), 300)
+
+    def test_a_429_without_a_day_limit_id_still_shows_the_wait_before_the_ids(self):
+        head = self.head(("tokens", "rpm"))
+        self.assertNotIn("PerDay", head)
+        self.assertLess(head.index("retryDelay=55s"), head.index("quotaId="))
+
+
+class HintAndFieldMaskTest(unittest.TestCase):
+    """독립 검증 F-03: 값을 자르기 전에 먼저 가린다 — 80자에서 잘린 키 조각은 비밀 패턴에 걸리지 않아 그대로 남았다."""
+
+    def test_a_key_straddling_the_80_character_cut_is_masked_first(self):
+        for name in ("quotaId", "retryDelay", "quotaMetric"):
+            value = "Q" * 60 + FAKE_KEY                 # 키가 60~99자 구간이라 80자에서 자르면 키의 앞 20자가 남는다
+            body = {"error": {"status": "X", "details": [{name: value}]}}
+            head = failure_detail(ApiError(429, body)).split(" | ", 1)[0]
+            self.assertNotIn("AIza", head, name)
+            self.assertIn(f"{name}={'Q' * 60}***", head, name)
+
+    def test_numbers_and_long_plain_values_are_still_cut_at_80(self):
+        body = {"error": {"status": "X", "details": [{"retryDelay": 12.5}, {"quotaId": "P" * 200}]}}
+        head = failure_detail(ApiError(429, body)).split(" | ", 1)[0]
+        self.assertIn("retryDelay=12.5", head)
+        self.assertIn("quotaId=" + "P" * 79 + "…", head)
+
+    def test_the_status_and_the_class_name_part_of_the_head_is_masked_too(self):
+        err = ApiError(429, quota_body())
+        err.status = f"BAD {FAKE_KEY}"
+        head = failure_detail(err).split(" | ", 1)[0]
+        self.assertNotIn("AIza", head)
+        self.assertIn("status=BAD ***", head)
+        verbatim = ApiError(429, quota_body())
+        verbatim.status = "REJECTED fake-llm-key-0123"
+        head = failure_detail(verbatim, secrets=("fake-llm-key-0123",)).split(" | ", 1)[0]
+        self.assertNotIn("fake-llm-key-0123", head)
+
+    def test_the_empty_answer_reason_hides_the_real_key_too(self):
+        log = CallLog(secrets=("fake-llm-key-0123",))
+        rec = log.empty("a", 1, Resp(text="", candidates=[Candidate("STOP fake-llm-key-0123")]))
+        self.assertEqual(rec.detail, "빈 응답 finish_reason=STOP ***")
+
+    def test_served_model_is_masked_before_it_is_cut_at_80(self):
+        shown = served_model(Resp(model_version="v" * 70 + FAKE_KEY))
+        self.assertNotIn("AIza", shown)
+        self.assertEqual(shown, "v" * 70 + "***")
+
+    def test_empty_detail_is_masked_before_it_is_cut_at_120(self):
+        reason = "R" * 90 + FAKE_KEY                       # 접두 16자 + 90 + 키 → 120자에서 키가 잘린다
+        shown = empty_detail(Resp(text="", candidates=[Candidate(reason)]))
+        self.assertNotIn("AIza", shown)
+        self.assertTrue(shown.endswith("***"), shown)
+
+
+class CallLineMaskTest(unittest.TestCase):
+    """독립 검증 F-04: 줄의 label·purpose·model·served 칸도 가린다(60자에서 자르기 전에)."""
+
+    def test_every_free_text_field_is_masked_before_being_cut(self):
+        text = "L" * 50 + FAKE_KEY                         # 60자에서 자르면 키 앞 10자(`AIza`+6)가 남는다
+        record = CallRecord(label=text, purpose=text, model=text, served_model=text, outcome="ok", seconds=1.0)
+        line = call_line(record)
+        self.assertNotIn("AIza", line)
+        self.assertEqual(line.count("L" * 50 + "***"), 4)
+        for name in ("label", "purpose", "model", "served"):
+            self.assertIn(f"{name}={'L' * 50}***", line)
+
+    def test_missing_values_are_dashes_not_the_word_none(self):
+        record = CallRecord(label=None, purpose=None, model="m", served_model=None, outcome="ok", seconds=0.0)
+        self.assertEqual(call_line(record), "[GEMINI] label=- purpose=- model=m result=ok sec=0.0 served=- tokens=-")
+
+    def test_folding_and_the_60_character_limit_still_apply(self):
+        record = CallRecord(label="a b\nc", purpose="p" * 100, model="m", served_model="", outcome="ok", seconds=0.0)
+        line = call_line(record)
+        self.assertIn("label=a_b_c ", line)
+        self.assertIn("purpose=" + "p" * 59 + "… ", line)
+        self.assertIn("served=- ", line)
+
+    def test_records_built_by_the_log_carry_no_secret_in_any_field_or_summary_line(self):
+        log = CallLog(label=f"b-{FAKE_KEY}", purpose=f"p-{FAKE_TOKEN}")
+        rec = log.success(f"m-{FAKE_NEW_KEY}", 1, Resp(model_version=f"v-{FAKE_KEY}", usage=Usage(1, 2, 3)))
+        log.failure(f"m-{FAKE_NEW_KEY}", 1, RuntimeError("x"))
+        shown = " ".join([call_line(r) for r in log.records] + [str(vars(rec))] + log.summary_lines())
+        for secret in (FAKE_KEY, FAKE_TOKEN, FAKE_NEW_KEY, FAKE_KEY[:20], FAKE_TOKEN[:20], FAKE_NEW_KEY[:20]):
+            self.assertNotIn(secret, shown)
+        self.assertEqual((rec.label, rec.purpose, rec.model, rec.served_model), ("b-***", "p-***", "m-***", "v-***"))
+
+
+class ScrubTest(unittest.TestCase):
+    """독립 검증 F-05: 호출 기록용 글자 가리기 — 비밀 패턴 + 실행 중인 키의 글자 그대로 + 프로젝트 번호."""
+
+    def test_a_secret_value_is_replaced_verbatim_when_it_is_long_enough(self):
+        self.assertEqual(scrub("앞 fake-llm-key 뒤 fake-llm-key 끝", ("fake-llm-key",)), "앞 *** 뒤 *** 끝")
+        self.assertEqual(scrub("a abcdef b", ("abcdef",)), "a *** b")                  # 6자는 가린다
+        self.assertEqual(scrub("a abcde b", ("abcde",)), "a abcde b")                  # 5자는 일반 낱말과 겹쳐 그대로 둔다
+        self.assertEqual(scrub("x one-key two-key y", ("one-key", "two-key")), "x *** *** y")
+
+    def test_empty_none_and_non_string_secrets_are_ignored(self):
+        for secrets in ((), (None,), ("",), (0,), (None, "", " "), None):
+            self.assertEqual(scrub("plain text here", secrets), "plain text here", secrets)
+        self.assertEqual(scrub("n 1234567 n", (1234567,)), "n *** n")                   # 숫자 값도 글자로 본다
+
+    def test_patterns_still_apply_and_input_may_be_an_exception(self):
+        self.assertEqual(scrub(f"앞 {FAKE_KEY} 뒤"), "앞 *** 뒤")
+        self.assertEqual(scrub(RuntimeError("bad fake-llm-key"), ("fake-llm-key",)), "bad ***")
+        self.assertEqual(scrub(None), "None")
+
+    def test_project_numbers_are_masked_in_both_shapes_and_the_label_stays(self):
+        self.assertEqual(scrub("consumer 'project_number:123456789012'."), "consumer 'project_number:***'.")
+        self.assertEqual(scrub("name: projects/123456789012/locations/x"), "name: projects/***/locations/x")
+        self.assertEqual(scrub("PROJECT_NUMBER:99 Projects/7"), "PROJECT_NUMBER:*** Projects/***")
+        self.assertEqual(scrub("project_number: abc projects/name project_number:"), "project_number: abc projects/name project_number:")
+
+    def test_the_shared_mask_is_unchanged_by_this_change(self):
+        """프로젝트 번호 가리기는 호출 기록 쪽에만 있다(공용 비밀 패턴·mask 는 건드리지 않는다)."""
+        self.assertEqual(llm_mod.mask("project_number:123456789012 projects/123456789012"), "project_number:123456789012 projects/123456789012")
+
+    def test_failure_detail_masks_project_numbers_in_the_body_and_the_hints(self):
+        body = quota_body(message="Quota exceeded for consumer 'project_number:123456789012' on projects/123456789012")
+        body["error"]["details"][1]["violations"][0]["quotaId"] = "Q-project_number:123456789012"
+        detail = failure_detail(ApiError(429, body))
+        self.assertNotIn("123456789012", detail)
+        self.assertIn("quotaId=Q-project_number:***", detail)
+
+
+class ApiKeyReplacementTest(unittest.TestCase):
+    KEY = "fake-llm-key-0123456789"          # 비밀 패턴(AIza…·ya29.… 등)에 걸리지 않는 값이라 글자 그대로 바꿔야만 가려진다
+
+    def run_failing_call(self, key, text, log=None):
+        client = Client([RuntimeError(text)])
+        lines = []
+        call = make_gemini_llm(key, ["a"], max_retries=0, sleep=lambda s: None, client_factory=lambda: client, clock=Clock(), log=log)
+        call.call_log.configure(out=lines.append)
+        with self.assertRaises(LLMError):
+            call("p")
+        return call, lines
+
+    def test_the_key_given_to_make_gemini_llm_never_reaches_the_log_line_or_the_record(self):
+        call, lines = self.run_failing_call(self.KEY, f"credential {self.KEY} rejected for {self.KEY}")
+        self.assertEqual(len(lines), 1)
+        self.assertNotIn(self.KEY, lines[0])
+        self.assertIn("credential *** rejected for ***", lines[0])
+        self.assertNotIn(self.KEY, call.call_log.records[0].detail)
+
+    def test_a_log_supplied_from_outside_gets_the_key_too(self):
+        outside = CallLog(label="issue-edit")
+        call, lines = self.run_failing_call(self.KEY, f"credential {self.KEY} rejected", log=outside)
+        self.assertIs(call.call_log, outside)
+        self.assertNotIn(self.KEY, lines[0])
+        self.assertEqual(outside.secrets, [self.KEY])
+
+    def test_the_key_is_also_replaced_inside_the_hint_values(self):
+        body = {"error": {"status": "X", "details": [{"quotaId": f"Q-{self.KEY}"}]}}
+        client = Client([ApiError(429, body)])
+        call = make_gemini_llm(self.KEY, ["a"], max_retries=0, sleep=lambda s: None, client_factory=lambda: client, clock=Clock())
+        with self.assertRaises(LLMError):
+            call("p")
+        self.assertNotIn(self.KEY, call.call_log.records[0].detail)
+        self.assertIn("quotaId=Q-***", call.call_log.records[0].detail)
+
+    def test_a_key_straddling_the_hint_cut_is_replaced_before_the_cut(self):
+        """키가 힌트 값의 80자 경계에 걸쳐도(앞 70자 + 키) 자르기 전에 먼저 바꾸므로 키 조각이 남지 않는다 — 안쪽 본문을 훑을 때도 같다."""
+        for details in ([{"quotaId": "Q" * 70 + self.KEY}], [{"violations": [{"quotaId": "Q" * 70 + self.KEY}]}]):
+            body = {"error": {"status": "X", "details": details}}
+            client = Client([ApiError(429, body)])
+            call = make_gemini_llm(self.KEY, ["a"], max_retries=0, sleep=lambda s: None, client_factory=lambda: client, clock=Clock())
+            with self.assertRaises(LLMError):
+                call("p")
+            head = call.call_log.records[0].detail.split(" | ", 1)[0]
+            self.assertNotIn("fake-llm", head)
+            self.assertIn("quotaId=" + "Q" * 70 + "***", head)
+
+    def test_every_field_of_a_record_hides_the_real_key(self):
+        log = CallLog(label=f"b-{self.KEY}", purpose=f"p-{self.KEY}", secrets=(self.KEY,))
+        rec = log.success(f"m-{self.KEY}", 1, Resp(model_version=f"v-{self.KEY}"))
+        self.assertEqual((rec.label, rec.purpose, rec.model, rec.served_model), ("b-***", "p-***", "m-***", "v-***"))
+        self.assertNotIn(self.KEY, " ".join(log.summary_lines() + [call_line(rec)]))
+
+    def test_short_keys_are_not_replaced_and_registering_twice_keeps_one_copy(self):
+        call, lines = self.run_failing_call("abc", "the abc key")
+        self.assertIn("the abc key", lines[0])
+        self.assertEqual(call.call_log.secrets, [])
+        edge = CallLog()
+        edge.add_secret("abcde")                       # 5자: 일반 낱말과 겹칠 수 있어 등록하지 않는다
+        edge.add_secret("abcdef")                      # 6자: 등록한다
+        self.assertEqual(edge.secrets, ["abcdef"])
+        log = CallLog(secrets=("secret-value-1",))
+        log.add_secret("secret-value-1")
+        log.add_secret("secret-value-2")
+        log.add_secret("")
+        log.add_secret(None)
+        self.assertEqual(log.secrets, ["secret-value-1", "secret-value-2"])
+
+    def test_the_error_text_given_to_callers_is_unchanged_by_the_replacement(self):
+        """호출 기록용 가리기가 호출 결과를 바꾸면 안 된다: LLMError 문구는 예전 그대로 mask 만 거친다(패턴에 안 걸리는 값은 그대로)."""
+        def failing_client():
+            return Client([RuntimeError(f"credential {self.KEY} rejected")])
+        legacy = legacy_make_gemini_llm(self.KEY, ["a"], max_retries=0, sleep=lambda s: None, client_factory=failing_client)
+        new = make_gemini_llm(self.KEY, ["a"], max_retries=0, sleep=lambda s: None, client_factory=failing_client, clock=Clock())
+        with self.assertRaises(LLMError) as old_ctx:
+            legacy("p")
+        with self.assertRaises(LLMError) as new_ctx:
+            new("p")
+        self.assertEqual(str(new_ctx.exception), str(old_ctx.exception))
+        self.assertIn(self.KEY, str(new_ctx.exception))             # 알려진 한계(D-31): 패턴에 안 걸리는 값은 호출 결과의 문구에서는 그대로다
+
+    def test_the_chance_module_registers_its_key_with_the_default_log(self):
+        """실제 실행처럼 환경 변수에 키를 두고 generator 를 불러 오면 기본 기록 장치가 그 키를 안다 — 패턴에 안 걸리는 키도 로그에 안 나온다."""
+        script = (
+            "import generator as g\n"
+            "class M:\n"
+            "    def generate_content(self, model, contents):\n"
+            "        raise RuntimeError('credential ' + g.API_KEY + ' rejected')\n"
+            "class C:\n"
+            "    models = M()\n"
+            "g.get_client = lambda: C()\n"
+            "g.MODEL_CANDIDATES = ['m1']\n"
+            "print('SECRETS', g.CALL_LOG.secrets)\n"
+            "try:\n"
+            "    g.call_gemini_with_fallback('p')\n"
+            "except RuntimeError as exc:\n"
+            "    print('RAISED', str(exc).replace(chr(10), ' / '))\n")
+        env = {k: v for k, v in os.environ.items() if k not in ("GEMINI_API_KEY", "PIPELINE_PAUSE", "DRY_RUN", "FIX_IMAGES")}
+        env.update({"GEMINI_API_KEY": self.KEY, "PYTHONUTF8": "1"})
+        proc = subprocess.run([sys.executable, "-c", script], cwd=str(REAL), env=env, capture_output=True, text=True,
+                              encoding="utf-8", timeout=120)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertNotIn(self.KEY, proc.stdout.replace("SECRETS ['" + self.KEY + "']", ""))     # 알려 주는 첫 줄을 빼면 어디에도 없다
+        self.assertIn("SECRETS ['" + self.KEY + "']", proc.stdout)
+        self.assertIn("result=other", proc.stdout)
+        self.assertIn("credential *** rejected", proc.stdout)
+
+
+# ----------------------------------------------------------------------------
+# 9) 기록은 best-effort: 기록·로그 출력이 실패해도 호출의 반환값·예외는 바뀌지 않는다(독립 검증 F-02)
+# ----------------------------------------------------------------------------
+class RaisingUsage:
+    """응답 본문은 멀쩡하고 usage_metadata 만 읽으면 RuntimeError 가 나는 응답."""
+    text = "응답 본문"
+    model_version = "gemini-3.8-flash"
+
+    @property
+    def usage_metadata(self):
+        raise RuntimeError("usage_metadata 를 읽을 수 없다")
+
+
+class RaisingServed:
+    text = "응답 본문"
+    usage_metadata = Usage(1, 2, 3)
+
+    @property
+    def model_version(self):
+        raise RuntimeError("model_version 을 읽을 수 없다")
+
+
+class RaisingReason:
+    """빈 응답인데 사유(candidates·prompt_feedback)를 읽으면 RuntimeError 가 난다."""
+    text = ""
+
+    @property
+    def candidates(self):
+        raise RuntimeError("candidates 를 읽을 수 없다")
+
+    @property
+    def prompt_feedback(self):
+        raise RuntimeError("prompt_feedback 를 읽을 수 없다")
+
+
+class BrokenAttrsError(Exception):
+    """code·status·details 를 읽으면 RuntimeError 가 나는 예외(깨진 SDK 오류 객체)."""
+
+    @property
+    def code(self):
+        raise RuntimeError("code 를 읽을 수 없다")
+
+    @property
+    def status(self):
+        raise RuntimeError("status 를 읽을 수 없다")
+
+    @property
+    def details(self):
+        raise RuntimeError("details 를 읽을 수 없다")
+
+
+class ExplodingDict(dict):
+    def items(self):
+        raise RuntimeError("items 를 읽을 수 없다")
+
+
+class ExplodingList(list):
+    def __getitem__(self, index):
+        raise RuntimeError("후보를 읽을 수 없다")
+
+
+class InterruptingResponse:
+    text = "응답 본문"
+
+    @property
+    def usage_metadata(self):
+        raise KeyboardInterrupt()
+
+
+def failing_sink(line):
+    raise BrokenPipeError("로그 출력이 닫혔다")
+
+
+SINK_ERRORS = (OSError("pipe"), BrokenPipeError("closed"), UnicodeEncodeError("cp949", "x", 0, 1, "illegal multibyte sequence"),
+               ValueError("v"), RuntimeError("r"), LookupError("l"))
+
+
+def raising_out(exc):
+    def out(line):
+        raise exc
+    return out
+
+
+class BestEffortRecordingTest(unittest.TestCase):
+    def test_a_broken_log_sink_never_changes_what_a_successful_call_returns(self):
+        for exc in SINK_ERRORS:
+            call, client, sleeps = build([Resp("본문")], models=("a", "b"), out=raising_out(exc))
+            self.assertEqual(call("p"), ("본문", "a"), repr(exc))
+            self.assertEqual((len(client.models.calls), sleeps), (1, []))
+            self.assertEqual(call.call_log.attempts, 1)          # 줄은 못 냈어도 기록은 남는다
+
+    def test_a_broken_log_sink_does_not_change_retry_fallback_or_the_final_error(self):
+        for exc in SINK_ERRORS:
+            call, client, sleeps = build([ApiError(429, quota_body()), Resp("본문")], models=("a",), out=raising_out(exc))
+            self.assertEqual(call("p"), ("본문", "a"), repr(exc))
+            self.assertEqual(sleeps, [2])
+            messages = []
+            for out in (raising_out(exc), None):
+                failing, _, _ = build([ApiError(503)] * 6, models=("a", "b"), out=out)
+                with self.assertRaises(LLMError) as ctx:
+                    failing("p")
+                messages.append(str(ctx.exception))
+                self.assertEqual(failing.call_log.attempts, 6)
+            self.assertEqual(messages[0], messages[1], repr(exc))
+
+    def test_the_record_is_returned_and_kept_when_the_sink_fails(self):
+        log = CallLog(label="x", out=failing_sink)
+        rec = log.success("a", 1.5, Resp(model_version="v", usage=Usage(1, 2, 3)))
+        self.assertIs(rec, log.records[0])
+        self.assertEqual((rec.model, rec.served_model, rec.seconds, rec.total_tokens), ("a", "v", 1.5, 3))
+        self.assertEqual(log.failure("a", 1, RuntimeError("e")).outcome, "other")
+        self.assertEqual(log.empty("a", 1, Resp(text="")).outcome, "empty")
+        self.assertEqual((log.attempts, log.failed), (3, 2))
+
+    def test_unreadable_response_fields_cost_only_those_fields(self):
+        for response, expected in ((RaisingUsage(), ("gemini-3.8-flash", None, None, None)),
+                                   (RaisingServed(), ("", 1, 2, 3))):
+            call, _, _ = build([response], models=("a",))
+            self.assertEqual(call("p"), ("응답 본문", "a"))
+            rec = call.call_log.records[0]
+            self.assertEqual((rec.served_model, rec.prompt_tokens, rec.candidate_tokens, rec.total_tokens), expected)
+            self.assertEqual(rec.outcome, "ok")
+
+    def test_an_empty_answer_whose_reason_cannot_be_read_is_still_recorded_as_empty(self):
+        call, _, _ = build([RaisingReason(), Resp("본문")], models=("a", "b"))
+        self.assertEqual(call("p"), ("본문", "b"))
+        self.assertEqual([r.outcome for r in call.call_log.records], ["empty", "ok"])
+        self.assertEqual(call.call_log.records[0].detail, "빈 응답")
+
+    def test_a_failure_whose_attributes_cannot_be_read_is_still_classified_and_recorded(self):
+        log = CallLog(label="x")
+        rec = log.failure("a", 1, BrokenAttrsError("깨진 오류"))
+        self.assertEqual(rec.outcome, "other")
+        self.assertIn("BrokenAttrsError", rec.detail)
+        self.assertIn("깨진 오류", rec.detail)
+
+    def test_a_failure_that_breaks_the_body_walk_keeps_the_count_and_the_outcome(self):
+        """_field 가 아니라 본문을 훑는 코드 자체가 실패하는 경우: 기록 전체의 마지막 방어선이 받아 최소 기록을 남긴다."""
+        err = ApiError(429, ExplodingDict({"error": {"status": "RESOURCE_EXHAUSTED", "message": "m", "details": []}}))
+        log = CallLog(label="x", purpose="p")
+        rec = log.failure("gemini-3.8-flash", 2.5, err)
+        self.assertEqual((rec.outcome, rec.model, rec.label, rec.purpose, rec.seconds), ("429", "gemini-3.8-flash", "x", "p", 2.5))
+        self.assertEqual(rec.detail, llm_mod.PARTIAL_DETAIL)
+        self.assertEqual((log.attempts, log.failed), (1, 1))
+        empty = log.empty("a", 1, Resp(text="", candidates=ExplodingList([Candidate("STOP")])))
+        self.assertEqual((empty.outcome, empty.detail), ("empty", llm_mod.PARTIAL_DETAIL))
+
+    def test_the_last_line_of_defence_also_covers_a_value_that_cannot_be_a_number(self):
+        log = CallLog(label="x")
+        rec = log.success("a", None, Resp())
+        self.assertEqual((rec.outcome, rec.seconds, rec.detail), ("ok", 0.0, llm_mod.PARTIAL_DETAIL))
+        self.assertEqual(log.attempts, 1)
+        lines = []
+        log.configure(out=lines.append)
+        log.success("a", "abc", Resp())
+        self.assertEqual(len(lines), 1)
+        self.assertIn(f"detail={llm_mod.PARTIAL_DETAIL}", lines[0])
+
+    def test_classification_failure_falls_back_to_other_inside_the_log(self):
+        with mock.patch.object(llm_mod, "classify_failure", side_effect=RuntimeError("분류 실패")):
+            log = CallLog()
+            rec = log.failure("a", 1, RuntimeError("x"))
+        self.assertEqual((rec.outcome, log.attempts), ("other", 1))
+
+    def test_interrupts_and_exits_are_never_swallowed(self):
+        for exc in (KeyboardInterrupt(), SystemExit(3)):
+            log = CallLog(out=raising_out(exc))
+            with self.assertRaises(type(exc)):
+                log.success("a", 1, Resp())
+            with self.assertRaises(type(exc)):
+                log.failure("a", 1, RuntimeError("e"))
+            call, _, _ = build([Resp("본문")], models=("a",), out=raising_out(exc))
+            with self.assertRaises(type(exc)):
+                call("p")
+        with self.assertRaises(KeyboardInterrupt):
+            CallLog().success("a", 1, InterruptingResponse())
+
+    def test_a_broken_error_object_keeps_the_old_behaviour_and_is_still_counted(self):
+        """`code` 를 읽으면 터지는 예외: 재시도 판단(_is_transient)은 옛날부터 그 RuntimeError 를 그대로 내보낸다. 기록은 그 전에 남는다."""
+        call, _, _ = build([BrokenAttrsError("깨진 오류")], models=("a",))
+        with self.assertRaises(RuntimeError) as ctx:
+            call("p")
+        self.assertEqual(str(ctx.exception), "code 를 읽을 수 없다")
+        self.assertEqual((call.call_log.attempts, call.call_log.failed), (1, 1))
+        no_retry, _, _ = build([BrokenAttrsError("깨진 오류"), Resp("본문")], models=("a", "b"), max_retries=0)
+        self.assertEqual(no_retry("p"), ("본문", "b"))
+
+
+class BestEffortChanceTest(ChanceBase):
+    def test_a_broken_sink_does_not_change_the_response_the_counts_or_the_error(self):
+        for exc in SINK_ERRORS:
+            self.log.out = raising_out(exc)
+            g.GEMINI_CALLS.update(attempts=0, failed=0)
+            self.fake_client([ApiError(429, quota_body()), Resp("본문")])
+            with mock.patch.object(g, "MODEL_CANDIDATES", ["a", "b"]):
+                response, out = capture(g.call_gemini_with_fallback, "프롬프트")
+            self.assertEqual(response.text, "본문", repr(exc))
+            self.assertEqual(g.GEMINI_CALLS, {"attempts": 2, "failed": 1})
+            self.assertIn("Gemini 모델 호출 성공: b", out)
+        self.log.out = failing_sink
+        self.fake_client([ApiError(503)] * 4)
+        with self.assertRaises(RuntimeError) as ctx:
+            capture(g.call_gemini_with_fallback, "프롬프트")
+        self.assertTrue(ctx.exception.args[0].startswith("모든 Gemini 모델 호출 실패\ngemini-3.8-flash: 503"))
+
+    def test_a_response_with_unreadable_fields_is_still_returned(self):
+        self.fake_client([RaisingUsage()])
+        response, _ = capture(g.call_gemini_with_fallback, "프롬프트")
+        self.assertEqual(response.text, "응답 본문")
+        self.assertEqual(self.log.records[0].outcome, "ok")
+
+    def test_a_broken_error_object_moves_on_to_the_next_model_as_before(self):
+        self.fake_client([BrokenAttrsError("깨진 오류"), Resp("본문")])
+        with mock.patch.object(g, "MODEL_CANDIDATES", ["a", "b"]):
+            response, _ = capture(g.call_gemini_with_fallback, "프롬프트")
+        self.assertEqual(response.text, "본문")
+        self.assertEqual([r.outcome for r in self.log.records], ["other", "ok"])
+
+
+def hostile_pool(with_secret=True):
+    """with_secret: 비밀 모양 문구를 담은 오류를 넣는다(Chance 의 옛 구현은 오류 문구를 가리지 않았으므로 Chance 비교에서는 뺀다)."""
+    pool = [lambda: Resp("본문"), lambda: Resp(""), lambda: RaisingUsage(), lambda: RaisingServed(), lambda: RaisingReason(),
+            lambda: ApiError(429, quota_body()), lambda: ApiError(503), lambda: ApiError(404), lambda: RuntimeError("boom"),
+            lambda: BrokenAttrsError("깨진 오류"),
+            lambda: ApiError(429, ExplodingDict({"error": {"status": "RESOURCE_EXHAUSTED", "message": "m", "details": []}})),
+            lambda: Resp("", candidates=ExplodingList([Candidate("STOP")])), lambda: mock.Mock(text="응답")]
+    if with_secret:
+        pool.append(lambda: RuntimeError(f"api_key={FAKE_KEY}"))
+    return pool
+
+
+class HostileDifferentialTest(unittest.TestCase):
+    """깨진 응답·오류 객체와 고장 난 로그 출력을 섞어도 옛 구현과 반환값·예외·호출 순서·대기가 같다(기록은 측정 전용)."""
+
+    @staticmethod
+    def outcome(call, prompt):
+        try:
+            return ("ok",) + tuple(call(prompt))
+        except LLMError as exc:
+            return ("llm-error", str(exc))
+        except Exception as exc:  # noqa: BLE001 - 깨진 오류 객체가 옛 구현에서도 내보내는 예외까지 같은지 본다
+            return ("raised", type(exc).__name__, str(exc))
+
+    def test_make_gemini_llm_matches_the_legacy_implementation(self):
+        pool = hostile_pool()
+        for seed in range(300):
+            rng = random.Random(seed)
+            models = rng.sample(["a", "b", "c", "d"], rng.randint(1, 4))
+            retries = rng.choice([0, 1, 2])
+            steps = [pool[rng.randrange(len(pool))]() for _ in range(16)]
+            outcomes = []
+            for new in (False, True):
+                client, sleeps = Client(list(steps)), []
+                if new:
+                    call = make_gemini_llm("키", models, retries, sleep=sleeps.append, client_factory=lambda c=client: c, clock=Clock(),
+                                           log=CallLog(out=failing_sink))
+                else:
+                    call = legacy_make_gemini_llm("키", models, retries, sleep=sleeps.append, client_factory=lambda c=client: c)
+                outcomes.append((self.outcome(call, "프롬프트"), client.models.calls, sleeps))
+            self.assertEqual(outcomes[0], outcomes[1], f"seed {seed}")
+
+    def test_chance_call_matches_the_legacy_implementation(self):
+        pool = hostile_pool(with_secret=False)
+        for seed in range(200):
+            rng = random.Random(seed)
+            models = rng.sample(["a", "b", "c", "d"], rng.randint(1, 4))
+            steps = [pool[rng.randrange(len(pool))]() for _ in range(6)]
+            results = []
+            for new in (False, True):
+                client = Client(list(steps))
+                buf = io.StringIO()
+                log = CallLog(label="chance", purpose="post", out=failing_sink)
+                with contextlib.redirect_stdout(buf), mock.patch.object(g, "get_client", return_value=client), \
+                        mock.patch.object(g, "MODEL_CANDIDATES", models), mock.patch.object(g, "CALL_LOG", log), \
+                        mock.patch.dict(g.GEMINI_CALLS, {"attempts": 0, "failed": 0}):
+                    try:
+                        if new:
+                            value = ("ok", g.call_gemini_with_fallback("p").text)
+                        else:
+                            value = ("ok", legacy_call_gemini_with_fallback("p", g.get_client, models, g.GEMINI_CALLS, g._one_line).text)
+                    except Exception as exc:  # noqa: BLE001
+                        value = ("err", type(exc).__name__, str(exc))
+                    calls = dict(g.GEMINI_CALLS)
+                results.append((value, client.models.calls, calls, buf.getvalue()))
+            self.assertEqual(results[0], results[1], f"seed {seed}")
+
+
+# ----------------------------------------------------------------------------
+# 10) Chance: 오류 문구가 키를 담아도 예외 문구·로그·마지막 줄에 나가지 않는다(독립 검증 F-06)
+# ----------------------------------------------------------------------------
+class ChanceLeakTest(ChanceBase):
+    REAL_KEY = "fake-gemini-key-0123456789"      # 비밀 패턴에 걸리지 않는 값
+
+    def run_all_models_failing(self, text, key=None):
+        self.fake_client([RuntimeError(text)] * 4)
+        buf = io.StringIO()
+        with mock.patch.object(g, "API_KEY", key), contextlib.redirect_stdout(buf), self.assertRaises(RuntimeError) as ctx:
+            g.call_gemini_with_fallback("프롬프트")
+        return ctx.exception.args[0], buf.getvalue()
+
+    def test_pattern_secrets_in_model_errors_are_masked_in_the_raised_error(self):
+        message, out = self.run_all_models_failing(f"bad request key={FAKE_KEY} and {FAKE_TOKEN} and {FAKE_NEW_KEY}")
+        for secret in (FAKE_KEY, FAKE_TOKEN, FAKE_NEW_KEY, FAKE_KEY[:20], FAKE_TOKEN[:20], FAKE_NEW_KEY[:20]):
+            self.assertNotIn(secret, message)
+            self.assertNotIn(secret, out)
+        self.assertTrue(message.startswith("모든 Gemini 모델 호출 실패\ngemini-3.8-flash: bad request"), message)
+        self.assertEqual(message.count("\n"), 4)                      # 모델마다 한 줄(4개) — 형식은 그대로
+
+    def test_the_real_key_is_replaced_even_when_no_pattern_matches_it(self):
+        message, out = self.run_all_models_failing(f"credential {self.REAL_KEY} rejected", key=self.REAL_KEY)
+        self.assertNotIn(self.REAL_KEY, message)
+        self.assertNotIn(self.REAL_KEY, out)
+        self.assertIn("gemini-3.8-flash: credential *** rejected", message)
+
+    def test_without_a_secret_the_error_text_is_exactly_the_old_one(self):
+        message, _ = self.run_all_models_failing("plain failure text")
+        self.assertEqual(message, "모든 Gemini 모델 호출 실패\n" + "\n".join(f"{m}: plain failure text" for m in g.MODEL_CANDIDATES))
+
+    def test_the_final_failure_line_is_masked(self):
+        for text, key in ((f"요청 실패 {FAKE_KEY} / key={FAKE_TOKEN}", None), (f"요청 실패 {self.REAL_KEY}", self.REAL_KEY)):
+            def boom(text=text):
+                raise ValueError(text)
+            out = io.StringIO()
+            with mock.patch.object(g, "main", boom), mock.patch.object(g, "API_KEY", key), contextlib.redirect_stdout(out):
+                with self.assertRaises(ValueError):
+                    g.run_cli()
+            shown = out.getvalue()
+            for secret in (FAKE_KEY, FAKE_TOKEN, self.REAL_KEY):
+                self.assertNotIn(secret, shown)
+            self.assertIn("작업 실패: ValueError: 요청 실패 ***", shown)
+
+    def test_the_final_failure_line_is_still_cut_at_600_after_masking(self):
+        def boom():
+            raise ValueError("가" * 2000)
+        out = io.StringIO()
+        with mock.patch.object(g, "main", boom), contextlib.redirect_stdout(out):
+            with self.assertRaises(ValueError):
+                g.run_cli()
+        line = next(line for line in out.getvalue().splitlines() if line.startswith("작업 실패:"))
+        self.assertEqual(len(line), len("작업 실패: ValueError: ") + 600)
+
+    def test_the_zero_count_line_is_part_of_the_usage_lines(self):
+        self.assertEqual(g.usage_lines(), ["Gemini 호출: 0회(실패 0회)"])
+        g.GEMINI_CALLS.update(attempts=2, failed=1)
+        self.log.failure("m", 1, RuntimeError("x"))
+        self.assertEqual(g.usage_lines()[0], "Gemini 호출: 2회(실패 1회)")
+        self.assertEqual(g.usage_lines()[1], "Gemini 실패 내역: 기타 1회")
 
 
 if __name__ == "__main__":

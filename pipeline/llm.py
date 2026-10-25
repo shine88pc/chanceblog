@@ -6,7 +6,8 @@
 호출 기록(CallLog): 무료 한도는 프로젝트 단위라 Chance·Blogger·이슈 수정·수동 실행이 한 통을 나눠 쓴다. 실제 소비는 AI Studio 화면에서만
 보이므로, 요청 한 번마다 요청 모델·응답 모델(modelVersion)·결과 종류(성공/429/5xx/빈 응답/기타)·소요 시간·토큰 사용량을 메모리에 쌓고
 로그 한 줄(`[GEMINI] ...`)로 남긴다. 실행 요약은 이 기록을 접어 쓴다. 장부 파일·커밋은 만들지 않는다(후속 작업).
-기록은 호출의 동작(재시도·폴백·반환값·예외)을 바꾸지 않는다 — 측정 전용이다.
+기록은 호출의 동작(재시도·폴백·반환값·예외)을 바꾸지 않는다 — 측정 전용이다. 기록하다 어떤 Exception 이 나도(응답·오류 객체의 깨진 속성,
+막힌 로그 출력) 호출 결과는 그대로이고 기록만 줄어든다(KeyboardInterrupt·SystemExit 는 그대로 지나간다).
 """
 import contextlib
 import enum
@@ -36,6 +37,22 @@ def mask(text):
     return out
 
 
+_MIN_SECRET_LEN = 6   # 글자 그대로 바꿀 값의 최소 길이: 이보다 짧으면 일반 낱말과 겹쳐 엉뚱한 곳이 가려진다(실제 키는 훨씬 길다)
+_PROJECT_ID_RX = re.compile(r"(project_number:|projects/)\d+", re.IGNORECASE)   # 구글 429·인증 오류 본문의 프로젝트 번호
+
+
+def scrub(text, secrets=()):
+    """호출 기록(로그 줄·실행 요약)에 쓰는 글에서 비밀을 가린다: 비밀 모양 패턴(mask) + 프로젝트 번호(`project_number:123…`·`projects/123…`, 숫자만)
+    + 이 실행이 가진 실제 값(secrets, 예: 넘겨 받은 API 키)을 글자 그대로. 패턴에 안 걸리는 모양의 키도 이 실행의 키라면 가린다.
+    호출의 반환값·예외 문구에는 쓰지 않는다(그쪽은 mask 그대로 — 동작 불변). 공용 비밀 패턴(secret_patterns)은 건드리지 않는다."""
+    out = _PROJECT_ID_RX.sub(lambda match: match.group(1) + "***", mask(text))
+    for value in secrets or ():
+        value = _safe_str(value) if value else ""
+        if len(value) >= _MIN_SECRET_LEN:
+            out = out.replace(value, "***")
+    return out
+
+
 def _is_transient(exc):
     code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
     if code in (429, 500, 502, 503, 504):
@@ -55,10 +72,14 @@ OUTCOME_EMPTY = "empty"          # 응답은 왔지만 텍스트가 비어 있�
 OUTCOME_OTHER = "other"          # 그 밖의 실패(인증·모델 없음·네트워크·타임아웃 …)
 # 실패 한 건을 로그에 남기는 최대 길이. 예전에는 200~300자로 잘려 429 본문의 한도 구분 필드와 재시도 대기 시간(retryDelay)이 사라졌다.
 FAILURE_DETAIL_LIMIT = 600
-# 구글 API 오류 본문(QuotaFailure·RetryInfo)에서 일/분 한도 구분과 재시도 대기 시간이 담기는 필드 이름(중요한 순서). 실제 모양은 관측해서
-# 확정하므로 찾지 못해도 본문 일부는 그대로 남는다.
+# 구글 API 오류 본문(QuotaFailure·RetryInfo)에서 일/분 한도 구분과 재시도 대기 시간이 담기는 필드 이름. 실제 모양은 관측해서 확정하므로
+# 찾지 못해도 본문 일부는 그대로 남는다. 실제 429 는 한도 위반이 3개까지 나오고(분당 토큰 → 분당 요청 → 일 요청 순이 보고됐다) 일 한도는
+# 마지막에 올 수 있어, 키마다 5개까지 보이고 일 한도 id(`…PerDay…`)가 맨 앞에 온다(2개로 자르면 일 한도 id 가 사라졌다).
 _HINT_KEYS = ("quotaId", "retryDelay", "quotaMetric")
-_HINT_PER_KEY = 2
+_HINT_PER_KEY = 5            # 키마다 로그에 보이는 값의 수
+_HINT_SCAN_MAX = 20          # 키마다 본문에서 읽어 두는 서로 다른 값의 수(그중에서 순서를 정해 _HINT_PER_KEY 개를 보인다)
+_DAY_QUOTA_MARK = "perday"   # quotaId 에 이 글자가 있으면 일 한도(예: GenerateRequestsPerDayPerProjectPerModel-FreeTier). 대소문자는 가리지 않는다
+PARTIAL_DETAIL = "(기록 일부 실패)"   # 기록 만들기가 도중에 실패해 최소 기록만 남겼을 때의 detail
 _LEADING_CODE_RX = re.compile(r"^\s*(\d{3})\b")
 
 
@@ -77,7 +98,7 @@ def _field(obj, name):
         return obj.get(name)
     try:
         return getattr(obj, name, None)
-    except (LookupError, TypeError, ValueError):  # 속성을 읽다가 예외를 내는 이상한 객체(AttributeError 는 getattr 이 처리한다)
+    except Exception:  # noqa: BLE001 - 속성을 읽다가 예외를 내는 이상한 객체(AttributeError 는 getattr 이 처리한다). 그 칸만 비운다
         return None
 
 
@@ -111,8 +132,9 @@ def classify_failure(exc):
     return OUTCOME_OTHER
 
 
-def _collect_hints(node, found, depth=0):
-    """오류 본문(details)을 훑어 _HINT_KEYS 이름의 값을 found(딕셔너리: 이름 → 값 목록)에 모은다(이름마다 중복 제외 최대 _HINT_PER_KEY개)."""
+def _collect_hints(node, found, secrets=(), depth=0):
+    """오류 본문(details)을 훑어 _HINT_KEYS 이름의 값을 found(딕셔너리: 이름 → 값 목록)에 모은다(이름마다 중복 제외 최대 _HINT_SCAN_MAX개).
+    값은 비밀을 먼저 가린 다음 80자로 자른다 — 자르고 가리면 잘린 키 조각이 비밀 패턴에 걸리지 않아 그대로 남는다."""
     if depth > 8:
         return
     if isinstance(node, dict):
@@ -124,11 +146,23 @@ def _collect_hints(node, found, depth=0):
     for key, value in children:
         if key in _HINT_KEYS and isinstance(value, (str, int, float)) and not isinstance(value, bool):
             values = found.setdefault(key, [])
-            shown = one_line(value, 80)
-            if shown not in values and len(values) < _HINT_PER_KEY:
+            shown = one_line(scrub(value, secrets), 80)
+            if shown not in values and len(values) < _HINT_SCAN_MAX:
                 values.append(shown)
         else:
-            _collect_hints(value, found, depth + 1)
+            _collect_hints(value, found, secrets, depth + 1)
+
+
+def _hint_parts(found):
+    """`키=값` 조각을 중요한 순서로: 일 한도 quotaId(…PerDay…) → 재시도 대기(retryDelay) → 나머지 quotaId → quotaMetric.
+    이슈 수정 러너는 이 줄을 300자로 자르므로, 일 한도 id 와 재시도 대기가 앞에 와야 위반이 여럿인 429 에서도 남는다."""
+    ids = found.get("quotaId", [])
+    day = [value for value in ids if _DAY_QUOTA_MARK in value.lower()][:_HINT_PER_KEY]
+    other = [value for value in ids if _DAY_QUOTA_MARK not in value.lower()][:_HINT_PER_KEY - len(day)]
+    return ([f"quotaId={value}" for value in day]
+            + [f"retryDelay={value}" for value in found.get("retryDelay", [])[:_HINT_PER_KEY]]
+            + [f"quotaId={value}" for value in other]
+            + [f"quotaMetric={value}" for value in found.get("quotaMetric", [])[:_HINT_PER_KEY]])
 
 
 def _head_tail(text, limit):
@@ -139,9 +173,10 @@ def _head_tail(text, limit):
     return text[:limit - tail - 3].rstrip() + " … " + text[-tail:].lstrip()
 
 
-def failure_detail(exc, limit=FAILURE_DETAIL_LIMIT):
+def failure_detail(exc, limit=FAILURE_DETAIL_LIMIT, secrets=()):
     """실패 한 건의 로그용 설명: `예외이름 code=429 status=RESOURCE_EXHAUSTED quotaId=… retryDelay=… | 본문`.
-    비밀은 가리고(mask) 한 줄로 접으며(one_line, `::`·`##[` 무력화) limit 자 안으로 줄인다. 코드·상태·한도 구분 필드는 맨 앞에 두어 잘리지 않는다."""
+    비밀은 먼저 가리고(scrub: 비밀 패턴·프로젝트 번호·secrets 의 실제 값) 한 줄로 접으며(one_line, `::`·`##[` 무력화) limit 자 안으로 줄인다.
+    코드·상태·한도 구분 필드는 맨 앞에 두어(`_hint_parts` 의 순서) 잘리지 않는다."""
     head = [type(exc).__name__]
     code, status = failure_code(exc), failure_status(exc)
     if code is not None:
@@ -149,10 +184,9 @@ def failure_detail(exc, limit=FAILURE_DETAIL_LIMIT):
     if status:
         head.append(f"status={status}")
     found = {}
-    _collect_hints(_field(exc, "details"), found)
-    hints = [f"{key}={value}" for key in _HINT_KEYS for value in found.get(key, [])]
-    prefix = one_line(mask(" ".join(head + hints)), limit * 3 // 5)
-    body = one_line(mask(_safe_str(exc)), 100000)   # 여기서는 접기만 한다(길이는 아래에서 앞·뒤를 남기며 줄인다)
+    _collect_hints(_field(exc, "details"), found, secrets)
+    prefix = one_line(scrub(" ".join(head + _hint_parts(found)), secrets), limit * 3 // 5)
+    body = one_line(scrub(_safe_str(exc), secrets), 100000)   # 여기서는 접기만 한다(길이는 아래에서 앞·뒤를 남기며 줄인다)
     return f"{prefix} | {_head_tail(body, limit - len(prefix) - 3)}"
 
 
@@ -174,7 +208,7 @@ def empty_detail(response):
         text = _enum_text(value)
         if text:
             parts.append(f"{label}={text}")
-    return one_line(" ".join(parts), 120)
+    return one_line(mask(" ".join(parts)), 120)
 
 
 def served_model(response):
@@ -182,7 +216,7 @@ def served_model(response):
     for name in ("model_version", "modelVersion"):
         value = _field(response, name)
         if isinstance(value, str) and value.strip():
-            return one_line(value, 80)
+            return one_line(mask(value), 80)
     return ""
 
 
@@ -215,8 +249,8 @@ class CallRecord:
 
 
 def _token(value, limit=60):
-    """로그 한 줄의 key=value 칸에 넣을 공백 없는 값(외부·설정 유래 문자열이라 한 줄로 접는다)."""
-    return re.sub(r"\s+", "_", one_line(value, limit)) or "-"
+    """로그 한 줄의 key=value 칸에 넣을 공백 없는 값(외부·설정 유래 문자열이라 비밀을 먼저 가리고 한 줄로 접는다)."""
+    return re.sub(r"\s+", "_", one_line(mask("" if value is None else value), limit)) or "-"
 
 
 def call_line(rec):
@@ -235,9 +269,18 @@ def call_line(rec):
 class CallLog:
     """한 실행의 Gemini 요청 기록(메모리). 로그 한 줄씩 남기고 실행 요약에서 접어 쓴다. 장부 파일은 만들지 않는다."""
 
-    def __init__(self, label="", out=None, purpose=""):
+    def __init__(self, label="", out=None, purpose="", secrets=()):
         self.label, self.out, self.purpose = label, out, purpose
         self.records = []
+        self.secrets = []           # 이 실행이 가진 실제 비밀 값(API 키 등): 로그·요약에서 글자 그대로 가린다(scrub)
+        for value in secrets or ():
+            self.add_secret(value)
+
+    def add_secret(self, value):
+        """로그·요약에서 글자 그대로 가릴 값을 더한다(6자 미만·빈 값·이미 있는 값은 무시)."""
+        value = _safe_str(value) if value else ""
+        if len(value) >= _MIN_SECRET_LEN and value not in self.secrets:
+            self.secrets.append(value)
 
     def configure(self, label=None, out=None, purpose=None):
         """호출 객체를 만든 뒤 어느 블로그·용도의 기록인지와 로그를 어디로 보낼지(out)를 정한다."""
@@ -265,15 +308,38 @@ class CallLog:
     def failed(self):
         return sum(1 for r in self.records if r.outcome != OUTCOME_OK)
 
-    def add(self, model, outcome, seconds, response=None, exc=None):
+    def _record(self, model, outcome, seconds, response, exc):
         tokens = token_usage(response)
-        detail = failure_detail(exc) if exc is not None else (empty_detail(response) if outcome == OUTCOME_EMPTY else "")
-        rec = CallRecord(label=self.label, purpose=self.purpose, model=_safe_str(model), served_model=served_model(response),
-                         outcome=outcome, seconds=max(float(seconds), 0.0), prompt_tokens=tokens[0],
-                         candidate_tokens=tokens[1], total_tokens=tokens[2], detail=detail)
+        detail = (failure_detail(exc, secrets=self.secrets) if exc is not None
+                  else (scrub(empty_detail(response), self.secrets) if outcome == OUTCOME_EMPTY else ""))
+        return CallRecord(label=scrub(self.label, self.secrets), purpose=scrub(self.purpose, self.secrets),
+                          model=scrub(_safe_str(model), self.secrets), served_model=scrub(served_model(response), self.secrets),
+                          outcome=outcome, seconds=max(float(seconds), 0.0), prompt_tokens=tokens[0],
+                          candidate_tokens=tokens[1], total_tokens=tokens[2], detail=detail)
+
+    def _minimal_record(self, model, outcome, seconds):
+        """기록을 만들다 실패했을 때도 요청 수는 세어야 하므로 확실히 만들어지는 칸만 채운다."""
+        try:
+            seconds = max(float(seconds), 0.0)
+        except Exception:  # noqa: BLE001 - 숫자가 아닌 값
+            seconds = 0.0
+        return CallRecord(label=_safe_str(self.label), purpose=_safe_str(self.purpose), model=_safe_str(model), served_model="",
+                          outcome=outcome, seconds=seconds, detail=PARTIAL_DETAIL)
+
+    def add(self, model, outcome, seconds, response=None, exc=None):
+        """요청 한 건을 기록하고 로그 한 줄을 낸다(만든 기록을 돌려준다). 기록은 측정 전용이라 여기서 나는 어떤 Exception 도 호출 결과를 바꾸지
+        않는다: 응답·오류 객체의 속성이 깨져 있으면 그 칸만, 기록 만들기 자체가 실패하면 최소 기록만 남기고, 로그 출력(out)이 막혀도
+        (BrokenPipeError·UnicodeEncodeError …) 기록은 남는다. KeyboardInterrupt·SystemExit 는 Exception 이 아니라 그대로 지나간다."""
+        try:
+            rec = self._record(model, outcome, seconds, response, exc)
+        except Exception:  # noqa: BLE001
+            rec = self._minimal_record(model, outcome, seconds)
         self.records.append(rec)
-        if self.out is not None:
-            self.out(call_line(rec))
+        try:
+            if self.out is not None:
+                self.out(call_line(rec))
+        except Exception:  # noqa: BLE001
+            pass
         return rec
 
     def success(self, model, seconds, response=None):
@@ -283,7 +349,11 @@ class CallLog:
         return self.add(model, OUTCOME_EMPTY, seconds, response=response)
 
     def failure(self, model, seconds, exc):
-        return self.add(model, classify_failure(exc), seconds, exc=exc)
+        try:
+            outcome = classify_failure(exc)
+        except Exception:  # noqa: BLE001 - 분류가 실패해도 요청은 센다
+            outcome = OUTCOME_OTHER
+        return self.add(model, outcome, seconds, exc=exc)
 
     def detail_lines(self):
         """실행 요약에 접어 쓰는 보충 줄(호출이 없으면 빈 목록): 실패 종류별 횟수 · 요청→응답 모델 · 토큰 합계 · 용도별 횟수."""
@@ -327,6 +397,7 @@ def make_gemini_llm(api_key, models, max_retries=2, sleep=time.sleep, client_fac
     """(prompt) -> (text, model) 을 돌려주는 호출 객체를 만든다. 요청별 기록은 호출 객체의 call_log(CallLog)에 쌓인다."""
     holder = {}
     log = CallLog() if log is None else log
+    log.add_secret(api_key)   # 이 키는 로그 줄·요약 어디에도 글자 그대로 나가지 않는다(패턴에 안 걸리는 모양이어도)
 
     def client():
         if "c" not in holder:

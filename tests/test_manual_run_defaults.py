@@ -10,6 +10,7 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -108,6 +109,21 @@ class ChanceWorkflowDefaultsTest(unittest.TestCase):
             description = inputs["real_ai"]["description"]
             for fragment in ("실제 Gemini", "무료 한도", "기본은 꺼짐", "가짜 AI"):
                 self.assertIn(fragment, description, wf)
+
+    def test_input_descriptions_say_that_practice_runs_still_search_unsplash(self):
+        """독립 검증 V-01: 연습 실행도 Unsplash 이미지 검색은 실제로 한다(UNSPLASH_ACCESS_KEY 는 항상 넘어간다). 그 사실과 한도를 나눠 쓴다는 것을
+        입력 설명이 알려야 한다 — 'Gemini 한도를 쓰지 않는다'만 읽으면 연습이 아무 한도도 안 쓰는 것으로 오해한다."""
+        for wf in CHANCE_WORKFLOWS:
+            description = load(wf)["on"]["workflow_dispatch"]["inputs"]["real_ai"]["description"]
+            self.assertIn("연습도 Unsplash 이미지 검색은 실제로 합니다", description, wf)
+            self.assertIn("시간당 한도를 정기 글과 나눠 씁니다", description, wf)
+
+    def test_the_practice_run_still_hands_over_the_unsplash_key_so_the_description_is_true(self):
+        for wf in CHANCE_WORKFLOWS:
+            for inputs in ({"dry_run": True, "real_ai": False}, {"dry_run": True, "real_ai": True}, {"dry_run": False}):
+                env = generator_step(wf)["env"]
+                self.assertEqual(value_of(env["UNSPLASH_ACCESS_KEY"], "workflow_dispatch", inputs,
+                                          secrets={"UNSPLASH_ACCESS_KEY": "fake-unsplash"}), "fake-unsplash", (wf, inputs))
 
     def test_run_names_show_whether_the_practice_run_used_the_real_ai(self):
         self.assertEqual(render(load("chanceblog.yml")["run-name"], context("workflow_dispatch", {"dry_run": True, "real_ai": True})),
@@ -224,6 +240,21 @@ class StubPracticeFlowTest(GenerationBase):
         self.assertIn("- AI 응답: 실제 Gemini 호출 — 연습 실행이지만 무료 한도를 씁니다", real_text)
         self.assertNotIn("가짜(스텁)", real_text)
 
+    def test_a_practice_run_summary_does_not_read_like_a_publication(self):
+        """독립 검증 V-12: 연습 실행은 아무것도 저장하지 않는데 `결과: PUBLISHED — 글을 만들었습니다`로 보이면 발행된 것처럼 읽힌다."""
+        report = {"outcome": "PUBLISHED", "title": "연습 글", "paths": ["_posts/a.md"], "lanes": []}
+        with mock.patch.object(g, "DRY_RUN", True):
+            practice = g.render_run_summary("workflow_dispatch", at(10, 12), None, dict(report))
+        self.assertIn("- 결과: **PUBLISHED** — 연습으로 글을 만들어 봤습니다(저장하지 않았습니다)", practice)
+        self.assertNotIn("글을 만들었습니다", practice)
+        with mock.patch.object(g, "DRY_RUN", False):
+            real = g.render_run_summary("workflow_dispatch", at(10, 12), None, dict(report))
+        self.assertIn("- 결과: **PUBLISHED** — 글을 만들었습니다", real)
+        self.assertNotIn("연습으로", real)
+        with mock.patch.object(g, "DRY_RUN", True):                   # 다른 결과의 문구는 연습이어도 그대로다
+            empty = g.render_run_summary("workflow_dispatch", at(10, 12), None, {"outcome": "ALL_REJECTED", "lanes": []})
+        self.assertIn(g.OUTCOME_TEXT["ALL_REJECTED"], empty)
+
     def test_a_real_publish_summary_has_no_ai_mode_line(self):
         with mock.patch.object(g, "DRY_RUN", False):
             text = g.render_run_summary("workflow_dispatch", at(10, 12), None, {"outcome": "ALL_LANES_EMPTY", "lanes": []})
@@ -283,10 +314,19 @@ class FixImagesCapTest(unittest.TestCase):
         self.assertNotIn("다음 실행", out)
 
     def test_one_over_the_cap_defers_exactly_one(self):
-        summary, _ = self.run_fix(21)
+        summary, out = self.run_fix(21)
         self.assertEqual(len(self.repairs), 20)
         self.assertIn("나머지 1건은 다음 실행으로 넘김", summary)
         self.assertIn("문제 21건 중 20건 처리", summary)
+        self.assertIn("한 번에 최대 20건만 처리합니다. 나머지 1건은 다음 실행에서 처리합니다.", out)     # 독립 검증 XN10: 이월 1건일 때의 로그 줄
+
+    def test_far_over_the_cap_still_processes_twenty_and_defers_the_rest(self):
+        """독립 검증 XN11: 상한을 크게 넘어도(100건) 처리는 20건이고 나머지는 세어서 알린다."""
+        summary, out = self.run_fix(100)
+        self.assertEqual(self.repairs, [f"p{i:02d}.md" for i in range(20)])
+        self.assertEqual(summary, "이미지 점검: 완료: 문제 100건 중 20건 처리 / 교체 20건 / 건너뜀 0건 / "
+                                  "나머지 80건은 다음 실행으로 넘김(한 번에 최대 20건)")
+        self.assertIn("한 번에 최대 20건만 처리합니다. 나머지 80건은 다음 실행에서 처리합니다.", out)
 
     def test_below_the_cap_the_old_summary_text_is_unchanged(self):
         summary, _ = self.run_fix(2)
@@ -408,6 +448,17 @@ class ManualOverCapTest(unittest.TestCase):
         self.assertIn("이미 3건이 게시되어 하루 상한(2건)", out)
         self.assertEqual(len(self.generated), 1)
 
+    def test_today_is_the_korean_date_even_right_after_midnight(self):
+        """독립 검증 GN17·XN01: 한국 시각 00:00~08:59 는 UTC 로는 전날이다. 오늘 글을 세는 날짜가 UTC 날짜면 이 시간대에 경고가 틀린다."""
+        with mock.patch.object(g, "now_kst", return_value=at(0, 30)):
+            value, out = self.run_main(self.today(2))
+            self.assertIn("오늘(2026-10-25) 이미 2건이 게시되어 하루 상한(2건)", out)
+            value, out = self.run_main([{"date": "2026-10-24", "topic": f"어제 {i}", "slot": None} for i in range(3)])     # 어제 글은 오늘이 아니다
+            self.assertNotIn("::warning::", out)
+        with mock.patch.object(g, "now_kst", return_value=at(23, 59)):
+            value, out = self.run_main(self.today(2))
+            self.assertIn("오늘(2026-10-25) 이미 2건이", out)
+
     def test_below_the_cap_there_is_no_warning_and_no_summary_line(self):
         value, out = self.run_main(self.today(1))
         self.assertNotIn("::warning::", out)
@@ -473,6 +524,9 @@ class BloggerManualDefaultsTest(RunBase):
         description = inputs["dry_run"]["description"]
         for fragment in ("기본 켜짐", "가짜 AI 응답", "호출하지 않", "체크를 풀면", "초안", "커밋", "하루 상한"):
             self.assertIn(fragment, description)
+        # 독립 검증 BL07: 낱말이 아니라 뜻을 고정한다 — 연습은 하루 상한을 쓰지 않고, 체크를 풀면 쓴다(앞뒤가 뒤바뀌면 운영자가 상한을 소진한다)
+        self.assertIn("파일 저장·게시·하루 상한 소진 없이 로그만 남깁니다", description)
+        self.assertIn("체크를 풀면 실제 Gemini로 글을 만들어 초안을 저장소에 커밋하고 그날 하루 상한을 씁니다", description)
 
     def test_the_default_value_reaches_the_runner_as_a_dry_run_and_scheduled_runs_never_are(self):
         default = self.workflow_inputs()["dry_run"]["default"]
@@ -593,6 +647,27 @@ class IssueEditPauseTest(unittest.TestCase):
         res = self.go(self.literal_issue())
         self.assertIn(load("issue-edit.yml")["name"], res.comment)
 
+    def test_the_pause_comment_says_what_was_not_done_and_how_to_run_it_again(self):
+        """독립 검증 V-04·RN15: 수동 실행은 `연습 실행`이 기본 켜짐이라, 정지를 풀고 그냥 다시 실행하면 연습만 돌아 PR 이 안 생긴다.
+        코멘트가 그 체크를 풀라고 말해야 하고(그 입력이 실제로 그 이름인지도 확인), 안 한 일을 정확히 말해야 한다."""
+        res = self.go(self.literal_issue())
+        self.assertIn("저장소 변수 `PIPELINE_PAUSE` 가 켜져 있어 이 요청을 처리하지 않았습니다", res.comment)
+        self.assertIn("(AI·이미지 검색도 부르지 않았고 저장소는 변경되지 않았습니다)", res.comment)
+        self.assertIn("변수를 지운 뒤 Actions 의 `이슈 수정 요청 처리(수정안 PR 만들기)` 에서 이 이슈 번호로, "
+                      "`연습 실행` 체크를 풀고 다시 실행해 주세요.", res.comment)
+        description = load("issue-edit.yml")["on"]["workflow_dispatch"]["inputs"]["dry_run"]["description"]
+        self.assertTrue(description.startswith("연습 실행"), description)          # 코멘트가 가리키는 입력의 이름
+
+    def test_an_already_processed_issue_is_a_duplicate_even_while_paused(self):
+        """독립 검증 RN12: 이미 처리한 이슈를 정지 중에 다시 실행하면 '일시정지 중'이 아니라 '이미 처리한 이슈'다(중복 확인이 정지 확인보다 먼저)."""
+        res = self.go(self.literal_issue(), remote_refs=["0123456789abcdef0123456789abcdef01234567\trefs/heads/issue-edit/12-about-r5"])
+        self.assertEqual(res.status, "duplicate")
+        self.assertIn("이미 처리한 이슈입니다", res.comment)
+        labeled = self.go(issue(page_body(before=OLD_SENTENCE, after=NEW_SENTENCE),
+                                labels=("blog-control", "edit:page", "issue-edit-done")), remote_refs=[])
+        self.assertEqual(labeled.status, "duplicate")
+        self.assertEqual(self.go(self.literal_issue(), remote_refs=[]).status, "paused")      # 처리한 적이 없으면 정지가 먼저 알린다
+
     def test_write_outputs_has_the_status_the_workflow_reads(self):
         res = self.go(self.literal_issue())
         out = self.io / "out"
@@ -662,7 +737,9 @@ class UntouchedPathsTest(unittest.TestCase):
     def test_blogger_keeps_its_cron_and_matrix_flow(self):
         wf = load("blogger.yml")
         self.assertEqual(wf["on"]["schedule"], [{"cron": "0 2 * * *"}])
-        self.assertEqual(list(wf["on"]["workflow_dispatch"]["inputs"]), ["blog", "topic", "dry_run", "publish"])
+        # 독립 검증 V-06: 목록 전체가 아니라 필수 입력을 포함하는지만 본다 — 인증 점검 입력(auth_check) 같은 새 입력이 더해져도 이 시험이 깨지지 않게
+        for name in ("blog", "topic", "dry_run", "publish"):
+            self.assertIn(name, wf["on"]["workflow_dispatch"]["inputs"])
 
     def test_pause_variable_is_still_passed_to_the_other_workflows(self):
         for wf in ("chanceblog.yml", "chance-fix-images.yml"):
@@ -672,6 +749,230 @@ class UntouchedPathsTest(unittest.TestCase):
     def test_the_stub_llm_still_answers_without_a_network(self):
         text, model = stub_llm("주제: 테스트 주제입니다")
         self.assertEqual(model, "stub")
+
+
+# ----------------------------------------------------------------------------
+# 7) 독립 검증 V-07: 식과 `run:` 스크립트를 직접 고정한다(정기 실행은 입력과 무관하게 게시·커밋 경로 그대로)
+# ----------------------------------------------------------------------------
+class BloggerPublishSwitchTest(unittest.TestCase):
+    """BL09·BL10: 정기 실행은 BLOGGER_PUBLISH 를 비워 레지스트리 mode 를 따르고, 수동 실행은 체크했을 때만 on, 아니면 off 다."""
+
+    def publish_value(self, event, publish=None):
+        step = next(s for s in load("blogger.yml")["jobs"]["generate"]["steps"] if "BLOGGER_PUBLISH" in s.get("env", {}))
+        event_inputs = None if publish is None else {"publish": publish}
+        return value_of(step["env"]["BLOGGER_PUBLISH"], event, event_inputs=event_inputs)
+
+    def test_a_scheduled_run_leaves_it_empty_so_the_registry_mode_decides(self):
+        self.assertEqual(self.publish_value("schedule"), "")
+        self.assertEqual(self.publish_value("schedule", "true"), "")        # 정기 실행에는 입력이 없지만 있어도 무시한다(모드는 레지스트리가 정한다)
+        self.assertEqual(self.publish_value("schedule", "false"), "")
+
+    def test_a_manual_run_publishes_only_when_the_box_is_checked(self):
+        self.assertEqual(self.publish_value("workflow_dispatch", "true"), "on")
+        self.assertEqual(self.publish_value("workflow_dispatch", "false"), "off")
+        self.assertEqual(self.publish_value("workflow_dispatch"), "off")     # 입력이 없어도(API 로 부른 경우) 게시하지 않는다
+        self.assertEqual(self.publish_value("workflow_dispatch", ""), "off")
+
+
+SHIM = """#!/usr/bin/env bash
+echo "$(basename "$0") $*" >> "$STEP_CALLS"
+if [ "$(basename "$0")" = "git" ] && [ "$1" = "diff" ]; then exit 1; fi
+if [ "$(basename "$0")" = "gh" ] && [ "$1" = "pr" ] && [ "$2" = "create" ]; then echo "https://example.invalid/pr/1"; fi
+exit 0
+"""
+
+
+def find_bash():
+    """워크플로의 `run:` 스크립트를 실제로 돌릴 bash. Windows 에서는 WSL 런처(System32 의 bash.exe)가 아니라 Git 의 bash 를 찾는다. 없으면 None."""
+    candidates = [shutil.which("bash")]
+    if os.name == "nt":
+        candidates += [r"C:\Program Files\Git\usr\bin\bash.exe", r"C:\Program Files\Git\bin\bash.exe"]
+    for path in candidates:
+        if path and os.path.exists(path) and "system32" not in path.lower():
+            return path
+    return None
+
+
+BASH = find_bash()
+
+
+@unittest.skipUnless(BASH, "bash 가 필요합니다(CI 의 Linux 에서는 항상 실행됩니다)")
+class WorkflowStepScriptTest(unittest.TestCase):
+    """워크플로의 `run:` 스크립트를 가짜 git·gh·python 으로 실제 실행해 상태별로 어떤 명령이 불리는지 본다(GitHub·저장소에는 아무것도 쓰지 않는다)."""
+
+    def step(self, workflow, job, name):
+        return next(s for s in load(workflow)["jobs"][job]["steps"] if s.get("name") == name)
+
+    def run_script(self, script, env, files=None, dirs=()):
+        """(종료 코드, 부른 명령 목록, 표준 출력, 임시 폴더, 작업 폴더 안 파일들)을 돌려준다."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            work, bin_dir, out_dir = tmp / "work", tmp / "bin", tmp / "issue-edit"
+            for folder in (work, bin_dir, out_dir):
+                folder.mkdir()
+            for name in dirs:
+                (work / name).mkdir()
+            for name, text in (files or {}).items():
+                target = (out_dir if name.startswith("out/") else work) / name.removeprefix("out/")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(text, encoding="utf-8", newline="\n")
+            for name in ("git", "gh", "python"):
+                shim = bin_dir / name
+                shim.write_text(SHIM, encoding="utf-8", newline="\n")
+                shim.chmod(0o755)          # 실행 권한이 없으면 Linux 의 bash 는 PATH 에서 이 파일을 건너뛰고 진짜 git 을 부른다
+            calls = tmp / "calls.log"
+            calls.write_text("", encoding="utf-8")
+            full_env = {k: v for k, v in os.environ.items() if k not in ("DRY_RUN", "GITHUB_REF_NAME", "ISSUE_NUMBER")}
+            full_env.update({"STEP_CALLS": calls.as_posix(), "RUNNER_TEMP": tmp.as_posix(), **env})
+            # 가짜 명령 폴더를 bash 안에서 PATH 맨 앞에 둔다(Windows 의 Git bash 는 시작할 때 자기 git 을 PATH 앞에 끼워 넣으므로 환경 변수로는 부족하다)
+            prelude = 'export PATH="$(cd ../bin && pwd):$PATH"\n'
+            proc = subprocess.run([BASH, "-c", prelude + script], cwd=str(work), env=full_env, capture_output=True, text=True,
+                                  encoding="utf-8", timeout=120)
+            made = {p.name: p.read_text(encoding="utf-8") for p in out_dir.iterdir() if p.is_file()}
+            return proc.returncode, calls.read_text(encoding="utf-8").strip().splitlines(), proc.stdout, made
+
+    # --- Blogger: 변경 사항 커밋(BL06) ---
+    def commit_step(self, dry_run):
+        script = self.step("blogger.yml", "generate", "변경 사항 커밋")["run"]
+        env = {"BLOG_KEY": "blogger_macat", "HISTORY_FILE": "blogger_history.json", "CONTENT_DIR": "_blogger_drafts", "GITHUB_REF_NAME": "main"}
+        if dry_run is not None:
+            env["DRY_RUN"] = dry_run
+        return self.run_script(script, env, files={"blogger_history.json": "[]", "_blogger_drafts/a.md": "x"})
+
+    def test_a_dry_run_commits_and_pushes_nothing(self):
+        code, calls, out, _ = self.commit_step("true")
+        self.assertEqual((code, calls), (0, []))
+        self.assertIn("DRY_RUN — 커밋 생략", out)
+
+    def test_a_real_run_commits_and_pushes_to_the_branch_it_ran_on(self):
+        for dry_run in ("false", None, "", "TRUE", "1"):          # 정확히 'true' 만 연습이다(워크플로의 DRY_RUN 식은 'true'·'false' 만 만든다)
+            code, calls, out, _ = self.commit_step(dry_run)
+            self.assertEqual(code, 0, (dry_run, out))
+            self.assertEqual(calls[:2], ["git config user.name github-actions[bot]",
+                                         "git config user.email 41898282+github-actions[bot]@users.noreply.github.com"], dry_run)
+            self.assertIn("git add -- blogger_history.json", calls, dry_run)
+            self.assertIn("git add -- _blogger_drafts", calls, dry_run)
+            self.assertTrue(any(call.startswith("git commit -m ") and "[blogger_macat]" in call for call in calls), (dry_run, calls))
+            self.assertIn("git push origin HEAD:main", calls, dry_run)
+            self.assertNotIn("DRY_RUN", out, dry_run)
+
+    # --- 이슈 수정: 브랜치·커밋·PR 생성(IE04), 이슈에 결과 코멘트 ---
+    def issue_env(self):
+        return {"ISSUE_NUMBER": "12", "DRY_RUN": "false", "DEFAULT_BRANCH": "main", "GITHUB_REPOSITORY": "owner/repo", "GH_TOKEN": "FAKE"}
+
+    def issue_files(self, status, **extra):
+        files = {"out/status.txt": status + "\n", "out/comment.md": f"[{status}] 코멘트 본문\n", "out/branch.txt": "issue-edit/12-about-r5\n",
+                 "out/files.txt": "about.md\n", "out/commit_msg.txt": "msg\n", "out/pr_title.txt": "title\n", "out/pr_body.md": "body\n",
+                 "out/summary.md": "- 요약\n"}
+        files.update({"out/" + name: text for name, text in extra.items()})
+        return files
+
+    def test_only_a_status_ok_result_reaches_the_branch_commit_and_pr_step(self):
+        script = self.step("issue-edit.yml", "edit", "브랜치·커밋·PR 생성")["run"]
+        for status in ("paused", "rejected", "duplicate", "error", "ignored", "weird"):
+            code, calls, out, _ = self.run_script(script, self.issue_env(), files=self.issue_files(status))
+            self.assertEqual((code, calls), (0, []), status)
+            self.assertIn("수정안 없음 — PR 을 만들지 않습니다", out, status)
+
+    def test_a_status_ok_result_makes_the_branch_the_commit_the_push_and_the_pr(self):
+        script = self.step("issue-edit.yml", "edit", "브랜치·커밋·PR 생성")["run"]
+        code, calls, out, made = self.run_script(script, self.issue_env(), files=self.issue_files("ok"))
+        self.assertEqual(code, 0, out)
+        expected = ["git config user.name ", "git config user.email ", "git switch -c issue-edit/12-about-r5", "git add -- about.md",
+                    "python -m pipeline.edits.runner --verify-staged ", "git commit -F ", "git push origin issue-edit/12-about-r5",
+                    "gh pr create --base main --head issue-edit/12-about-r5 ", "gh workflow run guardrails.yml --ref issue-edit/12-about-r5"]
+        self.assertEqual(len(calls), len(expected), calls)
+        for call, prefix in zip(calls, expected):
+            self.assertTrue(call.startswith(prefix), (call, prefix))
+        self.assertEqual(made["pr_url.txt"].strip(), "https://example.invalid/pr/1")
+
+    def comment_step(self, status, **extra):
+        script = self.step("issue-edit.yml", "edit", "이슈에 결과 코멘트")["run"]
+        files = self.issue_files(status, **extra) if status is not None else {}
+        if status is None:                                      # 처리기가 죽어 status.txt 자체가 없는 경우
+            files = {"out/comment.md": "x\n"}
+        return self.run_script(script, self.issue_env(), files=files)
+
+    def test_the_four_comment_statuses_post_the_comment_file_as_it_is(self):
+        for status in ("paused", "rejected", "duplicate", "error"):
+            code, calls, out, made = self.comment_step(status)
+            self.assertEqual(code, 0, (status, out))
+            self.assertEqual(len(calls), 1, (status, calls))
+            self.assertTrue(calls[0].startswith("gh issue comment 12 --body-file "), calls[0])
+            self.assertEqual(made["final_comment.md"], f"[{status}] 코멘트 본문\n", status)
+            self.assertFalse(any("issue edit" in call for call in calls), status)           # 표식 라벨은 붙이지 않는다
+
+    def test_an_ignored_issue_gets_no_comment_and_a_missing_result_gets_the_failure_notice(self):
+        code, calls, out, _ = self.comment_step("ignored")
+        self.assertEqual((code, calls), (0, []))
+        self.assertIn("처리 대상이 아니어서 코멘트하지 않습니다.", out)
+        for status in ("weird", None):
+            code, calls, out, made = self.comment_step(status)
+            self.assertEqual(code, 0, (status, out))
+            self.assertEqual(len(calls), 1, (status, calls))
+            self.assertIn("처리 결과를 만들지 못했습니다", made["final_comment.md"], status)
+
+    def test_a_status_ok_result_comments_and_labels_the_issue_only_when_a_pr_or_compare_link_exists(self):
+        code, calls, out, made = self.comment_step("ok", **{"pr_url.txt": "https://example.invalid/pr/1\n"})
+        self.assertEqual(code, 0, out)
+        self.assertIn("수정안을 PR 로 만들었습니다", made["final_comment.md"])
+        self.assertIn("- PR: https://example.invalid/pr/1", made["final_comment.md"])
+        self.assertEqual([call.split(" --")[0] for call in calls], ["gh issue comment 12", "gh issue edit 12"])
+        self.assertTrue(calls[1].endswith("--add-label issue-edit-done"), calls[1])
+        code, calls, out, made = self.comment_step("ok", **{"compare_url.txt": "https://github.com/owner/repo/compare/main...x?expand=1\n"})
+        self.assertIn("수정 브랜치를 만들었습니다", made["final_comment.md"])
+        self.assertEqual(len(calls), 2)
+        code, calls, out, made = self.comment_step("ok")                 # 브랜치·PR 단계가 실패한 경우
+        self.assertIn("브랜치·PR 단계에서 실패했습니다", made["final_comment.md"])
+        self.assertEqual(len(calls), 1)                                  # 코멘트만 — 표식 라벨은 붙이지 않는다(다시 처리할 수 있게)
+
+
+# ----------------------------------------------------------------------------
+# 8) 독립 검증 V-03: 이제 Blogger 수동 실행은 `연습 실행`이 기본 켜짐이라 `publish` 만 안 체크하면 아무것도 저장되지 않는다 — 안내 문구가 그 사실을 따라간다
+# ----------------------------------------------------------------------------
+class ManualRunGuidanceTest(unittest.TestCase):
+    def lines(self, doc, needle):
+        return [line for line in (ROOT / doc).read_text(encoding="utf-8").splitlines() if needle in line]
+
+    def test_every_blogger_first_run_guidance_tells_to_uncheck_the_practice_run(self):
+        for doc, needle in (("HANDLER.md", "L3 초안 1건"), ("HANDLER.md", "`publish`를 체크하지 말고"),
+                            ("docs/ENGINEERING_GUIDE.md", "**L3 초안**"), ("docs/ARCHITECTURE.md", "`blog=<key>`")):
+            found = self.lines(doc, needle)
+            self.assertTrue(found, (doc, needle))
+            for line in found:
+                self.assertRegex(line, r"`연습 실행` 체크(를)? ?(풀|해제)", (doc, needle))
+
+    def test_the_architecture_first_run_row_does_not_depend_on_the_shape_of_the_publish_input(self):
+        """뒤에 병합될 draft-upload 가 `publish` 를 off/draft/publish 선택으로 바꿔도 이 문구가 틀리지 않게."""
+        row = self.lines("docs/ARCHITECTURE.md", "`blog=<key>`")[0]
+        self.assertNotIn("publish", row)
+
+    def test_the_docs_say_that_practice_runs_still_search_unsplash(self):
+        paragraph = next(line for line in self.lines("docs/ARCHITECTURE.md", "수동 실행의 기본값과 정지 스위치"))
+        register = next(line for line in self.lines("docs/DEFECT_REGISTER.md", "**D-51**"))
+        for text in (paragraph, register):
+            self.assertIn("Unsplash 이미지 검색은 실제로", text)
+            self.assertIn("시간당 한도", text)
+
+    def test_the_docs_state_the_known_limits_of_the_manual_run_defaults(self):
+        paragraph = next(line for line in self.lines("docs/ARCHITECTURE.md", "수동 실행의 기본값과 정지 스위치"))
+        register = next(line for line in self.lines("docs/DEFECT_REGISTER.md", "**D-54**"))
+        for text in (paragraph, register):
+            self.assertIn("하루 3편", text)                       # V-05: 슬롯은 수동 글을 세지 않아 09시 슬롯 글이 있는 날 낮의 수동 게시 뒤 18시에 또 만들어진다
+        for fragment in ("`gh label create --force` 4건", "굶김", "교체 0건 / 건너뜀 N건"):                # V-13
+            self.assertIn(fragment, paragraph)
+
+    def test_the_defect_register_checklist_matches_the_current_behaviour(self):
+        """V-02: 정지 시험의 기대 결과에 `::notice::`는 없다(로그 정책 #19) — 머리를 단 참고 줄이다. V-11: 이미지 교체도 Gemini 를 쓴다."""
+        text = (ROOT / "docs" / "DEFECT_REGISTER.md").read_text(encoding="utf-8")
+        row = next(line for line in text.splitlines() if not line.startswith("| **D-")      # 결함 행이 아니라 관측 체크리스트의 행
+                   and "PIPELINE_PAUSE=true" in line and "수정안 PR 만들기" in line and "일시정지 중" in line)
+        self.assertNotIn("::notice::", row)
+        self.assertIn("status=paused", row)
+        self.assertIn("issue=#", row)
+        d49 = next(line for line in text.splitlines() if line.startswith("| **D-49**"))
+        self.assertNotIn("이미지 교체는 Gemini를 쓰지 않는데", d49)
+        self.assertIn("make_image_queries", d49)
 
 
 if __name__ == "__main__":
