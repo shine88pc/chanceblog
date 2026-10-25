@@ -1,6 +1,7 @@
 """블로그 한 곳을 한 번 실행한다: 주제 선정 → 생성 → 게이트 → (게시 | Blogger 초안함 업로드 | 저장소 초안) → 이력 기록.
 
 사용: python -m pipeline.run --blog blogger_macat [--dry-run] [--publish auto|draft|publish|on|off] [--topic "..."]
+      python -m pipeline.run --blog blogger_macat --auth-check     # 글을 만들지 않고 인증만 점검(쓰기 없음)
 
 글을 어디까지 보내는지는 레지스트리 mode 와 BLOGGER_PUBLISH(수동 실행 입력)로 정해진다:
   mode auto  → 즉시 게시(posted)             mode draft → Blogger 초안함에 업로드(draft_uploaded)
@@ -21,6 +22,8 @@
                      draft = Blogger 초안함에 업로드(게시용 시크릿 필요, 하나도 없으면 파일만 저장)
                      publish(on·1·true·yes) = 즉시 게시(게시용 시크릿 필요, 없으면 종료 2)
   BLOGGER_TOPIC      주제 지정(수동 실행용)
+  BLOGGER_AUTH_CHECK 1 이면 --auth-check 와 같다(워크플로의 '인증 점검만 실행' 입력). 정지(mode off) 중에도, 연습 실행이 켜져 있어도
+                     실제로 점검한다(쓰기가 없다). 종료 코드: 0 통과 / 1 인증 만료·네트워크·API 오류 / 2 시크릿 없음·권한·주소 불일치
 """
 import argparse
 import json
@@ -65,6 +68,8 @@ def parse_args(argv=None):
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--publish", choices=["auto", "draft", "publish", "on", "off"], default=None)
     p.add_argument("--topic", default=None)
+    p.add_argument("--auth-check", action="store_true",
+                   help="글을 만들지 않고 Blogger 인증만 점검한다(토큰 갱신·블로그 조회·주소 일치, 쓰기 없음, Gemini 호출 0회)")
     return p.parse_args(argv)
 
 
@@ -171,9 +176,52 @@ def _auth_check_failed(out, environ, blog, record, code, detail):
     out(skip_line("AUTH_CHECK_FAILED", blog=blog["key"], reason=code, exit=exit_code))
     out(f"[{'설정' if exit_code == EXIT_CONFIG else '인프라'} 오류] 인증 점검 실패({code}): {one_line(detail)}")
     out(f"::error::[{blog['key']}] {sentence_for(code)}")
-    record({"status": "publish_failed", "topic": "", "reasons": [f"[{code}] {one_line(detail, 300)}"]})
+    if record is not None:  # 단독 점검(--auth-check)은 쓰기가 없으므로 이력을 남기지 않는다
+        record({"status": "publish_failed", "topic": "", "reasons": [f"[{code}] {one_line(detail, 300)}"]})
     _summarize(environ, blog, "AUTH_CHECK_FAILED", f"{label_for(code)}({code}) — {sentence_for(code)}")
     return exit_code
+
+
+def run_auth_check_only(out, environ, blog, publisher_factory, secret_values, dry):
+    """--auth-check: 글을 만들지 않고 인증만 점검한다(토큰 갱신 → blogs.get → 블로그 주소 일치). 쓰기·Gemini 호출·이력·초안이 없다.
+
+    종료 코드: 0 통과 / 1 인프라(인증 만료·네트워크·API 오류) / 2 설정(시크릿 없음·권한·주소 불일치).
+    정지(mode off) 중에도 점검한다(시크릿을 등록한 직후 mode 를 켜기 전에 확인해야 하므로). 연습 실행(DRY_RUN)이 켜져 있어도
+    쓰기가 없는 점검은 실제로 수행한다(점검 자체가 목적이다)."""
+    missing = [role for role in missing_secret_roles(blog, environ) if role != "llm_api_key"]
+    if missing:
+        names = ", ".join(blog["secrets"].get(role, role) for role in missing)
+        if len(missing) == len(PUBLISH_ROLES):
+            message = (f"인증 점검을 할 수 없습니다: 게시용 시크릿이 하나도 등록되어 있지 않습니다({names}). "
+                       "저장소 Settings > Secrets and variables > Actions 에 등록한 뒤 다시 실행하세요(.github/editorial/BLOGGER_API_SETUP.md).")
+            code_text = "시크릿 없음"
+        else:
+            message = (f"인증 점검을 할 수 없습니다: 게시용 시크릿이 일부만 등록되어 있습니다(없는 것: {names}). "
+                       f"{len(PUBLISH_ROLES)}종을 모두 등록하세요(저장소 Settings > Secrets and variables > Actions).")
+            code_text = "시크릿 일부 없음"
+        out(skip_line("SECRETS_MISSING", blog=blog["key"], missing=names.replace(" ", ""), check="auth"))
+        out(f"::error::[{blog['key']}] {message}")
+        _summarize(environ, blog, "SECRETS_MISSING", f"**{code_text}** — {message}")
+        return EXIT_CONFIG
+    if dry:
+        out(f"[{blog['key']}] 연습 실행(DRY_RUN)이 켜져 있지만 인증 점검은 쓰기가 없어 실제로 점검합니다.")
+    if blog["mode"] == "off":
+        out(f"[{blog['key']}] mode=off(정지 중)이지만 인증 점검은 쓰기가 없어 실행합니다.")
+    try:
+        publisher = (publisher_factory or default_publisher_factory)(blog, environ)
+        auth_check(publisher, blog["url"])
+    except PublishError as exc:
+        return _auth_check_failed(out, environ, blog, None, exc.code, redact(exc, secret_values))
+    except Exception as exc:  # noqa: BLE001 - 어댑터 밖의 예외(설치 누락 등)도 기록하고 멈춘다
+        return _auth_check_failed(out, environ, blog, None, "unexpected", f"{type(exc).__name__}: {redact(exc, secret_values)}")
+    out(f"[{blog['key']}] 인증 점검 통과: 토큰 갱신·블로그 조회·블로그 주소 일치(쓰기 없음).")
+    out(f"::notice::[{blog['key']}] 인증 점검 통과 — 토큰 갱신·블로그 조회·블로그 주소 일치를 확인했습니다(쓰기 없음, 글은 만들지 않았습니다).")
+    names = ", ".join(blog["secrets"].get(role, role) for role in PUBLISH_ROLES)
+    _write_summary(environ, f"### {blog['key']}\n"
+                            "- 결과: **AUTH_CHECK_OK** — 토큰 갱신·블로그 조회·블로그 주소 일치를 확인했습니다(쓰기 없음, 글은 만들지 않았습니다).\n"
+                            f"- 확인한 시크릿(이름만, 값은 출력하지 않음): {names}\n"
+                            f"- 레지스트리 mode: {blog['mode']}(점검은 mode와 무관하게 실행됩니다)")
+    return EXIT_OK
 
 
 def default_publisher_factory(blog, environ):
@@ -220,13 +268,18 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
             "Settings > Secrets and variables > Actions > Variables 에서 PIPELINE_PAUSE 를 지우세요.")
         _summarize(environ, blog, "PAUSED", "저장소 변수 PIPELINE_PAUSE 가 켜져 있습니다.")
         return EXIT_OK
-    if blog["mode"] == "off":
+    auth_only = args.auth_check or _flag(environ, "BLOGGER_AUTH_CHECK")  # 워크플로는 입력을 환경변수로만 넘긴다
+    if blog["mode"] == "off" and not auth_only:
         out(skip_line("MODE_OFF", blog=blog["key"]))
         out(f"[{blog['key']}] mode=off — 실행하지 않습니다.")
         out(f"::notice::[{blog['key']}] 레지스트리(pipeline/blogs.json)에서 mode=off 로 정지된 블로그라 이번 실행을 건너뜁니다. "
             "다시 켜려면 mode 를 draft 또는 auto 로 바꾸세요.")
         _summarize(environ, blog, "MODE_OFF", "레지스트리(pipeline/blogs.json)에서 mode=off 로 정지된 블로그입니다.")
         return EXIT_OK
+
+    if auth_only:  # 인증만 점검한다: 글 생성·게시 입력(BLOGGER_PUBLISH·topic)은 읽지 않고, 이력·초안·Gemini 도 건드리지 않는다
+        return run_auth_check_only(out, environ, blog, publisher_factory,
+                                   [value for value in resolve_secrets(blog, environ).values() if value], dry)
 
     policy = publish_policy(args.publish, environ)
     if policy is None:

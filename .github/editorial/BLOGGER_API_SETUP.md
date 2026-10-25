@@ -113,9 +113,10 @@ BLOGGER_REFRESH_TOKEN=...
 
 가장 쉬운 방법은 GitHub → Actions → `Blogger 글 자동 작성` → Run workflow입니다.
 
+- **`인증 점검만 실행` 체크(기본 꺼짐)**: 글을 만들지 않고(Gemini 호출 0회, 저장소 변경·커밋 없음) Blogger 인증만 확인합니다 — 토큰 갱신, 블로그 조회, 돌려준 블로그 주소가 `blogs.json`의 `url`과 같은지. **시크릿을 등록한 직후와 토큰을 새로 받은 직후에 1회 실행**하세요. 통과하면 요약에 `AUTH_CHECK_OK`(확인한 시크릿 이름만, 값은 없음)가 나옵니다. 시크릿이 없으면 '시크릿 없음'으로 빨강(종료 2)입니다. 정지(`mode: off`) 중에도, `연습 실행`이 체크돼 있어도 실제로 점검합니다(쓰기가 없으므로). 체크하면 `publish`·`topic` 선택은 쓰이지 않습니다.
 - `연습 실행` 체크: 가짜 AI 응답으로 흐름만 확인합니다(저장·업로드·게시 없음, Blogger 접속 없음).
 - `publish` 선택: `off` 저장소 파일만 / `draft` Blogger 초안함 업로드(기본) / `publish` 즉시 게시.
-- 정지(`mode: off`) 중에는 수동 실행도 대상 0개로 끝납니다.
+- 정지(`mode: off`) 중에는 글을 만드는 수동 실행이 대상 0개로 끝납니다(인증 점검만은 예외).
 
 로컬에서 직접 실행할 때(환경변수 이름은 레지스트리의 시크릿 이름과 같습니다):
 
@@ -128,6 +129,12 @@ export BLOGGER_REFRESH_TOKEN=...
 export BLOGGER_PUBLISH=draft     # off=저장소 파일만 · draft=초안함 업로드 · publish=즉시 게시 · 비움/auto=레지스트리 mode를 따름
 
 python -m pipeline.run --blog blogger_macat
+```
+
+글을 만들지 않고 인증만 확인하려면(Gemini 키 불필요, 쓰기 없음) `--auth-check`를 붙입니다. 종료 코드: 0 통과 · 1 인증 만료·네트워크·API 오류 · 2 시크릿 없음·권한·주소 불일치.
+
+```bash
+python -m pipeline.run --blog blogger_macat --auth-check
 ```
 
 `BLOGGER_PUBLISH`의 예전 값(`1`·`true`·`yes`·`on` = 즉시 게시, `0`·`false`·`no`·`off` = 저장소 파일만, `auto`)은 그대로 쓸 수 있습니다. 알 수 없는 값(오타 등)은 설정 오류(종료 2)입니다.

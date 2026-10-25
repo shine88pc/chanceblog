@@ -351,6 +351,15 @@ class RunNameTest(unittest.TestCase):
         for choice in ("off", "draft", "publish"):
             self.assertEqual(self.title("blogger.yml", "workflow_dispatch", {"dry_run": True, "publish": choice}),
                              "Blogger 글 작성 · 수동(연습: 저장·게시 안 함)")
+        # '인증 점검만 실행'은 글을 만들지 않으므로 다른 선택(연습·publish)보다 제목에 먼저 드러난다
+        for dry_run in (False, True):
+            for choice in ("off", "draft", "publish"):
+                self.assertEqual(self.title("blogger.yml", "workflow_dispatch",
+                                            {"auth_check": True, "dry_run": dry_run, "publish": choice}),
+                                 "Blogger 글 작성 · 수동(인증 점검만: 글 안 만듦)")
+        self.assertEqual(self.title("blogger.yml", "workflow_dispatch", {"auth_check": False, "dry_run": False, "publish": "draft"}),
+                         "Blogger 글 작성 · 수동(Blogger 초안함 업로드)")
+        self.assertEqual(self.title("blogger.yml", "schedule", {"auth_check": True}), "Blogger 글 작성 · 정기")
 
     def test_watchdog_titles(self):
         self.assertEqual(self.title("watchdog.yml", "schedule"), "발행 중단 감시 · 정기")
@@ -363,7 +372,8 @@ class RunNameTest(unittest.TestCase):
         self.assertEqual(self.title("issue-edit.yml", "workflow_dispatch", {"issue_number": "7", "dry_run": False}),
                          "이슈 #7 수정 요청 처리 · 수동")
 
-    ALLOWED_REFS = {"github.event_name", "github.event.issue.number", "inputs.dry_run", "inputs.publish", "inputs.issue_number"}
+    ALLOWED_REFS = {"github.event_name", "github.event.issue.number", "inputs.dry_run", "inputs.publish", "inputs.issue_number",
+                    "inputs.auth_check"}
 
     def test_run_names_only_use_event_kind_numbers_and_booleans(self):
         """run-name 에는 이슈 제목·PR 제목·브랜치명·자유 입력(blog, topic) 같은 외부 유래 문자열을 넣지 않는다."""

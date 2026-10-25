@@ -748,7 +748,7 @@ class WorkflowPublishInputTest(unittest.TestCase):
             self.assertIn(word, description)
 
     def test_the_other_inputs_are_still_there(self):
-        self.assertEqual(set(self.inputs), {"blog", "topic", "dry_run", "publish"})
+        self.assertEqual(set(self.inputs), {"blog", "topic", "dry_run", "publish", "auth_check"})
 
     def test_the_choice_reaches_the_runner_only_through_an_environment_variable(self):
         env = self.run_step["env"]
@@ -782,7 +782,7 @@ class WorkflowPublishInputTest(unittest.TestCase):
         for key, value in env.items():
             if "secrets." in str(value) or "secrets[" in str(value):
                 self.assertTrue(key.startswith("PIPELINE_SECRET_"), key)     # 시크릿은 이 이름들로만 나간다
-        self.assertEqual(set(env) - set(expected), {"BLOG_KEY", "BLOGGER_TOPIC", "BLOGGER_PUBLISH"})
+        self.assertEqual(set(env) - set(expected), {"BLOG_KEY", "BLOGGER_TOPIC", "BLOGGER_PUBLISH", "BLOGGER_AUTH_CHECK"})
 
     def test_permissions_and_the_generate_condition_did_not_widen(self):
         self.assertEqual(self.data["permissions"], {"contents": "read"})

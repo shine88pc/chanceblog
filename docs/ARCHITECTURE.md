@@ -45,7 +45,7 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 자동인지 수동인지,
 |---------|----------------------|------|---------|-----------|
 | Chance_Blog Full-Auto Engine | `Chance 글 자동 작성·게시` | `chanceblog.yml` | 뉴스 기사를 바탕으로 Chance 글(한국어·영어)을 만들어 검증하고 저장소에 커밋해 게시 | **자동**(매시 17분 UTC에 실행, 게시 시각은 코드가 판단) + 수동 실행(연습이 기본). 실행 제목 `Chance 글 작성·게시 · 정기/수동` |
 | (`chanceblog.yml`의 `fix_images` 입력) | `Chance 기존 글 이미지 교체(수동)` | `chance-fix-images.yml` | 기존 글의 깨진·누락·중복 이미지만 교체(새 글은 만들지 않음). 2026-10-25에 글 작성 워크플로에서 분리 | **수동 전용**(연습이 기본) |
-| Blogger Generate | `Blogger 글 자동 작성` | `blogger.yml` | 레지스트리의 Blogger 블로그마다 글을 만들고 검증해 저장소 초안 저장·Blogger 초안함 업로드·즉시 게시 중 하나로 보낸다(블로그 모드에 따름. `mode: off`인 블로그는 건너뛰고, 대상이 하나도 없으면 초록 + `::notice::`) | **자동**(매일 02:00 UTC = KST 11시, 모드를 따름) + 수동 실행(입력 `publish`: `off` 저장소 파일만 · `draft` 초안함 업로드(기본) · `publish` 즉시 게시). 실행 제목 `Blogger 글 작성 · 정기/수동(…)` |
+| Blogger Generate | `Blogger 글 자동 작성` | `blogger.yml` | 레지스트리의 Blogger 블로그마다 글을 만들고 검증해 저장소 초안 저장·Blogger 초안함 업로드·즉시 게시 중 하나로 보낸다(블로그 모드에 따름. `mode: off`인 블로그는 건너뛰고, 대상이 하나도 없으면 초록 + `::notice::`) | **자동**(매일 02:00 UTC = KST 11시, 모드를 따름) + 수동 실행(입력 `publish`: `off` 저장소 파일만 · `draft` 초안함 업로드(기본) · `publish` 즉시 게시, 입력 `auth_check`(`인증 점검만 실행`, 기본 꺼짐): 글을 만들지 않고 인증만 점검 — §4-1). 실행 제목 `Blogger 글 작성 · 정기/수동(…)` |
 | Deploy GitHub Pages | `사이트 자동 배포` | `pages.yml` | Chance 사이트(GitHub Pages)를 빌드해 게시 | **자동**(main에 push될 때. 봇이 커밋한 뒤에는 `Chance 글 자동 작성·게시`·`Chance 기존 글 이미지 교체(수동)`가 직접 실행을 요청) + 수동 |
 | Guardrails | `저장소 규칙·테스트 자동 검사` | `guardrails.yml` | 비밀 유출·워크플로 보안 규칙·문서 불일치·광고 표면 변경 검사, 단위 테스트, `actionlint` | **자동**(main push·모든 PR) + 수동. job 이름 `검사 (Python 3.10/3.12)` |
 | Watchdog | `발행 중단 감시·알림` | `watchdog.yml` | 글이 오래 안 올라오거나 실패가 이어지거나 글 커밋 뒤 사이트 배포가 안 되면 `[Watchdog]` 이슈로 알림(담당자 지정·@멘션, 문제일 때만, 해소되면 닫음). 규칙은 §4-2 | **자동**(하루 2회, 시각은 `watchdog.yml`의 cron) + 수동. 실행 제목 `발행 중단 감시 · 정기/수동` |
@@ -91,7 +91,7 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 자동인지 수동인지,
 
 | 단계 | 입력 → 출력 | 실패 시 |
 |------|-------------|---------|
-| **Plan** | 레지스트리 → 매트릭스(`python -m pipeline.plan --platform P [--only KEY]`) | 레지스트리 검증 실패, `--only`에 레지스트리에 없는 key나 `--platform`과 다른 플랫폼의 key를 준 경우 → 워크플로 중단(종료 코드 1, 유효 key 안내). 대상(수동 실행이면 지정한 블로그, 아니면 그 플랫폼 전체)이 모두 `mode: off`이거나 없으면 대상 0개로 초록 + `::notice::`·요약을 남기고 `generate` 잡은 건너뜀 |
+| **Plan** | 레지스트리 → 매트릭스(`python -m pipeline.plan --platform P [--only KEY] [--include-off]` — `--include-off`는 '인증 점검만 실행' 수동 실행 전용으로 정지한 블로그도 대상에 넣는다) | 레지스트리 검증 실패, `--only`에 레지스트리에 없는 key나 `--platform`과 다른 플랫폼의 key를 준 경우 → 워크플로 중단(종료 코드 1, 유효 key 안내). 대상(수동 실행이면 지정한 블로그, 아니면 그 플랫폼 전체)이 모두 `mode: off`이거나 없으면 대상 0개로 초록 + `::notice::`·요약을 남기고 `generate` 잡은 건너뜀 |
 | **Auth check** | (Blogger 초안함 업로드·즉시 게시일 때만, 글을 만들기 **전에** 1회) 토큰 갱신 → `blogs.get` → 돌려준 블로그 주소가 레지스트리 `url`과 같은지. **쓰기 없음**(`pipeline/auth_check.py`) | 하나라도 실패하면 Gemini 호출·업로드·게시 없이 종료 1 또는 2(분류별 기준은 §4-1 '인증 점검 실패의 분류'), 이력에 `publish_failed`. 연습 실행은 Blogger에 접속하지 않는다 |
 | **Topic** | 프로필 시드·이력·타 블로그 제목 → 주제 1개 | 시드가 바닥나면 LLM으로 주제를 확장한다(확장 실패는 `llm_failed`, **종료 코드 1**). 그래도 없으면 `skipped_no_topic` 기록 후 정상 종료(경고 주석). 쿨다운·금지 주제·교차 중복 필터 통과 필수 |
 | **Generate** | 프롬프트 + 프로필 추가 규칙 → 원문 | LLM 전부 실패 → `llm_failed` 기록, **종료 코드 1**(Actions 실패 알림) |
@@ -145,6 +145,13 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 자동인지 수동인지,
 | `unexpected` | 어댑터 밖의 예외(라이브러리 미설치 등) | 1 | 로그를 확인 |
 
 게시 단계의 실패(`PUBLISH_FAILED`)는 같은 분류 이름을 쓰지만 종료 코드는 항상 1이다(글을 올리다 실패한 것은 인프라 실패로 본다).
+
+**단독 인증 점검**(`python -m pipeline.run --blog KEY --auth-check`, 워크플로 수동 입력 `인증 점검만 실행`, 환경변수 `BLOGGER_AUTH_CHECK=1`): 글을 만들지 않고 위의 인증 점검만 한다.
+
+- 쓰기 0(이력·초안·저장소 커밋이 없다), Gemini 호출 0회(Gemini 키도 필요 없다). `BLOGGER_PUBLISH`·`--topic`·하루 상한은 읽지 않는다
+- 정지(`mode: off`) 중에도, 연습 실행(`dry_run`)이 켜져 있어도 실제로 점검한다(쓰기가 없고, 시크릿을 등록한 직후 mode 를 켜기 **전에** 확인해야 하기 때문이다). `PIPELINE_PAUSE`는 따른다(`PAUSED`, 종료 0). 워크플로에서는 `plan`이 `--include-off`로 정지한 블로그도 대상에 넣는다
+- 종료 코드는 위 분류표와 같다: 0 통과(`::notice::`와 요약 `AUTH_CHECK_OK` — 확인한 시크릿 **이름**만 보이고 값은 없다) · 1 인프라(`auth_expired`·`network`·`bad_response`·`api_error`·`unexpected`) · 2 설정(`SECRETS_MISSING` — 게시용 시크릿이 하나도 없으면 요약에 '시크릿 없음', 일부만 없으면 '시크릿 일부 없음'; `auth_failed`; `blog_mismatch`)
+- 시크릿을 등록한 직후와 토큰을 새로 받은 직후에 1회 실행한다. **주 1회 정기 점검은 새 예약(cron) 작업이라 T3**이므로 이번 변경에 넣지 않았다. 후속 작업에서 기존 워치독 실행에 붙이는 방안을 먼저 검토한다(새 예약을 만들지 않는 쪽)
 
 위 코드는 **실행 전체의 결과**다. 분야 하나가 비었을 때는 폴백으로 다음 분야로 넘어가기 전에 `[SKIP] code=LANE_EMPTY lane=… sources=… failed=… fetched=… passed=… reasons=…` 한 줄을 남겨 왜 비었는지(소스 수, 수집 실패 수, 받은 기사 수, 통과 수, 탈락 사유 개수)를 알 수 있게 한다. 폴백으로 정상 발행한 실행에도 이 줄이 찍히므로 로그 검색은 `code=LANE_EMPTY`(분야 단위)와 실행 결과 코드를 구분해서 한다.
 
