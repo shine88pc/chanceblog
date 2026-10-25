@@ -9,10 +9,10 @@
 
 ## [2026-10-26] Claude – Chance 출처 개편: 구글 뉴스 14개·MIT TR·BBC Technology 제거, NASA·UN News·Pew·Federal Reserve 추가, 약관 점검 필드·차단 목록·고지문 (운영자 승인 2026-10-26, PR #27)
 
-**작업자**: Claude (총괄이 구현, 검증은 별도 세션)
-**대상**: Chance
-**등급**: T2(소스 개편 코드), 신뢰 목록·출처 정책은 T3 — 운영자가 2026-10-26 채팅으로 승인("Chance 출처 개편을 진행해줘: 구글 뉴스 14개 제거, NASA·UN News·Pew·Federal Reserve 추가, BBC·Guardian·Nature 제외, MIT TR·BBC Technology는 약관 점검 뒤 결정")
-**목적**: 비기술 5개 분야 후보가 0이던 원인(구글 뉴스 링크가 게시자 원문으로 풀리지 않음 — 14개 소스 통과율 0.4%, 신뢰 목록에 비기술 직접 소스 없음)을 없애고, 약관이 이 용도를 막는 매체를 더는 쓰지 않는다
+**작업자**: Claude (총괄이 구현, 검증은 별도 세션)  
+**대상**: Chance_Blog  
+**등급**: T2(소스 개편 코드), 신뢰 목록·출처 정책은 T3 — 운영자가 2026-10-26 채팅으로 승인("Chance 출처 개편을 진행해줘: 구글 뉴스 14개 제거, NASA·UN News·Pew·Federal Reserve 추가, BBC·Guardian·Nature 제외, MIT TR·BBC Technology는 약관 점검 뒤 결정")  
+**목적**: 비기술 5개 분야 후보가 0이던 원인(구글 뉴스 링크가 게시자 원문으로 풀리지 않음 — 14개 소스 통과율 0.4%, 신뢰 목록에 비기술 직접 소스 없음)을 없애고, 약관이 이 용도를 막는 매체를 더는 쓰지 않는다  
 
 ### 변경
 - `generator.py`: `NEWS_SOURCES`에서 구글 뉴스 14개·MIT Technology Review·BBC Technology 삭제, NASA(과학)·Pew Research Center(문화)·Federal Reserve(경제) 추가, UN News(사회)는 조건이 남아 보류(`pending`)로 넣음, 기존 기술 소스 7곳은 `terms` 유예(`unverified`·`restricted`). 신뢰 목록에서 BBC·Guardian·Nature·technologyreview.com 삭제, `TERMS_BLOCKED_DOMAINS`(+ `_trusted_domain` 거부)로 재유입 차단. 새 탈락 코드 `EXCLUDED`·`OFF_TOPIC`, 피드 분류 태그 읽기, 소스별 `exclude_title`·`topic_regex`·`no_page_fetch`·`notice`(글 끝 고지문)·`prompt_rule`(작성 지침 한 줄)
@@ -44,8 +44,14 @@
 주말 직후라 36시간 안 후보가 거의 없는 시점이다. 평일 공급은 병합 뒤 며칠 관측한다(D-62).
 
 ### 검증
-- 전체 시험 1740개 통과(`python -m unittest discover -s tests`), `python scripts/validate_repo.py` 오류 0·경고 2(main과 동일).
-- 독립 검증: 병합 전 별도 세션(새 clone·diff와 직접 실행만 근거)이 한다 — 결과는 이 항목에 덧붙인다.
+- **L0**: `python scripts/validate_repo.py` 오류 0·경고 2(main과 동일), pyflakes 0, vermin 최소 3.7, `git diff --check` 깨끗.
+- **L1**: `python -m unittest discover -s tests` 전체 1759개 통과(3차 수정 뒤). 소켓을 막아도 `test_generator_slots.py` 통과.
+- **L2**: `DRY_RUN=1 python generator.py`(스텁 AI, 실제 피드 읽기)를 로컬에서 실행 — 종료 0, 파일 변경 없음, 추첨된 일상·마음 분야는 `[SKIP] code=LANE_EMPTY sources=0`으로 건너뛰고 기술·미래로 대체(독립 검증자 실행). 작성자는 분야별 실피드 점검을 따로 했다.
+- **L3**(실제 Gemini 초안): **실행 필요** — 이 환경에서는 Actions를 실행하지 않았다. 병합 뒤 첫 정기 실행에서 확인한다(`docs/DEFECT_REGISTER.md` 하단 체크리스트).
+- **독립 검증 두 건**(각각 새 clone, 구현자 설명 미사용):
+  - 코드·동작(검증 A): 병합 차단 0. 전체 시험 1740개(당시)·validate_repo 통과, 분야별 실피드 점검이 PR 표와 일치, 차단 도메인 7개·모조 호스트(`notbbc.co.uk`·`bbc.com.evil.example` 등)는 어느 분야에서도 신뢰되지 않음, 악성 피드 19항목을 5개 분야에 먹인 시험에서 새어 나간 것 0, 정규식 최악 0.064초(제목은 300자·분류 태그는 80자로 잘림), 변이 61개 중 43 사망·18 생존(생존분은 3차 수정에서 시험 보강), 범위(AST 비교: 바뀐 함수 8개뿐)·병합 모의 이상 없음(Blogger 브랜치와의 충돌 7개 파일은 그 브랜치의 낡은 기반 때문). 권장 8건·사소한 것 다수를 3차 수정에 반영.
+  - 약관 사실(검증 B): MIT TR·BBC 제외 근거와 날짜·판 표기는 맞음. 정정 3건 — AI타임스 기사 하단의 "AI학습 및 활용 금지"(작성자도 직접 확인), UN "알린다(advised)" 조건의 출처와 robots.txt 제한(UN News 보류로 반영), Pew 인용 형식·번역 면책 문장·NASA 정확성 면책(고지문 보강).
+- **2차·3차 수정**(검증 반영): 위 정정 + 제외 규칙 보강(Fed·NASA·Pew: 뉴스레터 모음·방법론 글·행사 안내·사진 설명), 글 언어 판정(front matter `lang` 우선), 직접 RSS `<source>` 태그 미사용, 시험 보강(모조 호스트·분야별 신뢰·차단 목록 고정·Pew 페이지 읽기 금지·소스 이름 유일·분야 배정 고정). 변경분(2·3차)은 검증 A가 다시 본다.
 
 ### 못 한 검증·관측 대기·다음 AI 주의사항
 - **러너 IP에서의 피드 접근**은 병합 뒤 첫 실행에서만 확인된다(`수집 실패`가 보이면 그 소스만 건너뛴다). 이 PC에서는 4개 피드 모두 HTTP 200이었다.

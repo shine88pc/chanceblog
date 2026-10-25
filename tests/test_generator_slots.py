@@ -452,6 +452,25 @@ class FetchNewsStatsTest(unittest.TestCase):
         self.assertEqual(stats["sources"][0]["drops"], {"EXCLUDED": 2})
         self.assertIn("EXCLUDED 2", out)
 
+    def test_exclude_link_and_exclude_tags_are_counted_as_excluded(self):
+        summary = "요약 문장입니다. " * 20
+        sources = [{"name": "링크·태그 제외", "lane": "economy", "url": self.FEED,
+                    "exclude_link": r"/newsletter/", "exclude_tags": r"^methodolog"}]
+        items = [("뉴스레터 모음", "https://www.reuters.com/newsletter/a", self.fresh(), summary, ""),
+                 ("방법론 글", "https://www.reuters.com/b", self.fresh(), summary, "", ("Methodological Research",)),
+                 ("통과 기사", "https://www.reuters.com/c", self.fresh(), summary, "", ("Economy",))]
+        merged, stats, out = self.run_fetch(items, sources=sources)
+        self.assertEqual([m["title"] for m in merged], ["통과 기사"])
+        self.assertEqual(stats["sources"][0]["drops"], {"EXCLUDED": 2})
+
+    def test_a_direct_feeds_source_tag_is_not_used_as_the_publisher(self):
+        # UN News 처럼 직접 RSS 항목에 피드 자기소개용 <source> 가 붙어도 게시자 표시·신뢰 판정에 쓰지 않는다.
+        summary = "요약 문장입니다. " * 20
+        sources = [{"name": "UN형 소스", "lane": "economy", "url": self.FEED}]
+        items = [("통과 기사", "https://www.reuters.com/a", self.fresh(), summary, "https://elsewhere.example/feed.xml")]
+        merged, stats, out = self.run_fetch(items, sources=sources)
+        self.assertEqual([(m["source"], m["publisher_domain"]) for m in merged], [("UN형 소스", "www.reuters.com")])
+
     def test_topic_regex_looks_at_the_title_and_the_feed_categories(self):
         summary = "요약 문장입니다. " * 20
         sources = [{"name": "혼합 피드", "lane": "economy", "url": self.FEED, "topic_regex": r"social media|\bnews\b"}]
@@ -490,6 +509,17 @@ class FetchNewsStatsTest(unittest.TestCase):
         merged, stats, excerpt = self.run_short_summary_fetch({})
         excerpt.assert_called_once()
         self.assertEqual([m["title"] for m in merged], ["요약이 짧은 기사"])
+
+    def test_the_real_pew_config_never_reads_an_article_page_for_a_short_summary(self):
+        items = [("Social media use among teens", "https://www.pewresearch.org/internet/2026/10/01/a/", self.fresh(), "짧음", "",
+                  ("Social Media",))]
+        stats = {}
+        with mock.patch.object(g.urllib.request, "urlopen", lambda req, timeout=0: FakeResponse(rss(items))), \
+                mock.patch.object(g, "_fetch_source_excerpt", return_value="긴 요약 문장입니다. " * 20) as excerpt:
+            merged, out = run_captured(g.fetch_news_items, "culture", stats=stats)
+        excerpt.assert_not_called()
+        self.assertEqual(merged, [])
+        self.assertEqual(stats["sources"][0]["drops"], {"SHORT_SUMMARY": 1})
 
     def test_notice_and_prompt_rule_travel_with_the_item(self):
         summary = "요약 문장입니다. " * 20
@@ -1309,6 +1339,20 @@ class SourceNoticeTest(unittest.TestCase):
         self.assertTrue(content.endswith("\n\n*English notice sentence.*\n"), content[-80:])
         self.assertNotIn("한국어", content)
 
+    def test_the_language_comes_from_the_front_matter_before_hangul_detection(self):
+        english = ("---\nlayout: post\ntitle: \"t\"\nlang: en\n---\n\n"
+                   f"Hallyu (한류) keeps spreading. [source]({self.LINK})\n")
+        self.assertTrue(g.add_discovery_metadata(english, self.source()).endswith("*English notice sentence.*\n"))
+        korean = ("---\nlayout: post\ntitle: \"t\"\nlang: ko\n---\n\n"
+                  f"plain ascii body only. [source]({self.LINK})\n")
+        self.assertTrue(g.add_discovery_metadata(korean, self.source()).endswith("*고지문 한국어입니다.*\n"))
+
+    def test_an_english_post_with_a_korean_word_still_gets_the_english_sources_heading(self):
+        english = "---\nlayout: post\ntitle: \"t\"\nlang: en\n---\n\nHallyu (한류) keeps spreading with no link in the story.\n"
+        content = g.add_discovery_metadata(english, self.source())
+        self.assertIn("\n## Sources\n", content)
+        self.assertNotIn("## 출처", content)
+
     def test_the_notice_is_added_only_once(self):
         once = g.add_discovery_metadata(self.post(f"본문입니다. [원문]({self.LINK})"), self.source())
         twice = g.add_discovery_metadata(once, self.source())
@@ -1359,29 +1403,40 @@ class SourceNoticeTest(unittest.TestCase):
 
 
 class SourceRuleSamplesTest(unittest.TestCase):
-    """2026-10-26 에 실제 피드에서 받은 제목으로 소스별 제외·주제 규칙을 고정한다(피드가 바뀌면 규칙도 다시 본다)."""
+    """2026-10-26 에 실제 피드에서 받은 제목·주소·분류 태그로 소스별 제외·주제 규칙을 고정한다(피드가 바뀌면 규칙도 다시 본다)."""
 
-    @staticmethod
-    def rules(name):
+    def kept(self, name, title, categories=(), link=""):
         src = next(s for s in g.NEWS_SOURCES if s["name"] == name)
-        return (re.compile(src["exclude_title"], re.I) if src.get("exclude_title") else None,
-                re.compile(src["topic_regex"], re.I) if src.get("topic_regex") else None)
-
-    def kept(self, name, title, categories=()):
-        exclude, topic = self.rules(name)
-        if exclude and exclude.search(title):
+        if g._rule_excludes(src, title, {"link": link, "categories": list(categories)}):  # 엔진과 같은 함수
             return False
-        return not topic or bool(topic.search(" ".join([title, *categories])))
+        topic = src.get("topic_regex")
+        return not topic or bool(re.search(topic, " ".join([title, *categories]), re.I))
 
-    def test_nasa_skips_apod_and_media_invites_only(self):
-        for title in ("APOD: 2026 October 25 – Dark Matter in a Simulated Universe",
-                      "NASA Invites Media to 2026 von Braun Space Exploration Symposium"):
-            self.assertFalse(self.kept("NASA", title), title)
-        for title in ("NASA, Partners Accelerate Lander Development for 2028 Moon Missions",
-                      "NASA’s Swift Mission Ends, Leaves Behind Scientific Bonanza",
-                      "NASA’s Artemis III Mission to Test Future Moon Lander Operations",
-                      "El Niño Then and Now", "RS-25 Engine Tests at NASA Stennis"):
-            self.assertTrue(self.kept("NASA", title), title)
+    def test_nasa_skips_apod_advisories_captions_and_center_pages_only(self):
+        skipped = (
+            ("APOD: 2026 October 25 – Dark Matter in a Simulated Universe", "https://science.nasa.gov/image-article/apod-2026-10-25/"),
+            ("NASA Invites Media to 2026 von Braun Space Exploration Symposium", "https://www.nasa.gov/news-release/nasa-invites-media/"),
+            ("NASA to Host News Conference Previewing US Spacewalks 100, 101", "https://www.nasa.gov/news-release/nasa-to-host-news-conference/"),
+            ("NASA Astronauts to Answer Questions from Florida Students", "https://www.nasa.gov/learning-resources/nasa-astronauts-to-answer/"),
+            ("NASA to Conduct NCAA Flyover, Engage Fans at University of Alabama", "https://www.nasa.gov/news-release/nasa-to-conduct-ncaa-flyover/"),
+            ("NASA to Conduct Low-Altitude Flights Over Texas Farmland", "https://www.nasa.gov/general/nasa-to-conduct-low-altitude-flights/"),
+            ("Spiral’s Edge", "https://www.nasa.gov/image-article/spirals-edge/"),
+            ("Martian Dawn", "https://www.nasa.gov/image-article/martian-dawn/"),
+            ("Software", "https://www.nasa.gov/centers-and-facilities/glenn/acoustics-software/"),
+            ("Instrumentation", "https://www.nasa.gov/centers-and-facilities/glenn/acoustics-instrumentation/"),
+        )
+        for title, link in skipped:
+            self.assertFalse(self.kept("NASA", title, link=link), title)
+        kept = (
+            ("NASA, Partners Accelerate Lander Development for 2028 Moon Missions", "https://www.nasa.gov/news-release/nasa-partners-accelerate-lander/"),
+            ("NASA’s Swift Mission Ends, Leaves Behind Scientific Bonanza", "https://science.nasa.gov/missions/swift/ends/"),
+            ("NASA’s Artemis III Mission to Test Future Moon Lander Operations", "https://www.nasa.gov/news-release/artemis-iii/"),
+            ("El Niño Then and Now", "https://science.nasa.gov/earth/el-nino-then-and-now/"),
+            ("RS-25 Engine Tests at NASA Stennis", "https://www.nasa.gov/centers/stennis/rs-25/"),
+            ("Artemis II", "https://www.nasa.gov/news-release/artemis-ii/"),  # 짧은 제목이라는 이유만으로는 빼지 않는다
+        )
+        for title, link in kept:
+            self.assertTrue(self.kept("NASA", title, link=link), title)
 
     def test_un_news_skips_the_roundups_only(self):
         self.assertFalse(self.kept("UN News", "World News in Brief: Iran nuclear inspections, deadly church attack in Jordan"))
@@ -1393,35 +1448,49 @@ class SourceRuleSamplesTest(unittest.TestCase):
     def test_federal_reserve_skips_enforcement_and_application_orders(self):
         for title in ("Federal Reserve Board announces termination of enforcement actions with Gardner Bancshares",
                       "Federal Reserve Board announces enforcement action against American Express Company",
-                      "Federal Reserve Board announces approval of application by Isabella Bank Corporation"):
+                      "Federal Reserve Board announces approval of application by Isabella Bank Corporation",
+                      "Federal Reserve Board announces approval of related applications by Columbia Bank MHC and Columbia Financial, Inc.",
+                      "Federal Reserve Board does not object to the conversion of United Texas Bank to a state charter",
+                      "Federal Reserve Board has made the joint findings with the OCC on the proposed merger"):
             self.assertFalse(self.kept("Federal Reserve", title), title)
         for title in ("Federal Reserve issues FOMC statement",
                       "Minutes of the Federal Open Market Committee, September 15-16, 2026",
-                      "Federal Reserve Board releases results of the 2025 Survey of Consumer Finances"):
+                      "Federal Reserve Board releases results of the 2025 Survey of Consumer Finances",
+                      "Agencies seek comment on proposed third-party risk management guidance"):
             self.assertTrue(self.kept("Federal Reserve", title), title)
 
-    def test_pew_keeps_media_and_online_topics_and_drops_politics_quizzes_and_report_stubs(self):
+    def test_pew_keeps_media_and_online_topics_and_drops_politics_quizzes_digests_and_method_pages(self):
+        pew = "https://www.pewresearch.org"
         cases = [
-            ("Growing Share of Americans Say Social Media Is an Important News Source for Them", ("Social Media",), True),
-            ("1 in 5 Americans Regularly Get News on TikTok", ("Social Media", "TikTok"), True),
-            ("Americans’ Use of Social Media in 2026", ("Social Media",), True),
-            ("Where Americans are getting their news in the digital age", (), True),
-            ("Online Communities Rarely Focus on Politics, and Many Say It Should Stay That Way", ("Friendships", "Online Services"), True),
-            ("News Platform Fact Sheet", ("News Platforms & Sources",), True),
-            ("🔎 What’s your civic personality? Take our quiz", (), False),
-            ("Quiz: What Is Your Civic Personality?", ("News Habits & Media",), False),
-            ("Acknowledgments", ("Election 2026",), False),
-            ("Methodology", ("Election 2026",), False),
-            ("Additional charts", (), False),
-            ("Few Americans Say They Are Asking AI Chatbots for 2026 Election Information", ("Artificial Intelligence", "Election 2026"), False),
-            ("Americans’ mood before the election", (), False),
-            ("How U.S. Voters View Mail and Absentee Balloting", ("Election 2026",), False),
-            ("Pace of Trump’s Judicial Appointments Has Slowed in His Second Term", ("Criminal Justice", "Supreme Court"), False),
-            ("Women, Work and Caregiving Through the Arc of Family Life", ("Family Caregiving", "Uncategorized"), False),
+            ("Growing Share of Americans Say Social Media Is an Important News Source for Them", ("Social Media",), f"{pew}/short-reads/2026/10/23/a/", True),
+            ("1 in 5 Americans Regularly Get News on TikTok", ("Social Media", "TikTok"), f"{pew}/short-reads/2026/10/19/b/", True),
+            ("Americans’ Use of Social Media in 2026", ("Social Media",), f"{pew}/internet/fact-sheet/social-media/", True),
+            ("Online Communities Rarely Focus on Politics, and Many Say It Should Stay That Way", ("Friendships", "Online Services"), f"{pew}/short-reads/2026/10/20/c/", True),
+            ("News Platform Fact Sheet", ("News Platforms & Sources",), f"{pew}/journalism/fact-sheet/news-platform/", True),
+            ("Where Americans are getting their news in the digital age", (), f"{pew}/newsletter/the-briefing/the-briefing-10-22/", False),
+            ("Turkish police raid offices of major TV news channel", (), f"{pew}/newsletter/the-briefing/the-briefing-10-15/", False),
+            ("Can AI Stand In for Human Survey-Takers? Not Really", ("Artificial Intelligence", "Methodological Research"), f"{pew}/data-labs/2026/09/30/d/", False),
+            ("🔎 What’s your civic personality? Take our quiz", (), f"{pew}/quiz/civic-personality/", False),
+            ("Quiz: What Is Your Civic Personality?", ("News Habits & Media",), f"{pew}/quiz/civic-personality/", False),
+            ("Acknowledgments", ("Election 2026",), f"{pew}/politics/2026/e/acknowledgments/", False),
+            ("Methodology", ("Election 2026",), f"{pew}/politics/2026/e/methodology/", False),
+            ("Additional charts", (), f"{pew}/politics/2026/e/charts/", False),
+            ("Few Americans Say They Are Asking AI Chatbots for 2026 Election Information", ("Artificial Intelligence", "Election 2026"), f"{pew}/short-reads/2026/f/", False),
+            ("Americans’ mood before the election", (), f"{pew}/politics/2026/g/", False),
+            ("How U.S. Voters View Mail and Absentee Balloting", ("Election 2026",), f"{pew}/politics/2026/h/", False),
+            ("Pace of Trump’s Judicial Appointments Has Slowed in His Second Term", ("Criminal Justice", "Supreme Court"), f"{pew}/politics/2026/i/", False),
+            ("Women, Work and Caregiving Through the Arc of Family Life", ("Family Caregiving", "Uncategorized"), f"{pew}/social-trends/2026/j/", False),
         ]
-        for title, categories, expected in cases:
+        for title, categories, link, expected in cases:
             with self.subTest(title=title):
-                self.assertEqual(self.kept("Pew Research Center", title, categories), expected)
+                self.assertEqual(self.kept("Pew Research Center", title, categories, link), expected)
+
+    def test_pew_topic_words_need_word_boundaries(self):
+        pew = next(s for s in g.NEWS_SOURCES if s["name"] == "Pew Research Center")
+        for text in ("Automobile ownership trends", "Spreading costs across households"):
+            self.assertFalse(re.search(pew["topic_regex"], text, re.I), text)
+        for text in ("Americans’ Use of Mobile Devices in 2026", "Reading habits of adults"):
+            self.assertTrue(re.search(pew["topic_regex"], text, re.I), text)
 
 
 class SourceListTest(unittest.TestCase):
@@ -1447,11 +1516,42 @@ class SourceListTest(unittest.TestCase):
         self.assertEqual([s["name"] for s in g.NEWS_SOURCES
                           if s.get("google") or "news.google.com" in s["url"] or s["name"].startswith("Google")], [])
 
-    def test_approved_sources_are_in_the_lanes_the_overhaul_gave_them(self):
-        lanes = {s["name"]: s["lane"] for s in g.NEWS_SOURCES}
-        self.assertEqual({name: lanes.get(name) for name in ("NASA", "UN News", "Pew Research Center", "Federal Reserve")},
+    def test_source_names_are_unique_and_every_lane_assignment_is_pinned(self):
+        names = [s["name"] for s in g.NEWS_SOURCES]
+        self.assertEqual(len(names), len(set(names)))
+        self.assertEqual({s["name"]: s["lane"] for s in g.NEWS_SOURCES},
                          {"NASA": "science", "UN News": "society", "Pew Research Center": "culture",
-                          "Federal Reserve": "economy"})
+                          "Federal Reserve": "economy", "TechCrunch": "technology", "The Verge": "technology",
+                          "Ars Technica": "technology", "IEEE Spectrum": "technology", "Hacker News": "technology",
+                          "AI타임스": "technology", "전자신문": "technology"})
+
+    def test_look_alike_hosts_are_never_trusted_and_never_blocked_by_accident(self):
+        for host in ("notbbc.co.uk", "bbc.com.evil.example", "evilnasa.gov", "nasa.gov.evil.example", "xfederalreserve.gov"):
+            for lane in g.EDITORIAL_LANES:
+                with self.subTest(host=host, lane=lane):
+                    self.assertFalse(g._trusted_domain(host, lane))
+        self.assertTrue(g._host_in("sub.bbc.co.uk", g.TERMS_BLOCKED_DOMAINS))
+        self.assertFalse(g._host_in("notbbc.co.uk", g.TERMS_BLOCKED_DOMAINS))
+
+    def test_trust_is_per_lane_and_an_unknown_lane_trusts_nothing(self):
+        self.assertTrue(g._trusted_domain("www.nasa.gov", "science"))
+        self.assertFalse(g._trusted_domain("www.nasa.gov", "culture"))
+        self.assertFalse(g._trusted_domain("news.un.org", "science"))
+        for lane in (None, "", "no-such-lane"):
+            for host in ("www.nasa.gov", "www.reuters.com"):
+                self.assertFalse(g._trusted_domain(host, lane), (host, lane))
+
+    def test_the_blocked_domain_list_is_exactly_the_agreed_publishers(self):
+        self.assertEqual(set(g.TERMS_BLOCKED_DOMAINS),
+                         {"bbc.com", "bbc.co.uk", "bbci.co.uk", "theguardian.com", "guardian.co.uk",
+                          "nature.com", "technologyreview.com"})
+
+    def test_pew_never_reads_article_pages_and_the_prompt_rules_exist(self):
+        by_name = {s["name"]: s for s in g.NEWS_SOURCES}
+        self.assertIs(by_name["Pew Research Center"].get("no_page_fetch"), True)
+        self.assertIn("NASA가 직접", by_name["NASA"]["prompt_rule"])
+        self.assertIn("according to NASA", by_name["NASA"]["prompt_rule"])
+        self.assertIn("Pew", by_name["Pew Research Center"]["prompt_rule"])
 
     def test_every_source_declares_its_terms_status(self):
         for src in g.NEWS_SOURCES:

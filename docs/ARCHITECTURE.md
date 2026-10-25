@@ -144,17 +144,17 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 자동인지 수동인지,
 
 | 분야 | 소스(약관 점검 allowed) | 소스별 규칙 |
 |------|------------------------|-------------|
-| 과학·환경 | NASA | APOD·취재진 초대 제외(`exclude_title`). NASA의 AI 이용 안내(정보를 NASA에 직접 귀속하지 말 것)에 따라 작성 지침 한 줄(`prompt_rule`)과 글 끝 고지문(`notice`) |
+| 과학·환경 | NASA | APOD·취재진 초대·행사 안내(`exclude_title`)와 사진 설명·센터 소개 쪽(`exclude_link`) 제외. NASA의 AI 이용 안내(정보를 NASA에 직접 귀속하지 말 것)에 따라 작성 지침 한 줄(`prompt_rule`)과 글 끝 고지문(`notice`, 정확성 면책 포함) |
 | 사회·정책 | UN News — **보류(`pending`)** | 유엔에 알리는 일과 robots.txt 확인(D-63)이 끝날 때까지 읽지 않는다(로그에 `소스 UN News: 보류 — …` 한 줄). 풀면 'World News in Brief' 제외, 글 끝 고지문 |
-| 문화·미디어 | Pew Research Center | 제목·분류 태그에 미디어·온라인 주제어가 있는 것만(`topic_regex`), 선거·정당·퀴즈·보고서 부속 쪽 제외, 기사 페이지를 읽지 않음(`no_page_fetch`, Pew 약관의 스크래핑 금지), 약관 §2 인용 줄(`citation`)과 번역 면책 문장이 든 고지문 |
-| 경제·일 | Federal Reserve(보도자료) | 제재·인가 승인 건 제외, 글 끝 고지문. 주 0~1건이라 36시간 규칙에서는 대부분 비어 있다(D-62) |
+| 문화·미디어 | Pew Research Center | 제목·분류 태그에 미디어·온라인 주제어가 있는 것만(`topic_regex`), 선거·정당·퀴즈·보고서 부속 쪽(`exclude_title`)과 뉴스레터 모음(`exclude_link`)·방법론·선거 분류 글(`exclude_tags`) 제외, 기사 페이지를 읽지 않음(`no_page_fetch`, Pew 약관의 스크래핑 금지), 약관 §2 인용 줄(`citation`)과 번역 면책 문장이 든 고지문 |
+| 경제·일 | Federal Reserve(보도자료) | 제재·인가 승인·이의 없음 통보 건 제외, 글 끝 고지문. 그 건들을 빼면 주 1~2건이라 36시간 규칙에서는 대부분 비어 있다(D-62) |
 | 일상·마음 | 없음 | 약관상 쓸 수 있는 직접 RSS를 아직 못 찾았다(D-62). 이 분야가 뽑히면 후보가 없어 다음 분야로 넘어간다 |
-| 기술·미래 | TechCrunch·The Verge·Ars Technica·IEEE Spectrum·Hacker News·AI타임스·전자신문 | 모두 유예(D-61). AI타임스는 기사 하단에 "AI학습 및 활용 금지"가 있어 **금지로 읽힘(`restricted`)**, 전자신문은 불명확, 나머지는 미확인. 신뢰 목록을 통과해 글감이 되는 곳은 Ars·IEEE·AI타임스·전자신문뿐 |
+| 기술·미래 | TechCrunch·The Verge·Ars Technica·IEEE Spectrum·Hacker News·AI타임스·전자신문 | 모두 유예(D-61). AI타임스는 기사 하단에 "AI학습 및 활용 금지"가 있어 **금지로 읽힘(`restricted`)**, 전자신문은 불명확, 나머지는 미확인. 신뢰 목록을 통과해 글감이 되는 곳은 Ars·IEEE·AI타임스·전자신문이고, 이 밖에 Hacker News 링크가 신뢰 목록 도메인(reuters·apnews 등 약관을 읽지 않은 매체)으로 가면 통과하는 간접 경로가 있다(D-61) |
 
 - 소스마다 `terms`(`status` — `allowed` 허용으로 읽음 / `pending` 허용이지만 채우지 못한 조건(`blocker`)이 있어 읽지 않음 / `restricted` 금지로 읽히지만 운영자 결정 전까지 쓰는 기존 소스 / `unverified` 못 읽었거나 불명확한 기존 소스, 확인한 날짜, 근거 쪽 주소)를 적는다. `restricted`·`unverified`는 기존 7곳만 유예이고 시험(`SourceListTest`)이 늘리지 못하게 막는다.
 - **BBC·Guardian·Nature·MIT Technology Review**는 약관이 이 용도(광고가 붙는 사이트에서 RSS 제목·요약을 AI에 주어 새 글을 쓰는 것)를 금지하거나 허가가 필요하다고 읽혀 `TERMS_BLOCKED_DOMAINS`에 올렸다. 소스에도 신뢰 목록에도 없고, 실수로 신뢰 목록에 다시 들어와도 `_trusted_domain`이 거부한다(시험으로 고정). 허가를 받으면 이 목록에서 빼고 `terms`를 allowed로 적는다.
-- 소스별 선택 키: `citation`(글 끝 인용 한 줄의 틀 — `{title}`·`{date}`·`{url}`, 소스 약관이 정한 형식, 고지문 앞에 붙임), `exclude_title`
-- 직접 RSS에는 `<source>` 태그가 없어 게시자는 기사 주소의 호스트다. 구글 뉴스 해석 코드(`google` 키, `_resolve_article_url`)는 쓰는 소스가 없지만 시험이 있어 남겨 두었다.
+- 소스별 선택 키: `citation`(글 끝 인용 한 줄의 틀 — `{title}`·`{date}`·`{url}`, 소스 약관이 정한 형식, 고지문 앞에 붙임), `exclude_title`·`exclude_link`·`exclude_tags`(제목·기사 주소·피드 분류 태그 정규식, 맞으면 `EXCLUDED`), `topic_regex`(제목·분류 태그에 맞는 말이 없으면 `OFF_TOPIC`), `no_page_fetch`, `notice`(글 끝 고지문 ko·en — `add_discovery_metadata`가 글 언어(front matter `lang`, 없으면 한글 여부)에 맞춰 붙이고 이미 있으면 다시 붙이지 않는다), `prompt_rule`(글 작성 지침에 한 줄). 피드의 `<category>`(Atom은 `term`)는 `parse_feed`가 `categories`로 읽는다.
+- 직접 RSS 항목의 `<source>` 태그(UN News는 피드 태그라인이 들어 있다)는 게시자 표시로 쓰지 않는다 — 게시자는 기사 주소의 호스트이고 출처 이름은 소스 이름이다. 구글 뉴스 해석 코드(`google` 키, `_resolve_article_url`)는 쓰는 소스가 없지만 시험이 있어 남겨 두었다.
 
 **Chance 분야 폴백**: 슬롯 시각마다 6개 분야를 확률 가중 추첨 순서(`editorial_lane_order`, 첫 분야는 기존 추첨과 같음)로 늘어놓고, 앞에서부터 후보가 나올 때까지 시도한다. 이 단계는 Gemini를 부르지 않아 비용은 수집 시간뿐이다. `LANE_SEARCH_BUDGET_SECONDS`(기본 480초)가 지나면 새 분야도, 분야 안의 남은 소스도 시도하지 않는다(이미 시작한 소스 하나는 끝까지 기다리므로 수집은 상한 + 약 2분 안에 끝나고, 잡 제한은 20분이다). 시도한 소스가 전부 수집 실패면 시간과 무관하게 `SOURCES_UNREACHABLE`(빨강)이다. 글이 만들어지면 이력의 `lane`과 Gemini 프롬프트에는 실제로 후보가 나온 분야가 쓰인다.
 

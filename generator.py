@@ -709,6 +709,8 @@ EDITORIAL_LANES = {
 #
 # 소스별 선택 키(모두 생략 가능):
 #   exclude_title  제목이 이 정규식과 맞으면 쓰지 않는다(EXCLUDED). 약관이 빼라고 한 것, 글감이 못 되는 공지·퀴즈 등.
+#   exclude_link   기사 주소가 이 정규식과 맞으면 쓰지 않는다(EXCLUDED). 글 종류가 주소 경로에 드러나는 피드(뉴스레터 모음, 사진 설명 쪽).
+#   exclude_tags   피드 분류 태그 중 하나가 이 정규식과 맞으면 쓰지 않는다(EXCLUDED).
 #   topic_regex    제목·분류 태그에 이 정규식과 맞는 말이 없으면 쓰지 않는다(OFF_TOPIC). 여러 주제가 섞인 피드를 분야에 맞춘다.
 #   no_page_fetch  요약이 짧아도 기사 페이지를 따로 읽지 않는다(자동 수집을 막는 약관).
 #   notice         글 끝에 붙일 고지문(ko·en). 소스 약관이 요구하는 'AI 작성, 검토·승인 받지 않음' 안내.
@@ -719,21 +721,23 @@ NEWS_SOURCES = [
     {"name": "NASA", "lane": "science", "url": "https://www.nasa.gov/feed/",
      "terms": {"status": "allowed", "checked": "2026-10-26",
                "url": "https://www.nasa.gov/nasa-brand-center/images-and-media/"},
-     # APOD 는 사진마다 저작권자가 따로 있어 약관 예외이고, 취재진 초대·인증 안내는 글감이 못 된다.
-     "exclude_title": r"^APOD\b|\binvites? media\b|\bmedia accreditation\b",
+     # APOD 는 사진마다 저작권자가 따로 있어 약관 예외이고, 취재진 초대·인증·행사 안내와 사진 설명(image-article)·센터 소개 쪽은 글감이 못 된다.
+     "exclude_title": r"^APOD\b|\binvites? media\b|\bmedia accreditation\b|\bto (?:host|conduct|answer)\b|\bsets? coverage\b",
+     "exclude_link": r"/image-article/|/centers-and-facilities/",
      # NASA 의 AI 이용 안내: AI 결과물의 정보를 NASA 에 직접 귀속하는 것은 허용되지 않고, NASA 는 AI 결과물의 정확성에 책임지지 않으며,
      # "AI 도구가 NASA 자료를 포함한다"고 밝히되 NASA 가 검토·허가한 것처럼 암시하지 말라고 한다. 작성 지침 한 줄은 AI가 어길 수 있고(코드로
      # 막으면 후보가 계속 탈락해 호출이 낭비된다, D-63) 고지문은 코드가 붙인다.
      "notice": {"ko": "이 글은 AI 도구가 NASA가 공개한 자료를 참고해 작성했습니다. NASA는 이 글을 검토하거나 승인하지 않았고 내용의 정확성에 책임지지 않으며, 글의 내용은 NASA의 입장이 아닙니다.",
                 "en": "This article was written with an AI tool using publicly available NASA source material. NASA has not reviewed or approved it, is not responsible for its accuracy, and it does not represent NASA's position."},
      "prompt_rule": "NASA의 AI 이용 안내에 따라 정보를 NASA가 직접 말하거나 보증한 것처럼 쓰지 마세요. "
-                    "'NASA에 따르면', 'NASA는 밝혔다' 같은 직접 귀속 표현을 쓰지 말고 '공개된 자료에 따르면'처럼 자료를 가리키세요."},
+                    "'NASA에 따르면'·'NASA는 밝혔다'(영어 글은 'according to NASA'·'NASA said') 같은 직접 귀속 표현을 쓰지 말고 "
+                    "'공개된 자료에 따르면'(영어 글은 'according to the published material')처럼 자료를 가리키세요."},
     # 보류(pending): UN News 이용 안내는 출처 표기와 링크만 요구하고 재가공을 환영한다. 그러나 ① 유엔 저작권 안내(un.org/en/about-us/copyright)는
     # 뉴스 자료를 쓸 때 유엔에 알릴 것(the United Nations is advised)을 요구하는데 아직 하지 않았고, ② news.un.org 의 robots.txt 는 일반 봇에
     # 이 피드 경로(`*/news/`)를 허용하지 않는다. 알림과 서면 확인(unnews@un.org)을 마치고 운영자가 확인하면 allowed 로 바꾼다(D-63).
     {"name": "UN News", "lane": "society", "url": "https://news.un.org/feed/subscribe/en/news/all/rss.xml",
      "terms": {"status": "pending", "checked": "2026-10-26",
-               "url": "https://news.un.org/en/content/navigate-news",
+               "url": "https://www.un.org/en/about-us/copyright",  # 알림 조건이 있는 쪽. 재가공 환영 문구는 https://news.un.org/en/content/navigate-news
                "blocker": "유엔에 이용 사실을 알리고(un.org 저작권 안내) 이 피드 경로를 읽어도 되는지 서면 확인을 받아야 한다(news.un.org robots.txt 가 일반 봇에 */news/ 경로를 허용하지 않음)"},
      # 여러 소식을 묶은 요약 기사는 글감이 못 된다.
      "exclude_title": r"^World News in Brief\b",
@@ -745,9 +749,12 @@ NEWS_SOURCES = [
      # 퀴즈·보고서 부속 쪽(감사의 글·조사 방법 등)과 선거·정당 이야기는 문화·미디어 글감이 아니다.
      "exclude_title": r"\bquiz\b|^(?:acknowledg(?:e)?ments|methodology|additional charts|appendix)\b"
                       r"|\belection|\bvoters?\b|\bballots?\b|\bmidterms?\b|\btrump\b|\bbiden\b|\brepublican|\bdemocrat|\bpartisan",
+     # 뉴스레터 모음(/newsletter/)은 다른 매체 소식을 섞은 요약이라 'Pew 조사 결과'가 아니고, 방법론 연구 글과 선거 분류 글도 문화·미디어 글감이 아니다.
+     "exclude_link": r"/newsletter/",
+     "exclude_tags": r"methodolog|\belections?\b|\bvoters?\b|\bvoting\b|^political issues$|^donald trump$|^politics & policy$",
      # 피드는 정치·사회·종교 등이 섞여 있어 미디어·온라인·기술 주제만 문화·미디어 분야로 보낸다(제목과 분류 태그에서 찾는다).
      "topic_regex": r"social media|internet|online|\bAI\b|artificial intelligence|chatbot|\bnews\b|tiktok|youtube|instagram"
-                    r"|facebook|podcast|streaming|influencer|smartphone|mobile|video game|gaming|music|movie|\bbooks?\b|reading|digital|platform",
+                    r"|facebook|podcast|streaming|influencer|smartphone|\bmobile\b|video game|gaming|music|movie|\bbooks?\b|\breading\b|digital|journalis|television|platform",
      "no_page_fetch": True,  # Pew 이용약관 §3 은 허가 없는 스크래핑(spidering·scraping)을 막는다. §1 이 허락한 RSS 요약만 쓰고 기사 페이지는 읽지 않는다.
      # Pew 이용약관 §2 의 인용 형식과 §1 의 번역물 면책 문장(아래 ko 고지문의 영어 문장은 약관 원문 그대로).
      "citation": "“{title}.” Pew Research Center, Washington, D.C. ({date}) <{url}>",
@@ -760,8 +767,8 @@ NEWS_SOURCES = [
     {"name": "Federal Reserve", "lane": "economy", "url": "https://www.federalreserve.gov/feeds/press_all.xml",
      "terms": {"status": "allowed", "checked": "2026-10-26",
                "url": "https://www.federalreserve.gov/disclaimer.htm"},
-     # 은행 인수·합병 승인과 제재 건은 한 곳의 사업 사정이라 일반 독자의 글감이 못 된다.
-     "exclude_title": r"\benforcement actions?\b|\bapproval of (?:the )?application\b",
+     # 은행 인수·합병 승인과 제재·이의 없음 통보·공동 판단 건은 한 곳의 사업 사정이라 일반 독자의 글감이 못 된다.
+     "exclude_title": r"\benforcement actions?\b|\bapprovals? of (?:the |related )?applications?\b|\bdoes not object\b|\bjoint findings\b",
      "notice": {"ko": "이 글은 AI 도구가 미국 연방준비제도 이사회(Federal Reserve Board)가 공개한 자료를 참고해 작성했습니다. 연준은 이 글을 검토하거나 승인하지 않았습니다.",
                 "en": "This article was written with an AI tool using materials published by the Federal Reserve Board. The Board has not reviewed or approved it."}},
     # 해외 직접 RSS(기술). 신뢰 목록을 통과해 글감이 되는 곳은 Ars·IEEE 뿐이고 TechCrunch·The Verge 는 신뢰 목록에 없어 글감이 안 된다(D-61).
@@ -930,6 +937,12 @@ def parse_feed(data):
     return items
 
 
+def _rule_excludes(src, title, item):
+    """소스의 제외 규칙(exclude_title·exclude_link·exclude_tags)에 걸리는 기사인가."""
+    checks = (("exclude_title", [title]), ("exclude_link", [item.get("link") or ""]), ("exclude_tags", item.get("categories") or []))
+    return any(src.get(key) and any(re.search(src[key], text, re.I) for text in texts) for key, texts in checks)
+
+
 def fetch_news_items(editorial_lane=None, stats=None, deadline=None, clock=time.monotonic):
     """여러 소스에서 최근 기사 후보를 모아, 소스를 번갈아 섞은 목록으로 반환.
     stats(dict)를 넘기면 소스별 수집·탈락 사유 개수를 stats["sources"]에 채운다(동작은 같다).
@@ -963,7 +976,6 @@ def fetch_news_items(editorial_lane=None, stats=None, deadline=None, clock=time.
         kept = []
         drops = {}
         resolved_count = 0
-        exclude_re = re.compile(src["exclude_title"], re.I) if src.get("exclude_title") else None
         topic_re = re.compile(src["topic_regex"], re.I) if src.get("topic_regex") else None
         for it in parsed:
             title = it["title"]
@@ -974,10 +986,13 @@ def fetch_news_items(editorial_lane=None, stats=None, deadline=None, clock=time.
                     match = re.match(r"^(.*)\s+-\s+([^-]+)$", title)
                     if match:
                         title, publisher = match.group(1).strip(), match.group(2).strip()
+            else:
+                # 직접 RSS 의 <source> 는 피드 자기소개(예: UN News 의 긴 태그라인)라 게시자 표시로 쓰지 않는다 — 게시자는 기사 주소의 호스트다.
+                publisher = publisher_url = ""
             if not title:
                 _count(drops, "NO_TITLE")
                 continue
-            if exclude_re and exclude_re.search(title):
+            if _rule_excludes(src, title, it):
                 _count(drops, "EXCLUDED")
                 continue
             if topic_re and not topic_re.search(" ".join([title] + it.get("categories", []))):
@@ -1321,6 +1336,15 @@ def _description_from_markdown(content, max_chars=155):
     return ""
 
 
+def _content_lang(content, body):
+    """글 언어(ko|en). validate_post_data 가 front matter 에 심은 lang 을 먼저 보고, 없으면 본문에 한글이 있는지로 가른다(영어 글에 한글 단어가 섞여도 영어로 본다)."""
+    front = re.match(r"\A---\s*\n(.*?)\n---\s*\n", content, re.S)
+    found = re.search(r"(?m)^lang:\s*[\"']?(ko|en)\b", front.group(1)) if front else None
+    if found:
+        return found.group(1)
+    return "ko" if re.search(r"[가-힣]", body) else "en"
+
+
 _MONTHS = ("January", "February", "March", "April", "May", "June", "July",
            "August", "September", "October", "November", "December")
 
@@ -1341,7 +1365,7 @@ def _append_source_notice(content, source):
     body_match = re.match(r"\A---\s*\n.*?\n---\s*\n(.*)\Z", content, re.S)
     body = body_match.group(1) if body_match else content
     notice = source.get("notice")
-    text = str(notice.get("ko" if re.search(r"[가-힣]", body) else "en") or "").strip() if isinstance(notice, dict) else ""
+    text = str(notice.get(_content_lang(content, body)) or "").strip() if isinstance(notice, dict) else ""
     for block in (_citation_line(source.get("citation"), source), f"*{text}*" if text else ""):
         if block and block not in content:
             content = content.rstrip() + f"\n\n{block}\n"
@@ -1363,7 +1387,7 @@ def add_discovery_metadata(content, source=None):
             body_match = re.match(r"\A---\s*\n.*?\n---\s*\n(.*)\Z", content, re.S)
             body = body_match.group(1) if body_match else content
             if source_url not in body:
-                heading = "\n\n## 출처\n" if re.search(r"[가-힣]", body) else "\n\n## Sources\n"
+                heading = "\n\n## 출처\n" if _content_lang(content, body) == "ko" else "\n\n## Sources\n"
                 content = content.rstrip() + f"{heading}- [{source['source']}: {source.get('title', '원문 기사')}]({source_url})\n"
         content = _append_source_notice(content, source)
     return content
