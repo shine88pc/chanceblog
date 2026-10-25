@@ -82,6 +82,24 @@ class FrontMatterTest(TempDirCase):
             with self.subTest(line=line):
                 self.assertTrue(v.is_unpublished(self.read(f"---\n{line}\n---\n")))
 
+    def test_quoted_keys_and_spaces_before_the_colon_are_the_same_key(self):
+        """N-4: YAML 은 `published : false`·`"published": false`·`'published': false` 도 같은 키로 읽는다. Jekyll 은 그 글을 공개하지 않는다."""
+        for line in ("published : false", "published  : false", "published\t: false", '"published": false', "'published': false",
+                     '"published" : false', "'published' : no", '"published":   off # c', '"published":', "published :",
+                     "'published' : null", '"published": "FALSE"', "'published': False"):
+            with self.subTest(line=line):
+                self.assertTrue(v.is_unpublished(self.read(f"---\n{line}\n---\n")), line)
+
+    def test_other_keys_accept_the_same_key_forms(self):
+        front = self.read('---\n"permalink": /a/\n\'slug\' : s\ndate : 2026-10-20 08:20:00 +0900\n"published" : true\n---\n')
+        self.assertEqual(front, {"permalink": "/a/", "slug": "s", "date": "2026-10-20 08:20:00 +0900", "published": "true"})
+
+    def test_mismatched_or_unterminated_key_quotes_are_not_keys(self):
+        for line in ('"published\': false', "'published\": false", '"published: false', 'published": false', "'published: false",
+                     '""published": false', '"published"": false', '"pub lished": false', "published false"):
+            with self.subTest(line=line):
+                self.assertEqual(self.read(f"---\n{line}\n---\n"), {}, line)
+
     def test_anything_else_stays_published(self):
         for text in ("---\npublished: true\n---\n", '---\npublished: "true"\n---\n', "---\npublished: yes\n---\n",
                      "---\npublished: 0\n---\n", "---\npublished: falsey\n---\n", "---\ntitle: t\n---\n",
@@ -273,6 +291,16 @@ class EligibilityTest(TempDirCase):
         selection = self.select([KR, "a/2026-10-21-KR-000001.md"], {KR: 'published: "false"\n'})
         self.assertEqual([p.name for p in selection.posts], ["2026-10-21-KR-000001.md"])
 
+    def test_published_false_written_with_a_quoted_key_or_a_space_still_skips_the_post(self):
+        """N-4: 이런 표기를 '공개'로 읽으면 사이트에 없는 글의 주소를 열어 404 로 빨강이 된다."""
+        for line in ("published : false", '"published": false', "'published': no", '"published" : off'):
+            with self.subTest(line=line):
+                with tempfile.TemporaryDirectory() as tmp:
+                    make_repo(tmp, [KR, "a/2026-10-21-KR-000001.md"], fronts={KR: line + "\n"})
+                    selection = v.select_newest(tmp, NOW, KST)
+                self.assertEqual([p.name for p in selection.posts], ["2026-10-21-KR-000001.md"])
+                self.assertEqual([(p.name, reason) for p, reason in selection.skipped], [("2026-10-25-KR-101307.md", "published: false")])
+
     def test_everything_unpublished_means_nothing_to_check(self):
         selection = self.select([KR, EN], {KR: "published: false\n", EN: "published: no\n"})
         self.assertEqual(selection.posts, [])
@@ -347,6 +375,14 @@ class SiteConfigTest(TempDirCase):
                          {"permalink": "/a/", "nested_permalink": True})
         self.assertEqual(self.config("collections:\n  posts:\n    permalink: /c/\n"), {"nested_permalink": True})
         self.assertEqual(self.config("# permalink: /a/\n  # permalink: /b/\ntitle: t\n"), {})
+
+    def test_quoted_keys_and_spaces_before_the_colon(self):
+        self.assertEqual(self.config('"permalink": /p/\n\'timezone\' : Asia/Seoul\n'), {"permalink": "/p/", "timezone": "Asia/Seoul"})
+        self.assertEqual(self.config("permalink : /p/\ntimezone  : UTC\n"), {"permalink": "/p/", "timezone": "UTC"})
+        self.assertEqual(self.config('defaults:\n  - values:\n      "permalink": /b/\n'), {"nested_permalink": True})
+        self.assertEqual(self.config("collections:\n  posts:\n    permalink : /c/\n"), {"nested_permalink": True})
+        self.assertEqual(self.config("defaults:\n  - values:\n      'permalink' : /b/\n"), {"nested_permalink": True})
+        self.assertEqual(self.config('"permalink\': /x/\n\'timezone": UTC\n'), {})
 
     def test_keyword_permalink_is_kept_as_text(self):
         self.assertEqual(self.config("permalink: pretty\n"), {"permalink": "pretty"})
