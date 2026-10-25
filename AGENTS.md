@@ -9,6 +9,7 @@
 1. [`HANDLER.md`](./HANDLER.md) → [`AI_COLLAB.md`](./AI_COLLAB.md) → [`WORKLOG.md`](./WORKLOG.md) 최신 3~5개
 2. 코드·워크플로·프롬프트를 건드릴 거면 [`docs/ENGINEERING_GUIDE.md`](./docs/ENGINEERING_GUIDE.md)와 [`docs/SECURITY_GUARDRAILS.md`](./docs/SECURITY_GUARDRAILS.md)
 3. `git pull --rebase origin main` — 봇이 main에 직접 커밋한다. **낡은 사본에서 작업·push 하지 않는다.**
+4. 새 세션이면 [`docs/SESSION_START.md`](./docs/SESSION_START.md) §2(첫 30분)·§5(현재 상태와 다음 작업 순서)·§6(사용자 몫)을 읽고, 하루를 마칠 때는 §4(마감 체크리스트)를 따른다.
 
 ## 2. 절대 규칙 (어기면 사고)
 
