@@ -66,7 +66,7 @@ main 최신 커밋 · 최근 24시간 자동 실행 결과(Chance 슬롯, Blogge
 
 ## 5. 현재 상태와 다음 작업 순서
 
-> 갱신 기준: **2026-10-25 저녁(KST)**. 이후 변경은 `WORKLOG.md` 최신 항목·열린 PR·`HANDLER.md` §0이 더 정확합니다. 새 세션은 이 절을 믿기 전에 `git log --oneline -20 origin/main`과 열린 PR 목록으로 대조하세요.
+> 갱신 기준: **2026-10-25 19시 30분(KST)**. 이후 변경은 `WORKLOG.md` 최신 항목·열린 PR·`HANDLER.md` §0이 더 정확합니다. 새 세션은 이 절을 믿기 전에 `git log --oneline -20 origin/main`과 열린 PR 목록으로 대조하세요.
 
 ### 5-1. 오늘 병합된 것 (main)
 
@@ -78,35 +78,36 @@ main 최신 커밋 · 최근 24시간 자동 실행 결과(Chance 슬롯, Blogge
 | #16 | Blogger 가시화 + `blogger_macat` 정지(mode off) | D-25·D-26·D-32 |
 | #17 | 워크플로 한글 이름 + 이미지 교체 분리 + 검증기 WF-11 | — |
 | #18 | 실제 git 시험의 간헐 실패 방지 + 시험이 Actions 요약 파일에 쓰지 못하게 막기 | — |
+| #19 | 이슈 수정 시스템 하드닝(재처리 방지·이미지 주소 엄격 검증·로그 명령 주입 차단·외부 AI 전송 전 비밀/카드/주민번호 모양 점검·줄 끝 검사·제목 변경 PR 통과) | D-37~D-40, D-45·D-46 |
+| #20 | Pages 배포 뒤 공개 사이트 반영 확인(`사이트 반영 확인` 잡) | D-41(3차 잔여 N3-1~N3-5는 D-41 행) |
+| #21 | **확인 필요 모음**(이슈 `[운영] 확인 필요 모음` 1개 + 실행 요약, 2시간 간격 예약) | 독립 검증 잔여 F1~F16은 후속 PR |
 
-병합 직후 Actions 확인은 워치독(#9·#10 자동 해소), Blogger(대상 0개 notice), 이름 변경(새 이름 9개, 연습 실행 2종)까지 끝냈습니다.
+**병합 직후 Actions 관측(끝난 것)**: 워치독(이슈 #9·#10 자동 해소), Blogger(대상 0개 notice), 이름 변경(새 이름 9개, 연습 실행 2종), 이슈 수정 연습 실행. **Pages 확인**: 첫 배포(글이 추가되지 않은 커밋)에서 시도 1회·경과 0초·`X-Cache MISS`·`Age 0`이고 `posts.json`의 `Last-Modified`가 방금 배포 시각이라 배포 때 CDN이 새 파일을 가져온 것으로 보인다 — 새 글이 추가된 배포 직후의 첫 요청은 아직 못 봤다(N3-1 판단 근거). **확인 필요 모음**: 연습 실행(요약 정상) → 실제 실행으로 이슈 #22(라벨 `ops-inbox`, 담당자 소유자)가 만들어졌고 이슈 목록 맨 위에 고정했다. 지금 "해야 할 일 0건·참고 3건"이고, 정기 실행(2시간 간격 예약, 실제로는 3~6시간)이 돌면 새 해야 할 일이 생길 때만 @멘션 코멘트가 간다.
 
 ### 5-2. 열려 있는 브랜치 (진행 상태는 이 표 갱신 시각 기준)
 
 | 브랜치 | 내용 | 상태·다음 |
 |--------|------|-----------|
-| `ai/claude/issue-edit-hardening` (PR #19) | 이슈 수정 하드닝(재처리 방지·이미지 주소 검증·로그 정책·외부 전송 점검·줄 끝·제목 변경 PR) | 2차 검증 완료, CI 후 병합 |
-| `ai/claude/pages-verify` | 배포 뒤 공개 사이트 반영 확인(verify 잡) | 2차 검증 지적 수정 중(404 보관 대응·한글 이름), 병합 전 재확인 |
-| `ai/claude/ops-inbox` | **확인 필요 모음**(이슈 1개 + 실행 요약, 2시간마다) | 독립 검증 진행 중 |
-| `ai/claude/gemini-call-log`, `ai/claude/manual-run-defaults` | Gemini 호출 기록, 수동 실행 기본값·정지 스위치 | 구현 중 |
-| `ai/claude/blogger-draft-upload`, `ai/claude/blogger-auth-check` | Blogger 초안함 업로드 모드, 인증 점검 | 구현 중 |
-| `ai/claude/actions-guide-v1` | 운영자용 Actions 가이드 | 위 PR들 병합 뒤 갱신·검증 |
-| `ai/claude/handover-guide` | 이 문서와 REQUEST_BRIEFING 갱신, 진단·AI 검색 보고서 보관 | 마감 때 PR |
+| `ai/claude/quota-guard`(= `gemini-call-log` + `manual-run-defaults` 통합) | Gemini 호출 기록(`[GEMINI]` 줄·요약 `Gemini 호출: N회`), 수동 실행 기본값(연습 실행은 가짜 AI 응답, 실제 AI는 `real_ai` 체크 시만, Blogger 수동 `dry_run` 기본 켜짐, 이미지 교체 한 번에 20건), 이슈 수정이 `PIPELINE_PAUSE`를 따름 | 독립 검증 2명 진행 중(호출 기록 / 기본값·정지 스위치) → 지적 반영 → PR → 병합 |
+| `ai/claude/blogger-draft-upload` → `ai/claude/blogger-auth-check` | Blogger 초안함 업로드 모드(`mode draft` + Secrets면 초안함에 올림, 수동 `publish` 입력 off/draft/publish 3택), 인증 점검만 실행(`auth_check`) | 독립 검증 진행 중 → 병합 순서 C→D, 병합 때 위 quota-guard와 `pipeline/run.py`·`blogger.yml`·표 문서 충돌 해결 |
+| `ai/claude/ops-inbox-fixes` | 확인 필요 모음 후속 수정(워크플로 이름 표시, 본문 재작성 줄이기, 포크 PR 제외, 첫 이슈 생성 경로의 알림 유실 등) | 구현 중 |
+| `ai/claude/actions-guide-v2` | 운영자용 Actions 가이드 전면 갱신(병합 대기 기능은 마커로 감쌈) | 작성 중 → 독립 사실 검증 → 병합 직전 마커 정리 |
+| `ai/claude/handover-guide` | 이 문서·REQUEST_BRIEFING v3·작업요청 README·진단/AI 검색 보고서 보관 | 마감 때 PR |
 
 ### 5-3. 관측 대기 (병합했지만 Actions 에서만 보이는 것)
 
-- **Chance 18시 창의 첫 폴백 실행**(분야가 비면 기술로 대체): 실행 요약의 분야 표·`[SKIP]` 줄·`Gemini 호출: N회`·글 수. GitHub 예약 실행은 매시 17분 틱의 약 22%만 도는 것으로 관측됐다(진단 보고서 §4-1) — 창 안에 실행이 아예 없으면 기록해 두고 크론 틱 추가(T3)를 검토한다.
+- **Chance 18시 창**: 오늘 마지막 예약 실행은 15:09 KST(그 뒤 19:30까지 예약 실행 없음 — GitHub가 예약을 건너뛰는 일이 잦다). 글이 없는 창에서 수동 실행하면 슬롯 번호 없는 글이 만들어져 같은 날 예약 실행이 또 만들 수 있다(하루 3편 가능) → 크론 틱 추가(T3, §6 #9)나 "슬롯 보충 수동 실행" 입력 추가를 승인 뒤 검토. 창 안에 실행이 아예 없으면 그 창의 글은 없다.
 - 워치독 하루 2회 점검의 첫 실제 알림 수신(휴대폰 푸시, 메일).
-- 병합 예정 PR들의 병합 직후 체크리스트(`docs/DEFECT_REGISTER.md` 하단): 이슈 수정(번호 형식 검사·중복 코멘트·제목 변경 PR), Pages 확인(첫 배포 요약의 시도 횟수·Age·X-Cache), 확인 필요 모음(연습 → 실제 실행, 이슈·@멘션 알림).
+- 병합 예정 PR들의 병합 직후 체크리스트(`docs/DEFECT_REGISTER.md` 하단): 이슈 수정(번호 형식 검사·중복 코멘트·제목 변경 PR), 새 글이 추가된 배포의 Pages 확인(시도 1이 404였는지), 확인 필요 모음의 정기 실행 간격과 첫 @멘션 코멘트.
 
 ### 5-4. 다음 작업 순서
 
-1. **열린 PR 병합 마무리**: 위 표 순서(이슈 수정 강화 → Pages 확인 → 확인 필요 모음 → 호출 기록·수동 기본값 → Blogger 초안 업로드·인증 점검), 병합마다 main 병합·한글 이름 규칙·문서 표 행·결함 번호(D-50~D-57 예약) 확인, 병합 직후 Actions 확인.
+1. **열린 PR 병합 마무리**: 독립 검증이 끝나는 순서대로 — 병합마다 main 병합·충돌 해결(뒤에 병합하는 쪽이 자기 코드를 새 기반에 맞춤)·한글 이름 규칙·문서 표 행·결함 번호(D-50~D-57 예약, 다음은 D-58) 확인, 전체 테스트, 병합 직후 Actions 확인. 낡아진 안내 갱신 목록(Blogger 초안 업로드·수동 기본값 때문): `HANDLER.md` §3 P1·§10 5.4, `docs/ENGINEERING_GUIDE.md` L3·W7 행, `docs/REQUEST_BRIEFING.md`, `docs/CHARTER.md` 131행 근처, `tests/test_health_daily.py` 69행 독스트링.
 2. **운영자 승인 항목 반영**(§6): 승인되면 순서대로 — 모델 목록에서 `gemini-3.7-flash` 제거(PR-6), Blogger 건강 금지 주제 강화(PR-5), Chance 소스 개편(PR-8~10, 약관 허용 소스만), 사이트 정리(운영 문서 제외·홈 글 목록 미리 그리기).
 3. **Blogger macat0722 재개**: 영문 코드 일반화(PR-14) → 영문 프로필(PR-15, T3) → `mode: draft`(T3) → 시크릿 등록(사용자) → 인증 점검 → 초안 1건 확인. auto는 AdSense 판정 전까지 보류.
 4. **쿼터 거버너**(PR-17·18): 호출 기록 1주 관측 + 운영자가 읽어 온 AI Studio 한도 표가 선행 조건.
 5. **콘텐츠 전략 Phase 0**(작업요청서 3번): 4개 블로그 주제 분리, AI 검색 노출 전략(`docs/analysis/2026-10-25_ai-search-exposure.md`), 신규 한글 Blogger 추가, 네이버 반자동(초안 배달) — 대부분 T3.
-6. **보안·유지보수**: SEC-2 확대(D-42), 워크플로 권한 최소화(`permissions: {}`·`persist-credentials: false`)와 Dependabot(github-actions 주 1회), 액션 버전 갱신(Node 20 폐기 경고), 이슈 수정 3-job 분리(D-23), 워치독 잔여(D-44·D-47), 인박스 자신의 정지 감시.
+6. **보안·유지보수**: SEC-2 확대(D-42), 워크플로 권한 최소화(`permissions: {}`·`persist-credentials: false`)와 Dependabot(github-actions 주 1회), 액션 버전 갱신(Node 20 폐기 경고), 이슈 수정 3-job 분리(D-23), 워치독 잔여(D-44·D-47), 확인 필요 모음 자신의 정지 감시(워치독이 마지막 성공 실행 시각을 확인), Pages 확인 3차 잔여(D-41 N3-1~N3-5).
 
 ## 6. 사용자만 할 수 있는 일과 결정 대기
 
