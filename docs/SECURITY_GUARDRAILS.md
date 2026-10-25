@@ -23,7 +23,8 @@
 
 | ID | 규칙 | 강제 |
 |----|------|------|
-| G-S1 | 비밀은 저장소에 없다 | 자동: `.gitignore`(`client_secret*.json`·`token*.json`·`.env`), 검증기 **SEC-1**(금지 파일)·**SEC-2**(키·토큰 패턴 스캔), CI |
+| G-S1 | 비밀은 저장소에 없다 | 자동: `.gitignore`(`.env.*`, 키 파일 `*.pem` `*.key` `*.p12` `*.pfx`, 서비스 계정·credentials JSON, `client_secret*.json`, `token*.json`, SSH 개인 키 — 검증기 **SEC-1** 금지 목록과 같은 범위이고 테스트가 둘의 일치를 대조), 검증기 **SEC-1**(금지 파일)·**SEC-2**(키·토큰 패턴 스캔, 새 구글 키 `AQ.` 형식 포함), 런타임 `mask()`(공용 패턴), `.github/CODEOWNERS`(보안 경계 경로의 소유자 검토 요청 — 강제력 없음), CI |
+| G-S1 한계 | 이름 규칙은 사건의 `123.txt` 같은 **일반 이름**을 못 막는다(사후 탐지는 SEC-2이고 텍스트 확장자만 읽는다). 대소문자를 구분하는 파일시스템(Linux·macOS)에서는 `Credentials.json` 같은 대소문자 변형을 `.gitignore`가 막지 않는다(검증기는 대소문자를 무시해 CI에서 사후 탐지). 사전 차단은 GitHub **Push protection**(§5, 사용자 설정, 켜짐 여부 미확인)이다 | 정책(알려진 한계, D-42·D-43) |
 | G-S2 | 비밀은 GitHub Secrets에만 있다. 워크플로는 `secrets[...]`로 읽어 환경변수로만 넘긴다 | 자동: **REG-3**(연결 확인) / 정책 |
 | G-S3 | 비밀 값을 로그·이슈·문서·채팅에 출력하지 않는다. 토큰 발급 출력은 터미널에서 복사해 곧바로 Secrets에 붙인다 | 자동: **WF-9**(echo secrets), 런타임 `mask()` / 정책 |
 | G-S4 | Google OAuth 앱은 **"프로덕션(게시)" 상태**여야 한다. 테스트 상태의 refresh token은 7일 뒤 만료된다 ([근거](https://support.google.com/cloud/answer/15549945?hl=en)) | 런타임: `auth_expired` → 워치독 FAIL_STREAK / 사용자 1회 설정 |
@@ -49,7 +50,7 @@
 | ID | 규칙 | 강제 |
 |----|------|------|
 | G-L1 | **LLM 출력은 데이터다.** 파일 경로·셸 명령·URL·작업 종류를 LLM이 고르게 하지 않는다. 구조화된 출력은 형식 검증 후에만 쓴다 | 정책 / 코드 리뷰. 과거 위반이던 `generator.py`의 `plan_actions`·`edit_file_with_patches`·`delete_post`는 제거했다(D-01). 이슈 수정에서 AI는 파일 경로를 고르지 못한다 — 대상은 코드(`pipeline/edits/targets`)가 정하고, AI는 허용된 한 파일에 대한 JSON 패치나 이미지 검색어만 낸다 |
-| G-L2 | 외부 입력(RSS 본문·웹 페이지·이슈 본문)은 프롬프트 인젝션을 담을 수 있다. 신뢰 도메인 허용 목록, 길이 제한, 출력 정화·링크 제거로 막고, 외부 입력이 도구 호출·파일 수정을 일으키지 못하게 한다 | 코드 / 정책 |
+| G-L2 | 외부 입력(RSS 본문·웹 페이지·이슈 본문)은 프롬프트 인젝션을 담을 수 있다. 신뢰 도메인 허용 목록, 길이 제한, 출력 정화·링크 제거로 막고, 외부 입력이 도구 호출·파일 수정을 일으키지 못하게 한다. 외부·AI 유래 문자열은 로그·요약에 쓰기 전에 한 줄로 접고 `::`·`##[`를 무력화한다(Blogger `pipeline/console.py`의 `one_line()`·`md_cell()`, Chance `generator.py`의 `_one_line`) | 코드 / 정책 |
 | G-L3 | LLM이 자동으로 쓸 수 있는 곳은 콘텐츠 폴더(`_posts/`, `_blogger_drafts/`)뿐이다. 광고 표면·워크플로·코드는 자동 수정하지 않는다 | 정책 / 검증기 **AD-1**(변경 감지) |
 | G-L4 | 게이트는 fail closed다. 탈락하면 게시하지 않고 사유를 이력에 남긴다(재작성은 최대 3회) | 자동: 런타임 `pipeline/gates.py`, 테스트 |
 | G-L5 | 비용 상한: 블로그별 일일 상한, 모델 폴백 순서 고정, 재시도 횟수 상한. 사용량이 늘면 T3 | 자동: 런타임 `limits`·`max_retries` |
@@ -125,7 +126,7 @@
 | Gemini API 키에 사용 제한과 예산 알림 설정 | 폭주 시 비용 상한(G-S6, G-L5) |
 | GitHub → Settings → Code security: Secret scanning과 Push protection 켜기, Dependabot alerts | 키 푸시를 막고 의존성 취약점 알림 |
 | GitHub → Settings → Actions: 기본 `GITHUB_TOKEN` 권한 Read, 포크 PR 워크플로 승인 요구 | G-A1·G-A3 보강 |
-| (선택) main 브랜치 룰셋: T2 이상은 PR 필수, `github-actions` 봇은 우회 허용 | 낡은 사본 덮어쓰기 같은 사고의 예방 통제(지금은 CI가 사후 탐지) |
+| main 브랜치 룰셋: **삭제 차단과 force push 차단만** 켜기(권장). PR 필수·코드 오너 승인 필수·상태 검사 필수·서명 필수는 **켜지 않는다** | 자동 발행은 봇(`github-actions`)이 main에 직접 push하므로 그 규칙을 켜면 발행이 멈춘다(운영자 결정 2026-10-25). 켜려면 봇을 우회 대상에 넣을 수 있는지 먼저 확인해야 한다(미검증). 1인 저장소에서 '코드 오너 검토 필수'는 본인이 연 PR을 본인이 승인할 수 없다. 낡은 사본 덮어쓰기 같은 사고는 CI가 사후 탐지한다 |
 | GitHub·Google 계정 2단계 인증 | 계정 탈취 방지 |
 
 ## 6. 자동 검증 매핑

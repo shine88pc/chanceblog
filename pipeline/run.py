@@ -3,9 +3,10 @@
 사용: python -m pipeline.run --blog blogger_macat [--dry-run] [--publish auto|on|off] [--topic "..."]
 
 종료 코드
-  0 정상 종료(게이트 탈락·일일 상한·주제 없음으로 '건너뜀'인 경우 포함)
-  1 인프라 실패(LLM 호출·게시 API·이력 파일). Actions 실행이 실패로 표시되어 알림이 간다
-  2 설정 오류(레지스트리·프롬프트·시크릿 누락)
+  0 정상 종료(일일 상한·정지·게이트 탈락·주제 없음 등 '건너뜀' 포함). 건너뛴 사유는
+    '[SKIP] code=...' 한 줄과 실행 요약에 남는다(docs/ARCHITECTURE.md 4-1)
+  1 인프라 실패(LLM 호출·주제 확장·게시 API·이력 파일). Actions 실행이 실패로 표시되어 알림이 간다
+  2 설정 오류(레지스트리·프롬프트·LLM 키·게시 대상인데 게시용 시크릿 누락)
 
 환경변수
   DRY_RUN=1          파일·게시 없이 전체 흐름만 확인(스텁 LLM)
@@ -23,7 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from pipeline import gates
-from pipeline.console import safe_output
+from pipeline.console import md_cell, one_line, safe_output
 from pipeline.llm import LLMError, make_gemini_llm, mask
 from pipeline.publishers.base import PublishError
 from pipeline.registry import (ROOT, RegistryError, get_blog, load_profile, load_registry,
@@ -35,6 +36,8 @@ from pipeline.topics import clean_topic, pick_topic
 EXIT_OK, EXIT_INFRA, EXIT_CONFIG = 0, 1, 2
 HISTORY_KEEP = 200
 DRAFTS_KEEP = 120
+TITLE_SHOWN = 120      # 로그·요약에 보여 줄 글 제목의 최대 길이(제목은 LLM 유래)
+REASONS_SHOWN = 600    # 로그·요약에 보여 줄 게이트 탈락 사유 전체의 최대 길이
 COUNTED_STATUSES = {"posted", "draft", "generated_unpublished"}
 _TRUE = {"1", "true", "yes", "on"}
 _FALSE = {"0", "false", "no", "off"}
@@ -114,6 +117,16 @@ def _write_summary(environ, text):
             fh.write(text + "\n")
 
 
+def skip_line(code, **fields):
+    """건너뜀·실패를 로그에서 한 줄로 찾게 하는 규격: [SKIP] code=CODE key=value ... (docs/ARCHITECTURE.md 4-1)."""
+    return " ".join([f"[SKIP] code={code}"] + [f"{key}={value}" for key, value in fields.items()])
+
+
+def _summarize(environ, blog, code, text):
+    """실행 요약 한 블록. 정상 건너뜀·경고·실패 모두 같은 모양으로 남긴다(성공 경로는 아래에서 따로 쓴다)."""
+    _write_summary(environ, f"### {blog['key']}\n- 결과: **{code}** — {text}")
+
+
 def default_publisher_factory(blog, environ):
     secrets = resolve_secrets(blog, environ)
     if blog["platform"] == "blogger":
@@ -149,15 +162,41 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
         out(f"[설정 오류] {exc}")
         return EXIT_CONFIG
 
+    # 정지는 일부러 켜는 것이라 종료 코드는 0이다. 대신 ::notice:: 로 Actions 화면(실행 요약 위쪽 주석)에 남겨,
+    # 변수를 켜 놓고 잊어도 "왜 아무것도 안 올라오지?" 할 때 눈에 띄게 한다.
     if _flag(environ, "PIPELINE_PAUSE"):
+        out(skip_line("PAUSED", blog=blog["key"], var="PIPELINE_PAUSE"))
         out("[일시정지] PIPELINE_PAUSE 가 켜져 있어 실행하지 않습니다.")
+        out(f"::notice::[{blog['key']}] 저장소 변수 PIPELINE_PAUSE 가 켜져 있어 이번 실행을 건너뜁니다. 계속 멈춰 둘 것이 아니라면 "
+            "Settings > Secrets and variables > Actions > Variables 에서 PIPELINE_PAUSE 를 지우세요.")
+        _summarize(environ, blog, "PAUSED", "저장소 변수 PIPELINE_PAUSE 가 켜져 있습니다.")
         return EXIT_OK
     if blog["mode"] == "off":
+        out(skip_line("MODE_OFF", blog=blog["key"]))
         out(f"[{blog['key']}] mode=off — 실행하지 않습니다.")
+        out(f"::notice::[{blog['key']}] 레지스트리(pipeline/blogs.json)에서 mode=off 로 정지된 블로그라 이번 실행을 건너뜁니다. "
+            "다시 켜려면 mode 를 draft 또는 auto 로 바꾸세요.")
+        _summarize(environ, blog, "MODE_OFF", "레지스트리(pipeline/blogs.json)에서 mode=off 로 정지된 블로그입니다.")
         return EXIT_OK
 
     policy = publish_policy(args.publish, environ)
     will_publish = (policy == "on") or (policy == "auto" and blog["mode"] == "auto")
+
+    # 게시 대상인데 게시용 시크릿이 없으면 글을 만들기 전에 멈춘다. 예전에는 초안만 저장하고 초록으로 끝나
+    # 게시가 한 번도 안 된 채 며칠이 지나도 눈에 띄지 않았다(D-25). 시크릿은 '이름'만 표시한다.
+    if will_publish:
+        missing = [role for role in missing_secret_roles(blog, environ) if role != "llm_api_key"]
+        if missing:
+            names = ", ".join(blog["secrets"].get(role, role) for role in missing)
+            message = (f"게시용 시크릿이 등록되어 있지 않습니다: {names} "
+                       "(저장소 Settings > Secrets and variables > Actions). "
+                       "등록하기 전에는 이 블로그를 mode=draft 또는 off 로 두세요.")
+            if not dry:
+                out(skip_line("SECRETS_MISSING", blog=blog["key"], missing=names.replace(" ", "")))
+                out(f"::error::[{blog['key']}] {message}")
+                _summarize(environ, blog, "SECRETS_MISSING", message)
+                return EXIT_CONFIG
+            out(f"::warning::[{blog['key']}] (DRY_RUN이라 계속합니다) {message}")
 
     # ---- 상태·상한 --------------------------------------------------------
     history_path = root / blog["state"]["history"]
@@ -174,7 +213,12 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
                       and e.get("date") == today.isoformat() and e.get("status") in COUNTED_STATUSES]
     cap = blog["limits"]["max_posts_per_day"]
     if len(produced_today) >= cap and not override:
-        out(f"[{blog['key']}] 오늘({today}) 상한 {cap}건에 도달해 건너뜁니다.")
+        counted = ", ".join(sorted({str(e.get("status")) for e in produced_today}))
+        out(skip_line("DAILY_CAP", blog=blog["key"], date=today, cap=cap, today=len(produced_today)))
+        out(f"::notice::[{blog['key']}] 오늘({today}) 상한 {cap}건에 도달해 건너뜁니다 "
+            f"(오늘 기록: {counted}). 수동 실행에서 topic 을 입력하면 상한을 건너뛰고 실행합니다.")
+        _summarize(environ, blog, "DAILY_CAP",
+                   f"오늘({today}) 상한 {cap}건에 도달해 건너뜀(오늘 기록: {counted}). 게시되지 않은 초안도 상한에 포함됩니다.")
         return EXIT_OK
 
     # ---- LLM --------------------------------------------------------------
@@ -184,7 +228,11 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
         else:
             api_key = resolve_secrets(blog, environ).get("llm_api_key", "")
             if not api_key:
-                out(f"[설정 오류] LLM 키({blog['secrets']['llm_api_key']})가 없습니다. Settings > Secrets 를 확인하세요.")
+                message = f"LLM 키({blog['secrets']['llm_api_key']})가 없습니다. Settings > Secrets 를 확인하세요."
+                out(skip_line("SECRETS_MISSING", blog=blog["key"], missing=blog["secrets"]["llm_api_key"]))
+                out(f"[설정 오류] {message}")
+                out(f"::error::[{blog['key']}] {message}")
+                _summarize(environ, blog, "SECRETS_MISSING", message)
                 return EXIT_CONFIG
             llm = make_gemini_llm(api_key, blog["llm"]["models"], blog["llm"].get("max_retries", 2))
 
@@ -205,9 +253,20 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
             write_json_atomic(history_path, history, keep=HISTORY_KEEP)
         return entry
 
+    if not topic and source == "expand_failed":
+        # 시드를 다 쓴 뒤 LLM에게 새 주제를 받는 호출이 실패했다. '주제 없음'(초록)으로 넘기면 LLM 키·할당량 문제가
+        # 가려지므로 인프라 실패(종료 1)로 다룬다.
+        message = "주제 확장 LLM 호출이 실패했습니다. LLM 키·할당량·모델 이름을 확인하세요."
+        out(skip_line("EXPAND_FAILED", blog=blog["key"]))
+        out(f"::error::[{blog['key']}] {message}")
+        record({"status": "llm_failed", "topic": "", "reasons": ["[TOPIC] expand_failed"]})
+        _summarize(environ, blog, "EXPAND_FAILED", message)
+        return EXIT_INFRA
     if not topic:
-        out(f"[{blog['key']}] 고를 주제가 없습니다({source}). 건너뜁니다.")
+        out(skip_line("NO_TOPIC", blog=blog["key"], source=source))
+        out(f"::warning::[{blog['key']}] 고를 주제가 없습니다({source}). 시드 주제를 보강하세요. 건너뜁니다.")
         record({"status": "skipped_no_topic", "topic": "", "reasons": [f"[TOPIC] {source}"]})
+        _summarize(environ, blog, "NO_TOPIC", f"고를 주제가 없습니다({source}).")
         return EXIT_OK
     out(f"[{blog['key']}] 주제({source}): {topic}")
 
@@ -218,8 +277,11 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
         try:
             raw, model = llm(build_prompt(template, topic, profile, feedback))
         except LLMError as exc:
-            out(f"[인프라 오류] LLM 호출 실패: {exc}")
+            out(skip_line("LLM_FAILED", blog=blog["key"], attempt=attempt))
+            out(f"[인프라 오류] LLM 호출 실패: {one_line(mask(exc))}")
+            out(f"::error::[{blog['key']}] LLM 호출이 실패했습니다. LLM 키·할당량·모델 이름을 확인하세요.")
             record({"status": "llm_failed", "topic": topic, "reasons": [f"[LLM] {mask(exc)[:300]}"], "attempts": attempt})
+            _summarize(environ, blog, "LLM_FAILED", "LLM 호출이 실패했습니다(원인은 이 단계의 로그를 보세요).")
             return EXIT_INFRA
         try:
             parsed = gates.parse_labeled_post(raw)
@@ -241,9 +303,13 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
         out(f"  시도 {attempt}: 게이트 탈락 → 재작성 ({'; '.join(result.codes())})")
 
     if accepted is None:
-        out(f"[{blog['key']}] 게이트를 통과하지 못해 게시하지 않습니다: {'; '.join(reasons)}")
+        # 사유에는 이력 속 다른 글의 제목이 들어 있을 수 있다(외부 유래). 로그·요약에는 한 줄로 접어서만 쓰고,
+        # ::warning:: 주석에는 아예 넣지 않는다(고정 문장만).
+        out(skip_line("GATE_REJECTED", blog=blog["key"], attempts=attempts))
+        out(f"[{blog['key']}] 게이트를 통과하지 못해 게시하지 않습니다: {one_line('; '.join(reasons), REASONS_SHOWN)}")
+        out(f"::warning::[{blog['key']}] 게이트를 {attempts}번 모두 통과하지 못해 게시하지 않았습니다. 다음 실행에서 다시 시도합니다.")
         record({"status": "rejected", "topic": topic, "reasons": reasons, "attempts": attempts, "model": model})
-        _write_summary(environ, f"### {blog['key']}\n- 결과: **rejected** — {'; '.join(reasons)}")
+        _summarize(environ, blog, "GATE_REJECTED", md_cell('; '.join(reasons), REASONS_SHOWN))
         return EXIT_OK
 
     final_html = gates.append_disclosure(accepted["content"], profile)
@@ -253,25 +319,23 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
     status, url, post_id, exit_code, extra = "draft", "", "", EXIT_OK, []
     if dry:
         out("[DRY_RUN] 게이트 통과 — 게시·저장 없이 종료합니다.")
-        out(f"  제목: {post['title']} / 라벨: {post['labels']} / 본문 {gates.text_length(gates.plain_text(accepted['content']))}자")
+        out(f"  제목: {one_line(post['title'], TITLE_SHOWN)} / 라벨: {post['labels']} / 본문 {gates.text_length(gates.plain_text(accepted['content']))}자")
+        _summarize(environ, blog, "DRY_RUN", f"게이트 통과, 게시·저장 없이 종료(제목: {md_cell(post['title'], TITLE_SHOWN)})")
         return EXIT_OK
     if will_publish:
-        missing = [r for r in missing_secret_roles(blog, environ) if r != "llm_api_key"]
-        if missing:
-            status = "generated_unpublished"
-            extra = [f"[SECRETS] 게시 시크릿 미등록: {', '.join(missing)}"]
-            out(f"  게시 시크릿이 없어 초안만 저장합니다 (미등록: {', '.join(missing)})")
-        else:
-            try:
-                publisher = (publisher_factory or default_publisher_factory)(blog, environ)
-                publisher.healthcheck()
-                result = publisher.publish(post["title"], post["content_html"], post["labels"], draft=False)
-                status, url, post_id = "posted", result.url, result.post_id
-                out(f"  게시 성공: {url}")
-            except PublishError as exc:
-                status, exit_code = "publish_failed", EXIT_INFRA
-                extra = [f"[{exc.code}] {mask(exc)[:300]}"]
-                out(f"[인프라 오류] 게시 실패({exc.code}): {exc}")
+        # 게시용 시크릿 누락은 위의 사전 점검에서 이미 걸러졌다(여기까지 오면 4종 모두 있다).
+        try:
+            publisher = (publisher_factory or default_publisher_factory)(blog, environ)
+            publisher.healthcheck()
+            result = publisher.publish(post["title"], post["content_html"], post["labels"], draft=False)
+            status, url, post_id = "posted", result.url, result.post_id
+            out(f"  게시 성공: {url}")
+        except PublishError as exc:
+            status, exit_code = "publish_failed", EXIT_INFRA
+            extra = [f"[{exc.code}] {mask(exc)[:300]}"]
+            out(skip_line("PUBLISH_FAILED", blog=blog["key"], reason=exc.code))
+            out(f"[인프라 오류] 게시 실패({exc.code}): {one_line(mask(exc))}")
+            out(f"::error::[{blog['key']}] 게시에 실패했습니다({exc.code}). 이 단계의 로그와 BLOGGER_API_SETUP.md 의 점검 항목을 확인하세요.")
     else:
         out("  게시 정책이 draft/off 여서 초안만 저장합니다.")
 
@@ -281,7 +345,8 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
             "labels": post["labels"], "url": url, "post_id": post_id, "model": model,
             "attempts": attempts, "reasons": extra})
     out(f"  초안 저장: {draft_path.relative_to(root).as_posix()} / 상태: {status}")
-    _write_summary(environ, f"### {blog['key']}\n- 결과: **{status}** — {post['title']}\n- URL: {url or '(없음)'}")
+    _write_summary(environ, f"### {blog['key']}\n- 결과: **{status}** — {md_cell(post['title'], TITLE_SHOWN)}\n"
+                            f"- URL: {url or '(없음)'}")
     return exit_code
 
 
