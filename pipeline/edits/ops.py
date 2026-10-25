@@ -174,6 +174,9 @@ def extract_json_object(raw):
 
 def build_patch_prompt(label, text, request, before="", forbidden=()):
     forbid = ", ".join(forbidden) if forbidden else "(없음)"
+    # 요청·변경 전·페이지 원문에서 구분자 문자열(`REQUEST>>>` 등)을 지운다: 데이터가 블록을 닫고 지시문을 끼워 넣지 못하게.
+    # (원문에 그런 문자열이 있으면 AI 가 본 원문과 실제 원문이 달라 패치가 맞지 않아 거부된다 — fail closed)
+    text, request, before = (safety.strip_delimiters(value) for value in (text, request, before))
     return f"""당신은 정적 블로그의 페이지 편집 도우미입니다. 아래 [요청]을 만족하는 **최소한의 수정**을 '부분 패치'로만 만드세요.
 
 규칙:
@@ -224,15 +227,23 @@ def apply_patches(text, patches):
     return out
 
 
+def check_outbound(named_texts):
+    """외부 AI·이미지 검색으로 보내기 전 점검: 비밀 값·주민등록번호·카드번호 모양이 있으면 보내지 않고 거부한다(값은 되풀이하지 않는다)."""
+    problems = safety.outbound_problems(named_texts)
+    if problems:
+        raise EditError(safety.outbound_refusal(problems))
+
+
 def op_llm_patch(text, fields, cfg, llm):
+    request = frontmatter.normalize_newlines(fields.get("after", "")).strip()
+    before = frontmatter.normalize_newlines(fields.get("before", "")).strip()
+    # AI 로 나가는 것(요청·변경 전·페이지 원문 전체)을 호출 전에 점검한다. 이메일·전화번호는 연락처 수정이 정당한 용도라 막지 않는다.
+    check_outbound({"요청 내용": request, "변경 전": before, "페이지 원문": text})
     if llm is None:
         raise InfraError("AI(LLM) 호출을 구성하지 못했습니다(GEMINI_API_KEY 확인).")
-    request = frontmatter.normalize_newlines(fields.get("after", "")).strip()
     if not request:
         raise EditError("'변경 후 / 요청 내용'이 비어 있습니다.")
-    prompt = build_patch_prompt(cfg.get("label", ""), text, request,
-                                frontmatter.normalize_newlines(fields.get("before", "")).strip(),
-                                cfg.get("forbidden", []))
+    prompt = build_patch_prompt(cfg.get("label", ""), text, request, before, cfg.get("forbidden", []))
     try:
         raw, _model = llm(prompt)
     except Exception as exc:  # noqa: BLE001 - 호출 라이브러리별 예외를 한곳에서 인프라 실패로 분류
@@ -282,6 +293,7 @@ def image_queries(request, title, tags, llm=None):
     fallback = [request]
     if llm is None:
         return fallback
+    title, tags, request = (safety.strip_delimiters(str(value)) for value in (title, tags, request))   # 구분자 위조 방지
     prompt = (
         "다음 블로그 글의 대표 이미지를 Unsplash 에서 찾기 위한 영어 검색어 3개를 만드세요.\n"
         "- 사용자의 요청 장면을 가장 잘 나타내는 것부터, 구체적 → 일반적 순서\n"
@@ -315,9 +327,11 @@ def op_image(text, fields, post, root, llm=None, picker=None):
     request = frontmatter.normalize_newlines(fields.get("user_prompt", "")).strip()
     if not request:
         raise EditError("'원하는 이미지 설명'이 비어 있습니다.")
+    fm = frontmatter.parse_front_matter(frontmatter.split_front_matter(text)[0]) or {}
+    # 요청문은 AI 프롬프트와 Unsplash 검색어로, 제목·태그는 AI 프롬프트로 나간다 → 호출 전에 점검한다
+    check_outbound({"원하는 이미지 설명": request, "글 제목": str(post.get("title", "")), "태그": str(fm.get("tags", ""))})
     if picker is None:
         raise InfraError("이미지 검색기를 구성하지 못했습니다(UNSPLASH_ACCESS_KEY 확인).")
-    fm = frontmatter.parse_front_matter(frontmatter.split_front_matter(text)[0]) or {}
     old_url = str(fm.get("image") or "")
     queries = image_queries(request, post.get("title", ""), fm.get("tags", ""), llm)
     used = used_image_keys(root, exclude_path=post["path"])
