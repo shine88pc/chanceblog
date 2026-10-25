@@ -51,19 +51,23 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v4
 
-  # 배포 성공 != 공개 반영. 저장소의 가장 새 글이 공개 사이트(posts.json)에 있고 주소가 열리는지 확인한다.
-  # 몇 분 기다려도 안 보이면 이 실행이 실패(빨강)가 되어 워치독이 알린다. docs/DEFECT_REGISTER.md D-37
+  # 배포 성공 != 공개 반영. 저장소의 가장 새 글(공개될 것: published: false·미래 날짜 제외)의 공개 주소가 HTTP 200으로
+  # 열리는지 확인한다. 공개 CDN이 이전 응답을 최대 10분 들고 있을 수 있어 마감 12분까지 30초 간격으로 다시 확인하고
+  # (쿼리 문자열·no-cache 헤더로는 CDN을 피하지 못한다 — 실측), 끝내 안 열리면 이 실행이 실패(빨강)가 되어 워치독이
+  # 알린다. 잡 제한 15분 = 마감 12분 + 마지막 요청 + 준비 시간. docs/DEFECT_REGISTER.md D-41
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     needs: deploy
     permissions:
       contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: 공개 사이트에 최신 글이 올라왔는지 확인
         env:
           PAGE_URL: ${{ needs.deploy.outputs.page_url }}
-        run: python3 scripts/verify_pages_deploy.py --base "$PAGE_URL"
+        run: python3 -u scripts/verify_pages_deploy.py --base "$PAGE_URL"
