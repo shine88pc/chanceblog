@@ -6,6 +6,8 @@ git·PR 은 이 모듈이 하지 않는다(워크플로가 한다). 이 모듈�
 
 CLI: python -m pipeline.edits.runner --issue-file issue.json --out DIR [--dry-run]
      python -m pipeline.edits.runner --verify-staged DIR/files.txt   (스테이징 목록 == 허용 목록 확인)
+     python -m pipeline.edits.runner --show-output DIR                (DRY_RUN: 산출물을 워크플로 명령이 먹히지 않게 로그에 출력)
+로그 정책: 러너가 내는 줄은 모두 `issue=#N author=@login(권한)` 으로 시작하고, 요청 원문·페이지 원문·프롬프트·비밀·예외 원문은 내지 않는다.
 
 종료 코드: 0 처리 끝(ok·rejected·ignored 포함) / 1 인프라 실패(AI·네트워크) / 2 설정·명세 오류
 """
@@ -14,6 +16,7 @@ import json
 import os
 import posixpath
 import re
+import secrets
 import subprocess
 import sys
 from dataclasses import asdict, dataclass, field
@@ -21,7 +24,7 @@ from pathlib import Path
 
 from pipeline import registry as registry_mod
 from pipeline.console import safe_output
-from pipeline.edits import checks, forms, frontmatter, ops, pages, spec as spec_mod, targets
+from pipeline.edits import checks, forms, frontmatter, ops, pages, safety, spec as spec_mod, targets
 
 MAX_FIELD_CHARS = 5000
 EXIT_OK, EXIT_INFRA, EXIT_CONFIG = 0, 1, 2
@@ -43,6 +46,8 @@ class Result:
     pr_body: str = ""
     summary: str = ""
     comment: str = ""
+    notes: list = field(default_factory=list)   # 러너 로그에만 쓰는 참고 문장(공개 코멘트에는 쓰지 않는다)
+    log_detail: str = ""                        # 러너 로그에만 쓰는 (마스킹된) 실패 원인. result.json 에도 쓰지 않는다
 
 
 @dataclass
@@ -88,14 +93,9 @@ def _slug(text, limit=30):
     return re.sub(r"[^a-z0-9]+", "-", str(text).lower()).strip("-")[:limit] or "x"
 
 
-def _one_line(text, limit=90):
-    """한 줄로 접고 자르며 멘션(@)을 무력화한다(커밋 제목·PR 제목·사유 문장용)."""
-    return re.sub(r"\s+", " ", str(text)).strip()[:limit].replace("@", "@​")
-
-
-def _code(text, limit=90):
-    """신뢰할 수 없는 문자열을 한 줄 코드 스팬으로(마크다운·멘션·줄 시작 트레일러·워크플로 명령을 무력화)."""
-    return "`" + re.sub(r"[`\s]+", " ", str(text)).strip()[:limit] + "`"
+# 한 줄 접기·코드 스팬은 safety 모듈이 정의한다(ops·checks 도 같은 함수를 쓴다). 기존 이름은 그대로 둔다.
+_one_line = safety.one_line
+_code = safety.code
 
 
 def _fence(text):
@@ -113,10 +113,30 @@ def _reject(reasons, hint="", edit_type="", target=""):
     return Result("rejected", message=reasons[0], reasons=reasons, comment=comment, edit_type=edit_type, target=target)
 
 
-def _error(message, exit_code=EXIT_INFRA):
+def _error(message, exit_code=EXIT_INFRA, log_detail=""):
+    """처리 오류. message 는 공개 코멘트에도 들어가므로 원인 상세(log_detail)는 따로 두고 러너 로그에만 낸다."""
     message = _one_line(message, 400)
     comment =f"❌ **처리 중 오류가 발생했습니다.**\n\n- {message}\n\n저장소는 변경되지 않았습니다. Actions 로그를 확인하세요."
-    return Result("error", message=message, reasons=[message], comment=comment, exit_code=exit_code)
+    return Result("error", message=message, reasons=[message], comment=comment, exit_code=exit_code, log_detail=log_detail)
+
+
+def _clean_token(value, allowed, limit):
+    """GitHub 이 정한 짧은 식별자(로그인·권한)에서 허용 문자만 남긴다(로그 줄 위조·워크플로 명령·트레일러 주입 방지)."""
+    cleaned = re.sub(rf"[^{allowed}]", "", "" if value is None else str(value))[:limit]
+    return cleaned or "?"
+
+
+def _login(issue):
+    user = issue.get("user") if isinstance(issue, dict) else None
+    return _clean_token(user.get("login") if isinstance(user, dict) else None, r"A-Za-z0-9._\[\]-", 40)
+
+
+def issue_tag(issue):
+    """러너가 내는 모든 로그 줄 머리에 붙는 `issue=#N author=@login(권한)`."""
+    issue = issue if isinstance(issue, dict) else {}
+    number = issue.get("number")
+    n = str(number) if isinstance(number, int) and not isinstance(number, bool) and number > 0 else "?"
+    return f"issue=#{n} author=@{_login(issue)}({_clean_token(issue.get('author_association'), 'A-Za-z_', 30).upper()})"
 
 
 def build_llm(env, registry_models_):
@@ -155,7 +175,7 @@ def default_image_picker():
 def resolve_request(issue, root):
     """Request 또는 Result(ignored/rejected/error). 파일을 읽기만 하고 아무것도 쓰지 않는다."""
     root = Path(root)
-    login = (issue.get("user") or {}).get("login", "?")
+    login = _login(issue)   # 허용 문자만 남긴 값(커밋·PR 본문·로그에 그대로 들어가므로)
     assoc = str(issue.get("author_association") or "").upper()
     if "pull_request" in issue:
         return Result("ignored", message="PR 은 처리하지 않습니다.")
@@ -187,7 +207,7 @@ def resolve_request(issue, root):
     if issue_label == "edit:page":
         edit_key = forms.option_id(fields.get("edit_type"))
         if edit_key not in candidates:
-            return _reject([f"알 수 없는 수정 항목입니다: {edit_key or '(없음)'}"], "양식의 '수정 항목' 목록에서 선택해 주세요.")
+            return _reject([f"알 수 없는 수정 항목입니다: {_code(edit_key, 60) if edit_key else '(없음)'}"], "양식의 '수정 항목' 목록에서 선택해 주세요.")
     elif len(candidates) == 1:
         edit_key = next(iter(candidates))
     else:
@@ -205,7 +225,7 @@ def resolve_request(issue, root):
         except pages.PagesError as exc:
             return _error(str(exc), EXIT_CONFIG)
         if not entry:
-            return _reject([f"pages.json 에 없는 페이지입니다: {page_id}"],
+            return _reject([f"pages.json 에 없는 페이지입니다: {_code(page_id, 60)}"],
                            "새 페이지라면 front matter 에 `editable: true` 를 넣고 동기화를 기다려 주세요.", edit_key)
         target = {"path": entry["path"], "title": entry["title"], "id": entry["id"]}
     else:
@@ -216,7 +236,7 @@ def resolve_request(issue, root):
             return _reject(["일치하는 게시글을 찾지 못했습니다."],
                            "블로그에서 글을 열어 주소창의 공개 URL 을 복사하거나, 글 제목을 정확히 입력해 주세요.", edit_key)
         if len(hits) > 1:
-            return _reject([f"여러 글({len(hits)}건)이 일치해 대상을 정할 수 없습니다: " + " / ".join(targets.describe(hits))],
+            return _reject([f"여러 글({len(hits)}건)이 일치해 대상을 정할 수 없습니다: " + " / ".join(_code(d, 120) for d in targets.describe(hits))],
                            "공개 URL 로 정확히 지정해 주세요.", edit_key)
         target = {"path": hits[0]["path"], "title": hits[0]["title"], "id": Path(hits[0]["path"]).stem}
 
@@ -287,7 +307,7 @@ def process_issue(issue, root, env=None, llm=None, image_picker=None, dry_run=Fa
     except ops.EditError as exc:
         return _reject([str(exc)], edit_type=req.edit_key, target=path)
     except ops.InfraError as exc:
-        return _error(str(exc))
+        return _error(str(exc), log_detail=exc.detail)   # 원인 상세는 러너 로그에만(공개 코멘트에는 예외 종류까지만)
 
     reasons = checks.verify_changes({path: (text, new_text)}, req.patterns, limits, mode=check_mode(cfg),
                                     only_fields=cfg.get("only_fields"), ai_patch=(how == "AI 최소 패치"))
@@ -313,7 +333,7 @@ def process_issue(issue, root, env=None, llm=None, image_picker=None, dry_run=Fa
                if req.ad_surface else "")
     pr_body = (f"이슈 #{number} (@{login})의 수정 요청을 자동으로 처리한 PR 입니다.{ad_note}\n\n{summary}\n\n"
                f"### 요청 내용\n{_fence(fields.get('after') or fields.get('user_prompt') or '')}\n\n"
-               f"### 변경 내용\n```diff\n{diff}\n```\n\n"
+               f"### 변경 내용\n{safety.fenced(diff, 'diff')}\n\n"   # 내용 속 ``` 줄이 펜스를 닫지 못하게 틸드 펜스(내용보다 길게)
                "### 리뷰 체크리스트\n- [ ] 요청한 항목만 바뀌었다\n- [ ] 사실·수치·링크가 맞다\n- [ ] 광고 코드·레이아웃은 그대로다\n\n"
                f"Fixes #{number}\n")
     if req.ad_surface:
@@ -328,7 +348,9 @@ def process_issue(issue, root, env=None, llm=None, image_picker=None, dry_run=Fa
 def write_outputs(result, out_dir):
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    (out / "result.json").write_text(json.dumps(asdict(result), ensure_ascii=False, indent=2), encoding="utf-8")
+    data = asdict(result)
+    data.pop("log_detail", None)   # 마스킹했더라도 실패 원인 상세는 러너 로그에만 남긴다(산출물 폴더는 다른 단계·job 으로 넘어갈 수 있다)
+    (out / "result.json").write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     (out / "status.txt").write_text(result.status + "\n", encoding="utf-8")
     (out / "branch.txt").write_text(result.branch + "\n", encoding="utf-8")
     (out / "files.txt").write_text("".join(f + "\n" for f in result.files), encoding="utf-8")
@@ -345,9 +367,38 @@ def verify_staged(files_txt, root=None):
     res = subprocess.run(["git", "-c", "core.quotepath=false", "diff", "--cached", "--name-only"], cwd=root,
                          capture_output=True, check=True)
     staged = {ln.strip() for ln in res.stdout.decode("utf-8", "replace").splitlines() if ln.strip()}
-    if staged != expected:
-        print(f"스테이징 목록이 허용 목록과 다릅니다. 허용={sorted(expected)} 스테이징={sorted(staged)}")
+    if staged != expected:   # 파일 이름은 신뢰할 수 없는 문자열이다(`##[` 같은 워크플로 명령 모양이 들어 있을 수 있다)
+        print(f"스테이징 목록이 허용 목록과 다릅니다. 허용={safety.log_text(sorted(expected), 400)} 스테이징={safety.log_text(sorted(staged), 400)}")
         return 1
+    return 0
+
+
+SHOWN_FILES = ("status.txt", "files.txt", "comment.md", "summary.md", "pr_body.md")
+
+
+def show_output(out_dir, write=None, token=None):
+    """DRY_RUN: 산출물을 로그에 보여 준다. 요청 원문이 섞여 있어 워크플로 명령으로 해석되지 않도록 이중으로 막는다.
+
+    1) `::stop-commands::<무작위 토큰>` 과 `::<토큰>::` 사이에서만 내용을 출력한다(토큰은 내용을 읽은 뒤에 만든다).
+    2) 그래도 모든 내용 줄에서 비밀 모양 문자열을 가리고 `##[`·줄 시작 `::` 를 무력화한다.
+    write(줄 하나)·token 은 테스트가 바꿔 끼운다."""
+    write = write or (lambda line: print(line, flush=True))
+    out = Path(out_dir)
+    blocks = []
+    for name in SHOWN_FILES:
+        path = out / name
+        if path.is_file():
+            try:
+                blocks.append((name, path.read_text(encoding="utf-8")))
+            except (OSError, UnicodeDecodeError):
+                blocks.append((name, "(읽을 수 없음)"))
+    token = token or secrets.token_hex(16)
+    write(f"::stop-commands::{token}")
+    for name, text in blocks:
+        write(f"----- {name}")
+        for line in text.splitlines():   # splitlines: \r·\v·\f·U+2028 같은 줄바꿈 변형도 줄로 나눠 각각 무력화한다
+            write(safety.neutralize(safety.redact(line)))
+    write(f"::{token}::")
     return 0
 
 
@@ -359,25 +410,40 @@ def main(argv=None):
     parser.add_argument("--root", default=None)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--verify-staged")
+    parser.add_argument("--show-output")
     args = parser.parse_args(argv)
     root = Path(args.root).resolve() if args.root else Path(__file__).resolve().parents[2]
 
+    if args.show_output:
+        return show_output(args.show_output)
     if args.verify_staged:
         return verify_staged(args.verify_staged, root)
     if not (args.issue_file and args.out):
         parser.error("--issue-file 과 --out 이 필요합니다.")
     dry = args.dry_run or str(os.environ.get("DRY_RUN", "")).lower() in ("1", "true", "yes")
+    issue = {}
     try:
         issue = json.loads(Path(args.issue_file).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        if not isinstance(issue, dict):
+            raise ValueError("이슈 데이터가 객체가 아닙니다")
+    except (OSError, ValueError) as exc:   # json.JSONDecodeError 와 UnicodeDecodeError 는 ValueError 의 하위 클래스
+        issue = {}
         result = _error(f"이슈 데이터를 읽을 수 없습니다: {type(exc).__name__}", EXIT_CONFIG)
     else:
         result = process_issue(issue, root, dry_run=dry)
     write_outputs(result, args.out)
-    print(f"[issue-edit] status={result.status} edit={_one_line(result.edit_type or '-', 60)} "
-          f"target={_one_line(result.target or '-', 120)} {'(dry-run) ' if dry else ''}{_one_line(result.message, 300)}")
+    # 러너가 내는 모든 줄은 `issue=#N author=@login(권한)` 으로 시작하고, 신뢰할 수 없는 문자열은 한 줄로 접어 비밀을 가리고
+    # 워크플로 명령 모양(`::`·`##[`)을 무력화한 것만 쓴다.
+    tag = f"[issue-edit] {issue_tag(issue)}"
+    log = safety.log_text
+    print(f"{tag} status={result.status} edit={log(result.edit_type or '-', 60)} target={log(result.target or '-', 120)} "
+          f"{'(dry-run) ' if dry else ''}{log(result.message, 300)}")
     for r in result.reasons:
-        print(f"  - {_one_line(r, 300)}")
+        print(f"{tag}   - {log(r, 300)}")
+    for note in result.notes:
+        print(f"{tag}   * {log(note, 300)}")
+    if result.log_detail:   # AI 실패 원인: 마스킹하고 300자로 자른 것을 러너 로그에만 낸다(공개 코멘트·result.json 에는 없다)
+        print(f"{tag}   ! 원인(로그 전용): {log(result.log_detail, 300)}")
     return result.exit_code
 
 

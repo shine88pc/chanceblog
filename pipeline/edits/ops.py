@@ -14,7 +14,7 @@ import json
 import re
 from pathlib import Path
 
-from pipeline.edits import checks, frontmatter
+from pipeline.edits import checks, frontmatter, safety
 
 MAX_PATCHES = 10
 MAX_LINK_OCCURRENCES = 5
@@ -28,7 +28,12 @@ class EditError(ValueError):
 
 
 class InfraError(RuntimeError):
-    """LLM·네트워크 등 인프라 실패."""
+    """LLM·네트워크 등 인프라 실패. 메시지는 공개 코멘트에도 들어가므로 예외 종류까지만 적고,
+    원인 상세는 detail(마스킹·300자 제한)에 담아 러너 로그에만 낸다."""
+
+    def __init__(self, message, detail=""):
+        super().__init__(message)
+        self.detail = detail
 
 
 # ----------------------------------------------------------------------------
@@ -231,12 +236,13 @@ def op_llm_patch(text, fields, cfg, llm):
     try:
         raw, _model = llm(prompt)
     except Exception as exc:  # noqa: BLE001 - 호출 라이브러리별 예외를 한곳에서 인프라 실패로 분류
-        raise InfraError(f"AI 호출 실패: {type(exc).__name__}") from exc
+        raise InfraError(f"AI 호출 실패: {type(exc).__name__}",
+                         detail=safety.log_text(f"{type(exc).__name__}: {exc}", 300)) from exc
     data = extract_json_object(raw)
     patches = data.get("patches")
     if not patches:
         reason = str(data.get("reason") or "요청을 수정안으로 옮기지 못했습니다.").strip()[:300]
-        raise EditError(f"AI 가 수정하지 않기로 했습니다: {reason}")
+        raise EditError(f"AI 가 수정하지 않기로 했습니다: {safety.code(reason, 300)}")   # AI 문장은 코드 스팬으로(공개 코멘트에서 링크·이미지가 렌더되지 않게)
     return apply_patches(text, patches)
 
 

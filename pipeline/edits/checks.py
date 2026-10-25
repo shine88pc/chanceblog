@@ -11,7 +11,7 @@ import difflib
 import html
 import re
 
-from pipeline.edits import frontmatter, spec as spec_mod
+from pipeline.edits import frontmatter, safety, spec as spec_mod
 from pipeline.secret_patterns import find_secrets
 
 AD_PATTERNS = [re.compile(p, re.IGNORECASE) for p in (r"adsbygoogle", r"googlesyndication", r"ca-pub-\d+")]
@@ -70,11 +70,6 @@ def _hosts(text):
     return {h.lower() for h in _EXTERNAL_HOST.findall(_decode(text))}
 
 
-def _safe(text, limit=60):
-    """사유 문장에 들어갈 신뢰할 수 없는 문자열: 한 줄로 접고 자른다."""
-    return re.sub(r"\s+", " ", str(text)).strip()[:limit]
-
-
 def changed_line_count(before, after):
     diff = difflib.unified_diff(before.splitlines(), after.splitlines(), lineterm="", n=0)
     return sum(1 for line in diff if line[:1] in "+-" and not line.startswith(("+++", "---")))
@@ -103,7 +98,7 @@ def _front_matter_reasons(path, before, after, mode, only_fields):
     changed = {str(k) for k in set(dict_b) | set(dict_a) if dict_b.get(k) != dict_a.get(k)}
     reasons = []
     if changed - allowed:
-        reasons.append(f"{path}: 허용되지 않은 front matter 항목이 바뀌었습니다: {', '.join(_safe(k, 40) for k in sorted(changed - allowed))}")
+        reasons.append(f"{path}: 허용되지 않은 front matter 항목이 바뀌었습니다: {', '.join(safety.code(k, 40) for k in sorted(changed - allowed))}")
     if mode == "front_matter" and body_a != body_b:
         reasons.append(f"{path}: 본문이 바뀌었습니다(이 수정 항목은 front matter 필드만 바꿀 수 있습니다).")
     return reasons
@@ -202,7 +197,7 @@ def verify_changes(changes, allowed_patterns, limits, mode="body", only_fields=N
                 reasons.append(f"{path}: AI 수정이 파일의 큰 부분을 바꿉니다({lines}줄 > {cap}줄). 요청을 더 작게 나눠 주세요.")
             new_hosts = _hosts(after) - _hosts(before)
             if new_hosts:
-                reasons.append(f"{path}: AI 수정은 새 외부 링크를 넣을 수 없습니다({sorted(new_hosts)[0]}).")
+                reasons.append(f"{path}: AI 수정은 새 외부 링크를 넣을 수 없습니다({safety.code(sorted(new_hosts)[0], 80)}).")
         for rx in AD_PATTERNS:
             if len(rx.findall(before)) != len(rx.findall(after)):
                 reasons.append(f"{path}: 광고 코드({rx.pattern})가 추가되거나 삭제됩니다. 광고 표면은 이 경로로 바꿀 수 없습니다.")
@@ -224,7 +219,7 @@ def verify_changes(changes, allowed_patterns, limits, mode="body", only_fields=N
                 reasons.append(f"{path}: 비밀 값으로 보이는 문자열({label}, {preview})이 들어갑니다.")
         new_http = set(_HTTP_LINK.findall(after)) - set(_HTTP_LINK.findall(before))
         if new_http:
-            reasons.append(f"{path}: 암호화되지 않은 http:// 링크가 새로 들어갑니다: {sorted(new_http)[0]}")
+            reasons.append(f"{path}: 암호화되지 않은 http:// 링크가 새로 들어갑니다: {safety.code(sorted(new_http)[0], 100)}")
         fm_mode = "body" if mode == "body" else mode
         fm_only = ["image"] if mode == "image" else only_fields
         if mode == "image":

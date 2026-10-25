@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from pipeline.console import safe_output
-from pipeline.edits import checks, frontmatter, ops, runner, spec as spec_mod
+from pipeline.edits import checks, frontmatter, ops, runner, safety, spec as spec_mod
 
 MARKER = "<!-- issue-edit-scope-check -->"
 _EOL_NAMES = {"lf": "LF", "crlf": "CRLF", "cr": "CR 단독", "mixed": "LF·CRLF 혼합", "none": "줄바꿈 없음"}
@@ -32,8 +32,8 @@ _ISSUE_RE = re.compile(r"(?i)\b(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?)\s*:?\s+
 
 
 def _flat(text, limit=400):
-    """코멘트·로그에 들어가는 문장을 한 줄로 접는다(줄 시작 워크플로 명령·마크다운 구조 주입 방지)."""
-    return re.sub(r"\s+", " ", str(text)).strip()[:limit]
+    """코멘트·로그에 들어가는 문장을 한 줄로 접는다(줄 시작 `::`·줄 어디서든 `##[` 워크플로 명령 모양과 마크다운 구조 주입 방지)."""
+    return safety.neutralize(re.sub(r"\s+", " ", str(text)).strip()[:limit])
 
 
 @dataclass
