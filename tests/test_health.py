@@ -33,7 +33,7 @@ class EvaluateTest(unittest.TestCase):
 
     def test_recent_commit_rescues_staleness(self):
         findings = health.evaluate(BLOG, [entry("posted", 80)], NOW, last_content_commit=NOW - timedelta(hours=3))
-        self.assertEqual(findings, [])
+        self.assertNotIn("STALE", codes(findings))  # 하루 단위 NO_POSTS_DAY 는 test_health_daily.py 에서 따로 본다
 
     def test_failure_streak(self):
         history = [entry("posted", 70), entry("publish_failed", 48), entry("llm_failed", 24), entry("publish_failed", 1)]
