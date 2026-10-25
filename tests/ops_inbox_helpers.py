@@ -256,4 +256,3 @@ def make_root(tmp, histories=None, workflows=("chanceblog.yml", "blogger.yml", "
     for name in workflows:
         (root / ".github" / "workflows" / name).write_text("name: x\n", encoding="utf-8")
     return root
-

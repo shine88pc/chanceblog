@@ -5,11 +5,11 @@ run-name: "확인 필요 모음 갱신 · ${{ github.event_name == 'workflow_dis
 # 이슈 1개('[운영] 확인 필요 모음')와 이 실행의 요약에 모은다. 새로 해야 할 일이 생기면 이슈에 코멘트(@멘션)로 알려 휴대폰 알림이 간다.
 # 판단 규칙: pipeline/inbox.py / 입출력: scripts/ops_inbox.py / 설명: docs/OPS_INBOX.md
 # 이 워크플로가 쓰는 것은 이슈·코멘트·라벨뿐이다(파일·브랜치는 바꾸지 않는다). 끄려면 Actions 탭에서 이 워크플로를 Disable 한다.
-# 다른 워크플로의 이름에 기대지 않는다(workflow_run 트리거를 쓰지 않고 2시간마다 직접 조회한다).
+# 다른 워크플로의 이름에 기대지 않는다(workflow_run 트리거를 쓰지 않고 예약 시각마다 직접 조회한다).
 
 on:
   schedule:
-    # 2시간마다(정각 혼잡을 피해 40분). GitHub 스케줄은 지연·누락될 수 있어 실제 간격은 더 길 수 있다.
+    # 2시간 간격(정각 혼잡을 피해 40분). GitHub 스케줄은 지연·누락될 수 있어 실제 간격은 더 길 수 있다.
     - cron: '40 */2 * * *'
   workflow_dispatch:
     inputs:
