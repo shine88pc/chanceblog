@@ -258,7 +258,11 @@ def process_issue(issue, root, env=None, llm=None, image_picker=None, dry_run=Fa
 
     file_path = root / path
     try:
-        text, newline = frontmatter.read_file(file_path)
+        text, newline = frontmatter.read_file(file_path, strict=True)
+    except frontmatter.LineEndingError:
+        # 줄 끝이 섞인 파일을 한 가지로 다시 쓰면 요청하지 않은 줄 끝 변경이 파일 전체에 생긴다 → 고치지 않는다(fail closed)
+        return _error(f"{path} 의 줄 끝이 LF·CRLF 혼합(또는 CR 단독)이라 줄 끝을 보존한 채 고칠 수 없어 수정하지 않았습니다. "
+                      "줄 끝을 한 가지로 통일하는 수정이 먼저 필요합니다(저장소 관리자에게 요청).", EXIT_CONFIG)
     except (OSError, UnicodeDecodeError) as exc:
         return _error(f"대상 파일을 읽을 수 없습니다: {path} ({type(exc).__name__})", EXIT_CONFIG)
     if len(text) > limits["max_file_chars"]:
