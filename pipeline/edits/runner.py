@@ -20,8 +20,9 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from pipeline import registry as registry_mod
-from pipeline.console import safe_output
+from pipeline.console import md_cell, safe_output
 from pipeline.edits import checks, forms, frontmatter, ops, pages, spec as spec_mod, targets
+from pipeline.llm import CallLog
 
 MAX_FIELD_CHARS = 5000
 EXIT_OK, EXIT_INFRA, EXIT_CONFIG = 0, 1, 2
@@ -119,12 +120,13 @@ def _error(message, exit_code=EXIT_INFRA):
     return Result("error", message=message, reasons=[message], comment=comment, exit_code=exit_code)
 
 
-def build_llm(env, registry_models_):
+def build_llm(env, registry_models_, calls=None):
+    """calls(CallLog)를 넘기면 이번 실행의 Gemini 요청 기록이 거기에 쌓인다(무료 한도 측정, 실행 요약에서 쓴다)."""
     key = (env.get("GEMINI_API_KEY") or "").strip()
     if not key:
         return None
     from pipeline.llm import make_gemini_llm
-    return make_gemini_llm(key, registry_models_, max_retries=2)
+    return make_gemini_llm(key, registry_models_, max_retries=2, log=calls)
 
 
 def registry_models(root):
@@ -247,7 +249,7 @@ def check_mode(cfg):
 # ----------------------------------------------------------------------------
 # 본 처리
 # ----------------------------------------------------------------------------
-def process_issue(issue, root, env=None, llm=None, image_picker=None, dry_run=False):
+def process_issue(issue, root, env=None, llm=None, image_picker=None, dry_run=False, calls=None):
     env = os.environ if env is None else env
     root = Path(root)
     req = resolve_request(issue, root)
@@ -267,7 +269,7 @@ def process_issue(issue, root, env=None, llm=None, image_picker=None, dry_run=Fa
     method = cfg["method"]
     try:
         if method in ("text", "llm_patch", "image") and llm is None:
-            llm = build_llm(env, registry_models(root))
+            llm = build_llm(env, registry_models(root), calls)
         if method == "image" and image_picker is None:
             image_picker = default_image_picker()
         if method == "text":
@@ -345,6 +347,18 @@ def verify_staged(files_txt, root=None):
     return 0
 
 
+def write_step_summary(markdown):
+    """Actions 실행 화면의 요약 칸(GITHUB_STEP_SUMMARY)에 덧붙인다. 로컬 실행에서는 아무 일도 하지 않고, 쓰기에 실패해도 처리 결과는 바꾸지 않는다."""
+    target = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not target:
+        return
+    try:
+        with open(target, "a", encoding="utf-8") as fh:
+            fh.write(markdown.rstrip() + "\n\n")
+    except OSError as exc:
+        print(f"[issue-edit] 실행 요약 쓰기 실패(처리 결과에는 영향 없음): {_one_line(exc, 200)}")
+
+
 def main(argv=None):
     safe_output()
     parser = argparse.ArgumentParser(prog="python -m pipeline.edits.runner")
@@ -361,17 +375,23 @@ def main(argv=None):
     if not (args.issue_file and args.out):
         parser.error("--issue-file 과 --out 이 필요합니다.")
     dry = args.dry_run or str(os.environ.get("DRY_RUN", "")).lower() in ("1", "true", "yes")
+    calls = CallLog(label="issue-edit", out=print)   # 이번 실행의 Gemini 요청 기록(무료 한도 측정)
     try:
         issue = json.loads(Path(args.issue_file).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         result = _error(f"이슈 데이터를 읽을 수 없습니다: {type(exc).__name__}", EXIT_CONFIG)
     else:
-        result = process_issue(issue, root, dry_run=dry)
+        result = process_issue(issue, root, dry_run=dry, calls=calls)
     write_outputs(result, args.out)
     print(f"[issue-edit] status={result.status} edit={_one_line(result.edit_type or '-', 60)} "
           f"target={_one_line(result.target or '-', 120)} {'(dry-run) ' if dry else ''}{_one_line(result.message, 300)}")
     for r in result.reasons:
         print(f"  - {_one_line(r, 300)}")
+    ai_lines = calls.summary_lines()
+    for line in ai_lines:
+        print(f"[issue-edit] {line}")
+    write_step_summary(f"### 이슈 수정 요청 처리 요약\n- 결과: **{md_cell(result.status, 30)}**"
+                       + "".join(f"\n- {line}" for line in ai_lines))
     return result.exit_code
 
 

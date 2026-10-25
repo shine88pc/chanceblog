@@ -15,6 +15,7 @@ import re
 from pathlib import Path
 
 from pipeline.edits import frontmatter
+from pipeline.llm import purpose
 
 MAX_PATCHES = 10
 MAX_LINK_OCCURRENCES = 5
@@ -230,7 +231,8 @@ def op_llm_patch(text, fields, cfg, llm):
                                 frontmatter.normalize_newlines(fields.get("before", "")).strip(),
                                 cfg.get("forbidden", []))
     try:
-        raw, _model = llm(prompt)
+        with purpose(llm, "patch"):
+            raw, _model = llm(prompt)
     except Exception as exc:  # noqa: BLE001 - 호출 라이브러리별 예외를 한곳에서 인프라 실패로 분류
         raise InfraError(f"AI 호출 실패: {type(exc).__name__}") from exc
     data = extract_json_object(raw)
@@ -285,8 +287,9 @@ def image_queries(request, title, tags, llm=None):
         f"[제목] {title}\n[태그] {tags}\n[요청]\n<<<REQUEST\n{request}\nREQUEST>>>\n"
         'JSON 객체만 반환: {"image_queries": ["...", "...", "..."]}')
     try:
-        raw, _ = llm(prompt)
-        queries = [q.strip() for q in extract_json_object(raw).get("image_queries", []) if isinstance(q, str) and q.strip()]
+        with purpose(llm, "image-queries"):
+            raw, _ = llm(prompt)
+        queries =[q.strip() for q in extract_json_object(raw).get("image_queries", []) if isinstance(q, str) and q.strip()]
     except Exception:  # noqa: BLE001 - 검색어 제안 실패는 요청 문구로 대체한다
         queries = []
     return (queries[:3] + fallback) if queries else fallback
