@@ -1,4 +1,5 @@
-name: Watchdog
+name: 발행 중단 감시·알림
+run-name: "발행 중단 감시 · ${{ github.event_name == 'workflow_dispatch' && '수동' || '정기' }}"
 
 # 풀오토가 조용히 멈추는 것을 막는다. 문제가 있을 때만 [Watchdog] 이슈를 열어(담당자 지정 + @멘션) 알리고,
 # 풀릴 때까지 갱신·재알림하며, 해소되면 닫는다. 새로 생긴 심각 건이 있는 실행만 빨강으로 끝나 Actions 실패 알림도 간다.
@@ -22,6 +23,7 @@ concurrency:
 
 jobs:
   watch:
+    name: 발행 상태 점검
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

@@ -55,6 +55,49 @@
 
 ---
 
+## [2026-10-25] Claude – Actions 워크플로 이름 한글화·Chance 이미지 교체 워크플로 분리 (운영 접근성)
+
+**작업자**: Claude (구현 담당)  
+**대상**: 공통 (Chance_Blog 워크플로 분리 포함)  
+**등급**: T2 (워크플로·검증기 변경). 독립 검증은 별도 세션이 새 clone에서 수행했다(병합 가능, 조건 3개는 절차 문제 — 아래 '독립 검증 반영')  
+**목적**: 운영자가 Actions 탭 이름만 보고 "자동인가 수동인가, 무엇을 하는가"를 짐작할 수 있게 한다(운영자 요청). 한 워크플로에 묶여 있던 '글 자동 작성·게시'와 '기존 글 이미지 교체'를 둘로 나눈다
+
+### 변경 사항
+- **이름(`name`)**: 워크플로 8개를 한글로. 옛 이름 → 새 이름 · 파일 · 하는 일 · 자동/수동 표는 `docs/ARCHITECTURE.md` §2-1과 `docs/REQUEST_BRIEFING.md`(기준일 2026-10-25). 파일 이름·job 키·트리거·권한·env·`run:` 본문은 그대로다(예외 하나: `blogger.yml` plan 단계가 대상 0개일 때 쓰는 요약 제목 `### Blogger Generate` → `### Blogger 글 자동 작성`)
+- **실행 제목(`run-name`)**: `chanceblog`(정기/수동/연습), `chance-fix-images`(연습/실제 교체), `blogger`(정기/수동 3종), `watchdog`(정기/수동), `issue-edit`(이슈 번호 + 자동/수동/연습). 이벤트 종류·이슈 번호·불리언만 참조하고 이슈·PR 제목·자유 입력 같은 외부 문자열은 넣지 않는다. `pages`·`guardrails`·`pr-scope-check`·`sync-issue-form`은 기본 제목(커밋 메시지·PR 제목)이 더 알려 줘서 그대로 뒀다
+- **job·단계·입력 설명**: job `name`을 한글로(`글 작성·게시`, `대상 블로그 계획`, `글 생성 (블로그 key)`, `사이트 빌드`·`사이트 게시`, `검사 (Python 3.10/3.12)`, `발행 상태 점검`, `수정안 만들기`, `이슈 요청 범위 확인`, `목록 동기화`). `pages.yml`의 영어 단계 이름 5곳과 입력 `description`을 한글로(`DRY_RUN` → `연습 실행`). 이름 없는 `uses:` 단계(checkout·setup-python)는 그대로(진행 중인 다른 PR과 충돌을 줄이려고 이름·run-name·job name·입력 설명 줄만 건드림)
+- **분리**: 새 `chance-fix-images.yml`(수동 전용, 입력 `dry_run` 기본 true, `FIX_IMAGES: '1'`). 권한·concurrency 그룹 `chanceblog`(글 작성 실행과 동시에 돌지 않음)·타임아웃 20분·env(`DRY_RUN` 입력 연동, `PIPELINE_PAUSE`, 시크릿)·커밋·Pages 배포 요청·요약 기록은 `chanceblog.yml`과 같은 내용을 복사. `chanceblog.yml`에서는 `fix_images` 입력과 `FIX_IMAGES` env 줄만 제거(`generator.py`는 손대지 않음). 이제 이미지 교체 실행이 `chanceblog.yml` 실행 기록에 섞이지 않는다(워치독의 연속 실패 판단은 파일 이름 기준이라 영향 없음)
+- **검증기 WF-11**(`scripts/validate_repo.py` `check_workflow_names`): 워크플로 `name`에 한글이 없으면 오류, job `name`이 없거나 한글이 없으면 경고. 규칙 W10(`docs/ENGINEERING_GUIDE.md`), 매핑표(`docs/SECURITY_GUARDRAILS.md` §6)
+- **테스트**: `tests/test_validate_repo.py`에 WF-11 10개(영문 이름 오류·이름 없음·job 경고·식 속 한글·`.yaml`·워크플로 폴더 밖 무시·`run_checks`/CLI 연결·실제 저장소). 신규 `tests/test_workflow_names.py` 24개: 입력 설명·단계 이름·run-name 한글, 문서 두 표와 실제 이름 일치, 옛 영문 이름 검색(안내 문서·워크플로·이슈 양식·코드의 알림문·요약 제목·독스트링·주석까지, 검색기 자체 시험 포함), GitHub 표현식 해석기로 정기·수동·이슈 이벤트의 실행 제목과 `run-name`이 허용된 값만 참조하는지, blogger 연습 입력 설명의 경고, `chanceblog.yml`의 `fix_images` 제거와 `chance-fix-images.yml`의 트리거·입력·권한·동시성·타임아웃·단계 동일성. `tests/test_generator_slots.py`에 `FIX_IMAGES` 계약 3개(켜지면 이미지 교체만·꺼지면 교체 안 함·환경변수가 없으면 꺼짐)
+- **문서**: 현재형 안내의 옛 영문 이름을 새 이름으로(HANDLER, ISSUE_EDITS, COPILOT_GUIDE, CHARTER, ENGINEERING_GUIDE, SECURITY_GUARDRAILS, DEFECT_REGISTER 관측 체크리스트와 병합 뒤 확인 행, `.github/copilot-instructions.md`, `.github/instructions/workflows.instructions.md`). README·AGENTS·`인수인계/`에는 옛 영문 이름이 없어 그대로. 이 WORKLOG의 기존 항목은 과거 사실이라 고치지 않았다. `.github/CODEOWNERS` 머리 주석의 "main에 직접 push하는 워크플로 3종" 목록에는 같은 커밋 단계를 쓰는 `chance-fix-images.yml`을 더해 4종으로 고쳤다(보안 설정 PR의 머리 주석 시험은 그대로 통과)
+
+### 검증 증거
+- **L0**: `python scripts/validate_repo.py` 오류 0, 경고 2(LIQUID-1 인수인계 초안 문서, EXPOSE-1 — main과 같음, WF-11 지적 없음. `--base`를 main으로 줘도 오류 0). `actionlint` 1.7.12 저장소 전체 0건(새 파일 포함, `run-name` 식의 문맥 검사도 한다 — 허용되지 않은 문맥을 넣으면 오류가 나는 것을 시험 파일로 확인). `pyflakes` 변경 py 3개 0건. `vermin --target=3.10-`: 최소 3.7(3.10 호환)
+- **L1**: `python -m unittest discover -s tests` **630개 통과**(시작 기준 main ddf0a22는 401개 → 보안 설정 PR(#14) 반영 main c834c2d 431개 → 워치독 보강·Blogger 가시화(#15·#16) 반영 main 0f509d2 593개, 여기에 신규 37: `test_validate_repo.py` 10, `test_workflow_names.py` 24, `test_generator_slots.py` 3). Windows, Python 3.12. 새로 clone한 사본에서 실행
+- **리베이스·병합**: 작업 중 보안 설정 PR(#14, c834c2d)이 병합돼 그 위로 리베이스했다(충돌 3곳은 main 내용을 유지하고 이름 변경만 얹어 풀었다). 그 뒤 main(0f509d2)은 병합 커밋(`git merge`)으로 합쳤다: 충돌 5개 파일(HANDLER 2곳·WORKLOG·DEFECT_REGISTER 2곳·ENGINEERING_GUIDE·REQUEST_BRIEFING)은 양쪽 내용을 모두 살렸고 새로 들어온 안내·코드의 옛 이름을 바꿨다. 병합 직후 사본은 625개 통과였다
+- **동작 불변 증명**: main(ddf0a22, 병합 전)의 워크플로 8개와 이 브랜치를 PyYAML로 비교(이름·run-name·입력 description·job name·단계 name 제외): 7개 파일은 구조 차이 0건, `chanceblog.yml`은 `fix_images` 입력과 `FIX_IMAGES` env 두 곳만 다름, job 키·`needs` 전부 동일. 새 `chance-fix-images.yml`은 분리 전 `chanceblog.yml`과 `FIX_IMAGES: '1'`(전: 입력 연동 식)·`schedule` 트리거·`fix_images` 입력만 다름. 병합 뒤 현재 main(0f509d2)과 비교해도 `chanceblog.yml` 2곳과 `blogger.yml` plan 단계의 요약 제목 문구 1곳만 다르고 나머지 6개 파일은 0건
+- **표적 변이**: 새 테스트가 정말 실패하는지 복사본에 변이를 하나씩 넣어 확인했다. 1차 41종(검증기 10·워크플로/문서 27·표현식 해석기 4)과 후속 19종(`FIX_IMAGES` 계약 8·옛 이름 검색 범위 9·blogger 입력 설명 1·병합에서 바꾼 `pages.yml` 이름 1)이 모두 실패로 탐지됐고 생존 0이다(병합 뒤 최종 트리에서 다시 실행). 옛 워크플로 8개로 통째로 되돌린 복사본에서는 `test_workflow_names.py` 22개 중 15개와 WF-11 실제 저장소 시험 2개가 실패했다(병합 전 트리 기준)
+- **독립 검증**(e0ac1a4, 새 clone): **병합 가능**(조건 3개는 모두 절차 문제 — PR의 Linux CI 확인, 병합 직후 Actions 확인 5가지, 대기 브랜치 3개와의 병합 순서). 동작 불변을 구조 비교·줄 단위 diff·표현식 평가·`generator.py` 로컬 실행 네 방법으로 확인, 이름 대응표 불일치 0, 옛 영문 이름 현재형 잔존 0, 변이 78개 중 새 테스트가 67개 탐지(생존 10은 F3·F5·F6·F9와 동치 1). 대기 브랜치 시험 병합에서 워크플로 yml 4개는 모두 자동 병합, 충돌은 문서 표 줄뿐
+- **독립 검증 반영(병합 뒤 후속 커밋)**: F3 `FIX_IMAGES` 계약 시험 3개(변이 G01·G02 탐지), F5 옛 영문 이름 검색을 `.yml`·`.py`까지 확대(변이 D06·D07 탐지), F4·F11 WF-11 강제 범위(검증기는 워크플로 name 오류·job name 경고, job name 은 단위 테스트가 경고도 실패로 취급, 입력 description·단계 name·run-name 한글은 단위 테스트가 요구)와 외부 템플릿 안내를 `ENGINEERING_GUIDE` W10·`SECURITY_GUARDRAILS` §6·검증기 오류 문구·Copilot용 지침에 적음, F10 `blogger.yml` 연습 입력 설명에 '체크하지 않으면 초안이 저장소에 커밋됨' 추가. F2·F7·F8·F9·F12·F14는 코드 변경 없이 D-49로 기록했다. 새로 들어온 코드·시험의 옛 이름: `pipeline/health.py` 알림문('Deploy GitHub Pages' → `사이트 자동 배포`), `blogger.yml` 요약 제목, `tests/test_watchdog_integration.py`의 pages.yml 이름 단정(옛 이름 그대로면 병합 뒤 시험이 실패했다)
+- **로컬 연습 실행**: `FIX_IMAGES=1 DRY_RUN=1 EVENT_NAME=workflow_dispatch python generator.py`(키 없음=스텁, 새 워크플로가 부르는 방식): 종료 0, 파일 변경 없음, 요약 `이미지 점검: 완료: 문제 2건 / 교체 2건 / 건너뜀 0건 (DRY_RUN: 실제 변경 없음)`. 지금 저장소의 중복 이미지 2건이다 — 연습을 풀고 실제로 교체하면 이 2건이 바뀐다
+- **실행하지 못한 것(실행 필요)**: GitHub Actions 실제 실행 일체 — 새 이름 표시, 정기 실행 제목, `chance-fix-images.yml`·`chanceblog.yml`·`이슈 수정 요청 처리(수정안 PR 만들기)` 연습 실행(새 워크플로 파일은 main에 병합되기 전에는 수동 실행 불가), 이 PR의 `저장소 규칙·테스트 자동 검사` 3.10·3.12(PR을 열면 실행됨), 로컬 Python 3.10 단위 테스트(없음 — CI의 3.10이 대신)
+
+### 다음 AI에게 남기는 주의사항
+1. **병합 뒤 Actions에서 확인**(`docs/DEFECT_REGISTER.md` 하단 체크리스트 마지막 5행): ① 왼쪽 목록에 새 이름 9개 ② 정기 실행 제목(`Chance 글 작성·게시 · 정기` 등) ③ `Chance 글 자동 작성·게시` 연습 실행 ④ `Chance 기존 글 이미지 교체(수동)` 연습 실행 ⑤ `이슈 수정 요청 처리(수정안 PR 만들기)` 연습 실행
+2. **새 워크플로·job은 한글 `name`을 붙이고 두 표(`docs/ARCHITECTURE.md` §2-1, `docs/REQUEST_BRIEFING.md`)에 한 줄 넣는다.** 안 하면 검증기 WF-11이 알리고 `tests/test_workflow_names.py`와 `WorkflowNameTest`(실제 저장소 기준)가 실패한다. 같은 워크플로를 고치는 다른 PR을 병합할 때는 그쪽이 새로 만든 job(예: `pages.yml`의 배포 후 확인 잡)에도 한글 이름이 필요하고, 그 PR의 문서가 옛 영문 이름을 쓰면 `test_operator_docs_do_not_use_the_old_english_names`가 알린다(이 검사는 `.md`뿐 아니라 `.yml`·`.py`의 알림문·요약 제목·독스트링·주석도 본다. 대응표처럼 새 이름이 같은 줄에 있으면 허용, 과거 기록 `WORKLOG.md`는 제외)
+3. **PR 검사 이름이 바뀐다**: `guardrails.yml`의 job 이름이 `validate (3.10)`·`validate (3.12)`에서 `검사 (Python 3.10)`·`검사 (Python 3.12)`가 됐다. 운영자 결정(2026-10-25, `docs/SECURITY_GUARDRAILS.md` §5)으로 main 룰셋에 '상태 검사 필수'는 켜지 않으므로 지금은 영향이 없다(실제 룰셋 상태는 확인하지 못했다). 나중에 필수 검사를 켜게 되면 새 이름으로 골라야 병합이 막히지 않는다
+4. 옛 `gh workflow run chanceblog.yml -f fix_images=true` 호출은 이제 입력 오류로 막힌다(조용히 무시되지 않음). 이미지 교체는 `chance-fix-images.yml`로
+5. 알려진 한계: ① Blogger 매트릭스가 비어 `글 생성 (…)` job이 건너뛰어지면 화면에 `matrix.key` 식이 풀리지 않은 채 보일 수 있다(표시만의 문제) ② 두 Chance 워크플로가 같은 concurrency 그룹을 써서 GitHub 규칙상 대기 실행은 1개만 남는다(실행 중 1 + 대기 1) — 이미지 교체를 대기시킨 사이 정기 실행이 또 대기하면 먼저 대기한 쪽이 취소될 수 있다(운영 규칙: 이미지 교체는 연타하지 않고 정기 실행이 도는 매시 :17 전후를 피한다. 대기열을 늘리는 `queue: max`는 `actionlint` 1.7.12가 키를 거부하니 올린 뒤 검토 — D-49) ③ 제어 이슈가 아닌 이슈도 `이슈 수정 요청 처리` 실행이 하나 만들어지고 job이 건너뛰어진 채 회색으로 보인다(이전과 같은 동작, 이제 제목에 이슈 번호가 붙음) ④ `[Watchdog]` 이슈 제목 접두어·라벨 `watchdog`은 식별자라 한글로 바꾸지 않았다
+6. `generator.py`는 이미지 교체 모드에서도 `GEMINI_API_KEY`를 요구한다(`STUB_GEMINI and not DRY_RUN`이면 오류). 이미지 교체는 Gemini를 쓰지 않으므로 필요하면 별도 T2로 이 검사를 모드별로 나눈다. 이번에는 동작을 바꾸지 않으려고 시크릿 전달을 그대로 복사했다(D-49 F7)
+
+### 남은 이슈 / 확인할 점
+- Actions 실행은 하지 못했다. `run-name` 식은 `actionlint`와 단위 테스트의 표현식 해석기로만 확인했다 → 위 체크리스트
+- 같은 파일을 고치는 진행 중 PR(`blogger.yml`·`watchdog.yml`·`pages.yml`·`issue-edit.yml`)과 병합 때 충돌할 수 있다. 이 PR이 건드린 줄은 이름·run-name·job name·입력 설명 줄뿐이다
+- 독립 검증의 잔여 지적 F2·F7·F8·F9·F12·F14는 `docs/DEFECT_REGISTER.md` D-49(낮음, 열림)에 기록만 했다. F14는 D-49에 내용을 적었다(이미지 교체가 STALE 판정을 늦춘다는 우려는 워치독 보강 PR #15가 글 파일 '추가' 커밋만 세게 하면서 해소됨)
+- 이름 선택: 표의 이름을 그대로 썼다. 더 다듬을 후보는 `PR 변경 범위 검사` → `PR 변경 범위 자동 검사`(다른 이름의 '자동' 표기와 맞춤), `Blogger 글 자동 작성` → `Blogger 글 자동 작성(초안·게시)`(모드에 따라 게시도 함을 드러냄)
+
+---
+
 ## [2026-10-25] Claude – Blogger 가시화: 시크릿 미등록·정지·상한 건너뜀을 숨기지 않고, 로그·요약 정화, macat0722 정지 반영 (발행 복구 2/4, 총괄)
 
 **작업자**: Claude (총괄 역할)  

@@ -1,4 +1,5 @@
-name: Chance_Blog Full-Auto Engine
+name: Chance 글 자동 작성·게시
+run-name: "Chance 글 작성·게시 · ${{ github.event_name == 'workflow_dispatch' && (inputs.dry_run && '수동(연습: 저장 안 함)' || '수동') || '정기' }}"
 
 on:
   schedule:
@@ -7,14 +8,11 @@ on:
     # 다음 실행이 그 시각 글을 보충한다.
     - cron: '17 * * * *'
   # 이슈 기반 수정 요청은 issue-edit.yml 이 처리한다(D-01: 옛 LLM 파일 편집 핸들러는 제거함)
+  # 기존 글의 이미지만 교체하는 수동 실행은 chance-fix-images.yml 로 분리했다(실행 기록·이름이 섞이지 않게)
   workflow_dispatch:
     inputs:
-      fix_images:
-        description: '기존 글의 이미지만 교체 (새 글 생성 안 함)'
-        type: boolean
-        default: false
       dry_run:
-        description: 'DRY_RUN (파일 변경/커밋 없이 로그만)'
+        description: '연습 실행(파일·커밋·게시 없이 로그만) — 체크를 풀면 실제로 글을 만들어 게시합니다'
         type: boolean
         default: true
 
@@ -28,6 +26,7 @@ concurrency:
 
 jobs:
   build:
+    name: 글 작성·게시
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -48,7 +47,6 @@ jobs:
           UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
           EVENT_NAME: ${{ github.event_name }}
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '1' || '0' }}
-          FIX_IMAGES: ${{ github.event_name == 'workflow_dispatch' && inputs.fix_images && '1' || '0' }}
           # 킬 스위치: 저장소 Settings > Variables 에 PIPELINE_PAUSE=true 를 넣으면 글 생성을 멈춘다(blogger.yml 과 같은 변수)
           PIPELINE_PAUSE: ${{ vars.PIPELINE_PAUSE }}
         run: python generator.py
