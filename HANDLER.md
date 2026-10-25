@@ -19,7 +19,7 @@
 | 영역 | 상태 |
 |------|------|
 | 저장소·폴더 | 작업 PC는 `shine88pc/chanceblog` 공식 clone 1개로 정리 완료 (P0 ✅) |
-| Chance_Blog | 자동 생성 운영 중 (`chanceblog.yml` 매시 17분 실행, 게시 슬롯 KST 9·18시). AdSense 검토 대기. 슬롯 시각이 된 실행 13회 중 2회만 글이 나왔고(10-21~25, D-03) 분야 폴백·건너뜀 사유 기록·종료 정책으로 완화했다 — 병합 뒤 첫 슬롯 실행에서 확인(`docs/DEFECT_REGISTER.md` 하단 체크리스트). 비기술 분야가 계속 비면 글은 기술·미래 분야에서만 나온다 |
+| Chance_Blog | 자동 생성 운영 중 (`chanceblog.yml` 매시 17분 실행, 게시 슬롯 KST 9·18시). AdSense 검토 대기. 슬롯 시각이 된 실행 13회 중 2회만 글이 나왔고(10-20~25, D-03) 분야 폴백·건너뜀 사유 기록·종료 정책으로 완화했다 — 병합 뒤 첫 슬롯 실행에서 확인(`docs/DEFECT_REGISTER.md` 하단 체크리스트). 비기술 분야가 계속 비면 글은 기술·미래 분야에서만 나온다 |
 | Blogger 코드 | 완료 — `pipeline/`(레지스트리·게이트·어댑터·러너) + `blogger.yml` 매트릭스. 테스트·`actionlint` 통과 |
 | Blogger 실게시 | ⏳ 미완료 — ① OAuth 동의 화면 **"프로덕션"** 전환(테스트 상태면 토큰 7일 만료, D-11) ② refresh token 발급 ③ GitHub Secrets(`BLOGGER_*`) 등록 (§3 P1, §10) |
 | 풀오토 가이드 체계 | `AGENTS.md`(상시 규칙) · `docs/CHARTER`·`ARCHITECTURE`·`ENGINEERING_GUIDE`·`SECURITY_GUARDRAILS` · `docs/DEFECT_REGISTER`. 총괄 역할: Claude(2026-10-20) |

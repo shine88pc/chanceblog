@@ -564,7 +564,7 @@ def _one_line(text, limit=300):
     개행으로 새 줄을 시작해 '::error::' 같은 워크플로 명령을 흉내 내거나 '##[' 를 쓰지 못하게 한다."""
     folded = " ".join(str(text).split()).replace("##[", "# [")
     if folded.startswith("::"):
-        folded = " " + folded
+        folded = "→ " + folded  # 러너는 줄 앞 공백을 지우고 '::' 를 찾으므로 공백이 아니라 눈에 보이는 접두 문자로 막는다
     return folded[:limit]
 
 
@@ -1354,8 +1354,8 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
     gate_rejects = report["gate_rejects"] = []
     for item in candidates:
         topic = item["title"] if item else None
-        src_label = f" [{item['source']}]" if item and item.get("source") else ""
-        print(f"주제 시도: {topic or '(자동 선정)'}{src_label}")
+        src_label = f" [{_one_line(item['source'], 60)}]" if item and item.get("source") else ""
+        print(f"주제 시도: {_one_line(topic or '(자동 선정)', 200)}{src_label}")
         try:
             if STUB_GEMINI:
                 candidate = stub_post_data(topic, (item or {}).get("link"))
@@ -1445,7 +1445,7 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
                   source=(selected_item or {}).get("source", ""),
                   paths=[str(kr_path), str(en_path)])
     print("블로그 글 생성 완료" + (" (DRY_RUN: 파일·기록은 저장되지 않았습니다):" if DRY_RUN else ":"))
-    print(f"- KR: {kr_path}\n- EN: {en_path}\n- 편집 축: {EDITORIAL_LANES[editorial_lane]['label']}\n- 주제: {selected or '(자동 선정)'}")
+    print(f"- KR: {kr_path}\n- EN: {en_path}\n- 편집 축: {EDITORIAL_LANES[editorial_lane]['label']}\n- 주제: {_one_line(selected or '(자동 선정)', 200)}")
     print(f"- 이미지: {kr_image}\n         {en_image}")
     return kr_path, en_path
 
@@ -1482,7 +1482,7 @@ def render_run_summary(event, now, slot, report):
         lines.append(f"- Gemini 호출: {calls['attempts']}회(실패 {calls.get('failed', 0)}회)")
     rejects = report.get("gate_rejects", [])
     if rejects:
-        lines.append(f"- 본문 검증 탈락 {len(rejects)}건: " + " / ".join(_md_cell(r, 100) for r in rejects[:3]))
+        lines.append(f"- 후보 탈락 {len(rejects)}건(본문 검증·응답 형식): " + " / ".join(_md_cell(r, 100) for r in rejects[:3]))
     lanes = report.get("lanes", [])
     if lanes:
         lines += ["", "| 분야 | 소스 | 받은 기사 | 검증 통과 | 후보 | 탈락 사유(개수) |",

@@ -1,6 +1,6 @@
 """Chance 엔진(generator.py)의 슬롯 판정·분야 폴백·탈락 사유 기록·종료 정책 테스트. 네트워크 없이 돈다.
 
-배경(Task 4 진단): 스케줄 실행이 초록인데 글이 없던 것은 (1) 추첨된 분야에 후보가 0건이면 다른 분야를
+배경(운영자 요청서 4번 '발행 복구' 진단): 스케줄 실행이 초록인데 글이 없던 것은 (1) 추첨된 분야에 후보가 0건이면 다른 분야를
 시도하지 않고 정상 종료했고 (2) 왜 0건인지 기록이 없었기 때문이다. 이 테스트는 그 둘을 고정한다.
 """
 import io
@@ -754,6 +754,66 @@ class GenerateWithFallbackTest(unittest.TestCase):
             self.run_with_gemini({first: RuntimeError("모든 Gemini 모델 호출 실패"),
                                   second: self.dump(long_post(second, self.LINK))}, [first, second])
 
+    def test_published_files_never_contain_the_placeholder_images(self):
+        # 본문 사전 검증은 자리표시 이미지 주소로 하고 복사본에만 쓴다. 그 주소가 게시 파일에 새면 안 된다.
+        written = []
+        results = {"technology": [candidate("기술 기사", self.LINK)]}
+        with mock.patch.object(g, "fetch_news_items", self.fake_fetch(results)), \
+                mock.patch.object(g, "write_text_atomic", lambda path, content: written.append((str(path), content))):
+            value, _ = run_captured(g.generate_blog_posts, slot=self.slot, allow_auto_topic=False, report={})
+        self.assertIsNotNone(value)
+        posts = [content for path, content in written if path.endswith(".md")]
+        self.assertEqual(len(posts), 2)
+        for content in posts:
+            self.assertNotIn("example.invalid", content)
+            self.assertIn("images.unsplash.com", content)
+
+    def test_unreachable_sources_beat_a_budget_stop_in_the_outcome(self):
+        with mock.patch.object(g, "LANE_SEARCH_BUDGET_SECONDS", -1):
+            value, report, out = self.generate({}, errors=True, allow_auto_topic=False)
+        self.assertIsNone(value)
+        self.assertTrue(report["budget_exceeded"])
+        self.assertEqual(report["outcome"], "SOURCES_UNREACHABLE")
+
+    def test_unreadable_gemini_text_is_folded_in_the_log_and_the_reason_list(self):
+        value, report, out, gemini = self.run_with_gemini({"기술 기사": "첫 줄\n::error::가짜"}, ["기술 기사"])
+        self.assertIsNone(value)
+        self.assertNotIn("\n", report["gate_rejects"][0])
+        self.assertFalse(any(line.startswith("::error::") for line in out.splitlines()))
+
+    def test_gemini_skip_reason_is_folded_in_the_log(self):
+        skip = json.dumps({"skip": True, "reason": "중복\n::error::가짜"}, ensure_ascii=False)
+        value, report, out, gemini = self.run_with_gemini({"기술 기사": skip}, ["기술 기사"])
+        self.assertIsNone(value)
+        self.assertIn("중복 ::error::가짜", out)
+        self.assertFalse(any(line.startswith("::error::") for line in out.splitlines()))
+
+    def test_generated_title_too_similar_to_an_existing_post_is_discarded_and_folded(self):
+        existing = "인공지능 반도체 시장 전망과 한국 기업의 대응 전략 분석 보고서"
+        post = long_post("기술 기사", self.LINK)
+        post["kr_title"] = existing + "\n::error::가짜"
+        with mock.patch.object(g, "existing_titles", return_value=[existing]):
+            value, report, out, gemini = self.run_with_gemini({"기술 기사": self.dump(post)}, ["기술 기사"])
+        self.assertIsNone(value)
+        self.assertEqual(report["outcome"], "ALL_REJECTED")
+        self.assertIn("생성된 제목이 기존 글과 비슷해 폐기", out)
+        self.assertFalse(any(line.startswith("::error::") for line in out.splitlines()))
+
+    def test_feed_titles_and_publisher_names_are_folded_before_printing(self):
+        dirty = "기술 기사\n::error::가짜"
+        item = candidate(dirty, self.LINK)
+        item["source"] = "출처\n##[error]가짜"
+        gemini = FakeGemini({dirty: self.dump(long_post("기술 기사", self.LINK))})
+        with mock.patch.object(g, "STUB_GEMINI", False), \
+                mock.patch.object(g, "build_post_prompt", gemini.prompt), \
+                mock.patch.object(g, "call_gemini_with_fallback", gemini.call), \
+                mock.patch.object(g, "fetch_news_items", self.fake_fetch({"technology": [item]})):
+            value, out = run_captured(g.generate_blog_posts, slot=self.slot, allow_auto_topic=False, report={})
+        self.assertIsNotNone(value)
+        self.assertFalse(any(line.startswith("::error::") or "##[" in line for line in out.splitlines()))
+        self.assertIn("주제 시도: 기술 기사 ::error::가짜", out)
+        self.assertIn("- 주제: 기술 기사 ::error::가짜", out)
+
     def test_report_is_optional(self):
         link = "https://www.reuters.com/a"
         results = {"technology": [candidate("기술 기사", link)]}
@@ -939,7 +999,7 @@ class MainPolicyTest(unittest.TestCase):
         report = {"outcome": "ALL_REJECTED", "lanes": [],
                   "gate_rejects": ["KR 본문이 최소 편집 분량(1000자)에 미달합니다: 973자 | 표\n[링크](http://evil.example)"]}
         text = g.render_run_summary("schedule", at(10), 9, report)
-        line = next(row for row in text.splitlines() if row.startswith("- 본문 검증 탈락"))
+        line = next(row for row in text.splitlines() if row.startswith("- 후보 탈락"))
         self.assertIn("1건", line)
         self.assertIn("973자", line)
         for ch in "|[]":
@@ -977,6 +1037,15 @@ class GeminiCallCountTest(unittest.TestCase):
         self.assertIs(response, ok)
         self.assertEqual(g.GEMINI_CALLS, {"attempts": 3, "failed": 2})
 
+    def test_model_failure_text_is_folded_in_the_log(self):
+        ok = mock.Mock(text="응답")
+        client = self.client([RuntimeError("503\n::error::가짜 알림"), ok])
+        with mock.patch.object(g, "MODEL_CANDIDATES", ["a", "b"]), mock.patch.object(g, "get_client", return_value=client):
+            response, out = run_captured(g.call_gemini_with_fallback, "프롬프트")
+        self.assertIs(response, ok)
+        self.assertFalse(any(line.startswith("::error::") for line in out.splitlines()))
+        self.assertIn("503 ::error::가짜 알림", out)
+
     def test_summary_reports_the_calls(self):
         report = {"outcome": "ALL_REJECTED", "lanes": [], "gemini_calls": {"attempts": 4, "failed": 1}}
         text = g.render_run_summary("schedule", at(10), 9, report)
@@ -992,8 +1061,10 @@ class SanitizeTest(unittest.TestCase):
         self.assertEqual(g._one_line("a\n\n  b\r\nc"), "a b c")
 
     def test_one_line_never_starts_with_a_workflow_command(self):
-        self.assertFalse(g._one_line("::error::x").startswith("::"))
-        self.assertFalse(g._one_line("\n::error::x").startswith("::"))
+        # 러너는 줄 앞 공백을 지우고 '::' 를 찾으므로 공백으로 막은 것은 막은 것이 아니다
+        self.assertFalse(g._one_line("::error::x").lstrip().startswith("::"))
+        self.assertFalse(g._one_line("\n::error::x").lstrip().startswith("::"))
+        self.assertFalse(g._one_line("   ::error::x").lstrip().startswith("::"))
 
     def test_one_line_neutralises_group_markers(self):
         self.assertNotIn("##[", g._one_line("##[error]x"))
