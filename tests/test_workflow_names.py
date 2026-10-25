@@ -338,14 +338,19 @@ class RunNameTest(unittest.TestCase):
 
     def test_blogger_titles(self):
         self.assertEqual(self.title("blogger.yml", "schedule"), "Blogger 글 작성 · 정기")
-        manual = {"dry_run": False, "publish": False}
-        self.assertEqual(self.title("blogger.yml", "workflow_dispatch", manual), "Blogger 글 작성 · 수동(초안만 저장)")
-        self.assertEqual(self.title("blogger.yml", "workflow_dispatch", {**manual, "publish": True}), "Blogger 글 작성 · 수동(게시)")
-        self.assertEqual(self.title("blogger.yml", "workflow_dispatch", {"dry_run": True, "publish": False}),
+        # 수동 실행의 publish 는 3택(off=저장소 파일만, draft=Blogger 초안함 업로드, publish=즉시 게시)이다
+        manual = {"dry_run": False, "publish": "draft"}
+        self.assertEqual(self.title("blogger.yml", "workflow_dispatch", manual), "Blogger 글 작성 · 수동(Blogger 초안함 업로드)")
+        self.assertEqual(self.title("blogger.yml", "workflow_dispatch", {**manual, "publish": "off"}),
+                         "Blogger 글 작성 · 수동(저장소 파일만 저장)")
+        self.assertEqual(self.title("blogger.yml", "workflow_dispatch", {**manual, "publish": "publish"}),
+                         "Blogger 글 작성 · 수동(즉시 게시)")
+        self.assertEqual(self.title("blogger.yml", "workflow_dispatch", {"dry_run": True, "publish": "off"}),
                          "Blogger 글 작성 · 수동(연습: 저장·게시 안 함)")
-        # 연습이면 게시 체크와 무관하게 아무것도 게시하지 않는다(blogger.yml 의 DRY_RUN 이 우선)
-        self.assertEqual(self.title("blogger.yml", "workflow_dispatch", {"dry_run": True, "publish": True}),
-                         "Blogger 글 작성 · 수동(연습: 저장·게시 안 함)")
+        # 연습이면 선택과 무관하게 아무것도 올리지 않는다(blogger.yml 의 DRY_RUN 이 우선)
+        for choice in ("off", "draft", "publish"):
+            self.assertEqual(self.title("blogger.yml", "workflow_dispatch", {"dry_run": True, "publish": choice}),
+                             "Blogger 글 작성 · 수동(연습: 저장·게시 안 함)")
 
     def test_watchdog_titles(self):
         self.assertEqual(self.title("watchdog.yml", "schedule"), "발행 중단 감시 · 정기")

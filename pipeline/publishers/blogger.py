@@ -3,17 +3,24 @@
 - 인증 실패(invalid_grant 등)는 PublishError(code=auth_expired/auth_failed)로 구분한다.
 - 일시 오류(429/5xx)는 백오프 재시도. 재시도 전에 같은 제목 글이 이미 올라갔는지 확인해
   '서버는 처리했는데 응답만 실패한' 경우의 중복 게시를 막는다.
-- google 라이브러리는 실제 호출 때만 import 한다(테스트는 service_factory 로 가짜를 주입).
+- google 라이브러리는 실제 호출 때만 import 한다. 테스트는 service_factory 로 서비스 전체를 가짜로 갈아 끼우거나,
+  credentials_factory·request_factory·service_builder 로 구글 인증·서비스 생성 단계만 가짜로 갈아 끼운다
+  (그러면 토큰 갱신 실패 분류·재시도·blogs.get·posts.insert(isDraft) 경로를 실제 구글 호출 없이 시험할 수 있다).
+- 오류 문구에는 요청 주소(블로그 ID 포함)가 섞여 나오므로, 이 어댑터가 가진 실제 값 4개를 글자 그대로 가려서 낸다.
 """
+import re
 import time
 from datetime import datetime, timedelta, timezone
 
-from pipeline.llm import mask
-from pipeline.publishers.base import PublishError, PublishResult
+from pipeline.publishers.base import PublishError, PublishResult, redact
 
 SCOPES = ["https://www.googleapis.com/auth/blogger"]
 TOKEN_URI = "https://oauth2.googleapis.com/token"
 _TRANSIENT = {429, 500, 502, 503, 504}
+# 연결 실패·시간 초과처럼 HTTP 응답 없이 나는 오류의 클래스 이름(google·requests·httplib2 를 import 하지 않고 이름으로 알아본다)
+_NETWORK_NAMES = {"TransportError", "ServerNotFoundError", "HttpLib2Error", "ConnectionError", "Timeout",
+                  "ConnectTimeout", "ReadTimeout"}
+_URL_RX = re.compile(r"^https?://\S+$")
 EXPIRED_HINT = ("refresh token이 만료/폐기됐습니다. OAuth 동의 화면이 '테스트' 상태이면 7일 뒤 만료됩니다 → "
                 "'프로덕션(게시)'으로 전환 후 토큰 재발급 (docs/SECURITY_GUARDRAILS.md D-11)")
 
@@ -27,18 +34,35 @@ def _status_of(exc):
         return None
 
 
+def _is_network_error(exc):
+    """연결 실패·시간 초과처럼 HTTP 응답 없이 난 오류(잠시 뒤 다시 하면 될 수 있는 일시 오류)인가."""
+    if isinstance(exc, OSError):  # socket·ssl·requests 의 연결 오류와 내장 TimeoutError·ConnectionError 를 포함한다
+        return True
+    if getattr(exc, "retryable", False) is True:  # google-auth 가 토큰 서버의 일시 오류에 붙이는 표시
+        return True
+    return bool({cls.__name__ for cls in type(exc).__mro__} & _NETWORK_NAMES)
+
+
 class BloggerPublisher:
     def __init__(self, blog_id, client_id, client_secret, refresh_token,
-                 service_factory=None, sleep=time.sleep, retries=2, now=None):
+                 service_factory=None, sleep=time.sleep, retries=2, now=None,
+                 credentials_factory=None, request_factory=None, service_builder=None):
         self.blog_id = blog_id
         self._client_id = client_id
         self._client_secret = client_secret
         self._refresh_token = refresh_token
         self._factory = service_factory
+        self._credentials_factory = credentials_factory  # (client_id, client_secret, refresh_token) -> 자격 증명 객체
+        self._request_factory = request_factory          # () -> 토큰 갱신 때 쓰는 HTTP 요청 객체
+        self._service_builder = service_builder          # (api, version, credentials=..., cache_discovery=...) -> 서비스
         self._sleep = sleep
         self._retries = retries
         self._now = now or (lambda: datetime.now(timezone.utc))
         self._svc = None
+
+    def _scrub(self, exc):
+        """오류 문구에서 비밀(패턴 + 이 어댑터가 가진 실제 값)을 가린다."""
+        return redact(exc, (self.blog_id, self._client_id, self._client_secret, self._refresh_token))
 
     # -- 인증/서비스 ---------------------------------------------------------
     def _service(self):
@@ -47,34 +71,72 @@ class BloggerPublisher:
         if self._factory:
             self._svc = self._factory()
             return self._svc
-        from google.auth.transport.requests import Request
-        from google.oauth2.credentials import Credentials
-        from googleapiclient.discovery import build
-        creds = Credentials(token=None, refresh_token=self._refresh_token, token_uri=TOKEN_URI,
-                            client_id=self._client_id, client_secret=self._client_secret, scopes=SCOPES)
-        try:
-            creds.refresh(Request())
-        except Exception as exc:  # noqa: BLE001
-            text = mask(exc)
-            if "invalid_grant" in text or "expired" in text.lower() or "revoked" in text.lower():
-                raise PublishError(f"{EXPIRED_HINT} | {text[:160]}", code="auth_expired") from exc
-            raise PublishError(f"토큰 갱신 실패: {text[:200]}", code="auth_failed") from exc
-        self._svc = build("blogger", "v3", credentials=creds, cache_discovery=False)
+        creds = self._new_credentials()
+        self._refresh_credentials(creds, self._new_request())
+        self._svc = self._build_service(creds)
         return self._svc
+
+    def _new_credentials(self):
+        if self._credentials_factory:
+            return self._credentials_factory(self._client_id, self._client_secret, self._refresh_token)
+        from google.oauth2.credentials import Credentials
+        return Credentials(token=None, refresh_token=self._refresh_token, token_uri=TOKEN_URI,
+                           client_id=self._client_id, client_secret=self._client_secret, scopes=SCOPES)
+
+    def _new_request(self):
+        if self._request_factory:
+            return self._request_factory()
+        from google.auth.transport.requests import Request
+        return Request()
+
+    def _build_service(self, creds):
+        if self._service_builder:
+            return self._service_builder("blogger", "v3", credentials=creds, cache_discovery=False)
+        from googleapiclient.discovery import build
+        return build("blogger", "v3", credentials=creds, cache_discovery=False)
+
+    def _refresh_credentials(self, creds, request):
+        """access token 갱신. 연결 오류는 잠시 뒤 다시 시도하고, 그래도 안 되면 network. 거부는 auth_expired/auth_failed 로 가른다."""
+        for attempt in range(self._retries + 1):
+            try:
+                creds.refresh(request)
+                return
+            except Exception as exc:  # noqa: BLE001
+                text = self._scrub(exc)
+                if _is_network_error(exc):  # 만료 문구('certificate has expired' 등)가 섞여도 연결 오류가 먼저다
+                    if attempt < self._retries:
+                        self._sleep(3 * (2 ** attempt))
+                        continue
+                    raise PublishError(f"토큰 갱신 중 네트워크 오류: {text[:200]}", code="network") from exc
+                if "invalid_grant" in text or "expired" in text.lower() or "revoked" in text.lower():
+                    raise PublishError(f"{EXPIRED_HINT} | {text[:160]}", code="auth_expired") from exc
+                raise PublishError(f"토큰 갱신 실패: {text[:200]}", code="auth_failed") from exc
 
     # -- 공개 API -----------------------------------------------------------
     def healthcheck(self):
-        """대상 블로그에 접근할 수 있는지 확인한다."""
+        """대상 블로그에 접근할 수 있는지 확인한다(쓰기 없음: 토큰 갱신 + blogs.get)."""
         svc = self._service()
-        try:
-            blog = svc.blogs().get(blogId=self.blog_id).execute()
-        except Exception as exc:  # noqa: BLE001
-            status = _status_of(exc)
-            code = "auth_failed" if status in (401, 403, 404) else "api_error"
-            raise PublishError(f"블로그 접근 확인 실패(status={status}): {mask(exc)[:200]}", code=code) from exc
+        for attempt in range(self._retries + 1):
+            try:
+                blog = svc.blogs().get(blogId=self.blog_id).execute()
+                break
+            except Exception as exc:  # noqa: BLE001
+                status = _status_of(exc)
+                if status in (401, 403, 404):
+                    raise PublishError(f"블로그 접근 확인 실패(status={status}): {self._scrub(exc)[:200]}",
+                                       code="auth_failed") from exc
+                network = status is None and _is_network_error(exc)
+                if (network or status in _TRANSIENT) and attempt < self._retries:
+                    self._sleep(3 * (2 ** attempt))
+                    continue
+                raise PublishError(f"블로그 접근 확인 실패(status={status}): {self._scrub(exc)[:200]}",
+                                   code="network" if network else "api_error") from exc
+        if not isinstance(blog, dict):
+            raise PublishError("블로그 조회 응답이 객체가 아닙니다", code="bad_response")
         return {"name": blog.get("name", ""), "url": blog.get("url", "")}
 
     def publish(self, title, html, labels=(), draft=False):
+        """draft=True 면 Blogger 초안함(isDraft)에 올리고, False 면 즉시 게시한다. 응답에 글 ID·주소가 없으면 실패다."""
         svc = self._service()
         body = {"kind": "blogger#post", "title": title, "content": html}
         if labels:
@@ -82,20 +144,43 @@ class BloggerPublisher:
         for attempt in range(self._retries + 1):
             try:
                 res = svc.posts().insert(blogId=self.blog_id, body=body, isDraft=draft).execute()
-                return PublishResult(post_id=str(res.get("id", "")), url=res.get("url", ""), draft=draft)
             except Exception as exc:  # noqa: BLE001
                 status = _status_of(exc)
                 if status in (401, 403):
-                    raise PublishError(f"권한 오류(status={status}): {mask(exc)[:200]}", code="auth_failed") from exc
-                transient = status in _TRANSIENT or isinstance(exc, (TimeoutError, ConnectionError))
+                    raise PublishError(f"권한 오류(status={status}): {self._scrub(exc)[:200]}", code="auth_failed") from exc
+                network = status is None and _is_network_error(exc)
+                transient = status in _TRANSIENT or network
                 duplicate = self._find_recent(title) if (transient or status is None) else None
                 if duplicate:
                     return duplicate  # 응답은 실패했지만 글은 이미 올라가 있다
                 if transient and attempt < self._retries:
                     self._sleep(3 * (2 ** attempt))
                     continue
-                raise PublishError(f"Blogger 게시 실패(status={status}): {mask(exc)[:200]}", code="api_error") from exc
+                raise PublishError(f"Blogger 게시 실패(status={status}): {self._scrub(exc)[:200]}",
+                                   code="network" if network else "api_error") from exc
+            return self._checked_result(res, draft)  # 검증 실패는 재시도하지 않는다(글이 이미 만들어졌을 수 있어 중복이 생긴다)
         raise PublishError("Blogger 게시 실패: 재시도 초과", code="api_error")
+
+    @staticmethod
+    def _checked_result(res, draft):
+        """posts.insert 응답을 검사한다: 글 ID·주소가 비어 있거나, 요청(초안/게시)과 다른 상태면 실패로 본다."""
+        if not isinstance(res, dict):
+            raise PublishError("게시 응답이 객체가 아닙니다", code="bad_response")
+        post_id = str(res.get("id") or "").strip()
+        url = str(res.get("url") or "").strip()
+        status = str(res.get("status") or "").upper()  # 관리자 수준 요청에만 채워진다. 없으면 검사하지 않는다
+        if not post_id:
+            raise PublishError("게시 응답에 글 ID가 없습니다(글이 만들어졌는지 Blogger 화면에서 확인하세요)", code="bad_response")
+        if not _URL_RX.match(url):
+            raise PublishError("게시 응답에 글 주소(url)가 없거나 http(s) 주소가 아닙니다(Blogger 화면에서 확인하세요)",
+                               code="bad_response", post_id=post_id)
+        if draft and status == "LIVE":
+            raise PublishError("초안으로 올렸는데 응답이 공개(LIVE) 상태입니다 — Blogger 화면에서 바로 확인하세요",
+                               code="bad_response", post_id=post_id)
+        if not draft and status == "DRAFT":
+            raise PublishError("게시를 요청했는데 응답이 초안(DRAFT) 상태입니다 — Blogger 화면에서 확인하세요",
+                               code="bad_response", post_id=post_id)
+        return PublishResult(post_id=post_id, url=url, draft=draft)
 
     # -- 멱등성 -------------------------------------------------------------
     def _find_recent(self, title, within_minutes=15):
@@ -109,7 +194,7 @@ class BloggerPublisher:
         for item in res.get("items", []) or []:
             if item.get("title") != title:
                 continue
-            published = item.get("published", "")
+            published = item.get("published") or item.get("updated") or ""  # 초안에는 published 가 없을 수 있다(미확인)
             try:
                 when = datetime.fromisoformat(published.replace("Z", "+00:00"))
             except ValueError:

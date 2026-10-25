@@ -13,9 +13,9 @@ from pipeline.state import KST
 OK_STATUSES = {"posted", "draft", "draft_uploaded", "generated_unpublished"}
 # 실제로 독자에게 가는(또는 Blogger 초안함에 올라간) 상태. 저장소 파일로만 남은 초안(draft, generated_unpublished)은 제외한다.
 # NO_POSTS_DAY 는 이것만 센다(초안이 쌓이는 것을 '글이 나왔다'로 오해하지 않기 위해).
-# draft_uploaded 는 Blogger '초안 모드'(후속 작업: 초안을 Blogger 초안함에 올리는 모드)용 예약 상태 이름이다. 지금은 이 값을
-# 기록하는 코드가 없지만, 그 모드가 생기면 바로 '글이 나온 날'로 세도록 미리 넣어 두었다(tests/test_health_daily.py 가
-# 글이 있는 날/없는 날로 고정한다). 이름을 지우거나 바꾸면 그 테스트가 실패해야 한다.
+# draft_uploaded 는 Blogger '초안 모드'(mode draft + 게시용 시크릿 → 초안을 Blogger 초안함에 올림, pipeline/run.py 가 기록한다)의
+# 상태 이름이다. '글이 나온 날'로 센다(tests/test_health_daily.py 가 글이 있는 날/없는 날로 고정한다). 이름을 지우거나 바꾸면
+# 그 테스트가 실패해야 한다. 주의: Blogger 화면에서 초안을 방치해도 이 감시는 모른다(초안 방치 경고는 별도 작업).
 REAL_POST_STATUSES = {"posted", "draft_uploaded"}
 FAIL_STATUSES = {"publish_failed", "llm_failed"}
 REJECT_STREAK = 5

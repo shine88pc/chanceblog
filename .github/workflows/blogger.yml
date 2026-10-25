@@ -1,5 +1,5 @@
 name: Blogger 글 자동 작성
-run-name: "Blogger 글 작성 · ${{ github.event_name == 'workflow_dispatch' && (inputs.dry_run && '수동(연습: 저장·게시 안 함)' || (inputs.publish && '수동(게시)' || '수동(초안만 저장)')) || '정기' }}"
+run-name: "Blogger 글 작성 · ${{ github.event_name == 'workflow_dispatch' && (inputs.dry_run && '수동(연습: 저장·게시 안 함)' || (inputs.publish == 'publish' && '수동(즉시 게시)' || (inputs.publish == 'off' && '수동(저장소 파일만 저장)' || '수동(Blogger 초안함 업로드)'))) || '정기' }}"
 
 # 레지스트리(pipeline/blogs.json)의 platform=blogger 블로그를 모두 처리한다.
 # 블로그를 추가하면 이 파일을 고치지 않고 레지스트리와 Secrets 만 추가하면 된다.
@@ -24,9 +24,14 @@ on:
         type: boolean
         default: false
       publish:
-        description: 'Blogger에 실제 게시(체크하지 않으면 초안만 저장)'
-        type: boolean
-        default: false
+        description: '글을 어디까지 보낼지 고릅니다(정기 실행은 이 선택을 쓰지 않고 레지스트리 mode를 따름). off = 저장소 파일에만 저장하고 Blogger는 건드리지 않음 / draft(기본) = Blogger 초안함에 업로드하며 공개되지 않고, 운영자가 Blogger 화면에서 확인한 뒤 직접 게시(게시용 시크릿 4종이 모두 있어야 올라가고, 하나도 없으면 저장소 파일에만 저장, 일부만 있으면 빨강) / publish = Blogger에 즉시 게시(게시용 시크릿이 없으면 빨강). 연습 실행을 체크하면 어느 쪽이든 아무것도 저장·업로드·게시하지 않음'
+        type: choice
+        default: 'draft'
+        options:
+          # 따옴표가 필요하다: 따옴표 없는 off 는 YAML 1.1 파서(PyYAML 등)가 문자열이 아니라 false 로 읽는다
+          - 'off'
+          - 'draft'
+          - 'publish'
 
 permissions:
   contents: read
@@ -105,8 +110,8 @@ jobs:
         env:
           BLOG_KEY: ${{ matrix.key }}
           BLOGGER_TOPIC: ${{ github.event.inputs.topic }}
-          # 스케줄: 비움(레지스트리 mode 를 따름) / 수동: 체크하면 on, 아니면 off
-          BLOGGER_PUBLISH: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.publish == 'true' && 'on' || 'off') || '' }}
+          # 스케줄: 비움(레지스트리 mode 를 따름) / 수동: 고른 값 그대로(off=저장소 파일만, draft=Blogger 초안함 업로드, publish=즉시 게시)
+          BLOGGER_PUBLISH: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.publish || '' }}
           # 블로그마다 다른 Secrets 이름을 역할 이름으로 넘긴다(값은 로그에 마스킹됨)
           PIPELINE_SECRET_LLM_API_KEY: ${{ secrets[matrix.secret_llm_api_key] }}
           PIPELINE_SECRET_BLOG_ID: ${{ secrets[matrix.secret_blog_id] }}

@@ -50,19 +50,31 @@ def make_root(tmp, mode="auto"):
     return root
 
 
+# 레지스트리의 blogger_macat 주소. 인증 점검이 blogs.get 이 돌려준 주소와 이 값을 비교한다.
+BLOG_URL = registry.get_blog(registry.load_registry(REAL / "pipeline" / "blogs.json"), "blogger_macat")["url"]
+
+
 class FakePublisher:
-    def __init__(self, fail=None):
-        self.fail, self.published, self.health_calls = fail, [], 0
+    """check: healthcheck() 가 일으킬 예외(인증 점검 실패 시나리오), blog_url: blogs.get 이 돌려주는 주소, result: publish() 의 결과."""
+
+    def __init__(self, fail=None, check=None, blog_url=BLOG_URL, result=None):
+        self.fail, self.check, self.blog_url, self.result = fail, check, blog_url, result
+        self.published, self.health_calls = [], 0
 
     def healthcheck(self):
         self.health_calls += 1
-        return {}
+        if self.check:
+            raise self.check
+        return {"name": "테스트 블로그", "url": self.blog_url}
 
     def publish(self, title, html, labels, draft=False):
         if self.fail:
             raise self.fail
         self.published.append({"title": title, "html": html, "labels": labels, "draft": draft})
-        return PublishResult(post_id="p1", url="https://macat.example/p1")
+        return self.result or PublishResult(post_id="p1", url="https://macat.example/p1")
+
+
+_FAKE = object()
 
 
 class RunBase(unittest.TestCase):
@@ -71,8 +83,12 @@ class RunBase(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.root = make_root(self._tmp.name)
 
-    def go(self, env=None, llm=stub_llm, publisher=None, extra=(), now=NOW, seed=1, root=None):
+    def go(self, env=None, llm=stub_llm, publisher=_FAKE, extra=(), now=NOW, seed=1, root=None):
+        """publisher: 생략하면 인증 점검을 통과하는 가짜 게시자(업로드·게시 실행은 글 생성 전에 Blogger 를 점검하므로 항상 필요하다).
+        None 이면 러너가 기본 게시자를 만든다(그때는 BloggerPublisher 를 mock.patch 로 바꿔 쓴다)."""
         out = []
+        if publisher is _FAKE:
+            publisher = FakePublisher()
         factory = (lambda blog, environ: publisher) if publisher is not None else None
         code = run_mod.run(["--blog", "blogger_macat", "--root", str(root or self.root), *extra],
                            environ={} if env is None else env, now=now, llm=llm, publisher_factory=factory,
@@ -125,7 +141,7 @@ class FlowTest(RunBase):
             return stub_llm
         with mock.patch("pipeline.publishers.blogger.BloggerPublisher", SpyPublisher), \
                 mock.patch.object(run_mod, "make_gemini_llm", spy_llm_factory):
-            code, out = self.go(env=WORKFLOW_ENV, llm=None)     # llm=None: 러너가 키로 Gemini 호출 객체를 직접 만든다
+            code, out = self.go(env=WORKFLOW_ENV, llm=None, publisher=None)   # None: 러너가 키로 Gemini 호출 객체·기본 게시자를 직접 만든다
         self.assertEqual(code, 0, out)
         self.assertEqual(seen["llm_key"], FULL_ENV["GEMINI_API_KEY"])
         self.assertEqual(seen["publisher"], tuple(FULL_ENV[name] for name in PUBLISH_SECRET_NAMES))
@@ -170,23 +186,24 @@ class FlowTest(RunBase):
         self.assertEqual(code, 0)
         self.assertEqual(self.history()[-1]["status"], "draft")
         self.assertEqual(len(self.drafts()), 1)
-        self.assertIn("draft/off", out)
+        self.assertIn("저장소 파일에만 초안을 저장", out)
 
-    def test_draft_mode_never_publishes(self):
+    def test_draft_mode_uploads_to_the_blogger_drafts_never_publishes_live(self):
+        """mode draft + 게시용 시크릿 4종 → Blogger 초안함에 올린다(isDraft). 즉시 게시(draft=False)는 하지 않는다."""
         root = make_root(tempfile.mkdtemp(), mode="draft")
         self.addCleanup(shutil.rmtree, str(root), True)
         pub = FakePublisher()
         code, _ = self.go(env=FULL_ENV, publisher=pub, root=root)
         self.assertEqual(code, 0)
-        self.assertEqual(pub.published, [])
-        self.assertEqual(json.loads((root / "blogger_history.json").read_text(encoding="utf-8"))[-1]["status"], "draft")
+        self.assertEqual([item["draft"] for item in pub.published], [True])
+        self.assertEqual(json.loads((root / "blogger_history.json").read_text(encoding="utf-8"))[-1]["status"], "draft_uploaded")
 
     def test_explicit_publish_flag_overrides_draft_mode(self):
         root = make_root(tempfile.mkdtemp(), mode="draft")
         self.addCleanup(shutil.rmtree, str(root), True)
         pub = FakePublisher()
         self.go(env={**FULL_ENV, "BLOGGER_PUBLISH": "1"}, publisher=pub, root=root)
-        self.assertEqual(len(pub.published), 1)
+        self.assertEqual([item["draft"] for item in pub.published], [False])
 
     def test_publish_off_overrides_auto_mode(self):
         pub = FakePublisher()

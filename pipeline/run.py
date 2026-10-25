@@ -1,17 +1,25 @@
-"""블로그 한 곳을 한 번 실행한다: 주제 선정 → 생성 → 게이트 → (게시 | 초안) → 이력 기록.
+"""블로그 한 곳을 한 번 실행한다: 주제 선정 → 생성 → 게이트 → (게시 | Blogger 초안함 업로드 | 저장소 초안) → 이력 기록.
 
-사용: python -m pipeline.run --blog blogger_macat [--dry-run] [--publish auto|on|off] [--topic "..."]
+사용: python -m pipeline.run --blog blogger_macat [--dry-run] [--publish auto|draft|publish|on|off] [--topic "..."]
+
+글을 어디까지 보내는지는 레지스트리 mode 와 BLOGGER_PUBLISH(수동 실행 입력)로 정해진다:
+  mode auto  → 즉시 게시(posted)             mode draft → Blogger 초안함에 업로드(draft_uploaded)
+  게시용 시크릿 4종이 하나도 없는 mode draft 는 저장소 파일에만 저장한다(draft). 일부만 있으면 설정 오류다.
+  업로드·게시 전에는 인증 점검(pipeline/auth_check.py: 토큰 갱신·blogs.get·블로그 주소 일치)을 먼저 한다.
 
 종료 코드
   0 정상 종료(일일 상한·정지·게이트 탈락·주제 없음 등 '건너뜀' 포함). 건너뛴 사유는
     '[SKIP] code=...' 한 줄과 실행 요약에 남는다(docs/ARCHITECTURE.md 4-1)
-  1 인프라 실패(LLM 호출·주제 확장·게시 API·이력 파일). Actions 실행이 실패로 표시되어 알림이 간다
-  2 설정 오류(레지스트리·프롬프트·LLM 키·게시 대상인데 게시용 시크릿 누락)
+  1 인프라 실패(LLM 호출·주제 확장·게시 API·이력 파일·인증 만료·네트워크). Actions 실행이 실패로 표시되어 알림이 간다
+  2 설정 오류(레지스트리·프롬프트·LLM 키·게시용 시크릿 누락·블로그 주소 불일치·권한 없음·BLOGGER_PUBLISH 값 오류)
 
 환경변수
-  DRY_RUN=1          파일·게시 없이 전체 흐름만 확인(스텁 LLM)
+  DRY_RUN=1          파일·게시 없이 전체 흐름만 확인(스텁 LLM). Blogger 에도 접속하지 않는다
   PIPELINE_PAUSE=1   킬 스위치. 아무 것도 하지 않고 종료(저장소 Variables 로 설정)
-  BLOGGER_PUBLISH    1/0/auto (호환용). 비어 있으면 레지스트리 mode 를 따른다
+  BLOGGER_PUBLISH    글을 어디까지 보낼지. 비어 있거나 auto 면 레지스트리 mode 를 따른다.
+                     off(0·false·no) = 저장소 파일에만 저장, Blogger 는 건드리지 않음
+                     draft = Blogger 초안함에 업로드(게시용 시크릿 필요, 하나도 없으면 파일만 저장)
+                     publish(on·1·true·yes) = 즉시 게시(게시용 시크릿 필요, 없으면 종료 2)
   BLOGGER_TOPIC      주제 지정(수동 실행용)
 """
 import argparse
@@ -24,10 +32,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from pipeline import gates
+from pipeline.auth_check import auth_check, exit_code_for, label_for, safe_code, sentence_for
 from pipeline.console import md_cell, one_line, safe_output
-from pipeline.llm import LLMError, make_gemini_llm, mask
-from pipeline.publishers.base import PublishError
-from pipeline.registry import (ROOT, RegistryError, get_blog, load_profile, load_registry,
+from pipeline.llm import LLMError, make_gemini_llm
+from pipeline.publishers.base import PublishError, redact
+from pipeline.registry import (PLATFORMS, ROOT, RegistryError, get_blog, load_profile, load_registry,
                                merged_blog, missing_secret_roles, resolve_secrets, validate_registry)
 from pipeline.state import KST, StateError, entry_titles, other_blog_titles, read_json_list, write_json_atomic
 from pipeline.stubs import stub_llm
@@ -38,9 +47,15 @@ HISTORY_KEEP = 200
 DRAFTS_KEEP = 120
 TITLE_SHOWN = 120      # 로그·요약에 보여 줄 글 제목의 최대 길이(제목은 LLM 유래)
 REASONS_SHOWN = 600    # 로그·요약에 보여 줄 게이트 탈락 사유 전체의 최대 길이
-COUNTED_STATUSES = {"posted", "draft", "generated_unpublished"}
+# 하루 상한에 세는 상태. draft_uploaded(Blogger 초안함에 올림)도 한 건이다. publish_failed·rejected 등 글이 안 나온 실행은 세지 않는다
+COUNTED_STATUSES = {"posted", "draft", "draft_uploaded", "generated_unpublished"}
 _TRUE = {"1", "true", "yes", "on"}
-_FALSE = {"0", "false", "no", "off"}
+# BLOGGER_PUBLISH·--publish 값 → 정책. on=즉시 게시, draft=Blogger 초안함 업로드, off=저장소 파일에만 저장, auto=레지스트리 mode 를 따름
+_POLICY_VALUES = {"": "auto", "auto": "auto", "draft": "draft",
+                  "on": "on", "1": "on", "true": "on", "yes": "on", "publish": "on",
+                  "off": "off", "0": "off", "false": "off", "no": "off"}
+# 게시용 시크릿 역할(LLM 키 제외): 블로그 ID·OAuth 클라이언트 ID·시크릿·refresh token
+PUBLISH_ROLES = tuple(role for role in PLATFORMS["blogger"]["required_secrets"] if role != "llm_api_key")
 
 
 def parse_args(argv=None):
@@ -48,7 +63,7 @@ def parse_args(argv=None):
     p.add_argument("--blog", required=True, help="pipeline/blogs.json 의 key")
     p.add_argument("--root", default=None, help="저장소 루트(기본: 이 패키지의 상위)")
     p.add_argument("--dry-run", action="store_true")
-    p.add_argument("--publish", choices=["auto", "on", "off"], default=None)
+    p.add_argument("--publish", choices=["auto", "draft", "publish", "on", "off"], default=None)
     p.add_argument("--topic", default=None)
     return p.parse_args(argv)
 
@@ -58,12 +73,22 @@ def _flag(environ, name):
 
 
 def publish_policy(cli_value, environ):
+    """글을 어디까지 보낼지: 'on'(즉시 게시) · 'draft'(Blogger 초안함 업로드) · 'off'(저장소 파일만) · 'auto'(레지스트리 mode 를 따름).
+    알 수 없는 값은 None 이다(호출자가 설정 오류로 멈춘다. 오타를 auto 로 읽으면 mode auto 에서 뜻하지 않게 게시될 수 있다)."""
     raw = (cli_value or environ.get("BLOGGER_PUBLISH") or "").strip().lower()
-    if raw in _TRUE or raw == "on":
-        return "on"
-    if raw in _FALSE or raw == "off":
-        return "off"
-    return "auto"
+    return _POLICY_VALUES.get(raw)
+
+
+def decide_delivery(policy, mode):
+    """정책과 레지스트리 mode 로 정해지는 전달 방식: 'publish'(즉시 게시) · 'draft'(Blogger 초안함에 업로드) · 'file'(저장소 파일에만).
+    mode off 는 이 함수에 오기 전에 멈춘다(오면 'file')."""
+    if policy == "on":
+        return "publish"
+    if policy == "draft":
+        return "draft"
+    if policy == "off":
+        return "file"
+    return {"auto": "publish", "draft": "draft"}.get(mode, "file")
 
 
 def load_prompt_template(root, blog):
@@ -127,6 +152,30 @@ def _summarize(environ, blog, code, text):
     _write_summary(environ, f"### {blog['key']}\n- 결과: **{code}** — {text}")
 
 
+def _checked_result(result):
+    """게시 결과의 글 ID·주소를 검사한다. 비어 있으면 PublishError(bad_response) — 어댑터가 이미 검사하지만, 다른 어댑터나
+    가짜 어댑터가 빈 값을 돌려줘도 '게시 성공'으로 기록하지 않는다."""
+    post_id = str(getattr(result, "post_id", "") or "").strip()
+    url = str(getattr(result, "url", "") or "").strip()
+    if not post_id or not url:
+        raise PublishError("게시 결과에 글 ID 또는 주소(url)가 없습니다(Blogger 화면에서 글이 만들어졌는지 확인하세요)",
+                           code="bad_response", post_id=post_id)
+    return post_id, url
+
+
+def _auth_check_failed(out, environ, blog, record, code, detail):
+    """인증 점검 실패를 한곳에서 알린다: [SKIP] 줄·원인 한 줄·고정 문장 ::error::·이력(publish_failed)·실행 요약. 종료 코드를 돌려준다.
+    code 는 어댑터가 낸 분류이고(auth_check.FAILURES 에 없으면 api_error 로 접는다), detail 은 이미 비밀을 가린 원인 문구다."""
+    code = safe_code(code)
+    exit_code = exit_code_for(code)
+    out(skip_line("AUTH_CHECK_FAILED", blog=blog["key"], reason=code, exit=exit_code))
+    out(f"[{'설정' if exit_code == EXIT_CONFIG else '인프라'} 오류] 인증 점검 실패({code}): {one_line(detail)}")
+    out(f"::error::[{blog['key']}] {sentence_for(code)}")
+    record({"status": "publish_failed", "topic": "", "reasons": [f"[{code}] {one_line(detail, 300)}"]})
+    _summarize(environ, blog, "AUTH_CHECK_FAILED", f"{label_for(code)}({code}) — {sentence_for(code)}")
+    return exit_code
+
+
 def default_publisher_factory(blog, environ):
     secrets = resolve_secrets(blog, environ)
     if blog["platform"] == "blogger":
@@ -180,23 +229,43 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
         return EXIT_OK
 
     policy = publish_policy(args.publish, environ)
-    will_publish = (policy == "on") or (policy == "auto" and blog["mode"] == "auto")
+    if policy is None:
+        message = ("BLOGGER_PUBLISH 값을 알 수 없습니다. off(저장소 파일만)·draft(Blogger 초안함 업로드)·"
+                   "publish(즉시 게시)·auto 중 하나이거나 비워 두세요.")
+        out(skip_line("INVALID_PUBLISH", blog=blog["key"]))
+        out(f"[설정 오류] {message}")
+        out(f"::error::[{blog['key']}] {message}")
+        _summarize(environ, blog, "INVALID_PUBLISH", message)
+        return EXIT_CONFIG
+    delivery = decide_delivery(policy, blog["mode"])
+    secret_values = [value for value in resolve_secrets(blog, environ).values() if value]  # 오류 문구에서 실제 값을 가린다
 
-    # 게시 대상인데 게시용 시크릿이 없으면 글을 만들기 전에 멈춘다. 예전에는 초안만 저장하고 초록으로 끝나
-    # 게시가 한 번도 안 된 채 며칠이 지나도 눈에 띄지 않았다(D-25). 시크릿은 '이름'만 표시한다.
-    if will_publish:
-        missing = [role for role in missing_secret_roles(blog, environ) if role != "llm_api_key"]
-        if missing:
-            names = ", ".join(blog["secrets"].get(role, role) for role in missing)
+    # 즉시 게시, 또는 시크릿이 일부만 있는 초안함 업로드인데 게시용 시크릿이 없으면 글을 만들기 전에 멈춘다. 예전에는
+    # 초안만 저장하고 초록으로 끝나 게시가 한 번도 안 된 채 며칠이 지나도 눈에 띄지 않았다(D-25). 시크릿은 '이름'만 표시한다.
+    # 초안함 업로드(mode draft)인데 게시용 시크릿이 하나도 없으면 오류가 아니라 '시크릿 등록 전'의 정상 상태다:
+    # 저장소 파일에만 저장하고 그 사실을 로그·요약에 남긴다. 일부만 있는 것은 등록하다 만 실수일 가능성이 커서 멈춘다.
+    missing = [role for role in missing_secret_roles(blog, environ) if role != "llm_api_key"]
+    names = ", ".join(blog["secrets"].get(role, role) for role in missing)
+    upload_skipped = ""
+    if missing and (delivery == "publish" or (delivery == "draft" and len(missing) < len(PUBLISH_ROLES))):
+        if delivery == "publish":
             message = (f"게시용 시크릿이 등록되어 있지 않습니다: {names} "
                        "(저장소 Settings > Secrets and variables > Actions). "
-                       "등록하기 전에는 이 블로그를 mode=draft 또는 off 로 두세요.")
-            if not dry:
-                out(skip_line("SECRETS_MISSING", blog=blog["key"], missing=names.replace(" ", "")))
-                out(f"::error::[{blog['key']}] {message}")
-                _summarize(environ, blog, "SECRETS_MISSING", message)
-                return EXIT_CONFIG
-            out(f"::warning::[{blog['key']}] (DRY_RUN이라 계속합니다) {message}")
+                       "등록하기 전에는 이 블로그를 mode=draft(저장소 파일에만 저장) 또는 off 로 두세요.")
+        else:
+            message = (f"게시용 시크릿이 일부만 등록되어 있습니다(없는 것: {names}). Blogger 초안함에 올리려면 "
+                       f"{len(PUBLISH_ROLES)}종을 모두 등록하고, 올리지 않으려면 모두 지우세요(저장소 Settings > Secrets and variables > Actions).")
+        if not dry:
+            out(skip_line("SECRETS_MISSING", blog=blog["key"], missing=names.replace(" ", "")))
+            out(f"::error::[{blog['key']}] {message}")
+            _summarize(environ, blog, "SECRETS_MISSING", message)
+            return EXIT_CONFIG
+        out(f"::warning::[{blog['key']}] (DRY_RUN이라 계속합니다) {message}")
+    elif missing and delivery == "draft":
+        upload_skipped, delivery = names, "file"
+        out(skip_line("UPLOAD_SKIPPED", blog=blog["key"], reason="NO_SECRETS", missing=names.replace(" ", "")))
+        out(f"::notice::[{blog['key']}] Blogger 초안함에는 올리지 않고 저장소 파일에만 저장합니다(게시용 시크릿이 없음). "
+            "시크릿을 등록하면 다음 실행부터 초안함에 올라갑니다(.github/editorial/BLOGGER_API_SETUP.md).")
 
     # ---- 상태·상한 --------------------------------------------------------
     history_path = root / blog["state"]["history"]
@@ -236,14 +305,6 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
                 return EXIT_CONFIG
             llm = make_gemini_llm(api_key, blog["llm"]["models"], blog["llm"].get("max_retries", 2))
 
-    # ---- 주제 -------------------------------------------------------------
-    recent_titles = entry_titles(history[-100:])
-    other_titles = other_blog_titles(root, [merged_blog(reg, b) for b in reg["blogs"]], blog["key"])
-    if override:
-        topic, source = override, "override"
-    else:
-        topic, source = pick_topic(profile, history, today, other_titles + recent_titles, rng, llm=llm)
-
     base_entry = {"v": 1, "blog": blog["key"], "date": today.isoformat(), "generated_at": local_now.isoformat()}
 
     def record(entry):
@@ -252,6 +313,30 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
             history.append(entry)
             write_json_atomic(history_path, history, keep=HISTORY_KEEP)
         return entry
+
+    # ---- 인증 점검(사전 점검) -----------------------------------------------
+    # 업로드·게시를 하려면 글을 만들기 전에(Gemini 를 부르기 전에) 쓰기 없이 토큰 갱신·블로그 조회·주소 일치를 확인한다.
+    # 인증이 깨진 날 무료 한도를 쓰지 않고, 엉뚱한 블로그(같은 계정의 다른 블로그 ID)에 쓰는 사고를 글 생성 전에 막는다.
+    # 연습 실행은 Blogger 에 접속하지 않는다.
+    publisher = None
+    if delivery in ("publish", "draft") and not dry:
+        try:
+            publisher = (publisher_factory or default_publisher_factory)(blog, environ)
+            auth_check(publisher, blog["url"])
+        except PublishError as exc:
+            return _auth_check_failed(out, environ, blog, record, exc.code, redact(exc, secret_values))
+        except Exception as exc:  # noqa: BLE001 - 어댑터 밖의 예외(설치 누락 등)도 기록하고 멈춘다
+            return _auth_check_failed(out, environ, blog, record, "unexpected",
+                                      f"{type(exc).__name__}: {redact(exc, secret_values)}")
+        out(f"[{blog['key']}] 인증 점검 통과: 토큰 갱신·블로그 조회·주소 일치(쓰기 없음).")
+
+    # ---- 주제 -------------------------------------------------------------
+    recent_titles = entry_titles(history[-100:])
+    other_titles = other_blog_titles(root, [merged_blog(reg, b) for b in reg["blogs"]], blog["key"])
+    if override:
+        topic, source = override, "override"
+    else:
+        topic, source = pick_topic(profile, history, today, other_titles + recent_titles, rng, llm=llm)
 
     if not topic and source == "expand_failed":
         # 시드를 다 쓴 뒤 LLM에게 새 주제를 받는 호출이 실패했다. '주제 없음'(초록)으로 넘기면 LLM 키·할당량 문제가
@@ -278,9 +363,9 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
             raw, model = llm(build_prompt(template, topic, profile, feedback))
         except LLMError as exc:
             out(skip_line("LLM_FAILED", blog=blog["key"], attempt=attempt))
-            out(f"[인프라 오류] LLM 호출 실패: {one_line(mask(exc))}")
+            out(f"[인프라 오류] LLM 호출 실패: {one_line(redact(exc, secret_values))}")
             out(f"::error::[{blog['key']}] LLM 호출이 실패했습니다. LLM 키·할당량·모델 이름을 확인하세요.")
-            record({"status": "llm_failed", "topic": topic, "reasons": [f"[LLM] {mask(exc)[:300]}"], "attempts": attempt})
+            record({"status": "llm_failed", "topic": topic, "reasons": [f"[LLM] {redact(exc, secret_values)[:300]}"], "attempts": attempt})
             _summarize(environ, blog, "LLM_FAILED", "LLM 호출이 실패했습니다(원인은 이 단계의 로그를 보세요).")
             return EXIT_INFRA
         try:
@@ -316,28 +401,38 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
     post = {"title": accepted["title"], "labels": accepted["labels"], "content_html": final_html}
 
     # ---- 게시 / 초안 ------------------------------------------------------
-    status, url, post_id, exit_code, extra = "draft", "", "", EXIT_OK, []
+    status, url, post_id, exit_code, extra, fail_text = "draft", "", "", EXIT_OK, [], ""
     if dry:
         out("[DRY_RUN] 게이트 통과 — 게시·저장 없이 종료합니다.")
         out(f"  제목: {one_line(post['title'], TITLE_SHOWN)} / 라벨: {post['labels']} / 본문 {gates.text_length(gates.plain_text(accepted['content']))}자")
         _summarize(environ, blog, "DRY_RUN", f"게이트 통과, 게시·저장 없이 종료(제목: {md_cell(post['title'], TITLE_SHOWN)})")
         return EXIT_OK
-    if will_publish:
-        # 게시용 시크릿 누락은 위의 사전 점검에서 이미 걸러졌다(여기까지 오면 4종 모두 있다).
+    if delivery in ("publish", "draft"):
+        # 게시용 시크릿 누락과 인증은 위의 사전 점검에서 이미 걸러졌다(여기까지 오면 4종이 모두 있고 인증 점검을 통과했다).
+        as_draft = delivery == "draft"
+        noun = "Blogger 초안함 업로드" if as_draft else "게시"
         try:
-            publisher = (publisher_factory or default_publisher_factory)(blog, environ)
-            publisher.healthcheck()
-            result = publisher.publish(post["title"], post["content_html"], post["labels"], draft=False)
-            status, url, post_id = "posted", result.url, result.post_id
-            out(f"  게시 성공: {url}")
+            result = publisher.publish(post["title"], post["content_html"], post["labels"], draft=as_draft)
+            post_id, url = _checked_result(result)
+            status = "draft_uploaded" if as_draft else "posted"
+            out(f"  Blogger 초안함에 업로드했습니다(공개되지 않음): {one_line(url)}" if as_draft
+                else f"  게시 성공: {one_line(url)}")
         except PublishError as exc:
+            code, detail = safe_code(exc.code), redact(exc, secret_values)
+            status, exit_code, post_id = "publish_failed", EXIT_INFRA, str(getattr(exc, "post_id", "") or "")
+            extra, fail_text = [f"[{code}] {detail[:300]}"], f"{code}: {detail}"
+            out(skip_line("PUBLISH_FAILED", blog=blog["key"], reason=code, target=delivery))
+            out(f"[인프라 오류] {noun} 실패({code}): {one_line(detail)}")
+            out(f"::error::[{blog['key']}] {noun}에 실패했습니다({code}). 이 단계의 로그와 BLOGGER_API_SETUP.md 의 점검 항목을 확인하세요.")
+        except Exception as exc:  # noqa: BLE001 - 어댑터가 분류하지 못한 예외도 기록하고 초안 파일을 남긴다(예전에는 이력 없이 죽을 수 있었다)
+            detail = f"{type(exc).__name__}: {redact(exc, secret_values)}"
             status, exit_code = "publish_failed", EXIT_INFRA
-            extra = [f"[{exc.code}] {mask(exc)[:300]}"]
-            out(skip_line("PUBLISH_FAILED", blog=blog["key"], reason=exc.code))
-            out(f"[인프라 오류] 게시 실패({exc.code}): {one_line(mask(exc))}")
-            out(f"::error::[{blog['key']}] 게시에 실패했습니다({exc.code}). 이 단계의 로그와 BLOGGER_API_SETUP.md 의 점검 항목을 확인하세요.")
+            extra, fail_text = [f"[unexpected] {detail[:300]}"], f"unexpected: {detail}"
+            out(skip_line("PUBLISH_FAILED", blog=blog["key"], reason="unexpected", target=delivery))
+            out(f"[인프라 오류] {noun} 중 예기치 않은 오류: {one_line(detail)}")
+            out(f"::error::[{blog['key']}] {noun} 중 예기치 않은 오류가 났습니다. 이 단계의 로그를 확인하세요. 초안은 저장소 파일에 남겼습니다.")
     else:
-        out("  게시 정책이 draft/off 여서 초안만 저장합니다.")
+        out("  Blogger 에는 올리지 않고 저장소 파일에만 초안을 저장합니다.")
 
     meta = {"topic": topic, "status": status, "generated_at": local_now.isoformat(), "url": url}
     draft_path = save_draft(root, blog, local_now, post, meta)
@@ -345,8 +440,16 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
             "labels": post["labels"], "url": url, "post_id": post_id, "model": model,
             "attempts": attempts, "reasons": extra})
     out(f"  초안 저장: {draft_path.relative_to(root).as_posix()} / 상태: {status}")
-    _write_summary(environ, f"### {blog['key']}\n- 결과: **{status}** — {md_cell(post['title'], TITLE_SHOWN)}\n"
-                            f"- URL: {url or '(없음)'}")
+    lines = [f"### {blog['key']}", f"- 결과: **{status}** — {md_cell(post['title'], TITLE_SHOWN)}",
+             f"- URL: {one_line(url) or '(없음)'}"]
+    if status == "draft_uploaded":
+        lines.append("- 안내: Blogger 초안함에 올렸습니다. 아직 공개되지 않았으니 Blogger 화면에서 확인한 뒤 직접 게시하세요.")
+    if status == "publish_failed":
+        lines.append(f"- 사유: {md_cell(fail_text, REASONS_SHOWN)}")
+    if upload_skipped:
+        lines.append("- Blogger 초안함에는 올리지 않음(게시용 시크릿 없음): 저장소 파일에만 저장했습니다. "
+                     f"등록할 시크릿: {upload_skipped}")
+    _write_summary(environ, "\n".join(lines))
     return exit_code
 
 
