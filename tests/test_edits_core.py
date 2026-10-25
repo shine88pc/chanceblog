@@ -4,8 +4,8 @@ import unittest
 from pathlib import Path
 
 import _bootstrap  # noqa: F401
-from edits_helpers import REAL, make_edit_root, page_body, write
-from pipeline.edits import forms, pages, spec as spec_mod, targets
+from edits_helpers import REAL, issue, make_edit_root, page_body, write
+from pipeline.edits import forms, pages, runner, spec as spec_mod, targets
 
 
 def real_spec():
@@ -53,6 +53,35 @@ class SpecTest(unittest.TestCase):
 
     def test_image_method_requires_post_target(self):
         self.assertHas(self.errors(lambda s: s["edit_types"]["text_change"].update(method="image")), "게시글 대상")
+
+    def test_output_rejects_keys_the_code_does_not_read(self):
+        """D-23: 코드가 읽지 않는 스위치(예: comment_on_reject: false)는 조용한 실패를 부르므로 명세에 둘 수 없다."""
+        for key in ("comment_on_reject", "reviewers", "auto_merge"):
+            for value in (True, False):
+                errors = self.errors(lambda s, k=key, v=value: s["output"].update({k: v}))
+                self.assertHas(errors, "지원하지 않는 키")
+                self.assertHas(errors, key)
+        self.assertHas(self.errors(lambda s: s.update(output=["pull_request"])), "output 은 객체")
+
+    def test_real_spec_has_exactly_the_keys_the_code_reads(self):
+        self.assertEqual(set(real_spec()["output"]), spec_mod.OUTPUT_KEYS)
+        self.assertEqual(spec_mod.validate_spec(real_spec()), [])
+
+
+class SpecOutputRuntimeTest(unittest.TestCase):
+    """런타임도 같은 검증을 쓴다: 지원하지 않는 output 키가 들어간 명세로는 아무것도 수정하지 않는다(fail closed)."""
+
+    def test_runner_refuses_to_run_with_a_dead_switch_in_the_spec(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_edit_root(tmp)
+            spec_file = Path(root) / ".github" / "editorial" / "edit-spec.yml"
+            text = spec_file.read_bytes().decode("utf-8")
+            spec_file.write_bytes((text.rstrip("\n") + "\n  comment_on_reject: false\n").encode("utf-8"))
+            before = (Path(root) / "about.md").read_bytes()
+            res = runner.process_issue(issue(page_body(before="문의는 old@example.com 으로 보내 주세요.", after="x")), root, env={})
+            self.assertEqual((res.status, res.exit_code), ("error", runner.EXIT_CONFIG))
+            self.assertIn("comment_on_reject", res.message)
+            self.assertEqual((Path(root) / "about.md").read_bytes(), before)
 
 
 class PathRulesTest(unittest.TestCase):
