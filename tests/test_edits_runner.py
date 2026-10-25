@@ -54,7 +54,7 @@ class PageEditTest(RunnerBase):
         self.assertEqual(res.branch, "issue-edit/12-about-r5")
         self.assertIn("Fixes #12", res.pr_body)
         self.assertIn("Refs: #12", res.commit_message)
-        self.assertIn("```diff", res.pr_body)
+        self.assertIn("~~~~diff", res.pr_body)      # 틸드 펜스(내용 속 ``` 줄이 닫지 못한다)
 
     def test_ad_surface_page_gets_trailer_and_owner_only(self):
         res = self.literal()

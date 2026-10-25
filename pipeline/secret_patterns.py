@@ -1,6 +1,7 @@
 """비밀 값으로 보이는 문자열 패턴(단일 원천).
 
 저장소 검증기(scripts/validate_repo.py), 이슈 수정 사후 검증(pipeline/edits/checks.py),
+이슈 수정의 로그 정제·외부 전송 전 점검(pipeline/edits/safety.py),
 로그·이력 마스킹(pipeline/llm.py 의 mask())이 함께 쓴다. 패턴을 추가·수정하면 모두에 적용된다.
 (소비처 목록은 tests/test_security_settings.py 가 실제 import 와 대조한다.)
 """
