@@ -94,6 +94,15 @@ class CreateTest(unittest.TestCase):
         self.assertEqual(len(result[0]), 3)
         self.assertIn("::warning::새 이슈가 한 번에 너무 많아", buf.getvalue())
 
+    def test_default_cap_is_five_new_issues_per_run(self):
+        """상한 기본값이 바뀌면(예: 500) 한 번에 이슈가 쏟아진다. 호출자가 max_new 를 주지 않아도 5건에서 멈춘다."""
+        self.assertEqual(watchdog.MAX_NEW_ISSUES_PER_RUN, 5)
+        findings = [Finding(f"b{i}", "STALE", "critical", "x") for i in range(8)]
+        client, (created, _, _, new_critical) = sync(findings, [])
+        self.assertEqual(len(created), 5)
+        self.assertEqual(len(client.created), 5)
+        self.assertEqual(len(new_critical), 5)
+
     def test_dry_run_calls_nothing_but_still_reports(self):
         client, (created, closed, renotified, new_critical) = sync(
             [CRIT], [open_issue(WARN, number=9)], dry=True)
@@ -149,6 +158,56 @@ class ExistingIssueTest(unittest.TestCase):
         self.assertEqual(client.closed, [6])
         self.assertEqual([n for n, _ in client.comments], [6])
 
+    def test_dry_run_never_patches_or_comments_on_an_open_issue_but_still_reports(self):
+        newer = Finding("chance", "STALE", "critical", "마지막 활동 이후 70시간 경과")   # 본문이 바뀐다
+        client, (_, _, renotified, _) = sync([newer], [open_issue(CRIT, notified_hours_ago=49)], dry=True)
+        self.assertEqual(renotified, [CRIT.title])                      # 계획(재알림)은 보고한다
+        self.assertEqual((client.updated, client.comments, client.created, client.closed), ([], [], [], []))
+        client, _ = sync([newer], [open_issue(CRIT, notified_hours_ago=2)], dry=True)   # 본문만 바뀐 경우
+        self.assertEqual(client.updated, [])
+        client, _ = sync([newer], [open_issue(CRIT, notified_hours_ago=2)])             # 대조군: 드라이런이 아니면 PATCH
+        self.assertEqual(len(client.updated), 1)
+
+
+class NotifiedAtTest(unittest.TestCase):
+    """_notified_at: 표식 → 이슈를 연 시각 → None. 읽을 수 없는 값은 건너뛴다."""
+
+    def at(self, body=None, created_at=None):
+        issue = {"title": "t", "number": 1}
+        if body is not None:
+            issue["body"] = body
+        if created_at is not None:
+            issue["created_at"] = created_at
+        return watchdog._notified_at(issue)
+
+    def test_marker_wins_over_created_at(self):
+        got = self.at("<!-- watchdog:notified=2026-10-24T03:00:00+00:00 -->", "2026-10-20T00:00:00Z")
+        self.assertEqual(got, datetime(2026, 10, 24, 3, 0, tzinfo=timezone.utc))
+
+    def test_falls_back_to_created_at_with_a_z_suffix(self):
+        self.assertEqual(self.at("옛 형식 본문", "2026-10-20T00:00:00Z"), datetime(2026, 10, 20, tzinfo=timezone.utc))
+
+    def test_unreadable_marker_falls_back_to_created_at(self):
+        self.assertEqual(self.at("<!-- watchdog:notified=어제쯤 -->", "2026-10-20T00:00:00Z"),
+                         datetime(2026, 10, 20, tzinfo=timezone.utc))
+
+    def test_a_naive_marker_time_is_taken_as_utc(self):
+        self.assertEqual(self.at("<!-- watchdog:notified=2026-10-24T03:00:00 -->"),
+                         datetime(2026, 10, 24, 3, 0, tzinfo=timezone.utc))
+
+    def test_nothing_readable_gives_none(self):
+        self.assertIsNone(self.at("옛 형식 본문"))
+        self.assertIsNone(self.at(None, "아무 때나"))
+        self.assertIsNone(self.at())
+
+    def test_issue_with_neither_marker_nor_created_at_is_not_renotified_and_does_not_crash(self):
+        """알림 시각을 알 수 없으면 재알림하지 않는다(48시간을 셀 기준이 없다). 예외로 실행이 죽어서도 안 된다."""
+        issue = {"title": CRIT.title, "number": 5, "body": "옛 형식 본문(표식 없음)"}          # created_at 도 없다
+        client, (created, closed, renotified, new_critical) = sync([CRIT], [issue])
+        self.assertEqual((created, closed, renotified, new_critical), ([], [], [], []))
+        self.assertEqual(client.comments, [])
+        client, (_, _, renotified, _) = sync([CRIT], [{**issue, "created_at": None}])
+        self.assertEqual((renotified, client.comments), ([], []))
 
 class CommitTimesTest(unittest.TestCase):
     def git(self, root, *args, date=None):
