@@ -327,6 +327,77 @@ class LocalReadersTest(unittest.TestCase):
         self.assertEqual(oi.list_workflow_files(self.tmp / "none"), [])
 
 
+class WorkflowNameReadingTest(unittest.TestCase):
+    """항목에 쓰는 워크플로 이름은 체크아웃한 .github/workflows/<파일>의 최상위 name 이다(API 호출 0회).
+    표준 라이브러리만 쓰므로 YAML 전체를 해석하지 않고 필요한 모양만 읽는다. 못 읽으면 파일 이름이 쓰인다."""
+
+    PARSED = (
+        ("name: 확인 필요 모음\nrun-name: x\n", "확인 필요 모음"),
+        ('name: "Chance 글 자동 작성·게시"\non: push\n', "Chance 글 자동 작성·게시"),
+        ("name: 'it''s ok'\n", "it's ok"),
+        ('name: "a # b" # 주석\n', "a # b"),
+        ("name: 'a'  # c\n", "a"),
+        ("name: 발행 중단 감시·알림   # 주석\n", "발행 중단 감시·알림"),
+        ("name: 값 # 주석 # 또 주석\n", "값"),
+        ("name: C#언어\n", "C#언어"),                                    # '#' 앞에 공백이 없으면 주석이 아니다
+        ("name:   값  \r\non:\r\n", "값"),                               # CRLF(Windows 작업 사본)
+        ("\ufeffname: BOM 파일\n", "BOM 파일"),
+        ("# 설명\n\non: push\nname : 늦게 나오는 이름\njobs: {}\n", "늦게 나오는 이름"),
+        ("on: push\nname:\tTab 뒤의 값\n", "Tab 뒤의 값"),
+    )
+    NOT_FOUND = (
+        "", "on: push\njobs:\n  build:\n    name: 잡 이름\n", "  name: 들여쓴 이름\n", "# name: 주석\n", "names: x\n", "name-x: y\n", "namex: y\n", "nam: y\n",
+        "name:값\n", "name: >\n  접힌 문장\n", "name: |\n  줄\n", "name: *anchor\n", "name: &a 값\n", "name: [a, b]\n", "name: {a: b}\n",
+        "name: !!str 값\n", "name: @값\n", "name: `값\n", "name: %값\n", 'name: "탈출 \\n 문자"\n', "name:\n", "name: ''\n", 'name: ""\n',
+        "name: ' '\n", "name: # 값 없음\n", 'name: "닫히지 않음\n', "name: 'a' b\n", 'name: "a" b\n', "name: 'a''\n",
+    )
+
+    def test_the_top_level_name_is_parsed(self):
+        for text, expected in self.PARSED:
+            self.assertEqual(oi.workflow_name(text), expected, text)
+
+    def test_anything_that_is_not_a_plain_top_level_name_gives_none(self):
+        for text in self.NOT_FOUND:
+            self.assertIsNone(oi.workflow_name(text), text)
+        for bad in (None, 5, b"name: x", ["name: x"]):
+            self.assertIsNone(oi.workflow_name(bad), bad)
+
+    def test_the_first_top_level_name_wins_over_names_further_down(self):
+        self.assertEqual(oi.workflow_name("name: 위\njobs:\n  a:\n    name: 아래\n"), "위")
+
+    def test_names_are_read_from_the_checked_out_files(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = h.make_root(Path(self._tmp.name), workflows={"a.yml": "name: 에이\non: push\n", "b.yaml": 'name: "비"\n', "c.yml": "on: push\n"})
+        (root / ".github" / "workflows" / "lf.yml").write_bytes("name: 엘에프\njobs: {}\n".encode("utf-8"))
+        files = oi.list_workflow_files(root)
+        self.assertEqual(oi.read_workflow_names(root, files), {"a.yml": "에이", "b.yaml": "비", "lf.yml": "엘에프"})     # name 이 없는 c.yml 은 빠진다
+
+    def test_unreadable_files_are_left_out_without_noise(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = h.make_root(Path(self._tmp.name), workflows={"ok.yml": "name: 정상\n"})
+        folder = root / ".github" / "workflows"
+        (folder / "dir.yml").mkdir()
+        (folder / "bad.yml").write_bytes(b"name: \xff\xfe\n")
+        self.assertEqual(oi.read_workflow_names(root, ["ok.yml", "dir.yml", "bad.yml", "missing.yml"]), {"ok.yml": "정상"})
+        self.assertEqual(oi.read_workflow_names(Path(self._tmp.name) / "none", ["a.yml"]), {})
+
+    def test_only_the_beginning_of_a_huge_file_is_read(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        big = {"big.yml": "name: 앞쪽 이름\n# " + "가" * 300000 + "\n", "late.yml": "# " + "가" * 300000 + "\nname: 너무 뒤\n"}
+        root = h.make_root(Path(self._tmp.name), workflows=big)
+        self.assertEqual(oi.read_workflow_names(root, ["big.yml", "late.yml"]), {"big.yml": "앞쪽 이름"})
+
+    def test_every_real_workflow_name_matches_what_yaml_reads(self):
+        files = oi.list_workflow_files(_bootstrap.ROOT)
+        names = oi.read_workflow_names(_bootstrap.ROOT, files)
+        self.assertEqual(sorted(names), files)
+        for file in files:
+            self.assertEqual(names[file], yaml.safe_load((WORKFLOWS / file).read_text(encoding="utf-8"))["name"], file)
+
+
 # ----------------------------------------------------------------------------
 # 읽기: GitHub 소스
 # ----------------------------------------------------------------------------
@@ -375,6 +446,76 @@ class FetchTest(unittest.TestCase):
         self.assertEqual(by_path["/pulls/15"], {})
         self.assertEqual(by_path[f"/commits/{15:040x}/check-runs"], {"per_page": 100})
         self.assertEqual(by_path["/actions/runs"], {"status": "action_required", "per_page": 20})
+
+    # --- 병합 가능 여부(mergeable)가 아직 계산 중(null)이면 같은 점검 안에서 한 번 다시 묻는다
+    NULL_DETAIL = {"mergeable": None, "mergeable_state": "unknown"}
+    CLEAN_DETAIL = {"mergeable": True, "mergeable_state": "clean"}
+
+    def test_a_mergeable_value_that_is_not_computed_yet_is_asked_again_once_after_a_short_wait(self):
+        self.add_pull(15)
+        self.fake.details[15] = [dict(self.NULL_DETAIL), dict(self.CLEAN_DETAIL)]
+        slept = []
+        pulls = oi.fetch_pulls(self.fake, self.failures, self.notes, sleep=slept.append)
+        self.assertEqual((pulls[0]["mergeable"], pulls[0]["mergeable_state"]), (True, "clean"))
+        self.assertEqual(slept, [oi.PULL_RETRY_WAIT_SECONDS])
+        self.assertEqual(self.fake.paths().count("/pulls/15"), 2)
+        self.assertEqual((self.failures, self.notes), ([], []))
+
+    def test_it_asks_once_more_only_for_the_pulls_still_unknown_and_waits_once_for_all(self):
+        for n in (1, 2, 3):
+            self.add_pull(n)
+        self.fake.details[1] = [dict(self.NULL_DETAIL), dict(self.CLEAN_DETAIL)]
+        self.fake.details[2] = [dict(self.NULL_DETAIL)]                    # 끝까지 null
+        slept = []
+        pulls = {p["number"]: p for p in oi.fetch_pulls(self.fake, self.failures, self.notes, sleep=slept.append)}
+        self.assertEqual((pulls[1]["mergeable"], pulls[2]["mergeable"], pulls[3]["mergeable"]), (True, None, True))
+        asked = [path for path in self.fake.paths() if path.startswith("/pulls/")]
+        self.assertEqual(asked, ["/pulls/1", "/pulls/2", "/pulls/3", "/pulls/1", "/pulls/2"])      # 첫 조회가 모두 끝난 뒤에 다시 묻는다(그동안이 기다림이 된다)
+        self.assertEqual(len(slept), 1)
+
+    def test_a_known_mergeable_value_costs_no_extra_call_and_no_wait(self):
+        self.add_pull(15)
+        slept = []
+        oi.fetch_pulls(self.fake, self.failures, self.notes, sleep=slept.append)
+        self.assertEqual(slept, [])
+        self.assertEqual(len(self.fake.paths()), 1 + 2)
+
+    def test_a_pull_whose_check_lookup_failed_is_not_asked_again(self):
+        self.add_pull(15)
+        self.fake.details[15] = [dict(self.NULL_DETAIL), dict(self.CLEAN_DETAIL)]
+        self.fake.fail = [(r"GET /commits/", api_error(500, "HTTP 500"))]            # 상세는 받았지만(null) 검사 조회가 실패했다
+        slept = []
+        pulls = oi.fetch_pulls(self.fake, self.failures, self.notes, sleep=slept.append)
+        self.assertEqual(pulls[0]["error"], "HTTP 500")
+        self.assertEqual((slept, self.fake.paths().count("/pulls/15")), ([], 1))
+
+    def test_a_pull_whose_first_lookup_failed_is_not_asked_again(self):
+        self.add_pull(15)
+        self.fake.details[15] = [api_error(500, "HTTP 500")]
+        slept = []
+        pulls = oi.fetch_pulls(self.fake, self.failures, self.notes, sleep=slept.append)
+        self.assertEqual(pulls[0]["error"], "HTTP 500")
+        self.assertEqual((slept, self.fake.paths().count("/pulls/15")), ([], 1))
+
+    def test_a_failed_or_empty_second_answer_keeps_the_first_answer_and_records_nothing(self):
+        for second in (api_error(502, "HTTP 502"), None, "문자열", ["목록"]):
+            fake, failures, notes = h.FakeGitHub(), [], []
+            fake.pulls, fake.check_runs = [h.make_pull_raw(15, sha=f"{15:040x}")], {f"{15:040x}": [h.make_check("v")]}
+            fake.details = {15: [dict(self.NULL_DETAIL), second]}
+            pulls = oi.fetch_pulls(fake, failures, notes, sleep=lambda seconds: None)
+            self.assertEqual((pulls[0]["mergeable"], pulls[0]["mergeable_state"], pulls[0]["error"]), (None, "unknown", ""), second)
+            self.assertEqual((failures, notes), ([], []), second)
+
+    def test_the_second_question_stays_inside_the_read_budget_and_skips_the_wait_without_budget(self):
+        self.add_pull(15)
+        self.fake.details[15] = [dict(self.NULL_DETAIL), dict(self.CLEAN_DETAIL)]
+        for max_calls, reserve in ((3, 0), (4, 1)):                   # 읽기 3회(목록·상세·검사)로 이미 상한이거나, 남은 1회가 쓰기용 reserve 다
+            fake = h.FakeGitHub(max_calls=max_calls, reserve=reserve)
+            fake.pulls, fake.check_runs = self.fake.pulls, self.fake.check_runs
+            fake.details = {15: [dict(self.NULL_DETAIL), dict(self.CLEAN_DETAIL)]}
+            slept, failures = [], []
+            pulls = oi.fetch_pulls(fake, failures, [], sleep=slept.append)
+            self.assertEqual((pulls[0]["mergeable"], slept, failures, fake.calls), (None, [], [], 3), (max_calls, reserve))
 
     def test_pull_entries_without_a_numeric_number_are_skipped_without_calls(self):
         self.fake.pulls = [dict(h.make_pull_raw(1), number=None), dict(h.make_pull_raw(2), number="7"), dict(h.make_pull_raw(3), number=True)]
@@ -451,6 +592,17 @@ class FetchTest(unittest.TestCase):
         params = self.fake.log[0][2]
         self.assertEqual((params["branch"], params["per_page"]), ("trunk", 10))
         self.assertEqual(params["created"], ">=2026-10-23T06:00:00Z")                # NOW 의 48시간 전
+        self.assertEqual(self.failures, [])
+
+    def test_runs_of_fork_pull_requests_are_dropped_when_they_are_read(self):
+        own = h.make_run(1, ago(hours=2))
+        fork = h.make_run(2, ago(minutes=5), event="pull_request", head_repo="stranger/blog")
+        mine = h.make_run(3, ago(minutes=30), event="pull_request")                                        # 이 저장소 안의 PR 이 일으킨 실행은 남는다
+        self.fake.runs["a.yml"] = [fork, mine, own]
+        runs = oi.fetch_runs(self.fake, ["a.yml"], NOW, "main", self.failures)                             # 저장소는 클라이언트가 알고 있다
+        self.assertEqual([r["id"] for r in runs["a.yml"]], [3, 1])
+        kept = oi.fetch_runs(self.fake, ["a.yml"], NOW, "main", self.failures, repo="stranger/blog")        # 부르는 쪽이 알려 줄 수도 있다
+        self.assertEqual([r["id"] for r in kept["a.yml"]], [2, 1])
         self.assertEqual(self.failures, [])
 
     def test_workflow_unknown_to_the_default_branch_is_just_empty(self):
@@ -717,6 +869,49 @@ class IssueSyncTest(unittest.TestCase):
         self.assertEqual(inbox.parse_marker(self.inbox_issue()["body"]).items, ("a:1",))
         self.assertEqual(self.sync(action_items("PR #1"))["comment"], "none")
 
+    def test_first_run_writes_the_marker_without_notified_ids_and_adds_them_only_after_the_comment(self):
+        self.sync(action_items("PR #1", "PR #2"))
+        created = [e for e in self.fake.log if e[:2] == ("POST", "/issues")][0][2]
+        self.assertEqual(inbox.parse_marker(created["body"]).items, ())                       # 아직 알리지 못한 id 는 표식에 없다
+        self.assertEqual([(m, p) for m, p, _ in self.fake.writes()],
+                         [("POST", "/labels"), ("POST", "/issues"), ("POST", "/issues/200/comments"), ("PATCH", "/issues/200")])
+        patch = [e for e in self.fake.log if e[0] == "PATCH"][0][2]
+        self.assertEqual(set(patch), {"body"})
+        self.assertEqual(inbox.parse_marker(self.inbox_issue()["body"]).items, ("a:1", "a:2"))
+        self.assertEqual(self.sync(action_items("PR #1", "PR #2"))["action"], "unchanged")
+
+    def test_first_run_without_action_items_needs_no_second_write(self):
+        self.sync([inbox.Item("stat:x", "info", "현황"), inbox.Item("c:1", "check", "확인")])
+        self.assertEqual([(m, p) for m, p, _ in self.fake.writes()], [("POST", "/labels"), ("POST", "/issues")])
+
+    def test_first_run_with_a_failing_comment_and_a_failing_patch_still_notifies_next_time(self):
+        self.fake.fail = [(r"POST /issues/\d+/comments", api_error(500, "HTTP 500")), (r"PATCH /issues/\d+", api_error(500, "HTTP 500"))]
+        result = self.sync(action_items("PR #1"))                                              # 코멘트가 실패하면 고칠 본문이 없다 — 예외 없이 끝난다
+        self.assertEqual((result["action"], result["comment"]), ("created", "failed"))
+        self.assertEqual(inbox.parse_marker(self.inbox_issue()["body"]).items, ())
+        self.fake.fail = []
+        again = self.sync(action_items("PR #1"))
+        self.assertEqual((again["comment"], again["new"]), ("posted", 1))
+        self.assertEqual(inbox.parse_marker(self.inbox_issue()["body"]).items, ("a:1",))
+
+    def test_first_run_when_only_the_patch_after_a_good_comment_fails_notifies_again_rather_than_never(self):
+        self.fake.fail = [(r"PATCH /issues/\d+", api_error(500, "HTTP 500"))]
+        with self.assertRaises(oi.ApiError):
+            self.sync(action_items("PR #1"))
+        self.assertEqual(len(self.fake.comments[200]), 1)
+        self.assertEqual(inbox.parse_marker(self.inbox_issue()["body"]).items, ())             # 알림은 갔지만 표식에는 아직 없다
+        self.fake.fail = []
+        again = self.sync(action_items("PR #1"))
+        self.assertEqual((again["comment"], again["new"]), ("posted", 1))                       # 한 번 더 알린다(영영 못 알리는 쪽보다 낫다)
+        self.assertEqual(len(self.fake.comments[200]), 2)
+        self.assertEqual(inbox.parse_marker(self.inbox_issue()["body"]).items, ("a:1",))
+
+    def test_first_run_that_creates_the_issue_without_an_assignee_still_adds_the_ids_after_the_comment(self):
+        self.fake.reject_assignees = True
+        self.sync(action_items("PR #1"))
+        self.assertEqual(inbox.parse_marker(self.inbox_issue()["body"]).items, ("a:1",))
+        self.assertEqual(len([e for e in self.fake.log if e[0] == "PATCH"]), 1)
+
     # --- 고치기
     def test_changed_visible_text_patches_only_the_body(self):
         items = action_items("PR #1")
@@ -925,7 +1120,7 @@ class RunTest(unittest.TestCase):
 
     def run_script(self, fake, root, env=None, now=NOW):
         environ = dict(ENV, GITHUB_STEP_SUMMARY=str(self.summary), **(env or {}))
-        return oi.run(environ, fake, now, root, self.out.append)
+        return oi.run(environ, fake, now, root, self.out.append, sleep=lambda seconds: None)         # 시험은 실제로 기다리지 않는다
 
     def summary_text(self):
         return self.summary.read_text(encoding="utf-8") if self.summary.exists() else ""
@@ -948,6 +1143,81 @@ class RunTest(unittest.TestCase):
             self.assertIn(needle, visible)
         self.assertIn("[점검] 지금 해야 할 일 2건 · 확인하면 좋은 것 0건 · 참고 2건 (조회 실패 0건, GitHub API 호출 ", self.out[0])
         self.assertTrue(fake.comments[issue["number"]][0].startswith("@octo "))
+
+    PLATFORM_WARNING = ("Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: "
+                        "actions/checkout@v4, actions/setup-python@v5.")
+    PLATFORM_NOTICE = "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026."
+
+    def add_platform_run(self, fake, file, run_id, job_id, hours):
+        run = h.make_run(run_id, ago(hours=hours), name=f"{file} 실행 이름", path=f".github/workflows/{file}")
+        fake.runs.setdefault(file, []).append(run)
+        fake.runs[file].sort(key=lambda r: r["created_at"], reverse=True)
+        fake.jobs[run_id] = [{"id": job_id}]
+        fake.annotations[job_id] = [h.make_annotation(self.PLATFORM_WARNING), h.make_annotation(self.PLATFORM_NOTICE, "notice")]
+
+    def test_a_run_of_another_workflow_does_not_make_the_inbox_rewrite_the_issue(self):
+        fake, root = self.world(workflows=("chanceblog.yml", "blogger.yml", "pages.yml"))
+        fake.runs = {"chanceblog.yml": [], "blogger.yml": [], "pages.yml": []}
+        self.add_platform_run(fake, "chanceblog.yml", 11, 111, 3)
+        self.add_platform_run(fake, "blogger.yml", 12, 112, 2)
+        self.assertEqual(self.run_script(fake, root), 0)
+        body = self.inbox_issue(fake)["body"]
+        self.assertIn("플랫폼 경고 2종", body)
+        writes = len(fake.writes())
+        self.add_platform_run(fake, "pages.yml", 13, 113, 0.1)         # 다른 워크플로가 방금(가장 최근에) 돌았고 같은 안내가 달렸다
+        self.assertEqual(self.run_script(fake, root), 0)
+        self.assertEqual(len(fake.writes()), writes)                   # 이슈를 다시 쓰지 않는다
+        self.assertEqual(self.inbox_issue(fake)["body"], body)
+        self.assertIn("변경 없음", self.summary_text())
+
+    def test_workflow_names_in_the_issue_come_from_the_checked_out_files_not_from_run_names(self):
+        fake, root = self.world(workflows={"chanceblog.yml": 'name: "Chance 글 자동 작성·게시"\non: push\n', "blogger.yml": "name: Blogger 글 자동 작성\n"})
+        fake.runs["chanceblog.yml"] = [h.make_run(5, ago(hours=1), "failure", name="Chance 기존 글 이미지 교체 · 연습(저장 안 함)")]
+        self.assertEqual(self.run_script(fake, root), 0)
+        body = self.inbox_issue(fake)["body"]
+        self.assertIn("워크플로 실패 — Chance 글 자동 작성·게시", body)
+        self.assertNotIn("이미지 교체", body)
+        self.assertTrue(all(path.endswith("/runs") for path in fake.paths() if path.startswith("/actions/workflows")))      # 이름을 읽느라 API 를 더 부르지 않는다
+
+    def test_a_workflow_file_without_a_readable_name_is_shown_by_its_file_name(self):
+        fake, root = self.world(workflows={"chanceblog.yml": "on: push\n", "blogger.yml": "name: Blogger 글 자동 작성\n"})
+        fake.runs["chanceblog.yml"] = [h.make_run(5, ago(hours=1), "failure", name="Chance 기존 글 이미지 교체 · 연습(저장 안 함)")]
+        self.run_script(fake, root)
+        body = self.inbox_issue(fake)["body"]
+        self.assertIn("워크플로 실패 — chanceblog.yml", body)
+        self.assertNotIn("이미지 교체", body)
+
+    def test_fork_pull_request_runs_never_become_items_and_are_not_read_for_annotations(self):
+        fake, root = self.world(workflows=("chanceblog.yml",))
+        fork_bad = h.make_run(22, ago(minutes=5), "failure", event="pull_request", head_repo="stranger/blog")
+        fork_ok = h.make_run(23, ago(minutes=4), "success", event="pull_request", head_repo="stranger/blog")
+        fake.runs = {"chanceblog.yml": [fork_ok, fork_bad, h.make_run(21, ago(hours=3))]}
+        fake.jobs[23] = [{"id": 233}]
+        fake.annotations[233] = [h.make_annotation("포크의 경고")]
+        self.run_script(fake, root)
+        body = self.inbox_issue(fake)["body"]
+        self.assertNotIn("워크플로 실패", body)
+        self.assertNotIn("포크의 경고", body)
+        self.assertFalse(any("/runs/22/" in path or "/runs/23/" in path for path in fake.paths()))
+
+    def test_pull_request_runs_of_this_repository_still_count_end_to_end(self):
+        fake, root = self.world(workflows=("chanceblog.yml",))
+        own_pr_bad = h.make_run(24, ago(minutes=2), "failure", event="pull_request", head_repo=h.REPO)
+        fork_ok = h.make_run(23, ago(minutes=4), "success", event="pull_request", head_repo="stranger/blog")
+        fake.runs = {"chanceblog.yml": [own_pr_bad, fork_ok, h.make_run(21, ago(hours=3))]}
+        self.run_script(fake, root)
+        body = self.inbox_issue(fake)["body"]
+        self.assertIn("워크플로 실패", body)                         # 이 저장소의 PR 이 일으킨 실패는 센다(포크 실행의 성공은 가리지 못한다)
+        self.assertIn(f"{URL}/actions/runs/24", body)
+
+    def test_a_pull_whose_mergeable_value_was_not_computed_yet_is_judged_in_the_same_check(self):
+        fake, root = self.world()
+        fake.details[15] = [{"mergeable": None, "mergeable_state": "unknown"}, {"mergeable": True, "mergeable_state": "clean"}]
+        slept = []
+        environ = dict(ENV, GITHUB_STEP_SUMMARY=str(self.summary))
+        self.assertEqual(oi.run(environ, fake, NOW, root, self.out.append, sleep=slept.append), 0)
+        self.assertIn("PR #15 병합하면 됩니다", self.summary_text())
+        self.assertEqual(slept, [oi.PULL_RETRY_WAIT_SECONDS])
 
     def test_second_run_is_silent(self):
         fake, root = self.world()
@@ -997,6 +1267,11 @@ class RunTest(unittest.TestCase):
         self.assertFalse(any(p == "/issues" and params.get("labels") for m, p, params in fake.log))
         self.assertTrue(any("토큰이 없어 읽기 전용" in line for line in self.out))
         self.assertTrue(any("# 확인 필요 모음" in line for line in self.out))
+        # 정확한 문구: 열린 이슈 목록(워치독 알림용)은 읽지만 모음 이슈는 읽지도 쓰지도 않는다
+        self.assertTrue(any(p == "/issues" and params.get("state") == "open" for m, p, params in fake.log))
+        line = next(line for line in self.out if "토큰이 없어 읽기 전용" in line)
+        self.assertIn("열린 이슈 목록은 읽었지만 모음 이슈는 읽지도 쓰지도 않았습니다", line)
+        self.assertIn("열린 이슈 목록(워치독 알림용)은 읽지만 모음 이슈는 읽지도 쓰지도 않는다", oi.__doc__)
 
     def test_whitespace_only_token_counts_as_no_token(self):
         fake, root = self.world()
@@ -1067,7 +1342,8 @@ class RunTest(unittest.TestCase):
         fake, root = self.world()
         fake.fail = [(r"POST /issues$", api_error(403, "HTTP 403: Resource not accessible by integration"))]
         self.assertEqual(self.run_script(fake, root), 1)
-        self.assertTrue(any(line.startswith("::error::") and "HTTP 403" in line for line in self.out))
+        self.assertEqual([line for line in self.out if str(line).startswith("::")], [oi.ERROR_ISSUE_FAILED])       # 주석은 고정 문장
+        self.assertTrue(any("HTTP 403" in line and not line.startswith("::") for line in self.out))                  # 이유는 일반 로그 줄
         text = self.summary_text()
         self.assertIn("PR #15 병합하면 됩니다", text)             # 이슈를 못 써도 요약에는 남아 있다
         self.assertIn("이슈를 읽거나 쓰지 못했습니다", text)
@@ -1087,6 +1363,77 @@ class RunTest(unittest.TestCase):
         self.assertEqual(self.run_script(fake, root), 0)
         number = [i for i in fake.issues if i["title"] == inbox.ISSUE_TITLE][0]["number"]
         self.assertEqual(len(fake.comments[number]), 1)
+
+    # --- ::error:: 주석에는 고정 문장만(R9). 상세는 접고 마스킹한 일반 로그 줄로
+    HOSTILE = f"HTTP 500: {TOKEN}\n::stop-commands::x\n@everyone <b>x</b> ::error::위조 [링크](http://e.example) ##[group]g"
+
+    def assert_only_the_fixed_annotations(self, fake, allowed):
+        for block in self.out:
+            for line in str(block).splitlines():
+                if line.lstrip().startswith("::"):
+                    self.assertIn(line, allowed, line)
+                self.assertNotIn("##[", line)
+        self.assertNotIn(TOKEN, self.everything_printed(fake))
+
+    def reason_lines(self, marker):
+        return [line for line in self.out if marker in str(line) and not str(line).startswith("::")]
+
+    def test_a_failed_issue_write_gives_a_fixed_annotation_and_the_reason_in_a_plain_line(self):
+        fake, root = self.world()
+        fake.fail = [(r"POST /issues$", oi.ApiError(self.HOSTILE, status=403))]
+        self.assertEqual(self.run_script(fake, root), 1)
+        self.assertEqual([line for line in self.out if str(line).startswith("::")], [oi.ERROR_ISSUE_FAILED])
+        self.assert_only_the_fixed_annotations(fake, (oi.ERROR_ISSUE_FAILED,))
+        lines = self.reason_lines("HTTP 500")
+        self.assertEqual(len(lines), 1)
+        for raw in ("\n", "::", "@", "<", "](", TOKEN):
+            self.assertNotIn(raw, lines[0], raw)
+        self.assertNotIn("HTTP", oi.ERROR_ISSUE_FAILED)
+
+    def test_a_failed_comment_gives_a_fixed_annotation_and_the_reason_in_a_plain_line(self):
+        fake, root = self.world()
+        fake.fail = [(r"POST /issues/\d+/comments", oi.ApiError(self.HOSTILE, status=500))]
+        self.assertEqual(self.run_script(fake, root), 1)
+        self.assertEqual([line for line in self.out if str(line).startswith("::")], [oi.ERROR_COMMENT_FAILED])
+        self.assert_only_the_fixed_annotations(fake, (oi.ERROR_COMMENT_FAILED,))
+        lines = self.reason_lines("HTTP 500")
+        self.assertEqual(len(lines), 1)
+        for raw in ("\n", "::", "@", "<", "](", TOKEN):
+            self.assertNotIn(raw, lines[0], raw)
+        self.assertNotIn("HTTP", oi.ERROR_COMMENT_FAILED)
+
+    def test_post_comment_alone_gives_the_same_fixed_annotation_and_one_plain_reason_line(self):
+        fake, out = h.FakeGitHub(), []
+        fake.fail = [(r"POST /issues/5/comments", oi.ApiError(self.HOSTILE, status=500))]
+        self.assertFalse(oi.post_comment(fake, 5, "본문", out.append))
+        self.assertEqual(out[0], oi.ERROR_COMMENT_FAILED)
+        self.assertEqual(len(out), 2)
+        self.assertNotIn("::", out[1])
+        self.assertTrue(oi.post_comment(h.FakeGitHub(), 5, "본문", out.append))
+        self.assertEqual(len(out), 2)
+
+    def test_a_failed_label_is_logged_as_one_plain_folded_line(self):
+        fake, root = self.world()
+        fake.fail = [(r"POST /labels", oi.ApiError(self.HOSTILE, status=403))]
+        self.assertEqual(self.run_script(fake, root), 0)
+        self.assert_only_the_fixed_annotations(fake, ())
+        lines = self.reason_lines("라벨")
+        self.assertEqual(len(lines), 1)
+        for raw in ("\n", "::", "@", "<", TOKEN):
+            self.assertNotIn(raw, lines[0], raw)
+        self.assertIn("HTTP 500", lines[0])
+
+    def test_every_printed_line_that_starts_with_a_workflow_command_is_a_fixed_sentence(self):
+        for pattern, error, expected in ((r"POST /issues$", oi.ApiError(self.HOSTILE, status=403), (oi.ERROR_ISSUE_FAILED,)),
+                                         (r"GET /issues\?labels=", oi.ApiError(self.HOSTILE, status=500), (oi.ERROR_ISSUE_FAILED,)),
+                                         (r"POST /issues/\d+/comments", oi.ApiError(self.HOSTILE, status=500), (oi.ERROR_COMMENT_FAILED,)),
+                                         (r"GET /actions/runs\?", oi.ApiError(self.HOSTILE, status=500), ()),
+                                         (r"GET /pulls\?", oi.ApiError(self.HOSTILE, status=500), ())):
+            self.out.clear()
+            fake, root = self.world()
+            fake.fail = [(pattern, error)]
+            self.run_script(fake, root)
+            self.assert_only_the_fixed_annotations(fake, expected)
 
     def test_blogger_secrets_problem_becomes_an_action_with_names_only(self):
         history = [h.make_entry("generated_unpublished", ago(hours=30), [h.SECRETS_REASON]),
@@ -1140,9 +1487,30 @@ class RunTest(unittest.TestCase):
                 self.assertNotIn("##[", line)
 
     def test_api_call_cap_comes_from_the_environment_with_sane_bounds(self):
-        self.assertEqual(oi._int_env("40", 150, 5, 1000), 40)
-        for bad in (None, "", "abc", "4", "1001", "-3"):
-            self.assertEqual(oi._int_env(bad, 150, 5, 1000), 150, bad)
+        low, high = oi.MIN_API_CALLS, oi.MAX_API_CALLS
+        self.assertEqual((low, high), (24, 1000))
+        self.assertEqual(oi._int_env("40", 150, low, high), 40)
+        for edge in ("24", "1000", " 24 "):
+            self.assertEqual(oi._int_env(edge, 150, low, high), int(edge), edge)
+        for bad in (None, "", "abc", "23", "14", "9", "5", "4", "1001", "-3", "0", "2.5"):
+            self.assertEqual(oi._int_env(bad, 150, low, high), 150, bad)
+            self.assertIsNone(oi._int_env(bad, None, low, high), bad)
+
+    def test_the_smallest_cap_keeps_the_whole_write_reserve(self):
+        """하한이 너무 낮으면(옛 5) reserve 가 cap // 3 으로 줄어 쓰기가 실패하거나 알림이 유실된다. 하한에서도 reserve 는 그대로 WRITE_RESERVE 다."""
+        self.assertGreaterEqual(oi.MIN_API_CALLS, 3 * oi.WRITE_RESERVE)
+        self.assertGreaterEqual(oi.MIN_API_CALLS - oi.WRITE_RESERVE, 16)           # 읽기에 쓸 수 있는 호출이 최소 16회는 남는다
+
+    def test_a_rejected_call_cap_is_mentioned_in_the_log_and_a_good_one_is_not(self):
+        fake, root = self.world()
+        for value, rejected in (("9", True), ("23", True), ("abc", True), ("24", False), ("1000", False), ("", False)):
+            self.out.clear()
+            self.run_script(fake, root, {"INBOX_MAX_API_CALLS": value, "INBOX_DRY_RUN": "true"})
+            lines = [line for line in self.out if "INBOX_MAX_API_CALLS" in str(line)]
+            self.assertEqual(len(lines), 1 if rejected else 0, value)
+            if rejected:
+                self.assertIn(f"{oi.MIN_API_CALLS}~{oi.MAX_API_CALLS}", lines[0])
+                self.assertIn(f"{oi.MAX_CALLS_WITH_TOKEN}회", lines[0])
 
     def test_the_real_client_gets_the_documented_call_budget_and_write_reserve(self):
         class Stop(Exception):
@@ -1158,11 +1526,12 @@ class RunTest(unittest.TestCase):
         with_token = {"GITHUB_TOKEN": TOKEN}
         cases = (                                   # (환경변수, 호출 상한, 쓰기용 reserve, 클라이언트에 넘기는 토큰)
             (with_token, 150, 8, TOKEN), ({}, 25, 0, None),
-            (dict(with_token, INBOX_MAX_API_CALLS="30"), 30, 8, TOKEN), (dict(with_token, INBOX_MAX_API_CALLS="9"), 9, 3, TOKEN),
-            ({"INBOX_MAX_API_CALLS": "40"}, 40, 0, None),
-            (dict(with_token, INBOX_MAX_API_CALLS="5"), 5, 1, TOKEN), (dict(with_token, INBOX_MAX_API_CALLS="1000"), 1000, 8, TOKEN),
-            (dict(with_token, INBOX_MAX_API_CALLS="4"), 150, 8, TOKEN), (dict(with_token, INBOX_MAX_API_CALLS="1001"), 150, 8, TOKEN),
-            ({"INBOX_MAX_API_CALLS": "4"}, 25, 0, None))                       # 범위(5~1000) 밖의 값은 기본값으로
+            (dict(with_token, INBOX_MAX_API_CALLS="30"), 30, 8, TOKEN), (dict(with_token, INBOX_MAX_API_CALLS="24"), 24, 8, TOKEN),
+            ({"INBOX_MAX_API_CALLS": "40"}, 40, 0, None), ({"INBOX_MAX_API_CALLS": "24"}, 24, 0, None),
+            (dict(with_token, INBOX_MAX_API_CALLS="1000"), 1000, 8, TOKEN),
+            (dict(with_token, INBOX_MAX_API_CALLS="23"), 150, 8, TOKEN), (dict(with_token, INBOX_MAX_API_CALLS="9"), 150, 8, TOKEN),
+            (dict(with_token, INBOX_MAX_API_CALLS="5"), 150, 8, TOKEN), (dict(with_token, INBOX_MAX_API_CALLS="4"), 150, 8, TOKEN),
+            (dict(with_token, INBOX_MAX_API_CALLS="1001"), 150, 8, TOKEN), ({"INBOX_MAX_API_CALLS": "23"}, 25, 0, None))   # 범위(24~1000) 밖의 값은 기본값으로
         for extra, max_calls, reserve, token in cases:
             built.clear()
             with mock.patch.object(oi, "GitHubClient", side_effect=construct):
@@ -1171,14 +1540,18 @@ class RunTest(unittest.TestCase):
             args, kwargs = built[0]
             self.assertEqual((args, kwargs["max_calls"], kwargs["reserve"]), ((h.REPO, token), max_calls, reserve), extra)
 
-    def test_a_tiny_call_cap_still_leaves_room_for_the_writes(self):
-        fake, root = self.world(workflows=("a.yml", "b.yml", "c.yml", "d.yml", "e.yml", "f.yml"))
-        for name in ("a.yml", "b.yml", "c.yml", "d.yml", "e.yml", "f.yml"):
-            fake.runs[name] = []
-        fake.max_calls, fake.reserve = 20, 8
-        self.assertEqual(self.run_script(fake, root), 0)
-        self.assertTrue(fake.writes())                          # 읽기가 상한에 걸려도 이슈 쓰기는 한다
-        self.assertLessEqual(fake.calls, 20)
+    def test_the_smallest_allowed_call_cap_still_leaves_room_for_the_worst_case_writes(self):
+        names = tuple(f"w{n}.yml" for n in range(14))
+        fake, root = self.world(workflows=names)
+        fake.runs = {name: [] for name in names}
+        fake.reject_assignees = True                           # 담당자 거부 → 이슈를 두 번 만든다(쓰기 최악)
+        fake.max_calls, fake.reserve = oi.MIN_API_CALLS, oi.WRITE_RESERVE
+        self.assertEqual(self.run_script(fake, root), 0)       # 읽기가 상한에 걸려도 이슈 쓰기는 끝까지 한다
+        self.assertLessEqual(fake.calls, oi.MIN_API_CALLS)
+        issue = self.inbox_issue(fake)
+        self.assertEqual(len(fake.comments[issue["number"]]), 1)
+        self.assertEqual(inbox.parse_marker(issue["body"]).items, ("pr:15:ready", "watchdog:9"))      # 알린 id 를 적는 마지막 쓰기까지 됐다
+        self.assertIn("조회 실패 — 워크플로 실행 기록", issue["body"])
 
     def test_main_with_the_real_client_and_no_network_degrades_instead_of_crashing(self):
         env = {"GITHUB_REPOSITORY": h.REPO}
@@ -1207,6 +1580,11 @@ class RunTest(unittest.TestCase):
 # ----------------------------------------------------------------------------
 # 워크플로 파일과 다른 워크플로·스크립트와의 상호작용
 # ----------------------------------------------------------------------------
+def one_item(items):
+    assert len(items) == 1, [i.id for i in items]
+    return items[0]
+
+
 def load_workflow(name):
     data = yaml.safe_load((WORKFLOWS / name).read_text(encoding="utf-8"))
     if True in data and "on" not in data:               # YAML 1.1 은 키 on 을 True 로 읽는다
@@ -1302,6 +1680,48 @@ class WorkflowFileTest(unittest.TestCase):
             self.assertLessEqual(imported - {"pipeline"}, set(sys.stdlib_module_names), rel)
 
 
+class AnnotationSourceTest(unittest.TestCase):
+    """R9 를 소스에서 고정한다: 줄 머리가 '::' 인 문자열(워크플로 명령)은 고정 문장이어야 한다 — 값을 끼운 f-string 이면 안 된다."""
+
+    def test_workflow_command_strings_in_the_script_are_fixed_sentences(self):
+        tree = ast.parse((_bootstrap.ROOT / "scripts" / "ops_inbox.py").read_text(encoding="utf-8"))
+        commands = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.JoinedStr):
+                first = node.values[0] if node.values else None
+                if isinstance(first, ast.Constant) and str(first.value).lstrip().startswith("::"):
+                    self.fail(f"{node.lineno}번째 줄: 값을 끼운 f-string 이 워크플로 명령으로 시작합니다")
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value.lstrip().startswith("::"):
+                commands.append(node.value)
+        self.assertEqual(sorted(commands), sorted([oi.ERROR_COMMENT_FAILED, oi.ERROR_ISSUE_FAILED]))
+        for text in commands:
+            self.assertTrue(text.startswith("::error::"), text)
+            self.assertNotIn("\n", text)
+
+
+class GuideMatchesCodeTest(unittest.TestCase):
+    """docs/OPS_INBOX.md 가 말하는 값·동작이 코드와 같은지(값을 바꾸면 문서도 고친다)."""
+
+    def setUp(self):
+        self.doc = (_bootstrap.ROOT / "docs" / "OPS_INBOX.md").read_text(encoding="utf-8")
+
+    def test_the_wait_before_asking_again_matches_the_guide(self):
+        self.assertIn(f"{oi.PULL_RETRY_WAIT_SECONDS}초 뒤", self.doc)
+
+    def test_call_cap_and_reserve(self):
+        self.assertIn(f"{oi.MIN_API_CALLS}~{oi.MAX_API_CALLS}", self.doc)
+        self.assertIn(f"한 번에 최대 {oi.MAX_CALLS_WITH_TOKEN}회", self.doc)
+        self.assertIn(f"쓰기용 {oi.WRITE_RESERVE}회", self.doc)
+
+    def test_the_no_token_wording_is_exact(self):
+        self.assertIn("열린 이슈 목록(워치독 알림용)은 읽지만 모음 이슈는 읽지도 쓰지도 않", self.doc)
+        self.assertNotIn("이슈는 건드리지 않음", self.doc)
+
+    def test_the_rules_changed_by_this_fix_are_in_the_table(self):
+        for phrase in ("워크플로 파일의 최상위 `name`", "포크", "action_required", "변경 범위 검사", "3초 뒤"):
+            self.assertIn(phrase, self.doc, phrase)
+
+
 class InteractionWithOtherAutomationTest(unittest.TestCase):
     """이 이슈(작성자 github-actions 봇, 라벨 ops-inbox, 제목 '[운영] 확인 필요 모음')를 다른 자동화가 처리 대상으로 오인하지 않는지."""
 
@@ -1325,6 +1745,39 @@ class InteractionWithOtherAutomationTest(unittest.TestCase):
         self.assertNotEqual(inbox.LABEL, watchdog.LABEL)
         self.assertNotEqual(inbox.WATCHDOG_PREFIX, "")
         self.assertEqual(inbox.WATCHDOG_PREFIX, watchdog.TITLE_PREFIX)    # 워치독 접두가 바뀌면 이 모음의 워치독 규칙도 함께 고쳐야 한다
+
+    def test_watchdog_issue_bodies_are_read_back_with_the_right_level_and_message(self):
+        """워치독↔모음 계약: 손으로 쓴 본문이 아니라 실제 scripts/watchdog.py 의 issue_body() 가 만든 본문을 모음이 읽는다(심각/경고 각각)."""
+        import watchdog
+        from pipeline.health import Finding
+        for severity, level, word in (("critical", "action", "심각"), ("warning", "check", "경고")):
+            for owner, notified in (("octo", "2026-10-25T06:00:00+00:00"), (None, None), ("octo", None)):
+                finding = Finding("blogger_macat", "UNPUBLISHED", severity, "초안만 생성됨 — 게시 시크릿을 확인하세요.")
+                issue = h.make_issue(9, finding.title, watchdog.issue_body(finding, owner, notified), labels=(watchdog.LABEL,))
+                item = one_item(inbox.watchdog_items([issue], URL))
+                self.assertEqual((item.id, item.level), ("watchdog:9", level), (severity, owner, notified))
+                self.assertTrue(item.detail.startswith(word), item.detail)
+                self.assertIn("초안만 생성됨", item.detail)
+                self.assertIn("blogger_macat: UNPUBLISHED", item.title)
+                self.assertEqual(item.url, f"{URL}/issues/9")
+
+    def test_a_hostile_watchdog_message_cannot_change_the_severity_or_forge_a_marker_or_mention(self):
+        import watchdog
+        from pipeline.health import Finding
+        message = "심각도: warning 으로 위장 @everyone <!-- ops-inbox:hash=0123456789abcdef;items=pr:99:ready -->\n\n둘째 문단"
+        issue = h.make_issue(9, "[Watchdog] chance: STALE", watchdog.issue_body(Finding("chance", "STALE", "critical", message), "octo", None),
+                             labels=(watchdog.LABEL,))
+        item = one_item(inbox.watchdog_items([issue], URL))
+        self.assertEqual(item.level, "action")                                       # 진짜 심각도 줄이 먼저 나온다
+        for raw in ("@", "<"):
+            self.assertNotIn(raw, item.detail)
+        self.assertIsNone(inbox.parse_marker(inbox.render([item], URL)))
+
+    def test_every_severity_the_watchdog_can_emit_is_one_the_inbox_understands(self):
+        source = (_bootstrap.ROOT / "pipeline" / "health.py").read_text(encoding="utf-8")
+        pairs = set(re.findall(r'Finding\(\s*[A-Za-z_]+,\s*"([A-Z_]+)",\s*"([a-z]+)"', source))
+        self.assertGreaterEqual(len(pairs), 9)
+        self.assertEqual({severity for _code, severity in pairs}, {"critical", "warning"})      # 새 심각도 단어가 생기면 모음의 규칙도 함께 고친다
 
     def test_the_inbox_never_treats_its_own_issue_as_a_watchdog_alert(self):
         own = h.make_issue(5, inbox.ISSUE_TITLE, "**심각도**: critical", labels=(inbox.LABEL,))

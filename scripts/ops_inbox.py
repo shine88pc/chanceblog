@@ -10,9 +10,9 @@
       PIPELINE_PAUSE        워크플로가 저장소 변수를 넘긴다(1/true/yes/on 이면 '일시정지' 항목을 만든다)
       DEFAULT_BRANCH        실행 기록을 볼 브랜치(기본 main)
       GITHUB_REPOSITORY_OWNER  담당자·@멘션 대상(기본: 저장소 이름의 소유자)
-      INBOX_MAX_API_CALLS   GitHub API 호출 상한(기본: 토큰이 있으면 150, 없으면 25)
+      INBOX_MAX_API_CALLS   GitHub API 호출 상한(기본: 토큰이 있으면 150, 없으면 25. 24~1000 사이의 숫자만 받고 그 밖의 값은 기본값을 쓴다)
       GITHUB_STEP_SUMMARY   Actions 실행 요약 파일(있으면 같은 마크다운을 덧붙인다)
-토큰이 없으면(로컬) 읽기 전용으로 마크다운만 출력한다(인증 없는 공개 API 는 시간당 60회 제한). 이슈는 읽지도 쓰지도 않는다.
+토큰이 없으면(로컬) 읽기 전용으로 마크다운만 출력한다(인증 없는 공개 API 는 시간당 60회 제한). 열린 이슈 목록(워치독 알림용)은 읽지만 모음 이슈는 읽지도 쓰지도 않는다.
 
 한 소스(이슈·PR·실행 기록·주석·이력 파일)를 읽지 못해도 멈추지 않고 '조회 실패' 항목으로 남긴 뒤 계속한다.
 스크립트 자체의 버그(예상 밖 예외)는 그대로 올려 실행을 빨갛게 한다.
@@ -42,6 +42,13 @@ EXIT_OK, EXIT_WRITE_FAILED, EXIT_CONFIG = 0, 1, 2
 MAX_CALLS_WITH_TOKEN = 150
 MAX_CALLS_ANONYMOUS = 25
 WRITE_RESERVE = 8        # 이슈 찾기·라벨·본문·코멘트 쓰기에 남겨 두는 호출 수(읽기 쪽이 다 써 버리지 않게)
+MIN_API_CALLS = 3 * WRITE_RESERVE      # 호출 상한의 하한(24): 쓰기용 reserve 를 온전히 남기고도 읽기에 2/3 이상을 쓸 수 있다. 더 낮으면 쓰기가 실패하거나 알림이 유실된다
+MAX_API_CALLS = 1000
+PULL_RETRY_WAIT_SECONDS = 3   # 병합 가능 여부(mergeable)가 아직 계산 중(null)이면 이만큼 기다렸다가 같은 점검 안에서 한 번만 다시 묻는다
+MAX_WORKFLOW_CHARS = 100000   # 워크플로 파일은 앞쪽 이만큼만 읽어 최상위 name 을 찾는다
+ERROR_COMMENT_FAILED = "::error::알림 코멘트를 쓰지 못했습니다. 다음 점검에서 다시 시도합니다. 이유는 실행 로그의 바로 다음 줄에 있습니다."
+ERROR_ISSUE_FAILED = "::error::이슈를 읽거나 쓰지 못했습니다. 이유는 실행 로그의 바로 다음 줄에 있습니다."
+# ::error:: 주석에는 이 고정 문장만 쓴다(R9). 오류 문구는 접고 마스킹한 일반 로그 줄로 따로 낸다
 MAX_PULLS = 8            # PR 은 상세·검사 조회에 호출이 둘씩 들어가므로 처음 8건까지만 본다
 MAX_JOBS_PER_RUN = 6
 MAX_READ_SECONDS = 300    # 읽기에 쓰는 시간 상한(잡 제한 10분 안에 쓰기까지 끝내려고). 호출 하나는 20초에서 끊긴다
@@ -191,6 +198,70 @@ def list_workflow_files(root):
     return sorted({p.name for pattern in ("*.yml", "*.yaml") for p in folder.glob(pattern) if p.is_file()})
 
 
+_NAME_KEY_RE = re.compile(r"^name[ \t]*:(?:[ \t]+(.*))?$")
+_PLAIN_FORBIDDEN_START = "[]{}&*!|>%@`,?"         # 흐름·앵커·태그·블록 표기로 시작하는 값은 읽지 않는다
+
+
+def _after_value(rest):
+    """따옴표가 닫힌 뒤에는 공백과 주석('#' 앞에 공백)만 올 수 있다."""
+    return not rest.strip() or (rest[0] in " \t" and rest.strip().startswith("#"))
+
+
+def _scalar(value):
+    value = value.strip()
+    if not value or value.startswith("#"):
+        return None
+    if value[0] == '"':
+        end = value.find('"', 1)
+        if end < 0 or "\\" in value[1:end] or not _after_value(value[end + 1:]):      # 탈출(\n·\"·\u…)은 해석하지 않는다
+            return None
+        return value[1:end].strip() or None
+    if value[0] == "'":
+        chars, index = [], 1
+        while index < len(value):
+            if value[index] == "'":
+                if value[index + 1:index + 2] != "'":
+                    break
+                index += 1                          # '' 는 작은따옴표 하나
+            chars.append(value[index])
+            index += 1
+        else:
+            return None                             # 닫는 따옴표가 없다
+        return "".join(chars).strip() or None if _after_value(value[index + 1:]) else None
+    if value[0] in _PLAIN_FORBIDDEN_START:
+        return None
+    cut = re.search(r"[ \t]#", value)              # 공백 뒤의 '#' 부터는 주석
+    return (value[:cut.start()] if cut else value).strip() or None
+
+
+def workflow_name(text):
+    """워크플로 파일 본문 → 최상위 name(들여쓰기 없는 첫 'name:' 줄의 값). 표준 라이브러리만 쓰려고 YAML 전체를 해석하지 않고
+    일반 문자열·작은따옴표·큰따옴표(탈출 없음)만 읽는다. 그 밖의 모양(블록·앵커·배열·탈출 문자)이거나 name 이 없으면 None."""
+    if not isinstance(text, str):
+        return None
+    for line in re.split(r"\r\n|\r|\n", text.lstrip(chr(0xFEFF))):
+        match = _NAME_KEY_RE.match(line)
+        if match:
+            return _scalar(match.group(1) or "")
+    return None
+
+
+def read_workflow_names(root, files):
+    """워크플로 파일 이름 → 그 파일의 최상위 name. 체크아웃한 .github/workflows 에서 읽으므로 API 호출은 0회다. 읽지 못한 파일(없음·인코딩 오류 등)이나
+    name 이 없는 파일은 빠지고, 화면에는 파일 이름이 쓰인다. 실행(run)의 name 은 run-name 이라 실행마다 다르고 옛 이름도 남아 있어 쓰지 않는다."""
+    folder = Path(root) / ".github" / "workflows"
+    names = {}
+    for file in files:
+        try:
+            with open(folder / file, encoding="utf-8") as fh:
+                name = workflow_name(fh.read(MAX_WORKFLOW_CHARS))
+        except (OSError, ValueError):               # UnicodeDecodeError 는 ValueError 의 하위
+            continue
+        if name:
+            names[file] = name
+    return names
+
+
 # ----------------------------------------------------------------------------
 # 읽기 2: GitHub(소스마다 실패를 따로 처리한다)
 # ----------------------------------------------------------------------------
@@ -203,14 +274,30 @@ def fetch_issues(client, failures):
     return [i for i in data if isinstance(i, dict) and "pull_request" not in i] if isinstance(data, list) else []
 
 
-def fetch_pulls(client, failures, notes):
+def _ask_again_while_computing(client, entries, sleep):
+    """GitHub 는 병합 가능 여부(mergeable)를 첫 조회 때 계산하기 시작해 null 로 답하는 일이 잦다(main 에 새 커밋이 생긴 직후). 첫 조회가 모두 끝난 뒤
+    한 번만 기다렸다가(그동안의 호출도 기다림이 된다) null 인 PR 의 상세만 한 번 더 묻는다. 읽기 호출 상한 안에서만 하고, 실패하면 첫 답을 그대로 쓴다."""
+    waiting = [e for e in entries if not e[3] and isinstance(e[1], dict) and e[1].get("mergeable") is None]
+    if not waiting or client.remaining() < 1:
+        return
+    sleep(PULL_RETRY_WAIT_SECONDS)
+    for entry in waiting:
+        try:
+            detail = client.get(f"/pulls/{entry[0].get('number')}")
+        except ApiError:                            # 호출 상한 도달(ApiBudgetError)이나 일시 오류 — 첫 답을 그대로 쓴다
+            continue
+        if isinstance(detail, dict):
+            entry[1] = detail
+
+
+def fetch_pulls(client, failures, notes, sleep=time.sleep):
     try:
         listing = client.get("/pulls", state="open", per_page=50)
     except ApiError as exc:
         failures.append(("pulls", str(exc)))
         return []
     open_prs = [p for p in listing if isinstance(p, dict) and not p.get("draft")] if isinstance(listing, list) else []
-    pulls, errors = [], []
+    entries, errors = [], []            # entries: [원본 PR, 상세, 검사 목록, 오류]
     for raw in open_prs[:MAX_PULLS]:
         number = raw.get("number")
         if not isinstance(number, int) or isinstance(number, bool):
@@ -225,7 +312,9 @@ def fetch_pulls(client, failures, notes):
         except ApiError as exc:
             error = str(exc)
             errors.append(error)
-        pulls.append(inbox.normalize_pull(raw, detail, checks, error))
+        entries.append([raw, detail, checks, error])
+    _ask_again_while_computing(client, entries, sleep)
+    pulls = [inbox.normalize_pull(raw, detail, checks, error) for raw, detail, checks, error in entries]
     if len(open_prs) > MAX_PULLS:
         notes.append(("pulls_cap", f"열린 PR {len(open_prs)}건 중 처음 {MAX_PULLS}건만 확인했습니다."))
     if errors:
@@ -233,8 +322,10 @@ def fetch_pulls(client, failures, notes):
     return pulls
 
 
-def fetch_runs(client, files, now, branch, failures):
-    """워크플로 파일마다 기본 브랜치의 최근 실행(48시간 창). 기본 브랜치에 아직 없는 파일(404)은 기록 없음으로 본다."""
+def fetch_runs(client, files, now, branch, failures, repo=None):
+    """워크플로 파일마다 기본 브랜치의 최근 실행(48시간 창). 기본 브랜치에 아직 없는 파일(404)은 기록 없음으로 본다.
+    포크 PR 이 일으킨 실행은 읽자마자 뺀다(head 브랜치가 main 이면 섞여 들 수 있다 — 판단에도, 경고(주석) 읽기에도 쓰지 않게)."""
+    repo = repo or getattr(client, "repo", "")
     since = (now - timedelta(hours=inbox.RUN_WINDOW_HOURS)).strftime("%Y-%m-%dT%H:%M:%SZ")
     runs, errors = {}, []
     for file in files:
@@ -253,7 +344,7 @@ def fetch_runs(client, files, now, branch, failures):
                 errors.append(f"{file}: {exc}")
             continue
         found = data.get("workflow_runs") if isinstance(data, dict) else None
-        runs[file] = [r for r in found if isinstance(r, dict)] if isinstance(found, list) else []
+        runs[file] = [r for r in found if isinstance(r, dict) and not inbox.foreign_pull_run(r, repo)] if isinstance(found, list) else []
     if errors:
         failures.append(("runs", errors[0] + (f" (외 {len(errors) - 1}개 워크플로)" if len(errors) > 1 else "")))
     return runs
@@ -333,7 +424,7 @@ def ensure_label(client, out):
         client.post("/labels", {"name": inbox.LABEL, "color": inbox.LABEL_COLOR, "description": inbox.LABEL_DESCRIPTION})
     except ApiError as exc:
         if exc.status != 422:                       # 422 = 이미 있음
-            out(f"[참고] 라벨 {inbox.LABEL} 을 만들지 못했습니다(계속 진행합니다): {exc}")
+            out(f"[참고] 라벨 {inbox.LABEL} 을 만들지 못했습니다(계속 진행합니다): {inbox.ext(exc, 200)}")
 
 
 def create_issue(client, body, owner, out):
@@ -356,7 +447,8 @@ def post_comment(client, number, text, out):
         client.post(f"/issues/{number}/comments", {"body": text})
         return True
     except ApiError as exc:
-        out(f"::error::알림 코멘트를 쓰지 못했습니다(다음 점검에서 다시 시도합니다): {exc}")
+        out(ERROR_COMMENT_FAILED)
+        out(f"[코멘트 실패 이유] {inbox.ext(exc, 200)}")
         return False
 
 
@@ -366,6 +458,8 @@ def sync_issue(client, items, visible, failures, owner, repo_url, dry, out):
     - 본문은 내용(보이는 마크다운의 해시)이나 알린 action id 가 바뀐 때만 PATCH 한다.
     - 새로 생긴 action 항목이 있을 때만 코멘트(@멘션)를 쓴다. 코멘트를 먼저 쓰고 본문을 고친다 — 코멘트가 실패하면 표식에서
       그 id 를 빼 다음 점검이 다시 알리게 한다(알림을 놓치는 쪽보다 한 번 더 알리는 쪽이 낫다).
+    - 이슈를 처음 만들 때는 알린 id 없이 만들고, 코멘트가 성공한 뒤에야 본문을 고쳐 id 를 적는다. 먼저 적어 두면 코멘트 실패 뒤의
+      복구 쓰기까지 실패했을 때 id 가 표식에 남아 첫 알림이 영영 사라진다. 성공한 뒤의 쓰기가 실패하면 한 번 더 알리게 된다(놓치는 것보다 낫다).
     - 사람이 닫은 이슈는 새 action 항목이 생겼을 때만 코멘트와 함께 다시 연다. 그 밖의 변화는 닫힌 채로 본문만 고쳐 둔다
       (본문 수정은 알림이 없고, 표식이 현실을 따라가야 '해소됐다가 다시 생긴' 항목을 새 항목으로 알릴 수 있다).
     - 연습(dry)이면 읽기만 하고 아무것도 쓰지 않는다."""
@@ -385,7 +479,7 @@ def sync_issue(client, items, visible, failures, owner, repo_url, dry, out):
 
     if issue is None:
         ensure_label(client, out)
-        created = create_issue(client, inbox.build_body(visible, kept_ids), owner, out)
+        created = create_issue(client, inbox.build_body(visible, [i for i in kept_ids if i not in new_ids]), owner, out)      # 아직 알리지 못한 id 는 표식에 없다
         number = created.get("number") if isinstance(created, dict) else None
         if not isinstance(number, int):
             raise ApiError("이슈를 만들었지만 번호를 읽지 못했습니다")
@@ -393,8 +487,8 @@ def sync_issue(client, items, visible, failures, owner, repo_url, dry, out):
         if new_items:
             ok = post_comment(client, number, inbox.comment_text(owner, new_items, f"{repo_url}/issues/{number}"), out)
             result["comment"] = "posted" if ok else "failed"
-            if not ok:  # 표식에서 새 id 를 빼 둔다(다음 점검이 다시 알린다)
-                client.patch(f"/issues/{number}", {"body": inbox.build_body(visible, [i for i in kept_ids if i not in new_ids])})
+            if ok:  # 알렸으니 이제 표식에 id 를 적는다(실패하면 다음 점검이 한 번 더 알린다)
+                client.patch(f"/issues/{number}", {"body": inbox.build_body(visible, kept_ids)})
         return result
 
     number = issue["number"]
@@ -449,7 +543,7 @@ def _write_summary(environ, text, out):
         out(f"[참고] 실행 요약 쓰기 실패(점검 결과에는 영향 없음): {inbox.fold(exc, 150)}")
 
 
-def run(environ=None, client=None, now=None, root=ROOT, out=print):
+def run(environ=None, client=None, now=None, root=ROOT, out=print, sleep=time.sleep):
     environ = os.environ if environ is None else environ
     repo = (environ.get("GITHUB_REPOSITORY") or "").strip()
     if not inbox.is_valid_repo(repo):
@@ -460,22 +554,30 @@ def run(environ=None, client=None, now=None, root=ROOT, out=print):
     owner = (environ.get("GITHUB_REPOSITORY_OWNER") or repo.split("/")[0]).strip()
     branch = (environ.get("DEFAULT_BRANCH") or "").strip() or "main"
     now = now or datetime.now(timezone.utc)
-    cap = _int_env(environ.get("INBOX_MAX_API_CALLS"), MAX_CALLS_WITH_TOKEN if token else MAX_CALLS_ANONYMOUS, 5, 1000)
+    raw_cap = (environ.get("INBOX_MAX_API_CALLS") or "").strip()
+    cap = _int_env(raw_cap, None, MIN_API_CALLS, MAX_API_CALLS)
+    if cap is None:
+        cap = MAX_CALLS_WITH_TOKEN if token else MAX_CALLS_ANONYMOUS
+        if raw_cap:
+            out(f"[참고] INBOX_MAX_API_CALLS 는 {MIN_API_CALLS}~{MAX_API_CALLS} 사이의 숫자여야 해서 기본값 {cap}회를 씁니다(받은 값: {inbox.fold(raw_cap, 20)}).")
     if client is None:
-        client = GitHubClient(repo, token or None, max_calls=cap, reserve=min(WRITE_RESERVE, cap // 3) if token else 0)
+        client = GitHubClient(repo, token or None, max_calls=cap, reserve=WRITE_RESERVE if token else 0)
     repo_url = f"https://github.com/{repo}"
 
     failures, notes = [], []
     blogs = read_blogs(root, failures)
     histories = read_histories(root, blogs, failures)
     issues = fetch_issues(client, failures)
-    pulls = fetch_pulls(client, failures, notes)
-    runs = fetch_runs(client, list_workflow_files(root), now, branch, failures)
+    pulls = fetch_pulls(client, failures, notes, sleep)
+    files = list_workflow_files(root)
+    names = read_workflow_names(root, files)
+    runs = fetch_runs(client, files, now, branch, failures, repo)
     approvals = fetch_approvals(client, failures)
     annotations = fetch_annotations(client, runs, now, failures, notes)
     snapshot = inbox.Snapshot(
         now=now, repo=repo, issues=issues, pulls=pulls, runs=runs, approvals=approvals, annotations=annotations,
-        paused=inbox.is_truthy(environ.get("PIPELINE_PAUSE")), blogs=blogs, histories=histories, failures=failures, notes=notes)
+        paused=inbox.is_truthy(environ.get("PIPELINE_PAUSE")), blogs=blogs, histories=histories, failures=failures, notes=notes,
+        workflow_names=names)
     items = inbox.build_items(snapshot)
 
     counts = {level: sum(1 for i in items if i.level == level) for level in inbox.LEVELS}
@@ -487,7 +589,7 @@ def run(environ=None, client=None, now=None, root=ROOT, out=print):
     _write_summary(environ, summary_md, out)
 
     if not token:
-        out("(토큰이 없어 읽기 전용으로 끝냅니다 — 이슈는 읽지도 쓰지도 않았습니다)")
+        out("(토큰이 없어 읽기 전용으로 끝냅니다 — 열린 이슈 목록은 읽었지만 모음 이슈는 읽지도 쓰지도 않았습니다)")
         _write_summary(environ, "### 이번 점검\n- 토큰이 없어 읽기 전용으로 끝냈습니다(이슈를 쓰지 않음).", out)
         return EXIT_OK
     release = getattr(client, "release_reserve", None)
@@ -496,7 +598,8 @@ def run(environ=None, client=None, now=None, root=ROOT, out=print):
     try:
         result = sync_issue(client, items, visible, failures, owner, repo_url, dry, out)
     except ApiError as exc:
-        out(f"::error::이슈를 읽거나 쓰지 못했습니다: {exc}")
+        out(ERROR_ISSUE_FAILED)
+        out(f"[이슈 오류 이유] {inbox.ext(exc, 200)}")
         _write_summary(environ, f"### 이번 점검\n- **이슈를 읽거나 쓰지 못했습니다**: {inbox.ext(exc, 200)}", out)
         return EXIT_WRITE_FAILED
     line = describe(result)
