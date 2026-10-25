@@ -29,14 +29,14 @@ SHOULD_BE_IGNORED = [
     "client_secret.json", "client_secret_1234.apps.json", "token.json", "token.backup.json",
     ".env", ".env.local", ".env.production", ".env.staging", "credentials.json", "my-credentials-prod.json",
     "gcp-service-account.json", "service_account.json", "serviceAccountKey.json", "serviceaccount.json",
-    "ServiceAccount.json", "server.pem", "private.key", "cert.p12", "cert.pfx",
+    "ServiceAccount.json", "my-serviceAccountKey.json", "server.pem", "private.key", "cert.p12", "cert.pfx",
     "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",
 ]
 SHOULD_STAY_TRACKABLE = [".env.example", ".env.sample", ".env.template", "README.md", "generator.py",
                          "tokenizer.py", "keyboard.md", "pipeline/secret_patterns.py",
                          # 이름이 비슷하지만 검증기가 막지 않는 파일 — .gitignore 가 검증기보다 넓어지면 여기서 잡는다
                          ".envrc", "id_rsa.pub", "id_ed25519.pub", "cert.pem.txt", "private.key.md",
-                         "client_secret_setup.md", "credentials-guide.md"]
+                         "client_secret_setup.md", "credentials-guide.md", "serviceaccount-notes.md"]
 
 # 검증기 _FORBIDDEN_FILES 항목(정규식 원문) -> 그 항목이 막는 대표 파일 이름(OR 의 갈래마다 하나 이상).
 # 검증기에 항목이 추가·변경되면 여기에도 대표 이름을 적어야 테스트가 통과한다. 이름은 대소문자를 구분하는 Linux 기준으로 고른다.
@@ -108,7 +108,7 @@ class GitignoreTest(unittest.TestCase):
     def setUpClass(cls):
         cls.tmp = tempfile.TemporaryDirectory()
         cls.root = Path(cls.tmp.name)
-        git(cls.root, "init", "-q")
+        git(cls.root, "init", "-q", "--template=")  # 전역 init.templateDir 의 info/exclude 가 섞이지 않게 빈 템플릿
         # 판정이 PC·파일시스템·전역 설정에 따라 달라지지 않게 고정한다.
         # - core.ignorecase=false: 대소문자를 구분하는 쪽(자동 발행이 도는 Linux 러너)의 의미로 판정한다. 기본값(true)인
         #   Windows·macOS 에서는 `Credentials.json` 같은 변형까지 걸려 플랫폼마다 결과가 갈린다. 그런 대소문자 변형은
