@@ -57,9 +57,10 @@ BLOG_URL = registry.get_blog(registry.load_registry(REAL / "pipeline" / "blogs.j
 class FakePublisher:
     """check: healthcheck() 가 일으킬 예외(인증 점검 실패 시나리오), blog_url: blogs.get 이 돌려주는 주소, result: publish() 의 결과."""
 
-    def __init__(self, fail=None, check=None, blog_url=BLOG_URL, result=None):
+    def __init__(self, fail=None, check=None, blog_url=BLOG_URL, result=None, notes=()):
         self.fail, self.check, self.blog_url, self.result = fail, check, blog_url, result
         self.published, self.health_calls = [], 0
+        self.notes = list(notes)      # 어댑터가 남기는 한 줄 경고(예: 중복 글 확인 실패)
 
     def healthcheck(self):
         self.health_calls += 1

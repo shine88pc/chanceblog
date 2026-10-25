@@ -44,9 +44,10 @@ SECRET_VALUES = {"BLOGGER_BLOG_ID": "7654321098" + "765432101",
                  "BLOGGER_CLIENT_SECRET": "fake-client-" + "secret-value-0001",
                  "BLOGGER_REFRESH_TOKEN": "fake-refresh-" + "token-value-0002"}
 GEMINI_VALUE = "fake-gemini-" + "key-value-0003"
+PROJECT_NUMBER = SECRET_VALUES["BLOGGER_CLIENT_ID"].split("-")[0]       # 클라이언트 ID 앞 12자리 = 구글 클라우드 프로젝트 번호(오류 문구에 실려 나온다)
 ALL_ENV = {"GEMINI_API_KEY": GEMINI_VALUE, **SECRET_VALUES}
 LLM_ONLY_ENV = {"GEMINI_API_KEY": GEMINI_VALUE}
-EVERY_SECRET_VALUE = (GEMINI_VALUE, *SECRET_VALUES.values())
+EVERY_SECRET_VALUE = (GEMINI_VALUE, *SECRET_VALUES.values(), PROJECT_NUMBER)
 TODAY_ENTRY = {"v": 1, "blog": "blogger_macat", "date": "2026-10-21", "status": "draft", "topic": "오늘 이미 만든 주제",
                "title": "오늘 이미 만든 글", "generated_at": "2026-10-21T10:00:00+09:00"}
 SHORT_POST = "제목: 충분히 긴 제목입니다 정말로\n라벨: 가\n내용:\n<p>너무 짧음</p>", "m"
@@ -368,8 +369,8 @@ class ScenarioTest(unittest.TestCase):
         class NoneResult(FakePublisher):
             def publish(self, title, html, labels, draft=False):
                 return None
+        # 글 ID 가 없으면 초안함 업로드도 즉시 게시도 실패다. 주소(url)가 없으면 즉시 게시만 실패이고 초안은 글 ID 만 있으면 성공이다(V-03)
         for label, pub in (("글 ID 없음", FakePublisher(result=PublishResult(post_id="", url="https://macat.example/p1"))),
-                           ("주소 없음", FakePublisher(result=PublishResult(post_id="p9", url=""))),
                            ("결과 없음", NoneResult())):
             for mode in ("draft", "auto"):
                 with self.subTest(label=label, mode=mode):
@@ -377,8 +378,53 @@ class ScenarioTest(unittest.TestCase):
                     self.assertEqual((res.code, res.last["status"]), (1, "publish_failed"))
                     self.assertIn("[bad_response]", res.last["reasons"][0])
                     self.assertEqual((res.last["url"], len(res.drafts)), ("", 1))
-        res = self.r.run("draft", ALL_ENV, FakePublisher(result=PublishResult(post_id="p9", url="")))
-        self.assertEqual(res.last["post_id"], "p9")                              # 주소만 빠졌으면 글 ID 는 남겨 Blogger 에서 찾게 한다
+        res = self.r.run("auto", ALL_ENV, FakePublisher(result=PublishResult(post_id="p9", url="")))     # 즉시 게시는 주소가 필수
+        self.assertEqual((res.code, res.last["status"], res.last["post_id"], res.last["url"]), (1, "publish_failed", "p9", ""))
+        self.assertIn("[bad_response]", res.last["reasons"][0])                  # 주소만 빠졌으면 글 ID 는 남겨 Blogger 에서 찾게 한다
+
+    def test_a_draft_without_a_url_is_still_recorded_as_uploaded_and_tells_the_operator_to_look_in_blogger(self):
+        pub = FakePublisher(result=PublishResult(post_id="p9", url=""))
+        res = self.r.run("draft", ALL_ENV, pub)
+        self.assertEqual((res.code, res.skips, res.annotations), (0, [], []))
+        self.assertEqual((res.last["status"], res.last["post_id"], res.last["url"]), ("draft_uploaded", "p9", ""))
+        self.assertEqual(len(res.drafts), 1)
+        self.assertNotIn("url:", next(iter(res.drafts.values())).split("---")[1])           # 빈 주소는 사본 머리말에 쓰지 않는다
+        self.assertIn("(없음)", res.summary_lines[2])
+        self.assertIn("주소 없음", res.out)                                        # 로그에도 빈칸이 아니라 이유를 적는다
+        self.assertIn("응답에 글 주소(url)가 없어", res.summary)
+        self.assertIn("Blogger 화면에서 확인", res.summary)
+        # 글은 올라갔으므로 같은 날 다시 올리지 않는다
+        again = self.r.run("draft", ALL_ENV, FakePublisher(), history=res.history)
+        self.assertEqual((again.code, again.skips), (0, ["DAILY_CAP"]))
+
+    def test_a_failed_upload_that_left_a_post_id_uses_up_the_day_and_says_why(self):
+        """글 ID 가 남은 publish_failed 는 초안이 이미 만들어졌을 수 있다. 같은 날 재실행이 초안을 또 만들지 않게 하루 상한에 센다(V-02)."""
+        for label, pub in (("응답 검사 실패", FakePublisher(fail=PublishError("응답에 주소가 없습니다", code="bad_response", post_id="77"))),
+                           ("즉시 게시 주소 없음", FakePublisher(result=PublishResult(post_id="77", url="")))):
+            mode = "auto" if "즉시" in label else "draft"
+            with self.subTest(label):
+                first = self.r.run(mode, ALL_ENV, pub)
+                self.assertEqual((first.code, first.last["status"], first.last["post_id"]), (1, "publish_failed", "77"))
+                self.assertIn("글 ID: 77", first.summary)                      # 실패한 실행의 요약에도 정리할 글 ID 가 남는다
+                retry_pub = FakePublisher()
+                retry = self.r.run(mode, ALL_ENV, retry_pub, history=first.history)
+                self.assertEqual((retry.code, retry.skips), (0, ["DAILY_CAP"]))
+                self.assertEqual((retry_pub.health_calls, retry_pub.published, len(retry.history)), (0, [], 1))   # 다시 올리지 않는다
+                self.assertIn("publish_failed", retry.annotations[0])
+                self.assertIn("글 ID", retry.annotations[0])                       # 왜 세었는지 드러난다
+                self.assertIn("Blogger", retry.summary)
+                self.assertIn("확인", retry.summary)
+                # 수동 주제 지정은 상한을 건너뛴다(운영자가 초안함을 확인한 뒤의 선택)
+                forced = self.r.run(mode, ALL_ENV, FakePublisher(), history=first.history, extra=["--topic", "수동으로 지정한 오늘의 생활 습관 주제"])
+                self.assertEqual((forced.code, forced.last["status"]), (0, "draft_uploaded" if mode == "draft" else "posted"))
+
+    def test_a_failure_without_a_post_id_still_does_not_use_up_the_day(self):
+        for entry in ({"status": "publish_failed", "post_id": ""}, {"status": "publish_failed"}, {"status": "publish_failed", "post_id": "  "},
+                      {"status": "rejected", "post_id": "77"}, {"status": "llm_failed", "post_id": "77"}):
+            with self.subTest(entry):
+                history = [{**TODAY_ENTRY, **entry}]
+                res = self.r.run("draft", ALL_ENV, FakePublisher(), history=history)
+                self.assertEqual((res.code, res.skips, res.last["status"]), (0, [], "draft_uploaded"))
 
     def test_a_failure_after_the_post_exists_keeps_its_id_for_cleanup(self):
         pub = FakePublisher(fail=PublishError("응답에 주소가 없습니다", code="bad_response", post_id="77"))
@@ -453,6 +499,229 @@ class ScenarioTest(unittest.TestCase):
         cap_line = next(line for line in section.splitlines() if "일일 상한" in line)
         self.assertIn("건수가", cap_line)
         self.assertEqual(set(re.findall(r"`(\w+)`", cap_line.split("건수가")[0])), run_mod.COUNTED_STATUSES)   # 문서의 상태 목록 = 코드
+
+
+class ReviewFollowUpTest(unittest.TestCase):
+    """독립 검증(V-01~V-11) 지적을 고정하는 시험: 어댑터 경고 줄, 이력·초안 파일 쓰기 실패, 응답 속 식별자 가림, 요약 마크다운,
+    고정 안내 문장, 수동 주제·스위치 값, 워크플로의 연습 실행 전달."""
+
+    def setUp(self):
+        self.r = Runner(self)
+
+    def test_adapter_notes_are_printed_masked_and_folded(self):
+        leaky = f"중복 글 확인에 실패해 건너뜁니다(TypeError): key {SECRET_VALUES['BLOGGER_BLOG_ID']}\r::error::위조된 줄\n두 번째 줄"
+        for pub in (FakePublisher(notes=[leaky]), FakePublisher(notes=[leaky], fail=PublishError("x", code="network"))):
+            res = self.r.run("draft", ALL_ENV, pub)
+            self.assertIn("[참고] 중복 글 확인에 실패해 건너뜁니다(TypeError)", res.out)
+            self.assertNotIn(SECRET_VALUES["BLOGGER_BLOG_ID"], res.everything())
+            self.assertNotIn("\r", res.out)
+            errors = [line for line in res.lines if line.lstrip().startswith(("::error::", "##["))]
+            self.assertEqual(len(errors), len([a for a in res.annotations if a.startswith("::error::")]))   # 위조된 줄이 명령이 되지 않는다
+            self.assertTrue(all("위조된" not in line for line in res.annotations))
+        res = self.r.run("draft", ALL_ENV, FakePublisher())
+        self.assertNotIn("[참고]", res.out)                                       # 노트가 없으면 줄도 없다
+
+    def test_a_history_write_failure_after_the_upload_is_reported_with_the_upload_result(self):
+        pub = FakePublisher()
+        with mock.patch.object(run_mod, "write_json_atomic", side_effect=OSError("disk full")):
+            res = self.r.run("draft", ALL_ENV, pub)                               # 예외로 죽지 않는다
+        self.assertEqual(res.code, 1)
+        self.assertEqual(len(pub.published), 1)                                    # 업로드는 이미 됐다
+        self.assertEqual(res.history, [])                                          # 이력은 못 썼다
+        errors = [a for a in res.annotations if a.startswith("::error::")]
+        self.assertEqual(len(errors), 1, res.annotations)
+        self.assertIn("이력", errors[0])
+        self.assertIn("Blogger 초안함", errors[0])                                  # 같은 날 다시 실행하기 전에 확인하게 한다
+        self.assertNotIn("disk full", errors[0])                                   # 고정 문장
+        self.assertIn("https://macat.example/p1", res.out)                         # 업로드 결과(주소·글 ID)는 로그에 남는다
+        self.assertIn("p1", res.out)
+        self.assertEqual(len(res.drafts), 1)                                       # 저장소 초안 파일은 이력과 따로 남긴다
+        self.assertIn("이력 기록 실패", res.summary)
+        self.assertIn("https://macat.example/p1", res.summary)
+        self.assertEqual(res.skips, ["HISTORY_WRITE_FAILED"])                      # 로그에서 [SKIP] 으로 한 번에 찾는다
+        self.assertIn("글 ID p1", res.out)                                         # 결과를 한 줄로도 남긴다(주소·글 ID·상태)
+        self.assertIn("상태 draft_uploaded", res.out)
+
+    def test_the_history_is_written_before_the_draft_file(self):
+        """이력이 같은 글을 두 번 올리지 않게 막는 기준이라 파일 저장보다 먼저 쓴다. 파일 저장이 실패해도 이력은 남는다."""
+        order = []
+        real_record, real_save = run_mod.write_json_atomic, run_mod.save_draft
+
+        def spy_history(*args, **kwargs):
+            order.append("history")
+            return real_record(*args, **kwargs)
+
+        def spy_draft(*args, **kwargs):
+            order.append("draft")
+            return real_save(*args, **kwargs)
+        with mock.patch.object(run_mod, "write_json_atomic", spy_history), mock.patch.object(run_mod, "save_draft", spy_draft):
+            self.r.run("draft", ALL_ENV, FakePublisher())
+        self.assertEqual(order, ["history", "draft"])
+        with mock.patch.object(run_mod, "save_draft", side_effect=OSError("read-only")):
+            res = self.r.run("draft", ALL_ENV, FakePublisher())
+        self.assertEqual((res.code, res.last["status"]), (0, "draft_uploaded"))       # 업로드·이력은 성공이라 초록
+        warnings = [a for a in res.annotations if a.startswith("::warning::")]
+        self.assertEqual(len(warnings), 1, res.annotations)
+        self.assertIn("초안 파일", warnings[0])
+        self.assertNotIn("read-only", warnings[0])
+        self.assertIn("초안 파일", res.summary)
+
+    def test_when_the_repository_file_is_the_only_result_a_failed_save_is_red(self):
+        """Blogger 에 올리지 않는 실행(시크릿 없음·publish=off)은 저장소 초안 파일이 유일한 결과물이다. 못 썼는데 초록이면 글이 사라진다."""
+        for env, extra in ((LLM_ONLY_ENV, []), (ALL_ENV, ["--publish", "off"])):
+            with self.subTest(env=sorted(env), extra=extra):
+                with mock.patch.object(run_mod, "save_draft", side_effect=OSError("read-only")):
+                    res = self.r.run("draft", env, factory=must_not_be_called, extra=extra)
+                self.assertEqual(res.code, 1)
+                errors = [a for a in res.annotations if a.startswith("::error::")]
+                self.assertEqual(len(errors), 1, res.annotations)
+                self.assertIn("저장소 초안 파일", errors[0])
+                self.assertNotIn("read-only", errors[0])
+                self.assertEqual([a for a in res.annotations if a.startswith("::warning::")], [])
+                self.assertIn("초안 파일 저장 실패", res.summary)
+
+    def test_both_writes_failing_is_red_with_two_fixed_annotations_and_still_prints_the_result(self):
+        with mock.patch.object(run_mod, "write_json_atomic", side_effect=OSError("a")), \
+                mock.patch.object(run_mod, "save_draft", side_effect=OSError("b")):
+            res = self.r.run("auto", ALL_ENV, FakePublisher())
+        self.assertEqual(res.code, 1)
+        self.assertEqual(len([a for a in res.annotations if a.startswith("::error::")]), 1)
+        self.assertEqual(len([a for a in res.annotations if a.startswith("::warning::")]), 1)
+        self.assertIn("https://macat.example/p1", res.out)
+
+    def test_a_publish_failure_whose_history_write_also_fails_does_not_lose_the_failure_report(self):
+        with mock.patch.object(run_mod, "write_json_atomic", side_effect=OSError("disk full")):
+            res = self.r.run("draft", ALL_ENV, FakePublisher(fail=PublishError("x", code="api_error", post_id="77")))
+        self.assertEqual(res.code, 1)
+        self.assertIn("reason=api_error target=draft", res.out)
+        self.assertIn("77", res.out)                                               # 정리할 수 있게 글 ID 는 로그에 남는다
+
+    def test_google_project_numbers_and_blog_ids_in_responses_never_reach_the_outputs(self):
+        project, blog_id = PROJECT_NUMBER, SECRET_VALUES["BLOGGER_BLOG_ID"]
+        text = f"Blogger API has not been used in project {project} before or it is disabled."
+        for label, pub in (("인증 점검", FakePublisher(check=PublishError(text, code="auth_failed"))),
+                           ("게시 실패", FakePublisher(fail=PublishError(text, code="api_error"))),
+                           ("예기치 않은 예외", FakePublisher(fail=RuntimeError(text)))):
+            with self.subTest(label):
+                res = self.r.run("draft", ALL_ENV, pub)
+                self.assertNotEqual(res.code, 0)
+                self.assertNotIn(project, res.everything())
+        # 응답 주소·글 ID 속 블로그 ID
+        result = PublishResult(post_id=f"{blog_id}-p1", url=f"https://www.blogger.com/blog/post/edit/{blog_id}/p1")
+        for mode in ("draft", "auto"):
+            res = self.r.run(mode, ALL_ENV, FakePublisher(result=result))
+            self.assertEqual(res.code, 0, res.out)
+            self.assertNotIn(blog_id, res.everything())
+            self.assertIn("***", res.last["url"])
+            self.assertIn("***", res.last["post_id"])
+        # 실패 응답에 실린 글 ID 에도 블로그 ID 가 섞여 올 수 있다
+        res = self.r.run("draft", ALL_ENV, FakePublisher(fail=PublishError("x", code="bad_response", post_id=f"{blog_id}-p7")))
+        self.assertEqual((res.code, res.last["status"]), (1, "publish_failed"))
+        self.assertNotIn(blog_id, res.everything())
+        self.assertIn("***", res.last["post_id"])
+
+    def test_the_summary_url_line_neutralizes_markdown_and_html(self):
+        nasty = "https://macat.example/p?x=[a](https://evil.example)|<b>`t`"
+        for mode in ("draft", "auto"):
+            res = self.r.run(mode, ALL_ENV, FakePublisher(result=PublishResult(post_id="p1", url=nasty)))
+            self.assertEqual(res.code, 0)
+            line = next(line for line in res.summary_lines if line.startswith("- URL:"))
+            for char in "|<>`":
+                self.assertNotIn(char, line)
+            self.assertNotIn("](", line)
+            self.assertIn("macat.example", line)
+            self.assertEqual(len([line for line in res.summary_lines if line.startswith("#")]), 1)
+
+    def test_the_log_reads_as_an_upload_for_drafts_and_as_a_publication_for_live_posts(self):
+        res = self.r.run("draft", ALL_ENV, FakePublisher())
+        self.assertIn("Blogger 초안함에 업로드했습니다(공개되지 않음)", res.out)
+        self.assertNotIn("게시 성공", res.out)
+        res = self.r.run("auto", ALL_ENV, FakePublisher())
+        self.assertIn("게시 성공", res.out)
+        self.assertNotIn("초안함에 업로드했습니다", res.out)
+
+    def test_failure_annotations_tell_the_operator_to_look_in_blogger_before_running_again(self):
+        for mode, phrase in (("draft", "초안이 만들어졌을 수 있으니 재실행 전에 Blogger 초안함을 확인하세요"),
+                             ("auto", "글이 올라갔을 수 있으니 재실행 전에 Blogger 글 목록을 확인하세요")):
+            for pub in (FakePublisher(fail=PublishError("x", code="network")), FakePublisher(fail=KeyError("x")),
+                        FakePublisher(fail=PublishError("x", code="bad_response", post_id="7"))):
+                with self.subTest(mode=mode, pub=type(pub.fail).__name__):
+                    res = self.r.run(mode, ALL_ENV, pub)
+                    errors = [a for a in res.annotations if a.startswith("::error::")]
+                    self.assertEqual(len(errors), 1)
+                    self.assertIn(phrase, errors[0])
+
+    def test_the_manual_topic_environment_variable_works_like_the_option(self):
+        """워크플로는 수동 주제를 환경변수(BLOGGER_TOPIC)로만 넘긴다. 지정하면 하루 상한을 건너뛰고, 비어 있으면(정기 실행) 쓰이지 않는다."""
+        topic = "수동으로 지정한 오늘의 생활 습관 주제"
+        res = self.r.run("draft", {**ALL_ENV, "BLOGGER_TOPIC": topic}, FakePublisher(), history=[TODAY_ENTRY])
+        self.assertEqual((res.code, res.last["topic"], res.last["topic_source"]), (0, topic, "override"))
+        for empty in ("", "   "):
+            res = self.r.run("draft", {**ALL_ENV, "BLOGGER_TOPIC": empty}, FakePublisher(), history=[TODAY_ENTRY])
+            self.assertEqual((res.code, res.skips), (0, ["DAILY_CAP"]))
+
+    def test_switch_values_ignore_case_and_surrounding_spaces(self):
+        on = ("1", "true", "True", "TRUE", "yes", "YES", "on", "On", " true ", "\tTrue\n")
+        off = ("0", "false", "no", "off", "", "  ", "maybe", "2", "truee")
+        for value in on:
+            with self.subTest(switch="DRY_RUN", value=value):
+                res = self.r.run("draft", {**ALL_ENV, "DRY_RUN": value}, factory=must_not_be_called)
+                self.assertEqual((res.code, res.history), (0, []))
+                self.assertIn("[DRY_RUN]", res.out)
+            with self.subTest(switch="PIPELINE_PAUSE", value=value):
+                res = self.r.run("draft", {**ALL_ENV, "PIPELINE_PAUSE": value}, factory=must_not_be_called)
+                self.assertEqual((res.code, res.skips), (0, ["PAUSED"]))
+        for value in off:
+            for switch in ("DRY_RUN", "PIPELINE_PAUSE"):
+                with self.subTest(switch=switch, value=value):
+                    res = self.r.run("draft", {**ALL_ENV, switch: value}, FakePublisher())
+                    self.assertEqual((res.code, res.last["status"]), (0, "draft_uploaded"))
+
+    def test_the_stale_publish_checkbox_wording_is_gone_from_the_operator_docs(self):
+        stale = {"HANDLER.md": ("`publish`를 체크하지 말고", "L3 초안 1건(`publish` 끔)", "결정 — **A(풀오토 API 게시)**로 진행"),
+                 "docs/ENGINEERING_GUIDE.md": ("(`publish` 미체크)",),
+                 "docs/CHARTER.md": ("`draft`(초안만)",)}
+        for rel, phrases in stale.items():
+            text = (REAL / rel).read_text(encoding="utf-8")
+            for phrase in phrases:
+                self.assertNotIn(phrase, text, f"{rel} 에 낡은 문구가 남아 있습니다: {phrase}")
+        health_test = (REAL / "tests" / "test_health_daily.py").read_text(encoding="utf-8")
+        self.assertNotIn("Blogger 초안 모드(후속 작업)용 예약 상태 이름이다", health_test)
+        # 새 절차: 연습 실행을 풀고, 인증 점검 → T3 로 mode draft → 수동 publish=draft
+        handler = (REAL / "HANDLER.md").read_text(encoding="utf-8")
+        resume = next(line for line in handler.splitlines() if line.startswith("**재개 절차(Blogger)**"))
+        for phrase in ("인증 점검만 실행", "`연습 실행` 체크를 푼", "publish=draft", "mode: draft"):
+            self.assertIn(phrase, resume)                                          # 재개 절차 한 줄 안에서 이 순서로 안내한다
+        self.assertLess(resume.index("인증 점검만 실행"), resume.index("mode: draft` 전환"))
+        self.assertLess(resume.index("mode: draft` 전환"), resume.index("publish=draft"))
+        self.assertIn("`연습 실행` 체크를 푼", handler[handler.index("4. Actions → **Blogger 글 자동 작성**"):])   # §10 5-4 도 같은 안내
+
+    def test_docs_state_that_a_manual_publish_choice_can_post_live_even_in_draft_mode(self):
+        for rel in ("docs/ARCHITECTURE.md", ".github/editorial/BLOGGER_API_SETUP.md"):
+            text = (REAL / rel).read_text(encoding="utf-8")
+            self.assertRegex(text, r"mode: draft.{0,40}publish.{0,60}즉시 게시.{0,60}T3", rel)
+
+    def test_architecture_documents_the_post_id_cap_rule_the_write_order_and_the_explicit_mode_rule(self):
+        arch = (REAL / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
+        section5 = arch[arch.index("## 5."):arch.index("## 6.")]
+        cap_line = next(line for line in section5.splitlines() if "일일 상한" in line)
+        self.assertIn("`post_id`", cap_line)
+        self.assertIn("publish_failed", cap_line)
+        self.assertIn("이력을 먼저", arch)                                          # 이력 → 파일 순서
+        self.assertNotIn("같은 날 같은 글이 두 번 올라가는 것은 이력으로 막는다(상한과 제목 중복 게이트 DUP_SAME; 운영자가 Blogger에서 초안을 지웠는지는 알 수 없다).", arch)
+        section7 = arch[arch.index("### A."):arch.index("### B.")]
+        row = next(line for line in section7.splitlines() if "`blogs.json`에 항목 추가" in line)
+        self.assertIn("mode", row)
+        self.assertIn("직접", row)
+        self.assertIn("REG-1", row)
+
+    def test_defect_register_states_the_check_order_and_corrects_the_timeout_claim(self):
+        register = (REAL / "docs" / "DEFECT_REGISTER.md").read_text(encoding="utf-8")
+        row = next(line for line in register.splitlines() if line.startswith("| **D-55**"))
+        self.assertIn("인증 점검은 글 생성(Gemini) 앞", row)
+        self.assertIn("클라이언트 타임아웃", row)
+        self.assertIn("60초", row)
+        self.assertIn("120초", row)
 
 
 class PolicyTest(unittest.TestCase):
@@ -605,7 +874,8 @@ PUBLISH_STAGE = {
     "새 분류": (lambda: FakePublisher(fail=PublishError("x", "something_new")), "api_error"),
     "예외": (lambda: FakePublisher(fail=KeyError("x")), "unexpected"),
     "글 ID 없음": (lambda: FakePublisher(result=PublishResult(post_id="", url=OK_URL)), "bad_response"),
-    "주소 없음": (lambda: FakePublisher(result=PublishResult(post_id="p1", url="")), "bad_response"),
+    # 주소가 비면 즉시 게시만 실패하고, 초안은 글 ID 만 있으면 성공이다(전달 방식별 기대 분류)
+    "주소 없음": (lambda: FakePublisher(result=PublishResult(post_id="p1", url="")), {"draft": None, "publish": "bad_response"}),
     "결과 없음": (NoneResultPublisher, "bad_response"),
 }
 
@@ -704,12 +974,14 @@ class EnumerationTest(unittest.TestCase):
                 count += 1
                 new = res.history
                 label = f"{delivery}/인증:통과/글:정상/게시:{pub_name}"
+                reason = reason[delivery] if isinstance(reason, dict) else reason
                 if reason is None:
                     status = "posted" if delivery == "publish" else "draft_uploaded"
                     record_problems(label, res, mode, [], (0, [], [status], [delivery == "draft"], 1),
                                     (res.code, res.skips, [e["status"] for e in new], [p["draft"] for p in pub.published], len(res.drafts)))
-                    if not new or new[-1]["url"] != OK_URL or new[-1]["post_id"] != "p1":
-                        mismatches.append(f"{label}: 성공 이력에 주소·글 ID 가 없음 {new}")
+                    want_url = "" if pub_name == "주소 없음" else OK_URL          # 주소 없는 초안 성공은 주소를 빈칸으로 남긴다
+                    if not new or new[-1]["url"] != want_url or new[-1]["post_id"] != "p1":
+                        mismatches.append(f"{label}: 성공 이력의 주소·글 ID 가 기대와 다름 {new}")
                 else:
                     record_problems(label, res, mode, [], (1, ["PUBLISH_FAILED"], ["publish_failed"], 1),
                                     (res.code, res.skips, [e["status"] for e in new], len(res.drafts)))
@@ -744,8 +1016,32 @@ class WorkflowPublishInputTest(unittest.TestCase):
         self.assertIn(spec["default"], spec["options"])
         description = spec["description"]
         self.assertRegex(description, r"[가-힣]")
-        for word in ("off", "draft", "publish", "저장소 파일", "초안함", "즉시 게시", "기본", "정기 실행"):
+        for word in ("off", "draft", "publish", "저장소 파일", "초안함", "즉시 게시", "기본", "정기 실행", "BLOGGER_API_SETUP.md"):
             self.assertIn(word, description)
+
+    def test_input_descriptions_stay_short_enough_to_read_in_the_run_workflow_dialog(self):
+        """이 변경이 넣은 입력(publish, 점검 전용 입력이 있으면 그것도)의 설명은 120자 이하다. 300자가 넘는 설명은 실행 대화상자에서
+        읽히지 않으니 한 줄 요약 + 문서 링크로 둔다(V-16). 다른 입력의 설명(dry_run 등)은 이 시험의 대상이 아니다."""
+        owned = [name for name in ("publish", "auth_check") if name in self.inputs]
+        self.assertIn("publish", owned)
+        for name in owned:
+            description = self.inputs[name]["description"]
+            self.assertRegex(description, r"[가-힣]", name)
+            self.assertIn("BLOGGER_API_SETUP.md", description, name)
+            self.assertLessEqual(len(description), 120, f"{name} 입력 설명이 너무 깁니다({len(description)}자)")
+
+    def test_the_dry_run_checkbox_reaches_the_runner_as_DRY_RUN(self):
+        """연습 실행 체크가 환경변수로 전달되지 않으면 연습이 실제 업로드가 된다. 정기 실행은 연습이 아니다."""
+        import test_workflow_names as names
+        template = self.data["jobs"]["generate"]["env"]["DRY_RUN"]
+
+        def render(event, dry_run):
+            inputs = {} if dry_run is None else {"dry_run": dry_run}
+            ctx = {"github": {"event_name": event, "event": {"inputs": inputs}}, "inputs": inputs}
+            return names.render(template, ctx)
+        self.assertTrue(run_mod._flag({"DRY_RUN": render("workflow_dispatch", "true")}, "DRY_RUN"))
+        self.assertFalse(run_mod._flag({"DRY_RUN": render("workflow_dispatch", "false")}, "DRY_RUN"))
+        self.assertFalse(run_mod._flag({"DRY_RUN": render("schedule", None)}, "DRY_RUN"))    # 정기 실행에는 입력이 없다
 
     def test_the_other_inputs_are_still_there(self):
         self.assertEqual(set(self.inputs), {"blog", "topic", "dry_run", "publish"})

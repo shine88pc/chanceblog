@@ -47,7 +47,8 @@ HISTORY_KEEP = 200
 DRAFTS_KEEP = 120
 TITLE_SHOWN = 120      # 로그·요약에 보여 줄 글 제목의 최대 길이(제목은 LLM 유래)
 REASONS_SHOWN = 600    # 로그·요약에 보여 줄 게이트 탈락 사유 전체의 최대 길이
-# 하루 상한에 세는 상태. draft_uploaded(Blogger 초안함에 올림)도 한 건이다. publish_failed·rejected 등 글이 안 나온 실행은 세지 않는다
+# 하루 상한에 세는 상태. draft_uploaded(Blogger 초안함에 올림)도 한 건이다. rejected·llm_failed 등 글이 안 나온 실행은 세지 않는다.
+# publish_failed 는 글 ID(post_id)가 남은 것만 센다(_counts_toward_cap): 올리다 실패했어도 글이 이미 만들어졌을 수 있다
 COUNTED_STATUSES = {"posted", "draft", "draft_uploaded", "generated_unpublished"}
 _TRUE = {"1", "true", "yes", "on"}
 # BLOGGER_PUBLISH·--publish 값 → 정책. on=즉시 게시, draft=Blogger 초안함 업로드, off=저장소 파일에만 저장, auto=레지스트리 mode 를 따름
@@ -152,15 +153,26 @@ def _summarize(environ, blog, code, text):
     _write_summary(environ, f"### {blog['key']}\n- 결과: **{code}** — {text}")
 
 
-def _checked_result(result):
+def _checked_result(result, as_draft=False):
     """게시 결과의 글 ID·주소를 검사한다. 비어 있으면 PublishError(bad_response) — 어댑터가 이미 검사하지만, 다른 어댑터나
-    가짜 어댑터가 빈 값을 돌려줘도 '게시 성공'으로 기록하지 않는다."""
+    가짜 어댑터가 빈 값을 돌려줘도 '게시 성공'으로 기록하지 않는다. 초안함 업로드(as_draft)는 글 ID 만 있으면 올라간 것이고
+    주소는 빈칸일 수 있다(어댑터와 같은 기준 — 초안 응답에 url 이 오는지는 실제 호출로 확인해야 한다). 즉시 게시는 주소가 필수다."""
     post_id = str(getattr(result, "post_id", "") or "").strip()
     url = str(getattr(result, "url", "") or "").strip()
-    if not post_id or not url:
-        raise PublishError("게시 결과에 글 ID 또는 주소(url)가 없습니다(Blogger 화면에서 글이 만들어졌는지 확인하세요)",
-                           code="bad_response", post_id=post_id)
+    if not post_id or (not url and not as_draft):
+        raise PublishError("게시 결과에 글 ID" + ("" if as_draft else " 또는 주소(url)") + "가 없습니다"
+                           "(Blogger 화면에서 글이 만들어졌는지 확인하세요)", code="bad_response", post_id=post_id)
     return post_id, url
+
+
+def _counts_toward_cap(entry):
+    """하루 상한에 세는 이력 항목인가: COUNTED_STATUSES, 그리고 글 ID 가 남은 publish_failed.
+    올리다 실패했어도 글 ID 가 남았다면 초안·글이 이미 Blogger 에 만들어졌을 수 있다. 세지 않으면 같은 날 재실행(정기 실행 포함)이
+    같은 주제로 초안을 또 만들어 초안함에 쌓인다. 글 ID 가 없는 실패(인증·네트워크 등)는 아무것도 안 만들었으니 세지 않는다."""
+    status = entry.get("status")
+    if status in COUNTED_STATUSES:
+        return True
+    return status == "publish_failed" and bool(str(entry.get("post_id") or "").strip())
 
 
 def _auth_check_failed(out, environ, blog, record, code, detail):
@@ -238,7 +250,13 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
         _summarize(environ, blog, "INVALID_PUBLISH", message)
         return EXIT_CONFIG
     delivery = decide_delivery(policy, blog["mode"])
-    secret_values = [value for value in resolve_secrets(blog, environ).values() if value]  # 오류 문구에서 실제 값을 가린다
+    resolved = resolve_secrets(blog, environ)
+    secret_values = [value for value in resolved.values() if value]  # 오류 문구에서 실제 값을 가린다
+    # 클라이언트 ID 앞 12자리는 구글 클라우드 프로젝트 번호다. 'Blogger API has not been used in project <번호>' 같은 403 문구에
+    # 실려 나오므로 값 자체가 아니어도 함께 가린다(공개 저장소 로그에 남지 않게).
+    project_number = str(resolved.get("client_id") or "").split("-")[0]
+    if project_number:
+        secret_values.append(project_number)
 
     # 즉시 게시, 또는 시크릿이 일부만 있는 초안함 업로드인데 게시용 시크릿이 없으면 글을 만들기 전에 멈춘다. 예전에는
     # 초안만 저장하고 초록으로 끝나 게시가 한 번도 안 된 채 며칠이 지나도 눈에 띄지 않았다(D-25). 시크릿은 '이름'만 표시한다.
@@ -279,15 +297,18 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
     today = local_now.date()
     override = clean_topic(args.topic or environ.get("BLOGGER_TOPIC", ""))
     produced_today = [e for e in history if isinstance(e, dict)
-                      and e.get("date") == today.isoformat() and e.get("status") in COUNTED_STATUSES]
+                      and e.get("date") == today.isoformat() and _counts_toward_cap(e)]
     cap = blog["limits"]["max_posts_per_day"]
     if len(produced_today) >= cap and not override:
         counted = ", ".join(sorted({str(e.get("status")) for e in produced_today}))
+        failed_but_made = any(e.get("status") == "publish_failed" for e in produced_today)
+        why = (" publish_failed 는 글 ID 가 남아 있어 센 것입니다(올리다 실패했지만 Blogger 에 글이 만들어졌을 수 있습니다). "
+               "Blogger 초안함·글 목록에서 확인하세요." if failed_but_made else "")
         out(skip_line("DAILY_CAP", blog=blog["key"], date=today, cap=cap, today=len(produced_today)))
         out(f"::notice::[{blog['key']}] 오늘({today}) 상한 {cap}건에 도달해 건너뜁니다 "
-            f"(오늘 기록: {counted}). 수동 실행에서 topic 을 입력하면 상한을 건너뛰고 실행합니다.")
+            f"(오늘 기록: {counted}).{why} 수동 실행에서 topic 을 입력하면 상한을 건너뛰고 실행합니다.")
         _summarize(environ, blog, "DAILY_CAP",
-                   f"오늘({today}) 상한 {cap}건에 도달해 건너뜀(오늘 기록: {counted}). 게시되지 않은 초안도 상한에 포함됩니다.")
+                   f"오늘({today}) 상한 {cap}건에 도달해 건너뜀(오늘 기록: {counted}). 게시되지 않은 초안도 상한에 포함됩니다.{why}")
         return EXIT_OK
 
     # ---- LLM --------------------------------------------------------------
@@ -411,41 +432,84 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
         # 게시용 시크릿 누락과 인증은 위의 사전 점검에서 이미 걸러졌다(여기까지 오면 4종이 모두 있고 인증 점검을 통과했다).
         as_draft = delivery == "draft"
         noun = "Blogger 초안함 업로드" if as_draft else "게시"
+        # 실패 주석은 고정 문장이다. 어느 단계에서 났든 글이 이미 만들어졌을 수 있어(응답만 실패한 경우 포함) 다시 실행하기 전에
+        # Blogger 를 먼저 보게 한다 — 같은 날 정기 실행·수동 실행이 초안·글을 또 만들지 않도록(V-03).
+        look_first = ("초안이 만들어졌을 수 있으니 재실행 전에 Blogger 초안함을 확인하세요." if as_draft
+                      else "글이 올라갔을 수 있으니 재실행 전에 Blogger 글 목록을 확인하세요.")
         try:
             result = publisher.publish(post["title"], post["content_html"], post["labels"], draft=as_draft)
-            post_id, url = _checked_result(result)
+            post_id, url = _checked_result(result, as_draft)
+            # 응답 속 글 ID·주소에 블로그 ID 같은 값이 섞여 올 수 있다(예: .../blog/post/edit/<블로그 ID>/<글 ID>): 이력·로그·요약에 쓰기 전에 가린다
+            post_id, url = redact(post_id, secret_values), redact(url, secret_values)
             status = "draft_uploaded" if as_draft else "posted"
-            out(f"  Blogger 초안함에 업로드했습니다(공개되지 않음): {one_line(url)}" if as_draft
-                else f"  게시 성공: {one_line(url)}")
+            if as_draft:
+                out(f"  Blogger 초안함에 업로드했습니다(공개되지 않음): "
+                    f"{one_line(url) if url else '주소 없음(응답에 url 이 없습니다 — Blogger 화면에서 확인하세요)'}")
+            else:
+                out(f"  게시 성공: {one_line(url)}")
         except PublishError as exc:
             code, detail = safe_code(exc.code), redact(exc, secret_values)
-            status, exit_code, post_id = "publish_failed", EXIT_INFRA, str(getattr(exc, "post_id", "") or "")
+            status, exit_code = "publish_failed", EXIT_INFRA
+            post_id = redact(str(getattr(exc, "post_id", "") or ""), secret_values)
             extra, fail_text = [f"[{code}] {detail[:300]}"], f"{code}: {detail}"
             out(skip_line("PUBLISH_FAILED", blog=blog["key"], reason=code, target=delivery))
             out(f"[인프라 오류] {noun} 실패({code}): {one_line(detail)}")
-            out(f"::error::[{blog['key']}] {noun}에 실패했습니다({code}). 이 단계의 로그와 BLOGGER_API_SETUP.md 의 점검 항목을 확인하세요.")
+            out(f"::error::[{blog['key']}] {noun}에 실패했습니다({code}). 이 단계의 로그와 BLOGGER_API_SETUP.md 의 점검 항목을 확인하세요. {look_first}")
         except Exception as exc:  # noqa: BLE001 - 어댑터가 분류하지 못한 예외도 기록하고 초안 파일을 남긴다(예전에는 이력 없이 죽을 수 있었다)
             detail = f"{type(exc).__name__}: {redact(exc, secret_values)}"
             status, exit_code = "publish_failed", EXIT_INFRA
             extra, fail_text = [f"[unexpected] {detail[:300]}"], f"unexpected: {detail}"
             out(skip_line("PUBLISH_FAILED", blog=blog["key"], reason="unexpected", target=delivery))
             out(f"[인프라 오류] {noun} 중 예기치 않은 오류: {one_line(detail)}")
-            out(f"::error::[{blog['key']}] {noun} 중 예기치 않은 오류가 났습니다. 이 단계의 로그를 확인하세요. 초안은 저장소 파일에 남겼습니다.")
+            out(f"::error::[{blog['key']}] {noun} 중 예기치 않은 오류가 났습니다. 이 단계의 로그를 확인하세요. 초안은 저장소 파일에 남겼습니다. {look_first}")
+        # 어댑터가 모은 참고 사항(예: 중복 확인 실패)은 성공·실패와 상관없이 로그에 남긴다. 외부 문구라 한 줄로 접고 비밀을 가린다
+        for note in getattr(publisher, "notes", None) or ():
+            out(f"[참고] {one_line(redact(str(note), secret_values))}")
     else:
         out("  Blogger 에는 올리지 않고 저장소 파일에만 초안을 저장합니다.")
 
     meta = {"topic": topic, "status": status, "generated_at": local_now.isoformat(), "url": url}
-    draft_path = save_draft(root, blog, local_now, post, meta)
-    record({"status": status, "topic": topic, "topic_source": source, "title": post["title"],
-            "labels": post["labels"], "url": url, "post_id": post_id, "model": model,
-            "attempts": attempts, "reasons": extra})
-    out(f"  초안 저장: {draft_path.relative_to(root).as_posix()} / 상태: {status}")
+    # 이력을 파일 저장보다 먼저 쓴다. 같은 글을 두 번 올리지 않게 막는 기준이 이력이라, 이미 Blogger 에 올라간 뒤에는 감사용 사본
+    # 파일이 실패해도 이력은 남아야 한다. 어느 쪽 쓰기가 실패해도 예외로 죽지 않고(올라간 글의 주소·글 ID 를 잃지 않게) 고정 문장
+    # 주석과 요약을 남긴 채 끝낸다. 이력 실패는 같은 글이 또 올라갈 수 있어 빨강(종료 1), 사본 실패는 글이 올라갔다면 노랑이다.
+    history_ok, draft_path = True, None
+    try:
+        record({"status": status, "topic": topic, "topic_source": source, "title": post["title"],
+                "labels": post["labels"], "url": url, "post_id": post_id, "model": model,
+                "attempts": attempts, "reasons": extra})
+    except OSError:
+        history_ok, exit_code = False, EXIT_INFRA
+        out(skip_line("HISTORY_WRITE_FAILED", blog=blog["key"], status=status))
+        out(f"[인프라 오류] 이력 파일을 쓰지 못했습니다. 이번 결과: 상태 {status} · 글 ID {one_line(post_id) or '(없음)'} · "
+            f"주소 {one_line(url) or '(없음)'}")
+        out(f"::error::[{blog['key']}] 이력 파일을 쓰지 못했습니다. 이미 Blogger 에 올라갔을 수 있으니 같은 날 다시 실행하기 전에 "
+            "Blogger 초안함·글 목록을 확인하세요(이번 결과의 글 ID·주소는 이 단계의 로그에 있습니다).")
+    try:
+        draft_path = save_draft(root, blog, local_now, post, meta)
+        out(f"  초안 저장: {draft_path.relative_to(root).as_posix()} / 상태: {status}")
+    except OSError:
+        if delivery in ("publish", "draft"):
+            out(f"::warning::[{blog['key']}] 저장소 초안 파일(감사용 사본)을 저장하지 못했습니다. 이 단계의 로그를 확인하세요.")
+        else:  # 저장소 파일이 유일한 결과물인데 못 썼다: 글이 남지 않았으니 성공으로 끝내지 않는다
+            exit_code = EXIT_INFRA
+            out(f"::error::[{blog['key']}] 저장소 초안 파일을 저장하지 못했습니다. Blogger 에는 올리지 않는 실행이라 글이 남지 않았습니다. "
+                "이 단계의 로그를 확인하고 다시 실행하세요.")
+        out(f"[인프라 오류] 초안 파일 저장 실패(상태: {status})")
     lines = [f"### {blog['key']}", f"- 결과: **{status}** — {md_cell(post['title'], TITLE_SHOWN)}",
-             f"- URL: {one_line(url) or '(없음)'}"]
+             f"- URL: {md_cell(url, 300) or '(없음)'}"]
     if status == "draft_uploaded":
         lines.append("- 안내: Blogger 초안함에 올렸습니다. 아직 공개되지 않았으니 Blogger 화면에서 확인한 뒤 직접 게시하세요.")
+        if not url:
+            lines.append("- 안내: 응답에 글 주소(url)가 없어 주소는 비워 두었습니다. Blogger 화면의 초안함에서 이 글(제목 위)을 찾아 확인하세요.")
     if status == "publish_failed":
         lines.append(f"- 사유: {md_cell(fail_text, REASONS_SHOWN)}")
+        if post_id:
+            lines.append(f"- 글 ID: {md_cell(post_id, 120)} — 글이 이미 만들어졌을 수 있으니 재실행 전에 Blogger 에서 확인하세요.")
+    if not history_ok:
+        lines.append("- 이력 기록 실패: 이력 파일을 쓰지 못했습니다. 이미 올라간 글이 있을 수 있으니 같은 날 다시 실행하기 전에 "
+                     "Blogger 초안함·글 목록을 확인하세요.")
+    if draft_path is None:
+        lines.append("- 초안 파일 저장 실패: 저장소 초안 파일(감사용 사본)을 저장하지 못했습니다.")
     if upload_skipped:
         lines.append("- Blogger 초안함에는 올리지 않음(게시용 시크릿 없음): 저장소 파일에만 저장했습니다. "
                      f"등록할 시크릿: {upload_skipped}")

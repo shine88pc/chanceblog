@@ -1,3 +1,4 @@
+import json
 import ssl
 import unittest
 from datetime import datetime, timezone
@@ -10,9 +11,18 @@ NOW = datetime(2026, 10, 21, 2, 0, tzinfo=timezone.utc)
 
 
 class HttpErr(Exception):
-    def __init__(self, status, message="boom"):
+    def __init__(self, status, message="boom", reason=None):
+        """reason: 구글 API 오류 본문의 errors[].reason 값(예: rateLimitExceeded, accessNotConfigured). googleapiclient 의 HttpError 처럼
+        content(bytes JSON)와 error_details 로 읽을 수 있게 한다."""
         super().__init__(message)
         self.resp = type("Resp", (), {"status": status})()
+        body = {"error": {"code": status, "message": message, "errors": [{"reason": reason}] if reason else []}}
+        self.content = json.dumps(body).encode("utf-8")
+
+
+# 실제 googleapiclient 는 디스커버리 문서의 열거값을 '대소문자 구분'으로 검사해 어긋나면 요청을 만들기 전에 TypeError 를 낸다
+# (번들 blogger.v3.json: posts.list 의 status 는 LIVE/DRAFT/SCHEDULED, orderBy 는 PUBLISHED/UPDATED). 가짜 서비스도 똑같이 검사한다.
+LIST_ENUMS = {"status": {"LIVE", "DRAFT", "SCHEDULED"}, "orderBy": {"PUBLISHED", "UPDATED"}}
 
 
 class Req:
@@ -26,9 +36,11 @@ class Req:
 class FakeService:
     """blogs()/posts() 가 자기 자신을 돌려주는 최소 가짜 Blogger 서비스."""
 
-    def __init__(self, insert_results=(), list_items=(), blog=None, get_error=None, get_sequence=()):
+    def __init__(self, insert_results=(), list_items=(), blog=None, get_error=None, get_sequence=(), list_error=None):
         self.insert_results = list(insert_results)
         self.list_items = list(list_items)
+        self.list_error = list_error      # posts.list 가 일으킬 오류(중복 확인 실패 시나리오)
+        self.list_calls = []
         self.blog = blog or {"name": "테스트 블로그", "url": "https://b.example/"}
         self.get_error = get_error
         self.get_sequence = list(get_sequence)   # 호출마다 하나씩 꺼내 예외면 일으키고 아니면 돌려준다(재시도 시나리오)
@@ -68,6 +80,14 @@ class FakeService:
         return Req(fn)
 
     def list(self, **kwargs):
+        for name, allowed in LIST_ENUMS.items():
+            values = kwargs.get(name)
+            for value in (values if isinstance(values, (list, tuple)) else [] if values is None else [values]):
+                if value not in allowed:
+                    raise TypeError(f'Parameter "{name}" value "{value}" does not match the pattern "{"|".join(sorted(allowed))}"')
+        self.list_calls.append(kwargs)
+        if self.list_error:
+            raise self.list_error
         return Req(lambda: {"items": self.list_items})
 
 
@@ -204,6 +224,12 @@ def assert_no_secrets(test, text):
         test.assertNotIn(value, text)
 
 
+def make_with_secrets(service, sleeps=None):
+    """service_factory 로 서비스를 갈아 끼우되 시크릿은 실제 길이의 가짜 값을 쓰는 어댑터(오류 문구에서 값이 가려지는지 시험용)."""
+    return BloggerPublisher(BLOG_ID, CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN, service_factory=lambda: service,
+                            sleep=(sleeps.append if sleeps is not None else (lambda s: None)), retries=2, now=lambda: NOW)
+
+
 class GoogleAuthPathTest(unittest.TestCase):
     def test_success_refreshes_once_and_builds_the_blogger_service_once(self):
         pub, seen = real_path()
@@ -226,6 +252,19 @@ class GoogleAuthPathTest(unittest.TestCase):
                 self.assertEqual(ctx.exception.code, "auth_expired")
                 self.assertIn("프로덕션", str(ctx.exception))                  # 7일 만료 안내(EXPIRED_HINT)
                 self.assertEqual((len(seen["requests"]), sleeps, seen["builds"]), (1, [], []))
+
+    def test_each_expiry_signal_alone_is_enough_for_auth_expired(self):
+        """invalid_grant 문구 하나, 'expired' 하나, 'revoked' 하나만 있어도 인증 만료다(셋 중 하나를 빼면 다른 문구가 가려 주던 구멍)."""
+        cases = {"invalid_grant 만": "invalid_grant: Bad Request",
+                 "invalid_grant 튜플 모양": "('invalid_grant: Bad Request', {'error': 'invalid_grant', 'error_description': 'Bad Request'})",
+                 "expired 만": "the stored credential has Expired", "revoked 만": "The Grant Was REVOKED"}
+        for label, message in cases.items():
+            with self.subTest(label):
+                pub, seen = real_path([RefreshError(message)])
+                with self.assertRaises(PublishError) as ctx:
+                    pub.healthcheck()
+                self.assertEqual(ctx.exception.code, "auth_expired")
+                self.assertEqual(len(seen["requests"]), 1)
 
     def test_other_refresh_rejections_are_auth_failed(self):
         for message in ("invalid_client: Unauthorized", "unauthorized_client: Client is unauthorized to retrieve access tokens"):
@@ -321,10 +360,12 @@ class HealthcheckReliabilityTest(unittest.TestCase):
         self.assertEqual((ctx.exception.code, svc.get_calls, sleeps), ("api_error", 3, [3, 6]))
 
     def test_other_client_errors_are_api_error_without_retry(self):
-        svc = FakeService(get_error=HttpErr(400))
-        with self.assertRaises(PublishError) as ctx:
-            make(svc).healthcheck()
-        self.assertEqual((ctx.exception.code, svc.get_calls), ("api_error", 1))
+        for status in (405, 409, 410, 422):      # 400 은 블로그 ID 형식 오류로 따로 가른다(QuotaAndBadRequestTest)
+            with self.subTest(status):
+                svc = FakeService(get_error=HttpErr(status))
+                with self.assertRaises(PublishError) as ctx:
+                    make(svc).healthcheck()
+                self.assertEqual((ctx.exception.code, svc.get_calls), ("api_error", 1))
 
     def test_connection_errors_without_a_status_are_network(self):
         sleeps = []
@@ -360,23 +401,38 @@ class DraftUploadTest(unittest.TestCase):
         self.assertFalse(svc.last_draft)
 
     def test_incomplete_responses_are_failures_and_are_not_retried(self):
-        bad = {"빈 객체": {}, "id 없음": {"url": POST_URL}, "id 비어 있음": {"id": "", "url": POST_URL},
-               "url 없음": {"id": "7"}, "url 비어 있음": {"id": "7", "url": ""}, "url 이 공백": {"id": "7", "url": "  "},
-               "http 가 아닌 주소": {"id": "7", "url": "javascript:alert(1)"}, "상대 주소": {"id": "7", "url": "/p7"},
-               "객체가 아님": "oops", "None": None}
-        for label, response in bad.items():
+        """글 ID 가 없거나 응답이 객체가 아니면 초안·게시 모두 실패다. 주소(url)가 없거나 http(s)가 아닌 것은 즉시 게시만 실패다."""
+        no_id = {"빈 객체": {}, "id 없음": {"url": POST_URL}, "id 비어 있음": {"id": "", "url": POST_URL},
+                 "객체가 아님": "oops", "None": None}
+        no_url = {"url 없음": {"id": "7"}, "url 비어 있음": {"id": "7", "url": ""}, "url 이 공백": {"id": "7", "url": "  "},
+                  "http 가 아닌 주소": {"id": "7", "url": "javascript:alert(1)"}, "상대 주소": {"id": "7", "url": "/p7"}}
+        for draft in (True, False):
+            for label, response in {**no_id, **({} if draft else no_url)}.items():
+                with self.subTest(label, draft=draft):
+                    svc = FakeService(insert_results=[response, {"id": 9, "url": POST_URL}])
+                    with self.assertRaises(PublishError) as ctx:
+                        make(svc).publish("제목", "<p>x</p>", draft=draft)
+                    self.assertEqual(ctx.exception.code, "bad_response")
+                    self.assertEqual(svc.insert_calls, 1)       # 글이 이미 만들어졌을 수 있어 다시 올리지 않는다(중복 방지)
+
+    def test_a_draft_needs_only_its_id_to_count_as_uploaded(self):
+        """공식 문서에 isDraft=true 응답에 url 이 오는지 설명이 없다. 초안은 글 ID 만 있으면 성공이고 주소는 빈칸으로 둔다(V-03)."""
+        for label, response in {"url 없음": {"id": "7"}, "url 비어 있음": {"id": 7, "url": ""}, "url 이 공백": {"id": "7", "url": "  "},
+                                "http 가 아닌 주소": {"id": "7", "url": "javascript:alert(1)"},
+                                "상대 주소": {"id": "7", "url": "/p7"}, "url 이 숫자": {"id": "7", "url": 123}}.items():
             with self.subTest(label):
-                svc = FakeService(insert_results=[response, {"id": 9, "url": POST_URL}])
-                with self.assertRaises(PublishError) as ctx:
-                    make(svc).publish("제목", "<p>x</p>", draft=True)
-                self.assertEqual(ctx.exception.code, "bad_response")
-                self.assertEqual(svc.insert_calls, 1)       # 글이 이미 만들어졌을 수 있어 다시 올리지 않는다(중복 방지)
+                svc = FakeService(insert_results=[response])
+                res = make(svc).publish("제목", "<p>x</p>", draft=True)
+                self.assertEqual((res.post_id, res.url, res.draft, svc.insert_calls), ("7", "", True, 1))
+        # 주소가 오면 그대로 쓴다(http 주소만)
+        self.assertEqual(make(FakeService(insert_results=[{"id": 7, "url": POST_URL}])).publish("제목", "<p>x</p>", draft=True).url, POST_URL)
 
     def test_a_failure_after_the_post_exists_carries_its_id(self):
-        svc = FakeService(insert_results=[{"id": 77, "url": ""}])
-        with self.assertRaises(PublishError) as ctx:
-            make(svc).publish("제목", "<p>x</p>", draft=True)
-        self.assertEqual(ctx.exception.post_id, "77")           # Blogger 화면에서 찾아 지울 수 있게
+        for response in ({"id": 77, "url": ""}, {"id": 77}, {"id": 77, "url": "/p77"}):       # 즉시 게시는 주소가 필수다
+            svc = FakeService(insert_results=[response])
+            with self.assertRaises(PublishError) as ctx:
+                make(svc).publish("제목", "<p>x</p>", draft=False)
+            self.assertEqual((ctx.exception.code, ctx.exception.post_id), ("bad_response", "77"))   # Blogger 화면에서 찾아 지울 수 있게
 
     def test_a_draft_that_came_back_live_or_a_post_that_came_back_draft_is_a_failure(self):
         svc = FakeService(insert_results=[{"id": 7, "url": POST_URL, "status": "LIVE"}])
@@ -418,6 +474,168 @@ class DraftUploadTest(unittest.TestCase):
             with self.assertRaises(PublishError) as ctx:
                 make(svc).publish("제목", "<p>x</p>", draft=True)
             self.assertEqual((ctx.exception.code, svc.insert_calls), ("auth_failed", 1))
+
+
+class DuplicateCheckTest(unittest.TestCase):
+    """재시도 전 중복 확인(posts.list)이 실제 googleapiclient 처럼 열거값을 대소문자 구분으로 검사하는 가짜에서도 동작한다(V-01)."""
+
+    def test_the_duplicate_lookup_sends_the_enumeration_values_the_api_accepts(self):
+        existing = {"id": "9", "url": POST_URL, "title": "제목", "status": "DRAFT", "updated": "2026-10-21T01:55:00Z"}
+        svc = FakeService(insert_results=[HttpErr(504), {"id": 2, "url": POST_URL}], list_items=[existing])
+        res = make(svc).publish("제목", "<p>x</p>", draft=True)
+        self.assertEqual((res.post_id, svc.insert_calls), ("9", 1))                    # 중복을 찾아 두 번째 insert 를 하지 않았다
+        self.assertEqual(len(svc.list_calls), 1)
+        self.assertEqual(svc.list_calls[0]["status"], ["LIVE", "DRAFT"])               # 초안과 공개 글을 모두 본다
+        self.assertEqual(svc.list_calls[0]["orderBy"], "UPDATED")                      # 초안에는 published 가 없을 수 있어 수정 시각 순
+
+    def test_the_strict_fake_really_rejects_lowercase_values(self):
+        svc = FakeService()
+        for kwargs in ({"status": ["live", "draft"]}, {"orderBy": "published"}, {"status": ["LIVE", "draft"]}):
+            with self.assertRaises(TypeError):
+                svc.posts().list(blogId="1", **kwargs)
+
+    def test_a_failed_lookup_is_swallowed_but_leaves_one_masked_warning_line(self):
+        svc = FakeService(insert_results=[HttpErr(503), {"id": 2, "url": POST_URL}],
+                          list_error=HttpErr(500, f"<HttpError 500 when requesting https://blogger.googleapis.com/v3/blogs/{BLOG_ID}/posts>\n두 번째 줄\r::error::위조"))
+        pub = make_with_secrets(svc)
+        self.assertEqual(pub.publish("제목", "<p>x</p>", draft=True).post_id, "2")      # 확인이 실패하면 '없음'으로 보고 재시도한다
+        self.assertEqual(len(pub.notes), 1)
+        note = pub.notes[0]
+        self.assertIn("중복", note)
+        self.assertNotIn("\n", note)
+        self.assertNotIn("\r", note)                                                   # 오류 본문이 줄을 나눠도 한 줄로 접힌다
+        assert_no_secrets(self, note)                                                  # 블로그 ID 는 가려진다
+        self.assertIn("***", note)
+
+    def test_a_lookup_that_cannot_be_asked_is_reported_not_silent(self):
+        """열거값 오류(TypeError)처럼 API 가 요청 자체를 거부해도 조용히 꺼지지 않고 줄이 남는다."""
+        svc = FakeService(insert_results=[ConnectionError("reset"), {"id": 2, "url": POST_URL}],
+                          list_error=TypeError('Parameter "status" value "live" does not match the pattern'))
+        pub = make(svc)
+        pub.publish("제목", "<p>x</p>", draft=True)
+        self.assertEqual(len(pub.notes), 1)
+        self.assertIn("TypeError", pub.notes[0])
+
+    def test_the_same_failed_lookup_leaves_one_note_even_when_it_repeats_on_every_retry(self):
+        svc = FakeService(insert_results=[HttpErr(503), HttpErr(503), HttpErr(503)], list_error=HttpErr(500, "same failure"))
+        pub = make(svc)
+        with self.assertRaises(PublishError):
+            pub.publish("제목", "<p>x</p>", draft=True)
+        self.assertEqual((len(svc.list_calls), len(pub.notes)), (3, 1))            # 세 번 물었지만 같은 줄은 한 번만 남긴다
+
+    def test_no_note_when_the_lookup_works_or_is_not_needed(self):
+        pub = make(FakeService(insert_results=[{"id": 2, "url": POST_URL}]))
+        pub.publish("제목", "<p>x</p>", draft=True)
+        self.assertEqual((pub.notes, ), ([], ))
+        existing = {"id": "9", "url": POST_URL, "title": "제목", "status": "DRAFT", "updated": "2026-10-21T01:55:00Z"}
+        pub = make(FakeService(insert_results=[HttpErr(504)], list_items=[existing]))
+        pub.publish("제목", "<p>x</p>", draft=True)
+        self.assertEqual(pub.notes, [])
+
+
+class QuotaAndBadRequestTest(unittest.TestCase):
+    """blogs.get 400(블로그 ID 형식 오류 추정)은 설정 오류로, 쿼터·속도 제한 403 은 권한 오류가 아니라 API 오류로 구분한다(V-14)."""
+
+    def test_a_400_from_blogs_get_points_at_the_blog_id_not_at_a_retry(self):
+        sleeps = []
+        svc = FakeService(get_error=HttpErr(400, "Invalid value for: blogId", reason="invalid"))
+        with self.assertRaises(PublishError) as ctx:
+            make(svc, sleeps).healthcheck()
+        self.assertEqual((ctx.exception.code, svc.get_calls, sleeps), ("auth_failed", 1, []))
+        self.assertIn("블로그 ID", str(ctx.exception))
+        self.assertIn("status=400", str(ctx.exception))
+
+    def test_quota_and_rate_limit_403s_are_api_errors_that_are_not_blamed_on_permissions(self):
+        for reason in ("rateLimitExceeded", "userRateLimitExceeded", "quotaExceeded", "dailyLimitExceeded",
+                       "dailyLimitExceededUnreg", "sharedRateLimitExceeded"):
+            with self.subTest(reason):
+                svc = FakeService(get_error=HttpErr(403, "Rate Limit Exceeded", reason=reason))
+                with self.assertRaises(PublishError) as ctx:
+                    make(svc).healthcheck()
+                self.assertEqual(ctx.exception.code, "api_error")
+
+    def test_permission_403s_stay_auth_failed(self):
+        for reason in ("accessNotConfigured", "forbidden", "insufficientPermissions", None):
+            with self.subTest(reason):
+                svc = FakeService(get_error=HttpErr(403, "Forbidden", reason=reason))
+                with self.assertRaises(PublishError) as ctx:
+                    make(svc).healthcheck()
+                self.assertEqual((ctx.exception.code, svc.get_calls), ("auth_failed", 1))
+
+    def test_the_reason_is_also_read_from_error_details(self):
+        err = HttpErr(403, "x")
+        err.content = b"not json"
+        err.error_details = [{"reason": "rateLimitExceeded", "message": "slow down"}]       # googleapiclient 이 파싱해 둔 값
+        with self.assertRaises(PublishError) as ctx:
+            make(FakeService(get_error=err)).healthcheck()
+        self.assertEqual(ctx.exception.code, "api_error")
+        err = HttpErr(403, "x")
+        err.content = None
+        err.error_details = "rateLimitExceeded"                                               # 문자열 형태도 있다
+        with self.assertRaises(PublishError) as ctx:
+            make(FakeService(get_error=err)).healthcheck()
+        self.assertEqual(ctx.exception.code, "api_error")
+
+    def test_a_rate_limit_reason_only_changes_the_class_of_a_403_not_of_other_statuses(self):
+        """429·5xx 는 사유와 상관없이 일시 오류라 재시도한다. 사유 검사는 403 에만 적용된다."""
+        for status in (429, 500, 503):
+            with self.subTest(status):
+                sleeps = []
+                svc = FakeService(insert_results=[HttpErr(status, "slow", reason="rateLimitExceeded"), {"id": 2, "url": POST_URL}])
+                self.assertEqual(make(svc, sleeps).publish("제목", "<p>x</p>", draft=True).post_id, "2")
+                self.assertEqual((svc.insert_calls, sleeps), (2, [3]))
+        for status in (401, 404):                                                  # 권한·없음은 사유가 한도여도 권한 쪽이다
+            with self.subTest(status):
+                svc = FakeService(get_error=HttpErr(status, "x", reason="rateLimitExceeded"))
+                with self.assertRaises(PublishError) as ctx:
+                    make(svc).healthcheck()
+                self.assertEqual(ctx.exception.code, "auth_failed")
+
+    def test_the_quota_message_tells_the_operator_it_is_not_a_permission_problem(self):
+        svc = FakeService(get_error=HttpErr(403, "Rate Limit Exceeded", reason="rateLimitExceeded"))
+        with self.assertRaises(PublishError) as ctx:
+            make(svc).healthcheck()
+        self.assertIn("호출 한도", str(ctx.exception))
+        self.assertIn("다시 실행", str(ctx.exception))
+        svc = FakeService(insert_results=[HttpErr(403, "Quota", reason="quotaExceeded")])
+        with self.assertRaises(PublishError) as ctx:
+            make(svc).publish("제목", "<p>x</p>", draft=True)
+        self.assertIn("호출 한도", str(ctx.exception))
+
+    def test_quota_403_on_insert_is_an_api_error_without_retry_or_duplicate_lookup(self):
+        svc = FakeService(insert_results=[HttpErr(403, "Quota", reason="quotaExceeded")])
+        pub = make(svc)
+        with self.assertRaises(PublishError) as ctx:
+            pub.publish("제목", "<p>x</p>", draft=True)
+        self.assertEqual((ctx.exception.code, svc.insert_calls, svc.list_calls), ("api_error", 1, []))
+        svc = FakeService(insert_results=[HttpErr(403, "Forbidden", reason="forbidden")])
+        with self.assertRaises(PublishError) as ctx:
+            make(svc).publish("제목", "<p>x</p>", draft=True)
+        self.assertEqual(ctx.exception.code, "auth_failed")
+
+
+class ProjectNumberTest(unittest.TestCase):
+    def test_the_cloud_project_number_in_the_client_id_is_masked_in_every_error(self):
+        """클라이언트 ID 앞 12자리는 구글 클라우드 프로젝트 번호다. accessNotConfigured 403 문구에 실려 나온다(V-10)."""
+        project = CLIENT_ID.split("-")[0]
+        text = f"Blogger API has not been used in project {project} before or it is disabled."
+        svc = FakeService(get_error=HttpErr(403, text, reason="accessNotConfigured"))
+        with self.assertRaises(PublishError) as ctx:
+            make_with_secrets(svc).healthcheck()
+        self.assertNotIn(project, str(ctx.exception))
+        pub, _seen = real_path([RefreshError(f"invalid_client: project {project}")])
+        with self.assertRaises(PublishError) as ctx:
+            pub.healthcheck()
+        self.assertNotIn(project, str(ctx.exception))
+        svc = FakeService(insert_results=[HttpErr(400, text), HttpErr(400, text), HttpErr(400, text)])
+        with self.assertRaises(PublishError) as ctx:
+            make_with_secrets(svc).publish("제목", "<p>x</p>", draft=True)
+        self.assertNotIn(project, str(ctx.exception))
+        pub = make_with_secrets(FakeService(insert_results=[HttpErr(503), HttpErr(503), HttpErr(503)],
+                                            list_error=HttpErr(500, f"project {project}")))
+        with self.assertRaises(PublishError):
+            pub.publish("제목", "<p>x</p>", draft=True)
+        self.assertNotIn(project, " ".join(pub.notes))
 
 
 class RedactTest(unittest.TestCase):
