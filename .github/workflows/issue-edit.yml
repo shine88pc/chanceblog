@@ -99,6 +99,9 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
+          # 킬 스위치: 저장소 Settings > Variables 에 PIPELINE_PAUSE=true 를 넣으면 처리기가 AI·이미지 검색을 부르지 않고
+          # 파일·PR 도 만들지 않으며 이슈에 '일시정지 중' 코멘트만 남긴다(chanceblog.yml·blogger.yml 과 같은 변수)
+          PIPELINE_PAUSE: ${{ vars.PIPELINE_PAUSE }}
         run: python -m pipeline.edits.runner --issue-file "${RUNNER_TEMP}/issue.json" --out "${RUNNER_TEMP}/issue-edit" --remote-refs "${RUNNER_TEMP}/remote_refs.txt"
 
       - name: 브랜치·커밋·PR 생성
@@ -139,7 +142,7 @@ jobs:
               else
                 echo "❌ 수정안은 만들었지만 브랜치·PR 단계에서 실패했습니다. Actions 로그를 확인하세요." > "$final"
               fi ;;
-            rejected|error|duplicate) cp "$out/comment.md" "$final" ;;
+            rejected|error|duplicate|paused) cp "$out/comment.md" "$final" ;;
             ignored) echo "처리 대상이 아니어서 코멘트하지 않습니다."; exit 0 ;;
             *) echo "❌ 처리 결과를 만들지 못했습니다. Actions 로그를 확인하세요." > "$final" ;;
           esac

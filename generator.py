@@ -483,6 +483,11 @@ def repair(post, used):
 # ============================================================
 # FIX_IMAGES 모드
 # ============================================================
+# 한 번에 처리하는 글 수 상한. 글마다 Gemini(검색어 3개, 모든 모델이 실패하면 글당 모델 수만큼)와 Unsplash 를 부르므로, 문제 글이 많아도
+# 이만큼만 처리하고 나머지는 다음 실행으로 넘긴다(무료 한도 보호). chance-fix-images.yml 의 입력 설명에도 같은 숫자가 있다(시험이 대조한다).
+FIX_IMAGES_MAX_PER_RUN = 20
+
+
 def fix_images(keyword=None):
     posts = load_posts()
     print(f"검사 대상 글: {len(posts)}개 (오래된 글의 이미지를 우선 유지)")
@@ -499,8 +504,13 @@ def fix_images(keyword=None):
         else:
             used.add(image_key(post["image"]))
 
+    # 한 번에 처리하는 글 수에 상한을 둔다(글마다 Gemini 검색어와 Unsplash 를 부른다). 넘는 글은 다음 실행에서 다시 진단해 처리한다.
+    batch = targets[:FIX_IMAGES_MAX_PER_RUN]
+    deferred = len(targets) - len(batch)
+    if deferred:
+        print(f"한 번에 최대 {FIX_IMAGES_MAX_PER_RUN}건만 처리합니다. 나머지 {deferred}건은 다음 실행에서 처리합니다.")
     fixed = skipped = 0
-    for post, problem in targets:
+    for post, problem in batch:
         new_url = repair(post, used)
         if not new_url:
             print(f"  교체 후보 없음, 건너뜀: {post['path']}")
@@ -510,8 +520,13 @@ def fix_images(keyword=None):
         write_text_atomic(post["path"], apply_image(post["text"], post["image"], new_url))
         trigger_download(new_url)
         fixed += 1
-    summary = (f"완료: 문제 {len(targets)}건 / 교체 {fixed}건 / 건너뜀 {skipped}건"
-               + (" (DRY_RUN: 실제 변경 없음)" if DRY_RUN else ""))
+    if DRY_RUN:
+        head = f"교체 예정 {len(targets)}건 중 {len(batch)}건 처리 대상"
+    else:
+        head = f"문제 {len(targets)}건" + (f" 중 {len(batch)}건 처리" if deferred else "")
+    summary = (f"완료: {head} / 교체 {fixed}건 / 건너뜀 {skipped}건"
+               + (f" / 나머지 {deferred}건은 다음 실행으로 넘김(한 번에 최대 {FIX_IMAGES_MAX_PER_RUN}건)" if deferred else "")
+               + (f" (DRY_RUN: 실제 변경 없음, {'가짜 AI 검색어 사용' if STUB_GEMINI else '실제 Gemini 호출'})" if DRY_RUN else ""))
     print(summary)
     return "이미지 점검: " + summary
 
@@ -1543,6 +1558,13 @@ def render_run_summary(event, now, slot, report):
     lines = ["### Chance_Blog 실행 요약",
              f"- 실행: {mode} · {now:%Y-%m-%d %H:%M} KST" + (f" · {slot}시 슬롯" if slot is not None else ""),
              f"- 결과: **{outcome}** — {OUTCOME_TEXT.get(outcome, '알 수 없음')}"]
+    if DRY_RUN:  # 연습 실행이 한도를 썼는지 요약에서 바로 보이게 한다(기본은 가짜 응답, 실제 호출은 real_ai 체크)
+        lines.append("- AI 응답: " + ("가짜(스텁) — Gemini를 호출하지 않았습니다(실제 호출로 연습하려면 수동 실행에서 real_ai 를 체크)"
+                                      if STUB_GEMINI else "실제 Gemini 호출 — 연습 실행이지만 무료 한도를 씁니다"))
+    over = report.get("manual_over_cap")
+    if over:
+        lines.append(f"- 경고: 수동 실행은 게시 시각·하루 상한을 따지지 않습니다 — 오늘({over['date']}) 이미 {over['posted']}건이 "
+                     f"게시되어 상한({over['cap']}건) 이상입니다")
     if outcome == "PUBLISHED":
         lines.append(f"- 제목: {_md_cell(report.get('title', ''))}")
         lines.append(f"- 편집 축: {report.get('lane_label', '')} · 출처: {_md_cell(report.get('source', ''), 60)}")
@@ -1598,6 +1620,32 @@ def finish_run(result, report, event, now, slot=None):
           "다음 실행에서 다시 시도합니다.")
 
 
+def daily_cap():
+    """pipeline/blogs.json 에서 chance 블로그의 하루 게시 상한(limits.max_posts_per_day). 읽지 못하면 None."""
+    from pipeline import registry
+    try:
+        return int(registry.get_blog(registry.load_registry(), "chance")["limits"]["max_posts_per_day"])
+    except (registry.RegistryError, KeyError, TypeError, ValueError):
+        return None
+
+
+def note_manual_over_cap(report):
+    """수동 실제 실행은 게시 시각 판단(slot_state)과 하루 상한을 모두 건너뛴다. 운영자가 일부러 더 게시하려는 것일 수 있어 막지 않고(동작은
+    그대로), 오늘 이미 게시된 글이 상한 이상이면 경고 주석과 요약 줄만 남긴다. 연습 실행은 게시하지 않으므로 하지 않는다."""
+    if DRY_RUN:
+        return
+    cap = daily_cap()
+    if cap is None:
+        print("하루 게시 상한을 읽지 못해 수동 실행의 상한 초과 경고를 건너뜁니다.")
+        return
+    today = now_kst().strftime("%Y-%m-%d")
+    posted = sum(1 for item in read_history() if isinstance(item, dict) and item.get("date") == today)
+    if posted >= cap:
+        report["manual_over_cap"] = {"date": today, "posted": posted, "cap": cap}
+        print(f"::warning::수동 실행: 오늘({today}) 이미 {posted}건이 게시되어 하루 상한({cap}건) 이상입니다. "
+              "수동 실행은 게시 시각·하루 상한을 따지지 않고 글을 만듭니다(막지 않습니다).")
+
+
 def main():
     if _pause_on():
         print(skip_line("PAUSED", var="PIPELINE_PAUSE"))
@@ -1634,6 +1682,7 @@ def main():
         finish_run(result, report, "schedule", now, slot)
     else:
         report = {}
+        note_manual_over_cap(report)
         result = generate_blog_posts(report=report)
         finish_run(result, report, EVENT_NAME or "manual", now_kst())
 

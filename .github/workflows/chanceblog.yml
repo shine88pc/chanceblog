@@ -1,5 +1,5 @@
 name: Chance 글 자동 작성·게시
-run-name: "Chance 글 작성·게시 · ${{ github.event_name == 'workflow_dispatch' && (inputs.dry_run && '수동(연습: 저장 안 함)' || '수동') || '정기' }}"
+run-name: "Chance 글 작성·게시 · ${{ github.event_name == 'workflow_dispatch' && (inputs.dry_run && (inputs.real_ai && '수동(연습: 실제 AI 호출·저장 안 함)' || '수동(연습: 저장 안 함)') || '수동') || '정기' }}"
 
 on:
   schedule:
@@ -12,9 +12,13 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: '연습 실행(파일·커밋·게시 없이 로그만) — 체크를 풀면 실제로 글을 만들어 게시합니다'
+        description: '연습 실행(파일·커밋·게시 없이 로그만, 가짜 AI 응답 사용) — 체크를 풀면 실제 Gemini로 글을 만들어 게시합니다(수동 게시는 게시 시각·하루 상한을 따지지 않습니다)'
         type: boolean
         default: true
+      real_ai:
+        description: '연습 실행에서도 실제 Gemini를 호출(무료 한도를 씁니다). 기본은 꺼짐 — 꺼 두면 가짜 AI 응답으로만 연습해 한도를 쓰지 않습니다. 연습 실행을 푼 실제 게시에는 영향이 없습니다(항상 실제 호출)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -43,7 +47,9 @@ jobs:
 
       - name: AI 블로그 제너레이터 실행
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # 수동 연습 실행의 기본은 가짜 AI 응답(스텁)이다: real_ai 를 체크하지 않으면 Gemini 키를 넘기지 않아 한도를 쓰지 않는다
+          # (generator.py 는 키가 없으면 연습 실행을 스텁으로 돌린다). 정기 실행과 글을 실제로 게시하는 수동 실행은 항상 키를 넘긴다.
+          GEMINI_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || !inputs.dry_run || inputs.real_ai) && secrets.GEMINI_API_KEY || '' }}
           UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
           EVENT_NAME: ${{ github.event_name }}
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '1' || '0' }}

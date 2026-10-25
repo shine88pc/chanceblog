@@ -1,5 +1,5 @@
 name: Chance 기존 글 이미지 교체(수동)
-run-name: "Chance 기존 글 이미지 교체 · ${{ inputs.dry_run && '연습(저장 안 함)' || '실제 교체' }}"
+run-name: "Chance 기존 글 이미지 교체 · ${{ inputs.dry_run && (inputs.real_ai && '연습(실제 AI 호출·저장 안 함)' || '연습(저장 안 함)') || '실제 교체' }}"
 
 # 기존 글의 깨진·누락·중복 이미지만 교체한다(새 글은 만들지 않는다). 수동 실행 전용이다.
 # 예전에는 chanceblog.yml 의 fix_images 입력이었다. 새 글을 쓰는 정기 실행과 이름·실행 기록이 섞이지 않게 분리했다.
@@ -11,9 +11,13 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: '연습 실행(파일·커밋 없이 교체 대상만 로그로 확인) — 체크를 풀면 실제로 이미지를 교체하고 커밋합니다'
+        description: '연습 실행(파일·커밋 없이 교체 대상만 로그로 확인, 가짜 AI 검색어 사용) — 체크를 풀면 실제로 이미지를 교체하고 커밋합니다(한 번에 최대 20건, 나머지는 다음 실행)'
         type: boolean
         default: true
+      real_ai:
+        description: '연습 실행에서도 실제 Gemini를 호출(글마다 한 번씩 무료 한도를 씁니다). 기본은 꺼짐 — 꺼 두면 가짜 AI 검색어로만 연습해 한도를 쓰지 않습니다. 연습 실행을 푼 실제 교체에는 영향이 없습니다(항상 실제 호출)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -42,7 +46,9 @@ jobs:
 
       - name: 기존 글 이미지 교체 실행
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # 수동 연습 실행의 기본은 가짜 AI 응답(스텁)이다: real_ai 를 체크하지 않으면 Gemini 키를 넘기지 않아 한도를 쓰지 않는다
+          # (chanceblog.yml 과 같은 식 — tests/test_workflow_names.py 가 두 파일의 단계가 같은지 확인한다).
+          GEMINI_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || !inputs.dry_run || inputs.real_ai) && secrets.GEMINI_API_KEY || '' }}
           UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
           EVENT_NAME: ${{ github.event_name }}
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '1' || '0' }}

@@ -58,6 +58,8 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 자동인지 수동인지,
 
 **새 워크플로를 만들면 이 표와 [`REQUEST_BRIEFING.md`](./REQUEST_BRIEFING.md)의 표에 한 줄씩(`파일`과 `이름`을 같은 줄에 백틱으로) 넣어야** `tests/test_workflow_names.py`의 `test_docs_tables_list_every_workflow_with_its_current_name`이 통과한다. 안내 문서·워크플로·이슈 양식·코드에 옛 영문 이름이 새 이름 없이 남아도(옛 이름과 새 이름이 한 줄에 같이 있는 대응표는 제외) `test_operator_docs_do_not_use_the_old_english_names`가 실패한다.
 
+**수동 실행의 기본값과 정지 스위치**(2026-10-25, D-51·D-53·D-54): 무료 Gemini 한도는 프로젝트 단위로 모든 파이프라인이 한 통을 나눠 쓰므로, 점검용 수동 실행이 정기 발행의 몫을 쓰지 않게 기본값을 '연습'으로 맞췄다. `Chance 글 자동 작성·게시`와 `Chance 기존 글 이미지 교체(수동)`의 `연습 실행`(기본 켜짐)은 **가짜 AI 응답(스텁)**을 쓰고 Gemini 키를 프로세스에 넘기지 않아 호출이 0회이며, 연습에서도 실제 호출로 시험하려면 `real_ai`를 체크한다(기본 꺼짐. 실행 제목에 '실제 AI 호출'이 붙고 요약에 'AI 응답' 줄이 남는다). `Blogger 글 자동 작성`의 `dry_run`도 기본이 켜짐으로 바뀌어, 체크를 풀어야 실제 Gemini로 글을 만들어 초안을 저장소에 커밋하고(Blogger에 올릴지는 `publish` 입력에 따른다) 그날 하루 상한을 쓴다. 정기 실행과, 연습을 풀고 실제로 게시하는 수동 실행은 예전처럼 항상 실제 Gemini를 부른다. 기존 글 이미지 교체는 한 번에 최대 20건(`generator.py`의 `FIX_IMAGES_MAX_PER_RUN`)만 처리하고 나머지는 다음 실행으로 넘기며 요약에 그 사실을 남긴다(연습 실행의 요약은 '교체 예정 N건 중 M건 처리 대상'). Chance의 수동 실제 실행은 게시 시각 판단과 하루 상한(`pipeline/blogs.json`의 `max_posts_per_day`)을 따지지 않는다 — 운영자가 일부러 더 게시할 수 있어 막지 않고, 오늘 이미 게시된 글이 상한 이상이면 `::warning::`과 요약 줄만 남긴다. `이슈 수정 요청 처리(수정안 PR 만들기)`도 이제 `PIPELINE_PAUSE`(`1`·`true`·`yes`·`on`)를 읽는다: 켜져 있으면 AI·이미지 검색을 부르지 않고 파일·PR도 만들지 않으며, 형식이 맞는 요청에는 이슈에 '일시정지 중' 코멘트만 남기고 정상 종료한다.
+
 ### 외부 소비자 계약
 
 | 파일 | 소비자 | 규칙 |
@@ -198,7 +200,7 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 자동인지 수동인지,
 | 2 | 사용자 | GitHub Secrets 등록: 블로그 전용 이름 4종(예: `BLOGGER2_BLOG_ID`, `BLOGGER2_CLIENT_ID`, `BLOGGER2_CLIENT_SECRET`, `BLOGGER2_REFRESH_TOKEN`). LLM 키는 `GEMINI_API_KEY` 공유 |
 | 3 | AI (T3 승인 후) | `blogs.json`에 항목 추가: `mode: "draft"`, 고유 `key`, `secrets` 이름, `state`(전용 history·content_dir), 프로필·프롬프트 |
 | 4 | AI | `python -m pipeline.registry` · `python scripts/validate_repo.py` · `python -m unittest discover -s tests` |
-| 5 | AI/사용자 | Actions → `Blogger 글 자동 작성` → Run workflow(`blog=<key>`, `publish` 미체크)로 초안 확인 |
+| 5 | AI/사용자 | Actions → `Blogger 글 자동 작성` → Run workflow(`blog=<key>`, `연습 실행` 체크 해제, `publish` 미체크)로 초안 확인 |
 | 6 | 워치독 | `draft` 상태로 3일 이상 운영하며 `rejected`·실패 이슈가 없는지 본다 (카나리) |
 | 7 | 사용자 | `mode: "auto"` 전환 승인(T3) |
 

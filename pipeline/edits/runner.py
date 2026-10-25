@@ -47,7 +47,7 @@ DEFAULT_BRANCH_PREFIX = "issue-edit/"
 
 @dataclass
 class Result:
-    status: str                       # ok | rejected | ignored | error | duplicate(이미 처리한 이슈 — 코멘트만)
+    status: str                       # ok | rejected | ignored | error | duplicate(이미 처리한 이슈 — 코멘트만) | paused(정지 스위치 — 코멘트만)
     message: str = ""
     reasons: list = field(default_factory=list)
     exit_code: int = EXIT_OK
@@ -257,6 +257,25 @@ def _ignored(issue):
     return None
 
 
+PAUSE_VALUES = {"1", "true", "yes", "on"}   # Blogger 러너(pipeline/run.py)·Chance(generator.py)의 PIPELINE_PAUSE 와 같은 값 집합
+
+
+def pause_on(env):
+    """킬 스위치(저장소 변수 PIPELINE_PAUSE)가 켜져 있는가. 다른 파이프라인과 같은 규칙(1/true/yes/on, 대소문자·앞뒤 공백 무시)."""
+    return str(env.get("PIPELINE_PAUSE", "")).strip().lower() in PAUSE_VALUES
+
+
+def _paused(req):
+    """정지 스위치가 켜졌을 때의 결과: AI·이미지 검색을 부르지 않고 파일·PR 도 만들지 않으며 이슈 코멘트로만 알린다(종료 코드 0)."""
+    comment = ("⏸️ **일시정지 중입니다.**\n\n저장소 변수 `PIPELINE_PAUSE` 가 켜져 있어 이 요청을 처리하지 않았습니다"
+               "(AI·이미지 검색도 부르지 않았고 저장소는 변경되지 않았습니다).\n\n"
+               "변수를 지운 뒤 Actions 의 `이슈 수정 요청 처리(수정안 PR 만들기)` 에서 이 이슈 번호로 다시 실행해 주세요.")
+    note = ("저장소 변수 PIPELINE_PAUSE 가 켜져 있어 이슈 수정 요청을 처리하지 않았습니다. 계속 멈춰 둘 것이 아니라면 "
+            "Settings > Secrets and variables > Actions > Variables 에서 PIPELINE_PAUSE 를 지우세요.")
+    return Result("paused", message="PIPELINE_PAUSE 가 켜져 있어 처리하지 않았습니다.", comment=comment, notes=[note],
+                  edit_type=req.edit_key, target=req.target["path"])
+
+
 def build_llm(env, registry_models_, calls=None):
     """calls(CallLog)를 넘기면 이번 실행의 Gemini 요청 기록이 거기에 쌓인다(무료 한도 측정, 러너가 요약과 로그에 쓴다)."""
     key = (env.get("GEMINI_API_KEY") or "").strip()
@@ -451,6 +470,8 @@ def _process(issue, root, env, llm, image_picker, dry_run, search_notes, calls=N
     req = resolve_request(issue, root)
     if isinstance(req, Result):
         return req
+    if pause_on(env):   # 정지 스위치: 요청이 유효해도 AI·이미지 검색·파일 수정 없이 알리기만 한다(resolve_request 는 파일을 읽기만 한다)
+        return _paused(req)
     cfg, fields, target, path = req.cfg, req.fields, req.target, req.target["path"]
     limits = req.spec["limits"]
 

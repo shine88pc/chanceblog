@@ -259,12 +259,13 @@ class KoreanNamesTest(unittest.TestCase):
                 self.assertRegex(run_name, HANGUL, path.name)
         self.assertGreaterEqual(seen, 5)  # chanceblog · chance-fix-images · blogger · watchdog · issue-edit
 
-    def test_blogger_dry_run_description_warns_that_unchecked_means_a_real_draft_commit(self):
-        """blogger.yml 의 dry_run 은 기본이 꺼짐(chanceblog.yml 과 반대)이라, 체크를 건드리지 않고 실행하면 초안이 실제로 저장소에
-        커밋된다. Run workflow 대화상자의 입력 설명이 그 사실을 알려야 한다(기본값 자체는 이 시험이 고정하지 않는다)."""
+    def test_blogger_dry_run_description_says_what_unchecking_it_does(self):
+        """blogger.yml 의 dry_run 은 기본이 켜짐이다(2026-10-25 수동 실행 기본값 변경, D-51). 체크를 풀면 실제 Gemini 로 초안을 만들어 저장소에
+        커밋하고 하루 상한을 쓴다 — Run workflow 대화상자의 입력 설명이 그 사실을 알려야 한다(기본값 자체는 test_manual_run_defaults.py 가 고정한다)."""
         description = load("blogger.yml")["on"]["workflow_dispatch"]["inputs"]["dry_run"]["description"]
-        self.assertIn("체크하지 않으면", description)
+        self.assertIn("체크를 풀면", description)
         self.assertIn("커밋", description)
+        self.assertIn("하루 상한", description)
 
     def test_docs_tables_list_every_workflow_with_its_current_name(self):
         """워크플로 이름을 바꾸거나 새 워크플로를 만들면 두 문서의 대응표(`파일`과 `이름`이 같은 줄)도 고쳐야 한다."""
@@ -329,12 +330,17 @@ class RunNameTest(unittest.TestCase):
         self.assertEqual(self.title("chanceblog.yml", "workflow_dispatch", {"dry_run": True}),
                          "Chance 글 작성·게시 · 수동(연습: 저장 안 함)")
         self.assertEqual(self.title("chanceblog.yml", "workflow_dispatch", {"dry_run": False}), "Chance 글 작성·게시 · 수동")
+        self.assertEqual(self.title("chanceblog.yml", "workflow_dispatch", {"dry_run": True, "real_ai": True}),
+                         "Chance 글 작성·게시 · 수동(연습: 실제 AI 호출·저장 안 함)")
+        self.assertEqual(self.title("chanceblog.yml", "workflow_dispatch", {"dry_run": False, "real_ai": True}), "Chance 글 작성·게시 · 수동")
 
     def test_chance_fix_images_titles(self):
         self.assertEqual(self.title("chance-fix-images.yml", "workflow_dispatch", {"dry_run": True}),
                          "Chance 기존 글 이미지 교체 · 연습(저장 안 함)")
         self.assertEqual(self.title("chance-fix-images.yml", "workflow_dispatch", {"dry_run": False}),
                          "Chance 기존 글 이미지 교체 · 실제 교체")
+        self.assertEqual(self.title("chance-fix-images.yml", "workflow_dispatch", {"dry_run": True, "real_ai": True}),
+                         "Chance 기존 글 이미지 교체 · 연습(실제 AI 호출·저장 안 함)")
 
     def test_blogger_titles(self):
         self.assertEqual(self.title("blogger.yml", "schedule"), "Blogger 글 작성 · 정기")
@@ -358,7 +364,8 @@ class RunNameTest(unittest.TestCase):
         self.assertEqual(self.title("issue-edit.yml", "workflow_dispatch", {"issue_number": "7", "dry_run": False}),
                          "이슈 #7 수정 요청 처리 · 수동")
 
-    ALLOWED_REFS = {"github.event_name", "github.event.issue.number", "inputs.dry_run", "inputs.publish", "inputs.issue_number"}
+    ALLOWED_REFS = {"github.event_name", "github.event.issue.number", "inputs.dry_run", "inputs.publish", "inputs.issue_number",
+                    "inputs.real_ai"}
 
     def test_run_names_only_use_event_kind_numbers_and_booleans(self):
         """run-name 에는 이슈 제목·PR 제목·브랜치명·자유 입력(blog, topic) 같은 외부 유래 문자열을 넣지 않는다."""
@@ -397,8 +404,9 @@ class ChanceSplitTest(unittest.TestCase):
 
     def test_chanceblog_no_longer_has_the_fix_images_switch(self):
         inputs = self.chance["on"]["workflow_dispatch"]["inputs"]
-        self.assertEqual(list(inputs), ["dry_run"])
+        self.assertEqual(list(inputs), ["dry_run", "real_ai"])        # 이미지 교체 입력은 없고, 연습에서 실제 AI 를 켜는 real_ai 만 더해졌다
         self.assertEqual((inputs["dry_run"]["type"], inputs["dry_run"]["default"]), ("boolean", True))
+        self.assertEqual((inputs["real_ai"]["type"], inputs["real_ai"]["default"]), ("boolean", False))
         for step in self.steps(self.chance):
             self.assertNotIn("FIX_IMAGES", step.get("env", {}))
         text = (WORKFLOWS / "chanceblog.yml").read_text(encoding="utf-8").lower()
@@ -414,8 +422,9 @@ class ChanceSplitTest(unittest.TestCase):
     def test_fix_images_workflow_is_manual_only_with_dry_run_on_by_default(self):
         self.assertEqual(list(self.fix["on"]), ["workflow_dispatch"])
         inputs = self.fix["on"]["workflow_dispatch"]["inputs"]
-        self.assertEqual(list(inputs), ["dry_run"])
+        self.assertEqual(list(inputs), ["dry_run", "real_ai"])
         self.assertEqual((inputs["dry_run"]["type"], inputs["dry_run"]["default"]), ("boolean", True))
+        self.assertEqual((inputs["real_ai"]["type"], inputs["real_ai"]["default"]), ("boolean", False))
 
     def test_fix_images_workflow_sets_the_mode_and_passes_the_pause_switch(self):
         gen = next(s for s in self.steps(self.fix) if s.get("run") == "python generator.py")
@@ -423,7 +432,9 @@ class ChanceSplitTest(unittest.TestCase):
         self.assertEqual(env["FIX_IMAGES"], "1")
         self.assertEqual(env["DRY_RUN"], "${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '1' || '0' }}")
         self.assertEqual(env["PIPELINE_PAUSE"], "${{ vars.PIPELINE_PAUSE }}")
-        self.assertEqual(env["GEMINI_API_KEY"], "${{ secrets.GEMINI_API_KEY }}")
+        # 연습 실행의 기본은 가짜 AI 응답이라 real_ai 를 체크하지 않으면 키를 넘기지 않는다(식의 평가는 test_manual_run_defaults.py)
+        self.assertEqual(env["GEMINI_API_KEY"], "${{ (github.event_name != 'workflow_dispatch' || !inputs.dry_run || inputs.real_ai) "
+                                                "&& secrets.GEMINI_API_KEY || '' }}")
         self.assertEqual(env["UNSPLASH_ACCESS_KEY"], "${{ secrets.UNSPLASH_ACCESS_KEY }}")
 
     def test_permissions_concurrency_and_job_limits_are_the_same(self):
