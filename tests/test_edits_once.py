@@ -291,7 +291,7 @@ class IssueEditWorkflowTest(unittest.TestCase):
 
     def test_duplicate_status_gets_a_comment_and_done_issues_get_the_marker_label(self):
         comment_step = self.steps[self.step_index('gh issue comment "$ISSUE_NUMBER"')]["run"]
-        self.assertRegex(comment_step, r"rejected\|error\|duplicate\)\s+cp ")
+        self.assertRegex(comment_step, r"rejected\|error\|duplicate\|paused\)\s+cp ")   # paused: 정지 스위치(PIPELINE_PAUSE) 코멘트도 같은 분기
         self.assertIn(f'gh issue edit "$ISSUE_NUMBER" --add-label "{runner.DONE_LABEL}"', comment_step)
         self.assertLess(comment_step.index("gh issue comment"), comment_step.index("--add-label"))   # 코멘트가 먼저
         labels_step = self.steps[self.step_index("gh label create")]["run"]
@@ -428,7 +428,8 @@ class IssueEditWorkflowSecurityTest(unittest.TestCase):
 
     def test_only_the_edit_step_gets_the_api_keys_and_the_job_env_is_exactly_what_is_needed(self):
         edit = self.step_with("pipeline.edits.runner --issue-file")
-        self.assertEqual(set(edit["env"]), {"GEMINI_API_KEY", "UNSPLASH_ACCESS_KEY"})
+        self.assertEqual(set(edit["env"]), {"GEMINI_API_KEY", "UNSPLASH_ACCESS_KEY", "PIPELINE_PAUSE"})
+        self.assertEqual(edit["env"]["PIPELINE_PAUSE"], "${{ vars.PIPELINE_PAUSE }}")   # 정지 스위치는 시크릿이 아니라 저장소 변수다
         self.assertEqual(set(self.job["env"]), {"GH_TOKEN", "ISSUE_NUMBER", "DRY_RUN", "DEFAULT_BRANCH"})
         self.assertEqual(self.job["env"]["GH_TOKEN"], "${{ secrets.GITHUB_TOKEN }}")
         for step in self.steps:
