@@ -1,0 +1,55 @@
+name: 확인 필요 모음
+run-name: "확인 필요 모음 갱신 · ${{ github.event_name == 'workflow_dispatch' && (inputs.dry_run && '수동(연습: 이슈·코멘트 안 씀)' || '수동') || '정기' }}"
+
+# 운영자가 해야 할 일·확인할 일(워치독 알림, 병합 대기 PR, 실패한 워크플로, 승인 대기 실행, 일시정지, Blogger 게시 설정 등)을
+# 이슈 1개('[운영] 확인 필요 모음')와 이 실행의 요약에 모은다. 새로 해야 할 일이 생기면 이슈에 코멘트(@멘션)로 알려 휴대폰 알림이 간다.
+# 판단 규칙: pipeline/inbox.py / 입출력: scripts/ops_inbox.py / 설명: docs/OPS_INBOX.md
+# 이 워크플로가 쓰는 것은 이슈·코멘트·라벨뿐이다(파일·브랜치는 바꾸지 않는다). 끄려면 Actions 탭에서 이 워크플로를 Disable 한다.
+# 다른 워크플로의 이름에 기대지 않는다(workflow_run 트리거를 쓰지 않고 예약 시각마다 직접 조회한다).
+
+on:
+  schedule:
+    # 2시간 간격(정각 혼잡을 피해 40분). GitHub 스케줄은 지연·누락될 수 있어 실제 간격은 더 길 수 있다.
+    - cron: '40 */2 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '연습 실행 (이슈·코멘트를 쓰지 않고 실행 요약만 만듭니다)'
+        type: boolean
+        default: false
+
+# 읽기: 코드(contents)·실행 기록(actions)·검사 결과와 주석(checks)·PR(pull-requests). 쓰기: 이슈(issues)뿐.
+permissions:
+  contents: read
+  actions: read
+  checks: read
+  pull-requests: read
+  issues: write
+
+concurrency:
+  group: ops-inbox
+  cancel-in-progress: false
+
+jobs:
+  inbox:
+    name: 확인 필요 항목 모으기
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # GITHUB_REPOSITORY·GITHUB_REPOSITORY_OWNER 는 러너가 기본으로 넣어 준다(스크립트가 그대로 읽는다).
+      - name: 확인 필요 모음 갱신
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 킬 스위치 상태를 '지금 해야 할 일'로 보여 주려고 다른 워크플로와 같은 변수를 읽는다
+          PIPELINE_PAUSE: ${{ vars.PIPELINE_PAUSE }}
+          INBOX_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: python scripts/ops_inbox.py
