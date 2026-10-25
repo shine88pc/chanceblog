@@ -20,7 +20,7 @@ on:
         required: false
         type: string
       dry_run:
-        description: '연습 실행(가짜 AI 응답 사용, 파일·게시 없이 로그만)'
+        description: '연습 실행(가짜 AI 응답 사용, 파일·게시 없이 로그만). 기본은 꺼짐 — 체크하지 않으면 초안이 저장소에 커밋되고 그날 하루 상한을 씁니다'
         type: boolean
         default: false
       publish:
