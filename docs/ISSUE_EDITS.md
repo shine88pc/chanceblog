@@ -1,7 +1,7 @@
 # 이슈 기반 정규화된 수정 요청 시스템
 
 > 사용자가 GitHub 이슈 양식에서 **대상**과 **수정 항목**을 고르면, 시스템은 명세가 허용한 범위 안에서만 수정안을 만들어 **PR로** 올린다.
-> 사용자용 안내: [`COPILOT_GUIDE.md`](./COPILOT_GUIDE.md) · 상위 규칙: [`SECURITY_GUARDRAILS.md`](./SECURITY_GUARDRAILS.md), [`CHARTER.md`](./CHARTER.md)
+> 사용자용 안내: [`COPILOT_GUIDE.md`](./COPILOT_GUIDE.md) · 상위 규칙: [`SECURITY_GUARDRAILS.md`](./SECURITY_GUARDRAILS.md), [`CHARTER.md`](./CHARTER.md) · 운영자용 클릭 순서(연습 실행·PR 병합 전 확인): [`ACTIONS_GUIDE.md`](./ACTIONS_GUIDE.md)
 > 원 설계 초안: `인수인계/초안_이슈기반_수정요청/` (모바일 Claude 작성, 실제 저장소를 보지 않고 쓴 것 → 아래 "초안과 달라진 점")
 
 ## 1. 흐름
