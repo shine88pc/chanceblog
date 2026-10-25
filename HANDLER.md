@@ -275,6 +275,7 @@ VS Code:
 | 통합 성과 대시보드 검토(제안) | `docs/ANALYTICS_PLAN.md` |
 | 모바일 Claude용 브리핑 + 작업요청서 양식 | `docs/REQUEST_BRIEFING.md` · 요청서 보관·처리 규칙 `인수인계/작업요청/README.md` |
 | 새 세션 시작·마감(시작 문구·첫 30분·마감 체크리스트·현재 상태·사용자 몫) | `docs/SESSION_START.md` |
+| 운영자용 Actions 사용 가이드(이럴 땐 이렇게·보안 점검표) | `docs/ACTIONS_GUIDE.md` |
 | 확인 필요 모음(이슈 1개로 모아 보기) | `docs/OPS_INBOX.md` |
 | 진단·조사 보고서(발행 진단, AI 검색 노출) | `docs/analysis/` |
 
