@@ -33,5 +33,17 @@
     "lane": "technology",
     "source": "MIT Technology Review",
     "source_url": "https://www.technologyreview.com/2026/10/20/1145205/its-a-bird-its-a-plane-its-a-robo-puffin/"
+  },
+  {
+    "date": "2026-10-25",
+    "topic": "From Chip Lab to Center Stage",
+    "kr_title": "연구실을 나온 칩 설계자: 아날로그 반도체와 웨어러블이 바꾼 공학자의 무대",
+    "en_title": "From the Cleanroom to the Stage: Why Chip Designers Are Speaking Directly to Consumers",
+    "kr_image": "https://images.unsplash.com/photo-1592659762303-90081d34b277?auto=format&fit=crop&w=1000&q=80",
+    "en_image": "https://images.unsplash.com/photo-1672307613484-3254a04651fd?auto=format&fit=crop&w=1000&q=80",
+    "slot": 9,
+    "lane": "technology",
+    "source": "IEEE Spectrum",
+    "source_url": "https://spectrum.ieee.org/preethi-ashwath-chip-designer"
   }
 ]
