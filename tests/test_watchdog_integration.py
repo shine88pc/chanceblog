@@ -29,6 +29,7 @@ from pipeline.health import Finding
 from pipeline.registry import enabled_blogs, load_registry
 from pipeline.state import KST
 from watchdog_helpers import WORKFLOW_DIR, FakeGitHub, build_repo, canned_commit_times, kst_time, run_record, today_kst
+from watchdog_helpers import shallow_clone
 
 sys.path.insert(0, str(_bootstrap.ROOT / "scripts"))
 import watchdog  # noqa: E402
@@ -277,3 +278,66 @@ class DryRunTest(MainCase):
         res.client_cls.assert_not_called()
         self.assertIn("dry-run", res.out)
         self.assertIn("| chance | auto |", res.summary)
+
+
+class ShallowCloneTest(unittest.TestCase):
+    """F-14: 얕은 복제에서는 가장 위 커밋이 모든 파일을 '새로 추가'한 것처럼 보인다 — 새 글로 오인하지 않는다."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.now = datetime.now(timezone.utc)
+        cls.post_time = cls.now - timedelta(hours=100)
+        local = cls.post_time.astimezone(KST)
+        history = [{"date": local.date().isoformat(), "status": "posted", "generated_at": local.isoformat()}]
+        docs_only = (cls.now - timedelta(hours=1), {"notes.txt": "글이 아닌 커밋"}, "docs only")   # 맨 위 커밋
+        cls.source = new_repo(cls.addClassCleanup, posts=[cls.post_time], history=history, extra=[docs_only])
+        tmp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(tmp.cleanup)
+        cls.shallow = Path(tmp.name) / "shallow"
+        shallow_clone(cls.source, cls.shallow)
+
+    def test_commit_times_says_unknown_for_a_shallow_clone_and_warns(self):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            added = watchdog.commit_times(self.shallow, "_posts", added_only=True)
+            newest_added = watchdog.last_commit_time(self.shallow, "_posts", added_only=True)
+            newest = watchdog.last_commit_time(self.shallow, "_posts")
+        self.assertIsNone(added)                      # 빈 목록([])이 아니라 '알 수 없음'
+        self.assertIsNone(newest_added)
+        self.assertIsNone(newest)
+        self.assertIn("::warning::얕은 복제", buf.getvalue())
+        self.assertIn("fetch-depth: 0", buf.getvalue())
+        self.assertTrue(all(ln.startswith("::warning::") for ln in buf.getvalue().splitlines()))
+
+    def test_the_full_repository_still_counts_the_post_commit(self):
+        added = watchdog.commit_times(self.source, "_posts", added_only=True)
+        self.assertEqual(len(added), 1)               # 글을 추가한 커밋 하나(맨 위의 글 아닌 커밋은 세지 않는다)
+        self.assertEqual(int(added[0].timestamp()), int(self.post_time.timestamp()))
+
+    def test_not_a_git_repo_is_an_empty_list_not_unknown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(watchdog.commit_times(tmp, "_posts"), [])
+
+    def test_the_watchdog_workflow_checks_out_the_full_history(self):
+        """얕은 복제에서는 git 기반 판정을 건너뛰고 경고만 남기므로, 워크플로가 전체 이력을 받아 오는 것이 전제다."""
+        self.assertIn("fetch-depth: 0", (WORKFLOW_DIR / "watchdog.yml").read_text(encoding="utf-8"))
+
+    def test_head_commit_of_a_shallow_clone_is_not_mistaken_for_a_new_post(self):
+        full_findings, _, _ = collect(self.source, self.now)
+        self.assertEqual(summarize(full_findings), [("STALE", "critical")])        # 대조군: 전체 이력
+        findings, stats, out = collect(self.shallow, self.now)
+        # 얕은 복제에서 HEAD(1시간 전, 글 아님)를 새 글로 세면 STALE 이 가려진다. 이력 파일로 같은 판단을 해야 한다.
+        self.assertEqual(summarize(findings), [("STALE", "critical")])
+        self.assertEqual(stats[0]["posts_7d"], 1)                                   # 이력 파일 기준 현황
+        self.assertEqual(stats[0]["last_post"], self.post_time)
+        self.assertIn("::warning::얕은 복제", out)
+
+    def test_a_shallow_clone_still_reports_a_failed_deploy(self):
+        """글 커밋 시각이 필요한 배포 확인만 건너뛴다. 최근 배포 실패(PAGES_FAILED)는 git 과 무관하므로 계속 본다."""
+        gh = FakeGitHub(runs={"pages.yml": [run_record("failure", self.now - timedelta(hours=1))]})
+        findings, _, _ = collect(self.shallow, self.now, gh)
+        self.assertEqual(sorted(summarize(findings)), [("PAGES_FAILED", "warning"), ("STALE", "critical")])
+
+
+if __name__ == "__main__":
+    unittest.main()

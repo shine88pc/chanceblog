@@ -16,6 +16,7 @@ from unittest import mock
 
 import _bootstrap  # noqa: F401
 from pipeline.health import Finding
+from watchdog_helpers import build_repo
 
 sys.path.insert(0, str(_bootstrap.ROOT / "scripts"))
 import watchdog  # noqa: E402
@@ -252,6 +253,57 @@ class CommitTimesTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertEqual(watchdog.commit_times(tmp, "_posts"), [])
             self.assertIsNone(watchdog.last_commit_time(tmp, "_posts"))
+
+
+class Py310Datetime(datetime):
+    """Python 3.10 의 datetime.fromisoformat 흉내: 끝의 'Z' 를 읽지 못한다(3.11 부터 읽는다)."""
+
+    @classmethod
+    def fromisoformat(cls, value):
+        if isinstance(value, str) and value[-1:] in ("Z", "z"):
+            raise ValueError(f"Invalid isoformat string: {value!r}")
+        return datetime.fromisoformat(value)
+
+
+class CommitTimeFormatTest(unittest.TestCase):
+    """F-1: git 2.45+ 는 UTC 커밋 시각을 '...Z' 로 낸다. Python 3.10 의 fromisoformat 은 그걸 못 읽어 그 커밋이 조용히 사라졌다.
+    시각은 epoch(%ct)로 읽으므로 Z·오프셋·epoch 어느 모양으로 저장된 커밋이든 같은 시각으로 읽혀야 한다."""
+
+    @classmethod
+    def setUpClass(cls):
+        base = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(days=3)
+        cls.expected = [base, base + timedelta(hours=1), base + timedelta(hours=2)]       # 오래된 순
+        tmp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(tmp.cleanup)
+        cls.root = Path(tmp.name)
+        build_repo(cls.root, [
+            (cls.expected[0].astimezone(timezone(timedelta(hours=9))), {"_posts/a.md": "a"}, "offset +09:00"),
+            (cls.expected[1], {"_posts/b.md": "b"}, "UTC (git prints a Z suffix)"),
+            (f"{int(cls.expected[2].timestamp())} -0500", {"_posts/c.md": "c"}, "raw epoch with -05:00"),
+        ])
+
+    def test_z_offset_and_epoch_commit_dates_all_read_as_the_same_instants(self):
+        times = watchdog.commit_times(self.root, "_posts", added_only=True)
+        self.assertEqual(times, list(reversed(self.expected)))                 # 최신순
+        self.assertTrue(all(t.tzinfo is not None for t in times))
+        self.assertEqual(watchdog.last_commit_time(self.root, "_posts", added_only=True), self.expected[2])
+        self.assertEqual(watchdog.last_commit_time(self.root, "_posts"), self.expected[2])
+
+    def test_it_works_when_fromisoformat_cannot_read_z_like_python_3_10(self):
+        with mock.patch.object(watchdog, "datetime", Py310Datetime):
+            times = watchdog.commit_times(self.root, "_posts", added_only=True)
+            last = watchdog.last_commit_time(self.root, "_posts")
+        self.assertEqual(times, list(reversed(self.expected)))                 # Z 커밋이 사라지지 않는다
+        self.assertEqual(last, self.expected[2])
+
+    def test_unreadable_lines_are_skipped_not_fatal(self):
+        def fake_run(cmd, **kwargs):
+            out = "false\n" if cmd[:2] == ["git", "rev-parse"] else "1760003600\n\nnot-a-number\n99999999999999999999\n1760000000\n"
+            return subprocess.CompletedProcess(cmd, 0, stdout=out, stderr="")
+        with mock.patch.object(watchdog.subprocess, "run", fake_run):
+            times = watchdog.commit_times(".", "_posts")
+        self.assertEqual([int(t.timestamp()) for t in times], [1760003600, 1760000000])
+        self.assertTrue(all(t.utcoffset() == timedelta(0) for t in times))
 
 
 class CollectTest(unittest.TestCase):

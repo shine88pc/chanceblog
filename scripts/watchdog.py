@@ -10,6 +10,9 @@
 알림 방식: (블로그, 코드)마다 이슈 하나를 유지한다. 저장소 소유자에게 담당자 지정과 @멘션을 붙이고,
 열려 있는 동안 본문을 최신 내용으로 갱신하며, 심각 건은 며칠이 지나도 풀리지 않으면 코멘트로 다시 알린다.
 이 실행(워크플로)은 '새로 생긴 심각 건'이 있을 때만 실패(빨강)로 끝나 Actions 실패 알림도 간다.
+
+글 커밋 시각은 git 이력에서 읽으므로 워크플로의 checkout 은 fetch-depth: 0 이어야 한다. 얕은 복제면 가장 위 커밋이
+모든 파일을 '새로 추가'한 것처럼 보이므로, ::warning:: 을 내고 git 기반 판정은 건너뛴다(이력 파일 기반 판정만 한다).
 """
 import json
 import os
@@ -158,14 +161,32 @@ def sync_issues(findings, open_issues, client, dry=False, out=print, owner=None,
 
 def last_commit_time(root, path, added_only=False):
     """path 를 건드린 마지막 커밋 시각. added_only 면 '파일이 새로 추가된' 커밋만 센다
-    (이미지 교체처럼 기존 글만 고친 커밋을 '새 글'로 오해하지 않기 위해)."""
+    (이미지 교체처럼 기존 글만 고친 커밋을 '새 글'로 오해하지 않기 위해). 커밋이 없거나 알 수 없으면 None."""
     times = commit_times(root, path, added_only=added_only, limit=1)
     return times[0] if times else None
 
 
+def _is_shallow(root):
+    """얕은 복제인가(git rev-parse --is-shallow-repository 가 true). 확인할 수 없으면 아니라고 본다."""
+    try:
+        res = subprocess.run(["git", "rev-parse", "--is-shallow-repository"], cwd=root, capture_output=True,
+                             text=True, check=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return res.stdout.strip() == "true"
+
+
 def commit_times(root, path, added_only=False, limit=None, since="30 days ago"):
-    """path 를 건드린 커밋 시각 목록(최신순). git 을 못 쓰면 빈 목록."""
-    cmd = ["git", "log", f"--since={since}", "--format=%cI"]
+    """path 를 건드린 커밋 시각 목록(UTC aware, 최신순). git 을 못 쓰면 빈 목록.
+    얕은 복제면 None — '글 커밋이 없다'(빈 목록)와 구분되는 '알 수 없다'이다. 얕은 복제에서는 가장 위 커밋이
+    모든 파일을 새로 추가한 것처럼 보여 새 글로 오인되므로, 경고를 남기고 git 기반 판정은 하지 않는다.
+    시각은 epoch 초(%ct)로 읽는다. %cI 는 git 2.45 부터 UTC 를 '...Z' 로 내는데 Python 3.10 의 fromisoformat 은
+    Z 를 읽지 못해 그 커밋이 조용히 사라진다."""
+    if _is_shallow(root):
+        print("::warning::얕은 복제라 git 이력으로 글 커밋 시각을 판정할 수 없어 건너뜁니다"
+              "(워크플로 checkout 에 fetch-depth: 0 이 필요합니다).")
+        return None
+    cmd = ["git", "log", f"--since={since}", "--format=%ct"]
     if added_only:
         cmd.append("--diff-filter=A")
     if limit:
@@ -177,10 +198,17 @@ def commit_times(root, path, added_only=False, limit=None, since="30 days ago"):
     out = []
     for line in res.stdout.splitlines():
         try:
-            out.append(datetime.fromisoformat(line.strip()))
-        except ValueError:
+            out.append(datetime.fromtimestamp(int(line.strip()), timezone.utc))
+        except (ValueError, OverflowError, OSError):
             continue
     return out
+
+
+def _history_post_stats(history, now):
+    """이력 파일 기반 (최근 7일 글 수, 마지막 글 시각). 실제 글이 나온 항목(posted·draft_uploaded, 상태 없는 옛 항목 포함)만 센다."""
+    real = [h for h in history if isinstance(h, dict) and h.get("status", "posted") in ("posted", "draft_uploaded")]
+    times = [e for e in (entry_time(h) for h in real) if e]
+    return sum(1 for t in times if now - t <= timedelta(days=7)), (max(times) if times else None)
 
 
 def collect(reg, root, now, client=None):
@@ -208,18 +236,21 @@ def collect(reg, root, now, client=None):
         if blog.get("platform") == "jekyll-git":
             # 글 파일이 '추가된' 커밋만 새 글로 센다(이미지 교체 커밋은 새 글이 아니다).
             added = commit_times(root, content_dir, added_only=True)
-            last_content = max(added) if added else None
-            post_days = {t.astimezone(KST).date() for t in added}
-            posts_7d = sum(1 for t in added if now - t <= timedelta(days=7))
-            last_post = last_content
             pages = pages_runs
+            if added is None:
+                # 얕은 복제: 글 커밋 시각을 알 수 없다(경고는 commit_times 가 남겼다). git 기반 판정(최근 커밋으로 STALE 구제,
+                # 하루 단위 NO_POSTS_DAY, 글 커밋 뒤 배포 확인)은 건너뛰고 이력 파일만으로 판단한다.
+                last_content, post_days = None, None
+                posts_7d, last_post = _history_post_stats(history, now)
+            else:
+                last_content = max(added) if added else None
+                post_days = {t.astimezone(KST).date() for t in added}
+                posts_7d = sum(1 for t in added if now - t <= timedelta(days=7))
+                last_post = last_content
         else:
             last_content = last_commit_time(root, content_dir)
             post_days = None
-            real = [h for h in history if isinstance(h, dict) and h.get("status", "posted") in ("posted", "draft_uploaded")]
-            times = [e for e in (entry_time(h) for h in real) if e]
-            posts_7d = sum(1 for t in times if now - t <= timedelta(days=7))
-            last_post = max(times) if times else None
+            posts_7d, last_post = _history_post_stats(history, now)
             pages = None
         blog_findings = evaluate(blog, history, now, last_content_commit=last_content, recent_runs=runs,
                                  post_days=post_days, pages_runs=pages)
