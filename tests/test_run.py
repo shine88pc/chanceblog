@@ -5,8 +5,10 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest import mock
 
 import _bootstrap  # noqa: F401
+from pipeline import gates
 from pipeline import run as run_mod
 from pipeline.llm import LLMError
 from pipeline.publishers.base import PublishError, PublishResult
@@ -430,13 +432,111 @@ class VisibilityTest(RunBase):
         self.assertIn("DRY_RUN", self.summary())
 
     def test_warning_annotations_never_embed_llm_text(self):
-        """게이트 탈락 사유(LLM 글에서 나온 문자열)가 ::workflow-command:: 줄에 들어가면 안 된다."""
+        """게이트 탈락 사유(LLM 글·이력 파일에서 나온 문자열)가 ::workflow-command:: 줄이나 요약의 새 줄이 되면 안 된다."""
         def evil(prompt):
             return "제목: ::error::위조된 명령 제목입니다 충분히 길게\n라벨: 가\n내용:\n<p>짧음</p>", "m"
         code, out = self.go(env=self.env(**FULL_ENV), llm=evil, publisher=FakePublisher())
         for line in out.splitlines():
             if line.startswith("::"):
                 self.assertNotIn("위조된 명령", line)
+
+        # 비교 대상 이력(다른 블로그는 피드·LLM 유래)의 제목에 줄 바꿈 문자로 명령·제목·링크를 숨긴 경우
+        title = "충분히 긴 제목입니다 정말로 위조 테스트"
+
+        def same_title_again(prompt):
+            return f"제목: {title}\n라벨: 가\n내용:\n<p>짧음</p>", "m"
+        hidden = (("개행", "\n::error::위조된 명령"), ("단독 CR", "\r::error::위조된 명령"),
+                  ("U+2028", " ::error::위조된 명령"), ("U+0085", "\u0085::error::위조된 명령"),
+                  ("링크·표·HTML", "\n[x](https://e.io)|<b>"))
+        for label, suffix in hidden:
+            with self.subTest(label):
+                (self.root / "history.json").write_text(
+                    json.dumps([{"title": title + suffix}], ensure_ascii=False), encoding="utf-8")        # 다른 블로그 이력
+                (self.root / "blogger_history.json").write_text(
+                    json.dumps([{"title": title + suffix, "date": "2026-10-19", "status": "posted"}], ensure_ascii=False),
+                    encoding="utf-8")                                                                      # 이 블로그 이력
+                self.summary_path.unlink(missing_ok=True)
+                code, out = self.go(env=self.env(**FULL_ENV), llm=same_title_again, publisher=FakePublisher())
+                self.assertEqual(code, 0)
+                reasons = " ".join(self.history()[-1]["reasons"])
+                self.assertIn("DUP_OTHER", reasons)   # 전제: 이력 제목이 실제로 탈락 사유에 들어갔다
+                self.assertIn("DUP_SAME", reasons)
+                for char in ("\r", " ", "\u0085"):
+                    self.assertNotIn(char, out)
+                annotations = [line for line in out.splitlines() if line.lstrip().startswith(("::", "##["))]
+                self.assertEqual(len(annotations), 1, annotations)       # 고정 문장의 ::warning:: 한 줄뿐
+                self.assertTrue(annotations[0].startswith("::warning::[blogger_macat] 게이트를"))
+                self.assertNotIn("위조된 명령", annotations[0])
+                self.assertIn(title, out)                                 # 어떤 제목과 겹쳤는지는 로그에 남는다
+                summary_lines = self.summary().splitlines()
+                self.assertEqual(len(summary_lines), 2, summary_lines)    # '### 키' 와 '- 결과' 두 줄뿐(끼워 넣은 줄 없음)
+                for char in "|<>`":
+                    self.assertNotIn(char, summary_lines[1])
+                self.assertNotIn("](", summary_lines[1])
+
+    def test_summary_and_log_never_get_line_breaks_or_markdown_from_the_llm_title(self):
+        """LLM 제목의 단독 CR·링크·표·HTML 문법이 실행 요약(마크다운)과 로그에 그대로 들어가면 안 된다."""
+        def evil(prompt):
+            text, model = stub_llm(prompt)
+            first_line = text.split("\n", 1)[0]
+            return text.replace(first_line, "제목: [클릭](https://evil.example)|<b>굵게</b>\r::error::위조된 제목 줄", 1), model
+        pub = FakePublisher()
+        code, out = self.go(env=self.env(**FULL_ENV), llm=evil, publisher=pub)
+        self.assertEqual(code, 0)
+        self.assertIn("위조된 제목 줄", pub.published[0]["title"])        # 전제: 위조 문구가 제목에 실제로 들어갔다
+        lines = self.summary().splitlines()
+        self.assertEqual(len(lines), 3, lines)                           # '### 키', '- 결과', '- URL' 세 줄뿐
+        self.assertEqual([line for line in lines if line.startswith("#")], ["### blogger_macat"])
+        for char in "|<>`":
+            self.assertNotIn(char, lines[1])
+        self.assertNotIn("](", self.summary())
+        self.assertIn("클릭", lines[1])                                   # 제목 내용은 읽을 수 있게 남는다
+        self.assertIn("https://macat.example/p1", lines[2])               # 게시된 글 주소는 그대로
+
+        self.summary_path.unlink()
+        (self.root / "blogger_history.json").unlink()   # 방금 게시한 기록이 있으면 하루 상한에 걸린다
+        code, out = self.go(env=self.env(**FULL_ENV), llm=evil, publisher=FakePublisher(), extra=["--dry-run"])
+        self.assertEqual(code, 0)
+        self.assertIn("[DRY_RUN]", out)
+        self.assertNotIn("\r", out)
+        self.assertEqual([line for line in out.splitlines() if line.lstrip().startswith(("::", "##["))], [])
+        self.assertIn("위조된 제목 줄", out)                               # 로그에는 접힌 제목이 보인다
+        lines = self.summary().splitlines()
+        self.assertEqual(len(lines), 2, lines)
+        self.assertNotIn("](", self.summary())
+
+    def test_api_error_text_is_folded_into_one_line_before_it_reaches_the_log(self):
+        """LLM·Blogger API 오류 문구(외부 유래)에 단독 CR·개행으로 숨긴 '::error::' 가 로그의 새 줄이 되면 안 된다."""
+        def down(prompt):
+            raise LLMError("quota exceeded\r::error::위조된 LLM 줄\n## 가짜")
+        pub = FakePublisher(fail=PublishError("HTTP 500\r::error::위조된 게시 줄\n## 가짜", code="api_error"))
+        for label, kwargs, forged in (("LLM", {"llm": down}, "위조된 LLM 줄"), ("게시", {"publisher": pub}, "위조된 게시 줄")):
+            with self.subTest(label):
+                (self.root / "blogger_history.json").unlink(missing_ok=True)
+                code, out = self.go(env=self.env(**FULL_ENV), **kwargs)
+                self.assertEqual(code, 1)
+                self.assertIn(forged, out)                                # 원인은 접힌 한 줄로 보인다
+                self.assertNotIn("\r", out)
+                annotations = [line for line in out.splitlines() if line.lstrip().startswith(("::", "##["))]
+                self.assertEqual(len(annotations), 1, annotations)        # 고정 문장의 ::error:: 한 줄뿐
+                self.assertNotIn("위조된", annotations[0])
+
+    def test_log_and_summary_fold_whatever_the_gate_reports(self):
+        """사유를 만드는 쪽(gates)이 접어 주더라도, 로그·요약을 쓰는 run 도 받은 사유를 다시 한 줄로 접어 쓴다."""
+        forged = "[NEW_GATE] 사유\r::error::위조된 명령\n## 가짜 제목\n[x](https://e.io)"
+        rejected = gates.GateResult(ok=False, reasons=[forged])
+        with mock.patch.object(run_mod.gates, "check_post", return_value=rejected):
+            code, out = self.go(env=self.env(**FULL_ENV), publisher=FakePublisher())
+        self.assertEqual(code, 0)
+        self.assertEqual(self.history()[-1]["status"], "rejected")
+        self.assertNotIn("\r", out)
+        annotations = [line for line in out.splitlines() if line.lstrip().startswith(("::", "##["))]
+        self.assertEqual(len(annotations), 1, annotations)               # 고정 문장의 ::warning:: 한 줄뿐
+        self.assertNotIn("위조된 명령", annotations[0])
+        lines = self.summary().splitlines()
+        self.assertEqual(len(lines), 2, lines)
+        self.assertNotIn("](", self.summary())
+        self.assertIn("위조된 명령", lines[1])                              # 사유 내용은 읽을 수 있게 남는다
 
 
 class PolicyTest(unittest.TestCase):

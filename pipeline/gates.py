@@ -11,6 +11,8 @@ from difflib import SequenceMatcher
 from html.parser import HTMLParser
 from urllib.parse import urlsplit
 
+from pipeline.console import one_line
+
 
 class GateError(ValueError):
     """생성물을 형식대로 파싱할 수 없을 때(제목/라벨/내용 누락 등)."""
@@ -275,13 +277,15 @@ def check_post(post, profile, recent_titles=(), other_titles=(), sanitize_stats=
     if labels and not all(topic_allowed(x, profile) for x in labels):
         reasons.append("[LABELS] 금지 주제 라벨이 있음")
 
+    # 비교 대상 제목은 이력 파일에서 온 문자열이다(다른 블로그 이력의 제목은 피드·LLM 유래). 사유는 로그·실행 요약·이력·
+    # 재작성 프롬프트에 그대로 들어가므로 개행·'::' 가 섞이지 않게 한 줄로 접어 넣는다.
     sim = profile.get("similarity", {})
     score, other = most_similar(title, recent_titles)
     if score >= sim.get("same_blog", 1.1):
-        reasons.append(f"[DUP_SAME] 이 블로그의 기존 글과 제목이 비슷함({score:.2f}): {other}")
+        reasons.append(f"[DUP_SAME] 이 블로그의 기존 글과 제목이 비슷함({score:.2f}): {one_line(other, 100)}")
     score, other = most_similar(title, other_titles)
     if score >= sim.get("other_blogs", 1.1):
-        reasons.append(f"[DUP_OTHER] 다른 블로그 글과 제목이 비슷함({score:.2f}): {other}")
+        reasons.append(f"[DUP_OTHER] 다른 블로그 글과 제목이 비슷함({score:.2f}): {one_line(other, 100)}")
 
     if sanitize_stats:
         removed = {k: v for k, v in sanitize_stats.items() if v}

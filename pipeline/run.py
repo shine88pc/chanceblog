@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from pipeline import gates
-from pipeline.console import safe_output
+from pipeline.console import md_cell, one_line, safe_output
 from pipeline.llm import LLMError, make_gemini_llm, mask
 from pipeline.publishers.base import PublishError
 from pipeline.registry import (ROOT, RegistryError, get_blog, load_profile, load_registry,
@@ -36,6 +36,8 @@ from pipeline.topics import clean_topic, pick_topic
 EXIT_OK, EXIT_INFRA, EXIT_CONFIG = 0, 1, 2
 HISTORY_KEEP = 200
 DRAFTS_KEEP = 120
+TITLE_SHOWN = 120      # 로그·요약에 보여 줄 글 제목의 최대 길이(제목은 LLM 유래)
+REASONS_SHOWN = 600    # 로그·요약에 보여 줄 게이트 탈락 사유 전체의 최대 길이
 COUNTED_STATUSES = {"posted", "draft", "generated_unpublished"}
 _TRUE = {"1", "true", "yes", "on"}
 _FALSE = {"0", "false", "no", "off"}
@@ -269,7 +271,7 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
             raw, model = llm(build_prompt(template, topic, profile, feedback))
         except LLMError as exc:
             out(skip_line("LLM_FAILED", blog=blog["key"], attempt=attempt))
-            out(f"[인프라 오류] LLM 호출 실패: {mask(exc)[:300]}")
+            out(f"[인프라 오류] LLM 호출 실패: {one_line(mask(exc))}")
             out(f"::error::[{blog['key']}] LLM 호출이 실패했습니다. LLM 키·할당량·모델 이름을 확인하세요.")
             record({"status": "llm_failed", "topic": topic, "reasons": [f"[LLM] {mask(exc)[:300]}"], "attempts": attempt})
             _summarize(environ, blog, "LLM_FAILED", "LLM 호출이 실패했습니다(원인은 이 단계의 로그를 보세요).")
@@ -294,11 +296,13 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
         out(f"  시도 {attempt}: 게이트 탈락 → 재작성 ({'; '.join(result.codes())})")
 
     if accepted is None:
+        # 사유에는 이력 속 다른 글의 제목이 들어 있을 수 있다(외부 유래). 로그·요약에는 한 줄로 접어서만 쓰고,
+        # ::warning:: 주석에는 아예 넣지 않는다(고정 문장만).
         out(skip_line("GATE_REJECTED", blog=blog["key"], attempts=attempts))
-        out(f"[{blog['key']}] 게이트를 통과하지 못해 게시하지 않습니다: {'; '.join(reasons)}")
+        out(f"[{blog['key']}] 게이트를 통과하지 못해 게시하지 않습니다: {one_line('; '.join(reasons), REASONS_SHOWN)}")
         out(f"::warning::[{blog['key']}] 게이트를 {attempts}번 모두 통과하지 못해 게시하지 않았습니다. 다음 실행에서 다시 시도합니다.")
         record({"status": "rejected", "topic": topic, "reasons": reasons, "attempts": attempts, "model": model})
-        _summarize(environ, blog, "GATE_REJECTED", '; '.join(reasons))
+        _summarize(environ, blog, "GATE_REJECTED", md_cell('; '.join(reasons), REASONS_SHOWN))
         return EXIT_OK
 
     final_html = gates.append_disclosure(accepted["content"], profile)
@@ -308,8 +312,8 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
     status, url, post_id, exit_code, extra = "draft", "", "", EXIT_OK, []
     if dry:
         out("[DRY_RUN] 게이트 통과 — 게시·저장 없이 종료합니다.")
-        out(f"  제목: {post['title']} / 라벨: {post['labels']} / 본문 {gates.text_length(gates.plain_text(accepted['content']))}자")
-        _summarize(environ, blog, "DRY_RUN", f"게이트 통과, 게시·저장 없이 종료(제목: {post['title']})")
+        out(f"  제목: {one_line(post['title'], TITLE_SHOWN)} / 라벨: {post['labels']} / 본문 {gates.text_length(gates.plain_text(accepted['content']))}자")
+        _summarize(environ, blog, "DRY_RUN", f"게이트 통과, 게시·저장 없이 종료(제목: {md_cell(post['title'], TITLE_SHOWN)})")
         return EXIT_OK
     if will_publish:
         # 게시용 시크릿 누락은 위의 사전 점검에서 이미 걸러졌다(여기까지 오면 4종 모두 있다).
@@ -323,7 +327,7 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
             status, exit_code = "publish_failed", EXIT_INFRA
             extra = [f"[{exc.code}] {mask(exc)[:300]}"]
             out(skip_line("PUBLISH_FAILED", blog=blog["key"], reason=exc.code))
-            out(f"[인프라 오류] 게시 실패({exc.code}): {mask(exc)[:300]}")
+            out(f"[인프라 오류] 게시 실패({exc.code}): {one_line(mask(exc))}")
             out(f"::error::[{blog['key']}] 게시에 실패했습니다({exc.code}). 이 단계의 로그와 BLOGGER_API_SETUP.md 의 점검 항목을 확인하세요.")
     else:
         out("  게시 정책이 draft/off 여서 초안만 저장합니다.")
@@ -334,7 +338,8 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
             "labels": post["labels"], "url": url, "post_id": post_id, "model": model,
             "attempts": attempts, "reasons": extra})
     out(f"  초안 저장: {draft_path.relative_to(root).as_posix()} / 상태: {status}")
-    _write_summary(environ, f"### {blog['key']}\n- 결과: **{status}** — {post['title']}\n- URL: {url or '(없음)'}")
+    _write_summary(environ, f"### {blog['key']}\n- 결과: **{status}** — {md_cell(post['title'], TITLE_SHOWN)}\n"
+                            f"- URL: {url or '(없음)'}")
     return exit_code
 
 
