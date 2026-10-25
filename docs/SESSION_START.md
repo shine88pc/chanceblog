@@ -66,7 +66,7 @@ main 최신 커밋 · 최근 24시간 자동 실행 결과(Chance 슬롯, Blogge
 
 ## 5. 현재 상태와 다음 작업 순서
 
-> 갱신 기준: **2026-10-25 밤(KST)**. 이후 변경은 `WORKLOG.md` 최신 항목·열린 PR·`HANDLER.md` §0이 더 정확합니다. 새 세션은 이 절을 믿기 전에 `git log --oneline -20 origin/main`과 열린 PR 목록으로 대조하세요.
+> 갱신 기준: **2026-10-26 오전(KST)**(Chance 출처 개편 반영). 이후 변경은 `WORKLOG.md` 최신 항목·열린 PR·`HANDLER.md` §0이 더 정확합니다. 새 세션은 이 절을 믿기 전에 `git log --oneline -20 origin/main`과 열린 PR 목록으로 대조하세요.
 
 ### 5-1. 오늘 병합된 것 (main)
 
@@ -92,19 +92,20 @@ main 최신 커밋 · 최근 24시간 자동 실행 결과(Chance 슬롯, Blogge
 | 브랜치 | 내용 | 상태·다음 |
 |--------|------|-----------|
 | `ai/claude/blogger-draft-upload` → `ai/claude/blogger-auth-check` | Blogger 초안함 업로드 모드(`mode draft` + Secrets면 초안함에 올림, 수동 `publish` off/draft/publish 3택), 인증 점검만 실행(`auth_check`), 레지스트리 `mode` 직접 지정 검사(REG-1: 블로그 항목은 `mode`를 직접 적어야 함 — `defaults.mode`가 auto인 지금 새 블로그 사고 방지) | 독립 검증 2회 모두 **병합 가능**(변경분 재검증: 열거·퍼징 위반 0, 새 변이 86개 중 85 탐지). **호출 기록 병합(#24)이 끝난 지금 통합 단계**: `main`을 합치고 충돌을 풀어야 한다 — `pipeline/run.py` 3줄(`mask` import 제거, 옮겨진 주제 선정을 `with purpose(llm,"topic-expansion"):`로 감쌈, 성공 요약 앞에 `lines += [f"- {line}" for line in ai_lines()]`)·`blogger.yml`(`publish` choice 유지)·`DEFECT_REGISTER`(D-49는 quota 쪽 한 줄만)·`tests/test_workflow_names.py` ALLOWED_REFS 합집합(`inputs.auth_check`·`inputs.real_ai`)·`tests/test_manual_run_defaults.py` 4건(문구·`publish` 3택에 맞춤, 코드 변경 없음). 통합 뒤 변경분 재검증(검증자가 만든 임시 해결: scratchpad 밖에는 없음) → 병합 → 가이드의 `blogger-*` 마커 걷기(WORKLOG 오늘 항목의 문장 목록) |
-| `ai/claude/handover-guide` | 이 문서·REQUEST_BRIEFING v3·작업요청 README·진단/AI 검색 보고서 보관 | 이 PR |
+| `ai/claude/source-overhaul` | **Chance 출처 개편(#27)**: 구글 뉴스 14개·MIT TR·BBC Technology 제거, NASA·UN News·Pew·Federal Reserve 추가, 약관 점검 필드·차단 목록·글 끝 고지문(결정 #2, 2026-10-26 채팅 승인) | 독립 검증 대기 → 병합 → 첫 슬롯 관측(§5-3) |
 
 ### 5-3. 관측 대기 (병합했지만 Actions 에서만 보이는 것)
 
 - **호출 기록·수동 기본값 병합 직후**: 입력 없이 `Chance 글 자동 작성·게시` 수동 실행(가짜 AI 응답·초록), **병합 뒤 처음 도는 정기 실행**(`AI 응답` 줄이 없고, 글이 나왔다면 `Gemini 호출: N회` — 키가 안 넘어가 `GEMINI_API_KEY 환경 변수가 없습니다` 빨강이면 즉시 `git revert`). 로그의 `[GEMINI]` 줄에서 `quotaId`·`retryDelay`·`served=`를 읽고 일주일 뒤 AI Studio 사용량과 대조(배수로 나오면 SDK 자체 재시도 의심).
 - **Chance 슬롯 예약 누락**: 오늘 18시 창은 예약 실행이 15:09 KST 뒤 5시간 넘게 빠졌다가 20:34에야 돌아 글이 나왔다(창이 18~23시라 이번에는 늦게라도 만들어졌다). GitHub가 예약을 건너뛰는 일이 잦다(48시간에 12/48회, D-59) — 창 안에 실행이 한 번도 없으면 그 창의 글은 없다. 글이 없는 창에서 수동 실행하면 슬롯 번호 없는 글이 만들어져 같은 날 예약 실행이 또 만들 수 있다(하루 3편 가능) → 크론 틱 추가(T3, §6 #9)나 "슬롯 보충 수동 실행" 입력 추가를 승인 뒤 검토.
 - 확인 필요 모음의 첫 정기 실행(간격)·휴대폰 @멘션 코멘트 도착·닫은 이슈의 재오픈, 워치독 하루 2회 점검의 첫 실제 알림 수신, 글이 추가된 배포의 `사이트 반영 확인` 시도 1(오늘 1회는 정상).
+- **출처 개편(#27) 병합 뒤 첫 슬롯 실행**: 요약 분야 표에서 과학·사회·문화·경제에 소스가 1개씩, 일상·마음은 0인지, 로그 소스 줄에 NASA·UN News·Pew Research Center·Federal Reserve가 보이고 수집 실패(러너 IP 차단 가능성)가 없는지, 글이 나왔다면 끝 고지문 한 줄과 NASA 출처 글 본문에 'NASA에 따르면' 같은 직접 귀속 표현이 없는지. 평일에도 36시간 안 후보가 계속 비면 D-62(신선도 창·소스 추가)를 운영자에게 올린다.
 - 병합 예정 PR들의 병합 직후 체크리스트는 `docs/DEFECT_REGISTER.md` 하단.
 
 ### 5-4. 다음 작업 순서
 
 1. **열린 PR 병합 마무리**: Blogger 두 PR(호출 기록 병합 뒤 충돌 해결 → 변경분 재검증 → 병합 → 가이드의 `blogger-*` 마커 걷기와 문장 정리: 검증자 목록은 WORKLOG 오늘 항목, 마지막 마커를 걷을 때 가이드의 "먼저 읽기 3" 안내 문장도 삭제). 병합마다 main 병합·충돌 해결(뒤에 병합하는 쪽이 자기 코드를 새 기반에 맞춤)·한글 이름 규칙·문서 표 행·결함 번호(다음은 D-60) 확인, 전체 테스트, 병합 직후 Actions 확인. 낡아진 안내 갱신 목록은 Blogger PR이 고친다(HANDLER §3 P1·§10 5-4, ENGINEERING_GUIDE L3·W7, CHARTER 131행 근처, ARCHITECTURE UNPUBLISHED 행); `docs/REQUEST_BRIEFING.md`는 총괄이 갱신.
-2. **운영자 승인 항목 반영**(§6): 승인되면 순서대로 — 모델 목록에서 `gemini-3.7-flash` 제거(PR-6), Blogger 건강 금지 주제 강화(PR-5), Chance 소스 개편(PR-8~10, 약관 허용 소스만 — 오늘 18시 슬롯 요약이 비기술 분야 후보 0임을 다시 보여 줌), 사이트 정리(운영 문서 제외·홈 글 목록 미리 그리기), 예약 틱 추가 또는 슬롯 보충 수동 실행(D-59).
+2. **운영자 승인 항목 반영**(§6): 승인되면 순서대로 — 모델 목록에서 `gemini-3.7-flash` 제거(PR-6), Blogger 건강 금지 주제 강화(PR-5), Chance 소스 개편(승인·구현됨 — #27, 병합 뒤 관측), 사이트 정리(운영 문서 제외·홈 글 목록 미리 그리기), 예약 틱 추가 또는 슬롯 보충 수동 실행(D-59).
 3. **Blogger macat0722 재개**: 영문 코드 일반화(PR-14) → 영문 프로필(PR-15, T3) → `mode: draft`(T3) → 시크릿 등록(사용자) → 인증 점검 → 초안 1건 확인. auto는 AdSense 판정 전까지 보류.
 4. **쿼터 거버너**(PR-17·18): 호출 기록 1주 관측 + 운영자가 읽어 온 AI Studio 한도 표가 선행 조건.
 5. **콘텐츠 전략 Phase 0**(작업요청서 3번): 4개 블로그 주제 분리, AI 검색 노출 전략(`docs/analysis/2026-10-25_ai-search-exposure.md`), 신규 한글 Blogger 추가, 네이버 반자동(초안 배달) — 대부분 T3.
@@ -117,7 +118,7 @@ main 최신 커밋 · 최근 24시간 자동 실행 결과(Chance 슬롯, Blogge
 | # | 항목 | 추천 기본값 | 등급 |
 |---|------|-------------|------|
 | 1 | 폴백 모델 목록에서 `gemini-3.7-flash` 제거(이미 3.8로 자동 전달돼 중복 호출) | 제거 | T3 |
-| 2 | Chance 소스 개편: 구글 뉴스 14개 제거, NASA·UN News·Pew·Federal Reserve 추가, BBC·Guardian·Nature 제외, MIT TR·BBC Technology는 약관 점검 뒤 결정 | 진행 | T3(신뢰 목록·정책) |
+| 2 | Chance 소스 개편: 구글 뉴스 14개 제거, NASA·UN News·Pew·Federal Reserve 추가, BBC·Guardian·Nature 제외, MIT TR·BBC Technology는 약관 점검 뒤 결정 — **2026-10-26 채팅으로 승인, #27로 구현**(점검 결과 MIT TR·BBC Technology도 제외, 근거는 WORKLOG 2026-10-26) | 검증·병합 대기 | T3(신뢰 목록·정책) |
 | 3 | Blogger 건강 금지 주제 강화(제목·본문·수동 주제에도 적용) | 적용 | T1 강화, 알림 |
 | 4 | '초안 저장 후 수동 게시' = Blogger 초안함에 API 업로드(회사 PC에서 OAuth가 막히면 저장소 초안 파일 복사) | API 업로드 | 확인 1건 |
 | 5 | macat0722 영문 프로필(한국어 프로필의 실용 생활습관 방향을 영어로, 시드 90개 이상, 건강 금지 강화, 면책 문구 정정) | 승인 | T3 |
@@ -127,6 +128,9 @@ main 최신 커밋 · 최근 24시간 자동 실행 결과(Chance 슬롯, Blogge
 | 9 | Chance 예약 틱 추가(매시 17분 + 47분 등; 게시는 슬롯 규칙이 하루 2편으로 지킴, 예약 실행 증가라 T3)와 "슬롯 보충 수동 실행" 입력 추가(T2) 중 무엇을 할지(D-59) | 틱 추가 | T3 |
 | 10 | 로컬 작업 문서(작업요청서 3종·계획서·진단 요약)를 공개 저장소에 보관해도 되는지(공개 저장소라 먼저 읽고 비밀·개인정보·수익 수치가 없는지 확인한 뒤에만) | 보류 | 사용자 허락 |
 | 11 | **운영자가 20:26 KST에 직접 바꾼 `pipeline/blogs.json`의 `defaults.mode`(draft→auto)의 의도 확인** — 현재 동작은 그대로(두 블로그가 `mode`를 명시: `chance` auto, `blogger_macat` off). Blogger를 자동 발행으로 켜려는 뜻이라면 이 줄이 아니라 `blogger_macat`의 `mode`이고, 영문 프로필·Secrets·OAuth가 먼저다. `mode` 없이 추가하는 새 블로그는 곧바로 auto가 되므로 새 블로그는 `mode: draft`를 명시하거나 이 기본값을 draft로 되돌리는 것을 권장 | 되돌리기(draft) 또는 유지 | T3(운영자 본인 변경, 의도만 확인) |
+| 12 | **2026-10-21에 공개된 MIT TR 출처 글 1쌍**(KR `_posts/기술·미래/2026-10-21-KR-135226.md`, EN `_posts/Technology & Future/2026-10-21-EN-135226.md`) 처리 — MIT TR 약관이 이 용도를 금지하는 것으로 읽힌다(D-60) | 비공개 전환(삭제 아님; 방법은 승인 뒤 정함) | T3(공개 콘텐츠) |
+| 13 | 경제·일(Federal Reserve뿐, 주 0~1건)과 일상·마음(소스 없음) 공급: (a) 기관·연구 피드에 한해 신선도 창(지금 36시간)을 넓히기, (b) 약관상 쓸 수 있는 소스 추가(약관 점검 뒤) 중 무엇을 할지(D-62) | (b) 먼저, (a)는 평일 관측 뒤 | T3(품질 기준·신뢰 목록) |
+| 14 | 기술·미래 소스 7곳의 약관 점검 결과에 따른 처리 — 2026-10-26 점검: AI타임스·전자신문은 **불명확**(RSS·AI 이용 조항 없음, 복제·영리 이용은 사전 승낙 필요), 나머지 5곳은 읽지 못함. 기술 분야 공급이 AI타임스·전자신문에 몰려 있어 두 매체에 허가를 문의할지(D-61) | 허가 문의(운영자), 그동안 유예 유지 | T3 |
 
 그 밖의 승인 대기(순서대로 따로 받는다): 방침 개정·ads.txt·방문 분석 태그(애드센스 심사 상태 확인 뒤), 네이버 반자동·신규 한글 Blogger 개설 게이트, 지역(장소) 글 파일럿, robots.txt(현행 유지 권장), 게시 빈도·크론 틱 추가(관측 뒤) — 상세는 `docs/analysis/`의 두 보고서.
 
@@ -137,7 +141,8 @@ main 최신 커밋 · 최근 24시간 자동 실행 결과(Chance 슬롯, Blogge
 4. Chance의 AdSense 계정과 macat0722의 구글 계정이 같은지 알려 주기(같으면 Blogger 자동 글의 정책 위반이 광고 계정에 영향을 줄 수 있어 auto를 더 신중히 다룸).
 5. **Blogger 시크릿·OAuth는 초안 업로드 모드(PR 병합) 뒤에만**: OAuth 동의 화면을 "프로덕션"으로 전환(Testing이면 리프레시 토큰이 7일 만료) → 토큰 발급(`scripts/get_blogger_token.py`) → `BLOGGER_BLOG_ID`·`BLOGGER_CLIENT_ID`·`BLOGGER_CLIENT_SECRET`·`BLOGGER_REFRESH_TOKEN`을 GitHub Secrets에 직접 등록(값은 채팅·저장소에 쓰지 않음). 지금 등록하면 글이 검수 없이 공개될 수 있다.
 6. 신규 한글 Blogger(다른 구글 계정)의 블로그 URL·ID 확인(레지스트리 추가용), 영문 프로필 방향·네이버 운영 방식 결정.
-7. 중복 이미지 2건 교체를 원하면 `Chance 기존 글 이미지 교체(수동)`을 연습 끄고 실행(연습 결과: 문제 2건/교체 2건).
+7. **UN News에 이용 사실 알리기**(D-63): UN 쪽 안내가 사용 사실을 유엔에 알리라고 한다. 운영자 메일로 unnews@un.org 에 사이트 주소와 "UN News 기사를 바탕으로 AI 도구가 새 글을 쓰고 출처·링크를 밝힙니다"라는 한 줄을 한 번 보낸다(AI가 대신 보내지 않는다).
+8. 중복 이미지 2건 교체를 원하면 `Chance 기존 글 이미지 교체(수동)`을 연습 끄고 실행(연습 결과: 문제 2건/교체 2건).
 
 ## 7. 모바일 Claude(저장소를 못 보는 AI)와 함께 쓰기
 

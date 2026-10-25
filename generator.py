@@ -596,6 +596,8 @@ LANE_SEARCH_BUDGET_SECONDS = _int_env("LANE_SEARCH_BUDGET_SECONDS", 480)
 DROP_LABELS = {
     "NO_TITLE": "제목 없음",
     "NOT_TECH": "기술 키워드 아님",
+    "EXCLUDED": "소스별 제외 규칙(약관·글감 부적합)",
+    "OFF_TOPIC": "이 분야 주제어와 맞지 않음",
     "AGE": f"{NEWS_MAX_AGE_HOURS}시간 초과",
     "UNTRUSTED": "신뢰 목록에 없는 게시자",
     "UNCHECKED": "소스당 5건 검사 한도 초과",
@@ -693,81 +695,115 @@ EDITORIAL_LANES = {
         "focus": "일상생활, 심리, 건강, 가족, 도시와 사람들이 매일 겪는 변화",
     },
 }
-_GN_KO = "https://news.google.com/rss/search?q={q}&hl=ko&gl=KR&ceid=KR:ko"
-_GN_EN = "https://news.google.com/rss/search?q={q}&hl=en-US&gl=US&ceid=US:en"
 
 # 소스는 실패해도 건너뛰기만 합니다. 로그의 '소스 ...: N건' 줄로 동작 여부를 확인하고,
 # 계속 0건/실패인 소스는 이 목록에서 지우세요. (직접 RSS 주소는 사이트 사정으로 바뀔 수 있음)
+#
+# 약관 점검(terms): 소스마다 공식 약관·이용 안내를 읽은 결과를 적는다(법률 판단이 아니다).
+#   allowed    출처를 밝히고 요약해 새 글을 쓰는 이 용도가 허용된다고 읽은 소스. 확인한 날짜와 근거 쪽 주소를 함께 적는다.
+#   unverified 아직 약관을 읽지 못한 소스. 기존 소스만 유예이고 새로 늘릴 수 없다(tests/test_generator_slots.py SourceListTest).
+# 이 용도를 금지·허가 필요로 읽은 매체(BBC·Guardian·Nature·MIT Technology Review)는 TERMS_BLOCKED_DOMAINS 로 막고
+# 소스에도 신뢰 목록에도 두지 않는다. 일상·마음 분야는 약관상 쓸 수 있는 직접 RSS를 아직 찾지 못해 소스가 없다(뽑히면 다음 분야로 넘어간다).
+#
+# 소스별 선택 키(모두 생략 가능):
+#   exclude_title  제목이 이 정규식과 맞으면 쓰지 않는다(EXCLUDED). 약관이 빼라고 한 것, 글감이 못 되는 공지·퀴즈 등.
+#   topic_regex    제목·분류 태그에 이 정규식과 맞는 말이 없으면 쓰지 않는다(OFF_TOPIC). 여러 주제가 섞인 피드를 분야에 맞춘다.
+#   no_page_fetch  요약이 짧아도 기사 페이지를 따로 읽지 않는다(자동 수집을 막는 약관).
+#   notice         글 끝에 붙일 고지문(ko·en). 소스 약관이 요구하는 'AI 작성, 검토·승인 받지 않음' 안내.
+#   prompt_rule    글 작성 지침에 한 줄 더하는 소스별 약관 조건.
 NEWS_SOURCES = [
-    # 분야별 Google News 검색. 실행 슬롯은 해당 분야의 소스만 읽습니다.
-    {"name": "Google뉴스 KR 과학·환경", "google": True, "lane": "science",
-     "url": _GN_KO.format(q=urllib.parse.quote_plus("과학 기후 환경 보건 연구 when:2d"))},
-    {"name": "Google뉴스 US Science & Climate", "google": True, "lane": "science",
-     "url": _GN_EN.format(q=urllib.parse.quote_plus("science climate environment public health research when:2d"))},
-    {"name": "Google뉴스 KR 경제·일", "google": True, "lane": "economy",
-     "url": _GN_KO.format(q=urllib.parse.quote_plus("경제 소비 일자리 산업 주거 when:2d"))},
-    {"name": "Google뉴스 US Economy & Work", "google": True, "lane": "economy",
-     "url": _GN_EN.format(q=urllib.parse.quote_plus("economy jobs wages housing cost of living when:2d"))},
-    {"name": "Google뉴스 KR 사회·정책", "google": True, "lane": "society",
-     "url": _GN_KO.format(q=urllib.parse.quote_plus("사회 정책 교육 노동 공동체 when:2d"))},
-    {"name": "Google뉴스 US Society & Policy", "google": True, "lane": "society",
-     "url": _GN_EN.format(q=urllib.parse.quote_plus("education labor public policy social change when:2d"))},
-    {"name": "Google뉴스 KR 문화·미디어", "google": True, "lane": "culture",
-     "url": _GN_KO.format(q=urllib.parse.quote_plus("문화 콘텐츠 미디어 게임 출판 when:2d"))},
-    {"name": "Google뉴스 US Culture & Media", "google": True, "lane": "culture",
-     "url": _GN_EN.format(q=urllib.parse.quote_plus("culture media entertainment games publishing when:2d"))},
-    {"name": "Google뉴스 KR 일상·마음", "google": True, "lane": "daily_life",
-     "url": _GN_KO.format(q=urllib.parse.quote_plus("생활 건강 심리 가족 도시 when:2d"))},
-    {"name": "Google뉴스 US Everyday Life", "google": True, "lane": "daily_life",
-     "url": _GN_EN.format(q=urllib.parse.quote_plus("everyday life psychology health family cities when:2d"))},
-    # Google News 검색 (국내/해외, 가장 안정적인 기반)
-    {"name": "Google뉴스 KR AI·테크", "google": True, "lane": "technology",
-     "url": _GN_KO.format(q="AI+%ED%85%8C%ED%81%AC+%EA%B8%B0%EC%88%A0")},
-    {"name": "Google뉴스 KR 과학기술 토픽", "google": True, "lane": "technology", "tech_filter": True,
-     "url": "https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGRqTVhZU0FtdHZHZ0pMVWlnQVAB?hl=ko&gl=KR&ceid=KR:ko"},
-    {"name": "Google뉴스 US AI", "google": True, "lane": "technology",
-     "url": _GN_EN.format(q="artificial+intelligence+when%3A1d")},
-    {"name": "Google뉴스 US 반도체·로봇·우주", "google": True, "lane": "technology",
-     "url": _GN_EN.format(q="semiconductor+OR+robotics+OR+spaceflight+when%3A1d")},
-    # 해외 직접 RSS
-    {"name": "TechCrunch", "lane": "technology", "url": "https://techcrunch.com/feed/"},
-    {"name": "The Verge", "lane": "technology", "url": "https://www.theverge.com/rss/index.xml"},
-    {"name": "Ars Technica", "lane": "technology", "url": "https://feeds.arstechnica.com/arstechnica/index"},
-    {"name": "MIT Technology Review", "lane": "technology", "url": "https://www.technologyreview.com/feed/"},
-    {"name": "IEEE Spectrum", "lane": "technology", "url": "https://spectrum.ieee.org/feeds/feed.rss"},
-    {"name": "Hacker News", "lane": "technology", "url": "https://news.ycombinator.com/rss"},
-    {"name": "BBC Technology", "lane": "technology", "url": "https://feeds.bbci.co.uk/news/technology/rss.xml"},
-    # 국내 직접 RSS
-    {"name": "AI타임스", "lane": "technology", "url": "https://www.aitimes.com/rss/allArticle.xml"},
-    {"name": "전자신문", "lane": "technology", "url": "https://rss.etnews.com/Section901.xml"},
+    # 약관을 확인한 직접 RSS(2026-10-26). 분야마다 약관상 쓸 수 있는 소스만 둔다.
+    {"name": "NASA", "lane": "science", "url": "https://www.nasa.gov/feed/",
+     "terms": {"status": "allowed", "checked": "2026-10-26",
+               "url": "https://www.nasa.gov/nasa-brand-center/images-and-media/"},
+     # APOD 는 사진마다 저작권자가 따로 있어 약관 예외이고, 취재진 초대·인증 안내는 글감이 못 된다.
+     "exclude_title": r"^APOD\b|\binvites? media\b|\bmedia accreditation\b",
+     "notice": {"ko": "이 글은 AI 도구가 NASA가 공개한 자료를 참고해 작성했습니다. NASA는 이 글을 검토하거나 승인하지 않았으며, 글의 내용은 NASA의 입장이 아닙니다.",
+                "en": "This article was written with an AI tool using publicly available NASA source material. NASA has not reviewed or approved it, and it does not represent NASA's position."},
+     # NASA 의 AI 이용 안내: AI 결과물의 정보를 NASA 에 직접 귀속하는 것은 허용되지 않는다.
+     "prompt_rule": "NASA의 AI 이용 안내에 따라 정보를 NASA가 직접 말하거나 보증한 것처럼 쓰지 마세요. "
+                    "'NASA에 따르면', 'NASA는 밝혔다' 같은 직접 귀속 표현을 쓰지 말고 '공개된 자료에 따르면'처럼 자료를 가리키세요."},
+    {"name": "UN News", "lane": "society", "url": "https://news.un.org/feed/subscribe/en/news/all/rss.xml",
+     "terms": {"status": "allowed", "checked": "2026-10-26",
+               "url": "https://news.un.org/en/content/navigate-news"},
+     # 여러 소식을 묶은 요약 기사는 글감이 못 된다.
+     "exclude_title": r"^World News in Brief\b",
+     "notice": {"ko": "이 글은 UN News의 보도를 바탕으로 AI 도구가 작성했습니다. 유엔은 이 글을 검토하거나 승인하지 않았으며, 글의 내용은 유엔의 공식 입장이 아닙니다.",
+                "en": "This article was written with an AI tool based on reporting by UN News. The United Nations has not reviewed or approved it, and it is not an official UN position."}},
+    {"name": "Pew Research Center", "lane": "culture", "url": "https://www.pewresearch.org/feed/",
+     "terms": {"status": "allowed", "checked": "2026-10-26",
+               "url": "https://www.pewresearch.org/about/terms-and-conditions/"},
+     # 퀴즈·보고서 부속 쪽(감사의 글·조사 방법 등)과 선거·정당 이야기는 문화·미디어 글감이 아니다.
+     "exclude_title": r"\bquiz\b|^(?:acknowledg(?:e)?ments|methodology|additional charts|appendix)\b"
+                      r"|\belection|\bvoters?\b|\bballots?\b|\bmidterms?\b|\btrump\b|\bbiden\b|\brepublican|\bdemocrat|\bpartisan",
+     # 피드는 정치·사회·종교 등이 섞여 있어 미디어·온라인·기술 주제만 문화·미디어 분야로 보낸다(제목과 분류 태그에서 찾는다).
+     "topic_regex": r"social media|internet|online|\bAI\b|artificial intelligence|chatbot|\bnews\b|tiktok|youtube|instagram"
+                    r"|facebook|podcast|streaming|influencer|smartphone|mobile|video game|gaming|music|movie|\bbooks?\b|reading|digital|platform",
+     "no_page_fetch": True,  # Pew 약관은 허가 없는 수집(스크래핑)을 막는다. RSS 요약만 쓰고 기사 페이지는 읽지 않는다.
+     "notice": {"ko": "이 글은 AI 도구가 Pew Research Center가 영어로 발표한 자료를 참고해 새로 쓴 해설입니다. Pew Research Center는 이 글(번역·요약 포함)을 검토하거나 승인하지 않았으며, 분석과 해석의 책임은 이 사이트에 있습니다.",
+                "en": "This article is an original explainer written with an AI tool from findings published by Pew Research Center. The Center has not reviewed or approved it, and responsibility for the analysis and interpretation rests with this site."},
+     "prompt_rule": "Pew Research Center의 조사 결과를 전하되, Pew가 특정 정책·정당·견해를 지지하거나 주장하는 것처럼 쓰지 마세요. "
+                    "조사 결과와 이 사이트의 해석을 구분하세요."},
+    {"name": "Federal Reserve", "lane": "economy", "url": "https://www.federalreserve.gov/feeds/press_all.xml",
+     "terms": {"status": "allowed", "checked": "2026-10-26",
+               "url": "https://www.federalreserve.gov/disclaimer.htm"},
+     # 은행 인수·합병 승인과 제재 건은 한 곳의 사업 사정이라 일반 독자의 글감이 못 된다.
+     "exclude_title": r"\benforcement actions?\b|\bapproval of (?:the )?application\b",
+     "notice": {"ko": "이 글은 AI 도구가 미국 연방준비제도 이사회(Federal Reserve Board)가 공개한 자료를 참고해 작성했습니다. 연준은 이 글을 검토하거나 승인하지 않았습니다.",
+                "en": "This article was written with an AI tool using materials published by the Federal Reserve Board. The Board has not reviewed or approved it."}},
+    # 해외 직접 RSS(기술). 약관 미확인 — 읽는 대로 allowed 로 올리거나 이 목록에서 뺀다.
+    {"name": "TechCrunch", "lane": "technology", "url": "https://techcrunch.com/feed/",
+     "terms": {"status": "unverified"}},
+    {"name": "The Verge", "lane": "technology", "url": "https://www.theverge.com/rss/index.xml",
+     "terms": {"status": "unverified"}},
+    {"name": "Ars Technica", "lane": "technology", "url": "https://feeds.arstechnica.com/arstechnica/index",
+     "terms": {"status": "unverified"}},
+    {"name": "IEEE Spectrum", "lane": "technology", "url": "https://spectrum.ieee.org/feeds/feed.rss",
+     "terms": {"status": "unverified"}},
+    {"name": "Hacker News", "lane": "technology", "url": "https://news.ycombinator.com/rss",
+     "terms": {"status": "unverified"}},
+    # 국내 직접 RSS(기술). 약관 미확인.
+    {"name": "AI타임스", "lane": "technology", "url": "https://www.aitimes.com/rss/allArticle.xml",
+     "terms": {"status": "unverified", "note": "2026-10-26 저작권보호정책을 읽었다: 승낙 없는 복제·출판·전송·배포·판매·변형 금지(출처 표시 조건), RSS·AI 이용 조항은 없어 불명확 — 허가 문의 추천"}},
+    {"name": "전자신문", "lane": "technology", "url": "https://rss.etnews.com/Section901.xml",
+     "terms": {"status": "unverified", "note": "2026-10-26 이용약관(2012.09.01 표기)을 읽었다: 제공 정보의 영리 목적 이용 금지(회원 대상)·복제·전송·배포는 사전 승낙 필요, RSS·AI 이용 조항은 없어 불명확 — 허가 문의 추천"}},
     # 블로터(https://www.bloter.net/feed)는 HTTP 404라 2026-10-25에 뺐다(실행 로그 '수집 실패', 로컬에서도 404/403).
+    # 구글 뉴스 검색 소스 14개는 통과율이 0.4%(게시자 원문 주소로 풀리지 않음)라 2026-10-26에 뺐다.
+    # MIT Technology Review·BBC Technology 는 약관이 이 용도를 금지·허가 필요로 해서 2026-10-26에 뺐다(TERMS_BLOCKED_DOMAINS).
 ]
 
 # 게시 후보에 사용할 수 있는 출처 도메인. 도메인 이름은 끝 경계까지 비교합니다.
 # 보도자료·검색 결과·커뮤니티 링크만으로는 글을 발행하지 않습니다.
 TRUSTED_SOURCE_DOMAINS = {
-    "science": ("nature.com", "science.org", "pnas.org", "cell.com", "who.int",
+    "science": ("science.org", "pnas.org", "cell.com", "who.int",
                 "nih.gov", "noaa.gov", "nasa.gov", "ipcc.ch", "jpl.nasa.gov",
-                "reuters.com", "apnews.com", "bbc.com", "bbc.co.uk"),
+                "reuters.com", "apnews.com"),
     "economy": ("oecd.org", "imf.org", "worldbank.org", "federalreserve.gov",
                 "bls.gov", "bok.or.kr", "kostat.go.kr", "kdi.re.kr",
-                "reuters.com", "apnews.com", "ft.com", "bloomberg.com",
-                "bbc.com", "bbc.co.uk"),
+                "reuters.com", "apnews.com", "ft.com", "bloomberg.com"),
     "society": ("oecd.org", "un.org", "unesco.org", "unicef.org", "korea.kr",
-                "kostat.go.kr", "kdi.re.kr", "reuters.com", "apnews.com",
-                "bbc.com", "bbc.co.uk", "theguardian.com"),
-    "technology": ("nist.gov", "acm.org", "ieee.org", "arxiv.org", "nature.com",
-                   "science.org", "technologyreview.com", "arstechnica.com",
-                   "reuters.com", "apnews.com", "bbc.com", "bbc.co.uk",
+                "kostat.go.kr", "kdi.re.kr", "reuters.com", "apnews.com"),
+    "technology": ("nist.gov", "acm.org", "ieee.org", "arxiv.org",
+                   "science.org", "arstechnica.com",
+                   "reuters.com", "apnews.com",
                    "aitimes.com", "etnews.com"),
     "culture": ("unesco.org", "pewresearch.org", "reuters.com", "apnews.com",
-                "bbc.com", "bbc.co.uk", "theguardian.com", "variety.com",
-                "nytimes.com"),
+                "variety.com", "nytimes.com"),
     "daily_life": ("who.int", "nih.gov", "nhs.uk", "cdc.gov", "apa.org",
                    "kostat.go.kr", "korea.kr", "mfds.go.kr",
                    "foodsafetykorea.go.kr", "kca.go.kr", "consumer.go.kr",
-                   "reuters.com", "apnews.com", "bbc.com", "bbc.co.uk"),
+                   "reuters.com", "apnews.com"),
 }
+
+# 약관을 읽고 이 용도(광고가 붙는 사이트에서 RSS 제목·요약을 AI에 주어 새 글을 쓰는 것)가 금지이거나 허가가 필요하다고 읽은 매체.
+# 신뢰 목록에 실수로 다시 들어와도 _trusted_domain 이 거부한다(법률 판단이 아니다). 근거: docs/analysis/2026-10-25_publish-readiness.md §3-1,
+# BBC·MIT TR 은 2026-10-26 약관 재확인.
+#   BBC                    사업적 RSS 이용은 허가 필요, RSS·콘텐츠에서 메타데이터를 가져오는 것과 AI 이용은 허가 필요(이용약관 8·15항, 2022-09-19판)
+#   Guardian               사전 서면 승인 없는 상업적 이용·AI로 콘텐츠를 생성·합성하는 것 금지
+#   Nature                 상업적 이용에는 허가 필요
+#   MIT Technology Review  파생물·상업적 이용 금지(RSS 포함), AI 이용은 사전 서면 동의 필요(2023-09-06판)
+TERMS_BLOCKED_DOMAINS = ("bbc.com", "bbc.co.uk", "bbci.co.uk", "theguardian.com", "guardian.co.uk",
+                         "nature.com", "technologyreview.com")
 
 
 def _clean_text(s, limit=300):
@@ -798,9 +834,13 @@ def _host(url):
         return ""
 
 
+def _host_in(host, domains):
+    return any(host == domain or host.endswith("." + domain) for domain in domains)
+
+
 def _trusted_domain(host, lane):
-    return any(host == domain or host.endswith("." + domain)
-               for domain in TRUSTED_SOURCE_DOMAINS.get(lane, ()))
+    """게시 후보로 쓸 수 있는 게시자인가. 약관상 쓸 수 없는 도메인(TERMS_BLOCKED_DOMAINS)은 신뢰 목록에 들어와 있어도 거부한다."""
+    return not _host_in(host, TERMS_BLOCKED_DOMAINS) and _host_in(host, TRUSTED_SOURCE_DOMAINS.get(lane, ()))
 
 
 def _resolve_article_url(url):
@@ -852,6 +892,7 @@ def parse_feed(data):
         link = ""
         publisher_name = ""
         publisher_url = ""
+        categories = []
         for child in node:
             tag = child.tag.split("}")[-1]
             if tag == "link" and not link:
@@ -859,6 +900,10 @@ def parse_feed(data):
             elif tag == "source":
                 publisher_name = _clean_text(child.text or "", 120)
                 publisher_url = child.get("url") or ""
+            elif tag == "category":
+                label = _clean_text(child.get("term") or child.text or "", 80)
+                if label:
+                    categories.append(label)
         items.append({
             "title": _clean_text(text_of("title"), 300),
             "published": _parse_date(text_of("pubDate", "published", "updated", "date")),
@@ -866,6 +911,7 @@ def parse_feed(data):
             "link": link,
             "publisher_name": publisher_name,
             "publisher_url": publisher_url,
+            "categories": categories,
         })
     return items
 
@@ -899,6 +945,8 @@ def fetch_news_items(editorial_lane=None, stats=None, deadline=None, clock=time.
         kept = []
         drops = {}
         resolved_count = 0
+        exclude_re = re.compile(src["exclude_title"], re.I) if src.get("exclude_title") else None
+        topic_re = re.compile(src["topic_regex"], re.I) if src.get("topic_regex") else None
         for it in parsed:
             title = it["title"]
             publisher = it.get("publisher_name") or ""
@@ -910,6 +958,12 @@ def fetch_news_items(editorial_lane=None, stats=None, deadline=None, clock=time.
                         title, publisher = match.group(1).strip(), match.group(2).strip()
             if not title:
                 _count(drops, "NO_TITLE")
+                continue
+            if exclude_re and exclude_re.search(title):
+                _count(drops, "EXCLUDED")
+                continue
+            if topic_re and not topic_re.search(" ".join([title] + it.get("categories", []))):
+                _count(drops, "OFF_TOPIC")
                 continue
             if src.get("tech_filter") and not is_tech_title(title):
                 _count(drops, "NOT_TECH")
@@ -942,14 +996,15 @@ def fetch_news_items(editorial_lane=None, stats=None, deadline=None, clock=time.
                 _count(drops, "HOST_MISMATCH")
                 continue
             summary = it["summary"]
-            if len(summary) < 100:
+            if len(summary) < 100 and not src.get("no_page_fetch"):
                 summary = _fetch_source_excerpt(article_url)
             if len(summary) < 100:
                 _count(drops, "SHORT_SUMMARY")
                 continue
             kept.append({"title": title, "source": publisher or src["name"],
                          "link": article_url, "publisher_domain": publisher_host,
-                         "summary": summary, "published": pub})
+                         "summary": summary, "published": pub,
+                         "notice": src.get("notice"), "prompt_rule": src.get("prompt_rule")})
         kept.sort(key=lambda x: x["published"] or EPOCH, reverse=True)
         line = f"  소스 {src['name']}: {len(parsed)}건 중 {len(kept)}건 사용"
         if drops:
@@ -1076,6 +1131,7 @@ def build_post_prompt(item, recent_titles, category_hint="", allow_skip=False,
                    "- 제목·저자·학술지명·DOI·통계·인용문이나 출처를 추정해 만들지 마세요. 근거가 부족하면 skip을 반환하세요.\n"
                    if item and item.get("link") and item.get("source") else
                    "- 검증된 출처가 없으면 글을 만들지 말고 skip을 반환하세요.\n")
+    extra_rule = f"- {item['prompt_rule']}\n" if item and item.get("prompt_rule") else ""
     hint = f"[카테고리 힌트] {category_hint}\n" if category_hint else ""
     editorial_template = load_editorial_template()
     return f"""
@@ -1102,7 +1158,7 @@ def build_post_prompt(item, recent_titles, category_hint="", allow_skip=False,
 - 관용적인 AI 문구, 중요성을 부풀리는 표현, 반복되는 요약, 억지로 넣은 3단 나열은 덜어내세요. 자연스러움은 구체적인 근거와 명료한 문장에서 나오게 하세요. 오탈자·속어·가짜 개인 경험을 추가하거나 AI 사용 사실을 숨기려 하지 마세요.
 - 한국어/영어 글은 각 언어에 자연스럽게 쓰고 단순 직역은 피하세요.
 - 확인되지 않은 수치, 인용문, 발표 사실을 지어내지 마세요. 기사 문장을 그대로 옮기지 마세요.
-{source_rule}- 본문은 충분한 설명과 분석을 포함하고 Markdown으로 작성하세요.
+{source_rule}{extra_rule}- 본문은 충분한 설명과 분석을 포함하고 Markdown으로 작성하세요.
 - 각 글의 Front Matter에 layout, title, category, tags, lang을 포함하세요.
 - image는 쓰지 마세요. 대표 이미지는 시스템이 따로 채웁니다.
 - image_queries: 이 글의 대표 이미지를 Unsplash에서 찾을 영어 검색어 3개.
@@ -1246,6 +1302,18 @@ def _description_from_markdown(content, max_chars=155):
     return ""
 
 
+def _append_source_notice(content, notice):
+    """소스 약관이 요구하는 고지문(AI 작성·검토 안 받음)을 글 끝에 덧붙인다. 글 언어(한글 포함 여부)에 맞춰 ko/en 을 고르고, 이미 있으면 다시 붙이지 않는다."""
+    if not isinstance(notice, dict):
+        return content
+    body_match = re.match(r"\A---\s*\n.*?\n---\s*\n(.*)\Z", content, re.S)
+    body = body_match.group(1) if body_match else content
+    text = str(notice.get("ko" if re.search(r"[가-힣]", body) else "en") or "").strip()
+    if not text or text in content:
+        return content
+    return content.rstrip() + f"\n\n*{text}*\n"
+
+
 def add_discovery_metadata(content, source=None):
     description = _description_from_markdown(content)
     if description:
@@ -1263,6 +1331,7 @@ def add_discovery_metadata(content, source=None):
             if source_url not in body:
                 heading = "\n\n## 출처\n" if re.search(r"[가-힣]", body) else "\n\n## Sources\n"
                 content = content.rstrip() + f"{heading}- [{source['source']}: {source.get('title', '원문 기사')}]({source_url})\n"
+        content = _append_source_notice(content, source.get("notice"))
     return content
 
 

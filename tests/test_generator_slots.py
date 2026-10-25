@@ -7,6 +7,7 @@ import io
 import json
 import os
 import random
+import re
 import subprocess
 import sys
 import tempfile
@@ -17,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 from email.utils import format_datetime
 from pathlib import Path
 from unittest import mock
+from xml.sax.saxutils import escape
 
 import _bootstrap  # noqa: F401
 import generator as g
@@ -56,13 +58,14 @@ class FakeResponse:
 
 
 def rss(items):
-    """items: (title, link, published_dt, summary, publisher_url) 목록 → RSS 바이트."""
+    """items: (title, link, published_dt, summary, publisher_url[, 분류 태그 목록]) 목록 → RSS 바이트."""
     body = ""
-    for title, link, published, summary, publisher_url in items:
+    for title, link, published, summary, publisher_url, *rest in items:
         source = f'<source url="{publisher_url}">pub</source>' if publisher_url else ""
+        categories = "".join(f"<category>{escape(c)}</category>" for c in (rest[0] if rest else ()))
         body += (f"<item><title>{title}</title><link>{link}</link>"
                  f"<pubDate>{format_datetime(published)}</pubDate>"
-                 f"<description>{summary}</description>{source}</item>")
+                 f"<description>{summary}</description>{source}{categories}</item>")
     return f"<?xml version='1.0'?><rss><channel>{body}</channel></rss>".encode("utf-8")
 
 
@@ -437,6 +440,64 @@ class FetchNewsStatsTest(unittest.TestCase):
         items = [("오늘 날씨", "https://www.reuters.com/w", self.fresh(), summary, "")]
         merged, stats, out = self.run_fetch(items, sources=sources)
         self.assertEqual(stats["sources"][0]["drops"], {"NOT_TECH": 1})
+
+    def test_exclude_title_regex_drops_are_counted_as_excluded(self):
+        summary = "요약 문장입니다. " * 20
+        sources = [{"name": "제외형", "lane": "economy", "url": self.FEED, "exclude_title": r"^APOD\b|\bquiz\b"}]
+        items = [("APOD: 오늘의 사진", "https://www.reuters.com/a", self.fresh(), summary, ""),
+                 ("Take our Quiz", "https://www.reuters.com/b", self.fresh(), summary, ""),
+                 ("통과 기사", "https://www.reuters.com/c", self.fresh(), summary, "")]
+        merged, stats, out = self.run_fetch(items, sources=sources)
+        self.assertEqual([m["title"] for m in merged], ["통과 기사"])
+        self.assertEqual(stats["sources"][0]["drops"], {"EXCLUDED": 2})
+        self.assertIn("EXCLUDED 2", out)
+
+    def test_topic_regex_looks_at_the_title_and_the_feed_categories(self):
+        summary = "요약 문장입니다. " * 20
+        sources = [{"name": "혼합 피드", "lane": "economy", "url": self.FEED, "topic_regex": r"social media|\bnews\b"}]
+        items = [("제목에는 없는 기사", "https://www.reuters.com/a", self.fresh(), summary, "", ("Social Media",)),
+                 ("Where people get news", "https://www.reuters.com/b", self.fresh(), summary, ""),
+                 ("전혀 다른 기사", "https://www.reuters.com/c", self.fresh(), summary, "", ("Politics",))]
+        merged, stats, out = self.run_fetch(items, sources=sources)
+        self.assertEqual(sorted(m["title"] for m in merged), ["Where people get news", "제목에는 없는 기사"])
+        self.assertEqual(stats["sources"][0]["drops"], {"OFF_TOPIC": 1})
+
+    def test_feed_categories_are_parsed_from_rss_and_atom(self):
+        data = (b"<rss><channel><item><title>t</title><link>https://a.test/1</link>"
+                b"<category>Social Media</category><category> </category><category>AI</category></item></channel></rss>")
+        self.assertEqual(g.parse_feed(data)[0]["categories"], ["Social Media", "AI"])
+        atom = (b"<feed xmlns='http://www.w3.org/2005/Atom'><entry><title>t</title><link href='https://a.test/1'/>"
+                b"<category term='Science'/></entry></feed>")
+        self.assertEqual(g.parse_feed(atom)[0]["categories"], ["Science"])
+
+    def run_short_summary_fetch(self, source_extra):
+        sources = [dict({"name": "짧은 요약 소스", "lane": "economy", "url": self.FEED}, **source_extra)]
+        items = [("요약이 짧은 기사", "https://www.reuters.com/a", self.fresh(), "짧음", "")]
+        stats = {}
+        with mock.patch.object(g, "NEWS_SOURCES", sources), \
+                mock.patch.object(g.urllib.request, "urlopen", lambda req, timeout=0: FakeResponse(rss(items))), \
+                mock.patch.object(g, "_fetch_source_excerpt", return_value="긴 요약 문장입니다. " * 20) as excerpt:
+            merged, _ = run_captured(g.fetch_news_items, "economy", stats=stats)
+        return merged, stats, excerpt
+
+    def test_no_page_fetch_source_never_reads_the_article_page(self):
+        merged, stats, excerpt = self.run_short_summary_fetch({"no_page_fetch": True})
+        excerpt.assert_not_called()
+        self.assertEqual(merged, [])
+        self.assertEqual(stats["sources"][0]["drops"], {"SHORT_SUMMARY": 1})
+
+    def test_other_sources_still_read_the_page_when_the_summary_is_short(self):
+        merged, stats, excerpt = self.run_short_summary_fetch({})
+        excerpt.assert_called_once()
+        self.assertEqual([m["title"] for m in merged], ["요약이 짧은 기사"])
+
+    def test_notice_and_prompt_rule_travel_with_the_item(self):
+        summary = "요약 문장입니다. " * 20
+        notice = {"ko": "고지", "en": "notice"}
+        sources = [{"name": "고지 소스", "lane": "economy", "url": self.FEED, "notice": notice, "prompt_rule": "규칙"}]
+        items = [("통과 기사", "https://www.reuters.com/a", self.fresh(), summary, "")]
+        merged, stats, out = self.run_fetch(items, sources=sources)
+        self.assertEqual((merged[0]["notice"], merged[0]["prompt_rule"]), (notice, "규칙"))
 
     def test_failed_source_is_recorded_not_hidden(self):
         sources = [{"name": "죽은 소스", "lane": "economy", "url": "https://dead.test/feed"}]
@@ -1193,18 +1254,193 @@ class IntEnvTest(unittest.TestCase):
                 self.assertEqual(g._int_env("X_TEST_INT", 7), expected)
 
 
+class SourceNoticeTest(unittest.TestCase):
+    """소스 약관이 요구하는 고지문과 글 작성 지침 한 줄이 글과 프롬프트에 정확히 들어가는지."""
+    LINK = "https://www.nasa.gov/a"
+    NOTICE = {"ko": "고지문 한국어입니다.", "en": "English notice sentence."}
+
+    def source(self, notice="기본"):
+        return {"title": "원문 제목", "source": "NASA", "link": self.LINK, "publisher_domain": "www.nasa.gov",
+                "notice": self.NOTICE if notice == "기본" else notice}
+
+    @staticmethod
+    def post(body):
+        return f"---\nlayout: post\ntitle: \"t\"\n---\n\n{body}\n"
+
+    def test_korean_post_gets_the_korean_notice_at_the_very_end(self):
+        body = f"본문입니다. [원문]({self.LINK})\n\n## 출처\n- [NASA]({self.LINK})"
+        content = g.add_discovery_metadata(self.post(body), self.source())
+        self.assertTrue(content.endswith("\n\n*고지문 한국어입니다.*\n"), content[-80:])
+        self.assertNotIn("English notice", content)
+
+    def test_english_post_gets_the_english_notice(self):
+        body = f"Body text. [source]({self.LINK})\n\n## Sources\n- [NASA]({self.LINK})"
+        content = g.add_discovery_metadata(self.post(body), self.source())
+        self.assertTrue(content.endswith("\n\n*English notice sentence.*\n"), content[-80:])
+        self.assertNotIn("한국어", content)
+
+    def test_the_notice_is_added_only_once(self):
+        once = g.add_discovery_metadata(self.post(f"본문입니다. [원문]({self.LINK})"), self.source())
+        twice = g.add_discovery_metadata(once, self.source())
+        self.assertEqual(once, twice)
+        self.assertEqual(twice.count("고지문 한국어입니다."), 1)
+
+    def test_a_source_without_a_notice_changes_nothing(self):
+        plain = self.post(f"본문입니다. [원문]({self.LINK})")
+        for notice in (None, "문자열은 무시", {"ko": ""}):
+            with self.subTest(notice=notice):
+                content = g.add_discovery_metadata(plain, self.source(notice))
+                self.assertNotIn("고지", content)
+                self.assertFalse(content.rstrip().endswith("*"))
+
+    def test_prompt_rule_is_in_the_prompt_only_for_the_source_that_has_it(self):
+        with_rule = g.build_post_prompt(dict(candidate(), prompt_rule="규칙 한 줄 XYZ"), [], editorial_lane="science")
+        self.assertIn("\n- 규칙 한 줄 XYZ\n", with_rule)
+        self.assertNotIn("XYZ", g.build_post_prompt(candidate(), [], editorial_lane="science"))
+
+
+class SourceRuleSamplesTest(unittest.TestCase):
+    """2026-10-26 에 실제 피드에서 받은 제목으로 소스별 제외·주제 규칙을 고정한다(피드가 바뀌면 규칙도 다시 본다)."""
+
+    @staticmethod
+    def rules(name):
+        src = next(s for s in g.NEWS_SOURCES if s["name"] == name)
+        return (re.compile(src["exclude_title"], re.I) if src.get("exclude_title") else None,
+                re.compile(src["topic_regex"], re.I) if src.get("topic_regex") else None)
+
+    def kept(self, name, title, categories=()):
+        exclude, topic = self.rules(name)
+        if exclude and exclude.search(title):
+            return False
+        return not topic or bool(topic.search(" ".join([title, *categories])))
+
+    def test_nasa_skips_apod_and_media_invites_only(self):
+        for title in ("APOD: 2026 October 25 – Dark Matter in a Simulated Universe",
+                      "NASA Invites Media to 2026 von Braun Space Exploration Symposium"):
+            self.assertFalse(self.kept("NASA", title), title)
+        for title in ("NASA, Partners Accelerate Lander Development for 2028 Moon Missions",
+                      "NASA’s Swift Mission Ends, Leaves Behind Scientific Bonanza",
+                      "NASA’s Artemis III Mission to Test Future Moon Lander Operations",
+                      "El Niño Then and Now", "RS-25 Engine Tests at NASA Stennis"):
+            self.assertTrue(self.kept("NASA", title), title)
+
+    def test_un_news_skips_the_roundups_only(self):
+        self.assertFalse(self.kept("UN News", "World News in Brief: Iran nuclear inspections, deadly church attack in Jordan"))
+        for title in ("UN marks 81 years of global cooperation",
+                      "Soil mapping aims to boost agricultural production in Kenya",
+                      "Mothers get nearly eight times more paid leave than fathers – and women pay the price"):
+            self.assertTrue(self.kept("UN News", title), title)
+
+    def test_federal_reserve_skips_enforcement_and_application_orders(self):
+        for title in ("Federal Reserve Board announces termination of enforcement actions with Gardner Bancshares",
+                      "Federal Reserve Board announces enforcement action against American Express Company",
+                      "Federal Reserve Board announces approval of application by Isabella Bank Corporation"):
+            self.assertFalse(self.kept("Federal Reserve", title), title)
+        for title in ("Federal Reserve issues FOMC statement",
+                      "Minutes of the Federal Open Market Committee, September 15-16, 2026",
+                      "Federal Reserve Board releases results of the 2025 Survey of Consumer Finances"):
+            self.assertTrue(self.kept("Federal Reserve", title), title)
+
+    def test_pew_keeps_media_and_online_topics_and_drops_politics_quizzes_and_report_stubs(self):
+        cases = [
+            ("Growing Share of Americans Say Social Media Is an Important News Source for Them", ("Social Media",), True),
+            ("1 in 5 Americans Regularly Get News on TikTok", ("Social Media", "TikTok"), True),
+            ("Americans’ Use of Social Media in 2026", ("Social Media",), True),
+            ("Where Americans are getting their news in the digital age", (), True),
+            ("Online Communities Rarely Focus on Politics, and Many Say It Should Stay That Way", ("Friendships", "Online Services"), True),
+            ("News Platform Fact Sheet", ("News Platforms & Sources",), True),
+            ("🔎 What’s your civic personality? Take our quiz", (), False),
+            ("Quiz: What Is Your Civic Personality?", ("News Habits & Media",), False),
+            ("Acknowledgments", ("Election 2026",), False),
+            ("Methodology", ("Election 2026",), False),
+            ("Additional charts", (), False),
+            ("Few Americans Say They Are Asking AI Chatbots for 2026 Election Information", ("Artificial Intelligence", "Election 2026"), False),
+            ("Americans’ mood before the election", (), False),
+            ("How U.S. Voters View Mail and Absentee Balloting", ("Election 2026",), False),
+            ("Pace of Trump’s Judicial Appointments Has Slowed in His Second Term", ("Criminal Justice", "Supreme Court"), False),
+            ("Women, Work and Caregiving Through the Arc of Family Life", ("Family Caregiving", "Uncategorized"), False),
+        ]
+        for title, categories, expected in cases:
+            with self.subTest(title=title):
+                self.assertEqual(self.kept("Pew Research Center", title, categories), expected)
+
+
 class SourceListTest(unittest.TestCase):
+    # 일상·마음: 약관상 쓸 수 있는 직접 RSS를 아직 찾지 못해 소스가 없다(docs/analysis/2026-10-25_publish-readiness.md §3-1).
+    # 소스를 더하면 여기서 뺀다. 이 분야가 뽑히면 후보가 없어 다음 분야로 넘어간다.
+    LANES_WITHOUT_SOURCES = {"daily_life"}
+    # 약관을 아직 읽지 못한 기존 소스(유예). 새 소스는 allowed 만 늘린다 — 읽고 allowed 로 올리거나 목록에서 빼서 줄이기만 한다.
+    LEGACY_UNVERIFIED = {"TechCrunch", "The Verge", "Ars Technica", "IEEE Spectrum", "Hacker News", "AI타임스", "전자신문"}
+
     def test_dead_bloter_feed_is_gone(self):
         self.assertNotIn("블로터", [s["name"] for s in g.NEWS_SOURCES])
         self.assertFalse(any("bloter.net/feed" in s["url"] for s in g.NEWS_SOURCES))
 
-    def test_every_lane_has_at_least_one_source(self):
+    def test_every_lane_has_a_source_except_the_known_gap(self):
         lanes = {s.get("lane") for s in g.NEWS_SOURCES}
-        self.assertEqual(lanes, set(g.EDITORIAL_LANES))
+        self.assertTrue(lanes <= set(g.EDITORIAL_LANES), lanes - set(g.EDITORIAL_LANES))
+        self.assertEqual(set(g.EDITORIAL_LANES) - lanes, self.LANES_WITHOUT_SOURCES)
+
+    def test_google_news_sources_are_gone(self):
+        self.assertEqual([s["name"] for s in g.NEWS_SOURCES
+                          if s.get("google") or "news.google.com" in s["url"] or s["name"].startswith("Google")], [])
+
+    def test_approved_sources_are_in_the_lanes_the_overhaul_gave_them(self):
+        lanes = {s["name"]: s["lane"] for s in g.NEWS_SOURCES}
+        self.assertEqual({name: lanes.get(name) for name in ("NASA", "UN News", "Pew Research Center", "Federal Reserve")},
+                         {"NASA": "science", "UN News": "society", "Pew Research Center": "culture",
+                          "Federal Reserve": "economy"})
+
+    def test_every_source_declares_its_terms_status(self):
+        for src in g.NEWS_SOURCES:
+            with self.subTest(source=src["name"]):
+                terms = src.get("terms")
+                self.assertIsInstance(terms, dict)
+                self.assertIn(terms.get("status"), {"allowed", "unverified"})
+                if terms["status"] == "allowed":
+                    self.assertRegex(terms.get("checked", ""), r"^\d{4}-\d{2}-\d{2}$")
+                    self.assertTrue(terms.get("url", "").startswith("https://"))
+
+    def test_unverified_sources_cannot_grow(self):
+        unverified = {s["name"] for s in g.NEWS_SOURCES if s["terms"]["status"] == "unverified"}
+        self.assertTrue(unverified <= self.LEGACY_UNVERIFIED, unverified - self.LEGACY_UNVERIFIED)
+
+    def test_terms_blocked_publishers_are_in_no_source_and_no_trust_list(self):
+        for domain in ("bbc.com", "bbc.co.uk", "theguardian.com", "nature.com", "technologyreview.com"):
+            self.assertIn(domain, g.TERMS_BLOCKED_DOMAINS)
+        for lane, domains in g.TRUSTED_SOURCE_DOMAINS.items():
+            for domain in domains:
+                self.assertFalse(g._host_in(domain, g.TERMS_BLOCKED_DOMAINS), f"{lane}: {domain}")
+        for src in g.NEWS_SOURCES:
+            self.assertFalse(g._host_in(g._host(src["url"]), g.TERMS_BLOCKED_DOMAINS), src["name"])
+
+    def test_a_blocked_domain_is_refused_even_if_someone_adds_it_to_a_trust_list(self):
+        widened = {**g.TRUSTED_SOURCE_DOMAINS,
+                   "technology": g.TRUSTED_SOURCE_DOMAINS["technology"] + ("bbc.co.uk", "technologyreview.com")}
+        with mock.patch.object(g, "TRUSTED_SOURCE_DOMAINS", widened):
+            self.assertFalse(g._trusted_domain("www.bbc.co.uk", "technology"))
+            self.assertFalse(g._trusted_domain("www.technologyreview.com", "technology"))
+            self.assertTrue(g._trusted_domain("arstechnica.com", "technology"))
+
+    def test_each_allowed_source_publisher_is_trusted_in_its_own_lane(self):
+        for src in g.NEWS_SOURCES:
+            if src["terms"]["status"] == "allowed":
+                self.assertTrue(g._trusted_domain(g._host(src["url"]), src["lane"]), src["name"])
+        for host, lane in (("science.nasa.gov", "science"), ("news.un.org", "society")):
+            self.assertTrue(g._trusted_domain(host, lane), host)
+
+    def test_source_regexes_compile_and_notices_cover_both_languages(self):
+        for src in g.NEWS_SOURCES:
+            for key in ("exclude_title", "topic_regex"):
+                if src.get(key):
+                    re.compile(src[key], re.I)
+            if src["terms"]["status"] == "allowed":
+                self.assertEqual(sorted(src["notice"]), ["en", "ko"], src["name"])
+                self.assertTrue(all(src["notice"].values()), src["name"])
 
     def test_every_drop_code_has_a_label(self):
-        for code in ("NO_TITLE", "NOT_TECH", "AGE", "UNTRUSTED", "UNCHECKED", "UNRESOLVED",
-                     "HOST_MISMATCH", "SHORT_SUMMARY", "DUPLICATE"):
+        for code in ("NO_TITLE", "NOT_TECH", "EXCLUDED", "OFF_TOPIC", "AGE", "UNTRUSTED", "UNCHECKED",
+                     "UNRESOLVED", "HOST_MISMATCH", "SHORT_SUMMARY", "DUPLICATE"):
             self.assertIn(code, g.DROP_LABELS)
 
     def test_every_outcome_the_engine_can_report_has_a_text(self):

@@ -7,6 +7,54 @@
 
 ---
 
+## [2026-10-26] Claude – Chance 출처 개편: 구글 뉴스 14개·MIT TR·BBC Technology 제거, NASA·UN News·Pew·Federal Reserve 추가, 약관 점검 필드·차단 목록·고지문 (운영자 승인 2026-10-26, PR #27)
+
+**작업자**: Claude (총괄이 구현, 검증은 별도 세션)
+**대상**: Chance
+**등급**: T2(소스 개편 코드), 신뢰 목록·출처 정책은 T3 — 운영자가 2026-10-26 채팅으로 승인("Chance 출처 개편을 진행해줘: 구글 뉴스 14개 제거, NASA·UN News·Pew·Federal Reserve 추가, BBC·Guardian·Nature 제외, MIT TR·BBC Technology는 약관 점검 뒤 결정")
+**목적**: 비기술 5개 분야 후보가 0이던 원인(구글 뉴스 링크가 게시자 원문으로 풀리지 않음 — 14개 소스 통과율 0.4%, 신뢰 목록에 비기술 직접 소스 없음)을 없애고, 약관이 이 용도를 막는 매체를 더는 쓰지 않는다
+
+### 변경
+- `generator.py`: `NEWS_SOURCES`에서 구글 뉴스 14개·MIT Technology Review·BBC Technology 삭제, NASA(과학)·UN News(사회)·Pew Research Center(문화)·Federal Reserve(경제) 추가, 기존 기술 소스 7곳은 `terms: unverified`(유예). 신뢰 목록에서 BBC·Guardian·Nature·technologyreview.com 삭제, `TERMS_BLOCKED_DOMAINS`(+ `_trusted_domain` 거부)로 재유입 차단. 새 탈락 코드 `EXCLUDED`·`OFF_TOPIC`, 피드 분류 태그 읽기, 소스별 `exclude_title`·`topic_regex`·`no_page_fetch`·`notice`(글 끝 고지문)·`prompt_rule`(작성 지침 한 줄)
+- 시험(`tests/test_generator_slots.py`): 소스 목록 불변식(약관 상태 선언·`unverified` 증가 금지·차단 도메인 부재·구글 뉴스 부재·분야별 소스), 소스별 제외·주제 규칙을 실제 피드 제목으로 고정, 제외·주제·페이지 읽기 금지·고지문·작성 지침 동작
+- 문서: ARCHITECTURE(소스 표·탈락 코드), ACTIONS_GUIDE(코드표), DEFECT_REGISTER(D-60~D-63, 관측 체크리스트), SESSION_START·HANDLER·REQUEST_BRIEFING·작업요청 README(현황)
+
+### 약관 점검 결과 (2026-10-26에 공식 약관을 직접 읽음, 법률 판단이 아님)
+| 소스 | 읽은 곳 | 요지 | 결정 |
+|------|---------|------|------|
+| MIT Technology Review | 이용약관(2023-09-06판) | 복제·수정·재게시 금지, 상업적 이용·파생물 금지, AI 이용은 사전 서면 동의, 로봇·스크래퍼 금지, 허용은 건별 허가 | **제외**(운영자 위임 결정) |
+| BBC(BBC Technology 포함) | 이용약관 v1.8(2022-09-19) §8·§15 | RSS 사업 이용은 허가·수수료, RSS·콘텐츠의 메타데이터 가져오기 금지(개인 사이트에 BBC News RSS를 그대로 게시하는 것만 조건부 허용), AI 학습·컴퓨터 분석은 허가 | **제외** |
+| Guardian·Nature | 2026-10-25 진단 | 사전 승인 없는 상업적 이용 금지 등 | **제외**(운영자 지시) |
+| NASA | 이미지·미디어 이용 안내(2026-08-13 갱신) | 미국에서 일반적으로 저작권 없음·NASA를 출처로 표기·제3자 자료와 로고는 별도. **AI 이용: AI 결과물의 정보를 NASA에 직접 귀속하는 것은 허용되지 않음, "AI 도구가 NASA 자료를 포함한다"고 밝히는 것은 가능, 검토·승인을 암시하지 말 것** | allowed + 작성 지침·고지문 |
+| UN News | UN News 이용 안내(날짜 없음), UN 저작권·웹 TV 안내 | "사용·소개·재가공 환영", UN News 표기와 링크, 사진·그래픽·오디오·영상은 저작권 준수. UN 쪽 안내에 유엔에 알린다는 조건이 있다 | allowed + 고지문(알림은 운영자) |
+| Pew Research Center | 이용약관(2018-05-25 시행) | 출처 표기(보고서명·Pew Research Center·날짜·주소), 번역물은 "검토·승인하지 않았다" 면책, 견해 지지 암시 금지, 허가 없는 스크래핑 금지 | allowed + 고지문·작성 지침·기사 페이지 읽지 않음 |
+| Federal Reserve | 웹사이트 안내(2024-08-02 표시) | 정보는 공공 영역·출처를 밝힐 것, 제3자 자료·로고·휘장은 별도 | allowed + 고지문 |
+| AI타임스(기존 소스) | 저작권보호정책(날짜 없음) | 승낙 없는 복제·출판·전송·배포·판매·변형 금지, 허용 시 출처 표시. RSS·AI 이용 조항 없음 | **불명확** — 유예(`unverified`) 유지, 허가 문의 추천 |
+| 전자신문(기존 소스) | 이용약관(2012.09.01 표기) | 제공 정보의 영리 목적 이용 금지(회원 대상), 복제·전송·배포는 사전 승낙 필요. RSS·AI 이용 조항 없음 | **불명확** — 유예 유지, 허가 문의 추천 |
+| TechCrunch·The Verge·Ars Technica·IEEE Spectrum·Hacker News | 읽지 못함(이 환경에서 접속이 막히거나 페이지를 못 찾음) | — | 미확인 — 유예 유지 |
+
+### 피드 실측 (2026-10-26 07:21 KST, 이 PC에서 읽기 전용)
+| 피드 | 항목 | 36시간 안 | 7일 안 | 비고 |
+|------|------|-----------|--------|------|
+| NASA `nasa.gov/feed/` | 10 | 1(APOD, 제외 대상) | 10 | 항목 호스트 `science.nasa.gov`·`www.nasa.gov`, `/news-release/feed/`는 같은 내용 |
+| UN News 전체 RSS | 30 | 1 | 30 | 요약 116~279자 |
+| Pew `pewresearch.org/feed/` | 100 | 0 | 22 | 분류 태그가 풍부하고 선거·정치 비중이 크다. 퀴즈·보고서 부속 쪽(감사의 글·조사 방법)이 섞여 있다 |
+| Federal Reserve `press_all.xml` | 20 | 0 | 0 | 가장 최근 항목이 9일 전, 요약 100자 미만 10건이나 기사 페이지 발췌로 모두 통과 |
+
+주말 직후라 36시간 안 후보가 거의 없는 시점이다. 평일 공급은 병합 뒤 며칠 관측한다(D-62).
+
+### 검증
+- 전체 시험 1740개 통과(`python -m unittest discover -s tests`), `python scripts/validate_repo.py` 오류 0·경고 2(main과 동일).
+- 독립 검증: 병합 전 별도 세션(새 clone·diff와 직접 실행만 근거)이 한다 — 결과는 이 항목에 덧붙인다.
+
+### 못 한 검증·관측 대기·다음 AI 주의사항
+- **러너 IP에서의 피드 접근**은 병합 뒤 첫 실행에서만 확인된다(`수집 실패`가 보이면 그 소스만 건너뛴다). 이 PC에서는 4개 피드 모두 HTTP 200이었다.
+- **미결정(T3, `docs/SESSION_START.md` §6 12~14번)**: 2026-10-21 공개된 MIT TR 출처 글 1쌍 처리(D-60), 경제·일·일상·마음 공급(신선도 창 완화 또는 소스 추가, D-62), 기술 소스 7곳의 약관 점검과 처리(D-61).
+- **운영자 몫**: UN News에 이용 사실 알리기(D-63).
+- 이 PR이 하지 않은 것: 모델 목록(3.7 제거)·Blogger·사이트 정리·예약 틱 — 승인 대기 그대로. 구글 뉴스 해석 코드(`google` 키)는 쓰는 소스가 없지만 시험이 있어 남겼다.
+
+---
+
 ## [2026-10-25] Claude – 총괄 하루 기록: 발행 복구 병합 총정리·진단과 AI 검색 노출 조사·확인 필요 모음 도입·세션 인수인계 문서 (운영자 승인 11건 반영, 총괄)
 
 **작업자**: Claude (총괄 역할, 구현·검증은 별도 세션)  
