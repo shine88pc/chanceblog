@@ -92,6 +92,23 @@ class TextNeutralizationTest(unittest.TestCase):
         for secret in (token, google, "abc123def"):
             self.assertNotIn(secret, text)
 
+    def test_every_bidi_control_is_removed_and_neighbouring_characters_are_kept(self):
+        controls = [0x200E, 0x200F, *range(0x202A, 0x202F), *range(0x2066, 0x206A)]
+        for code in controls:
+            self.assertEqual(inbox.fold("a" + chr(code) + "b"), "ab", hex(code))
+        for code in (0x200B, 0x200C, 0x200D, 0x2010, 0x2065, 0x206A):      # 이모지 접합자·하이픈 등 가장자리 바깥은 그대로 둔다
+            self.assertIn(chr(code), inbox.fold("a" + chr(code) + "b"), hex(code))
+        self.assertEqual(inbox.fold("a" + chr(0x202F) + "b"), "a b")        # 좁은 줄바꿈 없는 공백은 지우지 않고 공백으로 접힌다
+
+    def test_replacement_characters_are_the_fullwidth_forms(self):
+        self.assertEqual(inbox.safe_text("@<&"), chr(0xFF20) + chr(0xFF1C) + chr(0xFF06))
+        self.assertEqual(inbox.ext("[]`"), chr(0xFF3B) + chr(0xFF3D) + "'")
+
+    def test_default_length_limits(self):
+        self.assertEqual(len(inbox.safe_text("x" * 1000)), 300)
+        self.assertEqual(len(inbox.ext("x" * 1000)), 120)
+        self.assertEqual(len(inbox._slug("a" * 100)), 48)
+
     def test_text_that_exactly_fits_is_not_clipped(self):
         self.assertEqual(inbox.safe_text("가" * 10, 10), "가" * 10)
         self.assertEqual(inbox.ext("가" * 10, 10), "가" * 10)
@@ -221,6 +238,10 @@ class WatchdogItemsTest(unittest.TestCase):
             self.assertNotIn("::", text)
             self.assertNotIn("](", text)
 
+    def test_message_is_found_when_it_is_the_last_paragraph(self):
+        issue = h.make_issue(13, "[Watchdog] x: Y", "**심각도**: warning\n\n마지막 문단이 설명입니다")
+        self.assertIn("마지막 문단이 설명입니다", one(self.build([issue])).detail)
+
     def test_message_without_following_paragraph_falls_back(self):
         issue = h.make_issue(8, "[Watchdog] x: Y", "**심각도**: critical", labels=("watchdog",))
         self.assertIn("이슈 본문을 확인하세요", one(self.build([issue])).detail)
@@ -337,6 +358,16 @@ class PullItemsTest(unittest.TestCase):
         self.assertEqual((item.id, item.level), ("pr:24:unknown", "check"))
         self.assertIn("HTTP 502", item.detail)
 
+    def test_the_lookup_failure_text_is_used_only_for_a_failed_unknown_state(self):
+        plain = one(self.build(h.make_pull(40, ci="pass", mergeable=None, state="unknown")))
+        self.assertIn("병합 가능 여부를 아직 알 수 없습니다", plain.detail)
+        self.assertNotIn("조회하지 못했습니다", plain.detail)
+        failed_stranger = inbox.normalize_pull(h.make_pull_raw(41, fork=True, assoc="NONE"), None, None, error="HTTP 502")
+        item = one(self.build(failed_stranger))
+        self.assertEqual(item.id, "pr:41:external")
+        self.assertIn("직접 읽기", item.detail)
+        self.assertNotIn("조회하지 못했습니다", item.detail)
+
     def test_draft_pull_requests_are_skipped(self):
         self.assertEqual(self.build(h.make_pull(25, draft=True)), [])
 
@@ -446,6 +477,12 @@ class RunFailureTest(unittest.TestCase):
         item = one(self.build(runs))
         self.assertIn("연속 3회", item.detail)
         self.assertEqual(item.since, NOW - timedelta(hours=5))
+
+    def test_two_failures_in_a_row_are_already_a_streak(self):
+        runs = runs_for("a.yml", h.make_run(2, ago(hours=1), "failure"), h.make_run(1, ago(hours=3), "failure"))
+        item = one(self.build(runs))
+        self.assertIn("연속 2회", item.detail)
+        self.assertEqual(item.since, NOW - timedelta(hours=3))
 
     def test_single_failure_has_no_streak_text(self):
         item = one(self.build(runs_for("a.yml", h.make_run(1, ago(hours=1), "failure"))))
@@ -682,6 +719,11 @@ class PlatformNoticeTest(unittest.TestCase):
         self.assertEqual(items["run:a.yml:warn"].level, "check")
         self.assertEqual(items["run:platform_notice"].level, "info")
 
+    def test_exactly_four_workflows_need_no_remainder(self):
+        item = one(self.items(files=tuple(f"w{n}.yml" for n in range(4)), runs_each=1))
+        self.assertNotIn("외", item.detail.split("예:")[0])
+        self.assertEqual(item.detail.count(" 이름"), 4)
+
     def test_workflow_names_are_limited_to_four_with_the_rest_counted(self):
         item = one(self.items(files=tuple(f"w{n}.yml" for n in range(6)), runs_each=1))
         self.assertIn("외 2개", item.detail)
@@ -755,6 +797,16 @@ class ApprovalItemsTest(unittest.TestCase):
         self.assertIn("3건 더", items[-1].title)
         self.assertEqual(len([i for i in items if i.id != "approve:more"]), 5)
 
+    def test_at_most_three_workflow_names_are_listed_per_commit(self):
+        runs = [self.pending(n, name=f"검사 {n}") for n in range(1, 5)]
+        detail = one(inbox.approval_items(runs, URL)).detail
+        self.assertEqual(sum(f"검사 {n}" in detail for n in range(1, 5)), 3)
+
+    def test_exactly_five_waiting_commits_need_no_summary_item(self):
+        items = inbox.approval_items([self.pending(n, sha=str(n) * 40) for n in range(1, 6)], URL)
+        self.assertEqual(len(items), 5)
+        self.assertNotIn("approve:more", [i.id for i in items])
+
     def test_oldest_waiting_commits_are_shown_first(self):
         runs = [self.pending(1, sha="1" * 40, created=ago(hours=1)), self.pending(2, sha="2" * 40, created=ago(hours=9))]
         self.assertEqual([i.id for i in inbox.approval_items(runs, URL)], ["approve:2222222", "approve:1111111"])
@@ -798,6 +850,11 @@ class EntryMomentTest(unittest.TestCase):
     def test_generated_at_beats_date_and_slot(self):
         entry = {"generated_at": "2026-10-25T01:00:00Z", "date": "2026-10-01", "slot": 18}
         self.assertEqual(inbox.entry_moment(entry)[1], "time")
+
+    def test_date_with_a_time_suffix_still_gives_the_day_and_slot_edges_are_valid(self):
+        self.assertEqual(inbox.entry_moment({"date": "2026-10-25T09:00:00+09:00"}), (datetime(2026, 10, 25, tzinfo=KST), "date"))
+        self.assertEqual(inbox.entry_moment({"date": "2026-10-25", "slot": 0}), (datetime(2026, 10, 25, 0, tzinfo=KST), "slot"))
+        self.assertEqual(inbox.entry_moment({"date": "2026-10-25", "slot": 23}), (datetime(2026, 10, 25, 23, tzinfo=KST), "slot"))
 
     def test_bad_values_are_ignored(self):
         for entry in (None, "문자열", 5, {}, {"date": "어제"}, {"date": ""}, {"generated_at": "x"}):
@@ -847,6 +904,12 @@ class BlogSecretsItemTest(unittest.TestCase):
         item = one(self.build([self.unpublished(6)], h.make_blog(secrets={"blog_id": "BLOGGER_BLOG_ID"})))
         self.assertNotIn("=", " ".join((item.title, item.detail, item.hint, item.url)))
         self.assertIn("BLOGGER_BLOG_ID", item.detail)
+
+    def test_a_blog_without_a_secrets_mapping_still_gets_a_generic_item(self):
+        blog = h.make_blog()
+        blog.pop("secrets")
+        item = one(self.build([self.unpublished(6)], blog))
+        self.assertIn("게시용 시크릿이 비어 있습니다", item.detail)
 
     def test_draft_mode_is_covered_too(self):
         self.assertEqual(one(self.build([self.unpublished(6)], h.make_blog(mode="draft"))).level, "action")
@@ -1261,6 +1324,11 @@ class MarkerTest(unittest.TestCase):
         body = inbox.build_body("본문", ["a:1"]).replace("\n", "\r\n")
         self.assertEqual(inbox.parse_marker(body).items, ("a:1",))
 
+    def test_marker_is_immutable(self):
+        marker = inbox.parse_marker(inbox.build_body("x", ["a:1"]))
+        with self.assertRaises(Exception):
+            marker.hash = "0" * 16
+
     def test_hash_depends_only_on_the_visible_text(self):
         self.assertEqual(inbox.body_hash("같은 글"), inbox.body_hash("같은 글"))
         self.assertNotEqual(inbox.body_hash("같은 글"), inbox.body_hash("다른 글"))
@@ -1364,6 +1432,11 @@ class CommentTextTest(unittest.TestCase):
             text = inbox.comment_text(owner, self.acts("t"), "")
             self.assertNotIn("@", text, owner)
             self.assertTrue(text.startswith("새로 해야 할 일이 1건"), owner)
+
+    def test_exactly_the_maximum_number_of_items_has_no_remainder_line(self):
+        text = inbox.comment_text("octo", self.acts(*[f"항목 {n}" for n in range(8)]), "")
+        self.assertEqual(text.count("\n- 항목"), 8)
+        self.assertNotIn("… 외", text)
 
     def test_long_lists_are_summarised(self):
         text = inbox.comment_text("octo", self.acts(*[f"항목 {n}" for n in range(12)]), "")

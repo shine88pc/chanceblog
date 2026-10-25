@@ -2,12 +2,14 @@
 
 네트워크는 쓰지 않는다(urlopen 대신 가짜 opener, 클라이언트 대신 FakeGitHub). 규칙 자체는 test_ops_inbox.py.
 """
+import ast
 import http.client
 import io
 import json
 import os
 import re
 import socket
+import sys
 import tempfile
 import unittest
 import urllib.error
@@ -164,6 +166,29 @@ class ClientTest(unittest.TestCase):
         for raw in (token, "@", "<", "::"):
             self.assertNotIn(raw, text, raw)
 
+    def test_the_quota_message_needs_both_a_rate_limit_status_and_the_exhausted_header(self):
+        exhausted = {"x-ratelimit-remaining": "0"}
+        for code, headers, quota in ((403, exhausted, True), (429, exhausted, True), (403, {}, False),
+                                     (403, {"x-ratelimit-remaining": "7"}, False), (500, exhausted, False), (404, exhausted, False)):
+            client, _ = self.client(http_error(code, "원문 메시지", headers))
+            with self.assertRaises(oi.ApiError) as caught:
+                client.get("/x")
+            self.assertEqual("호출 한도" in str(caught.exception), quota, (code, headers))
+            if not quota:
+                self.assertIn(f"HTTP {code}: 원문 메시지", str(caught.exception))
+
+    def test_remaining_never_goes_below_zero_and_writes_may_use_the_very_last_call(self):
+        reader, _ = self.client("{}", max_calls=2)
+        reader.get("/a")
+        reader.get("/b")
+        self.assertEqual(reader.remaining(), 0)
+        writer, opener = self.client("{}", max_calls=2)
+        writer.post("/w", {})
+        writer.patch("/w", {})
+        with self.assertRaises(oi.ApiBudgetError):
+            writer.post("/w", {})
+        self.assertEqual(len(opener.requests), 2)
+
     def test_rate_limit_exhaustion_is_reported_plainly(self):
         client, _ = self.client(http_error(403, "API rate limit exceeded", {"x-ratelimit-remaining": "0"}))
         with self.assertRaises(oi.ApiError) as caught:
@@ -264,6 +289,14 @@ class LocalReadersTest(unittest.TestCase):
         self.assertTrue(failures[0][1].startswith("history.json: JSON 형식 오류("), failures)
         self.assertNotIn(str(self.tmp), failures[0][1])
 
+    def test_unreadable_history_names_the_error_kind_without_a_path(self):
+        root = h.make_root(self.tmp)
+        (root / "history.json").mkdir()                      # 파일이 아니라 폴더 → 읽기 오류(OSError 계열)
+        failures = []
+        oi.read_histories(root, oi.read_blogs(root, failures), failures)
+        self.assertRegex(failures[0][1], r"^history\.json: [A-Za-z]+Error$")
+        self.assertNotIn(str(self.tmp), failures[0][1])
+
     def test_history_that_is_not_a_list_is_reported(self):
         root = h.make_root(self.tmp, histories={"history.json": {"a": 1}})
         failures = []
@@ -332,6 +365,40 @@ class FetchTest(unittest.TestCase):
         self.assertEqual((pulls[17]["mergeable"], pulls[17]["mergeable_state"]), (False, "dirty"))
         self.assertEqual((self.failures, self.notes), ([], []))
         self.assertEqual(len(self.fake.paths()), 1 + 3 * 2)                       # 목록 1 + PR 마다 상세·검사 2
+
+    def test_request_parameters_are_the_documented_ones(self):
+        self.add_pull(15)
+        oi.fetch_pulls(self.fake, self.failures, self.notes)
+        oi.fetch_approvals(self.fake, self.failures)
+        by_path = {path: params for _method, path, params in self.fake.log}
+        self.assertEqual(by_path["/pulls"], {"state": "open", "per_page": 50})
+        self.assertEqual(by_path["/pulls/15"], {})
+        self.assertEqual(by_path[f"/commits/{15:040x}/check-runs"], {"per_page": 100})
+        self.assertEqual(by_path["/actions/runs"], {"status": "action_required", "per_page": 20})
+
+    def test_pull_entries_without_a_numeric_number_are_skipped_without_calls(self):
+        self.fake.pulls = [dict(h.make_pull_raw(1), number=None), dict(h.make_pull_raw(2), number="7"), dict(h.make_pull_raw(3), number=True)]
+        self.assertEqual(oi.fetch_pulls(self.fake, self.failures, self.notes), [])
+        self.assertEqual(len(self.fake.log), 1)
+
+    def test_exactly_eight_pulls_need_no_cap_note(self):
+        for n in range(1, 9):
+            self.add_pull(n)
+        self.assertEqual(len(oi.fetch_pulls(self.fake, self.failures, self.notes)), 8)
+        self.assertEqual(self.notes, [])
+
+    def test_two_detail_failures_say_one_more(self):
+        for n in (1, 2):
+            self.add_pull(n)
+        self.fake.fail = [(r"GET /commits/", api_error(500, "HTTP 500"))]
+        oi.fetch_pulls(self.fake, self.failures, self.notes)
+        self.assertEqual(self.failures, [("pull_details", "HTTP 500 (외 1건)")])
+
+    def test_a_single_failing_workflow_has_no_remainder_text(self):
+        self.fake.runs["a.yml"] = []
+        self.fake.fail = [(r"workflows/a\.yml", api_error(500, "HTTP 500"))]
+        oi.fetch_runs(self.fake, ["a.yml"], NOW, "main", self.failures)
+        self.assertEqual(self.failures, [("runs", "a.yml: HTTP 500")])
 
     def test_draft_pulls_cost_no_calls(self):
         self.add_pull(20, draft=True)
@@ -459,6 +526,7 @@ class FetchAnnotationsTest(unittest.TestCase):
         self.assertEqual(self.fake.paths(), ["/actions/runs/1/jobs", "/check-runs/11/annotations", "/check-runs/12/annotations"])
         self.assertEqual(self.fake.log[0][2], {"per_page": 30})
         self.assertEqual(self.fake.log[1][2], {"per_page": 50})
+        self.assertEqual((self.failures, self.notes), ([], []))
 
     def test_only_the_latest_three_successes_per_workflow_are_read(self):
         for n, hours in enumerate((1, 3, 5, 7, 9), start=1):
@@ -491,6 +559,25 @@ class FetchAnnotationsTest(unittest.TestCase):
         self.assertEqual(oi.fetch_annotations(fake, fake.runs, NOW, self.failures, self.notes), {})
         self.assertEqual(fake.calls, 0)
         self.assertEqual(self.notes[0][0], "annotations_cap")
+
+    def test_garbage_job_entries_are_skipped(self):
+        self.fake.runs["a.yml"] = [h.make_run(1, ago(hours=1))]
+        self.fake.jobs[1] = [None, "x", {"id": "7"}, {"name": "id 없음"}, {"id": 11}]
+        self.fake.annotations[11] = [h.make_annotation("경고")]
+        found = self.fetch()
+        self.assertEqual([a["message"] for a in found[1]], ["경고"])
+        self.assertEqual(self.fake.paths(), ["/actions/runs/1/jobs", "/check-runs/11/annotations"])
+
+    def test_two_failing_runs_are_summarised_with_a_remainder(self):
+        self.add_run("a.yml", 1, 1, job_ids=(11,))
+        self.add_run("b.yml", 2, 2, job_ids=(21,))
+        self.fake.fail = [(r"/actions/runs/\d+/jobs", api_error(500, "HTTP 500"))]
+        self.fetch()
+        self.assertEqual(self.failures, [("annotations", "실행 1: HTTP 500 (외 1건)")])
+
+    def test_a_run_exactly_48_hours_old_is_still_read(self):
+        self.add_run("a.yml", 1, 48, job_ids=(11,))
+        self.assertEqual(sorted(self.fetch()), [1])
 
     def test_job_count_per_run_is_capped(self):
         self.add_run("a.yml", 1, 1, job_ids=tuple(range(10, 20)))
@@ -859,7 +946,7 @@ class RunTest(unittest.TestCase):
         self.assertIn("이슈를 새로 만들었습니다", summary)
         for needle in ("워치독 알림 — chance: STALE", "PR #15 병합하면 됩니다", "Chance_Blog: 마지막 글 2026-10-25 09시 슬롯(KST)"):
             self.assertIn(needle, visible)
-        self.assertIn("[점검] 지금 해야 할 일 2건", self.out[0])
+        self.assertIn("[점검] 지금 해야 할 일 2건 · 확인하면 좋은 것 0건 · 참고 2건 (조회 실패 0건, GitHub API 호출 ", self.out[0])
         self.assertTrue(fake.comments[issue["number"]][0].startswith("@octo "))
 
     def test_second_run_is_silent(self):
@@ -1064,19 +1151,25 @@ class RunTest(unittest.TestCase):
         built = []
 
         def construct(*args, **kwargs):
-            built.append(kwargs)
+            built.append((args, kwargs))
             raise Stop
 
         fake, root = self.world()
-        cases = (({"GITHUB_TOKEN": TOKEN}, (150, 8)), ({}, (25, 0)), ({"GITHUB_TOKEN": TOKEN, "INBOX_MAX_API_CALLS": "30"}, (30, 8)),
-                 ({"GITHUB_TOKEN": TOKEN, "INBOX_MAX_API_CALLS": "9"}, (9, 3)), ({"INBOX_MAX_API_CALLS": "40"}, (40, 0)),
-                 ({"GITHUB_TOKEN": TOKEN, "INBOX_MAX_API_CALLS": "2"}, (150, 8)))         # 너무 작은 값은 기본값으로
-        for extra, (max_calls, reserve) in cases:
+        with_token = {"GITHUB_TOKEN": TOKEN}
+        cases = (                                   # (환경변수, 호출 상한, 쓰기용 reserve, 클라이언트에 넘기는 토큰)
+            (with_token, 150, 8, TOKEN), ({}, 25, 0, None),
+            (dict(with_token, INBOX_MAX_API_CALLS="30"), 30, 8, TOKEN), (dict(with_token, INBOX_MAX_API_CALLS="9"), 9, 3, TOKEN),
+            ({"INBOX_MAX_API_CALLS": "40"}, 40, 0, None),
+            (dict(with_token, INBOX_MAX_API_CALLS="5"), 5, 1, TOKEN), (dict(with_token, INBOX_MAX_API_CALLS="1000"), 1000, 8, TOKEN),
+            (dict(with_token, INBOX_MAX_API_CALLS="4"), 150, 8, TOKEN), (dict(with_token, INBOX_MAX_API_CALLS="1001"), 150, 8, TOKEN),
+            ({"INBOX_MAX_API_CALLS": "4"}, 25, 0, None))                       # 범위(5~1000) 밖의 값은 기본값으로
+        for extra, max_calls, reserve, token in cases:
             built.clear()
             with mock.patch.object(oi, "GitHubClient", side_effect=construct):
                 with self.assertRaises(Stop):
                     oi.run(dict({"GITHUB_REPOSITORY": h.REPO}, **extra), None, NOW, root, self.out.append)
-            self.assertEqual((built[0]["max_calls"], built[0]["reserve"]), (max_calls, reserve), extra)
+            args, kwargs = built[0]
+            self.assertEqual((args, kwargs["max_calls"], kwargs["reserve"]), ((h.REPO, token), max_calls, reserve), extra)
 
     def test_a_tiny_call_cap_still_leaves_room_for_the_writes(self):
         fake, root = self.world(workflows=("a.yml", "b.yml", "c.yml", "d.yml", "e.yml", "f.yml"))
@@ -1182,8 +1275,8 @@ class WorkflowFileTest(unittest.TestCase):
         self.assertIn("workflow_dispatch", env["INBOX_DRY_RUN"])
         self.assertEqual(env["DEFAULT_BRANCH"], "${{ github.event.repository.default_branch }}")
         source = (_bootstrap.ROOT / "scripts" / "ops_inbox.py").read_text(encoding="utf-8")
-        for name in env:
-            self.assertIn(f'"{name}"', source, f"스크립트가 읽지 않는 환경변수 {name}")
+        for name in env:                                                  # 따옴표 모양(큰·작은)과 무관하게 스크립트가 그 이름을 읽는지
+            self.assertRegex(source, "[\"']" + name + "[\"']", f"스크립트가 읽지 않는 환경변수 {name}")
 
     def test_only_the_workflow_token_is_used_and_nothing_is_interpolated_into_the_shell(self):
         text = (WORKFLOWS / "ops-inbox.yml").read_text(encoding="utf-8")
@@ -1196,9 +1289,17 @@ class WorkflowFileTest(unittest.TestCase):
     def test_the_inbox_script_has_no_dependencies_to_install(self):
         text = (WORKFLOWS / "ops-inbox.yml").read_text(encoding="utf-8")
         self.assertNotIn("pip install", text)
-        source = (_bootstrap.ROOT / "scripts" / "ops_inbox.py").read_text(encoding="utf-8")
-        imported = {line.split()[1].split(".")[0] for line in source.splitlines() if line.startswith(("import ", "from ")) and "noqa" not in line}
-        self.assertLessEqual(imported, {"http", "json", "os", "re", "sys", "time", "urllib", "datetime", "pathlib"})
+        # 스크립트와, 스크립트가 (직접·간접으로) 가져오는 저장소 모듈은 표준 라이브러리만 최상위에서 가져온다(함수 안의 지연 import 는 부를 때만 필요)
+        for rel in ("scripts/ops_inbox.py", "pipeline/inbox.py", "pipeline/console.py", "pipeline/llm.py", "pipeline/registry.py",
+                    "pipeline/state.py", "pipeline/secret_patterns.py"):
+            tree = ast.parse((_bootstrap.ROOT / rel).read_text(encoding="utf-8"))
+            imported = set()
+            for node in tree.body:
+                if isinstance(node, ast.Import):
+                    imported |= {alias.name.split(".")[0] for alias in node.names}
+                elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                    imported.add(node.module.split(".")[0])
+            self.assertLessEqual(imported - {"pipeline"}, set(sys.stdlib_module_names), rel)
 
 
 class InteractionWithOtherAutomationTest(unittest.TestCase):
