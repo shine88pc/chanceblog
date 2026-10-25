@@ -56,6 +56,8 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 자동인지 수동인지,
 
 기본 제목(커밋 메시지·PR 제목)이 더 알려 주는 `사이트 자동 배포`·`저장소 규칙·테스트 자동 검사`·`PR 변경 범위 검사`·`이슈 양식 페이지 목록 갱신`은 `run-name`을 따로 두지 않았다. 정기·수동·연습은 `Run workflow` 대화상자 입력(`연습 실행` 체크)과 실행 제목으로 구분한다.
 
+**새 워크플로를 만들면 이 표와 [`REQUEST_BRIEFING.md`](./REQUEST_BRIEFING.md)의 표에 한 줄씩(`파일`과 `이름`을 같은 줄에 백틱으로) 넣어야** `tests/test_workflow_names.py`의 `test_docs_tables_list_every_workflow_with_its_current_name`이 통과한다. 안내 문서·워크플로·이슈 양식·코드에 옛 영문 이름이 새 이름 없이 남아도(옛 이름과 새 이름이 한 줄에 같이 있는 대응표는 제외) `test_operator_docs_do_not_use_the_old_english_names`가 실패한다.
+
 ### 외부 소비자 계약
 
 | 파일 | 소비자 | 규칙 |

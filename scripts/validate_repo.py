@@ -246,7 +246,7 @@ def check_workflow_names(root, files):
         if not _has_hangul(name):
             problem = "에 name 이 없습니다" if name is None else f" name '{str(name)[:40]}' 에 한글이 없습니다"
             out.append(err("WF-11", f"워크플로{problem} — Actions 탭에서 이름만 보고 하는 일을 짐작할 수 있게 "
-                                    "한글로 지으세요(예: '사이트 자동 배포')", rel))
+                                    "한글로 지으세요(예: '사이트 자동 배포'). 외부 템플릿을 복사해 넣을 때는 한글 name 을 붙이세요", rel))
         jobs = data.get("jobs")
         for job_id, job in (jobs.items() if isinstance(jobs, dict) else []):
             if isinstance(job, dict) and not _has_hangul(job.get("name")):

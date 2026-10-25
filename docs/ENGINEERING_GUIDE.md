@@ -53,7 +53,7 @@
 | W7 | `schedule.cron`은 레지스트리와 같게. 수동 실행 입력(`dry_run`, `publish`, 대상 블로그)을 제공한다 | **REG-2** |
 | W8 | 시크릿은 `secrets[...]` → `env`로만. `echo` 금지 | **WF-9**·**REG-3** |
 | W9 | 변경 후 `actionlint`가 0건이어야 한다 | CI |
-| W10 | 워크플로·job 이름(`name`)은 **한글**로, 이름만 보고 자동인지 수동인지·무엇을 하는지 짐작할 수 있게 짓는다(예: `사이트 자동 배포`, `Chance 기존 글 이미지 교체(수동)`). 이름 하나로 설명되지 않는 서로 다른 기능이 한 워크플로에 묶이면 나눈다(예: 글 작성과 이미지 교체). `run-name`에는 정기/수동·번호·불리언만 쓰고 이슈·PR 제목 같은 외부 문자열은 넣지 않는다. 이름 표는 [`ARCHITECTURE.md`](./ARCHITECTURE.md) §2-1 | **WF-11**(워크플로 name 은 오류, job name 은 경고) |
+| W10 | 워크플로·job 이름(`name`)은 **한글**로, 이름만 보고 자동인지 수동인지·무엇을 하는지 짐작할 수 있게 짓는다(예: `사이트 자동 배포`, `Chance 기존 글 이미지 교체(수동)`). 이름 하나로 설명되지 않는 서로 다른 기능이 한 워크플로에 묶이면 나눈다(예: 글 작성과 이미지 교체). `run-name`에는 정기/수동·번호·불리언만 쓰고 이슈·PR 제목 같은 외부 문자열은 넣지 않는다. 외부 워크플로 템플릿을 복사해 넣을 때는 영문 `name`을 한글로 바꾼다. 이름 표는 [`ARCHITECTURE.md`](./ARCHITECTURE.md) §2-1. **어디서 강제하나**: 검증기 WF-11은 워크플로 `name`(오류)과 job `name`(경고)만 본다. 그러나 job `name`은 단위 테스트 `test_real_repository_workflow_and_job_names_are_korean`이 경고도 실패로 취급하므로 새 job에도 한글 이름이 사실상 필요하다. 입력 `description`·단계 `name`·`run-name`의 한글과 run-name이 쓸 수 있는 값은 검증기가 아니라 단위 테스트(`tests/test_workflow_names.py`)가 요구한다 | **WF-11**(워크플로 name 은 오류, job name 은 경고) + 단위 테스트 |
 
 ## 4. 프롬프트·프로필 규칙
 

@@ -136,7 +136,7 @@
 | SEC-1 / SEC-2 | 금지 파일, 키·토큰 패턴 | G-S1 |
 | WF-0 / WF-1 / WF-3 / WF-4 / WF-5 / WF-9 | 워크플로 문법, permissions, `pull_request_target`, 입력 보간, 외부 액션 고정, 시크릿 echo | G-A1~A4, G-S3 |
 | WF-6 / WF-7 / WF-8 / WF-10 | 오류 은폐, timeout, concurrency, 배포 dispatch 누락 | G-O2, G-A6, G-A8 |
-| WF-11 | 워크플로 `name`(오류)·job `name`(경고)에 한글이 없음 — 운영자가 Actions 탭에서 이름만 보고 하는 일을 짐작할 수 있어야 한다 | 운영 접근성(보안 규칙은 아님, `ENGINEERING_GUIDE` W10) |
+| WF-11 | 워크플로 `name`(오류)·job `name`(경고)에 한글이 없음 — 운영자가 Actions 탭에서 이름만 보고 하는 일을 짐작할 수 있어야 한다. job `name`은 검증기에서는 경고지만 `test_real_repository_workflow_and_job_names_are_korean`이 경고도 실패로 취급하므로 새 job에도 한글 이름이 사실상 필요하다. 입력 `description`·단계 `name`·`run-name`의 한글은 검증기가 아니라 `tests/test_workflow_names.py`가 요구한다. 외부 템플릿을 복사해 넣을 때는 한글 `name`을 붙인다 | 운영 접근성(보안 규칙은 아님, `ENGINEERING_GUIDE` W10) |
 | REG-0~4 | 레지스트리 검증, cron·시크릿·모델 드리프트 | G-S2, P2·P10 |
 | CONTRACT-1 | 제어용 이슈 양식(`blog-control` 라벨) ↔ 워크플로 조건 | G-A7 (D-01) |
 | SPEC-1 / SPEC-2 / SYNC-1 | 수정 명세가 금지 경로를 허용하지 않음, 양식·명세 일관성, 자동 생성물(`pages.json`·양식 드롭다운) 최신 여부(SYNC-1은 경고) | G-L7, G-A7 |
