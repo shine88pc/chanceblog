@@ -25,7 +25,7 @@ from pipeline import run as run_mod
 from pipeline.edits import runner
 from pipeline.stubs import stub_llm
 from test_generator_slots import at, candidate, long_post, run_captured
-from test_run import FakePublisher, RunBase
+from test_run import RunBase
 from test_workflow_names import context, load, render
 
 ROOT = _bootstrap.ROOT
@@ -464,17 +464,15 @@ class BloggerManualDefaultsTest(RunBase):
         inputs = {} if dry_input is None else {"dry_run": dry_input}
         return value_of(template, event, event_inputs=inputs)
 
-    def test_dry_run_is_on_by_default_and_publish_is_off(self):
+    def test_dry_run_is_on_by_default(self):
         inputs = self.workflow_inputs()
         self.assertEqual((inputs["dry_run"]["type"], inputs["dry_run"]["default"]), ("boolean", True))
-        self.assertEqual((inputs["publish"]["type"], inputs["publish"]["default"]), ("boolean", False))
 
     def test_the_descriptions_say_what_is_saved_and_what_uses_the_daily_cap(self):
         inputs = self.workflow_inputs()
         description = inputs["dry_run"]["description"]
         for fragment in ("기본 켜짐", "가짜 AI 응답", "호출하지 않", "체크를 풀면", "초안", "커밋", "하루 상한"):
             self.assertIn(fragment, description)
-        self.assertIn("연습 실행을 풀었을 때만", inputs["publish"]["description"])
 
     def test_the_default_value_reaches_the_runner_as_a_dry_run_and_scheduled_runs_never_are(self):
         default = self.workflow_inputs()["dry_run"]["default"]
@@ -499,22 +497,6 @@ class BloggerManualDefaultsTest(RunBase):
         self.assertEqual(len(self.drafts()), 1)
         code, out = self.go(env={"DRY_RUN": dry, "GEMINI_API_KEY": "fake-llm-key", "BLOGGER_PUBLISH": "off"})
         self.assertIn("[SKIP] code=DAILY_CAP", out)                                  # 그날 하루 상한을 썼다
-
-    def test_the_publish_switch_expression_is_unchanged(self):
-        step = next(s for s in load("blogger.yml")["jobs"]["generate"]["steps"] if s.get("run", "").startswith("python -m pipeline.run"))
-        self.assertEqual(value_of(step["env"]["BLOGGER_PUBLISH"], "workflow_dispatch", event_inputs={"publish": "true"}), "on")
-        self.assertEqual(value_of(step["env"]["BLOGGER_PUBLISH"], "workflow_dispatch", event_inputs={"publish": "false"}), "off")
-        self.assertEqual(value_of(step["env"]["BLOGGER_PUBLISH"], "schedule"), "")
-
-    def test_publish_does_nothing_while_the_practice_run_is_on(self):
-        """입력 설명대로 publish 는 연습 실행을 풀었을 때만 뜻이 있다: 연습이 켜져 있으면 publish 를 체크해도 게시하지 않는다."""
-        pub = FakePublisher()
-        env = {"DRY_RUN": "true", "BLOGGER_PUBLISH": "on", "GEMINI_API_KEY": "k", "BLOGGER_BLOG_ID": "1", "BLOGGER_CLIENT_ID": "c",
-               "BLOGGER_CLIENT_SECRET": "s", "BLOGGER_REFRESH_TOKEN": "r"}
-        code, out = self.go(env=env, publisher=pub)
-        self.assertEqual(code, 0, out)
-        self.assertEqual(pub.published, [])
-        self.assertEqual(self.history(), [])
 
 
 # ----------------------------------------------------------------------------
