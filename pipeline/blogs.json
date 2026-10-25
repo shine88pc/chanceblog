@@ -3,7 +3,7 @@
   "schema_version": 1,
   "shared_secrets": ["GEMINI_API_KEY"],
   "defaults": {
-    "mode": "draft",
+    "mode": "auto",
     "timezone": "Asia/Seoul",
     "llm": {
       "models": ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"],
