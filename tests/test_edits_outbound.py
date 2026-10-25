@@ -95,6 +95,22 @@ class SensitiveKindsTest(unittest.TestCase):
                      "4111 1111 1111 1111 12 28", "4111 1111 1111 1111 123", "카드 4111 - 1111 - 1111 - 1111 끝"):
             self.assertEqual(safety.sensitive_kinds(text), ["카드번호 모양"], text)
 
+    def test_every_known_grouping_is_recognised_with_spaces_and_hyphens(self):
+        """`_CARD_SHAPES` 의 모든 묶음(4-4-4-4·4-4-4-4-1~3·4-6-5·4-6-4·4-4-4-1)을 Luhn 이 맞는 번호로 만들어 확인한다."""
+        issuer = {13: "4", 14: "36", 15: "37", 16: "4", 17: "6", 18: "6", 19: "6"}
+        self.assertEqual(sorted(sum(shape) for shape in safety._CARD_SHAPES), [13, 14, 15, 16, 17, 18, 19])
+        for shape in sorted(safety._CARD_SHAPES):
+            total = sum(shape)
+            body = with_luhn((issuer[total] + "1234567890123456789")[:total - 1])
+            self.assertEqual(len(body), total)
+            groups, position = [], 0
+            for size in shape:
+                groups.append(body[position:position + size])
+                position += size
+            for separator in (" ", "-", " - "):
+                text = f"카드 {separator.join(groups)} 끝"
+                self.assertEqual(safety.sensitive_kinds(text), ["카드번호 모양"], (shape, text))
+
     def test_numbers_that_fail_luhn_or_are_too_long_are_not_card_numbers(self):
         for text in ("4111111111111112", "12345678901234567890", "010-1234-5678", "2026-10-25 12:34:56", with_luhn("4111111111111111111")):   # 마지막은 20자리
             self.assertEqual(safety.sensitive_kinds(text), [], text)
@@ -374,6 +390,19 @@ class PromptDelimiterTest(unittest.TestCase):
             out = safety.strip_delimiters(text)
             self.assertIsNone(safety._DELIMITER.search(out), (text, out))
             self.assertEqual(safety.strip_delimiters(out), out)                     # 고정점
+
+    DEEP = ["R<<_<<Q<<>R A>><<<PAGE>>>>", "\tAPAGE\t>>Q>E RPAGEREQUEST>>>>>>>>>Q", "Q_<<B>PAGE>Q<<<QA>REQUESTE>>A>>>>>>>>>>\t"]
+
+    def test_inputs_that_need_three_or_more_passes_are_fully_stripped(self):
+        """무작위 탐색으로 찾은 입력(3·4·5번 되풀이해야 끝난다): 두 번만 지우면 구분자가 남는다."""
+        for text in self.DEEP:
+            twice = text
+            for _ in range(2):
+                twice = safety._DELIMITER.sub("", twice)
+            self.assertIsNotNone(safety._DELIMITER.search(twice), text)             # 두 번으로는 부족한 입력이다
+            out = safety.strip_delimiters(text)
+            self.assertIsNone(safety._DELIMITER.search(out), (text, out))
+            self.assertEqual(safety.strip_delimiters(out), out)
 
     def test_random_marker_soup_never_leaves_a_delimiter(self):
         rng = random.Random(7)
