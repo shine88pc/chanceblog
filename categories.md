@@ -1,6 +1,6 @@
 ---
 layout: page
-title: 카테고리
+title: "카테고리 (기준선 시험)"
 permalink: /categories/
 ---
 
