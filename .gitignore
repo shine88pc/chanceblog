@@ -10,6 +10,7 @@ credentials*.json
 *credentials*.json
 *service-account*.json
 *service_account*.json
+*[Ss]ervice[Aa]ccount*.json
 *.pem
 *.key
 *.p12

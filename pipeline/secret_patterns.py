@@ -1,14 +1,17 @@
 """비밀 값으로 보이는 문자열 패턴(단일 원천).
 
-저장소 검증기(scripts/validate_repo.py)와 이슈 수정 사후 검증(pipeline/edits/checks.py)이 함께 쓴다.
-패턴을 추가·수정하면 두 곳 모두에 적용된다.
+저장소 검증기(scripts/validate_repo.py), 이슈 수정 사후 검증(pipeline/edits/checks.py),
+로그·이력 마스킹(pipeline/llm.py 의 mask())이 함께 쓴다. 패턴을 추가·수정하면 모두에 적용된다.
+(소비처 목록은 tests/test_security_settings.py 가 실제 import 와 대조한다.)
 """
 import re
 
 SECRET_PATTERNS = [
     ("Google API 키", re.compile(r"AIza[0-9A-Za-z_\-]{35}")),
-    # 2026-10-18 공개 이력에 남았던 123.txt(D-30)의 형식: 점이 든 접두사 'AQ.' + 영숫자 40자 이상(총 53자 안팎)
-    ("Google API 키(새 형식)", re.compile(r"\bAQ\.[0-9A-Za-z_\-]{40,}")),
+    # 2026-10-18 공개 이력에 남았던 123.txt(D-30)의 형식: 점이 든 접두사 'AQ.' + 영숫자·-·_ 40자 이상(총 53자 안팎).
+    # 앞 글자가 영문자·숫자면 제외한다(FAQ. 같은 단어 끝). 단어 경계(\b) 대신 look-behind 를 쓴다: \b 는
+    # 한글·밑줄 바로 뒤에 붙은 키('키는AQ.…')를 놓친다.
+    ("Google API 키(새 형식)", re.compile(r"(?<![A-Za-z0-9])AQ\.[0-9A-Za-z_\-]{40,}")),
     ("Google OAuth 클라이언트 시크릿", re.compile(r"GOCSPX-[0-9A-Za-z_\-]{20,}")),
     ("Google refresh token", re.compile(r"\b1//0[0-9A-Za-z_\-]{40,}")),
     ("Google access token", re.compile(r"\bya29\.[0-9A-Za-z_\-]{30,}")),
