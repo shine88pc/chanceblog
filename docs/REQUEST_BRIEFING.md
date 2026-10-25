@@ -85,6 +85,7 @@
 | Issue Edit | `이슈 수정 요청 처리(수정안 PR 만들기)` | `issue-edit.yml` | 이슈 양식으로 접수된 수정 요청을 PR로 만듦 | 자동(제어 이슈가 열릴 때) + 수동 |
 | Sync Issue Form | `이슈 양식 페이지 목록 갱신` | `sync-issue-form.yml` | 이슈 양식의 페이지 목록을 자동 갱신 | 자동(관련 파일 push) + 수동 |
 | PR Scope Check | `PR 변경 범위 검사` | `pr-scope-check.yml` | PR이 요청 범위를 지켰는지 검사해 코멘트(Copilot이 만든 PR 포함) | 자동(PR이 열리거나 갱신될 때) + 수동 |
+| (신규) | `확인 필요 모음` | `ops-inbox.yml` | 해야 할 일·확인할 일(워치독 알림·병합 대기 PR·실패한 워크플로·승인 대기·일시정지·Blogger 게시 설정)을 이슈 1개와 실행 요약에 모으고, 새로 해야 할 일이 생기면 코멘트로 알림(휴대폰 알림). 설명: [`OPS_INBOX.md`](./OPS_INBOX.md) | 자동(2시간 간격 예약, 실제로는 보통 3~6시간) + 수동 |
 | (GitHub 내장) | `pages-build-deployment` | 파일 없음 | GitHub Pages가 스스로 만드는 실행. 이름을 바꿀 수 없고 누르지 않는다 | GitHub 내장 |
 
 ## 4. 일이 처리되는 길
