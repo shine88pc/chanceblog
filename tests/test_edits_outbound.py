@@ -48,7 +48,7 @@ class SensitiveKindsTest(unittest.TestCase):
 
     def test_resident_registration_number_shapes(self):
         for text in ("900101-1234567", "9001011234567", "주민번호 900101-1234567입니다", "(900101-1234567)", "900101 1234567",
-                     "000229-3123456", "900101–5123456", "991231-2999999"):
+                     "000229-3123456", "900101\N{EN DASH}5123456", "991231-2999999"):
             self.assertEqual(safety.sensitive_kinds(text), ["주민등록번호 모양"], text)
 
     def test_things_that_only_look_a_little_like_one_are_not_flagged(self):

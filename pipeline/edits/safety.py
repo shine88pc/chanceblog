@@ -17,7 +17,7 @@ from pipeline.secret_patterns import SECRET_PATTERNS, find_secrets
 # ----------------------------------------------------------------------------
 # 이슈·PR 본문은 공개다. 소유자가 실수로 키·주민등록번호·카드번호를 요청문에 붙여 넣으면 외부 서비스와 공개 PR 로 나간다.
 # 이메일·전화번호는 연락처 페이지 수정이 정당한 용도라 막지 않는다.
-_DASHES = "‐‑–—"
+_DASHES = "\N{HYPHEN}\N{NON-BREAKING HYPHEN}\N{EN DASH}\N{EM DASH}"
 # 주민등록번호 모양: 생년월일(월 01-12·일 01-31) + 선택적 구분 + 성별 자리 1-8 + 6자리의 13자리. 앞뒤에 숫자·영문·밑줄·하이픈이 붙어 있으면
 # 식별자의 일부(예: Unsplash 사진 id `photo-1507146426996-…` 의 13자리 시각값)로 보고 건너뛴다.
 _RRN = re.compile(rf"(?<![0-9A-Za-z_-])[0-9]{{2}}(?:0[1-9]|1[0-2])(?:0[1-9]|[12][0-9]|3[01])[-{_DASHES} ]?[1-8][0-9]{{6}}(?![0-9A-Za-z_-])")
@@ -38,7 +38,7 @@ def neutralize(line):
 
 def one_line(text, limit=90):
     """한 줄로 접고 자르며 멘션(@)과 워크플로 명령 모양을 무력화한다(커밋 제목·PR 제목·사유 문장·로그용)."""
-    flat = re.sub(r"\s+", " ", str(text)).strip()[:limit].replace("@", "@​")
+    flat = re.sub(r"\s+", " ", str(text)).strip()[:limit].replace("@", "@\N{ZERO WIDTH SPACE}")
     return neutralize(flat)
 
 

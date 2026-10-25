@@ -36,7 +36,7 @@ class IssueNumberTest(unittest.TestCase):
 
     def test_invalid_numbers(self):
         for value in (None, "", "0", 0, -1, "-1", "012", "1234567890", 1234567890, "12a", "1 2", " 12", "12\n", "12\nabc", "../1",
-                      "1;rm", True, False, 1.5, "1.0", "٣", [12], {"n": 12}):
+                      "1;rm", True, False, 1.5, "1.0", "\N{ARABIC-INDIC DIGIT THREE}", [12], {"n": 12}):
             self.assertIsNone(runner.valid_issue_number(value), repr(value))
 
     def test_pattern_matches_what_the_workflow_checks(self):
@@ -82,7 +82,7 @@ class AlreadyProcessedTest(unittest.TestCase):
 
     def test_invalid_numbers_never_match_and_never_crash(self):
         everything = REFS + [ref("issue-edit/-x"), ref("issue-edit/0-x"), ref("issue-edit/012-x")]
-        for number in (None, "", "abc", "12; rm", 0, -1, True, 1.5, "012", "1" * 10, "٣"):
+        for number in (None, "", "abc", "12; rm", 0, -1, True, 1.5, "012", "1" * 10, "\N{ARABIC-INDIC DIGIT THREE}"):
             self.assertFalse(runner.already_processed(number, everything, [{"name": "issue-edit-done"}]), repr(number))
 
     def test_custom_prefix(self):

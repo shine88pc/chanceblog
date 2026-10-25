@@ -22,7 +22,7 @@ from test_edits_runner import NEW_SENTENCE, OLD_SENTENCE, RunnerBase, llm_return
 
 FAKE_KEY = "AIza" + "B" * 35                        # 소스에 비밀 모양 리터럴을 쓰지 않는다(런타임 조립)
 FAKE_TOKEN = "gh" + "p_" + "C" * 36
-HOSTILE = "::warning::boom\n##[error]x\n  ::add-mask::VALUE\n::stop-commands::tok\r::error::y ::notice::z\u0085::warning::w ##[group]g"
+HOSTILE = "::warning::boom\n##[error]x\n  ::add-mask::VALUE\n::stop-commands::tok\r::error::y\N{LINE SEPARATOR}::notice::z\u0085::warning::w ##[group]g"
 
 
 def strip_code_spans(markdown):
@@ -52,7 +52,7 @@ def run_main(root, iss, extra=()):
 class NeutralizeTest(unittest.TestCase):
     def test_line_start_colons_and_legacy_commands_are_broken_everywhere(self):
         for text in ("::warning::x", "  ::error::x", "\t::add-mask::v", "::stop-commands::tok", "a ##[error]b", "##[group]", "###[error]x",
-                     "x ##[add-mask]y ##[warning]z", "\n::warning::after newline", " ::warning::nbsp"):
+                     "x ##[add-mask]y ##[warning]z", "\n::warning::after newline", "\N{NO-BREAK SPACE}::warning::nbsp"):
             for fn in (safety.one_line, lambda t: safety.log_text(t, 300)):
                 self.assertEqual(bad_lines(fn(text)), [], (text, fn(text)))
 
