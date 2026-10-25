@@ -1,4 +1,5 @@
-name: Chance_Blog Full-Auto Engine
+name: Chance 글 자동 작성·게시
+run-name: "Chance 글 작성·게시 · ${{ github.event_name == 'workflow_dispatch' && (inputs.dry_run && '수동(연습: 저장 안 함)' || '수동') || '정기' }}"
 
 on:
   schedule:
@@ -11,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: 'DRY_RUN (파일 변경/커밋 없이 로그만)'
+        description: '연습 실행(파일·커밋·게시 없이 로그만) — 체크를 풀면 실제로 글을 만들어 게시합니다'
         type: boolean
         default: true
 
@@ -25,6 +26,7 @@ concurrency:
 
 jobs:
   build:
+    name: 글 작성·게시
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

@@ -1,4 +1,5 @@
-name: Blogger Generate
+name: Blogger 글 자동 작성
+run-name: "Blogger 글 작성 · ${{ github.event_name == 'workflow_dispatch' && (inputs.dry_run && '수동(연습: 저장·게시 안 함)' || (inputs.publish && '수동(게시)' || '수동(초안만 저장)')) || '정기' }}"
 
 # 레지스트리(pipeline/blogs.json)의 platform=blogger 블로그를 모두 처리한다.
 # 블로그를 추가하면 이 파일을 고치지 않고 레지스트리와 Secrets 만 추가하면 된다.
@@ -11,19 +12,19 @@ on:
   workflow_dispatch:
     inputs:
       blog:
-        description: '특정 블로그 key만 실행 (비우면 blogger 전체)'
+        description: '실행할 블로그 key (비우면 Blogger 블로그 전체)'
         required: false
         type: string
       topic:
-        description: '특정 주제 (비우면 자동 선택)'
+        description: '직접 정할 주제 (비우면 자동 선택)'
         required: false
         type: string
       dry_run:
-        description: 'DRY_RUN (스텁 LLM, 파일·게시 없음)'
+        description: '연습 실행(가짜 AI 응답 사용, 파일·게시 없이 로그만)'
         type: boolean
         default: false
       publish:
-        description: 'Blogger 에 게시 (체크하지 않으면 초안만 저장)'
+        description: 'Blogger에 실제 게시(체크하지 않으면 초안만 저장)'
         type: boolean
         default: false
 
@@ -32,6 +33,7 @@ permissions:
 
 jobs:
   plan:
+    name: 대상 블로그 계획
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -56,6 +58,7 @@ jobs:
           echo "count=$(python -m pipeline.plan "${args[@]}" --count)" >> "$GITHUB_OUTPUT"
 
   generate:
+    name: 글 생성 (${{ matrix.key }})
     needs: plan
     if: needs.plan.outputs.count != '0'
     runs-on: ubuntu-latest
