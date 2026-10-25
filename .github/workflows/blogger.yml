@@ -20,11 +20,11 @@ on:
         required: false
         type: string
       dry_run:
-        description: '연습 실행(가짜 AI 응답 사용, 파일·게시 없이 로그만). 기본은 꺼짐 — 체크하지 않으면 초안이 저장소에 커밋되고 그날 하루 상한을 씁니다'
+        description: '연습 실행(기본 켜짐): 가짜 AI 응답을 쓰고 Gemini를 호출하지 않으며, 파일 저장·게시·하루 상한 소진 없이 로그만 남깁니다. 체크를 풀면 실제 Gemini로 글을 만들어 초안을 저장소에 커밋하고 그날 하루 상한을 씁니다'
         type: boolean
-        default: false
+        default: true
       publish:
-        description: 'Blogger에 실제 게시(체크하지 않으면 초안만 저장)'
+        description: 'Blogger에 실제 게시(체크하지 않으면 초안만 저장). 연습 실행을 풀었을 때만 적용됩니다'
         type: boolean
         default: false
 
