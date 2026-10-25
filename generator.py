@@ -25,6 +25,8 @@ import xml.etree.ElementTree as ET
 from datetime import timezone, timedelta
 from pathlib import Path
 
+from pipeline.llm import CallLog, mask  # Gemini 요청 기록·시크릿 마스킹은 Blogger·이슈 수정과 같은 코드를 쓴다(D-52)
+
 # ============================================================
 # 환경 설정
 # ============================================================
@@ -185,26 +187,39 @@ def extract_json_object(raw_text):
 
 # 이번 실행의 Gemini 모델 호출 횟수. 무료 한도(프로젝트 단위)를 나눠 쓰기 위한 측정값이며 동작에는 영향이 없다.
 GEMINI_CALLS = {"attempts": 0, "failed": 0}
+# 요청별 기록(요청 모델·응답 모델·결과 종류·소요·토큰, 실패 때는 코드·상태·본문 600자). 로그 한 줄씩 남기고 실행 요약에서 접어 쓴다.
+# 장부 파일은 만들지 않는다. 호출 수는 위 GEMINI_CALLS 가 세고, 이 기록은 그 내역이다.
+CALL_LOG = CallLog(label="chance", purpose="post", out=print)
 
 
 def call_gemini_with_fallback(prompt):
     errors = []
     for model_name in MODEL_CANDIDATES:
+        started = time.monotonic()
+        response, failure, usable = None, None, False
         try:
             print(f"Gemini 모델 호출 시도: {model_name}")
             GEMINI_CALLS["attempts"] += 1
             response = get_client().models.generate_content(
                 model=model_name, contents=prompt)
             text = getattr(response, "text", None)
-            if text and text.strip():
+            usable = bool(text and text.strip())
+        except Exception as exc:
+            failure = exc
+        elapsed = time.monotonic() - started   # 기록은 try 밖에서 한다: 기록 때문에 호출 실패로 오인되는 일이 없게
+        if failure is None:
+            if usable:
                 print(f"Gemini 모델 호출 성공: {model_name}")
+                CALL_LOG.success(model_name, elapsed, response)
                 return response
             GEMINI_CALLS["failed"] += 1
             errors.append(f"{model_name}: 응답 텍스트 없음")
-        except Exception as exc:
+            CALL_LOG.empty(model_name, elapsed, response)
+        else:
             GEMINI_CALLS["failed"] += 1
-            errors.append(f"{model_name}: {exc}")
-            print(f"Gemini 모델 호출 실패: {model_name} - {_one_line(exc)}")
+            errors.append(f"{model_name}: {failure}")
+            print(f"Gemini 모델 호출 실패: {model_name} - {_one_line(mask(failure))}")
+            CALL_LOG.failure(model_name, elapsed, failure)
     raise RuntimeError("모든 Gemini 모델 호출 실패\n" + "\n".join(errors))
 
 
@@ -236,6 +251,23 @@ def url_ok(url, timeout=10):
         return False
 
 
+# 마지막으로 관측한 Unsplash 응답 헤더(X-Ratelimit-Remaining·X-Ratelimit-Limit). 시간당 한도(데모 앱 50회)를 얼마나 썼는지 보려는
+# 측정값이며 동작에는 영향이 없다. 응답에 헤더가 없으면 이전 값을 그대로 둔다.
+UNSPLASH_RATE = {"remaining": None, "limit": None}
+
+
+def _note_unsplash_rate(headers):
+    if headers is None:
+        return
+    for key, header in (("remaining", "X-Ratelimit-Remaining"), ("limit", "X-Ratelimit-Limit")):
+        try:
+            value = headers.get(header)
+        except AttributeError:  # get 을 지원하지 않는 이상한 객체
+            return
+        if isinstance(value, str) and re.fullmatch(r"\d{1,7}", value.strip()):
+            UNSPLASH_RATE[key] = int(value.strip())
+
+
 def search_unsplash(query, per_page=15):
     if STUB_UNSPLASH:
         if DRY_RUN:
@@ -254,16 +286,20 @@ def search_unsplash(query, per_page=15):
         headers={"Authorization": f"Client-ID {UNSPLASH_KEY}",
                  "Accept-Version": "v1", "User-Agent": UA},
     )
+    headers = None
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
+            headers = getattr(resp, "headers", None)
             data = json.load(resp)
     except urllib.error.HTTPError as exc:
+        _note_unsplash_rate(getattr(exc, "headers", None))
         print(f"Unsplash API 오류 {exc.code} (query={query!r}) "
               "- 403/429면 시간당 호출 한도 초과일 수 있습니다.")
         return []
     except Exception as exc:
         print(f"Unsplash 호출 실패 (query={query!r}): {_one_line(exc, 200)}")
         return []
+    _note_unsplash_rate(headers)
 
     urls = []
     for item in data.get("results", []):
@@ -338,7 +374,8 @@ def make_image_queries(title, tags, category):
 JSON 객체만 반환: {{"image_queries": ["...", "...", "..."]}}
 """
     try:
-        data = extract_json_object(call_gemini_with_fallback(prompt).text)
+        with CALL_LOG.purposed("image-queries"):
+            data = extract_json_object(call_gemini_with_fallback(prompt).text)
         qs = [q.strip() for q in data.get("image_queries", [])
               if isinstance(q, str) and q.strip()]
         return qs[:4] or fallback
@@ -1464,6 +1501,39 @@ OUTCOME_TEXT = {
 }
 
 
+def _gemini_count_line(calls):
+    """Blogger·이슈 수정 요약과 같은 형식의 호출 수 줄."""
+    return f"Gemini 호출: {calls['attempts']}회(실패 {calls.get('failed', 0)}회)"
+
+
+def _unsplash_line(rate):
+    """마지막으로 관측한 Unsplash 시간당 남은 호출 수. 응답에 헤더가 없었으면 None(줄을 만들지 않는다)."""
+    remaining = (rate or {}).get("remaining")
+    if remaining is None:
+        return None
+    limit = rate.get("limit")
+    return f"Unsplash 남은 호출: {remaining}회" + (f"(시간당 한도 {limit}회)" if limit is not None else "")
+
+
+def usage_lines():
+    """지금까지의 Gemini·Unsplash 사용량 줄. 정상 종료 요약(finish_run)이 아닌 경로 — 예외로 끝난 실행, 이미지 교체 — 에서도 쓴다."""
+    lines = []
+    if GEMINI_CALLS["attempts"]:
+        lines.append(_gemini_count_line(GEMINI_CALLS))
+    lines += CALL_LOG.detail_lines()
+    unsplash = _unsplash_line(UNSPLASH_RATE)
+    if unsplash:
+        lines.append(unsplash)
+    return lines
+
+
+def failure_summary(exc):
+    """예외로 끝난 실행의 요약. 모든 모델이 실패한 실행에서도 호출 수가 사라지지 않게 사용량 줄을 붙인다(D-52)."""
+    return "\n".join(["### Chance_Blog 실행 요약",
+                      f"- 결과: **실패** — {type(exc).__name__} (원인은 이 단계의 로그를 보세요)"]
+                     + [f"- {line}" for line in usage_lines()])
+
+
 def render_run_summary(event, now, slot, report):
     """실행 요약(마크다운). 건수와 코드만 쓴다 — 비밀·수익·방문 수치 금지(G-O7)."""
     outcome = report.get("outcome", "UNKNOWN")
@@ -1479,7 +1549,11 @@ def render_run_summary(event, now, slot, report):
         lines.append("- 파일: " + ", ".join(f"`{str(p).replace(chr(96), '')}`" for p in report.get("paths", [])))
     calls = report.get("gemini_calls") or {}
     if calls.get("attempts"):
-        lines.append(f"- Gemini 호출: {calls['attempts']}회(실패 {calls.get('failed', 0)}회)")
+        lines.append(f"- {_gemini_count_line(calls)}")
+    lines += [f"- {note}" for note in report.get("gemini_notes", [])]
+    unsplash = _unsplash_line(report.get("unsplash_rate"))
+    if unsplash:
+        lines.append(f"- {unsplash}")
     rejects = report.get("gate_rejects", [])
     if rejects:
         lines.append(f"- 후보 탈락 {len(rejects)}건(본문 검증·응답 형식): " + " / ".join(_md_cell(r, 100) for r in rejects[:3]))
@@ -1509,6 +1583,8 @@ def finish_run(result, report, event, now, slot=None):
         report.setdefault("outcome", "PUBLISHED")
     outcome = report.get("outcome", "UNKNOWN")
     report.setdefault("gemini_calls", dict(GEMINI_CALLS))
+    report.setdefault("gemini_notes", CALL_LOG.detail_lines())
+    report.setdefault("unsplash_rate", dict(UNSPLASH_RATE))
     write_step_summary(render_run_summary(event, now, slot, report))
     if result is not None:
         return
@@ -1538,7 +1614,7 @@ def main():
         print(f"[DRY_RUN] 시작 (Gemini={'스텁' if STUB_GEMINI else '실제'}, "
               f"Unsplash={'스텁' if STUB_UNSPLASH else '실제'}) - 파일은 변경되지 않습니다.")
     if FIX_IMAGES:
-        write_step_summary(f"### Chance_Blog 실행 요약\n- {fix_images()}")
+        write_step_summary(f"### Chance_Blog 실행 요약\n- {fix_images()}" + "".join(f"\n- {line}" for line in usage_lines()))
     elif EVENT_NAME == "schedule":
         now = now_kst()
         slot, state = slot_state(read_history(), now)
@@ -1562,11 +1638,15 @@ def main():
         finish_run(result, report, EVENT_NAME or "manual", now_kst())
 
 
-if __name__ == "__main__":
+def run_cli():
+    """`python generator.py` 진입점. 예외로 끝나도 요약에 결과와 사용량을 남기고 예외는 그대로 다시 던진다(Actions 빨강)."""
     try:
         main()
     except Exception as exc:
         print(f"작업 실패: {type(exc).__name__}: {_one_line(exc, 600)}")
-        write_step_summary("### Chance_Blog 실행 요약\n"
-                           f"- 결과: **실패** — {type(exc).__name__} (원인은 이 단계의 로그를 보세요)")
+        write_step_summary(failure_summary(exc))
         raise
+
+
+if __name__ == "__main__":
+    run_cli()

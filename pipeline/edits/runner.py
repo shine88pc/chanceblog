@@ -31,8 +31,9 @@ from pathlib import Path
 from urllib.parse import quote
 
 from pipeline import registry as registry_mod
-from pipeline.console import safe_output
+from pipeline.console import md_cell, safe_output
 from pipeline.edits import checks, forms, frontmatter, ops, pages, safety, spec as spec_mod, targets
+from pipeline.llm import CallLog, call_line
 
 MAX_FIELD_CHARS = 5000
 EXIT_OK, EXIT_INFRA, EXIT_CONFIG = 0, 1, 2
@@ -256,12 +257,13 @@ def _ignored(issue):
     return None
 
 
-def build_llm(env, registry_models_):
+def build_llm(env, registry_models_, calls=None):
+    """calls(CallLog)를 넘기면 이번 실행의 Gemini 요청 기록이 거기에 쌓인다(무료 한도 측정, 러너가 요약과 로그에 쓴다)."""
     key = (env.get("GEMINI_API_KEY") or "").strip()
     if not key:
         return None
     from pipeline.llm import make_gemini_llm
-    return make_gemini_llm(key, registry_models_, max_retries=2)
+    return make_gemini_llm(key, registry_models_, max_retries=2, log=calls)
 
 
 def registry_models(root):
@@ -422,7 +424,7 @@ def check_mode(cfg):
 # ----------------------------------------------------------------------------
 # 본 처리
 # ----------------------------------------------------------------------------
-def process_issue(issue, root, env=None, llm=None, image_picker=None, dry_run=False, remote_refs=None):
+def process_issue(issue, root, env=None, llm=None, image_picker=None, dry_run=False, remote_refs=None, calls=None):
     """이슈 한 건을 처리한다. 이미 처리한 이슈(기존 브랜치·표식 라벨)면 코멘트용 결과(duplicate)만 돌려주고 아무것도 만들지 않는다.
     dry_run 은 예외다(시험 반복용) — 처리는 계속하고 로그에 참고 문장만 남긴다. remote_refs: `git ls-remote --heads` 출력 줄 목록."""
     env = os.environ if env is None else env
@@ -437,7 +439,7 @@ def process_issue(issue, root, env=None, llm=None, image_picker=None, dry_run=Fa
     if done and not dry_run:
         return _duplicate(issue, done, env)
     search_notes = []   # 이미지 선택기(레거시 엔진)가 낸 출력의 요약 — 결과의 참고 문장으로 러너 로그에 `issue=#N …` 머리를 달고 나간다
-    result = _process(issue, root, env, llm, image_picker, dry_run, search_notes)
+    result = _process(issue, root, env, llm, image_picker, dry_run, search_notes, calls)
     result.notes.extend(search_notes)
     if done:
         result.notes.append("이미 처리한 이슈이지만 dry-run 이라 처리를 계속했습니다"
@@ -445,7 +447,7 @@ def process_issue(issue, root, env=None, llm=None, image_picker=None, dry_run=Fa
     return result
 
 
-def _process(issue, root, env, llm, image_picker, dry_run, search_notes):
+def _process(issue, root, env, llm, image_picker, dry_run, search_notes, calls=None):
     req = resolve_request(issue, root)
     if isinstance(req, Result):
         return req
@@ -467,7 +469,7 @@ def _process(issue, root, env, llm, image_picker, dry_run, search_notes):
     method = cfg["method"]
     try:
         if method in ("text", "llm_patch", "image") and llm is None:
-            llm = build_llm(env, registry_models(root))
+            llm = build_llm(env, registry_models(root), calls)
         if method == "image" and image_picker is None:
             image_picker = default_image_picker(search_notes)
         if method == "text":
@@ -578,6 +580,19 @@ def show_output(out_dir, write=None, token=None):
     return 0
 
 
+def write_step_summary(markdown, on_error=print):
+    """Actions 실행 화면의 요약 칸(GITHUB_STEP_SUMMARY)에 덧붙인다. 로컬 실행에서는 아무 일도 하지 않고, 쓰기에 실패해도 처리 결과는 바꾸지 않는다
+    (on_error 에는 예외 종류만 넘긴다 — 예외 원문은 내지 않는다)."""
+    target = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not target:
+        return
+    try:
+        with open(target, "a", encoding="utf-8") as fh:
+            fh.write(markdown.rstrip() + "\n\n")
+    except OSError as exc:
+        on_error(f"실행 요약 쓰기 실패(처리 결과에는 영향 없음): {type(exc).__name__}")
+
+
 def main(argv=None):
     safe_output()
     parser = argparse.ArgumentParser(prog="python -m pipeline.edits.runner")
@@ -598,6 +613,7 @@ def main(argv=None):
     if not (args.issue_file and args.out):
         parser.error("--issue-file 과 --out 이 필요합니다.")
     dry = args.dry_run or str(os.environ.get("DRY_RUN", "")).lower() in ("1", "true", "yes")
+    calls = CallLog(label="issue-edit")   # 이번 실행의 Gemini 요청 기록(무료 한도 측정). 줄은 아래에서 `issue=#N …` 머리를 달아 한 번에 낸다
     issue = {}
     try:
         issue = json.loads(Path(args.issue_file).read_text(encoding="utf-8"))
@@ -613,7 +629,7 @@ def main(argv=None):
             result = _error(f"원격 브랜치 목록을 읽을 수 없습니다: {type(exc).__name__}", EXIT_CONFIG)
         else:
             try:
-                result = process_issue(issue, root, dry_run=dry, remote_refs=refs)
+                result = process_issue(issue, root, dry_run=dry, remote_refs=refs, calls=calls)
             except Exception as exc:  # noqa: BLE001 - 예상 못 한 입력으로 처리기가 죽어도 트레이스백 대신 오류 결과를 남긴다
                 if _is_test_signal(exc):
                     raise    # 러너를 거치는 시험의 단언·건너뛰기는 오류 결과로 가리지 않는다
@@ -633,6 +649,16 @@ def main(argv=None):
         print(f"{tag}   * {log(note, 300)}")
     if result.log_detail:   # AI 실패 원인: 마스킹하고 300자로 자른 것을 러너 로그에만 낸다(공개 코멘트·result.json 에는 없다)
         print(f"{tag}   ! 원인(로그 전용): {log(result.log_detail, 300)}")
+    # Gemini 요청 기록: 요청마다 한 줄(다른 줄과 같은 머리·마스킹·300자 한도)과 호출 수 요약. AI 를 부르지 않은 처리(문자 그대로 교체·링크·SEO)는
+    # 로그 줄을 늘리지 않고 실행 요약에만 `Gemini 호출: 0회` 를 남긴다.
+    ai_lines = calls.summary_lines()
+    if calls.attempts:
+        for record in calls.records:
+            print(f"{tag}   * {log(call_line(record), 300)}")
+        for line in ai_lines:
+            print(f"{tag}   * {log(line, 300)}")
+    write_step_summary(f"### 이슈 수정 요청 처리 요약\n- 결과: **{md_cell(result.status, 30)}**" + "".join(f"\n- {line}" for line in ai_lines),
+                       on_error=lambda message: print(f"{tag}   * {log(message, 300)}"))
     return result.exit_code
 
 

@@ -25,7 +25,7 @@ from pathlib import Path
 
 from pipeline import gates
 from pipeline.console import md_cell, one_line, safe_output
-from pipeline.llm import LLMError, make_gemini_llm, mask
+from pipeline.llm import LLMError, call_log_of, make_gemini_llm, mask, purpose
 from pipeline.publishers.base import PublishError
 from pipeline.registry import (ROOT, RegistryError, get_blog, load_profile, load_registry,
                                merged_blog, missing_secret_roles, resolve_secrets, validate_registry)
@@ -122,9 +122,10 @@ def skip_line(code, **fields):
     return " ".join([f"[SKIP] code={code}"] + [f"{key}={value}" for key, value in fields.items()])
 
 
-def _summarize(environ, blog, code, text):
-    """실행 요약 한 블록. 정상 건너뜀·경고·실패 모두 같은 모양으로 남긴다(성공 경로는 아래에서 따로 쓴다)."""
-    _write_summary(environ, f"### {blog['key']}\n- 결과: **{code}** — {text}")
+def _summarize(environ, blog, code, text, ai_lines=()):
+    """실행 요약 한 블록. 정상 건너뜀·경고·실패 모두 같은 모양으로 남긴다(성공 경로는 아래에서 따로 쓴다).
+    ai_lines: 이번 실행의 Gemini 호출 기록 줄(무료 한도를 나눠 쓰므로 실패·예외로 끝난 실행에서도 남긴다)."""
+    _write_summary(environ, f"### {blog['key']}\n- 결과: **{code}** — {text}" + "".join(f"\n- {line}" for line in ai_lines))
 
 
 def default_publisher_factory(blog, environ):
@@ -222,9 +223,10 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
         return EXIT_OK
 
     # ---- LLM --------------------------------------------------------------
+    stub_used = False
     if llm is None:
         if dry:
-            llm = stub_llm
+            llm, stub_used = stub_llm, True
         else:
             api_key = resolve_secrets(blog, environ).get("llm_api_key", "")
             if not api_key:
@@ -235,6 +237,16 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
                 _summarize(environ, blog, "SECRETS_MISSING", message)
                 return EXIT_CONFIG
             llm = make_gemini_llm(api_key, blog["llm"]["models"], blog["llm"].get("max_retries", 2))
+    # 요청별 호출 기록(무료 한도 측정): 어느 블로그의 호출인지와 로그 출력처를 정한다. 주입된 가짜 llm 에는 기록 장치가 없다.
+    call_log = call_log_of(llm)
+    if call_log is not None:
+        call_log.configure(label=blog["key"], out=out, purpose="generate")
+
+    def ai_lines():
+        """실행 요약에 붙일 Gemini 호출 줄. 실패·예외로 끝난 실행에서도 호출 수가 사라지지 않게 모든 종료 경로에서 쓴다."""
+        if call_log is not None:
+            return call_log.summary_lines()
+        return ["Gemini 호출: 0회(가짜 AI 응답 사용)"] if stub_used else []
 
     # ---- 주제 -------------------------------------------------------------
     recent_titles = entry_titles(history[-100:])
@@ -242,7 +254,8 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
     if override:
         topic, source = override, "override"
     else:
-        topic, source = pick_topic(profile, history, today, other_titles + recent_titles, rng, llm=llm)
+        with purpose(llm, "topic-expansion"):
+            topic, source = pick_topic(profile, history, today, other_titles + recent_titles, rng, llm=llm)
 
     base_entry = {"v": 1, "blog": blog["key"], "date": today.isoformat(), "generated_at": local_now.isoformat()}
 
@@ -260,13 +273,13 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
         out(skip_line("EXPAND_FAILED", blog=blog["key"]))
         out(f"::error::[{blog['key']}] {message}")
         record({"status": "llm_failed", "topic": "", "reasons": ["[TOPIC] expand_failed"]})
-        _summarize(environ, blog, "EXPAND_FAILED", message)
+        _summarize(environ, blog, "EXPAND_FAILED", message, ai_lines())
         return EXIT_INFRA
     if not topic:
         out(skip_line("NO_TOPIC", blog=blog["key"], source=source))
         out(f"::warning::[{blog['key']}] 고를 주제가 없습니다({source}). 시드 주제를 보강하세요. 건너뜁니다.")
         record({"status": "skipped_no_topic", "topic": "", "reasons": [f"[TOPIC] {source}"]})
-        _summarize(environ, blog, "NO_TOPIC", f"고를 주제가 없습니다({source}).")
+        _summarize(environ, blog, "NO_TOPIC", f"고를 주제가 없습니다({source}).", ai_lines())
         return EXIT_OK
     out(f"[{blog['key']}] 주제({source}): {topic}")
 
@@ -281,7 +294,7 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
             out(f"[인프라 오류] LLM 호출 실패: {one_line(mask(exc))}")
             out(f"::error::[{blog['key']}] LLM 호출이 실패했습니다. LLM 키·할당량·모델 이름을 확인하세요.")
             record({"status": "llm_failed", "topic": topic, "reasons": [f"[LLM] {mask(exc)[:300]}"], "attempts": attempt})
-            _summarize(environ, blog, "LLM_FAILED", "LLM 호출이 실패했습니다(원인은 이 단계의 로그를 보세요).")
+            _summarize(environ, blog, "LLM_FAILED", "LLM 호출이 실패했습니다(원인은 이 단계의 로그를 보세요).", ai_lines())
             return EXIT_INFRA
         try:
             parsed = gates.parse_labeled_post(raw)
@@ -309,7 +322,7 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
         out(f"[{blog['key']}] 게이트를 통과하지 못해 게시하지 않습니다: {one_line('; '.join(reasons), REASONS_SHOWN)}")
         out(f"::warning::[{blog['key']}] 게이트를 {attempts}번 모두 통과하지 못해 게시하지 않았습니다. 다음 실행에서 다시 시도합니다.")
         record({"status": "rejected", "topic": topic, "reasons": reasons, "attempts": attempts, "model": model})
-        _summarize(environ, blog, "GATE_REJECTED", md_cell('; '.join(reasons), REASONS_SHOWN))
+        _summarize(environ, blog, "GATE_REJECTED", md_cell('; '.join(reasons), REASONS_SHOWN), ai_lines())
         return EXIT_OK
 
     final_html = gates.append_disclosure(accepted["content"], profile)
@@ -320,7 +333,8 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
     if dry:
         out("[DRY_RUN] 게이트 통과 — 게시·저장 없이 종료합니다.")
         out(f"  제목: {one_line(post['title'], TITLE_SHOWN)} / 라벨: {post['labels']} / 본문 {gates.text_length(gates.plain_text(accepted['content']))}자")
-        _summarize(environ, blog, "DRY_RUN", f"게이트 통과, 게시·저장 없이 종료(제목: {md_cell(post['title'], TITLE_SHOWN)})")
+        _summarize(environ, blog, "DRY_RUN", f"게이트 통과, 게시·저장 없이 종료(제목: {md_cell(post['title'], TITLE_SHOWN)})",
+                   ai_lines())
         return EXIT_OK
     if will_publish:
         # 게시용 시크릿 누락은 위의 사전 점검에서 이미 걸러졌다(여기까지 오면 4종 모두 있다).
@@ -346,7 +360,7 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
             "attempts": attempts, "reasons": extra})
     out(f"  초안 저장: {draft_path.relative_to(root).as_posix()} / 상태: {status}")
     _write_summary(environ, f"### {blog['key']}\n- 결과: **{status}** — {md_cell(post['title'], TITLE_SHOWN)}\n"
-                            f"- URL: {url or '(없음)'}")
+                            f"- URL: {url or '(없음)'}" + "".join(f"\n- {line}" for line in ai_lines()))
     return exit_code
 
 
