@@ -8,6 +8,7 @@
 import contextlib
 import io
 import json
+import os
 import re
 import subprocess
 import tempfile
@@ -39,11 +40,12 @@ def bad_lines(text):
 
 
 def run_main(root, iss, extra=()):
+    """runner.main 을 실제 CLI 처럼 돌린다. 개발자 셸의 환경변수(DRY_RUN·GEMINI_API_KEY 등)가 결과를 바꾸지 않게 비운 환경에서 돌린다."""
     with tempfile.TemporaryDirectory() as tmp:
         issue_file, out = Path(tmp) / "issue.json", Path(tmp) / "out"
         issue_file.write_text(json.dumps(iss), encoding="utf-8")
         buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
+        with mock.patch.dict(os.environ, clear=True), contextlib.redirect_stdout(buf):
             code = runner.main(["--issue-file", str(issue_file), "--out", str(out), "--root", str(root), *extra])
         files = {p.name: p.read_text(encoding="utf-8") for p in out.iterdir()}
     return code, buf.getvalue(), files
