@@ -189,8 +189,12 @@ class FakeClient:
     def __init__(self):
         self.created, self.comments, self.closed = [], [], []
 
-    def create_issue(self, title, body):
+    def create_issue(self, title, body, assignees=None):
         self.created.append((title, body))
+        self.assignees = assignees
+
+    def update_body(self, number, body):
+        self.updated = getattr(self, "updated", []) + [number]
 
     def comment(self, number, body):
         self.comments.append(number)
@@ -206,7 +210,7 @@ F2 = Finding("chance", "FAIL_STREAK", "critical", "연속 실패")
 class SyncIssuesTest(unittest.TestCase):
     def test_creates_missing_and_does_not_duplicate(self):
         client = FakeClient()
-        created, closed = watchdog.sync_issues([F1, F2], [{"title": F1.title, "number": 5}], client, out=lambda s: None)
+        created, closed, *_ = watchdog.sync_issues([F1, F2], [{"title": F1.title, "number": 5}], client, out=lambda s: None)
         self.assertEqual(created, [F2.title])
         self.assertEqual(closed, [])
         self.assertEqual([t for t, _ in client.created], [F2.title])
@@ -216,15 +220,15 @@ class SyncIssuesTest(unittest.TestCase):
         client = FakeClient()
         issues = [{"title": F1.title, "number": 5}, {"title": "[Watchdog] x: GONE", "number": 6},
                   {"title": "사람이 연 일반 이슈", "number": 7}]
-        created, closed = watchdog.sync_issues([F1], issues, client, out=lambda s: None)
+        created, closed, *_ = watchdog.sync_issues([F1], issues, client, out=lambda s: None)
         self.assertEqual(closed, ["[Watchdog] x: GONE"])
         self.assertEqual(client.closed, [6])
         self.assertEqual(client.comments, [6])
 
     def test_dry_run_calls_nothing(self):
         client = FakeClient()
-        created, closed = watchdog.sync_issues([F1], [{"title": "[Watchdog] x: GONE", "number": 6}], client,
-                                               dry=True, out=lambda s: None)
+        created, closed, *_ = watchdog.sync_issues([F1], [{"title": "[Watchdog] x: GONE", "number": 6}], client,
+                                                   dry=True, out=lambda s: None)
         self.assertEqual((created, closed), ([F1.title], ["[Watchdog] x: GONE"]))
         self.assertEqual((client.created, client.closed, client.comments), ([], [], []))
 
