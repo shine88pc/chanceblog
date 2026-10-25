@@ -7,6 +7,39 @@
 
 ---
 
+## [2026-10-25] Claude – 보안 설정 강화: 키 파일 무시 규칙 확대·새 구글 키 형식 탐지·mask() 공용 패턴·CODEOWNERS (발행 복구 4/4, 총괄)
+
+**작업자**: Claude (총괄 역할)  
+**대상**: 공통  
+**등급**: T2 (비밀 방어선·보안 경계 설정). 독립 검증은 별도 세션이 새 clone에서 두 번 수행(아래)  
+**목적**: 10-18에 구글 키 형식의 한 줄이 든 `123.txt`가 공개 저장소에 올라갔다가 지워졌지만 이력에 남은 사건(D-30)의 재발 방지. 이름이 다른 키 파일이 `git add -A`로 올라가는 길을 줄이고, 새 키 형식을 탐지·마스킹하고, 보안 경계 경로에 소유자 검토 요청을 건다
+
+### 변경 사항
+- **`.gitignore`**: `.env.*`(예시·샘플·템플릿 제외), 서비스 계정·credentials JSON(`*[Ss]ervice[Aa]ccount*.json` 포함), `*.pem` `*.key` `*.p12` `*.pfx`, SSH 개인 키(`id_*`)를 추가했다. 검증기 SEC-1 금지 목록과 같은 범위이고, 테스트가 `_FORBIDDEN_FILES` 항목마다 대표 파일 이름을 두고 `.gitignore`가 실제로 무시하는지 대조한다(항목이 추가·변경되면 대표 이름을 적어야 통과)
+- **`pipeline/secret_patterns.py`**: 새 형식 `AQ.` 접두 구글 API 키(`(?<![A-Za-z0-9])AQ\.[0-9A-Za-z_\-]{40,}` — 한글·`_` 바로 뒤 키도 탐지, `FAQ.` 등은 제외). 소비처 세 곳(검증기 SEC-2, `pipeline/edits/checks.py`, `pipeline/llm.py`)이 같은 패턴을 쓴다
+- **`pipeline/llm.py`**: `mask()`가 공용 패턴 13개를 모두 쓴다(D-31 일부 해결: 구글 클라이언트 시크릿 맨몸·GitHub 토큰·새 구글 키가 이제 가려진다)
+- **`.github/CODEOWNERS`**: 자동화·보안 경계·광고 표면·T2 문서 경로(`/.gitignore`, `/docs/SECURITY_GUARDRAILS.md`, `/docs/CHARTER.md`, `/posts.json`, `/feed.xml`, `/requirements*.txt` 포함)를 소유자(@shine88pc) 검토 대상으로 지정. **이 파일만으로는 강제력이 없다.** main 보호 규칙은 운영자 결정(2026-10-25)대로 삭제·force push 차단만 켜고 PR 필수 등은 켜지 않는다(봇의 main 직접 push가 막혀 자동 발행이 멈춤)
+- **문서**: SECURITY_GUARDRAILS G-S1(범위와 한계)·§5(main 룰셋 권장 정정), DEFECT_REGISTER(D-07·D-30·D-31 갱신, D-42·D-43 신규), HANDLER 비밀 안내
+- 함께 고친 기존 결함: 기존 테스트가 `git ls-files`의 따옴표 이스케이프 때문에 한글 경로 파일 19개를 조용히 건너뛰던 것을 `-z`로 전부 읽게(못 읽으면 실패)
+
+### 검증 증거
+- **L0**: `python scripts/validate_repo.py` 오류 0·경고 2(LIQUID-1, EXPOSE-1 — main과 동일), actionlint 0건, pyflakes 0건, vermin 3.10 호환(최소 3.7). 비밀 모양 리터럴·로컬 경로 0건(테스트의 가짜 키는 런타임 조합)
+- **L1**: 신규 `tests/test_security_settings.py` 30개. 추적 파일 147개·`git log --all` 추가된 줄 5만 줄·커밋 메시지에서 새 패턴 오탐 0건(`123.txt`는 경로로 제외해 내용을 열지 않음). 전체 테스트는 main(401개) 위에서 통과(아래 PR 본문의 숫자 참고)
+- **독립 검증**: 1차(ca6b7a7) 조건부 병합 가능(`.gitignore`와 검증기 목록 불일치, CODEOWNERS 주석 모순, 테스트가 과도한 무시 규칙·패턴 경계를 못 잡음 등 13건). 2차(e7ad486) **병합 가능**: 이름 10,360개 조합으로 대조하니 검증기만 막던 이름 361개가 199개로 줄고 남은 199개는 전부 대문자 포함(대소문자 한계), 이전에 못 잡던 변이 30개 중 27개 탐지(나머지 3개는 동작이 같은 동치 변이), 새 변이 포함 208개 중 183개 탐지, 적대적 전역 git 설정에서도 통과, 오탐·성능(역추적) 이상 없음. 2차 권장 중 `git init --template=`(전역 템플릿 의존 제거)와 이름 목록 2개 보강은 반영
+- 실행하지 못한 것: 실제 Linux 러너·Python 3.10 실행(Guardrails CI의 3.10·3.12가 대신), GitHub 쪽 사실(저장소의 룰셋·Push protection 상태, 룰셋 우회 목록에 `github-actions`가 들어가는지 — 모두 미검증)
+
+### 다음 AI에게 남기는 주의사항
+1. **병합은 squash로 한다**: 첫 커밋 ca6b7a7의 테스트에 출처를 확인할 수 없는 6글자(`Ab8RN6`)가 남아 있어 일반 병합이면 main 이력에 남는다(작업 트리에서는 교체됨)
+2. **사전 차단은 아직 없다**: 이름 규칙은 `123.txt` 같은 일반 이름을 못 막고, 검증기 SEC-2는 텍스트 확장자만 읽는다(D-42 — 확장자와 무관하게 작은 비이진 파일 전부로 확대하는 후속 PR). 사용자: GitHub Push protection 켜짐 확인(SECURITY_GUARDRAILS §5)
+3. CODEOWNERS 머리 주석을 다시 쓰면 `test_header_comment_states_the_conditions_for_enforcement`의 키워드(github-actions·우회·미검증·본인 PR 승인 불가)를 유지하거나 테스트를 같이 고친다. 소유자 `@shine88pc`도 테스트가 고정한다
+4. 대소문자 구분 파일시스템에서 `Credentials.json` 같은 변형은 `.gitignore`가 못 막는다(D-43, CI가 사후 탐지)
+
+### 남은 이슈 / 확인할 점
+- 문구 고정 테스트의 취약성(2차 N1), 검증기 정규식에 새 갈래를 넣을 때 대표 이름·규칙을 강제하지 못하는 점(N2) — 낮음
+- `mask()` 한계(D-31 남은 것): 실행 중 시크릿 실제 값 직접 치환, 개인 키 본문, `Authorization: Bearer <임의>`, JSON `"token": "…"` 모양
+
+---
+
 ## [2026-10-25] Claude – Chance 복구: 분야 폴백·건너뜀 사유 기록·종료 정책 (발행 복구 1/4, 총괄)
 
 **작업자**: Claude (총괄 역할)  
