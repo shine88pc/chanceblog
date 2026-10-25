@@ -2,6 +2,22 @@
 client_secret*.json
 token*.json
 .env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+credentials*.json
+*credentials*.json
+*service-account*.json
+*service_account*.json
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
 
 # 파이썬 캐시
 __pycache__/

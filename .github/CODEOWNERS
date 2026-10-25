@@ -1,0 +1,34 @@
+# 코드 소유자(CODEOWNERS): 저장소 소유자가 직접 검토해야 하는 경로입니다.
+#
+# 주의 — 이 파일만으로는 아무것도 막지 않습니다. 지금은 'PR이 이 경로를 건드리면 소유자에게 검토 요청이 자동 지정되는' 효과뿐입니다.
+# 브랜치 보호의 'Require review from Code Owners'(또는 'Require a pull request')를 main에 켜면 효력이 생기지만,
+# 자동 발행 3종(chanceblog.yml, blogger.yml, sync-issue-form.yml)이 GITHUB_TOKEN으로 main에 직접 push하므로
+# 그 규칙을 켜는 순간 자동 발행이 멈춥니다. 켜기 전에 docs/ACTIONS_GUIDE.md의 브랜치 보호 경고를 읽으세요.
+
+# --- 자동화·보안 경계 (변경 등급 T2) ---
+/.github/                         @shine88pc
+/.github/editorial/edit-spec.yml  @shine88pc
+/pipeline/                        @shine88pc
+/scripts/                         @shine88pc
+/generator.py                     @shine88pc
+/blogger_generator.py             @shine88pc
+/requirements-dev.txt             @shine88pc
+/requirements-edits.txt           @shine88pc
+/requirements-pipeline.txt        @shine88pc
+/tests/                           @shine88pc
+/AGENTS.md                        @shine88pc
+/CLAUDE.md                        @shine88pc
+/GEMINI.md                        @shine88pc
+
+# --- 광고 표면 (변경 등급 T3, pipeline/blogs.json 의 protected_paths 와 같게 유지) ---
+/index.html                       @shine88pc
+/privacy.md                       @shine88pc
+/about.md                         @shine88pc
+/contact.md                       @shine88pc
+/robots.txt                       @shine88pc
+/ads.txt                          @shine88pc
+/_config.yml                      @shine88pc
+/_includes/                       @shine88pc
+/_layouts/                        @shine88pc
+/googlee86895dfeddcdd45.html      @shine88pc
+/naver8e7a71b78d49e6f323e7ad60ffb862a8.html  @shine88pc

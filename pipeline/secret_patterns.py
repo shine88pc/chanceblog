@@ -7,6 +7,8 @@ import re
 
 SECRET_PATTERNS = [
     ("Google API 키", re.compile(r"AIza[0-9A-Za-z_\-]{35}")),
+    # 2026-10-18 공개 이력에 남았던 123.txt(D-30)의 형식: 점이 든 접두사 'AQ.' + 영숫자 40자 이상(총 53자 안팎)
+    ("Google API 키(새 형식)", re.compile(r"\bAQ\.[0-9A-Za-z_\-]{40,}")),
     ("Google OAuth 클라이언트 시크릿", re.compile(r"GOCSPX-[0-9A-Za-z_\-]{20,}")),
     ("Google refresh token", re.compile(r"\b1//0[0-9A-Za-z_\-]{40,}")),
     ("Google access token", re.compile(r"\bya29\.[0-9A-Za-z_\-]{30,}")),
