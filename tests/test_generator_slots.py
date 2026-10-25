@@ -1500,7 +1500,7 @@ class SourceListTest(unittest.TestCase):
     LANES_WITHOUT_SOURCES = {"daily_life", "society"}
     # 약관을 읽지 못했거나 금지로 읽히는데 운영자 결정 전까지 쓰는 기존 소스(유예). 새 소스는 allowed 만 늘린다 — 읽고 allowed 로 올리거나
     # 목록에서 빼서 줄이기만 한다.
-    LEGACY_GRACE = {"TechCrunch", "The Verge", "Ars Technica", "IEEE Spectrum", "Hacker News", "AI타임스", "전자신문"}
+    LEGACY_GRACE = {"Ars Technica", "IEEE Spectrum", "전자신문"}
 
     def test_dead_bloter_feed_is_gone(self):
         self.assertNotIn("블로터", [s["name"] for s in g.NEWS_SOURCES])
@@ -1521,9 +1521,8 @@ class SourceListTest(unittest.TestCase):
         self.assertEqual(len(names), len(set(names)))
         self.assertEqual({s["name"]: s["lane"] for s in g.NEWS_SOURCES},
                          {"NASA": "science", "UN News": "society", "Pew Research Center": "culture",
-                          "Federal Reserve": "economy", "TechCrunch": "technology", "The Verge": "technology",
-                          "Ars Technica": "technology", "IEEE Spectrum": "technology", "Hacker News": "technology",
-                          "AI타임스": "technology", "전자신문": "technology"})
+                          "Federal Reserve": "economy", "Ars Technica": "technology", "IEEE Spectrum": "technology",
+                          "전자신문": "technology"})
 
     def test_look_alike_hosts_are_never_trusted_and_never_blocked_by_accident(self):
         for host in ("notbbc.co.uk", "bbc.com.evil.example", "evilnasa.gov", "nasa.gov.evil.example", "xfederalreserve.gov"):
@@ -1544,7 +1543,7 @@ class SourceListTest(unittest.TestCase):
     def test_the_blocked_domain_list_is_exactly_the_agreed_publishers(self):
         self.assertEqual(set(g.TERMS_BLOCKED_DOMAINS),
                          {"bbc.com", "bbc.co.uk", "bbci.co.uk", "theguardian.com", "guardian.co.uk",
-                          "nature.com", "technologyreview.com"})
+                          "nature.com", "technologyreview.com", "aitimes.com"})
 
     def test_pew_never_reads_article_pages_and_the_prompt_rules_exist(self):
         by_name = {s["name"]: s for s in g.NEWS_SOURCES}
@@ -1558,24 +1557,30 @@ class SourceListTest(unittest.TestCase):
             with self.subTest(source=src["name"]):
                 terms = src.get("terms")
                 self.assertIsInstance(terms, dict)
-                self.assertIn(terms.get("status"), {"allowed", "pending", "restricted", "unverified"})
-                if terms["status"] in {"allowed", "pending", "restricted"}:
+                self.assertIn(terms.get("status"), {"allowed", "pending", "unverified"})
+                if terms["status"] in {"allowed", "pending"}:
                     self.assertRegex(terms.get("checked", ""), r"^\d{4}-\d{2}-\d{2}$")
                     self.assertTrue(terms.get("url", "").startswith("https://"))
                 if terms["status"] == "pending":
                     self.assertTrue(str(terms.get("blocker", "")).strip(), "보류에는 이유(blocker)가 있어야 한다")
-                if terms["status"] in {"restricted", "unverified"} and src["name"] in self.LEGACY_GRACE:
+                if terms["status"] == "unverified" and src["name"] in self.LEGACY_GRACE:
                     self.assertTrue(str(terms.get("note", "")).strip(), "유예 소스는 읽은 결과(note)를 남긴다")
 
     def test_sources_under_grace_cannot_grow(self):
-        grace = {s["name"] for s in g.NEWS_SOURCES if s["terms"]["status"] in {"unverified", "restricted"}}
+        grace = {s["name"] for s in g.NEWS_SOURCES if s["terms"]["status"] == "unverified"}
         self.assertTrue(grace <= self.LEGACY_GRACE, grace - self.LEGACY_GRACE)
 
-    def test_aitimes_is_marked_restricted_not_merely_unverified(self):
-        # 기사 페이지 하단의 'AI학습 및 활용 금지' 표기(2026-10-26)를 읽었으므로 '읽지 못함'으로 두지 않는다.
-        aitimes = next(s for s in g.NEWS_SOURCES if s["name"] == "AI타임스")
-        self.assertEqual(aitimes["terms"]["status"], "restricted")
-        self.assertIn("AI학습 및 활용 금지", aitimes["terms"]["note"])
+    def test_aitimes_is_blocked_and_neither_read_nor_trusted_anywhere(self):
+        # 기사 페이지 하단의 'AI학습 및 활용 금지' 표기(2026-10-26)와 운영자 결정("금지된 부분이면 접근하지 않는다")으로 접근하지 않는다.
+        self.assertIn("aitimes.com", g.TERMS_BLOCKED_DOMAINS)
+        self.assertEqual([s["name"] for s in g.NEWS_SOURCES if s["name"] == "AI타임스" or "aitimes" in s["url"]], [])
+        for lane in g.EDITORIAL_LANES:
+            self.assertFalse(g._trusted_domain("www.aitimes.com", lane), lane)
+
+    def test_sources_that_never_produce_candidates_and_have_restrictive_terms_are_gone(self):
+        # 신뢰 목록에 없어 글감이 한 건도 안 되는 TechCrunch·The Verge, 링크가 약관을 읽지 않은 매체로 가는 Hacker News.
+        names = {s["name"] for s in g.NEWS_SOURCES}
+        self.assertFalse(names & {"TechCrunch", "The Verge", "Hacker News"})
 
     def test_un_news_is_held_until_its_conditions_are_met(self):
         un = next(s for s in g.NEWS_SOURCES if s["name"] == "UN News")
@@ -1594,7 +1599,7 @@ class SourceListTest(unittest.TestCase):
         self.assertIn("not responsible for its accuracy", nasa["notice"]["en"])
 
     def test_terms_blocked_publishers_are_in_no_source_and_no_trust_list(self):
-        for domain in ("bbc.com", "bbc.co.uk", "theguardian.com", "nature.com", "technologyreview.com"):
+        for domain in ("bbc.com", "bbc.co.uk", "theguardian.com", "nature.com", "technologyreview.com", "aitimes.com"):
             self.assertIn(domain, g.TERMS_BLOCKED_DOMAINS)
         for lane, domains in g.TRUSTED_SOURCE_DOMAINS.items():
             for domain in domains:

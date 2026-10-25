@@ -702,9 +702,8 @@ EDITORIAL_LANES = {
 # 약관 점검(terms): 소스마다 공식 약관·이용 안내를 읽은 결과를 적는다(법률 판단이 아니다).
 #   allowed    출처를 밝히고 요약해 새 글을 쓰는 이 용도가 허용된다고 읽은 소스. 확인한 날짜와 근거 쪽 주소를 함께 적는다.
 #   pending    약관은 허용하지만 아직 채우지 못한 조건(blocker)이 있어 읽지 않고 건너뛴다(로그에 이유가 한 줄 남는다). 조건을 채우고 운영자가 확인하면 allowed 로 바꾼다.
-#   restricted 약관을 읽었고 이 용도가 금지·허가 필요로 읽히지만 운영자 결정 전까지 쓰는 기존 소스(유예). 새로 늘릴 수 없다.
 #   unverified 아직 약관을 읽지 못했거나 허용인지 금지인지 불명확한 기존 소스(유예). 새로 늘릴 수 없다(tests/test_generator_slots.py SourceListTest).
-# 이 용도를 금지·허가 필요로 읽은 매체(BBC·Guardian·Nature·MIT Technology Review)는 TERMS_BLOCKED_DOMAINS 로 막고
+# 이 용도를 금지·허가 필요로 읽은 매체(BBC·Guardian·Nature·MIT Technology Review·AI타임스)는 TERMS_BLOCKED_DOMAINS 로 막고
 # 소스에도 신뢰 목록에도 두지 않는다. 일상·마음 분야는 약관상 쓸 수 있는 직접 RSS를 아직 찾지 못해 소스가 없다(뽑히면 다음 분야로 넘어간다).
 #
 # 소스별 선택 키(모두 생략 가능):
@@ -771,26 +770,18 @@ NEWS_SOURCES = [
      "exclude_title": r"\benforcement actions?\b|\bapprovals? of (?:the |related )?applications?\b|\bdoes not object\b|\bjoint findings\b",
      "notice": {"ko": "이 글은 AI 도구가 미국 연방준비제도 이사회(Federal Reserve Board)가 공개한 자료를 참고해 작성했습니다. 연준은 이 글을 검토하거나 승인하지 않았습니다.",
                 "en": "This article was written with an AI tool using materials published by the Federal Reserve Board. The Board has not reviewed or approved it."}},
-    # 해외 직접 RSS(기술). 신뢰 목록을 통과해 글감이 되는 곳은 Ars·IEEE 뿐이고 TechCrunch·The Verge 는 신뢰 목록에 없어 글감이 안 된다(D-61).
-    {"name": "TechCrunch", "lane": "technology", "url": "https://techcrunch.com/feed/",
-     "terms": {"status": "unverified", "note": "2026-10-26 RSS 이용약관을 읽었다: 피드 내용을 그대로 표시하고 출처·링크를 달 것, 변형·피드 광고 금지. AI로 새 글을 쓰는 이용은 언급이 없어 불명확"}},
-    {"name": "The Verge", "lane": "technology", "url": "https://www.theverge.com/rss/index.xml",
-     "terms": {"status": "unverified", "note": "검증 세션 보고(직접 재확인 못 함): Vox Media 이용약관 §15(2026-07-06)가 파생물·영리 이용을 금지하는 것으로 읽힘"}},
+    # 기술. 약관을 못 읽었거나 불명확한 기존 소스(유예, D-61). 읽고 허용이면 allowed 로 올리고, 금지로 읽히면 이 목록에서 빼고 TERMS_BLOCKED_DOMAINS 에 올린다.
     {"name": "Ars Technica", "lane": "technology", "url": "https://feeds.arstechnica.com/arstechnica/index",
      "terms": {"status": "unverified", "note": "검증 세션 보고(직접 재확인 못 함): robots.txt 가 ClaudeBot·CCBot 등 AI 크롤러를 막음. Condé Nast 이용약관은 읽지 못함"}},
     {"name": "IEEE Spectrum", "lane": "technology", "url": "https://spectrum.ieee.org/feeds/feed.rss",
      "terms": {"status": "unverified", "note": "검증 세션 보고(일부, 직접 재확인 못 함): IEEE 사이트 이용약관은 복제에 사전 서면 동의를 요구하고 개인·정보 목적 이용만 허용. Spectrum 자체 RSS 약관은 못 찾음"}},
-    {"name": "Hacker News", "lane": "technology", "url": "https://news.ycombinator.com/rss",
-     "terms": {"status": "unverified", "note": "항목 링크가 임의의 사이트라 신뢰 목록 도메인(reuters·apnews·ieee·arxiv 등)으로 가는 링크만 통과하고, 그 매체들의 약관은 읽지 않았다 — 간접 경로(D-61)"}},
-    # 국내 직접 RSS(기술).
-    {"name": "AI타임스", "lane": "technology", "url": "https://www.aitimes.com/rss/allArticle.xml",
-     "terms": {"status": "restricted", "checked": "2026-10-26", "url": "https://www.aitimes.com/com/copyright.html",
-               "note": "기사 페이지 하단에 '무단전재 및 재배포, AI학습 및 활용 금지'가 적혀 있고(2026-10-26 기사 3건 직접 확인) 저작권보호정책은 승낙 없는 복제·전송·배포·변형을 금지한다 — AI 이용은 허가 전 사용 불가로 읽힌다. 제외 또는 허가 문의는 운영자 결정(D-61)"}},
     {"name": "전자신문", "lane": "technology", "url": "https://rss.etnews.com/Section901.xml",
      "terms": {"status": "unverified", "note": "2026-10-26 이용약관(2012.09.01 표기)을 읽었다: 제공 정보의 영리 목적 이용 금지(회원 대상)·복제·전송·배포는 사전 승낙 필요, RSS·AI 이용 조항은 없어 불명확. 이 피드에는 해외 매체를 다시 쓴 기사도 섞여 권리가 한 겹 더 있다"}},
     # 블로터(https://www.bloter.net/feed)는 HTTP 404라 2026-10-25에 뺐다(실행 로그 '수집 실패', 로컬에서도 404/403).
     # 구글 뉴스 검색 소스 14개는 통과율이 0.4%(게시자 원문 주소로 풀리지 않음)라 2026-10-26에 뺐다.
     # MIT Technology Review·BBC Technology 는 약관이 이 용도를 금지·허가 필요로 해서 2026-10-26에 뺐다(TERMS_BLOCKED_DOMAINS).
+    # AI타임스는 모든 기사 하단의 'AI학습 및 활용 금지' 표기와 저작권보호정책 때문에 운영자 결정(2026-10-26 "금지된 부분이면 접근하지 않는다")으로 뺐다(TERMS_BLOCKED_DOMAINS, D-61).
+    # TechCrunch·The Verge·Hacker News 는 신뢰 목록에 없어 글감이 한 건도 안 되고 약관이 제한적이거나 간접 경로라 같은 날 뺐다(D-61).
 ]
 
 # 게시 후보에 사용할 수 있는 출처 도메인. 도메인 이름은 끝 경계까지 비교합니다.
@@ -807,7 +798,7 @@ TRUSTED_SOURCE_DOMAINS = {
     "technology": ("nist.gov", "acm.org", "ieee.org", "arxiv.org",
                    "science.org", "arstechnica.com",
                    "reuters.com", "apnews.com",
-                   "aitimes.com", "etnews.com"),
+                   "etnews.com"),
     "culture": ("unesco.org", "pewresearch.org", "reuters.com", "apnews.com",
                 "variety.com", "nytimes.com"),
     "daily_life": ("who.int", "nih.gov", "nhs.uk", "cdc.gov", "apa.org",
@@ -823,8 +814,9 @@ TRUSTED_SOURCE_DOMAINS = {
 #   Guardian               사전 서면 승인 없는 상업적 이용·AI로 콘텐츠를 생성·합성하는 것 금지
 #   Nature                 상업적 이용에는 허가 필요
 #   MIT Technology Review  복제·수정·재게시 금지, 파생물·상업적 이용 금지(서비스에 RSS 포함), 콘텐츠로 AI 시스템을 만들거나 학습·개선하는 것은 사전 서면 동의(Restrictions on Use·Commercial Use·AI and Large Language Model Usage, 2023-09-06판)
+#   AI타임스               모든 기사 하단에 "무단전재 및 재배포, AI학습 및 활용 금지", 저작권보호정책은 승낙 없는 복제·출판·전송·배포·판매·변형 금지(2026-10-26 기사 3건 확인). 운영자 결정으로 접근하지 않는다
 TERMS_BLOCKED_DOMAINS = ("bbc.com", "bbc.co.uk", "bbci.co.uk", "theguardian.com", "guardian.co.uk",
-                         "nature.com", "technologyreview.com")
+                         "nature.com", "technologyreview.com", "aitimes.com")
 
 
 def _clean_text(s, limit=300):
