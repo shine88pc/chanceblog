@@ -54,7 +54,7 @@ class PageEditTest(RunnerBase):
         self.assertEqual(res.branch, "issue-edit/12-about-r5")
         self.assertIn("Fixes #12", res.pr_body)
         self.assertIn("Refs: #12", res.commit_message)
-        self.assertIn("```diff", res.pr_body)
+        self.assertIn("~~~~diff", res.pr_body)      # 틸드 펜스(내용 속 ``` 줄이 닫지 못한다)
 
     def test_ad_surface_page_gets_trailer_and_owner_only(self):
         res = self.literal()
@@ -380,7 +380,8 @@ class ScopeCheckTest(unittest.TestCase):
 
 
 def git(root, *args):
-    out = subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args], cwd=root,
+    out = subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "gc.auto=0",
+                          "-c", "maintenance.auto=false", *args], cwd=root,
                          check=True, capture_output=True).stdout
     return out.decode("utf-8", "replace").strip()
 
@@ -389,7 +390,7 @@ class ScopeCheckGitTest(unittest.TestCase):
     """실제 git 과 CLI 를 거치는 통합 확인(느려서 최소한만)."""
 
     def test_real_git_and_cli(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             root = make_edit_root(tmp)
             git(root, "init", "-q")
             git(root, "add", "-A")
@@ -419,7 +420,7 @@ class ScopeCheckGitTest(unittest.TestCase):
 
 class VerifyStagedTest(unittest.TestCase):
     def test_staged_list_must_equal_allowed_list(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             root = Path(tmp)
             git(root, "init", "-q")
             write(root, "한글.md", "a")

@@ -78,7 +78,10 @@ def match_post(query, index):
     if not q or "\n" in q or len(q) > MAX_QUERY_CHARS:
         return [], "invalid"
     if re.match(r"^https?://", q, re.I) or q.startswith("/"):
-        path = urlsplit(q).path if q.lower().startswith("http") else q.split("#")[0].split("?")[0]
+        try:
+            path = urlsplit(q).path if q.lower().startswith("http") else q.split("#")[0].split("?")[0]
+        except ValueError:   # `http://[::1`·`https://[` 처럼 urlsplit 이 해석하지 못하는 주소(예외가 새면 러너가 트레이스백으로 죽는다)
+            return [], "invalid"
         norm = "/" + path.strip("/").lower()
         hits = [e for e in index if e["published"] and e["url_path"] and e["url_path"].lower() == norm]
         if not hits:
