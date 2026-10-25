@@ -183,9 +183,9 @@ class WorkflowNameTest(TmpCase):
         self.assertEqual(self.names(KOREAN_NAMES_WORKFLOW), [])
 
     def test_english_workflow_name_is_an_error(self):
-        found = self.names("name: Deploy GitHub Pages\njobs:\n  j:\n    name: 배포\n")
+        found = self.names("name: Build And Publish\njobs:\n  j:\n    name: 배포\n")
         self.assertEqual([(f.check, f.level, f.path) for f in found], [("WF-11", "ERROR", ".github/workflows/w.yml")])
-        self.assertIn("Deploy GitHub Pages", found[0].message)
+        self.assertIn("Build And Publish", found[0].message)
 
     def test_missing_or_non_text_workflow_name_is_an_error(self):
         found = self.names("on: push\njobs:\n  j:\n    name: 배포\n")

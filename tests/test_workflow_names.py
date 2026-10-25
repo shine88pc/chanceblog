@@ -6,8 +6,11 @@
 (3) chanceblog.yml 에서 분리한 chance-fix-images.yml 이 같은 권한·동시성·커밋·배포 단계를 유지하는지
 구조로 증명한다.
 """
+import os
 import re
+import tempfile
 import unittest
+from pathlib import Path
 
 import yaml
 
@@ -27,6 +30,47 @@ def load(name):
     if True in data and "on" not in data:  # YAML 1.1 은 키 on 을 True 로 읽는다
         data["on"] = data.pop(True)
     return data
+
+
+# ----------------------------------------------------------------------------
+# 옛 영문 워크플로 이름 검색(안내 문서·워크플로·이슈 양식·코드)
+# ----------------------------------------------------------------------------
+OLD_NAMES = {
+    "Chance_Blog Full-Auto Engine": "Chance 글 자동 작성·게시",
+    "Blogger Generate": "Blogger 글 자동 작성",
+    "Deploy GitHub Pages": "사이트 자동 배포",
+    "Guardrails": "저장소 규칙·테스트 자동 검사",
+    "PR Scope Check": "PR 변경 범위 검사",
+    "Sync Issue Form": "이슈 양식 페이지 목록 갱신",
+    "Issue Edit": "이슈 수정 요청 처리(수정안 PR 만들기)",
+}  # 'Watchdog' 은 일부러 뺐다: 이슈 제목 접두어 [Watchdog]·라벨 watchdog 은 식별자이고 문서에서는 감시 장치 자체를 가리키기도 한다
+OLD_NAME_SUFFIXES = (".md", ".yml", ".yaml", ".py")
+OLD_NAME_SKIP_DIRS = {"_posts", "_blogger_drafts", ".git", "assets", ".design", "__pycache__", "node_modules", ".venv", "venv"}
+# 옛 이름이 일부러 남아 있는 파일(이유를 적는다). 늘리기 전에 정말 과거 기록이나 대응표 상수인지 확인한다.
+OLD_NAME_ALLOWED_FILES = {
+    "WORKLOG.md": "과거 사실의 기록(이력)이라 고치지 않는다",
+    "tests/test_workflow_names.py": "옛 이름 → 새 이름 대응표 상수(OLD_NAMES)와 이 검색의 시험 자료가 이 파일에 있다",
+}
+
+
+def find_old_names(root, allowed=OLD_NAME_ALLOWED_FILES):
+    """root 아래 안내 문서·워크플로·이슈 양식·코드(.md .yml .yaml .py)에서 옛 영문 이름이 새 이름 없이 쓰인 줄을 찾는다.
+    알림문·요약 제목·독스트링·주석을 가리지 않고 줄 단위로 본다. 한 줄에 새 이름이 같이 있으면(대응표·'옛 이름 …' 설명) 허용한다."""
+    found = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if d not in OLD_NAME_SKIP_DIRS)
+        for name in sorted(filenames):
+            if not name.endswith(OLD_NAME_SUFFIXES):
+                continue
+            path = Path(dirpath, name)
+            rel = path.relative_to(root).as_posix()
+            if rel in allowed:
+                continue
+            for lineno, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+                for old, new in OLD_NAMES.items():
+                    if old in line and new not in line:
+                        found.append(f"{rel}:{lineno}: {old}")
+    return found
 
 
 # ----------------------------------------------------------------------------
@@ -215,6 +259,13 @@ class KoreanNamesTest(unittest.TestCase):
                 self.assertRegex(run_name, HANGUL, path.name)
         self.assertGreaterEqual(seen, 5)  # chanceblog · chance-fix-images · blogger · watchdog · issue-edit
 
+    def test_blogger_dry_run_description_warns_that_unchecked_means_a_real_draft_commit(self):
+        """blogger.yml 의 dry_run 은 기본이 꺼짐(chanceblog.yml 과 반대)이라, 체크를 건드리지 않고 실행하면 초안이 실제로 저장소에
+        커밋된다. Run workflow 대화상자의 입력 설명이 그 사실을 알려야 한다(기본값 자체는 이 시험이 고정하지 않는다)."""
+        description = load("blogger.yml")["on"]["workflow_dispatch"]["inputs"]["dry_run"]["description"]
+        self.assertIn("체크하지 않으면", description)
+        self.assertIn("커밋", description)
+
     def test_docs_tables_list_every_workflow_with_its_current_name(self):
         """워크플로 이름을 바꾸거나 새 워크플로를 만들면 두 문서의 대응표(`파일`과 `이름`이 같은 줄)도 고쳐야 한다."""
         for doc in ("docs/ARCHITECTURE.md", "docs/REQUEST_BRIEFING.md"):
@@ -224,30 +275,46 @@ class KoreanNamesTest(unittest.TestCase):
                 rows = [ln for ln in lines if ln.lstrip().startswith("|") and f"`{path.name}`" in ln and f"`{name}`" in ln]
                 self.assertTrue(rows, f"{doc} 표에 {path.name} 행(이름 `{name}`)이 없습니다")
 
-    OLD_NAMES = {
-        "Chance_Blog Full-Auto Engine": "Chance 글 자동 작성·게시",
-        "Blogger Generate": "Blogger 글 자동 작성",
-        "Deploy GitHub Pages": "사이트 자동 배포",
-        "Guardrails": "저장소 규칙·테스트 자동 검사",
-        "PR Scope Check": "PR 변경 범위 검사",
-        "Sync Issue Form": "이슈 양식 페이지 목록 갱신",
-        "Issue Edit": "이슈 수정 요청 처리(수정안 PR 만들기)",
-    }
-
     def test_operator_docs_do_not_use_the_old_english_names(self):
-        """안내 문서에 옛 영문 이름이 남아 있으면 운영자가 Actions 화면에서 찾지 못한다.
-        옛 이름과 새 이름이 한 줄에 같이 있는 대응표는 허용한다. 과거 사실의 기록인 WORKLOG.md 는 검사하지 않는다."""
-        skip_dirs = {"_posts", "_blogger_drafts", ".git", "assets", ".design"}
-        offenders = []
-        for path in sorted(REAL.rglob("*.md")):
-            rel = path.relative_to(REAL)
-            if rel.parts[0] in skip_dirs or rel.name == "WORKLOG.md":
-                continue
-            for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-                for old, new in self.OLD_NAMES.items():
-                    if old in line and new not in line:
-                        offenders.append(f"{rel.as_posix()}:{lineno}: {old}")
-        self.assertEqual(offenders, [])
+        """옛 영문 이름이 남아 있으면 운영자가 Actions 화면에서 찾지 못하고, 알림문이 없는 이름을 가리킨다(워치독이 'Deploy GitHub
+        Pages' 를 찾으라고 안내하던 사례). 안내 문서뿐 아니라 워크플로·이슈 양식·코드의 알림문·요약 제목·독스트링·주석도 본다.
+        옛 이름과 새 이름이 한 줄에 같이 있는 대응표는 허용하고, 과거 기록인 WORKLOG.md 는 보지 않는다(OLD_NAME_ALLOWED_FILES)."""
+        self.assertEqual(find_old_names(REAL), [])
+
+    def test_old_name_scan_covers_docs_workflows_issue_forms_and_code(self):
+        """위 검색이 실제로 .md 뿐 아니라 .yml(주석 포함)·.py(문자열·독스트링)도 보고, 허용 항목은 건너뛰는지."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            files = {
+                "docs/a.md": "Actions → Blogger Generate 실행\n",
+                ".github/workflows/w.yml": "# 옛 이름 Issue Edit\nname: x\n",
+                ".github/ISSUE_TEMPLATE/f.yml": "description: PR Scope Check 코멘트\n",
+                "pipeline/h.py": 'MSG = "성공한 \'Deploy GitHub Pages\' 실행이 없습니다"\n',
+                "scripts/s.py": '"""Sync Issue Form 이 부른다."""\n',
+                "docs/ok.md": "| Guardrails | `저장소 규칙·테스트 자동 검사` | `guardrails.yml` |\n",  # 대응표: 새 이름이 같은 줄
+                "WORKLOG.md": "Blogger Generate (과거 기록)\n",  # 허용 파일
+                "data.json": '{"x": "Blogger Generate"}\n',  # 검사하지 않는 확장자
+                "_posts/p.md": "Blogger Generate\n",  # 글 폴더는 건너뜀
+            }
+            for rel, content in files.items():
+                path = root / rel
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+            self.assertEqual(sorted(find_old_names(root)), [
+                ".github/ISSUE_TEMPLATE/f.yml:1: PR Scope Check",
+                ".github/workflows/w.yml:1: Issue Edit",
+                "docs/a.md:1: Blogger Generate",
+                "pipeline/h.py:1: Deploy GitHub Pages",
+                "scripts/s.py:1: Sync Issue Form",
+            ])
+            self.assertEqual(sorted(find_old_names(root, allowed={})), [
+                ".github/ISSUE_TEMPLATE/f.yml:1: PR Scope Check",
+                ".github/workflows/w.yml:1: Issue Edit",
+                "WORKLOG.md:1: Blogger Generate",
+                "docs/a.md:1: Blogger Generate",
+                "pipeline/h.py:1: Deploy GitHub Pages",
+                "scripts/s.py:1: Sync Issue Form",
+            ])
 
 
 # ----------------------------------------------------------------------------
