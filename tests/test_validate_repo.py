@@ -1,3 +1,4 @@
+import io
 import json
 import shutil
 import subprocess
@@ -5,6 +6,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 import _bootstrap  # noqa: F401
@@ -145,10 +147,94 @@ class WorkflowTest(TmpCase):
         self.assertEqual(levels(found, "WF-0"), ["ERROR"])
 
 
+KOREAN_NAMES_WORKFLOW = """
+name: 사이트 자동 배포
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    name: 사이트 빌드
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo ok
+  test:
+    name: 검사 (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.12']
+    steps:
+      - run: echo ok
+"""
+
+
+class WorkflowNameTest(TmpCase):
+    """WF-11: 워크플로·job 이름은 한글로(운영자가 Actions 탭에서 이름만 보고 하는 일을 짐작하게)."""
+
+    def names(self, text, rel=".github/workflows/w.yml"):
+        write(self.root, rel, text)
+        return vr.check_workflow_names(self.root, vr.list_files(self.root))
+
+    def test_korean_workflow_and_job_names_pass(self):
+        self.assertEqual(self.names(KOREAN_NAMES_WORKFLOW), [])
+
+    def test_english_workflow_name_is_an_error(self):
+        found = self.names("name: Deploy GitHub Pages\njobs:\n  j:\n    name: 배포\n")
+        self.assertEqual([(f.check, f.level, f.path) for f in found], [("WF-11", "ERROR", ".github/workflows/w.yml")])
+        self.assertIn("Deploy GitHub Pages", found[0].message)
+
+    def test_missing_or_non_text_workflow_name_is_an_error(self):
+        found = self.names("on: push\njobs:\n  j:\n    name: 배포\n")
+        self.assertEqual([(f.check, f.level) for f in found], [("WF-11", "ERROR")])
+        self.assertIn("name 이 없습니다", found[0].message)
+        found = self.names("name: 2026\njobs:\n  j:\n    name: 배포\n")  # YAML 숫자
+        self.assertEqual([(f.check, f.level) for f in found], [("WF-11", "ERROR")])
+
+    def test_job_without_a_korean_name_is_only_a_warning(self):
+        found = self.names("name: 배포\njobs:\n  nameless:\n    runs-on: x\n  english:\n    name: Build\n  korean:\n    name: 빌드\n")
+        self.assertEqual([(f.check, f.level) for f in found], [("WF-11", "WARN"), ("WF-11", "WARN")])
+        self.assertIn("'nameless'", found[0].message)
+        self.assertIn("'english'", found[1].message)
+
+    def test_hangul_next_to_expressions_counts(self):
+        found = self.names('name: "${{ github.event_name }} 검사"\njobs:\n  j:\n    name: "글 생성 (${{ matrix.key }})"\n')
+        self.assertEqual(found, [])
+
+    def test_yaml_syntax_error_is_left_to_wf0(self):
+        self.assertEqual(self.names("name: [unclosed\n"), [])
+
+    def test_yaml_extension_is_checked(self):
+        found = self.names("name: Deploy\njobs: {}\n", rel=".github/workflows/w.yaml")
+        self.assertEqual([(f.check, f.level) for f in found], [("WF-11", "ERROR")])
+
+    def test_yaml_files_outside_the_workflows_folder_are_ignored(self):
+        self.assertEqual(self.names("name: English\njobs:\n  j:\n    runs-on: x\n", rel=".github/other/w.yml"), [])
+
+    def test_run_checks_and_cli_report_english_workflow_name_as_error(self):
+        root = registry_root(self.root, chance_extra=DEPLOY_STEP)
+        self.assertNotIn("WF-11", checks(vr.run_checks(root)))
+        wf = root / ".github" / "workflows" / "chanceblog.yml"
+        wf.write_text(wf.read_text(encoding="utf-8").replace("name: 챈스 글 자동 작성", "name: chance"), encoding="utf-8")
+        self.assertIn(("WF-11", "ERROR"), [(f.check, f.level) for f in vr.run_checks(root)])
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = vr.main(["--root", str(root)])
+        self.assertEqual(code, 1)  # 오류가 있으니 종료 코드 1
+        self.assertIn("[WF-11]", out.getvalue())
+
+    def test_real_repository_workflow_and_job_names_are_korean(self):
+        found = vr.check_workflow_names(REAL, vr.list_files(REAL))
+        self.assertEqual([f.line() for f in found], [])
+
+
 def registry_root(tmp, chance_cron="17 * * * *", blogger_cron="0 2 * * *", chance_extra="", blogger_matrix=True):
     root = make_root(tmp)
     write(root, ".github/workflows/chanceblog.yml", f"""
-        name: chance
+        name: 챈스 글 자동 작성
         on:
           schedule:
             - cron: '{chance_cron}'
@@ -158,6 +244,7 @@ def registry_root(tmp, chance_cron="17 * * * *", blogger_cron="0 2 * * *", chanc
           group: c
         jobs:
           build:
+            name: 글 작성
             runs-on: ubuntu-latest
             timeout-minutes: 5
             steps:
@@ -169,7 +256,7 @@ def registry_root(tmp, chance_cron="17 * * * *", blogger_cron="0 2 * * *", chanc
         """)
     secrets_line = "S: ${{ secrets[matrix.secret_blog_id] }}" if blogger_matrix else "S: nothing"
     write(root, ".github/workflows/blogger.yml", f"""
-        name: blogger
+        name: 블로거 글 자동 작성
         on:
           schedule:
             - cron: '{blogger_cron}'
@@ -179,6 +266,7 @@ def registry_root(tmp, chance_cron="17 * * * *", blogger_cron="0 2 * * *", chanc
           group: b
         jobs:
           j:
+            name: 글 생성
             runs-on: ubuntu-latest
             timeout-minutes: 5
             steps:
