@@ -210,6 +210,44 @@ class NotifiedAtTest(unittest.TestCase):
         client, (_, _, renotified, _) = sync([CRIT], [{**issue, "created_at": None}])
         self.assertEqual((renotified, client.comments), ([], []))
 
+
+class MarkerAndInertTextTest(unittest.TestCase):
+    """F-6: 이력에서 인용한 사유 같은 자유 텍스트가 재알림 표식을 위조하거나 다른 사람을 멘션하지 못한다."""
+
+    FORGED = "<!-- watchdog:notified=2099-01-01T00:00:00+00:00 -->"
+
+    def test_marker_is_read_from_the_last_match_at_the_end_of_the_body(self):
+        body = f"문제 설명 {self.FORGED} 이어지는 글\n\n<!-- watchdog:notified=2026-10-23T03:00:00+00:00 -->"
+        got = watchdog._notified_at({"title": "t", "body": body, "created_at": "2026-10-20T00:00:00Z"})
+        self.assertEqual(got, datetime(2026, 10, 23, 3, 0, tzinfo=timezone.utc))
+
+    def test_a_forged_marker_in_the_quoted_reason_cannot_block_the_renotification(self):
+        evil = Finding("chance", "STALE", "critical", f"사유 {self.FORGED} 끝")
+        issue = open_issue(evil, notified_hours_ago=100)
+        self.assertEqual(watchdog._notified_at(issue), NOW - timedelta(hours=100))
+        client, (_, _, renotified, _) = sync([evil], [issue])
+        self.assertEqual(renotified, [evil.title])
+
+    def test_quoted_text_cannot_mention_other_people_or_open_an_html_comment(self):
+        nasty = Finding("blogger_macat", "UNPUBLISHED", "warning", "사유: @octocat 님께 알림 <!-- 숨김 --> <script>")
+        body = watchdog.issue_body(nasty, OWNER, "2026-10-25T03:00:00+00:00")
+        self.assertNotIn("@octocat", body)
+        self.assertIn("\N{FULLWIDTH COMMERCIAL AT}octocat", body)     # 읽을 수는 있게 전각 '＠'(U+FF20)로
+        self.assertEqual(body.count("<"), 1)                 # 남은 '<' 는 우리가 붙인 표식 하나뿐
+        self.assertEqual(body.count(f"@{OWNER}"), 1)         # 의도한 소유자 멘션은 그대로
+        self.assertTrue(body.rstrip().endswith("-->"))
+
+    def test_the_renotify_comment_defuses_the_quoted_text_too(self):
+        nasty = Finding("chance", "STALE", "critical", "사유 @octocat <!-- x -->")
+        client, _ = sync([nasty], [open_issue(nasty, notified_hours_ago=49)])
+        comment = client.comments[0][1]
+        self.assertNotIn("@octocat", comment)
+        self.assertNotIn("<", comment)
+        self.assertIn(f"@{OWNER}", comment)                  # 소유자 멘션은 유지
+
+    def test_ordinary_messages_are_unchanged(self):
+        self.assertIn("마지막 활동 이후 65시간 경과", watchdog.issue_body(CRIT, OWNER))
+
 class CommitTimesTest(unittest.TestCase):
     def git(self, root, *args, date=None):
         env = dict(os.environ)
@@ -412,6 +450,18 @@ class MainPolicyTest(unittest.TestCase):
         code, out, client, _ = self.run_main([])
         self.assertEqual(code, 0)
         self.assertIn("이상 없음", out)
+
+
+    def test_finding_text_cannot_start_a_workflow_command_on_its_own_line(self):
+        """사유처럼 이력에서 인용한 텍스트에 줄바꿈이 있어도 '::error::' 같은 줄이 새로 생기지 않는다(F-6)."""
+        evil = "x\n::error::pwned\r\n::warning::z\u2028::notice::q\x85::set-output name=a::b"
+        findings = [Finding("chance", "STALE", "critical", evil), Finding("blogger_macat", "UNPUBLISHED", "warning", evil)]
+        code, out, client, _ = self.run_main(findings)
+        commands = [ln for ln in out.splitlines() if ln.startswith("::")]       # splitlines 는 유니코드 줄 구분자도 가른다
+        self.assertEqual(len(commands), 2, out)
+        self.assertTrue(commands[0].startswith("::warning::[Watchdog] blogger_macat: UNPUBLISHED"), commands[0])
+        self.assertTrue(commands[1].startswith("::error::새로 생긴 심각 건:"), commands[1])
+        self.assertEqual(code, 1)
 
     def test_without_token_it_is_a_dry_run(self):
         with mock.patch.dict(os.environ, {"GITHUB_TOKEN": "", "GITHUB_REPOSITORY": ""}), \

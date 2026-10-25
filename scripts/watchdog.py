@@ -38,6 +38,19 @@ PAGES_WORKFLOW = "pages.yml"
 _NOTIFIED_RX = re.compile(r"<!--\s*watchdog:notified=(\S+?)\s*-->")
 
 
+def _oneline(text):
+    """줄바꿈·연속 공백(유니코드 줄 구분자 포함)을 한 칸 공백으로 접는다.
+    로그 줄이 '::' 로 시작해 Actions 워크플로 명령으로 해석되는 것을 막는다(외부·이력 텍스트는 접어서 출력)."""
+    return " ".join(str(text).split())
+
+
+def _inert(text):
+    """이슈 본문·코멘트에 인용하는 자유 텍스트(사유·오류 메시지 등)를 무해하게 만든다.
+    '@' 는 전각 '＠'(U+FF20)로 바꿔 다른 사람에게 멘션 알림이 가지 않게 하고, '<' 는 전각 '＜'(U+FF1C)로 바꿔
+    HTML 주석(<!--)으로 재알림 표식(watchdog:notified)을 위조하는 것을 막는다. 멘션·표식은 이 모듈이 직접 붙인다."""
+    return str(text).replace("@", "\N{FULLWIDTH COMMERCIAL AT}").replace("<", "\N{FULLWIDTH LESS-THAN SIGN}")
+
+
 class GitHubClient:
     def __init__(self, token, repo, opener=urllib.request.urlopen):
         self.token, self.repo, self._open = token, repo, opener
@@ -79,10 +92,12 @@ class GitHubClient:
 
 
 def issue_body(finding, owner=None, notified=None):
-    """이슈 본문. owner 가 있으면 @멘션(알림이 가도록), notified 는 마지막으로 알린 시각(재알림 판단용 표식)."""
+    """이슈 본문. owner 가 있으면 @멘션(알림이 가도록), notified 는 마지막으로 알린 시각(재알림 판단용 표식).
+    표식은 본문 맨 끝에 붙인다. 문제 설명(finding.message)에는 이력에서 인용한 자유 텍스트가 들어갈 수 있어
+    @멘션과 HTML 주석을 무력화해서 싣는다(_inert)."""
     mention = f"@{owner} " if owner else ""
     lines = [f"{mention}**블로그**: `{finding.blog}` / **코드**: `{finding.code}` / **심각도**: {finding.severity}", "",
-             finding.message, "",
+             _inert(finding.message), "",
              "이 이슈는 워치독(`scripts/watchdog.py`)이 자동으로 만들었고, 열려 있는 동안 내용을 갱신하며 "
              "문제가 해소되면 자동으로 닫힙니다.",
              "대응 절차: `HANDLER.md` §10, `docs/SECURITY_GUARDRAILS.md` 사고 대응 플레이북.",
@@ -94,9 +109,10 @@ def issue_body(finding, owner=None, notified=None):
 
 
 def _notified_at(issue):
-    """본문 표식에서 마지막 알림 시각을 읽는다. 없으면 이슈를 연 시각."""
-    match = _NOTIFIED_RX.search(str(issue.get("body") or ""))
-    for value in ((match.group(1) if match else None), issue.get("created_at")):
+    """본문 표식에서 마지막 알림 시각을 읽는다. 없으면 이슈를 연 시각, 그것도 없으면 None.
+    표식은 본문 맨 끝에 붙으므로 '마지막' 일치를 쓴다(앞쪽 같은 모양은 인용된 텍스트일 수 있다)."""
+    marks = _NOTIFIED_RX.findall(str(issue.get("body") or ""))
+    for value in ((marks[-1] if marks else None), issue.get("created_at")):
         if not value:
             continue
         try:
@@ -141,7 +157,8 @@ def sync_issues(findings, open_issues, client, dry=False, out=print, owner=None,
             if not dry:
                 days = max(1, int((now - last).total_seconds() // 86400))
                 mention = f"@{owner} " if owner else ""
-                client.comment(issue["number"], f"{mention}아직 해결되지 않았습니다(마지막 알림 {days}일 전). {finding.message}")
+                client.comment(issue["number"], f"{mention}아직 해결되지 않았습니다(마지막 알림 {days}일 전). "
+                                                f"{_inert(finding.message)}")
             renotified.append(title)
         if due or str(issue.get("body") or "").strip() != body.strip():
             if not dry and hasattr(client, "update_body"):
@@ -231,7 +248,7 @@ def collect(reg, root, now, client=None):
             try:
                 runs = client.workflow_runs(Path(blog["workflow"]).name)
             except Exception as exc:  # noqa: BLE001 - 실행 이력 조회 실패는 다른 검사를 막지 않는다
-                print(f"[참고] {blog['key']} 워크플로 실행 이력 조회 실패: {exc}")
+                print(f"[참고] {blog['key']} 워크플로 실행 이력 조회 실패: {_oneline(exc)}")
         content_dir = blog["state"]["content_dir"]
         if blog.get("platform") == "jekyll-git":
             # 글 파일이 '추가된' 커밋만 새 글로 센다(이미지 교체 커밋은 새 글이 아니다).
@@ -294,7 +311,7 @@ def _write_summary(markdown):
         with open(target, "a", encoding="utf-8") as fh:
             fh.write(markdown.rstrip() + "\n\n")
     except OSError as exc:
-        print(f"실행 요약 쓰기 실패(점검 결과에는 영향 없음): {exc}")
+        print(f"실행 요약 쓰기 실패(점검 결과에는 영향 없음): {_oneline(exc)}")
 
 
 def main():
@@ -302,7 +319,7 @@ def main():
     reg = load_registry()
     errors = validate_registry(reg, ROOT)
     if errors:
-        print("[오류] 레지스트리 검증 실패:\n  - " + "\n  - ".join(errors))
+        print("[오류] 레지스트리 검증 실패:\n  - " + "\n  - ".join(_oneline(e) for e in errors))
         return 1
     if os.environ.get("PIPELINE_PAUSE", "").strip().lower() in ("1", "true", "yes", "on"):
         print("[일시정지] PIPELINE_PAUSE 가 켜져 있어 점검 알림을 만들지 않습니다.")
@@ -315,7 +332,8 @@ def main():
     now = datetime.now(timezone.utc)
     findings, stats = collect(reg, ROOT, now, client)
     for f in findings:
-        print(f"- {f.severity.upper():<8} {f.title} — {f.message}")
+        # 메시지에는 이력에서 인용한 텍스트가 들어갈 수 있다 — 접지 않으면 둘째 줄이 '::' 로 시작해 워크플로 명령이 된다.
+        print(f"- {f.severity.upper():<8} {f.title} — {_oneline(f.message)}")
     if not findings:
         print("이상 없음")
     if client is None:
@@ -328,7 +346,7 @@ def main():
     _write_summary(render_summary(stats, findings, created, closed, renotified, open_issues))
     for f in findings:
         if f.severity == "warning":
-            print(f"::warning::{f.title}: {' '.join(f.message.split())[:200]}")
+            print(f"::warning::{f.title}: {_oneline(f.message)[:200]}")
     if new_critical and not dry:
         # 감시 실행이 항상 초록이면 Actions 실패 알림이 가지 않는다. 새로 생긴 심각 건만 빨갛게 한다(지속 중인 건은 초록).
         print("::error::새로 생긴 심각 건: " + ", ".join(new_critical))
