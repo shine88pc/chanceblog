@@ -24,6 +24,7 @@
 | Blogger 실게시 | ⏳ 미완료 — ① OAuth 동의 화면 **"프로덕션"** 전환(테스트 상태면 토큰 7일 만료, D-11) ② refresh token 발급 ③ GitHub Secrets(`BLOGGER_*`) 등록 (§3 P1, §10) |
 | 풀오토 가이드 체계 | `AGENTS.md`(상시 규칙) · `docs/CHARTER`·`ARCHITECTURE`·`ENGINEERING_GUIDE`·`SECURITY_GUARDRAILS` · `docs/DEFECT_REGISTER`. 총괄 역할: Claude(2026-10-20) |
 | 가드레일 자동화 | `scripts/validate_repo.py` + `guardrails.yml`(CI) + `watchdog.yml`(문제일 때만 이슈 알림) |
+| Pages 배포 후 확인 | 배포가 초록이어도 새 글이 공개 주소에서 열린다는 보장은 없어서, `pages.yml`의 `verify` 잡(`scripts/verify_pages_deploy.py`)이 배포 뒤 공개될 가장 새 글(`published: false`·미래 날짜 제외)의 주소가 HTTP 200으로 열리는지 마감 12분까지 30초 간격으로 확인하고 끝내 안 열리면 실행이 빨강이 된다(D-41, 구조 `docs/ARCHITECTURE.md` §4-2). 한계: 가장 새 글만 본다(이미지 교체 같은 커밋의 반영은 못 봄). ⏳ 병합 뒤 첫 배포 요약에서 '시도 N회'·`Age`·`Last-Modified`를 관측해야 한다(`docs/DEFECT_REGISTER.md` 체크리스트) |
 | 이슈로 수정 요청 | 이슈 양식(고정 페이지 수정·게시글 이미지 변경) → `issue-edit.yml`이 **PR로** 올림, `pr-scope-check.yml`이 Copilot 등 모든 PR의 요청 범위를 검증. 사용법 `docs/COPILOT_GUIDE.md`, 구조 `docs/ISSUE_EDITS.md` (첫 실행 관측 필요) |
 | 작업요청서 | 저장소를 볼 수 없는 AI(모바일 Claude 등)에게 `docs/REQUEST_BRIEFING.md`를 통째로 붙여 넣으면 이 프로그램에 맞는 요청서를 만든다. 요청서는 `인수인계/작업요청/`에 올리거나 채팅에 붙여 넣는다. 처리 규칙은 그 폴더의 README |
 | 통합 성과 대시보드 | **제안 단계 — 사용자 결정 대기.** 블로그별 방문자·인기 글·AdSense 사이트별 수익을 한곳에서 보는 방안(Looker Studio 먼저). 검토 결과·결정 항목은 `docs/ANALYTICS_PLAN.md` §7. 결정 전에는 사이트에 GA 등을 설치하지 않는다(T3) |
