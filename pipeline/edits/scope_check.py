@@ -157,15 +157,17 @@ def check_pull(issue, root, base, head, changes=None, show=None):
 
     proven = False
     if req.cfg["method"] == "image":
-        fm = frontmatter.parse_front_matter(frontmatter.split_front_matter(after)[0]) or {}
-        old_fm = frontmatter.parse_front_matter(frontmatter.split_front_matter(before)[0]) or {}
-        old_url, new_url = str(old_fm.get("image") or ""), str(fm.get("image") or "")
-        if new_url.startswith(ops.UNSPLASH_PREFIX) and old_url and after == before.replace(old_url, new_url):
-            items.append(("✅", "대표 이미지 URL 만 새 이미지로 바뀌었고 나머지는 그대로입니다."))
+        # 생성 직후 검증(runner)과 같은 함수: 허용 호스트·엄격한 주소 형식, 주소 외의 내용은 그대로
+        image_reasons = checks.verify_image_change(before, after)
+        if image_reasons:
+            fail = True
+            items += [("❌", r) for r in image_reasons]
+        elif not checks.front_matter_image(before)[0]:
+            items.append(("✅", "이미지가 없던 글에 대표 이미지(front matter image)만 추가되었고 나머지는 그대로입니다."))
             proven = True
         else:
-            fail = True
-            items.append(("❌", "이미지 교체 외의 변경이 있거나 새 이미지가 Unsplash 주소가 아닙니다."))
+            items.append(("✅", "대표 이미지 URL 만 새 이미지로 바뀌었고 나머지는 그대로입니다."))
+            proven = True
     else:
         if want is not None:
             if after == want and eol_problem:

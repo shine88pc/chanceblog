@@ -14,11 +14,10 @@ import json
 import re
 from pathlib import Path
 
-from pipeline.edits import frontmatter
+from pipeline.edits import checks, frontmatter
 
 MAX_PATCHES = 10
 MAX_LINK_OCCURRENCES = 5
-UNSPLASH_PREFIX = "https://images.unsplash.com/"
 # 사이트 내 경로는 한 개의 '/' 로만 시작해야 한다: '//host'(프로토콜 상대 URL)와 '/\host' 는 외부 도메인이 된다
 _SAFE_LINK_RE = re.compile(
     r"^(?:https://[^\s<>\"'`\\]+|/(?![/\\])[^\s<>\"'`\\]*|#[^\s<>\"'`\\]*|mailto:[^\s<>\"'`\\@]+@[^\s<>\"'`\\@]+)$")
@@ -319,6 +318,6 @@ def op_image(text, fields, post, root, llm=None, picker=None):
     if old_url:
         used.add(image_key(old_url))  # 지금 쓰는 이미지와 같은 것으로 '교체'하지 않는다
     new_url = picker(queries, used)
-    if not new_url or not str(new_url).startswith(UNSPLASH_PREFIX):
+    if not new_url or not checks.is_safe_image_url(str(new_url)):   # 접두사만이 아니라 전체 형식·허용 호스트를 확인한다(D-38)
         raise EditError("조건에 맞는 새 이미지를 찾지 못했습니다. 설명을 더 구체적으로 적어 새 이슈로 올려 주세요.")
     return apply_image(text, old_url, new_url), f"대표 이미지 교체 ({'; '.join(queries[:2])})"

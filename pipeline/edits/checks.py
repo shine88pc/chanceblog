@@ -39,6 +39,13 @@ _HTTP_LINK = re.compile(r"""\bhttp://[^\s)"'<>]+""", re.I)
 MIN_SHRINK_BASE = 500
 AI_MIN_LINES, AI_MAX_RATIO = 12, 0.3   # AI 패치는 작은 파일에서도 '일부'만 바꿔야 한다(절대 한도 80줄은 작은 페이지에서 무의미)
 
+# 게시글 대표 이미지로 허용하는 주소: 호스트는 아래뿐이다(호스트를 늘리는 것은 자동 수정 범위 확대이므로 T3).
+IMAGE_HOSTS = ("images.unsplash.com",)
+# `https://<호스트>/photo-<id>` + 선택적 질의(영숫자 _ . = & - 와 %XX 만). userinfo(@)·포트·프래그먼트·경로 추가·따옴표·괄호·공백·개행은 모두 불일치
+_IMAGE_URL = re.compile(r"https://(?P<host>[a-z0-9.\-]+)/photo-[A-Za-z0-9_\-]{1,64}"
+                        r"(?:\?(?:[A-Za-z0-9_.=&\-]|%[0-9A-Fa-f]{2}){1,300})?")
+_IMAGE_LINE = re.compile(r"image\s*:")
+
 
 def _decode(text):
     """엔티티를 반복해서 풀고 제어·보이지 않는 문자를 공백으로 바꾼다."""
@@ -99,6 +106,67 @@ def _front_matter_reasons(path, before, after, mode, only_fields):
         reasons.append(f"{path}: 허용되지 않은 front matter 항목이 바뀌었습니다: {', '.join(_safe(k, 40) for k in sorted(changed - allowed))}")
     if mode == "front_matter" and body_a != body_b:
         reasons.append(f"{path}: 본문이 바뀌었습니다(이 수정 항목은 front matter 필드만 바꿀 수 있습니다).")
+    return reasons
+
+
+def image_url_problem(url):
+    """게시글 대표 이미지로 허용되는 주소인지. None(허용) 또는 거부 사유. 주소 값은 사유에 쓰지 않는다(공개 코멘트에 되풀이 방지)."""
+    match = _IMAGE_URL.fullmatch(url) if isinstance(url, str) else None
+    if not match:
+        return "이미지 주소가 허용된 형식(https://images.unsplash.com/photo-… 와 영숫자·=&.-_ 질의)이 아닙니다"
+    if match.group("host") not in IMAGE_HOSTS:
+        return f"허용되지 않은 이미지 호스트입니다(허용: {', '.join(IMAGE_HOSTS)})"
+    return None
+
+
+def is_safe_image_url(url):
+    return image_url_problem(url) is None
+
+
+def front_matter_image(text):
+    """front matter 의 image 값(문자열, 없으면 '')과 front matter dict. front matter 를 해석할 수 없으면 (None, None)."""
+    fm_text, _body = frontmatter.split_front_matter(text)
+    data = frontmatter.parse_front_matter(fm_text) if fm_text is not None else None
+    if data is None:
+        return None, None
+    value = data.get("image")
+    return ("" if value is None else str(value)), data
+
+
+def _without_image_line(text):
+    fm_text, body = frontmatter.split_front_matter(text)
+    return "\n".join(ln for ln in fm_text.split("\n") if not _IMAGE_LINE.match(ln)) + "\0" + body
+
+
+def verify_image_change(before, after):
+    """게시글 이미지 변경이 '대표 이미지 주소'만 바꿨는지 확인한다. 거부 사유 목록(비어 있으면 통과).
+
+    생성 직후 검증(runner)과 PR 범위 검사(scope_check)가 같은 함수를 쓴다. 통과 조건:
+    1. 새 front matter image 가 허용 형식·허용 호스트의 주소다(값은 사유에 되풀이하지 않는다)
+    2. 이전 주소가 있었다면, 그것을 새 주소로 바꾼 것 말고는 본문·다른 줄이 한 글자도 다르지 않다(주소를 자리표시자로 바꿔 비교)
+    3. 이미지가 없던 글에 이미지가 추가된 경우에는 front matter 의 image 줄만 늘어난 것이다
+    """
+    old_url, old_fm = front_matter_image(before)
+    new_url, new_fm = front_matter_image(after)
+    if old_fm is None or new_fm is None:
+        return ["front matter 를 해석할 수 없어 이미지 변경을 확인할 수 없습니다."]
+    problem = image_url_problem(new_url)
+    if problem:
+        return [f"새 대표 이미지: {problem}."]
+    if new_url == old_url:
+        return ["대표 이미지 주소가 바뀌지 않았습니다."]
+    reasons = []
+    if sum(1 for ln in frontmatter.split_front_matter(after)[0].split("\n") if _IMAGE_LINE.match(ln)) > 1:
+        reasons.append("front matter 에 image 줄이 둘 이상입니다.")
+    if old_url:
+        marker = "\0IMAGE-URL\0"
+        while marker in before or marker in after:   # 본문에 자리표시자와 같은 문자열이 있어도 속지 않는다
+            marker += "\0"
+        same = before.replace(old_url, marker) == after.replace(new_url, marker)
+    else:
+        same = _without_image_line(before) == _without_image_line(after)
+    if not same:
+        reasons.append("대표 이미지 주소 외의 내용(본문·다른 front matter)이 바뀌었습니다. 이미지 변경은 주소만 바꿀 수 있습니다.")
     return reasons
 
 

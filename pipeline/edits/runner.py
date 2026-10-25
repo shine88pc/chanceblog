@@ -291,6 +291,8 @@ def process_issue(issue, root, env=None, llm=None, image_picker=None, dry_run=Fa
 
     reasons = checks.verify_changes({path: (text, new_text)}, req.patterns, limits, mode=check_mode(cfg),
                                     only_fields=cfg.get("only_fields"), ai_patch=(how == "AI 최소 패치"))
+    if method == "image":   # 대표 이미지 주소만 바뀌었는지(허용 호스트·주소 형식·본문 불변) — PR 범위 검사와 같은 함수
+        reasons = reasons + checks.verify_image_change(text, new_text)
     if reasons:
         return _reject(reasons, edit_type=req.edit_key, target=path)
 
