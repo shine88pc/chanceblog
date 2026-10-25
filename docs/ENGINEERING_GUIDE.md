@@ -87,7 +87,7 @@
 | **L0 정적** | 문법·보안 규칙·설정 일관성 | `python scripts/validate_repo.py` · `actionlint` · `python -m pipeline.registry` | 오류 0건 |
 | **L1 단위** | 로직(성공+실패 경로) | `python -m unittest discover -s tests` | 전부 통과, 네트워크 없음 |
 | **L2 드라이런** | 전체 흐름(스텁 LLM, 파일·게시 없음) | `python -m pipeline.run --blog <key> --dry-run` 또는 Actions `dry_run` 체크 | 종료 코드 0, 변경 파일 없음. 예외: Chance 드라이런은 모든 분야에 검증된 기사가 없거나 소스에 접속하지 못하면 종료 1이다(이상 신호, `docs/ARCHITECTURE.md` §4-1) — 실행 요약의 탈락 사유를 확인하고 기사가 있을 때 다시 실행한다 |
-| **L3 초안** | 실제 LLM·게이트·초안 저장, **게시 없음** | Actions → `Blogger 글 자동 작성` → Run workflow(`publish` 미체크) | `draft` 기록(게시 대상이 아닌 실행에서만. 게시 대상인데 시크릿이 없으면 종료 2), 초안 내용 확인 |
+| **L3 초안** | 실제 LLM·게이트·초안 저장, **게시 없음** | Actions → `Blogger 글 자동 작성` → Run workflow(`연습 실행` 체크 해제, `publish` 미체크) | `draft` 기록(게시 대상이 아닌 실행에서만. 게시 대상인데 시크릿이 없으면 종료 2), 초안 내용 확인 |
 | **L4 카나리** | 실제 게시 소량 관찰 | `mode: auto`, 상한 1건/일, 3일 이상 | `posted` 연속, 워치독 이슈 0, 게시글 확인 |
 | **L5 운영** | 지속 감시 | 워치독 일 2회, Actions 실패 메일 | 이슈 0건 |
 

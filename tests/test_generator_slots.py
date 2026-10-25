@@ -1121,9 +1121,12 @@ class GeminiCallCountTest(unittest.TestCase):
         text = g.render_run_summary("schedule", at(10), 9, report)
         self.assertIn("- Gemini 호출: 4회(실패 1회)", text)
 
-    def test_summary_omits_the_line_when_gemini_was_not_called(self):
+    def test_summary_says_zero_when_gemini_was_not_called(self):
+        """예전에는 호출이 없으면 줄을 생략했다. Blogger·이슈 수정은 0회를 적고, 줄이 없으면 '호출 안 함'과 '이 기능이 없는 옛 요약'을
+        구분할 수 없어(독립 검증 F-09) Chance 도 0회를 적는다. 호출 수 항목 자체가 없는 보고서에는 줄을 만들지 않는다."""
         report = {"outcome": "ALL_LANES_EMPTY", "lanes": [], "gemini_calls": {"attempts": 0, "failed": 0}}
-        self.assertNotIn("Gemini 호출", g.render_run_summary("schedule", at(10), 9, report))
+        self.assertIn("- Gemini 호출: 0회(실패 0회)", g.render_run_summary("schedule", at(10), 9, report))
+        self.assertNotIn("Gemini 호출", g.render_run_summary("schedule", at(10), 9, {"outcome": "ALL_LANES_EMPTY", "lanes": []}))
 
 
 class SanitizeTest(unittest.TestCase):

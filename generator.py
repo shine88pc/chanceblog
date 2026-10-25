@@ -25,6 +25,8 @@ import xml.etree.ElementTree as ET
 from datetime import timezone, timedelta
 from pathlib import Path
 
+from pipeline.llm import CallLog, scrub  # Gemini 요청 기록·시크릿 가리기는 Blogger·이슈 수정과 같은 코드를 쓴다(D-52)
+
 # ============================================================
 # 환경 설정
 # ============================================================
@@ -185,26 +187,44 @@ def extract_json_object(raw_text):
 
 # 이번 실행의 Gemini 모델 호출 횟수. 무료 한도(프로젝트 단위)를 나눠 쓰기 위한 측정값이며 동작에는 영향이 없다.
 GEMINI_CALLS = {"attempts": 0, "failed": 0}
+# 요청별 기록(요청 모델·응답 모델·결과 종류·소요·토큰, 실패 때는 코드·상태·본문 600자). 로그 한 줄씩 남기고 실행 요약에서 접어 쓴다.
+# 장부 파일은 만들지 않는다. 호출 수는 위 GEMINI_CALLS 가 세고, 이 기록은 그 내역이다. 이 실행의 Gemini 키는 로그에 글자 그대로 나가지 않는다.
+CALL_LOG = CallLog(label="chance", purpose="post", out=print, secrets=(API_KEY,))
+
+
+def _scrub(text):
+    """로그·예외 문구에 쓰기 전에 비밀을 가린다: 비밀 패턴(mask) + 프로젝트 번호 + 이 실행의 Gemini 키(글자 그대로)."""
+    return scrub(text, (API_KEY,))
 
 
 def call_gemini_with_fallback(prompt):
     errors = []
     for model_name in MODEL_CANDIDATES:
+        started = time.monotonic()
+        response, failure, usable = None, None, False
         try:
             print(f"Gemini 모델 호출 시도: {model_name}")
             GEMINI_CALLS["attempts"] += 1
             response = get_client().models.generate_content(
                 model=model_name, contents=prompt)
             text = getattr(response, "text", None)
-            if text and text.strip():
+            usable = bool(text and text.strip())
+        except Exception as exc:
+            failure = exc
+        elapsed = time.monotonic() - started   # 기록은 try 밖에서 한다: 기록 때문에 호출 실패로 오인되는 일이 없게
+        if failure is None:
+            if usable:
                 print(f"Gemini 모델 호출 성공: {model_name}")
+                CALL_LOG.success(model_name, elapsed, response)
                 return response
             GEMINI_CALLS["failed"] += 1
             errors.append(f"{model_name}: 응답 텍스트 없음")
-        except Exception as exc:
+            CALL_LOG.empty(model_name, elapsed, response)
+        else:
             GEMINI_CALLS["failed"] += 1
-            errors.append(f"{model_name}: {exc}")
-            print(f"Gemini 모델 호출 실패: {model_name} - {_one_line(exc)}")
+            errors.append(f"{model_name}: {_scrub(failure)}")   # 이 문구는 예외 메시지(트레이스백·`작업 실패` 줄)로 나가므로 가린 것을 쓴다
+            print(f"Gemini 모델 호출 실패: {model_name} - {_one_line(_scrub(failure))}")
+            CALL_LOG.failure(model_name, elapsed, failure)
     raise RuntimeError("모든 Gemini 모델 호출 실패\n" + "\n".join(errors))
 
 
@@ -236,6 +256,23 @@ def url_ok(url, timeout=10):
         return False
 
 
+# 마지막으로 관측한 Unsplash 응답 헤더(X-Ratelimit-Remaining·X-Ratelimit-Limit). 시간당 한도(데모 앱 50회)를 얼마나 썼는지 보려는
+# 측정값이며 동작에는 영향이 없다. 응답에 헤더가 없으면 이전 값을 그대로 둔다.
+UNSPLASH_RATE = {"remaining": None, "limit": None}
+
+
+def _note_unsplash_rate(headers):
+    if headers is None:
+        return
+    for key, header in (("remaining", "X-Ratelimit-Remaining"), ("limit", "X-Ratelimit-Limit")):
+        try:
+            value = headers.get(header)
+        except AttributeError:  # get 을 지원하지 않는 이상한 객체
+            return
+        if isinstance(value, str) and re.fullmatch(r"\d{1,7}", value.strip()):
+            UNSPLASH_RATE[key] = int(value.strip())
+
+
 def search_unsplash(query, per_page=15):
     if STUB_UNSPLASH:
         if DRY_RUN:
@@ -254,16 +291,20 @@ def search_unsplash(query, per_page=15):
         headers={"Authorization": f"Client-ID {UNSPLASH_KEY}",
                  "Accept-Version": "v1", "User-Agent": UA},
     )
+    headers = None
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
+            headers = getattr(resp, "headers", None)
             data = json.load(resp)
     except urllib.error.HTTPError as exc:
+        _note_unsplash_rate(getattr(exc, "headers", None))
         print(f"Unsplash API 오류 {exc.code} (query={query!r}) "
               "- 403/429면 시간당 호출 한도 초과일 수 있습니다.")
         return []
     except Exception as exc:
         print(f"Unsplash 호출 실패 (query={query!r}): {_one_line(exc, 200)}")
         return []
+    _note_unsplash_rate(headers)
 
     urls = []
     for item in data.get("results", []):
@@ -338,7 +379,8 @@ def make_image_queries(title, tags, category):
 JSON 객체만 반환: {{"image_queries": ["...", "...", "..."]}}
 """
     try:
-        data = extract_json_object(call_gemini_with_fallback(prompt).text)
+        with CALL_LOG.purposed("image-queries"):
+            data = extract_json_object(call_gemini_with_fallback(prompt).text)
         qs = [q.strip() for q in data.get("image_queries", [])
               if isinstance(q, str) and q.strip()]
         return qs[:4] or fallback
@@ -446,6 +488,11 @@ def repair(post, used):
 # ============================================================
 # FIX_IMAGES 모드
 # ============================================================
+# 한 번에 처리하는 글 수 상한. 글마다 Gemini(검색어 3개, 모든 모델이 실패하면 글당 모델 수만큼)와 Unsplash 를 부르므로, 문제 글이 많아도
+# 이만큼만 처리하고 나머지는 다음 실행으로 넘긴다(무료 한도 보호). chance-fix-images.yml 의 입력 설명에도 같은 숫자가 있다(시험이 대조한다).
+FIX_IMAGES_MAX_PER_RUN = 20
+
+
 def fix_images(keyword=None):
     posts = load_posts()
     print(f"검사 대상 글: {len(posts)}개 (오래된 글의 이미지를 우선 유지)")
@@ -462,8 +509,13 @@ def fix_images(keyword=None):
         else:
             used.add(image_key(post["image"]))
 
+    # 한 번에 처리하는 글 수에 상한을 둔다(글마다 Gemini 검색어와 Unsplash 를 부른다). 넘는 글은 다음 실행에서 다시 진단해 처리한다.
+    batch = targets[:FIX_IMAGES_MAX_PER_RUN]
+    deferred = len(targets) - len(batch)
+    if deferred:
+        print(f"한 번에 최대 {FIX_IMAGES_MAX_PER_RUN}건만 처리합니다. 나머지 {deferred}건은 다음 실행에서 처리합니다.")
     fixed = skipped = 0
-    for post, problem in targets:
+    for post, problem in batch:
         new_url = repair(post, used)
         if not new_url:
             print(f"  교체 후보 없음, 건너뜀: {post['path']}")
@@ -473,8 +525,13 @@ def fix_images(keyword=None):
         write_text_atomic(post["path"], apply_image(post["text"], post["image"], new_url))
         trigger_download(new_url)
         fixed += 1
-    summary = (f"완료: 문제 {len(targets)}건 / 교체 {fixed}건 / 건너뜀 {skipped}건"
-               + (" (DRY_RUN: 실제 변경 없음)" if DRY_RUN else ""))
+    if DRY_RUN:
+        head = f"교체 예정 {len(targets)}건 중 {len(batch)}건 처리 대상"
+    else:
+        head = f"문제 {len(targets)}건" + (f" 중 {len(batch)}건 처리" if deferred else "")
+    summary = (f"완료: {head} / 교체 {fixed}건 / 건너뜀 {skipped}건"
+               + (f" / 나머지 {deferred}건은 다음 실행으로 넘김(한 번에 최대 {FIX_IMAGES_MAX_PER_RUN}건)" if deferred else "")
+               + (f" (DRY_RUN: 실제 변경 없음, {'가짜 AI 검색어 사용' if STUB_GEMINI else '실제 Gemini 호출'})" if DRY_RUN else ""))
     print(summary)
     return "이미지 점검: " + summary
 
@@ -1453,6 +1510,7 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
 # ============================================================
 # 진입점
 # ============================================================
+PRACTICE_PUBLISHED_TEXT = "연습으로 글을 만들어 봤습니다(저장하지 않았습니다)"   # 연습 실행의 PUBLISHED: 아무것도 저장하지 않았는데 발행된 것처럼 읽히지 않게
 OUTCOME_TEXT = {
     "PUBLISHED": "글을 만들었습니다",
     "ALL_LANES_EMPTY": "모든 분야를 시도했지만 검증을 통과한 기사가 한 건도 없습니다",
@@ -1464,22 +1522,65 @@ OUTCOME_TEXT = {
 }
 
 
+def _gemini_count_line(calls):
+    """Blogger·이슈 수정 요약과 같은 형식의 호출 수 줄."""
+    return f"Gemini 호출: {calls['attempts']}회(실패 {calls.get('failed', 0)}회)"
+
+
+def _unsplash_line(rate):
+    """마지막으로 관측한 Unsplash 시간당 남은 호출 수. 응답에 헤더가 없었으면 None(줄을 만들지 않는다)."""
+    remaining = (rate or {}).get("remaining")
+    if remaining is None:
+        return None
+    limit = rate.get("limit")
+    return f"Unsplash 남은 호출: {remaining}회" + (f"(시간당 한도 {limit}회)" if limit is not None else "")
+
+
+def usage_lines():
+    """지금까지의 Gemini·Unsplash 사용량 줄. 정상 종료 요약(finish_run)이 아닌 경로 — 예외로 끝난 실행, 이미지 교체 — 에서도 쓴다."""
+    lines = [_gemini_count_line(GEMINI_CALLS)]   # 0회도 적는다: 줄이 없으면 '호출 안 함'과 '이 기능이 없는 옛 요약'을 구분할 수 없다
+    lines += CALL_LOG.detail_lines()
+    unsplash = _unsplash_line(UNSPLASH_RATE)
+    if unsplash:
+        lines.append(unsplash)
+    return lines
+
+
+def failure_summary(exc):
+    """예외로 끝난 실행의 요약. 모든 모델이 실패한 실행에서도 호출 수가 사라지지 않게 사용량 줄을 붙인다(D-52)."""
+    return "\n".join(["### Chance_Blog 실행 요약",
+                      f"- 결과: **실패** — {type(exc).__name__} (원인은 이 단계의 로그를 보세요)"]
+                     + [f"- {line}" for line in usage_lines()])
+
+
 def render_run_summary(event, now, slot, report):
     """실행 요약(마크다운). 건수와 코드만 쓴다 — 비밀·수익·방문 수치 금지(G-O7)."""
     outcome = report.get("outcome", "UNKNOWN")
     mode = "스케줄" if event == "schedule" else "수동"
     if DRY_RUN:
         mode += " (DRY_RUN: 파일·기록 저장 안 함)"
+    outcome_text = PRACTICE_PUBLISHED_TEXT if DRY_RUN and outcome == "PUBLISHED" else OUTCOME_TEXT.get(outcome, "알 수 없음")
     lines = ["### Chance_Blog 실행 요약",
              f"- 실행: {mode} · {now:%Y-%m-%d %H:%M} KST" + (f" · {slot}시 슬롯" if slot is not None else ""),
-             f"- 결과: **{outcome}** — {OUTCOME_TEXT.get(outcome, '알 수 없음')}"]
+             f"- 결과: **{outcome}** — {outcome_text}"]
+    if DRY_RUN:  # 연습 실행이 한도를 썼는지 요약에서 바로 보이게 한다(기본은 가짜 응답, 실제 호출은 real_ai 체크)
+        lines.append("- AI 응답: " + ("가짜(스텁) — Gemini를 호출하지 않았습니다(실제 호출로 연습하려면 수동 실행에서 real_ai 를 체크)"
+                                      if STUB_GEMINI else "실제 Gemini 호출 — 연습 실행이지만 무료 한도를 씁니다"))
+    over = report.get("manual_over_cap")
+    if over:
+        lines.append(f"- 경고: 수동 실행은 게시 시각·하루 상한을 따지지 않습니다 — 오늘({over['date']}) 이미 {over['posted']}건이 "
+                     f"게시되어 상한({over['cap']}건) 이상입니다")
     if outcome == "PUBLISHED":
         lines.append(f"- 제목: {_md_cell(report.get('title', ''))}")
         lines.append(f"- 편집 축: {report.get('lane_label', '')} · 출처: {_md_cell(report.get('source', ''), 60)}")
         lines.append("- 파일: " + ", ".join(f"`{str(p).replace(chr(96), '')}`" for p in report.get("paths", [])))
-    calls = report.get("gemini_calls") or {}
-    if calls.get("attempts"):
-        lines.append(f"- Gemini 호출: {calls['attempts']}회(실패 {calls.get('failed', 0)}회)")
+    calls = report.get("gemini_calls")
+    if isinstance(calls, dict) and "attempts" in calls:   # 0회도 적는다(finish_run 이 항상 넣는다). 항목 자체가 없으면 값을 지어내지 않는다
+        lines.append(f"- {_gemini_count_line(calls)}")
+    lines += [f"- {note}" for note in report.get("gemini_notes", [])]
+    unsplash = _unsplash_line(report.get("unsplash_rate"))
+    if unsplash:
+        lines.append(f"- {unsplash}")
     rejects = report.get("gate_rejects", [])
     if rejects:
         lines.append(f"- 후보 탈락 {len(rejects)}건(본문 검증·응답 형식): " + " / ".join(_md_cell(r, 100) for r in rejects[:3]))
@@ -1509,6 +1610,8 @@ def finish_run(result, report, event, now, slot=None):
         report.setdefault("outcome", "PUBLISHED")
     outcome = report.get("outcome", "UNKNOWN")
     report.setdefault("gemini_calls", dict(GEMINI_CALLS))
+    report.setdefault("gemini_notes", CALL_LOG.detail_lines())
+    report.setdefault("unsplash_rate", dict(UNSPLASH_RATE))
     write_step_summary(render_run_summary(event, now, slot, report))
     if result is not None:
         return
@@ -1520,6 +1623,32 @@ def finish_run(result, report, event, now, slot=None):
     print(skip_line(outcome, lanes_tried=len(report.get("lanes", []))))
     print(f"::warning::{where}: {OUTCOME_TEXT.get(outcome, '글을 만들지 못했습니다')}. "
           "다음 실행에서 다시 시도합니다.")
+
+
+def daily_cap():
+    """pipeline/blogs.json 에서 chance 블로그의 하루 게시 상한(limits.max_posts_per_day). 읽지 못하면 None."""
+    from pipeline import registry
+    try:
+        return int(registry.get_blog(registry.load_registry(), "chance")["limits"]["max_posts_per_day"])
+    except (registry.RegistryError, KeyError, TypeError, ValueError):
+        return None
+
+
+def note_manual_over_cap(report):
+    """수동 실제 실행은 게시 시각 판단(slot_state)과 하루 상한을 모두 건너뛴다. 운영자가 일부러 더 게시하려는 것일 수 있어 막지 않고(동작은
+    그대로), 오늘 이미 게시된 글이 상한 이상이면 경고 주석과 요약 줄만 남긴다. 연습 실행은 게시하지 않으므로 하지 않는다."""
+    if DRY_RUN:
+        return
+    cap = daily_cap()
+    if cap is None:
+        print("하루 게시 상한을 읽지 못해 수동 실행의 상한 초과 경고를 건너뜁니다.")
+        return
+    today = now_kst().strftime("%Y-%m-%d")
+    posted = sum(1 for item in read_history() if isinstance(item, dict) and item.get("date") == today)
+    if posted >= cap:
+        report["manual_over_cap"] = {"date": today, "posted": posted, "cap": cap}
+        print(f"::warning::수동 실행: 오늘({today}) 이미 {posted}건이 게시되어 하루 상한({cap}건) 이상입니다. "
+              "수동 실행은 게시 시각·하루 상한을 따지지 않고 글을 만듭니다(막지 않습니다).")
 
 
 def main():
@@ -1538,7 +1667,7 @@ def main():
         print(f"[DRY_RUN] 시작 (Gemini={'스텁' if STUB_GEMINI else '실제'}, "
               f"Unsplash={'스텁' if STUB_UNSPLASH else '실제'}) - 파일은 변경되지 않습니다.")
     if FIX_IMAGES:
-        write_step_summary(f"### Chance_Blog 실행 요약\n- {fix_images()}")
+        write_step_summary(f"### Chance_Blog 실행 요약\n- {fix_images()}" + "".join(f"\n- {line}" for line in usage_lines()))
     elif EVENT_NAME == "schedule":
         now = now_kst()
         slot, state = slot_state(read_history(), now)
@@ -1558,15 +1687,20 @@ def main():
         finish_run(result, report, "schedule", now, slot)
     else:
         report = {}
+        note_manual_over_cap(report)
         result = generate_blog_posts(report=report)
         finish_run(result, report, EVENT_NAME or "manual", now_kst())
 
 
-if __name__ == "__main__":
+def run_cli():
+    """`python generator.py` 진입점. 예외로 끝나도 요약에 결과와 사용량을 남기고 예외는 그대로 다시 던진다(Actions 빨강)."""
     try:
         main()
     except Exception as exc:
-        print(f"작업 실패: {type(exc).__name__}: {_one_line(exc, 600)}")
-        write_step_summary("### Chance_Blog 실행 요약\n"
-                           f"- 결과: **실패** — {type(exc).__name__} (원인은 이 단계의 로그를 보세요)")
+        print(f"작업 실패: {type(exc).__name__}: {_one_line(_scrub(exc), 600)}")
+        write_step_summary(failure_summary(exc))
         raise
+
+
+if __name__ == "__main__":
+    run_cli()
