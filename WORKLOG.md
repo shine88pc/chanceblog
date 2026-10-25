@@ -29,6 +29,7 @@
 - **리베이스·병합**: 작업 중 보안 설정 PR(#14, c834c2d)이 병합돼 그 위로 리베이스했다(충돌 3곳은 main 내용을 유지하고 이름 변경만 얹어 풀었다). 그 뒤 main(0f509d2)은 병합 커밋(`git merge`)으로 합쳤다: 충돌 5개 파일(HANDLER 2곳·WORKLOG·DEFECT_REGISTER 2곳·ENGINEERING_GUIDE·REQUEST_BRIEFING)은 양쪽 내용을 모두 살렸고 새로 들어온 안내·코드의 옛 이름을 바꿨다. 병합 직후 사본은 625개 통과였다
 - **동작 불변 증명**: main(ddf0a22, 병합 전)의 워크플로 8개와 이 브랜치를 PyYAML로 비교(이름·run-name·입력 description·job name·단계 name 제외): 7개 파일은 구조 차이 0건, `chanceblog.yml`은 `fix_images` 입력과 `FIX_IMAGES` env 두 곳만 다름, job 키·`needs` 전부 동일. 새 `chance-fix-images.yml`은 분리 전 `chanceblog.yml`과 `FIX_IMAGES: '1'`(전: 입력 연동 식)·`schedule` 트리거·`fix_images` 입력만 다름. 병합 뒤 현재 main(0f509d2)과 비교해도 `chanceblog.yml` 2곳과 `blogger.yml` plan 단계의 요약 제목 문구 1곳만 다르고 나머지 6개 파일은 0건
 - **표적 변이**: 새 테스트가 정말 실패하는지 복사본에 변이를 하나씩 넣어 확인했다. 1차 41종(검증기 10·워크플로/문서 27·표현식 해석기 4)과 후속 19종(`FIX_IMAGES` 계약 8·옛 이름 검색 범위 9·blogger 입력 설명 1·병합에서 바꾼 `pages.yml` 이름 1)이 모두 실패로 탐지됐고 생존 0이다(병합 뒤 최종 트리에서 다시 실행). 옛 워크플로 8개로 통째로 되돌린 복사본에서는 `test_workflow_names.py` 22개 중 15개와 WF-11 실제 저장소 시험 2개가 실패했다(병합 전 트리 기준)
+- **독립 검증**(e0ac1a4, 새 clone): **병합 가능**(조건 3개는 모두 절차 문제 — PR의 Linux CI 확인, 병합 직후 Actions 확인 5가지, 대기 브랜치 3개와의 병합 순서). 동작 불변을 구조 비교·줄 단위 diff·표현식 평가·`generator.py` 로컬 실행 네 방법으로 확인, 이름 대응표 불일치 0, 옛 영문 이름 현재형 잔존 0, 변이 78개 중 새 테스트가 67개 탐지(생존 10은 F3·F5·F6·F9와 동치 1). 대기 브랜치 시험 병합에서 워크플로 yml 4개는 모두 자동 병합, 충돌은 문서 표 줄뿐
 - **독립 검증 반영(병합 뒤 후속 커밋)**: F3 `FIX_IMAGES` 계약 시험 3개(변이 G01·G02 탐지), F5 옛 영문 이름 검색을 `.yml`·`.py`까지 확대(변이 D06·D07 탐지), F4·F11 WF-11 강제 범위(검증기는 워크플로 name 오류·job name 경고, job name 은 단위 테스트가 경고도 실패로 취급, 입력 description·단계 name·run-name 한글은 단위 테스트가 요구)와 외부 템플릿 안내를 `ENGINEERING_GUIDE` W10·`SECURITY_GUARDRAILS` §6·검증기 오류 문구·Copilot용 지침에 적음, F10 `blogger.yml` 연습 입력 설명에 '체크하지 않으면 초안이 저장소에 커밋됨' 추가. F2·F7·F8·F9·F12·F14는 코드 변경 없이 D-49로 기록했다. 새로 들어온 코드·시험의 옛 이름: `pipeline/health.py` 알림문('Deploy GitHub Pages' → `사이트 자동 배포`), `blogger.yml` 요약 제목, `tests/test_watchdog_integration.py`의 pages.yml 이름 단정(옛 이름 그대로면 병합 뒤 시험이 실패했다)
 - **로컬 연습 실행**: `FIX_IMAGES=1 DRY_RUN=1 EVENT_NAME=workflow_dispatch python generator.py`(키 없음=스텁, 새 워크플로가 부르는 방식): 종료 0, 파일 변경 없음, 요약 `이미지 점검: 완료: 문제 2건 / 교체 2건 / 건너뜀 0건 (DRY_RUN: 실제 변경 없음)`. 지금 저장소의 중복 이미지 2건이다 — 연습을 풀고 실제로 교체하면 이 2건이 바뀐다
 - **실행하지 못한 것(실행 필요)**: GitHub Actions 실제 실행 일체 — 새 이름 표시, 정기 실행 제목, `chance-fix-images.yml`·`chanceblog.yml`·`이슈 수정 요청 처리(수정안 PR 만들기)` 연습 실행(새 워크플로 파일은 main에 병합되기 전에는 수동 실행 불가), 이 PR의 `저장소 규칙·테스트 자동 검사` 3.10·3.12(PR을 열면 실행됨), 로컬 Python 3.10 단위 테스트(없음 — CI의 3.10이 대신)
@@ -44,7 +45,7 @@
 ### 남은 이슈 / 확인할 점
 - Actions 실행은 하지 못했다. `run-name` 식은 `actionlint`와 단위 테스트의 표현식 해석기로만 확인했다 → 위 체크리스트
 - 같은 파일을 고치는 진행 중 PR(`blogger.yml`·`watchdog.yml`·`pages.yml`·`issue-edit.yml`)과 병합 때 충돌할 수 있다. 이 PR이 건드린 줄은 이름·run-name·job name·입력 설명 줄뿐이다
-- 독립 검증의 잔여 지적 F2·F7·F8·F9·F12·F14는 `docs/DEFECT_REGISTER.md` D-49(낮음, 열림)에 기록만 했다. F14는 지적 번호만 전달받아 항목 내용은 검증 보고 원문 참조로 적어 뒀다(총괄이 채울 것)
+- 독립 검증의 잔여 지적 F2·F7·F8·F9·F12·F14는 `docs/DEFECT_REGISTER.md` D-49(낮음, 열림)에 기록만 했다. F14는 D-49에 내용을 적었다(이미지 교체가 STALE 판정을 늦춘다는 우려는 워치독 보강 PR #15가 글 파일 '추가' 커밋만 세게 하면서 해소됨)
 - 이름 선택: 표의 이름을 그대로 썼다. 더 다듬을 후보는 `PR 변경 범위 검사` → `PR 변경 범위 자동 검사`(다른 이름의 '자동' 표기와 맞춤), `Blogger 글 자동 작성` → `Blogger 글 자동 작성(초안·게시)`(모드에 따라 게시도 함을 드러냄)
 
 ---
