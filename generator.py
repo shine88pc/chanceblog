@@ -9,10 +9,12 @@
 """
 import os
 import re
+import copy
 import json
 import zlib
 import html
 import random
+import time
 import difflib
 import datetime
 from email.utils import parsedate_to_datetime
@@ -181,21 +183,28 @@ def extract_json_object(raw_text):
     raise ValueError(f"완전한 JSON 객체를 찾을 수 없습니다: {text[:300]}")
 
 
+# 이번 실행의 Gemini 모델 호출 횟수. 무료 한도(프로젝트 단위)를 나눠 쓰기 위한 측정값이며 동작에는 영향이 없다.
+GEMINI_CALLS = {"attempts": 0, "failed": 0}
+
+
 def call_gemini_with_fallback(prompt):
     errors = []
     for model_name in MODEL_CANDIDATES:
         try:
             print(f"Gemini 모델 호출 시도: {model_name}")
+            GEMINI_CALLS["attempts"] += 1
             response = get_client().models.generate_content(
                 model=model_name, contents=prompt)
             text = getattr(response, "text", None)
             if text and text.strip():
                 print(f"Gemini 모델 호출 성공: {model_name}")
                 return response
+            GEMINI_CALLS["failed"] += 1
             errors.append(f"{model_name}: 응답 텍스트 없음")
         except Exception as exc:
+            GEMINI_CALLS["failed"] += 1
             errors.append(f"{model_name}: {exc}")
-            print(f"Gemini 모델 호출 실패: {model_name} - {exc}")
+            print(f"Gemini 모델 호출 실패: {model_name} - {_one_line(exc)}")
     raise RuntimeError("모든 Gemini 모델 호출 실패\n" + "\n".join(errors))
 
 
@@ -253,7 +262,7 @@ def search_unsplash(query, per_page=15):
               "- 403/429면 시간당 호출 한도 초과일 수 있습니다.")
         return []
     except Exception as exc:
-        print(f"Unsplash 호출 실패 (query={query!r}): {exc}")
+        print(f"Unsplash 호출 실패 (query={query!r}): {_one_line(exc, 200)}")
         return []
 
     urls = []
@@ -334,7 +343,7 @@ JSON 객체만 반환: {{"image_queries": ["...", "...", "..."]}}
               if isinstance(q, str) and q.strip()]
         return qs[:4] or fallback
     except Exception as exc:
-        print(f"검색어 생성 실패, 기본값 사용: {exc}")
+        print(f"검색어 생성 실패, 기본값 사용: {_one_line(exc, 400)}")
         return fallback
 
 
@@ -514,6 +523,86 @@ def is_tech_title(title):
 NEWS_MAX_AGE_HOURS = 36
 EPOCH = datetime.datetime.min.replace(tzinfo=timezone.utc)
 
+
+def _int_env(name, default):
+    try:
+        return int(os.environ.get(name, "").strip() or default)
+    except ValueError:
+        return default
+
+
+# 뽑힌 분야에 후보가 없을 때 다음 분야를 시도하는 총 시간 상한(초). 이 시각이 지나면 새 분야도, 분야 안의 남은 소스도
+# 시도하지 않는다. 이미 시작한 소스 하나는 끝까지 기다리므로(소스당 최악 약 2분) 수집은 상한 + 약 2분 안에 끝난다.
+LANE_SEARCH_BUDGET_SECONDS = _int_env("LANE_SEARCH_BUDGET_SECONDS", 480)
+
+# 기사 탈락 사유 코드. 소스별 줄·[SKIP] 줄·실행 요약에 같은 코드로 남는다(docs/ARCHITECTURE.md).
+DROP_LABELS = {
+    "NO_TITLE": "제목 없음",
+    "NOT_TECH": "기술 키워드 아님",
+    "AGE": f"{NEWS_MAX_AGE_HOURS}시간 초과",
+    "UNTRUSTED": "신뢰 목록에 없는 게시자",
+    "UNCHECKED": "소스당 5건 검사 한도 초과",
+    "UNRESOLVED": "게시자 원문 주소 해석 실패",
+    "HOST_MISMATCH": "게시자와 원문 주소 불일치",
+    "SHORT_SUMMARY": "요약 100자 미만",
+    "DUPLICATE": "기존 글과 제목 유사",
+}
+
+
+def _count(counter, code, n=1):
+    counter[code] = counter.get(code, 0) + n
+
+
+def _format_drops(drops):
+    """사유별 개수를 많은 순으로 'UNTRUSTED 60, AGE 11' 형태로."""
+    return ", ".join(f"{code} {n}" for code, n in
+                     sorted(drops.items(), key=lambda kv: (-kv[1], kv[0])))
+
+
+def _one_line(text, limit=300):
+    """한 줄로 접는다(개행 제거, 길이 제한). 외부·AI 유래 문구를 로그에 찍기 전에 쓴다:
+    개행으로 새 줄을 시작해 '::error::' 같은 워크플로 명령을 흉내 내거나 '##[' 를 쓰지 못하게 한다."""
+    folded = " ".join(str(text).split()).replace("##[", "# [")
+    if folded.startswith("::"):
+        folded = "→ " + folded  # 러너는 줄 앞 공백을 지우고 '::' 를 찾으므로 공백이 아니라 눈에 보이는 접두 문자로 막는다
+    return folded[:limit]
+
+
+def _md_cell(text, limit=120):
+    """마크다운 표·목록에 안전하게 넣을 한 줄 텍스트(제목·출처처럼 AI·외부에서 온 문구용)."""
+    folded = _one_line(text, limit)
+    for ch, entity in (("|", "&#124;"), ("`", "'"), ("<", "&lt;"), (">", "&gt;"), ("[", "&#91;"), ("]", "&#93;")):
+        folded = folded.replace(ch, entity)
+    return folded
+
+
+def _pause_on():
+    """킬 스위치. Blogger 러너(pipeline/run.py)와 같은 값 집합(1/true/yes/on)을 쓴다."""
+    return os.environ.get("PIPELINE_PAUSE", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def skip_line(code, **fields):
+    """건너뜀을 로그에서 한 줄로 찾게 하는 규격: [SKIP] code=CODE key=value ..."""
+    parts = [f"[SKIP] code={code}"]
+    for key, value in fields.items():
+        if isinstance(value, dict):
+            value = ",".join(f"{k}:{v}" for k, v in sorted(value.items())) or "-"
+        parts.append(f"{key}={value}")
+    return " ".join(parts)
+
+
+def write_step_summary(markdown):
+    """Actions 실행 화면의 요약 칸(GITHUB_STEP_SUMMARY)에 덧붙인다. 로컬 실행에서는 아무 일도 하지 않는다.
+    요약은 보고용이라 쓰기에 실패해도 발행 결과를 바꾸지 않는다(대신 한 줄을 남긴다)."""
+    target = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not target:
+        return
+    try:
+        with open(target, "a", encoding="utf-8") as fh:
+            fh.write(markdown.rstrip() + "\n\n")
+    except OSError as exc:
+        print(f"실행 요약 쓰기 실패(발행에는 영향 없음): {exc}")
+
 # 기술을 포함하되 한 분야에 고정되지 않도록, 여러 편집 축의 후보를 둡니다.
 EDITORIAL_LANES = {
     "science": {
@@ -594,7 +683,7 @@ NEWS_SOURCES = [
     # 국내 직접 RSS
     {"name": "AI타임스", "lane": "technology", "url": "https://www.aitimes.com/rss/allArticle.xml"},
     {"name": "전자신문", "lane": "technology", "url": "https://rss.etnews.com/Section901.xml"},
-    {"name": "블로터", "lane": "technology", "url": "https://www.bloter.net/feed"},
+    # 블로터(https://www.bloter.net/feed)는 HTTP 404라 2026-10-25에 뺐다(실행 로그 '수집 실패', 로컬에서도 404/403).
 ]
 
 # 게시 후보에 사용할 수 있는 출처 도메인. 도메인 이름은 끝 경계까지 비교합니다.
@@ -724,23 +813,34 @@ def parse_feed(data):
     return items
 
 
-def fetch_news_items(editorial_lane=None):
-    """여러 소스에서 최근 기사 후보를 모아, 소스를 번갈아 섞은 목록으로 반환."""
+def fetch_news_items(editorial_lane=None, stats=None, deadline=None, clock=time.monotonic):
+    """여러 소스에서 최근 기사 후보를 모아, 소스를 번갈아 섞은 목록으로 반환.
+    stats(dict)를 넘기면 소스별 수집·탈락 사유 개수를 stats["sources"]에 채운다(동작은 같다).
+    deadline(clock 기준 시각)을 넘기면 그 시각이 지난 뒤에는 남은 소스를 시도하지 않는다(느린 장애에서 잡 제한을 넘기지 않도록)."""
     now = datetime.datetime.now(timezone.utc)
     max_age = timedelta(hours=NEWS_MAX_AGE_HOURS)
-    per_source, ok_count = [], 0
+    per_source, attempted, ok_count, time_skipped = [], 0, 0, 0
     for src in NEWS_SOURCES:
         if editorial_lane and src.get("lane") != editorial_lane:
             continue
+        if deadline is not None and clock() > deadline:
+            time_skipped += 1
+            continue
+        attempted += 1
         try:
             req = urllib.request.Request(src["url"], headers={"User-Agent": UA})
             with urllib.request.urlopen(req, timeout=15) as resp:
                 parsed = parse_feed(resp.read())
             ok_count += 1
         except Exception as exc:
-            print(f"  소스 {src['name']}: 수집 실패 ({type(exc).__name__}: {exc})")
+            print(f"  소스 {src['name']}: 수집 실패 ({type(exc).__name__}: {_one_line(exc, 200)})")
+            if stats is not None:
+                stats.setdefault("sources", []).append(
+                    {"name": src["name"], "fetched": 0, "kept": 0, "drops": {},
+                     "error": type(exc).__name__})
             continue
         kept = []
+        drops = {}
         resolved_count = 0
         for it in parsed:
             title = it["title"]
@@ -752,41 +852,63 @@ def fetch_news_items(editorial_lane=None):
                     if match:
                         title, publisher = match.group(1).strip(), match.group(2).strip()
             if not title:
+                _count(drops, "NO_TITLE")
                 continue
             if src.get("tech_filter") and not is_tech_title(title):
+                _count(drops, "NOT_TECH")
                 continue
             pub = it["published"]
             if pub and now - pub > max_age:
+                _count(drops, "AGE")
                 continue
             publisher_host = _host(publisher_url)
             if publisher_host and not _trusted_domain(publisher_host, editorial_lane):
+                _count(drops, "UNTRUSTED")
                 continue
             if resolved_count >= 5:
+                _count(drops, "UNCHECKED")
                 continue
             article_url = _resolve_article_url(it["link"]) if src.get("google") else it["link"]
             resolved_count += 1
             publisher_host = publisher_host or _host(article_url)
-            if not article_url or not _trusted_domain(publisher_host, editorial_lane):
+            if not article_url:
+                _count(drops, "UNRESOLVED")
+                continue
+            if not _trusted_domain(publisher_host, editorial_lane):
+                _count(drops, "UNTRUSTED")
                 continue
             article_host = _host(article_url)
             same_publisher = (article_host == publisher_host
                               or article_host.endswith("." + publisher_host)
                               or publisher_host.endswith("." + article_host))
             if not same_publisher or not _trusted_domain(article_host, editorial_lane):
+                _count(drops, "HOST_MISMATCH")
                 continue
             summary = it["summary"]
             if len(summary) < 100:
                 summary = _fetch_source_excerpt(article_url)
             if len(summary) < 100:
+                _count(drops, "SHORT_SUMMARY")
                 continue
             kept.append({"title": title, "source": publisher or src["name"],
                          "link": article_url, "publisher_domain": publisher_host,
                          "summary": summary, "published": pub})
         kept.sort(key=lambda x: x["published"] or EPOCH, reverse=True)
-        print(f"  소스 {src['name']}: {len(parsed)}건 중 {len(kept)}건 사용")
+        line = f"  소스 {src['name']}: {len(parsed)}건 중 {len(kept)}건 사용"
+        if drops:
+            line += f" (탈락: {_format_drops(drops)})"
+        print(line)
+        if stats is not None:
+            stats.setdefault("sources", []).append(
+                {"name": src["name"], "fetched": len(parsed), "kept": len(kept),
+                 "drops": drops})
         per_source.append(kept[:10])
 
-    if ok_count == 0:
+    if time_skipped:
+        print(f"  시간 상한으로 소스 {time_skipped}개를 시도하지 않았습니다.")
+        if stats is not None:
+            stats["time_skipped"] = time_skipped
+    if attempted and ok_count == 0:
         print("::warning::모든 뉴스 소스 수집에 실패했습니다. 네트워크/소스 주소를 확인하세요.")
     merged, seen = [], set()
     for rank in range(10):
@@ -800,21 +922,29 @@ def fetch_news_items(editorial_lane=None):
     return merged
 
 
-def pick_topic_candidates(titles, allow_auto_topic=True, editorial_lane=None):
-    """신뢰 출처 검증과 중복 검사를 통과한 기사 후보만 반환합니다."""
+def pick_topic_candidates(titles, allow_auto_topic=True, editorial_lane=None, stats=None, deadline=None,
+                          clock=time.monotonic):
+    """신뢰 출처 검증과 중복 검사를 통과한 기사 후보만 반환합니다.
+    stats(dict)를 넘기면 소스별 개수와 함께 중복으로 탈락한 수·최종 후보 수를 채웁니다."""
     picked = []
-    for it in fetch_news_items(editorial_lane):
+    duplicates = 0
+    for it in fetch_news_items(editorial_lane, stats=stats, deadline=deadline, clock=clock):
         if is_similar_to_any(it["title"], titles, 0.6):
+            duplicates += 1
             continue
         picked.append(it)
         if len(picked) >= MAX_ATTEMPTS:
             break
+    if stats is not None:
+        stats["duplicates"] = duplicates
+        stats["candidates"] = len(picked)
     # 출처 검증을 통과한 기사가 없으면 AI가 근거 없이 주제를 고르지 않습니다.
     return picked
 
 
-def choose_editorial_lane(slot, history):
-    """최근 발행 편중을 줄이면서 슬롯별로 재현 가능한 확률 선택을 합니다."""
+def editorial_lane_order(slot, history):
+    """최근 발행 편중을 줄이면서 슬롯별로 재현 가능한 확률 추첨 순서로 모든 분야를 반환합니다.
+    첫 번째가 choose_editorial_lane 의 선택과 같고, 뒤쪽은 그 분야에 후보가 없을 때 시도할 대체 순서입니다."""
     lanes = list(EDITORIAL_LANES)
     recent = [item.get("lane") for item in history[-12:]
               if isinstance(item, dict) and item.get("lane") in EDITORIAL_LANES]
@@ -832,7 +962,18 @@ def choose_editorial_lane(slot, history):
     latest = history[-1] if history else None
     latest_key = (latest.get("date", ""), latest.get("topic", "")) if isinstance(latest, dict) else str(latest or "")
     seed = f"{now:%Y-%m-%d}|{slot}|{len(history)}|{latest_key}"
-    return random.Random(seed).choices(lanes, weights=[weights[lane] for lane in lanes], k=1)[0]
+    rng = random.Random(seed)
+    remaining, order = list(lanes), []
+    while remaining:
+        picked = rng.choices(remaining, weights=[weights[lane] for lane in remaining], k=1)[0]
+        order.append(picked)
+        remaining.remove(picked)
+    return order
+
+
+def choose_editorial_lane(slot, history):
+    """추첨 순서의 첫 분야."""
+    return editorial_lane_order(slot, history)[0]
 
 
 # ============================================================
@@ -931,14 +1072,21 @@ def build_post_prompt(item, recent_titles, category_hint="", allow_skip=False,
 """
 
 
-def stub_post_data(topic):
+def stub_post_data(topic, link=None):
+    """DRY_RUN(API 키 없음)용 가짜 글. 본문 검증(최소 분량 + 원문 링크 인용)을 통과하도록 충분히 길게 만든다.
+    예전에는 본문이 2자라 후보가 있으면 검증에서 실패했다(첫 분야가 비면 가려졌던 결함)."""
     t = topic or "stub topic"
-    fm = "---\nlayout: post\ntitle: \"{}\"\ncategory: \"{}\"\ntags: []\n---\n\n본문"
+    fm = "---\nlayout: post\ntitle: \"{}\"\ncategory: \"{}\"\ntags: []\n---\n\n{}"
+    kr_body = "이 문단은 DRY_RUN 연습용 가짜 본문입니다. 실제 글이 아닙니다. " * 50
+    en_body = "This paragraph is placeholder text used only by the dry run; it is not a real article. " * 30
+    if link:
+        kr_body += f"\n\n근거: [원문]({link})\n"
+        en_body += f"\n\nSource: [original]({link})\n"
     return {
         "kr_category": "KR - 스텁", "kr_title": f"[스텁] {t}", "kr_tags": ["스텁"],
-        "kr_content": fm.format(f"[스텁] {t}", "KR - 스텁"),
+        "kr_content": fm.format(f"[스텁] {t}", "KR - 스텁", kr_body),
         "en_category": "EN - Stub", "en_title": f"[stub] {t}", "en_tags": ["stub"],
-        "en_content": fm.format(f"[stub] {t}", "EN - Stub"),
+        "en_content": fm.format(f"[stub] {t}", "EN - Stub", en_body),
         "image_queries": ["technology", "computer hardware"],
     }
 
@@ -1074,26 +1222,97 @@ def now_kst():
     return datetime.datetime.now(KST)
 
 
-def current_due_slot(history, now):
-    """지금 시각 기준으로 '이미 시작됐지만 아직 글이 없는' 가장 최근 슬롯 시각을 반환.
-    스케줄 실행이 지연/누락돼도 다음 시간별 실행이 같은 슬롯을 보충한다.
-    (오래된 슬롯을 한꺼번에 몰아서 만들지는 않는다)"""
+def slot_state(history, now):
+    """(슬롯, 코드)를 반환. 코드: DUE(만들 슬롯 있음) / OUT_OF_WINDOW(첫 게시 시각 전) /
+    ALREADY_PUBLISHED(그 슬롯 글이 이미 있음). 두 가지 '할 일 없음'을 구분해 기록하기 위한 것이다."""
     started = [h for h in SLOT_HOURS if now.hour >= h]
     if not started:
-        return None
+        return None, "OUT_OF_WINDOW"
     slot = max(started)
     today = now.strftime("%Y-%m-%d")
     for item in history:
         if isinstance(item, dict) and item.get("date") == today and item.get("slot") == slot:
-            return None
-    return slot
+            return slot, "ALREADY_PUBLISHED"
+    return slot, "DUE"
+
+
+def current_due_slot(history, now):
+    """지금 시각 기준으로 '이미 시작됐지만 아직 글이 없는' 가장 최근 슬롯 시각을 반환.
+    스케줄 실행이 지연/누락돼도 다음 시간별 실행이 같은 슬롯을 보충한다.
+    (오래된 슬롯을 한꺼번에 몰아서 만들지는 않는다)"""
+    slot, state = slot_state(history, now)
+    return slot if state == "DUE" else None
+
+
+def _lane_report(lane, stats, found):
+    """한 분야의 수집 결과를 요약 한 건으로 줄인다(받은 기사 → 통과 → 후보, 탈락 사유별 개수)."""
+    sources = stats.get("sources", [])
+    drops = {}
+    for src in sources:
+        for code, n in src.get("drops", {}).items():
+            _count(drops, code, n)
+    if stats.get("duplicates"):
+        _count(drops, "DUPLICATE", stats["duplicates"])
+    return {
+        "lane": lane, "label": EDITORIAL_LANES[lane]["label"],
+        "sources": len(sources),
+        "failed_sources": sum(1 for s in sources if s.get("error")),
+        "fetched": sum(s.get("fetched", 0) for s in sources),
+        "passed": sum(s.get("kept", 0) for s in sources),
+        "candidates": len(found),
+        "drops": drops,
+    }
+
+
+def collect_candidates(titles, allow_auto_topic, lane_order, report, fallback=True,
+                       clock=time.monotonic):
+    """분야를 추첨 순서대로 시도해 처음으로 후보가 나온 분야와 그 후보를 반환한다.
+    모든 분야가 비면 ([], 첫 분야). 이 단계는 Gemini 를 부르지 않아 비용은 수집 시간뿐이다.
+    LANE_SEARCH_BUDGET_SECONDS 를 넘으면 새 분야도, 분야 안의 남은 소스도 시도하지 않는다(소스 하나가 끝나는 시간만큼은 더 걸린다).
+    report 에 budget_exceeded(시간 상한으로 건너뜀)와 sources_unreachable(시도한 소스가 전부 수집 실패)을 남긴다."""
+    started = clock()
+    deadline = started + LANE_SEARCH_BUDGET_SECONDS
+    tried = lane_order if fallback else lane_order[:1]
+    attempted = failed = 0
+    for index, lane in enumerate(tried):
+        if index and clock() > deadline:
+            report["budget_exceeded"] = True
+            print(f"::warning::분야 대체 시도를 시간 상한({LANE_SEARCH_BUDGET_SECONDS}초)에서 멈춥니다. "
+                  f"{len(tried) - index}개 분야는 시도하지 못했습니다.")
+            break
+        if index:
+            print(f"편집 축 대체 시도: {EDITORIAL_LANES[lane]['label']}")
+        stats = {}
+        found = pick_topic_candidates(titles, allow_auto_topic, lane, stats=stats,
+                                      deadline=deadline, clock=clock)
+        lane_report = _lane_report(lane, stats, found)
+        report["lanes"].append(lane_report)
+        attempted += lane_report["sources"]
+        failed += lane_report["failed_sources"]
+        if stats.get("time_skipped"):
+            report["budget_exceeded"] = True
+        if found:
+            if index:
+                print(f"::notice::'{EDITORIAL_LANES[lane_order[0]]['label']}' 분야에 후보가 없어 "
+                      f"'{lane_report['label']}' 분야로 대체했습니다.")
+            return found, lane
+        print(skip_line("LANE_EMPTY", lane=lane, sources=lane_report["sources"],
+                        failed=lane_report["failed_sources"], fetched=lane_report["fetched"],
+                        passed=lane_report["passed"], reasons=lane_report["drops"]))
+    report["sources_unreachable"] = attempted > 0 and failed == attempted
+    return [], lane_order[0]
 
 
 def generate_blog_posts(topic_override=None, category_hint="", slot=None,
-                        allow_auto_topic=True):
+                        allow_auto_topic=True, report=None):
+    """KR/EN 글 한 쌍을 만든다. 만들면 (kr_path, en_path), 만들 수 없으면 None.
+    report(dict)를 넘기면 분야별 수집 결과와 최종 결과 코드(outcome)를 채워 준다."""
+    report = report if report is not None else {}
+    report.setdefault("lanes", [])
     posts = load_posts()
     history = read_history()
-    editorial_lane = choose_editorial_lane(slot, history)
+    lane_order = editorial_lane_order(slot, history)
+    editorial_lane = lane_order[0]
     print(f"편집 축: {EDITORIAL_LANES[editorial_lane]['label']}")
     titles = existing_titles(history, posts)
     used = used_keys_from_posts(posts)
@@ -1111,39 +1330,73 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
                         if is_similar_to_any(topic_override, [it["title"]], 0.35)), None)
         if not matched:
             print("요청 주제와 직접 연결되고 출처 검증을 통과한 기사가 없습니다. 발행을 중단합니다.")
+            report["outcome"] = "NO_MATCH"
             return None
         candidates = [dict(matched, title=topic_override)]
     else:
-        candidates = pick_topic_candidates(titles, allow_auto_topic, editorial_lane)
+        candidates, editorial_lane = collect_candidates(
+            titles, allow_auto_topic, lane_order, report)
+    report["lane"] = editorial_lane
+    report["lane_label"] = EDITORIAL_LANES[editorial_lane]["label"]
     if not candidates:
         print("쓸 만한 새 기사가 없습니다. 글을 만들지 않습니다.")
+        # 이상 신호(빨강)는 '소스에 접속하지 못함'과 '모든 분야에 검증된 기사가 한 건도 없음'이다.
+        # 검증된 기사는 있었지만 전부 기존 글과 비슷하면 뉴스가 뜸한 것이라 경고 수준이고, 시간 상한으로 일부만 시도했을 때도 경고다.
+        if report.get("sources_unreachable"):
+            report["outcome"] = "SOURCES_UNREACHABLE"
+        elif report.get("budget_exceeded"):
+            report["outcome"] = "NO_CANDIDATES"
+        elif any(lane["passed"] > 0 for lane in report.get("lanes", [])):
+            report["outcome"] = "ALL_DUPLICATES"
+        else:
+            report["outcome"] = "ALL_LANES_EMPTY"
         return None
+    gate_rejects = report["gate_rejects"] = []
     for item in candidates:
         topic = item["title"] if item else None
-        src_label = f" [{item['source']}]" if item and item.get("source") else ""
-        print(f"주제 시도: {topic or '(자동 선정)'}{src_label}")
-        if STUB_GEMINI:
-            candidate = stub_post_data(topic)
-        else:
-            resp = call_gemini_with_fallback(build_post_prompt(
-                item, recent_titles, category_hint, allow_skip=not topic_override,
-                editorial_lane=editorial_lane))
-            candidate = extract_json_object(resp.text)
+        src_label = f" [{_one_line(item['source'], 60)}]" if item and item.get("source") else ""
+        print(f"주제 시도: {_one_line(topic or '(자동 선정)', 200)}{src_label}")
+        try:
+            if STUB_GEMINI:
+                candidate = stub_post_data(topic, (item or {}).get("link"))
+            else:
+                # 모든 모델이 실패하면 RuntimeError 로 그대로 올라간다(인프라 장애 = 빨강).
+                resp = call_gemini_with_fallback(build_post_prompt(
+                    item, recent_titles, category_hint, allow_skip=not topic_override,
+                    editorial_lane=editorial_lane))
+                candidate = extract_json_object(resp.text)
+        except ValueError as exc:  # 모델이 JSON 을 못 맞춘 것은 이 후보의 탈락이다
+            reason = _one_line(exc, 200)
+            print(f"  Gemini 응답을 읽지 못해 이 후보는 건너뜀: {reason}")
+            gate_rejects.append(reason)
+            continue
         if candidate.get("skip") is True:
-            print(f"  Gemini가 중복 주제로 판단해 건너뜀: {candidate.get('reason', '')}")
+            print(f"  Gemini가 중복 주제로 판단해 건너뜀: {_one_line(candidate.get('reason', ''))}")
             continue
         kr_t, en_t = str(candidate.get("kr_title", "")), str(candidate.get("en_title", ""))
         if not topic_override and (is_similar_to_any(kr_t, titles, 0.7)
                                    or is_similar_to_any(en_t, titles, 0.7)):
-            print(f"  생성된 제목이 기존 글과 비슷해 폐기: {kr_t} / {en_t}")
+            print(f"  생성된 제목이 기존 글과 비슷해 폐기: {_one_line(kr_t, 150)} / {_one_line(en_t, 150)}")
+            continue
+        try:
+            # 본문 검증(분량·원문 링크 인용)은 이미지를 고르기 전에 먼저 한다: 탈락한 후보에 Unsplash 호출을 쓰지 않고,
+            # 첫 후보의 본문이 얇다는 이유로 실행 전체를 빨갛게 만들지 않고 다음 후보를 시도한다(검증 기준은 그대로).
+            validate_post_data(copy.deepcopy(candidate), "https://example.invalid/kr.jpg",
+                               "https://example.invalid/en.jpg",
+                               verified_source_url=(item or {}).get("link"))
+        except ValueError as exc:
+            reason = _one_line(exc, 200)
+            print(f"  본문 검증 탈락: {reason}")
+            gate_rejects.append(reason)
             continue
         data, selected, selected_item = candidate, topic, item
         break
     if data is None:
+        report["outcome"] = "ALL_REJECTED"
         if not topic_override and not allow_auto_topic:
-            print("겹치지 않는 주제를 찾지 못했습니다. 글을 만들지 않습니다.")
+            print("통과한 후보가 없습니다(중복·Gemini 건너뜀·본문 검증 탈락). 글을 만들지 않습니다.")
             return None
-        raise RuntimeError("기존 글과 겹치지 않는 주제를 만들지 못했습니다.")
+        raise RuntimeError("후보가 모두 탈락해 글을 만들지 못했습니다(중복·Gemini 건너뜀·본문 검증 탈락).")
 
     if not selected_item or not selected_item.get("link") or not selected_item.get("publisher_domain"):
         raise RuntimeError("검증된 게시자 원문이 없어 글을 저장하지 않습니다.")
@@ -1188,8 +1441,11 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
     write_history(history)
     trigger_download(kr_image)
     trigger_download(en_image)
-    print("블로그 글 생성 완료:")
-    print(f"- KR: {kr_path}\n- EN: {en_path}\n- 편집 축: {EDITORIAL_LANES[editorial_lane]['label']}\n- 주제: {selected or '(자동 선정)'}")
+    report.update(outcome="PUBLISHED", title=data["kr_title"], en_title=data["en_title"],
+                  source=(selected_item or {}).get("source", ""),
+                  paths=[str(kr_path), str(en_path)])
+    print("블로그 글 생성 완료" + (" (DRY_RUN: 파일·기록은 저장되지 않았습니다):" if DRY_RUN else ":"))
+    print(f"- KR: {kr_path}\n- EN: {en_path}\n- 편집 축: {EDITORIAL_LANES[editorial_lane]['label']}\n- 주제: {_one_line(selected or '(자동 선정)', 200)}")
     print(f"- 이미지: {kr_image}\n         {en_image}")
     return kr_path, en_path
 
@@ -1197,7 +1453,83 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
 # ============================================================
 # 진입점
 # ============================================================
+OUTCOME_TEXT = {
+    "PUBLISHED": "글을 만들었습니다",
+    "ALL_LANES_EMPTY": "모든 분야를 시도했지만 검증을 통과한 기사가 한 건도 없습니다",
+    "SOURCES_UNREACHABLE": "뉴스 소스에 접속하지 못했습니다(시도한 소스가 모두 수집 실패)",
+    "ALL_DUPLICATES": "검증된 기사는 있었지만 모두 이미 쓴 글과 비슷해 새 글감이 없습니다(뉴스가 뜸한 때)",
+    "NO_CANDIDATES": "시간 상한으로 일부 분야만 시도했고 후보를 찾지 못했습니다",
+    "ALL_REJECTED": "후보는 있었지만 전부 탈락했습니다(Gemini 건너뜀, 제목이 기존 글과 비슷, 또는 본문 검증 탈락)",
+    "NO_MATCH": "요청 주제와 연결되는 검증된 기사가 없습니다",
+}
+
+
+def render_run_summary(event, now, slot, report):
+    """실행 요약(마크다운). 건수와 코드만 쓴다 — 비밀·수익·방문 수치 금지(G-O7)."""
+    outcome = report.get("outcome", "UNKNOWN")
+    mode = "스케줄" if event == "schedule" else "수동"
+    if DRY_RUN:
+        mode += " (DRY_RUN: 파일·기록 저장 안 함)"
+    lines = ["### Chance_Blog 실행 요약",
+             f"- 실행: {mode} · {now:%Y-%m-%d %H:%M} KST" + (f" · {slot}시 슬롯" if slot is not None else ""),
+             f"- 결과: **{outcome}** — {OUTCOME_TEXT.get(outcome, '알 수 없음')}"]
+    if outcome == "PUBLISHED":
+        lines.append(f"- 제목: {_md_cell(report.get('title', ''))}")
+        lines.append(f"- 편집 축: {report.get('lane_label', '')} · 출처: {_md_cell(report.get('source', ''), 60)}")
+        lines.append("- 파일: " + ", ".join(f"`{str(p).replace(chr(96), '')}`" for p in report.get("paths", [])))
+    calls = report.get("gemini_calls") or {}
+    if calls.get("attempts"):
+        lines.append(f"- Gemini 호출: {calls['attempts']}회(실패 {calls.get('failed', 0)}회)")
+    rejects = report.get("gate_rejects", [])
+    if rejects:
+        lines.append(f"- 후보 탈락 {len(rejects)}건(본문 검증·응답 형식): " + " / ".join(_md_cell(r, 100) for r in rejects[:3]))
+    lanes = report.get("lanes", [])
+    if lanes:
+        lines += ["", "| 분야 | 소스 | 받은 기사 | 검증 통과 | 후보 | 탈락 사유(개수) |",
+                  "|---|---|---|---|---|---|"]
+        for lane in lanes:
+            drops = _format_drops(lane["drops"]) or "-"
+            failed = f" (수집 실패 {lane['failed_sources']})" if lane["failed_sources"] else ""
+            lines.append(f"| {lane['label']} | {lane['sources']}{failed} | {lane['fetched']} | "
+                         f"{lane['passed']} | {lane['candidates']} | {drops} |")
+        if len(lanes) > 1:
+            lines.append(f"\n분야 {len(lanes)}개를 차례로 시도했습니다(처음 추첨된 분야에 후보가 없으면 다음 분야).")
+        codes = sorted({code for lane in lanes for code in lane["drops"]})
+        if codes:
+            lines.append("\n탈락 사유 코드: " + " · ".join(f"{c}={DROP_LABELS.get(c, c)}" for c in codes))
+    return "\n".join(lines)
+
+
+def finish_run(result, report, event, now, slot=None):
+    """실행 결과를 로그·요약으로 남기고 종료 정책을 적용한다(docs/ARCHITECTURE.md '스킵 코드').
+    - 글을 만들었음: 정상
+    - 후보는 있었으나 전부 탈락, 검증된 기사는 있었지만 모두 중복(뉴스가 뜸함), 시간 상한으로 일부만 시도: 초록 + ::warning::
+    - 소스에 접속하지 못함, 또는 모든 분야에 검증된 기사가 한 건도 없음: 빨강(종료 1) — 발행하려던 실행이 0건으로 끝난 이상 신호"""
+    if result is not None:
+        report.setdefault("outcome", "PUBLISHED")
+    outcome = report.get("outcome", "UNKNOWN")
+    report.setdefault("gemini_calls", dict(GEMINI_CALLS))
+    write_step_summary(render_run_summary(event, now, slot, report))
+    if result is not None:
+        return
+    where = f"{slot}시 슬롯" if slot is not None else "수동 실행"
+    if outcome in ("ALL_LANES_EMPTY", "SOURCES_UNREACHABLE"):
+        print(skip_line(outcome, lanes_tried=len(report.get("lanes", []))))
+        print(f"::error::{where}: {OUTCOME_TEXT[outcome]}. 실행 요약의 탈락 사유와 수집 실패 개수를 확인하세요.")
+        raise SystemExit(1)
+    print(skip_line(outcome, lanes_tried=len(report.get("lanes", []))))
+    print(f"::warning::{where}: {OUTCOME_TEXT.get(outcome, '글을 만들지 못했습니다')}. "
+          "다음 실행에서 다시 시도합니다.")
+
+
 def main():
+    if _pause_on():
+        print(skip_line("PAUSED", var="PIPELINE_PAUSE"))
+        print("[일시정지] PIPELINE_PAUSE 가 켜져 있어 실행하지 않습니다.")
+        print("::notice::PIPELINE_PAUSE 가 켜져 있어 Chance_Blog 실행을 건너뛰었습니다.")
+        write_step_summary("### Chance_Blog 실행 요약\n- 결과: **일시정지** — "
+                           "저장소 변수 PIPELINE_PAUSE 가 켜져 있습니다.")
+        return
     if STUB_GEMINI and not DRY_RUN:
         raise RuntimeError(
             "GEMINI_API_KEY 환경 변수가 없습니다. "
@@ -1206,26 +1538,35 @@ def main():
         print(f"[DRY_RUN] 시작 (Gemini={'스텁' if STUB_GEMINI else '실제'}, "
               f"Unsplash={'스텁' if STUB_UNSPLASH else '실제'}) - 파일은 변경되지 않습니다.")
     if FIX_IMAGES:
-        fix_images()
+        write_step_summary(f"### Chance_Blog 실행 요약\n- {fix_images()}")
     elif EVENT_NAME == "schedule":
         now = now_kst()
-        slot = current_due_slot(read_history(), now)
-        if slot is None:
+        slot, state = slot_state(read_history(), now)
+        if state != "DUE":
+            reason = ("첫 게시 시각 전" if state == "OUT_OF_WINDOW"
+                      else f"{slot}시 슬롯 글이 이미 있음")
+            print(skip_line(state, now=now.isoformat(timespec="minutes"),
+                            slots=",".join(str(h) for h in SLOT_HOURS)))
             print(f"[스케줄] {now:%Y-%m-%d %H:%M} KST - 지금 만들 글이 없습니다 "
-                  f"(게시 시각 KST {SLOT_HOURS}시, 해당 시각 글은 이미 있거나 아직 전).")
+                  f"({reason}; 게시 시각 KST {SLOT_HOURS}시).")
+            write_step_summary(f"### Chance_Blog 실행 요약\n- 실행: 스케줄 · {now:%Y-%m-%d %H:%M} KST\n"
+                               f"- 결과: **{state}** — {reason}(정상 건너뜀)")
             return
         print(f"[스케줄] {now:%Y-%m-%d %H:%M} KST - {slot}시 슬롯 글을 생성합니다.")
-        result = generate_blog_posts(slot=slot, allow_auto_topic=False)
-        if result is None:
-            print(f"[스케줄] {slot}시 슬롯: 쓸 내용이 없어 건너뜁니다. "
-                  "다음 시간 실행에서 다시 시도합니다.")
+        report = {}
+        result = generate_blog_posts(slot=slot, allow_auto_topic=False, report=report)
+        finish_run(result, report, "schedule", now, slot)
     else:
-        generate_blog_posts()
+        report = {}
+        result = generate_blog_posts(report=report)
+        finish_run(result, report, EVENT_NAME or "manual", now_kst())
 
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as exc:
-        print(f"작업 실패: {type(exc).__name__}: {exc}")
+        print(f"작업 실패: {type(exc).__name__}: {_one_line(exc, 600)}")
+        write_step_summary("### Chance_Blog 실행 요약\n"
+                           f"- 결과: **실패** — {type(exc).__name__} (원인은 이 단계의 로그를 보세요)")
         raise
