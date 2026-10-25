@@ -25,7 +25,7 @@ push(*.md, spec 등) ─► sync-issue-form.yml ─► pages.json · 양식 드�
 | `.github/editorial/edit-spec.yml` | 수정 항목별 `required`·`allowed_paths`·`method`·금지 사항, 한도, 출력 방식 |
 | `.github/ISSUE_TEMPLATE/page-edit.yml` | 고정 페이지 수정 양식. `# PAGES:START~END`·`# EDITS:START~END` 사이는 **자동 생성(수동 편집 금지)** |
 | `.github/ISSUE_TEMPLATE/blog_control.yml` | 게시글 이미지 변경 양식(`edit:image` 라벨 추가) |
-| `pages.json` | 고정 페이지 레지스트리(자동 생성, 결정적 출력). `python scripts/build_pages_registry.py [--check]` |
+| `pages.json` | 고정 페이지 레지스트리(자동 생성, 결정적 출력). `python scripts/build_pages_registry.py [--check]` (`--check` 는 제목 차이를 보지 않는다 — 아래 "제목을 바꾸는 수정") |
 | `scripts/sync_issue_form.py` | 양식 드롭다운 동기화 `[--check]` |
 | `pipeline/edits/` | `spec`(명세·경로 규칙) · `pages` · `forms`(양식·본문 파서) · `targets`(게시글 매칭) · `ops`(수정 방식) · `checks`(사후 검증) · `safety`(로그·코멘트 정제, 외부 전송 전 점검) · `runner`(처리) · `scope_check`(PR 검증) |
 | `.github/workflows/` | `issue-edit.yml` · `sync-issue-form.yml` · `pr-scope-check.yml` |
@@ -106,6 +106,11 @@ push(*.md, spec 등) ─► sync-issue-form.yml ─► pages.json · 양식 드�
 
 ### 새 페이지를 수정 대상에 넣기
 페이지 파일(루트 `.md`/`.html`)의 front matter에 `editable: true`를 넣고 push하면 `sync-issue-form.yml`이 `pages.json`과 양식 드롭다운을 갱신한다(수동 실행 가능). 이름이 영문·숫자·`_-`가 아니면 `edit_id: faq`를 front matter에 지정한다. 기존 페이지는 명세 `targets.page.discover.include`에 적는다(파일을 고치지 않는다).
+
+### 제목을 바꾸는 수정은 pages.json 을 같이 고치지 않는다
+`pages.json` 과 양식 드롭다운의 페이지 제목은 각 페이지 front matter 의 `title` 에서 온다. 그래서 제목을 바꾸는 수정(이슈 수정의 SEO 메타 등)의 PR 은 요청한 파일 한 개(`categories.md` 등)만 바꾸고, `pages.json`·`page-edit.yml` 은 **병합 뒤** Sync Issue Form 이 새 제목으로 갱신한다(그 사이에는 드롭다운에 옛 제목이 보인다).
+- PR 단계의 검사(Guardrails 의 `pages.check_registry` 단위 테스트와 검증기 SYNC-1)는 이 때문에 **제목 차이를 보지 않고** 구조 — 페이지가 추가·삭제·이동됐는지, id·url 이 바뀌었는지, 파일이 손상됐는지 — 만 글자 단위로 비교한다. 구조가 어긋나면 계속 경고·실패한다(D-40).
+- 제목까지 완전히 같은지는 병합 뒤 Sync Issue Form 이 만든 상태에서만 성립한다(`pages.check_registry(…, strict_titles=True)`). 제목 변경 PR 의 Guardrails 가 빨강이면 이 규칙이 깨진 것이다.
 
 ### 수정 항목 추가하기 (T2)
 1. `edit-spec.yml`의 `edit_types`에 항목 추가(`method`는 `text`·`link`·`front_matter`·`llm_patch`·`image` 중 선택, `allowed_paths`에 `{page.path}`/`{post.path}` 필수).
