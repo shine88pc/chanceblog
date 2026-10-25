@@ -13,6 +13,7 @@ import json
 import zlib
 import html
 import random
+import time
 import difflib
 import datetime
 from email.utils import parsedate_to_datetime
@@ -514,6 +515,63 @@ def is_tech_title(title):
 NEWS_MAX_AGE_HOURS = 36
 EPOCH = datetime.datetime.min.replace(tzinfo=timezone.utc)
 
+
+def _int_env(name, default):
+    try:
+        return int(os.environ.get(name, "").strip() or default)
+    except ValueError:
+        return default
+
+
+# 뽑힌 분야에 후보가 없을 때 다음 분야를 시도하는 총 시간 상한(초). 잡 제한(20분) 안에서 끝나게 한다.
+LANE_SEARCH_BUDGET_SECONDS = _int_env("LANE_SEARCH_BUDGET_SECONDS", 480)
+
+# 기사 탈락 사유 코드. 소스별 줄·[SKIP] 줄·실행 요약에 같은 코드로 남는다(docs/ARCHITECTURE.md).
+DROP_LABELS = {
+    "NO_TITLE": "제목 없음",
+    "NOT_TECH": "기술 키워드 아님",
+    "AGE": f"{NEWS_MAX_AGE_HOURS}시간 초과",
+    "UNTRUSTED": "신뢰 목록에 없는 게시자",
+    "UNCHECKED": "소스당 5건 검사 한도 초과",
+    "UNRESOLVED": "게시자 원문 주소 해석 실패",
+    "HOST_MISMATCH": "게시자와 원문 주소 불일치",
+    "SHORT_SUMMARY": "요약 100자 미만",
+    "DUPLICATE": "기존 글과 제목 유사",
+}
+
+
+def _count(counter, code, n=1):
+    counter[code] = counter.get(code, 0) + n
+
+
+def _format_drops(drops):
+    """사유별 개수를 많은 순으로 'UNTRUSTED 60, AGE 11' 형태로."""
+    return ", ".join(f"{code} {n}" for code, n in
+                     sorted(drops.items(), key=lambda kv: (-kv[1], kv[0])))
+
+
+def skip_line(code, **fields):
+    """건너뜀을 로그에서 한 줄로 찾게 하는 규격: [SKIP] code=CODE key=value ..."""
+    parts = [f"[SKIP] code={code}"]
+    for key, value in fields.items():
+        if isinstance(value, dict):
+            value = ",".join(f"{k}:{v}" for k, v in sorted(value.items())) or "-"
+        parts.append(f"{key}={value}")
+    return " ".join(parts)
+
+
+def write_step_summary(markdown):
+    """Actions 실행 화면의 요약 칸(GITHUB_STEP_SUMMARY)에 덧붙인다. 로컬 실행에서는 아무 일도 하지 않는다.
+    요약은 보고용이라 쓰기에 실패해도 발행 결과를 바꾸지 않는다(대신 한 줄을 남긴다)."""
+    target = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not target:
+        return
+    try:
+        with open(target, "a", encoding="utf-8") as fh:
+            fh.write(markdown.rstrip() + "\n\n")
+    except OSError as exc:
+        print(f"실행 요약 쓰기 실패(발행에는 영향 없음): {exc}")
+
 # 기술을 포함하되 한 분야에 고정되지 않도록, 여러 편집 축의 후보를 둡니다.
 EDITORIAL_LANES = {
     "science": {
@@ -594,7 +652,7 @@ NEWS_SOURCES = [
     # 국내 직접 RSS
     {"name": "AI타임스", "lane": "technology", "url": "https://www.aitimes.com/rss/allArticle.xml"},
     {"name": "전자신문", "lane": "technology", "url": "https://rss.etnews.com/Section901.xml"},
-    {"name": "블로터", "lane": "technology", "url": "https://www.bloter.net/feed"},
+    # 블로터(https://www.bloter.net/feed)는 HTTP 404라 2026-10-25에 뺐다(실행 로그 '수집 실패', 로컬에서도 404/403).
 ]
 
 # 게시 후보에 사용할 수 있는 출처 도메인. 도메인 이름은 끝 경계까지 비교합니다.
@@ -724,8 +782,9 @@ def parse_feed(data):
     return items
 
 
-def fetch_news_items(editorial_lane=None):
-    """여러 소스에서 최근 기사 후보를 모아, 소스를 번갈아 섞은 목록으로 반환."""
+def fetch_news_items(editorial_lane=None, stats=None):
+    """여러 소스에서 최근 기사 후보를 모아, 소스를 번갈아 섞은 목록으로 반환.
+    stats(dict)를 넘기면 소스별 수집·탈락 사유 개수를 stats["sources"]에 채운다(동작은 같다)."""
     now = datetime.datetime.now(timezone.utc)
     max_age = timedelta(hours=NEWS_MAX_AGE_HOURS)
     per_source, ok_count = [], 0
@@ -739,8 +798,13 @@ def fetch_news_items(editorial_lane=None):
             ok_count += 1
         except Exception as exc:
             print(f"  소스 {src['name']}: 수집 실패 ({type(exc).__name__}: {exc})")
+            if stats is not None:
+                stats.setdefault("sources", []).append(
+                    {"name": src["name"], "fetched": 0, "kept": 0, "drops": {},
+                     "error": type(exc).__name__})
             continue
         kept = []
+        drops = {}
         resolved_count = 0
         for it in parsed:
             title = it["title"]
@@ -752,38 +816,56 @@ def fetch_news_items(editorial_lane=None):
                     if match:
                         title, publisher = match.group(1).strip(), match.group(2).strip()
             if not title:
+                _count(drops, "NO_TITLE")
                 continue
             if src.get("tech_filter") and not is_tech_title(title):
+                _count(drops, "NOT_TECH")
                 continue
             pub = it["published"]
             if pub and now - pub > max_age:
+                _count(drops, "AGE")
                 continue
             publisher_host = _host(publisher_url)
             if publisher_host and not _trusted_domain(publisher_host, editorial_lane):
+                _count(drops, "UNTRUSTED")
                 continue
             if resolved_count >= 5:
+                _count(drops, "UNCHECKED")
                 continue
             article_url = _resolve_article_url(it["link"]) if src.get("google") else it["link"]
             resolved_count += 1
             publisher_host = publisher_host or _host(article_url)
-            if not article_url or not _trusted_domain(publisher_host, editorial_lane):
+            if not article_url:
+                _count(drops, "UNRESOLVED")
+                continue
+            if not _trusted_domain(publisher_host, editorial_lane):
+                _count(drops, "UNTRUSTED")
                 continue
             article_host = _host(article_url)
             same_publisher = (article_host == publisher_host
                               or article_host.endswith("." + publisher_host)
                               or publisher_host.endswith("." + article_host))
             if not same_publisher or not _trusted_domain(article_host, editorial_lane):
+                _count(drops, "HOST_MISMATCH")
                 continue
             summary = it["summary"]
             if len(summary) < 100:
                 summary = _fetch_source_excerpt(article_url)
             if len(summary) < 100:
+                _count(drops, "SHORT_SUMMARY")
                 continue
             kept.append({"title": title, "source": publisher or src["name"],
                          "link": article_url, "publisher_domain": publisher_host,
                          "summary": summary, "published": pub})
         kept.sort(key=lambda x: x["published"] or EPOCH, reverse=True)
-        print(f"  소스 {src['name']}: {len(parsed)}건 중 {len(kept)}건 사용")
+        line = f"  소스 {src['name']}: {len(parsed)}건 중 {len(kept)}건 사용"
+        if drops:
+            line += f" (탈락: {_format_drops(drops)})"
+        print(line)
+        if stats is not None:
+            stats.setdefault("sources", []).append(
+                {"name": src["name"], "fetched": len(parsed), "kept": len(kept),
+                 "drops": drops})
         per_source.append(kept[:10])
 
     if ok_count == 0:
@@ -800,21 +882,28 @@ def fetch_news_items(editorial_lane=None):
     return merged
 
 
-def pick_topic_candidates(titles, allow_auto_topic=True, editorial_lane=None):
-    """신뢰 출처 검증과 중복 검사를 통과한 기사 후보만 반환합니다."""
+def pick_topic_candidates(titles, allow_auto_topic=True, editorial_lane=None, stats=None):
+    """신뢰 출처 검증과 중복 검사를 통과한 기사 후보만 반환합니다.
+    stats(dict)를 넘기면 소스별 개수와 함께 중복으로 탈락한 수·최종 후보 수를 채웁니다."""
     picked = []
-    for it in fetch_news_items(editorial_lane):
+    duplicates = 0
+    for it in fetch_news_items(editorial_lane, stats=stats):
         if is_similar_to_any(it["title"], titles, 0.6):
+            duplicates += 1
             continue
         picked.append(it)
         if len(picked) >= MAX_ATTEMPTS:
             break
+    if stats is not None:
+        stats["duplicates"] = duplicates
+        stats["candidates"] = len(picked)
     # 출처 검증을 통과한 기사가 없으면 AI가 근거 없이 주제를 고르지 않습니다.
     return picked
 
 
-def choose_editorial_lane(slot, history):
-    """최근 발행 편중을 줄이면서 슬롯별로 재현 가능한 확률 선택을 합니다."""
+def editorial_lane_order(slot, history):
+    """최근 발행 편중을 줄이면서 슬롯별로 재현 가능한 확률 추첨 순서로 모든 분야를 반환합니다.
+    첫 번째가 choose_editorial_lane 의 선택과 같고, 뒤쪽은 그 분야에 후보가 없을 때 시도할 대체 순서입니다."""
     lanes = list(EDITORIAL_LANES)
     recent = [item.get("lane") for item in history[-12:]
               if isinstance(item, dict) and item.get("lane") in EDITORIAL_LANES]
@@ -832,7 +921,18 @@ def choose_editorial_lane(slot, history):
     latest = history[-1] if history else None
     latest_key = (latest.get("date", ""), latest.get("topic", "")) if isinstance(latest, dict) else str(latest or "")
     seed = f"{now:%Y-%m-%d}|{slot}|{len(history)}|{latest_key}"
-    return random.Random(seed).choices(lanes, weights=[weights[lane] for lane in lanes], k=1)[0]
+    rng = random.Random(seed)
+    remaining, order = list(lanes), []
+    while remaining:
+        picked = rng.choices(remaining, weights=[weights[lane] for lane in remaining], k=1)[0]
+        order.append(picked)
+        remaining.remove(picked)
+    return order
+
+
+def choose_editorial_lane(slot, history):
+    """추첨 순서의 첫 분야."""
+    return editorial_lane_order(slot, history)[0]
 
 
 # ============================================================
@@ -1074,26 +1174,88 @@ def now_kst():
     return datetime.datetime.now(KST)
 
 
-def current_due_slot(history, now):
-    """지금 시각 기준으로 '이미 시작됐지만 아직 글이 없는' 가장 최근 슬롯 시각을 반환.
-    스케줄 실행이 지연/누락돼도 다음 시간별 실행이 같은 슬롯을 보충한다.
-    (오래된 슬롯을 한꺼번에 몰아서 만들지는 않는다)"""
+def slot_state(history, now):
+    """(슬롯, 코드)를 반환. 코드: DUE(만들 슬롯 있음) / OUT_OF_WINDOW(첫 게시 시각 전) /
+    ALREADY_PUBLISHED(그 슬롯 글이 이미 있음). 두 가지 '할 일 없음'을 구분해 기록하기 위한 것이다."""
     started = [h for h in SLOT_HOURS if now.hour >= h]
     if not started:
-        return None
+        return None, "OUT_OF_WINDOW"
     slot = max(started)
     today = now.strftime("%Y-%m-%d")
     for item in history:
         if isinstance(item, dict) and item.get("date") == today and item.get("slot") == slot:
-            return None
-    return slot
+            return slot, "ALREADY_PUBLISHED"
+    return slot, "DUE"
+
+
+def current_due_slot(history, now):
+    """지금 시각 기준으로 '이미 시작됐지만 아직 글이 없는' 가장 최근 슬롯 시각을 반환.
+    스케줄 실행이 지연/누락돼도 다음 시간별 실행이 같은 슬롯을 보충한다.
+    (오래된 슬롯을 한꺼번에 몰아서 만들지는 않는다)"""
+    slot, state = slot_state(history, now)
+    return slot if state == "DUE" else None
+
+
+def _lane_report(lane, stats, found):
+    """한 분야의 수집 결과를 요약 한 건으로 줄인다(받은 기사 → 통과 → 후보, 탈락 사유별 개수)."""
+    sources = stats.get("sources", [])
+    drops = {}
+    for src in sources:
+        for code, n in src.get("drops", {}).items():
+            _count(drops, code, n)
+    if stats.get("duplicates"):
+        _count(drops, "DUPLICATE", stats["duplicates"])
+    return {
+        "lane": lane, "label": EDITORIAL_LANES[lane]["label"],
+        "sources": len(sources),
+        "failed_sources": sum(1 for s in sources if s.get("error")),
+        "fetched": sum(s.get("fetched", 0) for s in sources),
+        "passed": sum(s.get("kept", 0) for s in sources),
+        "candidates": len(found),
+        "drops": drops,
+    }
+
+
+def collect_candidates(titles, allow_auto_topic, lane_order, report, fallback=True,
+                       clock=time.monotonic):
+    """분야를 추첨 순서대로 시도해 처음으로 후보가 나온 분야와 그 후보를 반환한다.
+    모든 분야가 비면 ([], 첫 분야). 이 단계는 Gemini 를 부르지 않아 비용은 수집 시간뿐이며,
+    LANE_SEARCH_BUDGET_SECONDS 를 넘으면 더 시도하지 않는다."""
+    started = clock()
+    tried = lane_order if fallback else lane_order[:1]
+    for index, lane in enumerate(tried):
+        if index and clock() - started > LANE_SEARCH_BUDGET_SECONDS:
+            report["budget_exceeded"] = True
+            print(f"::warning::분야 대체 시도를 시간 상한({LANE_SEARCH_BUDGET_SECONDS}초)에서 멈춥니다. "
+                  f"{len(tried) - index}개 분야는 시도하지 못했습니다.")
+            break
+        if index:
+            print(f"편집 축 대체 시도: {EDITORIAL_LANES[lane]['label']}")
+        stats = {}
+        found = pick_topic_candidates(titles, allow_auto_topic, lane, stats=stats)
+        lane_report = _lane_report(lane, stats, found)
+        report["lanes"].append(lane_report)
+        if found:
+            if index:
+                print(f"::notice::'{EDITORIAL_LANES[lane_order[0]]['label']}' 분야에 후보가 없어 "
+                      f"'{lane_report['label']}' 분야로 대체했습니다.")
+            return found, lane
+        print(skip_line("NO_CANDIDATES", lane=lane, sources=lane_report["sources"],
+                        fetched=lane_report["fetched"], passed=lane_report["passed"],
+                        reasons=lane_report["drops"]))
+    return [], lane_order[0]
 
 
 def generate_blog_posts(topic_override=None, category_hint="", slot=None,
-                        allow_auto_topic=True):
+                        allow_auto_topic=True, report=None):
+    """KR/EN 글 한 쌍을 만든다. 만들면 (kr_path, en_path), 만들 수 없으면 None.
+    report(dict)를 넘기면 분야별 수집 결과와 최종 결과 코드(outcome)를 채워 준다."""
+    report = report if report is not None else {}
+    report.setdefault("lanes", [])
     posts = load_posts()
     history = read_history()
-    editorial_lane = choose_editorial_lane(slot, history)
+    lane_order = editorial_lane_order(slot, history)
+    editorial_lane = lane_order[0]
     print(f"편집 축: {EDITORIAL_LANES[editorial_lane]['label']}")
     titles = existing_titles(history, posts)
     used = used_keys_from_posts(posts)
@@ -1111,12 +1273,19 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
                         if is_similar_to_any(topic_override, [it["title"]], 0.35)), None)
         if not matched:
             print("요청 주제와 직접 연결되고 출처 검증을 통과한 기사가 없습니다. 발행을 중단합니다.")
+            report["outcome"] = "NO_MATCH"
             return None
         candidates = [dict(matched, title=topic_override)]
     else:
-        candidates = pick_topic_candidates(titles, allow_auto_topic, editorial_lane)
+        candidates, editorial_lane = collect_candidates(
+            titles, allow_auto_topic, lane_order, report)
+    report["lane"] = editorial_lane
+    report["lane_label"] = EDITORIAL_LANES[editorial_lane]["label"]
     if not candidates:
         print("쓸 만한 새 기사가 없습니다. 글을 만들지 않습니다.")
+        # 모든 분야를 시도했는데도 없으면 이상 신호(ALL_LANES_EMPTY), 시간 상한으로 일부만 시도했으면 경고 수준.
+        report["outcome"] = ("NO_CANDIDATES" if report.get("budget_exceeded")
+                             else "ALL_LANES_EMPTY")
         return None
     for item in candidates:
         topic = item["title"] if item else None
@@ -1140,6 +1309,7 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
         data, selected, selected_item = candidate, topic, item
         break
     if data is None:
+        report["outcome"] = "ALL_REJECTED"
         if not topic_override and not allow_auto_topic:
             print("겹치지 않는 주제를 찾지 못했습니다. 글을 만들지 않습니다.")
             return None
@@ -1188,7 +1358,10 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
     write_history(history)
     trigger_download(kr_image)
     trigger_download(en_image)
-    print("블로그 글 생성 완료:")
+    report.update(outcome="PUBLISHED", title=data["kr_title"], en_title=data["en_title"],
+                  source=(selected_item or {}).get("source", ""),
+                  paths=[str(kr_path), str(en_path)])
+    print("블로그 글 생성 완료" + (" (DRY_RUN: 파일·기록은 저장되지 않았습니다):" if DRY_RUN else ":"))
     print(f"- KR: {kr_path}\n- EN: {en_path}\n- 편집 축: {EDITORIAL_LANES[editorial_lane]['label']}\n- 주제: {selected or '(자동 선정)'}")
     print(f"- 이미지: {kr_image}\n         {en_image}")
     return kr_path, en_path
@@ -1197,7 +1370,71 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
 # ============================================================
 # 진입점
 # ============================================================
+OUTCOME_TEXT = {
+    "PUBLISHED": "글을 만들었습니다",
+    "ALL_LANES_EMPTY": "모든 분야를 시도했지만 발행할 수 있는 기사가 없습니다",
+    "NO_CANDIDATES": "시간 상한으로 일부 분야만 시도했고 후보를 찾지 못했습니다",
+    "ALL_REJECTED": "후보는 있었지만 전부 탈락했습니다(Gemini 건너뜀 또는 제목이 기존 글과 비슷)",
+    "NO_MATCH": "요청 주제와 연결되는 검증된 기사가 없습니다",
+}
+
+
+def render_run_summary(event, now, slot, report):
+    """실행 요약(마크다운). 건수와 코드만 쓴다 — 비밀·수익·방문 수치 금지(G-O7)."""
+    outcome = report.get("outcome", "UNKNOWN")
+    mode = "스케줄" if event == "schedule" else "수동"
+    if DRY_RUN:
+        mode += " (DRY_RUN: 파일·기록 저장 안 함)"
+    lines = ["### Chance_Blog 실행 요약",
+             f"- 실행: {mode} · {now:%Y-%m-%d %H:%M} KST" + (f" · {slot}시 슬롯" if slot else ""),
+             f"- 결과: **{outcome}** — {OUTCOME_TEXT.get(outcome, '알 수 없음')}"]
+    if outcome == "PUBLISHED":
+        lines.append(f"- 제목: {report.get('title', '')}")
+        lines.append(f"- 편집 축: {report.get('lane_label', '')} · 출처: {report.get('source', '')}")
+        lines.append("- 파일: " + ", ".join(f"`{p}`" for p in report.get("paths", [])))
+    lanes = report.get("lanes", [])
+    if lanes:
+        lines += ["", "| 분야 | 소스 | 받은 기사 | 검증 통과 | 후보 | 탈락 사유(개수) |",
+                  "|---|---|---|---|---|---|"]
+        for lane in lanes:
+            drops = _format_drops(lane["drops"]) or "-"
+            failed = f" (수집 실패 {lane['failed_sources']})" if lane["failed_sources"] else ""
+            lines.append(f"| {lane['label']} | {lane['sources']}{failed} | {lane['fetched']} | "
+                         f"{lane['passed']} | {lane['candidates']} | {drops} |")
+        if len(lanes) > 1:
+            lines.append(f"\n분야 {len(lanes)}개를 차례로 시도했습니다(처음 추첨된 분야에 후보가 없으면 다음 분야).")
+    return "\n".join(lines)
+
+
+def finish_run(result, report, event, now, slot=None):
+    """실행 결과를 로그·요약으로 남기고 종료 정책을 적용한다(docs/ARCHITECTURE.md '스킵 코드').
+    - 글을 만들었음: 정상
+    - 후보는 있었으나 전부 탈락, 또는 시간 상한으로 일부 분야만 시도: 초록 + ::warning::
+    - 모든 분야에 후보가 없음: 빨강(종료 1) — 발행하려던 실행이 0건으로 끝난 이상 신호"""
+    if result is not None:
+        report.setdefault("outcome", "PUBLISHED")
+    outcome = report.get("outcome", "UNKNOWN")
+    write_step_summary(render_run_summary(event, now, slot, report))
+    if result is not None:
+        return
+    where = f"{slot}시 슬롯" if slot else "수동 실행"
+    if outcome == "ALL_LANES_EMPTY":
+        print(skip_line("ALL_LANES_EMPTY", lanes_tried=len(report.get("lanes", []))))
+        print(f"::error::{where}: 모든 분야를 시도했지만 발행할 수 있는 기사가 없습니다. "
+              "실행 요약의 탈락 사유별 개수를 확인하세요.")
+        raise SystemExit(1)
+    print(skip_line(outcome, lanes_tried=len(report.get("lanes", []))))
+    print(f"::warning::{where}: {OUTCOME_TEXT.get(outcome, '글을 만들지 못했습니다')}. "
+          "다음 실행에서 다시 시도합니다.")
+
+
 def main():
+    if _flag("PIPELINE_PAUSE"):
+        print(skip_line("PAUSED", var="PIPELINE_PAUSE"))
+        print("[일시정지] PIPELINE_PAUSE 가 켜져 있어 실행하지 않습니다.")
+        write_step_summary("### Chance_Blog 실행 요약\n- 결과: **일시정지** — "
+                           "저장소 변수 PIPELINE_PAUSE 가 켜져 있습니다.")
+        return
     if STUB_GEMINI and not DRY_RUN:
         raise RuntimeError(
             "GEMINI_API_KEY 환경 변수가 없습니다. "
@@ -1206,21 +1443,28 @@ def main():
         print(f"[DRY_RUN] 시작 (Gemini={'스텁' if STUB_GEMINI else '실제'}, "
               f"Unsplash={'스텁' if STUB_UNSPLASH else '실제'}) - 파일은 변경되지 않습니다.")
     if FIX_IMAGES:
-        fix_images()
+        write_step_summary(f"### Chance_Blog 실행 요약\n- {fix_images()}")
     elif EVENT_NAME == "schedule":
         now = now_kst()
-        slot = current_due_slot(read_history(), now)
-        if slot is None:
+        slot, state = slot_state(read_history(), now)
+        if state != "DUE":
+            reason = ("첫 게시 시각 전" if state == "OUT_OF_WINDOW"
+                      else f"{slot}시 슬롯 글이 이미 있음")
+            print(skip_line(state, now=now.isoformat(timespec="minutes"),
+                            slots=",".join(str(h) for h in SLOT_HOURS)))
             print(f"[스케줄] {now:%Y-%m-%d %H:%M} KST - 지금 만들 글이 없습니다 "
-                  f"(게시 시각 KST {SLOT_HOURS}시, 해당 시각 글은 이미 있거나 아직 전).")
+                  f"({reason}; 게시 시각 KST {SLOT_HOURS}시).")
+            write_step_summary(f"### Chance_Blog 실행 요약\n- 실행: 스케줄 · {now:%Y-%m-%d %H:%M} KST\n"
+                               f"- 결과: **{state}** — {reason}(정상 건너뜀)")
             return
         print(f"[스케줄] {now:%Y-%m-%d %H:%M} KST - {slot}시 슬롯 글을 생성합니다.")
-        result = generate_blog_posts(slot=slot, allow_auto_topic=False)
-        if result is None:
-            print(f"[스케줄] {slot}시 슬롯: 쓸 내용이 없어 건너뜁니다. "
-                  "다음 시간 실행에서 다시 시도합니다.")
+        report = {}
+        result = generate_blog_posts(slot=slot, allow_auto_topic=False, report=report)
+        finish_run(result, report, "schedule", now, slot)
     else:
-        generate_blog_posts()
+        report = {}
+        result = generate_blog_posts(report=report)
+        finish_run(result, report, EVENT_NAME or "manual", now_kst())
 
 
 if __name__ == "__main__":
@@ -1228,4 +1472,6 @@ if __name__ == "__main__":
         main()
     except Exception as exc:
         print(f"작업 실패: {type(exc).__name__}: {exc}")
+        write_step_summary("### Chance_Blog 실행 요약\n"
+                           f"- 결과: **실패** — {type(exc).__name__} (원인은 이 단계의 로그를 보세요)")
         raise
