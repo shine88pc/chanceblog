@@ -52,16 +52,19 @@ jobs:
           set -euo pipefail
           args=(--platform blogger)
           if [ -n "${ONLY_BLOG:-}" ]; then args+=(--only "$ONLY_BLOG"); fi
-          # 명령 치환을 echo 안에 넣으면 plan 이 실패해도 단계가 초록으로 지나가므로(E21) 먼저 변수에 받는다
+          # echo "matrix=$(명령)" 처럼 명령 치환을 echo 안에 넣으면 plan 이 실패해도 echo 가 성공해 이 단계가
+          # 초록으로 지나가고 matrix 가 빈 값이 된다. 그래서 먼저 변수에 받아 set -e 가 실패를 잡게 한다.
           matrix=$(python -m pipeline.plan "${args[@]}")
           count=$(python -m pipeline.plan "${args[@]}" --count)
           echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
           echo "count=${count}" >> "$GITHUB_OUTPUT"
+          # 위 plan 은 --only 가 레지스트리에 없거나 blogger 가 아닌 key 면 실패한다(이 단계가 빨강). 그래서 여기 오는
+          # 대상 0개는 대상(수동 실행이면 지정한 블로그, 아니면 platform=blogger 전체)이 모두 mode=off 이거나 없을 때뿐이다.
           if [ "$count" = "0" ]; then
-            echo "::notice::실행할 Blogger 블로그가 없습니다(레지스트리에서 mode=off 로 정지된 상태). generate 잡은 건너뜁니다."
+            echo "::notice::실행할 Blogger 블로그가 없습니다(대상이 모두 mode=off 로 정지됐거나 platform=blogger 블로그가 없음). generate 잡은 건너뜁니다."
             {
               echo "### Blogger Generate"
-              echo "- 결과: **대상 0개** — pipeline/blogs.json 에서 platform=blogger 블로그가 모두 mode=off(정지)입니다. 글은 만들지 않았습니다."
+              echo "- 결과: **대상 0개** — pipeline/blogs.json 에서 대상(수동 실행이면 지정한 블로그, 아니면 platform=blogger 블로그 전체)이 모두 mode=off(정지)이거나 없습니다. 글은 만들지 않았습니다."
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 

@@ -1,5 +1,8 @@
 import io
 import json
+import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -12,6 +15,12 @@ from unittest import mock
 import _bootstrap  # noqa: F401
 from pipeline import plan, registry
 from pipeline.health import Finding
+from test_run import make_root
+
+try:
+    import yaml
+except ImportError:  # pragma: no cover - requirements-dev.txt 가 설치하는 의존성
+    yaml = None
 
 sys.path.insert(0, str(_bootstrap.ROOT / "scripts"))
 import watchdog  # noqa: E402
@@ -70,6 +79,27 @@ class PlanTest(unittest.TestCase):
         self.assertIn("blogger_macat", err.getvalue())   # 유효한 key 안내
         self.assertIn("chance", err.getvalue())
 
+    def test_only_key_of_another_platform_is_an_error_not_an_empty_matrix(self):
+        """레지스트리에는 있지만 이 플랫폼 블로그가 아닌 key(blogger 워크플로에 chance)도 대상 0개(초록)가 아니라 오류다."""
+        for extra in ([], ["--count"]):
+            with self.subTest(extra=extra), mock.patch.object(plan, "load_registry", return_value=registry_all_auto()):
+                err, out = io.StringIO(), io.StringIO()
+                with redirect_stderr(err), redirect_stdout(out):
+                    code = plan.main(["--platform", "blogger", "--only", "chance", *extra])
+                self.assertEqual(code, 1)
+                self.assertEqual(out.getvalue(), "")                 # 빈 매트릭스·"0" 을 출력하지 않는다
+                self.assertIn("chance", err.getvalue())
+                self.assertIn("blogger 가 아니라 jekyll-git 플랫폼 블로그", err.getvalue())
+                self.assertIn("blogger_macat", err.getvalue())       # 이 플랫폼의 유효한 key 안내
+
+    def test_only_without_platform_may_pick_any_registered_blog(self):
+        """플랫폼 검사는 --platform 을 함께 줄 때만 한다(--only 단독은 레지스트리의 어떤 key 든 된다)."""
+        with mock.patch.object(plan, "load_registry", return_value=registry_all_auto()):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                self.assertEqual(plan.main(["--only", "chance", "--count"]), 0)
+            self.assertEqual(buf.getvalue().strip(), "1")
+
     def test_paused_blog_is_zero_targets_without_error(self):
         """mode=off 로 정지한 블로그는 오류가 아니라 대상 0개다(워크플로가 notice 를 남긴다)."""
         reg = registry_all_auto()
@@ -83,6 +113,76 @@ class PlanTest(unittest.TestCase):
             with redirect_stdout(buf):
                 self.assertEqual(plan.main(["--platform", "blogger", "--only", "blogger_macat", "--count"]), 0)
             self.assertEqual(buf.getvalue().strip(), "0")
+
+
+def plan_step_script():
+    """blogger.yml 의 plan 잡에서 id=plan 인 단계의 run 스크립트를 그대로 꺼낸다."""
+    workflow = yaml.safe_load((_bootstrap.ROOT / ".github" / "workflows" / "blogger.yml").read_text(encoding="utf-8"))
+    return next(step["run"] for step in workflow["jobs"]["plan"]["steps"] if step.get("id") == "plan")
+
+
+@unittest.skipUnless(yaml is not None and shutil.which("bash"),
+                     "PyYAML(requirements-dev.txt)과 bash 가 필요합니다(CI 의 Linux 에서는 항상 실행됩니다)")
+class WorkflowPlanStepTest(unittest.TestCase):
+    """blogger.yml 의 plan 단계를 GitHub 처럼 `bash -e <스크립트>` 로 실제 실행한다.
+    레지스트리·plan 코드는 임시 저장소에 복사해 쓴다(운영 중 mode 와 무관하게 시험한다)."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.work = Path(tmp.name)
+        self.script = self.work / "plan_step.sh"
+        self.script.write_bytes(plan_step_script().encode("utf-8"))  # 줄 끝은 LF 여야 한다(CRLF 면 bash 가 오류를 낸다)
+
+    def repo(self, mode):
+        root = self.work / f"repo_{mode}"
+        make_root(root, mode=mode)  # 레지스트리·프로필·프롬프트(blogger_macat 의 mode 만 바꾼다)
+        ignore = shutil.ignore_patterns("__pycache__", "blogs.json", "profiles")
+        shutil.copytree(_bootstrap.ROOT / "pipeline", root / "pipeline", dirs_exist_ok=True, ignore=ignore)
+        return root
+
+    def run_step(self, root, only=""):
+        output, summary = root / "github_output", root / "github_step_summary"
+        output.write_bytes(b"")
+        summary.write_bytes(b"")
+        env = {**os.environ, "PYTHONUTF8": "1", "ONLY_BLOG": only,
+               "GITHUB_OUTPUT": output.as_posix(), "GITHUB_STEP_SUMMARY": summary.as_posix(),
+               "PATH": os.path.dirname(sys.executable) + os.pathsep + os.environ.get("PATH", "")}
+        proc = subprocess.run(["bash", "-e", self.script.as_posix()], cwd=str(root), env=env, capture_output=True,
+                              text=True, encoding="utf-8", timeout=120)
+        return proc, output.read_text(encoding="utf-8"), summary.read_text(encoding="utf-8")
+
+    def test_plan_errors_turn_the_step_red_and_zero_targets_are_announced(self):
+        auto, off = self.repo("auto"), self.repo("off")
+
+        with self.subTest("정상: 대상 1개, 알림 없음"):
+            proc, output, summary = self.run_step(auto)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("count=1", output.splitlines())
+            self.assertIn('"key":"blogger_macat"', output)
+            self.assertNotIn("::notice::", proc.stdout)
+            self.assertEqual(summary, "")
+
+        for label, only in (("blogger 블로그가 모두 정지", ""), ("지정한 블로그가 정지", "blogger_macat")):
+            with self.subTest(label):
+                proc, output, summary = self.run_step(off, only)
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assertIn("count=0", output.splitlines())
+                self.assertIn('matrix={"include":[]}', output.splitlines())
+                self.assertIn("::notice::실행할 Blogger 블로그가 없습니다", proc.stdout)
+                self.assertIn("대상 0개", summary)
+                self.assertIn("지정한 블로그", summary)  # 수동 실행(--only)에서도 맞는 설명이다
+                self.assertIn("mode=off", summary)
+
+        # plan 이 실패하면 단계도 실패해야 한다. 명령 치환을 echo 안에 넣던 예전 스크립트는 matrix= 만 쓰고 초록으로 끝났다.
+        for label, only, hint in (("레지스트리에 없는 key(오타)", "blogger_macta", "레지스트리에 없는 key"),
+                                  ("다른 플랫폼 블로그의 key", "chance", "jekyll-git")):
+            with self.subTest(label):
+                proc, output, summary = self.run_step(auto, only)
+                self.assertNotEqual(proc.returncode, 0)
+                self.assertEqual(output, "")  # matrix=·count= 를 한 줄도 쓰지 않는다
+                self.assertEqual(summary, "")
+                self.assertIn(hint, proc.stderr)
 
 
 class FakeClient:
