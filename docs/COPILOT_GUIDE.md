@@ -1,6 +1,7 @@
 # Copilot(과 다른 AI)을 정확하게 쓰는 방법 — 개발 지식 없이
 
 > 이 문서는 개발자가 아닌 사용자를 위한 안내입니다. 기술 설명은 [`ISSUE_EDITS.md`](./ISSUE_EDITS.md)에 있습니다.
+> Actions 탭에서 무엇을 언제 누르는지(수동 실행·빨간 ✗·자동 발행 멈추기)는 [`ACTIONS_GUIDE.md`](./ACTIONS_GUIDE.md)에 있습니다.
 
 ## 1. 무슨 일이 일어나고 있나
 
