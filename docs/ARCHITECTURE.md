@@ -81,6 +81,36 @@
 
 종료 코드: `0` 정상(건너뜀 포함) / `1` 인프라 실패 / `2` 설정 오류.
 
+## 4-1. 건너뜀·종료 규약 (스킵 코드)
+
+"할 일이 없어서", 또는 "조건이 안 맞아서" 끝나는 실행도 **왜** 끝났는지 남긴다. 초록 체크는 "프로그램이 오류 없이 끝났다"는 뜻일 뿐 "글이 올라갔다"는 뜻이 아니기 때문이다(2026-10-25 진단: 두 블로그 모두 글 없이 초록으로 끝났다).
+
+한 줄 규격: `[SKIP] code=<코드> key=값 ...` — Actions 로그에서 `[SKIP]`로 찾고, 같은 코드가 실행 요약(Step Summary)에도 쓰인다.
+
+| 수준 | 의미 | 처리 | 종료 | 코드 |
+|------|------|------|------|------|
+| 정상 건너뜀 | 지금 할 일이 아님 | 초록 + 로그 한 줄 | 0 | `OUT_OF_WINDOW`(첫 게시 시각 전), `ALREADY_PUBLISHED`(그 슬롯 글이 이미 있음), `PAUSED`(`PIPELINE_PAUSE`), 예정: `DAILY_CAP`·`MODE_OFF`·`DRY_RUN` |
+| 경고 | 게시하려 했는데 못 했지만 다음 실행에서 다시 시도 | 초록 + `::warning::`(노란 주석) + 요약 | 0 | `ALL_REJECTED`(후보는 있었으나 Gemini 건너뜀·제목 유사로 전부 탈락), `NO_CANDIDATES`(시간 상한으로 일부 분야만 시도하고 후보 없음) |
+| 실패 | 발행하려던 실행이 0건으로 끝난 이상 신호 | **빨강** + `::error::` + 요약 | 1 | `ALL_LANES_EMPTY`(모든 분야에 후보 없음), 예정: `SECRETS_MISSING`·`AUTH_*`·`LLM_FAILED` |
+
+분야별 한 줄(`[SKIP] code=NO_CANDIDATES lane=… fetched=… passed=… reasons=…`)은 폴백으로 다음 분야로 넘어가기 전에 그 분야가 왜 비었는지 남긴다.
+
+**Chance 기사 탈락 사유 코드**(`generator.py` `DROP_LABELS`, 소스별 `소스 X: N건 중 M건 사용 (탈락: …)` 줄과 요약 표에 같은 코드):
+
+| 코드 | 뜻 |
+|------|----|
+| `NO_TITLE` | 제목 없음 |
+| `NOT_TECH` | 기술 키워드가 아님(`tech_filter` 소스만) |
+| `AGE` | 36시간 초과 |
+| `UNTRUSTED` | 게시자가 그 분야의 신뢰 목록(`TRUSTED_SOURCE_DOMAINS`)에 없음 |
+| `UNCHECKED` | 소스당 5건 검사 한도를 넘어 검사하지 않음 |
+| `UNRESOLVED` | Google 뉴스 링크에서 게시자 원문 주소를 얻지 못함 |
+| `HOST_MISMATCH` | 게시자와 원문 주소의 사이트가 다르거나 원문이 신뢰 목록 밖 |
+| `SHORT_SUMMARY` | 요약이 100자 미만(원문 발췌도 실패) |
+| `DUPLICATE` | 기존 글과 제목이 비슷(후보 단계) |
+
+**Chance 분야 폴백**: 슬롯 시각마다 6개 분야를 확률 가중 추첨 순서(`editorial_lane_order`, 첫 분야는 기존 추첨과 같음)로 늘어놓고, 앞에서부터 후보가 나올 때까지 시도한다. 이 단계는 Gemini를 부르지 않아 비용은 수집 시간뿐이며 `LANE_SEARCH_BUDGET_SECONDS`(기본 480초)를 넘으면 멈춘다. 글이 만들어지면 이력의 `lane`에는 실제로 후보가 나온 분야가 기록된다. 임시 조치이며 주제 파이프라인(Task 3 Phase 1)이 대체한다.
+
 ## 5. 상태·멱등성·동시성
 
 - **이력 스키마 v1**: `v`, `blog`, `date`(KST `YYYY-MM-DD`), `generated_at`(ISO, KST), `status`, `topic`, `topic_source`(`seed`·`llm`·`override`), `title`, `labels`, `url`, `post_id`, `model`, `attempts`, `reasons[]`.
