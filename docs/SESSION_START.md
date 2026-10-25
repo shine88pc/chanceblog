@@ -13,7 +13,7 @@
 
 ```text
 저장소 https://github.com/shine88pc/chanceblog 를 이 작업 폴더 아래 chanceblog 폴더로 clone해서 시작해줘(이미 있으면 git pull).
-읽는 순서: HANDLER.md → AI_COLLAB.md → WORKLOG.md 최신 항목 3~5개 → docs/SESSION_START.md §2·§5·§6.
+읽는 순서: HANDLER.md → AI_COLLAB.md → 인수인계/작업내용.md(작업 현황 단일 문서) → WORKLOG.md 최신 항목 3~5개 → docs/SESSION_START.md §2·§5·§6.
 그다음 ① 열린 PR·브랜치·최근 GitHub Actions 실행 상태를 확인해 지금 상태를 10줄 이내로 보고하고 ② §5 '다음 작업 순서'의 첫 항목부터 제안해줘.
 사용자 승인이 필요한 일(비밀·계정·광고 표면·비용·삭제·정책·톤)은 채팅으로 먼저 물어봐.
 내 로컬 기억(메모리)과 저장소 문서가 다르면 저장소 문서를 믿어.
@@ -57,6 +57,7 @@ main 최신 커밋 · 최근 24시간 자동 실행 결과(Chance 슬롯, Blogge
 
 - [ ] 모든 변경이 push됨: `git status` 깨끗, `git stash list` 비어 있음, `git branch -vv`에서 로컬에만 있는 커밋 없음
 - [ ] 열린 PR마다 상태 기록(검증 단계, 남은 지적, 병합 조건)
+- [ ] **`인수인계/작업내용.md` 갱신**(작업 내용을 관리하는 단일 문서: 맨 위 "마지막 갱신" 시각, §2 진행 중, §3 결정 대기, §4 사용자 몫, §5 작업 이력)
 - [ ] `WORKLOG.md` 최상단에 오늘 항목(변경, 증거, 못 한 검증, 다음 AI 주의사항)
 - [ ] `HANDLER.md` §0 현황 표와 이 문서 §5(다음 작업 순서)·§6(사용자 몫) 갱신
 - [ ] `docs/DEFECT_REGISTER.md` 결함 상태와 관측 체크리스트 갱신
