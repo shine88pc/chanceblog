@@ -84,6 +84,31 @@ def long_post(topic, link):
     }
 
 
+def thin_post(topic, link):
+    """분량 검증(한국어 최소 1000자)에 못 미치는 가짜 Gemini 결과. 실제 실행 #61에서 973자짜리 본문이 나온 상황."""
+    data = long_post(topic, link)
+    front = "---\nlayout: post\ntitle: \"t\"\ncategory: \"c\"\ntags: []\n---\n\n"
+    data["kr_content"] = front + "너무 짧은 본문입니다. " * 5 + f"\n\n[원문]({link})\n"
+    return data
+
+
+class FakeGemini:
+    """후보 제목(=프롬프트)에 따라 다른 응답을 내는 대역. responses 값이 예외면 던진다."""
+
+    def __init__(self, responses):
+        self.responses, self.calls = responses, []
+
+    def prompt(self, item, recent_titles, category_hint="", allow_skip=False, editorial_lane=None):
+        return item["title"]
+
+    def call(self, prompt):
+        self.calls.append(prompt)
+        value = self.responses[prompt]
+        if isinstance(value, Exception):
+            raise value
+        return mock.Mock(text=value)
+
+
 class SkipLineTest(unittest.TestCase):
     def test_single_line_with_code_and_fields(self):
         line = g.skip_line("LANE_EMPTY", lane="economy", fetched=71,
@@ -670,6 +695,65 @@ class GenerateWithFallbackTest(unittest.TestCase):
         self.assertIsNone(value)
         self.assertEqual(report["outcome"], "NO_MATCH")
 
+    def run_with_gemini(self, responses, titles, **kwargs):
+        cands = [candidate(title, self.LINK) for title in titles]
+        gemini = FakeGemini(responses)
+        report = {}
+        kwargs.setdefault("slot", self.slot)
+        kwargs.setdefault("allow_auto_topic", False)
+        with mock.patch.object(g, "STUB_GEMINI", False), \
+                mock.patch.object(g, "build_post_prompt", gemini.prompt), \
+                mock.patch.object(g, "call_gemini_with_fallback", gemini.call), \
+                mock.patch.object(g, "fetch_news_items", self.fake_fetch({"technology": cands})):
+            value, out = run_captured(g.generate_blog_posts, report=report, **kwargs)
+        return value, report, out, gemini
+
+    def dump(self, post):
+        return json.dumps(post, ensure_ascii=False)
+
+    def test_a_thin_body_rejects_that_candidate_and_the_next_one_is_published(self):
+        first, second = "첫째 기술 기사", "둘째 기술 기사 전혀 다른 소재"
+        value, report, out, gemini = self.run_with_gemini(
+            {first: self.dump(thin_post(first, self.LINK)), second: self.dump(long_post(second, self.LINK))},
+            [first, second])
+        self.assertIsNotNone(value)
+        self.assertEqual(report["outcome"], "PUBLISHED")
+        self.assertEqual(gemini.calls, [first, second])
+        self.assertEqual(len(report["gate_rejects"]), 1)
+        self.assertIn("최소 편집 분량", report["gate_rejects"][0])
+        self.assertIn("본문 검증 탈락", out)
+        self.assertIn(second, report["title"])
+
+    def test_every_candidate_failing_the_body_gate_is_all_rejected_not_a_crash(self):
+        titles = ["기술 기사 알파", "기술 기사 베타"]
+        value, report, out, gemini = self.run_with_gemini(
+            {title: self.dump(thin_post(title, self.LINK)) for title in titles}, titles)
+        self.assertIsNone(value)
+        self.assertEqual(report["outcome"], "ALL_REJECTED")
+        self.assertEqual(len(report["gate_rejects"]), 2)
+        self.assertEqual(gemini.calls, titles)
+
+    def test_the_same_failure_in_a_manual_run_says_why_no_post_was_made(self):
+        titles = ["기술 기사 알파"]
+        with self.assertRaisesRegex(RuntimeError, "후보가 모두 탈락"):
+            self.run_with_gemini({titles[0]: self.dump(thin_post(titles[0], self.LINK))}, titles,
+                                 slot=None, allow_auto_topic=True)
+
+    def test_unreadable_gemini_json_rejects_only_that_candidate(self):
+        first, second = "첫째 기술 기사", "둘째 기술 기사 전혀 다른 소재"
+        value, report, out, gemini = self.run_with_gemini(
+            {first: "이건 JSON이 아닙니다", second: self.dump(long_post(second, self.LINK))}, [first, second])
+        self.assertIsNotNone(value)
+        self.assertEqual(report["outcome"], "PUBLISHED")
+        self.assertEqual(len(report["gate_rejects"]), 1)
+        self.assertIn("JSON", report["gate_rejects"][0])
+
+    def test_a_gemini_outage_still_fails_the_run_and_stops_trying(self):
+        first, second = "첫째 기술 기사", "둘째 기술 기사 전혀 다른 소재"
+        with self.assertRaises(RuntimeError):
+            self.run_with_gemini({first: RuntimeError("모든 Gemini 모델 호출 실패"),
+                                  second: self.dump(long_post(second, self.LINK))}, [first, second])
+
     def test_report_is_optional(self):
         link = "https://www.reuters.com/a"
         results = {"technology": [candidate("기술 기사", link)]}
@@ -716,6 +800,7 @@ class MainPolicyTest(unittest.TestCase):
             _, out = self.run_main("schedule", at(10, 12))
         self.assertIn("[SKIP] code=PAUSED", out)
         self.assertIn("[일시정지]", out)
+        self.assertIn("::notice::PIPELINE_PAUSE", out)
         self.assertIn("일시정지", self.summary_text())
 
     def test_pause_off_values_do_not_pause(self):
@@ -832,6 +917,11 @@ class MainPolicyTest(unittest.TestCase):
         self.assertIn("::warning::9시 슬롯", out)
         self.assertNotIn("::error::", out)
 
+    def test_summary_includes_the_gemini_calls_of_this_run(self):
+        with mock.patch.dict(g.GEMINI_CALLS, {"attempts": 2, "failed": 1}):
+            self.run_main("schedule", at(10, 12), generate=self.fake_generate("ALL_REJECTED"))
+        self.assertIn("- Gemini 호출: 2회(실패 1회)", self.summary_text())
+
     def test_summary_is_safe_to_publish_when_the_title_comes_from_the_model(self):
         hostile = "제목 | 열\n# 가짜 제목\n[클릭](http://evil.example) `x` <img src=x>"
         report = {"outcome": "PUBLISHED", "title": hostile, "source": "A|B\n[x]", "lane_label": "경제·일",
@@ -845,6 +935,16 @@ class MainPolicyTest(unittest.TestCase):
         self.assertNotIn("|", source_line)
         self.assertNotIn("[", source_line)
 
+    def test_summary_lists_body_gate_rejections_safely(self):
+        report = {"outcome": "ALL_REJECTED", "lanes": [],
+                  "gate_rejects": ["KR 본문이 최소 편집 분량(1000자)에 미달합니다: 973자 | 표\n[링크](http://evil.example)"]}
+        text = g.render_run_summary("schedule", at(10), 9, report)
+        line = next(row for row in text.splitlines() if row.startswith("- 본문 검증 탈락"))
+        self.assertIn("1건", line)
+        self.assertIn("973자", line)
+        for ch in "|[]":
+            self.assertNotIn(ch, line)
+
     def test_summary_explains_the_drop_codes_it_uses(self):
         report = {"outcome": "ALL_LANES_EMPTY",
                   "lanes": [{"lane": "economy", "label": "경제·일", "sources": 2, "failed_sources": 0,
@@ -854,6 +954,37 @@ class MainPolicyTest(unittest.TestCase):
         self.assertIn(f"UNTRUSTED={g.DROP_LABELS['UNTRUSTED']}", text)
         self.assertIn(f"AGE={g.DROP_LABELS['AGE']}", text)
         self.assertNotIn("NOT_TECH=", text)  # 쓰이지 않은 코드는 범례에 넣지 않는다
+
+
+class GeminiCallCountTest(unittest.TestCase):
+    """무료 한도를 나눠 쓰려면 먼저 몇 번 부르는지 알아야 한다: 모델 호출 시도와 실패를 센다."""
+
+    def setUp(self):
+        patcher = mock.patch.dict(g.GEMINI_CALLS, {"attempts": 0, "failed": 0})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def client(self, outcomes):
+        models = mock.Mock()
+        models.generate_content.side_effect = outcomes
+        return mock.Mock(models=models)
+
+    def test_failed_models_and_the_final_success_are_all_counted(self):
+        ok = mock.Mock(text="응답")
+        with mock.patch.object(g, "MODEL_CANDIDATES", ["a", "b", "c"]), \
+                mock.patch.object(g, "get_client", return_value=self.client([RuntimeError("503"), mock.Mock(text=""), ok])):
+            response, _ = run_captured(g.call_gemini_with_fallback, "프롬프트")
+        self.assertIs(response, ok)
+        self.assertEqual(g.GEMINI_CALLS, {"attempts": 3, "failed": 2})
+
+    def test_summary_reports_the_calls(self):
+        report = {"outcome": "ALL_REJECTED", "lanes": [], "gemini_calls": {"attempts": 4, "failed": 1}}
+        text = g.render_run_summary("schedule", at(10), 9, report)
+        self.assertIn("- Gemini 호출: 4회(실패 1회)", text)
+
+    def test_summary_omits_the_line_when_gemini_was_not_called(self):
+        report = {"outcome": "ALL_LANES_EMPTY", "lanes": [], "gemini_calls": {"attempts": 0, "failed": 0}}
+        self.assertNotIn("Gemini 호출", g.render_run_summary("schedule", at(10), 9, report))
 
 
 class SanitizeTest(unittest.TestCase):

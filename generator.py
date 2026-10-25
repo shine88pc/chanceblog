@@ -9,6 +9,7 @@
 """
 import os
 import re
+import copy
 import json
 import zlib
 import html
@@ -182,19 +183,26 @@ def extract_json_object(raw_text):
     raise ValueError(f"완전한 JSON 객체를 찾을 수 없습니다: {text[:300]}")
 
 
+# 이번 실행의 Gemini 모델 호출 횟수. 무료 한도(프로젝트 단위)를 나눠 쓰기 위한 측정값이며 동작에는 영향이 없다.
+GEMINI_CALLS = {"attempts": 0, "failed": 0}
+
+
 def call_gemini_with_fallback(prompt):
     errors = []
     for model_name in MODEL_CANDIDATES:
         try:
             print(f"Gemini 모델 호출 시도: {model_name}")
+            GEMINI_CALLS["attempts"] += 1
             response = get_client().models.generate_content(
                 model=model_name, contents=prompt)
             text = getattr(response, "text", None)
             if text and text.strip():
                 print(f"Gemini 모델 호출 성공: {model_name}")
                 return response
+            GEMINI_CALLS["failed"] += 1
             errors.append(f"{model_name}: 응답 텍스트 없음")
         except Exception as exc:
+            GEMINI_CALLS["failed"] += 1
             errors.append(f"{model_name}: {exc}")
             print(f"Gemini 모델 호출 실패: {model_name} - {_one_line(exc)}")
     raise RuntimeError("모든 Gemini 모델 호출 실패\n" + "\n".join(errors))
@@ -1343,17 +1351,25 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
         else:
             report["outcome"] = "ALL_LANES_EMPTY"
         return None
+    gate_rejects = report["gate_rejects"] = []
     for item in candidates:
         topic = item["title"] if item else None
         src_label = f" [{item['source']}]" if item and item.get("source") else ""
         print(f"주제 시도: {topic or '(자동 선정)'}{src_label}")
-        if STUB_GEMINI:
-            candidate = stub_post_data(topic, (item or {}).get("link"))
-        else:
-            resp = call_gemini_with_fallback(build_post_prompt(
-                item, recent_titles, category_hint, allow_skip=not topic_override,
-                editorial_lane=editorial_lane))
-            candidate = extract_json_object(resp.text)
+        try:
+            if STUB_GEMINI:
+                candidate = stub_post_data(topic, (item or {}).get("link"))
+            else:
+                # 모든 모델이 실패하면 RuntimeError 로 그대로 올라간다(인프라 장애 = 빨강).
+                resp = call_gemini_with_fallback(build_post_prompt(
+                    item, recent_titles, category_hint, allow_skip=not topic_override,
+                    editorial_lane=editorial_lane))
+                candidate = extract_json_object(resp.text)
+        except ValueError as exc:  # 모델이 JSON 을 못 맞춘 것은 이 후보의 탈락이다
+            reason = _one_line(exc, 200)
+            print(f"  Gemini 응답을 읽지 못해 이 후보는 건너뜀: {reason}")
+            gate_rejects.append(reason)
+            continue
         if candidate.get("skip") is True:
             print(f"  Gemini가 중복 주제로 판단해 건너뜀: {_one_line(candidate.get('reason', ''))}")
             continue
@@ -1362,14 +1378,25 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
                                    or is_similar_to_any(en_t, titles, 0.7)):
             print(f"  생성된 제목이 기존 글과 비슷해 폐기: {_one_line(kr_t, 150)} / {_one_line(en_t, 150)}")
             continue
+        try:
+            # 본문 검증(분량·원문 링크 인용)은 이미지를 고르기 전에 먼저 한다: 탈락한 후보에 Unsplash 호출을 쓰지 않고,
+            # 첫 후보의 본문이 얇다는 이유로 실행 전체를 빨갛게 만들지 않고 다음 후보를 시도한다(검증 기준은 그대로).
+            validate_post_data(copy.deepcopy(candidate), "https://example.invalid/kr.jpg",
+                               "https://example.invalid/en.jpg",
+                               verified_source_url=(item or {}).get("link"))
+        except ValueError as exc:
+            reason = _one_line(exc, 200)
+            print(f"  본문 검증 탈락: {reason}")
+            gate_rejects.append(reason)
+            continue
         data, selected, selected_item = candidate, topic, item
         break
     if data is None:
         report["outcome"] = "ALL_REJECTED"
         if not topic_override and not allow_auto_topic:
-            print("겹치지 않는 주제를 찾지 못했습니다. 글을 만들지 않습니다.")
+            print("통과한 후보가 없습니다(중복·Gemini 건너뜀·본문 검증 탈락). 글을 만들지 않습니다.")
             return None
-        raise RuntimeError("기존 글과 겹치지 않는 주제를 만들지 못했습니다.")
+        raise RuntimeError("후보가 모두 탈락해 글을 만들지 못했습니다(중복·Gemini 건너뜀·본문 검증 탈락).")
 
     if not selected_item or not selected_item.get("link") or not selected_item.get("publisher_domain"):
         raise RuntimeError("검증된 게시자 원문이 없어 글을 저장하지 않습니다.")
@@ -1432,7 +1459,7 @@ OUTCOME_TEXT = {
     "SOURCES_UNREACHABLE": "뉴스 소스에 접속하지 못했습니다(시도한 소스가 모두 수집 실패)",
     "ALL_DUPLICATES": "검증된 기사는 있었지만 모두 이미 쓴 글과 비슷해 새 글감이 없습니다(뉴스가 뜸한 때)",
     "NO_CANDIDATES": "시간 상한으로 일부 분야만 시도했고 후보를 찾지 못했습니다",
-    "ALL_REJECTED": "후보는 있었지만 전부 탈락했습니다(Gemini 건너뜀 또는 제목이 기존 글과 비슷)",
+    "ALL_REJECTED": "후보는 있었지만 전부 탈락했습니다(Gemini 건너뜀, 제목이 기존 글과 비슷, 또는 본문 검증 탈락)",
     "NO_MATCH": "요청 주제와 연결되는 검증된 기사가 없습니다",
 }
 
@@ -1450,6 +1477,12 @@ def render_run_summary(event, now, slot, report):
         lines.append(f"- 제목: {_md_cell(report.get('title', ''))}")
         lines.append(f"- 편집 축: {report.get('lane_label', '')} · 출처: {_md_cell(report.get('source', ''), 60)}")
         lines.append("- 파일: " + ", ".join(f"`{str(p).replace(chr(96), '')}`" for p in report.get("paths", [])))
+    calls = report.get("gemini_calls") or {}
+    if calls.get("attempts"):
+        lines.append(f"- Gemini 호출: {calls['attempts']}회(실패 {calls.get('failed', 0)}회)")
+    rejects = report.get("gate_rejects", [])
+    if rejects:
+        lines.append(f"- 본문 검증 탈락 {len(rejects)}건: " + " / ".join(_md_cell(r, 100) for r in rejects[:3]))
     lanes = report.get("lanes", [])
     if lanes:
         lines += ["", "| 분야 | 소스 | 받은 기사 | 검증 통과 | 후보 | 탈락 사유(개수) |",
@@ -1475,6 +1508,7 @@ def finish_run(result, report, event, now, slot=None):
     if result is not None:
         report.setdefault("outcome", "PUBLISHED")
     outcome = report.get("outcome", "UNKNOWN")
+    report.setdefault("gemini_calls", dict(GEMINI_CALLS))
     write_step_summary(render_run_summary(event, now, slot, report))
     if result is not None:
         return
@@ -1492,6 +1526,7 @@ def main():
     if _pause_on():
         print(skip_line("PAUSED", var="PIPELINE_PAUSE"))
         print("[일시정지] PIPELINE_PAUSE 가 켜져 있어 실행하지 않습니다.")
+        print("::notice::PIPELINE_PAUSE 가 켜져 있어 Chance_Blog 실행을 건너뛰었습니다.")
         write_step_summary("### Chance_Blog 실행 요약\n- 결과: **일시정지** — "
                            "저장소 변수 PIPELINE_PAUSE 가 켜져 있습니다.")
         return
