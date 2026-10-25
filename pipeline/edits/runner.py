@@ -7,7 +7,7 @@ git·PR 은 이 모듈이 하지 않는다(워크플로가 한다). 이 모듈�
 CLI: python -m pipeline.edits.runner --issue-file issue.json --out DIR [--dry-run] [--remote-refs refs.txt]
      python -m pipeline.edits.runner --verify-staged DIR/files.txt   (스테이징 목록 == 허용 목록 확인)
      python -m pipeline.edits.runner --show-output DIR                (DRY_RUN: 산출물을 워크플로 명령이 먹히지 않게 로그에 출력)
-로그 정책: 러너가 내는 줄은 모두 `issue=#N author=@login(권한)` 으로 시작하고, 요청 원문·페이지 원문·프롬프트·비밀·예외 원문은 내지 않는다.
+로그 정책: 이슈를 처리하는 단계(--issue-file)가 내는 줄은 모두 `issue=#N author=@login(권한)` 으로 시작하고, 요청 원문·페이지 원문·프롬프트·비밀·예외 원문은 내지 않는다.
 
 한 이슈는 한 번만 처리한다: --remote-refs 에 이 이슈 번호의 원격 브랜치가 있거나 이슈에 표식 라벨(issue-edit-done)이 있으면
 새 브랜치·PR 없이 코멘트용 결과(duplicate)만 만든다(dry-run 은 예외).
@@ -152,7 +152,7 @@ def _login(issue):
 
 
 def issue_tag(issue):
-    """러너가 내는 모든 로그 줄 머리에 붙는 `issue=#N author=@login(권한)`."""
+    """이슈 처리 단계(main --issue-file)가 내는 모든 로그 줄 머리에 붙는 `issue=#N author=@login(권한)`."""
     issue = issue if isinstance(issue, dict) else {}
     number = issue.get("number")
     n = str(number) if isinstance(number, int) and not isinstance(number, bool) and number > 0 else "?"
@@ -197,9 +197,10 @@ def already_processed(number, refs=(), labels=(), prefix=DEFAULT_BRANCH_PREFIX, 
 def _branch_prefix(root):
     """명세의 브랜치 접두사(읽을 수 없으면 기본값 — 명세 오류는 이어지는 resolve_request 가 알린다)."""
     try:
-        prefix = spec_mod.load_spec(root).get("output", {}).get("branch_prefix")
+        output = spec_mod.load_spec(root).get("output")
     except spec_mod.SpecError:
-        prefix = None
+        output = None
+    prefix = output.get("branch_prefix") if isinstance(output, dict) else None
     return prefix if isinstance(prefix, str) and prefix else DEFAULT_BRANCH_PREFIX
 
 
@@ -549,7 +550,7 @@ def main(argv=None):
         else:
             result = process_issue(issue, root, dry_run=dry, remote_refs=refs)
     write_outputs(result, args.out)
-    # 러너가 내는 모든 줄은 `issue=#N author=@login(권한)` 으로 시작하고, 신뢰할 수 없는 문자열은 한 줄로 접어 비밀을 가리고
+    # 이슈 처리 단계가 내는 모든 줄은 `issue=#N author=@login(권한)` 으로 시작하고, 신뢰할 수 없는 문자열은 한 줄로 접어 비밀을 가리고
     # 워크플로 명령 모양(`::`·`##[`)을 무력화한 것만 쓴다.
     tag = f"[issue-edit] {issue_tag(issue)}"
     log = safety.log_text

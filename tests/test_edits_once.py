@@ -157,6 +157,18 @@ class ProcessIssueOnceTest(RunnerBase):
         self.assertEqual(self.literal(remote_refs=[ref("edits/12-about-r5")]).status, "duplicate")
         self.assertEqual(self.literal(remote_refs=[ref("issue-edit/12-about-r5")]).status, "ok")
 
+    def test_a_broken_spec_is_a_config_error_not_a_crash_in_the_duplicate_check(self):
+        spec_file = self.root / ".github" / "editorial" / "edit-spec.yml"
+        head = spec_file.read_bytes().decode("utf-8").replace("\r\n", "\n").split("\noutput:")[0]       # output 은 명세의 마지막 절이다
+        for broken in (head + "\noutput:\n", head + "\noutput: [1, 2]\n", "version: 1\n"):
+            spec_file.write_bytes(broken.encode("utf-8"))
+            for refs in (None, [ref("issue-edit/12-about-r5")]):
+                res = self.literal(remote_refs=refs)
+                self.assertIn(res.status, ("error", "duplicate"), (res.status, broken[-20:]))
+                if res.status == "error":
+                    self.assertEqual(res.exit_code, runner.EXIT_CONFIG)
+        self.assertEqual(self.read("about.md"), ABOUT)
+
     def test_comment_links_only_with_sane_environment_values_and_never_renders_branch_text(self):
         env = {"GITHUB_REPOSITORY": "shine88pc/chanceblog", "DEFAULT_BRANCH": "main"}
         res = self.literal(remote_refs=[ref("issue-edit/12-about-r5")], env=env)
