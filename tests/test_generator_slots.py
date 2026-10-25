@@ -494,10 +494,40 @@ class FetchNewsStatsTest(unittest.TestCase):
     def test_notice_and_prompt_rule_travel_with_the_item(self):
         summary = "요약 문장입니다. " * 20
         notice = {"ko": "고지", "en": "notice"}
-        sources = [{"name": "고지 소스", "lane": "economy", "url": self.FEED, "notice": notice, "prompt_rule": "규칙"}]
+        sources = [{"name": "고지 소스", "lane": "economy", "url": self.FEED, "notice": notice, "prompt_rule": "규칙",
+                    "citation": "{title} {date} {url}"}]
         items = [("통과 기사", "https://www.reuters.com/a", self.fresh(), summary, "")]
         merged, stats, out = self.run_fetch(items, sources=sources)
-        self.assertEqual((merged[0]["notice"], merged[0]["prompt_rule"]), (notice, "규칙"))
+        self.assertEqual((merged[0]["notice"], merged[0]["prompt_rule"], merged[0]["citation"]),
+                         (notice, "규칙", "{title} {date} {url}"))
+
+    def test_a_pending_source_is_not_requested_and_the_log_says_why(self):
+        sources = [{"name": "보류 소스", "lane": "economy", "url": self.FEED,
+                    "terms": {"status": "pending", "blocker": "알림을 아직 하지 않았다"}}]
+        requested = []
+
+        def fake_urlopen(req, timeout=0):
+            requested.append(getattr(req, "full_url", req))
+            return FakeResponse(rss([]))
+
+        stats = {}
+        with mock.patch.object(g, "NEWS_SOURCES", sources), mock.patch.object(g.urllib.request, "urlopen", fake_urlopen):
+            merged, out = run_captured(g.fetch_news_items, "economy", stats=stats)
+        self.assertEqual((requested, merged), ([], []))
+        self.assertIn("소스 보류 소스: 보류 — 알림을 아직 하지 않았다", out)
+        self.assertNotIn("sources", stats)  # 시도하지 않았으니 분야 요약의 소스 수에 세지 않는다
+        self.assertNotIn("모든 뉴스 소스 수집에 실패", out)
+
+    def test_the_held_un_news_source_is_never_requested(self):
+        def forbidden(req, timeout=0):
+            raise AssertionError(f"보류 소스를 요청했다: {getattr(req, 'full_url', req)}")
+
+        stats = {}
+        with mock.patch.object(g.urllib.request, "urlopen", forbidden):
+            merged, out = run_captured(g.fetch_news_items, "society", stats=stats)
+        self.assertEqual(merged, [])
+        self.assertIn("소스 UN News: 보류", out)
+        self.assertNotIn("sources", stats)
 
     def test_failed_source_is_recorded_not_hidden(self):
         sources = [{"name": "죽은 소스", "lane": "economy", "url": "https://dead.test/feed"}]
@@ -1293,6 +1323,35 @@ class SourceNoticeTest(unittest.TestCase):
                 self.assertNotIn("고지", content)
                 self.assertFalse(content.rstrip().endswith("*"))
 
+    def test_a_citation_line_comes_before_the_notice_and_uses_the_items_title_date_and_link(self):
+        item = self.source()
+        item["citation"] = "“{title}.” Pew Research Center, Washington, D.C. ({date}) <{url}>"
+        item["title"] = "1 in 5 Americans Regularly Get News on TikTok."  # 제목 끝의 마침표가 겹치지 않아야 한다
+        item["published"] = datetime(2026, 10, 24, 15, 0, tzinfo=timezone.utc)
+        story = "충분히 긴 첫 문단입니다. " * 8 + f"[원문]({self.LINK})"  # 실제 글처럼 60자 넘는 문단이 있어야 description 이 인용 줄이 아니라 본문에서 나온다
+        content = g.add_discovery_metadata(self.post(story), item)
+        citation = f"“1 in 5 Americans Regularly Get News on TikTok.” Pew Research Center, Washington, D.C. (October 24, 2026) <{self.LINK}>"
+        self.assertIn(citation, content)
+        self.assertLess(content.index(citation), content.index("*고지문 한국어입니다.*"))
+        self.assertTrue(content.endswith("*고지문 한국어입니다.*\n"))
+        self.assertEqual(g.add_discovery_metadata(content, item), content)  # 다시 붙이지 않는다
+
+    def test_no_citation_line_without_a_template_a_date_or_a_title(self):
+        template = "“{title}.” ({date}) <{url}>"
+        base = dict(self.source(None), citation=template, published=datetime(2026, 10, 24, tzinfo=timezone.utc))
+        for label, item in (("틀 없음", dict(base, citation=None)),
+                            ("게시일 없음", dict(base, published=None)),
+                            ("제목 없음", dict(base, title=""))):
+            with self.subTest(label):
+                content = g.add_discovery_metadata(self.post(f"본문입니다. [원문]({self.LINK})"), item)
+                self.assertNotIn(f"<{self.LINK}>", content)
+                self.assertNotIn("(October 24, 2026)", content)
+
+    def test_a_citation_without_a_notice_is_still_added(self):
+        item = dict(self.source(None), citation="{title} ({date}) {url}", published=datetime(2026, 1, 5, tzinfo=timezone.utc))
+        content = g.add_discovery_metadata(self.post(f"본문입니다. [원문]({self.LINK})"), item)
+        self.assertTrue(content.endswith(f"원문 제목 (January 5, 2026) {self.LINK}\n"), content[-120:])
+
     def test_prompt_rule_is_in_the_prompt_only_for_the_source_that_has_it(self):
         with_rule = g.build_post_prompt(dict(candidate(), prompt_rule="규칙 한 줄 XYZ"), [], editorial_lane="science")
         self.assertIn("\n- 규칙 한 줄 XYZ\n", with_rule)
@@ -1367,19 +1426,22 @@ class SourceRuleSamplesTest(unittest.TestCase):
 
 class SourceListTest(unittest.TestCase):
     # 일상·마음: 약관상 쓸 수 있는 직접 RSS를 아직 찾지 못해 소스가 없다(docs/analysis/2026-10-25_publish-readiness.md §3-1).
-    # 소스를 더하면 여기서 뺀다. 이 분야가 뽑히면 후보가 없어 다음 분야로 넘어간다.
-    LANES_WITHOUT_SOURCES = {"daily_life"}
-    # 약관을 아직 읽지 못한 기존 소스(유예). 새 소스는 allowed 만 늘린다 — 읽고 allowed 로 올리거나 목록에서 빼서 줄이기만 한다.
-    LEGACY_UNVERIFIED = {"TechCrunch", "The Verge", "Ars Technica", "IEEE Spectrum", "Hacker News", "AI타임스", "전자신문"}
+    # 사회·정책: UN News 가 보류(pending) 중이라 읽는 소스가 없다(D-63). 소스를 더하거나 보류를 풀면 여기서 뺀다.
+    # 이 분야가 뽑히면 후보가 없어 다음 분야로 넘어간다.
+    LANES_WITHOUT_SOURCES = {"daily_life", "society"}
+    # 약관을 읽지 못했거나 금지로 읽히는데 운영자 결정 전까지 쓰는 기존 소스(유예). 새 소스는 allowed 만 늘린다 — 읽고 allowed 로 올리거나
+    # 목록에서 빼서 줄이기만 한다.
+    LEGACY_GRACE = {"TechCrunch", "The Verge", "Ars Technica", "IEEE Spectrum", "Hacker News", "AI타임스", "전자신문"}
 
     def test_dead_bloter_feed_is_gone(self):
         self.assertNotIn("블로터", [s["name"] for s in g.NEWS_SOURCES])
         self.assertFalse(any("bloter.net/feed" in s["url"] for s in g.NEWS_SOURCES))
 
-    def test_every_lane_has_a_source_except_the_known_gap(self):
-        lanes = {s.get("lane") for s in g.NEWS_SOURCES}
-        self.assertTrue(lanes <= set(g.EDITORIAL_LANES), lanes - set(g.EDITORIAL_LANES))
-        self.assertEqual(set(g.EDITORIAL_LANES) - lanes, self.LANES_WITHOUT_SOURCES)
+    def test_every_lane_has_a_source_it_actually_reads_except_the_known_gaps(self):
+        every = {s.get("lane") for s in g.NEWS_SOURCES}
+        self.assertTrue(every <= set(g.EDITORIAL_LANES), every - set(g.EDITORIAL_LANES))
+        read = {s["lane"] for s in g.NEWS_SOURCES if s["terms"]["status"] != "pending"}
+        self.assertEqual(set(g.EDITORIAL_LANES) - read, self.LANES_WITHOUT_SOURCES)
 
     def test_google_news_sources_are_gone(self):
         self.assertEqual([s["name"] for s in g.NEWS_SOURCES
@@ -1396,14 +1458,40 @@ class SourceListTest(unittest.TestCase):
             with self.subTest(source=src["name"]):
                 terms = src.get("terms")
                 self.assertIsInstance(terms, dict)
-                self.assertIn(terms.get("status"), {"allowed", "unverified"})
-                if terms["status"] == "allowed":
+                self.assertIn(terms.get("status"), {"allowed", "pending", "restricted", "unverified"})
+                if terms["status"] in {"allowed", "pending", "restricted"}:
                     self.assertRegex(terms.get("checked", ""), r"^\d{4}-\d{2}-\d{2}$")
                     self.assertTrue(terms.get("url", "").startswith("https://"))
+                if terms["status"] == "pending":
+                    self.assertTrue(str(terms.get("blocker", "")).strip(), "보류에는 이유(blocker)가 있어야 한다")
+                if terms["status"] in {"restricted", "unverified"} and src["name"] in self.LEGACY_GRACE:
+                    self.assertTrue(str(terms.get("note", "")).strip(), "유예 소스는 읽은 결과(note)를 남긴다")
 
-    def test_unverified_sources_cannot_grow(self):
-        unverified = {s["name"] for s in g.NEWS_SOURCES if s["terms"]["status"] == "unverified"}
-        self.assertTrue(unverified <= self.LEGACY_UNVERIFIED, unverified - self.LEGACY_UNVERIFIED)
+    def test_sources_under_grace_cannot_grow(self):
+        grace = {s["name"] for s in g.NEWS_SOURCES if s["terms"]["status"] in {"unverified", "restricted"}}
+        self.assertTrue(grace <= self.LEGACY_GRACE, grace - self.LEGACY_GRACE)
+
+    def test_aitimes_is_marked_restricted_not_merely_unverified(self):
+        # 기사 페이지 하단의 'AI학습 및 활용 금지' 표기(2026-10-26)를 읽었으므로 '읽지 못함'으로 두지 않는다.
+        aitimes = next(s for s in g.NEWS_SOURCES if s["name"] == "AI타임스")
+        self.assertEqual(aitimes["terms"]["status"], "restricted")
+        self.assertIn("AI학습 및 활용 금지", aitimes["terms"]["note"])
+
+    def test_un_news_is_held_until_its_conditions_are_met(self):
+        un = next(s for s in g.NEWS_SOURCES if s["name"] == "UN News")
+        self.assertEqual(un["terms"]["status"], "pending")
+        self.assertIn("robots.txt", un["terms"]["blocker"])
+
+    def test_pew_texts_carry_what_pews_terms_require(self):
+        pew = next(s for s in g.NEWS_SOURCES if s["name"] == "Pew Research Center")
+        self.assertIn("Pew Research Center, Washington, D.C.", pew["citation"])
+        self.assertIn("Pew Research Center has published the original content in English but has not reviewed or approved this translation.",
+                      pew["notice"]["ko"])
+
+    def test_nasa_notice_says_nasa_is_not_responsible_for_accuracy(self):
+        nasa = next(s for s in g.NEWS_SOURCES if s["name"] == "NASA")
+        self.assertIn("정확성에 책임지지 않", nasa["notice"]["ko"])
+        self.assertIn("not responsible for its accuracy", nasa["notice"]["en"])
 
     def test_terms_blocked_publishers_are_in_no_source_and_no_trust_list(self):
         for domain in ("bbc.com", "bbc.co.uk", "theguardian.com", "nature.com", "technologyreview.com"):
@@ -1434,7 +1522,7 @@ class SourceListTest(unittest.TestCase):
             for key in ("exclude_title", "topic_regex"):
                 if src.get(key):
                     re.compile(src[key], re.I)
-            if src["terms"]["status"] == "allowed":
+            if src["terms"]["status"] in {"allowed", "pending"}:
                 self.assertEqual(sorted(src["notice"]), ["en", "ko"], src["name"])
                 self.assertTrue(all(src["notice"].values()), src["name"])
 

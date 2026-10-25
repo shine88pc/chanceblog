@@ -701,7 +701,9 @@ EDITORIAL_LANES = {
 #
 # 약관 점검(terms): 소스마다 공식 약관·이용 안내를 읽은 결과를 적는다(법률 판단이 아니다).
 #   allowed    출처를 밝히고 요약해 새 글을 쓰는 이 용도가 허용된다고 읽은 소스. 확인한 날짜와 근거 쪽 주소를 함께 적는다.
-#   unverified 아직 약관을 읽지 못한 소스. 기존 소스만 유예이고 새로 늘릴 수 없다(tests/test_generator_slots.py SourceListTest).
+#   pending    약관은 허용하지만 아직 채우지 못한 조건(blocker)이 있어 읽지 않고 건너뛴다(로그에 이유가 한 줄 남는다). 조건을 채우고 운영자가 확인하면 allowed 로 바꾼다.
+#   restricted 약관을 읽었고 이 용도가 금지·허가 필요로 읽히지만 운영자 결정 전까지 쓰는 기존 소스(유예). 새로 늘릴 수 없다.
+#   unverified 아직 약관을 읽지 못했거나 허용인지 금지인지 불명확한 기존 소스(유예). 새로 늘릴 수 없다(tests/test_generator_slots.py SourceListTest).
 # 이 용도를 금지·허가 필요로 읽은 매체(BBC·Guardian·Nature·MIT Technology Review)는 TERMS_BLOCKED_DOMAINS 로 막고
 # 소스에도 신뢰 목록에도 두지 않는다. 일상·마음 분야는 약관상 쓸 수 있는 직접 RSS를 아직 찾지 못해 소스가 없다(뽑히면 다음 분야로 넘어간다).
 #
@@ -710,6 +712,7 @@ EDITORIAL_LANES = {
 #   topic_regex    제목·분류 태그에 이 정규식과 맞는 말이 없으면 쓰지 않는다(OFF_TOPIC). 여러 주제가 섞인 피드를 분야에 맞춘다.
 #   no_page_fetch  요약이 짧아도 기사 페이지를 따로 읽지 않는다(자동 수집을 막는 약관).
 #   notice         글 끝에 붙일 고지문(ko·en). 소스 약관이 요구하는 'AI 작성, 검토·승인 받지 않음' 안내.
+#   citation       글 끝에 붙일 인용 한 줄의 틀({title}·{date}·{url}). 소스 약관이 정한 인용 형식(Pew).
 #   prompt_rule    글 작성 지침에 한 줄 더하는 소스별 약관 조건.
 NEWS_SOURCES = [
     # 약관을 확인한 직접 RSS(2026-10-26). 분야마다 약관상 쓸 수 있는 소스만 둔다.
@@ -718,14 +721,20 @@ NEWS_SOURCES = [
                "url": "https://www.nasa.gov/nasa-brand-center/images-and-media/"},
      # APOD 는 사진마다 저작권자가 따로 있어 약관 예외이고, 취재진 초대·인증 안내는 글감이 못 된다.
      "exclude_title": r"^APOD\b|\binvites? media\b|\bmedia accreditation\b",
-     "notice": {"ko": "이 글은 AI 도구가 NASA가 공개한 자료를 참고해 작성했습니다. NASA는 이 글을 검토하거나 승인하지 않았으며, 글의 내용은 NASA의 입장이 아닙니다.",
-                "en": "This article was written with an AI tool using publicly available NASA source material. NASA has not reviewed or approved it, and it does not represent NASA's position."},
-     # NASA 의 AI 이용 안내: AI 결과물의 정보를 NASA 에 직접 귀속하는 것은 허용되지 않는다.
+     # NASA 의 AI 이용 안내: AI 결과물의 정보를 NASA 에 직접 귀속하는 것은 허용되지 않고, NASA 는 AI 결과물의 정확성에 책임지지 않으며,
+     # "AI 도구가 NASA 자료를 포함한다"고 밝히되 NASA 가 검토·허가한 것처럼 암시하지 말라고 한다. 작성 지침 한 줄은 AI가 어길 수 있고(코드로
+     # 막으면 후보가 계속 탈락해 호출이 낭비된다, D-63) 고지문은 코드가 붙인다.
+     "notice": {"ko": "이 글은 AI 도구가 NASA가 공개한 자료를 참고해 작성했습니다. NASA는 이 글을 검토하거나 승인하지 않았고 내용의 정확성에 책임지지 않으며, 글의 내용은 NASA의 입장이 아닙니다.",
+                "en": "This article was written with an AI tool using publicly available NASA source material. NASA has not reviewed or approved it, is not responsible for its accuracy, and it does not represent NASA's position."},
      "prompt_rule": "NASA의 AI 이용 안내에 따라 정보를 NASA가 직접 말하거나 보증한 것처럼 쓰지 마세요. "
                     "'NASA에 따르면', 'NASA는 밝혔다' 같은 직접 귀속 표현을 쓰지 말고 '공개된 자료에 따르면'처럼 자료를 가리키세요."},
+    # 보류(pending): UN News 이용 안내는 출처 표기와 링크만 요구하고 재가공을 환영한다. 그러나 ① 유엔 저작권 안내(un.org/en/about-us/copyright)는
+    # 뉴스 자료를 쓸 때 유엔에 알릴 것(the United Nations is advised)을 요구하는데 아직 하지 않았고, ② news.un.org 의 robots.txt 는 일반 봇에
+    # 이 피드 경로(`*/news/`)를 허용하지 않는다. 알림과 서면 확인(unnews@un.org)을 마치고 운영자가 확인하면 allowed 로 바꾼다(D-63).
     {"name": "UN News", "lane": "society", "url": "https://news.un.org/feed/subscribe/en/news/all/rss.xml",
-     "terms": {"status": "allowed", "checked": "2026-10-26",
-               "url": "https://news.un.org/en/content/navigate-news"},
+     "terms": {"status": "pending", "checked": "2026-10-26",
+               "url": "https://news.un.org/en/content/navigate-news",
+               "blocker": "유엔에 이용 사실을 알리고(un.org 저작권 안내) 이 피드 경로를 읽어도 되는지 서면 확인을 받아야 한다(news.un.org robots.txt 가 일반 봇에 */news/ 경로를 허용하지 않음)"},
      # 여러 소식을 묶은 요약 기사는 글감이 못 된다.
      "exclude_title": r"^World News in Brief\b",
      "notice": {"ko": "이 글은 UN News의 보도를 바탕으로 AI 도구가 작성했습니다. 유엔은 이 글을 검토하거나 승인하지 않았으며, 글의 내용은 유엔의 공식 입장이 아닙니다.",
@@ -739,9 +748,13 @@ NEWS_SOURCES = [
      # 피드는 정치·사회·종교 등이 섞여 있어 미디어·온라인·기술 주제만 문화·미디어 분야로 보낸다(제목과 분류 태그에서 찾는다).
      "topic_regex": r"social media|internet|online|\bAI\b|artificial intelligence|chatbot|\bnews\b|tiktok|youtube|instagram"
                     r"|facebook|podcast|streaming|influencer|smartphone|mobile|video game|gaming|music|movie|\bbooks?\b|reading|digital|platform",
-     "no_page_fetch": True,  # Pew 약관은 허가 없는 수집(스크래핑)을 막는다. RSS 요약만 쓰고 기사 페이지는 읽지 않는다.
-     "notice": {"ko": "이 글은 AI 도구가 Pew Research Center가 영어로 발표한 자료를 참고해 새로 쓴 해설입니다. Pew Research Center는 이 글(번역·요약 포함)을 검토하거나 승인하지 않았으며, 분석과 해석의 책임은 이 사이트에 있습니다.",
-                "en": "This article is an original explainer written with an AI tool from findings published by Pew Research Center. The Center has not reviewed or approved it, and responsibility for the analysis and interpretation rests with this site."},
+     "no_page_fetch": True,  # Pew 이용약관 §3 은 허가 없는 스크래핑(spidering·scraping)을 막는다. §1 이 허락한 RSS 요약만 쓰고 기사 페이지는 읽지 않는다.
+     # Pew 이용약관 §2 의 인용 형식과 §1 의 번역물 면책 문장(아래 ko 고지문의 영어 문장은 약관 원문 그대로).
+     "citation": "“{title}.” Pew Research Center, Washington, D.C. ({date}) <{url}>",
+     "notice": {"ko": "이 글은 AI 도구가 Pew Research Center가 영어로 발표한 자료를 참고해 새로 쓴 해설입니다. "
+                      "Pew Research Center has published the original content in English but has not reviewed or approved this translation. "
+                      "(Pew Research Center가 영어 원문을 발표했으며, 이 글의 번역·요약을 검토하거나 승인하지 않았습니다.) 분석과 해석의 책임은 이 사이트에 있습니다.",
+                "en": "This article is a new explainer written with an AI tool from findings published by Pew Research Center. The Center has not reviewed or approved it, and responsibility for the analysis and interpretation rests with this site."},
      "prompt_rule": "Pew Research Center의 조사 결과를 전하되, Pew가 특정 정책·정당·견해를 지지하거나 주장하는 것처럼 쓰지 마세요. "
                     "조사 결과와 이 사이트의 해석을 구분하세요."},
     {"name": "Federal Reserve", "lane": "economy", "url": "https://www.federalreserve.gov/feeds/press_all.xml",
@@ -751,22 +764,23 @@ NEWS_SOURCES = [
      "exclude_title": r"\benforcement actions?\b|\bapproval of (?:the )?application\b",
      "notice": {"ko": "이 글은 AI 도구가 미국 연방준비제도 이사회(Federal Reserve Board)가 공개한 자료를 참고해 작성했습니다. 연준은 이 글을 검토하거나 승인하지 않았습니다.",
                 "en": "This article was written with an AI tool using materials published by the Federal Reserve Board. The Board has not reviewed or approved it."}},
-    # 해외 직접 RSS(기술). 약관 미확인 — 읽는 대로 allowed 로 올리거나 이 목록에서 뺀다.
+    # 해외 직접 RSS(기술). 신뢰 목록을 통과해 글감이 되는 곳은 Ars·IEEE 뿐이고 TechCrunch·The Verge 는 신뢰 목록에 없어 글감이 안 된다(D-61).
     {"name": "TechCrunch", "lane": "technology", "url": "https://techcrunch.com/feed/",
-     "terms": {"status": "unverified"}},
+     "terms": {"status": "unverified", "note": "2026-10-26 RSS 이용약관을 읽었다: 피드 내용을 그대로 표시하고 출처·링크를 달 것, 변형·피드 광고 금지. AI로 새 글을 쓰는 이용은 언급이 없어 불명확"}},
     {"name": "The Verge", "lane": "technology", "url": "https://www.theverge.com/rss/index.xml",
-     "terms": {"status": "unverified"}},
+     "terms": {"status": "unverified", "note": "검증 세션 보고(직접 재확인 못 함): Vox Media 이용약관 §15(2026-07-06)가 파생물·영리 이용을 금지하는 것으로 읽힘"}},
     {"name": "Ars Technica", "lane": "technology", "url": "https://feeds.arstechnica.com/arstechnica/index",
-     "terms": {"status": "unverified"}},
+     "terms": {"status": "unverified", "note": "검증 세션 보고(직접 재확인 못 함): robots.txt 가 ClaudeBot·CCBot 등 AI 크롤러를 막음. Condé Nast 이용약관은 읽지 못함"}},
     {"name": "IEEE Spectrum", "lane": "technology", "url": "https://spectrum.ieee.org/feeds/feed.rss",
-     "terms": {"status": "unverified"}},
+     "terms": {"status": "unverified", "note": "검증 세션 보고(일부, 직접 재확인 못 함): IEEE 사이트 이용약관은 복제에 사전 서면 동의를 요구하고 개인·정보 목적 이용만 허용. Spectrum 자체 RSS 약관은 못 찾음"}},
     {"name": "Hacker News", "lane": "technology", "url": "https://news.ycombinator.com/rss",
-     "terms": {"status": "unverified"}},
-    # 국내 직접 RSS(기술). 약관 미확인.
+     "terms": {"status": "unverified", "note": "항목 링크가 임의의 사이트라 신뢰 목록 도메인(reuters·apnews·ieee·arxiv 등)으로 가는 링크만 통과하고, 그 매체들의 약관은 읽지 않았다 — 간접 경로(D-61)"}},
+    # 국내 직접 RSS(기술).
     {"name": "AI타임스", "lane": "technology", "url": "https://www.aitimes.com/rss/allArticle.xml",
-     "terms": {"status": "unverified", "note": "2026-10-26 저작권보호정책을 읽었다: 승낙 없는 복제·출판·전송·배포·판매·변형 금지(출처 표시 조건), RSS·AI 이용 조항은 없어 불명확 — 허가 문의 추천"}},
+     "terms": {"status": "restricted", "checked": "2026-10-26", "url": "https://www.aitimes.com/com/copyright.html",
+               "note": "기사 페이지 하단에 '무단전재 및 재배포, AI학습 및 활용 금지'가 적혀 있고(2026-10-26 기사 3건 직접 확인) 저작권보호정책은 승낙 없는 복제·전송·배포·변형을 금지한다 — AI 이용은 허가 전 사용 불가로 읽힌다. 제외 또는 허가 문의는 운영자 결정(D-61)"}},
     {"name": "전자신문", "lane": "technology", "url": "https://rss.etnews.com/Section901.xml",
-     "terms": {"status": "unverified", "note": "2026-10-26 이용약관(2012.09.01 표기)을 읽었다: 제공 정보의 영리 목적 이용 금지(회원 대상)·복제·전송·배포는 사전 승낙 필요, RSS·AI 이용 조항은 없어 불명확 — 허가 문의 추천"}},
+     "terms": {"status": "unverified", "note": "2026-10-26 이용약관(2012.09.01 표기)을 읽었다: 제공 정보의 영리 목적 이용 금지(회원 대상)·복제·전송·배포는 사전 승낙 필요, RSS·AI 이용 조항은 없어 불명확. 이 피드에는 해외 매체를 다시 쓴 기사도 섞여 권리가 한 겹 더 있다"}},
     # 블로터(https://www.bloter.net/feed)는 HTTP 404라 2026-10-25에 뺐다(실행 로그 '수집 실패', 로컬에서도 404/403).
     # 구글 뉴스 검색 소스 14개는 통과율이 0.4%(게시자 원문 주소로 풀리지 않음)라 2026-10-26에 뺐다.
     # MIT Technology Review·BBC Technology 는 약관이 이 용도를 금지·허가 필요로 해서 2026-10-26에 뺐다(TERMS_BLOCKED_DOMAINS).
@@ -798,10 +812,10 @@ TRUSTED_SOURCE_DOMAINS = {
 # 약관을 읽고 이 용도(광고가 붙는 사이트에서 RSS 제목·요약을 AI에 주어 새 글을 쓰는 것)가 금지이거나 허가가 필요하다고 읽은 매체.
 # 신뢰 목록에 실수로 다시 들어와도 _trusted_domain 이 거부한다(법률 판단이 아니다). 근거: docs/analysis/2026-10-25_publish-readiness.md §3-1,
 # BBC·MIT TR 은 2026-10-26 약관 재확인.
-#   BBC                    사업적 RSS 이용은 허가 필요, RSS·콘텐츠에서 메타데이터를 가져오는 것과 AI 이용은 허가 필요(이용약관 8·15항, 2022-09-19판)
+#   BBC                    사업적 RSS 이용은 허가 필요, RSS·콘텐츠에서 메타데이터를 가져오는 것과 AI·컴퓨터 분석 이용은 허가 필요, 돈을 버는 이용도 허가 대상(이용약관 v1.8 §7(d)·§8·§15, 2022-09-19판)
 #   Guardian               사전 서면 승인 없는 상업적 이용·AI로 콘텐츠를 생성·합성하는 것 금지
 #   Nature                 상업적 이용에는 허가 필요
-#   MIT Technology Review  파생물·상업적 이용 금지(RSS 포함), AI 이용은 사전 서면 동의 필요(2023-09-06판)
+#   MIT Technology Review  복제·수정·재게시 금지, 파생물·상업적 이용 금지(서비스에 RSS 포함), 콘텐츠로 AI 시스템을 만들거나 학습·개선하는 것은 사전 서면 동의(Restrictions on Use·Commercial Use·AI and Large Language Model Usage, 2023-09-06판)
 TERMS_BLOCKED_DOMAINS = ("bbc.com", "bbc.co.uk", "bbci.co.uk", "theguardian.com", "guardian.co.uk",
                          "nature.com", "technologyreview.com")
 
@@ -926,6 +940,10 @@ def fetch_news_items(editorial_lane=None, stats=None, deadline=None, clock=time.
     for src in NEWS_SOURCES:
         if editorial_lane and src.get("lane") != editorial_lane:
             continue
+        terms = src.get("terms") or {}
+        if terms.get("status") == "pending":
+            print(f"  소스 {src['name']}: 보류 — {_one_line(terms.get('blocker', ''), 200)}")
+            continue
         if deadline is not None and clock() > deadline:
             time_skipped += 1
             continue
@@ -1004,7 +1022,8 @@ def fetch_news_items(editorial_lane=None, stats=None, deadline=None, clock=time.
             kept.append({"title": title, "source": publisher or src["name"],
                          "link": article_url, "publisher_domain": publisher_host,
                          "summary": summary, "published": pub,
-                         "notice": src.get("notice"), "prompt_rule": src.get("prompt_rule")})
+                         "notice": src.get("notice"), "citation": src.get("citation"),
+                         "prompt_rule": src.get("prompt_rule")})
         kept.sort(key=lambda x: x["published"] or EPOCH, reverse=True)
         line = f"  소스 {src['name']}: {len(parsed)}건 중 {len(kept)}건 사용"
         if drops:
@@ -1302,16 +1321,31 @@ def _description_from_markdown(content, max_chars=155):
     return ""
 
 
-def _append_source_notice(content, notice):
-    """소스 약관이 요구하는 고지문(AI 작성·검토 안 받음)을 글 끝에 덧붙인다. 글 언어(한글 포함 여부)에 맞춰 ko/en 을 고르고, 이미 있으면 다시 붙이지 않는다."""
-    if not isinstance(notice, dict):
-        return content
+_MONTHS = ("January", "February", "March", "April", "May", "June", "July",
+           "August", "September", "October", "November", "December")
+
+
+def _citation_line(citation, source):
+    """소스 약관이 정한 인용 형식(citation 틀의 {title}·{date}·{url})을 채운 한 줄. 제목·게시일·주소 중 하나라도 없으면 빈 문자열."""
+    published = source.get("published")
+    title = str(source.get("title") or "").strip().rstrip(".").strip()
+    link = str(source.get("link") or "").strip()
+    if not (isinstance(citation, str) and title and link and hasattr(published, "month")):
+        return ""
+    return citation.format(title=title, date=f"{_MONTHS[published.month - 1]} {published.day}, {published.year}", url=link)
+
+
+def _append_source_notice(content, source):
+    """소스 약관이 요구하는 인용 한 줄(citation)과 고지문(AI 작성·검토 안 받음)을 글 끝에 덧붙인다(인용, 고지문 순).
+    글 언어(한글 포함 여부)에 맞춰 ko/en 고지문을 고르고, 이미 있는 것은 다시 붙이지 않는다."""
     body_match = re.match(r"\A---\s*\n.*?\n---\s*\n(.*)\Z", content, re.S)
     body = body_match.group(1) if body_match else content
-    text = str(notice.get("ko" if re.search(r"[가-힣]", body) else "en") or "").strip()
-    if not text or text in content:
-        return content
-    return content.rstrip() + f"\n\n*{text}*\n"
+    notice = source.get("notice")
+    text = str(notice.get("ko" if re.search(r"[가-힣]", body) else "en") or "").strip() if isinstance(notice, dict) else ""
+    for block in (_citation_line(source.get("citation"), source), f"*{text}*" if text else ""):
+        if block and block not in content:
+            content = content.rstrip() + f"\n\n{block}\n"
+    return content
 
 
 def add_discovery_metadata(content, source=None):
@@ -1331,7 +1365,7 @@ def add_discovery_metadata(content, source=None):
             if source_url not in body:
                 heading = "\n\n## 출처\n" if re.search(r"[가-힣]", body) else "\n\n## Sources\n"
                 content = content.rstrip() + f"{heading}- [{source['source']}: {source.get('title', '원문 기사')}]({source_url})\n"
-        content = _append_source_notice(content, source.get("notice"))
+        content = _append_source_notice(content, source)
     return content
 
 

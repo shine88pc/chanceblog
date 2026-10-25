@@ -176,14 +176,14 @@
 ### 8-2. 검증·병합 중 — 같은 일을 새로 요청하지 마세요
 
 - **Blogger 초안함 업로드 모드와 인증 점검**: 글을 Blogger의 초안함에 올려 두고 운영자가 눈으로 보고 게시하는 방식("초안 저장 후 수동 게시"). 시크릿 등록은 이 기능이 병합된 뒤에만 합니다.
-- **Chance 출처 개편(PR #27)**: 운영자가 2026-10-26에 승인한 대로 구글 뉴스 14개·MIT TR·BBC Technology를 빼고 NASA·UN News·Pew·Federal Reserve를 더했다(약관 점검 필드·차단 목록·글 끝 고지문 포함). 독립 검증 대기, 병합 뒤 첫 슬롯 관측.
+- **Chance 출처 개편(PR #27)**: 운영자가 2026-10-26에 승인한 대로 구글 뉴스 14개·MIT TR·BBC Technology를 빼고 NASA·Pew·Federal Reserve를 더했다(UN News는 유엔 알림·robots.txt 확인 전이라 보류; 약관 점검 필드·차단 목록·글 끝 인용·고지문 포함). 독립 검증 대기, 병합 뒤 첫 슬롯 관측.
 
 ### 8-3. 운영자 결정 대기 (요청서에 "승인함"이라고 쓰지 마세요)
 
 | # | 항목 | 등급 |
 |---|------|------|
 | 1 | 폴백 모델 목록에서 `gemini-3.7-flash` 제거(이미 3.8로 자동 전달돼 중복 호출) | T3 |
-| 2 | Chance 출처 목록 개편(구글 뉴스 14개 제거, NASA·UN News·Pew·Federal Reserve 추가, 약관상 쓰기 어려운 해외 매체 제외, MIT TR·BBC Technology는 점검 결과 제외) — **2026-10-26 승인, 구현 PR #27 검증 대기** | T3 |
+| 2 | Chance 출처 목록 개편(구글 뉴스 14개 제거, NASA·UN News·Pew·Federal Reserve 추가, 약관상 쓰기 어려운 해외 매체 제외, MIT TR·BBC Technology는 점검 결과 제외) — **2026-10-26 승인, 구현 PR #27 검증 대기**(UN News는 보류로 넣음) | T3 |
 | 3 | Blogger 건강 금지 주제 강화(제목·본문·수동 주제에도 적용) | T1, 알림 |
 | 4 | "초안 저장 후 수동 게시"를 Blogger 초안함 API 업로드로 하는 방식 | 확인 |
 | 5 | macat0722 영문 프로필(시드 90개 이상, 건강 금지 강화, 면책 문구 정정) | T3 |
@@ -194,12 +194,12 @@
 | 10 | 로컬 작업 문서(작업요청서·계획서·진단 보고서)를 공개 저장소에 보관해도 되는지 | 사용자 허락 |
 | 11 | 운영자가 2026-10-25 20:26에 직접 바꾼 `defaults.mode`(draft→auto)의 의도 확인 — 현재 동작은 그대로(두 블로그가 `mode`를 명시), `mode` 없는 새 블로그만 곧바로 auto | 확인 |
 | 12 | 2026-10-21에 공개된 MIT TR 출처 글 1쌍 처리(약관이 이 용도를 금지하는 것으로 읽힘) — 추천: 비공개 전환 | T3(공개 콘텐츠) |
-| 13 | 경제·일·일상·마음 공급: 기관·연구 피드의 신선도 창 완화 또는 약관상 쓸 수 있는 소스 추가 | T3 |
-| 14 | 기술·미래 소스 7곳의 약관 점검 결과에 따른 처리 — AI타임스·전자신문은 약관이 불명확(허가 문의 추천), 나머지는 미확인 | T3 |
+| 13 | 경제·일·일상·마음·사회 공급: 기관·연구 피드의 신선도 창 완화 또는 약관상 쓸 수 있는 소스 추가 | T3 |
+| 14 | 기술·미래 소스 처리 — AI타임스는 기사 하단 "AI학습 및 활용 금지"로 금지로 읽힘(제외 또는 허가 문의), 전자신문은 불명확, TechCrunch·The Verge·Hacker News는 제거 추천 | T3 |
 
 ### 8-4. 사용자만 할 수 있는 일(AI가 대신할 수 없음)
 
-UN News에 이용 사실 알리기(운영자 메일로 unnews@un.org에 한 번) · AI Studio(`aistudio.google.com/rate-limit`)에서 Gemini 모델별 한도 숫자 읽어 오기 · GitHub의 비밀값 유출 자동 탐지(Secret scanning·Push protection) 켜짐 확인 · Search Console·Bing 등록 확인 · 옛 이슈 #1~#3 확인 후 닫기 · Chance의 AdSense 계정과 macat0722의 구글 계정이 같은지 알려 주기 · (초안 업로드 병합 뒤) Blogger OAuth 동의 화면 "프로덕션" 전환과 Secrets 4종 등록 · 신규 한글 Blogger URL·ID 확인 · 영문 프로필·네이버 운영 방식 결정 · (선택) 중복 이미지 2건 교체 실행.
+UN News에 이용 사실을 알리고 서면 확인 받기(운영자 메일로 unnews@un.org, 확인이 오면 알려 주기) · AI Studio(`aistudio.google.com/rate-limit`)에서 Gemini 모델별 한도 숫자 읽어 오기 · GitHub의 비밀값 유출 자동 탐지(Secret scanning·Push protection) 켜짐 확인 · Search Console·Bing 등록 확인 · 옛 이슈 #1~#3 확인 후 닫기 · Chance의 AdSense 계정과 macat0722의 구글 계정이 같은지 알려 주기 · (초안 업로드 병합 뒤) Blogger OAuth 동의 화면 "프로덕션" 전환과 Secrets 4종 등록 · 신규 한글 Blogger URL·ID 확인 · 영문 프로필·네이버 운영 방식 결정 · (선택) 중복 이미지 2건 교체 실행.
 
 ### 8-5. 알려진 문제와 한계
 
