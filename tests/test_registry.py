@@ -28,7 +28,10 @@ class RealRegistryTest(unittest.TestCase):
         reg["blogs"][1]["mode"] = "off"
         keys = [b["key"] for b in registry.enabled_blogs(reg)]
         self.assertEqual(keys, ["chance"])
-        self.assertEqual([b["key"] for b in registry.enabled_blogs(real_registry(), "blogger")], ["blogger_macat"])
+        reg = real_registry()
+        for blog in reg["blogs"]:
+            blog["mode"] = "auto"  # 운영 중 일시 정지(mode off)와 무관하게 platform 필터만 본다
+        self.assertEqual([b["key"] for b in registry.enabled_blogs(reg, "blogger")], ["blogger_macat"])
 
     def test_missing_secret_roles(self):
         blog = registry.get_blog(real_registry(), "blogger_macat")

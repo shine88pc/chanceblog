@@ -29,7 +29,7 @@
 | 작업요청서 | 저장소를 볼 수 없는 AI(모바일 Claude 등)에게 `docs/REQUEST_BRIEFING.md`를 통째로 붙여 넣으면 이 프로그램에 맞는 요청서를 만든다. 요청서는 `인수인계/작업요청/`에 올리거나 채팅에 붙여 넣는다. 처리 규칙은 그 폴더의 README |
 | 통합 성과 대시보드 | **제안 단계 — 사용자 결정 대기.** 블로그별 방문자·인기 글·AdSense 사이트별 수익을 한곳에서 보는 방안(Looker Studio 먼저). 검토 결과·결정 항목은 `docs/ANALYTICS_PLAN.md` §7. 결정 전에는 사이트에 GA 등을 설치하지 않는다(T3) |
 | 알려진 결함 | D-03 봇 글이 슬롯 대부분에서 안 나옴(원인: 비기술 분야 후보 0건 + 대체 분야 시도 없음 → 폴백으로 완화, 비기술 분야 후보 부족은 열림) · D-11 OAuth 7일 · D-08 내부 문서 공개 · D-15/D-16 Copilot PR 승인·PR 생성 설정(사용자 조치) — 상세는 `docs/DEFECT_REGISTER.md` (D-01 이슈 이미지 흐름은 `issue-edit`로 대체, 관측 대기) |
-| Blogger 워크플로 | 스케줄 실행 이력 없음. 첫 실행은 2026-10-21 02:00 UTC(KST 11시) 예정 |
+| Blogger 워크플로(Actions 이름 `Blogger 글 자동 작성`) | `blogger_macat`은 **정지(mode off)** — 영문 블로그인데 프로필이 한글이라 영문 프로필 준비 전까지(운영자 결정 2026-10-25). 정지 중에도 매일 02:00 UTC 실행은 돌고 대상 0개로 초록 + `::notice::`로 끝난다. 게시 대상인데 게시 Secrets가 없으면 이제 글을 만들기 전에 종료 2(빨강). 재개 절차는 §3 P1 |
 | 비밀 파일 | `client_secret.json`은 저장소에 없음 (`.gitignore`로 차단) |
 | 자동 push 스크립트 | `auto_sync.bat` 제거됨. 같은 동작 재도입 금지 |
 | 오래된 브랜치 | `feature/image-fix-20261019-0000` 병합 금지 (§11) |
@@ -81,7 +81,7 @@
 - **코드는 완료**, **Secrets 등록은 사용자 진행 중**
 - `client_secret.json`은 작업 PC에만 있고 **저장소에는 없다** (공개 저장소 — `.gitignore`로 차단). 다른 PC에서는 Google Cloud에서 다시 받는다 (§10)
 - refresh token **미발급** — `scripts/get_blogger_token.py` 실행 필요 (브라우저 Google 동의가 필요해 사용자가 직접)
-- `blogger.yml` 첫 스케줄 실행은 2026-10-21 02:00 UTC(KST 11시) 예정, 지금까지 실행 이력 없음 → 첫 실행 결과 확인 필요 (Secrets가 없으면 생성·초안 저장만 하고 게시는 건너뜀)
+- `blogger.yml`은 매일 02:00 UTC에 돌지만 지금은 `blogger_macat`이 `mode: off`라 대상 0개로 초록 + `::notice::`로 끝난다(2026-10-25 운영자 결정, §3 P1 재개 절차). 게시 대상(mode auto 또는 publish 켬)인데 Secrets가 없으면 글을 만들기 전에 종료 2(빨강)로 멈추므로 초안만 쌓인 채 초록으로 끝나지 않는다
 - 결제/Cloud 체험이 부담이면 → 초안 수동 게시 또는 이메일 게시 유지 가능
 
 ---
@@ -130,14 +130,16 @@ Secrets (API 선택 시):
 - (기존) `GEMINI_API_KEY`
 
 **현재 상태**: 결정 — **A(풀오토 API 게시)**로 진행. refresh token 미발급. 순서: ① OAuth 동의 화면 "프로덕션" 전환(미전환 시 7일 만료, D-11) → ② token 발급 → ③ Secrets 등록 → ④ 첫 실행 확인. 자세한 절차는 §10 5번.
-스케줄에 따라 매일 02:00 UTC에 `blogger.yml`이 돌아 Secrets가 없으면 초안(`_blogger_drafts/`)만 저장한다. 3일 연속 미게시이면 워치독이 이슈로 알린다.
+`blogger_macat`은 지금 `mode: off`(운영자 결정 2026-10-25: 영문 블로그인데 프로필·프롬프트가 한글이라 영문 프로필이 준비될 때까지 정지)라 매일 02:00 UTC 실행이 대상 0개로 초록 + `::notice::`로 끝난다. 게시 대상인데 게시 Secrets가 없으면 글을 만들기 전에 종료 2로 멈춘다(예전처럼 초안만 쌓이지 않는다).
+
+**재개 절차(Blogger)**: ① 영문 프로필·프롬프트 준비(T3 — 프로필·언어·톤 변경은 운영자 채팅 승인) ② `mode: draft`로 켠다(T3: 게시 모드 변경은 채팅 승인). 정지 중에는 `--dry-run`도 막히므로 시험은 mode를 켠 상태(또는 mode를 바꾼 사본)에서 한다 ③ L2 연습 실행 → L3 초안 1건(`publish` 끔) 확인 ④ 시크릿 등록(§10 5번) → 초안 모드 확인 ⑤ `auto` 전환은 T3. 재개 직후 마지막 활동이 오래돼 워치독 STALE(50시간)이 바로 걸릴 수 있다. `BLOGGER_PUBLISH=off`로 수동 실행해 만든 초안도 같은 날 하루 상한을 쓴다(KST 11시 정기 게시 전에 하면 정기 실행이 `DAILY_CAP`으로 건너뜀) — 시험은 정기 실행 뒤에 하거나 `topic`을 입력한다. 정지된 상태에서 워치독 이슈 #10(UNPUBLISHED)이 닫혀도 문제(시크릿 미등록, 영문 프로필)가 풀린 것은 아니다. 미게시 감시는 `UNPUBLISHED` 대신 빨간 실행(`RUN_FAIL_STREAK`)과 `STALE`에 의존한다.
 
 ### P2 — 이후 구현
 
 - 주제 충돌 방지 (Chance_Blog history ↔ Blogger history)
 - 초안 품질 점검 / 샘플 테스트
 - AdSense 승인 모니터링 (Chance_Blog 최우선 유지)
-- `Blogger 글 자동 작성` 첫 실행 결과 확인 (Actions 탭 → Run workflow, 처음에는 `dry_run`(연습 실행) 체크)
+- `Blogger 글 자동 작성` 첫 실행 결과 확인 (Actions 탭 → Run workflow, 처음에는 `dry_run`(연습 실행) 체크) — 지금은 mode off라 위 재개 절차가 먼저
 - `feature/image-fix-20261019-0000`·`backup/issue-template-$TS` 브랜치를 지울지 결정 (사용자) — §11
 - 풀오토 로드맵(Phase 1~4)과 완료 기준: `docs/ARCHITECTURE.md` §8
 - 결함 D-03(봇 글이 안 나온 원인과 완화)·D-08(내부 문서 공개): `docs/DEFECT_REGISTER.md`
@@ -289,7 +291,7 @@ VS Code:
    1. `client_secret.json`은 저장소에 없다. Google Cloud Console → 사용자 인증 정보에서 **데스크톱 앱 OAuth 클라이언트** JSON을 받아(필요하면 새로 만든다) 저장소 **루트**에 `client_secret.json`으로 저장한다. 절차는 `.github/editorial/BLOGGER_API_SETUP.md`.
    2. `pip install google-auth-oauthlib` 후 `python scripts/get_blogger_token.py`를 실행한다 (브라우저에서 Google 동의).
    3. 출력된 `BLOGGER_CLIENT_ID`·`BLOGGER_CLIENT_SECRET`·`BLOGGER_REFRESH_TOKEN`과 Blogger 설정의 `BLOGGER_BLOG_ID`를 GitHub **Settings → Secrets and variables → Actions**에 등록한다. 값은 채팅·저장소·메일에 남기지 않는다.
-   4. Actions → **Blogger 글 자동 작성** → Run workflow로 첫 실행을 확인한다. 처음에는 `publish`를 체크하지 말고 초안 결과부터 본다.
+   4. Actions → **Blogger 글 자동 작성** → Run workflow로 첫 실행을 확인한다. 처음에는 `publish`를 체크하지 말고 초안 결과부터 본다. 정지(mode off) 중에는 수동 실행도 대상 0개이므로 먼저 mode를 draft로 켠다(T3, 채팅 승인). `publish`를 끄고 만든 초안도 같은 날 하루 상한을 쓴다.
 6. 작업 중에는 `git add`를 파일을 지정해서 하고, push 전에 `git status`로 비밀 파일이 없는지 확인한다. `.gitignore`가 `client_secret*.json`·`token*.json`·`.env*`·키 파일(`*.pem`·`*.key` 등)·서비스 계정 JSON을 막아 준다(이름 규칙이라 `123.txt` 같은 일반 이름은 못 막는다 — CI의 검증기 SEC-2가 사후에 잡는다).
 7. 작업 후: WORKLOG.md 최상단 기록 → 커밋(AI 이름·대상 명시) → `git pull --rebase origin main` → push.
 
