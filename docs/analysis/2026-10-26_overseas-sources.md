@@ -8,7 +8,7 @@
 
 1. 약관이 **상업 이용과 재가공(각색)을 출처 표시·변경 표시 같은 조건으로 허용**한다(CC BY 계열·정부 공개 라이선스). 비상업(NC)·변경 금지(ND)·허가 필요·"광고 옆 링크 금지" 같은 문구가 있으면 뺀다.
 2. robots.txt가 AI 크롤러를 이름으로 막지 않는다(운영자 원칙 2026-10-26 "AI 크롤러를 막는 사이트는 접근하지 않는다").
-3. 영어 피드가 있고 우리 UA(`Mozilla/5.0 (compatible; ChanceBlogBot/2.0)`)로 HTTP 200이며 항목에 요약이 있다(없으면 기사 페이지 소개 문구로 보충 가능).
+3. 영어 피드가 있고 우리 UA(`Mozilla/5.0 (compatible; ChanceBlogBot/2.0)`)로 HTTP 200이며 항목에 요약이 있다(요약이 짧을 때 기사 페이지 소개 문구로 보충하는 경로가 있으나 거의 듣지 않는다 — §5).
 4. 계약·사용료가 필요 없다("무료 자동화 기반").
 5. 채택한 소스에는 **AI 학습·텍스트 마이닝을 금지하는 조항이 없다**(허용한다고 쓴 곳도 없음 — "사용·재가공·상업 이용" 문언으로 판단). 그래도 아래 §5의 주의가 있다.
 
@@ -16,12 +16,12 @@
 
 | 소스 | 분야 | 피드 | 라이선스·조건 | 비고(처리) |
 |------|------|------|----------------|-----------|
-| EU 집행위원회 소식 | 사회·정책 | `https://commission.europa.eu/node/2/rss_en` | **CC BY 4.0** — 법적 고지(`https://commission.europa.eu/legal-notice_en`): "달리 표시하지 않은 한 … 적절한 출처 표시와 변경 사실 표시를 조건으로 재사용 허용". 사람이 나오는 자료·제3자 자료·로고·상표는 제외 | RSS 2.0, 30건(약 5주). 주 8건 안팎이고 30건 중 8건(약 1/4)이 국채 입찰 공지(요약 25~30자)라 제외. 선거·정치광고·`democracy` 분류도 제외(중립). 보도자료(Press Corner)는 자바스크립트 앱이라 RSS 여부와 법적 고지를 확인하지 못했음(Energy 피드 30건 중 9건이 이 호스트 링크 — 연설·성명·공동 선언 제목은 제외). robots.txt는 Drupal 기본(AI 크롤러 이름 없음) |
+| EU 집행위원회 소식 | 사회·정책 | `https://commission.europa.eu/node/2/rss_en` | **CC BY 4.0** — 법적 고지(`https://commission.europa.eu/legal-notice_en`): "달리 표시하지 않은 한 … 적절한 출처 표시와 변경 사실 표시를 조건으로 재사용 허용". 식별 가능한 개인이 나오는 자료·제3자 저작물은 추가 권리 확인이 필요할 수 있고(그래서 글만 쓰고 이미지는 쓰지 않음) 로고·상표는 따로 다룸 | RSS 2.0, 30건(약 5주). 주 8건 안팎이고 30건 중 8건(약 1/4)이 국채 입찰 공지(요약 25~30자)라 제외. 선거·정치광고·`democracy` 분류도 제외(중립). 보도자료(Press Corner, `ec.europa.eu/commission/presscorner/…`)는 자바스크립트 앱이라 RSS 여부를 확인하지 못했고 앱 바닥글에도 법적 고지·라이선스 링크가 없어(2026-10-26 약관 검증) 재사용 조건을 확인하지 못했으므로 **주소로 뺀다**(`exclude_link`; Energy 피드 30건 중 9건이 이 호스트 링크). 연설·성명·공동 선언 제목은 집행위원회 소스 전부에서 뺀다. robots.txt는 Drupal 기본(AI 크롤러 이름 없음) |
 | 집행위원회 DG Energy | 경제·일 | `https://energy.ec.europa.eu/node/2/rss_en` | 같은 고지(바닥글이 연결) | 최근 7일 11건은 요약이 모두 100자 이상(30건 전체로는 2건이 93·97자). 링크 호스트가 energy.·ec.(보도자료·Eurostat 소식)·finance.·cinea.·eu-mayors.이고 **EIB·ACER 기사도 섞임**(집행위원회 자료가 아님 → 신뢰 목록 밖이라 탈락). Eurostat 소식은 Eurostat 자체 고지(출처 표기·면책 문구)가 따로 있어 제외 |
 | 집행위원회 DG Environment | 과학·환경 | `https://environment.ec.europa.eu/node/92/rss_en` (`/node/2/rss_en`은 404) | 같은 고지 | 주 6건. Eurostat 소식(예: 포장재 쓰레기 통계) 제외 |
-| 집행위원회 JRC(공동연구센터) | 과학·환경 | `https://joint-research-centre.ec.europa.eu/node/2/rss_en` | 같은 고지 | 주 2~3건, 요약의 약 1/3(30건 중 10건)이 100자 미만이라 기사 페이지 소개 문구로 보충. 국방·안보 분류 글 제외 |
+| 집행위원회 JRC(공동연구센터) | 과학·환경 | `https://joint-research-centre.ec.europa.eu/node/2/rss_en` | 같은 고지 | 주 2~3건, 요약의 약 1/3(30건 중 10건)이 100자 미만이라 `SHORT_SUMMARY`로 버려질 수 있음(기사 페이지 소개 문구가 피드 요약과 같아 보충이 거의 듣지 않음 — §5). 국방·안보 분류 글 제외 |
 | EU 디지털 전략(AI Act·디지털서비스법) | 기술·미래 | `https://digital-strategy.ec.europa.eu/en/rss.xml` | CC BY 4.0 — 이 사이트의 법적 고지(`…/en/pages/legal-notice`)가 출처 표시를 "작품 제목·유럽연합 귀속·원문 주소"로 안내 | 10건(약 5주), 주 2건. 요약 앞에 "Anonymous (not verified) 날짜" 잡음. robots.txt가 `/*?`·`/node/*`·`/taxonomy/*`를 막지만 `/en/rss.xml`·`/en/news/<슬러그>`는 허용 |
-| 캐나다 통계청 The Daily | 경제·일 / 사회·정책 / 일상·마음(소스 3개) | `https://www150.statcan.gc.ca/n1/rss/dai-quo/0-eng.atom` | **Statistics Canada Open Licence**(`…/en/terms-conditions/open-licence`): "sell" 포함 상업 이용과 재가공물(Value-added Products) 허용. 조건: 재가공물에 `Adapted from Statistics Canada, <상품명>, <기준일>. This does not constitute an endorsement by Statistics Canada of this product.`, 정보를 **정확히** 옮길 것, 보증 암시·오도 금지, 통계청 이름·로고·문장·기타 상징·도메인 이름과 캐나다 정부 공식 상징(Canada wordmark·국기 등)을 출처 표기 밖에서 서면 허가 없이 쓰지 말 것("Advertising and Publicity") | Atom 280건(100일), 평일 12:30 UTC에 4~6건. 피드 호스트(`www150.`)와 기사 호스트(`www.statcan.gc.ca`)가 다름. 제목·요약이 `type="xhtml"`이라 글자가 자식 요소 안에 있음(`parse_feed`가 읽도록 고침). 요약 100자 미만 약 21%. robots.txt: 피드 허용, Crawl-delay 2, AI 크롤러 이름 없음. 기술 공지·부문 물가지수·공급 처리표와 자살·약물 과다복용·성폭력·살인 주제는 제외 |
+| 캐나다 통계청 The Daily | 경제·일 / 사회·정책 / 일상·마음(소스 3개) | `https://www150.statcan.gc.ca/n1/rss/dai-quo/0-eng.atom` | **Statistics Canada Open Licence**(`…/en/terms-conditions/open-licence`): "sell" 포함 상업 이용과 재가공물(Value-added Products) 허용. 조건: 재가공물에 `Adapted from Statistics Canada, <상품명>, <기준일>. This does not constitute an endorsement by Statistics Canada of this product.`, 정보를 **정확히** 옮길 것, 보증 암시·오도 금지, 통계청 이름·로고·문장·기타 상징·도메인 이름과 캐나다 정부 공식 상징(Canada wordmark·국기 등)을 서면 허가 없이 쓰지 말 것("Advertising and Publicity" — 약관에 출처 표기 예외 문구는 없다. 필수 출처 문구가 통계청 이름을 쓰게 하므로 **이름은 출처 표기에서만 쓰고 글 본문·링크 글자에는 쓰지 않는다는 것은 이 PR의 해석**) | Atom 280건(100일), 평일 12:30 UTC에 4~6건. 피드 호스트(`www150.`)와 기사 호스트(`www.statcan.gc.ca`)가 다름. 제목·요약이 `type="xhtml"`이라 글자가 자식 요소 안에 있음(`parse_feed`가 읽도록 고침). 요약 100자 미만 약 21%. robots.txt: 피드 허용, Crawl-delay 2, AI 크롤러 이름 없음. 기술 공지·부문 물가지수·공급 처리표와 자살·약물 과다복용·성폭력·살인 주제는 제외 |
 
 글 끝에는 소스마다 코드가 **인용 줄과 고지문**을 붙입니다(집행위원회 계열은 "제목·기관·날짜·원문 주소·© European Union·CC BY 4.0 링크"와 "AI 작성·원문에서 바뀐 부분 있음·집행위원회가 검토·보증하지 않음", 통계청은 약관의 `Adapted from …` 문구). 통계청 글은 인용 줄에 통계청 주소를 쓰지 않고, 본문의 원문 링크(엔진이 반드시 요구해 주소에 `statcan.gc.ca`가 들어감)는 글자를 설명 문구로 쓰고 주소를 글자로 보이지 않게 하라는 작성 지침과 수치를 그대로 쓰라는 지침을 더했습니다. 기사 페이지를 연달아 읽을 때는 사이트의 Crawl-delay(2초)만큼 기다립니다.
 
@@ -64,9 +64,9 @@
 - 기사 페이지 소개 문구로 짧은 요약을 보충하는 경로(`_fetch_source_excerpt`)는 **거의 효과가 없습니다**: 코드 검증이 JRC 2건(피드 67·77자)과 통계청 1건(79자)에서 확인했는데 페이지의 meta description이 피드 요약과 똑같아 여전히 100자 미만(`SHORT_SUMMARY`)으로 버려졌습니다(JRC 약 1/3, 통계청 약 21%가 영향). 그래도 요청은 소스당 실행당 최대 5회 소비합니다.
 - 통계청 월별 반복 발표(Retail trade·소비자물가·고용 등)는 제목이 이전 달 글과 매우 비슷해(유사도 0.82~0.95, 임계 0.6) **중복(`DUPLICATE`)으로 막힐 수 있어** 통계청 경제 소스가 실제로 내는 새 글감은 주 1건 남짓으로 보는 것이 맞습니다(100일 모의: 주제어 통과 63건 중 새로 쓸 수 있는 것 19건).
 - 집행위원회 피드의 `pubDate`는 최종 수정 시각일 수 있어 링크의 날짜와 2일 이상 차이나는 항목이 101건 중 19건(최대 34일)입니다. 72시간 신선도 판정과 인용 줄의 날짜가 실제 첫 발행일과 다를 수 있습니다.
-- `ec.europa.eu`를 과학·경제·사회·기술에서 통째로 신뢰하는 것은, 바닥글이 같은 법적 고지로 연결됨을 직접 확인한 하위 사이트(energy·environment·joint-research-centre·cinea·finance·eu-mayors)와 보도자료 경로가 대부분이기 때문입니다. 확인하지 못한 하위 사이트(예: `research-and-innovation`, Press Corner의 법적 고지)와 Horizon 매거진은 제목·링크 제외 규칙으로 줄였지만, 새 하위 사이트 항목이 피드에 섞이면 같은 신뢰로 통과할 수 있어 병합 뒤 첫 글들을 눈으로 봅니다.
+- `ec.europa.eu`를 과학·경제·사회·기술에서 통째로 신뢰하는 것은, 바닥글이 같은 법적 고지로 연결됨을 직접 확인한 하위 사이트(energy·environment·joint-research-centre·cinea·finance·eu-mayors·research-and-innovation)가 대부분이기 때문입니다. 법적 고지를 확인하지 못한 Press Corner 보도자료(`/commission/presscorner/`)와 Horizon 매거진은 주소로 뺐습니다(`_EC_EXCLUDE_LINK`). 그 밖에 확인하지 못한 하위 사이트 항목이 피드에 섞이면 같은 신뢰로 통과할 수 있어 병합 뒤 첫 글들을 눈으로 봅니다.
 - **집행위원회 재사용 결정**(Commission Decision 2011/833/EU)의 본문은 EUR-Lex가 자동 접속을 막아(AWS 챌린지) 읽지 못했습니다. 법적 고지가 이 결정을 근거로 든다고 하므로 "원래 의미를 왜곡하지 말 것" 같은 조건이 더 붙을 수 있어 작성 지침에 "원문의 의미를 왜곡하지 말 것"을 넣었습니다. 사람이 브라우저로 읽어 확인하는 것이 안전합니다.
-- 인용 줄의 날짜는 피드의 게시·갱신 시각이라 원문 페이지 날짜와 하루쯤 다를 수 있고, 저작권 표시 `© European Union`에는 피드·사이트가 쓰는 연도 범위(1995-2026)를 붙이지 않았습니다(경미).
+- 인용 줄의 날짜는 피드의 게시·갱신 시각이라 원문 페이지 날짜와 다를 수 있고(바로 앞 항목: 최대 34일), 저작권 표시 `© European Union`에는 피드·사이트가 쓰는 연도 범위(1995-2026)와 집행위원회 법적 고지 링크를 붙이지 않았습니다(경미, 선택 사항으로 남김).
 - 엔진은 요청 사이에 기다리지 않습니다. 통계청만 `page_delay`(2초)로 기사 페이지를 연달아 읽을 때 Crawl-delay를 지키고, 분야 대체 때 같은 통계청 피드(204KB)를 최대 3번 받을 수 있습니다(하루 두 번 실행).
 - AI 학습·텍스트 마이닝 신호(`/.well-known/tdmrep.json`, 페이지 `tdm-reservation` 메타)는 요청하지 않았습니다(저장된 응답 헤더·HTML에서는 `Content-Signal`·`X-Robots-Tag`·`noai`가 보이지 않음).
 - 조사 노트 원문(약관 인용·요청 기록)은 작업 세션의 임시 폴더에 있었고 이 문서가 그 요약입니다. 채택 소스는 `NEWS_SOURCES`의 `terms.url`에서 근거 쪽을 다시 열 수 있습니다.

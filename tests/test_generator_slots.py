@@ -1728,10 +1728,12 @@ class SourceRuleSamplesTest(unittest.TestCase):
     def test_the_eurostat_and_statement_items_in_the_dg_feeds_are_skipped_and_the_rest_kept(self):
         eurostat = "https://ec.europa.eu/eurostat/web/products-eurostat-news/w/ddn-20261020-1"
         presscorner = "https://ec.europa.eu/commission/presscorner/detail/en/ip_26_1234"
-        # Eurostat 소식은 Eurostat 자체 고지(출처 표기·면책 문구)가 따로 있어 쓰지 않는다. 프레스 코너(집행위원회 자료)는 쓴다.
+        energy_news = "https://energy.ec.europa.eu/news/commission-invests-eu34-billion-net-zero-technology-projects-2026-10-20_en"
+        # Eurostat 소식은 Eurostat 자체 고지(출처 표기·면책 문구)가 따로 있어 쓰지 않는다. 프레스 코너 보도자료는 재사용 조건(법적 고지)을 확인하지 못해 쓰지 않는다(아래 전용 시험).
         for name in ("European Commission · Energy", "European Commission · Environment"):
             self.assertFalse(self.kept(name, "Eurostat: EU trade in wind turbines increased in 2025", link=eurostat), name)
-            self.assertTrue(self.kept(name, "Commission invests €3.4 billion in net-zero technology projects", link=presscorner), name)
+            self.assertFalse(self.kept(name, "Commission invests €3.4 billion in net-zero technology projects", link=presscorner), name)
+            self.assertTrue(self.kept(name, "Commission invests €3.4 billion in net-zero technology projects", link=energy_news), name)
         energy = "European Commission · Energy"
         self.assertFalse(self.kept(energy, "Statement by President von der Leyen at the joint press conference with President Costa", link=presscorner))
         self.assertFalse(self.kept(energy, "Cross-border gas network code – Commission launches call for feedback on revision of rules"))
@@ -1777,6 +1779,31 @@ class SourceRuleSamplesTest(unittest.TestCase):
                       "Energy statistics: renewables share reaches a record"):
             self.assertTrue(self.kept(energy, title), title)
 
+    def test_press_corner_items_are_not_used_until_their_reuse_terms_are_confirmed(self):
+        # 보도자료(Press Corner, ec.europa.eu/commission/presscorner)는 앱 바닥글에 법적 고지·라이선스 링크가 없어 재사용 조건을 확인하지 못했다(2026-10-26 약관 검증).
+        # 불명확은 유예한다(운영자 원칙). 같은 호스트의 다른 집행위원회 기사는 그대로 쓴다.
+        self.assertIn("/commission/presscorner/", g._EC_EXCLUDE_LINK)
+        presscorner = "https://ec.europa.eu/commission/presscorner/detail/en/ip_26_1234"
+        other = "https://ec.europa.eu/info/news/commission-launches-new-energy-tool-2026-10-20_en"
+        for name in ("European Commission", "European Commission · Energy", "European Commission · Environment",
+                     "European Commission · JRC", "EU Digital Strategy"):
+            with self.subTest(source=name):
+                self.assertFalse(self.kept(name, "Commission launches a new tool for households", link=presscorner), name)
+                self.assertTrue(self.kept(name, "Commission launches a new tool for households", link=other), name)
+
+    def test_every_commission_source_skips_speeches_statements_and_declarations(self):
+        link = "https://energy.ec.europa.eu/news/x_en"
+        for name in ("European Commission", "European Commission · Energy", "European Commission · Environment",
+                     "European Commission · JRC", "EU Digital Strategy"):
+            with self.subTest(source=name):
+                for title in ("Statement by President von der Leyen on energy security", "Joint statement on the energy transition",
+                              "Speech by Commissioner Jørgensen at the Energy Forum", "Opening remarks by the Commissioner on gas storage",
+                              "Berlin Declaration on affordable energy", "G7 Leaders’ Statement on the energy transition",
+                              "Joint press conference by the Commissioner and the Minister"):
+                    self.assertFalse(self.kept(name, title, link=link), (name, title))
+                for title in ("Energy statistics: renewables share reaches a record", "Commission publishes its annual report on the state of the energy union"):
+                    self.assertTrue(self.kept(name, title, link=link), (name, title))
+
     def test_every_commission_source_keeps_its_display_name_and_the_eurostat_rule(self):
         by_name = {s["name"]: s for s in g.NEWS_SOURCES}
         expected = {"European Commission": None, "European Commission · Energy": "European Commission (DG Energy)",
@@ -1808,12 +1835,29 @@ class SourceRuleSamplesTest(unittest.TestCase):
         for name in ("European Commission · Energy", "European Commission"):
             for title in ("Commissioner Jørgensen in Hungary to address high energy prices, energy security and housing",
                           "Commissioner Jørgensen in Slovakia to discuss energy prices and security with Visegrad Energy Ministers",
-                          "Commissioner Kos visits Kyiv", "Turning 18? Apply for a DiscoverEU pass"):
+                          "Commissioner Kos visits Kyiv", "Turning 18? Apply for a DiscoverEU pass",
+                          # 이름이 두 단어인 위원, 부위원장·집행부위원장(2026-10-26 코드 검증이 과소 일치로 지적)
+                          "Commissioner Dan Jørgensen visits Kyiv", "Executive Vice-President Ribera visits Warsaw to discuss the clean industrial deal",
+                          "Vice-President Šefčovič in Washington for trade talks"):
                 self.assertFalse(self.kept(name, title), (name, title))
         energy = "European Commission · Energy"
         self.assertFalse(self.kept(energy, "Opening remarks by Commissioner Jørgensen at the press conference"))
         for title in ("Oil Coordination Group discusses EU fuel market developments", "The Commissioner’s energy price package explained"):
             self.assertTrue(self.kept(energy, title), title)
+
+    def test_policy_news_that_merely_contains_apply_or_declaration_is_kept_and_promotions_and_joint_texts_are_dropped(self):
+        # 제목 가운데의 "must apply for", 문서 이름인 "Declaration of conformity" 는 정책 기사라 살리고, 신청 홍보·공동 선언·공동 성명·연설(복수형)은 뺀다(코드 검증 과잉·과소 탐침).
+        for name in ("European Commission", "European Commission · Energy", "European Commission · Environment"):
+            for title in ("Importers must apply for authorisation by 2027 under the new rules", "Declaration of conformity rules for batteries simplified"):
+                self.assertTrue(self.kept(name, title), (name, title))
+        for name in ("European Commission", "European Commission · Energy", "European Commission · Environment",
+                     "European Commission · JRC", "EU Digital Strategy"):
+            for title in ("EU-Japan Joint Declaration on clean energy", "G7 Leaders’ Joint Statement on the energy transition",
+                          "Speeches by the Commissioner at the forum"):
+                self.assertFalse(self.kept(name, title), (name, title))
+        environment = "European Commission · Environment"
+        self.assertFalse(self.kept(environment, "Apply for a LIFE grant today"))              # 제목 앞의 '신청 안내' 홍보
+        self.assertFalse(self.kept(environment, "Apply now: LIFE programme call for applications"))
 
     def test_atom_and_rss_nested_elements_are_not_taken_for_summaries_unless_they_are_xhtml(self):
         rss = ("<rss xmlns:media='http://search.yahoo.com/mrss/'><channel><item><title>제목 하나</title>"
@@ -1877,12 +1921,20 @@ class SourceRuleSamplesTest(unittest.TestCase):
                      "Suicide mortality in Canada, 2023", "Homicide in Canada, 2025", "Drug overdose deaths and hospitalizations, 2025",
                      "Police-reported violence among gender-related homicide victims in Canada, 2025",   # 2026-10-26 실제 피드 222번째 — 'police'(사회 주제어)에 걸려 제외어가 없으면 통과했다
                      "Self-harm among youth in Canada, 2024", "Family violence in Canada, 2025", "Intimate partner violence, 2025",
-                     "Child abuse and maltreatment statistics, 2025")
+                     "Child abuse and maltreatment statistics, 2025",
+                     # 제외어를 하나씩 지워도 시험이 실패하게 낱말마다 단독 제목을 둔다(코드 검증의 생존 변이 9개)
+                     "Domestic violence in Canada, 2025", "Gender-based violence among youth, 2025", "Child maltreatment in Canada, 2024",
+                     "Opioid-related harms, 2025", "Stimulant use patterns, 2025", "Sexual assault in Canada, 2024",
+                     "Violent victimization in Canada, 2024")
+        harmless = ("Violent crime severity index, 2025", "Family income and household wealth, 2025", "Child care costs, 2025",
+                    "Domestic travel by Canadians, 2025", "Drinking and driving trends, 2025")
         for name in (economy, society, life):
             src = next(s for s in g.NEWS_SOURCES if s["name"] == name)
             for title in sensitive:
                 # 주제어 불일치(OFF_TOPIC)가 아니라 제외 규칙(EXCLUDED)이 직접 걸러야 한다 — 제외어를 지워도 시험이 실패하게
                 self.assertTrue(g._rule_excludes(src, title, {"link": "", "categories": []}), (name, title))
+            for title in harmless:
+                self.assertFalse(g._rule_excludes(src, title, {"link": "", "categories": []}), (name, title))   # 같은 낱말이 든 평범한 제목은 살린다
         # 분야가 다른 제목은 이 분야 주제어에 맞지 않아 떨어진다(OFF_TOPIC)
         self.assertFalse(self.kept(society, "Retail trade, August 2026"))
         self.assertFalse(self.kept(life, "Consumer Price Index, September 2026"))

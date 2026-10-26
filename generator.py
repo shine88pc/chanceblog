@@ -737,9 +737,17 @@ _EC_NOTICE = {
 HEALTH_RULE = "건강·의료 정보는 정책과 통계 사실만 전하고 진단·치료·복용·예방 효과를 조언하지 마세요."
 _EC_PROMPT_RULE = ("집행위원회의 제안·협의·계획과 이미 확정된 법·결정을 구분하세요. 요약에 없는 시행 시기·금액·법적 효력은 쓰지 마세요. "
                    "원문의 의미를 왜곡하지 말고, 집행위원회가 이 글을 검토하거나 보증한 것처럼 쓰지 마세요. " + HEALTH_RULE)
-# 집행위원회 피드에서 뺄 기사 주소: Eurostat 소식(Eurostat 자체 고지가 따로 있음)과 Horizon 매거진 기사(2026-10-26 검증이 DG Environment 피드에 섞여 드는 것을 찾음).
+# 집행위원회 피드에서 뺄 기사 주소: Eurostat 소식(Eurostat 자체 고지가 따로 있음), Horizon 매거진 기사(2026-10-26 검증이 DG Environment 피드에 섞여 드는 것을 찾음),
+# Press Corner 보도자료(ec.europa.eu/commission/presscorner — 앱 바닥글에 법적 고지·라이선스 링크가 없어 재사용 조건을 확인하지 못했다. 불명확은 유예한다).
 # Horizon 은 재게시에 원 기자 이름·원문 링크·바닥글 문구를 요구하는데 피드의 기자 이름(dc:creator)을 아직 읽지 않아 지킬 수 없다.
-_EC_EXCLUDE_LINK = r"/eurostat/|/horizon-magazine/"
+_EC_EXCLUDE_LINK = r"/eurostat/|/horizon-magazine/|/commission/presscorner/"
+# 연설·성명·공동 선언·기자회견 발언은 글감이 못 된다(집행위원회 소스 전부).
+_EC_EXCLUDE_STATEMENTS = (r"^(?:joint )?statements?\b|^speech(?:es)?\b|\b(?:opening |closing )?remarks\b|\bleaders[’']? (?:joint )?statement\b"
+                          r"|\bjoint declaration\b|\bdeclaration (?:on|by|from)\b|\bjoint press conference\b")
+# 위원·부위원장 방문 예고("Commissioner Jørgensen in Hungary to …", "Executive Vice-President Ribera visits …")와 홍보성 신청 안내("Apply now…", "Turning 18? Apply for …")도 글감이 못 된다.
+# 제목 가운데의 "must apply for authorisation" 같은 정책 기사는 살린다.
+_EC_EXCLUDE_VISITS = r"^(?:(?:executive )?vice-president|commissioner) [\w’'-]+(?: [\w’'-]+)? (?:in|visits?|meets?|travels?|to (?:visit|meet|address))\b"
+_EC_EXCLUDE_APPLY = r"\bapply now\b|(?:^|[?:!.] )apply for\b"
 
 
 def _ec_citation(creator):
@@ -749,7 +757,8 @@ def _ec_citation(creator):
 
 # Statistics Canada Open Licence(https://www.statcan.gc.ca/en/terms-conditions/open-licence): 상업 이용·재가공(Value-added Products)을 허용하고,
 # 재가공물에는 "Adapted from Statistics Canada, <상품명>, <기준일>. This does not constitute an endorsement by Statistics Canada of this product."(코드는 상품명 자리에 피드 제목을, 기준일 자리에 발표일을 채운다)
-# 문구를 넣으라고 한다. 정보를 정확히 옮기고(reproduce accurately) 통계청이 보증하는 것처럼 보이게 하지 말며 통계청 이름·로고·문장(紋章)·기타 상징·도메인 이름을 출처 표기 밖에서 쓰지 말라는 조건("Advertising and Publicity")이 있다.
+# 문구를 넣으라고 한다. 정보를 정확히 옮기고(reproduce accurately) 통계청이 보증하는 것처럼 보이게 하지 말며 통계청 이름·로고·문장(紋章)·기타 상징·도메인 이름을 서면 허가 없이 쓰지 말라는 조건("Advertising and Publicity")이 있다.
+# 약관에 출처 표기 예외 문구는 없다 — 필수 출처 문구가 통계청 이름을 쓰게 하므로 이름은 출처 표기에서만 쓰고 글 본문·링크 글자에는 쓰지 않는다는 것은 이 코드의 해석이다(2026-10-26 약관 검증 지적).
 # 피드 하나(The Daily 전체 주제)를 분야별 주제어로 나눠 세 소스로 읽는다. 항목 제목이 Atom type="xhtml"이라 parse_feed 가 자식 요소까지 읽는다.
 _STATCAN_FEED = "https://www150.statcan.gc.ca/n1/rss/dai-quo/0-eng.atom"
 _STATCAN_TERMS = {"status": "allowed", "checked": "2026-10-26", "url": "https://www.statcan.gc.ca/en/terms-conditions/open-licence"}
@@ -761,7 +770,7 @@ _STATCAN_PROMPT_RULE = ("통계청 발표 요약의 수치·단위·기준 시�
                         "통계청이 이 글을 보증하는 것처럼 쓰지 마세요. 원문 링크의 글자는 '통계청 발표'처럼 설명 문구로 쓰고 주소(statcan.gc.ca)를 글자로 보이게 쓰지 마세요. " + HEALTH_RULE)
 # 통계청 사이트 robots.txt 의 Crawl-delay: 2 를 지켜, 기사 페이지를 연달아 읽을 때 사이에 이만큼(초) 기다린다.
 _STATCAN_PAGE_DELAY = 2
-# 글감이 못 되는 발표(통계 상품 안내·부문별 물가지수·공급 처리표·원자료 모음)와, 자동으로 다시 쓰기에는 민감한 주제(자살·약물 과다복용·마약성 진통제·성폭력·살인)는 쓰지 않는다.
+# 글감이 못 되는 발표(통계 상품 안내·부문별 물가지수·공급 처리표·원자료 모음)와, 자동으로 다시 쓰기에는 민감한 주제(자살·약물 과다복용·마약성 진통제·성폭력·살인·가정·친밀한 관계·성별 기반 폭력·아동 학대)는 쓰지 않는다.
 # 소비자물가지수·신규주택가격지수는 글감이라 살린다.
 _STATCAN_EXCLUDE = (
     r"(?<!consumer )(?<!housing )\bprice index(?:es)?\b|\bsupply and disposition\b|\bproduction survey\b|\bdata availability\b|\bannouncement\b"
@@ -843,8 +852,8 @@ NEWS_SOURCES = [
     # 유럽연합 집행위원회 소식: 약 1/4(30건 중 8건)이 국채 입찰 결과·신청 안내라 제외하고, 선거·정치광고·민주주의 방패 글은 중립을 위해 쓰지 않는다(Pew와 같은 원칙).
     {"name": "European Commission", "lane": "society", "url": "https://commission.europa.eu/node/2/rss_en",
      "terms": _EC_TERMS,
-     "exclude_title": r"\bauctions?\b|\bEU-(?:Bills?|Bonds?)\b|\bapply (?:now|for)\b|\bcall for (?:applications|tenders|proposals|experts)\b|\bwebinar\b"
-                      r"|^commissioner [\w’'-]+ (?:in|visits?|meets?|travels?|to (?:visit|meet|address))\b"
+     "exclude_title": _EC_EXCLUDE_STATEMENTS + "|" + _EC_EXCLUDE_VISITS + "|" + _EC_EXCLUDE_APPLY
+                      + r"|\bauctions?\b|\bEU-(?:Bills?|Bonds?)\b|\bcall for (?:applications|tenders|proposals|experts)\b|\bwebinar\b"
                       r"|\belections?\b|\bpolitical (?:ads?|advertising|parties)\b",
      "exclude_link": _EC_EXCLUDE_LINK,
      "exclude_tags": r"^democracy$|\belections?\b",
@@ -854,21 +863,21 @@ NEWS_SOURCES = [
      "url": "https://energy.ec.europa.eu/node/2/rss_en",
      "terms": _EC_TERMS,
      # 연설·성명·공동 선언은 글감이 못 된다(Press Corner 항목은 제3자와 함께 낸 문서일 수 있고 Press Corner 의 법적 고지는 확인하지 못했다).
-     "exclude_title": r"^(?:joint )?statements?\b|^speech\b|\b(?:opening |closing )?remarks\b|\bleaders[’']? statement\b|\bdeclaration\b|\bjoint press conference\b"
-                      r"|^commissioner [\w’'-]+ (?:in|visits?|meets?|travels?|to (?:visit|meet|address))\b"
-                      r"|\bapply (?:now|for)\b|\bcall for (?:feedback|evidence|applications|tenders|proposals)\b|\bwebinar\b",
+     "exclude_title": _EC_EXCLUDE_STATEMENTS + "|" + _EC_EXCLUDE_VISITS + "|" + _EC_EXCLUDE_APPLY
+                      + r"|\bcall for (?:feedback|evidence|applications|tenders|proposals)\b|\bwebinar\b",
      "exclude_link": _EC_EXCLUDE_LINK,
      "citation": _ec_citation("European Commission, DG Energy"), "notice": _EC_NOTICE, "prompt_rule": _EC_PROMPT_RULE},
     {"name": "European Commission · Environment", "display_name": "European Commission (DG Environment)", "lane": "science",
      "url": "https://environment.ec.europa.eu/node/92/rss_en",
      "terms": _EC_TERMS,
-     "exclude_title": r"\bapply (?:now|for)\b|\bcall for (?:applications|tenders|proposals)\b|\bwebinar\b",
+     "exclude_title": _EC_EXCLUDE_STATEMENTS + "|" + _EC_EXCLUDE_APPLY + r"|\bcall for (?:applications|tenders|proposals)\b|\bwebinar\b",
      "exclude_link": _EC_EXCLUDE_LINK,
      "citation": _ec_citation("European Commission, DG Environment"), "notice": _EC_NOTICE, "prompt_rule": _EC_PROMPT_RULE},
     # JRC: 요약이 짧은 항목은 기사 페이지의 소개 문구를 읽는다. 국방·안보 분류 글은 쓰지 않는다.
     {"name": "European Commission · JRC", "display_name": "European Commission, Joint Research Centre", "lane": "science",
      "url": "https://joint-research-centre.ec.europa.eu/node/2/rss_en",
      "terms": _EC_TERMS,
+     "exclude_title": _EC_EXCLUDE_STATEMENTS,
      "exclude_link": _EC_EXCLUDE_LINK,
      "exclude_tags": r"defen[cs]e|^security and law enforcement$",
      "citation": _ec_citation("European Commission, Joint Research Centre (JRC)"), "notice": _EC_NOTICE, "prompt_rule": _EC_PROMPT_RULE},
@@ -877,7 +886,7 @@ NEWS_SOURCES = [
     {"name": "EU Digital Strategy", "display_name": "European Commission (Digital Strategy)", "lane": "technology",
      "url": "https://digital-strategy.ec.europa.eu/en/rss.xml",
      "terms": {"status": "allowed", "checked": "2026-10-26", "url": "https://digital-strategy.ec.europa.eu/en/pages/legal-notice"},
-     "exclude_title": r"\bcall for (?:tenders|applications|proposals|experts)\b",
+     "exclude_title": _EC_EXCLUDE_STATEMENTS + r"|\bcall for (?:tenders|applications|proposals|experts)\b",
      "exclude_link": _EC_EXCLUDE_LINK,
      "citation": _ec_citation("European Union (European Commission, DG CNECT)"), "notice": _EC_NOTICE,
      "prompt_rule": _EC_PROMPT_RULE + " 요약 앞머리의 'Anonymous (not verified)'와 날짜는 사이트가 붙인 잡음이니 글에 쓰지 마세요."},
