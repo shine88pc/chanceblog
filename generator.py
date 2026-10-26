@@ -96,9 +96,10 @@ TECH_KO = (
     "디스플레이", "통신", "네트워크", "플랫폼", "컴퓨터", "서버", "센서", "드론",
     "자율주행", "핵융합", "과학", "기술", "칩", "챗gpt", "오픈ai",
 )
+# 영문 낱말 경계는 ASCII 글자·숫자 기준이다. 파이썬의 \b 는 한글도 낱말 글자로 봐서 'AI가'·'생성AI' 처럼 한글이 붙은 말을 놓친다(Dubai·Chipotle 처럼 영문 속에 든 것만 거른다).
 TECH_EN = re.compile(
-    r"\b(ai|gpu|cpu|llm|chatgpt|openai|nvidia|5g|6g|chip|robot|quantum|"
-    r"software|cloud|startup|cyber|satellite|rocket)\b", re.I)
+    r"(?<![A-Za-z0-9])(ai|gpu|cpu|llm|chatgpt|openai|nvidia|5g|6g|chip|robot|quantum|"
+    r"software|cloud|startup|cyber|satellite|rocket)(?![A-Za-z0-9])", re.I)
 
 _client = None
 _download_locations = {}
@@ -776,7 +777,7 @@ NEWS_SOURCES = [
     {"name": "IEEE Spectrum", "lane": "technology", "url": "https://spectrum.ieee.org/feeds/feed.rss",
      "terms": {"status": "unverified", "note": "검증 세션 보고(일부, 직접 재확인 못 함): IEEE 사이트 이용약관은 복제에 사전 서면 동의를 요구하고 개인·정보 목적 이용만 허용, robots.txt 는 GPTBot·ClaudeBot·anthropic-ai·CCBot·PerplexityBot 등 13개 AI 크롤러를 막는다(검증 세션이 읽음, Claude-Web 만 허용). Spectrum 자체 RSS 약관은 못 찾음"}},
     {"name": "전자신문", "lane": "technology", "url": "https://rss.etnews.com/Section901.xml",
-     "tech_filter": True,  # 이 피드는 건강·여행·증시 같은 일반 뉴스가 섞여 있어(2026-10-26 30건 중 기술 12건) 기술 키워드가 든 제목만 기술·미래 글감으로 쓴다
+     "tech_filter": True,  # 이 피드는 건강·여행·증시 같은 일반 뉴스가 섞여 있어(2026-10-26 30건 중 기술 12~13건) 기술 키워드가 든 제목만 기술·미래 글감으로 쓴다
      "terms": {"status": "unverified", "note": "2026-10-26 이용약관(2012.09.01 표기)을 읽었다: 제공 정보의 영리 목적 이용 금지(회원 대상)·복제·전송·배포는 사전 승낙 필요, RSS·AI 이용 조항은 없어 불명확. 이 피드에는 해외 매체를 다시 쓴 기사도 섞여 권리가 한 겹 더 있다"}},
     # 블로터(https://www.bloter.net/feed)는 HTTP 404라 2026-10-25에 뺐다(실행 로그 '수집 실패', 로컬에서도 404/403).
     # 구글 뉴스 검색 소스 14개는 통과율이 0.4%(게시자 원문 주소로 풀리지 않음)라 2026-10-26에 뺐다.
@@ -848,7 +849,9 @@ def _host(url):
         return ""
 
 
-_SAFE_URL = re.compile(r"https?://[^\s<>\"'\\]+")  # fullmatch 로 쓴다: `$` 는 끝의 줄바꿈 앞에서도 맞아 Atom href 의 끝 줄바꿈이 통과한다
+# 기사 주소는 글의 출처 목록·인용 줄에 마크다운 링크 `[글](주소)` 로 들어간다. 공백·꺾쇠·따옴표·역슬래시와 괄호·대괄호는 링크를 끊거나 새 링크·HTML 을 만들 수 있어 막는다.
+# fullmatch 로 쓴다: `$` 는 끝의 줄바꿈 앞에서도 맞아 Atom href 의 끝 줄바꿈이 통과한다. 실제 피드 링크 335개(16개 피드)에는 이 글자가 하나도 없었다(2026-10-26).
+_SAFE_URL = re.compile(r"https?://[^\s<>\"'\\()\[\]]+")
 
 
 def _host_in(host, domains):
@@ -1014,7 +1017,7 @@ def fetch_news_items(editorial_lane=None, stats=None, deadline=None, clock=time.
             article_url = _resolve_article_url(it["link"]) if src.get("google") else it["link"]
             resolved_count += 1
             publisher_host = publisher_host or _host(article_url)
-            if not article_url or not _SAFE_URL.fullmatch(article_url):  # 줄바꿈·꺾쇠·따옴표가 든 주소는 글에 그대로 들어가면 마크다운·HTML 이 된다
+            if not article_url or not _SAFE_URL.fullmatch(article_url):  # 줄바꿈·꺾쇠·따옴표·괄호가 든 주소는 글에 그대로 들어가면 마크다운·HTML 이 된다
                 _count(drops, "UNRESOLVED")
                 continue
             if not _trusted_domain(publisher_host, editorial_lane):

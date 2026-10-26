@@ -478,6 +478,31 @@ class FetchNewsStatsTest(unittest.TestCase):
         self.assertEqual(merged[0]["link"], "https://www.reuters.com/ok?x=1&y=2#frag")
         self.assertEqual(stats["sources"][0]["drops"], {"UNRESOLVED": 2})
 
+    def test_every_unsafe_character_and_scheme_in_a_link_is_dropped_as_unresolved(self):
+        # 링크는 글의 출처 목록·인용 줄에 그대로 들어간다. 마크다운·HTML 을 만들 수 있는 글자와 http(s) 아닌 주소는 하나씩 걸러야 한다.
+        summary = "요약 문장입니다. " * 20
+        sources = [{"name": "링크 시험", "lane": "economy", "url": self.FEED}]
+        bad = ["https://www.reuters.com/a" + ch + "b" for ch in '<>"\'\\()[] \t']
+        bad += ["ftp://www.reuters.com/a", "javascript:alert(1)", "//www.reuters.com/a",
+                "https://www.reuters.com/x)[click](javascript:alert(1))"]
+        control = ("정상 기사", "https://www.reuters.com/ok", self.fresh(), summary, "")
+        for link in bad:
+            with self.subTest(link=link):
+                items = [("나쁜 링크 기사", escape(link), self.fresh(), summary, ""), control]
+                merged, stats, out = self.run_fetch(items, sources=sources)
+                self.assertEqual([m["title"] for m in merged], ["정상 기사"])
+                self.assertEqual(stats["sources"][0]["drops"], {"UNRESOLVED": 1})
+
+    def test_ordinary_links_with_query_percent_unicode_and_port_are_kept(self):
+        summary = "요약 문장입니다. " * 20
+        sources = [{"name": "링크 시험", "lane": "economy", "url": self.FEED}]
+        good = ["https://www.reuters.com/ok?x=1&y=2#frag", "https://www.reuters.com/a%20b/%E2%80%99",
+                "https://www.reuters.com/기사/한글", "http://www.reuters.com:8080/a"]
+        items = [(f"정상 링크 {n}", escape(link), self.fresh(), summary, "") for n, link in enumerate(good)]
+        merged, stats, out = self.run_fetch(items, sources=sources)
+        self.assertEqual(sorted(m["link"] for m in merged), sorted(good))
+        self.assertEqual(stats["sources"][0]["drops"], {})
+
     def test_an_atom_href_with_a_trailing_newline_is_dropped_as_unresolved(self):
         # Atom 의 href 속성은 파서가 다듬지 않는다. 끝의 줄바꿈이 정규식 `$` 에 걸려 통과하면 안 된다.
         summary = "요약 문장입니다. " * 20
@@ -1559,6 +1584,16 @@ class SourceRuleSamplesTest(unittest.TestCase):
             with self.subTest(title=title):
                 self.assertEqual(self.kept("Pew Research Center", title, categories, link), expected)
 
+    def test_each_pew_exclude_tag_alone_decides_the_outcome(self):
+        # 제목이 주제어 검사(topic_regex)를 통과하고 제목 제외 규칙에 안 걸리게 해 두면 분류 태그(exclude_tags)만 결과를 가른다.
+        link = "https://www.pewresearch.org/short-reads/2026/10/20/x/"
+        title = "How Americans Follow the News Online"
+        self.assertTrue(self.kept("Pew Research Center", title, (), link))
+        self.assertTrue(self.kept("Pew Research Center", title, ("Social Media",), link))
+        for tag in ("Methodological Research", "Elections", "Voters", "Voting", "Political Issues", "Donald Trump", "Politics & Policy"):
+            with self.subTest(tag=tag):
+                self.assertFalse(self.kept("Pew Research Center", title, (tag,), link))
+
     def test_pew_citation_line_matches_the_format_pews_terms_require(self):
         pew = next(s for s in g.NEWS_SOURCES if s["name"] == "Pew Research Center")
         sample = {"title": "1 in 5 Americans Regularly Get News on TikTok",
@@ -1574,6 +1609,9 @@ class SourceRuleSamplesTest(unittest.TestCase):
         self.assertIn("United Nations has not reviewed or approved", by_name["UN News"]["notice"]["en"])
         self.assertIn("Federal Reserve Board", by_name["Federal Reserve"]["notice"]["en"])
         self.assertIn("검토하거나 승인하지 않았", by_name["Federal Reserve"]["notice"]["ko"])
+        self.assertIn("has not reviewed or approved", by_name["Federal Reserve"]["notice"]["en"])
+        self.assertIn("검토하거나 승인하지 않았", by_name["UN News"]["notice"]["ko"])
+        self.assertIn("has not reviewed or approved", by_name["Pew Research Center"]["notice"]["en"])
 
     def test_pew_topic_words_need_word_boundaries(self):
         pew = next(s for s in g.NEWS_SOURCES if s["name"] == "Pew Research Center")
@@ -1631,6 +1669,15 @@ class SourceListTest(unittest.TestCase):
         self.assertIs(etnews.get("tech_filter"), True)
         self.assertFalse(g.is_tech_title("오십견인 줄, 방치했더니…'옆으로 누워 자는 습관', 어깨 통증 키운다"))
         self.assertTrue(g.is_tech_title("사람 표정 따라하는 28cm AI 로봇"))
+
+    def test_english_tech_words_are_found_next_to_korean_text_but_not_inside_other_words(self):
+        for title in ("AI가 일자리를 바꾼다", "GPU가 부족한 진짜 이유", "생성AI 시대의 일하는 법", "온디바이스AI 경쟁 본격화",
+                      "LLM을 쓰는 법", "5G를 넘어 6G로", "Nvidia와 손잡은 회사"):
+            with self.subTest(title=title):
+                self.assertTrue(g.is_tech_title(title), title)
+        for title in ("Dubai 부동산 시장 전망", "Taipei 여행 후기", "Chipotle 신메뉴 출시", "Wait 후기와 AIDS 연구 동향"):
+            with self.subTest(title=title):
+                self.assertFalse(g.is_tech_title(title), title)
 
     def test_look_alike_hosts_are_never_trusted_and_never_blocked_by_accident(self):
         for host in ("notbbc.co.uk", "bbc.com.evil.example", "evilnasa.gov", "nasa.gov.evil.example", "xfederalreserve.gov"):
