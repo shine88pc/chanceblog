@@ -15,10 +15,8 @@ from unittest import mock
 import _bootstrap  # noqa: F401
 from verify_pages_helpers import BASE, KR, EN, KST, NOW, SITE_CONFIG, make_repo, post_of, v
 
-# 2026-10-25 공개 사이트 posts.json 에서 옮겨 온 (path -> absoluteUrl) 15건 중 13건(MIT TR 쌍 2건은 2026-10-26에 비공개로 돌려 아래 PUBLIC_MISSING으로 옮겼다)(로컬 사본. 이 테스트는 사이트에 접속하지 않는다).
+# 2026-10-25 공개 사이트 posts.json 에서 옮겨 온 (path -> absoluteUrl) 15건 중 10건(MIT TR 쌍 2건·IEEE Spectrum 쌍 2건·Ars Technica 1편은 2026-10-26에 비공개로 돌려 아래 PUBLIC_MISSING으로 옮겼다)(로컬 사본. 이 테스트는 사이트에 접속하지 않는다).
 PUBLIC_SNAPSHOT = {
-    "_posts/기술·미래/2026-10-25-KR-101307.md": "https://shine88pc.github.io/chanceblog/posts/2026/10/25/KR-101307/",
-    "_posts/Technology & Future/2026-10-25-EN-101307.md": "https://shine88pc.github.io/chanceblog/posts/2026/10/25/EN-101307/",
     "_posts/일상·마음/2026-10-20-KR-141500.md": "https://shine88pc.github.io/chanceblog/posts/2026/10/20/korean-food-date-labels/",
     "_posts/Everyday Life/2026-10-20-EN-141500.md": "https://shine88pc.github.io/chanceblog/posts/2026/10/20/south-korea-food-date-labels/",
     "_posts/과학 환경/2026-10-20-KR-125000.md": "https://shine88pc.github.io/chanceblog/posts/2026/10/20/KR-125000/",
@@ -27,17 +25,20 @@ PUBLIC_SNAPSHOT = {
     "_posts/KR - 테크 인사이트/2026-10-19-KR-103939.md": "https://shine88pc.github.io/chanceblog/posts/2026/10/19/KR-103939/",
     "_posts/Industrial AI/2026-10-19-EN-195755.md": "https://shine88pc.github.io/chanceblog/posts/2026/10/19/EN-195755/",
     "_posts/EN - Tech Insights/2026-10-19-EN-103939.md": "https://shine88pc.github.io/chanceblog/posts/2026/10/19/EN-103939/",
-    "_posts/2026-10-19-AI.md": "https://shine88pc.github.io/chanceblog/posts/2026/10/19/AI/",
     "_posts/EN - Space & Robotics/2026-10-18-EN-233513.md": "https://shine88pc.github.io/chanceblog/posts/2026/10/18/EN-233513/",
     "_posts/2026-10-18-AI.md": "https://shine88pc.github.io/chanceblog/posts/2026/10/18/AI/",
 }
-# 저장소에는 있으나 `published: false`라 공개 posts.json에 없는 9건(2026-10-25 사본의 5건 + 2026-10-26에 비공개로 돌린 4건).
+# 저장소에는 있으나 `published: false`라 공개 posts.json에 없는 12건(2026-10-25 사본의 5건 + 2026-10-26에 비공개로 돌린 7건).
 PUBLIC_MISSING = [
     # 2026-10-26 운영자 승인으로 비공개 전환(약관이 금지하는 매체 출처: MIT Technology Review 쌍 2026-10-21, AI타임스 쌍 2026-10-25)
     "_posts/기술·미래/2026-10-21-KR-135226.md",
     "_posts/Technology & Future/2026-10-21-EN-135226.md",
     "_posts/기술·미래/2026-10-25-KR-203740.md",
     "_posts/Technology & Future/2026-10-25-EN-203740.md",
+    # 2026-10-26 운영자 승인으로 비공개 전환(robots.txt 가 AI 크롤러를 막아 접근하지 않기로 한 매체 출처: Ars Technica 2026-10-19, IEEE Spectrum 쌍 2026-10-25)
+    "_posts/2026-10-19-AI.md",
+    "_posts/기술·미래/2026-10-25-KR-101307.md",
+    "_posts/Technology & Future/2026-10-25-EN-101307.md",
     "_posts/2026-10-18-EN-225949.md",
     "_posts/2026-10-18-KR-225949.md",
     "_posts/EN - Tech Geopolitics/2026-10-18-EN-161948.md",
