@@ -1,7 +1,8 @@
-"""사이트 정리(2026-10-26 운영자 승인, 7번; D-08·SIT-02·SIT-03)가 풀려 나가지 않게 고정한다.
+"""사이트 정리(2026-10-26 운영자 승인, 7번·18번; D-08·SIT-02·SIT-03)가 풀려 나가지 않게 고정한다.
 
-① `_config.yml` 의 `exclude` — 승인받은 운영 문서(AGENTS·AI_COLLAB·CLAUDE·GEMINI·HANDLER·WORKLOG·docs/·인수인계/)는 사이트(페이지·사이트맵·글 내비·정적 파일)로
-   나가지 않고, 사이트가 쓰는 파일은 빠지지 않는다. 저장소 맨 위에 새 문서·폴더를 만들면 이 시험이 '내보낼 것인가 뺄 것인가'를 정하라고 실패한다.
+① `_config.yml` 의 `exclude` — 승인받은 운영 문서(AGENTS·AI_COLLAB·CLAUDE·GEMINI·HANDLER·WORKLOG·docs/·인수인계/, 7번)와 코드·상태 파일(생성기·pipeline/·scripts/·tests/·이력·
+   페이지 목록·requirements 파일, 18번)은 사이트(페이지·사이트맵·글 내비·정적 파일)로 나가지 않고, 사이트가 쓰는 파일은 빠지지 않는다. 저장소 맨 위에 새 문서·폴더를 만들면
+   이 시험이 '내보낼 것인가 뺄 것인가'를 정하라고 실패한다(항목 이름으로 시작해 우연히 빠지는 새 파일도 마찬가지 — `unclassified`).
 ② `index.html` — 글 목록을 Jekyll 반복문으로 미리 그려 JS 없이도 글 링크가 보이게 한다. 광고 코드와 JS 의 나머지는 그대로다.
 Jekyll 을 돌리지는 않는다(설정과 홈 원본의 모양만 본다). 구문은 승인 작업 때 python-liquid 로 시험 렌더했고, 실제 GitHub Pages 빌드(`actions/jekyll-build-pages`)로
 main 과 이 변경을 각각 빌드해 견주었다(2026-10-26, 운영 문서 52개가 빠지고 시험 파일 1개가 늘어 파일 157→106개·사이트맵 44→19건·홈 카드 12장).
@@ -27,17 +28,19 @@ PUBLIC_ROOT = {
     "posts.json", "feed.xml", "robots.txt", "assets",
     "googlee86895dfeddcdd45.html", "naver8e7a71b78d49e6f323e7ad60ffb862a8.html",
 }
-# 사이트에 내보내면 안 되는 운영 문서 — 운영자가 승인한 범위(2026-10-26 "7. 진행": 운영 문서 19개 = AGENTS·AI_COLLAB·CLAUDE·GEMINI·HANDLER·WORKLOG·docs/·인수인계/).
+# 사이트에 내보내면 안 되는 것 — 운영자가 승인한 범위: 운영 문서(2026-10-26 "7. 진행": AGENTS·AI_COLLAB·CLAUDE·GEMINI·HANDLER·WORKLOG·docs/·인수인계/)와
+# 코드·상태 파일(같은 날 "2. 추천대로": 생성기·pipeline/·scripts/·tests/·이력·페이지 목록·requirements 파일).
 MUST_EXCLUDE = {
     "AGENTS.md", "AI_COLLAB.md", "CLAUDE.md", "GEMINI.md", "HANDLER.md", "WORKLOG.md",
     "docs", "인수인계",
-}
-# 코드·상태 파일은 지금도 정적 파일로 열려 있다(사이트맵에는 없고 비밀도 없다). 7번 승인 범위(운영 문서) 밖이라 이 PR 의 exclude 에 넣지 않았고, 빼는 것은
-# 운영자 승인(2026-10-26 채팅 "2. 추천대로")을 받아 후속 PR에서 한다(인수인계/작업내용.md §3 18번). 그때 `_config.yml` exclude 에 더하기만 하면 되고, 이 시험은 '뺐거나 여기 있거나' 둘 다 통과시킨다.
-STATIC_EXPOSED = {
-    "README.md", "pipeline", "scripts", "tests", "generator.py", "blogger_generator.py",
+    "generator.py", "blogger_generator.py", "pipeline", "scripts", "tests",
     "history.json", "blogger_history.json", "pages.json",
     "requirements-dev.txt", "requirements-edits.txt", "requirements-pipeline.txt",
+}
+# 사이트에 일부러 그대로 열어 두는 정적 파일(내보내지도 빼지도 않기로 한 것). README.md 는 문서라 운영자 승인 범위(운영 문서·코드·상태 파일) 밖이다.
+# 뺄 때는 `_config.yml` exclude 에 더하고 MUST_EXCLUDE 로 옮긴다. 이 시험은 '뺐거나 여기 있거나' 둘 다 통과시킨다.
+STATIC_EXPOSED = {
+    "README.md",
 }
 AD_SCRIPT = ('<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6035749437698387"\n'
              '     crossorigin="anonymous"></script>')
@@ -57,6 +60,28 @@ def is_excluded(path, excluded):
     return any(fnmatch.fnmatchcase(path, e) or path.startswith(e) for e in excluded)
 
 
+def is_listed(name, excluded):
+    """exclude 에 이름이 그대로(또는 글롭으로) 적혀 있는가 — 앞부분 일치로 우연히 빠지는 것은 세지 않는다."""
+    return any(name == e or fnmatch.fnmatchcase(name, e) for e in excluded)
+
+
+def unclassified(paths, excluded, public=None, static=None):
+    """사이트에 내보낼지 뺄지 아직 정해지지 않은 맨 위 항목. `tests-report.html` 이 `tests` 에 걸려 조용히 빠지는 식으로
+    새 공개 파일이 접두사에 먹히면 여기 걸려서, 만든 사람이 '내보내려던 파일이 빠졌다'를 알게 한다(독립 검증 2026-10-26).
+    public·static 을 생략하면 이 파일의 PUBLIC_ROOT·STATIC_EXPOSED 를 쓴다."""
+    public = PUBLIC_ROOT if public is None else public
+    static = STATIC_EXPOSED if static is None else static
+    unknown = set()
+    for path in paths:
+        name = path.split("/")[0]
+        if name.startswith((".", "_")):      # Jekyll 이 기본으로 내보내지 않는다
+            continue
+        if name in public or name in static or is_listed(name, excluded):
+            continue
+        unknown.add(name)
+    return sorted(unknown)
+
+
 def tracked_files():
     """저장소가 추적하는 파일(로컬에 있는 추적 안 된 폴더 — venv·임시 작업 폴더 — 는 세지 않는다)."""
     res = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, check=True, timeout=60)
@@ -64,7 +89,7 @@ def tracked_files():
 
 
 class ExcludeTest(unittest.TestCase):
-    def test_internal_docs_are_excluded_from_the_site(self):
+    def test_internal_docs_and_code_files_are_excluded_from_the_site(self):
         excluded = set(config().get("exclude") or [])
         self.assertEqual(sorted(MUST_EXCLUDE - excluded), [])
 
@@ -89,17 +114,19 @@ class ExcludeTest(unittest.TestCase):
                 self.assertTrue((ROOT / entry).exists(), f"exclude 의 {entry} 가 저장소에 없다")
 
     def test_every_top_level_tracked_item_is_public_or_excluded_or_a_known_static_one(self):
-        excluded = config().get("exclude") or []
-        unknown = set()
-        for path in tracked_files():
-            name = path.split("/")[0]
-            if name.startswith((".", "_")):      # Jekyll 이 기본으로 내보내지 않는다
-                continue
-            if name in PUBLIC_ROOT or name in STATIC_EXPOSED or is_excluded(name, excluded):
-                continue
-            unknown.add(name)
-        self.assertEqual(sorted(unknown), [],
+        self.assertEqual(unclassified(tracked_files(), config().get("exclude") or []), [],
                          "새 맨 위 파일·폴더는 사이트에 내보낼지(PUBLIC_ROOT) 뺄지(_config.yml exclude) 정해야 한다. 코드·상태 파일이면 STATIC_EXPOSED 에 적고 운영자에게 알린다")
+
+    def test_a_new_file_that_only_matches_an_exclude_prefix_is_still_reported(self):
+        # 합성 경로·합성 분류로 시험한다 — 실제 PUBLIC_ROOT·STATIC_EXPOSED 가 바뀌어도(예: README.md 를 뺄 때) 이 시험은 그대로다.
+        excluded = ["tests", "docs", "pipeline"]
+        public, static = {"index.html"}, {"README.md"}
+        paths = ["tests/test_a.py", "docs/a.md", "pipeline/x.json", "index.html", "README.md", "tests-report.html", "docs-extra/readme.md",
+                 "_posts/a.md", ".github/workflows/x.yml"]
+        self.assertEqual(unclassified(paths, excluded, public, static), ["docs-extra", "tests-report.html"])
+        self.assertEqual(unclassified(paths, excluded + ["docs-extra", "tests-report.html"], public, static), [])
+        # 글롭 글자가 든 이름도 exclude 에 그대로 적으면 분류된 것으로 본다
+        self.assertEqual(unclassified(["note [1].md"], ["note [1].md"], public, static), [])
 
     def test_the_static_exposed_list_does_not_go_stale(self):
         for name in sorted(STATIC_EXPOSED):

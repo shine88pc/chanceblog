@@ -7,6 +7,29 @@
 
 ---
 
+## [2026-10-26] Claude – 코드·상태 파일을 사이트에서 뺌 (운영자 승인 2026-10-26 "2. 추천대로", T3 광고 표면 `_config.yml`)
+
+**작업자**: Claude  
+**대상**: Chance_Blog  
+**등급**: T3(광고 표면 `_config.yml`) — 운영자가 2026-10-26 채팅으로 "코드·상태 파일(`generator.py`, `pipeline/`, `history.json` 등)도 사이트에서 뺄지" 질문에 "2. 추천대로"라고 답함(추천: 빼기)  
+**목적**: 사이트에 쓸모없고 정적 파일로 그대로 열려 있던 코드·상태 파일(`…/generator.py`, `…/pipeline/blogs.json` 등 HTTP 200)을 사이트에서 뺀다. 저장소에는 그대로 있다.
+
+### 한 일
+- `_config.yml` `exclude`에 11항목 추가: `generator.py`·`blogger_generator.py`·`pipeline`·`scripts`·`tests`·`history.json`·`blogger_history.json`·`pages.json`·`requirements-dev.txt`·`requirements-edits.txt`·`requirements-pipeline.txt`(승인 범위 = 코드·상태 파일). **`README.md`는 문서라 승인 범위 밖이어서 넣지 않았다**(그대로 열려 있음). 사이트가 쓰는 파일은 넣지 않았고, Jekyll 3.10의 "항목으로 시작하는 이름도 뺀다" 규칙에 걸려 빠지는 공개 파일이 없음을 시험이 확인한다.
+- `tests/test_site_cleanup.py`: `MUST_EXCLUDE`에 11항목을 옮기고 `STATIC_EXPOSED`는 `README.md`만 남김. 사이트가 이 파일들의 주소를 쓰지 않음은 #34 검증(저장소·워크플로·`verify_pages_deploy.py`·홈 JS)에서 확인했다.
+- 문서: D-08 해결 표기, ARCHITECTURE·HANDLER·REQUEST_BRIEFING의 낡은 "내부 문서 공개" 서술, 작업내용(§2·§3 7·18번·이력).
+
+### 독립 검증과 반영
+- 별도 세션 검증(깨끗한 clone c2ba6b8, 판정 **병합 가능**): 전체 시험 1792개 통과·`validate_repo` 오류 0·경고 1(LIQUID-1)·AD-1 통과, Jekyll 3.10 규칙으로 추적 파일 전수 시뮬레이션에서 104개가 빠지고(운영 문서 27 — #34로 이미 빠짐 — 와 이 PR이 새로 빼는 코드·상태 77) 14개가 남으며(공개 13 + `README.md`) 우연히 빠지는 공개 파일 0건, 사이트 주소로 제외 대상을 읽는 코드·워크플로 0건, 변이 36건 중 의도한 것 전부 잡힘. 병합 전 빌드 비교 로그: 파일 104→27개, 사라진 77개, 새로 생긴 0개.
+- 권고 반영: `docs/ACTIONS_GUIDE.md`의 낡은 "경고 2" 정정, SESSION_START·REQUEST_BRIEFING 거울 표(7·17번 갱신, 18·19번 추가), `tests/test_site_cleanup.py`의 분류를 이름 정확 일치(`unclassified`)로 바꿔 `tests-report.html` 같은 새 공개 파일이 `tests` 접두사에 조용히 빠지는 것을 시험이 알리게 함(새 시험 1개), 시험 설명·이름 갱신.
+- 반영분 델타 확인(b2dedc1)도 병합 가능. 비차단 4건 반영: 빌드 비교 숫자 정정, 변이 수 36건 정정, 순수 함수 시험이 실제 분류 상수(`PUBLIC_ROOT`·`STATIC_EXPOSED`)에 묶인 것을 인자로 풀어 `README.md` 를 뺄 때 시험이 깨지지 않게 함, 글롭 글자가 든 이름도 정확 일치로 인정(`is_listed`).
+- 남긴 것: `README.md` 제외 여부는 기본값(그대로 열어 둠)으로 두고 작업내용 §3 19번에 올림. D-08 '해결'은 병합·배포 확인 뒤 확정.
+
+### 남긴 것
+- 병합·배포 뒤 공개 사이트에서 `…/generator.py`·`…/pipeline/blogs.json`·`…/history.json`·`…/tests/…`가 404이고 사이트가 쓰는 주소(`posts.json`·`feed.xml`·`robots.txt`·홈·글 페이지)는 그대로 200인지 확인한다.
+
+---
+
 ## [2026-10-26] Claude – 전자신문 출처로 공개된 글 1쌍 비공개 전환 (운영자 승인 2026-10-26, T3 공개 콘텐츠)
 
 **작업자**: Claude  
@@ -39,11 +62,17 @@
 - **문서**: ARCHITECTURE(소스 표·AGE 72시간·`display_name`), ACTIONS_GUIDE(AGE·분야 대체), DEFECT_REGISTER(D-61·D-62·관측 체크리스트), HANDLER·SESSION_START·REQUEST_BRIEFING·작업내용, 새 `docs/analysis/2026-10-26_overseas-sources.md`.
 
 ### 검증
-- 전체 시험 1789개 통과(Windows·Python 3.12, 새 워크트리). 받아 둔 실제 피드 6개로 분야별 시뮬레이션: 과학 6건·경제 3건·문화 1건, 사회·일상·기술은 0건(주말 직후라 항목이 72시간보다 오래됨), 전자신문 줄 없음, 새 소스의 제외 규칙이 의도한 항목(국채 입찰 공지·Eurostat 소식·국방·안보 분류 등)만 뺌.
+- 전체 시험 1817개 통과(Windows·Python 3.12, main 69139b0을 합친 새 워크트리), pyflakes 0, `validate_repo` 오류 0. 받아 둔 실제 피드 6개로 분야별 시뮬레이션: 과학 6건·경제 3건·문화 1건, 사회·일상·기술은 0건(주말 직후라 항목이 72시간보다 오래됨), 전자신문 줄 없음, 새 소스의 제외 규칙이 의도한 항목(국채 입찰 공지·Eurostat 소식·국방·안보 분류 등)만 뺌.
+
+### 독립 검증과 반영 (2026-10-26, 별도 세션 2건 — 코드 / 약관 사실, 각각 1차 + 델타 재검증)
+- **1차 → `205bac3`·`9f2de57`**: 약관 사실 — Horizon 기사가 DG Environment 피드로 섞여 드는 것(`/horizon-magazine/` 제외), 성명·연설 제외 확장, 통계청 링크 글자 지침·Crawl-delay 존중(`page_delay`), 인용 줄 `?.` 정리, 분석 문서 숫자·문장 정정. 코드 — `text_of` 를 `type="xhtml"` 로 한정, 건강·의료 조언 금지 지침(`HEALTH_RULE`), 위원 방문·연설·"Apply for" 제외 확장, 통계청 폭력·아동 학대 제외, 시험 보강(민감 주제 시험이 제외 규칙을 직접 점검, 분야별 신뢰 목록 정확 집합, `display_name`, Eurostat·Horizon 제외, JRC 태그 단독 일치).
+- **델타 재검증**: 코드 — **병합 가능**(막는 결함 없음, 전체 시험 1813개 통과, `parse_feed` 비교 실제 피드 13개·합성 16개·무작위 2만 건에서 의도한 차이만, 변이 58개 중 49 사망·생존 9개는 겹침이거나 시험 제목 없음). 약관 사실 — **수정 후 병합(경미)**: ① Press Corner(보도자료) 앱 바닥글에 법적 고지·라이선스 링크가 없어 재사용 조건을 확인하지 못한 채 통과 중(Energy 후보 약 30%) ② 연설·성명 제외가 Energy 에만 걸림 ③ 문서 문장 5곳.
+- **반영 → `aa547bc`**: Press Corner 를 주소로 제외(`_EC_EXCLUDE_LINK` 에 `/commission/presscorner/` — 불명확은 유예한다는 운영자 원칙), 연설·성명·선언 제외를 집행위원회 소스 5개 전부로(`_EC_EXCLUDE_STATEMENTS`; 복수형 Speeches·Leaders Joint Statement·Joint Declaration 추가, "Declaration of conformity" 같은 문서 이름은 살림), 위원 방문 예고를 두 단어 이름·부위원장까지(`_EC_EXCLUDE_VISITS`), 신청 홍보를 "Apply now"·제목 앞 "Apply for" 로 좁혀 정책 기사("must apply for authorisation") 보호(`_EC_EXCLUDE_APPLY`), 통계청 제외어마다 단독 제목 시험 7개와 평범한 제목 5개 추가, 분석 문서·ARCHITECTURE·코드 주석 정정. 변이 18개(정밀화·제외 하나씩 되돌림)를 직접 넣어 모두 시험이 잡음.
+- 남은 비차단: 건강 조언 금지·링크 글자 지침은 AI 에게 하는 부탁이라 코드가 검사하지 않음(통계청 링크 글자 사후 검사는 후속 후보), 인용 줄 © 연도 범위·집행위원회 법적 고지 링크는 선택 사항, Commission Decision 2011/833/EU 본문은 EUR-Lex 챌린지로 못 읽어 사람이 확인하는 것이 안전.
 
 ### 남긴 것
 - 병합 뒤 Actions의 첫 슬롯 실행에서 `소스 …` 줄과 글 끝 인용·고지문 관측(DEFECT_REGISTER 체크리스트 마지막 줄).
-- 후보로 남긴 소스(Horizon·ECDC·GOV.UK·Global Voices 등)는 조건과 함께 분석 문서에 있다. Global Voices(AI 정책)·GOV.UK(robots.txt의 `meta-externalagent`) 판단은 운영자 몫.
+- 후보로 남긴 소스(Horizon·ECDC·NCSC·ONS 등)는 조건과 함께 분석 문서에 있다. Global Voices(AI 정책)는 운영자 결정(2026-10-26 채팅)으로 제외, GOV.UK(robots.txt의 `meta-externalagent` 는 `/search/all*` 만 막음)는 운영자가 사용을 결정해 이 PR 병합 뒤 후속 PR로 추가한다.
 - 주말 공급 공백은 72시간으로 줄 뿐 없어지지 않는다 — 모든 분야가 비면 여전히 `ALL_LANES_EMPTY`(빨강)이다.
 ## [2026-10-26] Claude – 사이트 정리: 운영 문서를 사이트에서 빼고 홈 글 목록을 미리 그림 (운영자 승인 2026-10-26 "7. 진행", T3 광고 표면)
 
