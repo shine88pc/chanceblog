@@ -73,6 +73,7 @@ layout: null
     .prose a { color: #3b82f6; text-decoration: underline; text-underline-offset: 3px; }
     .prose a:hover { color: #60a5fa; }
   </style>
+  <noscript><style>#post-carousel-controls { display: none; }</style></noscript>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans transition-colors duration-200">
 
@@ -186,7 +187,7 @@ layout: null
   <main class="max-w-6xl mx-auto px-4 py-6 flex-1 w-full">
     <section id="featured-post" class="hidden mb-8" aria-label="추천 글"></section>
     <div class="mb-4 flex items-center justify-between gap-3 text-sm">
-      <p id="results-summary" class="text-slate-400" aria-live="polite">글 목록을 준비하고 있습니다...</p>
+      <p id="results-summary" class="text-slate-400" aria-live="polite">{% if site.posts.size > 0 %}{{ site.posts.size }}개의 글을 만나보세요{% else %}글 목록을 준비하고 있습니다...{% endif %}</p>
       <button id="reset-filters" type="button" class="hidden shrink-0 text-blue-400 hover:text-blue-300">필터 초기화</button>
     </div>
     <section class="shorts-panel mb-9 overflow-hidden rounded-3xl border border-indigo-300/15 shadow-2xl shadow-indigo-950/20" aria-labelledby="shorts-title">
@@ -269,7 +270,7 @@ layout: null
       <p id="daily-publishing-status" class="px-4 py-2.5 text-[11px] text-slate-500 md:px-6">게시글 목록 기준으로 집계합니다.</p>
     </section>
     <!-- Loading Indicator -->
-    <div id="loading-indicator" class="py-24 flex flex-col items-center justify-center space-y-4">
+    <div id="loading-indicator" class="hidden py-24 flex flex-col items-center justify-center space-y-4">
       <div class="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
       <p class="text-sm text-slate-400 font-medium">포스트를 불러오는 중입니다...</p>
     </div>
@@ -292,7 +293,25 @@ layout: null
     </div>
     <!-- Horizontal Posts Carousel -->
     <div id="post-grid" class="flex snap-x snap-mandatory gap-5 overflow-x-auto scroll-smooth pb-5" tabindex="0" aria-label="게시글 목록. 좌우로 스크롤할 수 있습니다.">
-      <!-- Post cards injected here -->
+      <!-- 서버가 미리 그린 글 목록(2026-10-26 운영자 승인, SIT-02): JS 없이도 글 링크가 보이게 한다. JS가 켜져 posts.json 을 받으면 같은 글을 다시 그려 이 카드를 바꾼다. -->
+      {% for post in site.posts limit: 24 %}
+      {% assign card_category = post.category | default: post.categories.first | default: 'General' %}
+      <article class="group min-w-[84%] max-w-[84%] shrink-0 snap-start bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden flex flex-col justify-between sm:min-w-[48%] sm:max-w-[48%] xl:min-w-[32%] xl:max-w-[32%]">
+        <div>
+          <a href="{{ post.url | relative_url }}" class="relative aspect-video w-full overflow-hidden bg-slate-800 block" aria-label="{{ post.title | escape }} 글 읽기">
+            {% if post.image %}<img src="{{ post.image | escape }}" alt="{{ post.title | escape }}" class="w-full h-full object-cover" loading="lazy">{% endif %}
+            <div class="absolute top-3 left-3 flex gap-1.5">
+              <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-900/80 backdrop-blur-md text-blue-400 border border-blue-500/30">{{ card_category | escape }}</span>
+            </div>
+          </a>
+          <div class="p-5">
+            <div class="text-xs text-slate-500 font-mono mb-2">{{ post.date | date: "%Y-%m-%d" }}</div>
+            <h2 class="text-lg font-bold text-slate-100 line-clamp-2 leading-snug mb-2"><a href="{{ post.url | relative_url }}" class="hover:text-blue-400">{{ post.title | escape }}</a></h2>
+            <p class="text-sm text-slate-400 line-clamp-3 leading-relaxed mb-4">{{ post.excerpt | strip_html | normalize_whitespace | truncate: 180 }}</p>
+          </div>
+        </div>
+      </article>
+      {% endfor %}
     </div>
   </main>
 
@@ -652,9 +671,11 @@ layout: null
       const postGrid = document.getElementById('post-grid');
       const featured = document.getElementById('featured-post');
 
-      if (loadingEl) loadingEl.classList.remove('hidden');
+      // 서버가 미리 그려 둔 글 카드가 있으면(SIT-02) 새 목록이 준비될 때까지 그대로 두고, 가져오기에 실패해도 그 목록이 남는다.
+      const prerendered = Boolean(postGrid && postGrid.children.length > 0);
+      if (loadingEl && !prerendered) loadingEl.classList.remove('hidden');
       if (emptyEl) emptyEl.classList.add('hidden');
-      if (postGrid) postGrid.innerHTML = '';
+      if (postGrid && !prerendered) postGrid.innerHTML = '';
       if (featured) featured.classList.add('hidden');
 
       try {
@@ -694,7 +715,7 @@ layout: null
         renderDailyPublishingStats(allPosts);
       } catch (err) {
         console.error('fetchPostList critical error:', err);
-        if (emptyEl) emptyEl.classList.remove('hidden');
+        if (emptyEl && !prerendered) emptyEl.classList.remove('hidden');
       } finally {
         if (loadingEl) loadingEl.classList.add('hidden');
       }

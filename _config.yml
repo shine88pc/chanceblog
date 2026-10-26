@@ -14,3 +14,27 @@ plugins:
 # 깔끔한 반응형 공식 테마 적용
 theme: minima
 
+# 운영 문서·코드·상태 파일은 저장소에만 두고 사이트(페이지·사이트맵·정적 파일)로는 내보내지 않는다(2026-10-26 운영자 승인, D-08·SIT-03).
+# 사이트에 필요한 것(index.html·about·contact·privacy·categories·posts.json·feed.xml·robots.txt·assets·검색 인증 html)은 여기에 넣지 않는다.
+# 새 운영 문서·코드 폴더를 만들면 여기에도 더한다(tests/test_site_cleanup.py 가 목록을 지킨다).
+exclude:
+  - AGENTS.md
+  - AI_COLLAB.md
+  - CLAUDE.md
+  - GEMINI.md
+  - HANDLER.md
+  - README.md
+  - WORKLOG.md
+  - docs
+  - 인수인계
+  - pipeline
+  - scripts
+  - tests
+  - generator.py
+  - blogger_generator.py
+  - history.json
+  - blogger_history.json
+  - pages.json
+  - requirements-dev.txt
+  - requirements-edits.txt
+  - requirements-pipeline.txt
