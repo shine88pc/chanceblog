@@ -293,7 +293,7 @@ layout: null
     </div>
     <!-- Horizontal Posts Carousel -->
     <div id="post-grid" class="flex snap-x snap-mandatory gap-5 overflow-x-auto scroll-smooth pb-5" tabindex="0" aria-label="게시글 목록. 좌우로 스크롤할 수 있습니다.">
-      <!-- 서버가 미리 그린 글 목록(2026-10-26 운영자 승인, SIT-02): JS 없이도 글 링크가 보이게 한다. JS가 켜져 posts.json 을 받으면 같은 글을 다시 그려 이 카드를 바꾼다. -->
+      {% comment %}서버가 미리 그린 글 목록(2026-10-26 운영자 승인, SIT-02): JS 없이도 글 링크가 보이게 한다. JS가 켜져 posts.json 을 받으면 같은 글을 다시 그려 이 카드를 바꾼다.{% endcomment %}
       {% for post in site.posts limit: 24 %}
       {% assign card_category = post.category | default: post.categories.first | default: 'General' %}
       <article class="group min-w-[84%] max-w-[84%] shrink-0 snap-start bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden flex flex-col justify-between sm:min-w-[48%] sm:max-w-[48%] xl:min-w-[32%] xl:max-w-[32%]">
@@ -672,7 +672,7 @@ layout: null
       const featured = document.getElementById('featured-post');
 
       // 서버가 미리 그려 둔 글 카드가 있으면(SIT-02) 새 목록이 준비될 때까지 그대로 두고, 가져오기에 실패해도 그 목록이 남는다.
-      const prerendered = Boolean(postGrid && postGrid.children.length > 0);
+      const prerendered = Boolean(postGrid && postGrid.querySelector('article'));
       if (loadingEl && !prerendered) loadingEl.classList.remove('hidden');
       if (emptyEl) emptyEl.classList.add('hidden');
       if (postGrid && !prerendered) postGrid.innerHTML = '';
