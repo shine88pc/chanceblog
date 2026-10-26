@@ -2070,16 +2070,37 @@ class SourceRuleSamplesTest(unittest.TestCase):
                       "New weapons export controls announced", "Hybrid warfare resilience plan published", "Missiles testing range to expand",
                       "Armed forces covenant update for veterans", "Gaza aid flights resume", "Terror attack response drill held",
                       "New measures to tackle self-harm content online", "Suicide prevention funding for the NHS", "Child sexual abuse material to be blocked by new AI tool", "Child sexual imagery detection tool launched",
-                      "Sexual exploitation online: new offence announced", "Counter-terrorism strategy published"):
+                      "Sexual exploitation online: new offence announced", "Counter-terrorism strategy published",
+                      # 코드 검증이 지적한 보강: 인사 소식·분쟁·학대·극단주의, 단독 낱말 제목(제외어를 하나씩 지워도 시험이 실패하게)
+                      "New chair announced for the Environment Agency", "Chief executive steps down at the Met Office", "Minister appoints new advisers to the AI panel",
+                      "Dr Jane Smith appointed lead scientist for the new AI lab", "Russia gas imports fall to a record low", "Middle East energy outlook published",
+                      "Iran energy talks resume", "Israel and the UK sign a research agreement", "NATO summit agrees new cyber funding", "New sanctions on energy exports announced",
+                      "Child abuse imagery detection to be expanded", "Domestic abuse victims to get new online support", "Violence against women and girls strategy published",
+                      "Extremism commission launched", "Radicalisation online: new report published",
+                      "Call for input on AI regulation", "Call for applications to the AI fellowship", "Statement from the Energy Secretary on energy bills",
+                      "Statement by the Environment Secretary on flooding", "Sexual abuse online: new measures", "Sexual assault reporting to be easier", "Sexual violence strategy refreshed"):
             for name in (env, tech):
                 src = next(s for s in g.NEWS_SOURCES if s["name"] == name)
                 self.assertTrue(g._rule_excludes(src, title, {"link": news + "x", "categories": []}), (name, title))
         # 같은 낱말이 든 평범한 기사(제목 가운데의 "must apply for", 낱말 일부 일치)는 살린다
         for title in ("Applying for the Warm Home Discount made simpler", "Households must apply for the new scheme by March",
-                      "Flood defences get a funding boost", "Rural broadband rollout reaches another 2,000 homes"):
+                      "Flood defences get a funding boost", "Rural broadband rollout reaches another 2,000 homes",
+                      "AI to speed up appointments for patients", "NHS appointments made easier with a new booking tool"):
             for name in (env, tech):
                 src = next(s for s in g.NEWS_SOURCES if s["name"] == name)
                 self.assertFalse(g._rule_excludes(src, title, {"link": news + "x", "categories": []}), (name, title))
+
+    def test_govuk_link_rule_passes_only_https_news_stories_on_the_exact_host(self):
+        # 코드 검증의 생존 변이(http 허용·점 이스케이프 삭제·news/ 끝 슬래시 삭제)를 잡는다. 호스트 신뢰는 따로 시험하지만 링크 규칙도 스스로 엄격해야 한다.
+        src = next(s for s in g.NEWS_SOURCES if s["name"] == "GOV.UK · Environment & Energy")
+        cases = (("https://www.gov.uk/government/news/ok-story", False), ("https://WWW.GOV.UK/government/news/ok-story?x=1#y", False),
+                 ("http://www.gov.uk/government/news/ok-story", True), ("https://wwwxgovxuk/government/news/ok-story", True),
+                 ("https://www.gov.uk/government/newsflash/ok-story", True), ("https://www.gov.uk/government/news", True),
+                 ("https://www.gov.uk/government/speeches/ok-story", True), ("https://www.gov.uk.evil.example/government/news/ok-story", True),
+                 ("/government/news/ok-story", True), ("", True))
+        for link, excluded in cases:
+            with self.subTest(link=link):
+                self.assertEqual(g._rule_excludes(src, "A plain title", {"link": link, "categories": []}), excluded, link)
 
     def test_govuk_sources_carry_the_ogl_credit_and_notice_and_forbid_medical_advice(self):
         by_name = {s["name"]: s for s in g.NEWS_SOURCES}

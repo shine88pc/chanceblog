@@ -820,13 +820,16 @@ _GOVUK_TECH_FEED = (_GOVUK_FEED + "organisations%5B%5D=ai-security-institute"
                     "&organisations%5B%5D=department-for-science-innovation-and-technology")
 # '뉴스와 알림' 피드에는 연설(/speeches/)·정책 문서와 편지(/publications/)·사례 소개(/case-studies/)도 섞여 든다. 보도 기사(/government/news/)만 쓴다.
 _GOVUK_EXCLUDE_LINK = r"^(?!https://www\.gov\.uk/government/news/)"
-# 인사·위촉 소식, 신청·의견 모집 안내, 공동 성명·조의 표명, 선거·전쟁·군사 소재와 자동으로 다시 쓰기에는 민감한 주제(자살·자해·성폭력·아동 성착취·테러)는 쓰지 않는다.
+# 인사·위촉 소식(진료 "appointments" 같은 평범한 낱말은 살린다), 신청·의견 모집 안내, 공동 성명·조의 표명, 선거·전쟁·군사·분쟁 소재와 자동으로 다시 쓰기에는 민감한 주제
+# (자살·자해·성폭력·아동 성착취·학대·극단주의·테러)는 쓰지 않는다. "defence" 는 사이버 방어 소식이 있어 넣지 않았다.
 _GOVUK_EXCLUDE_TITLE = (
-    r"\bappoint|\breappoint|\bchair recruitment\b|\bnew chief executive\b"
+    r"\bappoints?\b|\bappointed\b|\bappointments? (?:to|of|as)\b|\breappoint|\bchair recruitment\b|\bnew (?:chair|chief executive)\b|\bsteps? down\b"
     r"|\bapply now\b|(?:^|[?:!.] )apply for\b|\bopens? for applications\b|\bapplications? (?:are )?(?:now )?open\b|\bcall for (?:evidence|views|input|applications)\b"
     r"|\bjoint statement\b|\bstatement (?:from|by|on)\b|\bcondolences\b"
-    r"|\belections?\b|\bpolitical parties\b|\b(?:military|weapons?|warfare|missiles?|armed forces|ukraine|gaza|russia)\b"
-    r"|\bsuicid|\bself-harm|\bsexual (?:abuse|exploitation|assault|violence)\b|\bchild sexual\b|\bterror")
+    r"|\belections?\b|\bpolitical parties\b"
+    r"|\b(?:military|weapons?|warfare|missiles?|armed forces|ukraine|gaza|russia|iran(?:ian)?|israel|middle east|nato|sanctions?)\b"
+    r"|\bsuicid|\bself-harm|\bsexual (?:abuse|exploitation|assault|violence)\b|\bchild (?:sexual|abuse)\b|\bdomestic abuse\b|\bviolence against women\b"
+    r"|\bextremis|\bradicali[sz]|\bterror")
 
 NEWS_SOURCES = [
     # 약관을 확인한 직접 RSS(2026-10-26). 분야마다 약관상 쓸 수 있는 소스만 둔다.
