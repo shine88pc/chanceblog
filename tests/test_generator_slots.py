@@ -452,6 +452,90 @@ class FetchNewsStatsTest(unittest.TestCase):
         self.assertEqual(stats["sources"][0]["drops"], {"EXCLUDED": 2})
         self.assertIn("EXCLUDED 2", out)
 
+    def test_a_source_on_a_blocked_host_is_never_requested(self):
+        sources = [{"name": "차단 호스트 소스", "lane": "technology", "url": "https://www.aitimes.com/rss/allArticle.xml",
+                    "terms": {"status": "unverified"}}]
+
+        def forbidden(req, timeout=0):
+            raise AssertionError(f"차단 호스트를 요청했다: {getattr(req, 'full_url', req)}")
+
+        stats = {}
+        with mock.patch.object(g, "NEWS_SOURCES", sources), mock.patch.object(g.urllib.request, "urlopen", forbidden):
+            merged, out = run_captured(g.fetch_news_items, "technology", stats=stats)
+        self.assertEqual(merged, [])
+        self.assertIn("약관상 접근하지 않는 도메인", out)
+        self.assertNotIn("sources", stats)
+
+    def test_a_link_with_markup_or_whitespace_is_dropped_as_unresolved(self):
+        summary = "요약 문장입니다. " * 20
+        sources = [{"name": "링크 시험", "lane": "economy", "url": self.FEED}]
+        hostile = escape("https://www.reuters.com/a\n\n## injected heading\n<img src=x onerror=alert(1)>")
+        items = [("악성 링크 기사", hostile, self.fresh(), summary, ""),
+                 ("공백 링크 기사", "https://www.reuters.com/b c", self.fresh(), summary, ""),
+                 ("정상 기사", "https://www.reuters.com/ok?x=1&amp;y=2#frag", self.fresh(), summary, "")]
+        merged, stats, out = self.run_fetch(items, sources=sources)
+        self.assertEqual([m["title"] for m in merged], ["정상 기사"])
+        self.assertEqual(merged[0]["link"], "https://www.reuters.com/ok?x=1&y=2#frag")
+        self.assertEqual(stats["sources"][0]["drops"], {"UNRESOLVED": 2})
+
+    def test_every_unsafe_character_and_scheme_in_a_link_is_dropped_as_unresolved(self):
+        # 링크는 글의 출처 목록·인용 줄에 그대로 들어간다. 마크다운·HTML 을 만들 수 있는 글자와 http(s) 아닌 주소는 하나씩 걸러야 한다.
+        summary = "요약 문장입니다. " * 20
+        sources = [{"name": "링크 시험", "lane": "economy", "url": self.FEED}]
+        bad = ["https://www.reuters.com/a" + ch + "b" for ch in '<>"\'\\()[] \t']
+        bad += ["ftp://www.reuters.com/a", "javascript:alert(1)", "//www.reuters.com/a",
+                "https://www.reuters.com/x)[click](javascript:alert(1))"]
+        control = ("정상 기사", "https://www.reuters.com/ok", self.fresh(), summary, "")
+        for link in bad:
+            with self.subTest(link=link):
+                items = [("나쁜 링크 기사", escape(link), self.fresh(), summary, ""), control]
+                merged, stats, out = self.run_fetch(items, sources=sources)
+                self.assertEqual([m["title"] for m in merged], ["정상 기사"])
+                self.assertEqual(stats["sources"][0]["drops"], {"UNRESOLVED": 1})
+
+    def test_ordinary_links_with_query_percent_unicode_and_port_are_kept(self):
+        summary = "요약 문장입니다. " * 20
+        sources = [{"name": "링크 시험", "lane": "economy", "url": self.FEED}]
+        good = ["https://www.reuters.com/ok?x=1&y=2#frag", "https://www.reuters.com/a%20b/%E2%80%99",
+                "https://www.reuters.com/기사/한글", "http://www.reuters.com:8080/a"]
+        items = [(f"정상 링크 {n}", escape(link), self.fresh(), summary, "") for n, link in enumerate(good)]
+        merged, stats, out = self.run_fetch(items, sources=sources)
+        self.assertEqual(sorted(m["link"] for m in merged), sorted(good))
+        self.assertEqual(stats["sources"][0]["drops"], {})
+
+    def test_an_atom_href_with_a_trailing_newline_is_dropped_as_unresolved(self):
+        # Atom 의 href 속성은 파서가 다듬지 않는다. 끝의 줄바꿈이 정규식 `$` 에 걸려 통과하면 안 된다.
+        summary = "요약 문장입니다. " * 20
+        sources = [{"name": "링크 시험", "lane": "economy", "url": self.FEED}]
+        updated = self.fresh().isoformat()
+
+        def entry(title, href):
+            return (f"<entry><title>{title}</title><link href='{href}'/><updated>{updated}</updated>"
+                    f"<summary>{summary}</summary></entry>")
+
+        atom = ("<?xml version='1.0'?><feed xmlns='http://www.w3.org/2005/Atom'>"
+                + entry("끝 줄바꿈 기사", "https://www.reuters.com/a&#10;")
+                + entry("정상 기사", "https://www.reuters.com/ok") + "</feed>").encode("utf-8")
+        stats = {}
+        with mock.patch.object(g, "NEWS_SOURCES", sources), \
+                mock.patch.object(g.urllib.request, "urlopen", lambda req, timeout=0: FakeResponse(atom)), \
+                mock.patch.object(g, "_fetch_source_excerpt", return_value=""):
+            merged, out = run_captured(g.fetch_news_items, "economy", stats=stats)
+        self.assertEqual([m["title"] for m in merged], ["정상 기사"])
+        self.assertEqual(stats["sources"][0]["drops"], {"UNRESOLVED": 1})
+
+    def test_etnews_drops_non_tech_titles_with_the_real_source_config(self):
+        summary = "요약 문장입니다. " * 20
+        etnews = dict(next(s for s in g.NEWS_SOURCES if s["name"] == "전자신문"), url=self.FEED)
+        items = [("사람 표정 따라하는 28cm AI 로봇", "https://www.etnews.com/2026102500001", self.fresh(), summary, ""),
+                 ("오십견인 줄, 방치했더니 어깨 통증 키운다", "https://www.etnews.com/2026102500002", self.fresh(), summary, "")]
+        stats = {}
+        with mock.patch.object(g, "NEWS_SOURCES", [etnews]), \
+                mock.patch.object(g.urllib.request, "urlopen", lambda req, timeout=0: FakeResponse(rss(items))):
+            merged, out = run_captured(g.fetch_news_items, "technology", stats=stats)
+        self.assertEqual([m["title"] for m in merged], ["사람 표정 따라하는 28cm AI 로봇"])
+        self.assertEqual(stats["sources"][0]["drops"], {"NOT_TECH": 1})
+
     def test_exclude_link_and_exclude_tags_are_counted_as_excluded(self):
         summary = "요약 문장입니다. " * 20
         sources = [{"name": "링크·태그 제외", "lane": "economy", "url": self.FEED,
@@ -1424,6 +1508,9 @@ class SourceRuleSamplesTest(unittest.TestCase):
             ("Martian Dawn", "https://www.nasa.gov/image-article/martian-dawn/"),
             ("Software", "https://www.nasa.gov/centers-and-facilities/glenn/acoustics-software/"),
             ("Instrumentation", "https://www.nasa.gov/centers-and-facilities/glenn/acoustics-instrumentation/"),
+            ("NASA Sets Coverage for Crew-12 Launch", "https://www.nasa.gov/news-release/nasa-sets-coverage-crew-12/"),
+            ("Media Accreditation Open for Artemis II Launch", "https://www.nasa.gov/news-release/media-accreditation-artemis-ii/"),
+            ("APOD: 2026 October 26 – Aurora", "https://apod.nasa.gov/apod/ap261026.html"),
         )
         for title, link in skipped:
             self.assertFalse(self.kept("NASA", title, link=link), title)
@@ -1434,6 +1521,11 @@ class SourceRuleSamplesTest(unittest.TestCase):
             ("El Niño Then and Now", "https://science.nasa.gov/earth/el-nino-then-and-now/"),
             ("RS-25 Engine Tests at NASA Stennis", "https://www.nasa.gov/centers/stennis/rs-25/"),
             ("Artemis II", "https://www.nasa.gov/news-release/artemis-ii/"),  # 짧은 제목이라는 이유만으로는 빼지 않는다
+            # 센터 소식 기사는 /centers-and-facilities/ 경로에 있어도 살린다(2026-10-26 표본에서 실제 기사 4건이 빠지던 것)
+            ("NASA, Virginia Launch Power Partnership for Energy Security", "https://www.nasa.gov/centers-and-facilities/langley/nasa-power-energy-partnership/"),
+            ("NASA JPL Looks to Next 90 Years of Innovation, Exploration", "https://www.nasa.gov/centers-and-facilities/jpl/nasa-jpl-looks-to-next-90-years-of-innovation-exploration/"),
+            ("NASA’s SR-1 Freedom Advances with Progress on Nuclear Power Module", "https://www.nasa.gov/centers-and-facilities/glenn/sr-1-freedom-advances-with-progress-on-nuclear-power-module/"),
+            ("NASA Improves Shock, Vibration Analysis", "https://www.nasa.gov/centers-and-facilities/kennedy/nasa-improves-shock-vibration-analysis/"),
         )
         for title, link in kept:
             self.assertTrue(self.kept("NASA", title, link=link), title)
@@ -1480,10 +1572,46 @@ class SourceRuleSamplesTest(unittest.TestCase):
             ("How U.S. Voters View Mail and Absentee Balloting", ("Election 2026",), f"{pew}/politics/2026/h/", False),
             ("Pace of Trump’s Judicial Appointments Has Slowed in His Second Term", ("Criminal Justice", "Supreme Court"), f"{pew}/politics/2026/i/", False),
             ("Women, Work and Caregiving Through the Arc of Family Life", ("Family Caregiving", "Uncategorized"), f"{pew}/social-trends/2026/j/", False),
+            # 제목에 선거·정당 낱말이 없어도 분류 태그(exclude_tags)가 정치 글을 걸러야 한다(2026-10-26 실제 제목)
+            ("So Far, the 119th Congress Is Among the Least Productive of the Past 40 Years", ("Congress", "Politics & Policy"), f"{pew}/politics/2026/k/", False),
+            ("Iran Conflict Remains Deeply Unpopular as Many Americans Expect It To Go On for Months", ("Donald Trump", "War & International Conflict"), f"{pew}/politics/2026/l/", False),
+            ("Cost Concerns Dominate as Public’s Economic Ratings Turn More Negative", ("Donald Trump", "Economic Conditions"), f"{pew}/politics/2026/m/", False),
+            # 언론·방송 주제어
+            ("How Americans View Local Television News", ("Television",), f"{pew}/journalism/2026/n/", True),
+            ("Journalists and the Public: A New Survey", ("Journalists",), f"{pew}/journalism/2026/o/", True),
         ]
         for title, categories, link, expected in cases:
             with self.subTest(title=title):
                 self.assertEqual(self.kept("Pew Research Center", title, categories, link), expected)
+
+    def test_each_pew_exclude_tag_alone_decides_the_outcome(self):
+        # 제목이 주제어 검사(topic_regex)를 통과하고 제목 제외 규칙에 안 걸리게 해 두면 분류 태그(exclude_tags)만 결과를 가른다.
+        link = "https://www.pewresearch.org/short-reads/2026/10/20/x/"
+        title = "How Americans Follow the News Online"
+        self.assertTrue(self.kept("Pew Research Center", title, (), link))
+        self.assertTrue(self.kept("Pew Research Center", title, ("Social Media",), link))
+        for tag in ("Methodological Research", "Elections", "Voters", "Voting", "Political Issues", "Donald Trump", "Politics & Policy"):
+            with self.subTest(tag=tag):
+                self.assertFalse(self.kept("Pew Research Center", title, (tag,), link))
+
+    def test_pew_citation_line_matches_the_format_pews_terms_require(self):
+        pew = next(s for s in g.NEWS_SOURCES if s["name"] == "Pew Research Center")
+        sample = {"title": "1 in 5 Americans Regularly Get News on TikTok",
+                  "link": "https://www.pewresearch.org/short-reads/2026/10/19/1-in-5/",
+                  "published": datetime(2026, 10, 19, 14, 0, tzinfo=timezone.utc)}
+        self.assertEqual(
+            g._citation_line(pew["citation"], sample),
+            "“1 in 5 Americans Regularly Get News on TikTok.” Pew Research Center, Washington, D.C. "
+            "(October 19, 2026) <https://www.pewresearch.org/short-reads/2026/10/19/1-in-5/>")
+
+    def test_notices_of_the_other_sources_say_what_their_terms_ask(self):
+        by_name = {s["name"]: s for s in g.NEWS_SOURCES}
+        self.assertIn("United Nations has not reviewed or approved", by_name["UN News"]["notice"]["en"])
+        self.assertIn("Federal Reserve Board", by_name["Federal Reserve"]["notice"]["en"])
+        self.assertIn("검토하거나 승인하지 않았", by_name["Federal Reserve"]["notice"]["ko"])
+        self.assertIn("has not reviewed or approved", by_name["Federal Reserve"]["notice"]["en"])
+        self.assertIn("검토하거나 승인하지 않았", by_name["UN News"]["notice"]["ko"])
+        self.assertIn("has not reviewed or approved", by_name["Pew Research Center"]["notice"]["en"])
 
     def test_pew_topic_words_need_word_boundaries(self):
         pew = next(s for s in g.NEWS_SOURCES if s["name"] == "Pew Research Center")
@@ -1498,8 +1626,8 @@ class SourceListTest(unittest.TestCase):
     # 사회·정책: UN News 가 보류(pending) 중이라 읽는 소스가 없다(D-63). 소스를 더하거나 보류를 풀면 여기서 뺀다.
     # 이 분야가 뽑히면 후보가 없어 다음 분야로 넘어간다.
     LANES_WITHOUT_SOURCES = {"daily_life", "society"}
-    # 약관을 읽지 못했거나 금지로 읽히는데 운영자 결정 전까지 쓰는 기존 소스(유예). 새 소스는 allowed 만 늘린다 — 읽고 allowed 로 올리거나
-    # 목록에서 빼서 줄이기만 한다.
+    # 약관을 읽지 못했거나 불명확해 운영자 결정 전까지 쓰는 기존 소스(유예). 새 소스는 allowed 만 늘린다 — 읽고 allowed 로 올리거나
+    # 목록에서 빼서 줄이기만 한다. 금지로 읽히면 소스에 두지 않고 TERMS_BLOCKED_DOMAINS 에 올린다.
     LEGACY_GRACE = {"Ars Technica", "IEEE Spectrum", "전자신문"}
 
     def test_dead_bloter_feed_is_gone(self):
@@ -1516,13 +1644,40 @@ class SourceListTest(unittest.TestCase):
         self.assertEqual([s["name"] for s in g.NEWS_SOURCES
                           if s.get("google") or "news.google.com" in s["url"] or s["name"].startswith("Google")], [])
 
-    def test_source_names_are_unique_and_every_lane_assignment_is_pinned(self):
+    def test_source_names_are_unique_and_every_feed_lane_and_publisher_is_pinned(self):
         names = [s["name"] for s in g.NEWS_SOURCES]
         self.assertEqual(len(names), len(set(names)))
-        self.assertEqual({s["name"]: s["lane"] for s in g.NEWS_SOURCES},
-                         {"NASA": "science", "UN News": "society", "Pew Research Center": "culture",
-                          "Federal Reserve": "economy", "Ars Technica": "technology", "IEEE Spectrum": "technology",
-                          "전자신문": "technology"})
+        self.assertEqual({s["name"]: (s["lane"], s["url"]) for s in g.NEWS_SOURCES}, {
+            "NASA": ("science", "https://www.nasa.gov/feed/"),
+            "UN News": ("society", "https://news.un.org/feed/subscribe/en/news/all/rss.xml"),
+            "Pew Research Center": ("culture", "https://www.pewresearch.org/feed/"),
+            "Federal Reserve": ("economy", "https://www.federalreserve.gov/feeds/press_all.xml"),
+            "Ars Technica": ("technology", "https://feeds.arstechnica.com/arstechnica/index"),
+            "IEEE Spectrum": ("technology", "https://spectrum.ieee.org/feeds/feed.rss"),
+            "전자신문": ("technology", "https://rss.etnews.com/Section901.xml"),
+        })
+        # 읽는 소스 전부(승인 상태와 상관없이)의 피드 호스트와 기사 호스트가 자기 분야에서 신뢰된다 — 기술 분야의 뼈대 전자신문·IEEE·Ars 포함
+        for src in g.NEWS_SOURCES:
+            self.assertTrue(g._trusted_domain(g._host(src["url"]), src["lane"]), src["name"])
+        for host in ("www.etnews.com", "spectrum.ieee.org", "arstechnica.com", "www.nasa.gov", "science.nasa.gov"):
+            lane = {"www.etnews.com": "technology", "spectrum.ieee.org": "technology", "arstechnica.com": "technology",
+                    "www.nasa.gov": "science", "science.nasa.gov": "science"}[host]
+            self.assertTrue(g._trusted_domain(host, lane), host)
+
+    def test_etnews_keeps_only_titles_with_tech_words(self):
+        etnews = next(s for s in g.NEWS_SOURCES if s["name"] == "전자신문")
+        self.assertIs(etnews.get("tech_filter"), True)
+        self.assertFalse(g.is_tech_title("오십견인 줄, 방치했더니…'옆으로 누워 자는 습관', 어깨 통증 키운다"))
+        self.assertTrue(g.is_tech_title("사람 표정 따라하는 28cm AI 로봇"))
+
+    def test_english_tech_words_are_found_next_to_korean_text_but_not_inside_other_words(self):
+        for title in ("AI가 일자리를 바꾼다", "GPU가 부족한 진짜 이유", "생성AI 시대의 일하는 법", "온디바이스AI 경쟁 본격화",
+                      "LLM을 쓰는 법", "5G를 넘어 6G로", "Nvidia와 손잡은 회사"):
+            with self.subTest(title=title):
+                self.assertTrue(g.is_tech_title(title), title)
+        for title in ("Dubai 부동산 시장 전망", "Taipei 여행 후기", "Chipotle 신메뉴 출시", "Wait 후기와 AIDS 연구 동향"):
+            with self.subTest(title=title):
+                self.assertFalse(g.is_tech_title(title), title)
 
     def test_look_alike_hosts_are_never_trusted_and_never_blocked_by_accident(self):
         for host in ("notbbc.co.uk", "bbc.com.evil.example", "evilnasa.gov", "nasa.gov.evil.example", "xfederalreserve.gov"):

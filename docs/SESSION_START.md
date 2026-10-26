@@ -93,7 +93,7 @@ main 최신 커밋 · 최근 24시간 자동 실행 결과(Chance 슬롯, Blogge
 | 브랜치 | 내용 | 상태·다음 |
 |--------|------|-----------|
 | `ai/claude/blogger-draft-upload` → `ai/claude/blogger-auth-check` | Blogger 초안함 업로드 모드(`mode draft` + Secrets면 초안함에 올림, 수동 `publish` off/draft/publish 3택), 인증 점검만 실행(`auth_check`), 레지스트리 `mode` 직접 지정 검사(REG-1: 블로그 항목은 `mode`를 직접 적어야 함 — `defaults.mode`가 auto인 지금 새 블로그 사고 방지) | 독립 검증 2회 모두 **병합 가능**(변경분 재검증: 열거·퍼징 위반 0, 새 변이 86개 중 85 탐지). **호출 기록 병합(#24)이 끝난 지금 통합 단계**: `main`을 합치고 충돌을 풀어야 한다 — `pipeline/run.py` 3줄(`mask` import 제거, 옮겨진 주제 선정을 `with purpose(llm,"topic-expansion"):`로 감쌈, 성공 요약 앞에 `lines += [f"- {line}" for line in ai_lines()]`)·`blogger.yml`(`publish` choice 유지)·`DEFECT_REGISTER`(D-49는 quota 쪽 한 줄만)·`tests/test_workflow_names.py` ALLOWED_REFS 합집합(`inputs.auth_check`·`inputs.real_ai`)·`tests/test_manual_run_defaults.py` 4건(문구·`publish` 3택에 맞춤, 코드 변경 없음). 통합 뒤 변경분 재검증(검증자가 만든 임시 해결: scratchpad 밖에는 없음) → 병합 → 가이드의 `blogger-*` 마커 걷기(WORKLOG 오늘 항목의 문장 목록) |
-| `ai/claude/source-overhaul` | **Chance 출처 개편(#27)**: 구글 뉴스 14개·MIT TR·BBC Technology 제거, NASA·Pew·Federal Reserve 추가와 UN News 보류, 약관 점검 필드·차단 목록·글 끝 인용·고지문(결정 #2, 2026-10-26 채팅 승인) | 독립 검증 대기 → 병합 → 첫 슬롯 관측(§5-3) |
+| `ai/claude/source-overhaul` → **PR #27 병합 완료**(4f981d7, 2026-10-26 09:22) | Chance 출처 개편(구글 뉴스 14개·MIT TR·BBC Technology·AI타임스 제거, NASA·Pew·Federal Reserve 추가, UN News 보류, 약관 점검 필드·차단 목록·고지문). 독립 검증 2건(코드 2회·약관 사실) | 검증 권장 보완은 `ai/claude/source-overhaul-followup`(PR #30)에서 진행 → 병합 뒤 첫 슬롯 관측(§5-3) |
 
 ### 5-3. 관측 대기 (병합했지만 Actions 에서만 보이는 것)
 
@@ -131,7 +131,7 @@ main 최신 커밋 · 최근 24시간 자동 실행 결과(Chance 슬롯, Blogge
 | 11 | **운영자가 20:26 KST에 직접 바꾼 `pipeline/blogs.json`의 `defaults.mode`(draft→auto)의 의도 확인** — 현재 동작은 그대로(두 블로그가 `mode`를 명시: `chance` auto, `blogger_macat` off). Blogger를 자동 발행으로 켜려는 뜻이라면 이 줄이 아니라 `blogger_macat`의 `mode`이고, 영문 프로필·Secrets·OAuth가 먼저다. `mode` 없이 추가하는 새 블로그는 곧바로 auto가 되므로 새 블로그는 `mode: draft`를 명시하거나 이 기본값을 draft로 되돌리는 것을 권장 | 되돌리기(draft) 또는 유지 | T3(운영자 본인 변경, 의도만 확인) |
 | 12 | **금지로 읽힌 매체 출처로 공개됐던 글 2쌍 — 비공개 전환 완료**(사용자 승인 2026-10-26, PR #29, `published: false` 한 줄씩, 삭제 없음): MIT TR(2026-10-21: KR `_posts/기술·미래/2026-10-21-KR-135226.md`, EN `_posts/Technology & Future/2026-10-21-EN-135226.md`)과 AI타임스(2026-10-25: KR `_posts/기술·미래/2026-10-25-KR-203740.md`, EN `_posts/Technology & Future/2026-10-25-EN-203740.md`) (D-60·D-61). 되돌리려면 해당 파일의 `published: false` 줄을 지운다 | 완료 | T3(공개 콘텐츠) |
 | 13 | 경제·일(Federal Reserve뿐, 주 1~2건)·일상·마음(소스 없음)·사회·정책(UN News 보류) 공급: (a) 기관·연구 피드에 한해 신선도 창(지금 36시간)을 넓히기, (b) 약관상 쓸 수 있는 소스 추가(약관 점검 뒤) 중 무엇을 할지(D-62) | (b) 먼저, (a)는 평일 관측 뒤 | T3(품질 기준·신뢰 목록) |
-| 14 | **기술 소스 처리(D-61)** — **결정됨(2026-10-26)**: 운영자가 "금지된 부분이면 접근하지 않는다, 득보다 실이 많다"고 하여 AI타임스를 소스·신뢰 목록에서 빼고 차단 목록에 올렸고(PR #27) 글감이 안 되던 TechCrunch·The Verge·Hacker News도 뺐다. 남은 것: 전자신문(약관 불명확) 허가 문의 또는 제외, 공급이 줄어 모든 분야가 비는 `ALL_LANES_EMPTY` 빨강이 늘면 이 종료 정책의 완화 | 전자신문 허가 문의 | T3 |
+| 14 | **기술 소스**(D-61) — **일부 결정됨(2026-10-26)**: AI타임스·TechCrunch·The Verge·Hacker News는 접근하지 않음(PR #27 병합). 남은 것: **전자신문**(약관 불명확, 지금 기술 분야의 사실상 유일한 공급원 — 허가 문의 또는 제외)과 **Ars·IEEE**(약관 못 읽음, robots.txt가 AI 크롤러를 막음 — 같은 원칙으로 뺄지). 셋을 모두 빼면 기술 글감이 없어 모든 분야가 빌 때 실행이 빨강(`ALL_LANES_EMPTY`)이 되므로 그 종료 정책의 완화도 함께 정해야 한다 | 전자신문 허가 문의 · Ars·IEEE는 제외(득보다 실) | T3 |
 
 그 밖의 승인 대기(순서대로 따로 받는다): 방침 개정·ads.txt·방문 분석 태그(애드센스 심사 상태 확인 뒤), 네이버 반자동·신규 한글 Blogger 개설 게이트, 지역(장소) 글 파일럿, robots.txt(현행 유지 권장), 게시 빈도·크론 틱 추가(관측 뒤) — 상세는 `docs/analysis/`의 두 보고서.
 

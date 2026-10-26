@@ -96,9 +96,10 @@ TECH_KO = (
     "디스플레이", "통신", "네트워크", "플랫폼", "컴퓨터", "서버", "센서", "드론",
     "자율주행", "핵융합", "과학", "기술", "칩", "챗gpt", "오픈ai",
 )
+# 영문 낱말 경계는 ASCII 글자·숫자 기준이다. 파이썬의 \b 는 한글도 낱말 글자로 봐서 'AI가'·'생성AI' 처럼 한글이 붙은 말을 놓친다(Dubai·Chipotle 처럼 영문 속에 든 것만 거른다).
 TECH_EN = re.compile(
-    r"\b(ai|gpu|cpu|llm|chatgpt|openai|nvidia|5g|6g|chip|robot|quantum|"
-    r"software|cloud|startup|cyber|satellite|rocket)\b", re.I)
+    r"(?<![A-Za-z0-9])(ai|gpu|cpu|llm|chatgpt|openai|nvidia|5g|6g|chip|robot|quantum|"
+    r"software|cloud|startup|cyber|satellite|rocket)(?![A-Za-z0-9])", re.I)
 
 _client = None
 _download_locations = {}
@@ -720,9 +721,9 @@ NEWS_SOURCES = [
     {"name": "NASA", "lane": "science", "url": "https://www.nasa.gov/feed/",
      "terms": {"status": "allowed", "checked": "2026-10-26",
                "url": "https://www.nasa.gov/nasa-brand-center/images-and-media/"},
-     # APOD 는 사진마다 저작권자가 따로 있어 약관 예외이고, 취재진 초대·인증·행사 안내와 사진 설명(image-article)·센터 소개 쪽은 글감이 못 된다.
+     # APOD 는 사진마다 저작권자가 따로 있어 약관 예외이고, 취재진 초대·인증·행사 안내와 사진 설명(image-article)·Glenn 센터 음향 연구실 소개 쪽은 글감이 못 된다(센터 소식 기사는 살린다).
      "exclude_title": r"^APOD\b|\binvites? media\b|\bmedia accreditation\b|\bto (?:host|conduct|answer)\b|\bsets? coverage\b",
-     "exclude_link": r"/image-article/|/centers-and-facilities/",
+     "exclude_link": r"/image-article/|/centers-and-facilities/[^/]+/acoustics-",
      # NASA 의 AI 이용 안내: AI 결과물의 정보를 NASA 에 직접 귀속하는 것은 허용되지 않고, NASA 는 AI 결과물의 정확성에 책임지지 않으며,
      # "AI 도구가 NASA 자료를 포함한다"고 밝히되 NASA 가 검토·허가한 것처럼 암시하지 말라고 한다. 작성 지침 한 줄은 AI가 어길 수 있고(코드로
      # 막으면 후보가 계속 탈락해 호출이 낭비된다, D-63) 고지문은 코드가 붙인다.
@@ -772,10 +773,11 @@ NEWS_SOURCES = [
                 "en": "This article was written with an AI tool using materials published by the Federal Reserve Board. The Board has not reviewed or approved it."}},
     # 기술. 약관을 못 읽었거나 불명확한 기존 소스(유예, D-61). 읽고 허용이면 allowed 로 올리고, 금지로 읽히면 이 목록에서 빼고 TERMS_BLOCKED_DOMAINS 에 올린다.
     {"name": "Ars Technica", "lane": "technology", "url": "https://feeds.arstechnica.com/arstechnica/index",
-     "terms": {"status": "unverified", "note": "검증 세션 보고(직접 재확인 못 함): robots.txt 가 ClaudeBot·CCBot 등 AI 크롤러를 막음. Condé Nast 이용약관은 읽지 못함"}},
+     "terms": {"status": "unverified", "note": "2026-10-26 검증 세션이 robots.txt 를 읽음: ClaudeBot·anthropic-ai·CCBot·Google-Extended 등 AI 크롤러 12개를 막는다(이 생성기의 ChanceBlogBot 은 일반 규칙이라 허용). Condé Nast 이용약관은 읽지 못함"}},
     {"name": "IEEE Spectrum", "lane": "technology", "url": "https://spectrum.ieee.org/feeds/feed.rss",
-     "terms": {"status": "unverified", "note": "검증 세션 보고(일부, 직접 재확인 못 함): IEEE 사이트 이용약관은 복제에 사전 서면 동의를 요구하고 개인·정보 목적 이용만 허용. Spectrum 자체 RSS 약관은 못 찾음"}},
+     "terms": {"status": "unverified", "note": "검증 세션 보고(일부, 직접 재확인 못 함): IEEE 사이트 이용약관은 복제에 사전 서면 동의를 요구하고 개인·정보 목적 이용만 허용, robots.txt 는 GPTBot·ClaudeBot·anthropic-ai·CCBot·PerplexityBot 등 13개 AI 크롤러를 막는다(검증 세션이 읽음, Claude-Web 만 허용). Spectrum 자체 RSS 약관은 못 찾음"}},
     {"name": "전자신문", "lane": "technology", "url": "https://rss.etnews.com/Section901.xml",
+     "tech_filter": True,  # 이 피드는 건강·여행·증시 같은 일반 뉴스가 섞여 있어(2026-10-26 30건 중 기술 12~13건) 기술 키워드가 든 제목만 기술·미래 글감으로 쓴다
      "terms": {"status": "unverified", "note": "2026-10-26 이용약관(2012.09.01 표기)을 읽었다: 제공 정보의 영리 목적 이용 금지(회원 대상)·복제·전송·배포는 사전 승낙 필요, RSS·AI 이용 조항은 없어 불명확. 이 피드에는 해외 매체를 다시 쓴 기사도 섞여 권리가 한 겹 더 있다"}},
     # 블로터(https://www.bloter.net/feed)는 HTTP 404라 2026-10-25에 뺐다(실행 로그 '수집 실패', 로컬에서도 404/403).
     # 구글 뉴스 검색 소스 14개는 통과율이 0.4%(게시자 원문 주소로 풀리지 않음)라 2026-10-26에 뺐다.
@@ -845,6 +847,11 @@ def _host(url):
         return (urllib.parse.urlparse(url).hostname or "").lower().rstrip(".")
     except (TypeError, ValueError):
         return ""
+
+
+# 기사 주소는 글의 출처 목록·인용 줄에 마크다운 링크 `[글](주소)` 로 들어간다. 공백·꺾쇠·따옴표·역슬래시와 괄호·대괄호는 링크를 끊거나 새 링크·HTML 을 만들 수 있어 막는다.
+# fullmatch 로 쓴다: `$` 는 끝의 줄바꿈 앞에서도 맞아 Atom href 의 끝 줄바꿈이 통과한다. 실제 피드 링크 335개(16개 피드)에는 이 글자가 하나도 없었다(2026-10-26).
+_SAFE_URL = re.compile(r"https?://[^\s<>\"'\\()\[\]]+")
 
 
 def _host_in(host, domains):
@@ -949,6 +956,9 @@ def fetch_news_items(editorial_lane=None, stats=None, deadline=None, clock=time.
         if terms.get("status") == "pending":
             print(f"  소스 {src['name']}: 보류 — {_one_line(terms.get('blocker', ''), 200)}")
             continue
+        if _host_in(_host(src.get("url", "")), TERMS_BLOCKED_DOMAINS):
+            print(f"  소스 {src['name']}: 약관상 접근하지 않는 도메인(TERMS_BLOCKED_DOMAINS)이라 읽지 않음")
+            continue
         if deadline is not None and clock() > deadline:
             time_skipped += 1
             continue
@@ -1007,7 +1017,7 @@ def fetch_news_items(editorial_lane=None, stats=None, deadline=None, clock=time.
             article_url = _resolve_article_url(it["link"]) if src.get("google") else it["link"]
             resolved_count += 1
             publisher_host = publisher_host or _host(article_url)
-            if not article_url:
+            if not article_url or not _SAFE_URL.fullmatch(article_url):  # 줄바꿈·꺾쇠·따옴표·괄호가 든 주소는 글에 그대로 들어가면 마크다운·HTML 이 된다
                 _count(drops, "UNRESOLVED")
                 continue
             if not _trusted_domain(publisher_host, editorial_lane):
