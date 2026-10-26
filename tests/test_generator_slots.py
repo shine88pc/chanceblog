@@ -1541,6 +1541,43 @@ class LayoutGuaranteeTest(unittest.TestCase):
                 self.assertTrue(out["kr_content"].startswith("---\nlayout: post\n"), out["kr_content"][:60])
                 self.assertEqual(len(re.findall(r"(?m)^layout\s*:", out["kr_content"])), 1)
 
+    def test_a_layout_line_that_is_not_the_first_front_matter_line_still_counts(self):
+        out = self.validate(self.data_with_front('title: "t"\ncategory: "c"\ntags: []\nlayout: post'))
+        self.assertEqual(len(re.findall(r"(?m)^layout\s*:", out["kr_content"])), 1)
+        self.assertTrue(out["kr_content"].startswith('---\ntitle: "t"\n'), out["kr_content"][:40])
+
+    def test_only_the_front_matter_is_searched_for_a_layout_line(self):
+        data = self.data_with_front('title: "t"\ncategory: "c"\ntags: []')
+        for prefix in ("kr", "en"):
+            data[f"{prefix}_content"] += "\nlayout: x\n"  # 본문에 layout: 으로 시작하는 줄이 있어도 front matter 의 layout 은 없는 글이다
+        out = self.validate(data)
+        self.assertTrue(out["kr_content"].startswith("---\nlayout: post\ntitle: "), out["kr_content"][:60])
+
+    def test_whitespace_after_the_opening_fence_leaves_no_blank_or_tab_only_line(self):
+        for opening in ("--- ", "---  ", "---\t"):
+            with self.subTest(opening=repr(opening)):
+                data = g.stub_post_data("주제", self.LINK)
+                for prefix in ("kr", "en"):
+                    body = data[f"{prefix}_content"].split("\n---\n", 1)[1]
+                    data[f"{prefix}_content"] = f'{opening}\ntitle: "t"\ncategory: "c"\ntags: []\n---\n{body}'
+                out = self.validate(data)
+                self.assertEqual(out["kr_content"].split("\n")[:3], ["---", "layout: post", 'title: "t"'])
+
+    def test_blank_lines_before_the_opening_fence_are_dropped(self):
+        data = self.data_with_front('title: "t"\ncategory: "c"\ntags: []')
+        for prefix in ("kr", "en"):
+            data[f"{prefix}_content"] = "\n\n  " + data[f"{prefix}_content"]
+        out = self.validate(data)
+        self.assertTrue(out["kr_content"].startswith('---\nlayout: post\ntitle: "t"'), repr(out["kr_content"][:50]))
+
+    def test_an_empty_front_matter_gets_just_the_layout_line_without_a_blank_line(self):
+        data = g.stub_post_data("주제", self.LINK)
+        for prefix in ("kr", "en"):
+            body = data[f"{prefix}_content"].split("\n---\n", 1)[1]
+            data[f"{prefix}_content"] = "---\n---\n" + body
+        out = self.validate(data)
+        self.assertEqual(out["kr_content"].split("\n")[:3], ["---", "layout: post", "lang: ko"])
+
     def test_a_front_matter_with_windows_line_endings_still_gets_a_clean_layout_line(self):
         data = g.stub_post_data("주제", self.LINK)
         for prefix in ("kr", "en"):

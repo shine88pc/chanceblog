@@ -542,10 +542,9 @@ class RealRepositoryTest(unittest.TestCase):
                 path = Path(tmp) / post.rel
                 text = path.read_text(encoding="utf-8")
                 # 글마다 front matter 줄이 다르다(봇 글은 layout 줄이 없을 수 있다 — 2026-10-26 18시 글). 맨 위 `---` 바로 아래에 넣는다
-                head, sep, rest = text.partition("\n")
-                self.assertEqual(head.rstrip("\r"), "---", post.rel)
-                eol = "\r\n" if head.endswith("\r") else "\n"
-                path.write_text(head + sep + "published: false" + eol + rest, encoding="utf-8", newline="")
+                head, sep, rest = text.partition("\n")  # read_text 가 줄바꿈을 \n 으로 읽는다
+                self.assertEqual(head, "---", post.rel)
+                path.write_text(head + sep + "published: false\n" + rest, encoding="utf-8", newline="")
             second = v.select_newest(tmp, datetime.now(timezone.utc), self.tz)
             self.assertTrue(second.posts)
             self.assertFalse({p.rel for p in first} & {p.rel for p in second.posts})

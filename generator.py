@@ -1474,6 +1474,7 @@ def validate_post_data(data, kr_image, en_image, verified_source_url=None):
                 f"lang: {html_lang}\nimage: {json.dumps(image_url)}\n---\n\n" + content
             )
         else:
+            content = content.lstrip()  # 위 검사(lstrip().startswith)와 같게 — 앞의 빈 줄·공백이 있으면 아래 content[3:end] 가 어긋난다
             end = content.find("\n---", 3)
             if end != -1:
                 front = content[3:end]
@@ -1483,7 +1484,8 @@ def validate_post_data(data, kr_image, en_image, verified_source_url=None):
                 front = re.sub(r"\n{2,}", "\n", front).rstrip()
                 if not re.search(r"(?m)^layout\s*:", front):
                     # 모델이 front matter 에서 layout 을 빼먹어도 다른 글·시험·도구와 같게 post 로 보장한다(2026-10-26 18시 글이 그랬다)
-                    front = "\nlayout: post\n" + front.lstrip("\r\n")
+                    rest = front.strip()  # 여는 울타리 뒤 공백·탭·줄바꿈이 남아 빈 줄이나 탭만 있는 줄이 되지 않게
+                    front = "\nlayout: post" + ("\n" + rest if rest else "")
                 front += f'\nlang: {html_lang}\nimage: "{image_url}"'
                 content = f"---{front}\n---\n\n{body}"
 
