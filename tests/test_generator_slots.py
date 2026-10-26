@@ -524,17 +524,70 @@ class FetchNewsStatsTest(unittest.TestCase):
         self.assertEqual([m["title"] for m in merged], ["정상 기사"])
         self.assertEqual(stats["sources"][0]["drops"], {"UNRESOLVED": 1})
 
-    def test_etnews_drops_non_tech_titles_with_the_real_source_config(self):
+    def test_items_between_36_and_72_hours_old_are_kept_and_older_ones_are_dropped_as_age(self):
+        # 신선도 한도는 72시간이다(2026-10-26): 금요일 발표가 월요일 슬롯까지 닿게 한다. 한도 안팎의 경계를 고정한다.
         summary = "요약 문장입니다. " * 20
-        etnews = dict(next(s for s in g.NEWS_SOURCES if s["name"] == "전자신문"), url=self.FEED)
-        items = [("사람 표정 따라하는 28cm AI 로봇", "https://www.etnews.com/2026102500001", self.fresh(), summary, ""),
-                 ("오십견인 줄, 방치했더니 어깨 통증 키운다", "https://www.etnews.com/2026102500002", self.fresh(), summary, "")]
-        stats = {}
-        with mock.patch.object(g, "NEWS_SOURCES", [etnews]), \
-                mock.patch.object(g.urllib.request, "urlopen", lambda req, timeout=0: FakeResponse(rss(items))):
-            merged, out = run_captured(g.fetch_news_items, "technology", stats=stats)
-        self.assertEqual([m["title"] for m in merged], ["사람 표정 따라하는 28cm AI 로봇"])
-        self.assertEqual(stats["sources"][0]["drops"], {"NOT_TECH": 1})
+        self.assertEqual(g.NEWS_MAX_AGE_HOURS, 72)
+        self.assertEqual(g.DROP_LABELS["AGE"], "72시간 초과")
+        items = [("71시간 된 기사", "https://www.reuters.com/a", self.fresh(71), summary, ""),
+                 ("40시간 된 기사", "https://www.reuters.com/b", self.fresh(40), summary, ""),
+                 ("73시간 된 기사", "https://www.reuters.com/c", self.fresh(73), summary, "")]
+        sources = [{"name": "시간 시험", "lane": "economy", "url": self.FEED}]
+        merged, stats, out = self.run_fetch(items, sources=sources)
+        self.assertEqual(sorted(m["title"] for m in merged), ["40시간 된 기사", "71시간 된 기사"])
+        self.assertEqual(stats["sources"][0]["drops"], {"AGE": 1})
+
+    def test_display_name_is_what_the_post_shows_and_name_is_the_fallback(self):
+        summary = "요약 문장입니다. " * 20
+        items = [("통과 기사", "https://www.reuters.com/a", self.fresh(), summary, "")]
+        merged, stats, out = self.run_fetch(items, sources=[{"name": "소스 · 경제", "display_name": "표시 이름", "lane": "economy", "url": self.FEED}])
+        self.assertEqual([m["source"] for m in merged], ["표시 이름"])
+        self.assertIn("소스 소스 · 경제: 1건 중 1건 사용", out)  # 로그에는 name 이 보인다
+        merged, stats, out = self.run_fetch(items, sources=[{"name": "이름만 있는 소스", "lane": "economy", "url": self.FEED}])
+        self.assertEqual([m["source"] for m in merged], ["이름만 있는 소스"])
+
+    def test_atom_text_inside_child_elements_is_read_as_xhtml_text(self):
+        # Statistics Canada The Daily 는 제목·요약이 type="xhtml" 이라 글자가 div·span 안에 있다. 예전에는 빈 제목으로 읽혀 전부 NO_TITLE 이 됐다.
+        atom = ("<?xml version='1.0'?><feed xmlns='http://www.w3.org/2005/Atom'><entry>"
+                "<title type='xhtml'><div xmlns='http://www.w3.org/1999/xhtml'>Retail trade, <span class='refper'>August 2026</span></div></title>"
+                "<link href='https://www.statcan.gc.ca/daily-quotidien/261023/dq261023a-eng.htm'></link>"
+                "<updated>2026-10-23T08:30:00-04:00</updated>"
+                "<summary type='xhtml'><div xmlns='http://www.w3.org/1999/xhtml'>Retail sales increased 1.2% to $74.6 billion in August.&#160;Sales were up.</div></summary>"
+                "</entry></feed>").encode("utf-8")
+        item = g.parse_feed(atom)[0]
+        self.assertEqual(item["title"], "Retail trade, August 2026")
+        self.assertEqual(item["summary"], "Retail sales increased 1.2% to $74.6 billion in August. Sales were up.")
+        self.assertEqual(item["link"], "https://www.statcan.gc.ca/daily-quotidien/261023/dq261023a-eng.htm")
+        # 평범한 텍스트·CDATA 제목은 그대로다
+        plain = ("<rss><channel><item><title>평범한 제목</title><description><![CDATA[<p>요약 <b>문장</b></p>]]></description>"
+                 "<link>https://www.reuters.com/a</link></item></channel></rss>").encode("utf-8")
+        item = g.parse_feed(plain)[0]
+        self.assertEqual((item["title"], item["summary"]), ("평범한 제목", "요약 문장"))
+
+    def test_the_real_statcan_sources_split_one_feed_by_lane(self):
+        def entry(title, minutes=0):
+            when = (self.fresh(2 + minutes)).astimezone(timezone(timedelta(hours=-4))).isoformat()
+            return (f"<entry><title type='xhtml'><div xmlns='http://www.w3.org/1999/xhtml'>{title}</div></title>"
+                    f"<link href='https://www.statcan.gc.ca/daily-quotidien/261023/{abs(hash(title)) % 10**8}-eng.htm'></link><updated>{when}</updated>"
+                    f"<summary type='xhtml'><div xmlns='http://www.w3.org/1999/xhtml'>{'Summary sentence for the release. ' * 5}</div></summary></entry>")
+        titles = ["Retail trade, August 2026", "Consumer Price Index, September 2026", "Retail Services Price Index, August 2026",
+                  "Canadian postsecondary enrolments and graduates, 2024/2025", "Health Reports, October 2026",
+                  "Natural gas supply and disposition, August 2026", "Violent victimization and unwanted sexual behaviours experienced by 2SLGBTQ+ people in Canada, 2025"]
+        atom = ("<?xml version='1.0'?><feed xmlns='http://www.w3.org/2005/Atom'>" + "".join(entry(t, i) for i, t in enumerate(titles)) + "</feed>").encode("utf-8")
+        statcan = [s for s in g.NEWS_SOURCES if s["name"].startswith("Statistics Canada")]
+        self.assertEqual(len(statcan), 3)
+        expected = {"economy": ["Consumer Price Index, September 2026", "Retail trade, August 2026"],
+                    "society": ["Canadian postsecondary enrolments and graduates, 2024/2025"],
+                    "daily_life": ["Health Reports, October 2026"]}
+        for lane, want in expected.items():
+            with self.subTest(lane=lane):
+                with mock.patch.object(g, "NEWS_SOURCES", statcan), \
+                        mock.patch.object(g.urllib.request, "urlopen", lambda req, timeout=0: FakeResponse(atom)), \
+                        mock.patch.object(g, "_fetch_source_excerpt", return_value=""):
+                    merged, out = run_captured(g.fetch_news_items, lane)
+                self.assertEqual(sorted(m["title"] for m in merged), sorted(want))
+                self.assertEqual({m["source"] for m in merged}, {"Statistics Canada"})
+                self.assertTrue(all(m["notice"] and m["citation"] and m["prompt_rule"] for m in merged))
 
     def test_exclude_link_and_exclude_tags_are_counted_as_excluded(self):
         summary = "요약 문장입니다. " * 20
@@ -633,15 +686,20 @@ class FetchNewsStatsTest(unittest.TestCase):
         self.assertNotIn("모든 뉴스 소스 수집에 실패", out)
 
     def test_the_held_un_news_source_is_never_requested(self):
-        def forbidden(req, timeout=0):
-            raise AssertionError(f"보류 소스를 요청했다: {getattr(req, 'full_url', req)}")
+        requested = []
+
+        def fake_urlopen(req, timeout=0):
+            requested.append(getattr(req, "full_url", req))
+            return FakeResponse(rss([]))
 
         stats = {}
-        with mock.patch.object(g.urllib.request, "urlopen", forbidden):
+        with mock.patch.object(g.urllib.request, "urlopen", fake_urlopen):
             merged, out = run_captured(g.fetch_news_items, "society", stats=stats)
         self.assertEqual(merged, [])
         self.assertIn("소스 UN News: 보류", out)
-        self.assertNotIn("sources", stats)
+        self.assertEqual([u for u in requested if "un.org" in u], [])
+        # 사회·정책 분야는 집행위원회 소식과 통계청(사회)을 읽고, 보류한 UN News 는 소스 수에 세지 않는다
+        self.assertEqual([s["name"] for s in stats["sources"]], ["European Commission", "Statistics Canada · society"])
 
     def test_failed_source_is_recorded_not_hidden(self):
         sources = [{"name": "죽은 소스", "lane": "economy", "url": "https://dead.test/feed"}]
@@ -1623,6 +1681,145 @@ class SourceRuleSamplesTest(unittest.TestCase):
         self.assertIn("분석과 해석의 책임은 이 사이트에 있습니다", by_name["Pew Research Center"]["notice"]["ko"])
         self.assertIn("responsibility for the analysis and interpretation rests with this site", by_name["Pew Research Center"]["notice"]["en"])
 
+    def test_european_commission_news_skips_bond_auctions_calls_elections_and_democracy_items_only(self):
+        # 2026-10-26 피드(30건)에서: 국채 입찰 결과·공지 8건, 모집·신청 1건, 'democracy' 분류 5건이 빠지고 나머지 16건이 남는다.
+        base = "https://commission.europa.eu/news-and-media/news/"
+        skipped = (
+            ("Results of 21-10-2026 auction (EU-Bills)", ("Directorate-General for Budget", "News article")),
+            ("Announcement of next auction (EU-Bonds) on 26-10-2026", ("News article", "EU budget")),
+            ("Apply now to be a European Climate Pact Ambassador!", ("News article", "climate change")),
+            ("The Parliament’s EUDS Special Committee visits the Centre", ("News article", "democracy")),
+            ("Pilot phase of Stakeholder Platform begins", ("News article", "democracy")),
+            ("The Commission launches a repository for transparency information on online political ads", ("News article",)),
+            ("Commission publishes guidance for the 2029 European elections", ("News article",)),
+            ("Webinar: how to use the new EU funding portal", ("News article",)),
+        )
+        for title, tags in skipped:
+            self.assertFalse(self.kept("European Commission", title, tags, base + "x_en"), title)
+        for title, tags in (
+                ("Click wisely: promoting online safety during European Cybersecurity Month", ("Directorate-General for Communication", "News article")),
+                ("An EU strategy for a rapidly changing Arctic", ("News article",)),
+                ("World Mental Health Day: let’s talk and listen", ("News article",)),
+                ("A long-term vision for a successful fisheries and aquaculture sector", ("News article",)),
+                ("Making data centres energy efficient thanks to a new EU rating system", ("News article", "energy efficiency"))):
+            self.assertTrue(self.kept("European Commission", title, tags, base + "x_en"), title)
+
+    def test_the_eurostat_and_statement_items_in_the_dg_feeds_are_skipped_and_the_rest_kept(self):
+        eurostat = "https://ec.europa.eu/eurostat/web/products-eurostat-news/w/ddn-20261020-1"
+        presscorner = "https://ec.europa.eu/commission/presscorner/detail/en/ip_26_1234"
+        # Eurostat 소식은 Eurostat 자체 고지(출처 표기·면책 문구)가 따로 있어 쓰지 않는다. 프레스 코너(집행위원회 자료)는 쓴다.
+        for name in ("European Commission · Energy", "European Commission · Environment"):
+            self.assertFalse(self.kept(name, "Eurostat: EU trade in wind turbines increased in 2025", link=eurostat), name)
+            self.assertTrue(self.kept(name, "Commission invests €3.4 billion in net-zero technology projects", link=presscorner), name)
+        energy = "European Commission · Energy"
+        self.assertFalse(self.kept(energy, "Statement by President von der Leyen at the joint press conference with President Costa", link=presscorner))
+        self.assertFalse(self.kept(energy, "Cross-border gas network code – Commission launches call for feedback on revision of rules"))
+        self.assertFalse(self.kept(energy, "Energy Transition Investment Council - Call for applications"))
+        for title in ("Oil Coordination Group discusses EU fuel market developments",
+                      "EU and New Caledonia sign strategic partnership on sustainable raw materials",
+                      "In focus: Renewable energy – building trust and sharing benefits"):
+            self.assertTrue(self.kept(energy, title), title)
+        self.assertTrue(self.kept("European Commission · Environment", "Bio-based Alliance launches to drive sustainable solutions"))
+        self.assertFalse(self.kept("European Commission · Environment", "Apply now: LIFE programme call for applications"))
+
+    def test_the_commission_feeds_never_pull_in_the_eib_or_acer_items(self):
+        # 에너지 피드에는 집행위원회 자료가 아닌 EIB·ACER 기사가 섞인다. 이 고지(CC BY 4.0)의 대상이 아니라 신뢰 목록에 두지 않는다.
+        for host in ("www.eib.org", "www.acer.europa.eu", "ec.europa.eu.evil.example", "evilec.europa.eu"):
+            for lane in g.EDITORIAL_LANES:
+                self.assertFalse(g._trusted_domain(host, lane), (host, lane))
+        for host, lane in (("energy.ec.europa.eu", "economy"), ("finance.ec.europa.eu", "economy"), ("ec.europa.eu", "economy"),
+                           ("environment.ec.europa.eu", "science"), ("projects.research-and-innovation.ec.europa.eu", "science"),
+                           ("joint-research-centre.ec.europa.eu", "science"), ("digital-strategy.ec.europa.eu", "technology"),
+                           ("commission.europa.eu", "society")):
+            self.assertTrue(g._trusted_domain(host, lane), (host, lane))
+        self.assertFalse(g._trusted_domain("commission.europa.eu", "economy"))  # 집행위원회 소식 피드는 사회·정책 분야에만 쓴다
+
+    def test_jrc_skips_defence_and_security_items_by_feed_category(self):
+        jrc = "European Commission · JRC"
+        self.assertTrue(self.kept(jrc, "AI adoption more than doubles in almost every EU strategic sector",
+                                  ("Joint Research Centre", "Digital transformation, cybersecurity", "News announcement")))
+        self.assertTrue(self.kept(jrc, "Food crises across the globe: acute food insecurity remains alarmingly high",
+                                  ("Joint Research Centre", "Anticipation, risks, resilience", "Sustainable food systems")))
+        self.assertFalse(self.kept(jrc, "How can Europe counter hybrid warfare?", ("Joint Research Centre", "Space, security, defence")))
+        self.assertFalse(self.kept(jrc, "JRC launches Security Research and Innovation Campus",
+                                   ("Joint Research Centre", "Security and law enforcement", "Space, security, defence")))
+        # 앵커가 있는 분류 태그는 정확히 그 태그일 때만 거른다
+        self.assertTrue(self.kept(jrc, "Privacy tools for citizens", ("Joint Research Centre", "Security and law enforcement research methods")))
+
+    def test_eu_digital_strategy_skips_only_calls_for_tenders(self):
+        name = "EU Digital Strategy"
+        self.assertFalse(self.kept(name, "Establishing the European AI Observatory: Call for tenders"))
+        for title in ("First harmonised standard supporting the AI Act published in the Official Journal",
+                      "Commission to investigate how Booking.com combats scams and fraud under the Digital Services Act",
+                      "Consultation on EU KIDS ACT"):
+            self.assertTrue(self.kept(name, title), title)
+
+    def test_statcan_keeps_headline_releases_and_studies_and_drops_technical_products_and_sensitive_topics(self):
+        economy, society, life = "Statistics Canada · economy", "Statistics Canada · society", "Statistics Canada · daily life"
+        # 2026-10-26 The Daily 실제 제목
+        for title in ("Retail trade, August 2026", "Consumer Price Index, September 2026", "Labour Force Survey, September 2026",
+                      "Gross domestic product by industry, July 2026", "New Housing Price Index, September 2026",
+                      "Canadian international merchandise trade, August 2026", "Employment Insurance, August 2026", "Building permits, August 2026",
+                      "Impact of cybercrime on Canadian businesses, 2025"):
+            self.assertTrue(self.kept(economy, title), title)
+        for title in ("Industrial product and raw materials price indexes, September 2026", "Retail Services Price Index, August 2026",
+                      "Lending Services Price Index, second quarter 2026", "Natural gas supply and disposition, August 2026",
+                      "Monthly credit aggregates, August 2026", "Monthly Mineral Production Survey, August 2026",
+                      "Building construction price indexes: announcement", "Electric power generating stations, 2025",
+                      "Employment by industry in rural Canada: Interactive dashboard, September 2026", "Open Database of Healthcare Facilities, version 2.0"):
+            self.assertFalse(self.kept(economy, title), title)
+        for title in ("The gender gap in high school graduation narrows in 2023/2024", "Canadian postsecondary enrolments and graduates, 2024/2025",
+                      "Canada's population estimates, second quarter 2026", "Housing affordability in Canada, 2024",
+                      "Police-reported hate crime and cybercrime, preliminary quarterly data, second quarter 2026"):
+            self.assertTrue(self.kept(society, title), title)
+        for title in ("Health Reports, October 2026", "Canadian Community Health Survey, 2025", "Births, 2025", "Fertility and baby names, 2025",
+                      "Study: Understanding quality of life among persons with disabilities in Canada—material and social well-being"):
+            self.assertTrue(self.kept(life, title), title)
+        # 자동으로 다시 쓰기에 민감한 주제는 세 분야 모두에서 뺀다. 같은 낱말이 든 평범한 제목은 살린다.
+        for title in ("Violent victimization and unwanted sexual behaviours experienced by 2SLGBTQ+ people in Canada, 2025",
+                      "Opioid and stimulant consumption patterns in select Canadian cities, January 2024 to March 2026",
+                      "Suicide mortality in Canada, 2023", "Homicide in Canada, 2025", "Drug overdose deaths and hospitalizations, 2025"):
+            for name in (economy, society, life):
+                self.assertFalse(self.kept(name, title), (name, title))
+        # 분야가 다른 제목은 이 분야 주제어에 맞지 않아 떨어진다(OFF_TOPIC)
+        self.assertFalse(self.kept(society, "Retail trade, August 2026"))
+        self.assertFalse(self.kept(life, "Consumer Price Index, September 2026"))
+        self.assertFalse(self.kept(economy, "Births, 2025"))
+
+    def test_the_new_sources_carry_the_credit_and_change_notices_their_licences_ask_for(self):
+        by_name = {s["name"]: s for s in g.NEWS_SOURCES}
+        sample = {"title": "AI adoption more than doubles in almost every EU strategic sector",
+                  "link": "https://joint-research-centre.ec.europa.eu/jrc-news-and-updates/ai-adoption_en",
+                  "published": datetime(2026, 10, 23, 8, 0, tzinfo=timezone.utc)}
+        for name in ("European Commission", "European Commission · Energy", "European Commission · Environment",
+                     "European Commission · JRC", "EU Digital Strategy"):
+            with self.subTest(source=name):
+                src = by_name[name]
+                line = g._citation_line(src["citation"], sample)
+                for needle in ("AI adoption more than doubles", "October 23, 2026", sample["link"], "© European Union", "CC BY 4.0",
+                               "https://creativecommons.org/licenses/by/4.0/"):
+                    self.assertIn(needle, line)
+                self.assertNotIn("{", line)
+                self.assertIn("CC BY 4.0", src["notice"]["ko"])
+                self.assertIn("바뀐 부분", src["notice"]["ko"])
+                self.assertIn("보증하지 않았", src["notice"]["ko"])
+                self.assertIn("CC BY 4.0", src["notice"]["en"])
+                self.assertIn("changes were made", src["notice"]["en"])
+                self.assertIn("has not reviewed or endorsed", src["notice"]["en"])
+                self.assertIn("확정된 법·결정을 구분", src["prompt_rule"])
+        self.assertIn("DG CNECT", by_name["EU Digital Strategy"]["citation"])            # 디지털 전략 사이트의 출처 표시 안내(작품 제목·유럽연합 귀속·원문 주소)
+        self.assertIn("Anonymous (not verified)", by_name["EU Digital Strategy"]["prompt_rule"])
+        for name in ("Statistics Canada · economy", "Statistics Canada · society", "Statistics Canada · daily life"):
+            with self.subTest(source=name):
+                src = by_name[name]
+                self.assertEqual(
+                    g._citation_line(src["citation"], dict(sample, title="Retail trade, August 2026", link="https://www.statcan.gc.ca/daily-quotidien/261023/dq261023a-eng.htm")),
+                    "Adapted from Statistics Canada, Retail trade, August 2026, October 23, 2026. This does not constitute an endorsement by Statistics Canada of this product.")
+                self.assertNotIn("statcan.gc.ca", g._citation_line(src["citation"], sample))  # 통계청 도메인 이름을 글에 표시하지 않는다(링크는 출처 목록에만)
+                self.assertIn("보증하지 않았", src["notice"]["ko"])
+                self.assertIn("has not reviewed or endorsed", src["notice"]["en"])
+                self.assertIn("그대로 쓰세요", src["prompt_rule"])
+
     def test_pew_topic_words_need_word_boundaries(self):
         pew = next(s for s in g.NEWS_SOURCES if s["name"] == "Pew Research Center")
         for text in ("Automobile ownership trends", "Spreading costs across households"):
@@ -1632,13 +1829,12 @@ class SourceRuleSamplesTest(unittest.TestCase):
 
 
 class SourceListTest(unittest.TestCase):
-    # 일상·마음: 약관상 쓸 수 있는 직접 RSS를 아직 찾지 못해 소스가 없다(docs/analysis/2026-10-25_publish-readiness.md §3-1).
-    # 사회·정책: UN News 가 보류(pending) 중이라 읽는 소스가 없다(D-63). 소스를 더하거나 보류를 풀면 여기서 뺀다.
-    # 이 분야가 뽑히면 후보가 없어 다음 분야로 넘어간다.
-    LANES_WITHOUT_SOURCES = {"daily_life", "society"}
-    # 약관을 읽지 못했거나 불명확해 운영자 결정 전까지 쓰는 기존 소스(유예). 새 소스는 allowed 만 늘린다 — 읽고 allowed 로 올리거나
-    # 목록에서 빼서 줄이기만 한다. 금지로 읽히면 소스에 두지 않고 TERMS_BLOCKED_DOMAINS 에 올린다.
-    LEGACY_GRACE = {"전자신문"}
+    # 모든 분야에 읽는 소스가 있다(2026-10-26 해외 소스 추가: 일상·마음·사회·정책은 Statistics Canada·집행위원회 소식). UN News 는 보류(pending)라 읽지 않는다(D-63).
+    # 분야가 하나라도 다시 비면 여기에 적고 이유를 남긴다(그 분야가 뽑히면 후보가 없어 다음 분야로 넘어간다).
+    LANES_WITHOUT_SOURCES = set()
+    # 약관을 읽지 못했거나 불명확해 운영자 결정 전까지 쓰는 기존 소스(유예). 마지막이던 전자신문을 2026-10-26에 뺐다 — 지금은 없고 새로 늘릴 수 없다.
+    # 읽고 allowed 로 올리거나 목록에서 빼서 줄이기만 한다. 금지로 읽히면 소스에 두지 않고 TERMS_BLOCKED_DOMAINS 에 올린다.
+    LEGACY_GRACE = set()
 
     def test_dead_bloter_feed_is_gone(self):
         self.assertNotIn("블로터", [s["name"] for s in g.NEWS_SOURCES])
@@ -1662,18 +1858,26 @@ class SourceListTest(unittest.TestCase):
             "UN News": ("society", "https://news.un.org/feed/subscribe/en/news/all/rss.xml"),
             "Pew Research Center": ("culture", "https://www.pewresearch.org/feed/"),
             "Federal Reserve": ("economy", "https://www.federalreserve.gov/feeds/press_all.xml"),
-            "전자신문": ("technology", "https://rss.etnews.com/Section901.xml"),
+            "European Commission": ("society", "https://commission.europa.eu/node/2/rss_en"),
+            "European Commission · Energy": ("economy", "https://energy.ec.europa.eu/node/2/rss_en"),
+            "European Commission · Environment": ("science", "https://environment.ec.europa.eu/node/92/rss_en"),
+            "European Commission · JRC": ("science", "https://joint-research-centre.ec.europa.eu/node/2/rss_en"),
+            "EU Digital Strategy": ("technology", "https://digital-strategy.ec.europa.eu/en/rss.xml"),
+            "Statistics Canada · economy": ("economy", "https://www150.statcan.gc.ca/n1/rss/dai-quo/0-eng.atom"),
+            "Statistics Canada · society": ("society", "https://www150.statcan.gc.ca/n1/rss/dai-quo/0-eng.atom"),
+            "Statistics Canada · daily life": ("daily_life", "https://www150.statcan.gc.ca/n1/rss/dai-quo/0-eng.atom"),
         })
-        # 읽는 소스 전부(승인 상태와 상관없이)의 피드 호스트와 기사 호스트가 자기 분야에서 신뢰된다 — 기술 분야의 뼈대 전자신문 포함
+        # 읽는 소스 전부(승인 상태와 상관없이)의 피드 호스트가 자기 분야에서 신뢰된다
         for src in g.NEWS_SOURCES:
             self.assertTrue(g._trusted_domain(g._host(src["url"]), src["lane"]), src["name"])
-        for host in ("www.etnews.com", "www.nasa.gov", "science.nasa.gov"):
-            lane = {"www.etnews.com": "technology", "www.nasa.gov": "science", "science.nasa.gov": "science"}[host]
-            self.assertTrue(g._trusted_domain(host, lane), host)
+        # 피드와 기사 호스트가 다른 소스(통계청 피드 www150 → 기사 www.statcan.gc.ca)도 기사 호스트가 신뢰된다
+        for host, lane in (("www.nasa.gov", "science"), ("science.nasa.gov", "science"),
+                           ("www.statcan.gc.ca", "economy"), ("www.statcan.gc.ca", "society"), ("www.statcan.gc.ca", "daily_life")):
+            self.assertTrue(g._trusted_domain(host, lane), (host, lane))
 
-    def test_etnews_keeps_only_titles_with_tech_words(self):
-        etnews = next(s for s in g.NEWS_SOURCES if s["name"] == "전자신문")
-        self.assertIs(etnews.get("tech_filter"), True)
+    def test_the_tech_title_filter_still_works_though_no_source_uses_it(self):
+        # tech_filter 를 쓰던 마지막 소스(전자신문)를 2026-10-26에 뺐다. 기능과 낱말 목록은 남겨 두어 시험으로 고정한다.
+        self.assertEqual([s["name"] for s in g.NEWS_SOURCES if s.get("tech_filter")], [])
         self.assertFalse(g.is_tech_title("오십견인 줄, 방치했더니…'옆으로 누워 자는 습관', 어깨 통증 키운다"))
         self.assertTrue(g.is_tech_title("사람 표정 따라하는 28cm AI 로봇"))
 
@@ -1714,7 +1918,7 @@ class SourceListTest(unittest.TestCase):
     def test_the_blocked_domain_list_is_exactly_the_agreed_publishers(self):
         self.assertEqual(set(g.TERMS_BLOCKED_DOMAINS),
                          {"bbc.com", "bbc.co.uk", "bbci.co.uk", "theguardian.com", "guardian.co.uk",
-                          "nature.com", "technologyreview.com", "aitimes.com", "arstechnica.com", "ieee.org"})
+                          "nature.com", "technologyreview.com", "aitimes.com", "arstechnica.com", "ieee.org", "etnews.com"})
 
     def test_pew_never_reads_article_pages_and_the_prompt_rules_exist(self):
         by_name = {s["name"]: s for s in g.NEWS_SOURCES}
@@ -1740,6 +1944,18 @@ class SourceListTest(unittest.TestCase):
     def test_sources_under_grace_cannot_grow(self):
         grace = {s["name"] for s in g.NEWS_SOURCES if s["terms"]["status"] == "unverified"}
         self.assertTrue(grace <= self.LEGACY_GRACE, grace - self.LEGACY_GRACE)
+        self.assertEqual(grace, set(), "2026-10-26 이후 약관 불명확(unverified) 소스는 없다")
+
+    def test_etnews_is_blocked_and_neither_read_nor_trusted_anywhere(self):
+        # 콘텐츠 이용에 사전 협의·정식 계약·사용료가 필요하고 무단 사용에는 30배 배상을 안내한다. 운영자 결정(2026-10-26 "무료 자동화 기반" 취지에 맞지 않음)으로 접근하지 않는다.
+        self.assertIn("etnews.com", g.TERMS_BLOCKED_DOMAINS)
+        self.assertEqual([s["name"] for s in g.NEWS_SOURCES if s["name"] == "전자신문" or "etnews" in s["url"]], [])
+        for host in ("www.etnews.com", "rss.etnews.com", "etnews.com"):
+            for lane in g.EDITORIAL_LANES:
+                self.assertFalse(g._trusted_domain(host, lane), (host, lane))
+        for lane, domains in g.TRUSTED_SOURCE_DOMAINS.items():
+            self.assertNotIn("etnews.com", domains, lane)
+        self.assertFalse(g._host_in("notetnews.com", g.TERMS_BLOCKED_DOMAINS))  # 비슷한 이름은 막지 않는다
 
     def test_aitimes_is_blocked_and_neither_read_nor_trusted_anywhere(self):
         # 기사 페이지 하단의 'AI학습 및 활용 금지' 표기(2026-10-26)와 운영자 결정("금지된 부분이면 접근하지 않는다")으로 접근하지 않는다.
@@ -1788,7 +2004,7 @@ class SourceListTest(unittest.TestCase):
 
     def test_terms_blocked_publishers_are_in_no_source_and_no_trust_list(self):
         for domain in ("bbc.com", "bbc.co.uk", "theguardian.com", "nature.com", "technologyreview.com", "aitimes.com",
-                       "arstechnica.com", "ieee.org"):
+                       "arstechnica.com", "ieee.org", "etnews.com"):
             self.assertIn(domain, g.TERMS_BLOCKED_DOMAINS)
         for lane, domains in g.TRUSTED_SOURCE_DOMAINS.items():
             for domain in domains:
@@ -1799,13 +2015,14 @@ class SourceListTest(unittest.TestCase):
     def test_a_blocked_domain_is_refused_even_if_someone_adds_it_to_a_trust_list(self):
         widened = {**g.TRUSTED_SOURCE_DOMAINS,
                    "technology": g.TRUSTED_SOURCE_DOMAINS["technology"]
-                   + ("bbc.co.uk", "technologyreview.com", "arstechnica.com", "ieee.org")}
+                   + ("bbc.co.uk", "technologyreview.com", "arstechnica.com", "ieee.org", "etnews.com")}
         with mock.patch.object(g, "TRUSTED_SOURCE_DOMAINS", widened):
             self.assertFalse(g._trusted_domain("www.bbc.co.uk", "technology"))
             self.assertFalse(g._trusted_domain("www.technologyreview.com", "technology"))
             self.assertFalse(g._trusted_domain("feeds.arstechnica.com", "technology"))
             self.assertFalse(g._trusted_domain("spectrum.ieee.org", "technology"))
-            self.assertTrue(g._trusted_domain("www.etnews.com", "technology"))
+            self.assertFalse(g._trusted_domain("www.etnews.com", "technology"))
+            self.assertTrue(g._trusted_domain("digital-strategy.ec.europa.eu", "technology"))
 
     def test_each_allowed_source_publisher_is_trusted_in_its_own_lane(self):
         for src in g.NEWS_SOURCES:
@@ -1814,9 +2031,19 @@ class SourceListTest(unittest.TestCase):
         for host, lane in (("science.nasa.gov", "science"), ("news.un.org", "society")):
             self.assertTrue(g._trusted_domain(host, lane), host)
 
+    def test_every_citation_template_fills_in_and_every_source_has_a_visible_name(self):
+        sample = {"title": "Sample release", "link": "https://example.test/a", "published": datetime(2026, 10, 23, 8, 0, tzinfo=timezone.utc)}
+        for src in g.NEWS_SOURCES:
+            with self.subTest(source=src["name"]):
+                if src.get("citation"):
+                    line = g._citation_line(src["citation"], sample)
+                    self.assertIn("October 23, 2026", line)
+                    self.assertNotRegex(line, r"[{}]")
+                self.assertTrue(str(src.get("display_name") or src["name"]).strip())
+
     def test_source_regexes_compile_and_notices_cover_both_languages(self):
         for src in g.NEWS_SOURCES:
-            for key in ("exclude_title", "topic_regex"):
+            for key in ("exclude_title", "topic_regex", "exclude_link", "exclude_tags"):
                 if src.get(key):
                     re.compile(src[key], re.I)
             if src["terms"]["status"] in {"allowed", "pending"}:

@@ -7,6 +7,32 @@
 
 ---
 
+## [2026-10-26] Claude – 해외(미국 외) 소스 추가·전자신문 제외·신선도 72시간 (운영자 승인 2026-10-26 "13. 소스 추가"·"14. 무료 자동화 기반이란 취지에 맞지 않음")
+
+**작업자**: Claude  
+**대상**: Chance_Blog  
+**등급**: T3(신뢰 목록·접근 차단 목록·공개 콘텐츠 공급원) — 운영자가 2026-10-26 채팅으로 13번 "소스 추가"와 14번 전자신문 제외를 답했고, 같은 날 "해외 사이트에서 미국 이외의 국가의 내용들도 확인이 가능하다면 진행"이라고 했다  
+**목적**: 전자신문(정식 계약·사용료 필요)을 빼면서 약관이 상업 이용·재가공을 허용한 공식·공공 소스로 모든 분야에 공급을 만든다.
+
+### 한 일
+- **조사**: 지역별 3건(유럽 / 영국·캐나다·아시아태평양 / 국제기구·개방지식)이 소스마다 약관·robots.txt·피드를 직접 읽었다(수십 곳). 채택·후보·제외와 이유는 `docs/analysis/2026-10-26_overseas-sources.md`.
+- **소스 8개 추가**(`generator.py` `NEWS_SOURCES`): EU 집행위원회 소식(사회·정책)·DG Energy(경제·일)·DG Environment·JRC(과학·환경)·디지털 전략(기술·미래), 캐나다 통계청 The Daily를 분야별 주제어로 나눈 3개(경제·일 / 사회·정책 / 일상·마음). 집행위원회 계열은 CC BY 4.0(출처·변경 표시), 통계청은 Open Licence(`Adapted from Statistics Canada…`·수치를 정확히 옮길 것). 글 끝 인용 줄·고지문·작성 지침을 소스마다 붙인다. Eurostat 소식·국채 입찰 공지·선거·정치광고·국방·안보 분류·민감 주제(자살·약물 과다복용·성폭력·살인)는 제외 규칙으로 뺀다.
+- **전자신문 제외**: `NEWS_SOURCES`·기술 신뢰 목록에서 빼고 `TERMS_BLOCKED_DOMAINS`에 `etnews.com` 추가(콘텐츠 이용 안내가 정식 계약·사용료를 요구하고 무단 사용에 사용료의 30배 배상을 안내함, 운영자 결정 14번). 그 출처로 이미 공개된 글 1쌍은 손대지 않았다(작업내용 §3 17번 운영자 결정 대기).
+- **엔진 보강**: ① `NEWS_MAX_AGE_HOURS` 36→72(주말·월요일 슬롯 공백) ② `parse_feed`가 Atom `type="xhtml"` 제목·요약(자식 요소 안의 글자)을 읽음(통계청 — 예전 코드로는 모든 항목이 빈 제목이라 `NO_TITLE`로 떨어졌다) ③ 소스 선택 키 `display_name`(같은 게시자를 분야별로 나눠 읽을 때 글에 보이는 출처 이름).
+- **신뢰 목록**: `ec.europa.eu`(과학·경제·사회·기술)·`commission.europa.eu`(사회)·`statcan.gc.ca`(경제·사회·일상) 추가, `etnews.com` 제거. EIB·ACER·`ec.europa.eu.evil.example` 같은 집행위원회가 아닌 주소는 신뢰하지 않음을 시험이 고정.
+- **시험**: `tests/test_generator_slots.py` 정리·보강(소스 표·차단 목록·신뢰 호스트·분야별 표본 제목·인용 줄 정확한 문구·xhtml Atom·72시간 경계·`display_name`).
+- **문서**: ARCHITECTURE(소스 표·AGE 72시간·`display_name`), ACTIONS_GUIDE(AGE·분야 대체), DEFECT_REGISTER(D-61·D-62·관측 체크리스트), HANDLER·SESSION_START·REQUEST_BRIEFING·작업내용, 새 `docs/analysis/2026-10-26_overseas-sources.md`.
+
+### 검증
+- 전체 시험 1789개 통과(Windows·Python 3.12, 새 워크트리). 받아 둔 실제 피드 6개로 분야별 시뮬레이션: 과학 6건·경제 3건·문화 1건, 사회·일상·기술은 0건(주말 직후라 항목이 72시간보다 오래됨), 전자신문 줄 없음, 새 소스의 제외 규칙이 의도한 항목(국채 입찰 공지·Eurostat 소식·국방·안보 분류 등)만 뺌.
+
+### 남긴 것
+- 병합 뒤 Actions의 첫 슬롯 실행에서 `소스 …` 줄과 글 끝 인용·고지문 관측(DEFECT_REGISTER 체크리스트 마지막 줄).
+- 후보로 남긴 소스(Horizon·ECDC·GOV.UK·Global Voices 등)는 조건과 함께 분석 문서에 있다. Global Voices(AI 정책)·GOV.UK(robots.txt의 `meta-externalagent`) 판단은 운영자 몫.
+- 주말 공급 공백은 72시간으로 줄 뿐 없어지지 않는다 — 모든 분야가 비면 여전히 `ALL_LANES_EMPTY`(빨강)이다.
+
+---
+
 ## [2026-10-26] Claude – Ars Technica·IEEE Spectrum 기술 소스 제외 (운영자 승인 2026-10-26, PR #31)
 
 **작업자**: Claude (총괄이 구현, 검증은 별도 세션)  
