@@ -7,6 +7,45 @@
 
 ---
 
+## [2026-10-26] Claude – Blogger 주제 가드레일 보강 6건(D-64 ⑥ a~f): 상담 구절 면제를 절 단위로·한국어 목록·수동 topic 검사·변형 낱말·시험 구멍·다이어트/간 건강 (T1, 운영자 승인 2026-10-26)
+
+**작업자**: Claude (구현 세션, 독립 검증은 별도 세션)  
+**대상**: Blogger  
+**등급**: T1(금지 목록을 막는 쪽으로만 강화). 승인 근거는 PR #40과 같다(운영자 채팅 2026-10-26 "3. 수동 작성은 없을 예정이니 주제에 대한 가드레일을 설정하고 진행"). **`mode`·시크릿·워크플로·`generator.py`·광고 표면·`인수인계/작업내용.md`는 바꾸지 않았다**(`blogger_macat`은 off 그대로).  
+**목적**: PR #40(main 362ba8f)에 대한 독립 검증이 '병합 가능' 판정과 함께 `mode: draft`를 켜기 전에 끝내라고 낸 보강 6건(`docs/DEFECT_REGISTER.md` D-64 ⑥)을 구현한다.  
+**브랜치**: `ai/claude/blogger-guardrails-hardening`(origin/main e89b7a3에서 시작). PR 생성·병합·Actions 실행은 하지 않았다(총괄이 처리).
+
+### 변경 사항
+- **(a) 상담 구절이 같은 문장 안의 위험한 권유를 면제하던 것**(`pipeline/gates.py`): 면제(`body_safe_patterns`)를 문장이 아니라 **절** 단위로 한다. 문장을 `; : — --`·띄어 쓴 하이픈(코드, 모든 언어 공통)과 프로필의 `body_clause_split_patterns`(영어 `, but`·`, so`·`, though`·`, yet`·`, then`·`, and`+새 절·`(ask…)` 등, 한국어 `~지만`·`~하되`·`~는데`·`~으나`·`~면서` 등)에서 절로 쪼개고, 상담 구절이 없는 절은 따로 검사한다. 새 선택 필드 `body_safe_veto_patterns`(용량 `400 mg`·`5000 IU`·`400mg`·`밀리그램`)에 맞는 절은 상담 구절이 있어도 면제하지 않는다. 검증자가 낸 세 문장("Magnesium supplements may help you sleep, but talk to your doctor first." 등)이 모두 `BODY_TOPIC`으로 막히고, "If you are pregnant, talk to your doctor before changing your routine."·기존 안전 표본 전부는 그대로 통과한다(운영자 결정 3번). 두 필드는 `pipeline/registry.py`가 검증한다(정규식 컴파일·빈 문자열 일치 금지).
+- **(b) 한국어 목록 28 → 56개**(주제·본문 목록은 같은 어휘 — 시험이 같음을 고정): 불면·혈압(고혈압·저혈압 포함)·혈당·콜레스테롤·치매·갱년기·폐경·편두통·면역(면역력 포함)과 영어 목록에만 있던 임상·접종·스테로이드·침술·카이로프랙틱·약 이름(항생제·진통제·수면제 …)·건강기능식품·멜라토닌·종합 비타민·증상·환자·감염·질환명·정신 질환명·종양·항암·심장 질환명·디톡스·단식·키토·체지방·슬리밍·간 건강·요법·임산부·산모·출산·용량 표기. 일상어와 겹쳐 **일부러 뺀 것**: 백신(컴퓨터 백신)·해독(암호 해독)·코로나·수유(수유동)·감량(쓰레기 감량)·용량(배터리 용량)·뜸·간질(간질간질)·약(약 10분)·살 빼·불안·우울감·두통·변비·탈모·관절. `간 건강`은 `시간 건강`과, `단식`은 `간단식`과 겹치지 않게 앞에 한글이 없을 때만 막는다.
+- **(c) 수동 `topic`**(`pipeline/run.py`): `--topic`·`BLOGGER_TOPIC`이 `gates.topic_allowed`를 거친다. 걸리면 Gemini·Blogger를 부르기 전에 **종료 2**(`[SKIP] code=TOPIC_BLOCKED word=…`)로 멈추고 이력·초안을 남기지 않는다. 걸린 낱말은 로그·실행 요약에 있고 `::error::` 주석은 입력 문자열이 없는 고정 문장이다. 이유: 운영자가 직접 넣은 값이라 조용한 초록이 아니라 `INVALID_PUBLISH`와 같은 설정 오류(빨강)로 알린다. 이력 읽기·하루 상한보다 앞이다. `docs/ARCHITECTURE.md` §4-1 표·처리 순서를 맞췄고 코드↔문서 시험이 있다. `run.py`의 다른 동작(`build_prompt`의 한국어 머리글 등)은 바꾸지 않았다(D-64 ③).
+- **(d) 영어 두 낱말 용어·동의어**: `blood-pressure`·`bloodpressure`·`blood-sugar` 등 `\s+`를 `[\s-]*`/`[\s-]+`로(12개 패턴, 주제·본문 목록 모두), `sleeping tablets`·`sleep aid(s)`·`shed pounds`·`drop a few kilos`·`body/belly/visceral fat`·`menopause`·본문 목록의 `immunity`를 추가, 용량 단위에 `μg`를 더했다. 같은 종류의 빈틈을 영어 전체 패턴에서 훑어 `chronic-pain`·`heart-disease`·`panic-attack`·`mental-health`·`kidney-stone`·`fatty-liver`·`crash-diet`·`calorie-deficit`·`pain-reliever`·`vitamin-gummies`·`expecting/nursing-mothers`·`sleep-apnea`·`intermittent-fasting`을 같이 고쳤다.
+- **(e) 시험 구멍**: 독립 검증이 변이로 찾은 셋을 잡는 시험을 더했다 — 문장 분리의 줄바꿈(`<li>Take magnesium supplements every night</li><li>Talk to your doctor …</li>`), 영어 글 언어 검사의 라틴 경계 `U+024F`(폴란드어·루마니아어 글자), `BODY_TOPIC` 사유의 낱말 한 줄·40자 접기.
+- **(f) 다이어트·간 건강**: 영어 `dieting`·`diet plan/program/pills/menu/…`(단독 `diet`·`balanced diet`는 일상어라 막지 않는다)·`liver health/function/support/…`와 한국어 `다이어트`·`간 건강/기능/수치/질환/해독`을 주제·제목·라벨·본문에서 막는다. 영어·한국어 프롬프트의 '쓰지 말 것'에도 넣었다. `AI_COLLAB.md`의 문장을 사실대로 고쳤다(막는 것: 다이어트·간 건강 / 프롬프트로만 막는 것: `비타민`(단독)·`통증`·`알레르기`·`아이` — 열린 운영자 결정 D-64 ④, 기본값 넣지 않음).
+- **시험**: `tests/test_guardrails.py`(74→105개)·`tests/test_run.py`(49→60개) 보강 — 패턴 안의 선택지 하나까지 지키는 표본 `AlternativeCoverageTest`(영어 낱말 166개·절 경계 조각 영어 77개·한국어 36개·용량 단위)와 알려진 과잉 차단 `STRICT_TRADE_OFF_*`도 있다. `tests/test_profile_en.py`는 수동 topic 시험을 새 동작으로 고치고 프롬프트 문구를 맞췄다. 문서: `docs/ARCHITECTURE.md` §4-1·§7-1(필드 표·'절 단위 면제' 절·대응표·한국어에서 뺀 낱말 이유), `docs/SECURITY_GUARDRAILS.md` G-C4, `docs/ENGINEERING_GUIDE.md`, `docs/DEFECT_REGISTER.md` D-64, `AI_COLLAB.md`(`HANDLER.md`·`SESSION_START.md`·`REQUEST_BRIEFING.md`·`ACTIONS_GUIDE.md`·`인수인계/작업내용.md`는 총괄 문서 PR 몫이라 건드리지 않았다).
+
+### 검증 증거
+- **L1**: `python -m unittest discover -s tests` **2135개 중 2134개 통과**(기준 main e89b7a3의 2093개 → 새 시험 42개). 네트워크 없이 돈다. 실패 1건은 `tests/test_verify_pages_select.py`의 `test_unpublished_newest_pair_scenario_on_a_copy_of_the_real_posts`로, **깨끗한 main e89b7a3에서도 똑같이 실패한다** — 봇이 낸 최신 글 `_posts/Culture & Media/2026-10-26-EN-182804.md`의 머리말에 `layout: post`가 없어서다. 이 변경과 무관해 고치지 않았다(총괄 확인 필요). `python scripts/validate_repo.py --base origin/main` 오류 0·경고 1(LIQUID-1, main과 같음), pyflakes 새 경고 0(바꾼 `.py` 6개 기준 vermin 최소 3.7).
+- **독립 검증 하니스**(검증자의 `probe.py`·`bypass.py`·`overblock.py`·`manual_topic.py`, 수정 없이 실행): `overblock.py` 영어 118개 중 오탐 15건(옮기기 전과 같은 항목 — `Treat Yourself`·`Detox`·`medicine ball` 같은 일부러 엄격한 것), **한국어 32개 중 0건**. `probe.py` 한국어 이름 붙은 10개 중 9개가 막힌다(`비타민 D`는 의도적 제외), 영어 `diet plan` 막힘. `bypass.py` 섹션 B의 위험 문장 7개가 모두 `BODY_TOPIC`(전: 5개 통과), 섹션 A의 `blood-pressure`·`bloodpressure`·`blood-sugar friendly`·`shed pounds`·`drop a few kilos`·`sleeping tablets`·`sleep aid`·`diet plan` 막힘. `manual_topic.py`는 `topic_allowed` 호출이 잡히고 금지 주제 8개가 모두 종료 2(`TOPIC_BLOCKED`)로 멈춘다(전: Gemini를 불러 3번 탈락하거나 통과).
+- **실제 글 점검**: 이력에 남은 한국어 글 5편의 제목·라벨·주제·본문 문장 40개와 한국어 일상 문장 20개가 새 한국어 목록에서 탈락 0건.
+- **변이(내가 직접)**: ① 이름 붙은 변이 65개(절 경계 문장부호 8·절 나누기·veto·문장 분리·라틴 경계·사유 접기·레지스트리 검증·러너 가드·프롬프트·문서, 그리고 바꾼 패턴 30곳을 옛 문자열로 되돌리기) ② 패턴 통째 삭제 296개(영어·한국어 목록 전수, 새 필드 포함) ③ 선택지 하나씩 삭제 627개(새로 더했거나 바꾼 패턴의 `|` 선택지를 하나씩 지움). ①②는 전부 사망했다. ③은 패턴 단위 시험이 못 잡던 구멍을 드러냈다 — 1차 321 사망·306 생존(동등 39 + 시험 구멍 267). 선택지마다 표본을 두는 `AlternativeCoverageTest`를 더하고 같은 두 묶음에 든 낱말(`shed…`/`drop…`, `expecting…`/`nursing…`)·절 경계 시험 틀을 고친 뒤 전체를 다시 돌려 **590 사망·37 생존**이다. 남은 37개는 모두 동등 변이다 — 다른 패턴이 같은 말을 이미 막는 중복 선택지(`illness`·`disease`·`disorders?` 등)라 동작이 다르지 않다(선택지 하나만 남긴 패턴에서 만든 문자열 수천 개로 확인 — 모두 다른 패턴이 같이 막는다). 합계 = **988개 중 951 사망, 생존 37**.
+
+### 못 한 검증
+- Actions 실행, 실제 Gemini 영어 출력으로 본 탈락률(상담 구절 절 단위 면제가 첫 영어 초안을 얼마나 막는지), 영문 글의 사람 눈 검토. `mode`·시크릿은 건드리지 않았다.
+
+### 다음 AI에게 남기는 주의사항
+1. 이 변경은 `mode: draft`를 켜기 **전에** 병합한다(D-64 ⑥). 병합 뒤 첫 영어 초안(L3)에서 `BODY_TOPIC`·`TOPIC_BLOCKED` 빈도를 본다. 같은 날 `GATE_REJECTED`가 반복되면 사유의 `'낱말'`을 보고 목록을 조정하되, 오탐이면 `tests/test_guardrails.py` 표본과 같이 바꾼다.
+2. 새 규칙은 규칙마다 그 규칙만 막는 표본이 있어야 시험이 통과한다(`RuleCoverageTest`·`ClauseScopedExemptionTest`). 절 경계 패턴을 바꾸면 `MIXED_BLOCKED_*`·`REFERRAL_OK_*` 표본을 같이 본다.
+3. 알려진 한계(문서 `docs/ARCHITECTURE.md` §7-1 '절 단위 면제'): 상담 구절이 접속어 없이 같은 절에 있는 문장(쉼표 이음·꼬리 구절)과 줄바꿈으로 갈린 두 낱말 용어·한 문장 안의 다른 언어 낱말은 여전히 통과하고, 목록에 없는 성분 이름(`magnesium`·`turmeric`)은 수동 `topic`도 통과한다.
+4. `docs/ACTIONS_GUIDE.md` 6-1 표에는 새 코드 `TOPIC_BLOCKED`가 없다(총괄이 문서 PR에서 갱신). 새 결함 번호는 D-65부터.
+
+### 남은 이슈 / 확인할 점
+- **과잉 차단 트레이드오프(실측)**: 병명을 이름 붙인 절과 상담 구절이 `, so`·`—`·`:`·`;`·`으니`로 나뉜 정상 안내도 이제 막는다 — 상담 구절이 든 정상 안내 표본 40개(영어 30·한국어 10, 모델이 쓸 법한 문체) 중 막히는 문장이 **2개 → 7개**("Pregnancy can change your needs, so talk to your doctor."·"If you have a condition—such as diabetes—talk to your doctor …"·"Who should check with a doctor first: pregnant women, people with diabetes …"·"임신 중에는 몸 상태가 달라질 수 있으니 의사와 상담하세요."). 구조로는 '위험한 권유, so 의사에게 물어보세요'와 구별되지 않아(검증자가 막으라고 한 세 번째 문장과 같은 모양) 막는 쪽으로 정했고 시험이 `STRICT_TRADE_OFF_*`로 고정한다. 풀려면 `_CLAUSE_PUNCTUATION`·프로필 `body_clause_split_patterns`에서 해당 경계를 빼면 되지만 검증자의 문장이 다시 통과하니 총괄 결정이다. 프롬프트가 병명을 쓰지 말라고 하므로 실제 빈도는 낮을 것이고, 재시도 피드백이 병명을 빼게 한다.
+- 영어 목록에 아직 없는 질환·보조 성분(탈모·관절·역류성 식도염·변비·소화불량·우울감·오메가3·프로바이오틱스·홍삼·숙취·여드름·알레르기)은 범위 밖이라 그대로다 — 어디까지 막을지는 `통증`·`비타민`(단독) 같은 열린 운영자 결정(D-64 ④)과 같은 성격이다.
+- 한국어 `다이어트`는 '스마트폰 다이어트' 같은 비유 표현도 막는다(재시도가 고친다). 한국어 프로필을 쓰는 블로그는 아직 없다.
+
+---
+
 ## [2026-10-26] Claude – 콘텐츠 전략 Phase 0 보고서와 현황 문서 갱신 (문서 전용, 코드·광고 표면 변경 없음)
 
 **작업자**: Claude

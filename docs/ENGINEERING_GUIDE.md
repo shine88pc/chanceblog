@@ -58,7 +58,7 @@
 ## 4. 프롬프트·프로필 규칙
 
 - 프롬프트(`.github/editorial/*`)는 톤·구조를, **정책·검증 기준은 프로필 JSON**에 둔다. 코드에 금지어를 박지 않는다.
-- 금지 표현·패턴을 **추가(강화)**하는 것은 T1, **줄이거나 완화**하는 것은 T2(총괄 승인). 규칙을 바꾸면 `tests/test_gates.py`에 그 규칙을 보여 주는 케이스를 함께 추가한다. 주제 가드레일 목록(`banned_topic_patterns`·`body_banned_patterns`·`body_safe_patterns`)은 막히는 표본과 **통과해야 하는 표본(부분 문자열 오탐·면책 문장)** 을 `tests/test_guardrails.py`에 같이 두고, 규칙마다 '그 규칙만 막는 표본'이 있어야 시험이 통과한다(`RuleCoverageTest`). 설계·한국어↔영어 대응표는 [`ARCHITECTURE.md`](./ARCHITECTURE.md) 7-1절.
+- 금지 표현·패턴을 **추가(강화)**하는 것은 T1, **줄이거나 완화**하는 것은 T2(총괄 승인). 규칙을 바꾸면 `tests/test_gates.py`에 그 규칙을 보여 주는 케이스를 함께 추가한다. 주제 가드레일 목록(`banned_topic_patterns`·`body_banned_patterns`·`body_safe_patterns`·`body_clause_split_patterns`·`body_safe_veto_patterns`)은 막히는 표본과 **통과해야 하는 표본(부분 문자열 오탐·면책 문장)** 을 `tests/test_guardrails.py`에 같이 두고, 규칙마다 '그 규칙만 막는 표본'이 있어야 시험이 통과한다(`RuleCoverageTest`). 설계·한국어↔영어 대응표는 [`ARCHITECTURE.md`](./ARCHITECTURE.md) 7-1절.
 - 프롬프트를 바꾸면 L2(드라이런)와 L3(초안) 결과를 확인한다. 게이트 통과율이 떨어지면 프롬프트를 고치고, 게이트를 풀지 않는다.
 
 ## 5. 테스트 작성 규칙

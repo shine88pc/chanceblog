@@ -12,7 +12,8 @@
   0 정상 종료(일일 상한·정지·게이트 탈락·주제 없음 등 '건너뜀' 포함). 건너뛴 사유는
     '[SKIP] code=...' 한 줄과 실행 요약에 남는다(docs/ARCHITECTURE.md 4-1)
   1 인프라 실패(LLM 호출·주제 확장·게시 API·이력 파일·인증 만료·네트워크). Actions 실행이 실패로 표시되어 알림이 간다
-  2 설정 오류(레지스트리·프롬프트·LLM 키·게시용 시크릿 누락·블로그 주소 불일치·권한 없음·BLOGGER_PUBLISH 값 오류)
+  2 설정 오류(레지스트리·프롬프트·LLM 키·게시용 시크릿 누락·블로그 주소 불일치·권한 없음·BLOGGER_PUBLISH 값 오류·
+    수동 주제가 금지 주제 낱말에 걸림)
 
 환경변수
   DRY_RUN=1          파일·게시 없이 전체 흐름만 확인(스텁 LLM). Blogger 에도 접속하지 않는다
@@ -21,7 +22,7 @@
                      off(0·false·no) = 저장소 파일에만 저장, Blogger 는 건드리지 않음
                      draft = Blogger 초안함에 업로드(게시용 시크릿 필요, 하나도 없으면 파일만 저장)
                      publish(on·1·true·yes) = 즉시 게시(게시용 시크릿 필요, 없으면 종료 2)
-  BLOGGER_TOPIC      주제 지정(수동 실행용)
+  BLOGGER_TOPIC      주제 지정(수동 실행용). 프로필의 금지 주제 낱말에 걸리면 Gemini 를 부르기 전에 종료 2(TOPIC_BLOCKED)
   BLOGGER_AUTH_CHECK 1 이면 --auth-check 와 같다(워크플로의 '인증 점검만 실행' 입력). 정지(mode off) 중에도, 연습 실행이 켜져 있어도
                      실제로 점검한다(쓰기가 없다). 종료 코드: 0 통과 / 1 인증 만료·네트워크·API 오류 / 2 시크릿 없음·권한·주소 불일치
 """
@@ -344,6 +345,23 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
         out(f"::notice::[{blog['key']}] Blogger 초안함에는 올리지 않고 저장소 파일에만 저장합니다(게시용 시크릿이 없음). "
             "시크릿을 등록하면 다음 실행부터 초안함에 올라갑니다(.github/editorial/BLOGGER_API_SETUP.md).")
 
+    # ---- 수동 주제 -------------------------------------------------------
+    # 운영자가 직접 입력한 주제(--topic·BLOGGER_TOPIC)도 시드·LLM 확장 주제와 같은 금지 주제 목록을 통과해야 한다(주제 가드레일 (a), D-64 ⑥ c).
+    # 예전에는 이 경로만 검사가 없어 제목·본문 가드레일이 뒤늦게 막았고, 그 사이 Gemini 호출과 하루 상한을 쓸 수 있었다.
+    # 입력을 고쳐 다시 실행하면 되는 설정 오류라 INVALID_PUBLISH 처럼 종료 2(빨강)로 끝내고, 조용한 초록으로 넘기지 않도록 걸린 낱말을 로그·요약에 남긴다.
+    # 상태 파일(이력)을 읽기 전, Gemini 를 부르기 전에 멈춘다.
+    override = clean_topic(args.topic or environ.get("BLOGGER_TOPIC", ""))
+    if override and not gates.topic_allowed(override, profile):
+        _, matched = gates.first_match(profile.get("banned_topic_patterns"), override)
+        word = one_line(matched, 40)
+        out(skip_line("TOPIC_BLOCKED", blog=blog["key"], word=word.replace(" ", "_")))
+        out(f"[설정 오류] 입력한 주제가 금지 주제 낱말('{word}')에 걸려 Gemini 를 부르지 않고 멈춥니다. "
+            "질병·치료·약·보충제·진단·임신·영유아·체중 감량·다이어트·간 건강 같은 건강 주장 주제는 쓰지 않습니다. 주제를 바꿔 다시 실행하세요.")
+        out(f"::error::[{blog['key']}] 입력한 주제(topic)가 금지 주제 낱말에 걸려 멈췄습니다. 걸린 낱말은 실행 요약에 있습니다. 주제를 바꿔 다시 실행하세요.")
+        _summarize(environ, blog, "TOPIC_BLOCKED",
+                   f"입력한 주제가 금지 주제 낱말('{md_cell(matched, 40)}')에 걸려 Gemini 호출 없이 멈췄습니다. 주제를 바꿔 다시 실행하세요.")
+        return EXIT_CONFIG
+
     # ---- 상태·상한 --------------------------------------------------------
     history_path = root / blog["state"]["history"]
     try:
@@ -354,7 +372,6 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
 
     local_now = now.astimezone(KST)
     today = local_now.date()
-    override = clean_topic(args.topic or environ.get("BLOGGER_TOPIC", ""))
     produced_today = [e for e in history if isinstance(e, dict)
                       and e.get("date") == today.isoformat() and _counts_toward_cap(e)]
     cap = blog["limits"]["max_posts_per_day"]

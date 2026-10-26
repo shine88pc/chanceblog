@@ -217,6 +217,8 @@ EN_TOPIC_RULE_SAMPLES = [
     "Expecting mothers brunch ideas", "Fetal heartbeat podcasts", "Infant car seat checklist", "Weight loss journaling",
     "Lose weight tracker apps", "Fat burning playlists", "Slimming closet storage", "Keto pantry labels", "Detox your inbox",
     "Immune support recipes",
+    "Liver function trackers", "Dieting playlists", "Shed pounds playlists", "Body fat playlists", "Sleep aid shelf cleanup",
+    "Menopause podcast playlists",
 ]
 EN_BODY_RULE_SAMPLES = [
     "Disease risk grows with long sitting.", "Infection spreads in crowded rooms.", "Chronic fatigue can follow busy weeks.",
@@ -232,12 +234,14 @@ EN_BODY_RULE_SAMPLES = [
     "Pregnancy changes routines.", "Nursing mothers need rest.", "A fetus grows quickly.", "Toddlers wake early.",
     "Weight loss claims are everywhere.", "Many try to lose weight each January.", "Fat burning claims are common.",
     "Slimming teas are marketed widely.", "Keto menus are popular.", "Detox kits are marketed widely.",
+    "Liver health is trending.", "Dieting is popular.", "Shed pounds quickly.", "Body fat varies.", "A sleep aid sits on the shelf.",
+    "Menopause is common.", "Immunity claims are common.",
 ]
 EN_SAFE_RULE_SAMPLES = [  # 위험 낱말이 있어도 이 문장 하나만으로 건너뛰어지는 문장(패턴마다 하나)
     "Check with your doctor before trying a new supplement routine.",
     "This post is not a substitute for medical advice.",
     "This is not medical advice about dosage.",
-    "For informational purposes only: this covers supplement basics.",
+    "This guide is for informational purposes only and covers supplement basics.",
 ]
 EN_CLAIM_SAMPLES = [
     "This miracle routine fixes everything.", "A cure-all for tired mornings.", "There are no side effects when you try this.",
@@ -269,10 +273,16 @@ KO_RULE_SAMPLES = [
     "자살 예방 이야기예요", "자해 충동 이야기예요", "임신 중에는 달라요", "태아 성장은 달라요", "영유아 일과는 달라요",
     "신생아 일과는 달라요", "한약 달이는 법", "주사 맞는 날", "시술 후 관리", "의료 정보는 달라요", "진단 결과는 달라요",
     "다이어트 약 후기", "체중 감량 식단",
+    "혈당 기록장은 달라요", "불면의 밤은 길어요", "콜레스테롤 수치는 달라요", "치매 이야기는 아니에요", "갱년기 이야기는 아니에요",
+    "편두통 일기는 달라요", "면역력 이야기는 아니에요", "임상 결과는 달라요", "접종 일정은 달라요", "스테로이드 이야기는 아니에요",
+    "침술 이야기는 아니에요", "수면제 이야기는 아니에요", "건강기능식품 선반을 정리해요", "멜라토닌 이야기는 아니에요",
+    "종합 비타민 선반을 정리해요", "증상 메모는 달라요", "천식 이야기는 아니에요", "자폐 이야기는 아니에요", "종양 이야기는 아니에요",
+    "심장병 이야기는 아니에요", "디톡스 이야기는 아니에요", "단식 이야기는 아니에요", "저탄고지 식단은 달라요", "체지방 기록은 달라요",
+    "간 건강 이야기는 아니에요", "요법 이야기는 아니에요", "임산부 이야기는 아니에요", "400mg 이야기는 아니에요",
 ]
 KO_SAFE_RULE_SAMPLES = [
     "임신 중이거나 약을 복용 중이라면 의사와 상담한 뒤 시작하세요.", "임신 중에는 상담을 의사와 먼저 하세요.",
-    "이 글은 진단이나 치료를 대신하지 않습니다.", "이 글은 의학적 조언이 아닙니다 — 복용법은 다루지 않아요",
+    "이 글은 진단이나 치료를 대신하지 않습니다.", "복용법을 다루는 이 글은 의학적 조언이 아닙니다.",
 ]
 
 class EnglishTopicGuardTest(unittest.TestCase):
@@ -1011,14 +1021,15 @@ class ProfileValidationTest(unittest.TestCase):
         self.assertEqual(self.errors(lambda p: p.update(min_latin_ratio=1)), [])
 
     def test_bad_regexes_in_the_new_lists_are_reported(self):
-        for field in ("body_banned_patterns", "body_safe_patterns", "banned_topic_patterns", "banned_patterns"):
+        for field in ("body_banned_patterns", "body_safe_patterns", "banned_topic_patterns", "banned_patterns",
+                      "body_clause_split_patterns", "body_safe_veto_patterns"):
             self.assertHas(self.errors(lambda p, f=field: p[f].append("([unclosed")), "정규식 오류")
             self.assertHas(self.errors(lambda p, f=field: p.update({f: "not a list"})), "배열")
 
     def test_a_pattern_that_matches_the_empty_string_is_an_error(self):
         """끝에 '|' 를 남기는 실수. 금지 목록이면 모든 글이 탈락하고, body_safe_patterns 면 모든 문장을 건너뛰어 본문 가드레일이 꺼진다."""
         for field in ("body_banned_patterns", "body_safe_patterns", "banned_topic_patterns", "banned_patterns",
-                      "title_banned_patterns", "leak_patterns"):
+                      "title_banned_patterns", "leak_patterns", "body_clause_split_patterns", "body_safe_veto_patterns"):
             for bad in ("treat|", "(?:)", "a*", r"\s*", "^", "$"):
                 with self.subTest(f"{field}: {bad!r}"):
                     self.assertHas(self.errors(lambda p, f=field, b=bad: p[f].append(b)), "빈 문자열")
@@ -1037,6 +1048,528 @@ class ProfileValidationTest(unittest.TestCase):
     def test_prompt_extra_must_be_a_list_of_strings(self):
         self.assertHas(self.errors(lambda p: p.update(prompt_extra="one long string")), "prompt_extra")
         self.assertHas(self.errors(lambda p: p.update(prompt_extra=["ok", 3])), "prompt_extra")
+
+
+# ----------------------------------------------------------------------------
+# (c) 본문 — 상담 구절은 같은 문장 안의 위험한 권유를 면제하지 않는다(D-64 ⑥ a)
+#   면제(body_safe_patterns)는 '문장'이 아니라 '절' 단위다. 문장을 문장부호·접속어에서 절로 쪼개 상담 구절이 없는 절은 따로 검사하고,
+#   용량(body_safe_veto_patterns)이 든 절은 상담 구절이 있어도 면제하지 않는다.
+# ----------------------------------------------------------------------------
+MIXED_BLOCKED_EN = [
+    # 독립 검증(2026-10-26)이 낸 문장 셋
+    "Magnesium supplements may help you sleep, but talk to your doctor first.",
+    "Vitamin D supplements may lower your blood pressure, so ask your doctor.",
+    "Taking 400 mg of magnesium before bed can improve sleep; check with your doctor.",
+    # 이음 방식별 변형
+    "Magnesium supplements help you sleep — ask your doctor first.",
+    "Magnesium supplements help you sleep: ask your doctor first.",
+    "Magnesium supplements help you sleep - talk to your pharmacist first.",
+    "Magnesium supplements help you sleep -- check with your doctor first.",
+    "Magnesium supplements help you sleep, though you should consult a professional.",
+    "Magnesium supplements help you sleep although you can ask your doctor.",
+    "Magnesium supplements help you sleep but ask your doctor.",
+    "Melatonin helps you fall asleep, yet it is wise to talk to a doctor.",
+    "Take magnesium supplements nightly, and ask your doctor if you are unsure.",
+    "Take magnesium supplements nightly and ask your doctor if you are unsure.",
+    "Take magnesium supplements nightly, then talk to your doctor.",
+    "Take magnesium supplements nightly (ask your doctor first).",
+    "Magnesium supplements help you sleep[ask your doctor first].",
+    "Take magnesium supplements nightly, and you should talk to your doctor.",
+    "Take magnesium supplements nightly, however, ask your doctor.",
+    "Take magnesium supplements nightly, and then ask your doctor.",
+    # 상담 구절이 앞에 오고 위험한 권유가 뒤에 오는 문장
+    "Talk to your doctor, but magnesium supplements help you sleep.",
+    "Check with your pharmacist; melatonin works well for most people.",
+    # 질환·보충제를 단정하는 절
+    "A daily cup of turmeric tea can reduce inflammation, though you should consult a professional.",
+    "Many people with diabetes find that a short walk helps, but ask your doctor.",
+    # 용량이 든 절은 상담 구절이 있어도 면제하지 않는다(같은 절 안이라 쪼개지지 않는 문장)
+    "Ask your doctor whether 400 mg of magnesium is right for you.",
+    "Consult your doctor about taking 5000 IU of vitamin D daily.",
+]
+# 계속 통과해야 하는 정상 상담 안내(질환·임신·약을 이름 붙인 것 포함 — 운영자 결정 3번)
+REFERRAL_OK_EN = [
+    "If you are pregnant, talk to your doctor before changing your routine.",
+    "If you have diabetes or high blood pressure, ask your doctor before starting a new exercise plan.",
+    "Check with your doctor before trying a new supplement routine.",
+    "Please consult a qualified professional about any diabetes or heart disease concerns, and take it slowly.",
+    "Talk to your doctor first, especially if you take medication or are pregnant.",
+    "If you take supplements, talk to your doctor, but otherwise keep your routine simple.",
+    "Always ask your doctor or pharmacist before taking any supplements.",
+    "Ask your pharmacist (or doctor) if you take medication.",
+    "Check with your doctor if you have asthma, diabetes, and high blood pressure.",
+    "This article is for informational purposes only, but it is not a substitute for medical advice.",
+    "Note: if you are pregnant, talk to your doctor.",
+    "Health tip: ask your doctor before taking supplements.",
+    "People taking medication should talk to a pharmacist first.",
+    "If you are on medication, check with your doctor, and keep the rest of your routine simple.",
+    "Talk to your doctor if you are pregnant; otherwise this routine is a gentle one.",
+    "It is not medical advice, but many people feel calmer after a quiet walk.",
+    "If you have a medical condition, consult your doctor - then adjust the plan slowly.",
+    "Check with your doctor before using a well-known supplement.",   # 낱말 안의 하이픈은 가르지 않는다
+    # 아래 STRICT_TRADE_OFF_* 와 같은 뜻을 한 절로 쓰면 통과한다
+    "If you have a health condition, such as diabetes or high blood pressure, talk to your doctor before you begin.",
+    "Because pregnancy can change your needs, talk to your doctor.",
+    "Pregnant women and people with diabetes should check with a doctor first.",
+    "Anyone who is pregnant or has diabetes should check with a doctor first.",
+    "People with high blood pressure should ask their doctor before trying new breathing exercises.",
+]
+MIXED_BLOCKED_KO = [
+    "마그네슘 보충제는 잠드는 데 도움이 될 수 있지만 먼저 의사와 상담하세요.",
+    "비타민 보충제를 드시되 의사와 상담하세요.",
+    "혈압을 낮출 수 있는데, 의사와 상담해 보세요.",
+    "보충제를 챙겨 드시고 의사와 상담하세요.",
+    "보충제가 잠에 도움이 됩니다 — 의사와 상담하세요.",
+    "멜라토닌을 드세요; 의사와 상담하세요.",
+    "보충제를 드세요 (의사와 상담하세요).",
+    "400mg을 드시고 의사와 상담하세요.",
+    "의사와 상담하면 400mg 정도가 적당해요.",          # 용량이 든 절은 상담 구절이 있어도 면제하지 않는다
+    "보충제는 도움이 되지만, 의사와 상담하세요.",
+    "혈당이 낮아질 수 있으나 의사와 상담하세요.",
+    "보충제는 도움이 됩니다, 그러나 의사와 상담하세요.",
+]
+REFERRAL_OK_KO = [
+    "임신 중이거나 약을 복용 중이라면 의사와 상담한 뒤 시작하세요.",
+    "당뇨나 고혈압이 있다면 병원에서 먼저 확인해 보세요.",
+    "건강에 대한 고민이 있다면 의사·약사 등 전문가와 상담하세요.",
+    "혈압약을 드시는 분은 의사와 상담하세요.",
+    "이 글은 진단이나 치료를 대신하지 않습니다.",
+    "몸이 불편하면 전문가와 상담해 보는 것이 좋아요.",
+    "일반적인 참고용이며 진단이나 치료를 대신하지 않습니다.",
+    "복용 중인 약이 있다면 의사와 상담하세요.",
+    "임신 중에는 몸 상태가 달라질 수 있어 의사와 상담하세요.",
+    "임신 중이면 의사와 상담하세요.",
+]
+# 알려진 과잉 차단(의도한 트레이드오프, D-64 ⑥ a). 병명을 이름 붙인 절과 상담 구절이 `, so`·`—`·`:`·`;`·`으니`로 나뉜 정상 안내도 막는다 —
+# '위험한 권유, so 의사에게 물어보세요'(MIXED_BLOCKED_*)와 구조로는 구별되지 않기 때문이다. 같은 뜻을 한 절로 쓰면(위 REFERRAL_OK_*) 통과한다.
+# 이 문장들이 통과하게 바뀌면 그 결정을 일부러 뒤집는 것이니, 시험과 docs/ARCHITECTURE.md §7-1 '절 단위 면제'의 한계 문단을 같이 고친다.
+STRICT_TRADE_OFF_EN = [
+    "Pregnancy can change your needs, so talk to your doctor.",
+    "If you have a health condition—such as diabetes or high blood pressure—talk to your doctor before you begin.",
+    "Who should check with a doctor first: pregnant women, people with diabetes, and anyone on medication.",
+    "Some people take supplements; if you do, talk to your doctor first.",
+    "People with high blood pressure — ask your doctor before trying new breathing exercises.",
+]
+STRICT_TRADE_OFF_KO = [
+    "임신 중에는 몸 상태가 달라질 수 있으니 의사와 상담하세요.",
+]
+
+
+class ClauseScopedExemptionTest(unittest.TestCase):
+    def test_the_three_sentences_from_the_independent_review_are_blocked_by_the_body_guard(self):
+        for sentence in MIXED_BLOCKED_EN[:3]:
+            with self.subTest(sentence):
+                self.assertIn("BODY_TOPIC", check(EN, sentence=sentence).codes(), sentence)
+
+    def test_every_mixed_sentence_is_blocked_in_both_languages(self):
+        for profile, sentences in ((EN, MIXED_BLOCKED_EN), (KO, MIXED_BLOCKED_KO)):
+            for sentence in sentences:
+                with self.subTest(sentence):
+                    self.assertIn("BODY_TOPIC", check(profile, sentence=sentence).codes(), sentence)
+
+    def test_ordinary_referral_sentences_still_pass_with_no_reason_at_all(self):
+        for profile, sentences in ((EN, REFERRAL_OK_EN), (KO, REFERRAL_OK_KO)):
+            for sentence in sentences:
+                with self.subTest(sentence):
+                    self.assertEqual(check(profile, sentence=sentence).codes(), [], sentence)
+
+    def test_known_over_blocks_stay_blocked_until_the_decision_is_reversed_on_purpose(self):
+        for profile, sentences in ((EN, STRICT_TRADE_OFF_EN), (KO, STRICT_TRADE_OFF_KO)):
+            for sentence in sentences:
+                with self.subTest(sentence):
+                    self.assertIn("BODY_TOPIC", check(profile, sentence=sentence).codes(), sentence)
+
+    def test_the_new_scope_is_what_blocks_them_not_some_other_gate(self):
+        """프로필의 절 경계·면제 취소 목록을 비우면 같은 문장이 (예전처럼) 면제돼 통과한다. 다른 게이트가 대신 막는 것이 아니다."""
+        loose = copy.deepcopy(EN)
+        loose["body_clause_split_patterns"] = []
+        for sentence in ("Magnesium supplements may help you sleep, but talk to your doctor first.",
+                         "Vitamin D supplements may lower your blood pressure, so ask your doctor.",
+                         "Take magnesium supplements nightly and ask your doctor if you are unsure."):
+            with self.subTest(sentence):
+                self.assertEqual(check(loose, sentence=sentence).codes(), [], sentence)
+                self.assertIn("BODY_TOPIC", check(EN, sentence=sentence).codes(), sentence)
+        no_veto = copy.deepcopy(EN)
+        no_veto["body_safe_veto_patterns"] = []
+        sentence = "Ask your doctor whether 400 mg of magnesium is right for you."
+        self.assertEqual(check(no_veto, sentence=sentence).codes(), [], sentence)
+        self.assertIn("BODY_TOPIC", check(EN, sentence=sentence).codes(), sentence)
+        loose_ko = copy.deepcopy(KO)
+        loose_ko["body_clause_split_patterns"] = []
+        sentence = "마그네슘 보충제는 잠드는 데 도움이 될 수 있지만 먼저 의사와 상담하세요."
+        self.assertEqual(check(loose_ko, sentence=sentence).codes(), [], sentence)
+
+    def test_punctuation_boundaries_work_without_any_profile_list(self):
+        """; : — -- 와 띄어 쓴 하이픈은 모든 언어에 공통이라 코드에 있다. 프로필에 목록이 없어도(예: 앞으로 만들 다른 프로필) 쪼갠다."""
+        bare = copy.deepcopy(EN)
+        del bare["body_clause_split_patterns"], bare["body_safe_veto_patterns"]
+        self.assertEqual(registry.validate_profile(bare), [])
+        for separator in ("; ", ": ", " — ", "—", " ― ", " -- ", "--", " - ", " – "):
+            sentence = f"Magnesium supplements help you sleep{separator}ask your doctor first."
+            with self.subTest(separator):
+                self.assertIn("BODY_TOPIC", check(bare, sentence=sentence).codes(), sentence)
+        for sentence in ("Ask your doctor before using a well-known supplement.", "Talk to your doctor about the 2-3 supplements you take."):
+            with self.subTest(sentence):
+                self.assertEqual(check(bare, sentence=sentence).codes(), [], sentence)  # 낱말·범위 안의 하이픈은 가르지 않는다
+
+    def test_a_split_pattern_with_a_capturing_group_never_leaks_its_text_as_a_clause(self):
+        """re.split 은 묶음 괄호의 내용까지 조각으로 돌려준다. 경계 위치만 쓰므로 프로필이 묶음 괄호를 써도 조각이 늘지 않는다."""
+        splitter = gates._clause_splitter({"body_clause_split_patterns": [r"\s+(but)\s+"]})
+        self.assertEqual(gates._split_clauses("tea helps but ask your doctor", splitter), ["tea helps", "ask your doctor"])
+        self.assertEqual(gates._split_clauses("a; b — c", gates._clause_splitter({})), ["a", "b", "c"])
+        zero_width = gates._clause_splitter({"body_clause_split_patterns": [r"(?<=x)(?=y)"]})
+        self.assertEqual(gates._split_clauses("xyz", zero_width), ["xyz"])  # 길이 0 경계는 무시
+
+    def test_an_efficacy_claim_is_still_blocked_whatever_the_clause_layout(self):
+        for sentence in ("Ask your doctor; this stretch is a miracle for tired mornings.",
+                         "Talk to your doctor — it is 100% effective for everyone."):
+            with self.subTest(sentence):
+                self.assertIn("BANNED", check(EN, sentence=sentence).codes(), sentence)
+
+    def test_every_profile_boundary_pattern_is_needed_by_one_of_the_sentences(self):
+        """경계 패턴을 하나 지우면 그것만으로 막히던 문장이 통과해야 한다(약하게 만든 패턴을 시험이 모르고 지나가지 않게)."""
+        for profile, sentences in ((EN, MIXED_BLOCKED_EN), (KO, MIXED_BLOCKED_KO)):
+            patterns = profile["body_clause_split_patterns"]
+            for index, pattern in enumerate(patterns):
+                without = {**profile, "body_clause_split_patterns": patterns[:index] + patterns[index + 1:]}
+                owned = [s for s in sentences if gates.body_risk_hit(s, profile) != (None, None) and gates.body_risk_hit(s, without) == (None, None)]
+                with self.subTest(f"{profile['name']}: {pattern}"):
+                    self.assertTrue(owned, "이 경계 패턴이 있어야만 막히는 문장이 없다")
+
+    def test_the_veto_pattern_is_needed_by_a_sentence(self):
+        for profile, sentences in ((EN, MIXED_BLOCKED_EN), (KO, MIXED_BLOCKED_KO)):
+            patterns = profile["body_safe_veto_patterns"]
+            for index, pattern in enumerate(patterns):
+                without = {**profile, "body_safe_veto_patterns": patterns[:index] + patterns[index + 1:]}
+                owned = [s for s in sentences if gates.body_risk_hit(s, profile) != (None, None) and gates.body_risk_hit(s, without) == (None, None)]
+                with self.subTest(f"{profile['name']}: {pattern}"):
+                    self.assertTrue(owned, "이 면제 취소 패턴이 있어야만 막히는 문장이 없다")
+
+    def test_the_disclosures_and_safe_samples_are_not_vetoed(self):
+        """면제 취소(용량)는 면책 문구·상담 안내를 막지 않는다."""
+        for profile in (EN, KO):
+            plain = gates.plain_text(profile["disclosure_html"])
+            self.assertEqual(gates.body_risk_hit(plain, profile), (None, None))
+        for sentence in EN_SAFE_RULE_SAMPLES:
+            self.assertEqual(gates.body_risk_hit(sentence, EN), (None, None), sentence)
+
+
+class ListItemAndFoldingTest(unittest.TestCase):
+    """줄바꿈(목록 항목)으로 문장을 가르는 규칙과 사유 문구의 한 줄 접기를 고정한다(독립 검증이 변이로 지운 부분, D-64 ⑥ e)."""
+
+    def test_list_items_are_judged_one_by_one(self):
+        """<li> 는 마침표 없이 끝나므로 줄바꿈이 문장 경계다. 줄바꿈으로 가르지 않으면 한 항목의 위험 권유가 다음 항목의 상담 구절에 면제된다."""
+        post, stats = stub_post(EN)
+        risky = "<ul><li>Take magnesium supplements every night</li><li>Talk to your doctor if you are unsure</li></ul>"
+        self.assertIn("BODY_TOPIC", gates.check_post({**post, "content": post["content"] + risky}, EN, [], [], stats).codes())
+        self.assertIsNotNone(gates.body_risk_hit("Take magnesium supplements every night\nTalk to your doctor if you are unsure", EN)[0])
+        safe = "<ul><li>If you take supplements, talk to your doctor</li><li>Drink water through the day</li></ul>"
+        self.assertEqual(gates.check_post({**post, "content": post["content"] + safe}, EN, [], [], stats).codes(), [])
+        ko_post, ko_stats = stub_post(KO)
+        ko_risky = "<ul><li>보충제를 매일 밤 드세요</li><li>궁금하면 의사와 상담하세요</li></ul>"
+        self.assertIn("BODY_TOPIC", gates.check_post({**ko_post, "content": ko_post["content"] + ko_risky}, KO, [], [], ko_stats).codes())
+
+    def test_the_matched_word_in_a_body_reason_is_folded_to_one_short_line(self):
+        word = "chiropract" + "x" * 80       # \bchiropract\w* 는 끝없이 이어지는 낱말도 잡는다
+        reasons = [r for r in check(EN, sentence=f"A {word} visit.").reasons if r.startswith("[BODY_TOPIC]")]
+        self.assertEqual(len(reasons), 1)
+        quoted = re.search(r"'([^']*)'", reasons[0]).group(1)
+        self.assertLessEqual(len(quoted), 40)
+        self.assertTrue(quoted.endswith("…"), quoted)
+        self.assertNotIn("\n", reasons[0])
+
+
+class EnglishVariantAndHardeningTest(unittest.TestCase):
+    """영어 두 낱말 용어의 하이픈·붙여 쓰기·동의어 변형과 다이어트·간 건강(D-64 ⑥ d·f)."""
+    FORBIDDEN = [
+        "blood-pressure", "bloodpressure", "Blood-Sugar Friendly Meals", "blood sugar-friendly meals", "blood-glucose checks",
+        "sleeping tablets", "sleep aid", "sleep aids", "sleep-aid gadgets", "sleeping-tablet tips",
+        "shed pounds fast", "shedding weight", "shed a few inches", "drop a few kilos", "dropping 10 lbs", "dropped 5 pounds",
+        "heart-disease facts", "heart-attack signs", "heart-failure facts", "panic-attack tips", "mental-health crisis lines", "kidney-stone diets", "fatty-liver friendly snacks",
+        "crash-diet tips", "calorie-deficit math", "pain-reliever shelf", "chronic-pain routines", "vitamin-gummies",
+        "expecting-mothers brunch", "nursing-mothers tips", "eating-disorder awareness", "sleep-apnea gadgets", "intermittent-fasting basics",
+        "50 μg", "50 µg", "400mg", "5000 IU",                                   # 용량(그리스 뮤·마이크로 기호·붙여 쓴 단위)
+        "liver health", "liver-health tips", "liver function", "healthy liver habits", "support your liver",
+        "dieting", "diet plan", "diet-plan templates", "diet pills", "diet culture", "diet programs", "dieters",
+        "belly fat", "body-fat checks", "visceral fat", "menopause", "perimenopause", "postmenopausal", "boost your immunity",
+    ]
+    # 낱말 일부나 일상 표현만 겹치는 것. 단독 diet·balanced diet 는 일상어라 막지 않는다
+    ALLOWED = [
+        "liver and onions for a quick dinner", "Deliver your weekly plan on time", "A healthy diet of small habits", "Dietary fiber basics",
+        "Meet a dietitian-approved snack", "A garden shed makeover", "Shed light on your evening routine", "Drop by a friend's place",
+        "Drop the phone one hour earlier", "Capsule wardrobe checklist", "Tablet-free evenings", "Body language basics",
+        "Belly laughs with friends", "Sleep-friendly bedroom colors", "Sleep tracker comparison", "Balanced diet basics", "Blood orange smoothie",
+    ]
+
+    def test_every_variant_is_blocked_as_a_topic_a_title_a_label_and_in_the_body(self):
+        for phrase in self.FORBIDDEN:
+            with self.subTest(phrase):
+                self.assertFalse(gates.topic_allowed(phrase, EN), phrase)
+                self.assertIn("TITLE_TOPIC", check(EN, {"title": f"A Calm Evening With {phrase.title()} Ideas"}).codes(), phrase)
+                self.assertIn("LABELS", check(EN, {"labels": ["habits", phrase[:30]]}).codes(), phrase)
+                self.assertIn("BODY_TOPIC", check(EN, sentence=f"Many readers ask about {phrase} these days.").codes(), phrase)
+
+    def test_look_alike_phrases_are_not_blocked(self):
+        for phrase in self.ALLOWED:
+            with self.subTest(phrase):
+                self.assertTrue(gates.topic_allowed(phrase, EN), phrase)
+                self.assertEqual(check(EN, sentence=f"{phrase}.").codes(), [], phrase)
+
+    def test_a_dietitian_is_still_a_valid_professional_to_ask(self):
+        self.assertEqual(check(EN, sentence="Ask a registered dietitian before changing how you eat.").codes(), [])
+
+    def test_the_english_prompt_tells_the_model_the_same_words(self):
+        prompt = (_bootstrap.ROOT / ".github" / "editorial" / "BLOGGER_PROMPT_EN.md").read_text(encoding="utf-8").lower()
+        for fragment in ("weight loss, dieting or liver health",):
+            self.assertIn(fragment, prompt)
+        self.assertIn("dieting or liver health", " ".join(EN["prompt_extra"]).lower())
+        self.assertIn("다이어트·간 건강", " ".join(KO["prompt_extra"]))
+
+
+KO_NEW_WORDS = [
+    "혈압", "고혈압", "저혈압", "혈당", "불면", "불면증", "콜레스테롤", "치매", "갱년기", "폐경", "편두통", "면역", "면역력", "임상", "접종", "예방접종",
+    "스테로이드", "침술", "카이로프랙틱", "항생제", "진통제", "수면제", "해열제", "항우울제", "소염제", "알약", "건강기능식품", "멜라토닌", "종합 비타민",
+    "멀티비타민", "비타민제", "증상", "환자", "감염", "천식", "관절염", "갑상선", "빈혈", "비만", "골다공증", "지방간", "간염", "뇌전증", "자폐", "조현병",
+    "알츠하이머", "파킨슨", "양극성", "강박증", "불안장애", "섭식장애", "거식증", "폭식증", "종양", "항암", "백혈병", "림프종", "심장병", "심근경색",
+    "뇌졸중", "협심증", "부정맥", "동맥경화", "심혈관", "디톡스", "단식", "간헐적 단식", "키토제닉", "키토 식단", "저탄고지", "체지방", "지방 연소",
+    "지방 분해", "슬리밍", "간 건강", "간 기능", "간 수치", "간 질환", "간 해독", "요법", "임산부", "산모", "출산", "다이어트", "400mg", "5000IU",
+    "밀리그램", "마이크로그램",
+]
+# 일상어와 겹칠 뿐인 한국어(막으면 오탐). '비타민'(단독)·'통증'·'알레르기'·'아이'는 열린 운영자 결정(D-64 ④)이라 일부러 넣지 않았다
+KO_LOOKALIKES = ["간단한 식단 정리", "간식 시간 정하기", "시간 건강하게 쓰는 법", "주사위 놀이", "하루 3분 투자해서 정리하기", "암막 커튼 달기", "간단식 도시락",
+                 "분단식 구조", "단순한 하루", "출근길 산책", "감사 메모 쓰기", "환기와 정리", "혈액순환에 좋은 스트레칭", "수면 시간을 일정하게",
+                 "비타민 D가 들어 있는 햇빛 산책", "통증 없이 가볍게 움직이기", "아이와 함께하는 저녁 산책", "알레르기 걱정 없는 환기법"]
+KO_BENIGN_SENTENCES = [
+    "오늘은 작은 습관 하나만 골라서 가볍게 시작해 보세요.", "점심시간에 15분 정도 걸으면 기분 전환에 도움이 될 수 있어요.",
+    "자기 전에 화면을 줄이면 편안한 밤을 보내는 데 도움이 돼요.", "물병을 눈에 띄는 곳에 두면 자주 마시기 쉬워요.",
+    "책상 위를 5분만 정리해도 다음 날 아침이 한결 가벼워져요.", "일주일에 한 번 돌아보며 나에게 맞게 조금씩 고쳐 가면 돼요.",
+    "스트레칭은 무리하지 않는 범위에서 천천히 해 보세요.", "몸이 불편하면 전문가와 상담해 보는 것이 좋아요.",
+    "퇴근 후 10분 동안 창문을 열어 환기하고 가볍게 정리해 보세요.", "비 오는 날에는 집 안에서 할 수 있는 작은 루틴을 정해 두면 편해요.",
+    "도시락을 미리 준비해 두면 점심 고민이 줄어들어요.", "출근길에 한 정거장 먼저 내려 걸어 보는 것도 좋은 방법이에요.",
+    "집중이 안 될 때는 25분 타이머를 맞추고 한 가지 일만 해 보세요.", "주말 장보기 목록을 미리 적어 두면 시간이 절약돼요.",
+    "아침에 햇빛을 잠깐 쬐면 하루를 시작하는 기분이 한결 상쾌해져요.", "감사한 일 세 줄을 적는 습관은 하루를 차분하게 마무리해 줘요.",
+    "시간을 정해 두고 스마트폰을 내려놓으면 저녁이 한결 여유로워져요.", "간단한 간식은 눈에 띄는 곳에 두어 챙기기 쉽게 해 보세요.",
+    "한 번에 많이 바꾸기보다 작은 변화를 꾸준히 이어 가는 것이 중요해요.", "마음이 급할 때는 숨을 천천히 세 번 쉬고 시작해 보세요.",
+]
+# 실제로 생성돼 이력에 남은 한국어 글 5편(_blogger_drafts)의 문장 40개와 제목·라벨·주제. 새 한국어 목록이 정상 글을 막지 않는지 본다
+KO_REAL_DRAFT_SENTENCES = [
+    "오늘은 이렇게 갑자기 피로가 몰려올 때 일상에서 복잡한 준비 없이 바로 실천할 수 있는 간단한 에너지 충전 방법들을 소개해 드릴게요.",
+    "우리 몸에 수분이 조금만 부족해져도 쉽게 피로함을 느끼고 집중력 저하가 찾아올 수 있어요.",
+    "차가운 물보다는 미지근한 물을 한 컵 천천히 마셔주면 체내 수분 균형을 맞추고 혈액순환을 도와 나른한 기운을 깨우는 데 도움이 될 수 있습니다.",
+    "오랫동안 같은 자세로 앉아 있으면 혈액순환이 원활하지 않아 뇌로 가는 산소 공급이 줄어들기 쉬워요.",
+    "이때 잠시 자리에서 일어나 손을 위로 높이 뻗어 기지개를 켜거나, 2~3분 정도 가볍게 제자리 걸음을 걸어주면 근육의 긴장이 풀리고 정신이 한결 맑아지는 느낌을 받을 수 있습니다.",
+    "밀폐된 실내 공간은 이산화탄소 농도가 높아져 쉽게 졸음과 피로를 유발하곤 합니다.",
+    "창문을 열어 환기를 시키고, 시원한 공기를 마시며 5초간 천천히 숨을 들이마시고 내쉬는 깊은 호흡을 해보세요.",
+    "뇌에 신선한 산소가 공급되어 멍했던 머리가 가벼워지는 데 도움을 줍니다.",
+    "이럴 때 복잡한 머릿속을 차분하게 정리하고 하루를 기분 좋게 마무리할 수 있는 좋은 방법이 있어요.",
+    "바로 잠들기 전 딱 3분만 투자해서 '감사 메모 3줄'을 적어보는 거예요.",
+    "거창한 일 대신 아주 사소한 순간 찾기",
+    "감사 메모를 적으라고 하면 대단한 성공이나 특별한 행운을 떠올려야 할 것 같아 부담을 느끼기 쉽습니다.",
+    "하지만 아침에 마신 따뜻한 커피 한 잔, 점심시간에 잠깐 쬐었던 기분 좋은 햇살, 버스를 놓치지 않고 바로 탄 일처럼 일상의 지극히 평범한 일이면 충분해요.",
+    "사소한 긍정적 경험에 집중하는 연습은 지친 뇌의 긴장을 풀고 마음을 편안하게 만드는 데 많은 도움이 될 수 있습니다.",
+    "스마트폰 메모장 대신 종이와 펜 사용하기",
+    "누운 자리에서 스마트폰으로 적기보다는, 머리맡에 작은 수첩과 펜을 두고 직접 손으로 적는 것을 권해드려요.",
+    "오늘은 지금 앉아 계신 그 자리에서 1분 만에 가볍게 확인해 볼 수 있는 책상 자세 체크리스트를 준비해 봤어요.",
+    "노트북이나 모니터를 사용할 때 화면이 너무 아래에 있으면 자연스럽게 고개가 숙여지고 목이 앞으로 나오기 쉬워요.",
+    "일반적으로 시선이 아래로 15도 이상 계속 떨어지면 목 뒤쪽 근육에 가해지는 부담이 훨씬 커질 수 있답니다.",
+    "모니터 화면의 맨 윗부분이 내 눈높이와 비슷하거나 살짝 아래에 오도록 노트북 거치대나 두꺼운 책을 받쳐주시는 것이 좋아요.",
+    "엉덩이를 의자 깊숙이 넣고 등받이 활용하기",
+    "집중하다 보면 의자 끝에 엉덩이만 살짝 걸치고 등을 구부정하게 만 채로 일하는 경우가 많죠.",
+    "의자 끝에 앉으면 상체의 무게를 오롯이 허리 아래쪽이 지탱해야 해서 쉽게 피로해질 수 있어요.",
+    "엉덩이를 의자 안쪽 끝까지 쑥 밀어 넣고, 허리와 등이 등받이에 편안하게 닿도록 앉는 습관을 들여보세요.",
+    "이럴 때는 억지로 잠을 청하기보다 몸과 마음에 들어간 힘을 슬쩍 빼주는 가벼운 행동들이 도움이 될 수 있어요.",
+    "천천히 숨을 내쉬는 4-7-8 호흡법",
+    "침대에 편안히 누워 숨을 깊게 다스려보세요.",
+    "4초 동안 코로 천천히 숨을 들이마시고, 7초 동안 숨을 잠깐 멈춘 뒤, 8초에 걸쳐 입으로 가늘고 길게 숨을 내쉬는 방법입니다.",
+    "일반적으로 날숨을 길게 쉬면 긴장했던 몸이 이완 모드로 전환되는 데 도움이 될 수 있어요.",
+    "20분 넘게 뒤척였다면 침대 밖으로 나오기",
+    "잠이 오지 않는데 계속 침대에 누워있으면 뇌가 '침대=뒤척이며 고민하는 곳'으로 기억하기 쉽습니다.",
+    "20분 이상 잠들지 못했다면 과감히 일어나 거실이나 방 한구석으로 이동해보세요.",
+    "만약 일상 속에서 큰 부담 없이 몸을 움직이고 싶다면, 매일 마주치는 계단부터 활용해 보는 건 어떨까요?",
+    "퇴근길 지하철 출구부터 시작해 보세요",
+    "처음부터 아파트 높은 층수를 다 걸어 올라가겠다고 마음먹으면 시작도 전에 지치기 쉽습니다.",
+    "가장 쉬운 방법은 퇴근길 지하철역이나 버스 정류장 근처의 짧은 계단부터 이용하는 거예요.",
+    "에스컬레이터 앞에 길게 늘어선 줄을 지나쳐 계단으로 발걸음을 옮기는 것만으로도 하루 활동량을 자연스럽게 늘리는 데 도움이 될 수 있습니다.",
+    "'딱 2~3층만' 먼저 걷는 규칙 만들기",
+    "집이나 사무실이 고층에 있다면, 엘리베이터를 아예 타지 않겠다는 다짐보다는 '목적지 2~3개 층 전'에서 내리는 방식을 추천해요.",
+    "예를 들어 10층에 산다면 7층이나 8층에서 내려 남은 층만 계단으로 올라가는 식입니다.",
+]
+KO_REAL_DRAFT_METADATA = [
+    ("점심만 지나면 골골? 피곤할 때 에너지를 올리는 간단한 습관 4가지", ["건강", "생활습관", "피로회복"], "피곤할 때 에너지 올리는 간단한 방법"),
+    ("잠들기 전 3분, 마음을 편안하게 정리하는 감사 메모 3줄 쓰기 방법", ["마음건강", "수면습관", "라이프스타일"], "감사 메모 3줄 쓰기로 하루 마무리하는 방법"),
+    ("재택근무 중 찌뿌둥한 몸을 깨우는 책상 자세 체크리스트 4가지", ["재택근무", "생활습관", "자세교정"], "재택근무 책상 자세 가볍게 점검하는 체크리스트"),
+    ("잠이 안 올 때 침대에서 바로 해보는 4가지 간단한 방법", ["수면팁", "생활습관", "건강"], "잠이 안 올 때 바로 해볼 수 있는 간단한 방법"),
+    ("바쁜 하루, 계단 오르기로 가볍게 움직임 채우는 4가지 방법", ["운동습관", "건강관리", "일상루틴"], "계단 오르기로 일상에 움직임 더하는 방법"),
+]
+
+
+class KoreanHardeningTest(unittest.TestCase):
+    """한국어 목록 보강(D-64 ⑥ b·f): 영어가 막는 질환·약·감량 낱말의 한국어 대응."""
+
+    def test_every_new_word_is_blocked_as_a_topic_a_title_a_label_and_in_the_body(self):
+        self.assertGreaterEqual(len(KO_NEW_WORDS), 80)
+        for word in KO_NEW_WORDS:
+            with self.subTest(word):
+                self.assertFalse(gates.topic_allowed(f"{word} 이야기", KO), word)
+                self.assertIn("TITLE_TOPIC", check(KO, {"title": f"저녁 루틴으로 알아보는 {word} 이야기"}).codes(), word)
+                self.assertIn("LABELS", check(KO, {"labels": ["생활습관", word]}).codes(), word)
+                self.assertIn("BODY_TOPIC", check(KO, sentence=f"요즘 {word} 이야기가 많아요.").codes(), word)
+
+    def test_the_eight_words_named_in_the_review_are_in_the_list(self):
+        for word in ("불면", "혈압", "혈당", "콜레스테롤", "치매", "갱년기", "편두통", "면역력"):
+            with self.subTest(word):
+                self.assertFalse(gates.topic_allowed(f"{word} 관리 루틴", KO), word)
+
+    def test_look_alike_words_are_not_blocked(self):
+        for phrase in KO_LOOKALIKES:
+            with self.subTest(phrase):
+                self.assertTrue(gates.topic_allowed(phrase, KO), phrase)
+                self.assertEqual(check(KO, sentence=f"{phrase}.").codes(), [], phrase)
+
+    def test_ordinary_lifestyle_sentences_are_not_blocked(self):
+        for sentence in KO_BENIGN_SENTENCES:
+            with self.subTest(sentence):
+                self.assertEqual(check(KO, sentence=sentence).codes(), [], sentence)
+
+    def test_sentences_from_the_real_generated_drafts_are_not_blocked(self):
+        self.assertGreaterEqual(len(KO_REAL_DRAFT_SENTENCES), 40)
+        for sentence in KO_REAL_DRAFT_SENTENCES:
+            with self.subTest(sentence[:40]):
+                self.assertEqual(gates.body_risk_hit(sentence, KO), (None, None), sentence)
+        for title, labels, topic in KO_REAL_DRAFT_METADATA:
+            with self.subTest(title):
+                self.assertTrue(gates.topic_allowed(title, KO) and gates.topic_allowed(topic, KO), title)
+                self.assertTrue(all(gates.topic_allowed(label, KO) for label in labels), labels)
+
+    def test_the_body_list_is_still_the_topic_list(self):
+        self.assertEqual(KO["body_banned_patterns"], KO["banned_topic_patterns"])
+
+    def test_the_diet_and_liver_words_the_collaboration_doc_promises_are_in_the_gate(self):
+        for profile, phrases in ((KO, ("다이어트 식단", "간 건강 챙기기", "간 기능 회복")),
+                                 (EN, ("a simple diet plan", "liver health habits", "liver function tips"))):
+            for phrase in phrases:
+                with self.subTest(phrase):
+                    self.assertFalse(gates.topic_allowed(phrase, profile), phrase)
+        doc = (_bootstrap.ROOT / "AI_COLLAB.md").read_text(encoding="utf-8")
+        sentence = next(line for line in doc.splitlines() if line.startswith("- **언어·프로필(2026-10-26)**"))
+        self.assertIn("다이어트·간 건강", sentence)
+        self.assertNotIn("게이트에 아직 없고", sentence)    # 예전 문구(게이트에 없고 프롬프트로만 막는다)가 남아 있지 않다
+
+
+class ProfileFieldValidationTest(unittest.TestCase):
+    """새 선택 필드 body_clause_split_patterns·body_safe_veto_patterns 의 검증(레지스트리, 검증기 REG-1)."""
+
+    def errors(self, mutate, base=EN):
+        profile = copy.deepcopy(base)
+        mutate(profile)
+        return registry.validate_profile(profile)
+
+    def test_both_real_profiles_define_both_fields(self):
+        for profile in (EN, KO):
+            self.assertTrue(profile["body_clause_split_patterns"], profile["name"])
+            self.assertTrue(profile["body_safe_veto_patterns"], profile["name"])
+
+    def test_bad_values_are_reported(self):
+        for field in ("body_clause_split_patterns", "body_safe_veto_patterns"):
+            self.assertTrue(any("정규식 오류" in e for e in self.errors(lambda p, f=field: p[f].append("([unclosed"))), field)
+            self.assertTrue(any("배열" in e for e in self.errors(lambda p, f=field: p.update({f: "not a list"}))), field)
+            for bad in ("but|", "(?:)", r"\s*", "x*"):
+                with self.subTest(f"{field}: {bad!r}"):
+                    self.assertTrue(any("빈 문자열" in e for e in self.errors(lambda p, f=field, b=bad: p[f].append(b))), field)
+
+    def test_a_profile_may_omit_both_fields(self):
+        self.assertEqual(self.errors(lambda p: (p.pop("body_clause_split_patterns"), p.pop("body_safe_veto_patterns"))), [])
+
+
+class LatinExtendedLetterTest(unittest.TestCase):
+    """영어 글 언어 검사의 라틴 범위 경계(U+024F). 폴란드어·체코어·루마니아어 글자(U+0100~U+024F)도 라틴 문자다(D-64 ⑥ e)."""
+
+    def test_latin_extended_a_and_b_letters_count_as_latin(self):
+        post, _ = stub_post(EN)
+        polish = "Zażółć gęślą jaźń. " * 70        # ż ł ć ę ś ą ź ń 는 U+0100 이상(라틴 확장-A)
+        romanian = "Șoarece țânțar șarpe. " * 200    # Ș ț 는 라틴 확장-B(U+0218~U+021B)
+        for extra in (polish, romanian, polish + romanian):
+            with self.subTest(extra[:12]):
+                self.assertNotIn("LANG", check(EN, {"content": post["content"] + "<p>" + extra + "</p>"}).codes())
+        self.assertNotIn("LANG", check(EN, {"title": "A Gentle Łódź Walk for a Calmer Afternoon"}).codes())
+        self.assertIn("LANG", check(EN, {"content": post["content"] + "<p>" + "ɐɑɒɓɔɕ ʁʂʃʄ " * 120 + "</p>"}).codes())  # IPA 확장(U+0250~)은 라틴이 아니다
+
+
+# ----------------------------------------------------------------------------
+# 선택지 하나까지 지키는 표본(D-64 ⑥ e). 패턴 안의 | 선택지를 하나씩 지운 변이(이 보강에서 바꾸거나 더한 패턴 전부)를 돌려 보니
+# 패턴 단위 시험(RuleCoverageTest 등)은 낱말 하나가 빠진 패턴을 모르고 지나갔다. 그래서 선택지마다 '그 선택지로만 막히는' 표본을 둔다.
+# 패턴에 선택지를 더하면 표본도 더한다. 다른 패턴이 같은 말을 이미 막는 중복 선택지(ARCHITECTURE §7-1에 적음)는 표본이 없어도 된다.
+# ----------------------------------------------------------------------------
+EN_ALTERNATIVE_SAMPLES = [
+    "5 mcg", "acetaminophen", "anemia", "anemic", "antibiotic", "antidepressant", "antihistamine", "anxiety attack", "arthritis", "aspirin",
+    "benzodiazepine", "cardiovascular", "chronic condition", "chronic fatigue", "cirrhosis", "copd", "coronavirus", "covid", "diet chart",
+    "diet drink", "diet food", "diet menu", "diet programme", "diet regimen", "diet shake", "diet tea", "epilepsy", "expecting parents",
+    "expecting women", "fad diet", "fibromyalgia", "healthier liver", "heart attacks", "heart condition", "heart conditions", "hepatitis",
+    "hiv", "kidney failure", "lactating", "liver care", "liver damage", "liver enzyme", "liver support", "mental health condition",
+    "mental health issue", "mental health problem", "migraine", "nsaid", "obese", "obesity", "opioid", "osteoporosis", "otc",
+    "over the counter", "painkiller", "panic attack", "paracetamol", "sedative", "seizure", "sleep capsule", "starvation", "starve",
+    "starved", "starves", "starving", "stroke", "support the liver", "supporting liver", "supporting the liver", "supports liver",
+    "supports the liver", "thyroid", "tummy fat", "vitamin capsule", "vitamin tablet",
+]
+# 같은 낱말이 두 묶음에 들어 있는 패턴(shed…/drop…, expecting…/nursing…)은 묶음마다 표본이 따로 있어야 한다
+EN_ALTERNATIVE_SAMPLES += (
+    [f"{verb} {thing}" for verb in ("shed", "sheds", "shedding") for thing in ("5 pounds", "5 lbs", "5 kilos", "5 kgs", "weight", "fat", "inches")]
+    + [f"{verb} {amount} {unit}" for verb in ("drop", "drops", "dropped", "dropping") for amount in ("a few", "some", "several", "5")
+       for unit in ("pounds", "lbs", "kilos", "kgs")]
+    + [f"{lead} {noun}" for lead in ("expecting", "nursing") for noun in ("mothers", "moms", "mums")]
+)
+EN_REFERRAL_VERBS = ("talk", "ask", "check", "consult", "speak", "see", "visit", "contact", "call", "seek")
+EN_ADVICE_VERBS = ("take", "try", "add", "use", "start", "drink", "eat", "choose", "pick", "consider", "include", "get", "buy", "combine",
+                   "mix", "limit", "avoid", "skip", "stop", "increase", "reduce")
+EN_SUBJECT_WORDS = ("you", "your", "they", "it", "this", "that", "these", "those", "we")
+# 절 경계 하나하나('Tea helps' 와 'the rest' 사이에 끼웠을 때 정확히 두 절로 갈라져야 하는 조각). ', and just talk' 의 'just' 는
+# 머리말 없는 ', and talk' 를 아래 ' and talk' 규칙도 가르기 때문에 쉼표 규칙만 따로 시험하려고 끼운 것이다
+EN_BOUNDARY_FRAGMENTS = (
+    [" but", " although", " though", " whereas", ", yet", ", so", ", while", ", then", ", however", ", and then"]
+    + [f", and {lead} take" for lead in ("please", "also", "always", "just")]
+    + [f", and just {verb}" for verb in EN_REFERRAL_VERBS]
+    + [f", and {word}" for word in EN_ADVICE_VERBS + EN_SUBJECT_WORDS]
+    + [f" and {lead} ask" for lead in ("please", "also", "always")]
+    + [f" and {verb}" for verb in EN_REFERRAL_VERBS]
+    + [f"({verb}" for verb in EN_REFERRAL_VERBS]
+)
+KO_REFERRAL_NOUNS = ("의사", "약사", "전문가", "전문의", "의료진", "병원", "상담", "문의")
+KO_BOUNDARY_FRAGMENTS = (
+    ["지만", "하되", "는데", "은데", "인데", "으나", "면서", "으며", "하며", "니까", "으니"]
+    + [", 그러나", ", 다만", ", 단", ", 그런데", ", 그리고"]
+    + [f"고 {lead} 약사" for lead in ("꼭", "반드시", "먼저", "항상")]
+    + [f"고 {noun}" for noun in KO_REFERRAL_NOUNS]
+    + [f"({noun}" for noun in KO_REFERRAL_NOUNS]
+)
+EN_DOSE_UNITS = ("mg", "mcg", "μg", "IU")
+KO_DOSE_UNITS = ("mg", "mcg", "μg", "IU", "밀리그램", "마이크로그램")
+
+
+class AlternativeCoverageTest(unittest.TestCase):
+    def test_every_english_word_sample_is_blocked_by_both_word_lists(self):
+        self.assertEqual(len(EN_ALTERNATIVE_SAMPLES), len(set(EN_ALTERNATIVE_SAMPLES)))
+        for sample in EN_ALTERNATIVE_SAMPLES:
+            with self.subTest(sample):
+                self.assertFalse(gates.topic_allowed(sample, EN), sample)
+                self.assertIsNotNone(gates.first_match(EN["body_banned_patterns"], sample)[0], sample)
+
+    def test_every_connector_fragment_splits_a_sentence_into_exactly_two_clauses(self):
+        # 뒤 문장은 상담 낱말로 시작하지 않는다(', 그리고 의사…' 는 '그리고' 선택지 없이도 '고 + 의사' 규칙이 갈라 버린다)
+        for profile, frame, fragments in ((EN, "Tea helps{} the rest", EN_BOUNDARY_FRAGMENTS), (KO, "보충제{} 오늘은 쉬세요", KO_BOUNDARY_FRAGMENTS)):
+            self.assertEqual(len(fragments), len(set(fragments)))
+            splitter = gates._clause_splitter(profile)
+            for fragment in fragments:
+                text = frame.format(fragment)
+                with self.subTest(text):
+                    self.assertEqual(len(gates._split_clauses(text, splitter)), 2, text)
+
+    def test_every_dose_unit_keeps_a_referral_clause_from_exempting_the_dose(self):
+        for profile, template, units in ((EN, "Ask your doctor whether 5 {} of this is right for you.", EN_DOSE_UNITS),
+                                         (KO, "의사와 상담해서 5{}을 정하세요.", KO_DOSE_UNITS)):
+            for unit in units:
+                sentence = template.format(unit)
+                with self.subTest(sentence):
+                    self.assertIn("BODY_TOPIC", check(profile, sentence=sentence).codes(), sentence)
 
 
 if __name__ == "__main__":
