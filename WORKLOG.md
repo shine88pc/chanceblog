@@ -7,6 +7,49 @@
 
 ---
 
+## [2026-10-26] Claude – Blogger 주제 가드레일(제목·라벨·본문)과 영문 프로필·영어 프롬프트, macat0722 영문 전환 (운영자 승인 2026-10-26, D-64)
+
+**작업자**: Claude (구현 세션, 독립 검증은 별도 세션)  
+**대상**: Blogger  
+**등급**: T3(프로필·언어·톤 변경, 레지스트리의 프로필·프롬프트 전환)·T1(금지 표현 강화) — 운영자가 2026-10-26 채팅으로 승인("3. 수동 작성은 없을 예정이니 주제에 대한 가드레일을 설정하고 진행", "5. 3번 답변 + 주제 변경이 필요하면 문제 되지 않는 선에서 변경하여 진행", "6. 모드는 draft까지, auto는 AdSense 판정 전 보류"에 동의). **`mode`는 바꾸지 않았다**: `blogger_macat`은 off 그대로이고, 켜는 것은 검증 뒤 별도 T3 승인과 운영자의 시크릿 등록 뒤다.  
+**목적**: 수동 작성 경로가 없어 모든 글이 자동 생성이므로, 안전한 주제를 받은 모델이 질병·치료·약·보충제·진단·임신·영유아·체중 감량 쪽으로 흐르는 것을 주제 후보뿐 아니라 생성된 제목·라벨·본문에서도 막는다. 영문 블로그(macat0722)를 영문 프로필·영어 프롬프트로 옮긴다(D-32, D-64).  
+**브랜치**: `ai/claude/blogger-guardrails-en`(작업 시작 main 9ba5313, push 전에 최신 main 53ce263 — Blogger 초안함 업로드·인증 점검 통합 PR #39, 해외 소스 PR #35, GOV.UK 소스 PR #38이 병합된 뒤 — 위로 옮김. 문서 충돌은 두 쪽 내용을 살려 풀었고 코드·시험은 자동 병합). PR 생성·병합·Actions 실행·시크릿 등록은 하지 않았다(총괄이 독립 검증 뒤 처리).
+
+### 변경 사항
+- **가드레일**(`pipeline/gates.py`, 설계 `docs/ARCHITECTURE.md` 7-1절): 같은 위험 어휘를 세 곳에 건다 — (a) 주제 후보(`topic_allowed`, 기존) (b) 제목(`banned_topic_patterns`를 예외 없이 → `TITLE_TOPIC`)·라벨(`LABELS`, 기존) (c) 본문(`body_banned_patterns`를 문장 단위로 보되 `body_safe_patterns`에 맞는 전문가 상담·면책 문장은 건너뜀 → `BODY_TOPIC`). 효능 단정(`banned_patterns`)은 예외 없이 제목+본문 전체에 그대로 건다. 본문을 '단정·조언 문맥'에 가깝게 건 이유: 안전한 면책·상담 문장("does not replace professional medical advice", "의사와 상담하세요")에도 위험 낱말이 들어가고, 영어는 `treat yourself`·`a dose of fresh air`·`time heals` 같은 일상어와 겹치며, 오탐으로 재시도 3회가 모두 탈락하면 그날 발행을 잃는다. 그래서 영어 본문 목록은 주제 목록에서 `treat`(의료 대상이 뒤따를 때만)·`heal`·`remedy`·`immune`·`pharmacy`·사람을 가리키는 `therapist`를 뺀 부분집합이고 한국어 본문 목록은 주제 목록과 같다(시험이 같음을 고정).
+- **영어 글 언어 검사**(`check_post`): `language: en`이면 글자 중 라틴 문자 비율이 `min_latin_ratio`(0.9) 이상이어야 하고 제목에는 라틴이 아닌 글자가 하나도 없어야 한다(한국어 검사는 그대로). 응답 머리표는 `Title:/Labels:/Content:`도 받는다(한국어 머리표 우선, 두 가지를 섞어 빈 항목을 채우지 않음). 비교 전에 글을 고른다(NFKC·보이지 않는 문자 제거·굽은 따옴표 곧게 — 굽은 따옴표로 쓴 `isn't a substitute…` 면책이 탈락하고 단정이 통과하는 일을 막는다).
+- **레지스트리 검증**(`pipeline/registry.py`): 프로필 `language`가 `ko`·`en`인지, 비율 필드, 정규식이 배열·컴파일, **빈 문자열에 맞는 정규식 금지**(끝에 `|`가 남으면 금지 목록은 모든 글을, `body_safe_patterns`는 모든 문장을 건너뛰어 가드레일이 조용히 꺼진다), **시드가 금지 주제 목록을 통과**, `prompt_extra`·`topic_expand_prompt` 형식, 그리고 블로그 `languages`에 프로필 `language`가 들어 있는지(D-32 재발 방지).
+- **영문 프로필**(`pipeline/profiles/blogger_practical_en.json` 신설): 한국어 프로필과 같은 엄격함의 영어판 — 효능 단정 13·클릭 미끼 제목 12·AI 자기 언급·잔재 16·주제 위험 어휘 61(굴절형·단어 경계)·본문 50·본문 예외 4, 글자 수 2,400~7,500·제목 15~70·라벨 30자, 영어 면책, 시드 34개(한국어 시드 32개 중 30개의 영어판 + 새 4개, 모두 가드레일 통과·35~55자). 한국어↔영어 대응표는 ARCHITECTURE 7-1절.
+- **영어 프롬프트**(`.github/editorial/BLOGGER_PROMPT_EN.md` 신설): 한국어 프롬프트와 같은 구조·같은 안전 규칙(개인 경험·연구·통계·전문가 지어내기 금지, 질병·치료·약·보충제·용량·진단·임신·영유아·체중 감량은 경고로도 쓰지 않기, 완화 표현, 면책 문장은 쓰지 않기, 출력 형식). 연결은 레지스트리 `prompt`·`profile` 필드로 충분하다(`pipeline/run.py` 수정 없음).
+- **스텁·주제 확장**(`pipeline/stubs.py`, `pipeline/topics.py`): 연습 실행(`--dry-run`)의 가짜 AI 응답이 영문 프롬프트에는 영어 글을 낸다(프롬프트의 `Topic:` 줄·`JSON array of strings`로 판별). 주제 확장 지시문은 프로필의 `topic_expand_prompt`를 쓰고 없으면 예전 한국어 지시문 그대로다(시험이 바이트 단위로 같음을 고정).
+- **한국어 프로필**(`blogger_practical_ko.json`): 같은 가드레일 적용 + 오탐 2건 정정(`자해`↔"투자해서"는 앞에 한글이 없을 때만, `주사`↔"주사위" 제외). 실제로 생성된 본문 5편에서 "투자해서"가 새 본문 검사에 걸리는 것을 찾아 고쳤다.
+- **레지스트리 전환**(`pipeline/blogs.json`): `blogger_macat` → `role` "생활 습관 실용형 (EN)"·`languages ["en"]`·`prompt` `BLOGGER_PROMPT_EN.md`·`profile` `blogger_practical_en`. `mode`(off)·시크릿 이름·일정·상한·상태 경로는 그대로.
+- **시험**: 새 `tests/test_guardrails.py`(74개)·`tests/test_profile_en.py`(42개), `test_run.make_root`에 `lang`(기본 `ko`: 임시 저장소가 영문 항목을 한국어 프로필·프롬프트로 바꿔 기존 흐름 시험을 그대로 유지), `test_gates`(+3)·`test_topics`(+2)·`test_registry`(+2). 문서: ARCHITECTURE 7-1절 신설, SECURITY_GUARDRAILS G-C4·게이트 코드 줄, ENGINEERING_GUIDE, DEFECT_REGISTER D-64·D-32 상태, HANDLER(§0 표의 Blogger 두 줄·§3 P1의 영문 프로필 두 문장), 인수인계/작업내용, AI_COLLAB(영문 전환 안내 두 줄).
+
+### 검증 증거
+- **L0**: `python scripts/validate_repo.py --base 53ce263` 오류 0·경고 1(LIQUID-1, main과 같음); `python -m pipeline.registry` 통과; `python -m pipeline.plan --platform blogger` → `{"include":[]}`(off라 대상 0개); `python -m pipeline.run --blog blogger_macat --dry-run` → `[SKIP] code=MODE_OFF`, 종료 0; pyflakes — 새·바꾼 파일 0건(`tests/*.py`의 `_bootstrap` 임포트와 `pipeline/publishers/__init__.py` 재수출 경고는 main과 같다); vermin 3.7 이상.
+- **L1**: `python -m unittest discover -s tests` **2093개 통과**(기준 main 53ce263의 1,970개 → 새 시험 123개). 시험은 네트워크 없이 돈다.
+- **L2(임시 저장소)**: `make_root(lang="en")`(mode draft)에서 영문 프로필·프롬프트로 가짜 AI 응답을 끝까지 돌림 — 연습 실행 통과(저장 없음), 초안 저장(영어 본문·영어 면책), 제목에 위험 낱말(3회 탈락 `rejected`), 본문에 위험 낱말 후 재작성 통과(시도 2), 전문가 상담 문장 통과, 한국어 응답 탈락(`LANG`), 수동 topic이 제목에 오르면 탈락, 시드 소진 뒤 영어 주제 확장.
+- **L3(실제 Gemini 초안)**: **실행 필요** — 이 환경에서는 Actions를 실행하지 않았고 실제 영어 글의 탈락률은 못 봤다.
+- **변이**(내가 직접 돌림, main 위로 옮긴 최종 트리에서): 한 줄씩 망가뜨린 변이 48개(게이트 세 지점·언어 검사·머리표·정규화·레지스트리 검증·스텁·주제 확장·레지스트리 전환·프롬프트 규칙·프로필 설정)와 프로필 목록의 패턴을 하나씩 지운 변이 216개(전체: 영어 156·한국어 60)를 합쳐 264개 중 264 사망, 생존 0. 도중에 살아남은 변이가 있었고(영어 `body_safe_patterns`의 '참고용' 문장 패턴 등) 시험을 보강해 잡았다.
+- **통합 PR 병합 뒤 main 위로 옮김**: Blogger 초안함 업로드·인증 점검 통합(PR #39)과 소스 PR 2개가 main에 병합된 뒤라 그 위(53ce263)로 옮겼다. 충돌은 문서뿐이었고(`HANDLER.md` §0 표의 Blogger 행·`WORKLOG.md` 최상단·`docs/ARCHITECTURE.md` §2 '주제' 행·`인수인계/작업내용.md`의 표 행) 두 쪽 내용을 살려 풀었다. 코드·시험(`pipeline/registry.py`·`tests/test_registry.py`·`tests/test_run.py`)은 자동 병합됐다. 통합 PR의 시험(문서 문구를 고정하는 시험 포함)과 함께 전체 시험 2093개가 통과한다. 옮기기 전에 통합 브랜치(4bd6def)와 합쳐 본 시험에서는 충돌을 모두 이 브랜치(main) 쪽으로 풀면 통합 쪽의 문서 문구 시험 2개가 실패했고 두 쪽을 살려 풀면 통과했다 — 같은 문서를 건드릴 때 통합 PR이 고정한 문구를 지켜야 한다.
+
+### 못 한 검증
+- Actions 실행(L2 연습 실행·L3 초안), 실제 Gemini 영어 출력으로 본 가드레일 탈락률, 영문 글의 사람 눈 검토, Blogger 초안함 업로드(범위 밖).
+
+### 다음 AI에게 남기는 주의사항
+1. **`mode`는 off다.** 켜려면 운영자 채팅 승인(T3)과 시크릿 등록(운영자)이 먼저고, 첫 초안(L3)에서 영어 글이 가드레일에 얼마나 탈락하는지 본다. 같은 날 `GATE_REJECTED`가 반복되면 사유의 `'낱말'`을 보고 프로필 목록을 조정하되, 오탐이면 `tests/test_guardrails.py` 표본과 같이 바꾼다(규칙마다 그 규칙만 막는 표본이 있어야 시험이 통과한다).
+2. 수동 `topic`(override)은 러너가 주제 후보 검사를 건너뛴다(`pipeline/run.py`). 제목·본문 가드레일이 막지만 러너에서 막는 것이 정석이다 — 별도 변경(통합 PR이 병합돼 이제 `run.py`를 안전하게 고칠 수 있다. 같은 변경에서 `build_prompt`의 한국어 머리글(`[추가 규칙]`·`[이전 시도에서 고쳐야 할 점]`)도 영어 블로그에 맞출 수 있다).
+3. 병합 뒤 문서: `docs/DEFECT_REGISTER.md`의 D-32 행은 이 브랜치가 '완화(코드 구현됨·병합 대기)'로만 적었으니 병합되면 '해결(관측 필요)'로 바꾼다. `docs/ACTIONS_GUIDE.md`(26·313·318행)·`docs/REQUEST_BRIEFING.md`(59·187·189행)·`docs/SESSION_START.md`(111~112·125·127·151행)의 "영문 프로필이 아직 없다/진행 중" 문장은 범위 밖이라 이 브랜치가 고치지 않았다 — 병합 뒤 갱신. `인수인계/작업내용.md`의 맨 위 '마지막 갱신' 줄도 여러 브랜치가 같은 줄을 고쳐 충돌하므로 건드리지 않았다. `HANDLER.md` §3 P1의 재개 절차 줄은 통합 PR의 시험 2개(`test_draft_upload`의 `…stale_publish_checkbox_wording_is_gone…`, `test_manual_run_defaults`의 `…first_run_guidance_tells_to_uncheck_the_practice_run`)가 문구를 고정하므로 영문 프로필 문장만 바꿨다.
+4. 새 결함 번호는 D-65부터.
+
+### 남은 이슈 / 확인할 점
+- 영어 시드 중 모델이 위험한 쪽으로 흐르기 쉬운 것(오후 에너지·자기 전 진정 루틴·물 마시기·비 오는 날·가벼운 저녁): 가드레일이 막고 재시도가 고치지만 탈락률에는 영향이 있다.
+- 경계 낱말: 일상 표현과 겹치는 `통증`·`비타민`·`알레르기`·`아이`(영어 `pain`·`vitamin`(단독)·`allergy`·`kids`)는 두 언어 모두 목록에 넣지 않았다. 영어만 `detox`(`digital detox` 포함)·`cleanse`·`keto`·`fasting`·`cholesterol` 등을 막고 한국어 목록(원래 28개)에는 대응 낱말이 없다 — 어디까지 막을지는 운영자 결정(D-64 ④, 대응표는 ARCHITECTURE 7-1절).
+- 본문에서 "임신 중이면 의사와 상담하세요"처럼 질환·임신을 이름 붙인 상담 안내는 통과한다(권장). 더 엄격하게 하려면 그 문장도 막는다 — 운영자 결정.
+
+---
+
 ## [2026-10-26] Claude – GOV.UK(영국 정부) 소스 2개 추가 (운영자 결정 2026-10-26 "AI 학습을 위한 목적이 아니기에 문제가 없을것으로 보여져", T3 신뢰 목록)
 
 **작업자**: Claude
@@ -80,6 +123,7 @@
 6. 비밀·시크릿: 이 변경에는 값이 없다(PR 변경분에서 키 모양 문자열 0건 확인). 시크릿 등록·Actions 실행·dispatch는 하지 않았다.
 
 ---
+
 ## [2026-10-26] Claude – 코드·상태 파일을 사이트에서 뺌 (운영자 승인 2026-10-26 "2. 추천대로", T3 광고 표면 `_config.yml`)
 
 **작업자**: Claude  
