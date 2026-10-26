@@ -7,6 +7,29 @@
 
 ---
 
+## [2026-10-26] Claude – 코드·상태 파일을 사이트에서 뺌 (운영자 승인 2026-10-26 "2. 추천대로", T3 광고 표면 `_config.yml`)
+
+**작업자**: Claude  
+**대상**: Chance_Blog  
+**등급**: T3(광고 표면 `_config.yml`) — 운영자가 2026-10-26 채팅으로 "코드·상태 파일(`generator.py`, `pipeline/`, `history.json` 등)도 사이트에서 뺄지" 질문에 "2. 추천대로"라고 답함(추천: 빼기)  
+**목적**: 사이트에 쓸모없고 정적 파일로 그대로 열려 있던 코드·상태 파일(`…/generator.py`, `…/pipeline/blogs.json` 등 HTTP 200)을 사이트에서 뺀다. 저장소에는 그대로 있다.
+
+### 한 일
+- `_config.yml` `exclude`에 11항목 추가: `generator.py`·`blogger_generator.py`·`pipeline`·`scripts`·`tests`·`history.json`·`blogger_history.json`·`pages.json`·`requirements-dev.txt`·`requirements-edits.txt`·`requirements-pipeline.txt`(승인 범위 = 코드·상태 파일). **`README.md`는 문서라 승인 범위 밖이어서 넣지 않았다**(그대로 열려 있음). 사이트가 쓰는 파일은 넣지 않았고, Jekyll 3.10의 "항목으로 시작하는 이름도 뺀다" 규칙에 걸려 빠지는 공개 파일이 없음을 시험이 확인한다.
+- `tests/test_site_cleanup.py`: `MUST_EXCLUDE`에 11항목을 옮기고 `STATIC_EXPOSED`는 `README.md`만 남김. 사이트가 이 파일들의 주소를 쓰지 않음은 #34 검증(저장소·워크플로·`verify_pages_deploy.py`·홈 JS)에서 확인했다.
+- 문서: D-08 해결 표기, ARCHITECTURE·HANDLER·REQUEST_BRIEFING의 낡은 "내부 문서 공개" 서술, 작업내용(§2·§3 7·18번·이력).
+
+### 독립 검증과 반영
+- 별도 세션 검증(깨끗한 clone c2ba6b8, 판정 **병합 가능**): 전체 시험 1792개 통과·`validate_repo` 오류 0·경고 1(LIQUID-1)·AD-1 통과, Jekyll 3.10 규칙으로 추적 파일 전수 시뮬레이션에서 104개가 빠지고(운영 문서 27 — #34로 이미 빠짐 — 와 이 PR이 새로 빼는 코드·상태 77) 14개가 남으며(공개 13 + `README.md`) 우연히 빠지는 공개 파일 0건, 사이트 주소로 제외 대상을 읽는 코드·워크플로 0건, 변이 36건 중 의도한 것 전부 잡힘. 병합 전 빌드 비교 로그: 파일 104→27개, 사라진 77개, 새로 생긴 0개.
+- 권고 반영: `docs/ACTIONS_GUIDE.md`의 낡은 "경고 2" 정정, SESSION_START·REQUEST_BRIEFING 거울 표(7·17번 갱신, 18·19번 추가), `tests/test_site_cleanup.py`의 분류를 이름 정확 일치(`unclassified`)로 바꿔 `tests-report.html` 같은 새 공개 파일이 `tests` 접두사에 조용히 빠지는 것을 시험이 알리게 함(새 시험 1개), 시험 설명·이름 갱신.
+- 반영분 델타 확인(b2dedc1)도 병합 가능. 비차단 4건 반영: 빌드 비교 숫자 정정, 변이 수 36건 정정, 순수 함수 시험이 실제 분류 상수(`PUBLIC_ROOT`·`STATIC_EXPOSED`)에 묶인 것을 인자로 풀어 `README.md` 를 뺄 때 시험이 깨지지 않게 함, 글롭 글자가 든 이름도 정확 일치로 인정(`is_listed`).
+- 남긴 것: `README.md` 제외 여부는 기본값(그대로 열어 둠)으로 두고 작업내용 §3 19번에 올림. D-08 '해결'은 병합·배포 확인 뒤 확정.
+
+### 남긴 것
+- 병합·배포 뒤 공개 사이트에서 `…/generator.py`·`…/pipeline/blogs.json`·`…/history.json`·`…/tests/…`가 404이고 사이트가 쓰는 주소(`posts.json`·`feed.xml`·`robots.txt`·홈·글 페이지)는 그대로 200인지 확인한다.
+
+---
+
 ## [2026-10-26] Claude – 전자신문 출처로 공개된 글 1쌍 비공개 전환 (운영자 승인 2026-10-26, T3 공개 콘텐츠)
 
 **작업자**: Claude  
