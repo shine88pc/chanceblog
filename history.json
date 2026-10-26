@@ -57,5 +57,17 @@
     "lane": "technology",
     "source": "AI타임스",
     "source_url": "https://www.aitimes.com/news/articleView.html?idxno=216631"
+  },
+  {
+    "date": "2026-10-26",
+    "topic": "빌 게이츠 “20년내 AI가 인간보다 우월...가장 혼란스런 시점”",
+    "kr_title": "빌 게이츠의 ‘20년 경고’: AI의 지적·신체적 추월이 던지는 사회적 비용",
+    "en_title": "Bill Gates on the 20-Year Horizon: The Societal Costs of Intellectual and Physical AI Superiority",
+    "kr_image": "https://images.unsplash.com/photo-1784821856280-401b76b03266?auto=format&fit=crop&w=1000&q=80",
+    "en_image": "https://images.unsplash.com/photo-1715059250871-08786b8a884a?auto=format&fit=crop&w=1000&q=80",
+    "slot": 9,
+    "lane": "technology",
+    "source": "전자신문",
+    "source_url": "https://www.etnews.com/20261026000036"
   }
 ]
