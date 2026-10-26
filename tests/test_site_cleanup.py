@@ -4,7 +4,7 @@
    나가지 않고, 사이트가 쓰는 파일은 빠지지 않는다. 저장소 맨 위에 새 문서·폴더를 만들면 이 시험이 '내보낼 것인가 뺄 것인가'를 정하라고 실패한다.
 ② `index.html` — 글 목록을 Jekyll 반복문으로 미리 그려 JS 없이도 글 링크가 보이게 한다. 광고 코드와 JS 의 나머지는 그대로다.
 Jekyll 을 돌리지는 않는다(설정과 홈 원본의 모양만 본다). 구문은 승인 작업 때 python-liquid 로 시험 렌더했고, 실제 GitHub Pages 빌드(`actions/jekyll-build-pages`)로
-main 과 이 변경을 각각 빌드해 견주었다(2026-10-26, 파일 157→28개·사이트맵 44→19건·홈 카드 12장).
+main 과 이 변경을 각각 빌드해 견주었다(2026-10-26, 운영 문서 52개가 빠지고 시험 파일 1개가 늘어 파일 157→106개·사이트맵 44→19건·홈 카드 12장).
 """
 import fnmatch
 import re
@@ -32,8 +32,8 @@ MUST_EXCLUDE = {
     "AGENTS.md", "AI_COLLAB.md", "CLAUDE.md", "GEMINI.md", "HANDLER.md", "WORKLOG.md",
     "docs", "인수인계",
 }
-# 코드·상태 파일은 지금도 정적 파일로 열려 있다(사이트맵에는 없고 비밀도 없다). 승인 범위 밖이라 exclude 에 넣지 않았고, 뺄지는 운영자 확인을 받는다
-# (인수인계/작업내용.md §3 18번). 승인되면 `_config.yml` exclude 에 더하기만 하면 되고, 이 시험은 '뺐거나 여기 있거나' 둘 다 통과시킨다.
+# 코드·상태 파일은 지금도 정적 파일로 열려 있다(사이트맵에는 없고 비밀도 없다). 7번 승인 범위(운영 문서) 밖이라 이 PR 의 exclude 에 넣지 않았고, 빼는 것은
+# 운영자 승인(2026-10-26 채팅 "2. 추천대로")을 받아 후속 PR에서 한다(인수인계/작업내용.md §3 18번). 그때 `_config.yml` exclude 에 더하기만 하면 되고, 이 시험은 '뺐거나 여기 있거나' 둘 다 통과시킨다.
 STATIC_EXPOSED = {
     "README.md", "pipeline", "scripts", "tests", "generator.py", "blogger_generator.py",
     "history.json", "blogger_history.json", "pages.json",
