@@ -1593,6 +1593,10 @@ class SourceRuleSamplesTest(unittest.TestCase):
         for tag in ("Methodological Research", "Elections", "Voters", "Voting", "Political Issues", "Donald Trump", "Politics & Policy"):
             with self.subTest(tag=tag):
                 self.assertFalse(self.kept("Pew Research Center", title, (tag,), link))
+        # 앵커(^…$)가 있는 세 태그는 정확히 그 태그일 때만 거른다 — 더 긴 태그(미디어 주제가 들어올 수 있는)는 살린다
+        for tag in ("Political Issues and Media", "Donald Trump Jr.", "Politics & Policy Journalism"):
+            with self.subTest(longer_tag=tag):
+                self.assertTrue(self.kept("Pew Research Center", title, (tag,), link))
 
     def test_pew_citation_line_matches_the_format_pews_terms_require(self):
         pew = next(s for s in g.NEWS_SOURCES if s["name"] == "Pew Research Center")
@@ -1612,6 +1616,11 @@ class SourceRuleSamplesTest(unittest.TestCase):
         self.assertIn("has not reviewed or approved", by_name["Federal Reserve"]["notice"]["en"])
         self.assertIn("검토하거나 승인하지 않았", by_name["UN News"]["notice"]["ko"])
         self.assertIn("has not reviewed or approved", by_name["Pew Research Center"]["notice"]["en"])
+        self.assertIn("연방준비제도 이사회", by_name["Federal Reserve"]["notice"]["ko"])
+        self.assertIn("공식 입장이 아닙니다", by_name["UN News"]["notice"]["ko"])
+        self.assertIn("not an official UN position", by_name["UN News"]["notice"]["en"])
+        self.assertIn("분석과 해석의 책임은 이 사이트에 있습니다", by_name["Pew Research Center"]["notice"]["ko"])
+        self.assertIn("responsibility for the analysis and interpretation rests with this site", by_name["Pew Research Center"]["notice"]["en"])
 
     def test_pew_topic_words_need_word_boundaries(self):
         pew = next(s for s in g.NEWS_SOURCES if s["name"] == "Pew Research Center")
@@ -1675,6 +1684,15 @@ class SourceListTest(unittest.TestCase):
         for title in ("Dubai 부동산 시장 전망", "Taipei 여행 후기", "Chipotle 신메뉴 출시", "Wait 후기와 AIDS 연구 동향"):
             with self.subTest(title=title):
                 self.assertFalse(g.is_tech_title(title), title)
+
+    def test_every_english_tech_word_is_pinned_on_its_own(self):
+        words = [w for w in "ai gpu cpu llm chatgpt openai nvidia 5g 6g chip robot quantum software cloud startup cyber satellite rocket".split()]
+        self.assertEqual(len(words), 18)
+        for word in words:
+            for form in (word, word.upper()):
+                with self.subTest(word=form):
+                    self.assertTrue(g.is_tech_title(f"{form}를 둘러싼 논쟁"), form)
+                    self.assertFalse(g.is_tech_title(f"x{form} 이야기"), form)
 
     def test_look_alike_hosts_are_never_trusted_and_never_blocked_by_accident(self):
         for host in ("notbbc.co.uk", "bbc.com.evil.example", "evilnasa.gov", "nasa.gov.evil.example", "xfederalreserve.gov"):
@@ -1761,6 +1779,11 @@ class SourceListTest(unittest.TestCase):
         nasa = next(s for s in g.NEWS_SOURCES if s["name"] == "NASA")
         self.assertIn("정확성에 책임지지 않", nasa["notice"]["ko"])
         self.assertIn("not responsible for its accuracy", nasa["notice"]["en"])
+        # NASA 의 AI 이용 안내: 검토·승인했다고 암시하지 말고, NASA 의 입장처럼 쓰지 말 것
+        self.assertIn("검토하거나 승인하지 않았", nasa["notice"]["ko"])
+        self.assertIn("NASA의 입장이 아닙니다", nasa["notice"]["ko"])
+        self.assertIn("has not reviewed or approved", nasa["notice"]["en"])
+        self.assertIn("does not represent NASA's position", nasa["notice"]["en"])
 
     def test_terms_blocked_publishers_are_in_no_source_and_no_trust_list(self):
         for domain in ("bbc.com", "bbc.co.uk", "theguardian.com", "nature.com", "technologyreview.com", "aitimes.com",
