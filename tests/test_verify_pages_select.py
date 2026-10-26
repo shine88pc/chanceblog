@@ -541,8 +541,11 @@ class RealRepositoryTest(unittest.TestCase):
             for post in first:
                 path = Path(tmp) / post.rel
                 text = path.read_text(encoding="utf-8")
-                self.assertIn("layout: post", text)
-                path.write_text(text.replace("layout: post", "layout: post\npublished: false", 1), encoding="utf-8", newline="")
+                # 글마다 front matter 줄이 다르다(봇 글은 layout 줄이 없을 수 있다 — 2026-10-26 18시 글). 맨 위 `---` 바로 아래에 넣는다
+                head, sep, rest = text.partition("\n")
+                self.assertEqual(head.rstrip("\r"), "---", post.rel)
+                eol = "\r\n" if head.endswith("\r") else "\n"
+                path.write_text(head + sep + "published: false" + eol + rest, encoding="utf-8", newline="")
             second = v.select_newest(tmp, datetime.now(timezone.utc), self.tz)
             self.assertTrue(second.posts)
             self.assertFalse({p.rel for p in first} & {p.rel for p in second.posts})

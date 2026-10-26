@@ -1481,6 +1481,9 @@ def validate_post_data(data, kr_image, en_image, verified_source_url=None):
                 front = re.sub(r"(?m)^image:\s*.*$", "", front)
                 front = re.sub(r"(?m)^lang:\s*.*$", "", front)
                 front = re.sub(r"\n{2,}", "\n", front).rstrip()
+                if not re.search(r"(?m)^layout\s*:", front):
+                    # 모델이 front matter 에서 layout 을 빼먹어도 다른 글·시험·도구와 같게 post 로 보장한다(2026-10-26 18시 글이 그랬다)
+                    front = "\nlayout: post\n" + front.lstrip("\r\n")
                 front += f'\nlang: {html_lang}\nimage: "{image_url}"'
                 content = f"---{front}\n---\n\n{body}"
 
