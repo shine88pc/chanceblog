@@ -19,6 +19,18 @@ class RealRegistryTest(unittest.TestCase):
         self.assertEqual(blog["limits"]["max_posts_per_day"], 1)   # 블로그 값이 우선
         self.assertEqual(registry.get_blog(real_registry(), "chance")["limits"]["max_posts_per_day"], 2)
 
+    def test_defaults_mode_is_draft_so_a_blog_without_its_own_mode_never_publishes_by_itself(self):
+        # 2026-10-25 20:26 에 auto 로 바뀌었던 것을 2026-10-26 운영자 답변으로 draft 로 되돌렸다. mode 없이 추가한 새 블로그가 곧바로 자동 게시되지 않게 한다.
+        self.assertEqual(real_registry()["defaults"]["mode"], "draft")
+        self.assertEqual({b["key"]: b.get("mode") for b in real_registry()["blogs"]}, {"chance": "auto", "blogger_macat": "off"})
+
+    def test_model_chain_has_no_retired_model_and_matches_the_engine(self):
+        import generator
+        models = real_registry()["defaults"]["llm"]["models"]
+        self.assertEqual(models, ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"])
+        self.assertNotIn("gemini-3.7-flash", models)  # 2026-10-08 폐기, 요청이 3.8로 전달돼 같은 모델을 두 번 부르게 된다
+        self.assertEqual(list(generator.MODEL_CANDIDATES), models)  # 두 목록은 한 곳처럼 같이 바뀐다(REG-4)
+
     def test_unknown_blog_raises(self):
         with self.assertRaises(registry.RegistryError):
             registry.get_blog(real_registry(), "nope")

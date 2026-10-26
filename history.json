@@ -45,5 +45,29 @@
     "lane": "technology",
     "source": "IEEE Spectrum",
     "source_url": "https://spectrum.ieee.org/preethi-ashwath-chip-designer"
+  },
+  {
+    "date": "2026-10-25",
+    "topic": "가상 섬에 홀로 둔 AI, 스스로 놀이 만들고 개발자도 몰랐던 기술 발견",
+    "kr_title": "가상 섬에 남겨진 AI는 왜 농구를 시작했을까: MIT 연구진이 포착한 ‘기계의 놀이’",
+    "en_title": "Why an AI Left on a Virtual Island Invented Basketball: MIT’s Exploration of Machine Play",
+    "kr_image": "https://images.unsplash.com/photo-1730382625230-3756013c515c?auto=format&fit=crop&w=1000&q=80",
+    "en_image": "https://images.unsplash.com/photo-1589495374906-b7f5ca5de879?auto=format&fit=crop&w=1000&q=80",
+    "slot": 18,
+    "lane": "technology",
+    "source": "AI타임스",
+    "source_url": "https://www.aitimes.com/news/articleView.html?idxno=216631"
+  },
+  {
+    "date": "2026-10-26",
+    "topic": "빌 게이츠 “20년내 AI가 인간보다 우월...가장 혼란스런 시점”",
+    "kr_title": "빌 게이츠의 ‘20년 경고’: AI의 지적·신체적 추월이 던지는 사회적 비용",
+    "en_title": "Bill Gates on the 20-Year Horizon: The Societal Costs of Intellectual and Physical AI Superiority",
+    "kr_image": "https://images.unsplash.com/photo-1784821856280-401b76b03266?auto=format&fit=crop&w=1000&q=80",
+    "en_image": "https://images.unsplash.com/photo-1715059250871-08786b8a884a?auto=format&fit=crop&w=1000&q=80",
+    "slot": 9,
+    "lane": "technology",
+    "source": "전자신문",
+    "source_url": "https://www.etnews.com/20261026000036"
   }
 ]
