@@ -62,18 +62,21 @@ def is_excluded(path, excluded):
 
 def is_listed(name, excluded):
     """exclude 에 이름이 그대로(또는 글롭으로) 적혀 있는가 — 앞부분 일치로 우연히 빠지는 것은 세지 않는다."""
-    return any(fnmatch.fnmatchcase(name, e) for e in excluded)
+    return any(name == e or fnmatch.fnmatchcase(name, e) for e in excluded)
 
 
-def unclassified(paths, excluded):
+def unclassified(paths, excluded, public=None, static=None):
     """사이트에 내보낼지 뺄지 아직 정해지지 않은 맨 위 항목. `tests-report.html` 이 `tests` 에 걸려 조용히 빠지는 식으로
-    새 공개 파일이 접두사에 먹히면 여기 걸려서, 만든 사람이 '내보내려던 파일이 빠졌다'를 알게 한다(독립 검증 2026-10-26)."""
+    새 공개 파일이 접두사에 먹히면 여기 걸려서, 만든 사람이 '내보내려던 파일이 빠졌다'를 알게 한다(독립 검증 2026-10-26).
+    public·static 을 생략하면 이 파일의 PUBLIC_ROOT·STATIC_EXPOSED 를 쓴다."""
+    public = PUBLIC_ROOT if public is None else public
+    static = STATIC_EXPOSED if static is None else static
     unknown = set()
     for path in paths:
         name = path.split("/")[0]
         if name.startswith((".", "_")):      # Jekyll 이 기본으로 내보내지 않는다
             continue
-        if name in PUBLIC_ROOT or name in STATIC_EXPOSED or is_listed(name, excluded):
+        if name in public or name in static or is_listed(name, excluded):
             continue
         unknown.add(name)
     return sorted(unknown)
@@ -115,11 +118,15 @@ class ExcludeTest(unittest.TestCase):
                          "새 맨 위 파일·폴더는 사이트에 내보낼지(PUBLIC_ROOT) 뺄지(_config.yml exclude) 정해야 한다. 코드·상태 파일이면 STATIC_EXPOSED 에 적고 운영자에게 알린다")
 
     def test_a_new_file_that_only_matches_an_exclude_prefix_is_still_reported(self):
+        # 합성 경로·합성 분류로 시험한다 — 실제 PUBLIC_ROOT·STATIC_EXPOSED 가 바뀌어도(예: README.md 를 뺄 때) 이 시험은 그대로다.
         excluded = ["tests", "docs", "pipeline"]
+        public, static = {"index.html"}, {"README.md"}
         paths = ["tests/test_a.py", "docs/a.md", "pipeline/x.json", "index.html", "README.md", "tests-report.html", "docs-extra/readme.md",
                  "_posts/a.md", ".github/workflows/x.yml"]
-        self.assertEqual(unclassified(paths, excluded), ["docs-extra", "tests-report.html"])
-        self.assertEqual(unclassified(paths + ["docs-extra/readme.md"], excluded + ["docs-extra", "tests-report.html"]), [])
+        self.assertEqual(unclassified(paths, excluded, public, static), ["docs-extra", "tests-report.html"])
+        self.assertEqual(unclassified(paths, excluded + ["docs-extra", "tests-report.html"], public, static), [])
+        # 글롭 글자가 든 이름도 exclude 에 그대로 적으면 분류된 것으로 본다
+        self.assertEqual(unclassified(["note [1].md"], ["note [1].md"], public, static), [])
 
     def test_the_static_exposed_list_does_not_go_stale(self):
         for name in sorted(STATIC_EXPOSED):
