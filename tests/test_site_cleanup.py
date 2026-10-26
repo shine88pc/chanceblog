@@ -27,17 +27,19 @@ PUBLIC_ROOT = {
     "posts.json", "feed.xml", "robots.txt", "assets",
     "googlee86895dfeddcdd45.html", "naver8e7a71b78d49e6f323e7ad60ffb862a8.html",
 }
-# 사이트에 내보내면 안 되는 운영 문서 — 운영자가 승인한 범위(2026-10-26 "7. 진행": 운영 문서 19개 = AGENTS·AI_COLLAB·CLAUDE·GEMINI·HANDLER·WORKLOG·docs/·인수인계/).
+# 사이트에 내보내면 안 되는 것 — 운영자가 승인한 범위: 운영 문서(2026-10-26 "7. 진행": AGENTS·AI_COLLAB·CLAUDE·GEMINI·HANDLER·WORKLOG·docs/·인수인계/)와
+# 코드·상태 파일(같은 날 "2. 추천대로": 생성기·pipeline/·scripts/·tests/·이력·페이지 목록·requirements 파일).
 MUST_EXCLUDE = {
     "AGENTS.md", "AI_COLLAB.md", "CLAUDE.md", "GEMINI.md", "HANDLER.md", "WORKLOG.md",
     "docs", "인수인계",
-}
-# 코드·상태 파일은 지금도 정적 파일로 열려 있다(사이트맵에는 없고 비밀도 없다). 7번 승인 범위(운영 문서) 밖이라 이 PR 의 exclude 에 넣지 않았고, 빼는 것은
-# 운영자 승인(2026-10-26 채팅 "2. 추천대로")을 받아 후속 PR에서 한다(인수인계/작업내용.md §3 18번). 그때 `_config.yml` exclude 에 더하기만 하면 되고, 이 시험은 '뺐거나 여기 있거나' 둘 다 통과시킨다.
-STATIC_EXPOSED = {
-    "README.md", "pipeline", "scripts", "tests", "generator.py", "blogger_generator.py",
+    "generator.py", "blogger_generator.py", "pipeline", "scripts", "tests",
     "history.json", "blogger_history.json", "pages.json",
     "requirements-dev.txt", "requirements-edits.txt", "requirements-pipeline.txt",
+}
+# 사이트에 일부러 그대로 열어 두는 정적 파일(내보내지도 빼지도 않기로 한 것). README.md 는 문서라 운영자 승인 범위(운영 문서·코드·상태 파일) 밖이다.
+# 뺄 때는 `_config.yml` exclude 에 더하고 MUST_EXCLUDE 로 옮긴다. 이 시험은 '뺐거나 여기 있거나' 둘 다 통과시킨다.
+STATIC_EXPOSED = {
+    "README.md",
 }
 AD_SCRIPT = ('<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6035749437698387"\n'
              '     crossorigin="anonymous"></script>')
