@@ -601,6 +601,48 @@ class FetchNewsStatsTest(unittest.TestCase):
                 self.assertEqual({m["source"] for m in merged}, {"Statistics Canada"})
                 self.assertTrue(all(m["notice"] and m["citation"] and m["prompt_rule"] for m in merged))
 
+    def test_the_govuk_sources_read_the_news_atom_feed_and_never_open_article_pages(self):
+        gov = [s for s in g.NEWS_SOURCES if s["name"].startswith("GOV.UK")]
+        self.assertEqual(len(gov), 2)
+        long = "Government sets out new plans to protect homes and businesses from flooding with funding for local schemes. " * 2
+
+        def entry(title, path, hours, summary):
+            return (f"<entry><id>tag:www.gov.uk,2005:/government/{path}</id><updated>{self.fresh(hours).isoformat()}</updated>"
+                    f"<link rel='alternate' type='text/html' href='https://www.gov.uk/government/{path}'/>"
+                    f"<title>{title}</title><summary type='html'>{summary}</summary></entry>")
+
+        atom = ("<?xml version='1.0'?><feed xmlns='http://www.w3.org/2005/Atom'>"
+                + entry("New flood schemes announced", "news/new-flood-schemes", 5, long)
+                + entry("Short summary news", "news/short-summary", 6, "Too short.")
+                + entry("Heat networks speech", "speeches/heat-networks", 7, long)
+                + entry("Two new appointments to the board", "news/two-new-appointments", 8, long)
+                + entry("Old announcement", "news/old-announcement", 100, long)
+                + "</feed>").encode("utf-8")
+        requested = []
+
+        def fake_urlopen(req, timeout=0):
+            requested.append(getattr(req, "full_url", req))
+            return FakeResponse(atom)
+
+        def no_page_reads(url):
+            raise AssertionError(f"GOV.UK 기사 페이지를 읽었다: {url}")
+
+        stats = {}
+        with mock.patch.object(g, "NEWS_SOURCES", gov), mock.patch.object(g.urllib.request, "urlopen", fake_urlopen), \
+                mock.patch.object(g, "_fetch_source_excerpt", side_effect=no_page_reads):
+            merged, out = run_captured(g.fetch_news_items, "science", stats=stats)
+        self.assertEqual([m["title"] for m in merged], ["New flood schemes announced"])
+        self.assertEqual(stats["sources"][0]["drops"], {"EXCLUDED": 2, "SHORT_SUMMARY": 1, "AGE": 1})
+        self.assertEqual((merged[0]["source"], merged[0]["publisher_domain"]), ("GOV.UK", "www.gov.uk"))
+        self.assertTrue(merged[0]["notice"] and merged[0]["citation"] and merged[0]["prompt_rule"])
+        self.assertEqual(requested, [gov[0]["url"]])       # 과학·환경 분야는 에너지·환경 피드만 요청한다
+        requested.clear()
+        with mock.patch.object(g, "NEWS_SOURCES", gov), mock.patch.object(g.urllib.request, "urlopen", fake_urlopen), \
+                mock.patch.object(g, "_fetch_source_excerpt", side_effect=no_page_reads):
+            merged, out = run_captured(g.fetch_news_items, "technology", stats={})
+        self.assertEqual([m["title"] for m in merged], ["New flood schemes announced"])
+        self.assertEqual(requested, [gov[1]["url"]])       # 기술·미래 분야는 과학·기술 피드만 요청한다
+
     def test_exclude_link_and_exclude_tags_are_counted_as_excluded(self):
         summary = "요약 문장입니다. " * 20
         sources = [{"name": "링크·태그 제외", "lane": "economy", "url": self.FEED,
@@ -1823,10 +1865,16 @@ class SourceRuleSamplesTest(unittest.TestCase):
 
     def test_the_trust_lists_of_the_new_domains_are_exactly_the_agreed_lanes(self):
         lanes_of = {domain: {lane for lane, domains in g.TRUSTED_SOURCE_DOMAINS.items() if domain in domains}
-                    for domain in ("ec.europa.eu", "commission.europa.eu", "statcan.gc.ca")}
+                    for domain in ("ec.europa.eu", "commission.europa.eu", "statcan.gc.ca", "www.gov.uk")}
         self.assertEqual(lanes_of, {"ec.europa.eu": {"science", "economy", "society", "technology"},
                                     "commission.europa.eu": {"society"},
-                                    "statcan.gc.ca": {"economy", "society", "daily_life"}})
+                                    "statcan.gc.ca": {"economy", "society", "daily_life"},
+                                    "www.gov.uk": {"science", "technology"}})
+        # GOV.UK 는 www.gov.uk 호스트만 신뢰한다 — 다른 정부 부처 사이트(*.gov.uk)나 비슷한 이름은 아니다
+        for host in ("ons.gov.uk", "assets.publishing.service.gov.uk", "gov.uk", "evilgov.uk", "www.gov.uk.evil.example", "nhs.uk"):
+            for lane in ("science", "technology"):
+                self.assertFalse(g._trusted_domain(host, lane), (host, lane))
+        self.assertFalse(g._trusted_domain("www.gov.uk", "economy"))   # 경제 분야 피드(재무부·DWP·DBT)는 정치 발표가 대부분이라 쓰지 않는다
 
     def test_the_commission_and_statcan_prompt_rules_forbid_medical_advice(self):
         by_name = {s["name"]: s for s in g.NEWS_SOURCES}
@@ -1981,6 +2029,108 @@ class SourceRuleSamplesTest(unittest.TestCase):
                 self.assertIn("statcan.gc.ca", src["prompt_rule"])            # 링크 글자에 주소를 보이지 않게 하는 지침(통계청 'Advertising and Publicity')
                 self.assertEqual(src.get("page_delay"), 2)                    # 통계청 robots.txt 의 Crawl-delay: 2
 
+    def test_govuk_keeps_news_stories_and_drops_speeches_publications_case_studies_appointments_and_sensitive_items(self):
+        env, tech = "GOV.UK · Environment & Energy", "GOV.UK · Science & Technology"
+        news = "https://www.gov.uk/government/news/"
+        # 2026-10-26 DESNZ·Defra 피드의 실제 제목: 보도 기사(/government/news/)는 살린다
+        for title, slug in (("Households to receive £150 Warm Home Discount confirmation letter", "households-to-receive-150-warm-home-discount-confirmation-letter"),
+                            ("World-first taskforce to protect communities from climate change", "world-first-taskforce-to-protect-communities-from-climate-change"),
+                            ("Octopus explosion off South West prompts talks between fishermen and scientists", "octopus-explosion-off-south-west"),
+                            ("Plan to unlock organic market for stronger farms, more homegrown food", "plan-to-unlock-organic-market"),
+                            ("£1.6m fine for Anglian Water's pollution of Essex river", "16m-fine-for-anglian-waters-pollution-of-essex-river"),
+                            ("Government activates plan to protect consumers as severe drought declared in parts of England", "government-activates-plan-to-protect-consumers")):
+            self.assertTrue(self.kept(env, title, link=news + slug), title)
+        # DSIT·AISI 피드의 실제 제목(2026-06~10)
+        for title, slug in (("UK backs new AI labs to make technology cheaper, more reliable and easier to use", "uk-backs-new-ai-labs"),
+                            ("World’s first national framework for quantum standards to boost UK leadership", "worlds-first-national-framework-for-quantum-standards"),
+                            ("Britain steps up national defences against growing AI risks", "britain-steps-up-national-defences-against-growing-ai-risks"),
+                            ("Businesses across Britain sign up to Cyber Resilience Pledge as ministers urge firms to strengthen cyber defences", "businesses-sign-up-to-cyber-resilience-pledge")):
+            self.assertTrue(self.kept(tech, title, link=news + slug), title)
+        # 같은 피드에 섞이는 연설·정책 문서·편지·사례 소개는 주소 경로로 뺀다
+        for title, path in (("The role of heat networks in the energy transition", "speeches/the-role-of-heat-networks-in-the-energy-transition"),
+                            ("Strategic Spatial Energy Plan: deadline extension", "publications/strategic-spatial-energy-plan-deadline-extension"),
+                            ("Ministerial direction to protect public water supplies in areas affected by severe drought", "publications/ministerial-direction-to-protect-public-water-supplies"),
+                            ("Improving access to and use of digital services: open letter to business leaders", "publications/improving-access-to-and-use-of-digital-services"),
+                            ("When AI Leaves the Lab: Testing Frontier Models in Government Cyber Defence", "case-studies/when-ai-leaves-the-lab"),
+                            ("Liz Kendall's statement on children and social media", "speeches/liz-kendalls-statement-on-children-and-social-media")):
+            for name in (env, tech):
+                self.assertFalse(self.kept(name, title, link="https://www.gov.uk/government/" + path), (name, title))
+        # 보도 기사라도 인사·신청 안내·성명·선거·전쟁 소재·민감 주제는 뺀다(주소가 아니라 제목 규칙이 직접 걸러야 한다)
+        for title in ("Two new appointments to the Marine Management Organisation board",
+                      "Seven non-executive members appointed to Information Commission Board as chair recruitment launches",
+                      "Government reappoints the chair of the Environment Agency",
+                      "New chief executive named for the Met Office", "Chair recruitment launches for the new regulator",
+                      "Barnsley Tech Town's £800,000 AI skills fund opens for applications",
+                      "Applications are now open for the Clean Heat Grant", "Applications open for the green skills programme",
+                      "Apply now for the farming resilience fund", "Apply for a green homes grant today", "Call for evidence on water company performance", "Call for views on the new energy plan",
+                      "Joint statement from the UK and Canada on clean energy", "Joint statement signed at the clean energy summit", "Statement on the death of a former minister", "Condolences on the passing of the former chair",
+                      "New partnership set to see the UK and Ukraine develop battle winning technology", "Military drones to be tested in new range",
+                      "UK sanctions Russia over energy exports", "Elections Act changes explained", "Political parties to publish funding data",
+                      # 낱말마다 단독 제목(제외어를 하나씩 지워도 시험이 실패하게)
+                      "New weapons export controls announced", "Hybrid warfare resilience plan published", "Missiles testing range to expand",
+                      "Armed forces covenant update for veterans", "Gaza aid flights resume", "Terror attack response drill held",
+                      "New measures to tackle self-harm content online", "Suicide prevention funding for the NHS", "Child sexual abuse material to be blocked by new AI tool", "Child sexual imagery detection tool launched",
+                      "Sexual exploitation online: new offence announced", "Counter-terrorism strategy published",
+                      # 코드 검증이 지적한 보강: 인사 소식·분쟁·학대·극단주의, 단독 낱말 제목(제외어를 하나씩 지워도 시험이 실패하게)
+                      "New chair announced for the Environment Agency", "Chief executive steps down at the Met Office", "Minister appoints new advisers to the AI panel",
+                      "Dr Jane Smith appointed lead scientist for the new AI lab", "Russia gas imports fall to a record low", "Middle East energy outlook published",
+                      "Iran energy talks resume", "Israel and the UK sign a research agreement", "NATO summit agrees new cyber funding", "New sanctions on energy exports announced",
+                      "Child abuse imagery detection to be expanded", "Domestic abuse victims to get new online support", "Violence against women and girls strategy published",
+                      "Extremism commission launched", "Radicalisation online: new report published",
+                      "Call for input on AI regulation", "Call for applications to the AI fellowship", "Statement from the Energy Secretary on energy bills",
+                      "Statement by the Environment Secretary on flooding", "Sexual abuse online: new measures", "Sexual assault reporting to be easier", "Sexual violence strategy refreshed"):
+            for name in (env, tech):
+                src = next(s for s in g.NEWS_SOURCES if s["name"] == name)
+                self.assertTrue(g._rule_excludes(src, title, {"link": news + "x", "categories": []}), (name, title))
+        # 같은 낱말이 든 평범한 기사(제목 가운데의 "must apply for", 낱말 일부 일치)는 살린다
+        for title in ("Applying for the Warm Home Discount made simpler", "Households must apply for the new scheme by March",
+                      "Flood defences get a funding boost", "Rural broadband rollout reaches another 2,000 homes",
+                      "AI to speed up appointments for patients", "NHS appointments made easier with a new booking tool"):
+            for name in (env, tech):
+                src = next(s for s in g.NEWS_SOURCES if s["name"] == name)
+                self.assertFalse(g._rule_excludes(src, title, {"link": news + "x", "categories": []}), (name, title))
+
+    def test_govuk_link_rule_passes_only_https_news_stories_on_the_exact_host(self):
+        # 코드 검증의 생존 변이(http 허용·점 이스케이프 삭제·news/ 끝 슬래시 삭제)를 잡는다. 호스트 신뢰는 따로 시험하지만 링크 규칙도 스스로 엄격해야 한다.
+        src = next(s for s in g.NEWS_SOURCES if s["name"] == "GOV.UK · Environment & Energy")
+        cases = (("https://www.gov.uk/government/news/ok-story", False), ("https://WWW.GOV.UK/government/news/ok-story?x=1#y", False),
+                 ("http://www.gov.uk/government/news/ok-story", True), ("https://wwwxgovxuk/government/news/ok-story", True),
+                 ("https://www.gov.uk/government/newsflash/ok-story", True), ("https://www.gov.uk/government/news", True),
+                 ("https://www.gov.uk/government/speeches/ok-story", True), ("https://www.gov.uk.evil.example/government/news/ok-story", True),
+                 ("/government/news/ok-story", True), ("", True))
+        for link, excluded in cases:
+            with self.subTest(link=link):
+                self.assertEqual(g._rule_excludes(src, "A plain title", {"link": link, "categories": []}), excluded, link)
+
+    def test_govuk_sources_carry_the_ogl_credit_and_notice_and_forbid_medical_advice(self):
+        by_name = {s["name"]: s for s in g.NEWS_SOURCES}
+        sample = {"title": "Jackdaw gas field gets green light", "link": "https://www.gov.uk/government/news/jackdaw-gas-field-gets-green-light",
+                  "published": datetime(2026, 10, 23, 17, 30, tzinfo=timezone.utc)}
+        ogl = "https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/"
+        for name in ("GOV.UK · Environment & Energy", "GOV.UK · Science & Technology"):
+            with self.subTest(source=name):
+                src = by_name[name]
+                self.assertEqual(src["display_name"], "GOV.UK")
+                self.assertEqual(src["terms"], {"status": "allowed", "checked": "2026-10-26", "url": "https://www.gov.uk/help/terms-conditions"})
+                self.assertEqual(
+                    g._citation_line(src["citation"], sample),
+                    "“Jackdaw gas field gets green light.” GOV.UK, October 23, 2026 <https://www.gov.uk/government/news/jackdaw-gas-field-gets-green-light>. "
+                    "Contains public sector information licensed under the Open Government Licence v3.0. (" + ogl + ")")
+                self.assertIn("Open Government Licence v3.0", src["notice"]["ko"])
+                self.assertIn("바뀐 부분", src["notice"]["ko"])
+                self.assertIn("보증하지 않았", src["notice"]["ko"])
+                self.assertIn("공식 입장이나 공식 문서가 아닙니다", src["notice"]["ko"])      # OGL Non-endorsement: 공식 지위를 암시하지 말 것
+                self.assertIn("is not an official government publication or position", src["notice"]["en"])
+                self.assertIn("Contains public sector information licensed under the Open Government Licence v3.0.", src["notice"]["en"])
+                self.assertIn(ogl, src["notice"]["en"])
+                self.assertIn("changes were made", src["notice"]["en"])
+                self.assertIn("have not reviewed or endorsed", src["notice"]["en"])
+                self.assertIn("진단·치료·복용·예방 효과를 조언하지 마세요", src["prompt_rule"])
+                self.assertIn("정당·선거·장관 개인에 대한 평가", src["prompt_rule"])
+                self.assertIn("공식 입장·문서인 것처럼 쓰지 마세요", src["prompt_rule"])
+                self.assertIs(src.get("no_page_fetch"), True)   # 기사 페이지의 메타 설명이 피드 요약과 같아 읽어도 소용없다
+                self.assertEqual(src.get("exclude_link"), g._GOVUK_EXCLUDE_LINK)
+
     def test_pew_topic_words_need_word_boundaries(self):
         pew = next(s for s in g.NEWS_SOURCES if s["name"] == "Pew Research Center")
         for text in ("Automobile ownership trends", "Spreading costs across households"):
@@ -2027,6 +2177,10 @@ class SourceListTest(unittest.TestCase):
             "Statistics Canada · economy": ("economy", "https://www150.statcan.gc.ca/n1/rss/dai-quo/0-eng.atom"),
             "Statistics Canada · society": ("society", "https://www150.statcan.gc.ca/n1/rss/dai-quo/0-eng.atom"),
             "Statistics Canada · daily life": ("daily_life", "https://www150.statcan.gc.ca/n1/rss/dai-quo/0-eng.atom"),
+            "GOV.UK · Environment & Energy": ("science", "https://www.gov.uk/search/news-and-communications.atom?organisations%5B%5D=department-for-energy-security-and-net-zero"
+                                                         "&organisations%5B%5D=department-for-environment-food-rural-affairs"),
+            "GOV.UK · Science & Technology": ("technology", "https://www.gov.uk/search/news-and-communications.atom?organisations%5B%5D=ai-security-institute"
+                                                            "&organisations%5B%5D=department-for-science-innovation-and-technology"),
         })
         # 읽는 소스 전부(승인 상태와 상관없이)의 피드 호스트가 자기 분야에서 신뢰된다
         for src in g.NEWS_SOURCES:
