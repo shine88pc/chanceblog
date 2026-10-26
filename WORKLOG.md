@@ -18,7 +18,7 @@
 - `generator.py`: `NEWS_SOURCES`에서 Ars Technica·IEEE Spectrum 삭제, 기술 신뢰 목록에서 `arstechnica.com`·`ieee.org` 삭제, `TERMS_BLOCKED_DOMAINS`에 두 도메인 추가(신뢰 목록에 다시 들어와도 거부하고, 피드 호스트면 수집 루프가 읽지 않음). 기술 분야에는 전자신문만 남는다.
 - `tests/test_generator_slots.py`: 소스 표·유예 목록(전자신문만)·차단 목록 정확 일치, 두 도메인(하위 도메인 포함)이 어느 분야에서도 신뢰되지 않음, 신뢰 목록에 실수로 다시 넣어도 거부. 변이 4개(`ieee.org`를 기술 신뢰 목록에 되돌림, 두 도메인을 각각 차단 목록에서 뺌, IEEE 소스를 되살림)가 모두 시험에 잡혔다. 전체 시험 1768개.
 - 문서: ARCHITECTURE(기술 줄·차단 목록 항목)·DEFECT_REGISTER D-61·관측 체크리스트·SESSION_START(§5-2 브랜치 표, §6 14번 갱신과 15번 신설)·REQUEST_BRIEFING·HANDLER 0절·`인수인계/작업내용.md`.
-- **비공개 전환 완료**(사용자 승인 2026-10-26 "Ars·IEEE 출처로 공개된 글 3편(2026-10-19 Ars 1편, 2026-10-25 IEEE 1쌍)을 비공개로 전환해줘(삭제는 하지 말고)"): 3개 글(`_posts/2026-10-19-AI.md`, `_posts/기술·미래/2026-10-25-KR-101307.md`, `_posts/Technology & Future/2026-10-25-EN-101307.md`)의 front matter에 `published: false` 한 줄씩(삭제 없음, PR #29의 4개 글과 같은 방식, 되돌리려면 그 줄만 지운다). `tests/test_verify_pages_select.py`의 공개 사이트 사본 표에서 이 3개를 `PUBLIC_SNAPSHOT`에서 `PUBLIC_MISSING`으로 옮겼다(공개 글 13개 → 10개). 글 하나를 다시 공개로 돌리면 `test_exactly_the_posts_missing_from_the_public_site_are_unpublished`가 실패함을 확인했다.
+- **비공개 전환 완료**(사용자 승인 2026-10-26 "Ars·IEEE 출처로 공개된 글 3편(2026-10-19 Ars 1편, 2026-10-25 IEEE 1쌍)을 비공개로 전환해줘(삭제는 하지 말고)"): 3개 글(`_posts/2026-10-19-AI.md`, `_posts/기술·미래/2026-10-25-KR-101307.md`, `_posts/Technology & Future/2026-10-25-EN-101307.md`)의 front matter에 `published: false` 한 줄씩(삭제 없음, PR #29의 4개 글과 같은 방식, 되돌리려면 그 줄만 지운다). `tests/test_verify_pages_select.py`의 공개 사이트 사본 표에서 이 3개를 `PUBLIC_SNAPSHOT`에서 `PUBLIC_MISSING`으로 옮겼다(4f981d7 기준 공개 글 13개 → 10개). 글 하나를 다시 공개로 돌리면 `test_exactly_the_posts_missing_from_the_public_site_are_unpublished`가 실패함을 확인했다.
 
 ### 같은 원칙으로 남은 소스 점검 (2026-10-26, robots.txt를 직접 읽음, 읽기 전용)
 | 소스 | robots.txt | AI 크롤러 |
@@ -32,7 +32,12 @@
 ### 남긴 것
 - 공개 사이트 반영 확인(배포 뒤 글 3편의 주소가 열리지 않고 `posts.json`·`feed.xml`에서 빠졌는지)은 병합 뒤에 한다.
 - 기술 분야 글감이 전자신문 하나라 글감이 없는 날이 늘 수 있고 모든 분야가 비면 실행이 빨강(`ALL_LANES_EMPTY`)이 된다 → 같은 §6 14번.
-- 이 변경은 PR #30(후속 보완) 위에 쌓았다. #30이 병합된 뒤 main을 합쳐 PR을 올린다.
+- PR #30은 그동안 스쿼시로 병합됐다(c187c6d, 10:48). 이 브랜치가 품던 #30 원래 커밋과 이력이 달라 main을 합칠 때 9개 파일이 충돌했는데, main의 트리가 #30 끝 커밋(0a0ae84)의 트리에 봇 글 3개 파일만 더한 것임을 `git diff --stat 0a0ae84 origin/main`으로 확인하고 이 브랜치 쪽을 그대로 두었다(합친 뒤 main과의 차이는 PR #31의 13개 파일뿐).
+
+### 병합과 관측(2026-10-26 오전)
+- **검증 A 변경분 재검증 2회**(#30: b5a7609, 0a0ae84 / #31): 병합 차단 0. 2회 보고: #30 새 커밋 전체 시험 1771개·CI 3/3, 두 시점 코퍼스 고유 링크 316개 오탈락 0, `TECH_EN` 새 필터는 전자신문 표본에서 바뀐 제목이 정확히 1건(오늘 봇이 발행한 "빌 게이츠 “20년내 AI가…”", 옛 필터라면 `NOT_TECH`로 버려짐), 변이 136개(109+27) 중 99 사망·37 생존이며 지난번 의미 있던 15개는 모두 사망, 남은 생존(고지문 문구 8·영문 낱말 14·Pew 앵커 5)은 이 브랜치에서 시험으로 고정(변이 33개 모두 사망). #31: 변이 20개 중 19 사망(생존 1은 설계상 무해), 현재 main에 합친 모의에서 충돌 0.
+- **9시 슬롯 정기 실행 #71**(10:13): 2026-10-26 10:13 KST 9시 슬롯 정기 실행 #71(main 4f981d7 상태): 분야 표가 과학 NASA(10건, EXCLUDED 6·AGE 4)·문화 Pew(100건, EXCLUDED 69·AGE 24·OFF_TOPIC 7)·경제 연준(20건, AGE 10·EXCLUDED 10)·기술 3곳(80건, 통과 5·후보 3, AGE 50·UNCHECKED 25)·사회·일상 0으로 기대와 같았고 `소스 UN News: 보류 — …` 줄이 찍혔으며 수집 실패는 없었다. 일상·마음에 후보가 없어 기술·미래로 넘어가 전자신문 출처 글 1쌍을 발행했고(`Gemini 호출: 2회(실패 1회, 5xx)`, 3.7→3.8 전달, 입력 3,662·출력 1,780 토큰), 봇 커밋 ecc95e5 → Pages 배포 → `사이트 반영 확인` 시도 1회·HTTP 200으로 통과했다.
+- 같은 시각 연습 실행 #70(09:56, 저장 안 함·가짜 AI)에서 러너가 새 소스를 모두 읽는 것을 먼저 확인했다(Ars·IEEE는 전부 36시간 초과라 후보 0).
 
 ---
 ## [2026-10-26] Claude – Chance 출처 개편: 구글 뉴스 14개·MIT TR·BBC Technology 제거, NASA·Pew·Federal Reserve 추가(UN News 보류), AI타임스 차단, 약관 점검 필드·차단 목록·고지문 (운영자 승인 2026-10-26, PR #27)
