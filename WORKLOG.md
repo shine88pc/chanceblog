@@ -7,6 +7,24 @@
 
 ---
 
+## [2026-10-26] Claude – 생성 글 front matter 에 layout: post 보장과 실제 글 사본 시험 보강 (D-65, 시험 복구)
+
+**작업자**: Claude
+**대상**: Chance_Blog
+**등급**: T2 (생성기 `validate_post_data` 3줄 + 시험). 광고 표면·신뢰 목록·글 파일 변경 없음
+**목적**: 18시 슬롯 봇 글(KR/EN-182804)에 `layout: post` 가 없어 main 에서 `test_verify_pages_select` 가 실패했다. 사이트는 기본 레이아웃으로 정상이었지만 봇 커밋은 자동 검사를 일으키지 않아 다음 PR 의 검사 전까지 숨어 있었다.
+
+### 한 일
+- `generator.py` `validate_post_data`: 모델이 준 front matter 에 `layout` 줄이 없으면 `layout: post` 를 맨 앞에 넣는다(있으면 그대로). 여는 울타리 뒤 공백·탭·CRLF와 글 앞의 빈 줄·공백도 정리해 빈 줄·탭만 있는 줄이 남지 않게 했다(독립 검증이 `---`+탭 입력에서 YAML 오류가 나는 것을 찾아 `strip()`으로 고침). 새 시험 `LayoutGuaranteeTest` 10개(없을 때·있을 때·마지막 줄에 있을 때·값/다른 키 안의 낱말·본문 속 `layout:` 줄·공백/탭 울타리·앞 빈 줄·빈 front matter·CRLF·front matter 없음).
+- `tests/test_verify_pages_select.py`: 실제 글 사본에 `published: false` 를 넣을 때 `layout: post` 줄에 기대지 않고 맨 위 `---` 바로 아래에 넣는다.
+- 변이 13개(보장 끄기·조건 뒤집기·앵커·콜론·값·검색 범위·첫 줄만·`strip` 변형·빈 front 줄바꿈·위치·앞쪽 `lstrip` 변형) 모두 시험이 잡는다. 독립 검증(별도 세션)이 입력 53개+무작위 600개를 main·PR 코드에 같은 입력으로 돌려 비교해(YAML을 PyYAML·libyaml로 확인) 본문 소실 0·기존 layout 글 출력 동일 246/246을 확인했다. 이미 올라간 두 글(공개 콘텐츠)은 그대로 둔다.
+- 기록만: D-66(Gemini 호출 시간 제한 없음 — 18시 슬롯에서 283초 붙잡힘, 폴백으로 글은 나옴, 열림).
+
+### 다음 AI에게 남기는 주의사항
+- 봇 커밋(`🤖 자동 포스팅`)은 `GITHUB_TOKEN` 푸시라 시험 워크플로를 일으키지 않는다. 봇 글이 시험을 깨뜨리면 다음 PR 의 자동 검사에서야 드러난다 — 시험은 글 파일의 front matter 모양(`layout`·`published` 줄 위치)에 기대지 않아야 한다.
+
+---
+
 ## [2026-10-26] Claude – 콘텐츠 전략 Phase 0 보고서와 현황 문서 갱신 (문서 전용, 코드·광고 표면 변경 없음)
 
 **작업자**: Claude
