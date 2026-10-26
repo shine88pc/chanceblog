@@ -7,6 +7,62 @@
 
 ---
 
+## [2026-10-26] Claude – Chance 출처 개편: 구글 뉴스 14개·MIT TR·BBC Technology 제거, NASA·UN News·Pew·Federal Reserve 추가, 약관 점검 필드·차단 목록·고지문 (운영자 승인 2026-10-26, PR #27)
+
+**작업자**: Claude (총괄이 구현, 검증은 별도 세션)  
+**대상**: Chance_Blog  
+**등급**: T2(소스 개편 코드), 신뢰 목록·출처 정책은 T3 — 운영자가 2026-10-26 채팅으로 승인("Chance 출처 개편을 진행해줘: 구글 뉴스 14개 제거, NASA·UN News·Pew·Federal Reserve 추가, BBC·Guardian·Nature 제외, MIT TR·BBC Technology는 약관 점검 뒤 결정")  
+**목적**: 비기술 5개 분야 후보가 0이던 원인(구글 뉴스 링크가 게시자 원문으로 풀리지 않음 — 14개 소스 통과율 0.4%, 신뢰 목록에 비기술 직접 소스 없음)을 없애고, 약관이 이 용도를 막는 매체를 더는 쓰지 않는다  
+
+### 변경
+- `generator.py`: `NEWS_SOURCES`에서 구글 뉴스 14개·MIT Technology Review·BBC Technology 삭제, NASA(과학)·Pew Research Center(문화)·Federal Reserve(경제) 추가, UN News(사회)는 조건이 남아 보류(`pending`)로 넣음, 기술 소스는 AI타임스(운영자 결정(2026-10-26 채팅: "금지된 부분이면 접근하지 않는다, 득보다 실이 많다")로 차단)·TechCrunch·The Verge·Hacker News(글감이 안 되거나 간접 경로)를 빼고 3곳(Ars Technica·IEEE Spectrum·전자신문)만 `terms: unverified` 유예. 신뢰 목록에서 BBC·Guardian·Nature·technologyreview.com 삭제, `TERMS_BLOCKED_DOMAINS`(+ `_trusted_domain` 거부)로 재유입 차단. 새 탈락 코드 `EXCLUDED`·`OFF_TOPIC`, 피드 분류 태그 읽기, 소스별 `exclude_title`·`topic_regex`·`no_page_fetch`·`notice`(글 끝 고지문)·`prompt_rule`(작성 지침 한 줄)
+- 시험(`tests/test_generator_slots.py`): 소스 목록 불변식(약관 상태 선언·`unverified` 증가 금지·차단 도메인 부재·구글 뉴스 부재·분야별 소스), 소스별 제외·주제 규칙을 실제 피드 제목으로 고정, 제외·주제·페이지 읽기 금지·고지문·작성 지침 동작
+- 문서: ARCHITECTURE(소스 표·탈락 코드), ACTIONS_GUIDE(코드표), DEFECT_REGISTER(D-60~D-63, 관측 체크리스트), SESSION_START·HANDLER·REQUEST_BRIEFING·작업요청 README(현황)
+
+### 약관 점검 결과 (2026-10-26에 공식 약관을 직접 읽음, 법률 판단이 아님)
+| 소스 | 읽은 곳 | 요지 | 결정 |
+|------|---------|------|------|
+| MIT Technology Review | 이용약관(2023-09-06판) — Copyright; Restrictions on Use·Commercial Use·General Access·AI and Large Language Model Usage | 복제·수정·재게시 금지, 상업적 이용·파생물 금지, 로봇·스크래퍼 금지, 콘텐츠로 AI 시스템을 만들거나 학습·개선하는 것은 사전 서면 동의, 허용은 건별 허가(서비스에 RSS 포함). 약관이 "등록 이용자"에게 적용된다고도 쓰여 있으나 저작권 문장은 일반적 | **제외**(운영자 위임 결정) |
+| BBC(BBC Technology 포함) | 이용약관 v1.8(2022-09-19) §7(d)·§8·§15, 사업 이용 안내(2022-10-24 갱신) | RSS 사업 이용은 허가·수수료, RSS·콘텐츠의 메타데이터 가져오기 금지(BBC News RSS를 그대로 게시하는 것만 조건부 허용), AI 학습·컴퓨터 분석과 돈을 버는 이용은 허가 | **제외** |
+| Guardian·Nature | 2026-10-25 진단 | 사전 승인 없는 상업적 이용 금지 등 | **제외**(운영자 지시) |
+| NASA | 이미지·미디어 이용 안내(2026-08-13 갱신) | 미국에서 일반적으로 저작권 없음·NASA를 출처로 표기·제3자 자료와 로고는 별도. **AI 이용: AI 결과물의 정보를 NASA에 직접 귀속하는 것은 허용되지 않음("according to NASA" 같은 표현 금지), "AI 도구가 NASA 자료를 포함한다"고 밝히는 것은 가능, 검토·승인 암시 금지, NASA는 AI 결과물의 정확성에 책임지지 않음.** 출처 표기 규정과 직접 귀속 금지 규정이 충돌하며 AI 규정을 따르는 쪽으로 읽었다. 이 안내는 이미지·오디오·영상 중심이라 기사 글의 재사용은 일반적인 미국 정부 저작물 지위에 기댄다(이 페이지가 직접 말하지는 않음) | allowed + 작성 지침(코드로 막지 않음)·정확성 면책이 든 고지문 |
+| UN News | UN News 이용 안내(날짜 없음), un.org 저작권 안내·media.un.org 저작권 이용 안내(날짜 없음), UN 이용약관, 권리·허가 안내, news.un.org robots.txt | UN News: "사용·소개·재가공 환영", UN News 표기와 링크, 사진·그래픽·오디오·영상은 저작권 준수. **"유엔에 알린다(the United Nations is advised)"는 조건은 UN News 안내가 아니라 un.org 저작권 안내와 media.un.org 안내에 있다.** 권리·허가 안내는 뉴스 센터 기사를 "전문·무편집"으로 게시할 때 환영한다 하고 UN 이용약관은 개인·비영리 이용과 파생물 금지를 기본으로 해 문서끼리 어긋난다. news.un.org robots.txt는 일반 봇에 `*/news/`를 허용하지 않아 피드 경로(`/feed/subscribe/en/news/all/rss.xml`)가 걸린다(구글 피드 수집기만 `/feed/subscribe/` 허용) | **보류(`pending`)** — 알림·서면 확인을 마치고 운영자가 확인하면 allowed(D-63) |
+| Pew Research Center | 이용약관(2018-05-25 시행) §1~§4, robots.txt | §1: RSS·위젯·API로 얻은 콘텐츠의 판매·수정·파생물 제작까지 허락하되 정책·견해·지지를 Pew가 한 것처럼 암시하지 말고 §2 인용 형식("Report Title." Pew Research Center, Washington, D.C. (Publication date) URL.)으로 출처를 밝힐 것, 번역물에는 "has not reviewed or approved this translation" 문장을 넣을 것. §3: 허가 없는 스크래핑 금지. §4: Pew 상표 사용 불가. robots.txt는 `ai-input=yes` 신호 | allowed + 인용 줄·고지문(약관 문장 그대로)·작성 지침·기사 페이지를 읽지 않음 |
+| Federal Reserve | 웹사이트 안내(2024-08-02 표시) | 정보는 공공 영역·출처를 밝힐 것, 제3자 자료·로고·휘장은 별도 | allowed + 고지문 |
+| AI타임스(기존 소스) | 기사 페이지 하단 표기(직접 확인, 기사 3건), 저작권보호정책(날짜 없음), 이용약관 §9·§10 | **모든 기사 하단에 "무단전재 및 재배포, AI학습 및 활용 금지"**, 보호정책은 승낙 없는 복제·출판·전송·배포·판매·변형을 금지(허용 시 출처 표시), 피드의 `<copyright>`는 "All rights reserved" | **금지로 읽힘 → 운영자 결정(2026-10-26 채팅: "금지된 부분이면 접근하지 않는다, 득보다 실이 많다")으로 소스·신뢰 목록에서 빼고 `TERMS_BLOCKED_DOMAINS`에 올림.** 이 출처로 만든 공개 글 1쌍(2026-10-25-KR/EN-203740)은 D-60처럼 T3 결정 |
+| 전자신문(기존 소스) | 이용약관(2012.09.01 표기) | 제공 정보의 영리 목적 이용 금지(회원 대상), 복제·전송·배포는 사전 승낙 필요. RSS·AI 이용 조항 없음. 이 피드(Section901)에는 해외 매체를 다시 쓴 기사도 섞여 권리가 한 겹 더 있다 | **불명확** — 유예(`unverified`) 유지, 허가 문의 추천 |
+| TechCrunch·The Verge·Hacker News(기존) | TechCrunch RSS 이용약관은 직접 읽음, The Verge는 검증 세션 보고(직접 재확인 못 함) | TechCrunch: 피드 내용을 그대로 표시·출처와 링크 유지·변형과 피드 광고 금지(AI로 새 글을 쓰는 이용은 언급 없음). The Verge(Vox Media 이용약관 §15, 2026-07-06): 파생물·영리 이용 금지로 읽힘. Hacker News: 링크가 가는 매체의 약관이 적용되는 간접 경로 | **제거** — 신뢰 목록에 없어 글감이 한 건도 안 되는 TechCrunch·The Verge와 간접 경로 Hacker News(같은 원칙, D-61) |
+| Ars Technica·IEEE Spectrum(기존) | 검증 세션 보고(직접 재확인 못 함) | Ars: robots.txt가 AI 크롤러를 막음, 이용약관은 읽지 못함. IEEE: 사이트 이용약관이 복제에 사전 서면 동의를 요구(일부 읽음), Spectrum 자체 RSS 약관은 못 찾음 | 미확인(유예) |
+
+### 피드 실측 (2026-10-26 07:21 KST, 이 PC에서 읽기 전용)
+| 피드 | 항목 | 36시간 안 | 7일 안 | 비고 |
+|------|------|-----------|--------|------|
+| NASA `nasa.gov/feed/` | 10 | 1(APOD, 제외 대상) | 10 | 항목 호스트 `science.nasa.gov`·`www.nasa.gov`, `/news-release/feed/`는 같은 내용 |
+| UN News 전체 RSS | 30 | 1 | 30 | 요약 116~279자 |
+| Pew `pewresearch.org/feed/` | 100 | 0 | 22 | 분류 태그가 풍부하고 선거·정치 비중이 크다. 퀴즈·보고서 부속 쪽(감사의 글·조사 방법)이 섞여 있다 |
+| Federal Reserve `press_all.xml` | 20 | 0 | 0 | 가장 최근 항목이 9일 전, 요약 100자 미만 10건이나 기사 페이지 발췌로 모두 통과 |
+
+주말 직후라 36시간 안 후보가 거의 없는 시점이다. 평일 공급은 병합 뒤 며칠 관측한다(D-62).
+
+### 검증
+- **L0**: `python scripts/validate_repo.py` 오류 0·경고 2(main과 동일), pyflakes 0, vermin 최소 3.7, `git diff --check` 깨끗.
+- **L1**: `python -m unittest discover -s tests` 전체 1760개 통과(3차 수정과 AI타임스 제외 반영 뒤). 소켓을 막아도 `test_generator_slots.py` 통과.
+- **L2**: `DRY_RUN=1 python generator.py`(스텁 AI, 실제 피드 읽기)를 로컬에서 실행 — 종료 0, 파일 변경 없음, 추첨된 일상·마음 분야는 `[SKIP] code=LANE_EMPTY sources=0`으로 건너뛰고 기술·미래로 대체(독립 검증자 실행). 작성자는 분야별 실피드 점검을 따로 했다.
+- **L3**(실제 Gemini 초안): **실행 필요** — 이 환경에서는 Actions를 실행하지 않았다. 병합 뒤 첫 정기 실행에서 확인한다(`docs/DEFECT_REGISTER.md` 하단 체크리스트).
+- **독립 검증 두 건**(각각 새 clone, 구현자 설명 미사용):
+  - 코드·동작(검증 A): 병합 차단 0. 전체 시험 1740개(당시)·validate_repo 통과, 분야별 실피드 점검이 PR 표와 일치, 차단 도메인 7개·모조 호스트(`notbbc.co.uk`·`bbc.com.evil.example` 등)는 어느 분야에서도 신뢰되지 않음, 악성 피드 19항목을 5개 분야에 먹인 시험에서 새어 나간 것 0, 정규식 최악 0.064초(제목은 300자·분류 태그는 80자로 잘림), 변이 61개 중 43 사망·18 생존(생존분은 3차 수정에서 시험 보강), 범위(AST 비교: 바뀐 함수 8개뿐)·병합 모의 이상 없음(Blogger 브랜치와의 충돌 7개 파일은 그 브랜치의 낡은 기반 때문). 권장 8건·사소한 것 다수를 3차 수정에 반영.
+  - 약관 사실(검증 B): MIT TR·BBC 제외 근거와 날짜·판 표기는 맞음. 정정 3건 — AI타임스 기사 하단의 "AI학습 및 활용 금지"(작성자도 직접 확인), UN "알린다(advised)" 조건의 출처와 robots.txt 제한(UN News 보류로 반영), Pew 인용 형식·번역 면책 문장·NASA 정확성 면책(고지문 보강).
+- **2차·3차 수정**(검증 반영): 위 정정 + 제외 규칙 보강(Fed·NASA·Pew: 뉴스레터 모음·방법론 글·행사 안내·사진 설명), 글 언어 판정(front matter `lang` 우선), 직접 RSS `<source>` 태그 미사용, 시험 보강(모조 호스트·분야별 신뢰·차단 목록 고정·Pew 페이지 읽기 금지·소스 이름 유일·분야 배정 고정). 변경분(2·3차)은 검증 A가 다시 본다.
+
+### 못 한 검증·관측 대기·다음 AI 주의사항
+- **러너 IP에서의 피드 접근**은 병합 뒤 첫 실행에서만 확인된다(`수집 실패`가 보이면 그 소스만 건너뛴다). 이 PC에서는 4개 피드 모두 HTTP 200이었다.
+- **미결정(T3, `docs/SESSION_START.md` §6 13·14번)**: 경제·일·일상·마음·사회 공급(신선도 창 완화 또는 소스 추가, D-62), 전자신문(약관 불명확) 허가 문의 또는 제외(D-61). **AI타임스는 운영자가 2026-10-26에 접근하지 않기로 결정해 뺐다.**
+- **비공개 전환 완료**(사용자 승인 2026-10-26 "AI타임스(2026-10-25)·MIT TR(2026-10-21) 출처로 이미 공개된 글 2쌍을 비공개로 전환해줘(삭제는 하지 말고)", PR #29): 4개 글의 front matter에 `published: false` 한 줄씩(KR/EN 쌍 2개, 삭제 없음, 이미 숨겨 둔 10-18 글들과 같은 방식). 처음 CI가 빨강이었던 것은 `tests/test_verify_pages_select.py`의 공개 사이트 사본 표(`PUBLIC_SNAPSHOT`)에 MIT TR 쌍이 공개 글로 적혀 있어서였고, 그 두 줄을 `PUBLIC_MISSING`으로 옮겨 고쳤다. **확인(2026-10-26 09:19 KST)**: 병합 뒤 배포를 마친 공개 사이트에서 4개 주소가 모두 HTTP 404, 공개 `posts.json`은 13건(MIT TR·AI타임스 글 0건)이고 `feed.xml`에도 없다. 같은 날의 다른 글(10-25 10:13 쌍)은 200이다.
+- **운영자 몫**: UN News에 이용 사실을 알리고 이 피드 경로를 읽어도 되는지 서면 확인 받기(unnews@un.org, D-63) — 그 뒤 `pending`을 `allowed`로 바꾼다.
+- 이 PR이 하지 않은 것: 모델 목록(3.7 제거)·Blogger·사이트 정리·예약 틱 — 승인 대기 그대로. 구글 뉴스 해석 코드(`google` 키)는 쓰는 소스가 없지만 시험이 있어 남겼다.
+
+---
+
 ## [2026-10-25] Claude – 총괄 하루 기록: 발행 복구 병합 총정리·진단과 AI 검색 노출 조사·확인 필요 모음 도입·세션 인수인계 문서 (운영자 승인 11건 반영, 총괄)
 
 **작업자**: Claude (총괄 역할, 구현·검증은 별도 세션)  
