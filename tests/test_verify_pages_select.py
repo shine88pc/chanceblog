@@ -28,7 +28,7 @@ PUBLIC_SNAPSHOT = {
     "_posts/EN - Space & Robotics/2026-10-18-EN-233513.md": "https://shine88pc.github.io/chanceblog/posts/2026/10/18/EN-233513/",
     "_posts/2026-10-18-AI.md": "https://shine88pc.github.io/chanceblog/posts/2026/10/18/AI/",
 }
-# 저장소에는 있으나 `published: false`라 공개 posts.json에 없는 12건(2026-10-25 사본의 5건 + 2026-10-26에 비공개로 돌린 7건).
+# 저장소에는 있으나 `published: false`라 공개 posts.json에 없는 14건(2026-10-25 사본의 5건 + 2026-10-26에 비공개로 돌린 9건).
 PUBLIC_MISSING = [
     # 2026-10-26 운영자 승인으로 비공개 전환(약관이 금지하는 매체 출처: MIT Technology Review 쌍 2026-10-21, AI타임스 쌍 2026-10-25)
     "_posts/기술·미래/2026-10-21-KR-135226.md",
@@ -39,6 +39,9 @@ PUBLIC_MISSING = [
     "_posts/2026-10-19-AI.md",
     "_posts/기술·미래/2026-10-25-KR-101307.md",
     "_posts/Technology & Future/2026-10-25-EN-101307.md",
+    # 2026-10-26 운영자 승인으로 비공개 전환(콘텐츠 이용에 정식 계약·사용료가 필요해 접근하지 않기로 한 매체 출처: 전자신문 쌍 2026-10-26)
+    "_posts/기술·미래/2026-10-26-KR-101652.md",
+    "_posts/Technology & Future/2026-10-26-EN-101652.md",
     "_posts/2026-10-18-EN-225949.md",
     "_posts/2026-10-18-KR-225949.md",
     "_posts/EN - Tech Geopolitics/2026-10-18-EN-161948.md",

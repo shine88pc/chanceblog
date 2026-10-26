@@ -32,7 +32,7 @@
 | 이슈로 수정 요청 | 이슈 양식(고정 페이지 수정·게시글 이미지 변경) → `issue-edit.yml`이 **PR로** 올림, `pr-scope-check.yml`이 Copilot 등 모든 PR의 요청 범위를 검증. 사용법 `docs/COPILOT_GUIDE.md`, 구조 `docs/ISSUE_EDITS.md` (첫 실행 관측 필요) |
 | 작업요청서 | 저장소를 볼 수 없는 AI(모바일 Claude 등)에게 `docs/REQUEST_BRIEFING.md`를 통째로 붙여 넣으면 이 프로그램에 맞는 요청서를 만든다. 요청서는 `인수인계/작업요청/`에 올리거나 채팅에 붙여 넣는다. 처리 규칙은 그 폴더의 README |
 | 통합 성과 대시보드 | **제안 단계 — 사용자 결정 대기.** 블로그별 방문자·인기 글·AdSense 사이트별 수익을 한곳에서 보는 방안(Looker Studio 먼저). 검토 결과·결정 항목은 `docs/ANALYTICS_PLAN.md` §7. 결정 전에는 사이트에 GA 등을 설치하지 않는다(T3) |
-| 알려진 결함 | D-03 봇 글이 슬롯 대부분에서 안 나옴(원인: 비기술 분야 후보 0건 + 대체 분야 시도 없음 → 폴백으로 완화, 비기술 분야 후보 부족은 열림) · D-11 OAuth 7일 · D-08 내부 문서 공개 · D-15/D-16 Copilot PR 승인·PR 생성 설정(사용자 조치) — 상세는 `docs/DEFECT_REGISTER.md` (D-01 이슈 이미지 흐름은 `issue-edit`로 대체, 관측 대기) |
+| 알려진 결함 | D-03 봇 글이 슬롯 대부분에서 안 나옴(원인: 비기술 분야 후보 0건 + 대체 분야 시도 없음 → 폴백으로 완화, 비기술 분야 후보 부족은 열림) · D-11 OAuth 7일 · D-08 내부 문서·코드의 사이트 공개(해결: 사이트에서 뺌, 2026-10-26) · D-15/D-16 Copilot PR 승인·PR 생성 설정(사용자 조치) — 상세는 `docs/DEFECT_REGISTER.md` (D-01 이슈 이미지 흐름은 `issue-edit`로 대체, 관측 대기) |
 | Blogger 워크플로(Actions 이름 `Blogger 글 자동 작성`) | `blogger_macat`은 **정지(mode off)** — 영문 블로그인데 프로필이 한글이라 영문 프로필 준비 전까지(운영자 결정 2026-10-25). 정지 중에도 매일 02:00 UTC 실행은 돌고 대상 0개로 초록 + `::notice::`로 끝난다. 켜면 `mode: draft`는 게시 Secrets 4종이 모두 있을 때 Blogger **초안함**에 업로드(공개되지 않음, 운영자가 Blogger 화면에서 확인한 뒤 직접 게시)하고, 하나도 없으면 저장소 파일에만 저장하며, 일부만 있거나 `mode: auto`(즉시 게시)인데 없으면 글을 만들기 전에 종료 2(빨강). 올리기 전에 인증 점검(토큰 갱신·블로그 조회·주소 일치)을 먼저 한다. 재개 절차는 §3 P1 |
 | 비밀 파일 | `client_secret.json`은 저장소에 없음 (`.gitignore`로 차단) |
 | 자동 push 스크립트 | `auto_sync.bat` 제거됨. 같은 동작 재도입 금지 |
@@ -146,7 +146,7 @@ Secrets (API 선택 시):
 - `Blogger 글 자동 작성` 첫 실행 결과 확인 (Actions 탭 → Run workflow, 처음에는 `dry_run`(연습 실행) 체크) — 지금은 mode off라 위 재개 절차가 먼저
 - `feature/image-fix-20261019-0000`·`backup/issue-template-$TS` 브랜치를 지울지 결정 (사용자) — §11
 - 풀오토 로드맵(Phase 1~4)과 완료 기준: `docs/ARCHITECTURE.md` §8
-- 결함 D-03(봇 글이 안 나온 원인과 완화)·D-08(내부 문서 공개): `docs/DEFECT_REGISTER.md`
+- 결함 D-03(봇 글이 안 나온 원인과 완화)·D-08(내부 문서·코드의 사이트 공개 — 해결): `docs/DEFECT_REGISTER.md`
 - 이슈 수정 시스템 첫 실행 관측 + 저장소 설정 1회(Allow GitHub Actions to create and approve pull requests): `docs/ISSUE_EDITS.md` §6
 - 통합 성과 대시보드: 사용자 결정(`docs/ANALYTICS_PLAN.md` §7) 후 Phase A(Looker Studio, 코드 없음) → 필요하면 Phase B(비공개 저장소 수집기). 수익·방문 수치는 공개 저장소에 올리지 않는다(G-O7)
 

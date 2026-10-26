@@ -7,12 +7,12 @@
 
 ---
 
-## [2026-10-26] Claude – Blogger 초안함 업로드·인증 점검 통합 브랜치 `ai/claude/blogger-integration`: main(9ba5313)을 합치고 충돌 7개 파일 해결, 가이드 병합대기 표식 걷기 (승인 4번 ①, PR 아님·병합 전)
+## [2026-10-26] Claude – Blogger 초안함 업로드·인증 점검 통합 브랜치 `ai/claude/blogger-integration`: main(9ba5313)을 합치고 충돌 7개 파일 해결, 가이드 병합대기 표식 걷기 (승인 4번 ①, 독립 검증 병합 가능 → main(69139b0) 재통합 뒤 PR)
 
 **작업자**: Claude (통합 담당 서브에이전트, 독립 검증은 별도 세션)  
 **대상**: Blogger  
 **등급**: T2(코드·워크플로 통합, 독립 검증 필요) — 운영자가 2026-10-26 채팅으로 승인한 4번 ①("Blogger 초안함 API 업로드")의 구현이다. 이 변경은 Blogger를 켜지 않는다  
-**목적**: 독립 검증 2회 "병합 가능"을 받은 두 브랜치(`ai/claude/blogger-draft-upload` → `ai/claude/blogger-auth-check`)를 호출 기록 병합(#24) 이후의 main(9ba5313)과 합친 PR 준비 브랜치 하나로 만든다. PR은 만들지 않았고 병합하지 않았다
+**목적**: 독립 검증 2회 "병합 가능"을 받은 두 브랜치(`ai/claude/blogger-draft-upload` → `ai/claude/blogger-auth-check`)를 호출 기록 병합(#24) 이후의 main(9ba5313)과 합친 PR 준비 브랜치 하나로 만든다. 독립 검증(별도 세션, 2026-10-26, head 4bd6def·기준 main 9ba5313)은 **병합 가능**(막는 결함 없음, 시험 1926개, 432 시나리오 행동 표·변이 37개 모두 통과)이었고, 그 뒤 main(69139b0: #34 사이트 정리·#36·#37)을 다시 합쳐 PR 로 올린다
 
 ### 한 일
 - `origin/ai/claude/blogger-auth-check`에서 새 브랜치를 만들고 `origin/main`(9ba5313)을 **병합 커밋**으로 합쳤다(리베이스 아님, 병합 커밋 `18dac09`, 부모 `0f24ecd`·`9ba5313`). 문서 정리는 별도 커밋으로 나눴다. main 쪽에는 호출 기록(#24)·출처 개편(#27~#31)·확인 필요 모음·Pages 배포 확인·Actions 가이드·모델 3.7 제거·예약 47분 틱·`defaults.mode` draft 복귀(#33)가 들어 있다.
@@ -54,6 +54,64 @@
 6. 비밀·시크릿: 이 변경에는 값이 없다(PR 변경분에서 키 모양 문자열 0건 확인). 시크릿 등록·Actions 실행·dispatch는 하지 않았다.
 
 ---
+## [2026-10-26] Claude – 코드·상태 파일을 사이트에서 뺌 (운영자 승인 2026-10-26 "2. 추천대로", T3 광고 표면 `_config.yml`)
+
+**작업자**: Claude  
+**대상**: Chance_Blog  
+**등급**: T3(광고 표면 `_config.yml`) — 운영자가 2026-10-26 채팅으로 "코드·상태 파일(`generator.py`, `pipeline/`, `history.json` 등)도 사이트에서 뺄지" 질문에 "2. 추천대로"라고 답함(추천: 빼기)  
+**목적**: 사이트에 쓸모없고 정적 파일로 그대로 열려 있던 코드·상태 파일(`…/generator.py`, `…/pipeline/blogs.json` 등 HTTP 200)을 사이트에서 뺀다. 저장소에는 그대로 있다.
+
+### 한 일
+- `_config.yml` `exclude`에 11항목 추가: `generator.py`·`blogger_generator.py`·`pipeline`·`scripts`·`tests`·`history.json`·`blogger_history.json`·`pages.json`·`requirements-dev.txt`·`requirements-edits.txt`·`requirements-pipeline.txt`(승인 범위 = 코드·상태 파일). **`README.md`는 문서라 승인 범위 밖이어서 넣지 않았다**(그대로 열려 있음). 사이트가 쓰는 파일은 넣지 않았고, Jekyll 3.10의 "항목으로 시작하는 이름도 뺀다" 규칙에 걸려 빠지는 공개 파일이 없음을 시험이 확인한다.
+- `tests/test_site_cleanup.py`: `MUST_EXCLUDE`에 11항목을 옮기고 `STATIC_EXPOSED`는 `README.md`만 남김. 사이트가 이 파일들의 주소를 쓰지 않음은 #34 검증(저장소·워크플로·`verify_pages_deploy.py`·홈 JS)에서 확인했다.
+- 문서: D-08 해결 표기, ARCHITECTURE·HANDLER·REQUEST_BRIEFING의 낡은 "내부 문서 공개" 서술, 작업내용(§2·§3 7·18번·이력).
+
+### 독립 검증과 반영
+- 별도 세션 검증(깨끗한 clone c2ba6b8, 판정 **병합 가능**): 전체 시험 1792개 통과·`validate_repo` 오류 0·경고 1(LIQUID-1)·AD-1 통과, Jekyll 3.10 규칙으로 추적 파일 전수 시뮬레이션에서 104개가 빠지고(운영 문서 27 — #34로 이미 빠짐 — 와 이 PR이 새로 빼는 코드·상태 77) 14개가 남으며(공개 13 + `README.md`) 우연히 빠지는 공개 파일 0건, 사이트 주소로 제외 대상을 읽는 코드·워크플로 0건, 변이 36건 중 의도한 것 전부 잡힘. 병합 전 빌드 비교 로그: 파일 104→27개, 사라진 77개, 새로 생긴 0개.
+- 권고 반영: `docs/ACTIONS_GUIDE.md`의 낡은 "경고 2" 정정, SESSION_START·REQUEST_BRIEFING 거울 표(7·17번 갱신, 18·19번 추가), `tests/test_site_cleanup.py`의 분류를 이름 정확 일치(`unclassified`)로 바꿔 `tests-report.html` 같은 새 공개 파일이 `tests` 접두사에 조용히 빠지는 것을 시험이 알리게 함(새 시험 1개), 시험 설명·이름 갱신.
+- 반영분 델타 확인(b2dedc1)도 병합 가능. 비차단 4건 반영: 빌드 비교 숫자 정정, 변이 수 36건 정정, 순수 함수 시험이 실제 분류 상수(`PUBLIC_ROOT`·`STATIC_EXPOSED`)에 묶인 것을 인자로 풀어 `README.md` 를 뺄 때 시험이 깨지지 않게 함, 글롭 글자가 든 이름도 정확 일치로 인정(`is_listed`).
+- 남긴 것: `README.md` 제외 여부는 기본값(그대로 열어 둠)으로 두고 작업내용 §3 19번에 올림. D-08 '해결'은 병합·배포 확인 뒤 확정.
+
+### 남긴 것
+- 병합·배포 뒤 공개 사이트에서 `…/generator.py`·`…/pipeline/blogs.json`·`…/history.json`·`…/tests/…`가 404이고 사이트가 쓰는 주소(`posts.json`·`feed.xml`·`robots.txt`·홈·글 페이지)는 그대로 200인지 확인한다.
+
+---
+
+## [2026-10-26] Claude – 전자신문 출처로 공개된 글 1쌍 비공개 전환 (운영자 승인 2026-10-26, T3 공개 콘텐츠)
+
+**작업자**: Claude  
+**대상**: Chance_Blog  
+**등급**: T3(공개 콘텐츠 변경) — 운영자가 2026-10-26 채팅으로 승인: "전자신문 출처 글 1쌍(2026-10-26-KR-101652·EN-101652)을 비공개로 전환해줘(삭제는 하지 말고)."  
+**목적**: 전자신문(콘텐츠 이용에 정식 계약·사용료가 필요해 운영자 결정 14번으로 소스에서 뺀 매체)을 출처로 이미 공개된 글을 사이트에서 내린다. 삭제하지 않는다.
+
+### 한 일
+- `_posts/기술·미래/2026-10-26-KR-101652.md`, `_posts/Technology & Future/2026-10-26-EN-101652.md`: front matter `layout: post` 바로 아래에 `published: false` 한 줄씩(PR #29·#31과 같은 방식). 파일·이미지·이력(`history.json`)은 그대로라 되돌리려면 그 줄만 지우면 된다. Jekyll은 이 글들을 사이트·`posts.json`·`feed.xml`·사이트맵에서 뺀다. 같은 날 슬롯 기록(`slot_state`는 이력만 본다)은 남아 있어 18시 슬롯이 이 글 때문에 다시 열리지 않고, 같은 소재는 제목 유사도 검사(이력·`_posts` 제목)가 계속 막는다.
+- `tests/test_verify_pages_select.py`: 두 파일을 `PUBLIC_MISSING`에 더해 `published: false`임을 시험이 확인한다(비공개 12건→14건). 배포 뒤 공개 반영 확인(verify)은 `published: false` 글을 건너뛰어 그다음으로 새 글을 본다.
+- 문서: `인수인계/작업내용.md` §3 17번·이력, `docs/SESSION_START.md`·`docs/REQUEST_BRIEFING.md` 17번 줄.
+
+### 남긴 것
+- 병합·배포 뒤 공개 사이트에서 두 글 주소(`…/posts/2026/10/26/KR-101652/`·`…/EN-101652/`)가 404인지, `posts.json`·`feed.xml`·사이트맵에서 빠졌는지, 홈 글 카드가 2장 줄었는지 확인한다.
+- `docs/DEFECT_REGISTER.md` D-61 행의 "그 출처 공개 글의 비공개 전환은 결정 대기" 문장은 해외 소스 추가 PR(#35)이 같은 행을 고치므로 그 PR이 병합된 뒤 이 결과로 바로잡는다(두 PR의 충돌 방지).
+## [2026-10-26] Claude – 사이트 정리: 운영 문서를 사이트에서 빼고 홈 글 목록을 미리 그림 (운영자 승인 2026-10-26 "7. 진행", T3 광고 표면)
+
+**작업자**: Claude  
+**대상**: Chance_Blog  
+**등급**: T3(광고 표면) — 운영자가 2026-10-26 채팅으로 승인 대기 7번에 "진행"이라고 답함(분석 `docs/analysis/2026-10-25_ai-search-exposure.md` 묶음 가, SIT-02·SIT-03·D-08)  
+**목적**: 운영 문서가 사이트맵의 절반 가까이를 차지하고 홈은 JS 없이 열면 글 목록이 비는 문제를 줄인다. 저장소에는 아무것도 지우지 않는다.
+
+### 한 일
+- `_config.yml`: `exclude` 8개 항목 추가(운영 문서 6개 `AGENTS.md`·`AI_COLLAB.md`·`CLAUDE.md`·`GEMINI.md`·`HANDLER.md`·`WORKLOG.md`와 `docs/`·`인수인계/` — 운영자가 승인한 범위). 처음 구현은 코드·상태 파일(`generator.py`·`pipeline/`·`scripts/`·`tests/`·`history.json`·`pages.json`·`requirements-*.txt`·`README.md`)까지 20개를 넣었으나 독립 검증이 승인 범위 밖이라고 지적해 뺐고, 그 파일들을 정적 파일로 여는 것을 줄일지는 운영자 확인을 받는다(작업내용 §3 18번). 사이트가 쓰는 파일(`index.html`·about·contact·privacy·categories·`posts.json`·`feed.xml`·`robots.txt`·`assets/`·검색 인증 html)은 넣지 않았다.
+- `index.html`: 글 목록 영역(`#post-grid`)에 Jekyll 반복문으로 최근 24편 카드를 미리 그리고, 요약 줄에 서버가 센 글 수를 넣고, 로딩 표시를 처음엔 숨기고, JS(`fetchPostList`)는 미리 그린 카드가 있으면 새 목록이 준비될 때까지 그대로 두며 가져오기에 실패해도 그 카드가 남게 했다. JS가 꺼진 방문자에게 쓸모없는 가로 이동 단추는 숨긴다. **광고 스크립트 줄(바이트 동일)·모달·방문 카운터·스타일은 건드리지 않았고, `<head>` 안 변경은 `<noscript><style>…</style></noscript>` 한 줄뿐이다**(변경은 6곳: head 1·요약 1·로딩 표시 1·글 목록 1·JS 2곳)(시험이 광고 코드 한 줄이 그대로임을 확인).
+- `tests/test_site_cleanup.py` 새 시험: exclude 필수 항목·사이트가 쓰는 파일이 빠지지 않음(Jekyll 3.10의 앞부분 일치 규칙까지)·항목이 실제로 있음·**맨 위 모든 추적 파일이 내보냄/뺌/알려진 정적 파일 중 하나로 분류됨**(새 문서를 만들면 실패)·검증기 EXPOSE-1 해소·홈의 반복문과 카드 각 부분·JS 보존 로직·head의 noscript 한 줄·광고 코드와 구조 불변·Liquid 블록 짝.
+- 검증: 시험 렌더 — python-liquid(저장소에 넣지 않은 임시 도구)로 `index.html`을 글 3편(이미지 없음·분류 없음·따옴표·`&` 포함)과 0편으로 렌더해 구문·이스케이프·폴백(분류 General)·광고 스크립트 1회를 확인했다. Ruby Liquid 와의 차이는 병합 뒤 실제 Pages 빌드로 확인한다(빌드가 실패해도 기존 사이트는 그대로 유지된다).
+
+### 남긴 것
+- 병합·배포 뒤 확인: 사이트맵에서 운영 문서 주소가 사라졌는지(44건 → 19건 예상), `…/HANDLER.md`·`…/docs/…` 같은 주소가 404가 됐는지(`generator.py`·`pipeline/…`는 승인 범위 밖이라 그대로 열려 있는 것이 정상), 홈 HTML(JS 없이 받은 것)에 글 링크 24개 이하가 들어 있는지, 홈을 JS로 열었을 때 서버가 그린 카드가 새 목록으로 **한 번 바뀌는 것**(카드 12장 → 카드 11장+추천 블록)은 정상이다. 모든 글 페이지·분류 페이지의 상단 메뉴에서 운영 문서 링크 25개가 사라진다(실제 Jekyll 빌드 비교로 확인).
+- 되돌리려면 `_config.yml`의 `exclude` 블록과 `index.html`의 변경 6곳을 되돌린다(이 PR의 커밋들).
+- **검증 기록**: ① 첫 검사는 AD-1(광고 표면 변경에 `Ad-Surface-Approved` 표기 없음)로 빨강이었고 표기를 담은 커밋을 더해 통과했다. ② 병합 전에 GitHub Pages와 같은 `actions/jekyll-build-pages`로 main과 PR을 각각 빌드해 견주었다(임시 브랜치, 배포 없음): 파일 157→106개(사라진 52개가 모두 운영 문서, 시험 파일 1개가 새로 생김 — 처음 20항목 구현은 157→28), 사이트맵 44→19건, 홈 카드 12장·링크 깨짐 0·광고 스크립트 1개, 달라진 페이지는 상단 메뉴의 운영 문서 링크가 빠진 글 12쪽과 분류 쪽. ③ 독립 검증 1회: 판정 "수정 후 병합"(코드 결함 없음) — 제외 범위를 승인 범위로 줄이고 "머리 부분 불변·변경 5곳" 문구를 정정(위 반영), 미리 그린 카드 판정을 `article` 선택자로, 승인 메모를 Liquid 주석으로, 시험 보강. 변경분 재검증(d0b0094) 1회: 코드·시험 문제 없음(변이 26건 중 설계상 못 잡는 2건만 생존), 지적한 PR 본문·D-08 상태·숫자·문구는 이 커밋에서 정정. 코드·상태 파일 제외는 운영자 승인("2. 추천대로")을 받아 후속 PR로 한다.
+
+---
+
 ## [2026-10-26] Claude – Ars Technica·IEEE Spectrum 기술 소스 제외 (운영자 승인 2026-10-26, PR #31)
 
 **작업자**: Claude (총괄이 구현, 검증은 별도 세션)  

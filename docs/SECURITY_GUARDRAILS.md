@@ -143,7 +143,7 @@
 | AD-1 | 광고 표면 무승인 변경 | G-C6 |
 | DOC-1, AGENT-1 | 깨진 문서 링크, AI 지침 파일 | CHARTER P10 |
 | DEP-1 | 버전 범위 없는 설치 | G-A5 |
-| EXPOSE-1 | 내부 문서가 사이트에 공개됨 | D-08 |
+| EXPOSE-1 | 내부 문서가 사이트에 공개됨(2026-10-26 `exclude`로 해결, 경고 사라짐) | D-08 |
 | PY-1, JSON-1 | 문법 오류 | — |
 
 런타임 게이트 코드: `TITLE_LEN`·`TITLE_BANNED`·`LEN_SHORT`·`LEN_LONG`·`LANG`·`STRUCT_H3`·`STRUCT_LIST`·`BANNED`·`LEAK`·`LABELS`·`DUP_SAME`·`DUP_OTHER`·`PARSE`.
