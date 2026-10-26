@@ -11,13 +11,14 @@
 
 **작업자**: Claude (총괄이 구현, 검증은 별도 세션)  
 **대상**: Chance_Blog  
-**등급**: T3(신뢰 목록 변경) — 운영자가 2026-10-26 채팅으로 승인("Ars·IEEE를 기술 소스에서 제외해줘(AI 크롤러를 막는 사이트는 접근하지 않는 원칙)")  
+**등급**: T3(신뢰 목록 변경, 공개 글 비공개 전환) — 운영자가 2026-10-26 채팅으로 승인("Ars·IEEE를 기술 소스에서 제외해줘(AI 크롤러를 막는 사이트는 접근하지 않는 원칙)", 이어서 "Ars·IEEE 출처로 공개된 글 3편(2026-10-19 Ars 1편, 2026-10-25 IEEE 1쌍)을 비공개로 전환해줘(삭제는 하지 말고)")  
 **목적**: robots.txt가 AI 크롤러를 막는 두 사이트를 더 읽지 않는다. 같은 원칙을 남은 소스에 적용해 점검한다.
 
 ### 한 일
 - `generator.py`: `NEWS_SOURCES`에서 Ars Technica·IEEE Spectrum 삭제, 기술 신뢰 목록에서 `arstechnica.com`·`ieee.org` 삭제, `TERMS_BLOCKED_DOMAINS`에 두 도메인 추가(신뢰 목록에 다시 들어와도 거부하고, 피드 호스트면 수집 루프가 읽지 않음). 기술 분야에는 전자신문만 남는다.
 - `tests/test_generator_slots.py`: 소스 표·유예 목록(전자신문만)·차단 목록 정확 일치, 두 도메인(하위 도메인 포함)이 어느 분야에서도 신뢰되지 않음, 신뢰 목록에 실수로 다시 넣어도 거부. 변이 4개(`ieee.org`를 기술 신뢰 목록에 되돌림, 두 도메인을 각각 차단 목록에서 뺌, IEEE 소스를 되살림)가 모두 시험에 잡혔다. 전체 시험 1768개.
 - 문서: ARCHITECTURE(기술 줄·차단 목록 항목)·DEFECT_REGISTER D-61·관측 체크리스트·SESSION_START(§5-2 브랜치 표, §6 14번 갱신과 15번 신설)·REQUEST_BRIEFING·HANDLER 0절·`인수인계/작업내용.md`.
+- **비공개 전환 완료**(사용자 승인 2026-10-26 "Ars·IEEE 출처로 공개된 글 3편(2026-10-19 Ars 1편, 2026-10-25 IEEE 1쌍)을 비공개로 전환해줘(삭제는 하지 말고)"): 3개 글(`_posts/2026-10-19-AI.md`, `_posts/기술·미래/2026-10-25-KR-101307.md`, `_posts/Technology & Future/2026-10-25-EN-101307.md`)의 front matter에 `published: false` 한 줄씩(삭제 없음, PR #29의 4개 글과 같은 방식, 되돌리려면 그 줄만 지운다). `tests/test_verify_pages_select.py`의 공개 사이트 사본 표에서 이 3개를 `PUBLIC_SNAPSHOT`에서 `PUBLIC_MISSING`으로 옮겼다(공개 글 13개 → 10개). 글 하나를 다시 공개로 돌리면 `test_exactly_the_posts_missing_from_the_public_site_are_unpublished`가 실패함을 확인했다.
 
 ### 같은 원칙으로 남은 소스 점검 (2026-10-26, robots.txt를 직접 읽음, 읽기 전용)
 | 소스 | robots.txt | AI 크롤러 |
@@ -29,7 +30,7 @@
 | UN News | 일반 봇에 `*/news/` 경로(이 피드 경로 포함)를 허용하지 않고 `Feedfetcher-Google`만 `/feed/subscribe/` 허용 | AI 크롤러 이름은 없음 — 이미 보류(`pending`, D-63) |
 
 ### 남긴 것
-- 이미 공개된 글 3편(2026-10-19 Ars Technica 1편, 2026-10-25 IEEE Spectrum 1쌍)은 공개 콘텐츠라 승인 없이 바꾸지 않았다 → `docs/SESSION_START.md` §6 15번(비공개 전환 시 공개 글 13개 → 10개).
+- 공개 사이트 반영 확인(배포 뒤 글 3편의 주소가 열리지 않고 `posts.json`·`feed.xml`에서 빠졌는지)은 병합 뒤에 한다.
 - 기술 분야 글감이 전자신문 하나라 글감이 없는 날이 늘 수 있고 모든 분야가 비면 실행이 빨강(`ALL_LANES_EMPTY`)이 된다 → 같은 §6 14번.
 - 이 변경은 PR #30(후속 보완) 위에 쌓았다. #30이 병합된 뒤 main을 합쳐 PR을 올린다.
 
