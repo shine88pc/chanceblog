@@ -7,6 +7,23 @@
 
 ---
 
+## [2026-10-26] Claude – 18시 슬롯 관측과 #42·#43 병합 기록 (문서 전용, 코드·광고 표면 변경 없음)
+
+**작업자**: Claude
+**대상**: Chance_Blog·Blogger·공통 (문서)
+**등급**: T1(문서)
+**목적**: 18시 슬롯 정기 실행(#74) 관측 결과와 PR #42(layout 보장)·#43(가드레일 보강)의 병합을 현황 문서에 반영하고, 새 결과 코드 `TOPIC_BLOCKED`를 Actions 가이드에 적는다.
+
+### 한 일
+- `인수인계/작업내용.md`: 헤더·§1·§2(18시 관측 결과, 2차 보강 행)·§3(3번 상태, 22번 `mode: draft` 켜기 승인 예정)·§5·§6, `HANDLER.md`·`docs/ACTIONS_GUIDE.md`(6-1 표 `TOPIC_BLOCKED`, 수동 `topic` 설명, "영문 프로필이 아직 없다" 문장 정리)·`.github/editorial/BLOGGER_API_SETUP.md`·`docs/REQUEST_BRIEFING.md`·`docs/SESSION_START.md`(PR 번호 사전 #41~#43).
+- 18시 슬롯(#74, 18:22 KST): 문화·미디어(Pew)에서 멈춰 새 소스는 읽히지 않음(예측대로), 글 1쌍 발행·공개 확인, Gemini 첫 호출 283초 붙잡힘(D-66).
+
+### 남긴 것
+- 새 소스(집행위원회·통계청·GOV.UK)의 첫 실제 관측: 이후 슬롯 로그의 `소스 …` 줄·글 끝 인용·고지문. 같은 실행에서 글 front matter 첫 줄의 `layout: post`.
+- 2차 보강(D-64 ⑦) 병합 뒤 `mode: draft` 켜기 승인 요청(§3 22번).
+
+---
+
 ## [2026-10-26] Claude – 생성 글 front matter 에 layout: post 보장과 실제 글 사본 시험 보강 (D-65, 시험 복구)
 
 **작업자**: Claude
