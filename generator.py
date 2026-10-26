@@ -792,26 +792,27 @@ _STATCAN_LIFE = (
     r"health|mental|well-?being|quality of life|sleep|physical activity|nutrition|obesity|chronic|life expectancy|mortality"
     r"|time use|loneliness|social connection|leisure|\bbirths?\b|fertility|baby names|\bdeaths?\b|marriage|divorce")
 
-# 영국 정부(GOV.UK): "GOV.UK 의 대부분의 내용은 왕실 저작권 아래 Open Government Licence(OGL)로 공개된다"(이용약관 https://www.gov.uk/help/terms-conditions, 2024-09-03판).
+# 영국 정부(GOV.UK): "GOV.UK 의 대부분의 내용은 왕실 저작권 아래 Open Government Licence(OGL)로 공개된다"(이용약관 https://www.gov.uk/help/terms-conditions, 2024-09-03판 —
+# 약관은 버전을 적지 않고, v3.0 이라는 근거는 모든 페이지 바닥글이다. 바닥글은 "달리 표시한 경우는 제외"라고 해서 개별 항목의 별도 표시는 코드가 가려내지 못한다).
 # OGL v3.0(https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)은 복제·재가공·상업 이용을 허용하고, 조건은 출처 표시 —
-# 정보 제공자가 정한 문구가 없으면 "Contains public sector information licensed under the Open Government Licence v3.0." — 와 제공자가 이 이용을 보증하는 것처럼
-# 보이게 하지 않는 것이다. 개인정보·제3자 권리·로고·왕실 문장은 이 허락의 대상이 아니다. 이용약관에 AI·텍스트 마이닝 조항은 없고, GOV.UK robots.txt 는 AI 크롤러로
+# 정보 제공자가 정한 문구가 없으면 "Contains public sector information licensed under the Open Government Licence v3.0." — 와 제공자가 이 이용을 보증하거나
+# 공식 지위가 있는 것처럼 보이게 하지 않는 것(Non-endorsement)이다. 개인정보·제3자 권리·로고·왕실 문장은 이 허락의 대상이 아니다. 이용약관에 AI·텍스트 마이닝 조항은 없고, GOV.UK robots.txt 는 AI 크롤러로
 # meta-externalagent 를 `/search/all*` 에만 막는다(우리가 읽는 `/search/news-and-communications.atom` 경로가 아니다). 운영자가 이 소스를 쓰기로 결정했다
 # (2026-10-26 채팅 "AI 학습을 위한 목적이 아니기에 문제가 없을것으로 보여져"). 피드는 20건이 한도이고 항목 날짜(updated)는 마지막 수정 시각이라 고친 글이 새 글처럼 보일 수 있다 —
 # 같은 글을 두 번 쓰지 않는 것은 이력·제목 유사도 검사가 맡는다.
 # 피드 요약이 한두 문장이고 기사 페이지의 메타 설명이 그 요약과 같아서(docs/analysis/2026-10-26_overseas-sources.md) 페이지를 따로 읽지 않는다(no_page_fetch): 100자 미만 요약은 SHORT_SUMMARY 로 떨어진다.
 _OGL_URL = "https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/"
 _GOVUK_TERMS = {"status": "allowed", "checked": "2026-10-26", "url": "https://www.gov.uk/help/terms-conditions"}
-_GOVUK_CITATION = ("“{title}.” GOV.UK, {date} <{url}>. Contains public sector information licensed under the Open Government Licence v3.0 (" + _OGL_URL + ").")
+_GOVUK_CITATION = ("“{title}.” GOV.UK, {date} <{url}>. Contains public sector information licensed under the Open Government Licence v3.0. (" + _OGL_URL + ")")
 _GOVUK_NOTICE = {
     "ko": "이 글은 AI 도구가 영국 정부(GOV.UK)가 공개한 자료를 요약·재구성해 작성했으며 원문에서 바뀐 부분이 있습니다. "
           "원문은 Open Government Licence v3.0으로 제공됩니다(Contains public sector information licensed under the Open Government Licence v3.0.). "
-          "영국 정부와 해당 부처는 이 글을 검토하거나 보증하지 않았습니다.",
+          "영국 정부와 해당 부처는 이 글을 검토하거나 보증하지 않았으며, 이 글은 영국 정부의 공식 입장이나 공식 문서가 아닙니다.",
     "en": "This article was written with an AI tool by summarising and restructuring material published on GOV.UK; changes were made to the original. "
-          "Contains public sector information licensed under the Open Government Licence v3.0 (" + _OGL_URL + "). "
-          "The UK Government and the departments concerned have not reviewed or endorsed this article."}
+          "Contains public sector information licensed under the Open Government Licence v3.0. (" + _OGL_URL + ") "
+          "The UK Government and the departments concerned have not reviewed or endorsed this article, and it is not an official government publication or position."}
 _GOVUK_PROMPT_RULE = ("영국 정부(부처)가 발표한 내용임을 분명히 하고, 정부의 계획·주장과 확인된 사실을 구분하세요. 요약에 없는 금액·시행 시기·법적 효력은 쓰지 마세요. "
-                      "정당·선거·장관 개인에 대한 평가는 쓰지 말고, 영국 정부나 해당 부처가 이 글을 검토하거나 보증한 것처럼 쓰지 마세요. " + HEALTH_RULE)
+                      "정당·선거·장관 개인에 대한 평가는 쓰지 말고, 영국 정부나 해당 부처가 이 글을 검토·보증했거나 정부의 공식 입장·문서인 것처럼 쓰지 마세요. " + HEALTH_RULE)
 _GOVUK_FEED = "https://www.gov.uk/search/news-and-communications.atom?"
 _GOVUK_ENV_FEED = (_GOVUK_FEED + "organisations%5B%5D=department-for-energy-security-and-net-zero"
                    "&organisations%5B%5D=department-for-environment-food-rural-affairs")

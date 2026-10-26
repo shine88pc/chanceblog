@@ -2094,16 +2094,19 @@ class SourceRuleSamplesTest(unittest.TestCase):
                 self.assertEqual(
                     g._citation_line(src["citation"], sample),
                     "“Jackdaw gas field gets green light.” GOV.UK, October 23, 2026 <https://www.gov.uk/government/news/jackdaw-gas-field-gets-green-light>. "
-                    "Contains public sector information licensed under the Open Government Licence v3.0 (" + ogl + ").")
+                    "Contains public sector information licensed under the Open Government Licence v3.0. (" + ogl + ")")
                 self.assertIn("Open Government Licence v3.0", src["notice"]["ko"])
                 self.assertIn("바뀐 부분", src["notice"]["ko"])
                 self.assertIn("보증하지 않았", src["notice"]["ko"])
-                self.assertIn("Contains public sector information licensed under the Open Government Licence v3.0", src["notice"]["en"])
+                self.assertIn("공식 입장이나 공식 문서가 아닙니다", src["notice"]["ko"])      # OGL Non-endorsement: 공식 지위를 암시하지 말 것
+                self.assertIn("is not an official government publication or position", src["notice"]["en"])
+                self.assertIn("Contains public sector information licensed under the Open Government Licence v3.0.", src["notice"]["en"])
                 self.assertIn(ogl, src["notice"]["en"])
                 self.assertIn("changes were made", src["notice"]["en"])
                 self.assertIn("have not reviewed or endorsed", src["notice"]["en"])
                 self.assertIn("진단·치료·복용·예방 효과를 조언하지 마세요", src["prompt_rule"])
                 self.assertIn("정당·선거·장관 개인에 대한 평가", src["prompt_rule"])
+                self.assertIn("공식 입장·문서인 것처럼 쓰지 마세요", src["prompt_rule"])
                 self.assertIs(src.get("no_page_fetch"), True)   # 기사 페이지의 메타 설명이 피드 요약과 같아 읽어도 소용없다
                 self.assertEqual(src.get("exclude_link"), g._GOVUK_EXCLUDE_LINK)
 
