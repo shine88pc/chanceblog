@@ -25,7 +25,7 @@
 | 구성 | Chance_Blog (`chance`) | Blogger (`blogger_macat`) |
 |------|------------------------|---------------------------|
 | 엔진 | `generator.py` — 레거시 단일 파일. Phase 3에서 `pipeline/`으로 이관 | `python -m pipeline.run --blog blogger_macat` (`blogger_generator.py`는 호환 래퍼) |
-| 트리거 | `chanceblog.yml` 매시 17분(KST 9·18시 슬롯을 코드가 판단), 수동 (이슈 요청은 `issue-edit.yml`이, 기존 글 이미지 교체는 수동 전용 `chance-fix-images.yml`이 따로 처리) | `blogger.yml` 매일 02:00 UTC(KST 11시), 수동 |
+| 트리거 | `chanceblog.yml` 매시 17분·47분(KST 9·18시 슬롯을 코드가 판단), 수동 (이슈 요청은 `issue-edit.yml`이, 기존 글 이미지 교체는 수동 전용 `chance-fix-images.yml`이 따로 처리) | `blogger.yml` 매일 02:00 UTC(KST 11시), 수동 |
 | 주제 | 약관을 읽은 직접 RSS(NASA·Pew·Federal Reserve 등, UN News는 보류), 신뢰 도메인 허용 목록, 36시간 이내, 출처 원문 검증 | 프로필 시드 32개 + LLM 확장, 쿨다운 60일, 금지 주제 필터, Chance 이력과 교차 중복 방지 |
 | 생성 | Gemini 모델 폴백, KR/EN 쌍, 편집 템플릿 | Gemini 모델 폴백 + 일시 오류 재시도, 형식 엄격 파싱 |
 | 게이트 | `validate_post_data`(길이·인라인 출처), 제목 유사도 | `pipeline/gates.py`(파싱·HTML 정화·정책·중복), 탈락 사유를 넣어 최대 3회 재작성 |
@@ -78,10 +78,10 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 자동인지 수동인지,
 | `name`, `role`, `url`, `languages` | 표시·문서용. `url`은 `https://` |
 | `platform` | `jekyll-git` · `blogger` (새 플랫폼은 §7.B) |
 | `mode` | `off` 중지 · `draft` 초안만 · `auto` 자동 게시. **`auto` 전환은 T3** |
-| `workflow`, `entrypoint`, `prompt` | 저장소에 존재하는 파일. `workflow`의 cron이 `schedule.cron`과 같아야 한다(검증기 REG-2) |
+| `workflow`, `entrypoint`, `prompt` | 저장소에 존재하는 파일. `workflow`의 cron 목록에 `schedule.cron`이 들어 있어야 한다(검증기 REG-2, Chance는 17분·47분 두 틱이고 레지스트리에는 17분이 대표값) |
 | `profile` | `pipeline/profiles/<이름>.json`. `blogger` 플랫폼은 필수 |
 | `state.history`, `state.content_dir` | 이력 파일, 산출물 폴더(저장소 상대 경로, `..` 금지) |
-| `schedule.cron` | 워크플로 cron과 동일. `slots_kst`는 참고 |
+| `schedule.cron` | 워크플로 cron 목록 중 하나(대표값). `slots_kst`는 참고 |
 | `limits.max_posts_per_day` | 1~24. 하루 상한(KST 날짜 기준). 수동 `--topic`은 우회 |
 | `llm.models`, `llm.max_retries` | 모델 폴백 순서, 일시 오류 재시도 횟수 |
 | `secrets` | `{역할: 환경변수(=Secrets) 이름}`. **값은 절대 쓰지 않는다.** 플랫폼별 필수 역할은 `registry.PLATFORMS` |

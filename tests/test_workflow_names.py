@@ -418,7 +418,8 @@ class ChanceSplitTest(unittest.TestCase):
         self.assertNotIn("fix_images", text)
 
     def test_chanceblog_keeps_its_schedule_and_posting_flow(self):
-        self.assertEqual(self.chance["on"]["schedule"], [{"cron": "17 * * * *"}])
+        # 2026-10-26 운영자 승인(D-59): 매시 17분에 47분 틱을 더했다(게시는 슬롯 규칙이 하루 2편으로 지킨다)
+        self.assertEqual(self.chance["on"]["schedule"], [{"cron": "17 * * * *"}, {"cron": "47 * * * *"}])
         gen = next(s for s in self.steps(self.chance) if s.get("run") == "python generator.py")
         self.assertEqual(gen["env"]["EVENT_NAME"], "${{ github.event_name }}")
         self.assertIn("inputs.dry_run", gen["env"]["DRY_RUN"])
