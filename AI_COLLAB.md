@@ -45,7 +45,7 @@
   (예: 수면, 운동, 스트레스, 일상 습관, 간단한 과학 설명, 생활 속 기술 등도 포함 가능)
 - **톤**: 쉽게 읽고 바로 적용할 수 있는 실용 정보 위주. 과도한 전문 용어나 긴 분석보다 명확한 설명과 팁 중심.
 - **자동화 목표**: Chance_Blog 자동화의 연장선으로, 공통 주제에서 실용 버전을 분기 생성·게시
-- **언어·프로필(2026-10-26)**: 영문 블로그다. 프롬프트는 `.github/editorial/BLOGGER_PROMPT_EN.md`, 프로필은 `pipeline/profiles/blogger_practical_en.json`. 주제는 가벼운 생활 습관으로 좁혔다(운영자 승인 "위험하지 않은 선에서 변경"): 질병·치료·약·보충제·진단·임신·영유아·체중 감량은 주제·제목·라벨·본문에서 게이트가 막는다(`docs/ARCHITECTURE.md` §7-1). 다이어트·간 건강·비타민(단독) 같은 경계 낱말은 게이트에 아직 없고 프롬프트 규칙으로만 막는다(독립 검증 2026-10-26 확인, 후속 강화는 `docs/DEFECT_REGISTER.md` D-64 ⑥). 한국어 `BLOGGER_PROMPT.md`·`blogger_practical_ko`는 새 한글 Blogger용으로 남겨 둔다
+- **언어·프로필(2026-10-26)**: 영문 블로그다. 프롬프트는 `.github/editorial/BLOGGER_PROMPT_EN.md`, 프로필은 `pipeline/profiles/blogger_practical_en.json`. 주제는 가벼운 생활 습관으로 좁혔다(운영자 승인 "위험하지 않은 선에서 변경"): 질병·치료·약·보충제·진단·임신·영유아·체중 감량·다이어트·간 건강은 주제·제목·라벨·본문에서 게이트가 막는다(`docs/ARCHITECTURE.md` §7-1). 비타민(단독)·통증·알레르기·아이 같은 일상 표현과 겹치는 낱말은 게이트에 넣지 않고 프롬프트 규칙으로만 막는다(열린 운영자 결정, `docs/DEFECT_REGISTER.md` D-64 ④). 한국어 `BLOGGER_PROMPT.md`·`blogger_practical_ko`는 새 한글 Blogger용으로 남겨 둔다
 
 ---
 

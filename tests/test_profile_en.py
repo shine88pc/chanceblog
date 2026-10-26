@@ -202,7 +202,7 @@ class EnglishProfileTest(unittest.TestCase):
 
     def test_prompt_extra_is_english_and_repeats_the_safety_rules(self):
         joined = " ".join(EN["prompt_extra"]).lower()
-        for fragment in ("never claim", "medications", "supplements", "pregnancy", "infants", "weight loss", "never invent",
+        for fragment in ("never claim", "medications", "supplements", "pregnancy", "infants", "weight loss", "dieting", "liver health", "never invent",
                          "personal experiences", "only the title, labels and content"):
             self.assertIn(fragment, joined)
         self.assertFalse(re.search(r"[가-힣]", joined))
@@ -235,7 +235,7 @@ class EnglishPromptTest(unittest.TestCase):
     def test_template_keeps_the_same_safety_rules_as_the_korean_prompt(self):
         lower = self.template.lower()
         for fragment in ("do not claim any health outcome", "may help", "diseases, treatments, medications, supplements, dosages, diagnoses, "
-                         "health measurements such as blood pressure or blood sugar, pregnancy, infants or weight loss",
+                         "health measurements such as blood pressure or blood sugar, pregnancy, infants, weight loss, dieting or liver health",
                          "never invent personal experiences", "do not add disclaimers",
                          "<h3>", "<ul>", "checklist", "600-900 words", "no markdown"):
             self.assertIn(fragment, lower)
@@ -459,14 +459,14 @@ class EnglishFlowTest(unittest.TestCase):
         self.assertIn("[LANG]", json.dumps(entry["reasons"], ensure_ascii=False))
         self.assertEqual(self.drafts(), [])
 
-    def test_a_manual_topic_with_a_banned_word_is_stopped_at_the_generated_title(self):
-        """run.py 는 수동 topic(override)에 주제 후보 검사를 하지 않는다. 그래도 그 주제가 제목에 오르면 제목 가드레일이 막는다."""
-        code, out = self.go(env=NO_PUBLISH, extra=["--topic", "Fast weight loss tips for busy people"])
-        self.assertEqual(code, 0)
-        entry = self.history()[-1]
-        self.assertEqual(entry["status"], "rejected")
-        self.assertIn("TITLE_TOPIC", json.dumps(entry["reasons"]))
-        self.assertEqual(self.drafts(), [])
+    def test_a_manual_topic_with_a_banned_word_stops_before_any_llm_call(self):
+        """수동 topic(override)도 금지 주제 목록을 통과해야 한다(D-64 ⑥ c): 걸리면 Gemini 를 부르기 전에 종료 2(TOPIC_BLOCKED), 이력·초안 없음.
+        (예전에는 이 검사가 없어 제목 가드레일이 뒤늦게 3번 탈락시켰다.) 제목·본문 가드레일은 그 뒤의 두 번째 방어선으로 남는다."""
+        llm = self.scripted(lambda p: self.stub_with(p))
+        code, out = self.go(env=NO_PUBLISH, extra=["--topic", "Fast weight loss tips for busy people"], llm=llm)
+        self.assertEqual(code, 2, out)
+        self.assertIn("[SKIP] code=TOPIC_BLOCKED", out)
+        self.assertEqual((llm.prompts, self.history(), self.drafts()), ([], [], []))
 
     def test_a_manual_safe_topic_runs_normally(self):
         code, _ = self.go(env=NO_PUBLISH, extra=["--topic", "A calm ten-minute walk after dinner"])

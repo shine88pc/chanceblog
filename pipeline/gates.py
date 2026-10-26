@@ -287,34 +287,62 @@ def topic_allowed(topic, profile):
 # 주제 가드레일(docs/SECURITY_GUARDRAILS.md G-C4). 같은 위험 영역(질병·치료·약·보충제·진단·임신·영유아·체중 감량)을 세 곳에서 막는다.
 #   (a) 주제 후보(시드·LLM 확장)  — topic_allowed(): banned_topic_patterns
 #   (b) 생성된 제목·라벨          — check_post(): 같은 banned_topic_patterns 를 예외 없이(엄격하게) 적용 → TITLE_TOPIC · LABELS
-#   (c) 생성된 본문               — body_risk_hit(): body_banned_patterns, 전문가 상담·면책 문장은 body_safe_patterns 로 건너뛴다 → BODY_TOPIC
+#   (c) 생성된 본문               — body_risk_hit(): body_banned_patterns, 전문가 상담·면책 절은 body_safe_patterns 로 건너뛴다 → BODY_TOPIC
 # 제목·라벨은 짧고 우리가 정하는 자리라 '그 낱말이 있으면 탈락'으로 엄격하게 한다. 본문은 길고, '진단이나 치료를 대신하지 않습니다'
 # 같은 안전한 면책·상담 안내 문장에도 위험 낱말이 정상적으로 들어가므로(검사는 append_disclosure 가 붙이기 전이지만 모델이 같은 문장을 쓸 수 있다)
 # 낱말 목록을 '단정·조언 문맥'에만 건다: ① 일상어와 겹치는 낱말(treat·heal·remedy 같은 것)은 본문 목록에서 빼거나 의료 문맥으로 좁히고,
-# ② 전문가 상담 안내·'의학적 조언이 아님' 문장은 문장 단위로 건너뛴다. 효능 단정(완치·기적·부작용 없음 등)은 이 예외 없이
+# ② 전문가 상담 안내·'의학적 조언이 아님' 구절은 건너뛴다. 효능 단정(완치·기적·부작용 없음 등)은 이 예외 없이
 # banned_patterns 가 제목·본문 전체에 따로 건다. 오탐으로 모든 글이 탈락하면(재시도 3회 → ALL_REJECTED) 하루 발행을 잃으므로 이 구분이 필요하다.
+#
+# 면제는 '문장'이 아니라 '절' 단위다. "마그네슘 보충제가 잠에 도움이 될 수 있지만 먼저 의사와 상담하세요"처럼 위험한 권유 뒤에 상담 구절을 붙인
+# 문장이 통째로 면제되면 안 되기 때문이다(D-64 ⑥ a). 문장을 문장부호(; : — -- 띄어 쓴 하이픈)와 프로필의 body_clause_split_patterns(영어 ', but'·', so'·
+# '지만' 같은 접속어)에서 절로 더 쪼개고, 상담 구절이 없는 절은 따로 검사한다. 또 body_safe_veto_patterns(용량 같은 것)에 맞는 절은 상담 구절이
+# 있어도 면제하지 않는다. 상담 구절이 접속어 없이 한 절 안에 들어 있는 경우("…를 챙기세요, 의사와 상담한 뒤에")는 여전히 면제된다 — 알려진 한계다.
 # ----------------------------------------------------------------------------
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?。！？])\s+|\n+")
+# 모든 언어에 공통인 절 경계: ; : — ― 줄표(--)와 양쪽에 공백이 있는 하이픈(엔 대시는 비교 전에 하이픈으로 바뀐다). 낱말 안의 하이픈(high-dose)은 가르지 않는다
+_CLAUSE_PUNCTUATION = r"\s*[;:—―]\s*|\s*-{2,}\s*|\s+-\s+"
+
+
+def _clause_splitter(profile):
+    parts = [_CLAUSE_PUNCTUATION] + [p for p in (profile.get("body_clause_split_patterns") or []) if isinstance(p, str)]
+    return re.compile("|".join(f"(?:{p})" for p in parts), re.IGNORECASE)
+
+
+def _split_clauses(sentence, splitter):
+    """문장을 절 경계에서 자른다. re.split 은 패턴 안의 묶음 괄호 내용까지 조각으로 돌려주므로 경계 위치만 써서 직접 자른다."""
+    pieces, start = [], 0
+    for boundary in splitter.finditer(sentence):
+        if boundary.end() > boundary.start():  # 길이 0 경계는 무시(레지스트리가 빈 일치 패턴을 막지만 방어한다)
+            pieces.append(sentence[start:boundary.start()])
+            start = boundary.end()
+    pieces.append(sentence[start:])
+    return pieces
 
 
 def body_risk_hit(text, profile):
     """본문(정화된 글의 텍스트)에서 위험 표현을 찾는다 → (패턴, 맞은 낱말) 또는 (None, None).
 
-    body_banned_patterns 가 없으면 검사하지 않는다. 문장 단위로 보고, body_safe_patterns 에 하나라도 맞는 문장
-    (전문가 상담 안내·'의학적 조언이 아님' 면책)은 위험 낱말이 있어도 건너뛴다.
+    body_banned_patterns 가 없으면 검사하지 않는다. 문장을 절로 나눠 절마다 보고, body_safe_patterns 에 맞는 절
+    (전문가 상담 안내·'의학적 조언이 아님' 면책)은 위험 낱말이 있어도 건너뛴다. 다만 body_safe_veto_patterns 에도 맞는 절은 건너뛰지 않는다.
     """
     patterns = profile.get("body_banned_patterns")
     if not patterns:
         return None, None
     banned = list(zip(patterns, _compiled(patterns)))
     safe = _compiled(profile.get("body_safe_patterns"))
+    veto = _compiled(profile.get("body_safe_veto_patterns"))
+    splitter = _clause_splitter(profile)
     for sentence in _SENTENCE_SPLIT.split(_normalized(text)):
-        if not sentence.strip() or any(rx.search(sentence) for rx in safe):
-            continue
-        for raw, rx in banned:
-            found = rx.search(sentence)
-            if found:
-                return raw, found.group(0) or raw
+        for clause in _split_clauses(sentence, splitter):
+            if not clause.strip():
+                continue
+            if any(rx.search(clause) for rx in safe) and not any(rx.search(clause) for rx in veto):
+                continue
+            for raw, rx in banned:
+                found = rx.search(clause)
+                if found:
+                    return raw, found.group(0) or raw
     return None, None
 
 

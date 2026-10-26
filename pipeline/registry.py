@@ -43,8 +43,10 @@ _PROFILE_REQUIRED = (
     "disclosure_html", "seed_topics", "topic_cooldown_days",
 )
 # 정규식 목록 필드. body_* 는 선택 항목이다(없으면 본문 주제 가드레일을 쓰지 않는다 — pipeline/gates.py body_risk_hit).
+# body_clause_split_patterns(절 경계)·body_safe_veto_patterns(면제를 취소하는 표현)는 빈 문자열에 맞으면 안 된다: 경계가 빈 문자열에 맞으면
+# 절 나누기가 의미를 잃고, 면제 취소가 빈 문자열에 맞으면 모든 절의 면제가 취소돼 상담 안내 문장이 전부 탈락한다.
 _PATTERN_FIELDS = ("banned_patterns", "title_banned_patterns", "leak_patterns", "banned_topic_patterns",
-                   "body_banned_patterns", "body_safe_patterns")
+                   "body_banned_patterns", "body_safe_patterns", "body_clause_split_patterns", "body_safe_veto_patterns")
 _RATIO_FIELDS = ("min_hangul_ratio", "min_latin_ratio")
 
 

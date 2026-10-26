@@ -685,6 +685,136 @@ class VisibilityTest(RunBase):
         self.assertIn("위조된 명령", lines[1])                              # 사유 내용은 읽을 수 있게 남는다
 
 
+class ManualTopicGuardTest(RunBase):
+    """수동 topic(--topic·BLOGGER_TOPIC)도 시드·LLM 확장 주제와 같은 금지 주제 목록을 통과해야 한다(D-64 ⑥ c, 주제 가드레일 (a)).
+    걸리면 Gemini·Blogger 를 부르기 전에 종료 2(빨강)로 멈춘다. 통과하는 주제는 예전 그대로다."""
+
+    def setUp(self):
+        super().setUp()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.summary_path = Path(tmp.name) / "summary.md"
+
+    def env(self, **extra):
+        return {"GITHUB_STEP_SUMMARY": str(self.summary_path), **extra}
+
+    def summary(self):
+        return self.summary_path.read_text(encoding="utf-8") if self.summary_path.exists() else ""
+
+    @staticmethod
+    def spy():
+        prompts = []
+
+        def llm(prompt):
+            prompts.append(prompt)
+            return stub_llm(prompt)
+        llm.prompts = prompts
+        return llm
+
+    def test_a_blocked_topic_stops_with_exit_2_before_any_llm_call_blogger_call_history_or_draft(self):
+        for label, extra, env in (("--topic", ["--topic", "혈압 낮추는 아침 습관"], {}),
+                                  ("BLOGGER_TOPIC", [], {"BLOGGER_TOPIC": "혈압 낮추는 아침 습관"})):
+            with self.subTest(label):
+                llm, pub = self.spy(), FakePublisher()
+                code, out = self.go(env=self.env(**FULL_ENV, **env), llm=llm, publisher=pub, extra=extra)
+                self.assertEqual(code, 2, out)
+                self.assertIn("[SKIP] code=TOPIC_BLOCKED blog=blogger_macat word=혈압", out)
+                self.assertEqual((llm.prompts, pub.health_calls, pub.published, self.history(), self.drafts()), ([], 0, [], [], []))
+
+    def test_the_reason_is_in_the_log_and_the_summary_but_the_error_annotation_is_a_fixed_sentence(self):
+        code, out = self.go(env=self.env(**NO_PUBLISH), extra=["--topic", "다이어트 식단 짜는 법"])
+        self.assertEqual(code, 2)
+        self.assertIn("'다이어트'", out)                      # 로그 줄에는 걸린 낱말
+        self.assertIn("TOPIC_BLOCKED", self.summary())
+        self.assertIn("'다이어트'", self.summary())           # 요약에도 — 운영자가 어떤 낱말을 고칠지 본다
+        errors = [line for line in out.splitlines() if line.startswith("::error::")]
+        self.assertEqual(len(errors), 1, errors)
+        self.assertTrue(errors[0].startswith("::error::[blogger_macat]"), errors[0])
+        self.assertNotIn("다이어트", errors[0])                # 주석에는 입력에서 온 문자열을 넣지 않는다(고정 문장)
+
+    def test_the_guard_is_the_same_in_a_dry_run_and_does_not_need_secrets(self):
+        llm = self.spy()
+        code, out = self.go(env=self.env(), llm=llm, extra=["--dry-run", "--topic", "체중 감량 식단"])
+        self.assertEqual((code, llm.prompts), (2, []))
+        self.assertIn("[SKIP] code=TOPIC_BLOCKED", out)
+
+    def test_a_blocked_topic_is_reported_even_when_the_daily_cap_is_reached(self):
+        """수동 topic 은 하루 상한을 건너뛰지만 금지 주제는 건너뛰지 못한다. 상한 안내(초록)에 가려지면 안 된다."""
+        (self.root / "blogger_history.json").write_text(
+            json.dumps([{"topic": "오늘 이미 만든 주제", "date": "2026-10-21", "status": "draft"}], ensure_ascii=False), encoding="utf-8")
+        code, out = self.go(env=self.env(**NO_PUBLISH), extra=["--topic", "혈당 관리 식사 순서"])
+        self.assertEqual(code, 2)
+        self.assertIn("[SKIP] code=TOPIC_BLOCKED", out)
+        self.assertNotIn("DAILY_CAP", out)
+
+    def test_the_quotes_around_the_input_do_not_hide_the_word(self):
+        code, out = self.go(env=self.env(**NO_PUBLISH), extra=["--topic", '  "치매 예방 생활 습관"  '])
+        self.assertEqual(code, 2, out)
+
+    def test_a_safe_topic_runs_exactly_as_before(self):
+        topic = "수동으로 지정한 오늘의 생활 습관 주제"
+        for label, extra, env in (("--topic", ["--topic", topic], {}), ("BLOGGER_TOPIC", [], {"BLOGGER_TOPIC": topic})):
+            with self.subTest(label):
+                root = make_root(tempfile.mkdtemp())
+                self.addCleanup(shutil.rmtree, str(root), True)
+                llm = self.spy()
+                code, out = self.go(env=self.env(**NO_PUBLISH, **env), llm=llm, extra=extra, root=root)
+                self.assertEqual(code, 0, out)
+                self.assertNotIn("TOPIC_BLOCKED", out)
+                self.assertIn(topic, llm.prompts[0])
+                history = json.loads((root / "blogger_history.json").read_text(encoding="utf-8"))
+                self.assertEqual((history[-1]["status"], history[-1]["topic_source"], history[-1]["topic"]), ("draft", "override", topic))
+
+    def test_no_topic_input_means_no_check_and_the_seed_flow_is_unchanged(self):
+        llm = self.spy()
+        code, out = self.go(env=self.env(**NO_PUBLISH), llm=llm)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(len(llm.prompts), 1)
+        self.assertEqual(self.history()[-1]["topic_source"], "seed")
+
+    def test_a_blocked_topic_is_reported_before_the_history_file_is_read(self):
+        """입력 오류는 상태 파일을 읽기 전에 알린다(깨진 이력에 가려 종료 1 로 끝나지 않게). 이력은 덮어쓰지 않는다."""
+        (self.root / "blogger_history.json").write_text("{not json", encoding="utf-8")
+        code, out = self.go(env=self.env(**NO_PUBLISH), extra=["--topic", "혈압 낮추는 아침 습관"])
+        self.assertEqual(code, 2, out)
+        self.assertIn("[SKIP] code=TOPIC_BLOCKED", out)
+        self.assertEqual((self.root / "blogger_history.json").read_text(encoding="utf-8"), "{not json")
+
+    def test_the_matched_word_is_one_token_in_the_skip_line_and_a_long_word_is_cut_in_the_log_and_the_summary(self):
+        code, out = self.go(env=self.env(**NO_PUBLISH), extra=["--topic", "간 건강 챙기기 습관"])
+        self.assertEqual(code, 2, out)
+        self.assertIn("word=간_건강", out)                      # 낱말 안의 공백은 key=value 한 덩어리로 유지한다
+        root = make_root(tempfile.mkdtemp(), lang="en")
+        self.addCleanup(shutil.rmtree, str(root), True)
+        code, out = self.go(env=self.env(**NO_PUBLISH), extra=["--topic", "Acupunctur" + "x" * 100], root=root)  # \bacupunctur\w* 는 끝없이 이어진다
+        self.assertEqual(code, 2, out)
+        line = next(line for line in out.splitlines() if line.startswith("[SKIP] code=TOPIC_BLOCKED"))
+        word = line.split("word=", 1)[1]
+        self.assertLessEqual(len(word), 40)
+        self.assertTrue(word.endswith("…"), word)
+        self.assertIn("…", self.summary())
+        self.assertNotIn("x" * 60, self.summary())
+
+    def test_the_architecture_doc_lists_the_skip_code_as_a_config_error_with_exit_code_2(self):
+        """코드표가 문서에 있다(ARCHITECTURE §4-1): 코드 이름이 '설정 오류·종료 2' 행에 있고 처리 순서에도 나온다. 문서가 코드와 어긋나면 실패한다."""
+        text = (REAL / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
+        section = text[text.index("## 4-1."):text.index("## 4-2.")]
+        rows = [line for line in section.splitlines() if line.lstrip().startswith("|") and "`TOPIC_BLOCKED`" in line]
+        self.assertTrue(rows, "TOPIC_BLOCKED 행이 §4-1 표에 없습니다")
+        self.assertTrue(any(line.startswith("| 설정 오류 |") and re.search(r"\|\s*\*\*2\*\*\s*\|", line) for line in rows), rows)
+        self.assertIn("수동 `topic` 금지 주제 검사", section)
+
+    def test_the_topic_check_uses_the_topic_guard_list_of_the_blogs_own_profile(self):
+        """영문 프로필 블로그에서는 영어 목록이 쓰인다(한국어 낱말은 걸리지 않고 영어 낱말은 걸린다)."""
+        root = make_root(tempfile.mkdtemp(), lang="en")
+        self.addCleanup(shutil.rmtree, str(root), True)
+        code, out = self.go(env=self.env(**NO_PUBLISH), extra=["--topic", "Blood-pressure friendly evening habits"], root=root)
+        self.assertEqual(code, 2, out)
+        self.assertIn("word=Blood-pressure", out)
+        code, out = self.go(env=self.env(**NO_PUBLISH), extra=["--topic", "A calm ten-minute walk after dinner"], root=root)
+        self.assertEqual(code, 0, out)
+
+
 class PolicyTest(unittest.TestCase):
     def test_publish_policy_values(self):
         for cli, env, expected in ((None, {}, "auto"), (None, {"BLOGGER_PUBLISH": "1"}, "on"),

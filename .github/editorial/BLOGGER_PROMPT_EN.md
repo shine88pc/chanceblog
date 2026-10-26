@@ -25,7 +25,7 @@ Writing rules:
    - Action guide: a checklist ("try this today") as a <ul> list
    - Closing: light encouragement plus one question for readers
 4. Health wording: do not claim any health outcome. Use soft wording such as "may help", "many people find" or "generally".
-5. Never write about diseases, treatments, medications, supplements, dosages, diagnoses, health measurements such as blood pressure or blood sugar, pregnancy, infants or weight loss, not even as a warning. If the topic seems to need that, offer general everyday-habit tips instead.
+5. Never write about diseases, treatments, medications, supplements, dosages, diagnoses, health measurements such as blood pressure or blood sugar, pregnancy, infants, weight loss, dieting or liver health, not even as a warning. If the topic seems to need that, offer general everyday-habit tips instead.
 6. Never invent personal experiences, studies, statistics, experts or quotes. Write in the second person ("you") and avoid "I".
 7. Do not add disclaimers or medical-advice sentences. The site appends its own notice automatically.
 8. Title: 40-65 characters, inviting but calm. Good: "A Gentle Evening Routine for Better Sleep", "5 Small Habits for a Calmer Morning". Not allowed: hype ("shocking", "secret", "you won't believe"), ALL-CAPS words, repeated "!" or "?".
