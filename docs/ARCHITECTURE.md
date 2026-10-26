@@ -26,7 +26,7 @@
 |------|------------------------|---------------------------|
 | 엔진 | `generator.py` — 레거시 단일 파일. Phase 3에서 `pipeline/`으로 이관 | `python -m pipeline.run --blog blogger_macat` (`blogger_generator.py`는 호환 래퍼) |
 | 트리거 | `chanceblog.yml` 매시 17분·47분(KST 9·18시 슬롯을 코드가 판단), 수동 (이슈 요청은 `issue-edit.yml`이, 기존 글 이미지 교체는 수동 전용 `chance-fix-images.yml`이 따로 처리) | `blogger.yml` 매일 02:00 UTC(KST 11시), 수동 |
-| 주제 | 약관을 읽은 직접 RSS(NASA·Pew·Federal Reserve 등, UN News는 보류), 신뢰 도메인 허용 목록, 36시간 이내, 출처 원문 검증 | 프로필 시드 32개 + LLM 확장, 쿨다운 60일, 금지 주제 필터, Chance 이력과 교차 중복 방지 |
+| 주제 | 약관을 읽은 직접 RSS(NASA·Pew·Federal Reserve·EU 집행위원회 계열·캐나다 통계청 등, UN News는 보류), 신뢰 도메인 허용 목록, 72시간 이내, 출처 원문 검증 | 프로필 시드 32개 + LLM 확장, 쿨다운 60일, 금지 주제 필터, Chance 이력과 교차 중복 방지 |
 | 생성 | Gemini 모델 폴백, KR/EN 쌍, 편집 템플릿 | Gemini 모델 폴백 + 일시 오류 재시도, 형식 엄격 파싱 |
 | 게이트 | `validate_post_data`(길이·인라인 출처), 제목 유사도 | `pipeline/gates.py`(파싱·HTML 정화·정책·중복), 탈락 사유를 넣어 최대 3회 재작성 |
 | 게시 | git 커밋 → Pages 배포(`pages.yml`). 봇 커밋 뒤 `gh workflow run pages.yml`로 배포 실행 | Blogger API 어댑터(멱등 재시도, 인증 실패 구분, 초안함 업로드 `isDraft`, 쓰기 전 인증 점검 — 아래 §4·§4-1) |
@@ -168,7 +168,7 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 자동인지 수동인지,
 | `NOT_TECH` | 기술 키워드가 아님(`tech_filter` 소스만) |
 | `EXCLUDED` | 소스별 제외 규칙(`exclude_title`)에 걸림 — 약관이 빼라고 한 것, 글감이 못 되는 공지·퀴즈 등 |
 | `OFF_TOPIC` | 제목·분류 태그에 이 분야 주제어(`topic_regex`)가 없음 |
-| `AGE` | 36시간 초과 |
+| `AGE` | 72시간 초과(2026-10-26에 36시간에서 늘림 — 주말 공급 공백, D-62) |
 | `UNTRUSTED` | 게시자가 그 분야의 신뢰 목록(`TRUSTED_SOURCE_DOMAINS`)에 없음 |
 | `UNCHECKED` | 소스당 5건 검사 한도를 넘어 검사하지 않음 |
 | `UNRESOLVED` | 기사 원문 주소를 얻지 못했거나 주소 모양이 안전하지 않음(공백·꺾쇠·따옴표·역슬래시·괄호·대괄호가 들었거나 http(s)가 아님). 구글 뉴스 링크 해석(`google` 키 소스)은 지금 쓰는 소스가 없다 |
@@ -178,22 +178,26 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 자동인지 수동인지,
 
 요약 표의 '검증 통과'는 소스당 10건 상한·소스 간 같은 제목 병합·`DUPLICATE` 제거를 하기 **전**의 수이고, '후보'는 그 뒤 최대 3건(`MAX_ATTEMPTS`)이다. 소스마다 '받은 기사 = 검증 통과 + 탈락 사유 합'이 성립하며, '검증 통과'가 있는데 '후보'가 0이면 전부 기존 글과 비슷했다는 뜻이다(`ALL_DUPLICATES`). 요약에는 그 실행에서 나온 코드의 뜻을 한 줄로 붙인다.
 
-**Chance 소스와 약관 점검**(`generator.py`의 `NEWS_SOURCES`·`TRUSTED_SOURCE_DOMAINS`·`TERMS_BLOCKED_DOMAINS`, 2026-10-26 출처 개편): 소스는 분야마다 **약관을 읽고 이 용도(출처를 밝히고 요약해 새 글을 쓰는 것)가 허용된다고 판단한 직접 RSS**만 둔다(기술·미래의 유예 1곳 제외). 구글 뉴스 검색 소스 14개는 링크가 게시자 원문 주소로 풀리지 않아 통과율이 0.4%였기에 뺐다(약관 해석은 법률 판단이 아니다).
+**Chance 소스와 약관 점검**(`generator.py`의 `NEWS_SOURCES`·`TRUSTED_SOURCE_DOMAINS`·`TERMS_BLOCKED_DOMAINS`, 2026-10-26 출처 개편): 소스는 분야마다 **약관을 읽고 이 용도(출처를 밝히고 요약해 새 글을 쓰는 것)가 허용된다고 판단한 직접 RSS**만 둔다. 2026-10-26에 미국 외 해외 소스(EU 집행위원회 계열·캐나다 통계청)를 더하고 전자신문을 뺐다(조사 근거: [`docs/analysis/2026-10-26_overseas-sources.md`](./analysis/2026-10-26_overseas-sources.md)). 구글 뉴스 검색 소스 14개는 링크가 게시자 원문 주소로 풀리지 않아 통과율이 0.4%였기에 뺐다(약관 해석은 법률 판단이 아니다).
 
 | 분야 | 소스(약관 점검 allowed) | 소스별 규칙 |
 |------|------------------------|-------------|
 | 과학·환경 | NASA | APOD·취재진 초대·행사 안내(`exclude_title`)와 사진 설명·Glenn 센터 음향 연구실 소개 쪽(`exclude_link`) 제외(센터 소식 기사는 살린다). NASA의 AI 이용 안내(정보를 NASA에 직접 귀속하지 말 것)에 따라 작성 지침 한 줄(`prompt_rule`)과 글 끝 고지문(`notice`, 정확성 면책 포함) |
+| 과학·환경 | European Commission · Environment, European Commission · JRC | CC BY 4.0(집행위원회 법적 고지: 출처 표시·변경 표시가 조건). **Eurostat 소식(자체 고지가 따로 있음)·Horizon 매거진(기자 이름·바닥글 의무)·Press Corner 보도자료(재사용 조건을 확인하지 못함)는 주소로 뺀다**(`exclude_link`: `/eurostat/`·`/horizon-magazine/`·`/commission/presscorner/`), 연설·성명·선언 제목 제외, 모집·신청 안내는 Environment 만 제외. JRC는 국방·안보 분류 글 제외(`exclude_tags`). 글 끝에 인용 줄(`citation`: 제목·기관·날짜·원문 주소·© European Union·라이선스 링크)과 고지문(AI 작성·바뀐 부분 있음·집행위원회가 검토·보증하지 않음) |
 | 사회·정책 | UN News — **보류(`pending`)** | 유엔에 알리는 일과 robots.txt 확인(D-63)이 끝날 때까지 읽지 않는다(로그에 `소스 UN News: 보류 — …` 한 줄). 풀면 'World News in Brief' 제외, 글 끝 고지문 |
+| 사회·정책 | European Commission(소식), Statistics Canada · society | 집행위원회 소식: 국채 입찰 공지·모집 안내·위원 방문 예고·연설·성명·선거·정치광고·`democracy` 분류 글 제외(Pew와 같은 중립 원칙). 통계청: 교육·인구·범죄·원주민·이민·장애·주거 등 주제어(`topic_regex`)만, 기술 공지·부문 물가지수·자살·약물 과다복용·성폭력·살인·가정·친밀한 관계·성별 기반 폭력·아동 학대 제외. 통계청 약관 문구 `Adapted from Statistics Canada, …`(`citation`)와 고지문, 수치를 그대로 쓰라는 작성 지침(`prompt_rule`) |
 | 문화·미디어 | Pew Research Center | 제목·분류 태그에 미디어·온라인 주제어가 있는 것만(`topic_regex`), 선거·정당·퀴즈·보고서 부속 쪽(`exclude_title`)과 뉴스레터 모음(`exclude_link`)·방법론·선거 분류 글(`exclude_tags`) 제외, 기사 페이지를 읽지 않음(`no_page_fetch`, Pew 약관의 스크래핑 금지), 약관 §2 인용 줄(`citation`)과 번역 면책 문장이 든 고지문 |
-| 경제·일 | Federal Reserve(보도자료) | 제재·인가 승인·이의 없음 통보 건 제외, 글 끝 고지문. 그 건들을 빼면 주 1~2건이라 36시간 규칙에서는 대부분 비어 있다(D-62) |
-| 일상·마음 | 없음 | 약관상 쓸 수 있는 직접 RSS를 아직 못 찾았다(D-62). 이 분야가 뽑히면 후보가 없어 다음 분야로 넘어간다 |
-| 기술·미래 | 전자신문 | 유예(D-61): 약관이 불명확하고 일반 뉴스가 섞여 있어 `tech_filter`로 기술 제목만 쓰며(30건 중 약 12~13건) 지금 기술 분야의 **유일한 공급원**이다. **AI타임스는 모든 기사 하단의 "AI학습 및 활용 금지" 때문에, Ars Technica·IEEE Spectrum은 robots.txt가 AI 크롤러(ClaudeBot 등)를 막기 때문에 운영자 결정(2026-10-26)으로 접근하지 않는다**(`TERMS_BLOCKED_DOMAINS`). 글감이 한 건도 안 되던 TechCrunch·The Verge와 간접 경로 Hacker News도 같은 날 뺐다 |
+| 경제·일 | Federal Reserve(보도자료) | 제재·인가 승인·이의 없음 통보 건 제외, 글 끝 고지문. 그 건들을 빼면 주 1~2건이라 연준만으로는 대부분 비어 있어 아래 소스를 더했다(D-62) |
+| 경제·일 | European Commission · Energy, Statistics Canada · economy | Energy: 평일 거의 매일 나오는 에너지·경제 소식(연설문·성명·위원 방문 예고·모집·의견 수렴 공지·Eurostat 소식·보도자료(Press Corner) 제외; 피드에 섞이는 EIB·ACER 기사는 신뢰 목록에 없어 떨어짐). 통계청: 소비자물가·고용·소매·무역·GDP 같은 대표 발표만(`topic_regex`), 부문 물가지수·공급 처리표·원자료 모음 제외 |
+| 일상·마음 | Statistics Canada · daily life | 건강 보고서·출생·출산·삶의 질 같은 주제어만(`topic_regex`), 자살·약물 과다복용·마약성 진통제·폭력·학대 주제 제외. 의학 조언 없는 통계 해설만 쓴다(원문 수치를 그대로) |
+| 기술·미래 | EU Digital Strategy(AI Act·디지털서비스법 소식) | 약 주 2건이라 기술·미래 글은 드물어졌다(여러 분야를 고르게 쓰려는 운영자 확인 2026-10-26). 사이트가 요약 앞에 붙이는 "Anonymous (not verified) 날짜" 잡음은 작성 지침으로 쓰지 않게 한다. **전자신문(콘텐츠 이용에 정식 계약·사용료 필요)·AI타임스("AI학습 및 활용 금지") 는 운영자 결정(2026-10-26)으로, Ars Technica·IEEE Spectrum은 robots.txt가 AI 크롤러(ClaudeBot 등)를 막기 때문에 접근하지 않는다**(`TERMS_BLOCKED_DOMAINS`). 글감이 한 건도 안 되던 TechCrunch·The Verge와 간접 경로 Hacker News도 뺐다 |
 
-- 소스마다 `terms`(`status` — `allowed` 허용으로 읽음 / `pending` 허용이지만 채우지 못한 조건(`blocker`)이 있어 읽지 않음 / `unverified` 못 읽었거나 불명확한 기존 소스, 확인한 날짜, 근거 쪽 주소)를 적는다. `unverified`는 기존 1곳(전자신문)만 유예이고 시험(`SourceListTest`)이 늘리지 못하게 막는다. 금지로 읽힌 매체는 소스에 두지 않고 `TERMS_BLOCKED_DOMAINS`에 올린다.
+- 소스마다 `terms`(`status` — `allowed` 허용으로 읽음 / `pending` 허용이지만 채우지 못한 조건(`blocker`)이 있어 읽지 않음 / `unverified` 못 읽었거나 불명확한 기존 소스, 확인한 날짜, 근거 쪽 주소)를 적는다. `unverified`(약관 불명확 유예)는 지금 쓰는 소스가 없고(마지막이던 전자신문을 2026-10-26에 뺐다) 시험(`SourceListTest`)이 늘리지 못하게 막는다. 금지로 읽힌 매체는 소스에 두지 않고 `TERMS_BLOCKED_DOMAINS`에 올린다.
 - **BBC·Guardian·Nature·MIT Technology Review·AI타임스**는 약관이 이 용도(광고가 붙는 사이트에서 RSS 제목·요약을 AI에 주어 새 글을 쓰는 것)를 금지하거나 허가가 필요하다고 읽혀 `TERMS_BLOCKED_DOMAINS`에 올렸다. 소스에도 신뢰 목록에도 없고, 실수로 신뢰 목록에 다시 들어와도 `_trusted_domain`이 거부한다(시험으로 고정). 허가를 받으면 이 목록에서 빼고 `terms`를 allowed로 적는다.
 - **Ars Technica·IEEE Spectrum**은 robots.txt가 AI 관련 크롤러를 이름으로 막아(ClaudeBot·anthropic-ai·CCBot 등. 검증 A 재집계: `Disallow: /` 대상이 Ars 34개 중 AI 관련 약 30개, IEEE 33개 중 약 21개이고 IEEE는 사용자 요청형 일부를 명시 허용) 운영자 결정(2026-10-26 "AI 크롤러를 막는 사이트는 접근하지 않는 원칙")으로 같은 목록에 올렸다. 같은 날 남은 소스의 robots.txt도 읽었다: NASA는 제한이 없고, Pew는 `Content-Signal: ai-train=yes, ai-input=yes`로 이용을 명시 허용하고, 연준은 robots.txt가 없고, 전자신문은 제한이 없다(GPTBot 차단 줄은 주석 처리). UN News는 일반 봇에 이 피드 경로(`*/news/`)를 허용하지 않아 이미 보류다.
+- **전자신문**은 콘텐츠 이용 안내(info.etnews.com 콘텐츠 구매 페이지)가 영리·비영리 정보서비스에 사전 협의·정식 계약을 요구하고 수집해 자체 DB를 만들면 저작권 침해이며 무단 사용에는 사용료의 30배 배상을 안내한다. 운영자 결정(2026-10-26 "계약·사용료는 '무료 자동화 기반' 취지에 맞지 않음")으로 소스·신뢰 목록에서 빼고 `TERMS_BLOCKED_DOMAINS`에 올렸다(뉴스 기사를 AI가 각색하는 방식은 어느 매체나 같은 종류의 위험이라, 출처는 약관이 재가공을 허용한 공식·공공·개방 라이선스 자료 중심으로 옮긴다). 그 출처로 이미 공개된 글 1쌍은 운영자 승인(2026-10-26 채팅)을 받아 `published: false`로 비공개 전환했다(PR #36, 삭제 없음).
 - 수집 루프는 피드 주소의 호스트가 `TERMS_BLOCKED_DOMAINS`에 있는 소스를 읽지 않고(로그에 `약관상 접근하지 않는 도메인` 한 줄), 기사 주소에 공백·꺾쇠·따옴표·역슬래시·괄호·대괄호가 있으면 `UNRESOLVED`로 버린다(글의 출처 목록·인용 줄에 그대로 들어가 마크다운·HTML이 되지 않게).
-- 소스별 선택 키: `citation`(글 끝 인용 한 줄의 틀 — `{title}`·`{date}`·`{url}`, 소스 약관이 정한 형식, 고지문 앞에 붙임), `exclude_title`·`exclude_link`·`exclude_tags`(제목·기사 주소·피드 분류 태그 정규식, 맞으면 `EXCLUDED`), `topic_regex`(제목·분류 태그에 맞는 말이 없으면 `OFF_TOPIC`), `no_page_fetch`, `notice`(글 끝 고지문 ko·en — `add_discovery_metadata`가 글 언어(front matter `lang`, 없으면 한글 여부)에 맞춰 붙이고 이미 있으면 다시 붙이지 않는다), `prompt_rule`(글 작성 지침에 한 줄). 피드의 `<category>`(Atom은 `term`)는 `parse_feed`가 `categories`로 읽는다.
+- 소스별 선택 키: `citation`(글 끝 인용 한 줄의 틀 — `{title}`·`{date}`·`{url}`, 소스 약관이 정한 형식, 고지문 앞에 붙임), `exclude_title`·`exclude_link`·`exclude_tags`(제목·기사 주소·피드 분류 태그 정규식, 맞으면 `EXCLUDED`), `topic_regex`(제목·분류 태그에 맞는 말이 없으면 `OFF_TOPIC`), `no_page_fetch`, `notice`(글 끝 고지문 ko·en — `add_discovery_metadata`가 글 언어(front matter `lang`, 없으면 한글 여부)에 맞춰 붙이고 이미 있으면 다시 붙이지 않는다), `prompt_rule`(글 작성 지침에 한 줄), `display_name`(글에 보이는 출처 이름, 생략하면 `name` — 한 게시자의 피드를 분야별로 나눠 읽을 때 `name`이 달라야 해서 둔다). 피드의 `<category>`(Atom은 `term`)는 `parse_feed`가 `categories`로 읽고, 글자가 자식 요소 안에 있는 Atom `type="xhtml"` 제목·요약(통계청)도 자식까지 이어 읽는다.
 - 직접 RSS 항목의 `<source>` 태그(UN News는 피드 태그라인이 들어 있다)는 게시자 표시로 쓰지 않는다 — 게시자는 기사 주소의 호스트이고 출처 이름은 소스 이름이다. 구글 뉴스 해석 코드(`google` 키, `_resolve_article_url`)는 쓰는 소스가 없지만 시험이 있어 남겨 두었다.
 
 **Chance 분야 폴백**: 슬롯 시각마다 6개 분야를 확률 가중 추첨 순서(`editorial_lane_order`, 첫 분야는 기존 추첨과 같음)로 늘어놓고, 앞에서부터 후보가 나올 때까지 시도한다. 이 단계는 Gemini를 부르지 않아 비용은 수집 시간뿐이다. `LANE_SEARCH_BUDGET_SECONDS`(기본 480초)가 지나면 새 분야도, 분야 안의 남은 소스도 시도하지 않는다(이미 시작한 소스 하나는 끝까지 기다리므로 수집은 상한 + 약 2분 안에 끝나고, 잡 제한은 20분이다). 시도한 소스가 전부 수집 실패면 시간과 무관하게 `SOURCES_UNREACHABLE`(빨강)이다. 글이 만들어지면 이력의 `lane`과 Gemini 프롬프트에는 실제로 후보가 나온 분야가 쓰인다.
@@ -209,7 +213,7 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 자동인지 수동인지,
 4. 실제 사용량은 AI Studio 사용량 화면(429 본문에도 안내되는 https://ai.dev/usage?tab=rate-limit)에서만 정확히 보인다. 이 저장소의 숫자는 참고용이라 병합 일주일 뒤 하루 단위로 대조한다 — AI Studio 숫자가 우리 숫자의 배수로 나오면 SDK 자체 재시도가 요청을 더 보내고 있다는 신호다(공식 문서들이 SDK 재시도에 대해 서로 다르게 말해 아직 확정하지 못했다).
 5. 하루 한도는 한국 날짜가 아니라 미국 태평양 시간 자정(한국 시각 오후 4~5시, 서머타임에 따라)에 풀린다. 그래서 한국 날짜가 바뀌어도 한도가 그대로일 수 있고, 이 저장소의 날짜(한국 시각)로 센 숫자와 AI Studio의 하루 숫자는 칸이 어긋난다.
 
-임시 조치이며 알려진 부작용이 있다: 비기술 분야가 계속 비면 글은 사실상 기술·미래 분야에서만 나온다. 2026-10-26 출처 개편이 구글 뉴스 소스를 약관상 쓸 수 있는 직접 RSS로 바꿔 과학·문화에 후보를 만들 수 있게 했다 — 사회·정책은 UN News가 보류 중이라 아직 후보가 없다(아래 '**Chance 소스와 약관 점검**'). 경제·일은 신선도 규칙 때문에 거의 비고 일상·마음은 소스가 없어(D-62) 폴백은 그대로 둔다. 콘텐츠 전략 작업(운영자 요청서 3번, 저장소 밖 문서)이 주제 선정을 개편하면서 이 폴백을 대체하거나 정리한다.
+임시 조치이며 알려진 부작용이 있다: 비기술 분야가 계속 비면 글은 사실상 기술·미래 분야에서만 나온다. 2026-10-26 출처 개편이 구글 뉴스 소스를 약관상 쓸 수 있는 직접 RSS로 바꿔 과학·문화에 후보를 만들 수 있게 했다 — 사회·정책은 UN News가 보류 중이지만 집행위원회 소식·캐나다 통계청이 후보를 낸다(아래 '**Chance 소스와 약관 점검**'). 2026-10-26 해외 소스 추가(#35)로 경제·일·사회·정책·일상·마음에도 읽는 소스가 생겼지만(D-62), 주말·월요일 아침에는 공공기관 발표가 적어 분야가 비는 일이 남아 폴백은 그대로 둔다. 콘텐츠 전략 작업(운영자 요청서 3번, 저장소 밖 문서)이 주제 선정을 개편하면서 이 폴백을 대체하거나 정리한다.
 
 ## 4-2. 워치독 규칙과 알림 방식
 
