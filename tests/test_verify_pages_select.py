@@ -15,12 +15,10 @@ from unittest import mock
 import _bootstrap  # noqa: F401
 from verify_pages_helpers import BASE, KR, EN, KST, NOW, SITE_CONFIG, make_repo, post_of, v
 
-# 2026-10-25 공개 사이트 posts.json 에서 옮겨 온 (path -> absoluteUrl) 15건(로컬 사본. 이 테스트는 사이트에 접속하지 않는다).
+# 2026-10-25 공개 사이트 posts.json 에서 옮겨 온 (path -> absoluteUrl) 15건 중 13건(MIT TR 쌍 2건은 2026-10-26에 비공개로 돌려 아래 PUBLIC_MISSING으로 옮겼다)(로컬 사본. 이 테스트는 사이트에 접속하지 않는다).
 PUBLIC_SNAPSHOT = {
     "_posts/기술·미래/2026-10-25-KR-101307.md": "https://shine88pc.github.io/chanceblog/posts/2026/10/25/KR-101307/",
     "_posts/Technology & Future/2026-10-25-EN-101307.md": "https://shine88pc.github.io/chanceblog/posts/2026/10/25/EN-101307/",
-    "_posts/기술·미래/2026-10-21-KR-135226.md": "https://shine88pc.github.io/chanceblog/posts/2026/10/21/KR-135226/",
-    "_posts/Technology & Future/2026-10-21-EN-135226.md": "https://shine88pc.github.io/chanceblog/posts/2026/10/21/EN-135226/",
     "_posts/일상·마음/2026-10-20-KR-141500.md": "https://shine88pc.github.io/chanceblog/posts/2026/10/20/korean-food-date-labels/",
     "_posts/Everyday Life/2026-10-20-EN-141500.md": "https://shine88pc.github.io/chanceblog/posts/2026/10/20/south-korea-food-date-labels/",
     "_posts/과학 환경/2026-10-20-KR-125000.md": "https://shine88pc.github.io/chanceblog/posts/2026/10/20/KR-125000/",
@@ -33,8 +31,13 @@ PUBLIC_SNAPSHOT = {
     "_posts/EN - Space & Robotics/2026-10-18-EN-233513.md": "https://shine88pc.github.io/chanceblog/posts/2026/10/18/EN-233513/",
     "_posts/2026-10-18-AI.md": "https://shine88pc.github.io/chanceblog/posts/2026/10/18/AI/",
 }
-# 같은 날 저장소에는 있으나 `published: false`라 공개 posts.json에 없는 5건.
+# 저장소에는 있으나 `published: false`라 공개 posts.json에 없는 9건(2026-10-25 사본의 5건 + 2026-10-26에 비공개로 돌린 4건).
 PUBLIC_MISSING = [
+    # 2026-10-26 운영자 승인으로 비공개 전환(약관이 금지하는 매체 출처: MIT Technology Review 쌍 2026-10-21, AI타임스 쌍 2026-10-25)
+    "_posts/기술·미래/2026-10-21-KR-135226.md",
+    "_posts/Technology & Future/2026-10-21-EN-135226.md",
+    "_posts/기술·미래/2026-10-25-KR-203740.md",
+    "_posts/Technology & Future/2026-10-25-EN-203740.md",
     "_posts/2026-10-18-EN-225949.md",
     "_posts/2026-10-18-KR-225949.md",
     "_posts/EN - Tech Geopolitics/2026-10-18-EN-161948.md",
