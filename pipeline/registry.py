@@ -13,6 +13,7 @@ import sys
 from pathlib import Path, PurePosixPath
 
 from pipeline.console import safe_output
+from pipeline.gates import SUPPORTED_LANGUAGES, first_match
 
 ROOT = Path(__file__).resolve().parent.parent
 REGISTRY_PATH = Path(__file__).resolve().parent / "blogs.json"
@@ -41,6 +42,10 @@ _PROFILE_REQUIRED = (
     "banned_patterns", "title_banned_patterns", "leak_patterns", "banned_topic_patterns",
     "disclosure_html", "seed_topics", "topic_cooldown_days",
 )
+# 정규식 목록 필드. body_* 는 선택 항목이다(없으면 본문 주제 가드레일을 쓰지 않는다 — pipeline/gates.py body_risk_hit).
+_PATTERN_FIELDS = ("banned_patterns", "title_banned_patterns", "leak_patterns", "banned_topic_patterns",
+                   "body_banned_patterns", "body_safe_patterns")
+_RATIO_FIELDS = ("min_hangul_ratio", "min_latin_ratio")
 
 
 class RegistryError(ValueError):
@@ -126,12 +131,39 @@ def validate_profile(profile):
     for field in _PROFILE_REQUIRED:
         if field not in profile:
             errors.append(f"프로필 필수 항목 누락: {field}")
-    for field in ("banned_patterns", "title_banned_patterns", "leak_patterns", "banned_topic_patterns"):
-        for pattern in profile.get(field, []) or []:
+    if "language" in profile and profile["language"] not in SUPPORTED_LANGUAGES:
+        # 모르는 언어는 글 언어 검사(gates.check_post)가 조용히 꺼진다
+        errors.append(f"프로필 language는 {'·'.join(SUPPORTED_LANGUAGES)} 중 하나여야 합니다: {profile['language']!r}")
+    for field in _RATIO_FIELDS:
+        if field in profile:
+            value = profile[field]
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 < value <= 1:
+                errors.append(f"프로필 {field}는 0~1 사이 숫자여야 합니다.")
+    patterns_ok = True
+    for field in _PATTERN_FIELDS:
+        patterns = profile.get(field, []) or []
+        if not isinstance(patterns, list):
+            errors.append(f"프로필 {field}는 정규식 문자열의 배열이어야 합니다.")
+            patterns_ok = False
+            continue
+        for pattern in patterns:
             try:
-                re.compile(pattern, re.IGNORECASE)
+                compiled = re.compile(pattern, re.IGNORECASE)
             except (re.error, TypeError) as exc:
                 errors.append(f"프로필 {field}의 정규식 오류 {pattern!r}: {exc}")
+                patterns_ok = False
+                continue
+            if compiled.search(""):
+                # 한 줄 끝에 '|' 를 남긴 것 같은 실수. 금지 목록이면 모든 글이 탈락하고, body_safe_patterns 면 모든 문장을 건너뛰어
+                # 본문 가드레일이 조용히 꺼진다
+                errors.append(f"프로필 {field}의 정규식 {pattern!r}이 빈 문자열에도 맞습니다 — 모든 글(문장)에 걸립니다.")
+                patterns_ok = False
+    extra = profile.get("prompt_extra")
+    if extra is not None and not (isinstance(extra, list) and all(isinstance(line, str) for line in extra)):
+        errors.append("프로필 prompt_extra는 문자열 배열이어야 합니다.")
+    expand = profile.get("topic_expand_prompt")
+    if expand is not None and not (isinstance(expand, str) and "{n}" in expand and "{avoid}" in expand):
+        errors.append("프로필 topic_expand_prompt는 {n}과 {avoid} 자리표시자를 가진 문자열이어야 합니다.")
     length = profile.get("length", {})
     if not (isinstance(length.get("min_chars"), int) and isinstance(length.get("max_chars"), int)
             and 0 < length["min_chars"] < length["max_chars"]):
@@ -144,6 +176,11 @@ def validate_profile(profile):
     seeds = profile.get("seed_topics")
     if not isinstance(seeds, list) or not seeds or not all(isinstance(s, str) and s.strip() for s in seeds):
         errors.append("프로필 seed_topics는 비어 있지 않은 문자열 배열이어야 합니다.")
+    elif patterns_ok:
+        for seed in seeds:  # 시드도 주제 가드레일을 통과해야 한다(걸리는 시드는 조용히 한 번도 뽑히지 않는다)
+            raw, word = first_match(profile.get("banned_topic_patterns"), seed)
+            if raw is not None:
+                errors.append(f"프로필 seed_topics의 {seed!r}가 banned_topic_patterns에 걸립니다('{word}').")
     if not isinstance(profile.get("topic_cooldown_days"), int) or profile["topic_cooldown_days"] < 0:
         errors.append("프로필 topic_cooldown_days는 0 이상 정수여야 합니다.")
     return errors
@@ -227,11 +264,16 @@ def validate_registry(reg, root=None):
             if not profile_path.exists():
                 errors.append(f"{label}: 프로필 파일이 없습니다: pipeline/profiles/{profile_name}.json")
             else:
+                loaded = None
                 try:
-                    profile_errors = validate_profile(json.loads(profile_path.read_text(encoding="utf-8")))
+                    loaded = json.loads(profile_path.read_text(encoding="utf-8"))
+                    profile_errors = validate_profile(loaded)
                 except (OSError, json.JSONDecodeError) as exc:
                     profile_errors = [f"읽을 수 없음: {exc}"]
                 errors.extend(f"{label}: {e}" for e in profile_errors)
+                if not profile_errors and isinstance(langs, list) and loaded["language"] not in langs:
+                    # 영문 블로그에 한국어 프로필을 쓰는 것 같은 어긋남(D-32). 글 언어 검사는 프로필의 language 를 따른다
+                    errors.append(f"{label}: 프로필 {profile_name}의 language({loaded['language']!r})가 이 블로그의 languages {langs} 에 없습니다.")
 
         state = blog.get("state") or {}
         for field in ("history", "content_dir"):

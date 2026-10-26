@@ -64,7 +64,8 @@
 | G-C1 | AI 사용 사실을 숨기지 않는다. Chance는 `/about`에 공개, Blogger는 면책·AI 사용 문구를 게시 직전에 항상 붙인다 | 자동: `gates.append_disclosure` |
 | G-C2 | 가짜 개인 경험·인물·인터뷰·자격을 쓰지 않는다 | 정책(`CHANCE_BLOG_TEMPLATE.md`, 프로필 `prompt_extra`) |
 | G-C3 | Chance: 검증된 게시자 원문과 본문 인라인 출처가 없으면 게시하지 않는다. Blogger: 일반적인 생활 정보만, 의학적 단정 금지 | 자동: `generator.py` 검증 / 게이트 **BANNED**·**LEAK** |
-| G-C4 | 건강(YMYL) 주제는 가벼운 생활 습관으로 제한한다. 질병·약·보충제·진단·임신·영유아·체중 감량은 주제 단계에서 거른다 | 자동: 프로필 `banned_topic_patterns`, 게이트 **LABELS** |
+| G-C4 | 건강(YMYL) 주제는 가벼운 생활 습관으로 제한한다. 질병·치료·약·보충제·진단·임신·영유아·체중 감량은 **세 곳에서** 거른다 — (a) 주제 후보(시드·LLM 확장), (b) 생성된 제목·라벨, (c) 생성된 본문. 수동 작성 경로가 없어 모든 글이 자동 생성이므로, 모델이 안전한 주제를 받고도 위험한 내용으로 흐를 수 있다(예전에는 주제 후보와 라벨만 걸렸고 제목·본문에는 효능 단정 표현만 걸렸다). 운영자 승인 2026-10-26 | 자동: 프로필 `banned_topic_patterns`(주제·제목·라벨에 예외 없이), `body_banned_patterns`·`body_safe_patterns`(본문: 전문가 상담·면책 문장은 건너뜀), 게이트 **TITLE_TOPIC**·**LABELS**·**BODY_TOPIC**, 레지스트리 검증(시드도 같은 목록을 통과해야 하고, 빈 문자열에 맞는 패턴·모르는 `language`는 오류) |
+| G-C4 한계 | ① 수동 `topic`(override)은 러너(`pipeline/run.py`)가 주제 후보 검사를 건너뛴다. 그 주제가 제목에 오르면 TITLE_TOPIC이, 본문에 오르면 BODY_TOPIC이 막는다(러너에서 막는 것이 정석이지만 `run.py`를 고치는 별도 변경이다 — D-64). ② 정규식 목록은 낱말 기반이라 '단정·조언 문맥'을 이해하지 못한다. 본문은 일상어와 겹치는 낱말(treat·heal·remedy·immune 등)을 빼고 전문가 상담·면책 문장을 문장 단위로 건너뛰는 근사이며, 병명의 완곡어·약어 같은 변형은 놓칠 수 있다. ③ 막는 낱말이 늘수록 정상 글이 탈락하고(재시도 3회 → `GATE_REJECTED`) 하루 발행을 잃으므로, 목록을 바꿀 때는 `tests/test_guardrails.py`의 막힘·통과 표본과 같이 바꾼다(규칙마다 그 규칙만 막는 표본이 있어야 시험이 통과한다). ④ 비교 전에 글을 고르지만(NFKC·보이지 않는 문자 제거·굽은 따옴표 곧게) 키릴·그리스 문자로 바꿔치기한 낱말은 다루지 않는다 — 모델이 흐르는 것을 막는 장치이지 일부러 피해 가는 입력을 막는 장치가 아니다 | 정책(알려진 한계) |
 | G-C5 | 양산·복제 방지: 일일 상한, 쿨다운, 같은 블로그·다른 블로그와의 제목 중복 게이트. 블로그를 늘릴 때마다 고유한 목적·독자·형식을 정의한다 | 자동: **DUP_SAME**·**DUP_OTHER**, `limits` |
 | G-C6 | **광고 표면(AdSense 심사 대상)은 사용자 승인 없이 바꾸지 않는다.** 승인했다면 커밋 메시지에 `Ad-Surface-Approved: <사유>` | 자동: 검증기 **AD-1**(CI에서 push 범위 검사) |
 | G-C7 | 이미지는 라이선스가 명확한 출처(Unsplash API 약관 준수)만 쓰고, 게시 전에 URL을 확인한다 | 코드(`generator.py`) |
@@ -146,4 +147,4 @@
 | EXPOSE-1 | 내부 문서가 사이트에 공개됨(2026-10-26 `exclude`로 해결, 경고 사라짐) | D-08 |
 | PY-1, JSON-1 | 문법 오류 | — |
 
-런타임 게이트 코드: `TITLE_LEN`·`TITLE_BANNED`·`LEN_SHORT`·`LEN_LONG`·`LANG`·`STRUCT_H3`·`STRUCT_LIST`·`BANNED`·`LEAK`·`LABELS`·`DUP_SAME`·`DUP_OTHER`·`PARSE`.
+런타임 게이트 코드: `TITLE_LEN`·`TITLE_BANNED`·`TITLE_TOPIC`·`LEN_SHORT`·`LEN_LONG`·`LANG`·`STRUCT_H3`·`STRUCT_LIST`·`BANNED`·`LEAK`·`BODY_TOPIC`·`LABELS`·`DUP_SAME`·`DUP_OTHER`·`PARSE`. `TITLE_TOPIC`(제목)·`LABELS`(라벨)·`BODY_TOPIC`(본문)이 G-C4의 세 지점이고, `tests/test_gates.py`가 게이트가 내는 코드가 이 줄에서 빠지지 않았는지 대조한다.

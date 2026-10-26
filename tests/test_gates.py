@@ -234,6 +234,35 @@ class TopicAllowedTest(unittest.TestCase):
             self.assertTrue(gates.topic_allowed(topic, PROFILE), topic)
 
 
+class GuardrailGateTest(unittest.TestCase):
+    """주제 가드레일 한 줄 요약(자세한 표본은 tests/test_guardrails.py): 제목·본문에도 위험 낱말을 건다."""
+
+    def test_title_with_a_banned_topic_word_is_rejected(self):
+        post, stats = good_post()
+        post["title"] = "당뇨에 좋은 아침 습관 4가지"
+        result = run_check(post, stats)
+        self.assertEqual(result.codes(), ["TITLE_TOPIC"])
+        self.assertIn("'당뇨'", result.reasons[0])
+
+    def test_body_with_a_risk_word_is_rejected_unless_the_sentence_refers_to_a_professional(self):
+        post, stats = good_post()
+        post["content"] += "<p>비타민 보충제를 함께 드세요.</p>"
+        self.assertEqual(run_check(post, stats).codes(), ["BODY_TOPIC"])
+        post, stats = good_post()
+        post["content"] += "<p>임신 중이거나 약을 복용 중이라면 의사와 상담한 뒤 시작하세요.</p>"
+        self.assertTrue(run_check(post, stats).ok)
+
+    def test_every_gate_code_is_listed_in_the_security_guardrails_document(self):
+        """게이트가 내는 탈락 코드가 문서의 '런타임 게이트 코드' 줄에서 빠지면(예: 새 코드를 추가하고 문서를 안 고침) 알린다."""
+        source = (_bootstrap.ROOT / "pipeline" / "gates.py").read_text(encoding="utf-8")
+        emitted = set(re.findall(r'reasons\.append\(\s*f?"\[([A-Z0-9_]+)\]', source))
+        self.assertTrue({"TITLE_TOPIC", "BODY_TOPIC", "LANG", "LABELS"} <= emitted, emitted)
+        doc = (_bootstrap.ROOT / "docs" / "SECURITY_GUARDRAILS.md").read_text(encoding="utf-8")
+        line = [ln for ln in doc.splitlines() if ln.startswith("런타임 게이트 코드")][0]
+        for code in emitted:
+            self.assertIn(f"`{code}`", line, code)
+
+
 class SimilarityTest(unittest.TestCase):
     def test_similarity_bounds(self):
         self.assertEqual(gates.similarity("", "abc"), 0.0)

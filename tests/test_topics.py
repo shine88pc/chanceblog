@@ -82,5 +82,34 @@ class ParsingTest(unittest.TestCase):
         self.assertFalse(topics.recently_used("같은 주제 글", history, TODAY, 60))
 
 
+class ExpandPromptTest(unittest.TestCase):
+    @staticmethod
+    def legacy_korean_prompt(recent_topics, n):
+        """주제 확장 지시문의 한국어 원문(프로필에 topic_expand_prompt 가 없을 때). 영문 프로필을 붙이면서 바뀌지 않았다."""
+        avoid = "\n".join(f"- {t}" for t in recent_topics[-40:]) or "- (없음)"
+        return (
+            "너는 건강·음식·생활 중심 실용 블로그의 편집자다. 독자가 오늘 바로 실천할 수 있는 "
+            f"가벼운 생활 습관 주제 {n}개를 제안한다.\n"
+            "조건: 질병 치료, 약, 보충제, 진단, 임신·영유아, 체중 감량, 의료 조언 관련 주제는 제외한다. "
+            f"각 주제는 제목형 한 문장({topics.TOPIC_MIN_CHARS}~{topics.TOPIC_MAX_CHARS}자)으로 쓴다.\n"
+            f"이미 다룬 주제와 겹치지 않게 한다:\n{avoid}\n"
+            '출력: JSON 문자열 배열만 출력한다(설명·코드 블록 금지). 예: ["주제1", "주제2"]'
+        )
+
+    def test_korean_prompt_is_unchanged_byte_for_byte(self):
+        self.assertNotIn("topic_expand_prompt", PROFILE)
+        for recent in ([], ["잠이 안 올 때 바로 해볼 수 있는 간단한 방법", "집에서 쉽게 하는 스트레칭 루틴"], [f"주제 {i}" for i in range(60)]):
+            self.assertEqual(topics.expand_prompt(PROFILE, recent, 8), self.legacy_korean_prompt(recent, 8))
+
+    def test_a_profile_prompt_replaces_every_placeholder_and_keeps_only_the_last_forty_topics(self):
+        profile = {"topic_expand_prompt": "Give {n} topics of {min}-{max} characters. Avoid:\n{avoid}\nJSON array of strings only."}
+        prompt = topics.expand_prompt(profile, [f"topic number {i}" for i in range(60)], 5)
+        self.assertTrue(prompt.startswith("Give 5 topics of 8-60 characters. Avoid:\n- topic number 20\n"))
+        self.assertIn("- topic number 59\nJSON array of strings only.", prompt)
+        self.assertNotIn("topic number 19", prompt)
+        self.assertNotIn("{", prompt)
+        self.assertIn("- (none)", topics.expand_prompt(profile, [], 5))
+
+
 if __name__ == "__main__":
     unittest.main()

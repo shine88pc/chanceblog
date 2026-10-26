@@ -31,17 +31,23 @@ NO_PUBLISH = {"BLOGGER_PUBLISH": "0"}
 PUBLISH_SECRET_NAMES = ("BLOGGER_BLOG_ID", "BLOGGER_CLIENT_ID", "BLOGGER_CLIENT_SECRET", "BLOGGER_REFRESH_TOKEN")
 
 
-def make_root(tmp, mode="auto"):
+def make_root(tmp, mode="auto", lang="ko"):
+    """임시 저장소. lang="ko"(기본)는 실제 레지스트리의 blogger_macat(영문 프로필)을 한국어 프로필·프롬프트로 바꿔 놓는다 —
+    이 파일의 실행 흐름 시험은 한국어 스텁·한국어 프로필로 돌린다. lang="en"은 실제 레지스트리 그대로(영문 프로필)다."""
     root = Path(tmp)
     (root / "pipeline" / "profiles").mkdir(parents=True)
     reg = json.loads((REAL / "pipeline" / "blogs.json").read_text(encoding="utf-8"))
     for blog in reg["blogs"]:
         if blog["key"] == "blogger_macat":
             blog["mode"] = mode
+            if lang == "ko":
+                blog.update(languages=["ko"], profile="blogger_practical_ko", prompt=".github/editorial/BLOGGER_PROMPT.md")
     (root / "pipeline" / "blogs.json").write_text(json.dumps(reg, ensure_ascii=False), encoding="utf-8")
-    shutil.copy(REAL / "pipeline" / "profiles" / "blogger_practical_ko.json", root / "pipeline" / "profiles")
+    for name in ("blogger_practical_ko.json", "blogger_practical_en.json"):
+        shutil.copy(REAL / "pipeline" / "profiles" / name, root / "pipeline" / "profiles")
     (root / ".github" / "editorial").mkdir(parents=True)
-    shutil.copy(REAL / ".github" / "editorial" / "BLOGGER_PROMPT.md", root / ".github" / "editorial")
+    for name in ("BLOGGER_PROMPT.md", "BLOGGER_PROMPT_EN.md"):
+        shutil.copy(REAL / ".github" / "editorial" / name, root / ".github" / "editorial")
     for rel in (".github/workflows/chanceblog.yml", ".github/workflows/blogger.yml", "generator.py",
                 "blogger_generator.py", ".github/editorial/CHANCE_BLOG_TEMPLATE.md"):
         path = root / rel
