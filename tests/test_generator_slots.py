@@ -1594,7 +1594,8 @@ class SourceRuleSamplesTest(unittest.TestCase):
             with self.subTest(tag=tag):
                 self.assertFalse(self.kept("Pew Research Center", title, (tag,), link))
         # 앵커(^…$)가 있는 세 태그는 정확히 그 태그일 때만 거른다 — 더 긴 태그(미디어 주제가 들어올 수 있는)는 살린다
-        for tag in ("Political Issues and Media", "Donald Trump Jr.", "Politics & Policy Journalism"):
+        for tag in ("Political Issues and Media", "Donald Trump Jr.", "Politics & Policy Journalism",
+                    "Global Political Issues", "Not Donald Trump", "Local Politics & Policy"):
             with self.subTest(longer_tag=tag):
                 self.assertTrue(self.kept("Pew Research Center", title, (tag,), link))
 
