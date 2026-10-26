@@ -320,6 +320,18 @@ class RegistryContractTest(TmpCase):
         found = vr.check_registry(root, vr.list_files(root))
         self.assertEqual(levels(found, "REG-1"), ["ERROR"])
 
+    def test_a_blog_without_its_own_mode_is_a_REG_1_error(self):
+        """블로그 항목이 mode 를 직접 적지 않으면 defaults.mode(auto)를 물려받아 새 블로그가 바로 자동 게시된다."""
+        root = registry_root(self.root, chance_extra=DEPLOY_STEP)
+        reg_path = root / "pipeline" / "blogs.json"
+        reg = json.loads(reg_path.read_text(encoding="utf-8"))
+        reg["defaults"]["mode"] = "auto"
+        del reg["blogs"][1]["mode"]
+        reg_path.write_text(json.dumps(reg), encoding="utf-8")
+        found = vr.check_registry(root, vr.list_files(root))
+        self.assertEqual(levels(found, "REG-1"), ["ERROR"])
+        self.assertTrue(any("mode" in f.line() and "직접" in f.line() for f in found if f.check == "REG-1"))
+
     def test_model_drift_is_warned(self):
         root = registry_root(self.root, chance_extra=DEPLOY_STEP)
         write(root, "generator.py", 'MODEL_CANDIDATES = [\n    "gemini-old-1",\n]\n')

@@ -756,7 +756,13 @@ class UntouchedPathsTest(unittest.TestCase):
 # 7) 독립 검증 V-07: 식과 `run:` 스크립트를 직접 고정한다(정기 실행은 입력과 무관하게 게시·커밋 경로 그대로)
 # ----------------------------------------------------------------------------
 class BloggerPublishSwitchTest(unittest.TestCase):
-    """BL09·BL10: 정기 실행은 BLOGGER_PUBLISH 를 비워 레지스트리 mode 를 따르고, 수동 실행은 체크했을 때만 on, 아니면 off 다."""
+    """BL09·BL10: 정기 실행은 BLOGGER_PUBLISH 를 비워 레지스트리 mode 를 따르고, 수동 실행은 `publish` 3택(off·draft·publish)을 그대로 넘긴다.
+    즉시 게시는 운영자가 `publish` 를 직접 고를 때뿐이고 기본값은 `draft`(Blogger 초안함)다."""
+
+    CHOICES = ("off", "draft", "publish")
+
+    def publish_input(self):
+        return load("blogger.yml")["on"]["workflow_dispatch"]["inputs"]["publish"]
 
     def publish_value(self, event, publish=None):
         step = next(s for s in load("blogger.yml")["jobs"]["generate"]["steps"] if "BLOGGER_PUBLISH" in s.get("env", {}))
@@ -765,14 +771,20 @@ class BloggerPublishSwitchTest(unittest.TestCase):
 
     def test_a_scheduled_run_leaves_it_empty_so_the_registry_mode_decides(self):
         self.assertEqual(self.publish_value("schedule"), "")
-        self.assertEqual(self.publish_value("schedule", "true"), "")        # 정기 실행에는 입력이 없지만 있어도 무시한다(모드는 레지스트리가 정한다)
-        self.assertEqual(self.publish_value("schedule", "false"), "")
+        for value in (*self.CHOICES, "true", "false"):                       # 정기 실행에는 입력이 없지만 있어도 무시한다(모드는 레지스트리가 정한다)
+            self.assertEqual(self.publish_value("schedule", value), "", value)
 
-    def test_a_manual_run_publishes_only_when_the_box_is_checked(self):
-        self.assertEqual(self.publish_value("workflow_dispatch", "true"), "on")
-        self.assertEqual(self.publish_value("workflow_dispatch", "false"), "off")
-        self.assertEqual(self.publish_value("workflow_dispatch"), "off")     # 입력이 없어도(API 로 부른 경우) 게시하지 않는다
-        self.assertEqual(self.publish_value("workflow_dispatch", ""), "off")
+    def test_a_manual_run_passes_the_chosen_value_and_only_an_explicit_publish_publishes(self):
+        for choice in self.CHOICES:
+            self.assertEqual(self.publish_value("workflow_dispatch", choice), choice)
+        # 러너가 그 값을 읽는 방식: 즉시 게시('on')는 publish 를 고를 때뿐이다
+        self.assertEqual({choice: run_mod.publish_policy(None, {"BLOGGER_PUBLISH": choice}) for choice in self.CHOICES},
+                         {"off": "off", "draft": "draft", "publish": "on"})
+
+    def test_the_publish_input_is_a_three_way_choice_whose_default_never_publishes(self):
+        """GitHub 는 생략된 입력(API 로 부른 경우 포함)에 기본값을 채운다. 그 기본값이 즉시 게시면 입력을 안 건드린 실행이 게시한다."""
+        publish = self.publish_input()
+        self.assertEqual((publish["type"], publish["options"], publish["default"]), ("choice", list(self.CHOICES), "draft"))
 
 
 SHIM = """#!/usr/bin/env bash
@@ -929,24 +941,28 @@ class WorkflowStepScriptTest(unittest.TestCase):
 
 
 # ----------------------------------------------------------------------------
-# 8) 독립 검증 V-03: 이제 Blogger 수동 실행은 `연습 실행`이 기본 켜짐이라 `publish` 만 안 체크하면 아무것도 저장되지 않는다 — 안내 문구가 그 사실을 따라간다
+# 8) 독립 검증 V-03: 이제 Blogger 수동 실행은 `연습 실행`이 기본 켜짐이라 체크를 풀지 않으면 `publish`(off·draft·publish 3택)가 무엇이든 아무것도 저장되지 않는다 — 안내 문구가 그 사실을 따라간다
 # ----------------------------------------------------------------------------
 class ManualRunGuidanceTest(unittest.TestCase):
     def lines(self, doc, needle):
         return [line for line in (ROOT / doc).read_text(encoding="utf-8").splitlines() if needle in line]
 
     def test_every_blogger_first_run_guidance_tells_to_uncheck_the_practice_run(self):
-        for doc, needle in (("HANDLER.md", "L3 초안 1건"), ("HANDLER.md", "`publish`를 체크하지 말고"),
+        # `publish` 가 off/draft/publish 3택이 된 뒤의 첫 실행 안내: HANDLER 는 재개 절차(`publish=draft`)와 §10 5번 4(`publish`를 `draft`(기본값)로 두면)
+        for doc, needle in (("HANDLER.md", "`publish=draft`"), ("HANDLER.md", "`publish`를 `draft`(기본값)"),
                             ("docs/ENGINEERING_GUIDE.md", "**L3 초안**"), ("docs/ARCHITECTURE.md", "`blog=<key>`")):
             found = self.lines(doc, needle)
             self.assertTrue(found, (doc, needle))
             for line in found:
-                self.assertRegex(line, r"`연습 실행` 체크(를)? ?(풀|해제)", (doc, needle))
+                self.assertRegex(line, r"`연습 실행` 체크(를)? ?(풀|푼|해제)", (doc, needle))
 
-    def test_the_architecture_first_run_row_does_not_depend_on_the_shape_of_the_publish_input(self):
-        """뒤에 병합될 draft-upload 가 `publish` 를 off/draft/publish 선택으로 바꿔도 이 문구가 틀리지 않게."""
+    def test_the_architecture_first_run_row_names_the_publish_choices(self):
+        """`publish` 는 off/draft/publish 3택이다. 첫 실행 행은 초안함 업로드(`publish=draft`)를 안내하고, 시크릿을 등록하기 전에는 저장소 초안만
+        남기는 `publish=off` 를 안내한다. 즉시 게시(`publish=publish`)는 처음에 고르라고 하지 않는다."""
         row = self.lines("docs/ARCHITECTURE.md", "`blog=<key>`")[0]
-        self.assertNotIn("publish", row)
+        self.assertIn("`publish=draft`", row)
+        self.assertIn("`publish=off`", row)
+        self.assertNotIn("publish=publish", row)
 
     def test_the_docs_say_that_practice_runs_still_search_unsplash(self):
         paragraph = next(line for line in self.lines("docs/ARCHITECTURE.md", "수동 실행의 기본값과 정지 스위치"))

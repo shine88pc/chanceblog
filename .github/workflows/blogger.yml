@@ -1,5 +1,5 @@
 name: Blogger 글 자동 작성
-run-name: "Blogger 글 작성 · ${{ github.event_name == 'workflow_dispatch' && (inputs.dry_run && '수동(연습: 저장·게시 안 함)' || (inputs.publish && '수동(게시)' || '수동(초안만 저장)')) || '정기' }}"
+run-name: "Blogger 글 작성 · ${{ github.event_name == 'workflow_dispatch' && (inputs.auth_check && '수동(인증 점검만: 글 안 만듦)' || inputs.dry_run && '수동(연습: 저장·게시 안 함)' || (inputs.publish == 'publish' && '수동(즉시 게시)' || (inputs.publish == 'off' && '수동(저장소 파일만 저장)' || '수동(Blogger 초안함 업로드)'))) || '정기' }}"
 
 # 레지스트리(pipeline/blogs.json)의 platform=blogger 블로그를 모두 처리한다.
 # 블로그를 추가하면 이 파일을 고치지 않고 레지스트리와 Secrets 만 추가하면 된다.
@@ -24,7 +24,16 @@ on:
         type: boolean
         default: true
       publish:
-        description: 'Blogger에 실제 게시(체크하지 않으면 초안만 저장). 연습 실행을 풀었을 때만 적용됩니다'
+        description: '글을 어디까지(연습 실행을 풀어야 적용): off=저장소 파일만 / draft=Blogger 초안함(기본) / publish=즉시 게시. 정기 실행은 mode를 따름. 자세히: BLOGGER_API_SETUP.md'
+        type: choice
+        default: 'draft'
+        options:
+          # 따옴표가 필요하다: 따옴표 없는 off 는 YAML 1.1 파서(PyYAML 등)가 문자열이 아니라 false 로 읽는다
+          - 'off'
+          - 'draft'
+          - 'publish'
+      auth_check:
+        description: '인증 점검만 실행(기본 꺼짐): 글·Gemini 없이 토큰·블로그·주소만 확인(쓰기 없음). 자세히: BLOGGER_API_SETUP.md'
         type: boolean
         default: false
 
@@ -50,10 +59,13 @@ jobs:
         id: plan
         env:
           ONLY_BLOG: ${{ github.event.inputs.blog }}
+          AUTH_CHECK_ONLY: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.auth_check == 'true' && '1' || '' }}
         run: |
           set -euo pipefail
           args=(--platform blogger)
           if [ -n "${ONLY_BLOG:-}" ]; then args+=(--only "$ONLY_BLOG"); fi
+          # 인증 점검만 하는 수동 실행은 정지(mode off)한 블로그도 대상에 넣는다(쓰기가 없고, 시크릿을 등록한 직후 mode 를 켜기 전에 확인해야 한다)
+          if [ -n "${AUTH_CHECK_ONLY:-}" ]; then args+=(--include-off); fi
           # echo "matrix=$(명령)" 처럼 명령 치환을 echo 안에 넣으면 plan 이 실패해도 echo 가 성공해 이 단계가
           # 초록으로 지나가고 matrix 가 빈 값이 된다. 그래서 먼저 변수에 받아 set -e 가 실패를 잡게 한다.
           matrix=$(python -m pipeline.plan "${args[@]}")
@@ -105,8 +117,10 @@ jobs:
         env:
           BLOG_KEY: ${{ matrix.key }}
           BLOGGER_TOPIC: ${{ github.event.inputs.topic }}
-          # 스케줄: 비움(레지스트리 mode 를 따름) / 수동: 체크하면 on, 아니면 off
-          BLOGGER_PUBLISH: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.publish == 'true' && 'on' || 'off') || '' }}
+          # 스케줄: 비움(레지스트리 mode 를 따름) / 수동: 고른 값 그대로(off=저장소 파일만, draft=Blogger 초안함 업로드, publish=즉시 게시)
+          BLOGGER_PUBLISH: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.publish || '' }}
+          # 수동 실행의 '인증 점검만 실행'(체크하면 1). 정기 실행은 항상 비어 글을 만든다
+          BLOGGER_AUTH_CHECK: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.auth_check == 'true' && '1' || '' }}
           # 블로그마다 다른 Secrets 이름을 역할 이름으로 넘긴다(값은 로그에 마스킹됨)
           PIPELINE_SECRET_LLM_API_KEY: ${{ secrets[matrix.secret_llm_api_key] }}
           PIPELINE_SECRET_BLOG_ID: ${{ secrets[matrix.secret_blog_id] }}

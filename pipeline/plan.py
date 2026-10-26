@@ -2,6 +2,10 @@
 
   python -m pipeline.plan --platform blogger           # {"include":[...]} 한 줄 JSON
   python -m pipeline.plan --platform blogger --count   # 대상 블로그 수
+  python -m pipeline.plan --platform blogger --include-off   # 정지(mode off)한 블로그도 대상에 넣는다
+
+--include-off 는 '인증 점검만' 하는 수동 실행 전용이다. 인증 점검은 쓰기가 없고, 시크릿을 등록한 직후 mode 를 켜기 *전에*
+(정지 중에) 확인해야 하므로 정지한 블로그도 점검할 수 있어야 한다. 글을 만드는 실행에는 쓰지 않는다(러너는 mode off 를 다시 막는다).
 
 레지스트리 검증에 실패하면 종료 코드 1(워크플로가 잘못된 설정으로 돌지 않게 한다).
 --only 도 두 단계로 검사해 틀리면 종료 코드 1이다: 레지스트리에 없는 key(오타)도, 레지스트리에는 있지만
@@ -20,9 +24,14 @@ from pipeline.registry import ROOT, RegistryError, enabled_blogs, load_registry,
 _SECRET_ROLES = ("llm_api_key", "blog_id", "client_id", "client_secret", "refresh_token")
 
 
-def build_matrix(reg, platform=None, only=None):
+def build_matrix(reg, platform=None, only=None, include_off=False):
     include = []
-    for blog in enabled_blogs(reg, platform):
+    if include_off:
+        candidates = [merged_blog(reg, raw) for raw in reg.get("blogs", []) if isinstance(raw, dict)]
+        candidates = [blog for blog in candidates if not platform or blog.get("platform") == platform]
+    else:
+        candidates = enabled_blogs(reg, platform)
+    for blog in candidates:
         if only and blog["key"] != only:
             continue
         secrets = blog.get("secrets", {})
@@ -45,6 +54,8 @@ def main(argv=None):
     parser.add_argument("--platform", default=None)
     parser.add_argument("--only", default=None, help="이 key 의 블로그만 (수동 실행용)")
     parser.add_argument("--count", action="store_true")
+    parser.add_argument("--include-off", action="store_true",
+                        help="정지(mode off)한 블로그도 대상에 넣는다(인증 점검만 하는 수동 실행 전용)")
     args = parser.parse_args(argv)
     try:
         reg = load_registry()
@@ -70,7 +81,7 @@ def main(argv=None):
             print(f"[오류] --only {args.only!r} 는 {args.platform} 가 아니라 {owner['platform']} 플랫폼 블로그입니다. "
                   f"{args.platform} 플랫폼의 key: {', '.join(same_platform) or '(없음)'}", file=sys.stderr)
             return 1
-    matrix = build_matrix(reg, args.platform, args.only)
+    matrix = build_matrix(reg, args.platform, args.only, include_off=args.include_off)
     print(len(matrix["include"]) if args.count else json.dumps(matrix, ensure_ascii=False, separators=(",", ":")))
     return 0
 

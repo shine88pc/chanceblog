@@ -7,6 +7,57 @@
 
 ---
 
+## [2026-10-26] Claude – Blogger 초안함 업로드·인증 점검 통합 브랜치 `ai/claude/blogger-integration`: main(9ba5313)을 합치고 충돌 7개 파일 해결, 가이드 병합대기 표식 걷기 (승인 4번 ①, 독립 검증 병합 가능 → main(69139b0) 재통합 뒤 PR)
+
+**작업자**: Claude (통합 담당 서브에이전트, 독립 검증은 별도 세션)  
+**대상**: Blogger  
+**등급**: T2(코드·워크플로 통합, 독립 검증 필요) — 운영자가 2026-10-26 채팅으로 승인한 4번 ①("Blogger 초안함 API 업로드")의 구현이다. 이 변경은 Blogger를 켜지 않는다  
+**목적**: 독립 검증 2회 "병합 가능"을 받은 두 브랜치(`ai/claude/blogger-draft-upload` → `ai/claude/blogger-auth-check`)를 호출 기록 병합(#24) 이후의 main(9ba5313)과 합친 PR 준비 브랜치 하나로 만든다. 독립 검증(별도 세션, 2026-10-26, head 4bd6def·기준 main 9ba5313)은 **병합 가능**(막는 결함 없음, 시험 1926개, 432 시나리오 행동 표·변이 37개 모두 통과)이었고, 그 뒤 main(69139b0: #34 사이트 정리·#36·#37)을 다시 합쳐 PR 로 올린다
+
+### 한 일
+- `origin/ai/claude/blogger-auth-check`에서 새 브랜치를 만들고 `origin/main`(9ba5313)을 **병합 커밋**으로 합쳤다(리베이스 아님, 병합 커밋 `18dac09`, 부모 `0f24ecd`·`9ba5313`). 문서 정리는 별도 커밋으로 나눴다. main 쪽에는 호출 기록(#24)·출처 개편(#27~#31)·확인 필요 모음·Pages 배포 확인·Actions 가이드·모델 3.7 제거·예약 47분 틱·`defaults.mode` draft 복귀(#33)가 들어 있다.
+- **충돌 7개 파일과 해결**(원칙: main의 새 내용을 지키고 브랜치 추가분을 더한다)
+
+| 파일 | 해결 |
+|---|---|
+| `pipeline/run.py`(4곳) | import는 main의 `call_log_of`·`purpose`와 브랜치의 `redact`·`PLATFORMS`를 두고 안 쓰게 된 `mask`만 뺐다. 인증 점검 뒤로 옮겨진 주제 선정을 `with purpose(llm, "topic-expansion"):`로 감쌌다. `LLM_FAILED`는 이력에 브랜치의 `redact(exc, secret_values)`, 요약에 main의 `ai_lines()`. 성공 요약은 브랜치의 `lines` 끝에 `lines += [f"- {line}" for line in ai_lines()]` |
+| `.github/workflows/blogger.yml` | `publish` choice(off·draft·publish, 기본 draft)·`auth_check` 유지, main의 `dry_run` 기본 켜짐·설명 유지. `publish` 설명에 main이 더한 "연습 실행을 풀었을 때만 적용" 뜻을 넣되 120자 이내로 줄임 |
+| `HANDLER.md`(2곳) | 브랜치의 재개 절차·§10 5-4를 두고, 병합으로 낡아진 두 문장("이 입력이 아직 없으면", "기본값이 바뀌면")을 현재형으로 고치고 main의 "연습 실행 기본 켜짐" 설명을 더함 |
+| `docs/ARCHITECTURE.md`(2곳) | `mode` 행은 브랜치(초안함 업로드), `workflow` 행은 main(cron 목록·47분 틱), 블로그 추가 플레이북 5단계는 둘을 합침 |
+| `docs/DEFECT_REGISTER.md`(3곳) | main의 D-49~D-54·D-58~D-63 전부 + 브랜치의 D-55~D-57(D-49는 브랜치가 바꾸지 않아 main의 정정판). 관측 체크리스트는 main 9행 + 브랜치 2행. 번호 D-01~D-63 순서·중복 없음 확인 |
+| `docs/ENGINEERING_GUIDE.md` | L3 행은 브랜치(이미 "`연습 실행` 체크를 풀고 `publish`=`draft`") |
+| `tests/test_workflow_names.py` | `ALLOWED_REFS` 합집합(`inputs.auth_check`·`inputs.real_ai`) |
+
+- **충돌 없이 합쳐졌지만 확인한 것**: `pipeline/blogs.json`(main의 모델 3개·`defaults.mode` draft, 두 블로그 모두 `mode`를 직접 적음 — REG-1, `chance` auto·`blogger_macat` **off 유지**), `pipeline/registry.py`의 REG-1, `tests/test_registry.py`·`tests/test_validate_repo.py`(main과 브랜치가 각자 더한 시험이 같이 통과). 병합 커밋 기준으로 main 대비 바뀐 파일은 브랜치가 원래 바꾸던 23개와 `tests/test_manual_run_defaults.py`뿐이고(문서 정리 커밋이 `docs/ACTIONS_GUIDE.md`·`docs/SESSION_START.md`·`인수인계/작업내용.md`·`WORKLOG.md`를 더한다), Chance 쪽(`generator.py`·`chanceblog.yml`·`chance-fix-images.yml`·`pages.yml`·`pipeline/llm.py`)은 바뀌지 않았다.
+- **순수 병합이 아닌 변경과 이유**
+  1. `tests/test_manual_run_defaults.py`(4건, 프로덕션 코드 변경 없음): 병합 뒤 이 파일의 3건이 실패했다 — 옛 체크박스 전제의 `test_a_manual_run_publishes_only_when_the_box_is_checked`('true'→'on', 입력 없음→'off')와, 낡은 안내 문구를 찾는 `test_every_blogger_first_run_guidance_tells_to_uncheck_the_practice_run`(HANDLER의 "L3 초안 1건"·"`publish`를 체크하지 말고"는 브랜치가 3택 문구로 바꿨고 브랜치 시험 `test_the_stale_publish_checkbox_wording_is_gone_from_the_operator_docs`가 옛 문구의 부재를 요구한다), 그리고 ARCHITECTURE 첫 실행 행에 `publish`가 없어야 한다는 `test_the_architecture_first_run_row_does_not_depend_on_the_shape_of_the_publish_input`(그 시험 자신이 draft-upload 병합 뒤에는 바뀔 것을 예고했다). 기대를 약하게 만들지 않고 새 구조로 바꿨다: 수동 실행은 고른 값(off·draft·publish)을 그대로 넘기고 러너가 'publish'만 즉시 게시('on')로 읽음, `publish` 입력은 choice(off·draft·publish)이고 기본값이 `draft`(즉시 게시가 아님), HANDLER 두 줄은 새 문구(`publish=draft`·`publish`를 `draft`(기본값))에서 `연습 실행` 체크를 풀라고 말함(정규식에 '푼'을 허용 — 브랜치 시험이 "체크를 푼"을 요구한다), ARCHITECTURE 행은 `publish=draft`·`publish=off`를 말하고 `publish=publish`는 말하지 않음. 같은 클래스의 정기 실행 시험은 3택 값으로 넓혔다.
+  2. `blogger.yml` `publish` 입력 설명: main의 "연습 실행을 풀었을 때만 적용됩니다"를 그대로 더하면 125자라 브랜치 시험(`test_input_descriptions_stay_short_enough_to_read_in_the_run_workflow_dialog`, 120자 이하)이 실패해 "글을 어디까지(연습 실행을 풀어야 적용): …"로 줄였다.
+  3. `pipeline/run.py`에서 `mask` import 제거(의뢰 목록의 항목): `redact`가 안에서 `mask`를 부르므로 마스킹은 그대로다.
+- **가이드 정리**(검증자 목록은 이 파일 2026-10-25 총괄 항목): `docs/ACTIONS_GUIDE.md`의 `병합대기` 표식 5곳(`blogger-auth` 3, `blogger-draft` 2)과 각 "(아직 병합 전인 기능입니다…)" 안내 줄을 걷고 본문은 현재형으로 남겼다. 먼저 읽기 3의 표식 설명 문장 삭제(마지막 표식이 사라졌으므로). 3-12 시크릿 단계(5번 행)·6번 행·"하지 말 것"의 "초안함 업로드 모드가 있을 때만/없을 때" 한정 문구 삭제. 3-12 `defaults.mode` 문장 → "줄이 없으면 검증기(REG-1)가 오류로 막습니다". `BLOGGER_API_SETUP.md` 날짜 문장("2026-10-25 기준으로 … 낡은 부분이었습니다")과 "고쳐져 있으니" 문장을 날짜 없는 문장으로. `draft_uploaded`를 6-3 "하는 일"·"정상일 때"에 합치고 표식 블록의 중복 줄 삭제. 인증 점검만 실행의 "정지 중에도 점검하는 예외"를 3-12 2번 행·"알아 둘 것"·6-3 "지금 상태"에 표기. 용어 풀이 "모드" 행의 "defaults 이어받음"을 REG-1 문장으로. `.github/editorial/BLOGGER_API_SETUP.md` 머리의 "초안함 업로드 모드가 병합된 뒤에" 한 줄을 병합 전후와 무관한 순서 안내로.
+- 상태 문서: `docs/SESSION_START.md` §5 머리·§5-1 #25 표현·§5-2 Blogger 행·§5-4 1번, `인수인계/작업내용.md` 머리·§2 행·§5 항목. **병합됨이 아니라 "push됨·독립 검증 대기"**로 적었다.
+
+### 검증 증거 (최종 트리 기준, 이 PC: Windows·Python 3.12.10)
+- `python -m unittest discover -s tests`(`PYTHONIOENCODING=utf-8`) → **1926개 통과, 실패·오류 0**(약 160초). 병합 직후 첫 실행에서 `tests/test_manual_run_defaults.py` 3건이 실패했고(위 1번), 고친 뒤 전체 실행에서 `publish` 입력 설명 125자 1건이 더 실패해 줄였다. 이 밖에 병합이 만든 시험 실패는 없었다. 모델 수·호출 수를 4개로 가정한 시험은 브랜치 새 시험에 없었다(`MODEL_COUNT`로 바꿀 곳 없음).
+- `python scripts/validate_repo.py` → 오류 0건·경고 2건(`LIQUID-1` 인수인계 초안 문서, `EXPOSE-1` 내부 문서 공개 — 기준선과 같음).
+- pyflakes(바뀐 .py 17개) → 새 지적 0. `_bootstrap` 미사용 import 3건(`tests/test_health_daily.py`·`tests/test_publisher_blogger.py`·`tests/test_registry.py`)은 main에도 있는 기준선이다. actionlint 1.7.12 → 0건.
+- `git diff --check`(main 대비 변경분) → 이 항목 머리 줄의 끝 공백 2칸(마크다운 줄바꿈, 기존 항목과 같음)만 지적한다.
+- **변이 확인**(저장소 밖 임시 사본에서만): ① `BLOGGER_PUBLISH` 식을 옛 체크박스 식으로 ② `publish` 기본값을 `publish`로 ③ ARCHITECTURE 첫 실행 행에서 `publish=off` 삭제 ④ HANDLER §10 5-4의 "연습 실행 체크를 푼 채" 삭제 ⑤ `publish` 설명을 120자 초과로 ⑥ `run.py` 성공 요약의 `ai_lines()` 줄 삭제 ⑦ 주제 선정의 `purpose(...)` 감싸기 삭제 ⑧ `LLM_FAILED` 요약의 `ai_lines()` 삭제 — **8개 모두 시험이 잡았다**.
+- 로컬 점검: `python -m pipeline.registry` 통과(`chance` auto·`blogger_macat` off), `python -m pipeline.plan --platform blogger` → `{"include":[]}`(정기 실행은 대상 0개), `--include-off`는 인증 점검 전용으로만 `blogger_macat`을 넣음, `python -m pipeline.run --blog blogger_macat --dry-run` → `MODE_OFF` 건너뜀·종료 0.
+- **실행하지 못한·하지 않은 것**: GitHub Actions(L2·L3 — 수동 실행·dispatch 없음), 실제 구글 API 호출(시크릿 없음, 가짜 게시자 시험만), 통합본에서의 Gemini 실호출. (통합본의 독립 검증은 이 항목을 쓴 뒤 별도 세션이 했다 — 아래 '독립 검증과 재통합'.)
+
+### 독립 검증과 재통합 (2026-10-26)
+- 별도 세션이 새 clone 에서 통합본(head 4bd6def, 기준 main 9ba5313)을 검증했다 — 판정 **병합 가능**(막는 결함 없음): 전체 시험 1926개, 432 시나리오 행동 표(모드×입력×시크릿×실패 지점), 인증 점검 실패 18개 시나리오·분류 10종 모두 Gemini 0회·게시 0회, 변이 37개 모두 시험이 잡음, Chance 경로 불변, 비밀 모양 0건. 낮음·문서 지적(`BLOGGER_API_SETUP.md` "어느 경우에도" 문장의 인증 점검 예외, `HANDLER` 재개 절차 중복, PR 본문에 `docs/CHARTER.md` 한 줄, 낡은 `REQUEST_BRIEFING` 줄)은 PR 에서 반영하거나 후속으로 남겼다.
+- 그 뒤 main 이 움직여 두 번 다시 합쳤다: 69139b0(#34·#36·#37, 충돌 HANDLER·WORKLOG·작업내용 3개 문서) → 같은 검증자가 델타 확인(병합 가능, 코드·워크플로 바이트 동일, 전체 시험 1942개, 검증기 오류 0·경고 1), 이어 f37a94b(#35, 충돌 DEFECT_REGISTER 관측 표·작업내용 2개 문서). 코드·워크플로·시험은 재통합으로 바뀌지 않았다.
+
+### 다음 AI에게 남기는 주의사항·남은 것
+1. 이 브랜치는 독립 검증(병합 가능)을 거쳐 PR 로 올렸다(2026-10-26). 병합해도 Blogger는 켜지지 않는다 — `blogger_macat`은 `mode: off`이고 시크릿 4종은 병합 뒤 운영자가 영문 프로필·`mode: draft` 승인 뒤에 직접 등록한다. 지금 등록하지 않는다.
+2. 작은 후속(이번에 일부러 하지 않음): 글을 만들기 전 인증 점검이 실패한 실행(`AUTH_CHECK_FAILED`)의 요약에는 main의 `Gemini 호출: N회` 줄이 없다(그 시점의 호출은 0회라 정보 손실은 없지만 "모든 종료 경로에 남긴다"는 main의 규칙과 한 곳 어긋남). `_auth_check_failed`에 `ai_lines()`를 넘기면 되고, 시험은 `tests/test_gemini_call_log.py` 5절에 한 건 더하면 된다.
+3. `docs/ACTIONS_GUIDE.md` 3-13 표의 "후보 3건 × 모델 4개"·"최대 12건"은 모델이 3개가 된(#33) 뒤 낡은 숫자다(main의 문서, 이번 병합이 만든 것이 아님).
+4. `HANDLER.md` 재개 절차에는 `mode: draft`가 ②와 ⑤에 두 번 나온다. 브랜치 시험(`test_the_stale_publish_checkbox_wording_is_gone_from_the_operator_docs`)이 "인증 점검만 실행 → `mode: draft` 전환 → `publish=draft`" 순서를 못 박고 있어 건드리지 않았다. 문장을 정리하려면 시험과 함께 고친다.
+5. `docs/REQUEST_BRIEFING.md` 178행("시크릿 등록은 이 기능이 병합된 뒤에만")은 이 PR 에서 "병합되면(PR 열림) 시크릿·OAuth 등록은 운영자가 직접"으로 고쳤다. 병합 뒤 Actions 확인은 `docs/DEFECT_REGISTER.md` 하단 체크리스트의 D-55~D-57 두 행을 따른다.
+6. 비밀·시크릿: 이 변경에는 값이 없다(PR 변경분에서 키 모양 문자열 0건 확인). 시크릿 등록·Actions 실행·dispatch는 하지 않았다.
+
+---
 ## [2026-10-26] Claude – 코드·상태 파일을 사이트에서 뺌 (운영자 승인 2026-10-26 "2. 추천대로", T3 광고 표면 `_config.yml`)
 
 **작업자**: Claude  

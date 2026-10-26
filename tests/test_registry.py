@@ -84,6 +84,34 @@ class InvalidRegistryTest(unittest.TestCase):
     def test_bad_mode(self):
         self.assertHas(self.errors(lambda r: r["blogs"][0].update(mode="yolo")), "mode는")
 
+    def test_every_blog_must_write_its_own_mode(self):
+        """defaults.mode 에 기대면 새 블로그가 곧바로 auto 로 글을 올릴 수 있다 — 항목마다 mode 를 직접 적게 한다."""
+        for index in (0, 1):
+            errors = self.errors(lambda r, i=index: r["blogs"][i].pop("mode"))
+            self.assertHas(errors, "mode")
+            self.assertHas(errors, "직접")
+
+    def test_a_missing_mode_is_reported_whatever_the_default_is(self):
+        """기본값이 무엇이든(off·draft·auto) 빠진 mode 는 오류다. 기본값이 바뀌어도 판정이 같아야 한다."""
+        for default in ("off", "draft", "auto"):
+            def mutate(r, d=default):
+                r["defaults"]["mode"] = d
+                r["blogs"][1].pop("mode")
+            self.assertHas(self.errors(mutate), "직접")
+
+    def test_the_default_mode_value_itself_is_not_judged(self):
+        """운영자가 defaults.mode 를 바꿔도(예: draft -> auto) 블로그가 mode 를 직접 적었다면 통과한다."""
+        for default in ("off", "draft", "auto"):
+            self.assertEqual(self.errors(lambda r, d=default: r["defaults"].update(mode=d)), [], default)
+
+    def test_the_message_names_the_blog_so_the_operator_knows_which_entry_to_fix(self):
+        errors = self.errors(lambda r: r["blogs"][1].pop("mode"))
+        self.assertTrue(any("blogger_macat" in e and "직접" in e for e in errors), errors)
+
+    def test_the_two_current_blogs_write_their_mode_in_the_file(self):
+        raw = registry.load_registry()["blogs"]
+        self.assertEqual({b["key"]: b["mode"] for b in raw}, {"chance": "auto", "blogger_macat": "off"})
+
     def test_http_url(self):
         self.assertHas(self.errors(lambda r: r["blogs"][0].update(url="http://x.example")), "https://")
 

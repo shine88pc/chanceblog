@@ -349,14 +349,28 @@ class RunNameTest(unittest.TestCase):
 
     def test_blogger_titles(self):
         self.assertEqual(self.title("blogger.yml", "schedule"), "Blogger 글 작성 · 정기")
-        manual = {"dry_run": False, "publish": False}
-        self.assertEqual(self.title("blogger.yml", "workflow_dispatch", manual), "Blogger 글 작성 · 수동(초안만 저장)")
-        self.assertEqual(self.title("blogger.yml", "workflow_dispatch", {**manual, "publish": True}), "Blogger 글 작성 · 수동(게시)")
-        self.assertEqual(self.title("blogger.yml", "workflow_dispatch", {"dry_run": True, "publish": False}),
+        # 수동 실행의 publish 는 3택(off=저장소 파일만, draft=Blogger 초안함 업로드, publish=즉시 게시)이다
+        manual = {"dry_run": False, "publish": "draft"}
+        self.assertEqual(self.title("blogger.yml", "workflow_dispatch", manual), "Blogger 글 작성 · 수동(Blogger 초안함 업로드)")
+        self.assertEqual(self.title("blogger.yml", "workflow_dispatch", {**manual, "publish": "off"}),
+                         "Blogger 글 작성 · 수동(저장소 파일만 저장)")
+        self.assertEqual(self.title("blogger.yml", "workflow_dispatch", {**manual, "publish": "publish"}),
+                         "Blogger 글 작성 · 수동(즉시 게시)")
+        self.assertEqual(self.title("blogger.yml", "workflow_dispatch", {"dry_run": True, "publish": "off"}),
                          "Blogger 글 작성 · 수동(연습: 저장·게시 안 함)")
-        # 연습이면 게시 체크와 무관하게 아무것도 게시하지 않는다(blogger.yml 의 DRY_RUN 이 우선)
-        self.assertEqual(self.title("blogger.yml", "workflow_dispatch", {"dry_run": True, "publish": True}),
-                         "Blogger 글 작성 · 수동(연습: 저장·게시 안 함)")
+        # 연습이면 선택과 무관하게 아무것도 올리지 않는다(blogger.yml 의 DRY_RUN 이 우선)
+        for choice in ("off", "draft", "publish"):
+            self.assertEqual(self.title("blogger.yml", "workflow_dispatch", {"dry_run": True, "publish": choice}),
+                             "Blogger 글 작성 · 수동(연습: 저장·게시 안 함)")
+        # '인증 점검만 실행'은 글을 만들지 않으므로 다른 선택(연습·publish)보다 제목에 먼저 드러난다
+        for dry_run in (False, True):
+            for choice in ("off", "draft", "publish"):
+                self.assertEqual(self.title("blogger.yml", "workflow_dispatch",
+                                            {"auth_check": True, "dry_run": dry_run, "publish": choice}),
+                                 "Blogger 글 작성 · 수동(인증 점검만: 글 안 만듦)")
+        self.assertEqual(self.title("blogger.yml", "workflow_dispatch", {"auth_check": False, "dry_run": False, "publish": "draft"}),
+                         "Blogger 글 작성 · 수동(Blogger 초안함 업로드)")
+        self.assertEqual(self.title("blogger.yml", "schedule", {"auth_check": True}), "Blogger 글 작성 · 정기")
 
     def test_watchdog_titles(self):
         self.assertEqual(self.title("watchdog.yml", "schedule"), "발행 중단 감시 · 정기")
@@ -370,7 +384,7 @@ class RunNameTest(unittest.TestCase):
                          "이슈 #7 수정 요청 처리 · 수동")
 
     ALLOWED_REFS = {"github.event_name", "github.event.issue.number", "inputs.dry_run", "inputs.publish", "inputs.issue_number",
-                    "inputs.real_ai"}
+                    "inputs.auth_check", "inputs.real_ai"}
 
     def test_run_names_only_use_event_kind_numbers_and_booleans(self):
         """run-name 에는 이슈 제목·PR 제목·브랜치명·자유 입력(blog, topic) 같은 외부 유래 문자열을 넣지 않는다."""
