@@ -733,8 +733,10 @@ _EC_NOTICE = {
           "원문은 CC BY 4.0 라이선스(" + _CC_BY + "deed.ko)로 제공됩니다. 집행위원회는 이 글을 검토하거나 보증하지 않았습니다.",
     "en": "This article was written with an AI tool by summarising and restructuring material published by the European Commission; changes were made to the original. "
           "The original is licensed under CC BY 4.0 (" + _CC_BY + "). The European Commission has not reviewed or endorsed this article."}
+# 건강·의료 주제의 안전 지침(Chance 의 일상·마음 분야와 건강 관련 정책·통계 글). 통계·정책 사실만 전하고 의학적 조언은 하지 않는다("의심스러우면 게시하지 않는다").
+HEALTH_RULE = "건강·의료 정보는 정책과 통계 사실만 전하고 진단·치료·복용·예방 효과를 조언하지 마세요."
 _EC_PROMPT_RULE = ("집행위원회의 제안·협의·계획과 이미 확정된 법·결정을 구분하세요. 요약에 없는 시행 시기·금액·법적 효력은 쓰지 마세요. "
-                   "원문의 의미를 왜곡하지 말고, 집행위원회가 이 글을 검토하거나 보증한 것처럼 쓰지 마세요.")
+                   "원문의 의미를 왜곡하지 말고, 집행위원회가 이 글을 검토하거나 보증한 것처럼 쓰지 마세요. " + HEALTH_RULE)
 # 집행위원회 피드에서 뺄 기사 주소: Eurostat 소식(Eurostat 자체 고지가 따로 있음)과 Horizon 매거진 기사(2026-10-26 검증이 DG Environment 피드에 섞여 드는 것을 찾음).
 # Horizon 은 재게시에 원 기자 이름·원문 링크·바닥글 문구를 요구하는데 피드의 기자 이름(dc:creator)을 아직 읽지 않아 지킬 수 없다.
 _EC_EXCLUDE_LINK = r"/eurostat/|/horizon-magazine/"
@@ -746,7 +748,7 @@ def _ec_citation(creator):
 
 
 # Statistics Canada Open Licence(https://www.statcan.gc.ca/en/terms-conditions/open-licence): 상업 이용·재가공(Value-added Products)을 허용하고,
-# 재가공물에는 "Adapted from Statistics Canada, <상품명>, <기준 시점>. This does not constitute an endorsement by Statistics Canada of this product."
+# 재가공물에는 "Adapted from Statistics Canada, <상품명>, <기준일>. This does not constitute an endorsement by Statistics Canada of this product."(코드는 상품명 자리에 피드 제목을, 기준일 자리에 발표일을 채운다)
 # 문구를 넣으라고 한다. 정보를 정확히 옮기고(reproduce accurately) 통계청이 보증하는 것처럼 보이게 하지 말며 통계청 이름·로고·문장(紋章)·기타 상징·도메인 이름을 출처 표기 밖에서 쓰지 말라는 조건("Advertising and Publicity")이 있다.
 # 피드 하나(The Daily 전체 주제)를 분야별 주제어로 나눠 세 소스로 읽는다. 항목 제목이 Atom type="xhtml"이라 parse_feed 가 자식 요소까지 읽는다.
 _STATCAN_FEED = "https://www150.statcan.gc.ca/n1/rss/dai-quo/0-eng.atom"
@@ -756,7 +758,7 @@ _STATCAN_NOTICE = {
     "ko": "이 글은 AI 도구가 캐나다 통계청(Statistics Canada)이 발표한 자료를 바탕으로 재구성해 작성했습니다. 통계청은 이 글을 검토하거나 보증하지 않았으며, 수치와 기준 시점은 통계청의 발표를 따릅니다.",
     "en": "This article was written with an AI tool, adapting information published by Statistics Canada. Statistics Canada has not reviewed or endorsed it; figures and reference periods follow Statistics Canada's release."}
 _STATCAN_PROMPT_RULE = ("통계청 발표 요약의 수치·단위·기준 시점(월·분기·연도)을 그대로 쓰세요. 반올림·환산·추정을 하지 말고, 발표에 없는 원인이나 전망을 통계청의 말처럼 쓰지 마세요. "
-                        "통계청이 이 글을 보증하는 것처럼 쓰지 마세요. 원문 링크의 글자는 '통계청 발표'처럼 설명 문구로 쓰고 주소(statcan.gc.ca)를 글자로 보이게 쓰지 마세요.")
+                        "통계청이 이 글을 보증하는 것처럼 쓰지 마세요. 원문 링크의 글자는 '통계청 발표'처럼 설명 문구로 쓰고 주소(statcan.gc.ca)를 글자로 보이게 쓰지 마세요. " + HEALTH_RULE)
 # 통계청 사이트 robots.txt 의 Crawl-delay: 2 를 지켜, 기사 페이지를 연달아 읽을 때 사이에 이만큼(초) 기다린다.
 _STATCAN_PAGE_DELAY = 2
 # 글감이 못 되는 발표(통계 상품 안내·부문별 물가지수·공급 처리표·원자료 모음)와, 자동으로 다시 쓰기에는 민감한 주제(자살·약물 과다복용·마약성 진통제·성폭력·살인)는 쓰지 않는다.
@@ -765,7 +767,8 @@ _STATCAN_EXCLUDE = (
     r"(?<!consumer )(?<!housing )\bprice index(?:es)?\b|\bsupply and disposition\b|\bproduction survey\b|\bdata availability\b|\bannouncement\b"
     r"|\bstorage survey\b|\bfuel consumption\b|\bgenerating stations?\b|\bsawmills?\b|\bpost-production\b|\bcredit aggregates\b"
     r"|\binteractive dashboard\b|\bopen database\b|\bdrinking water\b|\bmapping services\b"
-    r"|\bsuicid|\boverdose|\bopioid|\bstimulant|\bself-harm|\bsexual (?:assault|behaviou?rs)|\bhomicide")
+    r"|\bsuicid|\boverdose|\bopioid|\bstimulant|\bself-harm|\bsexual (?:assault|behaviou?rs)|\bhomicide"
+    r"|\b(?:family|domestic|intimate partner|gender-based) violence\b|\bchild (?:abuse|maltreatment)\b|\bviolent victimi[sz]ation\b")
 _STATCAN_ECONOMY = (
     r"consumer price index|labour force survey|retail trade|wholesale trade|gross domestic product|merchandise trade|trade in services"
     r"|employment insurance|job vacanc|payroll|earnings|new housing price index|building permits|monthly survey of manufacturing"
@@ -840,7 +843,8 @@ NEWS_SOURCES = [
     # 유럽연합 집행위원회 소식: 약 1/4(30건 중 8건)이 국채 입찰 결과·신청 안내라 제외하고, 선거·정치광고·민주주의 방패 글은 중립을 위해 쓰지 않는다(Pew와 같은 원칙).
     {"name": "European Commission", "lane": "society", "url": "https://commission.europa.eu/node/2/rss_en",
      "terms": _EC_TERMS,
-     "exclude_title": r"\bauctions?\b|\bEU-(?:Bills?|Bonds?)\b|\bapply now\b|\bcall for (?:applications|tenders|proposals|experts)\b|\bwebinar\b"
+     "exclude_title": r"\bauctions?\b|\bEU-(?:Bills?|Bonds?)\b|\bapply (?:now|for)\b|\bcall for (?:applications|tenders|proposals|experts)\b|\bwebinar\b"
+                      r"|^commissioner [\w’'-]+ (?:in|visits?|meets?|travels?|to (?:visit|meet|address))\b"
                       r"|\belections?\b|\bpolitical (?:ads?|advertising|parties)\b",
      "exclude_link": _EC_EXCLUDE_LINK,
      "exclude_tags": r"^democracy$|\belections?\b",
@@ -850,14 +854,15 @@ NEWS_SOURCES = [
      "url": "https://energy.ec.europa.eu/node/2/rss_en",
      "terms": _EC_TERMS,
      # 연설·성명·공동 선언은 글감이 못 된다(Press Corner 항목은 제3자와 함께 낸 문서일 수 있고 Press Corner 의 법적 고지는 확인하지 못했다).
-     "exclude_title": r"^(?:joint )?statements?\b|^speech\b|^remarks\b|\bleaders[’']? statement\b|\bdeclaration\b|\bjoint press conference\b"
-                      r"|\bapply now\b|\bcall for (?:feedback|evidence|applications|tenders|proposals)\b|\bwebinar\b",
+     "exclude_title": r"^(?:joint )?statements?\b|^speech\b|\b(?:opening |closing )?remarks\b|\bleaders[’']? statement\b|\bdeclaration\b|\bjoint press conference\b"
+                      r"|^commissioner [\w’'-]+ (?:in|visits?|meets?|travels?|to (?:visit|meet|address))\b"
+                      r"|\bapply (?:now|for)\b|\bcall for (?:feedback|evidence|applications|tenders|proposals)\b|\bwebinar\b",
      "exclude_link": _EC_EXCLUDE_LINK,
      "citation": _ec_citation("European Commission, DG Energy"), "notice": _EC_NOTICE, "prompt_rule": _EC_PROMPT_RULE},
     {"name": "European Commission · Environment", "display_name": "European Commission (DG Environment)", "lane": "science",
      "url": "https://environment.ec.europa.eu/node/92/rss_en",
      "terms": _EC_TERMS,
-     "exclude_title": r"\bapply now\b|\bcall for (?:applications|tenders|proposals)\b|\bwebinar\b",
+     "exclude_title": r"\bapply (?:now|for)\b|\bcall for (?:applications|tenders|proposals)\b|\bwebinar\b",
      "exclude_link": _EC_EXCLUDE_LINK,
      "citation": _ec_citation("European Commission, DG Environment"), "notice": _EC_NOTICE, "prompt_rule": _EC_PROMPT_RULE},
     # JRC: 요약이 짧은 항목은 기사 페이지의 소개 문구를 읽는다. 국방·안보 분류 글은 쓰지 않는다.
@@ -1027,8 +1032,11 @@ def parse_feed(data):
         def text_of(*names):
             for child in node:
                 if child.tag.split("}")[-1] in names:
-                    # Atom 의 type="xhtml" 은 글자가 자식 요소(div·span) 안에 들어 있다(Statistics Canada The Daily). 자식까지 이어 읽는다.
-                    text = (child.text or "").strip() or "".join(child.itertext()).strip()
+                    text = (child.text or "").strip()
+                    # Atom 의 type="xhtml" 은 글자가 자식 요소(div·span) 안에 들어 있다(Statistics Canada The Daily). 그때만 자식까지 이어 읽는다
+                    # (그 밖의 중첩 요소 — 예: <media:content> 안의 <media:description> — 를 요약으로 착각하지 않게).
+                    if not text and child.get("type") == "xhtml":
+                        text = "".join(child.itertext()).strip()
                     if text:
                         return text
             return ""

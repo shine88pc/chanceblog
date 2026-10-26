@@ -1777,6 +1777,55 @@ class SourceRuleSamplesTest(unittest.TestCase):
                       "Energy statistics: renewables share reaches a record"):
             self.assertTrue(self.kept(energy, title), title)
 
+    def test_every_commission_source_keeps_its_display_name_and_the_eurostat_rule(self):
+        by_name = {s["name"]: s for s in g.NEWS_SOURCES}
+        expected = {"European Commission": None, "European Commission · Energy": "European Commission (DG Energy)",
+                    "European Commission · Environment": "European Commission (DG Environment)",
+                    "European Commission · JRC": "European Commission, Joint Research Centre",
+                    "EU Digital Strategy": "European Commission (Digital Strategy)"}
+        for name, shown in expected.items():
+            with self.subTest(source=name):
+                self.assertEqual(by_name[name].get("display_name"), shown)
+                self.assertEqual(by_name[name].get("exclude_link"), g._EC_EXCLUDE_LINK)
+                self.assertFalse(self.kept(name, "Eurostat: EU trade in wind turbines increased in 2025",
+                                           link="https://ec.europa.eu/eurostat/web/products-eurostat-news/w/ddn-20261020-1"), name)
+
+    def test_the_trust_lists_of_the_new_domains_are_exactly_the_agreed_lanes(self):
+        lanes_of = {domain: {lane for lane, domains in g.TRUSTED_SOURCE_DOMAINS.items() if domain in domains}
+                    for domain in ("ec.europa.eu", "commission.europa.eu", "statcan.gc.ca")}
+        self.assertEqual(lanes_of, {"ec.europa.eu": {"science", "economy", "society", "technology"},
+                                    "commission.europa.eu": {"society"},
+                                    "statcan.gc.ca": {"economy", "society", "daily_life"}})
+
+    def test_the_commission_and_statcan_prompt_rules_forbid_medical_advice(self):
+        by_name = {s["name"]: s for s in g.NEWS_SOURCES}
+        for name in ("European Commission", "European Commission · Energy", "European Commission · Environment", "European Commission · JRC",
+                     "EU Digital Strategy", "Statistics Canada · economy", "Statistics Canada · society", "Statistics Canada · daily life"):
+            with self.subTest(source=name):
+                self.assertIn("진단·치료·복용·예방 효과를 조언하지 마세요", by_name[name]["prompt_rule"])
+
+    def test_energy_and_news_skip_commissioner_visit_notices_and_promotions_but_keep_policy_news(self):
+        for name in ("European Commission · Energy", "European Commission"):
+            for title in ("Commissioner Jørgensen in Hungary to address high energy prices, energy security and housing",
+                          "Commissioner Jørgensen in Slovakia to discuss energy prices and security with Visegrad Energy Ministers",
+                          "Commissioner Kos visits Kyiv", "Turning 18? Apply for a DiscoverEU pass"):
+                self.assertFalse(self.kept(name, title), (name, title))
+        energy = "European Commission · Energy"
+        self.assertFalse(self.kept(energy, "Opening remarks by Commissioner Jørgensen at the press conference"))
+        for title in ("Oil Coordination Group discusses EU fuel market developments", "The Commissioner’s energy price package explained"):
+            self.assertTrue(self.kept(energy, title), title)
+
+    def test_atom_and_rss_nested_elements_are_not_taken_for_summaries_unless_they_are_xhtml(self):
+        rss = ("<rss xmlns:media='http://search.yahoo.com/mrss/'><channel><item><title>제목 하나</title>"
+               "<media:content url='https://x.test/i.jpg' type='image/jpeg'><media:description>이미지 설명입니다</media:description></media:content>"
+               "<description>진짜 요약 문장입니다.</description><link>https://www.reuters.com/a</link></item></channel></rss>").encode("utf-8")
+        item = g.parse_feed(rss)[0]
+        self.assertEqual(item["summary"], "진짜 요약 문장입니다.")
+        # xhtml 이 아닌 type 이 붙은 빈 요소는 자식 글자를 읽지 않는다
+        atom = ("<feed xmlns='http://www.w3.org/2005/Atom'><entry><title>T</title><summary type='html'><b>태그</b></summary>"
+                "<content>본문 글자</content><link href='https://www.reuters.com/b'/></entry></feed>").encode("utf-8")
+        self.assertEqual(g.parse_feed(atom)[0]["summary"], "본문 글자")
+
     def test_jrc_skips_defence_and_security_items_by_feed_category(self):
         jrc = "European Commission · JRC"
         self.assertTrue(self.kept(jrc, "AI adoption more than doubles in almost every EU strategic sector",
@@ -1788,6 +1837,10 @@ class SourceRuleSamplesTest(unittest.TestCase):
                                    ("Joint Research Centre", "Security and law enforcement", "Space, security, defence")))
         # 앵커가 있는 분류 태그는 정확히 그 태그일 때만 거른다
         self.assertTrue(self.kept(jrc, "Privacy tools for citizens", ("Joint Research Centre", "Security and law enforcement research methods")))
+        # 태그 하나만으로 결과가 갈린다(제외 정규식을 하나씩 지워도 시험이 실패하게)
+        self.assertFalse(self.kept(jrc, "Border technology", ("Security and law enforcement",)))
+        self.assertFalse(self.kept(jrc, "Space systems", ("Space, security, defence",)))
+        self.assertTrue(self.kept(jrc, "Space systems", ("Space",)))
 
     def test_eu_digital_strategy_skips_only_calls_for_tenders(self):
         name = "EU Digital Strategy"
@@ -1819,11 +1872,17 @@ class SourceRuleSamplesTest(unittest.TestCase):
                       "Study: Understanding quality of life among persons with disabilities in Canada—material and social well-being"):
             self.assertTrue(self.kept(life, title), title)
         # 자동으로 다시 쓰기에 민감한 주제는 세 분야 모두에서 뺀다. 같은 낱말이 든 평범한 제목은 살린다.
-        for title in ("Violent victimization and unwanted sexual behaviours experienced by 2SLGBTQ+ people in Canada, 2025",
-                      "Opioid and stimulant consumption patterns in select Canadian cities, January 2024 to March 2026",
-                      "Suicide mortality in Canada, 2023", "Homicide in Canada, 2025", "Drug overdose deaths and hospitalizations, 2025"):
-            for name in (economy, society, life):
-                self.assertFalse(self.kept(name, title), (name, title))
+        sensitive = ("Violent victimization and unwanted sexual behaviours experienced by 2SLGBTQ+ people in Canada, 2025",
+                     "Opioid and stimulant consumption patterns in select Canadian cities, January 2024 to March 2026",
+                     "Suicide mortality in Canada, 2023", "Homicide in Canada, 2025", "Drug overdose deaths and hospitalizations, 2025",
+                     "Police-reported violence among gender-related homicide victims in Canada, 2025",   # 2026-10-26 실제 피드 222번째 — 'police'(사회 주제어)에 걸려 제외어가 없으면 통과했다
+                     "Self-harm among youth in Canada, 2024", "Family violence in Canada, 2025", "Intimate partner violence, 2025",
+                     "Child abuse and maltreatment statistics, 2025")
+        for name in (economy, society, life):
+            src = next(s for s in g.NEWS_SOURCES if s["name"] == name)
+            for title in sensitive:
+                # 주제어 불일치(OFF_TOPIC)가 아니라 제외 규칙(EXCLUDED)이 직접 걸러야 한다 — 제외어를 지워도 시험이 실패하게
+                self.assertTrue(g._rule_excludes(src, title, {"link": "", "categories": []}), (name, title))
         # 분야가 다른 제목은 이 분야 주제어에 맞지 않아 떨어진다(OFF_TOPIC)
         self.assertFalse(self.kept(society, "Retail trade, August 2026"))
         self.assertFalse(self.kept(life, "Consumer Price Index, September 2026"))
