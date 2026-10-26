@@ -19,6 +19,11 @@
 - `tests/test_site_cleanup.py`: `MUST_EXCLUDE`에 11항목을 옮기고 `STATIC_EXPOSED`는 `README.md`만 남김. 사이트가 이 파일들의 주소를 쓰지 않음은 #34 검증(저장소·워크플로·`verify_pages_deploy.py`·홈 JS)에서 확인했다.
 - 문서: D-08 해결 표기, ARCHITECTURE·HANDLER·REQUEST_BRIEFING의 낡은 "내부 문서 공개" 서술, 작업내용(§2·§3 7·18번·이력).
 
+### 독립 검증과 반영
+- 별도 세션 검증(깨끗한 clone c2ba6b8, 판정 **병합 가능**): 전체 시험 1792개 통과·`validate_repo` 오류 0·경고 1(LIQUID-1)·AD-1 통과, Jekyll 3.10 규칙으로 추적 파일 전수 시뮬레이션에서 104개가 빠지고(운영 문서 27·코드·상태 77) 14개가 남으며(공개 13 + `README.md`) 우연히 빠지는 공개 파일 0건, 사이트 주소로 제외 대상을 읽는 코드·워크플로 0건, 변이 38건 중 의도한 것 전부 잡힘.
+- 권고 반영: `docs/ACTIONS_GUIDE.md`의 낡은 "경고 2" 정정, SESSION_START·REQUEST_BRIEFING 거울 표(7·17번 갱신, 18·19번 추가), `tests/test_site_cleanup.py`의 분류를 이름 정확 일치(`unclassified`)로 바꿔 `tests-report.html` 같은 새 공개 파일이 `tests` 접두사에 조용히 빠지는 것을 시험이 알리게 함(새 시험 1개), 시험 설명·이름 갱신.
+- 남긴 것: `README.md` 제외 여부는 기본값(그대로 열어 둠)으로 두고 작업내용 §3 19번에 올림. D-08 '해결'은 병합·배포 확인 뒤 확정.
+
 ### 남긴 것
 - 병합·배포 뒤 공개 사이트에서 `…/generator.py`·`…/pipeline/blogs.json`·`…/history.json`·`…/tests/…`가 404이고 사이트가 쓰는 주소(`posts.json`·`feed.xml`·`robots.txt`·홈·글 페이지)는 그대로 200인지 확인한다.
 
