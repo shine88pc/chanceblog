@@ -31,7 +31,7 @@
 |------|----------|------------------------------|
 | **Horizon**(EU 연구혁신 매거진) | CC BY 4.0, "all our articles are free to republish" — ① 원 기자 이름(byline) ② 원문 링크 ③ 바닥글 "This article was originally published in Horizon, the EU Research and Innovation magazine." 필수, 번역 허용 | `parse_feed`가 기자 이름(`dc:creator`)을 아직 읽지 않아 보류. 주 2건, 편집 품질이 가장 좋고 요약 전부 100자 이상. `https://projects.research-and-innovation.ec.europa.eu/en/horizon-magazine/articles.xml`(분야별 16개 피드: health 등) |
 | **ECDC**(유럽질병예방통제센터) | CC BY 4.0 + ECDC를 만든 이로 표기·라이선스 링크·변경 표시 3조건 | 감염병·보건 글은 의료 조언 위험(YMYL)이라 건강 주제 가드레일을 정한 뒤. `https://www.ecdc.europa.eu/en/taxonomy/term/1307/feed` 주 3~4건 |
-| **GOV.UK**(영국 정부) | OGL v3.0 — "Contains public sector information licensed under the Open Government Licence v3.0." (+ 라이선스 링크) | Atom `https://www.gov.uk/search/news-and-communications.atom?organisations[]=<부처 슬러그>`(부처 조합별). DSIT+AI Security Institute 조합은 14일에 1건뿐이고 DESNZ+Defra 조합은 주 10건이지만 영국 국내 정책 소식 위주. Atom `updated`는 마지막 수정 시각(새 글이 아닐 수 있음). **robots.txt가 AI 학습 크롤러 `meta-externalagent`를 `/search/all*`에만 막음**(성능 문제라는 주석, 피드 경로 아님) — "AI 크롤러를 막는 사이트" 원칙에 해당하는지 운영자 판단이 필요 |
+| **GOV.UK**(영국 정부) — **사용 결정(2026-10-26 사용자 "AI 학습을 위한 목적이 아니기에 문제가 없을 것으로 보여져")**, 후속 PR로 추가 | OGL v3.0 — "Contains public sector information licensed under the Open Government Licence v3.0." (+ 라이선스 링크) | Atom `https://www.gov.uk/search/news-and-communications.atom?organisations[]=<부처 슬러그>`(부처 조합별). **추가할 피드**: DESNZ+Defra(에너지·환경·식품·농촌, 주 10건, 과학·환경 분야)와 DSIT+AI Security Institute(기술 분야, 14일에 1건뿐이지만 AI 소식). **뺄 피드**: 재무부·DWP·DBT 경제 피드(20건 중 총리·장관·재무장관 발표와 연설이 대부분이라 정치 중립 원칙과 맞지 않음). Atom `updated`는 마지막 수정 시각(새 글이 아닐 수 있음). robots.txt는 AI 학습 크롤러 `meta-externalagent`를 검색 경로 `/search/all*`에만 막고(성능 이유 주석) 우리가 읽는 피드 경로는 막지 않는다 — 사용자가 이용 목적이 학습이 아니라는 이유로 문제가 없다고 판단 |
 | 영국 의회 Commons·Lords Library·POST | Open Parliament Licence v3.0 | 영국 정치 위주, 주 0~10건 |
 | NCSC(영국 사이버보안센터) | OGL v3.0 | 주 2~4건, CVE 정확성 문제 |
 | ONS(영국 통계청) | OGL v3.0 + 공정 이용 정책: UA가 운영자 이름과 연락처(주소)를 밝혀야 함 | 현재 UA에 주소가 없음 |
@@ -41,7 +41,6 @@
 | ECB(유럽중앙은행) | "자유 이용, ECB를 출처로 밝힐 것, 수정한 정보는 명시" | 연설·인터뷰 위주(15건 중 12건), 요약 없음, 문구가 느슨 |
 | 캐나다 중앙은행 | 자체 약관(자유 이용·출처·변경 표시) | 주 1건, '상업·재가공' 문구가 명시되지 않음 |
 | Taiwan Today(대만 외교부) | 정부 공개 데이터 이용 허가 v1.0(OGDL): "any purpose, including … Derivative Works" | 근거가 data.gov.tw 카탈로그(사이트 자체엔 © 문구뿐), pubDate가 날짜만, 기사 전문 제공. 포털 피드는 링크 호스트가 4곳 |
-| **Global Voices**(네덜란드 재단) | CC BY 3.0(재게시 환영 — 저자 이름을 글 맨 위에·원문 링크·변경 표시, 제3자 사진 제외) | 공급은 가장 좋음(일 3건). 그러나 이 단체의 자체 "AI 정책"(2026-09-09)이 AI가 쓴 글을 받지 않는다고 밝힘 — 재사용 제한은 아니지만 평판·항의 위험이라 **운영자 결정 필요**. 저자 이름을 읽는 기능도 필요 |
 | 360info(호주 대학 연구 해설) | CC BY 4.0 | 주 2~3건, 발행이 몰림 |
 | Our World in Data·eLife·Frontiers·SciDev.Net | CC BY 계열(조건부) | OWID는 "수정 금지" 문구를 먼저 문의해야 함(licensing 주소), eLife·Frontiers는 논문 초록 중심에 날짜만 있는 시각, SciDev는 CC BY 2.0/3.0 버전 충돌·저빈도 |
 | WIPO·Copernicus ACP(CC BY 4.0) | CC BY 4.0 | 저빈도, ACP 항목 링크가 `doi.org`(너무 넓은 해석기)라 신뢰 목록에 넣기 곤란 |
@@ -50,6 +49,7 @@
 ## 4. 제외와 이유
 
 - **약관상 상업 이용·재가공을 허용하지 않거나 허가·알림이 필요**: BIS(비상업), UNEP·UNDP·ITU·WMO·ESA(개인·비상업, 파생물 불가), UNCTAD(알림 필요), WHO·FAO(비상업·CC BY-NC-SA), World Bank(비상업, 파생물 불가), 영국 BoE(상업 재이용 금지)·UKRI(CC BY-NC-SA)·NICE("AI purposes … not covered")·Met Office(RSS 수정 금지), 캐나다 Canada.ca 부처들(상업 재배포는 사전 허가), 호주 CSIRO·BoM(상업 금지·스크레이핑 금지), 싱가포르 MAS·IMDA, 일본 AIST·JST(RSS 비상업·무수정)·JAXA·RIKEN·BoJ, 독일 DLR(이미지 CC BY-NC-ND), 프랑스 CNIL(CC BY-ND), The Conversation(CC BY-ND), 유럽의회("전체를 그대로 재생산"할 때만), EFSA("광고 옆에 링크 표시 금지"·상업·재가공 문구 없음), ENISA(출처 표시만, 피드 못 찾음), CERN(텍스트 라이선스 없음, 피드 404).
+- **운영자 결정으로 제외**: Global Voices(CC BY 3.0, 공급은 가장 좋았음 — 일 3건. 이 단체의 자체 "AI 정책"(2026-09-09)이 AI가 쓴 글을 받지 않는다고 밝혀 재사용 제한은 아니지만 평판·항의 위험이 있어 사용자가 2026-10-26 채팅에서 "제외해줘").
 - **robots.txt가 AI 크롤러를 이름으로 막음**: UNESCO·UNEP·WHO(CCBot 등)·The Conversation(약 55개)·아일랜드 정부 gov.ie(ClaudeBot·GPTBot 등 `Disallow: /`)·climate.copernicus.eu(`meta-externalagent` 전체 차단 + 라이선스 미확인). (Ars Technica·IEEE는 앞선 결정으로 제외.)
 - **라이선스는 허용이지만 쓸 피드가 없음**: Eurostat(서술형 피드는 robots.txt가 막고 열린 피드는 데이터셋 코드 갱신뿐), EEA(`Disallow: /*/rss.xml`), CORDIS(공개 피드 주소 없음), INSEE(RSS 목록이 JS로 생성), 덴마크 통계(피드 못 찾음, robots.txt에 GPTBot 이름), 호주 ABS·뉴질랜드 Stats NZ·아일랜드 CSO(CC BY 4.0이나 피드 없음), 영국 ICO(RSS 중단)·FSA(옛 사이트 폐쇄)·NHS(뉴스 피드 미확인), 일본 METI(영문 Atom이 2026-06-19에 멈춤)·MOF(제목만), OECD·ILO(약관은 허용이나 피드 없음; ILO robots는 `ai-train=no` 신호), Wikinews(피드 폐지·robots.txt가 피드 경로를 막음), Copernicus.eu(사이트 보관, 피드 2026-04-23 이후 정지).
 - **접근 불가(미확인)**: 호주 RBA·뉴질랜드 RBNZ·영국 Ofcom(403), 뉴질랜드 Beehive(Imperva 챌린지), canada.ca·health.gov.au(시간 초과), IMF·IEA(403), Eurofound(Vercel 429), 유럽연합 이사회(Cloudflare 403 — 피드만 응답), 핀란드 통계(502), MDPI(우리 UA로 403, 브라우저 UA는 200).
