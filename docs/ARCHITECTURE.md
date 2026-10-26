@@ -26,7 +26,7 @@
 |------|------------------------|---------------------------|
 | 엔진 | `generator.py` — 레거시 단일 파일. Phase 3에서 `pipeline/`으로 이관 | `python -m pipeline.run --blog blogger_macat` (`blogger_generator.py`는 호환 래퍼) |
 | 트리거 | `chanceblog.yml` 매시 17분·47분(KST 9·18시 슬롯을 코드가 판단), 수동 (이슈 요청은 `issue-edit.yml`이, 기존 글 이미지 교체는 수동 전용 `chance-fix-images.yml`이 따로 처리) | `blogger.yml` 매일 02:00 UTC(KST 11시), 수동 |
-| 주제 | 약관을 읽은 직접 RSS(NASA·Pew·Federal Reserve·EU 집행위원회 계열·캐나다 통계청·영국 정부 GOV.UK 등, UN News는 보류), 신뢰 도메인 허용 목록, 72시간 이내, 출처 원문 검증 | 프로필 시드 32개 + LLM 확장, 쿨다운 60일, 금지 주제 필터, Chance 이력과 교차 중복 방지 |
+| 주제 | 약관을 읽은 직접 RSS(NASA·Pew·Federal Reserve·EU 집행위원회 계열·캐나다 통계청·영국 정부 GOV.UK 등, UN News는 보류), 신뢰 도메인 허용 목록, 72시간 이내, 출처 원문 검증 | 프로필 시드(영문 34개) + LLM 확장, 쿨다운 60일, 금지 주제 필터(주제 후보·제목·라벨·본문, §7-1), Chance 이력과 교차 중복 방지 |
 | 생성 | Gemini 모델 폴백, KR/EN 쌍, 편집 템플릿 | Gemini 모델 폴백 + 일시 오류 재시도, 형식 엄격 파싱 |
 | 게이트 | `validate_post_data`(길이·인라인 출처), 제목 유사도 | `pipeline/gates.py`(파싱·HTML 정화·정책·중복), 탈락 사유를 넣어 최대 3회 재작성 |
 | 게시 | git 커밋 → Pages 배포(`pages.yml`). 봇 커밋 뒤 `gh workflow run pages.yml`로 배포 실행 | Blogger API 어댑터(멱등 재시도, 인증 실패 구분, 초안함 업로드 `isDraft`, 쓰기 전 인증 점검 — 아래 §4·§4-1) |
@@ -81,7 +81,7 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 자동인지 수동인지,
 | `platform` | `jekyll-git` · `blogger` (새 플랫폼은 §7.B) |
 | `mode` | `off` 중지 · `draft` 초안 — Blogger는 게시용 시크릿 4종(`blog_id`·`client_id`·`client_secret`·`refresh_token`)이 **모두** 있으면 글을 Blogger **초안함에 업로드**하고(`draft_uploaded`, 공개되지 않음 — 운영자가 Blogger 화면에서 확인한 뒤 직접 게시), **하나도** 없으면 저장소 파일에만 저장하며(`draft`, 오류 아님), **일부만** 있으면 설정 오류(종료 2) · `auto` 자동 게시. **`auto` 전환은 T3** |
 | `workflow`, `entrypoint`, `prompt` | 저장소에 존재하는 파일. `workflow`의 cron 목록에 `schedule.cron`이 들어 있어야 한다(검증기 REG-2, Chance는 17분·47분 두 틱이고 레지스트리에는 17분이 대표값) |
-| `profile` | `pipeline/profiles/<이름>.json`. `blogger` 플랫폼은 필수 |
+| `profile` | `pipeline/profiles/<이름>.json`. `blogger` 플랫폼은 필수. 글 언어 검사는 `languages`(표시·문서용)가 아니라 프로필의 `language`(`ko`·`en`)가 정한다. 필드와 가드레일은 §7-1 |
 | `state.history`, `state.content_dir` | 이력 파일, 산출물 폴더(저장소 상대 경로, `..` 금지) |
 | `schedule.cron` | 워크플로 cron 목록 중 하나(대표값). `slots_kst`는 참고 |
 | `limits.max_posts_per_day` | 1~24. 하루 상한(KST 날짜 기준). 수동 `--topic`은 우회 |
@@ -276,6 +276,8 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 자동인지 수동인지,
 | 6 | 워치독 | `draft` 상태로 3일 이상 운영하며 `rejected`·실패 이슈가 없는지 본다 (카나리) |
 | 7 | 사용자 | `mode: "auto"` 전환 승인(T3) |
 
+블로그 언어가 기존 프로필과 다르면(예: 영문) 3단계의 프로필·프롬프트·스텁을 §7-1의 체크리스트로 새로 만든다. 글 언어 검사·주제 가드레일 목록·시드·시험이 언어마다 필요하다. 블로그의 `languages`에 프로필의 `language`가 없으면 검증기가 오류로 막는다(D-32 재발 방지).
+
 ### B. 새 플랫폼(WordPress, Tistory, Medium, 다른 Jekyll 저장소 등)
 
 1. **정책 확인(T3)**: 해당 플랫폼 약관이 자동 게시를 허용하는지, 계정·API 방식이 무엇인지 사용자와 확정한다.
@@ -287,6 +289,99 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 자동인지 수동인지,
 ### C. 또 하나의 Jekyll(git) 블로그
 
 `jekyll-git` 어댑터와 공용 엔진이 필요하다(Phase 3). 그 전에는 `generator.py`를 복사하지 않는다.
+
+## 7-1. 프로필(콘텐츠 정책)과 주제 가드레일
+
+블로그마다 프로필 하나(`pipeline/profiles/<이름>.json`)가 "무엇을 어떤 기준으로 게시하는가"를 정한다. 레지스트리의 `profile`이 가리키고, 정규식은 Python `re`로 **대소문자를 무시**해 검사한다. 같은 성격의 블로그는 프로필을 재사용하고, 언어가 다르면 같은 구조의 프로필을 새로 만든다. 지금은 영문 `blogger_practical_en`(macat0722, 모드 off)과 한국어 `blogger_practical_ko`(쓰는 블로그가 없다 — 새 한글 Blogger가 재사용할 예정)가 있다.
+
+### 프로필 필드
+
+| 필드 | 뜻 | 한국어 | 영어 |
+|------|----|--------|------|
+| `language` | 글 언어 검사(`LANG`)의 종류. `ko`·`en`만 허용하고 그 밖의 값은 레지스트리가 오류로 막는다(모르는 언어는 검사가 조용히 꺼지므로) | `ko` | `en` |
+| `min_hangul_ratio` / `min_latin_ratio` | `ko`: 본문 글자 중 한글 비율 하한(기본 0.5). `en`: 글자(숫자·기호 제외) 중 라틴 문자(é·ñ 포함) 비율 하한(기본 0.9). 영어는 **제목에 라틴 문자가 아닌 글자가 하나라도 있으면** 탈락한다 | 0.5 | 0.9 |
+| `length` · `title` · `labels` | 본문 글자 수, 제목 글자 수, 라벨 개수·글자 수 | 900~3200 · 8~60 · 1~5개 20자 | 2400~7500 · 15~70 · 1~5개 30자 |
+| `structure` · `similarity` · `topic_cooldown_days` · `max_attempts` · `allow_links` | 소제목 3개 이상·목록 필수, 같은 블로그 0.72·다른 블로그 0.6 제목 유사도, 쿨다운 60일, 재작성 3회, 링크 제거 | 같음 | 같음 |
+| `prompt_extra` | 프롬프트 뒤에 붙는 추가 규칙(문자열 배열) | 한국어 4줄 | 영어 5줄 |
+| `topic_expand_prompt` | 시드를 다 쓴 뒤 LLM에 새 주제를 청하는 지시문(`{n}`·`{min}`·`{max}`·`{avoid}` 자리표시자, `{n}`·`{avoid}` 필수). **없으면 코드(`pipeline/topics.py`)의 한국어 지시문** — 새 언어를 코드 수정 없이 붙이기 위한 필드 | 없음 | 있음 |
+| `banned_patterns` | 효능·안전 **단정**(완치·기적·부작용 없음·100% 효과·병원 갈 필요 없음·약을 끊어라 등). 제목+본문 전체에 예외 없이 건다 → `BANNED` | 10개 | 13개 |
+| `title_banned_patterns` | 클릭 미끼 제목(충격·비밀·의사들이·`!!` 등) → `TITLE_BANNED` | 11개 | 12개 |
+| `leak_patterns` | AI 자기 언급·코드 펜스·템플릿 잔재·머리표 잔여물 → `LEAK` | 12개 | 16개 |
+| `banned_topic_patterns` | **주제 가드레일의 위험 어휘**: 주제 후보·생성된 제목·생성된 라벨에 예외 없이 건다 → (주제는 버림) · `TITLE_TOPIC` · `LABELS` | 28개 | 61개 |
+| `body_banned_patterns` · `body_safe_patterns` | (선택) 생성된 본문의 위험 표현과, 있어도 건너뛸 전문가 상담·면책 문장 → `BODY_TOPIC`. 없으면 본문 위험 낱말 검사를 하지 않는다 | 28개 · 4개 | 50개 · 4개 |
+| `disclosure_html` | AI 사용·면책 문구. 게이트를 통과한 **뒤** 게시 직전에 붙인다(`append_disclosure`) | 한국어 | 영어(AI 도움·일반 참고용·진단/치료 대체 아님·전문가 상담) |
+| `seed_topics` | 시드 주제(8~60자). 모두 `banned_topic_patterns`를 통과해야 한다(레지스트리 검증) | 32개 | 34개 |
+
+레지스트리 검증(`registry.validate_profile`, 검증기 REG-1)은 위 필수 항목과 함께 ① 모든 정규식이 컴파일되는지, ② **빈 문자열에 맞는 정규식**(끝에 `|`가 남은 것 같은 실수 — 금지 목록이면 모든 글이 탈락하고 `body_safe_patterns`면 모든 문장을 건너뛰어 가드레일이 조용히 꺼진다)이 없는지, ③ 시드가 금지 주제 목록을 통과하는지, ④ `language`가 지원 언어인지, ⑤ 비율 필드·`prompt_extra`·`topic_expand_prompt`의 형식을 본다. 레지스트리 항목은 추가로 ⑥ 블로그의 `languages`에 프로필의 `language`가 들어 있어야 한다(영문 블로그에 한국어 프로필을 쓰는 어긋남 — D-32 — 이 다시 생기지 않게).
+
+응답 머리표는 한국어 프롬프트가 `제목:/라벨:/내용:`, 영어 프롬프트가 `Title:/Labels:/Content:`다. 파서(`gates.parse_labeled_post`)는 한국어 머리표를 먼저 보고(한국어 응답의 결과·오류 문구는 그대로), 온전하지 않을 때만 영어 머리표를 본다. 두 가지를 섞어 빈 항목을 채우지는 않는다.
+
+### 가드레일: 같은 위험 영역을 세 곳에서 막는다
+
+위험 영역은 질병·치료·약·보충제·진단·임신·영유아·체중 감량(G-C4). 수동 작성 경로가 없어 모든 글이 자동 생성이므로, 모델이 안전한 주제를 받고도 위험한 내용으로 흐를 수 있다. 그래서 주제에만 걸던 규칙을 생성물에도 건다(운영자 승인 2026-10-26).
+
+| 지점 | 검사 대상 | 쓰는 목록 | 예외 | 코드 |
+|------|-----------|-----------|------|------|
+| (a) 주제 후보 | 시드·LLM 확장 주제 | `banned_topic_patterns` | 없음 | 후보에서 버림(`pipeline/topics.py`) |
+| (b) 제목 | 생성된 제목 | `banned_topic_patterns` | 없음 | `TITLE_TOPIC` |
+| (b) 라벨 | 생성된 라벨 각각 | `banned_topic_patterns` | 없음 | `LABELS` |
+| (c) 본문 | 정화된 본문 텍스트(면책을 붙이기 **전**) | `body_banned_patterns` | **문장 단위**: `body_safe_patterns`에 맞는 문장은 건너뜀 | `BODY_TOPIC` |
+| (d) 단정 표현 | 제목+본문 전체 | `banned_patterns` | 없음 | `BANNED` |
+
+`TITLE_TOPIC`·`BODY_TOPIC` 사유에는 걸린 낱말이 들어가(`'Melatonin'`, `'당뇨'`) 다음 시도의 프롬프트로 돌아가 모델이 그 문장을 뺀다. 낱말은 모델 출력에서 온 것이라 한 줄·40자로 접어서만 넣는다. 수동 `topic`(override)은 러너가 (a)를 건너뛰지만, 그 주제가 제목·본문에 오르면 (b)·(c)가 막는다(시험이 고정).
+
+비교하기 전에 글을 고른다(`gates._normalized`, 화면에 나가는 글은 바뀌지 않는다): ① NFKC(전각 영문·풀어 쓴 한글 자모), ② 보이지 않는 서식 문자(너비 0 공백·소프트 하이픈 등) 제거, ③ 굽은 따옴표(U+2019 등)와 특수 하이픈을 곧게. 모델이 영어 글에 굽은 따옴표를 자주 써서 ③이 없으면 `isn't a substitute for medical advice` 같은 안전한 면책이 탈락하고 `you won't need medication` 같은 단정이 통과한다. 키릴·그리스 문자로 바꿔치기한 낱말은 다루지 않는다 — 이 가드레일은 모델이 흐르는 것을 막는 것이지 일부러 피해 가는 입력을 막는 것이 아니다. 정규식은 모두 길이가 한정돼(`{0,3}` 같은 상한) 7,000자짜리 반복 입력에서도 가장 느린 경우가 약 0.1초다(시험이 2초 안에 끝나는지 본다).
+
+**제목·라벨은 엄격하게, 본문은 '단정·조언 문맥'에 가깝게** 건다. 이유는 셋이다.
+
+1. **본문에는 안전한 문장에도 위험 낱말이 들어간다.** "진단이나 치료를 대신하지 않습니다", "does not replace professional medical advice", "의사와 상담하세요", "if you are pregnant, check with your doctor" 같은 문장이다. 검사는 `append_disclosure`가 면책을 붙이기 전이라 프로필의 면책 문구 자체는 걸리지 않지만, 모델이 비슷한 문장을 본문에 쓸 수 있고 그것을 탈락시키면 안 된다. 그래서 전문가 상담 안내와 '의학 조언이 아님' 문장은 문장 단위로 건너뛴다(`body_safe_patterns`). 효능 단정(`banned_patterns`)은 이 예외를 받지 않는다 — "의사와 상담하세요, 하지만 부작용은 전혀 없어요"는 걸린다.
+2. **영어에는 일상어와 겹치는 낱말이 많다.** `treat yourself`·`a small treat`·`a dose of fresh air`·`time heals`·`home remedy` 같은 표현이다. 그래서 영어 본문 목록은 주제 목록에서 bare `treat`·`heal`·`remedy`·`immune`·`pharmacy`와 사람을 가리키는 `therapist`(의사·약사처럼 상담 안내에 흔히 나오고 그 자체가 위험 낱말은 아니다)를 빼고, `treat`는 증상·질병·통증 같은 **의료 대상**이 뒤따를 때만 막으며, `dose`는 `a dose of fresh air/sunshine/nature` 같은 관용구를 통과시킨다. 제목·라벨·주제는 짧고 우리가 정하는 자리라 `Treat Yourself` 같은 제목도 막는다.
+3. **오탐의 비용이 크다.** 재시도 3회가 모두 탈락하면 그날 발행을 잃는다(`GATE_REJECTED`). 건강 느낌이 나지만 위험하지 않은 일상 문장 52개(수면·자세·카페인·수분·번아웃·두통 같은 낱말 포함)와 안전한 표본 문장 28개는 영어 본문 검사에서 탈락 0건이어야 한다고 시험이 고정한다(`tests/test_guardrails.py`).
+
+한국어는 본문 목록과 주제 목록이 **같은 어휘**다(시험이 같음을 고정). 한국어 목록은 처음부터 `치료`·`진단`·`처방`처럼 의료 어휘만 담고 있어 본문에서도 일상 문장과 겹치지 않기 때문이다(실제로 생성된 본문 5편은 탈락하지 않는다). 영어만 본문 목록이 주제 목록의 부분집합이다.
+
+본문 예외 문장(`body_safe_patterns`)은 둘이다. ① 상담 안내: 상담·문의·확인 동사와 의사·약사·전문가·의료진·병원 같은 전문가 낱말이 같은 문장에 있는 것(영어는 `consult`·`talk to`·`check with`·`ask`·`see` … `doctor`·`pharmacist`·`healthcare professional` …). ② 면책: "진단·치료·의학적 조언을 대신하지 않는다 / is not a substitute for … medical advice, diagnosis or treatment / is for informational purposes only". 문장은 `.`·`!`·`?`·줄바꿈으로 나눈다.
+
+### 한국어 ↔ 영어 대응표 (`banned_topic_patterns`)
+
+영어는 단어 경계(`\b`)와 굴절형(treat·treats·treated·treating·treatment)을 명시해 `secure`·`manicure`(cure), `cancel`·`Cancun`(cancer), `dosa`(dose), `insulation`(insulin), `pillow`(pill), `retreat`(treat), `meditation`(medication), `surge`(surgery), `patience`(patients)가 걸리지 않는다.
+
+| 위험 영역 | 한국어 낱말 | 영어 패턴(굴절형 포함) |
+|-----------|-------------|-------------------------|
+| 치료·완치 | 치료, 완치 | `treat`·`treats`·`treated`·`treating`·`treatment(s)`, `cure`(s/d)·`curing`·`curable`, `heal`(s/ed/ing/er), `remedy`·`remedies`, `therapy`·`therapies`·`therapist`·`therapeutic` |
+| 진단·처방 | 진단, 처방 | `diagnose`(s/d)·`diagnosing`·`diagnosis`·`diagnostic`, `prescribe`(s/d)·`prescribing`·`prescription(s)` |
+| 의료·시술 | 의료, 수술, 시술, 주사, 한약 | `medical(ly)`, `medicine`·`medicinal`, `medication(s)`·`medicate`, `meds`, `clinical(ly)`, `surgery`·`surgical`·`surgeon`, `injection(s)`·`injectable`, `vaccine`·`vaccination`, `steroid(s)`, `acupuncture`, `chiropractic`(한약은 medicine·remedy·supplement가 포괄) |
+| 질병 일반 | 질환, 질병 | `disease(s)`, `illness(es)`, `disorder(s)`, `syndrome(s)`, `symptom(s)`, `patients`, `infection(s)`, `inflammation`·`inflammatory`, `chronic pain/fatigue/illness/disease/condition` |
+| 암 | 암(독립된 낱말) | `cancer`(s/ous), `tumor`·`tumour`, `chemo(therapy)`, `oncology`, `leukemia`·`melanoma`·`lymphoma` |
+| 당뇨·혈압·심장 | 당뇨, 고혈압 | `diabetes`·`diabetic`·`prediabetes`, `insulin`, `hypertension`·`hypotension`, `blood pressure/sugar/glucose`, `cholesterol`·`triglycerides`, `heart disease/attack/failure/condition`, `cardiac`·`cardiovascular`, `stroke` |
+| 정신 건강 | 우울증, 공황, 자살, 자해 | `depression`·`depressive`·`depressed`·`antidepressant`, `anxiety disorder/attack`, `panic attack/disorder`, `bipolar`·`schizophrenia`·`psychosis`·`PTSD`·`OCD`·`ADHD`·`autism`·`dementia`·`alzheimer`·`parkinson`, `mental illness/disorder/health condition…`, `eating disorder`·`anorexia`·`bulimia`, `suicide`·`suicidal`, `self-harm`·`self harm`·`self-injury`, `overdose` |
+| 그 밖의 질환명 | (질환·질병으로 포괄) | `insomnia`, `sleep apnea`, `arthritis`, `asthma`, `COPD`, `epilepsy`·`seizure`, `migraine`, `fibromyalgia`, `thyroid`, `anemia`, `obese`·`obesity`, `osteoporosis`, `hepatitis`, `cirrhosis`, `fatty liver`, `kidney disease/stones/failure`, `covid`·`coronavirus`, `HIV` |
+| 약물·복용 | 약물, 복용 | `drug(s)`, `pill(s)`, `pharmacy`·`pharmacist`, `antibiotic`·`painkiller`·`pain reliever`·`ibuprofen`·`acetaminophen`·`paracetamol`·`aspirin`·`NSAID`·`opioid`·`sedative`·`antihistamine`·`benzodiazepine`, `over-the-counter`·`OTC`, `dose`·`doses`·`dosed`·`dosing`·`dosage`, `5 mg`·`200mcg`·`IU` 같은 용량 |
+| 보충제·영양제 | 보충제, 영양제 | `supplement`(s/ed/ing)·`supplementation`, `multivitamin`, `vitamin pills/tablets/capsules/gummies`, `melatonin`·`ashwagandha`·`CBD`·`cannabis`·`marijuana`·`THC`·`creatine` |
+| 임신·영유아 | 임신, 태아, 영유아, 신생아 | `pregnant`·`pregnancy`, `prenatal`·`postnatal`·`postpartum`·`antenatal`, `expectant`·`expecting mothers`, `miscarriage`·`fertility`, `breastfeeding`·`lactation`·`nursing mothers`, `fetus`·`fetal`·`foetus`, `infant(s)`·`newborn(s)`·`babies`·`toddler(s)`·`neonatal`·`pediatric` |
+| 체중 감량·디톡스 | 체중 감량, 다이어트 약 | `weight loss`·`weight-loss`, `lose weight/fat`·`lose 10 pounds`, `fat burn(ing/er)`·`burn belly fat`, `slimming`·`slim down`, `crash diet`·`fad diet`·`keto`·`fasting`·`starve`·`calorie deficit`, `detox`(es/ification)·`cleanse`, (다이어트 약은 `diet pills`가 `pills`로 포괄) |
+| 면역 | (없음) | `immune`·`immunity` — 영어에만 추가(병·예방 효능 주장에 자주 쓰이는 낱말) |
+
+본문 목록(영어)은 이 표에서 `heal`·`remedy`·`immune`·`pharmacy`·`therapist`를 뺀다. 영어에만 있는 항목(`clinical`·`vaccine`·`steroid`·`acupuncture`·`chiropractic`·`cholesterol`·`insomnia`·질환명 확장·`detox`·`cleanse`·`keto`·`fasting`·`immune`)은 한국어 목록에 대응 낱말이 없어 영어를 한 단계 더 촘촘하게 둔 것이다. 반대로 영어에는 `pain`·`vitamin`(단독)·`allergy`·`kids`를 넣지 않았다 — 한국어에도 `통증`·`비타민`·`알레르기`·`아이`가 없고 일상 표현과 겹침이 커서다(운영자가 더 엄격하게 하려면 이 표에 한 줄씩 추가하고 `tests/test_guardrails.py`의 표본을 같이 바꾼다).
+
+### 한국어 프로필에 적용한 근거
+
+권장대로 한국어 프로필(`blogger_practical_ko`)에도 같은 가드레일을 적용했다. 근거: ① 위험(YMYL)·광고 계정·파이프라인이 같아 언어에 따라 안전선이 달라질 이유가 없다. ② 지금 한국어 프로필을 쓰는 블로그가 없어(macat0722는 영문으로 전환, 새 한글 Blogger는 계획) 운영 중인 흐름이 바뀌지 않는다. ③ 적용 전후로 확인했다 — 기존 시험이 `make_root`(임시 저장소가 영문 항목을 한국어 프로필·프롬프트로 바꿔 쓰게 함) 외에는 수정 없이 통과하고, 한국어 시드 32개·스텁 글·실제로 생성돼 이력에 남은 제목 5개·본문 5편이 새 제목·본문 검사를 통과한다. ④ 이 확인에서 **오탐 1건**을 찾아 고쳤다: 실제 생성 글의 "딱 3분만 투자해서"가 `자해`(자기 해침)와 겹쳐 본문 검사에 걸렸다. 한국어 낱말은 어절 중간 일치가 흔해서, 주제 목록의 `자해`를 `(?<![가-힣])자해`(앞에 한글이 없을 때만)로, `주사`를 `주사(?!위)`(주사위 제외)로 고쳤다. 이 목록이 제목·라벨에도 걸리게 됐기 때문에(제목 "3분 투자해서 …"는 흔하다) 필요한 수정이고, 걸리지 않게 된 것은 `비자해`처럼 실제로 쓰지 않는 합성어뿐이다.
+
+### 영어 시드(34개)
+
+한국어 시드 32개 중 30개의 영어판(2개는 뺐다: 야식 충동·간식 기준 — 체중 관리·영양 주장으로 흐르기 쉽다. '잠이 안 올 때'는 문제 틀을 빼고 '자기 전 진정 루틴'으로, '운동·소화·비 오는 날 기분·피곤할 때 에너지'는 의학적 해석을 부르는 낱말을 풀어 다시 썼다)과 새 시드 4개(책상 정리·채소 더하기·주간 플래너·습관 쌓기). 생활 습관·수면 위생·책상 자세·산책·정리·식사 계획·스트레칭처럼 **의학적 주장이 필요 없는** 주제만이다. 영어는 같은 뜻이 더 길어서 35~55자(주제 길이 한도는 8~60자)다. 모든 시드는 레지스트리 검증과 시험에서 금지 주제 목록을 통과해야 하고, 시드마다 영어 스텁 글이 게이트 전체를 통과하는지, Chance 영·한 제목·한국어 이력과의 제목 유사도가 교차 중복 한도(0.6) 아래인지(측정한 최댓값 0.50)도 시험이 본다.
+
+### 새 언어·새 블로그 프로필 체크리스트
+
+1. 가장 가까운 프로필 JSON을 복사해 `name`·`language`·비율 필드·길이·목록·시드·`disclosure_html`·`prompt_extra`·`topic_expand_prompt`를 그 언어로 만든다. 목록은 이 절의 대응표를 기준으로 낱말·굴절형을 정하고, 정규식에는 단어 경계를 둔다.
+2. 새 `language` 값이면 `pipeline/gates.py`의 `SUPPORTED_LANGUAGES`와 `check_post`의 글 언어 검사에 그 언어를 더한다(현재 `ko`·`en`).
+3. 프롬프트 파일(`.github/editorial/…`)을 만든다: `text` 코드 블록 안에 `{topic}`(영어는 줄 맨 앞 `Topic: {topic}`)과 출력 형식. 머리표는 `제목:/라벨:/내용:` 또는 `Title:/Labels:/Content:`(`gates._MARKER_SETS` — 새 머리표는 여기에 더한다).
+4. `pipeline/stubs.py`가 그 언어의 글을 내도록 한다. 안 그러면 연습 실행(`--dry-run`·`연습 실행`)이 한국어 가짜 글로 언어 검사에서 탈락한다.
+5. 시험: `tests/test_guardrails.py`의 막힘·통과 표본(부분 문자열 오탐 포함)을 새 언어로, 시드·스텁 통과, 임시 저장소(`make_root`)에서 가짜 LLM으로 한 편(통과·탈락·재작성).
+6. `python -m pipeline.registry` → `python scripts/validate_repo.py` → `python -m unittest discover -s tests`. 레지스트리에는 `mode`를 직접(`off`로) 적는다.
+
+**알려진 한계**: `pipeline/run.py`의 `build_prompt`가 `[추가 규칙]`·`[이전 시도에서 고쳐야 할 점]` 머리글을 한국어로 붙이고 탈락 사유도 한국어라, 영문 블로그의 프롬프트는 영어 본문에 한국어 머리글이 섞인다(모델은 이해하지만 영어로 통일하려면 `run.py`를 고쳐야 한다 — 같은 파일을 다른 Blogger 변경이 고치고 있어 이 변경에서는 하지 않았다, D-64). 영어 글의 제목·라벨 중복 검사(`DUP_SAME`·`DUP_OTHER`)는 Chance 영어 제목과 한국어 이력에 그대로 쓰며(문자열 비교라 언어가 달라도 동작하고 영·한 사이는 거의 겹치지 않는다), 영어 제목은 같은 틀("5 Simple Ways to …")이 반복돼 같은 블로그 안 유사도(0.72)에 걸릴 수 있다.
 
 ## 8. 로드맵과 완료 기준
 

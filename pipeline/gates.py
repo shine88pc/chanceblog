@@ -6,12 +6,17 @@
 """
 import html as html_lib
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from html.parser import HTMLParser
 from urllib.parse import urlsplit
 
 from pipeline.console import one_line
+
+# 글 언어 검사(check_post)가 지원하는 프로필 language 값. 레지스트리(validate_profile)가 이 밖의 값을 오류로 막는다 —
+# 모르는 언어는 언어 검사가 조용히 꺼지기 때문이다.
+SUPPORTED_LANGUAGES = ("ko", "en")
 
 
 class GateError(ValueError):
@@ -158,16 +163,39 @@ def _clean_title(value):
     return value.strip().strip("\"'“”‘’「」『』").strip()
 
 
+# 응답 머리표. 한국어 프롬프트는 '제목:/라벨:/내용:', 영어 프롬프트는 'Title:/Labels:/Content:'로 답하게 한다.
+# 한국어 머리표를 먼저 본다 — 한국어 응답의 파싱 결과와 오류 문구는 영어 머리표를 받기 전과 같고, 한국어 머리표가 하나라도
+# 온전히 갖춰지지 않았을 때만 영어 머리표를 시도한다. (표시 이름, 정규식 조각, 플래그)
+_MARKER_SETS = (
+    (("제목", "라벨", "내용"), ("제목", "라벨", "내용"), 0),
+    (("Title", "Labels", "Content"), ("Title", "Labels?|Tags?", "Content|Body"), re.IGNORECASE),
+)
+
+
+def _find_sections(text, patterns, flags):
+    title_p, labels_p, body_p = patterns
+    return (re.search(rf"^\s*(?:{title_p})\s*:\s*(.+?)\s*$", text, re.M | flags),
+            re.search(rf"^\s*(?:{labels_p})\s*:\s*(.+?)\s*$", text, re.M | flags),
+            re.search(rf"^\s*(?:{body_p})\s*:[ \t]*\n?([\s\S]+)$", text, re.M | flags))
+
+
 def parse_labeled_post(raw):
-    """'제목:/라벨:/내용:' 형식의 응답을 파싱한다. 하나라도 없으면 GateError(기본값으로 채우지 않는다)."""
+    """'제목:/라벨:/내용:'(또는 'Title:/Labels:/Content:') 형식의 응답을 파싱한다. 하나라도 없으면 GateError(기본값으로 채우지 않는다)."""
     text = strip_code_fences(raw).strip()
     if not text:
         raise GateError("응답이 비어 있음")
-    m_title = re.search(r"^\s*제목\s*:\s*(.+?)\s*$", text, re.M)
-    m_labels = re.search(r"^\s*라벨\s*:\s*(.+?)\s*$", text, re.M)
-    m_body = re.search(r"^\s*내용\s*:[ \t]*\n?([\s\S]+)$", text, re.M)
-    missing = [name for name, m in (("제목", m_title), ("라벨", m_labels), ("내용", m_body)) if not m]
-    if missing:
+    closest = None
+    for names, patterns, flags in _MARKER_SETS:
+        found = _find_sections(text, patterns, flags)
+        if all(found):
+            m_title, m_labels, m_body = found
+            break
+        score = sum(1 for m in found if m)
+        if closest is None or score > closest[0]:  # 동점이면 먼저 본 한국어 머리표 기준으로 안내한다
+            closest = (score, names, found)
+    else:
+        _, names, found = closest
+        missing = [name for name, m in zip(names, found) if not m]
         raise GateError("형식 오류: 누락된 항목 " + ", ".join(missing))
     labels = []
     for item in re.split(r"[,，、#]+", m_labels.group(1)):
@@ -213,17 +241,81 @@ def _compiled(patterns):
     return [re.compile(p, re.IGNORECASE) for p in patterns or []]
 
 
+# 곧은 따옴표·하이픈으로 바꿀 문자(굽은 작은따옴표 U+2018·U+2019, 굽은 큰따옴표 U+201C·U+201D, 특수 하이픈 U+2010·U+2011·U+2013 등).
+# 모델은 영어 글에 굽은 따옴표를 자주 쓰는데(don't 의 따옴표가 U+2019), 패턴은 곧은 따옴표(n't)로 쓰므로 맞춰 준다.
+_PUNCT_FOLD = str.maketrans({"\u2018": "'", "\u2019": "'", "\u02bc": "'", "\uff07": "'", "\u201c": '"', "\u201d": '"',
+                             "\u2010": "-", "\u2011": "-", "\u2013": "-"})
+
+
+def _normalized(text):
+    """금지 목록과 비교하기 전에 글을 고른다(화면에 나가는 글은 바뀌지 않는다).
+
+    ① NFKC: 전각 영문·합자·풀어 쓴 한글 자모를 보통 글자로 합친다. ② 눈에 안 보이는 서식 문자(너비 0 공백·소프트 하이픈·방향 표시 등,
+    유니코드 범주 Cf)를 뺀다 — 모델이 낱말 사이에 끼워 넣어도(supple + 너비 0 공백 + ment) 놓치지 않게 한다. ③ 굽은 따옴표·특수 하이픈을 곧은 것으로 바꾼다
+    (굽은 따옴표로 쓴 isn't a substitute 가 면책 문장으로 인정되고, 특수 하이픈으로 쓴 weight-loss 가 막히도록). 키릴·그리스 문자로 바꿔치기한 낱말(동형 문자)은
+    다루지 않는다 — 이 가드레일은 모델이 흐르는 것을 막는 것이지 일부러 피해 가는 입력을 막는 것이 아니다.
+    """
+    text = unicodedata.normalize("NFKC", text or "")
+    return "".join(ch for ch in text if unicodedata.category(ch) != "Cf").translate(_PUNCT_FOLD)
+
+
 def matches_any(patterns, text):
     """text에서 처음 맞는 패턴 문자열을 돌려준다(없으면 None)."""
+    text = _normalized(text)
     for raw, rx in zip(patterns or [], _compiled(patterns)):
-        if rx.search(text or ""):
+        if rx.search(text):
             return raw
     return None
+
+
+def first_match(patterns, text):
+    """(패턴, 맞은 낱말). 없으면 (None, None). 사유에 '어떤 낱말이 걸렸는지'를 보여 줄 때 쓴다(재작성 지침이 된다)."""
+    text = _normalized(text)
+    for raw, rx in zip(patterns or [], _compiled(patterns)):
+        found = rx.search(text)
+        if found:
+            return raw, found.group(0) or raw
+    return None, None
 
 
 def topic_allowed(topic, profile):
     """주제가 금지 주제 패턴에 걸리지 않으면 True."""
     return matches_any(profile.get("banned_topic_patterns"), topic) is None
+
+
+# ----------------------------------------------------------------------------
+# 주제 가드레일(docs/SECURITY_GUARDRAILS.md G-C4). 같은 위험 영역(질병·치료·약·보충제·진단·임신·영유아·체중 감량)을 세 곳에서 막는다.
+#   (a) 주제 후보(시드·LLM 확장)  — topic_allowed(): banned_topic_patterns
+#   (b) 생성된 제목·라벨          — check_post(): 같은 banned_topic_patterns 를 예외 없이(엄격하게) 적용 → TITLE_TOPIC · LABELS
+#   (c) 생성된 본문               — body_risk_hit(): body_banned_patterns, 전문가 상담·면책 문장은 body_safe_patterns 로 건너뛴다 → BODY_TOPIC
+# 제목·라벨은 짧고 우리가 정하는 자리라 '그 낱말이 있으면 탈락'으로 엄격하게 한다. 본문은 길고, '진단이나 치료를 대신하지 않습니다'
+# 같은 안전한 면책·상담 안내 문장에도 위험 낱말이 정상적으로 들어가므로(검사는 append_disclosure 가 붙이기 전이지만 모델이 같은 문장을 쓸 수 있다)
+# 낱말 목록을 '단정·조언 문맥'에만 건다: ① 일상어와 겹치는 낱말(treat·heal·remedy 같은 것)은 본문 목록에서 빼거나 의료 문맥으로 좁히고,
+# ② 전문가 상담 안내·'의학적 조언이 아님' 문장은 문장 단위로 건너뛴다. 효능 단정(완치·기적·부작용 없음 등)은 이 예외 없이
+# banned_patterns 가 제목·본문 전체에 따로 건다. 오탐으로 모든 글이 탈락하면(재시도 3회 → ALL_REJECTED) 하루 발행을 잃으므로 이 구분이 필요하다.
+# ----------------------------------------------------------------------------
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?。！？])\s+|\n+")
+
+
+def body_risk_hit(text, profile):
+    """본문(정화된 글의 텍스트)에서 위험 표현을 찾는다 → (패턴, 맞은 낱말) 또는 (None, None).
+
+    body_banned_patterns 가 없으면 검사하지 않는다. 문장 단위로 보고, body_safe_patterns 에 하나라도 맞는 문장
+    (전문가 상담 안내·'의학적 조언이 아님' 면책)은 위험 낱말이 있어도 건너뛴다.
+    """
+    patterns = profile.get("body_banned_patterns")
+    if not patterns:
+        return None, None
+    banned = list(zip(patterns, _compiled(patterns)))
+    safe = _compiled(profile.get("body_safe_patterns"))
+    for sentence in _SENTENCE_SPLIT.split(_normalized(text)):
+        if not sentence.strip() or any(rx.search(sentence) for rx in safe):
+            continue
+        for raw, rx in banned:
+            found = rx.search(sentence)
+            if found:
+                return raw, found.group(0) or raw
+    return None, None
 
 
 def check_post(post, profile, recent_titles=(), other_titles=(), sanitize_stats=None):
@@ -241,6 +333,10 @@ def check_post(post, profile, recent_titles=(), other_titles=(), sanitize_stats=
     hit = matches_any(profile.get("title_banned_patterns"), title)
     if hit:
         reasons.append(f"[TITLE_BANNED] 자극적/금지 제목 표현: {hit}")
+    raw, word = first_match(profile.get("banned_topic_patterns"), title)
+    if raw is not None:  # 주제 가드레일 (b): 주제 후보와 같은 목록을 제목에도 예외 없이 건다
+        reasons.append("[TITLE_TOPIC] 제목에 금지 주제 낱말(질병·치료·약·보충제·진단·임신·영유아·체중 감량 등)이 있음: "
+                       f"'{one_line(word, 40)}'")
 
     l_cfg = profile.get("length", {})
     if n < l_cfg.get("min_chars", 0):
@@ -254,6 +350,16 @@ def check_post(post, profile, recent_titles=(), other_titles=(), sanitize_stats=
         ratio = (len(hangul) / len(letters)) if letters else 0.0
         if ratio < profile.get("min_hangul_ratio", 0.5):
             reasons.append(f"[LANG] 한글 비율 {ratio:.0%} (최소 {profile.get('min_hangul_ratio', 0.5):.0%})")
+    elif profile.get("language") == "en":
+        # 글자(숫자·기호 제외) 중 라틴 문자(기본 라틴~라틴 확장-B: é·ñ 포함)의 비율. 한글·한자·키릴 문자가 섞이면 낮아진다.
+        letters = [ch for ch in text if ch.isalpha()]
+        latin = [ch for ch in letters if ord(ch) < 0x250]
+        ratio = (len(latin) / len(letters)) if letters else 0.0
+        min_ratio = profile.get("min_latin_ratio", 0.9)
+        if ratio < min_ratio:
+            reasons.append(f"[LANG] 라틴 문자 비율 {ratio:.0%} (최소 {min_ratio:.0%})")
+        if any(ch.isalpha() and ord(ch) >= 0x250 for ch in title):
+            reasons.append("[LANG] 제목에 영어(라틴 문자)가 아닌 글자가 있음")
 
     s_cfg = profile.get("structure", {})
     h3_count = len(re.findall(r"<h[23]>", content))
@@ -268,14 +374,19 @@ def check_post(post, profile, recent_titles=(), other_titles=(), sanitize_stats=
     hit = matches_any(profile.get("leak_patterns"), title + "\n" + text)
     if hit:
         reasons.append(f"[LEAK] 프롬프트/AI 메타 문구·마크다운 잔여물: {hit}")
+    raw, word = body_risk_hit(text, profile)
+    if raw is not None:  # 주제 가드레일 (c): 본문 — 전문가 상담·면책 문장은 건너뛰고 나머지에서 위험 표현을 찾는다
+        reasons.append("[BODY_TOPIC] 본문에 질병·치료·약·보충제·진단·임신·영유아·체중 감량 관련 표현이 있음: "
+                       f"'{one_line(word, 40)}' — 그 문장을 빼고 일상 습관 팁만 쓴다(전문가 상담 안내 문장은 괜찮다)")
 
     lab_cfg = profile.get("labels", {})
     if not lab_cfg.get("min", 1) <= len(labels) <= lab_cfg.get("max", 5):
         reasons.append(f"[LABELS] 라벨 {len(labels)}개 (허용 {lab_cfg.get('min', 1)}~{lab_cfg.get('max', 5)}개)")
     elif any(len(x) > lab_cfg.get("max_chars", 20) for x in labels):
         reasons.append("[LABELS] 너무 긴 라벨이 있음")
-    if labels and not all(topic_allowed(x, profile) for x in labels):
-        reasons.append("[LABELS] 금지 주제 라벨이 있음")
+    banned_label = next((x for x in labels if not topic_allowed(x, profile)), None)
+    if banned_label is not None:  # 주제 가드레일 (b): 라벨. 어떤 라벨이 걸렸는지 알려 줘야 모델이 그 라벨만 바꾼다
+        reasons.append(f"[LABELS] 금지 주제 라벨이 있음: '{one_line(banned_label, 30)}'")
 
     # 비교 대상 제목은 이력 파일에서 온 문자열이다(다른 블로그 이력의 제목은 피드·LLM 유래). 사유는 로그·실행 요약·이력·
     # 재작성 프롬프트에 그대로 들어가므로 개행·'::' 가 섞이지 않게 한 줄로 접어 넣는다.

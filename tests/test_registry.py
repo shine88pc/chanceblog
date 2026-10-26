@@ -176,6 +176,19 @@ class ProfileTest(unittest.TestCase):
         with self.assertRaises(registry.RegistryError):
             registry.load_profile("does_not_exist")
 
+    def test_english_profile_valid_and_every_profile_file_is_valid(self):
+        self.assertEqual(registry.validate_profile(registry.load_profile("blogger_practical_en")), [])
+        for path in sorted(registry.PROFILE_DIR.glob("*.json")):
+            self.assertEqual(registry.validate_profile(registry.load_profile(path.stem)), [], path.name)
+
+    def test_unknown_language_and_empty_matching_pattern_are_reported(self):
+        profile = copy.deepcopy(registry.load_profile("blogger_practical_ko"))
+        profile["language"] = "ja"
+        self.assertTrue(any("language" in e for e in registry.validate_profile(profile)))
+        profile = copy.deepcopy(registry.load_profile("blogger_practical_ko"))
+        profile["body_safe_patterns"].append("전문가|")
+        self.assertTrue(any("빈 문자열" in e for e in registry.validate_profile(profile)))
+
 
 if __name__ == "__main__":
     unittest.main()

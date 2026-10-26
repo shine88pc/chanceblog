@@ -66,7 +66,13 @@ def parse_topic_list(raw):
 
 
 def expand_prompt(profile, recent_topics, n):
-    avoid = "\n".join(f"- {t}" for t in recent_topics[-40:]) or "- (없음)"
+    recent = "\n".join(f"- {t}" for t in recent_topics[-40:])
+    template = profile.get("topic_expand_prompt")
+    if template:
+        # 영어 등 한국어가 아닌 블로그는 프로필이 주제 확장 지시문(자리표시자 {n}·{min}·{max}·{avoid})을 가진다. 새 언어를 코드 수정 없이 붙이기 위한 것
+        return (template.replace("{n}", str(n)).replace("{min}", str(TOPIC_MIN_CHARS))
+                .replace("{max}", str(TOPIC_MAX_CHARS)).replace("{avoid}", recent or "- (none)"))
+    avoid = recent or "- (없음)"
     return (
         "너는 건강·음식·생활 중심 실용 블로그의 편집자다. 독자가 오늘 바로 실천할 수 있는 "
         f"가벼운 생활 습관 주제 {n}개를 제안한다.\n"
