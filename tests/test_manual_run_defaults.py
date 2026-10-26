@@ -727,7 +727,8 @@ class IssueEditPauseTest(unittest.TestCase):
 class UntouchedPathsTest(unittest.TestCase):
     def test_the_schedule_and_the_commit_and_deploy_steps_are_untouched(self):
         chance = load("chanceblog.yml")
-        self.assertEqual(chance["on"]["schedule"], [{"cron": "17 * * * *"}])
+        # 2026-10-26 운영자 승인(D-59): 매시 17분에 47분 틱을 더했다. 게시는 슬롯 규칙(하루 2편)이 지킨다.
+        self.assertEqual(chance["on"]["schedule"], [{"cron": "17 * * * *"}, {"cron": "47 * * * *"}])
         steps = chance["jobs"]["build"]["steps"]
         commit = next(s for s in steps if s.get("id") == "commit")
         self.assertEqual(commit["if"], "${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}")

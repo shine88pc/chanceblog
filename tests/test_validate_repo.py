@@ -290,6 +290,17 @@ class RegistryContractTest(TmpCase):
         found = vr.check_registry(root, vr.list_files(root))
         self.assertEqual(levels(found, "REG-2"), ["ERROR"])
 
+    def test_a_second_cron_tick_is_fine_when_the_registry_cron_is_one_of_them(self):
+        both = "47 * * * *'\n            - cron: '17 * * * *"
+        root = registry_root(self.root, chance_cron=both, chance_extra=DEPLOY_STEP)
+        self.assertEqual(vr.check_registry(root, vr.list_files(root)), [])
+
+    def test_two_cron_ticks_none_of_which_is_the_registry_cron_is_an_error(self):
+        neither = "47 * * * *'\n            - cron: '5 * * * *"
+        root = registry_root(self.root, chance_cron=neither, chance_extra=DEPLOY_STEP)
+        found = vr.check_registry(root, vr.list_files(root))
+        self.assertEqual(levels(found, "REG-2"), ["ERROR"])
+
     def test_missing_secret_wiring_is_warned(self):
         root = registry_root(self.root, chance_extra=DEPLOY_STEP, blogger_matrix=False)
         found = vr.check_registry(root, vr.list_files(root))

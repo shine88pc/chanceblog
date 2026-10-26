@@ -47,6 +47,11 @@ PS = chr(0x2029)
 
 WHITESPACE = "  " + chr(10) + " "   # 공백과 줄바꿈뿐인 응답 텍스트
 
+# 운영 모델 사슬의 길이와 모델당 시도 횟수(max_retries 2 → 최대 3번). 목록이 바뀌어도(2026-10-26 gemini-3.7-flash 제거) 호출 수 시험이 따라가게 한다.
+MODEL_COUNT = len(g.MODEL_CANDIDATES)
+TRIES_PER_MODEL = 3
+ALL_TRIES = MODEL_COUNT * TRIES_PER_MODEL
+
 DAY_QUOTA_ID = "GenerateRequestsPerDayPerProjectPerModel-FreeTier"
 MINUTE_QUOTA_ID = "GenerateRequestsPerMinutePerProjectPerModel-FreeTier"
 
@@ -857,29 +862,29 @@ class BloggerRunSummaryTest(RunBase):
 
     def test_all_models_failing_with_429_still_leaves_the_call_count_in_the_summary(self):
         """이전: LLM_FAILED 요약에는 호출 수가 없었다(Chance 는 예외 시 호출 수가 사라지던 것과 같은 계열). 이제 12회·429 12회가 남는다."""
-        with self.real_llm([ApiError(429, quota_body())] * 12):
+        with self.real_llm([ApiError(429, quota_body())] * ALL_TRIES):
             code, out = self.go(env=self.env(), llm=None)
         self.assertEqual(code, 1)
         self.assertIn("[SKIP] code=LLM_FAILED", out)
         text = self.summary()
         self.assertIn("**LLM_FAILED**", text)
-        self.assertIn("- Gemini 호출: 12회(실패 12회)", text)
-        self.assertIn("- Gemini 실패 내역: 429(한도 초과) 12회", text)
-        self.assertEqual(len(gemini_lines(out)), 12)
+        self.assertIn(f"- Gemini 호출: {ALL_TRIES}회(실패 {ALL_TRIES}회)", text)
+        self.assertIn(f"- Gemini 실패 내역: 429(한도 초과) {ALL_TRIES}회", text)
+        self.assertEqual(len(gemini_lines(out)), ALL_TRIES)
         self.assertTrue(all(f"quotaId={DAY_QUOTA_ID}" in line for line in gemini_lines(out)))
         self.assertEqual(self.history()[-1]["status"], "llm_failed")
 
     def test_topic_expansion_requests_are_labelled_and_a_failure_keeps_the_count(self):
         self.use_all_seeds()
-        with self.real_llm([ApiError(503)] * 12):
+        with self.real_llm([ApiError(503)] * ALL_TRIES):
             code, out = self.go(env=self.env(), llm=None)
         self.assertEqual(code, 1)
         self.assertIn("[SKIP] code=EXPAND_FAILED", out)
         lines = gemini_lines(out)
-        self.assertEqual(len(lines), 12)
+        self.assertEqual(len(lines), ALL_TRIES)
         self.assertTrue(all("purpose=topic-expansion" in line and "result=5xx" in line for line in lines))
-        self.assertIn("- Gemini 호출: 12회(실패 12회)", self.summary())
-        self.assertIn("- Gemini 실패 내역: 5xx(서버 오류) 12회", self.summary())
+        self.assertIn(f"- Gemini 호출: {ALL_TRIES}회(실패 {ALL_TRIES}회)", self.summary())
+        self.assertIn(f"- Gemini 실패 내역: 5xx(서버 오류) {ALL_TRIES}회", self.summary())
 
     def test_expansion_then_generation_shows_both_purposes(self):
         self.use_all_seeds()
@@ -917,8 +922,9 @@ class BloggerRunSummaryTest(RunBase):
         text = self.summary()
         self.assertIn("- Gemini 호출: 4회(실패 3회)", text)
         self.assertIn("- Gemini 실패 내역: 429(한도 초과) 3회", text)
-        self.assertIn("gemini-3.7-flash→gemini-3.7-flash 1회", text)
-        self.assertEqual(self.history()[-1]["model"], "gemini-3.7-flash")
+        second = g.MODEL_CANDIDATES[1]  # 첫 모델이 429 로 세 번 실패한 뒤 답하는 둘째 모델
+        self.assertIn(f"{second}→{second} 1회", text)
+        self.assertEqual(self.history()[-1]["model"], second)
 
     def test_a_dry_run_says_the_ai_answers_were_fake_and_no_gemini_was_called(self):
         code, out = self.go(env=self.env(), llm=None, extra=["--dry-run"])
@@ -1045,12 +1051,12 @@ class ChanceCallRecordTest(ChanceBase):
         self.assertEqual([line.split()[5] for line in gemini_lines(out)], ["sec=1.5", "sec=1.5"])
 
     def test_all_models_failing_raises_the_same_error_and_records_every_request(self):
-        self.fake_client([ApiError(429, quota_body())] * 4)
+        self.fake_client([ApiError(429, quota_body())] * MODEL_COUNT)
         with self.assertRaises(RuntimeError) as ctx:
             capture(g.call_gemini_with_fallback, "프롬프트")
         self.assertTrue(ctx.exception.args[0].startswith("모든 Gemini 모델 호출 실패\ngemini-3.8-flash: 429 RESOURCE_EXHAUSTED."))
-        self.assertEqual(g.GEMINI_CALLS, {"attempts": 4, "failed": 4})
-        self.assertEqual(self.log.attempts, 4)
+        self.assertEqual(g.GEMINI_CALLS, {"attempts": MODEL_COUNT, "failed": MODEL_COUNT})
+        self.assertEqual(self.log.attempts, MODEL_COUNT)
         self.assertEqual([r.model for r in self.log.records], list(g.MODEL_CANDIDATES))
 
     def test_an_empty_answer_is_counted_as_failed_and_recorded_as_empty(self):
@@ -1174,13 +1180,13 @@ class ChanceSummaryTest(ChanceBase):
 
     def test_failure_summary_keeps_the_call_count_when_every_model_failed(self):
         """모든 모델이 실패해 RuntimeError 로 끝난 실행: 예전 요약에는 '실패 — RuntimeError' 한 줄뿐이라 호출 수가 사라졌다."""
-        self.fake_client([ApiError(429, quota_body())] * 4)
+        self.fake_client([ApiError(429, quota_body())] * MODEL_COUNT)
         with self.assertRaises(RuntimeError) as ctx:
             capture(g.call_gemini_with_fallback, "프롬프트")
         text = g.failure_summary(ctx.exception)
         self.assertTrue(text.startswith("### Chance_Blog 실행 요약\n- 결과: **실패** — RuntimeError (원인은 이 단계의 로그를 보세요)"))
-        self.assertIn("- Gemini 호출: 4회(실패 4회)", text)
-        self.assertIn("- Gemini 실패 내역: 429(한도 초과) 4회", text)
+        self.assertIn(f"- Gemini 호출: {MODEL_COUNT}회(실패 {MODEL_COUNT}회)", text)
+        self.assertIn(f"- Gemini 실패 내역: 429(한도 초과) {MODEL_COUNT}회", text)
 
     def test_failure_summary_without_any_call_adds_only_the_zero_line(self):
         """Gemini 를 부르기 전에 죽은 실행(예: 뉴스 수집 예외)도 `0회`를 적어 '호출은 없었다'가 요약에서 보이게 한다(F-09)."""
@@ -1189,7 +1195,7 @@ class ChanceSummaryTest(ChanceBase):
                          "- Gemini 호출: 0회(실패 0회)")
 
     def test_run_cli_writes_the_failure_summary_with_the_calls_and_reraises(self):
-        self.fake_client([ApiError(503)] * 4)
+        self.fake_client([ApiError(503)] * MODEL_COUNT)
 
         def boom():
             g.call_gemini_with_fallback("프롬프트")
@@ -1200,8 +1206,8 @@ class ChanceSummaryTest(ChanceBase):
                     capture(g.run_cli)
             text = target.read_text(encoding="utf-8")
         self.assertIn("**실패** — RuntimeError", text)
-        self.assertIn("- Gemini 호출: 4회(실패 4회)", text)
-        self.assertIn("5xx(서버 오류) 4회", text)
+        self.assertIn(f"- Gemini 호출: {MODEL_COUNT}회(실패 {MODEL_COUNT}회)", text)
+        self.assertIn(f"5xx(서버 오류) {MODEL_COUNT}회", text)
 
     def test_run_cli_prints_the_folded_error_and_lets_exit_codes_pass_through(self):
         def boom():
@@ -1410,42 +1416,42 @@ class EditsRunnerCallLogTest(unittest.TestCase):
         self.assertIn("- Gemini 호출: 0회(실패 0회)", self.summary())  # 0회는 실행 요약에만 남는다
 
     def test_every_model_failing_leaves_the_count_and_the_failure_kind_in_the_summary(self):
-        client = self.fake_gemini([ApiError(429, quota_body())] * 12)
+        client = self.fake_gemini([ApiError(429, quota_body())] * ALL_TRIES)
         self.write_issue(page_body(edit=self.LAYOUT, after="둘째 문단 아래에 강조 문장을 넣어 주세요"))
         code, out = self.run_main()
         self.assertEqual(code, runner.EXIT_INFRA)
-        self.assertEqual(len(client.models.calls), 12)
+        self.assertEqual(len(client.models.calls), ALL_TRIES)
         text = self.summary()
         self.assertIn("**error**", text)
-        self.assertIn("- Gemini 호출: 12회(실패 12회)", text)
-        self.assertIn("- Gemini 실패 내역: 429(한도 초과) 12회", text)
+        self.assertIn(f"- Gemini 호출: {ALL_TRIES}회(실패 {ALL_TRIES}회)", text)
+        self.assertIn(f"- Gemini 실패 내역: 429(한도 초과) {ALL_TRIES}회", text)
         lines = runner_gemini_lines(out)
-        self.assertEqual(len(lines), 12)
+        self.assertEqual(len(lines), ALL_TRIES)
         self.assertTrue(all(f"quotaId={DAY_QUOTA_ID}" in line and "retryDelay=37s" in line for line in lines))   # 300자 안에 한도 구분 필드가 남는다
         self.assertTrue(all(len(line) <= 300 for line in lines))
-        self.assertIn(TAG + "   * Gemini 호출: 12회(실패 12회)", out.splitlines())
+        self.assertIn(TAG + f"   * Gemini 호출: {ALL_TRIES}회(실패 {ALL_TRIES}회)", out.splitlines())
         for line in out.splitlines():
             self.assertTrue(line.startswith(TAG), line)
 
     def test_a_three_violation_429_keeps_the_day_limit_and_the_wait_in_every_runner_line(self):
         """독립 검증 F-01: 러너의 요청 줄은 300자로 잘린다. 실제 모양(위반 3개)의 429 에서도 일 한도 id 와 재시도 대기가 줄 안에 남아야 한다."""
-        client = self.fake_gemini([ClientError(429, three_violation_body())] * 12)
+        client = self.fake_gemini([ClientError(429, three_violation_body())] * ALL_TRIES)
         self.write_issue(page_body(edit=self.LAYOUT, after="둘째 문단 아래에 강조 문장을 넣어 주세요"))
         code, out = self.run_main()
-        self.assertEqual(len(client.models.calls), 12)
+        self.assertEqual(len(client.models.calls), ALL_TRIES)
         lines = runner_gemini_lines(out)
-        self.assertEqual(len(lines), 12)
+        self.assertEqual(len(lines), ALL_TRIES)
         for line in lines:
             self.assertIn(f"quotaId={DAY_QUOTA_ID} retryDelay=55s", line)
             self.assertLessEqual(len(line), 300)
 
     def test_the_api_key_from_the_environment_is_replaced_in_the_gemini_lines(self):
         """독립 검증 F-05: 환경의 GEMINI_API_KEY 값은 비밀 패턴에 걸리지 않는 모양이어도 요청 줄에서 글자 그대로 가려진다."""
-        self.fake_gemini([RuntimeError("credential fake-llm-key rejected")] * 4)       # 일시 오류가 아니라 모델마다 한 번씩만 시도한다
+        self.fake_gemini([RuntimeError("credential fake-llm-key rejected")] * MODEL_COUNT)       # 일시 오류가 아니라 모델마다 한 번씩만 시도한다
         self.write_issue(page_body(edit=self.LAYOUT, after="둘째 문단 아래에 강조 문장을 넣어 주세요"))
         code, out = self.run_main()
         lines = runner_gemini_lines(out)
-        self.assertEqual(len(lines), 4)
+        self.assertEqual(len(lines), MODEL_COUNT)
         self.assertTrue(all("credential *** rejected" in line and "fake-llm-key" not in line for line in lines), lines[0])
 
     def test_secrets_and_commands_in_failures_stay_out_of_the_runner_log(self):
@@ -2200,7 +2206,7 @@ class ChanceLeakTest(ChanceBase):
             self.assertNotIn(secret, message)
             self.assertNotIn(secret, out)
         self.assertTrue(message.startswith("모든 Gemini 모델 호출 실패\ngemini-3.8-flash: bad request"), message)
-        self.assertEqual(message.count("\n"), 4)                      # 모델마다 한 줄(4개) — 형식은 그대로
+        self.assertEqual(message.count("\n"), MODEL_COUNT)             # 모델마다 한 줄 — 형식은 그대로
 
     def test_the_real_key_is_replaced_even_when_no_pattern_matches_it(self):
         message, out = self.run_all_models_failing(f"credential {self.REAL_KEY} rejected", key=self.REAL_KEY)

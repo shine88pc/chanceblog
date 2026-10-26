@@ -61,7 +61,6 @@ SLOT_HOURS = sorted({int(x) for x in os.environ.get("POST_HOURS_KST", "9,18").sp
 
 MODEL_CANDIDATES = [
     "gemini-3.8-flash",
-    "gemini-3.7-flash",
     "gemini-3.6-flash",
     "gemini-3.5-flash-lite",
 ]
