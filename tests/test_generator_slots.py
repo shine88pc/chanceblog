@@ -537,6 +537,18 @@ class FetchNewsStatsTest(unittest.TestCase):
         self.assertEqual(sorted(m["title"] for m in merged), ["40시간 된 기사", "71시간 된 기사"])
         self.assertEqual(stats["sources"][0]["drops"], {"AGE": 1})
 
+    def test_page_delay_waits_between_consecutive_article_page_fetches_only(self):
+        short = "짧음"
+        items = [(f"기사 {i}", f"https://www.reuters.com/a{i}", self.fresh(), short, "") for i in range(3)]
+        with mock.patch.object(g.time, "sleep") as sleep:
+            merged, stats, out = self.run_fetch(items, sources=[{"name": "예절 시험", "lane": "economy", "url": self.FEED, "page_delay": 2}],
+                                                excerpt="긴 요약 문장입니다. " * 20)
+        self.assertEqual(len(merged), 3)
+        self.assertEqual([c.args for c in sleep.call_args_list], [(2,), (2,)])   # 세 번 읽는 사이사이에 두 번
+        with mock.patch.object(g.time, "sleep") as sleep:
+            self.run_fetch(items, sources=[{"name": "지연 없음", "lane": "economy", "url": self.FEED}], excerpt="긴 요약 문장입니다. " * 20)
+        sleep.assert_not_called()
+
     def test_display_name_is_what_the_post_shows_and_name_is_the_fallback(self):
         summary = "요약 문장입니다. " * 20
         items = [("통과 기사", "https://www.reuters.com/a", self.fresh(), summary, "")]
@@ -1533,6 +1545,15 @@ class SourceNoticeTest(unittest.TestCase):
                 self.assertNotIn(f"<{self.LINK}>", content)
                 self.assertNotIn("(October 24, 2026)", content)
 
+    def test_a_title_ending_with_a_question_or_exclamation_mark_gets_no_extra_period(self):
+        sample = {"link": "https://x.test/a", "published": datetime(2026, 10, 23, 8, 0, tzinfo=timezone.utc)}
+        template = "“{title}.” Source, {date} <{url}>."
+        self.assertTrue(g._citation_line(template, dict(sample, title="How can Europe counter hybrid warfare?")).startswith("“How can Europe counter hybrid warfare?” Source,"))
+        self.assertTrue(g._citation_line(template, dict(sample, title="Apply now!")).startswith("“Apply now!” Source,"))
+        self.assertTrue(g._citation_line(template, dict(sample, title="A plain title.")).startswith("“A plain title.” Source,"))   # 마침표는 하나만
+        self.assertTrue(g._citation_line(template, dict(sample, title="A plain title")).startswith("“A plain title.” Source,"))
+        self.assertTrue(g._citation_line(template, dict(sample, title="What now?")).endswith("<https://x.test/a>."))             # 끝의 틀 마침표는 그대로
+
     def test_a_citation_without_a_notice_is_still_added(self):
         item = dict(self.source(None), citation="{title} ({date}) {url}", published=datetime(2026, 1, 5, tzinfo=timezone.utc))
         content = g.add_discovery_metadata(self.post(f"본문입니다. [원문]({self.LINK})"), item)
@@ -1734,6 +1755,28 @@ class SourceRuleSamplesTest(unittest.TestCase):
             self.assertTrue(g._trusted_domain(host, lane), (host, lane))
         self.assertFalse(g._trusted_domain("commission.europa.eu", "economy"))  # 집행위원회 소식 피드는 사회·정책 분야에만 쓴다
 
+    def test_horizon_magazine_articles_never_enter_through_the_commission_feeds(self):
+        # Horizon 은 재게시에 원 기자 이름·바닥글을 요구하는데 피드의 기자 이름을 읽지 못한다. DG Environment 피드에 Horizon 기사가 섞여 든다(2026-10-26 검증).
+        horizon = "https://projects.research-and-innovation.ec.europa.eu/en/horizon-magazine/plants-and-waste-everyday-products-boosting-europes-bioeconomy"
+        news = "https://research-and-innovation.ec.europa.eu/news/all-research-and-innovation-news/horizon-europe-launches-new-research-and-innovation-call-nature-2026-10-02_en"
+        for name in ("European Commission", "European Commission · Energy", "European Commission · Environment",
+                     "European Commission · JRC", "EU Digital Strategy"):
+            with self.subTest(source=name):
+                self.assertFalse(self.kept(name, "From plants and waste to everyday products: boosting Europe’s bioeconomy", link=horizon), name)
+                # 'Horizon Europe' 연구 사업 소식(집행위원회 R&I 뉴스)은 Horizon 매거진이 아니라 살린다
+                self.assertTrue(self.kept(name, "Horizon Europe launches new research and innovation call on nature", link=news), name)
+
+    def test_energy_skips_statements_speeches_and_declarations_but_keeps_news_with_the_word_statement_inside(self):
+        energy = "European Commission · Energy"
+        for title in ("Statement by President von der Leyen at the joint press conference with President Costa",
+                      "Joint statement on energy security", "G7 Leaders’ Statement on the energy transition",
+                      "Speech by Commissioner Jørgensen at the Energy Forum", "Remarks by the Commissioner on gas storage",
+                      "Berlin Declaration on affordable energy"):
+            self.assertFalse(self.kept(energy, title), title)
+        for title in ("Commission invests €3.4 billion in net-zero technology projects", "Oil Coordination Group discusses EU fuel market developments",
+                      "Energy statistics: renewables share reaches a record"):
+            self.assertTrue(self.kept(energy, title), title)
+
     def test_jrc_skips_defence_and_security_items_by_feed_category(self):
         jrc = "European Commission · JRC"
         self.assertTrue(self.kept(jrc, "AI adoption more than doubles in almost every EU strategic sector",
@@ -1807,6 +1850,7 @@ class SourceRuleSamplesTest(unittest.TestCase):
                 self.assertIn("changes were made", src["notice"]["en"])
                 self.assertIn("has not reviewed or endorsed", src["notice"]["en"])
                 self.assertIn("확정된 법·결정을 구분", src["prompt_rule"])
+                self.assertIn("왜곡하지 말고", src["prompt_rule"])
         self.assertIn("DG CNECT", by_name["EU Digital Strategy"]["citation"])            # 디지털 전략 사이트의 출처 표시 안내(작품 제목·유럽연합 귀속·원문 주소)
         self.assertIn("Anonymous (not verified)", by_name["EU Digital Strategy"]["prompt_rule"])
         for name in ("Statistics Canada · economy", "Statistics Canada · society", "Statistics Canada · daily life"):
@@ -1819,6 +1863,8 @@ class SourceRuleSamplesTest(unittest.TestCase):
                 self.assertIn("보증하지 않았", src["notice"]["ko"])
                 self.assertIn("has not reviewed or endorsed", src["notice"]["en"])
                 self.assertIn("그대로 쓰세요", src["prompt_rule"])
+                self.assertIn("statcan.gc.ca", src["prompt_rule"])            # 링크 글자에 주소를 보이지 않게 하는 지침(통계청 'Advertising and Publicity')
+                self.assertEqual(src.get("page_delay"), 2)                    # 통계청 robots.txt 의 Crawl-delay: 2
 
     def test_pew_topic_words_need_word_boundaries(self):
         pew = next(s for s in g.NEWS_SOURCES if s["name"] == "Pew Research Center")

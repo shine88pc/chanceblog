@@ -719,6 +719,7 @@ EDITORIAL_LANES = {
 #   citation       글 끝에 붙일 인용 한 줄의 틀({title}·{date}·{url}). 소스 약관이 정한 인용 형식(Pew).
 #   prompt_rule    글 작성 지침에 한 줄 더하는 소스별 약관 조건.
 #   display_name   글에 보이는 출처 이름(생략하면 name). 한 게시자의 피드를 분야별로 나눠 읽을 때 name 은 달라야 해서 둔다.
+#   page_delay     기사 페이지를 연달아 읽을 때 사이에 기다릴 초(사이트의 Crawl-delay 를 지킨다).
 # 해외(미국 외) 소스의 공통 약관 조건(2026-10-26, 조사 보고서 R1·R2에서 약관·robots.txt·피드를 직접 읽어 확인).
 #
 # 유럽연합 집행위원회 계열: 법적 고지(https://commission.europa.eu/legal-notice_en)는 "달리 표시하지 않은 한 CC BY 4.0이며 적절한 출처 표시와
@@ -733,7 +734,10 @@ _EC_NOTICE = {
     "en": "This article was written with an AI tool by summarising and restructuring material published by the European Commission; changes were made to the original. "
           "The original is licensed under CC BY 4.0 (" + _CC_BY + "). The European Commission has not reviewed or endorsed this article."}
 _EC_PROMPT_RULE = ("집행위원회의 제안·협의·계획과 이미 확정된 법·결정을 구분하세요. 요약에 없는 시행 시기·금액·법적 효력은 쓰지 마세요. "
-                   "집행위원회가 이 글을 검토하거나 보증한 것처럼 쓰지 마세요.")
+                   "원문의 의미를 왜곡하지 말고, 집행위원회가 이 글을 검토하거나 보증한 것처럼 쓰지 마세요.")
+# 집행위원회 피드에서 뺄 기사 주소: Eurostat 소식(Eurostat 자체 고지가 따로 있음)과 Horizon 매거진 기사(2026-10-26 검증이 DG Environment 피드에 섞여 드는 것을 찾음).
+# Horizon 은 재게시에 원 기자 이름·원문 링크·바닥글 문구를 요구하는데 피드의 기자 이름(dc:creator)을 아직 읽지 않아 지킬 수 없다.
+_EC_EXCLUDE_LINK = r"/eurostat/|/horizon-magazine/"
 
 
 def _ec_citation(creator):
@@ -743,7 +747,7 @@ def _ec_citation(creator):
 
 # Statistics Canada Open Licence(https://www.statcan.gc.ca/en/terms-conditions/open-licence): 상업 이용·재가공(Value-added Products)을 허용하고,
 # 재가공물에는 "Adapted from Statistics Canada, <상품명>, <기준 시점>. This does not constitute an endorsement by Statistics Canada of this product."
-# 문구를 넣으라고 한다. 정보를 정확히 옮기고(reproduce accurately) 통계청이 보증하는 것처럼 보이게 하지 말며 로고·문장(紋章)·도메인 이름을 쓰지 말라는 조건이 있다.
+# 문구를 넣으라고 한다. 정보를 정확히 옮기고(reproduce accurately) 통계청이 보증하는 것처럼 보이게 하지 말며 통계청 이름·로고·문장(紋章)·기타 상징·도메인 이름을 출처 표기 밖에서 쓰지 말라는 조건("Advertising and Publicity")이 있다.
 # 피드 하나(The Daily 전체 주제)를 분야별 주제어로 나눠 세 소스로 읽는다. 항목 제목이 Atom type="xhtml"이라 parse_feed 가 자식 요소까지 읽는다.
 _STATCAN_FEED = "https://www150.statcan.gc.ca/n1/rss/dai-quo/0-eng.atom"
 _STATCAN_TERMS = {"status": "allowed", "checked": "2026-10-26", "url": "https://www.statcan.gc.ca/en/terms-conditions/open-licence"}
@@ -752,7 +756,9 @@ _STATCAN_NOTICE = {
     "ko": "이 글은 AI 도구가 캐나다 통계청(Statistics Canada)이 발표한 자료를 바탕으로 재구성해 작성했습니다. 통계청은 이 글을 검토하거나 보증하지 않았으며, 수치와 기준 시점은 통계청의 발표를 따릅니다.",
     "en": "This article was written with an AI tool, adapting information published by Statistics Canada. Statistics Canada has not reviewed or endorsed it; figures and reference periods follow Statistics Canada's release."}
 _STATCAN_PROMPT_RULE = ("통계청 발표 요약의 수치·단위·기준 시점(월·분기·연도)을 그대로 쓰세요. 반올림·환산·추정을 하지 말고, 발표에 없는 원인이나 전망을 통계청의 말처럼 쓰지 마세요. "
-                        "통계청이 이 글을 보증하는 것처럼 쓰지 마세요.")
+                        "통계청이 이 글을 보증하는 것처럼 쓰지 마세요. 원문 링크의 글자는 '통계청 발표'처럼 설명 문구로 쓰고 주소(statcan.gc.ca)를 글자로 보이게 쓰지 마세요.")
+# 통계청 사이트 robots.txt 의 Crawl-delay: 2 를 지켜, 기사 페이지를 연달아 읽을 때 사이에 이만큼(초) 기다린다.
+_STATCAN_PAGE_DELAY = 2
 # 글감이 못 되는 발표(통계 상품 안내·부문별 물가지수·공급 처리표·원자료 모음)와, 자동으로 다시 쓰기에는 민감한 주제(자살·약물 과다복용·마약성 진통제·성폭력·살인)는 쓰지 않는다.
 # 소비자물가지수·신규주택가격지수는 글감이라 살린다.
 _STATCAN_EXCLUDE = (
@@ -831,31 +837,34 @@ NEWS_SOURCES = [
                 "en": "This article was written with an AI tool using materials published by the Federal Reserve Board. The Board has not reviewed or approved it."}},
     # 해외(미국 외) 소스(2026-10-26 운영자 승인 13·14번 — 약관을 확인한 공식·공공 소스만, 라이선스가 출처 표시와 변경 표시를 조건으로 상업 이용·재가공을 허용한다).
     # 글 끝의 인용 한 줄(citation)과 고지문(notice)은 그 조건을 코드가 붙인다. 위 `_EC_*`·`_STATCAN_*` 상수에 약관 근거를 적었다.
-    # 유럽연합 집행위원회 소식: 약 1/3이 국채 입찰 결과·신청 안내라 제외하고, 선거·정치광고·민주주의 방패 글은 중립을 위해 쓰지 않는다(Pew와 같은 원칙).
+    # 유럽연합 집행위원회 소식: 약 1/4(30건 중 8건)이 국채 입찰 결과·신청 안내라 제외하고, 선거·정치광고·민주주의 방패 글은 중립을 위해 쓰지 않는다(Pew와 같은 원칙).
     {"name": "European Commission", "lane": "society", "url": "https://commission.europa.eu/node/2/rss_en",
      "terms": _EC_TERMS,
      "exclude_title": r"\bauctions?\b|\bEU-(?:Bills?|Bonds?)\b|\bapply now\b|\bcall for (?:applications|tenders|proposals|experts)\b|\bwebinar\b"
                       r"|\belections?\b|\bpolitical (?:ads?|advertising|parties)\b",
-     "exclude_link": r"/eurostat/",
+     "exclude_link": _EC_EXCLUDE_LINK,
      "exclude_tags": r"^democracy$|\belections?\b",
      "citation": _ec_citation("European Commission"), "notice": _EC_NOTICE, "prompt_rule": _EC_PROMPT_RULE},
     # DG Energy: 에너지·경제 소식이 주 1~2건이 아니라 평일 거의 매일 나온다. 위원 방문·연설문은 글감이 못 된다. EIB·ACER 기사는 신뢰 목록에 없어 떨어진다.
     {"name": "European Commission · Energy", "display_name": "European Commission (DG Energy)", "lane": "economy",
      "url": "https://energy.ec.europa.eu/node/2/rss_en",
      "terms": _EC_TERMS,
-     "exclude_title": r"^statement by\b|\bjoint press conference\b|\bapply now\b|\bcall for (?:feedback|evidence|applications|tenders|proposals)\b|\bwebinar\b",
-     "exclude_link": r"/eurostat/",
+     # 연설·성명·공동 선언은 글감이 못 된다(Press Corner 항목은 제3자와 함께 낸 문서일 수 있고 Press Corner 의 법적 고지는 확인하지 못했다).
+     "exclude_title": r"^(?:joint )?statements?\b|^speech\b|^remarks\b|\bleaders[’']? statement\b|\bdeclaration\b|\bjoint press conference\b"
+                      r"|\bapply now\b|\bcall for (?:feedback|evidence|applications|tenders|proposals)\b|\bwebinar\b",
+     "exclude_link": _EC_EXCLUDE_LINK,
      "citation": _ec_citation("European Commission, DG Energy"), "notice": _EC_NOTICE, "prompt_rule": _EC_PROMPT_RULE},
     {"name": "European Commission · Environment", "display_name": "European Commission (DG Environment)", "lane": "science",
      "url": "https://environment.ec.europa.eu/node/92/rss_en",
      "terms": _EC_TERMS,
      "exclude_title": r"\bapply now\b|\bcall for (?:applications|tenders|proposals)\b|\bwebinar\b",
-     "exclude_link": r"/eurostat/",
+     "exclude_link": _EC_EXCLUDE_LINK,
      "citation": _ec_citation("European Commission, DG Environment"), "notice": _EC_NOTICE, "prompt_rule": _EC_PROMPT_RULE},
     # JRC: 요약이 짧은 항목은 기사 페이지의 소개 문구를 읽는다. 국방·안보 분류 글은 쓰지 않는다.
     {"name": "European Commission · JRC", "display_name": "European Commission, Joint Research Centre", "lane": "science",
      "url": "https://joint-research-centre.ec.europa.eu/node/2/rss_en",
      "terms": _EC_TERMS,
+     "exclude_link": _EC_EXCLUDE_LINK,
      "exclude_tags": r"defen[cs]e|^security and law enforcement$",
      "citation": _ec_citation("European Commission, Joint Research Centre (JRC)"), "notice": _EC_NOTICE, "prompt_rule": _EC_PROMPT_RULE},
     # 디지털 전략(AI Act·디지털서비스법 등): 이 사이트의 법적 고지는 출처 표시 방법을 "작품 제목, 유럽연합 귀속, 원문 주소"로 안내한다.
@@ -864,17 +873,18 @@ NEWS_SOURCES = [
      "url": "https://digital-strategy.ec.europa.eu/en/rss.xml",
      "terms": {"status": "allowed", "checked": "2026-10-26", "url": "https://digital-strategy.ec.europa.eu/en/pages/legal-notice"},
      "exclude_title": r"\bcall for (?:tenders|applications|proposals|experts)\b",
+     "exclude_link": _EC_EXCLUDE_LINK,
      "citation": _ec_citation("European Union (European Commission, DG CNECT)"), "notice": _EC_NOTICE,
      "prompt_rule": _EC_PROMPT_RULE + " 요약 앞머리의 'Anonymous (not verified)'와 날짜는 사이트가 붙인 잡음이니 글에 쓰지 마세요."},
     # 캐나다 통계청 The Daily(평일 12:30 UTC 발표). 한 피드를 분야별 주제어로 나눠 읽는다(_STATCAN_* 상수).
     {"name": "Statistics Canada · economy", "display_name": "Statistics Canada", "lane": "economy", "url": _STATCAN_FEED,
-     "terms": _STATCAN_TERMS, "exclude_title": _STATCAN_EXCLUDE, "topic_regex": _STATCAN_ECONOMY,
+     "terms": _STATCAN_TERMS, "exclude_title": _STATCAN_EXCLUDE, "topic_regex": _STATCAN_ECONOMY, "page_delay": _STATCAN_PAGE_DELAY,
      "citation": _STATCAN_CITATION, "notice": _STATCAN_NOTICE, "prompt_rule": _STATCAN_PROMPT_RULE},
     {"name": "Statistics Canada · society", "display_name": "Statistics Canada", "lane": "society", "url": _STATCAN_FEED,
-     "terms": _STATCAN_TERMS, "exclude_title": _STATCAN_EXCLUDE, "topic_regex": _STATCAN_SOCIETY,
+     "terms": _STATCAN_TERMS, "exclude_title": _STATCAN_EXCLUDE, "topic_regex": _STATCAN_SOCIETY, "page_delay": _STATCAN_PAGE_DELAY,
      "citation": _STATCAN_CITATION, "notice": _STATCAN_NOTICE, "prompt_rule": _STATCAN_PROMPT_RULE},
     {"name": "Statistics Canada · daily life", "display_name": "Statistics Canada", "lane": "daily_life", "url": _STATCAN_FEED,
-     "terms": _STATCAN_TERMS, "exclude_title": _STATCAN_EXCLUDE, "topic_regex": _STATCAN_LIFE,
+     "terms": _STATCAN_TERMS, "exclude_title": _STATCAN_EXCLUDE, "topic_regex": _STATCAN_LIFE, "page_delay": _STATCAN_PAGE_DELAY,
      "citation": _STATCAN_CITATION, "notice": _STATCAN_NOTICE, "prompt_rule": _STATCAN_PROMPT_RULE},
     # 전자신문(rss.etnews.com)은 2026-10-26에 뺐다: 콘텐츠 이용 안내(info.etnews.com)가 영리·비영리 정보서비스에 사전 협의·정식 계약을 요구하고 무단 사용에는 사용료의
     # 30배 배상을 안내한다. 운영자 결정(2026-10-26 "계약·사용료는 '무료 자동화 기반' 취지에 맞지 않음")으로 TERMS_BLOCKED_DOMAINS 에 올렸다(D-61).
@@ -1093,6 +1103,7 @@ def fetch_news_items(editorial_lane=None, stats=None, deadline=None, clock=time.
         drops = {}
         resolved_count = 0
         topic_re = re.compile(src["topic_regex"], re.I) if src.get("topic_regex") else None
+        pages_fetched = 0
         for it in parsed:
             title = it["title"]
             publisher = it.get("publisher_name") or ""
@@ -1146,6 +1157,9 @@ def fetch_news_items(editorial_lane=None, stats=None, deadline=None, clock=time.
                 continue
             summary = it["summary"]
             if len(summary) < 100 and not src.get("no_page_fetch"):
+                if pages_fetched and src.get("page_delay"):
+                    time.sleep(src["page_delay"])   # 같은 사이트의 기사 페이지를 연달아 읽을 때 Crawl-delay 를 지킨다
+                pages_fetched += 1
                 summary = _fetch_source_excerpt(article_url)
             if len(summary) < 100:
                 _count(drops, "SHORT_SUMMARY")
@@ -1472,7 +1486,8 @@ def _citation_line(citation, source):
     link = str(source.get("link") or "").strip()
     if not (isinstance(citation, str) and title and link and hasattr(published, "month")):
         return ""
-    return citation.format(title=title, date=f"{_MONTHS[published.month - 1]} {published.day}, {published.year}", url=link)
+    line = citation.format(title=title, date=f"{_MONTHS[published.month - 1]} {published.day}, {published.year}", url=link)
+    return re.sub(r"([?!])\.(?=[”\"])", r"\1", line)   # 제목이 ?·! 로 끝나면 틀의 마침표를 겹쳐 쓰지 않는다("…warfare?.”" 방지)
 
 
 def _append_source_notice(content, source):
