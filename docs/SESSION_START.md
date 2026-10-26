@@ -67,7 +67,7 @@ main 최신 커밋 · 최근 24시간 자동 실행 결과(Chance 슬롯, Blogge
 
 ## 5. 현재 상태와 다음 작업 순서
 
-> 갱신 기준: **2026-10-26 오전(KST)**(Chance 출처 개편 반영). 이후 변경은 `WORKLOG.md` 최신 항목·열린 PR·`HANDLER.md` §0이 더 정확합니다. 새 세션은 이 절을 믿기 전에 `git log --oneline -20 origin/main`과 열린 PR 목록으로 대조하세요.
+> 갱신 기준: **2026-10-26 오후(KST)**(Chance 출처 개편·Blogger 통합 브랜치 반영). 이후 변경은 `WORKLOG.md` 최신 항목·열린 PR·`HANDLER.md` §0이 더 정확합니다. 새 세션은 이 절을 믿기 전에 `git log --oneline -20 origin/main`과 열린 PR 목록으로 대조하세요.
 
 ### 5-1. 오늘 병합된 것 (main)
 
@@ -84,7 +84,7 @@ main 최신 커밋 · 최근 24시간 자동 실행 결과(Chance 슬롯, Blogge
 | #21 | **확인 필요 모음**(이슈 `[운영] 확인 필요 모음` 1개 + 실행 요약, 2시간 간격 예약) | — |
 | #23 | 확인 필요 모음 독립 검증 권장 수정 12건(이름은 워크플로 파일에서 읽음·본문 재작성 억제·포크 PR 제외·첫 알림 유실·오류 줄·호출 상한·본문 한도·워치독 계약 시험·문구) | 잔여는 D-58 |
 | #24 | **호출 기록 + 수동 실행 기본값·정지 스위치**(`[GEMINI]` 로그·요약 `Gemini 호출: N회`, 연습 실행은 가짜 AI 응답·`real_ai`, Blogger 수동 `dry_run` 기본 켜짐, 이슈 수정 `PIPELINE_PAUSE`, 이미지 교체 20건 상한) | D-50~D-54 |
-| #25 | **운영자용 Actions 사용 가이드 v2**(`docs/ACTIONS_GUIDE.md`, 시나리오 16개·보안 점검표·워크플로별 상세; 아직 병합 전인 Blogger 두 기능은 `병합대기` 마커로 구분) | 사실 검증 2회, 틀림 0 |
+| #25 | **운영자용 Actions 사용 가이드 v2**(`docs/ACTIONS_GUIDE.md`, 시나리오 16개·보안 점검표·워크플로별 상세; 당시 병합 전이던 Blogger 두 기능은 `병합대기` 마커로 구분했고, 마커는 Blogger 통합 브랜치에서 걷음) | 사실 검증 2회, 틀림 0 |
 
 **병합 직후 Actions 관측(끝난 것)**: 워치독(이슈 #9·#10 자동 해소), Blogger(대상 0개 notice), 이름 변경(새 이름 9개, 연습 실행 2종), 이슈 수정 연습 실행. **Pages 확인**: 글이 추가된 첫 배포(20:37 KST)에서도 시도 1회·경과 0초·HTTP 200·`MISS`·`Age 0`(N3-1 — 첫 요청이 정규 주소에 404를 심는 경우 — 은 이 관측 1회에서는 일어나지 않음, 표본이 더 쌓일 때까지 D-41에 열어 둔다). **확인 필요 모음**: 연습 실행 → 실제 실행으로 이슈 **#22**(라벨 `ops-inbox`, 담당자 소유자)가 만들어졌고 이슈 목록 맨 위에 고정했으며, 후속 수정(#23) 병합 뒤 실제 실행에서 이름 표시가 고쳐지고 곧바로 다시 실행하면 "변경 없음"으로 끝났다. 지금 "해야 할 일 0건·참고 3건"이고 정기 실행(2시간 간격 예약, 실제로는 3~6시간 예상)은 아직 관측 전이다. **Chance 18시 슬롯**: 15:09 KST 이후 예약 실행이 5시간 넘게 없다가 20:34 KST 예약 실행이 "사회·정책 후보 없음 → 기술·미래로 대체"해 글 1편을 발행했다(복구 PR #11의 첫 실제 폴백, `Gemini 호출: 1회(실패 0회)`). 비기술 분야는 여전히 후보 0(신뢰 목록 밖 게시자·36시간 초과가 대부분) — 출처 개편(§6 #2)의 근거. **호출 기록·수동 기본값(#24) 병합 직후**: 입력 없이 `Chance 글 자동 작성·게시`를 수동 실행하자 30초에 초록, 요약이 "결과: PUBLISHED — 연습으로 글을 만들어 봤습니다(저장하지 않았습니다)"·"AI 응답: 가짜(스텁) — Gemini를 호출하지 않았습니다"·`Gemini 호출: 0회(실패 0회)`·`Unsplash 남은 호출: 49회`였고 새 커밋은 없었다. **병합 뒤 처음 도는 정기 실행은 아직 관측 전**(§5-3). **운영자 직접 변경**: 20:26 KST `pipeline/blogs.json`의 `defaults.mode`를 `draft`→`auto`(커밋 c68d565). 두 블로그가 자기 `mode`를 명시해 동작은 그대로이며(`chance` auto, `blogger_macat` off) `mode` 없이 추가하는 새 블로그만 곧바로 auto — 의도 확인(§6 #11).
 
@@ -92,7 +92,7 @@ main 최신 커밋 · 최근 24시간 자동 실행 결과(Chance 슬롯, Blogge
 
 | 브랜치 | 내용 | 상태·다음 |
 |--------|------|-----------|
-| `ai/claude/blogger-draft-upload` → `ai/claude/blogger-auth-check` | Blogger 초안함 업로드 모드(`mode draft` + Secrets면 초안함에 올림, 수동 `publish` off/draft/publish 3택), 인증 점검만 실행(`auth_check`), 레지스트리 `mode` 직접 지정 검사(REG-1: 블로그 항목은 `mode`를 직접 적어야 함 — `defaults.mode`가 auto인 지금 새 블로그 사고 방지) | 독립 검증 2회 모두 **병합 가능**(변경분 재검증: 열거·퍼징 위반 0, 새 변이 86개 중 85 탐지). **호출 기록 병합(#24)이 끝난 지금 통합 단계**: `main`을 합치고 충돌을 풀어야 한다 — `pipeline/run.py` 3줄(`mask` import 제거, 옮겨진 주제 선정을 `with purpose(llm,"topic-expansion"):`로 감쌈, 성공 요약 앞에 `lines += [f"- {line}" for line in ai_lines()]`)·`blogger.yml`(`publish` choice 유지)·`DEFECT_REGISTER`(D-49는 quota 쪽 한 줄만)·`tests/test_workflow_names.py` ALLOWED_REFS 합집합(`inputs.auth_check`·`inputs.real_ai`)·`tests/test_manual_run_defaults.py` 4건(문구·`publish` 3택에 맞춤, 코드 변경 없음). 통합 뒤 변경분 재검증(검증자가 만든 임시 해결: scratchpad 밖에는 없음) → 병합 → 가이드의 `blogger-*` 마커 걷기(WORKLOG 오늘 항목의 문장 목록) |
+| `ai/claude/blogger-integration`(`ai/claude/blogger-draft-upload` → `ai/claude/blogger-auth-check` 위에 main 9ba5313을 합친 통합 브랜치) | Blogger 초안함 업로드 모드(`mode draft` + Secrets면 초안함에 올림, 수동 `publish` off/draft/publish 3택), 인증 점검만 실행(`auth_check`), 레지스트리 `mode` 직접 지정 검사(REG-1: 블로그 항목은 `mode`를 직접 적어야 함 — 새 블로그 사고 방지), 결함 D-55~D-57 | 두 브랜치는 독립 검증 2회 모두 **병합 가능**(변경분 재검증: 열거·퍼징 위반 0, 새 변이 86개 중 85 탐지). **통합 브랜치를 push했고(PR 아님, 병합 아님) 통합본의 독립 검증을 기다린다.** main의 호출 기록(#24)·출처 개편·47분 틱·`defaults.mode` draft 복귀·모델 3개 목록은 그대로 두고 브랜치 추가분을 더했다. 충돌 7개 파일(`pipeline/run.py`·`blogger.yml`·`HANDLER.md`·`docs/ARCHITECTURE.md`·`docs/DEFECT_REGISTER.md`·`docs/ENGINEERING_GUIDE.md`·`tests/test_workflow_names.py`)을 풀었고, `tests/test_manual_run_defaults.py`의 시험 문구를 `publish` 3택에 맞췄으며(코드 변경 없음), `docs/ACTIONS_GUIDE.md`의 `병합대기` 마커와 그 문장도 이 브랜치에서 걷었다. 병합해도 Blogger는 켜지지 않는다(`blogger_macat` `mode: off`·시크릿 없음·Actions 실행 없음). 다음: 통합본 독립 검증(변경분 재검증, Chance·Blogger 정기 경로 불변 확인) → PR 생성 → 병합 → 병합 뒤 Actions 확인 |
 | `ai/claude/source-overhaul` → **PR #27 병합 완료**(4f981d7, 2026-10-26 09:22) | Chance 출처 개편(구글 뉴스 14개·MIT TR·BBC Technology·AI타임스 제거, NASA·Pew·Federal Reserve 추가, UN News 보류, 약관 점검 필드·차단 목록·고지문). 독립 검증 2건(코드 2회·약관 사실) | 검증 권장 보완은 `ai/claude/source-overhaul-followup`(PR #30)으로 **병합 완료**(c187c6d, 2026-10-26 10:48) → 첫 슬롯 관측은 §5-3 |
 | `ai/claude/source-drop-ars-ieee` (PR #31 **병합 완료** 5d74970, 2026-10-26 11:02) | Ars Technica·IEEE Spectrum 제외(사용자 채팅 승인): 소스·기술 신뢰 목록에서 삭제, `TERMS_BLOCKED_DOMAINS`에 추가, 그 출처 공개 글 3편 비공개 전환(`published: false`, 삭제 없음), 시험·문서 | 병합·배포·공개 사이트 확인(3개 주소 404, posts.json 12건)·연습 실행 #72 완료 — 남은 관측은 §5-3 |
 
@@ -107,7 +107,7 @@ main 최신 커밋 · 최근 24시간 자동 실행 결과(Chance 슬롯, Blogge
 
 ### 5-4. 다음 작업 순서
 
-1. **열린 PR 병합 마무리**: Blogger 두 PR(호출 기록 병합 뒤 충돌 해결 → 변경분 재검증 → 병합 → 가이드의 `blogger-*` 마커 걷기와 문장 정리: 검증자 목록은 WORKLOG 오늘 항목, 마지막 마커를 걷을 때 가이드의 "먼저 읽기 3" 안내 문장도 삭제). 병합마다 main 병합·충돌 해결(뒤에 병합하는 쪽이 자기 코드를 새 기반에 맞춤)·한글 이름 규칙·문서 표 행·결함 번호(다음은 D-64) 확인, 전체 테스트, 병합 직후 Actions 확인. 낡아진 안내 갱신 목록은 Blogger PR이 고친다(HANDLER §3 P1·§10 5-4, ENGINEERING_GUIDE L3·W7, CHARTER 131행 근처, ARCHITECTURE UNPUBLISHED 행); `docs/REQUEST_BRIEFING.md`는 총괄이 갱신.
+1. **열린 PR 병합 마무리**: Blogger 통합 브랜치 `ai/claude/blogger-integration`(충돌 해결과 가이드의 `blogger-*` 마커·"먼저 읽기 3" 안내 정리까지 끝내 push함, 병합 전) → 통합본 독립 검증(변경분 재검증) → PR 생성 → 병합. 병합마다 main 병합·충돌 해결(뒤에 병합하는 쪽이 자기 코드를 새 기반에 맞춤)·한글 이름 규칙·문서 표 행·결함 번호(다음은 D-64) 확인, 전체 테스트, 병합 직후 Actions 확인. 낡아진 안내 갱신 목록은 Blogger 통합 브랜치가 고쳤다(HANDLER §3 P1·§10 5-4, ENGINEERING_GUIDE L3·W7, CHARTER 131행 근처, ARCHITECTURE UNPUBLISHED 행); `docs/REQUEST_BRIEFING.md`는 총괄이 갱신.
 2. **운영자 승인 항목 반영**(§6, 2026-10-26 답변 반영): 모델 3.7 제거·예약 47분 틱·`defaults.mode` draft 복귀는 설정 PR로 끝났고, Blogger 초안함 업로드 통합(4번)·주제 가드레일(3번)·영문 프로필(5번)·사이트 정리(7번)·해외 소스 추가와 전자신문 제외(13·14번)가 진행 중이다. 상세와 최신 상태는 `인수인계/작업내용.md` §2·§3.
 3. **Blogger macat0722 재개**: 영문 코드 일반화(PR-14) → 영문 프로필(PR-15, T3) → `mode: draft`(T3) → 시크릿 등록(사용자) → 인증 점검 → 초안 1건 확인. auto는 AdSense 판정 전까지 보류.
 4. **쿼터 거버너**(PR-17·18): 호출 기록 1주 관측 + 운영자가 읽어 온 AI Studio 한도 표가 선행 조건.
