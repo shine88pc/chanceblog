@@ -758,7 +758,7 @@ def _ec_citation(creator):
 # Statistics Canada Open Licence(https://www.statcan.gc.ca/en/terms-conditions/open-licence): 상업 이용·재가공(Value-added Products)을 허용하고,
 # 재가공물에는 "Adapted from Statistics Canada, <상품명>, <기준일>. This does not constitute an endorsement by Statistics Canada of this product."(코드는 상품명 자리에 피드 제목을, 기준일 자리에 발표일을 채운다)
 # 문구를 넣으라고 한다. 정보를 정확히 옮기고(reproduce accurately) 통계청이 보증하는 것처럼 보이게 하지 말며 통계청 이름·로고·문장(紋章)·기타 상징·도메인 이름을 서면 허가 없이 쓰지 말라는 조건("Advertising and Publicity")이 있다.
-# 약관에 출처 표기 예외 문구는 없다 — 필수 출처 문구가 통계청 이름을 쓰게 하므로 이름은 출처 표기에서만 쓰고 글 본문·링크 글자에는 쓰지 않는다는 것은 이 코드의 해석이다(2026-10-26 약관 검증 지적).
+# 약관에 출처 표기 예외 문구는 없다 — 필수 출처 문구가 통계청 이름을 쓰게 하므로 이름은 출처를 밝히는 용도(필수 문구·고지문·'통계청 발표' 링크 글자·출처 목록)로만 쓰고 제목·홍보 문구에는 쓰지 않는다는 것은 이 코드의 해석이다(2026-10-26 약관 검증 지적).
 # 피드 하나(The Daily 전체 주제)를 분야별 주제어로 나눠 세 소스로 읽는다. 항목 제목이 Atom type="xhtml"이라 parse_feed 가 자식 요소까지 읽는다.
 _STATCAN_FEED = "https://www150.statcan.gc.ca/n1/rss/dai-quo/0-eng.atom"
 _STATCAN_TERMS = {"status": "allowed", "checked": "2026-10-26", "url": "https://www.statcan.gc.ca/en/terms-conditions/open-licence"}
@@ -862,7 +862,7 @@ NEWS_SOURCES = [
     {"name": "European Commission · Energy", "display_name": "European Commission (DG Energy)", "lane": "economy",
      "url": "https://energy.ec.europa.eu/node/2/rss_en",
      "terms": _EC_TERMS,
-     # 연설·성명·공동 선언은 글감이 못 된다(Press Corner 항목은 제3자와 함께 낸 문서일 수 있고 Press Corner 의 법적 고지는 확인하지 못했다).
+     # 연설·성명·공동 선언은 글감이 못 된다(집행위원회 소스 전부에서 제목으로 뺀다). Press Corner 보도자료는 법적 고지를 확인하지 못해 주소로 뺀다(_EC_EXCLUDE_LINK).
      "exclude_title": _EC_EXCLUDE_STATEMENTS + "|" + _EC_EXCLUDE_VISITS + "|" + _EC_EXCLUDE_APPLY
                       + r"|\bcall for (?:feedback|evidence|applications|tenders|proposals)\b|\bwebinar\b",
      "exclude_link": _EC_EXCLUDE_LINK,
