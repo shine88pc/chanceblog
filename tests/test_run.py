@@ -795,6 +795,88 @@ class ManualTopicGuardTest(RunBase):
         self.assertIn("…", self.summary())
         self.assertNotIn("x" * 60, self.summary())
 
+    def test_a_banned_word_far_into_a_long_topic_is_still_caught(self):
+        """주제 전체를 본다(앞부분만 보지 않는다). 120자 상한 안에서 금지 낱말이 뒤쪽에 있어도 막는다(D-64 ⑦ N-5)."""
+        topic = "A long and calm evening routine for desk workers who love tea music and slow walks, plus a gentle plan for insomnia"
+        self.assertTrue(90 < topic.index("insomnia") and len(topic) <= 120, (topic.index("insomnia"), len(topic)))
+        root = make_root(tempfile.mkdtemp(), lang="en")
+        self.addCleanup(shutil.rmtree, str(root), True)
+        code, out = self.go(env=self.env(**NO_PUBLISH), extra=["--topic", topic], root=root)
+        self.assertEqual(code, 2, out)
+        self.assertIn("word=insomnia", out)
+
+    def test_the_guard_uses_the_topic_list_and_not_the_body_list(self):
+        """주제 목록에만 있는 낱말(remedy·heal·treat·pharmacy)은 본문 목록이 일상어라 뺀 것이다. 수동 topic 은 주제 목록을 쓰므로 이 낱말도 막는다(D-64 ⑦ N-5)."""
+        profile = registry.load_profile("blogger_practical_en")
+        root = make_root(tempfile.mkdtemp(), lang="en")
+        self.addCleanup(shutil.rmtree, str(root), True)
+        for topic in ("Home remedy ideas for a calm evening", "Time to heal your sleep schedule", "Treat yourself to a slow morning",
+                      "Pharmacy pickup reminders for your phone"):
+            with self.subTest(topic):
+                self.assertEqual(gates.body_risk_hit(topic, profile), (None, None))   # 본문 목록으로는 걸리지 않는 주제
+                self.assertFalse(gates.topic_allowed(topic, profile))
+                code, out = self.go(env=self.env(**NO_PUBLISH), extra=["--topic", topic], root=root)
+                self.assertEqual(code, 2, out)
+                self.assertIn("[SKIP] code=TOPIC_BLOCKED", out)
+
+    def test_a_blocked_topic_stops_before_the_upload_skipped_notice(self):
+        """초안함 업로드(draft)인데 게시용 시크릿이 하나도 없으면 'UPLOAD_SKIPPED … 저장소 파일에만 저장합니다' 안내가 나온다. 주제가 막혀 아무것도
+        저장하지 않고 멈추는 실행에서는 그 안내가 나오면 안 된다(D-64 ⑦ N-7)."""
+        env = self.env(GEMINI_API_KEY="k", BLOGGER_PUBLISH="draft")
+        code, out = self.go(env=env, extra=["--topic", "혈압 낮추는 아침 습관"])
+        self.assertEqual(code, 2, out)
+        self.assertIn("[SKIP] code=TOPIC_BLOCKED", out)
+        self.assertNotIn("UPLOAD_SKIPPED", out)
+        self.assertNotIn("저장소 파일에만 저장합니다", out)
+        self.assertNotIn("UPLOAD_SKIPPED", self.summary())
+        self.assertEqual((self.history(), self.drafts()), ([], []))
+
+    def test_without_a_blocked_topic_the_upload_skipped_notice_is_unchanged(self):
+        """주제가 없거나 통과하면 안내는 예전 그대로다(정기 실행의 출력을 바꾸지 않는다)."""
+        env = self.env(GEMINI_API_KEY="k", BLOGGER_PUBLISH="draft")
+        for label, extra in (("정기 실행(주제 없음)", []), ("통과하는 수동 주제", ["--topic", "수동으로 지정한 오늘의 생활 습관 주제"])):
+            with self.subTest(label):
+                root = make_root(tempfile.mkdtemp())
+                self.addCleanup(shutil.rmtree, str(root), True)
+                code, out = self.go(env=env, extra=extra, root=root)
+                self.assertEqual(code, 0, out)
+                self.assertIn("[SKIP] code=UPLOAD_SKIPPED blog=blogger_macat reason=NO_SECRETS", out)
+                self.assertIn("::notice::[blogger_macat] Blogger 초안함에는 올리지 않고 저장소 파일에만 저장합니다", out)
+                self.assertNotIn("TOPIC_BLOCKED", out)
+
+    def test_the_errors_that_came_first_still_come_first_with_a_blocked_topic(self):
+        """일시정지·mode off·잘못된 BLOGGER_PUBLISH·시크릿 누락 오류는 수동 주제 검사보다 먼저 처리된다(순서는 그대로)."""
+        topic = ["--topic", "혈압 낮추는 아침 습관"]
+        code, out = self.go(env=self.env(PIPELINE_PAUSE="true", **NO_PUBLISH), extra=topic)
+        self.assertEqual(code, 0, out)
+        self.assertIn("code=PAUSED", out)
+        self.assertNotIn("TOPIC_BLOCKED", out)
+        off_root = make_root(tempfile.mkdtemp(), mode="off")
+        self.addCleanup(shutil.rmtree, str(off_root), True)
+        code, out = self.go(env=self.env(**NO_PUBLISH), extra=topic, root=off_root)
+        self.assertEqual(code, 0, out)
+        self.assertIn("code=MODE_OFF", out)
+        self.assertNotIn("TOPIC_BLOCKED", out)
+        code, out = self.go(env=self.env(BLOGGER_PUBLISH="yolo"), extra=topic)
+        self.assertEqual(code, 2, out)
+        self.assertIn("code=INVALID_PUBLISH", out)
+        self.assertNotIn("TOPIC_BLOCKED", out)
+        code, out = self.go(env=self.env(GEMINI_API_KEY="k", BLOGGER_PUBLISH="publish"), extra=topic)       # 즉시 게시인데 게시용 시크릿이 없다
+        self.assertEqual(code, 2, out)
+        self.assertIn("code=SECRETS_MISSING", out)
+        self.assertNotIn("TOPIC_BLOCKED", out)
+        code, out = self.go(env=self.env(GEMINI_API_KEY="k", BLOGGER_PUBLISH="draft", BLOGGER_BLOG_ID="123"), extra=topic)   # 일부만 등록
+        self.assertEqual(code, 2, out)
+        self.assertIn("code=SECRETS_MISSING", out)
+        self.assertNotIn("TOPIC_BLOCKED", out)
+
+    def test_in_a_dry_run_the_partial_secrets_warning_still_comes_before_the_topic_error(self):
+        env = self.env(GEMINI_API_KEY="k", BLOGGER_PUBLISH="draft", BLOGGER_BLOG_ID="123")
+        code, out = self.go(env=env, extra=["--dry-run", "--topic", "혈압 낮추는 아침 습관"])
+        self.assertEqual(code, 2, out)
+        self.assertIn("DRY_RUN이라 계속합니다", out)
+        self.assertLess(out.index("DRY_RUN이라 계속합니다"), out.index("TOPIC_BLOCKED"))
+
     def test_the_architecture_doc_lists_the_skip_code_as_a_config_error_with_exit_code_2(self):
         """코드표가 문서에 있다(ARCHITECTURE §4-1): 코드 이름이 '설정 오류·종료 2' 행에 있고 처리 순서에도 나온다. 문서가 코드와 어긋나면 실패한다."""
         text = (REAL / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
