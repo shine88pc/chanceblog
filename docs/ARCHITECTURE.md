@@ -140,7 +140,7 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 자동인지 수동인지,
 
 요약 표의 '검증 통과'는 소스당 10건 상한·소스 간 같은 제목 병합·`DUPLICATE` 제거를 하기 **전**의 수이고, '후보'는 그 뒤 최대 3건(`MAX_ATTEMPTS`)이다. 소스마다 '받은 기사 = 검증 통과 + 탈락 사유 합'이 성립하며, '검증 통과'가 있는데 '후보'가 0이면 전부 기존 글과 비슷했다는 뜻이다(`ALL_DUPLICATES`). 요약에는 그 실행에서 나온 코드의 뜻을 한 줄로 붙인다.
 
-**Chance 소스와 약관 점검**(`generator.py`의 `NEWS_SOURCES`·`TRUSTED_SOURCE_DOMAINS`·`TERMS_BLOCKED_DOMAINS`, 2026-10-26 출처 개편): 소스는 분야마다 **약관을 읽고 이 용도(출처를 밝히고 요약해 새 글을 쓰는 것)가 허용된다고 판단한 직접 RSS**만 둔다(기술·미래의 유예 3곳 제외). 구글 뉴스 검색 소스 14개는 링크가 게시자 원문 주소로 풀리지 않아 통과율이 0.4%였기에 뺐다(약관 해석은 법률 판단이 아니다).
+**Chance 소스와 약관 점검**(`generator.py`의 `NEWS_SOURCES`·`TRUSTED_SOURCE_DOMAINS`·`TERMS_BLOCKED_DOMAINS`, 2026-10-26 출처 개편): 소스는 분야마다 **약관을 읽고 이 용도(출처를 밝히고 요약해 새 글을 쓰는 것)가 허용된다고 판단한 직접 RSS**만 둔다(기술·미래의 유예 1곳 제외). 구글 뉴스 검색 소스 14개는 링크가 게시자 원문 주소로 풀리지 않아 통과율이 0.4%였기에 뺐다(약관 해석은 법률 판단이 아니다).
 
 | 분야 | 소스(약관 점검 allowed) | 소스별 규칙 |
 |------|------------------------|-------------|
@@ -149,10 +149,11 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 자동인지 수동인지,
 | 문화·미디어 | Pew Research Center | 제목·분류 태그에 미디어·온라인 주제어가 있는 것만(`topic_regex`), 선거·정당·퀴즈·보고서 부속 쪽(`exclude_title`)과 뉴스레터 모음(`exclude_link`)·방법론·선거 분류 글(`exclude_tags`) 제외, 기사 페이지를 읽지 않음(`no_page_fetch`, Pew 약관의 스크래핑 금지), 약관 §2 인용 줄(`citation`)과 번역 면책 문장이 든 고지문 |
 | 경제·일 | Federal Reserve(보도자료) | 제재·인가 승인·이의 없음 통보 건 제외, 글 끝 고지문. 그 건들을 빼면 주 1~2건이라 36시간 규칙에서는 대부분 비어 있다(D-62) |
 | 일상·마음 | 없음 | 약관상 쓸 수 있는 직접 RSS를 아직 못 찾았다(D-62). 이 분야가 뽑히면 후보가 없어 다음 분야로 넘어간다 |
-| 기술·미래 | Ars Technica·IEEE Spectrum·전자신문 | 모두 유예(D-61). **전자신문**은 약관이 불명확하고 일반 뉴스가 섞여 있어 `tech_filter`로 기술 제목만 쓰며(30건 중 약 12건), 지금 기술 분야의 사실상 유일한 공급원이다. Ars·IEEE는 약관을 못 읽었고 robots.txt가 AI 크롤러(ClaudeBot 등)를 막는다. **AI타임스는 모든 기사 하단의 "AI학습 및 활용 금지" 때문에 운영자 결정(2026-10-26)으로 접근하지 않는다**(`TERMS_BLOCKED_DOMAINS`). 글감이 한 건도 안 되던 TechCrunch·The Verge와 간접 경로 Hacker News도 같은 날 뺐다 |
+| 기술·미래 | 전자신문 | 유예(D-61): 약관이 불명확하고 일반 뉴스가 섞여 있어 `tech_filter`로 기술 제목만 쓰며(30건 중 약 12~13건) 지금 기술 분야의 **유일한 공급원**이다. **AI타임스는 모든 기사 하단의 "AI학습 및 활용 금지" 때문에, Ars Technica·IEEE Spectrum은 robots.txt가 AI 크롤러(ClaudeBot 등)를 막기 때문에 운영자 결정(2026-10-26)으로 접근하지 않는다**(`TERMS_BLOCKED_DOMAINS`). 글감이 한 건도 안 되던 TechCrunch·The Verge와 간접 경로 Hacker News도 같은 날 뺐다 |
 
-- 소스마다 `terms`(`status` — `allowed` 허용으로 읽음 / `pending` 허용이지만 채우지 못한 조건(`blocker`)이 있어 읽지 않음 / `unverified` 못 읽었거나 불명확한 기존 소스, 확인한 날짜, 근거 쪽 주소)를 적는다. `unverified`는 기존 3곳(Ars Technica·IEEE Spectrum·전자신문)만 유예이고 시험(`SourceListTest`)이 늘리지 못하게 막는다. 금지로 읽힌 매체는 소스에 두지 않고 `TERMS_BLOCKED_DOMAINS`에 올린다.
+- 소스마다 `terms`(`status` — `allowed` 허용으로 읽음 / `pending` 허용이지만 채우지 못한 조건(`blocker`)이 있어 읽지 않음 / `unverified` 못 읽었거나 불명확한 기존 소스, 확인한 날짜, 근거 쪽 주소)를 적는다. `unverified`는 기존 1곳(전자신문)만 유예이고 시험(`SourceListTest`)이 늘리지 못하게 막는다. 금지로 읽힌 매체는 소스에 두지 않고 `TERMS_BLOCKED_DOMAINS`에 올린다.
 - **BBC·Guardian·Nature·MIT Technology Review·AI타임스**는 약관이 이 용도(광고가 붙는 사이트에서 RSS 제목·요약을 AI에 주어 새 글을 쓰는 것)를 금지하거나 허가가 필요하다고 읽혀 `TERMS_BLOCKED_DOMAINS`에 올렸다. 소스에도 신뢰 목록에도 없고, 실수로 신뢰 목록에 다시 들어와도 `_trusted_domain`이 거부한다(시험으로 고정). 허가를 받으면 이 목록에서 빼고 `terms`를 allowed로 적는다.
+- **Ars Technica·IEEE Spectrum**은 robots.txt가 AI 관련 크롤러를 이름으로 막아(ClaudeBot·anthropic-ai·CCBot 등. 검증 A 재집계: `Disallow: /` 대상이 Ars 34개 중 AI 관련 약 30개, IEEE 33개 중 약 21개이고 IEEE는 사용자 요청형 일부를 명시 허용) 운영자 결정(2026-10-26 "AI 크롤러를 막는 사이트는 접근하지 않는 원칙")으로 같은 목록에 올렸다. 같은 날 남은 소스의 robots.txt도 읽었다: NASA는 제한이 없고, Pew는 `Content-Signal: ai-train=yes, ai-input=yes`로 이용을 명시 허용하고, 연준은 robots.txt가 없고, 전자신문은 제한이 없다(GPTBot 차단 줄은 주석 처리). UN News는 일반 봇에 이 피드 경로(`*/news/`)를 허용하지 않아 이미 보류다.
 - 수집 루프는 피드 주소의 호스트가 `TERMS_BLOCKED_DOMAINS`에 있는 소스를 읽지 않고(로그에 `약관상 접근하지 않는 도메인` 한 줄), 기사 주소에 공백·꺾쇠·따옴표·역슬래시·괄호·대괄호가 있으면 `UNRESOLVED`로 버린다(글의 출처 목록·인용 줄에 그대로 들어가 마크다운·HTML이 되지 않게).
 - 소스별 선택 키: `citation`(글 끝 인용 한 줄의 틀 — `{title}`·`{date}`·`{url}`, 소스 약관이 정한 형식, 고지문 앞에 붙임), `exclude_title`·`exclude_link`·`exclude_tags`(제목·기사 주소·피드 분류 태그 정규식, 맞으면 `EXCLUDED`), `topic_regex`(제목·분류 태그에 맞는 말이 없으면 `OFF_TOPIC`), `no_page_fetch`, `notice`(글 끝 고지문 ko·en — `add_discovery_metadata`가 글 언어(front matter `lang`, 없으면 한글 여부)에 맞춰 붙이고 이미 있으면 다시 붙이지 않는다), `prompt_rule`(글 작성 지침에 한 줄). 피드의 `<category>`(Atom은 `term`)는 `parse_feed`가 `categories`로 읽는다.
 - 직접 RSS 항목의 `<source>` 태그(UN News는 피드 태그라인이 들어 있다)는 게시자 표시로 쓰지 않는다 — 게시자는 기사 주소의 호스트이고 출처 이름은 소스 이름이다. 구글 뉴스 해석 코드(`google` 키, `_resolve_article_url`)는 쓰는 소스가 없지만 시험이 있어 남겨 두었다.

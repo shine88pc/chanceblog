@@ -1593,6 +1593,11 @@ class SourceRuleSamplesTest(unittest.TestCase):
         for tag in ("Methodological Research", "Elections", "Voters", "Voting", "Political Issues", "Donald Trump", "Politics & Policy"):
             with self.subTest(tag=tag):
                 self.assertFalse(self.kept("Pew Research Center", title, (tag,), link))
+        # 앵커(^…$)가 있는 세 태그는 정확히 그 태그일 때만 거른다 — 더 긴 태그(미디어 주제가 들어올 수 있는)는 살린다
+        for tag in ("Political Issues and Media", "Donald Trump Jr.", "Politics & Policy Journalism",
+                    "Global Political Issues", "Not Donald Trump", "Local Politics & Policy"):
+            with self.subTest(longer_tag=tag):
+                self.assertTrue(self.kept("Pew Research Center", title, (tag,), link))
 
     def test_pew_citation_line_matches_the_format_pews_terms_require(self):
         pew = next(s for s in g.NEWS_SOURCES if s["name"] == "Pew Research Center")
@@ -1612,6 +1617,11 @@ class SourceRuleSamplesTest(unittest.TestCase):
         self.assertIn("has not reviewed or approved", by_name["Federal Reserve"]["notice"]["en"])
         self.assertIn("검토하거나 승인하지 않았", by_name["UN News"]["notice"]["ko"])
         self.assertIn("has not reviewed or approved", by_name["Pew Research Center"]["notice"]["en"])
+        self.assertIn("연방준비제도 이사회", by_name["Federal Reserve"]["notice"]["ko"])
+        self.assertIn("공식 입장이 아닙니다", by_name["UN News"]["notice"]["ko"])
+        self.assertIn("not an official UN position", by_name["UN News"]["notice"]["en"])
+        self.assertIn("분석과 해석의 책임은 이 사이트에 있습니다", by_name["Pew Research Center"]["notice"]["ko"])
+        self.assertIn("responsibility for the analysis and interpretation rests with this site", by_name["Pew Research Center"]["notice"]["en"])
 
     def test_pew_topic_words_need_word_boundaries(self):
         pew = next(s for s in g.NEWS_SOURCES if s["name"] == "Pew Research Center")
@@ -1628,7 +1638,7 @@ class SourceListTest(unittest.TestCase):
     LANES_WITHOUT_SOURCES = {"daily_life", "society"}
     # 약관을 읽지 못했거나 불명확해 운영자 결정 전까지 쓰는 기존 소스(유예). 새 소스는 allowed 만 늘린다 — 읽고 allowed 로 올리거나
     # 목록에서 빼서 줄이기만 한다. 금지로 읽히면 소스에 두지 않고 TERMS_BLOCKED_DOMAINS 에 올린다.
-    LEGACY_GRACE = {"Ars Technica", "IEEE Spectrum", "전자신문"}
+    LEGACY_GRACE = {"전자신문"}
 
     def test_dead_bloter_feed_is_gone(self):
         self.assertNotIn("블로터", [s["name"] for s in g.NEWS_SOURCES])
@@ -1652,16 +1662,13 @@ class SourceListTest(unittest.TestCase):
             "UN News": ("society", "https://news.un.org/feed/subscribe/en/news/all/rss.xml"),
             "Pew Research Center": ("culture", "https://www.pewresearch.org/feed/"),
             "Federal Reserve": ("economy", "https://www.federalreserve.gov/feeds/press_all.xml"),
-            "Ars Technica": ("technology", "https://feeds.arstechnica.com/arstechnica/index"),
-            "IEEE Spectrum": ("technology", "https://spectrum.ieee.org/feeds/feed.rss"),
             "전자신문": ("technology", "https://rss.etnews.com/Section901.xml"),
         })
-        # 읽는 소스 전부(승인 상태와 상관없이)의 피드 호스트와 기사 호스트가 자기 분야에서 신뢰된다 — 기술 분야의 뼈대 전자신문·IEEE·Ars 포함
+        # 읽는 소스 전부(승인 상태와 상관없이)의 피드 호스트와 기사 호스트가 자기 분야에서 신뢰된다 — 기술 분야의 뼈대 전자신문 포함
         for src in g.NEWS_SOURCES:
             self.assertTrue(g._trusted_domain(g._host(src["url"]), src["lane"]), src["name"])
-        for host in ("www.etnews.com", "spectrum.ieee.org", "arstechnica.com", "www.nasa.gov", "science.nasa.gov"):
-            lane = {"www.etnews.com": "technology", "spectrum.ieee.org": "technology", "arstechnica.com": "technology",
-                    "www.nasa.gov": "science", "science.nasa.gov": "science"}[host]
+        for host in ("www.etnews.com", "www.nasa.gov", "science.nasa.gov"):
+            lane = {"www.etnews.com": "technology", "www.nasa.gov": "science", "science.nasa.gov": "science"}[host]
             self.assertTrue(g._trusted_domain(host, lane), host)
 
     def test_etnews_keeps_only_titles_with_tech_words(self):
@@ -1678,6 +1685,15 @@ class SourceListTest(unittest.TestCase):
         for title in ("Dubai 부동산 시장 전망", "Taipei 여행 후기", "Chipotle 신메뉴 출시", "Wait 후기와 AIDS 연구 동향"):
             with self.subTest(title=title):
                 self.assertFalse(g.is_tech_title(title), title)
+
+    def test_every_english_tech_word_is_pinned_on_its_own(self):
+        words = [w for w in "ai gpu cpu llm chatgpt openai nvidia 5g 6g chip robot quantum software cloud startup cyber satellite rocket".split()]
+        self.assertEqual(len(words), 18)
+        for word in words:
+            for form in (word, word.upper()):
+                with self.subTest(word=form):
+                    self.assertTrue(g.is_tech_title(f"{form}를 둘러싼 논쟁"), form)
+                    self.assertFalse(g.is_tech_title(f"x{form} 이야기"), form)
 
     def test_look_alike_hosts_are_never_trusted_and_never_blocked_by_accident(self):
         for host in ("notbbc.co.uk", "bbc.com.evil.example", "evilnasa.gov", "nasa.gov.evil.example", "xfederalreserve.gov"):
@@ -1698,7 +1714,7 @@ class SourceListTest(unittest.TestCase):
     def test_the_blocked_domain_list_is_exactly_the_agreed_publishers(self):
         self.assertEqual(set(g.TERMS_BLOCKED_DOMAINS),
                          {"bbc.com", "bbc.co.uk", "bbci.co.uk", "theguardian.com", "guardian.co.uk",
-                          "nature.com", "technologyreview.com", "aitimes.com"})
+                          "nature.com", "technologyreview.com", "aitimes.com", "arstechnica.com", "ieee.org"})
 
     def test_pew_never_reads_article_pages_and_the_prompt_rules_exist(self):
         by_name = {s["name"]: s for s in g.NEWS_SOURCES}
@@ -1732,6 +1748,18 @@ class SourceListTest(unittest.TestCase):
         for lane in g.EDITORIAL_LANES:
             self.assertFalse(g._trusted_domain("www.aitimes.com", lane), lane)
 
+    def test_ars_and_ieee_are_blocked_and_neither_read_nor_trusted_anywhere(self):
+        # robots.txt 가 AI 크롤러를 막는 사이트라 운영자 결정(2026-10-26 "AI 크롤러를 막는 사이트는 접근하지 않는 원칙")으로 접근하지 않는다.
+        self.assertIn("arstechnica.com", g.TERMS_BLOCKED_DOMAINS)
+        self.assertIn("ieee.org", g.TERMS_BLOCKED_DOMAINS)
+        self.assertEqual([s["name"] for s in g.NEWS_SOURCES
+                          if s["name"] in {"Ars Technica", "IEEE Spectrum"} or "arstechnica" in s["url"] or "ieee.org" in s["url"]], [])
+        for host in ("arstechnica.com", "feeds.arstechnica.com", "spectrum.ieee.org", "www.ieee.org"):
+            for lane in g.EDITORIAL_LANES:
+                self.assertFalse(g._trusted_domain(host, lane), (host, lane))
+        for lane, domains in g.TRUSTED_SOURCE_DOMAINS.items():
+            self.assertFalse({"arstechnica.com", "ieee.org"} & set(domains), lane)
+
     def test_sources_that_never_produce_candidates_and_have_restrictive_terms_are_gone(self):
         # 신뢰 목록에 없어 글감이 한 건도 안 되는 TechCrunch·The Verge, 링크가 약관을 읽지 않은 매체로 가는 Hacker News.
         names = {s["name"] for s in g.NEWS_SOURCES}
@@ -1752,9 +1780,15 @@ class SourceListTest(unittest.TestCase):
         nasa = next(s for s in g.NEWS_SOURCES if s["name"] == "NASA")
         self.assertIn("정확성에 책임지지 않", nasa["notice"]["ko"])
         self.assertIn("not responsible for its accuracy", nasa["notice"]["en"])
+        # NASA 의 AI 이용 안내: 검토·승인했다고 암시하지 말고, NASA 의 입장처럼 쓰지 말 것
+        self.assertIn("검토하거나 승인하지 않았", nasa["notice"]["ko"])
+        self.assertIn("NASA의 입장이 아닙니다", nasa["notice"]["ko"])
+        self.assertIn("has not reviewed or approved", nasa["notice"]["en"])
+        self.assertIn("does not represent NASA's position", nasa["notice"]["en"])
 
     def test_terms_blocked_publishers_are_in_no_source_and_no_trust_list(self):
-        for domain in ("bbc.com", "bbc.co.uk", "theguardian.com", "nature.com", "technologyreview.com", "aitimes.com"):
+        for domain in ("bbc.com", "bbc.co.uk", "theguardian.com", "nature.com", "technologyreview.com", "aitimes.com",
+                       "arstechnica.com", "ieee.org"):
             self.assertIn(domain, g.TERMS_BLOCKED_DOMAINS)
         for lane, domains in g.TRUSTED_SOURCE_DOMAINS.items():
             for domain in domains:
@@ -1764,11 +1798,14 @@ class SourceListTest(unittest.TestCase):
 
     def test_a_blocked_domain_is_refused_even_if_someone_adds_it_to_a_trust_list(self):
         widened = {**g.TRUSTED_SOURCE_DOMAINS,
-                   "technology": g.TRUSTED_SOURCE_DOMAINS["technology"] + ("bbc.co.uk", "technologyreview.com")}
+                   "technology": g.TRUSTED_SOURCE_DOMAINS["technology"]
+                   + ("bbc.co.uk", "technologyreview.com", "arstechnica.com", "ieee.org")}
         with mock.patch.object(g, "TRUSTED_SOURCE_DOMAINS", widened):
             self.assertFalse(g._trusted_domain("www.bbc.co.uk", "technology"))
             self.assertFalse(g._trusted_domain("www.technologyreview.com", "technology"))
-            self.assertTrue(g._trusted_domain("arstechnica.com", "technology"))
+            self.assertFalse(g._trusted_domain("feeds.arstechnica.com", "technology"))
+            self.assertFalse(g._trusted_domain("spectrum.ieee.org", "technology"))
+            self.assertTrue(g._trusted_domain("www.etnews.com", "technology"))
 
     def test_each_allowed_source_publisher_is_trusted_in_its_own_lane(self):
         for src in g.NEWS_SOURCES:

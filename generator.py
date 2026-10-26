@@ -704,7 +704,8 @@ EDITORIAL_LANES = {
 #   allowed    출처를 밝히고 요약해 새 글을 쓰는 이 용도가 허용된다고 읽은 소스. 확인한 날짜와 근거 쪽 주소를 함께 적는다.
 #   pending    약관은 허용하지만 아직 채우지 못한 조건(blocker)이 있어 읽지 않고 건너뛴다(로그에 이유가 한 줄 남는다). 조건을 채우고 운영자가 확인하면 allowed 로 바꾼다.
 #   unverified 아직 약관을 읽지 못했거나 허용인지 금지인지 불명확한 기존 소스(유예). 새로 늘릴 수 없다(tests/test_generator_slots.py SourceListTest).
-# 이 용도를 금지·허가 필요로 읽은 매체(BBC·Guardian·Nature·MIT Technology Review·AI타임스)는 TERMS_BLOCKED_DOMAINS 로 막고
+# 이 용도를 금지·허가 필요로 읽은 매체(BBC·Guardian·Nature·MIT Technology Review·AI타임스)와 robots.txt 로 AI 크롤러를 막아 운영자가 접근하지 않기로 한
+# 매체(Ars Technica·IEEE)는 TERMS_BLOCKED_DOMAINS 로 막고
 # 소스에도 신뢰 목록에도 두지 않는다. 일상·마음 분야는 약관상 쓸 수 있는 직접 RSS를 아직 찾지 못해 소스가 없다(뽑히면 다음 분야로 넘어간다).
 #
 # 소스별 선택 키(모두 생략 가능):
@@ -771,11 +772,7 @@ NEWS_SOURCES = [
      "exclude_title": r"\benforcement actions?\b|\bapprovals? of (?:the |related )?applications?\b|\bdoes not object\b|\bjoint findings\b",
      "notice": {"ko": "이 글은 AI 도구가 미국 연방준비제도 이사회(Federal Reserve Board)가 공개한 자료를 참고해 작성했습니다. 연준은 이 글을 검토하거나 승인하지 않았습니다.",
                 "en": "This article was written with an AI tool using materials published by the Federal Reserve Board. The Board has not reviewed or approved it."}},
-    # 기술. 약관을 못 읽었거나 불명확한 기존 소스(유예, D-61). 읽고 허용이면 allowed 로 올리고, 금지로 읽히면 이 목록에서 빼고 TERMS_BLOCKED_DOMAINS 에 올린다.
-    {"name": "Ars Technica", "lane": "technology", "url": "https://feeds.arstechnica.com/arstechnica/index",
-     "terms": {"status": "unverified", "note": "2026-10-26 검증 세션이 robots.txt 를 읽음: ClaudeBot·anthropic-ai·CCBot·Google-Extended 등 AI 크롤러 12개를 막는다(이 생성기의 ChanceBlogBot 은 일반 규칙이라 허용). Condé Nast 이용약관은 읽지 못함"}},
-    {"name": "IEEE Spectrum", "lane": "technology", "url": "https://spectrum.ieee.org/feeds/feed.rss",
-     "terms": {"status": "unverified", "note": "검증 세션 보고(일부, 직접 재확인 못 함): IEEE 사이트 이용약관은 복제에 사전 서면 동의를 요구하고 개인·정보 목적 이용만 허용, robots.txt 는 GPTBot·ClaudeBot·anthropic-ai·CCBot·PerplexityBot 등 13개 AI 크롤러를 막는다(검증 세션이 읽음, Claude-Web 만 허용). Spectrum 자체 RSS 약관은 못 찾음"}},
+    # 기술. 약관이 불명확한 기존 소스 하나(유예, D-61). 읽고 허용이면 allowed 로 올리고, 금지로 읽히면 이 목록에서 빼고 TERMS_BLOCKED_DOMAINS 에 올린다.
     {"name": "전자신문", "lane": "technology", "url": "https://rss.etnews.com/Section901.xml",
      "tech_filter": True,  # 이 피드는 건강·여행·증시 같은 일반 뉴스가 섞여 있어(2026-10-26 30건 중 기술 12~13건) 기술 키워드가 든 제목만 기술·미래 글감으로 쓴다
      "terms": {"status": "unverified", "note": "2026-10-26 이용약관(2012.09.01 표기)을 읽었다: 제공 정보의 영리 목적 이용 금지(회원 대상)·복제·전송·배포는 사전 승낙 필요, RSS·AI 이용 조항은 없어 불명확. 이 피드에는 해외 매체를 다시 쓴 기사도 섞여 권리가 한 겹 더 있다"}},
@@ -784,6 +781,8 @@ NEWS_SOURCES = [
     # MIT Technology Review·BBC Technology 는 약관이 이 용도를 금지·허가 필요로 해서 2026-10-26에 뺐다(TERMS_BLOCKED_DOMAINS).
     # AI타임스는 모든 기사 하단의 'AI학습 및 활용 금지' 표기와 저작권보호정책 때문에 운영자 결정(2026-10-26 "금지된 부분이면 접근하지 않는다")으로 뺐다(TERMS_BLOCKED_DOMAINS, D-61).
     # TechCrunch·The Verge·Hacker News 는 신뢰 목록에 없어 글감이 한 건도 안 되고 약관이 제한적이거나 간접 경로라 같은 날 뺐다(D-61).
+    # Ars Technica·IEEE Spectrum 은 robots.txt 가 AI 관련 크롤러(ClaudeBot·anthropic-ai·CCBot 등)를 이름으로 막고 이용약관은 못 읽었거나 복제에 서면 동의를 요구해,
+    # 운영자 결정(2026-10-26 "AI 크롤러를 막는 사이트는 접근하지 않는 원칙")으로 같은 날 뺐다(TERMS_BLOCKED_DOMAINS, D-61).
 ]
 
 # 게시 후보에 사용할 수 있는 출처 도메인. 도메인 이름은 끝 경계까지 비교합니다.
@@ -797,8 +796,8 @@ TRUSTED_SOURCE_DOMAINS = {
                 "reuters.com", "apnews.com", "ft.com", "bloomberg.com"),
     "society": ("oecd.org", "un.org", "unesco.org", "unicef.org", "korea.kr",
                 "kostat.go.kr", "kdi.re.kr", "reuters.com", "apnews.com"),
-    "technology": ("nist.gov", "acm.org", "ieee.org", "arxiv.org",
-                   "science.org", "arstechnica.com",
+    "technology": ("nist.gov", "acm.org", "arxiv.org",
+                   "science.org",
                    "reuters.com", "apnews.com",
                    "etnews.com"),
     "culture": ("unesco.org", "pewresearch.org", "reuters.com", "apnews.com",
@@ -809,7 +808,8 @@ TRUSTED_SOURCE_DOMAINS = {
                    "reuters.com", "apnews.com"),
 }
 
-# 약관을 읽고 이 용도(광고가 붙는 사이트에서 RSS 제목·요약을 AI에 주어 새 글을 쓰는 것)가 금지이거나 허가가 필요하다고 읽은 매체.
+# 약관을 읽고 이 용도(광고가 붙는 사이트에서 RSS 제목·요약을 AI에 주어 새 글을 쓰는 것)가 금지이거나 허가가 필요하다고 읽은 매체,
+# 그리고 robots.txt 로 AI 크롤러를 막아 운영자가 접근하지 않기로 한 매체.
 # 신뢰 목록에 실수로 다시 들어와도 _trusted_domain 이 거부한다(법률 판단이 아니다). 근거: docs/analysis/2026-10-25_publish-readiness.md §3-1,
 # BBC·MIT TR 은 2026-10-26 약관 재확인.
 #   BBC                    사업적 RSS 이용은 허가 필요, RSS·콘텐츠에서 메타데이터를 가져오는 것과 AI·컴퓨터 분석 이용은 허가 필요, 돈을 버는 이용도 허가 대상(이용약관 v1.8 §7(d)·§8·§15, 2022-09-19판)
@@ -817,8 +817,11 @@ TRUSTED_SOURCE_DOMAINS = {
 #   Nature                 상업적 이용에는 허가 필요
 #   MIT Technology Review  복제·수정·재게시 금지, 파생물·상업적 이용 금지(서비스에 RSS 포함), 콘텐츠로 AI 시스템을 만들거나 학습·개선하는 것은 사전 서면 동의(Restrictions on Use·Commercial Use·AI and Large Language Model Usage, 2023-09-06판)
 #   AI타임스               모든 기사 하단에 "무단전재 및 재배포, AI학습 및 활용 금지", 저작권보호정책은 승낙 없는 복제·출판·전송·배포·판매·변형 금지(2026-10-26 기사 3건 확인). 운영자 결정으로 접근하지 않는다
+#   Ars Technica           robots.txt 가 ClaudeBot·anthropic-ai·CCBot·Google-Extended 등 AI 관련 크롤러 약 30개를 이름으로 막는다(`Disallow: /` 대상 34개 중, 2026-10-26 검증 세션이 읽음), Condé Nast 약관은 읽지 못함. 운영자 결정(2026-10-26 "AI 크롤러를 막는 사이트는 접근하지 않는 원칙")으로 접근하지 않는다
+#   IEEE(Spectrum 포함)    robots.txt 가 GPTBot·ClaudeBot·anthropic-ai·CCBot·PerplexityBot 등 AI 관련 크롤러 약 21개를 이름으로 막고(33개 중, 사용자 요청형 일부는 명시 허용) 이용약관은 복제에 사전 서면 동의를 요구한다(검증 세션 보고). 같은 결정으로 접근하지 않는다
 TERMS_BLOCKED_DOMAINS = ("bbc.com", "bbc.co.uk", "bbci.co.uk", "theguardian.com", "guardian.co.uk",
-                         "nature.com", "technologyreview.com", "aitimes.com")
+                         "nature.com", "technologyreview.com", "aitimes.com",
+                         "arstechnica.com", "ieee.org")
 
 
 def _clean_text(s, limit=300):
