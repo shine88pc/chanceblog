@@ -25,11 +25,11 @@
 
 ---
 
-## [2026-10-26] Claude – Blogger 주제 가드레일 보강 6건(D-64 ⑥ a~f): 상담 구절 면제를 절 단위로·한국어 목록·수동 topic 검사·변형 낱말·시험 구멍·다이어트/간 건강 (T1, 운영자 승인 2026-10-26)
+## [2026-10-26] Claude – Blogger 주제 가드레일 보강 6건(D-64 ⑥ a~f): 상담 구절 면제를 절 단위로·한국어 목록·수동 topic 검사·변형 낱말·시험 구멍·다이어트/간 건강 (T2, 운영자 승인 2026-10-26)
 
 **작업자**: Claude (구현 세션, 독립 검증은 별도 세션)  
 **대상**: Blogger  
-**등급**: T1(금지 목록을 막는 쪽으로만 강화). 승인 근거는 PR #40과 같다(운영자 채팅 2026-10-26 "3. 수동 작성은 없을 예정이니 주제에 대한 가드레일을 설정하고 진행"). **`mode`·시크릿·워크플로·`generator.py`·광고 표면·`인수인계/작업내용.md`는 바꾸지 않았다**(`blogger_macat`은 off 그대로).  
+**등급**: T2(`pipeline/` 코어·레지스트리 스키마의 새 선택 필드·`docs/SECURITY_GUARDRAILS.md` 변경 — 프로필 금지 목록 강화만은 T1). 총괄 승인: 독립 검증 델타 '병합 가능' 판정과 정기·연습 실행 시나리오 32개가 main 과 바이트 단위로 같다는 dry-run 증거를 근거로 한다. 승인 근거는 PR #40과 같다(운영자 채팅 2026-10-26 "3. 수동 작성은 없을 예정이니 주제에 대한 가드레일을 설정하고 진행"). **`mode`·시크릿·워크플로·`generator.py`·광고 표면·`인수인계/작업내용.md`는 바꾸지 않았다**(`blogger_macat`은 off 그대로).  
 **목적**: PR #40(main 362ba8f)에 대한 독립 검증이 '병합 가능' 판정과 함께 `mode: draft`를 켜기 전에 끝내라고 낸 보강 6건(`docs/DEFECT_REGISTER.md` D-64 ⑥)을 구현한다.  
 **브랜치**: `ai/claude/blogger-guardrails-hardening`(origin/main e89b7a3에서 시작). PR 생성·병합·Actions 실행은 하지 않았다(총괄이 처리).
 
@@ -55,9 +55,10 @@
 1. 이 변경은 `mode: draft`를 켜기 **전에** 병합한다(D-64 ⑥). 병합 뒤 첫 영어 초안(L3)에서 `BODY_TOPIC`·`TOPIC_BLOCKED` 빈도를 본다. 같은 날 `GATE_REJECTED`가 반복되면 사유의 `'낱말'`을 보고 목록을 조정하되, 오탐이면 `tests/test_guardrails.py` 표본과 같이 바꾼다.
 2. 새 규칙은 규칙마다 그 규칙만 막는 표본이 있어야 시험이 통과한다(`RuleCoverageTest`·`ClauseScopedExemptionTest`). 절 경계 패턴을 바꾸면 `MIXED_BLOCKED_*`·`REFERRAL_OK_*` 표본을 같이 본다.
 3. 알려진 한계(문서 `docs/ARCHITECTURE.md` §7-1 '절 단위 면제'): 상담 구절이 접속어 없이 같은 절에 있는 문장(쉼표 이음·꼬리 구절)과 줄바꿈으로 갈린 두 낱말 용어·한 문장 안의 다른 언어 낱말은 여전히 통과하고, 목록에 없는 성분 이름(`magnesium`·`turmeric`)은 수동 `topic`도 통과한다.
-4. `docs/ACTIONS_GUIDE.md` 6-1 표에는 새 코드 `TOPIC_BLOCKED`가 없다(총괄이 문서 PR에서 갱신). 새 결함 번호는 D-65부터.
+4. `docs/ACTIONS_GUIDE.md` 6-1 표에는 새 코드 `TOPIC_BLOCKED`가 없다(총괄이 문서 PR에서 갱신). 새 결함 번호는 D-67부터(D-65·D-66은 PR #42가 썼다).
 
 ### 남은 이슈 / 확인할 점
+- **독립 검증 델타(병합 가능)가 낸 `mode: draft` 전 권고**(병합 조건은 아님, 후속 PR): N-1 쉼표 없는 접속어(`so`·`yet`·`while`·`because`·`unless you`·`otherwise`, 한국어 `, 그래서`·`고 나서`)가 아직 상담 구절 면제를 받는다(중간), N-3 용량 단위(`milligrams`·`0.4 g`·`400-mg`·`capsules`) 미인식, N-4 레지스트리는 패턴을 하나씩·gates 는 합쳐 컴파일해 `(?i)`·같은 이름 그룹이 실행 중 `re.error` 가 될 수 있음, N-5 시험 구멍 5개, N-7 수동 주제 가드와 `UPLOAD_SKIPPED` 안내 순서. N-2(`, then` 조건문·`stop and consult` 과잉 차단)는 첫 실제 영어 초안의 `BODY_TOPIC` 빈도를 보고 정한다.
 - **과잉 차단 트레이드오프(실측)**: 병명을 이름 붙인 절과 상담 구절이 `, so`·`—`·`:`·`;`·`으니`로 나뉜 정상 안내도 이제 막는다 — 상담 구절이 든 정상 안내 표본 40개(영어 30·한국어 10, 모델이 쓸 법한 문체) 중 막히는 문장이 **2개 → 7개**("Pregnancy can change your needs, so talk to your doctor."·"If you have a condition—such as diabetes—talk to your doctor …"·"Who should check with a doctor first: pregnant women, people with diabetes …"·"임신 중에는 몸 상태가 달라질 수 있으니 의사와 상담하세요."). 구조로는 '위험한 권유, so 의사에게 물어보세요'와 구별되지 않아(검증자가 막으라고 한 세 번째 문장과 같은 모양) 막는 쪽으로 정했고 시험이 `STRICT_TRADE_OFF_*`로 고정한다. 풀려면 `_CLAUSE_PUNCTUATION`·프로필 `body_clause_split_patterns`에서 해당 경계를 빼면 되지만 검증자의 문장이 다시 통과하니 총괄 결정이다. 프롬프트가 병명을 쓰지 말라고 하므로 실제 빈도는 낮을 것이고, 재시도 피드백이 병명을 빼게 한다.
 - 영어 목록에 아직 없는 질환·보조 성분(탈모·관절·역류성 식도염·변비·소화불량·우울감·오메가3·프로바이오틱스·홍삼·숙취·여드름·알레르기)은 범위 밖이라 그대로다 — 어디까지 막을지는 `통증`·`비타민`(단독) 같은 열린 운영자 결정(D-64 ④)과 같은 성격이다.
 - 한국어 `다이어트`는 '스마트폰 다이어트' 같은 비유 표현도 막는다(재시도가 고친다). 한국어 프로필을 쓰는 블로그는 아직 없다.
