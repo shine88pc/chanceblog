@@ -1783,12 +1783,15 @@ class SourceRuleSamplesTest(unittest.TestCase):
         # 보도자료(Press Corner, ec.europa.eu/commission/presscorner)는 앱 바닥글에 법적 고지·라이선스 링크가 없어 재사용 조건을 확인하지 못했다(2026-10-26 약관 검증).
         # 불명확은 유예한다(운영자 원칙). 같은 호스트의 다른 집행위원회 기사는 그대로 쓴다.
         self.assertIn("/commission/presscorner/", g._EC_EXCLUDE_LINK)
-        presscorner = "https://ec.europa.eu/commission/presscorner/detail/en/ip_26_1234"
+        presscorner_links = ("https://ec.europa.eu/commission/presscorner/detail/en/ip_26_1234",
+                             "https://ec.europa.eu/commission/presscorner/home/en",
+                             "https://ec.europa.eu/commission/presscorner/api/files/document/print/en/ip_26_1234/IP_26_1234_EN.pdf")   # 실제 주소 3형태
         other = "https://ec.europa.eu/info/news/commission-launches-new-energy-tool-2026-10-20_en"
         for name in ("European Commission", "European Commission · Energy", "European Commission · Environment",
                      "European Commission · JRC", "EU Digital Strategy"):
             with self.subTest(source=name):
-                self.assertFalse(self.kept(name, "Commission launches a new tool for households", link=presscorner), name)
+                for presscorner in presscorner_links:
+                    self.assertFalse(self.kept(name, "Commission launches a new tool for households", link=presscorner), (name, presscorner))
                 self.assertTrue(self.kept(name, "Commission launches a new tool for households", link=other), name)
 
     def test_every_commission_source_skips_speeches_statements_and_declarations(self):
@@ -1799,7 +1802,8 @@ class SourceRuleSamplesTest(unittest.TestCase):
                 for title in ("Statement by President von der Leyen on energy security", "Joint statement on the energy transition",
                               "Speech by Commissioner Jørgensen at the Energy Forum", "Opening remarks by the Commissioner on gas storage",
                               "Berlin Declaration on affordable energy", "G7 Leaders’ Statement on the energy transition",
-                              "Joint press conference by the Commissioner and the Minister"):
+                              "Joint press conference by the Commissioner and the Minister",
+                              "Joint Declaration of Intent on clean hydrogen cooperation"):
                     self.assertFalse(self.kept(name, title, link=link), (name, title))
                 for title in ("Energy statistics: renewables share reaches a record", "Commission publishes its annual report on the state of the energy union"):
                     self.assertTrue(self.kept(name, title, link=link), (name, title))
