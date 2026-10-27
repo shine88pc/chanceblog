@@ -646,6 +646,36 @@ class FailureTest(PackageRunBase):
             for path in self.drafts():
                 path.unlink()
 
+    def test_the_runner_masks_the_github_token_value_itself_even_when_it_does_not_look_like_a_token(self):
+        """어댑터는 자기 토큰을 스스로 가리지만, 러너도 환경의 GITHUB_TOKEN 값을 글자 그대로 비밀 목록에 넣어 어댑터 밖에서 새는 것까지 가린다.
+        토큰 모양 규칙(`ghs_…`)에 기대지 않도록 모양이 없는 값으로 본다."""
+        plain = "plain-value-98765-without-any-token-shape"
+        self.assertEqual(run_mod.redact("앞 " + plain + " 뒤"), "앞 " + plain + " 뒤")           # 모양 규칙만으로는 가려지지 않는 값인지 먼저 확인한다
+
+        class CountBoom(FakePackagePublisher):
+            def count_open_drafts(self, channel_label):
+                raise RuntimeError(f"조회 중 뜻밖 {plain}")
+
+        class CreateBoom(FakePackagePublisher):
+            def publish_package(self, draft):
+                raise ValueError(f"만들다 뜻밖 {plain}")
+
+        cases = (("점검 PublishError", FakePackagePublisher(check=PublishError(f"조회 실패 {plain}", code="network"))), ("점검 예외", CountBoom()),
+                 ("만들기 PublishError", FakePackagePublisher(fail=PublishError(f"만들기 실패 {plain}", code="api_error"))), ("만들기 예외", CreateBoom()),
+                 ("참고 문구", FakePackagePublisher(notes=[f"참고 {plain}"])))
+        for name, pub in cases:
+            with self.subTest(name):
+                self.summary_path.unlink(missing_ok=True)
+                code, out = self.go(env=self.env(GITHUB_TOKEN=plain), publisher=pub)
+                everything = out + self.summary() + json.dumps(self.history(), ensure_ascii=False) + "".join(p.read_text(encoding="utf-8") for p in self.drafts())
+                self.assertNotIn(plain, everything)
+                self.assertIn("***", everything)                                         # 가렸다는 표시는 남는다
+                history = self.root / "tistory_test_history.json"
+                if history.exists():
+                    history.unlink()
+                for path in self.drafts():
+                    path.unlink()
+
     def test_a_history_write_failure_after_the_issue_exists_points_at_the_issue_list_not_blogger(self):
         pub = FakePackagePublisher()
         with mock.patch.object(run_mod, "write_json_atomic", side_effect=OSError("disk full")):
