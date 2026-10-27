@@ -100,13 +100,17 @@ class GroundingRulesTextTest(unittest.TestCase):
 
     def test_the_first_rule_forbids_converting_and_rounding_and_keeps_the_announced_figures(self):
         self.assert_terms(g.GROUNDING_RULES[0], ("환산", "반올림", "추정", "원화", "킬로미터", "수치·단위·기준 시점", "그대로"))
+        # 금지는 금지로, 지시는 지시로 남는다(문장의 뜻을 뒤집는 편집이 낱말 시험을 통과하지 못하게 부정·명령 형태까지 고정한다)
+        self.assert_terms(g.GROUNDING_RULES[0], ("환산하거나 숫자를 반올림·추정하지 마세요", "원화로, 마일을 킬로미터로 바꾸지 마세요", "기준 시점을 그대로 쓰세요."))
 
     def test_the_second_rule_lists_what_may_not_be_invented_and_how_background_is_marked(self):
         self.assert_terms(g.GROUNDING_RULES[1], ("평가 기준", "심사 절차", "일정", "시행 시기", "금액", "예산 대비 배수", "참여 국가 수", "법적 효력",
                                                 "요약에 없는", "일반적으로", "일반론", "구체적인 수치", "고유명사"))
+        self.assert_terms(g.GROUNDING_RULES[1], ("요약에 없는 평가 기준", "법적 효력은 쓰지 마세요.", "일반론임을 드러내고", "고유명사는 지어내지 마세요."))
 
     def test_the_third_rule_forbids_putting_unsupported_content_in_the_sources_mouth(self):
         self.assert_terms(g.GROUNDING_RULES[2], ("출처에 없는 내용", "원인", "전망", "절차", "출처 기관", "말하거나 밝힌", "하기로 한 일"))
+        self.assert_terms(g.GROUNDING_RULES[2], ("출처 기관이 말하거나 밝힌 것", "하기로 한 일처럼 쓰지 마세요."))
 
     def test_the_rules_are_commands_in_the_prompts_polite_form(self):
         # 기존 지침의 말투('~하세요'·'~마세요')에 맞춘다: 모든 규칙이 금지('마세요')를 담고 명령형으로 끝난다
