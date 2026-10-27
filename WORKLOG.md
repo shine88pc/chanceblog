@@ -7,6 +7,35 @@
 
 ---
 
+## [2026-10-27] Claude – 묶음 2 통합: Chance 승인 흐름(E)·티스토리/네이버 초안 패키지(C)·초안 현황판(B)·텔레그램 알림(TG)을 main 위 한 브랜치로 (작업 INT, T2, 새 기능 없음·기본 꺼짐)
+
+**작업자**: Claude (통합 세션, 독립 검증은 별도 세션)
+**대상**: 공통
+**등급**: T2(독립 검증을 받은 네 브랜치를 합치고 서로 어긋난 번호·가정·문장을 고침 — 새 기능·새 호출 없음). `mode`(Chance `auto`·Blogger `off`)·시크릿 값·광고 표면(`index.html`·`_config.yml`)·`pipeline/blogs.json`(`publish_flow: direct` 한 줄 외 변경 없음, 티스토리·네이버 항목 없음)·`인수인계/작업내용.md`·`docs/SESSION_START.md` 는 바꾸지 않았다. `docs/REQUEST_BRIEFING.md` 는 이번 통합에서만 고쳤다(표 패치 둘을 합침).
+**승인 근거**: 운영자 채팅 2026-10-27 "추천대로 진행해줘"(채널 관리 계획 D1~D7)와 텔레그램 알림 요청(2026-10-27). 켜는 일(`publish_flow: pr`, 티스토리·네이버 블로그 항목과 `mode: package`, 텔레그램 시크릿 등록)은 모두 별도 승인·운영자 입력이다.
+**목적**: 운영자는 PR 을 직접 병합해야 하는데 PR 여러 개를 차례로 병합하면 두 번째부터 `WORKLOG.md` 맨 위가 겹쳐 충돌하고 비개발자는 풀 수 없다. 독립 검증 "병합 가능"을 받은 네 브랜치를 미리 합치고 충돌을 풀어 시험까지 마친 한 브랜치로 낸다.
+**브랜치**: `ai/claude/batch-2`(기준 `origin/main` `f8724b7`). 합친 head: E `chance-approval-flow` `49face5`·C `package-mode` `942be8f`·B `draft-board` `6d426a2`·TG `telegram-alerts` `fbe66c1`(넷 모두 작업 A 의 옛 브랜치 끝 `5c57a7c` 위, main 은 그 뒤 A 를 스쿼시로 병합했다). PR·병합·main push·Actions 실행은 하지 않았다(총괄이 처리).
+
+### 한 일
+- **합치기**: `git cherry-pick 5c57a7c..<브랜치>` 를 E→C→B→TG 순서로 했다(커밋 18개). 충돌은 `WORKLOG.md`(브랜치마다 자기 항목을 더하는 커밋 — 모든 항목을 남기고 `---` 유지, 마지막에 올린 것이 위)와 문서 표·절(`docs/ACTIONS_GUIDE.md`·`ARCHITECTURE.md`·`SECURITY_GUARDRAILS.md`·`DEFECT_REGISTER.md`·`OPS_INBOX.md`·`HANDLER.md`)에서 났고, 코드·시험·워크플로 충돌은 TG 첫 커밋의 `.github/workflows/chanceblog.yml`(E 의 단계 뒤에 TG 의 알림 단계)·`tests/test_manual_run_defaults.py`·`tests/test_workflow_names.py` 뿐이었다. 같은 줄을 두 쪽이 다른 자리에서 고친 곳은 3-way 로 둘 다 살렸고(`pipeline/registry.py`·`health.py`·`run.py` 등 코드는 자동 병합이 의미까지 맞았다) 양쪽 변경이 모두 남았는지는 '브랜치별 더한 줄이 통합 트리에 그대로 있는지' 기계로 대조했다.
+- **겹친 번호 재배정**(각 작업이 서로를 모르고 같은 번호를 썼다): 가드레일 `G-L8`(E, C → C 는 `G-L9`)·`G-C11`(E, TG → TG 는 `G-C12`), ACTIONS_GUIDE 3장 `3-17`(E·C·TG → E 는 `3-17`, TG `3-18`, C `3-19`), 6장 `6-12`(C·TG → C 는 `6-12`·`6-13`, TG `6-14`), ARCHITECTURE `§4-4`(E·TG → TG `§4-5`). 바꾼 곳은 그 작업이 더한 줄(본문 참조·앵커 링크·코드 주석·실행 요약 안내 문구·시험이 읽는 번호·그 작업의 WORKLOG 항목)이다. 브리핑은 `G-C11`·`3-17`·`§4-4` 의 E·TG 겹침만 알았고 C 의 `3-17`·`G-L8`·`6-12` 겹침은 통합 중에 찾았다. 결함 번호는 새로 만들지 않았다(D-72 B, D-73·D-74 C, 번호 순서로 두고 문서 머리의 갱신 날짜 줄을 맞췄다).
+- **의미 조정**: ① 러너 요약 머리(C↔B): C 의 `_summary_head()`(`### <key>`)를 없애고 초안 패키지 경로도 B 의 `summary_head()`(`### [채널 라벨] 블로그 이름`)를 쓴다. ② chanceblog.yml 은 9단계(기준 6 + E 의 `발행 흐름 확인`·`초안 올리기` + TG 의 `텔레그램 알림(새 글)`)이고 알림이 맨 끝이다 — E·TG 의 시험 네 곳(`FlowStepTest`·`ChanceSplitTest`·`WorkflowStructureTest` 둘)이 서로의 단계를 몰라 고쳤고(단계 수 8→9, 마지막 단계, 이름 목록, `pull-requests: write` 권한), 충돌로 만난 시험(`test_workflow_names` 둘·`test_manual_run_defaults`)은 풀면서 맞췄다. ③ E 의 낡은 문장('초안 PR 은 확인 필요 모음에 `검사 결과 없음`으로 보인다')을 B 의 사실('초안 대기' 한 줄 + @멘션 코멘트)로 고쳤다(ACTIONS_GUIDE 3곳·ARCHITECTURE·DEFECT_REGISTER·OPS_INBOX). ④ `docs/REQUEST_BRIEFING.md`: C·TG 의 표 패치를 손으로 합쳐 새 워크플로 3개(`[티스토리] 초안 패키지 만들기`·`[네이버] 초안 패키지 만들기`·`[공통] 텔레그램 알림 시험`)와 제어 줄·소개 문장을 반영했다. ⑤ 라벨 이름은 E·C·B 가 같지만 색·설명이 세 곳에서 다르다 — 코드는 그대로 두고 `docs/OPS_INBOX.md` §3-1 에 사실과 권고만 적었다.
+- **켜기 전에 연결할 것**(일부러 연결하지 않았다 — `docs/ARCHITECTURE.md` §4-2-1 끝): E·C 가 초안을 만든 직후 `ops-inbox.yml` 즉시 실행(workflow_dispatch)과 텔레그램 발행 대기 알림(`notify_draft_waiting`). 승인 흐름에서는 글을 main 에 커밋하지 않아 새 글 알림 단계도 돌지 않는다.
+- **통합 시험 19개**(`tests/test_batch2_integration.py`): 라벨·제목 약속, E 의 승인 PR·C 의 초안 이슈가 확인 필요 모음에 '초안 대기' 한 줄·코멘트 하나·휴대폰 한 통으로 나오는 길(가짜 GitHub·가짜 텔레그램 HTTP), 레지스트리에서 두 기능이 함께 사는 것, chanceblog.yml 단계 순서와 '연결하지 않은 것'이 문서와 코드에서 같게 말해지는지, 옮긴 번호가 겹치지 않는지.
+
+### 검증 증거
+- 전체 시험 **3263개 통과**(`python -X utf8 -m unittest discover -s tests`, 기준 main 2222개 + E 275 + C 232 + B 217 + TG 298 + 통합 19 = 3263). `validate_repo.py --base origin/main` 오류 0·경고 2(둘 다 `인수인계/` 문서의 LIQUID-1, main 과 같음), `actionlint` 13개 워크플로 0건, `pyflakes` main 과 같은 16건(새 경고 0), `vermin --target=3.10-` 위반 0(최소 3.10), 3.12 전용 f-string 검사 101개 파일 0건, `git diff --check` 0.
+- **동작 불변**(시크릿 없음·`publish_flow: direct`·티스토리/네이버 항목 없음, 직접 만든 비교 도구로 main `f8724b7` 대 통합 트리): `generator.py` 정기·수동·이미지 교체 24개 시나리오 **24/24 바이트 동일**(음성 대조는 '다름'으로 잡힘). Blogger 러너 시나리오 2155개는 요약 머리 줄(B 의 의도한 변경)을 빼고 2153개가 바이트 동일, 나머지 2개는 C 의 의도한 안내문 변경(`platform=blogger 만` → `platform=blogger·tistory·naver 만`)뿐이고 종료 코드는 2155개 모두 같다. CLI 21개(63개 출력 파일) **63/63 동일**, 확인 필요 모음 12개 시나리오 22번 실행은 의도한 정규화(호출 수 문구·초안 조회·라벨 만들기) 밖 차이 0. 워크플로 YAML 은 허용된 차이만(새 파일 3개, chanceblog.yml 의 E 두 단계·권한 한 줄·조건 한 조각·TG 알림 단계, watchdog.yml 의 `pull-requests: read`, ops-inbox.yml 의 B 8곳·TG env, blogger.yml 의 TG env 둘) — 그것들을 걷어 내면 main 과 같다.
+- **교차 상호작용**: E 의 실제 승인 흐름 이야기(실제 git·생성기)가 연 PR 둘을 B 의 확인 필요 모음 + TG 의 알림(가짜 HTTP)에 흘렸다: 표 `Chance | 2`, '초안 대기' 줄 2개·`검사 결과 없음` 줄 0, 코멘트 1개·휴대폰 1통('2건'), 둘째 점검은 쓰기·알림 0, 토큰 누출 0.
+- 통합 시험의 변이 시험 24개 중 23개를 그 시험이 잡았고 1개(요약 머리의 이름 없을 때 대체값)는 B 의 `SummaryHeadTest` 가 잡는다.
+
+### 남긴 것 / 다음 AI 에게 남기는 주의사항
+- **실제 Actions·실제 GitHub·실제 텔레그램은 한 번도 돌려 보지 못했다**(각 작업 항목의 병합 직후·켠 뒤 관측 목록이 그대로 유효하다). 병합 직후 볼 것: `[공통] 저장소 규칙·테스트 자동 검사` 초록(시험이 3000개 넘어 시간 제한 10분 안인지), 다음 `[Chance] 글 자동 작성·게시` 정기 실행(새 단계 `발행 흐름 확인`·`텔레그램 알림(새 글)`이 보이고 알림은 시크릿이 없어 건너뜀, 결과 그대로), Actions 목록의 새 워크플로 2개(대상 0개로 초록)·`[공통] 텔레그램 알림 시험`(수동).
+- 켜는 것은 모두 별도다: Chance 승인 흐름(T3 + 저장소 설정 확인), 티스토리·네이버(운영자 입력 D8 + T3), 텔레그램(시크릿 등록 + 시험 워크플로 1회). 켜기 전에 '연결할 것'(위)과 라벨 색 통일을 한다.
+- 두 모듈이 아직 모르는 곳: `scripts/watchdog.py` 요약표·`pipeline/inbox.py` 의 `package_issued`(C 보고 §10-5), 초안 PR 이 `pr:<번호>:ready` 와 `draft:<번호>:wait` 로 한 번 더 알려질 수 있는 경우(B 의 N1, 켜기 전 권고).
+
+---
+
 ## [2026-10-27] Claude – 텔레그램 알림: 새 글 발행·Blogger 초안 발행 대기·확인 필요를 휴대폰으로 (운영자 요청, 작업 TG, T2, 시크릿이 없으면 동작 변화 없음)
 
 **작업자**: Claude (구현 세션, 독립 검증은 별도 세션)
