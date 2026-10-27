@@ -49,8 +49,8 @@ from pipeline.console import md_cell, one_line, safe_output
 from pipeline.llm import LLMError, call_log_of, make_gemini_llm, purpose
 from pipeline.publishers import issue_package
 from pipeline.publishers.base import PublishError, redact
-from pipeline.registry import (PACKAGE_PLATFORMS, PLATFORMS, ROOT, RegistryError, get_blog, load_profile, load_registry,
-                               merged_blog, missing_secret_roles, resolve_secrets, validate_registry)
+from pipeline.registry import (PACKAGE_PLATFORMS, PLATFORMS, ROOT, RegistryError, cleaned_secret_names, get_blog, load_profile,
+                               load_registry, merged_blog, missing_secret_roles, resolve_secrets, validate_registry)
 from pipeline.state import KST, StateError, entry_titles, other_blog_titles, read_json_list, write_json_atomic
 from pipeline.stubs import stub_llm
 from pipeline.topics import clean_topic, pick_topic
@@ -220,6 +220,23 @@ def _secret_values(blog, environ):
     return values
 
 
+CLEANED_NOTICE = ("::notice::[{key}] 시크릿 값에 보이지 않는 문자(폭 없는 공백·제어 문자 등)가 섞여 있어 지우고 썼습니다: {names} — "
+                  "원본에서 바로 복사해 다시 등록하는 것을 권장합니다(값은 출력하지 않습니다).")
+CLEANED_SUMMARY = ("시크릿 값에 보이지 않는 문자가 섞여 있어 지우고 썼습니다(이름만 표시, 값은 출력하지 않음): {names} — "
+                   "원본에서 바로 복사해 다시 등록하는 것을 권장합니다.")
+
+
+def _announce_cleaned_secrets(out, environ, blog):
+    """보이지 않는 문자를 지우고 쓴 시크릿이 있으면 그 **이름만** `::notice::` 한 줄로 알리고(채팅 앱에서 복사한 값에 섞이는 폭 없는 공백 등 — 이슈 #58, D-79), 실행 요약에 붙일 줄을 돌려준다.
+    없으면 아무것도 출력하지 않고 빈 튜플이다(출력이 예전과 바이트 단위로 같다). 값·길이는 쓰지 않는다. 이름은 레지스트리가 모양을 검사한 환경변수 이름이다."""
+    names = cleaned_secret_names(blog, environ)
+    if not names:
+        return ()
+    joined = ", ".join(names)
+    out(CLEANED_NOTICE.format(key=blog["key"], names=joined))
+    return (CLEANED_SUMMARY.format(names=joined),)
+
+
 def _counts_toward_cap(entry):
     """하루 상한에 세는 이력 항목인가: COUNTED_STATUSES, 그리고 글 ID 가 남은 publish_failed.
     올리다 실패했어도 글 ID 가 남았다면 초안·글이 이미 Blogger 에 만들어졌을 수 있다. 세지 않으면 같은 날 재실행(정기 실행 포함)이
@@ -230,7 +247,7 @@ def _counts_toward_cap(entry):
     return status == "publish_failed" and bool(str(entry.get("post_id") or "").strip())
 
 
-def _auth_check_failed(out, environ, blog, record, code, detail):
+def _auth_check_failed(out, environ, blog, record, code, detail, notes=()):
     """인증 점검 실패를 한곳에서 알린다: [SKIP] 줄·원인 한 줄·고정 문장 ::error::·이력(publish_failed)·실행 요약. 종료 코드를 돌려준다.
     code 는 어댑터가 낸 분류이고(auth_check.FAILURES 에 없으면 api_error 로 접는다), detail 은 이미 비밀을 가린 원인 문구다."""
     code = safe_code(code)
@@ -240,7 +257,7 @@ def _auth_check_failed(out, environ, blog, record, code, detail):
     out(f"::error::[{blog['key']}] {sentence_for(code)}")
     if record is not None:  # 단독 점검(--auth-check)은 쓰기가 없으므로 이력을 남기지 않는다
         record({"status": "publish_failed", "topic": "", "reasons": [f"[{code}] {one_line(detail, 300)}"]})
-    _summarize(environ, blog, "AUTH_CHECK_FAILED", f"{label_for(code)}({code}) — {sentence_for(code)}")
+    _summarize(environ, blog, "AUTH_CHECK_FAILED", f"{label_for(code)}({code}) — {sentence_for(code)}", notes)
     return exit_code
 
 
@@ -265,6 +282,7 @@ def run_auth_check_only(out, environ, blog, publisher_factory, secret_values, dr
         out(f"::error::[{blog['key']}] {message}")
         _summarize(environ, blog, "SECRETS_MISSING", f"**{code_text}** — {message}")
         return EXIT_CONFIG
+    cleaned = _announce_cleaned_secrets(out, environ, blog)
     if dry:
         out(f"[{blog['key']}] 연습 실행(DRY_RUN)이 켜져 있지만 인증 점검은 쓰기가 없어 실제로 점검합니다.")
     if blog["mode"] == "off":
@@ -273,16 +291,17 @@ def run_auth_check_only(out, environ, blog, publisher_factory, secret_values, dr
         publisher = (publisher_factory or default_publisher_factory)(blog, environ)
         auth_check(publisher, blog["url"])
     except PublishError as exc:
-        return _auth_check_failed(out, environ, blog, None, exc.code, redact(exc, secret_values))
+        return _auth_check_failed(out, environ, blog, None, exc.code, redact(exc, secret_values), cleaned)
     except Exception as exc:  # noqa: BLE001 - 어댑터 밖의 예외(설치 누락 등)도 기록하고 멈춘다
-        return _auth_check_failed(out, environ, blog, None, "unexpected", f"{type(exc).__name__}: {redact(exc, secret_values)}")
+        return _auth_check_failed(out, environ, blog, None, "unexpected", f"{type(exc).__name__}: {redact(exc, secret_values)}", cleaned)
     out(f"[{blog['key']}] 인증 점검 통과: 토큰 갱신·블로그 조회·블로그 주소 일치(쓰기 없음).")
     out(f"::notice::[{blog['key']}] 인증 점검 통과 — 토큰 갱신·블로그 조회·블로그 주소 일치를 확인했습니다(쓰기 없음, 글은 만들지 않았습니다).")
     names = ", ".join(blog["secrets"].get(role, role) for role in PUBLISH_ROLES)
     _write_summary(environ, f"{summary_head(blog)}\n"
                             "- 결과: **AUTH_CHECK_OK** — 토큰 갱신·블로그 조회·블로그 주소 일치를 확인했습니다(쓰기 없음, 글은 만들지 않았습니다).\n"
                             f"- 확인한 시크릿(이름만, 값은 출력하지 않음): {names}\n"
-                            f"- 레지스트리 mode: {blog['mode']}(점검은 mode와 무관하게 실행됩니다)")
+                            f"- 레지스트리 mode: {blog['mode']}(점검은 mode와 무관하게 실행됩니다)"
+                            + "".join(f"\n- {line}" for line in cleaned))
     return EXIT_OK
 
 
@@ -566,6 +585,7 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
     secret_values = _secret_values(blog, environ)  # 오류 문구에서 실제 값을 가린다
     if is_package:
         secret_values = secret_values + [str(environ.get("GITHUB_TOKEN") or "").strip()]   # 이슈 API 오류 문구에 실릴 수 있는 토큰도 가린다
+    cleaned = () if dry else _announce_cleaned_secrets(out, environ, blog)       # 시크릿이 쓰이는 실행에서만 알린다(연습 실행은 쓰지 않는다)
 
     # 즉시 게시, 또는 시크릿이 일부만 있는 초안함 업로드인데 게시용 시크릿이 없으면 글을 만들기 전에 멈춘다. 예전에는
     # 초안만 저장하고 초록으로 끝나 게시가 한 번도 안 된 채 며칠이 지나도 눈에 띄지 않았다(D-25). 시크릿은 '이름'만 표시한다.
@@ -685,10 +705,10 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
             publisher = (publisher_factory or default_publisher_factory)(blog, environ)
             auth_check(publisher, blog["url"])
         except PublishError as exc:
-            return _auth_check_failed(out, environ, blog, record, exc.code, redact(exc, secret_values))
+            return _auth_check_failed(out, environ, blog, record, exc.code, redact(exc, secret_values), cleaned)
         except Exception as exc:  # noqa: BLE001 - 어댑터 밖의 예외(설치 누락 등)도 기록하고 멈춘다
             return _auth_check_failed(out, environ, blog, record, "unexpected",
-                                      f"{type(exc).__name__}: {redact(exc, secret_values)}")
+                                      f"{type(exc).__name__}: {redact(exc, secret_values)}", cleaned)
         out(f"[{blog['key']}] 인증 점검 통과: 토큰 갱신·블로그 조회·주소 일치(쓰기 없음).")
 
     # ---- 초안 패키지 사전 점검(Gemini 를 부르기 전, 쓰기 없음) -----------------------

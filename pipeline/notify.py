@@ -41,7 +41,8 @@ from collections import namedtuple
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from pipeline.console import md_cell, one_line, safe_output
+from pipeline.console import (INVISIBLE_CODEPOINTS, INVISIBLE_RE, clean_secret, md_cell, one_line, safe_output,
+                              secret_was_cleaned)
 from pipeline.llm import mask
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -118,9 +119,9 @@ REASON_TEXT = {
 # ---- 입력 소독 ---------------------------------------------------------------
 _TOKEN_RE = re.compile(r"[0-9]{3,20}:[A-Za-z0-9_\-]{20,100}")
 _CHAT_RE = re.compile(r"-?[0-9]{1,20}|@[A-Za-z][A-Za-z0-9_]{3,31}")
-# 글자 순서를 뒤집거나 보이지 않게 만드는 문자(소프트 하이픈·폭 없는 공백·방향 제어·단어 결합자·BOM). 소스에는 보이지 않는 문자를 넣지 않으려고 코드 포인트로 쓴다(pipeline/inbox.py 와 같다).
-_INVISIBLE_CODEPOINTS = (0x00AD, *range(0x200B, 0x2010), *range(0x202A, 0x202F), *range(0x2060, 0x2065), *range(0x2066, 0x206A), 0xFEFF)
-_INVISIBLE_RE = re.compile("[" + "".join(chr(code) for code in _INVISIBLE_CODEPOINTS) + "]")
+# 글자 순서를 뒤집거나 보이지 않게 만드는 문자(소프트 하이픈·폭 없는 공백·방향 제어·단어 결합자·BOM). 목록은 pipeline/console.py 한 곳에 있다 — 시크릿 값 정리(console.clean_secret)가 같은 목록을 쓴다.
+_INVISIBLE_CODEPOINTS = INVISIBLE_CODEPOINTS
+_INVISIBLE_RE = INVISIBLE_RE
 _SURROGATE_RE = re.compile("[" + chr(0xD800) + "-" + chr(0xDFFF) + "]")       # 짝 없는 서로게이트는 UTF-8 로 인코딩할 수 없다
 _URL_SCHEME_RE = re.compile(r"(?i)\b(https?|ftp|tg)://")
 _URL_CHARS_RE = re.compile(r"[A-Za-z0-9\-._~:/?#@!$&'()*+,;=%]+")
@@ -257,8 +258,9 @@ class Notifier:
 
     def __init__(self, environ=None, opener=None, sleep=None, clock=None, budget=None):
         environ = os.environ if environ is None else environ
-        self._token = str(environ.get(ENV_TOKEN) or "").strip()
-        self._chat = str(environ.get(ENV_CHAT) or "").strip()
+        # 값에 보이지 않는 문자(채팅 앱에서 복사할 때 섞이는 폭 없는 공백 등)가 있으면 지운다(console.clean_secret) — 보이지 않는 문자가 없는 값은 예전의 `.strip()` 과 같다
+        self._token = clean_secret(environ.get(ENV_TOKEN))
+        self._chat = clean_secret(environ.get(ENV_CHAT))
         self._opener, self._sleep, self._clock = opener, sleep, clock
         self.budget = budget if budget is not None else _DEFAULT_BUDGET
 
@@ -858,17 +860,25 @@ def run_chance_published(commit, notifier, root, out, environ, runner=subprocess
     return 0
 
 
+CLEANED_HINT = ("값에 보이지 않는 문자(폭 없는 공백·제어 문자 등)가 섞여 있어 지우고 씁니다: {names} — 원본에서 바로 복사해 다시 등록하는 것을 권장합니다"
+                "(값은 이 화면에 나오지 않습니다)")
+
+
 def run_status(notifier, environ, out):
     names = (ENV_TOKEN, ENV_CHAT)
-    present = {name: bool(str(environ.get(name) or "").strip()) for name in names}
+    present = {name: bool(clean_secret(environ.get(name))) for name in names}
     rows = [f"| `{name}` | {'등록됨' if present[name] else '없음'} |" for name in names]
     for name in names:
         out(f"{name}: {'등록됨' if present[name] else '없음'}")
     ready = all(present.values())
+    cleaned = [name for name in names if secret_was_cleaned(environ.get(name))]
+    if cleaned:
+        out("[참고] " + CLEANED_HINT.format(names=", ".join(cleaned)))
     _write_summary(environ, "### 텔레그램 시크릿 등록 여부\n\n| 시크릿 이름 | 상태 |\n|---|---|\n" + "\n".join(rows) + "\n\n"
                    + ("두 시크릿이 모두 등록돼 있어 다음 단계에서 시험 메시지를 보냅니다(값은 이 화면에 나오지 않습니다)." if ready else
                       "**시크릿이 모두 등록돼 있지 않아 시험 메시지를 보내지 않습니다.** 저장소 Settings → Secrets and variables → Actions 에서 "
-                      "위 두 이름을 등록한 뒤 다시 실행하세요(`.github/editorial/TELEGRAM_SETUP.md`)."), out)
+                      "위 두 이름을 등록한 뒤 다시 실행하세요(`.github/editorial/TELEGRAM_SETUP.md`).")
+                   + (("\n\n" + CLEANED_HINT.format(names=", ".join(f"`{name}`" for name in cleaned)) + ".") if cleaned else ""), out)
     target = environ.get("GITHUB_OUTPUT")
     if target:
         try:
