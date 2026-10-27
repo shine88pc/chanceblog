@@ -39,6 +39,79 @@
 
 ---
 
+## [2026-10-27] Claude – 계획 승인 반영과 9시 슬롯 관측 (문서 전용, 코드·워크플로·레지스트리·광고 표면 변경 없음)
+
+**작업자**: Claude
+**대상**: 공통·Chance (문서)
+**등급**: T1(문서)
+**목적**: 사용자 승인("추천대로 진행해줘", 2026-10-27 채팅)을 작업요청서 5 계획 보고와 현황 문서에 반영하고, 2026-10-27 9시 슬롯 정기 실행(#79)의 관측 결과를 기록한다.
+
+### 한 일
+- 승인 반영: 계획 보고 §0 승인 기록·제목 문구, `인수인계/작업내용.md`(헤더·§1·§2 작업요청서 5 행·§3 21번·§5), `인수인계/작업요청/README.md` 5번 행, `docs/REQUEST_BRIEFING.md` §8, `docs/DEFECT_REGISTER.md` 해외 소스 관측 행.
+- 9시 슬롯 관측(읽기 전용: GitHub REST 실행 목록·커밋·공개 실행 화면의 주석, 공개 사이트, 원문 페이지; 단계 로그는 로그인이 없어 못 읽음):
+  - 실행 #79(정기, 00:27 UTC 시작·3분 37초, 성공, main 71dfde6) → 봇 커밋 931d2dc(00:30:56 UTC) → `사이트 자동 배포`(workflow_dispatch) 00:32:03 UTC 성공. 공개 주소 두 개 200, 사이트맵 21건 중 새 글 2건, `posts.json` 반영.
+  - 공개 주석: 경고 `모든 뉴스 소스 수집에 실패했습니다…`, 알림 `'사회·정책' 분야에 후보가 없어 '경제·일' 분야로 대체했습니다.`, Node.js 20 폐기 경고, `ubuntu-latest` 가 2026-10-19부터 Ubuntu 26으로 옮겨 간다는 안내(워크플로는 파이썬 버전을 고정해서 쓰지만 유지보수 후보).
+  - 같은 코드로 사회·정책 분야를 로컬에서 읽어 보면(다른 시각): 집행위원회 소식 30건 중 0건 사용(EXCLUDED 16·AGE 14), 통계청 사회는 `ParseError: mismatched tag: line 169, column 2`. 통계청 피드 주소가 00:35 UTC에 점검 안내 HTML(`We're sorry! The website is currently unavailable`, 200, `text/html`, 92,815바이트)을 돌려줬고 약 10분 뒤 정상 Atom(198,646바이트, `application/atom+xml`)이었다 → 같은 시각 실행의 수집 실패와 같은 원인으로 보이나 실행 로그 원문은 못 읽었다.
+  - 글 1쌍(`2026-10-27-KR/EN-093056`, 경제·일, DG Energy 항목 = CINEA 보도): front matter 첫 줄 `layout: post`, 글 끝 CC BY 4.0 인용 줄·AI 고지문(한·영) 확인. 원문 대조: 67건·€2.88 billion 일치. 모델이 받은 요약은 194자 한 문장뿐(요약 100자 이상이라 페이지의 메타 설명도 읽지 않음)이고 글은 약 5,000자 — 한국어 글에만 원화 환산 "한화 약 4조 2천억 원", 두 글에 평가 기준·절차 서술(원문에 없음), 한국어에 "민관 공동"·수소·가스망, 원문의 "예산의 약 5배·20여 개국·2027년 1월 결과"는 빠짐.
+
+### 남긴 것
+- 단계 로그의 `소스 …` 줄과 분야 표(로그인 필요), 통계청 점검 시간대 반복 여부(18시 슬롯부터 며칠), GOV.UK·통계청 글의 첫 발행 관측.
+- 원문 근거가 얇은 문제의 보강(프롬프트에 환산·절차 서술 금지 한 줄 — T2; 원문 발췌를 읽을지는 사용자 결정, 기본값 변경 없음)은 Task 5 구현 PR 병합 뒤 별도 PR. 결함 번호는 그때 레지스터에 올린다.
+- 이 PR 은 계획 보고서 PR 과 하나로 병합한다(같은 브랜치).
+
+---
+
+## [2026-10-27] Claude – 작업요청서 5 계획 보고 (문서 전용, 코드·워크플로·레지스트리·광고 표면 변경 없음)
+
+**작업자**: Claude
+**대상**: 공통 (문서)
+**등급**: T1(문서) — 구현은 승인 뒤 PR-A~E
+**목적**: 사용자가 2026-10-27 채팅으로 지목한 작업요청서 5의 첫 단계(§6-1 계획 보고)를 낸다. 요청서의 사실 4건을 직접 확인하고, 워크플로 재분류·이름 변경안, 얇은 채널 워크플로 구조, 초안 이슈·현황판, 레지스트리 변경안, AdSense 선택지 비교, 보안, 구현 순서를 정리한다.
+
+### 한 일
+- 새 `docs/analysis/2026-10-27_channel-management-plan.md`: 결정 D1~D8과 추천, 사실 확인(AdSense 두 건은 구글 공식 문서 원문 확인, 티스토리 API 종료·에디터·이미지·robots.txt·약관은 별도 조사 에이전트 2개가 읽기 전용으로 확인), 현황, 워크플로 표, 구조·인박스·레지스트리·AdSense 비교·보안·구현 순서·사용자 몫·미확인.
+- `인수인계/작업내용.md`(§1·§2·§3 21번·§4 9~12번·§5), `인수인계/작업요청/README.md` 표, `docs/REQUEST_BRIEFING.md` §8.
+
+### 남긴 것
+- 사용자 답(D1~D8). 승인된 것부터 PR-A(이름 접두사·`channel` 필드·검증 규칙)로 구현.
+- 이름 변경 때 브랜치 보호의 '필수 검사' 지정 여부는 사용자만 확인 가능(미확인).
+
+---
+
+## [2026-10-27] Claude – Blogger 주제 가드레일 2차 보강(D-64 ⑦ 권고 N-1·N-3·N-4·N-5·N-7): 쉼표 없는 접속어·용량 단위·패턴 따로 컴파일·시험 구멍·수동 주제 가드 순서 (T2, 독립 검증 델타 + dry-run 증거)
+
+**작업자**: Claude (구현 세션, 독립 검증은 별도 세션)  
+**대상**: Blogger  
+**등급**: T2 — 레지스트리가 받은 설정을 돌리는 `pipeline/gates.py`(절 경계 계산)와 `pipeline/run.py`(수동 주제 가드 순서) 코어를 바꿨다. 프로필은 금지를 늘리는 쪽으로만 바꿨다(T1). 승인 근거: 독립 검증 델타("병합 가능", `mode: draft` 전 권고 5건) + 아래의 dry-run·변이 증거. 실제 T2 승인은 총괄이 PR 에서 기록한다. 운영자 승인(2026-10-26 채팅 "3. …가드레일을 설정하고 진행")의 범위 안(목록을 막는 쪽으로만 강화)이다. **`mode`·시크릿·워크플로·`generator.py`·광고 표면·`인수인계/작업내용.md`·`HANDLER.md`·`docs/SESSION_START.md`·`REQUEST_BRIEFING.md`·`ACTIONS_GUIDE.md`는 바꾸지 않았다**(`blogger_macat`은 off 그대로).  
+**목적**: PR #43(main 0da8221)의 독립 검증 델타가 `mode: draft` 를 켜기 전에 처리하라고 권고한 항목(`docs/DEFECT_REGISTER.md` D-64 ⑦)을 구현한다. 범위는 권고 항목으로 한정했고 새 항목을 늘리지 않았다.  
+**브랜치**: `ai/claude/blogger-guardrails-round2`(origin/main 71dfde6에서 시작). PR 생성·병합·Actions 실행은 하지 않았다(총괄이 처리).
+
+### 변경 사항
+- **N-1 쉼표 없는 접속어**(`pipeline/profiles/*.json`의 `body_clause_split_patterns`): 접속어 **바로 뒤에 상담 구절**(상담 동사 `talk to`·`speak with`·`check with`·`consult`·`ask` + 전문가 낱말)이 올 때만 가르는 패턴을 더했다. 쉼표는 있어도 없어도 된다(`…lower your blood pressure so ask your doctor.` 가 막힌다). 접속어 `so`·`yet`·`while`·`then`·`or`·`because`·`since`·`as`·`unless`·`otherwise`·`therefore`·`thus`·`hence`·`plus`·`and`·`which is why`·`which means`·`meaning`·`except that`, 도입구 `you should`·`you can`·`make sure to`·`remember to`·`it is wise to`·`consider` 등. `see`·`call`·`visit`·`contact`·`seek`은 인과·순서 접속어와 쓰일 때만 가른다(`or see a specialist` 같은 서술을 가르지 않으려고). 한국어는 `~고,`·`~서`(돼서·그래서·따라서·고 나서; 장소의 `에서`는 제외)·`그러므로/그러니/그러니까`·`(먼저 의사와 …)`. 검증자의 연결어 그리드 영어 69행 중 지금까지 통과하던 32행 가운데 **22행을 닫았다**(남은 10행은 쉼표만으로 이은 것과 같은 계열이라 일부러 열어 뒀다: `, `·`, please`·`, just`·`, also`·`, of course,`·`, if you want,`·`, remember to`·`, be sure to`·`, make sure to`, 그리고 하니스가 `<br>`을 글자 그대로 넘겨서 생기는 `<br>` 행 — 실제 실행은 줄바꿈으로 읽어 막는다). 한국어 그리드는 10행 중 8행을 닫았다(남은 것은 `, 의사와…`·`~는 점, 의사와…`). 대가: 같은 모양의 정상 안내가 더 막힌다 — 검증자의 정상 안내 표본(영어 42·한국어 15)은 새로 막히는 것이 0개, 내가 쓴 정상 안내 68문장 중 14개(`…, which is why you should talk to your doctor`·`Do not start any supplement unless you check with your doctor`·`can then ask`·`임신 중이라서 의사와 상담이 필요해요` 등)는 새로 막혀 시험 `STRICT_TRADE_OFF_*`가 고정한다.
+- **N-3 용량 면제 취소**(`body_safe_veto_patterns`): 숫자+`mg`·`mcg`·`μg`·`IU`만 인식하던 것을 `milligrams`·`micrograms`·`grams`·`g`·`units`·`capsules`·`tablets`·`0.4 g`·`10,000 units`·`400-mg`·영어 숫자말(`four hundred milligrams`·`half a tablet`)로, 한국어는 `g`·`그램`·`정`·`캡슐`·`알`·`한 알`·`두 캡슐`로 넓혔다. `a handful of`·`2정거장`·`프로그램`·`5G` 같은 일상어는 용량으로 읽지 않는다(시험이 고정). **용량 낱말 자체를 막는 목록(`banned_*`의 `mg`·`IU` 패턴)은 넓히지 않았다** — 상담 구절도 막는 낱말도 없는 `Take 400 milligrams of magnesium before bed.`는 그대로 통과한다(범위 밖, 총괄 결정).
+- **N-4 절 경계 패턴을 따로 컴파일**(`pipeline/gates.py` `_clause_splitter`·`_split_clauses`): `(?:p1)|(?:p2)` 하나의 정규식으로 합치던 것을 패턴마다 따로 컴파일·탐색하고 겹치거나 맞닿은 경계를 합친다. 레지스트리는 패턴을 하나씩 컴파일해 검사하므로, 합치면 `(?i)`로 시작하는 패턴이나 같은 이름의 묶음이 검증을 통과하고도 실행 중 `re.error` 가 됐다(검증자 재현 `(?i)\s+whereas\s+`). 지금은 그 설정이 오류 없이 검증되고 그대로 돈다 — 시험이 '레지스트리가 받은 패턴은 본문 검사가 예외 없이 돌린다'를 고정한다.
+- **N-5 시험 구멍 5개**: 대문자 접속어(`, BUT`·`SO ASK YOUR DOCTOR`), 문장 끝 `!`·`?`·`。`·`！`·`？`, 수동 topic 의 30자 뒤에 있는 금지어, 수동 topic 가드가 본문 목록을 써도 통과하던 것(`remedy`·`heal`·`treat`·`pharmacy` 는 주제 목록에만 있다), 한국어 `400 mg`(띄어 쓴 용량) — 각각 그것만 잡는 표본을 더했다. 새 패턴마다 그 패턴만 가르는 문장이 있어야 하는 시험(`ClauseScopedExemptionTest`)은 그대로 통과한다(영어 `, and`·` and` 규칙은 새 규칙과 겹쳐 '앞에 상담·뒤에 위험한 권유'·`and see …` 표본을 더했다).
+- **N-7 수동 주제 가드 순서**(`pipeline/run.py`): `BLOGGER_PUBLISH=draft`인데 시크릿이 하나도 없고 주제가 막히면 `UPLOAD_SKIPPED`('저장소 파일에만 저장합니다') 안내가 먼저 나온 뒤 `TOPIC_BLOCKED` 종료 2 로 끝났다. 가드를 그 안내 앞으로 옮겼다 — 일시정지·mode off·잘못된 `BLOGGER_PUBLISH`·시크릿 누락 오류가 먼저 처리되는 순서는 그대로고, 주제가 없거나 통과하는 실행의 출력은 main 과 바이트 단위로 같다(검증자의 `compare_sched.py` 32개 + 내가 더한 16개 시나리오, 시험은 `ManualTopicGuardTest`). `docs/ARCHITECTURE.md` §4-1 처리 순서를 고쳤다.
+- **N-2 는 고치지 않았다**: `, then` 조건문("If you are pregnant, then check with your doctor first.")·`stop and consult`가 막히는 과잉 차단은 첫 실제 영어 초안의 `BODY_TOPIC` 빈도를 보고 정한다(`docs/ARCHITECTURE.md` §7-1 한계에 한 줄).
+- **시험·문서**: `tests/test_guardrails.py`(105→114개)·`tests/test_run.py`(60→66개). 연결어 그리드 시험(`ConnectorGridTest`: 닫은 것은 모두 막히고 열어 둔 것은 지금 그대로 통과), 선택지 하나까지 지키는 표본(`AlternativeCoverageTest`)을 새 패턴·용량 단위까지 넓혔다. 문서: `docs/ARCHITECTURE.md` §4-1·§7-1(필드 표·절 경계 표·면제 취소·한계·트레이드오프), `docs/SECURITY_GUARDRAILS.md` G-C4 한계, `docs/DEFECT_REGISTER.md` D-64.
+
+### 검증 증거
+- **L1**: `python -m unittest discover -s tests` **2160개 통과**(기준 main 71dfde6의 2145개 → 새 시험 15개). `python scripts/validate_repo.py --base origin/main` 오류 0·경고 1(LIQUID-1, main과 같음), pyflakes 새 경고 0, 바꾼 `.py` vermin 최소 3.7.
+- **정기·연습 실행 출력**: 검증자의 `compare_sched.py` 32개 시나리오와 내가 더한 16개(초안함 업로드·시크릿 없음·연습 실행·하루 상한·즉시 게시 시크릿 누락 등)에서 main 과 **바이트 단위로 같다**(주제를 넣지 않은 실행).
+- **검증자 하니스**(수정 없이 실행, main 과 나란히): `tradeoff.py` 위험 문장 영어 14→17개 막힘(`which is why`·`and you can ask`·`and then consult`), 용량+상담 구절 4→9개 막힘, 정상 안내 영어 8/42·한국어 1/15 막힘은 **전과 같은 문장**(새 오탐 0); `overblock2.py` 영어 5/31·한국어 16/27 표시는 전과 같음; `probe.py`·`bypass.py`·`overblock.py`·`manual_topic.py`는 출력이 전과 같음(과잉 차단 영어 15/118·한국어 0/32 그대로).
+- **변이(내가 직접)**: ① 이름 붙은 변이 37개(절 경계 문장부호 7·경계 찾기·합치기·대소문자 10·면제 취소·문장 나누기 5·수동 주제 가드와 `UPLOAD_SKIPPED` 안내 9·문서 2·바꾼 패턴 4곳을 옛 문자열로 되돌리기 4) ② 새로 더했거나 바꾼 패턴 통째 삭제 10개 ③ 선택지 하나씩 삭제 306개(새로 더했거나 바꾼 패턴의 `|` 선택지를 하나씩 지움) = **353개 중 353 사망, 생존 0**. 첫 실행(이름 붙은 37 + 삭제 10 + 선택지 314)에서는 15개가 살아남았다 — 경계 합치기 3개(맞닿은 경계·겹친 경계의 끝·정렬)와 용량 숫자말 단위 4개(`micrograms`·`grams`·`units`·`capsules`)는 시험 구멍이라 표본·시험을 더해 막았고, 나머지 8개는 같은 낱말이 안쪽에 또 있거나(`healthcare professional`은 맨 앞의 `professionals?`와 창이 이미 잡는다) 쓸모가 없는(숫자말 사이의 `and`, `그러니까`는 `~니까` 경계가 가른다) 선택지라 패턴에서 뺐다. 단순화 전후의 동작은 생성한 문장 약 6만 개에서 달랐던 것이 0개다.
+
+### 못 한 검증
+- Actions 실행, 실제 Gemini 영어 출력으로 본 탈락률(`BODY_TOPIC`·`TOPIC_BLOCKED` 빈도), 영문 글의 사람 눈 검토. `mode`·시크릿은 건드리지 않았다.
+
+### 다음 AI에게 남기는 주의사항
+1. 이 변경도 `mode: draft` 를 켜기 **전에** 병합한다(D-64 ⑦). 병합 뒤 첫 영어 초안(L3)에서 `BODY_TOPIC` 빈도를 본다. 정상 안내가 새로 막히면 사유의 `'낱말'`을 보고 접속어 목록을 조정하되, `STRICT_TRADE_OFF_*`·`ConnectorGridTest` 표본과 ARCHITECTURE §7-1 한계 문단을 같이 바꾼다.
+2. 새 절 경계 패턴을 더하면 그 패턴만 가르는 문장(`MIXED_BLOCKED_*`)과 선택지마다의 조각(`AlternativeCoverageTest`)이 같이 있어야 시험이 통과한다. 쉼표만으로 이은 연결어를 닫으면 `GRID_OPEN_*`·문서의 한계 목록을 같이 고친다.
+3. 알려진 한계: 쉼표만으로 이은 상담 구절·꼬리 구절·줄바꿈으로 갈린 두 낱말 용어·한 문장 안의 다른 언어 낱말·상담 구절이 앞에 오고 위험한 권유가 쉼표 없는 `and try …`로 뒤따르는 문장은 여전히 통과한다. 용량 낱말 자체를 막는 목록은 넓히지 않았다.
+4. 새 결함 번호는 D-67부터. `docs/ACTIONS_GUIDE.md` 6-1 표의 `TOPIC_BLOCKED`·`HANDLER.md`·`인수인계/작업내용.md` 갱신은 총괄 문서 PR 몫이다.
+
+---
+
 ## [2026-10-26] Claude – 18시 슬롯 관측과 #42·#43 병합 기록 (문서 전용, 코드·광고 표면 변경 없음)
 
 **작업자**: Claude
