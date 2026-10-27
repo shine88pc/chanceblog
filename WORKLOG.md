@@ -7,6 +7,40 @@
 
 ---
 
+## [2026-10-27] Claude – 텔레그램 알림: 새 글 발행·Blogger 초안 발행 대기·확인 필요를 휴대폰으로 (운영자 요청, 작업 TG, T2, 시크릿이 없으면 동작 변화 없음)
+
+**작업자**: Claude (구현 세션, 독립 검증은 별도 세션)
+**대상**: 공통 (알림 모듈·워크플로·검증기·문서; 호출 자리는 Chance·Blogger·확인 필요 모음)
+**등급**: T2(새 모듈·새 워크플로·워크플로 단계와 env 추가·검증기 규칙). 시크릿 사용(T3 항목)에 대한 승인은 운영자의 2026-10-27 채팅 요청("새 글 발행이나 초안 작성 후에 발행 대기중 같이 필요한 알람에 대해서 텔레그램 메세지로 받을 수 있게 해줘")이다. **시크릿 값은 만들지도 쓰지도 않았다**(이름 `TELEGRAM_BOT_TOKEN`·`TELEGRAM_CHAT_ID`만) — 운영자가 GitHub 화면에서 직접 등록하고, 등록하기 전에는 알림이 꺼져 있다(아무 일도 하지 않음). `mode`·광고 표면(`index.html`·`_config.yml`)·`generator.py`·글 생성 로직은 바꾸지 않았다.
+**목적**: 새 글이 올라갔을 때, Blogger 초안이 초안함에서 게시를 기다릴 때, 확인 필요 모음에 새로 해야 할 일이 생겼을 때를 운영자가 휴대폰(텔레그램)으로 바로 안다. 이 PC 의 회사망이 텔레그램 사이트를 막아 공식 문서는 읽지 못했고(HTTP 403) 한도·형식은 조사 보고(미러 문서·공식 채널·소스)의 값이다. 실제 텔레그램 서버로는 한 번도 요청하지 않았다(토큰도 없다) — 시험은 가짜 HTTP 와 127.0.0.1 임시 서버뿐이다.
+**브랜치**: `ai/claude/telegram-alerts`(기준 `origin/ai/claude/channel-names` 5c57a7c). PR 생성·병합·main push·Actions 실행·브라우저는 쓰지 않았다(총괄이 처리).
+
+### 한 일
+- **`pipeline/notify.py`**(새 모듈, 표준 라이브러리만, Python 3.10 호환): `Notifier`(환경변수에서 토큰·채팅 ID 를 읽는다 — 둘 중 하나라도 비면 비활성, 아무것도 보내지 않음) + `send_message`·`notify_chance_published`·`notify_draft_waiting`(티스토리·네이버 초안 패키지·Chance 승인 대기·Blogger 초안 공통)·`notify_blogger_result`·`notify_ops_alert`·`notify_test` + 명령 줄 `python -m pipeline.notify chance-published --commit HEAD | test | status`. 모든 공개 함수는 예외를 던지지 않고 `Result(ok, sent, status, reason, detail)`를 돌려준다. **토큰·채팅 ID 는 로그·예외·출력·명령 줄 어디에도 나오지 않는다**: 예외는 클래스 이름만 쓰고(문구·요청 객체·원 예외 사슬 금지 — 토큰이 요청 주소 경로에 들어가 `requests` 식 예외 문자열이 주소째 새는 사고를 막는다), 돌려주는 모든 글에서 토큰·채팅 ID(와 URL 인코딩·토큰 절반)를 글자 그대로 지운 뒤 비밀 패턴(`mask`)으로 한 번 더 가리며, argparse 오류도 잘못 넘긴 값을 되풀이하지 않는다. JSON POST 15초 제한·링크 미리보기 끔·429 는 `retry_after`(최대 10초)만큼 기다려 한 번·네트워크 오류와 5xx 는 한 번·서식 해석 오류(400)는 평문으로 한 번·버튼 거부는 버튼 없이 한 번(요청은 한 통에 최대 5번)·본문 3,800자(UTF-16 단위)·한 실행 5통·통 사이 1.1초. 외부·AI 유래 글은 소독하고(비밀 모양 가리기·보이지 않는 문자 제거·한 줄 접기·길이 제한·HTML 이스케이프) 주소는 허용 목록(`shine88pc.github.io`·`github.com/shine88pc/chanceblog`·`www.blogger.com` + 코드가 주는 블로그 주소)만 링크·버튼으로 건다. 새 글 주소는 `scripts/verify_pages_deploy.py` 의 계산(배포 확인이 여는 주소와 같은 규칙)을 그대로 쓴다.
+- **호출 자리**: `chanceblog.yml` 마지막 단계 `텔레그램 알림(새 글)`(`if: steps.commit.outputs.pushed == 'true'`·`continue-on-error: true`·`timeout-minutes: 2`, 이 단계 `env` 에만 시크릿 두 개 — 연습 실행은 push 가 없어 돌지 않고, 전송이 실패해도 종료 코드 0 에 `::warning::` 고정 문장) · `pipeline/run.py`(Blogger 러너: 초안함 업로드·즉시 게시에 **성공한 직후** 알림, 연습·실패·파일만 저장에서는 부르지 않고 어떤 실패도 결과·이력·요약·종료 코드를 바꾸지 않음) + `blogger.yml` 러너 단계 `env` 두 줄 · `scripts/ops_inbox.py`(코멘트를 쓰려고 할 때마다 같은 새 항목 판정으로 같은 제목 줄(`inbox.alert_lines`)을 평문 한 통, 코멘트 성공 여부와 무관·서로 영향 없음) + `ops-inbox.yml` `env` 두 줄 · 새 워크플로 `[공통] 텔레그램 알림 시험`(`telegram-test.yml`, 수동 전용, 읽기 권한: 시크릿 등록 여부를 이름별 `등록됨/없음`만 요약에 쓰고 둘 다 있으면 시험 메시지 한 통, 실패는 분류(토큰 틀림 401·채팅 ID 틀림 400·`/start` 안 함 403·네트워크…)와 조치를 요약에).
+- **검증기**: **WF-13** — 텔레그램 시크릿 이름은 단계 `env` 의 같은 이름 환경변수에 `secrets.그 이름` 표현식 그대로일 때만 허용(`run`·`with`·`if`·job/워크플로 `env`·이름 등 어디든 나오면 오류, `$TELEGRAM_BOT_TOKEN` 같은 셸 확장도 같음). **WF-6 예외** — run 이 정확히 `python -m pipeline.notify <이벤트> [--commit …]` 한 줄이고 `timeout-minutes` 가 있는 단계만 `continue-on-error` 에 경고하지 않는다(알림은 보조라 게시 실행을 실패시키면 안 되고 알림 명령이 스스로 경고를 낸다 — W4 의 유일한 예외). 비밀 패턴(`pipeline/secret_patterns.py`)에 `Telegram 봇 토큰`(`숫자:영문숫자 30~50자`, 주소 경로의 `bot` 바로 뒤에서도 걸림) — SEC-2 와 런타임 `mask()` 가 함께 쓴다.
+- **문서**: 운영자 안내 `.github/editorial/TELEGRAM_SETUP.md`(봇 `@chance_auto_post_bot`, 휴대폰에서 `/start`, 채팅 ID 확인 방법(미확인 표시), 시크릿 등록 순서, 시험 실행과 결과 읽는 법, 알림 표, 끄는 법, 노출 시 BotFather `/revoke`, 종단간 암호화 한계, "AI 는 값을 대신 입력하지 않는다"), `docs/ACTIONS_GUIDE.md`(3-17·6-12·이름 표·알려진 상태), `docs/ARCHITECTURE.md`(§4-4 알림 계층·§2-1 표·§6), `docs/SECURITY_GUARDRAILS.md`(**G-C11** 토큰 취급·WF-13·SEC-2·WF-6 예외·§1·§3·§4·§5·§6), `docs/OPS_INBOX.md`(코멘트 알림과 텔레그램의 관계), `docs/ENGINEERING_GUIDE.md`(W4 예외·W8·확장 표), `HANDLER.md`.
+- **시험**: 새 시험 파일 4개(`test_notify.py`·`test_notify_cli.py`·`test_notify_integration.py`·도구 `notify_helpers.py`)와 `test_validate_repo.py`·`test_security_settings.py` 보강, 기존 시험 8곳 갱신(워크플로 이름 표·env 목록·새 단계·시크릿 표본). 전부 가짜 HTTP(`urllib.request.urlopen` 자리)·가짜 git·127.0.0.1 임시 서버뿐이고 `tests/_bootstrap.py` 가 시험 PC 의 텔레그램 환경변수를 지운다.
+
+### 알아 둘 것
+- **총괄 소유 문서(`docs/REQUEST_BRIEFING.md`)는 이 브랜치에서 고치지 않았다.** 새 워크플로가 그 표에 없으면 시험 2개(`test_docs_tables_list_every_workflow_with_its_current_name`·`test_real_briefing_covers_current_repository`)와 검증기 BRIEF-1 경고가 나온다 — 패치 `TG_request_briefing_table.patch`(행 1줄·한 구절)를 얹으면 전부 통과한다.
+- **확인 필요 모음의 휴대폰 알림은 코멘트 성공 여부와 무관하게 간다**(서로 영향 없음, 기존 새 항목 판정 그대로). 코멘트가 실패해 다음 점검이 같은 항목을 다시 알릴 때는 휴대폰 알림도 한 번 더 간다(기존 "놓치는 쪽보다 한 번 더 알리는 쪽이 낫다" 원칙). 코멘트가 성공한 점검에서만 보내려면 `scripts/ops_inbox.py` 의 `send_alert` 호출 두 곳을 `if ok:` 안으로 옮기면 된다.
+- 티스토리·네이버 초안 패키지(작업 C)와 Chance 승인 대기(작업 E)의 호출은 넣지 않았다 — 초안을 만든 직후 `notify_draft_waiting(channel_label, title, where, url=None)` 을 부르면 같은 모양의 `📝 발행 대기` 알림이 간다(`docs/ARCHITECTURE.md` §4-4).
+- 텔레그램 전송에는 멱등성 키가 없어 타임아웃 뒤 재시도로 같은 알림이 드물게 두 번 갈 수 있다(최소 한 번 가는 쪽을 택했다). `blogger.yml` 을 재사용 워크플로로 바꾸는 작업 D 는 러너 단계 `env` 두 줄을 그대로 옮겨야 한다.
+
+### 검증 증거
+- **L1**: `python -X utf8 -m unittest discover -s tests` — 기준 5c57a7c **2217개 통과**(447.5초) → 브랜치 **2499개 통과**(646.7초, 부하 중; 총괄 패치 `TG_request_briefing_table.patch` 를 얹은 작업 트리). 새 시험 282개(`test_notify` 140·`test_notify_cli` 62·`test_notify_integration` 51·`test_validate_repo` +23·`test_security_settings` +6). 패치 없이는 `docs/REQUEST_BRIEFING.md` 표를 보는 시험 2개만 실패한다.
+- **L0**: `python scripts/validate_repo.py --base origin/ai/claude/channel-names` 오류 0·경고 1(LIQUID-1, 기준과 같음; 패치 없이는 BRIEF-1 한 건 더), `actionlint` 1.7.12 워크플로 11개 지적 0, `pyflakes` 기준과 같은 16건(새 경고 0), `vermin --target=3.10-` 최소 3.10(`--violations` 종료 0), 3.12 전용 f-string 검사 0건, `git diff --check` 0.
+- **동작 불변**: 시크릿이 없을 때 Blogger 러너 시나리오 10개와 확인 필요 모음 시나리오 5개의 출력·종료 코드·이력·초안·요약·쓰기 로그 **80개 파일이 5c57a7c 와 바이트 단위로 같다**(대조군: 가짜 시크릿·가짜 HTTP 를 주면 5개 출력만 `[참고] 텔레그램 알림: 보냈습니다` 한 줄 등이 더해져 달라짐). 워크플로 YAML 은 더한 것(알림 단계 1개·env 5줄·새 파일)을 빼면 기존 10개가 `yaml.safe_load` 결과까지 같다. `generator.py` 는 한 줄도 바뀌지 않았다.
+- **누출 시험**: 요청 주소가 든 예외 문자열(`requests` 식 연결 실패·`InvalidURL`·`URLError`·원인 사슬·응답 설명에 토큰 등) 15가지 + 명령 줄 2가지 실패 모양에서 결과·설명·로그·요약·단계 출력·argparse 오류에 토큰·채팅 ID 가 없다.
+- **변이(직접 돌림)**: 121개(`pipeline/notify.py`·`scripts/validate_repo.py`·`pipeline/secret_patterns.py`·`pipeline/run.py`·`scripts/ops_inbox.py`·`pipeline/inbox.py`·워크플로 4개) **모두 시험이 잡는다**. 첫 판 122개 중 4개가 살아남았다 — 둘(U02 포트 검사·U04 백슬래시 검사)은 다른 검사(netloc 일치·허용 글자 목록)가 이미 막는 중복 검사라 코드에서 지웠고, 둘(W04·W05, 러너가 실패·시크릿 없음에서 알림 함수를 부르는지)은 알림 함수 안쪽의 같은 걸러내기에 가려 결과로는 구분되지 않아 '알림 함수가 불리지 않는다'를 따로 고정하는 시험 3개를 더했다. 그 뒤 코드(주소 검사 단순화·소독의 원문 상한·알림 줄 반복문)가 바뀌어 전체를 다시 돌렸다.
+- **실제 서버 없이 실제 urllib**: 127.0.0.1 임시 서버로 200·401·400·403·404·429(대기 후 성공)·5xx(HTML 본문)·소켓 제한 시간·연결 거부가 분류로 이어지는지 확인(텔레그램으로는 나가지 않음).
+
+### 못 한 검증
+- **실제 텔레그램 호출**(시크릿 등록 뒤 `[공통] 텔레그램 알림 시험`이 첫 검증), 휴대폰 앱의 버튼·알림 도착, 새 글 알림의 주소가 배포 뒤 열리는지, Actions 에서 `텔레그램 알림(새 글)` 단계의 실제 실행. 텔레그램 공식 문서(core.telegram.org)는 이 PC 에서 읽을 수 없어 미러·소스로 확인한 값이다. 3.10 에서 직접 돌리지는 못했다(로컬 3.12 — `vermin`과 3.12 전용 f-string 검사로 대신).
+
+---
+
 ## [2026-10-27] Claude – 워크플로 이름 `[구분]` 접두사와 레지스트리 `channel`·`ads` 필드·검증 규칙 (작업요청서 5 PR-A, T2, 동작 변화 없음)
 
 **작업자**: Claude (구현 세션, 독립 검증은 별도 세션)

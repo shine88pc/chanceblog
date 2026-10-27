@@ -472,7 +472,9 @@ class WorkflowAuthCheckInputTest(unittest.TestCase):
         expected = {"PIPELINE_SECRET_" + role.upper(): "${{ secrets[matrix.secret_%s] }}" % role for role in roles}
         env = self.run_step["env"]
         self.assertEqual({k: v for k, v in env.items() if k.startswith("PIPELINE_SECRET_")}, expected)
-        self.assertEqual(set(env) - set(expected), {"BLOG_KEY", "BLOGGER_TOPIC", "BLOGGER_PUBLISH", "BLOGGER_AUTH_CHECK"})
+        self.assertEqual(set(env) - set(expected), {"BLOG_KEY", "BLOGGER_TOPIC", "BLOGGER_PUBLISH", "BLOGGER_AUTH_CHECK", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"})
+        for name in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"):          # 알림용 시크릿은 같은 이름의 환경변수로만 나간다(검증기 WF-13)
+            self.assertEqual(env[name], "${{ secrets.%s }}" % name)
         self.assertEqual(set(self.plan_step["env"]), {"ONLY_BLOG", "AUTH_CHECK_ONLY"})            # plan 단계에는 시크릿이 없다
 
 

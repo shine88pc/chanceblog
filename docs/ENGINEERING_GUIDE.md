@@ -47,11 +47,11 @@
 | W1 | 최상위 `permissions`를 **명시하고 최소**로. 쓰기 권한은 필요한 job에만 | **WF-1** |
 | W2 | 신뢰할 수 없는 값은 **`env:`로 받아 `"$VAR"`로 쓴다**(`run:`에 GitHub 표현식(달러 기호+이중 중괄호)을 직접 보간 금지) | **WF-4** |
 | W3 | 모든 job에 `timeout-minutes`, 스케줄 워크플로에 `concurrency` | **WF-7·WF-8** |
-| W4 | `\|\| true`, `continue-on-error`로 실패를 숨기지 않는다. 필요한 재시도는 명시적 루프로 | **WF-6** |
+| W4 | `\|\| true`, `continue-on-error`로 실패를 숨기지 않는다. 필요한 재시도는 명시적 루프로. **예외는 알림 단계 하나**: run 이 정확히 `python -m pipeline.notify <이벤트> [--commit …]` 한 줄이고 `timeout-minutes` 가 있는 단계는 `continue-on-error: true` 를 써도 된다(알림은 보조라 게시 실행을 실패시키면 안 되고, 알림 명령이 스스로 `::warning::` 으로 실패를 드러낸다) | **WF-6**(예외 조건 포함) |
 | W5 | 외부 액션은 SHA 고정, 패키지는 버전 범위 | **WF-5**·**DEP-1** |
 | W6 | 커밋을 push하는 워크플로가 사이트를 바꾼다면 **배포를 dispatch**한다 | **WF-10** |
 | W7 | `schedule.cron`은 레지스트리와 같게. 수동 실행 입력(`dry_run`, `publish`(off·draft·publish 3택, 기본 draft), 대상 블로그·주제)을 제공한다 | **REG-2** |
-| W8 | 시크릿은 `secrets[...]` → `env`로만. `echo` 금지 | **WF-9**·**REG-3** |
+| W8 | 시크릿은 `secrets[...]` → `env`로만. `echo` 금지. 텔레그램 시크릿(`TELEGRAM_BOT_TOKEN`·`TELEGRAM_CHAT_ID`)은 **단계의 `env`에 같은 이름으로**만 두고 `run`·`with`·`if`·job/워크플로 `env`에는 쓰지 않는다 | **WF-9**·**REG-3**·**WF-13** |
 | W9 | 변경 후 `actionlint`가 0건이어야 한다 | CI |
 | W10 | 워크플로·job 이름(`name`)은 **한글**로, 이름만 보고 자동인지 수동인지·무엇을 하는지 짐작할 수 있게 짓는다(예: `[공통] 사이트 자동 배포`, `[Chance] 기존 글 이미지 교체(수동)`). 이름 하나로 설명되지 않는 서로 다른 기능이 한 워크플로에 묶이면 나눈다(예: 글 작성과 이미지 교체). `run-name`에는 정기/수동·번호·불리언만 쓰고 이슈·PR 제목 같은 외부 문자열은 넣지 않는다. 외부 워크플로 템플릿을 복사해 넣을 때는 영문 `name`을 한글로 바꾼다. **워크플로 `name`·`run-name` 맨 앞에는 `[구분] `을 붙인다** — 블로그 채널 라벨(`Chance`·`Blogger`·`Blogger 영문`·`Blogger 한글`·`티스토리`·`네이버`)이거나, 블로그에 속하지 않으면 `공통`(배포·검사·감시·점검), 다른 워크플로가 부르는 공용 실행이면 `내부`. 대괄호로 시작하는 값은 YAML에서 따옴표가 필요하다(`name: "[공통] 사이트 자동 배포"`). job·단계 이름에는 붙이지 않는다(job 이름은 PR 검사 화면의 이름이다). 블로그 워크플로의 구분은 레지스트리 `channel.label`과 같은 글자여야 한다. 이름 표는 [`ARCHITECTURE.md`](./ARCHITECTURE.md) §2-1. **어디서 강제하나**: 검증기 WF-12는 모든 워크플로의 `name`이 허용된 `[구분] `으로 시작하고 `run-name`이 있으면 같은 접두사인지(오류) 보고, 레지스트리 검증(REG-1)은 블로그 워크플로의 `name` 접두사가 `channel.label`과 같은지 본다. 검증기 WF-11은 워크플로 `name`(오류, 접두사 뒤의 이름 부분에 한글이 있어야 한다)과 job `name`(경고)만 본다. 그러나 job `name`은 단위 테스트 `test_real_repository_workflow_and_job_names_are_korean`이 경고도 실패로 취급하므로 새 job에도 한글 이름이 사실상 필요하다. 입력 `description`·단계 `name`·`run-name`의 한글과 run-name이 쓸 수 있는 값은 검증기가 아니라 단위 테스트(`tests/test_workflow_names.py`)가 요구한다 | **WF-11**(워크플로 name 은 오류, job name 은 경고)·**WF-12**(`[구분] ` 접두사, 오류) + 단위 테스트 |
 
@@ -78,6 +78,7 @@
 | 검증기 검사 추가 | `scripts/validate_repo.py`에 `check_*` 함수 + `run_checks`에 등록 → `tests/test_validate_repo.py` → [`SECURITY_GUARDRAILS.md`](./SECURITY_GUARDRAILS.md) §6 매핑표 갱신 |
 | 어댑터 추가 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) §7.B. 가짜 서비스로 재시도·중복·인증 실패 테스트(`tests/test_publisher_blogger.py` 참고) |
 | 감시 규칙 추가 | `pipeline/health.py`에 순수 함수로 추가 → `tests/test_health.py` |
+| 알림(텔레그램) 종류 추가 | `pipeline/notify.py`에 이벤트 함수(문구는 `format_*` 순수 함수, 동적 값은 `clean_text`→`escape_html`, 주소는 `allowed_url`) → `tests/test_notify.py`(문구·소독) → 호출 자리는 **시크릿이 없을 때 출력이 그대로이게**(`notify.Notifier(environ).enabled` 가 아니면 아무것도 하지 않음)·실패가 결과·종료 코드를 바꾸지 않게 감싸고 `tests/test_notify_integration.py` 에 시험 → [`ARCHITECTURE.md`](./ARCHITECTURE.md) §4-4·[`TELEGRAM_SETUP.md`](../.github/editorial/TELEGRAM_SETUP.md) 알림 표. 토큰·예외 취급은 G-C11 |
 | 워크플로 추가·이름 변경 | `[구분] ` 접두사와 한글 `name`·job `name`(W10, 블로그 워크플로면 레지스트리 `channel.label`과 같은 글자) → [`ARCHITECTURE.md`](./ARCHITECTURE.md) §2-1 표와 [`REQUEST_BRIEFING.md`](./REQUEST_BRIEFING.md) 표에 한 줄(`파일`과 `이름`을 같은 줄에 백틱으로)·[`ACTIONS_GUIDE.md`](./ACTIONS_GUIDE.md) 이름 표 → `python scripts/validate_repo.py`(WF-11·WF-12·BRIEF-1)·`tests/test_workflow_names.py`(표와 이름이 같은지·run-name 제목·옛 이름 인용) |
 | 레지스트리에 블로그 추가·`channel`·`ads` 변경 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) §3(`channel`·`ads`)·§7 플레이북 → `python -m pipeline.registry` · `python scripts/validate_repo.py`(REG-1·REG-5) · `tests/test_registry.py`. `ads`를 `pending_gate`·`on`으로 올리거나 광고 코드를 넣고 빼는 것은 T3([`SECURITY_GUARDRAILS.md`](./SECURITY_GUARDRAILS.md) G-C10) |
 

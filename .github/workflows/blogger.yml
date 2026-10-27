@@ -127,6 +127,8 @@ jobs:
           PIPELINE_SECRET_CLIENT_ID: ${{ secrets[matrix.secret_client_id] }}
           PIPELINE_SECRET_CLIENT_SECRET: ${{ secrets[matrix.secret_client_secret] }}
           PIPELINE_SECRET_REFRESH_TOKEN: ${{ secrets[matrix.secret_refresh_token] }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python -m pipeline.run --blog "$BLOG_KEY"
 
       # 생성 단계가 실패해도(llm_failed/publish_failed) 기록과 초안은 남긴다

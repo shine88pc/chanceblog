@@ -12,3 +12,7 @@ if str(ROOT) not in sys.path:
 # 이 파일들이 필요한 시험은 mock.patch.dict(os.environ, ...)·env 인자로 자기 경로를 직접 준다.
 for _name in ("GITHUB_STEP_SUMMARY", "GITHUB_OUTPUT", "GITHUB_ENV", "GITHUB_PATH"):
     os.environ.pop(_name, None)
+# 텔레그램 알림은 두 시크릿이 모두 있을 때만 켜진다(pipeline/notify.py). 시험 PC 의 환경에 값이 있어도 시험이 알림을 켜지 못하게 지운다 —
+# 알림 시험은 값을 직접 주는 가짜 환경(dict)과 가짜 HTTP 로만 돈다.
+for _name in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"):
+    os.environ.pop(_name, None)

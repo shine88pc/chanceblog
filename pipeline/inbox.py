@@ -903,3 +903,12 @@ def comment_text(owner, items, issue_url=""):
     url = safe_url(issue_url)
     lines += ["", f"▶ [모아 보기]({url})" if url else "이슈 본문의 '▶ 바로 하기' 링크로 바로 처리할 수 있습니다."]
     return "\n".join(lines)
+
+
+def alert_lines(items):
+    """새 action 항목을 휴대폰(텔레그램, pipeline/notify.py)으로 알릴 때 쓰는 제목 줄들. 코멘트(comment_text)와 같은 항목·같은 개수 제한(COMMENT_ITEMS_MAX)·
+    같은 소독(safe_text)이고, 넘친 건수를 마지막 줄로 알린다. @멘션·링크는 없다(링크는 알림 버튼이 따로 단다)."""
+    lines = [safe_text(item.title, TITLE_MAX) for item in items[:COMMENT_ITEMS_MAX]]
+    if len(items) > COMMENT_ITEMS_MAX:
+        lines.append(f"… 외 {len(items) - COMMENT_ITEMS_MAX}건")
+    return lines
