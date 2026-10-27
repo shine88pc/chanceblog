@@ -15,6 +15,7 @@ from test_run import make_root
 
 sys.path.insert(0, str(_bootstrap.ROOT / "scripts"))
 import validate_repo as vr  # noqa: E402
+from pipeline import registry as reg_mod  # noqa: E402
 
 REAL = _bootstrap.ROOT
 
@@ -148,7 +149,7 @@ class WorkflowTest(TmpCase):
 
 
 KOREAN_NAMES_WORKFLOW = """
-name: 사이트 자동 배포
+name: "[공통] 사이트 자동 배포"
 on:
   workflow_dispatch:
 permissions:
@@ -218,7 +219,7 @@ class WorkflowNameTest(TmpCase):
         root = registry_root(self.root, chance_extra=DEPLOY_STEP)
         self.assertNotIn("WF-11", checks(vr.run_checks(root)))
         wf = root / ".github" / "workflows" / "chanceblog.yml"
-        wf.write_text(wf.read_text(encoding="utf-8").replace("name: 챈스 글 자동 작성", "name: chance"), encoding="utf-8")
+        wf.write_text(wf.read_text(encoding="utf-8").replace('name: "[Chance] 챈스 글 자동 작성"', "name: chance"), encoding="utf-8")
         self.assertIn(("WF-11", "ERROR"), [(f.check, f.level) for f in vr.run_checks(root)])
         out = io.StringIO()
         with redirect_stdout(out):
@@ -230,11 +231,27 @@ class WorkflowNameTest(TmpCase):
         found = vr.check_workflow_names(REAL, vr.list_files(REAL))
         self.assertEqual([f.line() for f in found], [])
 
+    def test_a_korean_prefix_does_not_count_as_a_korean_name(self):
+        """`[공통]`·`[네이버]` 같은 한글 접두사가 한글 이름 검사를 대신 통과시키면 안 된다 — 접두사 뒤의 이름에 한글이 있어야 한다."""
+        job = "jobs:\n  j:\n    name: 배포\n"
+        found = self.names(f'name: "[공통] Deploy Pages"\n{job}')
+        self.assertEqual([(f.check, f.level) for f in found], [("WF-11", "ERROR")])
+        self.assertIn("접두사", found[0].message)
+        self.assertEqual(self.names(f'name: "[공통] 사이트 자동 배포"\n{job}'), [])
+        self.assertEqual(self.names(f'name: "[Chance] 글 자동 작성"\n{job}'), [])
+        self.assertEqual([(f.check, f.level) for f in self.names(f'name: "[Chance] Full-Auto Engine"\n{job}')], [("WF-11", "ERROR")])
+        self.assertEqual(self.names(f'name: "사이트 [공통] 배포"\n{job}'), [])  # 맨 앞이 아닌 대괄호는 접두사가 아니라 이름의 일부다
+
+
+AD_SCRIPT = ('<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1234567890123456"\n'
+             '     crossorigin="anonymous"></script>\n')
+
 
 def registry_root(tmp, chance_cron="17 * * * *", blogger_cron="0 2 * * *", chance_extra="", blogger_matrix=True):
     root = make_root(tmp)
+    write(root, "index.html", AD_SCRIPT)   # Chance 의 광고 표면(protected_paths)에 광고 코드가 있다 — 레지스트리의 ads=on 과 맞는다(REG-5)
     write(root, ".github/workflows/chanceblog.yml", f"""
-        name: 챈스 글 자동 작성
+        name: "[Chance] 챈스 글 자동 작성"
         on:
           schedule:
             - cron: '{chance_cron}'
@@ -256,7 +273,7 @@ def registry_root(tmp, chance_cron="17 * * * *", blogger_cron="0 2 * * *", chanc
         """)
     secrets_line = "S: ${{ secrets[matrix.secret_blog_id] }}" if blogger_matrix else "S: nothing"
     write(root, ".github/workflows/blogger.yml", f"""
-        name: 블로거 글 자동 작성
+        name: "[Blogger] 블로거 글 자동 작성"
         on:
           schedule:
             - cron: '{blogger_cron}'
@@ -278,6 +295,87 @@ def registry_root(tmp, chance_cron="17 * * * *", blogger_cron="0 2 * * *", chanc
 
 
 DEPLOY_STEP = "              - run: gh workflow run pages.yml\n"
+
+
+class WorkflowPrefixTest(TmpCase):
+    """WF-12: 워크플로 name 은 `[구분] `(채널 라벨·공통·내부)으로 시작하고, run-name 이 있으면 같은 접두사로 시작한다."""
+
+    def prefixes(self, text, rel=".github/workflows/w.yml"):
+        write(self.root, rel, text)
+        return vr.check_workflow_prefixes(self.root, vr.list_files(self.root))
+
+    def test_every_allowed_label_passes(self):
+        for label in ("Chance", "Blogger", "Blogger 영문", "Blogger 한글", "티스토리", "네이버", "공통", "내부"):
+            self.assertEqual(self.prefixes(f'name: "[{label}] 이름"\n'), [], label)
+
+    def test_a_name_without_the_prefix_is_an_error(self):
+        found = self.prefixes("name: 사이트 자동 배포\n")
+        self.assertEqual([(f.check, f.level, f.path) for f in found], [("WF-12", "ERROR", ".github/workflows/w.yml")])
+        self.assertIn("사이트 자동 배포", found[0].message)
+        self.assertIn("[공통]", found[0].message)       # 허용 구분을 알려 준다
+
+    def test_an_unknown_label_is_an_error(self):
+        found = self.prefixes('name: "[기타] 이름"\n')
+        self.assertEqual([(f.check, f.level) for f in found], [("WF-12", "ERROR")])
+        self.assertIn("[기타]", found[0].message)
+        self.assertIn("CHANNEL_LABELS", found[0].message)
+        for label in ("chance", "CHANCE", "Blogger 영어", "블로거"):      # 대소문자·표기가 다르면 다른 라벨이다
+            self.assertEqual(levels(self.prefixes(f'name: "[{label}] 이름"\n'), "WF-12"), ["ERROR"], label)
+
+    def test_malformed_prefixes_are_errors(self):
+        for name in ('"[Chance]이름"', '"[Chance] "', '"[Chance]  이름"', '"Chance] 이름"', '"[] 이름"', '" [Chance] 이름"', '"[[Chance]] 이름"', '"[Chance 이름"'):
+            self.assertEqual(levels(self.prefixes(f"name: {name}\n"), "WF-12"), ["ERROR"], name)
+
+    def test_run_name_must_use_the_same_prefix(self):
+        self.assertEqual(self.prefixes('name: "[Chance] 이름"\nrun-name: "[Chance] 제목 · ${{ github.event_name }}"\n'), [])
+        for run_name in ('"제목 · ${{ github.event_name }}"', '"[공통] 제목"', '"[Chance]제목"', '"Chance 제목"', "42"):
+            found = self.prefixes(f'name: "[Chance] 이름"\nrun-name: {run_name}\n')
+            self.assertEqual([(f.check, f.level) for f in found], [("WF-12", "ERROR")], run_name)
+            self.assertIn("run-name", found[0].message)
+            self.assertIn("[Chance] ", found[0].message)
+
+    def test_a_workflow_without_run_name_needs_none(self):
+        self.assertEqual(self.prefixes('name: "[공통] 사이트 자동 배포"\non: push\n'), [])
+
+    def test_a_bad_name_is_reported_once_and_the_run_name_is_not_judged_against_it(self):
+        found = self.prefixes('name: 이름\nrun-name: "[Chance] 제목"\n')
+        self.assertEqual(len(found), 1)
+        self.assertIn("name", found[0].message)
+
+    def test_missing_or_non_text_names_are_left_to_wf11(self):
+        for text in ("on: push\n", "name: 2026\n", "name: ''\n", "name:\n", "jobs: {}\n"):
+            self.assertEqual(self.prefixes(text), [], text)
+
+    def test_yaml_syntax_errors_are_left_to_wf0(self):
+        """대괄호로 시작하는 값에 따옴표가 없으면 YAML 이 배열로 읽어 문법 오류가 된다 — 그 오류는 WF-0 이 알리고 WF-12 는 조용하다."""
+        text = "name: [Chance] 이름\non: push\npermissions:\n  contents: read\njobs: {}\n"
+        self.assertEqual(self.prefixes(text), [])
+        self.assertEqual(levels(vr.check_workflows(self.root, vr.list_files(self.root)), "WF-0"), ["ERROR"])
+
+    def test_yaml_extension_is_checked_and_other_folders_are_ignored(self):
+        self.assertEqual(levels(self.prefixes("name: 이름\n", rel=".github/workflows/w.yaml"), "WF-12"), ["ERROR"])
+        (self.root / ".github" / "workflows" / "w.yaml").unlink()
+        self.assertEqual(self.prefixes("name: 이름\n", rel=".github/other/w.yml"), [])
+
+    def test_labels_are_the_registry_channel_labels_plus_common_and_internal(self):
+        self.assertEqual(vr.WORKFLOW_LABELS, tuple(reg_mod.CHANNEL_LABELS) + ("공통", "내부"))
+        self.assertEqual(reg_mod.CHANNEL_LABELS, ("Chance", "Blogger", "Blogger 영문", "Blogger 한글", "티스토리", "네이버"))
+
+    def test_run_checks_and_cli_report_a_missing_prefix_as_error(self):
+        root = registry_root(self.root, chance_extra=DEPLOY_STEP)
+        self.assertNotIn("WF-12", checks(vr.run_checks(root)))
+        wf = root / ".github" / "workflows" / "chanceblog.yml"
+        wf.write_text(wf.read_text(encoding="utf-8").replace('name: "[Chance] 챈스 글 자동 작성"', "name: 챈스 글 자동 작성"), encoding="utf-8")
+        self.assertIn(("WF-12", "ERROR"), [(f.check, f.level) for f in vr.run_checks(root)])
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = vr.main(["--root", str(root)])
+        self.assertEqual(code, 1)
+        self.assertIn("[WF-12]", out.getvalue())
+
+    def test_real_repository_workflow_names_and_run_names_have_valid_prefixes(self):
+        found = vr.check_workflow_prefixes(REAL, vr.list_files(REAL))
+        self.assertEqual([f.line() for f in found], [])
 
 
 class RegistryContractTest(TmpCase):
@@ -337,6 +435,120 @@ class RegistryContractTest(TmpCase):
         write(root, "generator.py", 'MODEL_CANDIDATES = [\n    "gemini-old-1",\n]\n')
         found = vr.check_registry(root, vr.list_files(root))
         self.assertEqual(levels(found, "REG-4"), ["WARN"])
+
+    def test_a_workflow_name_that_does_not_match_the_channel_label_is_a_REG_1_error(self):
+        """블로그의 channel.label 과 그 워크플로 name 의 `[라벨] ` 이 다르면 레지스트리 검증(REG-1)이 알린다."""
+        root = registry_root(self.root, chance_extra=DEPLOY_STEP)
+        wf = root / ".github" / "workflows" / "blogger.yml"
+        wf.write_text(wf.read_text(encoding="utf-8").replace('"[Blogger] ', '"[Chance] '), encoding="utf-8")
+        found = vr.check_registry(root, vr.list_files(root))
+        self.assertEqual(levels(found, "REG-1"), ["ERROR"])
+        message = next(f.message for f in found if f.check == "REG-1")
+        self.assertIn("blogger_macat", message)
+        self.assertIn("[Blogger] ", message)
+
+
+class AdsDriftTest(TmpCase):
+    """REG-5: 레지스트리의 ads 선언이 광고 표면(protected_paths)의 실제 광고 코드와 맞는지(jekyll-git 블로그만)."""
+
+    PLAIN = "<html><body>광고 없음</body></html>\n"
+
+    runs = 0
+
+    def run_reg5(self, ads="on", index=AD_SCRIPT, extra_files=None):
+        self.runs += 1                              # 한 시험 안에서 여러 번 부르므로 호출마다 새 임시 저장소를 만든다(make_root 는 폴더가 있으면 실패한다)
+        root = registry_root(self.root / f"run{self.runs}", chance_extra=DEPLOY_STEP)
+        reg_path = root / "pipeline" / "blogs.json"
+        reg = json.loads(reg_path.read_text(encoding="utf-8"))
+        reg["blogs"][0]["ads"] = ads
+        reg_path.write_text(json.dumps(reg, ensure_ascii=False), encoding="utf-8")
+        write(root, "index.html", index)
+        for rel, text in (extra_files or {}).items():
+            write(root, rel, text)
+        return [f for f in vr.check_registry(root, vr.list_files(root)) if f.check == "REG-5"]
+
+    def test_on_with_ad_code_and_off_without_it_are_consistent(self):
+        self.assertEqual(self.run_reg5("on", AD_SCRIPT), [])
+        for ads in ("off", "pending_gate"):
+            self.assertEqual(self.run_reg5(ads, self.PLAIN), [], ads)
+
+    def test_on_without_any_ad_code_is_an_error(self):
+        found = self.run_reg5("on", self.PLAIN)
+        self.assertEqual([(f.check, f.level, f.path) for f in found], [("REG-5", "ERROR", "pipeline/blogs.json")])
+        self.assertIn("chance", found[0].message)
+        self.assertIn("ads=on", found[0].message)
+        self.assertIn("Ad-Surface-Approved", found[0].message)
+
+    def test_off_or_pending_gate_with_ad_code_is_an_error(self):
+        for ads in ("off", "pending_gate"):
+            found = self.run_reg5(ads, AD_SCRIPT)
+            self.assertEqual([(f.check, f.level) for f in found], [("REG-5", "ERROR")], ads)
+            self.assertIn(f"ads={ads}", found[0].message)
+            self.assertIn("index.html", found[0].message)          # 어느 파일에 있는지 알려 준다
+            self.assertIn("Ad-Surface-Approved", found[0].message)
+
+    def test_ad_code_in_a_protected_directory_counts(self):
+        """protected_paths 의 `_layouts/` 처럼 '/' 로 끝나는 항목은 폴더 전체다."""
+        layout = {"_layouts/default.html": AD_SCRIPT}
+        self.assertEqual(self.run_reg5("on", self.PLAIN, layout), [])
+        found = self.run_reg5("off", self.PLAIN, layout)
+        self.assertEqual([f.check for f in found], ["REG-5"])
+        self.assertIn("_layouts/default.html", found[0].message)
+
+    def test_ad_code_outside_the_ad_surface_does_not_count(self):
+        elsewhere = {"_posts/p.md": AD_SCRIPT, "docs/x.md": "adsbygoogle 설명\n", "notes.html": AD_SCRIPT}
+        self.assertEqual(self.run_reg5("off", self.PLAIN, elsewhere), [])
+        self.assertEqual(len(self.run_reg5("on", self.PLAIN, elsewhere)), 1)
+
+    def test_each_ad_code_signature_counts_case_insensitively(self):
+        for token in ("adsbygoogle", "googlesyndication", "ca-pub-1234567890123456", "AdsByGoogle", "GOOGLESYNDICATION", "CA-PUB-99"):
+            page = f"<script>{token}</script>\n"
+            self.assertEqual(self.run_reg5("on", page), [], token)
+            self.assertEqual(len(self.run_reg5("off", page)), 1, token)
+        for text in ("ca-pub-", "ca-pub-x", "google ads", "ad sense"):   # ca-pub- 뒤에는 숫자가 와야 하고 낱말만으로는 광고 코드가 아니다
+            self.assertEqual(len(self.run_reg5("on", f"<p>{text}</p>\n")), 1, text)
+
+    def test_non_jekyll_blogs_are_not_checked_here_and_on_is_a_registry_error(self):
+        root = registry_root(self.root, chance_extra=DEPLOY_STEP)
+        reg_path = root / "pipeline" / "blogs.json"
+        reg = json.loads(reg_path.read_text(encoding="utf-8"))
+        reg["blogs"][1]["ads"] = "on"                     # blogger 블로그는 on 을 둘 수 없다 — REG-1 이 알리고 REG-5 는 대상이 아니다
+        reg_path.write_text(json.dumps(reg, ensure_ascii=False), encoding="utf-8")
+        found = vr.check_registry(root, vr.list_files(root))
+        self.assertEqual(levels(found, "REG-1"), ["ERROR"])
+        self.assertEqual(levels(found, "REG-5"), [])
+
+    def test_the_drift_check_looks_only_at_jekyll_git_blogs(self):
+        """다른 플랫폼 블로그는 광고를 플랫폼 화면에서 켜므로 저장소에서 확인할 수 없다 — 선언이 무엇이든 REG-5 는 아무것도 말하지 않는다."""
+        root = registry_root(self.root, chance_extra=DEPLOY_STEP)
+        files = vr.list_files(root)
+        for ads in ("off", "pending_gate", "on"):
+            blog = {"key": "x", "platform": "blogger", "ads": ads, "protected_paths": ["index.html"]}      # index.html 에는 광고 코드가 있다
+            self.assertEqual(vr._ads_drift(root, files, blog), [], ads)
+        chance = {"key": "x", "platform": "jekyll-git", "ads": "off", "protected_paths": ["index.html"]}
+        self.assertEqual(len(vr._ads_drift(root, files, chance)), 1)                                       # 같은 입력이 jekyll-git 이면 걸린다
+        self.assertEqual(vr._ads_drift(root, files, {"key": "x", "platform": "jekyll-git", "ads": "off", "protected_paths": None}), [])
+
+    def test_patterns_are_the_same_as_the_edit_systems_ad_snippet_check(self):
+        from pipeline.edits import checks as edit_checks
+        self.assertEqual([p.pattern for p in vr._AD_CODE_PATTERNS], [p.pattern for p in edit_checks.AD_PATTERNS])
+        self.assertEqual([p.flags for p in vr._AD_CODE_PATTERNS], [p.flags for p in edit_checks.AD_PATTERNS])
+
+    def test_run_checks_and_cli_report_drift_as_error(self):
+        root = registry_root(self.root, chance_extra=DEPLOY_STEP)
+        write(root, "index.html", self.PLAIN)
+        self.assertIn(("REG-5", "ERROR"), [(f.check, f.level) for f in vr.run_checks(root)])
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = vr.main(["--root", str(root)])
+        self.assertEqual(code, 1)
+        self.assertIn("[REG-5]", out.getvalue())
+
+    def test_real_repository_ads_declaration_matches_the_site(self):
+        found = [f.line() for f in vr.check_registry(REAL, vr.list_files(REAL)) if f.check == "REG-5"]
+        self.assertEqual(found, [])
+        reg = reg_mod.load_registry()
+        self.assertEqual(reg_mod.get_blog(reg, "chance")["ads"], "on")                 # 지금 사실: 홈에 광고 스크립트가 있다
 
 
 class IssueContractTest(TmpCase):

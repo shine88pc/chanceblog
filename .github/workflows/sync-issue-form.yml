@@ -1,4 +1,4 @@
-name: 이슈 양식 페이지 목록 갱신
+name: "[공통] 이슈 양식 페이지 목록 갱신"
 
 # pages.json(고정 페이지 레지스트리)과 이슈 양식의 '대상 페이지'·'수정 항목' 드롭다운을 자동으로 최신화한다.
 # 새 페이지는 front matter 에 `editable: true` 만 넣으면 이 워크플로가 목록에 반영한다. 설명: docs/ISSUE_EDITS.md

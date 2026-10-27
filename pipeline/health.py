@@ -172,11 +172,11 @@ def evaluate(blog, history, now, last_content_commit=None, recent_runs=(), post_
                 if not deployed:
                     findings.append(Finding(key, "PAGES_NOT_DEPLOYED", "critical",
                                             f"글 커밋({committed.astimezone(KST):%Y-%m-%d %H:%M} KST) 뒤 "
-                                            f"{PAGES_GRACE_MINUTES}분이 지났는데 성공한 '사이트 자동 배포' 실행이 없습니다. "
+                                            f"{PAGES_GRACE_MINUTES}분이 지났는데 성공한 '[공통] 사이트 자동 배포' 실행이 없습니다. "
                                             "새 글이 공개 사이트에 올라가지 않았을 수 있습니다."))
         if runs and runs[0]["conclusion"] == "failure":
             findings.append(Finding(key, "PAGES_FAILED", "warning",
-                                    "가장 최근 '사이트 자동 배포' 실행이 실패했습니다(예: 문서 속 Liquid 구문 사고, D-24). "
+                                    "가장 최근 '[공통] 사이트 자동 배포' 실행이 실패했습니다(예: 문서 속 Liquid 구문 사고, D-24). "
                                     "이전 성공 배포는 계속 공개되지만 새 글은 올라가지 않을 수 있습니다."))
 
     # 3) 워크플로 실행 결과 연속 실패

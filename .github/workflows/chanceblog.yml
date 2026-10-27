@@ -1,5 +1,5 @@
-name: Chance 글 자동 작성·게시
-run-name: "Chance 글 작성·게시 · ${{ github.event_name == 'workflow_dispatch' && (inputs.dry_run && (inputs.real_ai && '수동(연습: 실제 AI 호출·저장 안 함)' || '수동(연습: 저장 안 함)') || '수동') || '정기' }}"
+name: "[Chance] 글 자동 작성·게시"
+run-name: "[Chance] 글 작성·게시 · ${{ github.event_name == 'workflow_dispatch' && (inputs.dry_run && (inputs.real_ai && '수동(연습: 실제 AI 호출·저장 안 함)' || '수동(연습: 저장 안 함)') || '수동') || '정기' }}"
 
 on:
   schedule:

@@ -333,7 +333,9 @@ class WorkflowNameReadingTest(unittest.TestCase):
 
     PARSED = (
         ("name: 확인 필요 모음\nrun-name: x\n", "확인 필요 모음"),
-        ('name: "Chance 글 자동 작성·게시"\non: push\n', "Chance 글 자동 작성·게시"),
+        ('name: "[공통] 확인 필요 모음"\nrun-name: "[공통] 확인 필요 모음 갱신 · 정기"\non: push\n', "[공통] 확인 필요 모음"),     # 실제 워크플로의 모양
+        ("name: '[Chance] 글 자동 작성·게시'\non: push\n", "[Chance] 글 자동 작성·게시"),
+        ('name: "[Blogger 영문] 글 자동 작성"  # 주석\n', "[Blogger 영문] 글 자동 작성"),
         ("name: 'it''s ok'\n", "it's ok"),
         ('name: "a # b" # 주석\n', "a # b"),
         ("name: 'a'  # c\n", "a"),
@@ -350,6 +352,7 @@ class WorkflowNameReadingTest(unittest.TestCase):
         "name:값\n", "name: >\n  접힌 문장\n", "name: |\n  줄\n", "name: *anchor\n", "name: &a 값\n", "name: [a, b]\n", "name: {a: b}\n",
         "name: !!str 값\n", "name: @값\n", "name: `값\n", "name: %값\n", 'name: "탈출 \\n 문자"\n', "name:\n", "name: ''\n", 'name: ""\n',
         "name: ' '\n", "name: # 값 없음\n", 'name: "닫히지 않음\n', "name: 'a' b\n", 'name: "a" b\n', "name: 'a''\n",
+        "name: [공통] 확인 필요 모음\n", "name: [Chance] 글\n", 'name: ["[공통] 글"]\n',        # 따옴표 없는 대괄호 값은 YAML 에서 배열(또는 문법 오류)이라 읽지 않는다
     )
 
     def test_the_top_level_name_is_parsed(self):
@@ -1171,17 +1174,20 @@ class RunTest(unittest.TestCase):
         self.assertIn("변경 없음", self.summary_text())
 
     def test_workflow_names_in_the_issue_come_from_the_checked_out_files_not_from_run_names(self):
-        fake, root = self.world(workflows={"chanceblog.yml": 'name: "Chance 글 자동 작성·게시"\non: push\n', "blogger.yml": "name: Blogger 글 자동 작성\n"})
-        fake.runs["chanceblog.yml"] = [h.make_run(5, ago(hours=1), "failure", name="Chance 기존 글 이미지 교체 · 연습(저장 안 함)")]
+        fake, root = self.world(workflows={"chanceblog.yml": 'name: "[Chance] 글 자동 작성·게시"\non: push\n',
+                                           "blogger.yml": 'name: "[Blogger] 글 자동 작성(초안함 업로드)"\n'})
+        fake.runs["chanceblog.yml"] = [h.make_run(5, ago(hours=1), "failure", name="[Chance] 기존 글 이미지 교체 · 연습(저장 안 함)")]
         self.assertEqual(self.run_script(fake, root), 0)
         body = self.inbox_issue(fake)["body"]
-        self.assertIn("워크플로 실패 — Chance 글 자동 작성·게시", body)
+        # 이슈 본문에서는 외부 텍스트의 대괄호가 링크 문법이 되지 않도록 전각(［ ］)으로 바뀌어 보인다(pipeline/inbox.py ext)
+        self.assertIn("워크플로 실패 — " + "[Chance] 글 자동 작성·게시".replace("[", chr(0xFF3B)).replace("]", chr(0xFF3D)), body)
+        self.assertNotIn("[Chance]", body)
         self.assertNotIn("이미지 교체", body)
         self.assertTrue(all(path.endswith("/runs") for path in fake.paths() if path.startswith("/actions/workflows")))      # 이름을 읽느라 API 를 더 부르지 않는다
 
     def test_a_workflow_file_without_a_readable_name_is_shown_by_its_file_name(self):
-        fake, root = self.world(workflows={"chanceblog.yml": "on: push\n", "blogger.yml": "name: Blogger 글 자동 작성\n"})
-        fake.runs["chanceblog.yml"] = [h.make_run(5, ago(hours=1), "failure", name="Chance 기존 글 이미지 교체 · 연습(저장 안 함)")]
+        fake, root = self.world(workflows={"chanceblog.yml": "on: push\n", "blogger.yml": 'name: "[Blogger] 글 자동 작성(초안함 업로드)"\n'})
+        fake.runs["chanceblog.yml"] = [h.make_run(5, ago(hours=1), "failure", name="[Chance] 기존 글 이미지 교체 · 연습(저장 안 함)")]
         self.run_script(fake, root)
         body = self.inbox_issue(fake)["body"]
         self.assertIn("워크플로 실패 — chanceblog.yml", body)
@@ -1599,7 +1605,8 @@ class WorkflowFileTest(unittest.TestCase):
 
     def test_names_are_korean_and_tell_what_it_does(self):
         hangul = r"[가-힣]"
-        self.assertEqual(self.wf["name"], "확인 필요 모음")
+        self.assertEqual(self.wf["name"], "[공통] 확인 필요 모음")
+        self.assertEqual(self.wf["run-name"].split(" · ")[0], "[공통] 확인 필요 모음 갱신")          # 같은 접두사(검증기 WF-12)
         self.assertRegex(self.wf["run-name"], hangul)
         self.assertRegex(self.wf["jobs"]["inbox"]["name"], hangul)
         for step in self.wf["jobs"]["inbox"]["steps"]:

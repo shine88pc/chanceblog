@@ -849,13 +849,17 @@ class EvasionAndSpeedTest(unittest.TestCase):
         import time
         payloads = ["treat " * 1200, "lose a " * 1000, "cure " * 1400, "a " * 3500, "heart " * 1200, "no need to " * 700,
                     "stop taking " * 600, ("word " * 20 + ". ") * 300, "talk to a " * 700, "ask see call " * 500,
-                    "(" * 300 + "treat" + ")" * 300, "x" * 7000]
+                    "(" * 300 + "treat" + ")" * 300, "x" * 7000,
+                    # D-64 ⑧: 새 도입구·3인칭 주어·부사·연결어가 겹쳐 나오는 반복 입력
+                    "so you should ask " * 400, "so you might want to " * 300, "and people should " * 400, "so please also just first " * 300, "so do do do " * 500,
+                    "so you should make sure to remember to " * 150, "so ask " + "your " * 1500 + "doctor"]
         for payload in payloads:
             post, stats = stub_post(EN)
             started = time.perf_counter()
             gates.check_post({**post, "content": f"<p>{payload}</p>"}, EN, [], [], stats)
             self.assertLess(time.perf_counter() - started, 2.0, payload[:30])
-        ko_payloads = ["치료 " * 1200, "자해 " * 1500, "의사와 상담 " * 800, "가나다 " * 2000]
+        ko_payloads = ["치료 " * 1200, "자해 " * 1500, "의사와 상담 " * 800, "가나다 " * 2000,
+                       "그래서 의사와 " * 600, "고 꼭 반드시 먼저 우선 " * 400, "대해서 의사와 " * 600, "서 서 서 " * 1500]
         for payload in ko_payloads:
             post, stats = stub_post(KO)
             started = time.perf_counter()
@@ -1108,6 +1112,53 @@ MIXED_BLOCKED_EN = [
     # D-64 ⑦ N-3: 용량 단위(milligrams·grams·units·capsules·영어 숫자말)
     "Ask your doctor whether four hundred milligrams of magnesium supplements is right for you.",
     "Ask your doctor whether 0.4 g of melatonin is right for you.",
+    # D-64 ⑧ N2-1: 연결어 바로 뒤에 쉼표가 붙은 모양(연결어마다 하나). 연결어가 있으니 쉼표 이음과 달리 가른다
+    "Magnesium supplements may help you sleep, therefore, ask your doctor first.",
+    "Magnesium supplements may help you sleep, thus, you should talk to your doctor.",
+    "Take magnesium supplements nightly, hence, it is wise to ask your doctor.",
+    "Vitamin D supplements may lower your blood pressure, so, please ask your doctor.",
+    "Melatonin helps many people fall asleep, because, you should check with your pharmacist.",
+    "Take magnesium supplements nightly, unless, you ask your doctor.",
+    "Magnesium supplements may help you sleep or, ask your doctor.",
+    "Magnesium supplements may help you sleep, but, talk to your doctor first.",
+    "Magnesium supplements may help you sleep, so, call your doctor.",                       # 약한 동사
+    # D-64 ⑧ N2-4: 허용 목록을 넓힌 도입구·3인칭 주어·두 겹 도입구(쉼표 없는 연결어 + 도입구 + 상담 구절)
+    "Magnesium supplements may help you sleep so you might want to ask your doctor.",
+    "Magnesium supplements may help you sleep so you may wish to talk to your pharmacist.",
+    "Magnesium supplements may help you sleep so you'd better check with your doctor.",
+    "Magnesium supplements may help you sleep so you should definitely ask your doctor.",
+    "Magnesium supplements may help you sleep so you really should consult a professional.",
+    "Magnesium supplements may help you sleep so it would be wise to ask your doctor.",
+    "Magnesium supplements may help you sleep so it is advisable to talk to your doctor.",
+    "Magnesium supplements may help you sleep so I would suggest you ask your doctor.",
+    "Magnesium supplements may help you sleep so we recommend you check with your pharmacist.",
+    "Magnesium supplements may help you sleep so please do ask your doctor.",
+    "Magnesium supplements may help you sleep so kindly consult a professional.",
+    "Magnesium supplements may help you sleep so don't forget to ask your doctor.",
+    "Magnesium supplements may help you sleep so feel free to ask your doctor.",
+    "Magnesium supplements may help you sleep so do not hesitate to talk to your pharmacist.",
+    "Magnesium supplements may help you sleep so always remember to check with your doctor.",
+    "Magnesium supplements may help you sleep so take a moment to talk to your doctor.",
+    "Magnesium supplements may help you sleep so people should ask their doctor.",
+    "Magnesium supplements may help you sleep so they should talk to a professional.",
+    "Magnesium supplements may help you sleep so you should make sure to ask your doctor.",
+    # D-64 ⑧ N2-4: 동명사·refer to·목록에 없던 연결어
+    "Magnesium supplements may help you sleep so asking your doctor is wise.",
+    "Magnesium supplements may help you sleep so seeing a doctor is wise.",
+    "Magnesium supplements may help you sleep so refer to your doctor.",
+    "Magnesium supplements may help you sleep, nevertheless ask your doctor.",
+    "Magnesium supplements may help you sleep, accordingly check with your doctor.",
+    "Magnesium supplements may help you sleep, for this reason ask your doctor.",
+    "Magnesium supplements may help you sleep, that said, ask your doctor.",
+    "Magnesium supplements may help you sleep however ask your doctor.",
+    "Magnesium supplements may help you sleep so definitely ask your doctor.",
+    # D-64 ⑧ N2-4·N2-6: 연결어만으로 가르는 패턴(', so' 뒤가 상담 구절이 아니어도 가른다)이 맡는 문장
+    "Magnesium supplements may help you sleep, so many people also see their doctor.",
+    "Magnesium supplements may help you sleep, while many people also see their doctor.",
+    "Magnesium supplements may help you sleep, yet many people also see their doctor.",
+    "Magnesium supplements may help you sleep, then many people also see their doctor.",
+    "Magnesium supplements may help you sleep, however, many people also see their doctor.",
+    "Magnesium supplements may help you sleep, and then many people also see their doctor.",
 ]
 # 계속 통과해야 하는 정상 상담 안내(질환·임신·약을 이름 붙인 것 포함 — 운영자 결정 3번)
 REFERRAL_OK_EN = [
@@ -1148,6 +1199,24 @@ REFERRAL_OK_EN = [
     "Whether you take medication or not, it is wise to ask your doctor.",
     "People who take medication or visit a doctor regularly should check with their doctor.",
     "Everyone, including people with asthma, can ask their doctor.",
+    # D-64 ⑧: 새 도입구·연결어·동명사가 정상 안내를 새로 막지 않는지 — 연결어 앞에 위험 절이 없거나(쉼표 이음·조건절·문장 첫머리), 주어가 길어 3인칭 목록에 안 걸리는 문장
+    "If you take medication, you might want to check with your doctor first.",
+    "If you are pregnant, you may wish to ask your pharmacist before changing your routine.",
+    "Because you take medication, you'd better talk to your doctor first.",
+    "Whether you take medication or not, it would be wise to ask your doctor.",
+    "Since everyone is different, I would suggest you ask your doctor first.",
+    "If you have a health condition, we recommend you talk to your doctor.",
+    "People with asthma should definitely ask their doctor about stretching.",
+    "If you take medication, please do talk to your pharmacist.",
+    "Anyone who is pregnant should ask their doctor first.",
+    "Pregnant women and anyone taking medication should talk to their doctor.",
+    "However, ask your doctor if you take medication.",
+    "Seeing a doctor is wise if you take medication.",
+    "If you have asthma, referring to a specialist may help.",
+    "People taking medication, therefore, should ask their doctor.",
+    "If you are on medication, kindly consult your doctor.",
+    "If you take medication, feel free to ask your doctor, and do not hesitate to call.",
+    "If you have a heart condition, it makes sense to talk to your doctor.",
 ]
 MIXED_BLOCKED_KO = [
     "마그네슘 보충제는 잠드는 데 도움이 될 수 있지만 먼저 의사와 상담하세요.",
@@ -1179,6 +1248,25 @@ MIXED_BLOCKED_KO = [
     "의사와 상담해서 멜라토닌 2알을 정하세요.",
     "의사와 상담해서 멜라토닌 0.4 g을 정하세요.",
     "의사와 상담하면 400 mg 정도가 적당해요.",
+    # D-64 ⑧ N2-1: 연결어 바로 뒤의 쉼표
+    "혈압이 높을 수 있어요, 그러므로, 의사와 상담하세요.",
+    "혈압이 높을 수 있어요, 그러니, 먼저 의사와 상담하세요.",
+    "혈압이 높을 수 있어요, 따라서, 의사와 상담하세요.",
+    "마그네슘 보충제는 잠드는 데 도움이 돼서, 의사와 상담하세요.",
+    "보충제는 도움이 됩니다, 그러나, 의사와 상담하세요.",
+    # D-64 ⑧ N2-3: '그러므로' 계열의 접속 부사
+    "혈압이 높을 수 있어요, 그렇기 때문에 의사와 상담하세요.",
+    "혈압이 높을 수 있어요, 이 때문에 의사와 상담하세요.",
+    "혈압이 높을 수 있어요, 그런 이유로 의사와 상담하세요.",
+    # D-64 ⑧ N2-3: 안전 패턴이 인식하는 상담 낱말(경계 패턴이 몰라서 통과하던 것)
+    "혈압이 높을 수 있어요, 그래서 주치의와 상담하세요.",
+    "혈압이 높을 수 있어요, 그래서 한의원에서 상담하세요.",
+    "혈압이 높을 수 있어요, 그래서 영양사와 상담하세요.",
+    "혈압이 높을 수 있어요, 그래서 의료 전문가와 상담하세요.",
+    "혈압이 높을 수 있어요, 그래서 가까운 병원에서 의사와 상담하세요.",
+    "혈압이 높을 수 있어요, 그래서 반드시 먼저 전문의와 상담하세요.",
+    "보충제를 챙겨 드시고 주치의와 상담하세요.",
+    "보충제를 챙겨 드세요 (한의원에서 상담하세요).",
 ]
 REFERRAL_OK_KO = [
     "임신 중이거나 약을 복용 중이라면 의사와 상담한 뒤 시작하세요.",
@@ -1195,6 +1283,27 @@ REFERRAL_OK_KO = [
     "임신 중이라면 가까운 병원에서 전문의와 상담하세요.",
     "집에서 쉬다가 불편하면 의사와 상담하세요.",
     "보충제를 드시기 전에는 꼭 의사와 상담하세요.",
+    # D-64 ⑧ N2-3: 후치사처럼 쓰인 `~서`(…에 대해서·관해서·위해서·통해서·인해서·비해서·의해서·관련해서·로서·에 따라서·앞서·여기서)는 접속 어미가 아니라서 가르지 않는다
+    "임신 중에는 영양제에 대해서 의사와 상담하세요.",
+    "혈압에 관해서 의사에게 문의하세요.",
+    "임신 중에는 안전을 위해서 의사와 상담하세요.",
+    "혈압 측정 결과를 통해서 의사와 상담하세요.",
+    "혈당 변화로 인해서 의사와 상담이 필요할 수 있어요.",
+    "임신 중에는 이전에 비해서 의사와 상담하는 횟수를 늘리세요.",
+    "임신 중에는 의사의 설명에 의해서 약사와 상담하세요.",
+    "복용 중인 약과 관련해서 약사와 상담하세요.",
+    "당뇨 환자로서 의사와 상담하세요.",
+    "혈압에 따라서 의사와 상담하세요.",
+    "보충제를 시작하기에 앞서 의사와 상담하세요.",
+    "수술 전에 앞서서 의사와 상담하세요.",
+    "임신 중에는 여기서 의사와 상담하세요.",
+    "임신 중에는 의사에게서 약사에게서 모두 확인하세요.",
+    "임신 중에는 의사한테서 약사한테서 모두 확인하세요.",
+    # D-64 ⑧: 접속 어미·괄호 뒤가 상담 구절일 때만 가른다 — 뒤가 다른 말이면 한 절이라 면제된다(경계 패턴의 앞내다보기를 지우면 이 문장들이 막힌다)
+    "임신 중에는 천천히 시작하세요 (자세한 내용은 의사와 상담하세요).",
+    "임신 중이라면 쉬고 천천히 걷는 것이 좋고, 불편하면 의사와 상담해 보세요.",
+    "임신 중에는 몸 상태가 달라질 수 있어요, 그러므로 천천히 시작하고 불편하면 의사와 상담하세요.",
+    "임신 중에는 몸이 달라져서 천천히 시작하고 불편하면 의사와 상담하세요.",
 ]
 # 알려진 과잉 차단(의도한 트레이드오프, D-64 ⑥ a). 병명을 이름 붙인 절과 상담 구절이 `, so`·`—`·`:`·`;`·`으니`로 나뉜 정상 안내도 막는다 —
 # '위험한 권유, so 의사에게 물어보세요'(MIXED_BLOCKED_*)와 구조로는 구별되지 않기 때문이다. 같은 뜻을 한 절로 쓰면(위 REFERRAL_OK_*) 통과한다.
@@ -1211,11 +1320,23 @@ STRICT_TRADE_OFF_EN = [
     "People with asthma can then ask their doctor about stretching.",
     "Pregnant women should rest and then check with their doctor if they feel dizzy.",
     "Pregnant women should rest, otherwise check with their doctor.",
+    # D-64 ⑧ N2-2: `or`·`unless`·`, then` 계열도 같은 모양이라 막는다. 풀지 말지는 첫 실제 영어 초안의 BODY_TOPIC 빈도를 보고 정한다(WORKLOG)
+    "Stay home if you have symptoms, or talk to a healthcare professional.",
+    "People with high blood pressure should skip this routine or ask their doctor first.",
+    "If you have diabetes, keep the routine gentle or check with your doctor.",
+    "Avoid this exercise if you have asthma unless you check with your doctor.",
+    "If you have high blood pressure, then talk to your doctor before changing your routine.",
+    "If you are pregnant, then check with your doctor first.",
+    # D-64 ⑧ N2-4: 도입구·3인칭 주어까지 넓힌 값
+    "Heart conditions vary a lot, so you may want to check with your doctor before you begin.",
+    "Everyone responds differently to medication, which is why people should ask their doctor.",
 ]
 STRICT_TRADE_OFF_KO = [
     "임신 중에는 몸 상태가 달라질 수 있으니 의사와 상담하세요.",
     "임신 중이라서 의사와 상담이 필요해요.",
     "혈압이 높을 수 있어요, 그래서 의사와 상담하세요.",
+    # D-64 ⑧ N2-3: 같은 뜻의 접속 부사(그렇기 때문에·이 때문에)도 '그러므로'처럼 막는다
+    "임신 중에는 몸 상태가 달라질 수 있어요, 그렇기 때문에 의사와 상담하세요.",
 ]
 
 
@@ -1351,14 +1472,32 @@ GRID_CLOSED_EN = [", but ", " but ", ", yet ", " yet ", ", so ", " so ", ", whil
                   ", so make sure to ", ", and make sure to ", ", but remember to ", ", unless you ", ", otherwise ", ", except that you should ",
                   ", though you should ", ", plus ", ", meaning you can ", ", thus you should ", ", therefore ", ", hence ", ", and you should ", ", and you can ",
                   ", but you can ", ", and it is wise to ", ", but it is best to ", ", and it helps to ", ", but it is always wise to ", ", which is why you should ",
-                  ", so it is wise to ", " (", " [", " – ", " - ", " — ", "; ", ": ", ". ", "! ", "? ", "\n", ", and then ", ", and so ", ", and yet "]
-GRID_OPEN_EN = [", ", ", if you want, ", ", also ", ", just ", ", please ", ", of course, ", ", remember to ", ", be sure to ", ", make sure to "]
+                  ", so it is wise to ", " (", " [", " – ", " - ", " — ", "; ", ": ", ". ", "! ", "? ", "\n", ", and then ", ", and so ", ", and yet ",
+                  # D-64 ⑧ N2-1: 연결어 바로 뒤의 쉼표
+                  ", so, ", " so, ", ", yet, ", " yet, ", ", while, ", ", then, ", ", or, ", " or, ", ", and, ", " and, ", ", because, ", ", since, ", ", as, ", ", unless, ", ", otherwise, ",
+                  ", therefore, ", ", thus, ", ", hence, ", ", plus, ", ", but, ", ", although, ", ", though, ", ", whereas, ", ", however, ", ", and then, ",
+                  ", which is why, you should ", ", meaning, you can ", ", so, you should ", ", therefore, it is wise to ",
+                  # D-64 ⑧ N2-4: 쉼표 없는 연결어 + 허용 목록을 넓힌 도입구·3인칭 주어, 목록에 없던 연결어
+                  " so you might want to ", " so you may wish to ", " so you'd better ", " so you should definitely ", " so you really should ", " so it would be wise to ",
+                  " so it is advisable to ", " so I would suggest you ", " so we recommend you ", " so please do ", " so kindly ", " so don't forget to ", " so feel free to ", " so do not hesitate to ", " so always remember to ",
+                  " so take a moment to ", " so people should ", " so they should ", " so everyone should ", " so you should make sure to ", " because you might want to ",
+                  " or you might want to ", " so definitely ", " so please, ", ", however ", " however ", ", accordingly ", ", consequently ", ", for this reason ",
+                  ", for that reason ", ", nevertheless ", ", nonetheless ", ", that said, ", ", even so, "]    # 'even so'는 연결어 `so`가 가른다
+GRID_OPEN_EN = [", ", ", if you want, ", ", also ", ", just ", ", please ", ", of course, ", ", remember to ", ", be sure to ", ", make sure to ",
+                # D-64 ⑧: 연결어 뒤의 부사절 도입구('조건절 + 쉼표 + 상담 구절'과 구별되지 않는다)와 상담 구절을 앞세우지 않는 연결어
+                " so if in doubt, ", " so to be safe, ", " so of course, ", ", to be safe, ", ", to be sure, ", ", for safety ", ", still ", ", in case you want to ", " so that you can "]
 GRID_STEMS_KO = ["마그네슘 보충제는 잠드는 데 도움이 되", "멜라토닌을 먹으면 잠이 잘 오", "이 영양제는 혈압을 낮춰 주"]
 GRID_REFERRAL_KO = "먼저 의사와 상담하세요."
 GRID_CLOSED_KO = ["{a}지만 {r}", "{a}지만, {r}", "{a}는데 {r}", "{a}는데, {r}", "{a}으니 {r}", "{a}니까 {r}", "{a}면서 {r}", "{a}으며 {r}", "{a}하되 {r}", "{a}고 {r}",
                   "{a}고, {r}", "{a}. 다만 {r}", "{a}, 다만 {r}", "{a}, 그러나 {r}", "{a}, 그래서 {r}", "{a}, 따라서 {r}", "{a}, 그러므로 {r}", "{a}, 그러니 {r}",
-                  "{a}; {r}", "{a} — {r}", "{a} ({r})", "{a}(참고: {r})", "{a}서 {r}", "{a}지만 그래도 {r}", "{a}지만 꼭 {r}", "{a}지만 반드시 {r}", "{a}고 나서 {r}"]
-GRID_OPEN_KO = ["{a}, {r}", "{a}는 점, {r}"]
+                  "{a}; {r}", "{a} — {r}", "{a} ({r})", "{a}(참고: {r})", "{a}서 {r}", "{a}지만 그래도 {r}", "{a}지만 꼭 {r}", "{a}지만 반드시 {r}", "{a}고 나서 {r}",
+                  # D-64 ⑧ N2-1·N2-3: 연결어 바로 뒤의 쉼표, 그러므로 계열 접속 부사
+                  "{a}, 그러므로, {r}", "{a}, 그러니, {r}", "{a}, 따라서, {r}", "{a}, 그래서, {r}", "{a}서, {r}", "{a}, 그러나, {r}",
+                  "{a}, 그렇기 때문에 {r}", "{a}, 이 때문에 {r}", "{a}, 그런 이유로 {r}", "{a}, 이런 이유로, {r}"]
+# 일부러 열어 둔 한국어 연결: 쉼표 이음·`~는 점,`와 같은 계열이거나(`므로`·`기 때문에`·`다 보니`·`거나`·`또는`·`또한`·`그러면`·`물론`), 막으면 정상 안내 오탐이 느는 것(`므로`: 검증자의
+# 정상 안내 '…달라지므로 의사와 상담하세요'가 새로 막힌다)
+GRID_OPEN_KO = ["{a}, {r}", "{a}는 점, {r}", "{a}므로 {r}", "{a}기 때문에 {r}", "{a}다 보니 {r}", "{a}거나 {r}", "{a}든지 {r}", "{a}, 또는 {r}", "{a}, 아니면 {r}",
+                "{a}, 또한 {r}", "{a}, 게다가 {r}", "{a}, 그러면 {r}", "{a}, 물론 {r}"]
 
 
 class ConnectorGridTest(unittest.TestCase):
@@ -1623,11 +1762,11 @@ class ProfileFieldValidationTest(unittest.TestCase):
     def test_a_split_pattern_with_a_global_flag_or_a_shared_group_name_validates_and_runs(self):
         """패턴을 `(?:p1)|(?:p2)` 하나로 합치던 때는 `(?i)` 같은 전역 플래그나 같은 이름의 묶음이 레지스트리 검증(패턴 하나씩 컴파일)을
         통과하고도 실행 중에 re.error 로 터졌다(D-64 ⑦ N-4). 지금은 패턴마다 따로 쓰므로 검증을 통과한 설정은 그대로 돌아간다."""
-        extra = [r"(?i)\s+nevertheless\s+", r"(?P<joiner>\s+albeit\s+)", r"(?P<joiner>\s+notwithstanding\s+)"]
+        extra = [r"(?i)\s+furthermore\s+", r"(?P<joiner>\s+albeit\s+)", r"(?P<joiner>\s+notwithstanding\s+)"]
         profile = copy.deepcopy(EN)
         profile["body_clause_split_patterns"] = profile["body_clause_split_patterns"] + extra
         self.assertEqual(registry.validate_profile(profile), [])
-        for word in ("nevertheless", "albeit", "notwithstanding"):
+        for word in ("furthermore", "albeit", "notwithstanding"):
             sentence = f"Magnesium supplements help you sleep {word} ask your doctor first."
             with self.subTest(word):
                 self.assertEqual(gates.body_risk_hit(sentence, EN), (None, None), sentence)          # 새 패턴이 없으면 통과하는 문장이고
@@ -1699,40 +1838,67 @@ EN_BOUNDARY_FRAGMENTS = (
     + [f" and {lead} ask" for lead in ("please", "also", "always")]
     + [f" and {verb}" for verb in EN_REFERRAL_VERBS]
     + [f"({verb}" for verb in EN_REFERRAL_VERBS]
+    # D-64 ⑧ N2-1: 연결어 바로 뒤의 쉼표(연결어 앞의 쉼표는 있어도 없어도 된다)
+    + [" but,", " although,", " though,", " whereas,", ", yet,", ", so,", ", while,", ", then,", ", however,", ", and then,"]
 )
 # D-64 ⑦ N-1: 쉼표 없는 접속어 + 상담 구절. 새 영어 패턴 둘(강한 동사·약한 동사)의 선택지마다 그 선택지로만 갈라지는 조각
+# D-64 ⑧ N2-4: 목록에 없던 연결어(두 패턴 모두에 들어갔다). 쉼표가 앞에 있든 없든, 바로 뒤에 쉼표가 붙든 말든 가른다
+EN_NEW_CONNECTORS = ("however", "accordingly", "consequently", "for this reason", "for that reason", "nevertheless", "nonetheless", "that said")
 EN_CONNECTORS = ("so", "yet", "while", "then", "or", "because", "since", "as", "unless", "otherwise", "therefore", "thus", "hence", "plus",
-                 "which is why", "that is why", "which means", "that means", "meaning", "this means", "except that")
+                 "which is why", "that is why", "which means", "that means", "meaning", "this means", "except that") + EN_NEW_CONNECTORS
 EN_CAUSAL_CONNECTORS = ("so", "yet", "then", "because", "since", "unless", "otherwise", "therefore", "thus", "hence", "plus",
-                        "which is why", "that is why", "which means", "that means", "meaning", "this means", "except that")
+                        "which is why", "that is why", "which means", "that means", "meaning", "this means", "except that") + EN_NEW_CONNECTORS
 EN_MODALS = ("should", "can", "could", "may", "might", "must", "will", "would", "need to", "ought to")
-EN_LEAD_INS = ([f"{subject} should" for subject in ("you", "it", "one")] + [f"you {modal}" for modal in EN_MODALS]
-               + ["you", "make sure to", "be sure to", "remember to", "consider", "it's wise to"]
-               + [f"it is {adverb}{adjective} to" for adverb in ("", "always ", "really ")
-                  for adjective in ("wise", "best", "better", "smart", "safest", "important", "recommended", "a good idea")])
+EN_ITS_FORMS = ("it is", "it's", "it would be", "it will be")
+EN_ITS_ADVERBS = ("", "always ", "really ", "highly ")
+EN_ITS_ADJECTIVES = ("wise", "best", "better", "smart", "safest", "important", "recommended", "advisable", "a good idea", "a smart move")
+EN_THIRD_SUBJECTS = ("people", "readers", "everyone", "everybody", "anyone", "they", "users", "patients", "parents", "beginners", "most people", "we")
+EN_THIRD_MODALS = ("should", "can", "may", "might", "must", "need to", "ought to")
+EN_LEAD_INS = (
+    [f"{subject} should" for subject in ("you", "it", "one")] + [f"you {modal}" for modal in EN_MODALS]
+    + [f"you {adverb} {modal}" for adverb in ("really", "definitely", "certainly", "probably") for modal in ("should", "ought to", "need to", "must")]
+    + [f"you {auxiliary} {verb} to" for auxiliary in ("might", "may", "will") for verb in ("want", "wish")] + ["you'll want to", "you'll wish to"]
+    + ["you'd better", "you had better", "you", "make sure to", "be sure to", "make certain to", "be certain to", "remember to", "always remember to", "consider"]
+    + [f"be {adjective} to" for adjective in ("wise", "smart", "best", "sensible")]
+    + [f"{form} {EN_ITS_ADVERBS[index % len(EN_ITS_ADVERBS)]}{adjective} to"
+       for index, (form, adjective) in enumerate((form, adjective) for form in EN_ITS_FORMS for adjective in EN_ITS_ADJECTIVES)]
+    + ["it is recommended that you", "it makes sense to"]
+    + ["I suggest", "I recommend", "I'd suggest that", "I'd recommend that", "I would suggest", "I would recommend that", "we suggest", "we recommend", "we'd suggest that",
+       "we'd recommend", "we would suggest that", "we would recommend that", "I suggest you", "we recommend you", "I would suggest you", "we'd recommend that you"]     # 뒤의 `you`는 도입구 `you`가 받는다
+    + ["do", "please do", "do not forget to", "don't forget to", "do not hesitate to", "don't hesitate to", "feel free to", "take a moment to", "take the time to", "kindly"]
+    + [f"{subject} {EN_THIRD_MODALS[index % len(EN_THIRD_MODALS)]}" for index, subject in enumerate(EN_THIRD_SUBJECTS)]
+    + ["you should make sure to", "do remember to", "you might consider", "it may be wise to"]          # 도입구 두 겹
+)
 EN_PROFESSIONALS = ("doctor", "physician", "pharmacist", "nurse", "dietitian", "nutritionist", "therapist", "counselor", "counsellor", "psychologist",
                     "psychiatrist", "clinician", "specialist", "professional", "healthcare provider", "healthcare professional", "healthcare practitioner",
                     "healthcare team", "health care provider", "health provider", "health professional", "health practitioner", "medical professional",
                     "medical provider", "medical practitioner", "medical advice", "medical attention", "medical help", "medical care")
-EN_STRONG_PHRASES = ("talk to", "talk with", "speak to", "speak with", "check with", "consult", "ask")
-EN_WEAK_VERBS = ("see", "call", "visit", "contact", "seek")
-EN_REFERRAL_ADVERBS = ("please", "also", "always", "just", "first")
+EN_STRONG_PHRASES = ("talk to", "talk with", "speak to", "speak with", "check with", "consult", "ask", "refer to",
+                     "talking to", "talking with", "speaking to", "speaking with", "checking with", "consulting", "asking", "referring to")
+EN_WEAK_VERBS = ("see", "call", "visit", "contact", "seek", "seeing", "calling", "visiting", "contacting", "seeking")
+EN_REFERRAL_ADVERBS = ("please", "also", "always", "just", "first", "definitely", "probably", "really", "certainly", "simply")
+EN_PROFESSIONAL_PLURALS = tuple(f"{noun}s" for noun in EN_PROFESSIONALS if not noun.endswith(("advice", "attention", "help", "care")))      # 복수형도 가른다(doctors·healthcare teams)
 EN_CONNECTOR_FRAGMENTS = list(dict.fromkeys(
     [f" {c} ask your doctor" for c in EN_CONNECTORS]
-    + [" and you should ask your doctor"]                       # 'and' 는 도입구 없이는 ' and ask' 규칙이 같이 가르므로 도입구를 붙여 시험한다
+    + [f" {c}, ask your doctor" for c in EN_CONNECTORS]         # D-64 ⑧ N2-1: 연결어 바로 뒤의 쉼표
+    + [" and you should ask your doctor", " and, you should ask your doctor"]    # 'and' 는 도입구 없이는 ' and ask' 규칙이 같이 가르므로 도입구를 붙여 시험한다
     + [f" so {lead} ask your doctor" for lead in EN_LEAD_INS]
     + [f" so {adverb} ask your doctor" for adverb in EN_REFERRAL_ADVERBS]
+    + [f" so {adverb}, ask your doctor" for adverb in EN_REFERRAL_ADVERBS]
     + [f" so {phrase} your doctor" for phrase in EN_STRONG_PHRASES]
-    + [f" so ask your {noun}" for noun in EN_PROFESSIONALS]
+    + [f" so ask your {noun}" for noun in EN_PROFESSIONALS + EN_PROFESSIONAL_PLURALS]
     + [f" {c} see your doctor" for c in EN_CAUSAL_CONNECTORS]
+    + [f" {c}, see your doctor" for c in EN_CAUSAL_CONNECTORS]
     + [f" so {lead} see your doctor" for lead in EN_LEAD_INS]
     + [f" so {adverb} see your doctor" for adverb in EN_REFERRAL_ADVERBS]
     + [f" so {verb} your doctor" for verb in EN_WEAK_VERBS]
-    + [f" so see your {noun}" for noun in EN_PROFESSIONALS]
+    + [f" so see your {noun}" for noun in EN_PROFESSIONALS + EN_PROFESSIONAL_PLURALS]
+    + [f" so {adverb}, see your doctor" for adverb in EN_REFERRAL_ADVERBS]
 ))
-KO_REFERRAL_NOUNS = ("의사", "약사", "전문가", "전문의", "의료진", "병원", "상담", "문의")
-KO_ADVERBS = ("꼭", "반드시", "먼저", "항상")
-KO_CONNECTIVES = ("그러므로", "그러니")     # '그러니까'는 첫 패턴 목록의 ~니까 가 가른다
+KO_REFERRAL_NOUNS = ("의사", "약사", "전문가", "전문의", "의료진", "병원", "상담", "문의", "주치의", "한의원", "영양사")    # 상담사는 '상담'으로 시작해 따로 둘 필요가 없다
+KO_ADVERBS = ("꼭", "반드시", "먼저", "항상", "우선", "일단", "미리", "한번", "한 번")
+KO_MODIFIERS = ("가까운", "담당", "전문", "주변", "동네", "의료", "건강", "치과", "한")                # 상담 낱말 앞에 붙는 말(가까운 병원·담당 의사·의료 전문가·건강 상담·치과 의사·한의사)
+KO_CONNECTIVES = ("그러므로", "그러니", "그렇기 때문에", "이 때문에", "그런 이유로", "이런 이유로")     # '그러니까'는 첫 패턴 목록의 ~니까 가 가른다
 KO_BOUNDARY_FRAGMENTS = list(dict.fromkeys(
     ["지만", "하되", "는데", "은데", "인데", "으나", "면서", "으며", "하며", "니까", "으니"]
     + [", 그러나", ", 다만", ", 단", ", 그런데", ", 그리고"]
@@ -1745,26 +1911,48 @@ KO_BOUNDARY_FRAGMENTS = list(dict.fromkeys(
     + [f", {word} 의사" for word in KO_CONNECTIVES] + [f" {word} 의사" for word in KO_CONNECTIVES]
     + [f", 그러니 {lead} 의사" for lead in KO_ADVERBS] + [f", 그러니 {noun}" for noun in KO_REFERRAL_NOUNS]
     + ["돼서 의사", ", 그래서 의사", ", 따라서 의사", "고 나서 의사"] + [f"돼서 {lead} 의사" for lead in KO_ADVERBS] + [f"돼서 {noun}" for noun in KO_REFERRAL_NOUNS]
+    # D-64 ⑧ N2-1: 연결어 바로 뒤의 쉼표
+    + [", 그러나, 의사", ", 하지만, 의사", ", 그리고, 의사", ", 그러므로, 의사", ", 그러니, 의사", "돼서, 의사", ", 따라서, 의사", ", 그래서, 의사", "돼서， 의사"]
+    # D-64 ⑧ N2-3: 상담 낱말 앞의 말(가까운 병원·담당 의사·한의사)과 부사 여러 개
+    + [f"고 {modifier} 의사" for modifier in KO_MODIFIERS] + [f"({modifier} 의사" for modifier in KO_MODIFIERS]
+    + [f", 그러니 {modifier} 의사" for modifier in KO_MODIFIERS] + [f"돼서 {modifier} 의사" for modifier in KO_MODIFIERS]
+    + ["고 꼭 반드시 먼저 의사", "고 반드시 먼저 전문의", "돼서 꼭 먼저 의사", ", 그러므로 꼭 반드시 먼저 의사", "(꼭 먼저 의사", "고 한 번 의사", "고 한번 의사"]
+    + ["고 가까운 병원", "고 의료 전문가", "고 건강 전문가", "고 담당 의사", "고 치과 의사", "고 전문 의료진"]
+    # 세 번째 부사까지(부사 반복 {0,3})와 전각 쉼표·괄호 — 본문 검사는 NFKC 로 먼저 반각으로 바꾸지만 절 쪼개기 함수는 글을 그대로 받는다
+    + ["(꼭 반드시 먼저 의사", "돼서 꼭 반드시 먼저 의사", ", 그러니 꼭 반드시 먼저 의사"]
+    + ["， 그러나， 의사", "，그러므로， 의사", "고， 의사", "（의사", "（꼭 먼저 의사"]
 ))
 # 용량 면제 취소(D-64 ⑦ N-3): 상담 구절이 있어도 이 표기가 든 절은 면제하지 않는다. 문장에 banned 낱말(melatonin·멜라토닌)을 넣어 면제 취소가 막는 것만 보게 한다
 EN_NUMBER_WORDS = ("one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "fifteen", "twenty", "thirty",
                    "forty", "fifty", "sixty", "seventy", "eighty", "ninety", "hundred", "thousand", "half", "couple")
 EN_DOSES = list(dict.fromkeys(
-    [f"5 {unit}" for unit in ("mg", "mcg", "μg", "IU", "g", "milligrams", "micrograms", "grams", "units", "capsules", "tablets")]
-    + ["400mg", "400-mg", "400  mg", "0.4 g", "10,000 units", "1000iu", "1.5 grams"]
+    [f"5 {unit}" for unit in ("mg", "mgs", "mcg", "μg", "ug", "IU", "g", "milligrams", "micrograms", "grams", "units", "capsules", "tablets", "softgels", "gummies", "gummy")]
+    + ["400mg", "400mgs", "400-mg", "400 -mg", "400- mg", "0.4 g", "10,000 units", "1000iu", "1.5 grams"]       # 띄어 쓴 하이픈 사이 간격은 plain_text 가 공백 하나로 접으므로 하이픈으로 시험한다
     + [f"{word} tablets" for word in EN_NUMBER_WORDS]
-    + [f"two {unit}" for unit in ("milligrams", "micrograms", "grams", "units", "capsules", "tablets")]
-    + ["half a tablet", "a couple of tablets", "one hundred and fifty milligrams", "twenty-five milligrams"]
+    + [f"two {unit}" for unit in ("milligrams", "micrograms", "grams", "units", "capsules", "tablets", "softgels", "gummies")]
+    + ["half a tablet", "a couple of tablets", "one hundred and fifty milligrams", "twenty-five milligrams", "a couple of gummies", "half a softgel"]
+    + [f"1 {unit}" for unit in ("milligram", "microgram", "gram", "unit", "capsule", "tablet", "softgel")]                      # 단수형
+    + [f"one {unit}" for unit in ("milligram", "microgram", "gram", "unit", "capsule", "tablet", "softgel", "gummy")] + ["a two-tablet dose"]
 ))
 EN_DOSE_TEMPLATE = "Ask your doctor whether {} of melatonin is right for you."
 KO_NATIVE_NUMBERS = ("한", "두", "세", "네", "다섯", "여섯", "일곱", "여덟", "아홉", "열")
 KO_DOSES = list(dict.fromkeys(
-    [f"5{unit}" for unit in ("mg", "mcg", "μg", "IU", "g")]
-    + ["5 mg", "0.4 g", "10,000 mg", "500밀리그램", "50마이크로그램", "100그램", "1킬로그램", "2 g"]
+    [f"5{unit}" for unit in ("mg", "mgs", "mcg", "μg", "IU", "g")]
+    + ["5 mg", "400mgs", "0.4 g", "10,000 mg", "500밀리그램", "50마이크로그램", "100그램", "100 그램", "1킬로그램", "1 킬로그램", "2 g"]
     + ["2정", "2 정", "3캡슐", "2알", "2 알"]
-    + [f"{number} 알" for number in KO_NATIVE_NUMBERS] + ["한 정", "두 캡슐"]
+    + [f"{number} 알" for number in KO_NATIVE_NUMBERS] + ["한 정", "두 캡슐", "반 알", "반 정", "반 캡슐"]
 ))
 KO_DOSE_TEMPLATE = "의사와 상담해서 멜라토닌 {}을 정하세요."
+# D-64 ⑧ N2-5: 일상어는 용량이 아니다. 문장마다 금지 낱말(melatonin·멜라토닌)과 상담 구절이 같은 절에 있어야 시험이 의미가 있다 — 면제 취소가 일상어를 용량으로 잘못 읽으면 막히고,
+# 같은 틀에 진짜 용량을 넣으면(아래 짝) 면제 취소가 있어야만 막힌다. 면제 취소가 읽는 '5G'(대소문자)·'6 glasses'(뒤 경계)·'B12 tablets'(앞 경계)·'2정거장'·'5gb'는 각각 그 규칙만 시험한다
+EN_EVERYDAY_TEMPLATE = "Ask your doctor about melatonin and {}."
+EN_EVERYDAY_NOT_DOSES = ("a handful of nuts", "a 10-inch tablet stand", "a 5G phone", "the 5G network", "6 glasses of water", "your B12 tablets", "a couple of ideas",
+                         "ten minutes", "twenty steps", "half an hour", "two cups of tea", "a hundred ideas", "forty winks",
+                         "a phone tablet stand", "two gramophone records", "2 tabletop games")      # 숫자말·단위 앞뒤 경계(`one`⊂`phone`, `gram`⊂`gramophone`, `tablet`⊂`tabletop`)
+EN_EVERYDAY_DOSE_TWINS = ("400 mg", "5 g", "2 tablets")
+KO_EVERYDAY_TEMPLATE = "의사와 상담해서 멜라토닌과 {} 중에서 정하세요."     # 일상어 뒤가 공백이라야 `2정거장`의 '거장' 두 글자가 용량 뒤 두 글자 보호(`(?![가-힣]{2,})`)를 시험한다
+KO_EVERYDAY_NOT_DOSES = ("2정거장", "한 정거장", "5G 요금제", "5gb 데이터", "프로그램", "세 알아보기")
+KO_EVERYDAY_DOSE_TWINS = ("400 mg", "5g", "2정")
 
 
 class AlternativeCoverageTest(unittest.TestCase):
@@ -1794,15 +1982,104 @@ class AlternativeCoverageTest(unittest.TestCase):
                     self.assertIn("BODY_TOPIC", check(profile, sentence=sentence).codes(), sentence)
 
     def test_everyday_counting_words_are_not_doses(self):
-        """용량 면제 취소가 일상어를 용량으로 읽지 않는다(상담 구절이 든 문장이 새로 막히면 안 된다)."""
-        for sentence in ("Ask your doctor or a friend for a handful of ideas.", "Talk to your doctor before you add 2 supplements to your day.",
-                         "Ask a colleague for two coffee pods and a 10-inch tablet stand.", "Check with your doctor whether a supplement fits your routine.",
-                         "A handful of nuts makes an easy snack."):
+        """용량 면제 취소가 일상어를 용량으로 읽지 않는다. 모든 문장에 금지 낱말과 상담 구절이 같이 들어 있어, 면제 취소가 잘못 읽으면 막히고 면제 취소를 비우면 통과한다.
+        같은 틀에 진짜 용량을 넣은 짝은 면제 취소가 있어야만 막힌다(D-64 ⑧ N2-5)."""
+        for profile, template, everyday, twins in ((EN, EN_EVERYDAY_TEMPLATE, EN_EVERYDAY_NOT_DOSES, EN_EVERYDAY_DOSE_TWINS),
+                                                   (KO, KO_EVERYDAY_TEMPLATE, KO_EVERYDAY_NOT_DOSES, KO_EVERYDAY_DOSE_TWINS)):
+            no_veto = {**profile, "body_safe_veto_patterns": []}
+            for word in everyday:
+                sentence = template.format(word)
+                with self.subTest(sentence):
+                    self.assertIsNotNone(gates.first_match(profile["body_banned_patterns"], sentence)[0], sentence)    # 금지 낱말이 있고
+                    self.assertEqual(gates.body_risk_hit(sentence, no_veto), (None, None), sentence)                   # 상담 구절로 면제되는 절이라
+                    self.assertEqual(check(profile, sentence=sentence).codes(), [], sentence)                          # 면제 취소가 용량으로 읽지 않아야 통과한다
+            for dose in twins:
+                sentence = template.format(dose)
+                with self.subTest(sentence):
+                    self.assertEqual(gates.body_risk_hit(sentence, no_veto), (None, None), sentence)
+                    self.assertIn("BODY_TOPIC", check(profile, sentence=sentence).codes(), sentence)
+
+
+# ----------------------------------------------------------------------------
+# D-64 ⑧ (3차 보강): 상담 구절의 모양·한국어 상담 낱말 정렬·후치사 `~서`
+# ----------------------------------------------------------------------------
+class ReferralPhraseShapeTest(unittest.TestCase):
+    """영어 상담 구절의 모양(창 길이·낱말 모양·상담 부사 두 개·동명사)을 하나씩 고정한다. 2차 보강의 변이 시험에서 지우거나 약하게 만들어도 시험이 모르고
+    지나가던 곳이다(D-64 ⑧ N2-6). 모두 '위험한 절 + 쉼표 없는 연결어 + 상담 구절' 모양이고, 연결어 `so` 하나로 시험한다."""
+    RISKY = "Magnesium supplements may help you sleep"
+    BLOCKED = (
+        "so ask your very kind local doctor",                                                   # 동사와 전문가 낱말 사이 4단어(강한 동사)
+        "so call your very kind local doctor",                                                  # 4단어(약한 동사)
+        "so ask your board-certified doctor", "so call your board-certified doctor",             # 창 안의 하이픈 낱말
+        "so ask your family's doctor", "so call your family's doctor",                           # 창 안의 아포스트로피 낱말
+        "so please also ask your doctor", "so just always call your doctor",                     # 상담 부사 두 개 연속
+        "so talking to your doctor first is wise", "so asking your doctor first is wise",        # 동명사
+        "so consulting your doctor first is wise",
+    )
+    OPEN = (
+        "so ask your very kind local family doctor",                                            # 창은 4단어다 — 5단어부터는 열려 있다(문서 한계)
+        "so anyone taking medication should ask their doctor",                                   # 수식어가 붙은 3인칭 주어
+        "so those with health concerns should ask their doctor",
+        "or see your doctor", "while see your doctor", "as seeing your doctor is wise",          # 약한 동사는 or·while·as 와 쓰이면 일상 서술이라 가르지 않는다
+    )
+
+    def test_each_shape_is_blocked(self):
+        for tail in self.BLOCKED:
+            sentence = f"{self.RISKY} {tail}."
             with self.subTest(sentence):
-                self.assertEqual(check(EN, sentence=sentence).codes(), [], sentence)
-        for sentence in ("지하철 2정거장 거리를 걸어 보세요.", "의사와 상담해서 프로그램을 정하세요.", "한 정거장 먼저 내려 걸어 보세요.", "5G 네트워크가 없는 곳에서 쉬어 보세요."):
+                self.assertIn("BODY_TOPIC", check(EN, sentence=sentence).codes(), sentence)
+
+    def test_the_documented_limits_are_still_open(self):
+        """닫으면 정상 안내 오탐이 늘거나(`or see a specialist`) 창을 넓혀야 한다. 일부러 닫을 때 이 시험과 ARCHITECTURE §7-1 한계 목록을 같이 고친다."""
+        for tail in self.OPEN:
+            sentence = f"{self.RISKY} {tail}."
+            with self.subTest(sentence):
+                self.assertEqual(gates.body_risk_hit(sentence, EN), (None, None), sentence)
+
+
+KO_REFERRAL_PHRASES = (
+    "의사와 상담하세요", "약사에게 문의하세요", "전문가와 상담하세요", "전문의와 상담하세요", "의료진과 상담하세요", "병원을 방문하세요",
+    "주치의와 상담하세요", "한의원에서 상담하세요", "영양사와 상담하세요", "상담사와 상담하세요", "의료 전문가와 상담하세요", "건강 전문가에게 문의하세요",
+    "가까운 병원에서 의사와 상담하세요", "담당 의사와 상담하세요", "치과 의사와 상담하세요", "전문 의료진과 상담하세요", "한의사와 상담하세요",
+    "주변 병원에서 상담하세요", "동네 약사에게 문의하세요", "반드시 먼저 전문의와 상담하세요", "꼭 항상 의사와 상담하세요", "우선 의사와 상담하세요",
+    "일단 병원을 방문하세요", "미리 약사와 상담하세요", "한번 전문가와 상담하세요", "한 번 의사와 상담하세요",
+)
+KO_ALIGNMENT_TEMPLATES = ("혈압이 높을 수 있어요, 그래서 {}", "혈압이 높을 수 있고 {}", "혈압이 높을 수 있어요 ({})", "혈압이 높을 수 있어요, 그러므로 {}",
+                          "혈압이 높을 수 있어요, 그렇기 때문에 {}")
+# 후치사·부사처럼 쓰여 접속 어미가 아닌 `~서`(앞에 쉼표·명사가 있다). 끝의 세 개(`가족에게서`·`친구한테서`·`집에서`)는 출처·장소 조사 `에게서`·`한테서`·`에서`
+KO_POSTPOSITION_PHRASES = ("영양제에 대해서", "영양제에 관해서", "안전을 위해서", "혈압 측정 결과를 통해서", "혈당 변화로 인해서", "이전에 비해서", "약사의 설명에 의해서",
+                           "복용 중인 약과 관련해서", "환자로서", "혈압에 따라서", "시작하기에 앞서", "수술에 앞서서", "여기서", "거기서", "저기서", "어디서",
+                           "가족에게서", "친구한테서", "집에서")
+KO_CONNECTIVE_PHRASES = ("영양제를 챙겨서", "영양제를 먹어서", "임신 중이라서", "수면에 도움이 돼서", "영양제를 준비해서", "영양제를 소통해서", "영양제에 동의해서",
+                         "영양제 이야기를 듣고 나서", "그래서", "따라서")
+
+
+class KoreanReferralAlignmentTest(unittest.TestCase):
+    """한국어 경계 패턴이 아는 상담 낱말을 안전 패턴(body_safe_patterns)이 인식하는 것과 맞춘다(D-64 ⑧ N2-3). 어긋나면 안전 패턴만 알아 면제가 남는다
+    (`그래서 주치의와 상담하세요`가 통과하던 것). 후치사처럼 쓰인 `~서`(…에 대해서·위해서·통해서·로서·에 따라서·앞서)는 접속 어미가 아니라서 가르지 않는다."""
+
+    def test_every_referral_phrase_the_safe_pattern_recognises_is_a_boundary_too(self):
+        safe = gates._compiled(KO["body_safe_patterns"])
+        for phrase in KO_REFERRAL_PHRASES:
+            self.assertTrue(any(rx.search(gates._normalized(phrase)) for rx in safe), phrase)   # 안전 패턴이 인식하는 상담 구절이다
+            for template in KO_ALIGNMENT_TEMPLATES:
+                sentence = template.format(phrase) + "."
+                with self.subTest(sentence):
+                    self.assertIn("BODY_TOPIC", check(KO, sentence=sentence).codes(), sentence)
+
+    def test_postpositions_that_look_like_connective_endings_do_not_split(self):
+        for phrase in KO_POSTPOSITION_PHRASES:
+            sentence = f"임신 중에는 {phrase} 의사와 상담하세요."
             with self.subTest(sentence):
                 self.assertEqual(check(KO, sentence=sentence).codes(), [], sentence)
+                self.assertEqual(len(gates._split_clauses(sentence[:-1], gates._clause_splitter(KO))), 1, sentence)
+
+    def test_real_connective_endings_still_split_even_when_a_postposition_ends_the_same_way(self):
+        """`준비해서`는 `비해서`로, `소통해서`는 `통해서`로, `동의해서`는 `의해서`로 끝나지만 접속 어미다(후치사는 앞에 공백이 있는 낱말 `대해서`·`비해서`…)."""
+        for phrase in KO_CONNECTIVE_PHRASES:
+            sentence = f"임신 중에는 {phrase} 의사와 상담하세요."
+            with self.subTest(sentence):
+                self.assertIn("BODY_TOPIC", check(KO, sentence=sentence).codes(), sentence)
 
 
 if __name__ == "__main__":

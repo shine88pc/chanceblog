@@ -808,7 +808,7 @@ def render_summary(sha, att, selection, posts, tries, elapsed, deadline, ok, his
     lines += index_notes(att)
     if not ok:
         lines.append("- 해석: " + interpret(att, elapsed))
-        lines.append("- 조치: Actions 의 이 실행 로그와 사이트 자동 배포 이전 실행을 확인하고, 새 글 주소를 직접 열어 본다")
+        lines.append("- 조치: Actions 의 이 실행 로그와 [공통] 사이트 자동 배포 이전 실행을 확인하고, 새 글 주소를 직접 열어 본다")
     lines.append("- 범위: 가장 새 글(공개 가능한 것)의 공개 여부만 본다 — 이미지 교체·기존 글 수정 같은 변경의 반영은 확인하지 않는다")
     return "\n".join(lines)
 

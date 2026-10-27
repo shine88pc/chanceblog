@@ -25,15 +25,15 @@
 | Blogger 코드 | 완료 — `pipeline/`(레지스트리·게이트·어댑터·러너) + `blogger.yml` 매트릭스. 테스트·`actionlint` 통과 |
 | Blogger 실게시 | ⏳ 미완료 — ① OAuth 동의 화면 **"프로덕션"** 전환(테스트 상태면 토큰 7일 만료, D-11) ② refresh token 발급 ③ GitHub Secrets(`BLOGGER_*`) 등록 (§3 P1, §10) |
 | 풀오토 가이드 체계 | `AGENTS.md`(상시 규칙) · `docs/CHARTER`·`ARCHITECTURE`·`ENGINEERING_GUIDE`·`SECURITY_GUARDRAILS` · `docs/DEFECT_REGISTER`. 총괄 역할: Claude(2026-10-20) |
-| 확인 필요 모음 | 사람이 확인해야 할 것(워치독 알림·병합 대기 PR·실패한 워크플로·승인 대기·일시정지·Blogger 게시 설정·블로그 현황)을 이슈 **`[운영] 확인 필요 모음`** 1개(라벨 `ops-inbox`, 이슈 목록 맨 위에 고정, 현재 #22)와 실행 요약에 모은다. 워크플로 `확인 필요 모음`(`ops-inbox.yml`): 2시간 간격 예약(GitHub 사정으로 실제로는 보통 3~6시간) + 수동(`연습 실행`). 새로 해야 할 일이 생길 때만 담당자(저장소 소유자)에게 @멘션 코멘트(휴대폰 알림). 설명 `docs/OPS_INBOX.md`. 독립 검증 2회(차단 0건) + 후속 수정 병합, 실제 실행에서 이슈 생성·고정·"변경 없음" 확인(2026-10-25). 잔여·후속(자기 멈춤 감시, F8·F9 등)은 `docs/DEFECT_REGISTER.md` D-58 |
-| 가드레일 자동화 | `scripts/validate_repo.py` + `guardrails.yml`(CI, Actions 이름 `저장소 규칙·테스트 자동 검사`) + `watchdog.yml`(`발행 중단 감시·알림`, 문제일 때만 이슈 알림) |
-| Actions 탭 이름 | 워크플로 이름을 **이름만 보고 자동/수동과 하는 일을 알 수 있게 한글로** 바꿨다(2026-10-25). 기존 글 이미지 교체는 글 작성 워크플로에서 분리해 수동 전용 `chance-fix-images.yml`(`Chance 기존 글 이미지 교체(수동)`)이 됐다. 옛 이름 → 새 이름 · 파일 · 하는 일 · 자동/수동 표는 `docs/ARCHITECTURE.md` §2-1. 새 워크플로·job 이름도 한글로 짓는다(검증기 WF-11) |
+| 확인 필요 모음 | 사람이 확인해야 할 것(워치독 알림·병합 대기 PR·실패한 워크플로·승인 대기·일시정지·Blogger 게시 설정·블로그 현황)을 이슈 **`[운영] 확인 필요 모음`** 1개(라벨 `ops-inbox`, 이슈 목록 맨 위에 고정, 현재 #22)와 실행 요약에 모은다. 워크플로 `[공통] 확인 필요 모음`(`ops-inbox.yml`): 2시간 간격 예약(GitHub 사정으로 실제로는 보통 3~6시간) + 수동(`연습 실행`). 새로 해야 할 일이 생길 때만 담당자(저장소 소유자)에게 @멘션 코멘트(휴대폰 알림). 설명 `docs/OPS_INBOX.md`. 독립 검증 2회(차단 0건) + 후속 수정 병합, 실제 실행에서 이슈 생성·고정·"변경 없음" 확인(2026-10-25). 잔여·후속(자기 멈춤 감시, F8·F9 등)은 `docs/DEFECT_REGISTER.md` D-58 |
+| 가드레일 자동화 | `scripts/validate_repo.py` + `guardrails.yml`(CI, Actions 이름 `[공통] 저장소 규칙·테스트 자동 검사`) + `watchdog.yml`(`[공통] 발행 중단 감시·알림`, 문제일 때만 이슈 알림) |
+| Actions 탭 이름 | 워크플로 이름을 **이름만 보고 자동/수동과 하는 일을 알 수 있게 한글로** 바꿨다(2026-10-25). 기존 글 이미지 교체는 글 작성 워크플로에서 분리해 수동 전용 `chance-fix-images.yml`(`[Chance] 기존 글 이미지 교체(수동)`)이 됐다. 2026-10-27에는 이름 맨 앞에 채널 접두사 `[구분] `(`[Chance]`·`[Blogger]`·`[공통]` 등 — Actions 목록이 이름순이라 같은 채널끼리 붙어 보인다)을 붙였고 `run-name`도 같다. 블로그 항목에는 `channel`(접두사와 같은 라벨)·`ads`(광고 선언)가 있다 — 신규 채널은 품질 게이트를 통과하기 전까지 광고를 켜지 않는다(`docs/ARCHITECTURE.md` §3 '광고 선언', `docs/SECURITY_GUARDRAILS.md` G-C10). 옛 이름 → 새 이름 · 파일 · 하는 일 · 자동/수동 표는 `docs/ARCHITECTURE.md` §2-1. 새 워크플로·job 이름도 한글로 짓고 접두사를 붙인다(검증기 WF-11·WF-12) |
 | Pages 배포 후 확인 | 배포가 초록이어도 새 글이 공개 주소에서 열린다는 보장은 없어서, `pages.yml`의 `verify` 잡(`사이트 반영 확인`, `scripts/verify_pages_deploy.py`)이 배포 뒤 공개될 가장 새 글(`published: false`·미래 날짜 제외)의 주소가 HTTP 200으로 열리는지 마감 12분까지 확인하고 끝내 안 열리면 실행이 빨강이 된다. 공개 CDN이 404를 최대 약 18분 보관하므로(1회 측정, 불확실) 시도마다 요청 모양(`index.html`·`Accept-Encoding`·`//`·`./`)을 바꾸고 대기를 10초에서 2배씩 늘린다(D-41, 구조 `docs/ARCHITECTURE.md` §4-3). 한계: 가장 새 글만 본다(이미지 교체 같은 커밋의 반영은 못 봄). ⏳ 병합 뒤 첫 배포 요약에서 '시도 기록'·`X-Cache`·`Age`·`Last-Modified`를 관측해야 한다(`docs/DEFECT_REGISTER.md` 체크리스트) |
 | 이슈로 수정 요청 | 이슈 양식(고정 페이지 수정·게시글 이미지 변경) → `issue-edit.yml`이 **PR로** 올림, `pr-scope-check.yml`이 Copilot 등 모든 PR의 요청 범위를 검증. 사용법 `docs/COPILOT_GUIDE.md`, 구조 `docs/ISSUE_EDITS.md` (첫 실행 관측 필요) |
 | 작업요청서 | 저장소를 볼 수 없는 AI(모바일 Claude 등)에게 `docs/REQUEST_BRIEFING.md`를 통째로 붙여 넣으면 이 프로그램에 맞는 요청서를 만든다. 요청서는 `인수인계/작업요청/`에 올리거나 채팅에 붙여 넣는다. 처리 규칙은 그 폴더의 README |
 | 통합 성과 대시보드 | **제안 단계 — 사용자 결정 대기.** 블로그별 방문자·인기 글·AdSense 사이트별 수익을 한곳에서 보는 방안(Looker Studio 먼저). 검토 결과·결정 항목은 `docs/ANALYTICS_PLAN.md` §7. 결정 전에는 사이트에 GA 등을 설치하지 않는다(T3) |
 | 알려진 결함 | D-03 봇 글이 슬롯 대부분에서 안 나옴(원인: 비기술 분야 후보 0건 + 대체 분야 시도 없음 → 폴백으로 완화, 비기술 분야 후보 부족은 열림) · D-11 OAuth 7일 · D-08 내부 문서·코드의 사이트 공개(해결: 사이트에서 뺌, 2026-10-26) · D-15/D-16 Copilot PR 승인·PR 생성 설정(사용자 조치) — 상세는 `docs/DEFECT_REGISTER.md` (D-01 이슈 이미지 흐름은 `issue-edit`로 대체, 관측 대기) |
-| Blogger 워크플로(Actions 이름 `Blogger 글 자동 작성`) | `blogger_macat`은 **정지(mode off)** — 영문 블로그인데 프로필이 한글이라 멈췄고(운영자 결정 2026-10-25), **영문 프로필·영어 프롬프트·주제 가드레일(제목·라벨·본문)은 병합됨**(PR #40 362ba8f·보강 PR #43 0da8221; 레지스트리는 영문 프로필을 가리키지만 `mode`는 off 그대로, 켜기 전에 2차 보강 `docs/DEFECT_REGISTER.md` D-64 ⑦, 설계 `docs/ARCHITECTURE.md` §7-1). 정지 중에도 매일 02:00 UTC 실행은 돌고 대상 0개로 초록 + `::notice::`로 끝난다. 켜면 `mode: draft`는 게시 Secrets 4종이 모두 있을 때 Blogger **초안함**에 업로드(공개되지 않음, 운영자가 Blogger 화면에서 확인한 뒤 직접 게시)하고, 하나도 없으면 저장소 파일에만 저장하며, 일부만 있거나 `mode: auto`(즉시 게시)인데 없으면 글을 만들기 전에 종료 2(빨강). 올리기 전에 인증 점검(토큰 갱신·블로그 조회·주소 일치)을 먼저 한다. 재개 절차는 §3 P1 |
+| Blogger 워크플로(Actions 이름 `[Blogger] 글 자동 작성(초안함 업로드)`) | `blogger_macat`은 **정지(mode off)** — 영문 블로그인데 프로필이 한글이라 멈췄고(운영자 결정 2026-10-25), **영문 프로필·영어 프롬프트·주제 가드레일(제목·라벨·본문)은 병합됨**(PR #40 362ba8f·보강 PR #43 0da8221; 레지스트리는 영문 프로필을 가리키지만 `mode`는 off 그대로, 켜기 전에 2차 보강 `docs/DEFECT_REGISTER.md` D-64 ⑦, 설계 `docs/ARCHITECTURE.md` §7-1). 정지 중에도 매일 02:00 UTC 실행은 돌고 대상 0개로 초록 + `::notice::`로 끝난다. 켜면 `mode: draft`는 게시 Secrets 4종이 모두 있을 때 Blogger **초안함**에 업로드(공개되지 않음, 운영자가 Blogger 화면에서 확인한 뒤 직접 게시)하고, 하나도 없으면 저장소 파일에만 저장하며, 일부만 있거나 `mode: auto`(즉시 게시)인데 없으면 글을 만들기 전에 종료 2(빨강). 올리기 전에 인증 점검(토큰 갱신·블로그 조회·주소 일치)을 먼저 한다. 재개 절차는 §3 P1 |
 | 비밀 파일 | `client_secret.json`은 저장소에 없음 (`.gitignore`로 차단) |
 | 자동 push 스크립트 | `auto_sync.bat` 제거됨. 같은 동작 재도입 금지 |
 | 오래된 브랜치 | `feature/image-fix-20261019-0000` 병합 금지 (§11) |
@@ -76,7 +76,7 @@
 | 11 | `auto_sync.bat` 제거 (검토 없는 자동 push 위험) | ✅ |
 | 12 | 다른 PC에서 이어받기 절차·브랜치 현황 문서화 (§10·§11) | ✅ |
 | 13 | 풀오토 코어 `pipeline/`(레지스트리·게이트·어댑터·러너)와 테스트, Blogger 파이프라인 대체 | ✅ |
-| 14 | 가드레일: 저장소 검증기·워치독·`저장소 규칙·테스트 자동 검사`(guardrails.yml) CI, `chanceblog.yml` 배포 dispatch(D-02) | ✅ 코드 / 관측 필요 |
+| 14 | 가드레일: 저장소 검증기·워치독·`[공통] 저장소 규칙·테스트 자동 검사`(guardrails.yml) CI, `chanceblog.yml` 배포 dispatch(D-02) | ✅ 코드 / 관측 필요 |
 | 15 | 가이드 체계 문서화(AGENTS·CHARTER·ARCHITECTURE·ENGINEERING_GUIDE·SECURITY_GUARDRAILS·DEFECT_REGISTER) | ✅ |
 | 16 | 이슈 기반 정규화된 수정 요청 시스템(양식·명세·처리기·PR 범위 검증·Copilot 지침) + 옛 LLM 이슈 핸들러 제거(D-01) | ✅ 코드 / 관측 필요 |
 
@@ -143,7 +143,7 @@ Secrets (API 선택 시):
 - 주제 충돌 방지 (Chance_Blog history ↔ Blogger history)
 - 초안 품질 점검 / 샘플 테스트
 - AdSense 승인 모니터링 (Chance_Blog 최우선 유지)
-- `Blogger 글 자동 작성` 첫 실행 결과 확인 (Actions 탭 → Run workflow, 처음에는 `dry_run`(연습 실행) 체크) — 지금은 mode off라 위 재개 절차가 먼저
+- `[Blogger] 글 자동 작성(초안함 업로드)` 첫 실행 결과 확인 (Actions 탭 → Run workflow, 처음에는 `dry_run`(연습 실행) 체크) — 지금은 mode off라 위 재개 절차가 먼저
 - `feature/image-fix-20261019-0000`·`backup/issue-template-$TS` 브랜치를 지울지 결정 (사용자) — §11
 - 풀오토 로드맵(Phase 1~4)과 완료 기준: `docs/ARCHITECTURE.md` §8
 - 결함 D-03(봇 글이 안 나온 원인과 완화)·D-08(내부 문서·코드의 사이트 공개 — 해결): `docs/DEFECT_REGISTER.md`
@@ -269,7 +269,7 @@ VS Code:
 | 코드·검증 가이드 | `docs/ENGINEERING_GUIDE.md` |
 | 보안 가드레일·사고 대응 | `docs/SECURITY_GUARDRAILS.md` |
 | 결함 레지스터 | `docs/DEFECT_REGISTER.md` |
-| 블로그 레지스트리 | `pipeline/blogs.json` |
+| 블로그 레지스트리(`channel`·`ads` 포함) | `pipeline/blogs.json` · 필드 설명 `docs/ARCHITECTURE.md` §3 |
 | 이슈 기반 수정 시스템 | `docs/ISSUE_EDITS.md` · 명세 `.github/editorial/edit-spec.yml` |
 | Copilot·AI 활용 안내(사용자용) | `docs/COPILOT_GUIDE.md` |
 | 통합 성과 대시보드 검토(제안) | `docs/ANALYTICS_PLAN.md` |
@@ -300,7 +300,7 @@ VS Code:
    1. `client_secret.json`은 저장소에 없다. Google Cloud Console → 사용자 인증 정보에서 **데스크톱 앱 OAuth 클라이언트** JSON을 받아(필요하면 새로 만든다) 저장소 **루트**에 `client_secret.json`으로 저장한다. 절차는 `.github/editorial/BLOGGER_API_SETUP.md`.
    2. `pip install google-auth-oauthlib` 후 `python scripts/get_blogger_token.py`를 실행한다 (브라우저에서 Google 동의).
    3. 출력된 `BLOGGER_CLIENT_ID`·`BLOGGER_CLIENT_SECRET`·`BLOGGER_REFRESH_TOKEN`과 Blogger 설정의 `BLOGGER_BLOG_ID`를 GitHub **Settings → Secrets and variables → Actions**에 등록한다. 값은 채팅·저장소·메일에 남기지 않는다.
-   4. Actions → **Blogger 글 자동 작성** → Run workflow로 첫 실행을 확인한다. `연습 실행` 체크를 푼 채(기본이 켜짐이라 그대로 두면 가짜 AI 응답으로 연습만 하고 아무것도 저장하지 않는다) `publish`를 `draft`(기본값)로 두면 Blogger **초안함**에 올라가고 공개되지 않는다(`off`는 저장소 파일만, `publish`는 즉시 게시라 처음에는 고르지 않는다). 올리기 전에 인증 점검이 먼저 돌고, 시크릿 등록 직후에는 `인증 점검만 실행` 입력으로 먼저 확인할 수 있다. 정지(mode off) 중에는 수동 실행도 대상 0개이므로 먼저 mode를 draft로 켠다(T3, 채팅 승인). 초안함에 올린 글과 `publish`를 `off`로 만든 초안도 같은 날 하루 상한을 쓴다.
+   4. Actions → **[Blogger] 글 자동 작성(초안함 업로드)** → Run workflow로 첫 실행을 확인한다. `연습 실행` 체크를 푼 채(기본이 켜짐이라 그대로 두면 가짜 AI 응답으로 연습만 하고 아무것도 저장하지 않는다) `publish`를 `draft`(기본값)로 두면 Blogger **초안함**에 올라가고 공개되지 않는다(`off`는 저장소 파일만, `publish`는 즉시 게시라 처음에는 고르지 않는다). 올리기 전에 인증 점검이 먼저 돌고, 시크릿 등록 직후에는 `인증 점검만 실행` 입력으로 먼저 확인할 수 있다. 정지(mode off) 중에는 수동 실행도 대상 0개이므로 먼저 mode를 draft로 켠다(T3, 채팅 승인). 초안함에 올린 글과 `publish`를 `off`로 만든 초안도 같은 날 하루 상한을 쓴다.
 6. 작업 중에는 `git add`를 파일을 지정해서 하고, push 전에 `git status`로 비밀 파일이 없는지 확인한다. `.gitignore`가 `client_secret*.json`·`token*.json`·`.env*`·키 파일(`*.pem`·`*.key` 등)·서비스 계정 JSON을 막아 준다(이름 규칙이라 `123.txt` 같은 일반 이름은 못 막는다 — CI의 검증기 SEC-2가 사후에 잡는다).
 7. 작업 후: WORKLOG.md 최상단 기록 → 커밋(AI 이름·대상 명시) → `git pull --rebase origin main` → push.
 

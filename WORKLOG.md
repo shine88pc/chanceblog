@@ -7,6 +7,96 @@
 
 ---
 
+## [2026-10-27] Claude – 텔레그램·오토마우스 조사, 사용자 설정 메모 확인, 진행 현황 (문서 전용, 코드·워크플로·레지스트리·광고 표면 변경 없음)
+
+**작업자**: Claude
+**대상**: 공통 (문서)
+**등급**: T1(문서)
+**목적**: 사용자 요청 2건(텔레그램 알림+붙여넣기·오토마우스 자동 발행의 적용 가능성, 새 글 발행·초안 대기 알림)의 조사 결과와 사용자가 올린 설정 메모의 확인 결과를 기록하고 현황 문서를 갱신한다.
+
+### 한 일
+- 새 `docs/analysis/2026-10-27_telegram-and-rpa-feasibility.md`: 결론(알림 가능·권장, 오토마우스 비권장, 검토는 검토 화면이 있는 곳), 텔레그램 사실(한도·`copy_text`·이스케이프·토큰 노출 경로), 승인 버튼을 서버 없이 받는 구조 비교, RPA 기술·업무용 PC·정책, 채널별 권고, 확인 못 한 것·사용자가 확인할 것, 출처.
+- 사용자 설정 메모(`인수인계/작업요청/Telegram_Auto_Posting_Setup_Guide.md`, 커밋 56313af): 시크릿 이름이 구현과 같음을 확인, 샘플 코드의 문제 3가지(`requests` 미설치·Markdown 모드·예외 출력으로 토큰 노출)를 문서 머리에 적고, 공개 저장소에 적힌 채팅 ID 값을 지움. 봇 `@chance_auto_post_bot` 이 존재하는 것을 공개 `t.me` 페이지로 확인(읽기 전용).
+- `인수인계/작업내용.md`(헤더·§1·§2·§3 23번·§4 13~15번·§5), `인수인계/작업요청/README.md`.
+
+### 관측·사실
+- 이 PC 의 회사 프록시가 `telegram.org`·`core.telegram.org`·`web.telegram.org` 를 "비업무용 사이트 차단"(HTTP 403 안내 페이지)으로 막는다(`t.me`·`api.telegram.org` 는 열림). 조사 에이전트가 텔레그램 공식 문서를 못 읽은 원인.
+- 조사 중 에이전트의 검색 호출 한도가 소진돼 일부 영역은 후기·Q&A를 보지 못했다. 교차 검증 단계는 세션 재시작으로 끝나지 않았다.
+- 내장 브라우저가 `github.com` 을 "조직 정책으로 차단"(이전 시간대에는 열렸음) — 이 동안 PR 을 만들 수 없다.
+
+### 남긴 것
+- 사용자: GitHub 접속 허용(또는 허락), 텔레그램 시크릿 이름 확인·휴대폰에서 봇 `/start`, 알림 기능 병합 뒤 시험 워크플로 1회 실행, 필수 상태 검사 설정 확인.
+- 병합 대기: PR-A(`ai/claude/channel-names`)·R3(`ai/claude/blogger-guardrails-round3`), 구현 중: E·B·C·TG.
+
+---
+
+## [2026-10-27] Claude – Blogger 주제 가드레일 3차 보강(D-64 ⑧ 2차 델타 검증 N2-1·N2-3~N2-7): 연결어 뒤 쉼표·도입구·한국어 상담 낱말 정렬·후치사 `~서`·`5G`·시험 구멍 15개 (T2, 독립 검증 델타 + 변이 증거)
+
+**작업자**: Claude (구현 세션, 독립 검증은 별도 세션)
+**대상**: Blogger
+**등급**: T2 — 영문·한글 프로필의 절 경계·용량 면제 취소 패턴과 시험을 바꿨다(코드는 `pipeline/gates.py`의 설명 주석뿐). 대부분 금지를 늘리는 쪽(T1)이지만 한국어 후치사 `~서`와 `5G`처럼 막던 것을 푸는 부분이 있어 T2 로 둔다. 승인 근거: 2차 보강의 독립 검증 델타("병합 가능", `mode: draft`·한글 Blogger 전 권고 N2-1·N2-3~N2-7) + 총괄 지시. 실제 T2 승인은 총괄이 PR 에서 기록한다. **`mode`·시크릿·워크플로·`generator.py`·`registry.py`·광고 표면·`인수인계/작업내용.md`·`HANDLER.md`·`docs/SESSION_START.md`·`REQUEST_BRIEFING.md`·`ACTIONS_GUIDE.md`·`BLOGGER_API_SETUP.md`는 바꾸지 않았다**(`blogger_macat`은 off 그대로).
+**목적**: 2차 보강(round2)의 독립 검증 델타가 `mode: draft`·한글 Blogger 를 켜기 **전에** 처리하라고 한 항목(`docs/DEFECT_REGISTER.md` D-64 ⑧)을 구현한다. 범위는 그 항목으로 한정했고 새 항목을 늘리지 않았다.
+**브랜치**: `ai/claude/blogger-guardrails-round3` — **기준은 `origin/ai/claude/blogger-guardrails-round2`(899758587e88a008bdf4816a025b888ae9ab0b07)** 이고 그 브랜치는 아직 main 에 없다(PR 예정). round2 가 병합된 뒤 main 으로 `rebase --onto` 한다. PR 생성·병합·Actions 실행은 하지 않았다(총괄이 처리).
+
+### 변경 사항
+- **N2-1 연결어 바로 뒤의 쉼표**(`body_clause_split_patterns`): 영어 [0]·[1]·[5]·[6]의 연결어 뒤에 `,?`를 더했다(`therefore, ask your doctor`·`so, please ask…`·`thus, you should talk to…` — 검증자 29형이 모두 닫힌다). 한국어는 [1]·[4]·[5]에 같은 원리를 적용했다(`그러므로, 의사와`·`돼서, 의사와`·`그러나, 의사와`).
+- **N2-2 현행 유지 + 결정 고정**: 영어 `or`·`unless`·`, then` 계열은 풀지 않았다(caveat 75문장 중 막히는 문장 main 8 → round2 38, `or`가 가장 크다 — 검증자 계산으로 `or`를 빼면 새 오탐 30→17). `docs/ARCHITECTURE.md` §7-1 '알려진 과잉 차단'과 시험 `STRICT_TRADE_OFF_EN`에 올렸다. **첫 실제 영어 초안의 `BODY_TOPIC` 빈도를 보고 `or`/`unless` 를 풀지 정한다.**
+- **N2-3 한국어 `~서`·상담 낱말**: 후치사처럼 쓰인 `~서`(`에 대해서·관해서·위해서·통해서·인해서·비해서·의해서·관련해서·로서·에 따라서·앞서(앞서서)·여기서·거기서·저기서·어디서`)는 가르지 않는다(`보충제에 대해서 의사와 상담하세요.` 통과, 검증자 17문장 중 12개 풀림). `준비해서`·`소통해서`·`동의해서`는 접속 어미라 그대로 가른다(`대해서`류는 앞에 공백이 있는 낱말만 제외). 경계 패턴의 상담 낱말을 안전 패턴이 인식하는 것에 가깝게 늘렸다(완전히 같지는 않다 — 아래 V-1) — `주치의`·`한의원`·`영양사`(상담사는 `상담`이 이미 받는다), 앞에 붙는 `가까운`·`담당`·`전문`·`주변`·`동네`·`의료`·`건강`·`치과`·`한`, 부사 `우선`·`일단`·`미리`·`한번`과 부사 여러 개(`반드시 먼저 전문의`). `그렇기 때문에`·`이 때문에`·`그런 이유로`·`이런 이유로`는 `그러므로` 계열이라 닫았다. `므로`·`기 때문에`·`다 보니`·`거나`·`든지`·`아니면`·`또는`·`또한`·`게다가`·`그러면`·`물론`은 **넣지 않았다**: 검증자·구현자 정상 안내 표본 211문장에서 `므로`만 새 오탐 1(`…달라지므로 의사와 상담하세요.`)이고 나머지는 0이지만, 그 모양으로 쓴 자연스러운 정상 안내(`증상이 계속되면 쉬거나 병원을 방문하세요.`·`…달라질 수 있기 때문에 의사와 상담하세요.` 등)는 모두 새로 막힌다(영어 `or`와 같은 값). 한계로 문서화했다. 독립 검증(V-1)이 '맞췄다'는 표현이 사실보다 넓다고 짚어 고쳤다: 안전 패턴 [1]은 `진료·진찰·방문·도움·조언`+10자 안의 `의사·약사·전문가·전문의·의료진·병원` 같은 '행위 먼저' 표현도 면제로 인식하지만 경계 앞내다보기는 `상담·문의`만 받고, 상담 낱말 앞 수식어가 닫힌 목록이라 `내과`·`산부인과`·`정신건강의학과`·`믿을 만한`·`해당 분야`·`가족 주치의` 같은 말이 붙으면 면제만 남는다(독립 검증 V-1 — 한글 Blogger 를 켜기 전에 목록을 한 번 더 점검).
+- **N2-4 열린 도입구**: 영어 [5]·[6]의 도입구를 넓혔다 — `you might/may want|wish to`·`you'll want to`·`you'd better`·`you really/definitely/certainly/probably should`·`you would be wise to`·`it would be wise to`·`it is advisable/recommended…`·`it makes sense to`·`I would suggest`·`we recommend`·`please do`·`kindly`·`don't forget to`·`do not hesitate to`·`feel free to`·`always remember to`·`take a moment to`·`be certain to`, 3인칭 주어(`people/readers/everyone/they/we should`…), 도입구 두 겹(`you should make sure to`), 상담 부사 `definitely`·`probably`·`really`·`certainly`·`simply`(뒤에 쉼표도), `refer to`·동명사(`asking`·`talking to`·`seeing a doctor`), 새 연결어 `however`(쉼표 없이도)·`accordingly`·`consequently`·`for this reason`·`nevertheless`·`nonetheless`·`that said`. 검증자 도입구 31형 중 열린 것 31→7(조건·부사절 `if in doubt,`·`to be safe,`·`of course,`… 6개는 '조건절 + 쉼표 + 상담 구절'과 구별할 수 없어 일부러 열어 뒀고, 수식어가 붙은 3인칭 주어 `anyone taking medication should`는 병렬 주어 정상 안내 `Pregnant women and anyone taking medication should talk to their doctor.`를 막아서 넣지 않았다 — 검증자의 3인칭 실험은 정규식에 공백 오류가 있어 이 문장을 놓쳤다). 연결어 뒤 부사절·5단어 이상 창·약한 동사+`or`/`while`/`as`·목록에 없는 도입구(`you are advised to`·`it is best that you`)도 한계다.
+- **N2-5 용량**: 영어·한국어 `g`를 대소문자 구분(`(?-i:g)`)으로 바꿔 `a 5G phone`·`5G 요금제`가 용량으로 읽히지 않는다. `400mgs`·`100 ug`·`softgels`·`gummies`·한국어 `반 알`을 용량으로 읽는다. `ml`·`teaspoon`·`tablespoon`·`tabs`(브라우저 탭)·`a gram`(`a gram of curiosity`)·`스푼`·`2개`는 일상어 오탐이 있어 **넣지 않았다**. 공허하던 시험 `test_everyday_counting_words_are_not_doses`는 문장마다 금지 낱말과 상담 구절을 같이 넣고(면제 취소가 잘못 읽으면 막힌다) 같은 틀의 진짜 용량 짝이 면제 취소로만 막히는 것을 보는 시험으로 다시 썼다. 2차 보강 WORKLOG 의 틀린 문장("`5G` 는 용량으로 읽지 않는다(시험이 고정)")은 정정했다.
+- **N2-6 시험 구멍 15개**: 영어 창 길이 4단어(강한·약한 동사)·창 안 하이픈·아포스트로피 낱말·상담 부사 두 개 연속·동명사 `talking`/`asking`/`consulting`, 한국어 `에게서`/`한테서` 제외·용량 뒤 두 글자 보호(`2정거장`)와 그 임계, 영어 용량 간격(`400 -mg`)·앞뒤 `\b`(`6 glasses`·`B12 tablets`), 한국어 `5gb` — 각각 그것만 잡는 표본을 더했다(검증자 변이 R66·R68·R69·R74~R77·R117·R118·R129·R130·R142·R144·R145·R161 모두 사망).
+- **N2-7 문서**: `docs/ARCHITECTURE.md` §7-1(필드 표·절 경계 표·면제 취소·알려진 과잉 차단·한계), `docs/SECURITY_GUARDRAILS.md` G-C4 한계, `docs/DEFECT_REGISTER.md` D-64 ⑧, 이 항목. **시험·코드**: `tests/test_guardrails.py`(새 시험 5개 + 표본·그리드·조각·속도 입력 확장), `pipeline/gates.py`는 설명 주석만.
+- **줄인 것(동등)**: 변이 시험에서 `even so`(연결어 `so`가 이미 가른다)와 `I suggest` 도입구의 `(?:you\s+)?`(도입구 `you`가 받는다)가 동등이라 패턴에서 뺐다.
+
+### 검증 증거
+- **L1**: `python -X utf8 -m unittest discover -s tests` **2165개 통과**(round2 head 2160개 → 새 시험 5개, 서브케이스는 수백 개 늘었다). `python -X utf8 scripts/validate_repo.py --base origin/main` 오류 0·경고 1(LIQUID-1, main 과 같음), pyflakes 새 경고 0, 바꾼 `.py` vermin 최소 3.7.
+- **정기·연습 실행 출력**: 검증자 `compare_sched.py` 32개 시나리오와 `runner_matrix.py` 900개 조합이 round2 head 와 **바이트 단위로 같다**(JSON 전체 비교, 같은 입력).
+- **검증자 하니스**(수정 없이 실행, round2 head 와 나란히): `tradeoff.py` 위험 17/27·정상 안내 영어 8/42·한국어 1/15 **전과 같음(새 오탐 0)**, `normal2.py` 영어 75문장 38개 그대로·한국어 15→13(풀림 2), `overblock.py` 영어 15/118·한국어 0/32·`overblock2.py`·`probe.py`·`bypass.py`·`named10.py`·`manual_topic.py`·`real_posts.py` 26편 **출력 변화 없음**, `ko_seo.py` 17문장 중 막히는 것 14→2, `ko_fp.py` `5G 요금제…` 풀림, `dose2.py` 영어 용량 인식 42→46/61·한국어 24→25/32(`5G` 오탐 제거), `grid2.py` 열린 연결어 1392→930·도입구 324→108·3인칭 96→24·연쇄 90→66·동사 378→246, 한국어 그리드 28/56→0/56. 8만 문장 말뭉치에서 일상 문장(`benign`)은 영어 0→0·한국어 710→710으로 새로 막힌 것이 없다.
+- **변이(내가 직접)**: 바꾼 패턴 전부의 단일 편집 변이 903개(선택지 삭제·선택적 묶음 제거/필수화·수량자 약화·문자 클래스 한 글자 삭제·앞뒤내다보기 제거·`\b` 제거·`(?-i:)` 해제) 중 **877 사망**, 생존 26개 중 24개는 동등이다(앞쪽 선택적 쉼표 `,?` 4와 그 안의 문자 2, 이미 있는 선택지와 겹치는 `(?:care\s+)?` 2, 용량 숫자 `(?:[.,]\d+)*`·`\d+`·`{0,3}`·`+` 반복 14 — 마지막 숫자(말)만으로 맞는다, `하지만`/`그렇지만` 2 — `지만` 경계가 가른다). 나머지 2개는 전문가 낱말 끝의 `\b` 를 지운 변이로 동등은 아니다: `nursery`·`doctorate` 처럼 전문가 낱말로 시작하는 다른 낱말이 연결어 바로 뒤에 올 때만 달라지는 억지스러운 경우라 시험으로 고정하지 않았다. 이름 붙인 33개(검증자 구멍 15개 + 새 규칙) 중 33 사망. 첫 실행에서는 138개가 살아남았다 — 복수형·단수형 명사·단위, 전각 쉼표·괄호, 앞내다보기 없이 항상 가르는 경계, 세 번째 부사, 숫자말 앞뒤 경계(`phone tablet`·`gramophone`), 한국어 용량 `\s?`가 시험 구멍이라 표본을 더했고 나머지는 위 변이다.
+
+### 못 한 검증
+- Actions 실행, 실제 Gemini 영어 출력으로 본 탈락률(`BODY_TOPIC` 빈도), 한국어 글의 사람 눈 검토. `mode`·시크릿은 건드리지 않았다.
+
+### 다음 AI에게 남기는 주의사항
+1. 이 브랜치는 round2(아직 main 에 없음) 위에 쌓였다. round2 가 병합되면 `git rebase --onto origin/main ai/claude/blogger-guardrails-round2 ai/claude/blogger-guardrails-round3`로 main 에 올린다. 이 변경도 `mode: draft` 를 켜기 **전에** 병합한다(D-64 ⑧). 병합 뒤 첫 영어 초안(L3)에서 `BODY_TOPIC` 빈도를 보고 `or`/`unless`·한국어 `~거나`를 풀지 정한다(`STRICT_TRADE_OFF_*`·`GRID_OPEN_*`·ARCHITECTURE §7-1 을 같이 바꾼다).
+2. 새 절 경계 패턴이나 도입구 선택지를 더하면 그것만 가르는 표본(`MIXED_BLOCKED_*`)과 조각(`AlternativeCoverageTest`의 `EN_LEAD_INS`·`KO_*`)이 같이 있어야 시험이 통과한다. 후치사 `~서`를 더 제외하려면 `KO_POSTPOSITION_PHRASES`에 표본을 더한다(`준비해서`처럼 접속 어미로 끝나는 낱말은 앞 공백으로 구분한다).
+3. 알려진 한계: 쉼표만으로 이은 상담 구절·연결어 뒤 부사절·수식어 붙은 3인칭 주어·5단어 이상 창·약한 동사+`or`/`while`/`as`·한국어 `~므로`/`~거나`/`또는`/`또한` 연결·일상어와 겹치는 용량 단위(`ml`·`teaspoon`)·줄바꿈으로 갈린 두 낱말 용어는 통과한다. 용량 낱말 자체를 막는 목록은 넓히지 않았다.
+4. `HANDLER.md`·`docs/ACTIONS_GUIDE.md`·`docs/SESSION_START.md`·`docs/REQUEST_BRIEFING.md`·`인수인계/작업내용.md`·`.github/editorial/BLOGGER_API_SETUP.md` 의 '2차 보강(D-64 ⑦) 진행 중' 문장은 총괄 문서 PR 몫이다. 새 결함 번호는 D-68부터(D-67 은 다른 작업 몫).
+
+---
+
+## [2026-10-27] Claude – 워크플로 이름 `[구분]` 접두사와 레지스트리 `channel`·`ads` 필드·검증 규칙 (작업요청서 5 PR-A, T2, 동작 변화 없음)
+
+**작업자**: Claude (구현 세션, 독립 검증은 별도 세션)
+**대상**: 공통 (워크플로 이름·레지스트리 스키마·검증기·문서)
+**등급**: T2(워크플로 파일의 `name`·`run-name`, 레지스트리 스키마의 새 필드, 검증기 규칙). 광고 표면(`index.html`·`_config.yml`)·`mode`·시크릿·워크플로의 그 밖의 줄은 바꾸지 않았다. 승인 근거: 운영자가 2026-10-27 채팅으로 계획 보고의 추천을 전부 승인("추천대로 진행해줘") — D2(워크플로 `[구분]` 접두사)·D6(신규 채널 광고 금지 원칙의 레지스트리 반영).
+**목적**: 채널별로 워크플로를 구분해 보이게 한다(Actions 목록은 이름순이라 접두사가 같은 것끼리 붙는다). 한글 Blogger·티스토리·네이버를 더하기 전에 이름 규칙과 `channel`·`ads` 선언·검증을 먼저 깐다.
+**브랜치**: `ai/claude/channel-names`(origin/main 71dfde6에서 시작). PR 생성·병합·Actions 실행은 하지 않았다(총괄이 처리).
+
+### 한 일
+- **워크플로 10개의 `name`·`run-name`**(`.github/workflows/*.yml`): 맨 앞에 `[구분] ` — `[Chance]`(`chanceblog.yml`·`chance-fix-images.yml`·`issue-edit.yml`), `[Blogger]`(`blogger.yml`, 이름은 `[Blogger] 글 자동 작성(초안함 업로드)`), `[공통]`(나머지 6개). `name`은 대괄호로 시작해 큰따옴표로 감쌌다(따옴표가 없으면 YAML 문법 오류). 바뀐 줄은 `name`·`run-name` 16줄뿐이고 `on`·`jobs`·`permissions`·`concurrency` 등은 `yaml.safe_load` 결과가 main 과 같다. job 이름·단계 이름·이슈 제목 접두 `[Watchdog]`·`[운영] 확인 필요 모음`·라벨은 그대로.
+- **레지스트리**(`pipeline/blogs.json`·`pipeline/registry.py`): 블로그마다 필수 `channel: {key, label}`(chance → `Chance`, blogger_macat → `Blogger`)와 `ads`(`off`·`pending_gate`·`on`, chance `on`·blogger_macat `off`, `defaults.ads` `off`). 검증 — channel: 필수·모양, 라벨이 허용 집합(`Chance`·`Blogger`·`Blogger 영문`·`Blogger 한글`·`티스토리`·`네이버`), 블로그 사이 라벨·key 중복 없음, **그 블로그 워크플로 `name` 이 `"[라벨] …"` 로 시작**(표준 라이브러리로 `name:` 줄을 읽는다 — `blogger.yml` 의 plan 잡은 pip install 없이 이 검증을 돌린다). ads: 값, `jekyll-git` 밖의 `on` 금지, `ad_surface: true` 도 `jekyll-git` 에만, `defaults.ads` 는 `off` 로 고정. `python -m pipeline.registry`·`pipeline.plan` 출력은 main 과 바이트 단위로 같다(18개 명령).
+- **검증기**(`scripts/validate_repo.py`): **WF-12** — 모든 워크플로 `name` 이 `[구분] ` 으로 시작(구분 = 채널 라벨·`공통`·`내부`)하고 `run-name` 이 있으면 같은 접두사. WF-11 은 접두사를 뗀 이름 부분에 한글을 요구한다(`[공통]` 같은 한글 접두사가 대신 통과시키지 않게). **REG-5** — `jekyll-git` 블로그의 `ads` 선언이 광고 표면(`protected_paths`)의 실제 광고 코드(`adsbygoogle`·`googlesyndication`·`ca-pub-숫자`)와 같은지.
+- **이름을 인용하던 곳**: 코드 안내문 5곳(`pipeline/health.py` 2·`pipeline/edits/runner.py`·`pipeline/inbox.py` 꼬리글·`scripts/verify_pages_deploy.py`)과 주석 몇 곳, 시험 이름 기대값, 문서(`docs/ACTIONS_GUIDE.md` 이름 표·`[구분]` 설명, `docs/ARCHITECTURE.md` §2-1·§3(`channel`·`ads`·광고 선언·품질 게이트 기준 제안)·§7-A, `HANDLER.md`, `docs/OPS_INBOX.md`, `docs/ENGINEERING_GUIDE.md` W10, `docs/SECURITY_GUARDRAILS.md` G-C10·WF-12·REG-5, `docs/ISSUE_EDITS.md`·`docs/COPILOT_GUIDE.md`·`docs/CHARTER.md`·`docs/DEFECT_REGISTER.md`·`.github/*`). 이름을 파일 경로가 아니라 **이름으로 찾는 코드는 없다**(워치독·점검 모음·워크플로 간 호출은 모두 파일 이름. 이름은 안내문과 모음 항목 제목에만 쓰인다) — 계획 보고의 주장이 맞았다.
+- **시험**: `tests/test_workflow_names.py`(승인된 이름 10개 고정·접두사·run-name·레지스트리 채널과의 일치·job/단계 접두사 없음·정렬 인접·안내 문서에 모든 이름 있음·**접두사 없는 옛 이름 인용 검색**), `tests/test_registry.py`(channel·ads 규칙, `name:` 줄 읽기 모양), `tests/test_validate_repo.py`(WF-12·REG-5·WF-11 접두사), 이름 인용 시험 수정. `tests/test_run.py` 의 `make_root()` 는 워크플로 두 개를 `name` 한 줄짜리 스텁으로 쓴다.
+
+### 알아 둘 것
+- 모음(`[운영] 확인 필요 모음`) 이슈 본문에서는 외부 텍스트의 대괄호가 전각(［ ］)으로 바뀌어 `［Chance］ 글 자동 작성·게시` 처럼 보인다(링크 문법 무력화, 기존 동작). 시험으로 고정했다.
+- 한 워크플로 파일을 채널이 다른 블로그 둘이 나눠 쓸 수 없다(라벨 중복 금지·이름 접두사 일치) — 한글 Blogger 등록 작업(PR-D)이 `blogger.yml` 을 재사용 워크플로로 바꾸고 채널별 래퍼를 둬야 한다. 플레이북(`docs/ARCHITECTURE.md` §7-A)에 적었다.
+- 브랜치 보호의 '필수 검사' 지정 여부는 설정 화면을 보는 사용자만 확인할 수 있다. 필수 검사의 이름은 보통 job 이름이고 이 변경은 job 이름을 바꾸지 않았다(외부 지식, 미확인).
+- 총괄 소유 문서(`docs/REQUEST_BRIEFING.md` 의 워크플로 이름 표 등)는 이 PR 에서 고치지 않았다 — 표 검사 시험 2개가 그 표를 보므로 총괄이 별도 패치(`A_request_briefing_table.patch`)를 얹어야 초록이 된다.
+
+### 검증 증거
+- **L1**: `python -m unittest discover -s tests` — 기준 main 71dfde6 **2145개 통과**(189.6초) → 브랜치 **2202개**(새 시험 57개: `test_workflow_names` +11·`test_registry` +19·`test_validate_repo` +26·`test_ops_inbox` +1). 총괄 소유 `docs/REQUEST_BRIEFING.md`를 이 PR에서 고치지 않아 그 표를 읽는 시험 2개(`test_docs_tables_list_every_workflow_with_its_current_name`·`test_operator_docs_do_not_use_the_old_english_names`)는 패치 없이는 실패한다(2200 통과·2 실패). 패치 `A_request_briefing_table.patch`(13줄, `git apply --check` 통과)를 얹으면 **2202개 모두 통과** — 처음 만든 커밋에서 368초, 그 뒤 봇 글 커밋(931d2dc) 위로 옮긴 커밋에서 다시 돌려 287초. 옮긴 뒤 바뀐 것은 `docs/ARCHITECTURE.md` 문구 3곳과 `docs/ACTIONS_GUIDE.md` 빈 줄 하나뿐이고, 문서를 읽는 시험 64개를 패치 적용본에서 다시 돌려 통과했다. 네트워크 없이 돈다.
+- **L0**: `python scripts/validate_repo.py --base origin/main` 오류 0·경고 1(LIQUID-1, main과 같음)·AD-1 통과, `actionlint` 1.7.12 10개 파일 지적 0, `pyflakes` 새 경고 0, `vermin --target=3.10-` 최소 3.10, `git diff --check` 0.
+- **동작 불변**: CLI 21개(`pipeline.registry`·`pipeline.plan` 변형 18개·`pipeline.run --blog … --dry-run` 2개·`validate_repo --json`)의 표준 출력·표준 오류·종료 코드 63개 파일이 main과 바이트 단위로 같다. 워크플로 YAML은 `git diff` 상 `name`·`run-name` 16줄 외 0줄, `yaml.safe_load`로 읽은 `on`·`jobs`·`permissions`·`concurrency`·`env`가 10개 파일 모두 main과 같다.
+- **변이(직접 돌림)**: 레지스트리 27·검증기 19·데이터 15·문서/시험 코드 8 = 69개, 모두 시험이 잡는다(첫 판에서 접두사 뒤 공백이 둘인 이름을 거르는 시험이 없어 하나가 살아남았고 시험을 보강했다).
+
+### 못 한 검증
+- Actions 에서의 실제 실행(이름·실행 제목이 목록에 어떻게 보이는지, 목록의 정렬 순서), 브랜치 보호 설정 화면. 푸시·병합 뒤 관측이 필요하다.
+
+---
+
 ## [2026-10-27] Claude – 계획 승인 반영과 9시 슬롯 관측 (문서 전용, 코드·워크플로·레지스트리·광고 표면 변경 없음)
 
 **작업자**: Claude
@@ -56,7 +146,7 @@
 
 ### 변경 사항
 - **N-1 쉼표 없는 접속어**(`pipeline/profiles/*.json`의 `body_clause_split_patterns`): 접속어 **바로 뒤에 상담 구절**(상담 동사 `talk to`·`speak with`·`check with`·`consult`·`ask` + 전문가 낱말)이 올 때만 가르는 패턴을 더했다. 쉼표는 있어도 없어도 된다(`…lower your blood pressure so ask your doctor.` 가 막힌다). 접속어 `so`·`yet`·`while`·`then`·`or`·`because`·`since`·`as`·`unless`·`otherwise`·`therefore`·`thus`·`hence`·`plus`·`and`·`which is why`·`which means`·`meaning`·`except that`, 도입구 `you should`·`you can`·`make sure to`·`remember to`·`it is wise to`·`consider` 등. `see`·`call`·`visit`·`contact`·`seek`은 인과·순서 접속어와 쓰일 때만 가른다(`or see a specialist` 같은 서술을 가르지 않으려고). 한국어는 `~고,`·`~서`(돼서·그래서·따라서·고 나서; 장소의 `에서`는 제외)·`그러므로/그러니/그러니까`·`(먼저 의사와 …)`. 검증자의 연결어 그리드 영어 69행 중 지금까지 통과하던 32행 가운데 **22행을 닫았다**(남은 10행은 쉼표만으로 이은 것과 같은 계열이라 일부러 열어 뒀다: `, `·`, please`·`, just`·`, also`·`, of course,`·`, if you want,`·`, remember to`·`, be sure to`·`, make sure to`, 그리고 하니스가 `<br>`을 글자 그대로 넘겨서 생기는 `<br>` 행 — 실제 실행은 줄바꿈으로 읽어 막는다). 한국어 그리드는 10행 중 8행을 닫았다(남은 것은 `, 의사와…`·`~는 점, 의사와…`). 대가: 같은 모양의 정상 안내가 더 막힌다 — 검증자의 정상 안내 표본(영어 42·한국어 15)은 새로 막히는 것이 0개, 내가 쓴 정상 안내 68문장 중 14개(`…, which is why you should talk to your doctor`·`Do not start any supplement unless you check with your doctor`·`can then ask`·`임신 중이라서 의사와 상담이 필요해요` 등)는 새로 막혀 시험 `STRICT_TRADE_OFF_*`가 고정한다.
-- **N-3 용량 면제 취소**(`body_safe_veto_patterns`): 숫자+`mg`·`mcg`·`μg`·`IU`만 인식하던 것을 `milligrams`·`micrograms`·`grams`·`g`·`units`·`capsules`·`tablets`·`0.4 g`·`10,000 units`·`400-mg`·영어 숫자말(`four hundred milligrams`·`half a tablet`)로, 한국어는 `g`·`그램`·`정`·`캡슐`·`알`·`한 알`·`두 캡슐`로 넓혔다. `a handful of`·`2정거장`·`프로그램`·`5G` 같은 일상어는 용량으로 읽지 않는다(시험이 고정). **용량 낱말 자체를 막는 목록(`banned_*`의 `mg`·`IU` 패턴)은 넓히지 않았다** — 상담 구절도 막는 낱말도 없는 `Take 400 milligrams of magnesium before bed.`는 그대로 통과한다(범위 밖, 총괄 결정).
+- **N-3 용량 면제 취소**(`body_safe_veto_patterns`): 숫자+`mg`·`mcg`·`μg`·`IU`만 인식하던 것을 `milligrams`·`micrograms`·`grams`·`g`·`units`·`capsules`·`tablets`·`0.4 g`·`10,000 units`·`400-mg`·영어 숫자말(`four hundred milligrams`·`half a tablet`)로, 한국어는 `g`·`그램`·`정`·`캡슐`·`알`·`한 알`·`두 캡슐`로 넓혔다. `a handful of`·`2정거장`·`프로그램` 같은 일상어는 용량으로 읽지 않는다(시험이 고정). **정정(3차 보강, D-64 ⑧ N2-5)**: 처음 쓴 이 줄에는 `5G`도 읽지 않는다고 적었지만 틀렸다 — `g`가 대소문자를 가리지 않아 `a 5G phone`·`5G 요금제`가 용량으로 읽혔다(상담 구절이 든 문장에서 막힘). 시험 문장에 금지 낱말·상담 구절이 없어 공허했고, 3차 보강에서 `g`를 대소문자 구분으로 고치고 시험을 다시 썼다. **용량 낱말 자체를 막는 목록(`banned_*`의 `mg`·`IU` 패턴)은 넓히지 않았다** — 상담 구절도 막는 낱말도 없는 `Take 400 milligrams of magnesium before bed.`는 그대로 통과한다(범위 밖, 총괄 결정).
 - **N-4 절 경계 패턴을 따로 컴파일**(`pipeline/gates.py` `_clause_splitter`·`_split_clauses`): `(?:p1)|(?:p2)` 하나의 정규식으로 합치던 것을 패턴마다 따로 컴파일·탐색하고 겹치거나 맞닿은 경계를 합친다. 레지스트리는 패턴을 하나씩 컴파일해 검사하므로, 합치면 `(?i)`로 시작하는 패턴이나 같은 이름의 묶음이 검증을 통과하고도 실행 중 `re.error` 가 됐다(검증자 재현 `(?i)\s+whereas\s+`). 지금은 그 설정이 오류 없이 검증되고 그대로 돈다 — 시험이 '레지스트리가 받은 패턴은 본문 검사가 예외 없이 돌린다'를 고정한다.
 - **N-5 시험 구멍 5개**: 대문자 접속어(`, BUT`·`SO ASK YOUR DOCTOR`), 문장 끝 `!`·`?`·`。`·`！`·`？`, 수동 topic 의 30자 뒤에 있는 금지어, 수동 topic 가드가 본문 목록을 써도 통과하던 것(`remedy`·`heal`·`treat`·`pharmacy` 는 주제 목록에만 있다), 한국어 `400 mg`(띄어 쓴 용량) — 각각 그것만 잡는 표본을 더했다. 새 패턴마다 그 패턴만 가르는 문장이 있어야 하는 시험(`ClauseScopedExemptionTest`)은 그대로 통과한다(영어 `, and`·` and` 규칙은 새 규칙과 겹쳐 '앞에 상담·뒤에 위험한 권유'·`and see …` 표본을 더했다).
 - **N-7 수동 주제 가드 순서**(`pipeline/run.py`): `BLOGGER_PUBLISH=draft`인데 시크릿이 하나도 없고 주제가 막히면 `UPLOAD_SKIPPED`('저장소 파일에만 저장합니다') 안내가 먼저 나온 뒤 `TOPIC_BLOCKED` 종료 2 로 끝났다. 가드를 그 안내 앞으로 옮겼다 — 일시정지·mode off·잘못된 `BLOGGER_PUBLISH`·시크릿 누락 오류가 먼저 처리되는 순서는 그대로고, 주제가 없거나 통과하는 실행의 출력은 main 과 바이트 단위로 같다(검증자의 `compare_sched.py` 32개 + 내가 더한 16개 시나리오, 시험은 `ManualTopicGuardTest`). `docs/ARCHITECTURE.md` §4-1 처리 순서를 고쳤다.

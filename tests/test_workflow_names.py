@@ -3,7 +3,8 @@
 실제 `.github/workflows/*.yml` 과 문서를 읽어 확인한다. GitHub Actions 를 실행할 수 없는 환경에서도
 (1) 이름·입력 설명·단계 이름이 한글이고 문서의 대응표와 같은지,
 (2) run-name 표현식이 정기·수동·이슈 이벤트에서 의도한 제목을 내고 외부 유래 문자열을 담지 않는지,
-(3) chanceblog.yml 에서 분리한 chance-fix-images.yml 이 같은 권한·동시성·커밋·배포 단계를 유지하는지
+(3) chanceblog.yml 에서 분리한 chance-fix-images.yml 이 같은 권한·동시성·커밋·배포 단계를 유지하는지,
+(4) 모든 워크플로 name·run-name 이 `[구분] ` 접두사(채널 라벨·공통·내부)로 시작하고 그 이름을 인용하는 안내가 접두사를 빠뜨리지 않았는지
 구조로 증명한다.
 """
 import os
@@ -15,6 +16,7 @@ from pathlib import Path
 import yaml
 
 import _bootstrap  # noqa: F401
+from pipeline import registry
 
 REAL = _bootstrap.ROOT
 WORKFLOWS = REAL / ".github" / "workflows"
@@ -36,13 +38,13 @@ def load(name):
 # 옛 영문 워크플로 이름 검색(안내 문서·워크플로·이슈 양식·코드)
 # ----------------------------------------------------------------------------
 OLD_NAMES = {
-    "Chance_Blog Full-Auto Engine": "Chance 글 자동 작성·게시",
-    "Blogger Generate": "Blogger 글 자동 작성",
-    "Deploy GitHub Pages": "사이트 자동 배포",
-    "Guardrails": "저장소 규칙·테스트 자동 검사",
-    "PR Scope Check": "PR 변경 범위 검사",
-    "Sync Issue Form": "이슈 양식 페이지 목록 갱신",
-    "Issue Edit": "이슈 수정 요청 처리(수정안 PR 만들기)",
+    "Chance_Blog Full-Auto Engine": "[Chance] 글 자동 작성·게시",
+    "Blogger Generate": "[Blogger] 글 자동 작성(초안함 업로드)",
+    "Deploy GitHub Pages": "[공통] 사이트 자동 배포",
+    "Guardrails": "[공통] 저장소 규칙·테스트 자동 검사",
+    "PR Scope Check": "[공통] PR 변경 범위 검사",
+    "Sync Issue Form": "[공통] 이슈 양식 페이지 목록 갱신",
+    "Issue Edit": "[Chance] 이슈 수정 요청 처리(수정안 PR 만들기)",
 }  # 'Watchdog' 은 일부러 뺐다: 이슈 제목 접두어 [Watchdog]·라벨 watchdog 은 식별자이고 문서에서는 감시 장치 자체를 가리키기도 한다
 OLD_NAME_SUFFIXES = (".md", ".yml", ".yaml", ".py")
 OLD_NAME_SKIP_DIRS = {"_posts", "_blogger_drafts", ".git", "assets", ".design", "__pycache__", "node_modules", ".venv", "venv"}
@@ -297,7 +299,7 @@ class KoreanNamesTest(unittest.TestCase):
                 ".github/ISSUE_TEMPLATE/f.yml": "description: PR Scope Check 코멘트\n",
                 "pipeline/h.py": 'MSG = "성공한 \'Deploy GitHub Pages\' 실행이 없습니다"\n',
                 "scripts/s.py": '"""Sync Issue Form 이 부른다."""\n',
-                "docs/ok.md": "| Guardrails | `저장소 규칙·테스트 자동 검사` | `guardrails.yml` |\n",  # 대응표: 새 이름이 같은 줄
+                "docs/ok.md": "| Guardrails | `[공통] 저장소 규칙·테스트 자동 검사` | `guardrails.yml` |\n",  # 대응표: 새 이름이 같은 줄
                 "WORKLOG.md": "Blogger Generate (과거 기록)\n",  # 허용 파일
                 "data.json": '{"x": "Blogger Generate"}\n',  # 검사하지 않는 확장자
                 "_posts/p.md": "Blogger Generate\n",  # 글 폴더는 건너뜀
@@ -331,57 +333,63 @@ class RunNameTest(unittest.TestCase):
         return render(load(workflow)["run-name"], context(event, inputs, issue))
 
     def test_chance_posting_titles(self):
-        self.assertEqual(self.title("chanceblog.yml", "schedule"), "Chance 글 작성·게시 · 정기")
+        self.assertEqual(self.title("chanceblog.yml", "schedule"), "[Chance] 글 작성·게시 · 정기")
         self.assertEqual(self.title("chanceblog.yml", "workflow_dispatch", {"dry_run": True}),
-                         "Chance 글 작성·게시 · 수동(연습: 저장 안 함)")
-        self.assertEqual(self.title("chanceblog.yml", "workflow_dispatch", {"dry_run": False}), "Chance 글 작성·게시 · 수동")
+                         "[Chance] 글 작성·게시 · 수동(연습: 저장 안 함)")
+        self.assertEqual(self.title("chanceblog.yml", "workflow_dispatch", {"dry_run": False}), "[Chance] 글 작성·게시 · 수동")
         self.assertEqual(self.title("chanceblog.yml", "workflow_dispatch", {"dry_run": True, "real_ai": True}),
-                         "Chance 글 작성·게시 · 수동(연습: 실제 AI 호출·저장 안 함)")
-        self.assertEqual(self.title("chanceblog.yml", "workflow_dispatch", {"dry_run": False, "real_ai": True}), "Chance 글 작성·게시 · 수동")
+                         "[Chance] 글 작성·게시 · 수동(연습: 실제 AI 호출·저장 안 함)")
+        self.assertEqual(self.title("chanceblog.yml", "workflow_dispatch", {"dry_run": False, "real_ai": True}), "[Chance] 글 작성·게시 · 수동")
 
     def test_chance_fix_images_titles(self):
         self.assertEqual(self.title("chance-fix-images.yml", "workflow_dispatch", {"dry_run": True}),
-                         "Chance 기존 글 이미지 교체 · 연습(저장 안 함)")
+                         "[Chance] 기존 글 이미지 교체 · 연습(저장 안 함)")
         self.assertEqual(self.title("chance-fix-images.yml", "workflow_dispatch", {"dry_run": False}),
-                         "Chance 기존 글 이미지 교체 · 실제 교체")
+                         "[Chance] 기존 글 이미지 교체 · 실제 교체")
         self.assertEqual(self.title("chance-fix-images.yml", "workflow_dispatch", {"dry_run": True, "real_ai": True}),
-                         "Chance 기존 글 이미지 교체 · 연습(실제 AI 호출·저장 안 함)")
+                         "[Chance] 기존 글 이미지 교체 · 연습(실제 AI 호출·저장 안 함)")
 
     def test_blogger_titles(self):
-        self.assertEqual(self.title("blogger.yml", "schedule"), "Blogger 글 작성 · 정기")
+        self.assertEqual(self.title("blogger.yml", "schedule"), "[Blogger] 글 작성 · 정기")
         # 수동 실행의 publish 는 3택(off=저장소 파일만, draft=Blogger 초안함 업로드, publish=즉시 게시)이다
         manual = {"dry_run": False, "publish": "draft"}
-        self.assertEqual(self.title("blogger.yml", "workflow_dispatch", manual), "Blogger 글 작성 · 수동(Blogger 초안함 업로드)")
+        self.assertEqual(self.title("blogger.yml", "workflow_dispatch", manual), "[Blogger] 글 작성 · 수동(Blogger 초안함 업로드)")
         self.assertEqual(self.title("blogger.yml", "workflow_dispatch", {**manual, "publish": "off"}),
-                         "Blogger 글 작성 · 수동(저장소 파일만 저장)")
+                         "[Blogger] 글 작성 · 수동(저장소 파일만 저장)")
         self.assertEqual(self.title("blogger.yml", "workflow_dispatch", {**manual, "publish": "publish"}),
-                         "Blogger 글 작성 · 수동(즉시 게시)")
+                         "[Blogger] 글 작성 · 수동(즉시 게시)")
         self.assertEqual(self.title("blogger.yml", "workflow_dispatch", {"dry_run": True, "publish": "off"}),
-                         "Blogger 글 작성 · 수동(연습: 저장·게시 안 함)")
+                         "[Blogger] 글 작성 · 수동(연습: 저장·게시 안 함)")
         # 연습이면 선택과 무관하게 아무것도 올리지 않는다(blogger.yml 의 DRY_RUN 이 우선)
         for choice in ("off", "draft", "publish"):
             self.assertEqual(self.title("blogger.yml", "workflow_dispatch", {"dry_run": True, "publish": choice}),
-                             "Blogger 글 작성 · 수동(연습: 저장·게시 안 함)")
+                             "[Blogger] 글 작성 · 수동(연습: 저장·게시 안 함)")
         # '인증 점검만 실행'은 글을 만들지 않으므로 다른 선택(연습·publish)보다 제목에 먼저 드러난다
         for dry_run in (False, True):
             for choice in ("off", "draft", "publish"):
                 self.assertEqual(self.title("blogger.yml", "workflow_dispatch",
                                             {"auth_check": True, "dry_run": dry_run, "publish": choice}),
-                                 "Blogger 글 작성 · 수동(인증 점검만: 글 안 만듦)")
+                                 "[Blogger] 글 작성 · 수동(인증 점검만: 글 안 만듦)")
         self.assertEqual(self.title("blogger.yml", "workflow_dispatch", {"auth_check": False, "dry_run": False, "publish": "draft"}),
-                         "Blogger 글 작성 · 수동(Blogger 초안함 업로드)")
-        self.assertEqual(self.title("blogger.yml", "schedule", {"auth_check": True}), "Blogger 글 작성 · 정기")
+                         "[Blogger] 글 작성 · 수동(Blogger 초안함 업로드)")
+        self.assertEqual(self.title("blogger.yml", "schedule", {"auth_check": True}), "[Blogger] 글 작성 · 정기")
 
     def test_watchdog_titles(self):
-        self.assertEqual(self.title("watchdog.yml", "schedule"), "발행 중단 감시 · 정기")
-        self.assertEqual(self.title("watchdog.yml", "workflow_dispatch"), "발행 중단 감시 · 수동")
+        self.assertEqual(self.title("watchdog.yml", "schedule"), "[공통] 발행 중단 감시 · 정기")
+        self.assertEqual(self.title("watchdog.yml", "workflow_dispatch"), "[공통] 발행 중단 감시 · 수동")
+
+    def test_ops_inbox_titles(self):
+        self.assertEqual(self.title("ops-inbox.yml", "schedule"), "[공통] 확인 필요 모음 갱신 · 정기")
+        self.assertEqual(self.title("ops-inbox.yml", "workflow_dispatch", {"dry_run": False}), "[공통] 확인 필요 모음 갱신 · 수동")
+        self.assertEqual(self.title("ops-inbox.yml", "workflow_dispatch", {"dry_run": True}),
+                         "[공통] 확인 필요 모음 갱신 · 수동(연습: 이슈·코멘트 안 씀)")
 
     def test_issue_edit_titles_show_the_issue_number(self):
-        self.assertEqual(self.title("issue-edit.yml", "issues", issue=12), "이슈 #12 수정 요청 처리 · 자동(이슈 등록 시)")
+        self.assertEqual(self.title("issue-edit.yml", "issues", issue=12), "[Chance] 이슈 #12 수정 요청 처리 · 자동(이슈 등록 시)")
         self.assertEqual(self.title("issue-edit.yml", "workflow_dispatch", {"issue_number": "7", "dry_run": True}),
-                         "이슈 #7 수정 요청 처리 · 수동(연습: PR·코멘트 안 만듦)")
+                         "[Chance] 이슈 #7 수정 요청 처리 · 수동(연습: PR·코멘트 안 만듦)")
         self.assertEqual(self.title("issue-edit.yml", "workflow_dispatch", {"issue_number": "7", "dry_run": False}),
-                         "이슈 #7 수정 요청 처리 · 수동")
+                         "[Chance] 이슈 #7 수정 요청 처리 · 수동")
 
     ALLOWED_REFS = {"github.event_name", "github.event.issue.number", "inputs.dry_run", "inputs.publish", "inputs.issue_number",
                     "inputs.auth_check", "inputs.real_ai"}
@@ -481,6 +489,175 @@ class ChanceSplitTest(unittest.TestCase):
         deploy = self.steps(self.fix)[-1]
         self.assertIn("gh workflow run pages.yml", deploy["run"])
         self.assertEqual(deploy["if"], "steps.commit.outputs.pushed == 'true'")
+
+
+# ----------------------------------------------------------------------------
+# 4) 이름 접두사 `[구분] `: 채널 라벨(레지스트리 channel.label)·공통·내부
+# ----------------------------------------------------------------------------
+PREFIX_LABELS = set(registry.CHANNEL_LABELS) | {"공통", "내부"}
+QUOTE_MARKS = ("`", "'", '"', "**")
+# 접두사를 붙이기 전(2026-10-25 한글화 이후 ~ 2026-10-27)의 워크플로 이름 → 지금 이름. 안내 문서·코드가 옛 이름을 따옴표·백틱·굵게로 인용하면
+# 운영자가 Actions 목록에서 그 이름을 찾지 못한다(목록에는 새 이름이 보인다). 이름을 또 바꾸면 지금 이름을 여기 옛 이름으로 옮겨 적는다.
+PREVIOUS_NAMES = {
+    "Chance 글 자동 작성·게시": "[Chance] 글 자동 작성·게시",
+    "Chance 기존 글 이미지 교체(수동)": "[Chance] 기존 글 이미지 교체(수동)",
+    "이슈 수정 요청 처리(수정안 PR 만들기)": "[Chance] 이슈 수정 요청 처리(수정안 PR 만들기)",
+    "Blogger 글 자동 작성": "[Blogger] 글 자동 작성(초안함 업로드)",
+    "사이트 자동 배포": "[공통] 사이트 자동 배포",
+    "저장소 규칙·테스트 자동 검사": "[공통] 저장소 규칙·테스트 자동 검사",
+    "PR 변경 범위 검사": "[공통] PR 변경 범위 검사",
+    "이슈 양식 페이지 목록 갱신": "[공통] 이슈 양식 페이지 목록 갱신",
+    "발행 중단 감시·알림": "[공통] 발행 중단 감시·알림",
+    "확인 필요 모음": "[공통] 확인 필요 모음",
+}
+# 이전 이름 인용 검색(find_previous_name_quotes)에서 빼는 곳(이유를 적는다). 안내 문서·코드·워크플로는 지금 이름으로 인용해야 하고,
+# 아래는 날짜가 붙은 기록이거나 총괄이 따로 갱신하는 현황·브리핑 문서이거나 시험 자료다. '/' 로 끝나면 폴더 전체다.
+PREVIOUS_NAME_QUOTE_ALLOWED = {
+    "WORKLOG.md": "과거 사실의 기록(이력)이라 고치지 않는다",
+    "docs/DEFECT_REGISTER.md": "날짜가 붙은 결함 기록이라 당시 이름 그대로 둔다",
+    "docs/analysis/": "날짜가 붙은 분석 보고라 당시 이름 그대로 둔다",
+    "docs/SESSION_START.md": "총괄이 갱신하는 현황 문서",
+    "docs/REQUEST_BRIEFING.md": "총괄이 갱신하는 브리핑 문서(이름 표는 test_docs_tables_list_every_workflow_with_its_current_name 이 따로 본다)",
+    "인수인계/": "작업 현황·요청서 기록",
+    "tests/": "시험 자료(가짜 이름·옛 이름 시나리오를 일부러 담는다)",
+}
+
+
+def current_names():
+    return {path.name: load(path.name)["name"] for path in workflow_paths()}
+
+
+def find_previous_name_quotes(root, previous=PREVIOUS_NAMES, allowed=PREVIOUS_NAME_QUOTE_ALLOWED):
+    """root 아래 안내 문서·워크플로·코드(.md .yml .yaml .py)에서 이전 이름이 백틱·따옴표·굵게(**)로 감싸여 인용됐는데 지금 이름이 같은 줄에 없는 곳을
+    찾는다. 이름만 접두사로 바뀐 것(`사이트 자동 배포` → `[공통] 사이트 자동 배포`)도 이전 이름이 따옴표째 남으면 걸린다.
+    따옴표 없이 문장 속에 풀어 쓴 언급은 보지 않는다. 한 줄에 지금 이름이 같이 있으면(옛 이름 → 새 이름 대응표) 허용한다."""
+    found = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if d not in OLD_NAME_SKIP_DIRS)
+        for name in sorted(filenames):
+            if not name.endswith(OLD_NAME_SUFFIXES):
+                continue
+            path = Path(dirpath, name)
+            rel = path.relative_to(root).as_posix()
+            if any(rel == skip or (skip.endswith("/") and rel.startswith(skip)) for skip in allowed):
+                continue
+            for lineno, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+                for old, new in previous.items():
+                    if new not in line and any(mark + old + mark in line for mark in QUOTE_MARKS):
+                        found.append(f"{rel}:{lineno}: {old}")
+    return found
+
+
+class NamePrefixTest(unittest.TestCase):
+    EXPECTED = {
+        "chanceblog.yml": "[Chance] 글 자동 작성·게시",
+        "chance-fix-images.yml": "[Chance] 기존 글 이미지 교체(수동)",
+        "issue-edit.yml": "[Chance] 이슈 수정 요청 처리(수정안 PR 만들기)",
+        "blogger.yml": "[Blogger] 글 자동 작성(초안함 업로드)",
+        "pages.yml": "[공통] 사이트 자동 배포",
+        "guardrails.yml": "[공통] 저장소 규칙·테스트 자동 검사",
+        "pr-scope-check.yml": "[공통] PR 변경 범위 검사",
+        "sync-issue-form.yml": "[공통] 이슈 양식 페이지 목록 갱신",
+        "watchdog.yml": "[공통] 발행 중단 감시·알림",
+        "ops-inbox.yml": "[공통] 확인 필요 모음",
+    }
+
+    def test_every_workflow_has_its_approved_name(self):
+        """운영자가 승인한 이름(2026-10-27, 계획 보고 §3)이다. 이름을 바꾸거나 워크플로를 더하면 이 표와 문서 대응표를 함께 고친다."""
+        self.assertEqual(current_names(), self.EXPECTED)
+
+    def test_every_name_starts_with_an_allowed_label(self):
+        for file, name in current_names().items():
+            self.assertIn(registry.name_label(name), PREFIX_LABELS, f"{file}: {name!r}")
+
+    def test_run_name_starts_with_the_same_prefix_as_name(self):
+        seen = 0
+        for file, name in current_names().items():
+            run_name = load(file).get("run-name")
+            if run_name is None:
+                continue
+            seen += 1
+            self.assertEqual(registry.name_label(run_name), registry.name_label(name), f"{file}: {run_name!r}")
+        self.assertEqual(seen, 6)  # chanceblog · chance-fix-images · issue-edit · blogger · watchdog · ops-inbox
+
+    def test_registered_blog_workflows_use_their_channel_label(self):
+        """레지스트리 channel.label 과 그 블로그 워크플로 이름의 접두사는 같은 글자다(레지스트리 검증도 같은 것을 본다)."""
+        blogs = registry.load_registry()["blogs"]
+        self.assertGreaterEqual(len(blogs), 2)
+        for raw in blogs:
+            name = load(Path(raw["workflow"]).name)["name"]
+            self.assertEqual(registry.name_label(name), raw["channel"]["label"], f"{raw['key']}: {name!r}")
+
+    def test_job_and_step_names_do_not_get_the_prefix(self):
+        """접두사는 워크플로 name·run-name 에만 붙인다. job 이름은 PR 검사 화면의 이름이고 단계 이름은 실행 화면의 줄 이름이라 그대로 둔다."""
+        checked = 0
+        for file in current_names():
+            for job_id, job in load(file)["jobs"].items():
+                self.assertIsNone(registry.name_label(job.get("name")), f"{file} job {job_id}")
+                for step in job.get("steps", []):
+                    checked += 1
+                    self.assertIsNone(registry.name_label(step.get("name")), f"{file} {job_id}: {step.get('name')!r}")
+        self.assertGreater(checked, 40)
+
+    def test_same_label_workflows_are_adjacent_in_name_order(self):
+        """Actions 왼쪽 목록은 이름순이라 접두사가 같은 워크플로끼리 붙어 보인다(이 시험은 파이썬 기본 정렬로 그 성질을 확인한다)."""
+        labels = [registry.name_label(name) for name in sorted(current_names().values())]
+        groups = [label for index, label in enumerate(labels) if index == 0 or label != labels[index - 1]]
+        self.assertEqual(len(groups), len(set(groups)), f"같은 구분이 떨어져 있습니다: {groups}")
+        self.assertEqual(set(groups), {"Blogger", "Chance", "공통"})
+
+    def test_operator_guide_lists_every_current_name(self):
+        guide = (REAL / "docs" / "ACTIONS_GUIDE.md").read_text(encoding="utf-8")
+        for file, name in current_names().items():
+            self.assertIn(f"`{name}`", guide, f"docs/ACTIONS_GUIDE.md 에 {file} 의 현재 이름 `{name}` 이 없습니다")
+
+    def test_previous_names_map_to_exactly_the_current_names(self):
+        """PREVIOUS_NAMES 가 현재 이름과 어긋나면 아래 검색이 엉뚱한 이름을 기준으로 삼는다 — 이름을 바꾸면 이 표도 같이 고친다."""
+        self.assertEqual(sorted(PREVIOUS_NAMES.values()), sorted(current_names().values()))
+        for old, new in PREVIOUS_NAMES.items():
+            self.assertNotEqual(old, new)
+
+    def test_living_docs_and_code_never_quote_a_previous_name(self):
+        """접두사를 붙이기 전의 이름(예: `사이트 자동 배포`)을 인용한 안내가 남으면 운영자가 Actions 목록에서 그 이름을 찾지 못한다."""
+        self.assertEqual(find_previous_name_quotes(REAL), [])
+
+    def test_previous_name_scan_finds_quotes_and_skips_allowed_places(self):
+        previous = {"사이트 자동 배포": "[공통] 사이트 자동 배포", "Chance 글 자동 작성·게시": "[Chance] 글 자동 작성·게시"}
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            files = {
+                "docs/a.md": "Actions → `사이트 자동 배포` 를 누른다\n",
+                "docs/b.md": "**사이트 자동 배포**와 'Chance 글 자동 작성·게시' 를 본다\n",
+                "docs/c.md": 'MSG = "사이트 자동 배포"\n',
+                "pipeline/h.py": "MSG = \"성공한 '사이트 자동 배포' 실행이 없습니다\"\n",
+                ".github/workflows/w.yml": "# 주석: `Chance 글 자동 작성·게시` 워크플로\n",
+                "docs/ok.md": "Actions → `[공통] 사이트 자동 배포` 를 누른다\n",
+                "docs/table.md": "| 옛 `사이트 자동 배포` | `[공통] 사이트 자동 배포` |\n",             # 대응표: 지금 이름이 같은 줄
+                "docs/prose.md": "사이트 자동 배포가 돌고 Chance 글 자동 작성·게시가 끝난다\n",         # 따옴표 없는 문장 속 언급
+                "docs/other.md": "`사이트 자동 배포 상태`와 'Chance 글 자동 작성·게시 기록' 은 다른 말이다\n",   # 이름이 더 긴 문구의 일부
+                "docs/summary.md": "요약 제목 `### 사이트 자동 배포` 는 제목 줄 전체를 인용한 것이다\n",       # 이름 앞뒤에 다른 글자가 붙은 인용
+                "WORKLOG.md": "`사이트 자동 배포` (과거 기록)\n",
+                "tests/t.py": "NAME = '사이트 자동 배포'\n",
+                "인수인계/n.md": "`사이트 자동 배포`\n",
+                "docs/analysis/r.md": "`사이트 자동 배포`\n",
+                "data.json": '{"x": "`사이트 자동 배포`"}\n',                                         # 검사하지 않는 확장자
+                "_posts/p.md": "`사이트 자동 배포`\n",                                                 # 글 폴더는 건너뜀
+            }
+            for rel, content in files.items():
+                path = root / rel
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+            self.assertEqual(sorted(find_previous_name_quotes(root, previous)), [
+                ".github/workflows/w.yml:1: Chance 글 자동 작성·게시",
+                "docs/a.md:1: 사이트 자동 배포",
+                "docs/b.md:1: Chance 글 자동 작성·게시",
+                "docs/b.md:1: 사이트 자동 배포",
+                "docs/c.md:1: 사이트 자동 배포",
+                "pipeline/h.py:1: 사이트 자동 배포",
+            ])
+            self.assertEqual(len(find_previous_name_quotes(root, previous, allowed={})), 6 + 4)   # 허용 목록을 비우면 WORKLOG·tests·인수인계·analysis 도 걸린다
+
+
 
 
 if __name__ == "__main__":

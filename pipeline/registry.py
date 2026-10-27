@@ -4,6 +4,10 @@
 블로그를 추가할 때는 코드를 고치지 않고 항목을 추가한다.
 시크릿 '값'은 여기에 두지 않는다. 항목에는 환경변수(= GitHub Secrets) '이름'만 둔다.
 
+블로그마다 `channel`(채널 라벨 — 그 블로그 워크플로 name 맨 앞의 `[라벨] `과 같은 글자)과 `ads`(광고 선언: off·pending_gate·on)를
+적는다. 둘 다 이 파일이 검증한다(규칙: docs/ARCHITECTURE.md §3). 이 모듈은 표준 라이브러리만 쓴다 — blogger.yml 의 plan 잡이
+pip install 없이 `python -m pipeline.plan` 으로 이 검증을 실행하기 때문이다(워크플로 name 은 YAML 을 해석하지 않고 줄을 본다).
+
 CLI: python -m pipeline.registry   (검증 후 요약 출력, 오류가 있으면 종료 코드 1)
 """
 import copy
@@ -20,6 +24,17 @@ REGISTRY_PATH = Path(__file__).resolve().parent / "blogs.json"
 PROFILE_DIR = Path(__file__).resolve().parent / "profiles"
 
 MODES = ("off", "draft", "auto")
+
+# 광고 선언(D6, 2026-10-27 운영자 승인). 레지스트리가 아는 것은 '의도'뿐이다 — 광고는 각 플랫폼 화면에서 운영자가 켠다.
+#   off          광고가 없다. 새 채널의 시작값이다(defaults.ads).
+#   pending_gate 품질 게이트를 통과하면 켜려는 곳. 아직 광고 코드는 없다.
+#   on           광고 코드가 사이트에 들어 있다(AdSense 승인 대기 중이어도 on). 우리가 코드를 관리하는 jekyll-git 에서만 쓴다.
+# pending_gate/on 으로 올리는 편집은 T3(사용자 승인)다. 설명: docs/ARCHITECTURE.md §3 '광고 선언', docs/SECURITY_GUARDRAILS.md G-C10
+ADS_STATES = ("off", "pending_gate", "on")
+
+# 채널 라벨 = 그 블로그 워크플로 `name:` 맨 앞의 `[라벨] `(운영자가 Actions 목록에서 채널별로 묶어 본다). 블로그에 속하지 않는
+# 워크플로의 구분(`공통`·`내부`)은 레지스트리 밖이라 여기에 없다(scripts/validate_repo.py WF-12 가 합쳐서 쓴다).
+CHANNEL_LABELS = ("Chance", "Blogger", "Blogger 영문", "Blogger 한글", "티스토리", "네이버")
 
 # 플랫폼별 필수 시크릿 역할. 새 플랫폼을 지원하려면 여기와 publishers/ 어댑터를 함께 추가한다.
 PLATFORMS = {
@@ -125,6 +140,89 @@ def _safe_rel(path_str):
     return not p.is_absolute() and ".." not in p.parts
 
 
+_NAME_LABEL_RE = re.compile(r"^\[([^\[\]]+)\] (?=\S)")
+
+
+def name_label(name):
+    """워크플로 `name`·`run-name` 맨 앞의 `[구분] `에서 구분(라벨)을 꺼낸다. 문자열이 아니거나 그 모양이 아니면 None.
+    `[라벨]` 바로 뒤에 공백 하나와 이름이 이어져야 한다(`[Chance]글`·`[Chance] ` 는 접두사가 아니다)."""
+    match = _NAME_LABEL_RE.match(name) if isinstance(name, str) else None
+    return match.group(1) if match else None
+
+
+_TOP_NAME_LINE_RE = re.compile(r"^name[ \t]*:[ \t]*(.*)$")
+
+
+def _workflow_name_problem(text, label):
+    """워크플로 본문의 최상위 `name:` 줄(들여쓰기 없는 첫 줄)이 `"[라벨] 이름"`(따옴표로 감싼 값)이 아니면 이유, 맞으면 None.
+    YAML 을 해석하지 않고 줄을 본다(이 모듈은 표준 라이브러리만 쓴다). 대괄호로 시작하는 값은 YAML 에서 따옴표가 없으면 배열로 읽혀
+    문법 오류이므로 따옴표가 필수다."""
+    prefix = re.escape(f"[{label}] ")
+    for line in re.split(r"\r\n|\r|\n", text.lstrip(chr(0xFEFF))):
+        match = _TOP_NAME_LINE_RE.match(line)
+        if not match:
+            continue
+        # 따옴표로 감싼 값이 `[라벨] ` 로 시작하고 바로 이어 이름이 있어야 한다(닫는 따옴표가 곧바로 오면 이름이 빈 것이다)
+        if re.match(r"""(["'])""" + prefix + r"(?!\1)\S", match.group(1).strip()):
+            return None
+        return f"name 줄이 `{line.strip()[:60]}` 입니다"
+    return "최상위 name: 줄을 찾지 못했습니다"
+
+
+def _channel_errors(raw_channel, blog, label, root, seen_labels, seen_keys):
+    """channel 규칙: ① 필수·모양 ② 라벨이 CHANNEL_LABELS 중 하나 ③ 블로그 사이에 라벨·key 중복 없음 ④ 그 블로그 워크플로 name 이
+    `[라벨] ` 로 시작. defaults 에서 물려받지 않고 항목에 직접 적는다(채널은 블로그마다 달라야 하므로 물려받을 값이 없다)."""
+    allowed = " · ".join(CHANNEL_LABELS)
+    if not isinstance(raw_channel, dict):
+        return [f"{label}: channel이 필요합니다 — {{\"key\": \"영문 식별자\", \"label\": \"허용 라벨\"}} 모양으로 이 항목에 직접 적으세요"
+                f"(허용 라벨: {allowed})."]
+    errors = []
+    channel_key, channel_label = raw_channel.get("key"), raw_channel.get("label")
+    if not isinstance(channel_key, str) or not _KEY_RE.match(channel_key):
+        errors.append(f"{label}: channel.key는 영소문자로 시작하는 [a-z0-9_] 2~31자여야 합니다: {channel_key!r}")
+    elif channel_key in seen_keys:
+        errors.append(f"{label}: channel.key가 다른 블로그('{seen_keys[channel_key]}')와 같습니다: {channel_key!r}. 채널은 블로그마다 달라야 합니다.")
+    else:
+        seen_keys[channel_key] = blog.get("key")
+    if channel_label not in CHANNEL_LABELS:
+        errors.append(f"{label}: channel.label은 {allowed} 중 하나여야 합니다: {channel_label!r}")
+        return errors
+    if channel_label in seen_labels:
+        errors.append(f"{label}: channel.label이 다른 블로그('{seen_labels[channel_label]}')와 같습니다: {channel_label!r}. "
+                      "채널 라벨은 블로그마다 달라야 합니다(같으면 Actions 목록에서 채널이 구분되지 않습니다).")
+    else:
+        seen_labels[channel_label] = blog.get("key")
+    workflow = blog.get("workflow")
+    if _safe_rel(workflow) and (root / workflow).is_file():       # 경로가 없거나 안전하지 않으면 workflow 경로 오류가 이미 알린다
+        try:
+            text = (root / workflow).read_text(encoding="utf-8")
+        except (OSError, ValueError) as exc:                      # UnicodeDecodeError 는 ValueError 의 하위
+            errors.append(f"{label}: 워크플로 {workflow}를 읽을 수 없어 name 접두사를 확인하지 못했습니다: {exc}")
+        else:
+            problem = _workflow_name_problem(text, channel_label)
+            if problem:
+                errors.append(f"{label}: 워크플로 {workflow}의 {problem}. name은 channel.label({channel_label!r})에 맞춰 "
+                              f"\"[{channel_label}] 이름\" 으로 시작해야 합니다(대괄호로 시작하는 값은 YAML 에서 따옴표가 필요합니다).")
+    return errors
+
+
+def _ads_errors(blog, label):
+    """ads 규칙(D6): ① 값은 ADS_STATES 중 하나 ② on 은 우리가 광고 코드를 관리하는 jekyll-git 에서만 ③ ad_surface=true 도 jekyll-git 에서만.
+    생략하면 defaults.ads(off)를 물려받는다."""
+    errors = []
+    ads, platform = blog.get("ads"), blog.get("platform")
+    if ads not in ADS_STATES:
+        errors.append(f"{label}: ads는 {' · '.join(ADS_STATES)} 중 하나여야 합니다: {ads!r}")
+    elif ads == "on" and platform != "jekyll-git":
+        errors.append(f"{label}: platform {platform!r} 블로그는 ads를 on으로 둘 수 없습니다 — on은 광고 코드를 이 저장소가 관리하는 "
+                      "platform jekyll-git 에서만 씁니다. 다른 플랫폼은 품질 게이트를 통과한 뒤 운영자가 플랫폼 화면에서 켜므로 "
+                      "그 전에는 off 또는 pending_gate 입니다.")
+    if blog.get("ad_surface") is True and platform != "jekyll-git":
+        errors.append(f"{label}: ad_surface=true는 platform jekyll-git 블로그에만 쓸 수 있습니다(지금 platform: {platform!r}). "
+                      "광고 표면 파일은 이 저장소가 사이트를 가진 jekyll-git 에만 있습니다.")
+    return errors
+
+
 def validate_profile(profile):
     """프로필 오류 목록. 정규식은 실제로 컴파일해 본다."""
     errors = []
@@ -212,12 +310,19 @@ def validate_registry(reg, root=None):
     if not isinstance(blogs, list) or not blogs:
         return errors + ["blogs는 비어 있지 않은 배열이어야 합니다."]
 
+    defaults = reg.get("defaults")
+    if not isinstance(defaults, dict) or defaults.get("ads") != "off":
+        # ads 를 적지 않은 새 블로그가 광고를 켠(또는 켜려는) 상태로 시작하지 않게 한다. 바꾸는 것은 T3(정책)이다
+        errors.append("defaults.ads는 off여야 합니다 — ads를 적지 않은 새 블로그는 광고 없이 시작해야 합니다"
+                      "(품질 게이트를 통과하기 전에는 광고를 켜지 않는다, docs/SECURITY_GUARDRAILS.md G-C10).")
+
     shared = set(reg.get("shared_secrets", []))
     for name in shared:
         if not isinstance(name, str) or not _ENV_RE.match(name):
             errors.append(f"shared_secrets 항목이 올바른 이름이 아닙니다: {name!r}")
     seen_keys = set()
     secret_owner = {}
+    seen_channel_labels, seen_channel_keys = {}, {}
 
     for index, raw in enumerate(blogs):
         if not isinstance(raw, dict):
@@ -257,6 +362,7 @@ def validate_registry(reg, root=None):
                 errors.append(f"{label}: {field} 경로가 올바르지 않습니다: {value!r}")
             elif not (root / value).exists():
                 errors.append(f"{label}: {field} 파일이 없습니다: {value}")
+        errors.extend(_channel_errors(raw.get("channel"), blog, label, root, seen_channel_labels, seen_channel_keys))
 
         profile_name = blog.get("profile")
         if platform == "blogger" and not profile_name:
@@ -314,6 +420,7 @@ def validate_registry(reg, root=None):
 
         if not isinstance(blog.get("ad_surface"), bool):
             errors.append(f"{label}: ad_surface는 true/false여야 합니다.")
+        errors.extend(_ads_errors(blog, label))
         protected = blog.get("protected_paths")
         if not isinstance(protected, list) or not all(_safe_rel(p) for p in protected):
             errors.append(f"{label}: protected_paths는 상대 경로 배열이어야 합니다.")

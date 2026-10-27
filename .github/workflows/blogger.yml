@@ -1,5 +1,5 @@
-name: Blogger 글 자동 작성
-run-name: "Blogger 글 작성 · ${{ github.event_name == 'workflow_dispatch' && (inputs.auth_check && '수동(인증 점검만: 글 안 만듦)' || inputs.dry_run && '수동(연습: 저장·게시 안 함)' || (inputs.publish == 'publish' && '수동(즉시 게시)' || (inputs.publish == 'off' && '수동(저장소 파일만 저장)' || '수동(Blogger 초안함 업로드)'))) || '정기' }}"
+name: "[Blogger] 글 자동 작성(초안함 업로드)"
+run-name: "[Blogger] 글 작성 · ${{ github.event_name == 'workflow_dispatch' && (inputs.auth_check && '수동(인증 점검만: 글 안 만듦)' || inputs.dry_run && '수동(연습: 저장·게시 안 함)' || (inputs.publish == 'publish' && '수동(즉시 게시)' || (inputs.publish == 'off' && '수동(저장소 파일만 저장)' || '수동(Blogger 초안함 업로드)'))) || '정기' }}"
 
 # 레지스트리(pipeline/blogs.json)의 platform=blogger 블로그를 모두 처리한다.
 # 블로그를 추가하면 이 파일을 고치지 않고 레지스트리와 Secrets 만 추가하면 된다.
