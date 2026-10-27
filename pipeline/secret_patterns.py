@@ -21,6 +21,11 @@ SECRET_PATTERNS = [
     ("개인 키 블록", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY(?: BLOCK)?-----")),
     ("Slack 토큰", re.compile(r"\bxox[baprs]-[0-9A-Za-z\-]{10,}")),
     ("AWS 액세스 키", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+    # 텔레그램 봇 토큰: '<봇 번호 숫자>:<영숫자·-·_ 35자>'(실제 8~10자리·35자, 여유를 둬 6~12자리·30~50자). 이 서비스는 토큰이 요청 주소의 경로
+    # (https://api.telegram.org/bot<토큰>/sendMessage)에 들어가 오류 문구·스택트레이스에 주소째 새기 쉽다 — 알림 모듈(pipeline/notify.py)이
+    # 정확한 값 치환에 더해 이 모양으로도 한 번 더 가린다(docs/SECURITY_GUARDRAILS.md G-C11). 앞에는 제한이 없다 — 주소 경로에서는 'bot' 글자 바로 뒤에 붙는다
+    # (…/bot<토큰>/…). 비밀 절반 뒤에 영숫자·-·_ 가 더 이어지면 토큰이 아니라 다른 긴 문자열이라 제외한다.
+    ("Telegram 봇 토큰", re.compile(r"[0-9]{6,12}:[A-Za-z0-9_\-]{30,50}(?![A-Za-z0-9_\-])")),
     ("sk- 형식 API 키", re.compile(r"\bsk-[A-Za-z0-9]{32,}\b")),
     # 값이 환경변수 이름(대문자_숫자_밑줄)이면 시크릿이 아니라 레지스트리의 '이름 매핑'이다
     ("client_secret JSON 값", re.compile(r'"client_secret"\s*:\s*"(?![A-Z][A-Z0-9_]*")[^"]{8,}"')),

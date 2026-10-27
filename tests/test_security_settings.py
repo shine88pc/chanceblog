@@ -252,6 +252,67 @@ class NewKeyFormatTest(unittest.TestCase):
         self.assertEqual(hits, [])
 
 
+class TelegramTokenPatternTest(unittest.TestCase):
+    """텔레그램 봇 토큰 모양('<봇 번호 숫자>:<영숫자·-·_ 35자>', 요청 주소 경로 …/bot<토큰>/… 에 들어간다). 가짜 값은 런타임에 조합한다."""
+    LABEL = "Telegram 봇 토큰"
+
+    @staticmethod
+    def token(digits="1234567890", tail=None):
+        return digits + ":" + (tail if tail is not None else "AAF" + "k_-" * 5 + "Z" * 17)
+
+    def labels(self, text):
+        return [label for label, _ in find_secrets(text)]
+
+    def test_the_token_is_found_alone_in_a_url_path_and_in_a_sentence(self):
+        token = self.token()
+        for text in (token, f"/bot{token}/sendMessage", f"https://api.telegram.org/bot{token}/getMe", f"토큰은 {token} 입니다", f"x={token};",
+                     f"HTTPSConnectionPool(host='api.telegram.org'): Max retries exceeded with url: /bot{token}/sendMessage (Caused by …)"):
+            with self.subTest(text=text[:30]):
+                self.assertIn(self.LABEL, self.labels(text))
+
+    def test_real_world_lengths_are_covered(self):
+        for digits in ("123456", "12345678", "1234567890", "123456789012"):
+            for size in (30, 35, 50):
+                with self.subTest(digits=len(digits), size=size):
+                    self.assertIn(self.LABEL, self.labels(self.token(digits, "A" * size)))
+
+    def test_near_misses_are_not_flagged(self):
+        for text in ("12345:" + "A" * 35, "1234567890:" + "A" * 29, "1234567890:" + "A" * 51, "abcdefghij:" + "A" * 35, "1234567890: " + "A" * 35,
+                     "2026-10-27T12:34:56", "sha256:" + "a" * 64, "12:34:56", "ratio 3:1", "1234567890" + "A" * 35):
+            with self.subTest(text=text[:30]):
+                self.assertNotIn(self.LABEL, self.labels(text))
+
+    def test_the_whole_token_including_the_bot_prefix_in_a_url_is_masked(self):
+        token = self.token()
+        self.assertEqual(mask(f"Max retries exceeded with url: /bot{token}/sendMessage"), "Max retries exceeded with url: /bot***/sendMessage")
+        self.assertEqual(mask(token), "***")
+
+    def test_no_tracked_file_matches_the_pattern(self):
+        """오탐 점검: 추적 중인 모든 파일에서 이 패턴이 적중하지 않아야 한다(시험의 가짜 값은 런타임에 조합하므로 소스에 없다)."""
+        rx = dict(SECRET_PATTERNS)[self.LABEL]
+        hits = []
+        for rel in tracked_files():
+            path = ROOT / rel
+            try:
+                if path.stat().st_size > 2_000_000:
+                    continue
+                text = path.read_bytes().decode("utf-8", "ignore")
+            except OSError:
+                continue
+            if rx.search(text):
+                hits.append(rel)
+        self.assertEqual(hits, [])
+
+    def test_the_pattern_is_listed_once_and_the_validator_reports_a_committed_token_without_the_value(self):
+        self.assertEqual([label for label, _ in SECRET_PATTERNS].count(self.LABEL), 1)
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "note.md").write_text("토큰: " + self.token() + "\n", encoding="utf-8")
+            found = validate_repo.check_secret_patterns(tmp, ["note.md"])
+        self.assertEqual([(f.check, f.level) for f in found], [("SEC-2", "ERROR")])
+        self.assertNotIn(self.token(), found[0].message)
+        self.assertNotIn("AAF", found[0].message)
+
+
 class MaskTest(unittest.TestCase):
     @staticmethod
     def samples():
@@ -268,6 +329,7 @@ class MaskTest(unittest.TestCase):
             "Slack 토큰": "xox" + "b-" + "1" * 12,
             "AWS 액세스 키": "AKIA" + "Q" * 16,
             "sk- 형식 API 키": "sk-" + "a" * 40,
+            "Telegram 봇 토큰": "1234567" + "890" + ":" + "AAF" + "k_-" * 5 + "Z" * 17,
             "client_secret JSON 값": '"client_' + 'secret": "' + "k" * 12 + '"',
             "키/토큰 할당": 'password: "' + "k" * 24 + '"',
         }

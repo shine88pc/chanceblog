@@ -1666,14 +1666,21 @@ class WorkflowFileTest(unittest.TestCase):
         self.assertIn("workflow_dispatch", env["INBOX_DRY_RUN"])
         self.assertEqual(env["DEFAULT_BRANCH"], "${{ github.event.repository.default_branch }}")
         source = (_bootstrap.ROOT / "scripts" / "ops_inbox.py").read_text(encoding="utf-8")
+        notify_source = (_bootstrap.ROOT / "pipeline" / "notify.py").read_text(encoding="utf-8")
         for name in env:                                                  # 따옴표 모양(큰·작은)과 무관하게 스크립트가 그 이름을 읽는지
-            self.assertRegex(source, "[\"']" + name + "[\"']", f"스크립트가 읽지 않는 환경변수 {name}")
+            # 텔레그램 시크릿 두 개는 스크립트가 environ 째로 pipeline/notify.py 에 넘기고 그쪽이 읽는다(그 밖의 이름은 스크립트가 직접 읽는다)
+            reader = notify_source if name in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID") else source
+            self.assertRegex(reader, "[\"']" + name + "[\"']", f"스크립트가 읽지 않는 환경변수 {name}")
+        self.assertEqual(env["TELEGRAM_BOT_TOKEN"], "${{ secrets.TELEGRAM_BOT_TOKEN }}")
+        self.assertEqual(env["TELEGRAM_CHAT_ID"], "${{ secrets.TELEGRAM_CHAT_ID }}")
 
     def test_only_the_workflow_token_is_used_and_nothing_is_interpolated_into_the_shell(self):
         text = (WORKFLOWS / "ops-inbox.yml").read_text(encoding="utf-8")
         self.assertEqual(self.step["run"].strip(), "python scripts/ops_inbox.py")
         self.assertNotIn("${{", self.step["run"])
-        self.assertEqual(text.count("secrets."), text.count("secrets.GITHUB_TOKEN"))
+        # 시크릿은 워크플로 토큰과, 휴대폰(텔레그램) 알림용 두 개(같은 이름의 환경변수로만, 검증기 WF-13)뿐이다
+        self.assertEqual(text.count("secrets."), text.count("secrets.GITHUB_TOKEN") + text.count("secrets.TELEGRAM_BOT_TOKEN") + text.count("secrets.TELEGRAM_CHAT_ID"))
+        self.assertEqual((text.count("secrets.GITHUB_TOKEN"), text.count("secrets.TELEGRAM_BOT_TOKEN"), text.count("secrets.TELEGRAM_CHAT_ID")), (1, 1, 1))
         for forbidden in ("|| true", "continue-on-error", "pull_request_target", "write-all", "git push", "gh "):
             self.assertNotIn(forbidden, text, forbidden)
 
@@ -1682,7 +1689,7 @@ class WorkflowFileTest(unittest.TestCase):
         self.assertNotIn("pip install", text)
         # 스크립트와, 스크립트가 (직접·간접으로) 가져오는 저장소 모듈은 표준 라이브러리만 최상위에서 가져온다(함수 안의 지연 import 는 부를 때만 필요)
         for rel in ("scripts/ops_inbox.py", "pipeline/inbox.py", "pipeline/console.py", "pipeline/llm.py", "pipeline/registry.py",
-                    "pipeline/state.py", "pipeline/secret_patterns.py"):
+                    "pipeline/state.py", "pipeline/secret_patterns.py", "pipeline/notify.py"):
             tree = ast.parse((_bootstrap.ROOT / rel).read_text(encoding="utf-8"))
             imported = set()
             for node in tree.body:

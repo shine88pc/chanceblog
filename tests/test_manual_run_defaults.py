@@ -742,8 +742,9 @@ class UntouchedPathsTest(unittest.TestCase):
         # 승인 흐름(publish_flow: pr)을 더하면서 커밋 단계에 `&& steps.flow.outputs.flow != 'pr'` 한 조각이 붙었다. direct 에서 이 조건이 예전 식과
         # 같은 결과를 내는지는 test_chance_draft_workflow.py 가 모든 이벤트·입력 조합으로 대조한다.
         self.assertEqual(commit["if"], "${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) && steps.flow.outputs.flow != 'pr' }}")
-        deploy = next(s for s in steps if "gh workflow run pages.yml" in s.get("run", ""))
+        deploy = next(s for s in steps if "gh workflow run pages.yml" in str(s.get("run", "")))          # 마지막 단계는 텔레그램 알림 단계라 내용으로 찾는다
         self.assertEqual(deploy["if"], "steps.commit.outputs.pushed == 'true'")
+        self.assertEqual(steps.index(deploy), steps.index(commit) + 1)                                      # 커밋 바로 다음이 배포 요청이다(알림은 그 뒤)
 
     def test_blogger_keeps_its_cron_and_matrix_flow(self):
         wf = load("blogger.yml")

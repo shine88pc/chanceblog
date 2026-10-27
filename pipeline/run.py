@@ -27,6 +27,8 @@
                      draft = Blogger 초안함에 업로드(게시용 시크릿 필요, 하나도 없으면 파일만 저장)
                      publish(on·1·true·yes) = 즉시 게시(게시용 시크릿 필요, 없으면 종료 2)
   BLOGGER_TOPIC      주제 지정(수동 실행용). 프로필의 금지 주제 낱말에 걸리면 Gemini 를 부르기 전에 종료 2(TOPIC_BLOCKED)
+  TELEGRAM_BOT_TOKEN·TELEGRAM_CHAT_ID  둘 다 있으면 초안함 업로드·즉시 게시에 성공한 직후 휴대폰(텔레그램)으로 알린다(pipeline/notify.py). 없으면 아무 일도 하지
+                     않고 출력도 그대로다. 알림이 실패해도 게시 결과·이력·요약·종료 코드는 바뀌지 않는다(연습 실행·실패에서는 보내지 않는다)
   BLOGGER_AUTH_CHECK 1 이면 --auth-check 와 같다(워크플로의 '인증 점검만 실행' 입력). 정지(mode off) 중에도, 연습 실행이 켜져 있어도
                      실제로 점검한다(쓰기가 없다). 종료 코드: 0 통과 / 1 인증 만료·네트워크·API 오류 / 2 시크릿 없음·권한·주소 불일치
   GITHUB_TOKEN·GITHUB_REPOSITORY  (초안 패키지 전용) 초안 이슈를 읽고 만드는 데 쓴다. 워크플로가 넘기고, 오류 문구에서 가린다
@@ -40,7 +42,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from pipeline import gates
+from pipeline import gates, notify
 from pipeline.auth_check import auth_check, exit_code_for, label_for, safe_code, sentence_for
 from pipeline.console import md_cell, one_line, safe_output
 from pipeline.llm import LLMError, call_log_of, make_gemini_llm, purpose
@@ -177,6 +179,20 @@ def _summarize(environ, blog, code, text, ai_lines=()):
     """실행 요약 한 블록. 정상 건너뜀·경고·실패 모두 같은 모양으로 남긴다(성공 경로는 아래에서 따로 쓴다).
     ai_lines: 이번 실행의 Gemini 호출 기록 줄(무료 한도를 나눠 쓰므로 실패·예외로 끝난 실행에서도 남긴다)."""
     _write_summary(environ, f"{summary_head(blog)}\n- 결과: **{code}** — {text}" + "".join(f"\n- {line}" for line in ai_lines))
+
+
+def _alert_result(environ, out, blog, status, title, url):
+    """게시·초안함 업로드 성공을 텔레그램으로 알린다(보조 알림, pipeline/notify.py). 시크릿 TELEGRAM_BOT_TOKEN·TELEGRAM_CHAT_ID 가 없으면 아무것도 하지 않고
+    출력도 만들지 않는다(기존 동작과 바이트 단위로 같다). 알림이 실패하거나 예외가 나도 게시 결과·이력·요약·종료 코드는 바뀌지 않는다 —
+    로그에 한 줄과 고정 문장 ::warning:: 만 더한다(토큰·채팅 ID 는 어디에도 쓰지 않는다)."""
+    try:
+        notifier = notify.Notifier(environ)
+        if not notifier.enabled:
+            return
+        result = notifier.notify_blogger_result(status, title, url=url, blog_label=blog["channel"]["label"], extra_prefixes=(blog["url"],))
+        notify.log_result(result, out)
+    except Exception as exc:  # noqa: BLE001 - 알림은 보조다: 어떤 예외도 글 게시 결과를 바꾸지 못한다(클래스 이름만 남긴다. 예외 문구에 요청 주소가 있을 수 있다)
+        out(f"[참고] 텔레그램 알림 중 예기치 않은 오류({type(exc).__name__}) — 게시 결과에는 영향이 없습니다")
 
 
 def _checked_result(result, as_draft=False):
@@ -810,6 +826,8 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
         # 어댑터가 모은 참고 사항(예: 중복 확인 실패)은 성공·실패와 상관없이 로그에 남긴다. 외부 문구라 한 줄로 접고 비밀을 가린다
         for note in getattr(publisher, "notes", None) or ():
             out(f"[참고] {one_line(redact(str(note), secret_values))}")
+        if status in ("draft_uploaded", "posted"):
+            _alert_result(environ, out, blog, status, post["title"], url)
     else:
         out("  Blogger 에는 올리지 않고 저장소 파일에만 초안을 저장합니다.")
 

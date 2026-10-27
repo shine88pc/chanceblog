@@ -494,10 +494,14 @@ class ChanceSplitTest(unittest.TestCase):
                 if s.get("id") != "flow" and "pipeline.draft_flow" not in s.get("run", "")]
 
     def test_steps_are_identical_except_the_fix_images_switch(self):
-        a = [self.normalized(s) for s in self.chance_direct_steps()]
+        # chanceblog.yml 에만 새 글 텔레그램 알림 단계가 더 있다(이미지 교체는 새 글이 없어 알리지 않는다) — 그 단계를 뺀 나머지가 같아야 한다
+        alert = [s for s in self.steps(self.chance) if "pipeline.notify" in str(s.get("run", ""))]
+        self.assertEqual([s["name"] for s in alert], ["텔레그램 알림(새 글)"])
+        a = [self.normalized(s) for s in self.chance_direct_steps() if s not in alert]
         b = [self.normalized(s, drop_env=("FIX_IMAGES",)) for s in self.steps(self.fix)]
         self.assertEqual(len(a), 6)  # checkout · setup-python · 의존성 · 생성기 · 커밋 · Pages 배포 요청
         self.assertEqual(a, b)
+        self.assertNotIn("pipeline.notify", " ".join(str(s.get("run", "")) for s in self.steps(self.fix)))
 
     def test_the_draft_flow_added_exactly_two_steps_to_chanceblog(self):
         added = [s for s in self.steps(self.chance) if s.get("id") == "flow" or "pipeline.draft_flow" in s.get("run", "")]
@@ -536,6 +540,8 @@ PREVIOUS_NAMES = {
     # 새로 만든 채널 워크플로(2026-10-27)는 접두사 없던 시절이 없다. 문서가 `[구분]` 을 빼고 인용하지 않게 접두사 없는 모양을 같은 표에 둔다
     "티스토리 초안 패키지 만들기": "[티스토리] 초안 패키지 만들기",
     "네이버 초안 패키지 만들기": "[네이버] 초안 패키지 만들기",
+    # 처음부터 접두사와 함께 만든 워크플로(옛 이름 없음): 접두사 없이 이름만 인용하는 안내(예: `텔레그램 알림 시험`)가 남지 않게 접두사 뗀 모양을 둔다
+    "텔레그램 알림 시험": "[공통] 텔레그램 알림 시험",
 }
 # 이전 이름 인용 검색(find_previous_name_quotes)에서 빼는 곳(이유를 적는다). 안내 문서·코드·워크플로는 지금 이름으로 인용해야 하고,
 # 아래는 날짜가 붙은 기록이거나 총괄이 따로 갱신하는 현황·브리핑 문서이거나 시험 자료다. '/' 로 끝나면 폴더 전체다.
@@ -589,6 +595,7 @@ class NamePrefixTest(unittest.TestCase):
         "ops-inbox.yml": "[공통] 확인 필요 모음",
         "tistory.yml": "[티스토리] 초안 패키지 만들기",
         "naver.yml": "[네이버] 초안 패키지 만들기",
+        "telegram-test.yml": "[공통] 텔레그램 알림 시험",
     }
 
     def test_every_workflow_has_its_approved_name(self):

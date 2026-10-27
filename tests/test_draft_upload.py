@@ -1077,8 +1077,11 @@ class WorkflowPublishInputTest(unittest.TestCase):
         self.assertEqual({k: v for k, v in env.items() if k.startswith("PIPELINE_SECRET_")}, expected)
         for key, value in env.items():
             if "secrets." in str(value) or "secrets[" in str(value):
-                self.assertTrue(key.startswith("PIPELINE_SECRET_"), key)     # 시크릿은 이 이름들로만 나간다
-        self.assertEqual(set(env) - set(expected), {"BLOG_KEY", "BLOGGER_TOPIC", "BLOGGER_PUBLISH", "BLOGGER_AUTH_CHECK"})
+                # 시크릿은 이 이름들로만 나간다: 블로그 시크릿은 PIPELINE_SECRET_*, 텔레그램 알림용 둘은 같은 이름의 환경변수(검증기 WF-13)
+                self.assertTrue(key.startswith("PIPELINE_SECRET_") or key in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"), key)
+        self.assertEqual(set(env) - set(expected), {"BLOG_KEY", "BLOGGER_TOPIC", "BLOGGER_PUBLISH", "BLOGGER_AUTH_CHECK", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"})
+        for name in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"):
+            self.assertEqual(env[name], "${{ secrets.%s }}" % name)
 
     def test_permissions_and_the_generate_condition_did_not_widen(self):
         self.assertEqual(self.data["permissions"], {"contents": "read"})

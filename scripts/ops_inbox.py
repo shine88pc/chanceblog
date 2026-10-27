@@ -15,6 +15,8 @@
       GITHUB_REPOSITORY_OWNER  담당자·@멘션 대상(기본: 저장소 이름의 소유자)
       INBOX_MAX_API_CALLS   GitHub API 호출 상한(기본: 토큰이 있으면 150, 없으면 25. 24~1000 사이의 숫자만 받고 그 밖의 값은 기본값을 쓴다)
       GITHUB_STEP_SUMMARY   Actions 실행 요약 파일(있으면 같은 마크다운을 덧붙인다)
+      TELEGRAM_BOT_TOKEN·TELEGRAM_CHAT_ID  둘 다 있으면 코멘트를 쓰는 새 해야 할 일을 휴대폰(텔레그램)으로도 한 통 알린다(pipeline/notify.py).
+                            없으면 아무 일도 하지 않고 출력도 그대로다. 알림이 실패해도 코멘트·이슈·종료 코드는 바뀌지 않는다
 토큰이 없으면(로컬) 읽기 전용으로 마크다운만 출력한다(인증 없는 공개 API 는 시간당 60회 제한). 열린 이슈 목록(워치독 알림용)은 읽지만 모음 이슈는 읽지도 쓰지도 않는다.
 
 한 소스(이슈·PR·실행 기록·주석·이력 파일)를 읽지 못해도 멈추지 않고 '조회 실패' 항목으로 남긴 뒤 계속한다.
@@ -35,7 +37,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from pipeline import inbox  # noqa: E402
+from pipeline import inbox, notify  # noqa: E402
 from pipeline.console import safe_output  # noqa: E402
 from pipeline.registry import ROOT, RegistryError, load_registry, merged_blog  # noqa: E402
 from pipeline.state import StateError, read_json_list  # noqa: E402
@@ -513,7 +515,30 @@ def post_comment(client, number, text, out):
         return False
 
 
-def sync_issue(client, items, visible, failures, owner, repo_url, dry, out):
+def send_alert(alert, new_items, issue_url, out):
+    """휴대폰 알림 콜백을 안전하게 부른다. 콜백이 없으면(시크릿 없음) 아무것도 하지 않는다. 어떤 예외도 코멘트 흐름으로 올라가지 않는다."""
+    if alert is None:
+        return
+    try:
+        alert(new_items, issue_url)
+    except Exception as exc:  # noqa: BLE001 - 알림은 보조다(클래스 이름만 남긴다. 예외 문구에 요청 주소가 있을 수 있다)
+        out(f"[참고] 텔레그램 알림 중 예기치 않은 오류({type(exc).__name__}) — 모음 이슈에는 영향이 없습니다")
+
+
+def make_alert(environ, out):
+    """텔레그램 시크릿(TELEGRAM_BOT_TOKEN·TELEGRAM_CHAT_ID)이 둘 다 있으면 휴대폰 알림 콜백을, 없으면 None 을 돌려준다(None 이면 이 스크립트의 출력은 예전과 같다).
+    콜백은 코멘트와 같은 새 항목의 제목 줄(inbox.alert_lines)을 평문 한 통으로 보낸다."""
+    notifier = notify.Notifier(environ)
+    if not notifier.enabled:
+        return None
+
+    def alert(new_items, issue_url):
+        result = notifier.notify_ops_alert(inbox.alert_lines(new_items), issue_url, count=len(new_items))
+        notify.log_result(result, out)
+    return alert
+
+
+def sync_issue(client, items, visible, failures, owner, repo_url, dry, out, alert=None):
     """이슈 1개를 만들거나 고친다. 돌려주는 값: {'action': ..., 'number': 번호|None, 'new': 새 action 항목 수, 'comment': ...}.
 
     - 본문은 내용(보이는 마크다운의 해시)이나 알린 action id 가 바뀐 때만 PATCH 한다.
@@ -523,7 +548,10 @@ def sync_issue(client, items, visible, failures, owner, repo_url, dry, out):
       복구 쓰기까지 실패했을 때 id 가 표식에 남아 첫 알림이 영영 사라진다. 성공한 뒤의 쓰기가 실패하면 한 번 더 알리게 된다(놓치는 것보다 낫다).
     - 사람이 닫은 이슈는 새 action 항목이 생겼을 때만 코멘트와 함께 다시 연다. 그 밖의 변화는 닫힌 채로 본문만 고쳐 둔다
       (본문 수정은 알림이 없고, 표식이 현실을 따라가야 '해소됐다가 다시 생긴' 항목을 새 항목으로 알릴 수 있다).
-    - 연습(dry)이면 읽기만 하고 아무것도 쓰지 않는다."""
+    - 연습(dry)이면 읽기만 하고 아무것도 쓰지 않는다.
+    - alert(새 항목, 이슈 주소)는 휴대폰 알림(텔레그램) 콜백이다. 코멘트를 쓰려고 할 때마다(같은 새 항목 판정, 연습 제외) 코멘트 성공 여부와 무관하게 부르고,
+      알림이 실패하거나 예외를 던져도 코멘트·표식·결과·종료 코드는 바뀌지 않는다(서로 영향을 주지 않는다). 코멘트가 실패해 다음 점검이 같은 항목을 다시 알릴 때는
+      휴대폰 알림도 한 번 더 간다 — 위의 '놓치는 쪽보다 한 번 더 알리는 쪽이 낫다'와 같은 원칙이다."""
     issue = find_inbox_issue(client)
     marker = inbox.parse_marker(issue.get("body")) if issue else None
     new_ids, kept_ids = inbox.plan_notice(items, marker.items if marker else None, failures)
@@ -548,6 +576,7 @@ def sync_issue(client, items, visible, failures, owner, repo_url, dry, out):
         if new_items:
             ok = post_comment(client, number, inbox.comment_text(owner, new_items, f"{repo_url}/issues/{number}"), out)
             result["comment"] = "posted" if ok else "failed"
+            send_alert(alert, new_items, f"{repo_url}/issues/{number}", out)
             if ok:  # 알렸으니 이제 표식에 id 를 적는다(실패하면 다음 점검이 한 번 더 알린다)
                 client.patch(f"/issues/{number}", {"body": inbox.build_body(visible, kept_ids)})
         return result
@@ -557,6 +586,7 @@ def sync_issue(client, items, visible, failures, owner, repo_url, dry, out):
     if new_items:
         ok = post_comment(client, number, inbox.comment_text(owner, new_items, f"{repo_url}/issues/{number}"), out)
         result["comment"] = "posted" if ok else "failed"
+        send_alert(alert, new_items, f"{repo_url}/issues/{number}", out)
         if not ok:
             final_ids = [i for i in kept_ids if i not in new_ids]
     if reopen or inbox.needs_update(marker, visible, final_ids):
@@ -663,7 +693,7 @@ def run(environ=None, client=None, now=None, root=ROOT, out=print, sleep=time.sl
     if callable(release):
         release()                                   # 쓰기 단계에서는 남겨 둔 호출도 쓴다
     try:
-        result = sync_issue(client, items, visible, failures, owner, repo_url, dry, out)
+        result = sync_issue(client, items, visible, failures, owner, repo_url, dry, out, alert=make_alert(environ, out))
     except ApiError as exc:
         out(ERROR_ISSUE_FAILED)
         out(f"[이슈 오류 이유] {inbox.ext(exc, 200)}")
