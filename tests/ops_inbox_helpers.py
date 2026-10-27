@@ -108,6 +108,25 @@ def make_entry(status="posted", generated_at=None, reasons=(), date=None, slot=N
 SECRETS_REASON = "[SECRETS] 게시 시크릿 미등록: blog_id, client_id, client_secret, refresh_token"
 
 
+def make_draft_raw(number, title="[초안][티스토리] 시험 글", channel="티스토리", hours=30, pull=False, extra_labels=(), state="open", login=BOT,
+                   assoc="CONTRIBUTOR", draft_label=True, created=None):
+    """GitHub 이슈(또는 pull=True 면 PR) 객체 모양의 초안: 라벨 `초안` + `채널:<channel>`(channel 이 None 이면 채널 라벨 없음)."""
+    labels = (["초안"] if draft_label else []) + ([f"채널:{channel}"] if channel else []) + list(extra_labels)
+    return make_issue(number, title, state=state, login=login, assoc=assoc, labels=labels, created=created or ago(hours=hours), pull=pull)
+
+
+def make_draft(number, title="[초안][티스토리] 시험 글", channel="티스토리", **kw):
+    """규칙이 읽는 평평한 초안 dict(inbox.normalize_draft 결과)."""
+    from pipeline import inbox
+    return inbox.normalize_draft(make_draft_raw(number, title, channel, **kw))
+
+
+def channel_blog(key, label, platform="tistory", mode="package", name=None, history=None, **extra):
+    """초안 현황 시험용 레지스트리 블로그(기본값 병합본 모양): channel.label 이 있다."""
+    blog = make_blog(key, name or label, mode, platform, history=history, channel={"key": key, "label": label}, **extra)
+    return blog
+
+
 # ---------------------------------------------------------------- 가짜 GitHub
 class FakeGitHub:
     def __init__(self, max_calls=1000, reserve=0):
@@ -121,7 +140,8 @@ class FakeGitHub:
         self.approvals = []
         self.jobs = {}                 # 실행 id → job 목록
         self.annotations = {}          # job id → 주석 목록
-        self.labels = set()
+        self.labels = set()            # 저장소에 있는 라벨 이름(GET /labels 가 돌려주고, POST /labels 가 더한다)
+        self.label_payloads = {}       # POST /labels 로 만든 라벨 이름 → 보낸 내용(색·설명)
         self.comments = {}             # 이슈 번호 → [본문]
         self.fail = []                 # [(정규식, ApiError)] — "METHOD /경로?쿼리" 에 맞으면 그 오류를 낸다(쓰기는 쿼리 없음)
         self.reject_assignees = False  # True 면 담당자가 든 이슈 생성을 422 로 거부
@@ -188,6 +208,8 @@ class FakeGitHub:
         match = re.fullmatch(r"/check-runs/(\d+)/annotations", path)
         if match:
             return copy.deepcopy(self.annotations.get(int(match.group(1)), []))
+        if path == "/labels":
+            return [{"name": name, "color": "ededed"} for name in sorted(self.labels)][:params.get("per_page", 30)]
         raise AssertionError(f"가짜 GitHub 가 모르는 GET {path}")
 
     def _list_issues(self, params):
@@ -200,15 +222,17 @@ class FakeGitHub:
             if "creator" in params and issue["user"]["login"] != params["creator"]:
                 continue
             out.append(issue)
-        return out[:params.get("per_page", 30)]
+        per_page, page = params.get("per_page", 30), params.get("page", 1)         # GitHub 처럼 쪽은 1부터 센다
+        return out[(page - 1) * per_page:page * per_page]
 
     # --- 쓰기
     def post(self, path, payload):
         self._enter("POST", path, payload)
         if path == "/labels":
-            if payload["name"] in self.labels:
+            if payload["name"].casefold() in {name.casefold() for name in self.labels}:         # GitHub 라벨 이름은 대소문자를 구분하지 않고 하나뿐이다
                 raise ops_inbox.ApiError("HTTP 422: already_exists", status=422)
             self.labels.add(payload["name"])
+            self.label_payloads[payload["name"]] = copy.deepcopy(payload)
             return {"name": payload["name"]}
         if path == "/issues":
             if self.reject_assignees and payload.get("assignees"):
@@ -247,6 +271,24 @@ SYNTHETIC_REGISTRY = json.dumps({
          "state": {"history": "blogger_history.json", "content_dir": "_blogger_drafts"},
          "secrets": {"llm_api_key": "GEMINI_API_KEY", "blog_id": "BLOGGER_BLOG_ID", "client_id": "BLOGGER_CLIENT_ID",
                      "client_secret": "BLOGGER_CLIENT_SECRET", "refresh_token": "BLOGGER_REFRESH_TOKEN"}},
+    ]}, ensure_ascii=False)
+
+
+# 채널(channel.label)이 있는 가짜 레지스트리: Chance(자동 공개)·Blogger(초안함 업로드)·티스토리(패키지)·네이버(정지). 초안 현황 시험용이다.
+CHANNEL_REGISTRY = json.dumps({
+    "schema_version": 1,
+    "defaults": {"mode": "draft"},
+    "blogs": [
+        {"key": "chance", "name": "Chance_Blog", "channel": {"key": "chance", "label": "Chance"}, "platform": "jekyll-git", "mode": "auto",
+         "state": {"history": "history.json", "content_dir": "_posts"}, "secrets": {"llm_api_key": "GEMINI_API_KEY"}},
+        {"key": "blogger_macat", "name": "Blogger (macat0722)", "channel": {"key": "blogger", "label": "Blogger"}, "platform": "blogger", "mode": "draft",
+         "state": {"history": "blogger_history.json", "content_dir": "_blogger_drafts"},
+         "secrets": {"llm_api_key": "GEMINI_API_KEY", "blog_id": "BLOGGER_BLOG_ID", "client_id": "BLOGGER_CLIENT_ID",
+                     "client_secret": "BLOGGER_CLIENT_SECRET", "refresh_token": "BLOGGER_REFRESH_TOKEN"}},
+        {"key": "tistory_x", "name": "티스토리 시험", "channel": {"key": "tistory", "label": "티스토리"}, "platform": "tistory", "mode": "package",
+         "state": {"history": "tistory_history.json", "content_dir": "_tistory_drafts"}, "secrets": {"llm_api_key": "GEMINI_API_KEY"}},
+        {"key": "naver_x", "name": "네이버 시험", "channel": {"key": "naver", "label": "네이버"}, "platform": "naver", "mode": "off",
+         "state": {"history": "naver_history.json", "content_dir": "_naver_drafts"}, "secrets": {"llm_api_key": "GEMINI_API_KEY"}},
     ]}, ensure_ascii=False)
 
 

@@ -7,6 +7,46 @@
 
 ---
 
+## [2026-10-27] Claude – 초안 현황판(확인 필요 모음 안 구역)·초안 모델·초안 이벤트 갱신·Blogger 요약 `[채널]` 머리 (작업요청서 5 PR-B, T2, D-72)
+
+**작업자**: Claude (구현 세션, 독립 검증은 별도 세션)
+**대상**: 공통 (확인 필요 모음: `pipeline/inbox.py`·`scripts/ops_inbox.py`·`ops-inbox.yml`) + Blogger 러너의 실행 요약 첫 줄(`pipeline/run.py`)
+**등급**: T2(코드·시험·워크플로 트리거·문서). 광고 표면(`index.html`·`_config.yml`)·`mode`·시크릿·레지스트리·다른 워크플로 9개는 바꾸지 않았다. 승인 근거: 운영자가 2026-10-27 채팅으로 계획 보고의 추천을 전부 승인("추천대로 진행해줘") — D3(초안 현황판은 확인 필요 모음 #22 안의 구역 + 초안 이슈가 생기거나 닫힐 때 즉시 갱신)와 계획 §5(Blogger 실행 요약 첫 줄에 `[채널] 블로그 이름`). D1 (a)·D4·D5 같은 T3 항목은 이 PR 에 없다(초안을 만드는 쪽은 작업 C·E).
+**목적**: 운영자가 "이슈 하나만 보면 된다"는 `[운영] 확인 필요 모음`(#22)에서 채널별 발행 대기 초안을 한눈에 보게 한다. 초안 모델(라벨 규칙)을 이 작업이 정해 작업 C(티스토리·네이버 초안 이슈)·E(Chance 승인 PR)가 따른다.
+**브랜치**: `ai/claude/draft-board`(`origin/ai/claude/channel-names` 5c57a7c 에서 시작 = origin/main e71a6ec + 작업 A). PR 생성·병합·Actions 실행은 하지 않았다(총괄이 처리).
+
+### 한 일
+- **초안 모델**(`pipeline/inbox.py`, 순수 함수): 초안 1건 = 이슈 1개 또는 PR 1개. 라벨 `초안`(대기)·`채널:<채널 라벨>`(레지스트리 `channel.label` 에서 만든 글자)·`폐기`(쓰지 않음), 닫으면 발행 완료 또는 폐기. 센다 = 열림 · 라벨 `초안` · 라벨 `폐기` 없음 · 작성자가 봇이거나 소유자·멤버·협업자(낯선 사람의 위장은 안 센다). `normalize_draft`·`pending_drafts`·`draft_label_specs`.
+- **항목**(`draft_items`): 열린 초안 이슈가 3일 이하면 action(`draft:<번호>:wait`, 새 항목이라 코멘트 알림), 넘으면 check(`draft:<번호>:stale`, 알림 없음). PR 초안은 열린 PR 규칙이 이미 한 줄로 다루므로 항목을 또 만들지 않는다(같은 PR 의 이중 알림 방지). 초안 목록 조회가 실패하면 이미 알린 `draft:` id 를 표식에 남긴다(`SOURCE_PREFIXES["drafts"]`).
+- **초안 현황 표**(`draft_board`·`board_rows`, `render(board=…)`): 본문 머리 바로 아래. 채널(레지스트리 순서, 대기 0 이어도 유지) | 대기 초안 | 가장 오래된(일수) | 최신 초안(링크). `mode: off` → `정지`, 승인 흐름이 아닌 Chance(`publish_flow` 없음·`direct`) → `자동 공개`, Blogger → 이력의 `draft_uploaded` 최근 14일 대략치(`N (대략)`, 공개 여부는 Blogger 쪽 사실이라 모른다고 표 아래에 적음), 조회 실패 → `조회 실패`(0 이 아님), 레지스트리에 없는 채널 라벨·채널 라벨 없는 초안 → 별도 줄(조용히 사라지지 않게). 표 아래 마지막 줄에 휴대폰 필터 링크(`is:open label:초안 label:"채널:<라벨>"` 퍼센트 인코딩; 평범한 채널 라벨일 때만). 외부 글(제목·라벨)은 기존 `ext()` 무력화를 거치고 `|` 는 전각으로 바꾼다.
+- **읽기·쓰기**(`scripts/ops_inbox.py`): `fetch_drafts`(`GET /issues?state=open&labels=초안`, 100건씩 최대 3쪽, 실패는 전부 버리고 `drafts` 조회 실패 하나), `ensure_draft_labels`(없는 라벨만, 색·설명 고정, 이슈를 쓴 뒤·실패해도 점검 결과 불변·연습/토큰 없음은 안 만듦).
+- **워크플로**(`ops-inbox.yml`): `issues`·`pull_request`(opened·closed·reopened·labeled·unlabeled) 트리거, job `if` 가 `초안` 라벨(또는 방금 뗀 `초안` 라벨)이 있는 것만·PR 은 이 저장소의 브랜치에서 온 것만 통과, PR 이벤트는 기본 브랜치 코드를 체크아웃, 이벤트 값은 셸·환경변수에 넣지 않음, `concurrency` 는 job 수준으로 옮김, `timeout-minutes` 10 → 12, 실행 제목에 `이슈 변경(초안만 점검)`·`PR 변경(초안만 점검)`. 권한은 그대로. 다른 워크플로 9개는 그대로.
+- **Blogger 실행 요약**(`pipeline/run.py`): 요약 첫 줄만 `### [채널 라벨] 블로그 이름`(`summary_head()`, 예 `### [Blogger] Blogger (macat0722)`; 3곳). 나머지 줄은 한 글자도 바꾸지 않았다.
+- **문서**: `docs/OPS_INBOX.md`(§1·§2 자주 묻는 일·§3 규칙표·**§3-1 초안 모델과 표**·§4·§5 한계 11~14·§6 이벤트 트리거 보안·§7·§8 켠 뒤 확인·§9), `docs/ACTIONS_GUIDE.md`(1장·표·시간표·6-3·6-10·3-14), `docs/ARCHITECTURE.md`(§2-1 행·§4-1·**§4-2-1**), `HANDLER.md`, `docs/SECURITY_GUARDRAILS.md`(G-O8), `docs/DEFECT_REGISTER.md`(D-72).
+- **시험**: 새 `tests/test_ops_inbox_drafts.py` 162개(초안 모델·항목·표·`render(board)`·읽기·라벨·전체 실행·워크플로 `if` 를 GitHub 규칙대로 계산하는 해석기·문서↔코드), `tests/test_run.py` `SummaryHeadTest` 9개, 기존 시험 갱신(요약 첫 줄 5곳·실행 제목·라벨 시험 범위·워크플로 트리거·시간 상한), 가짜 GitHub(`ops_inbox_helpers.py`)에 `GET /labels`·쪽 넘김·초안·채널 레지스트리.
+
+### 알아 둘 것
+- **저장소 기본 토큰(`GITHUB_TOKEN`)이 만든 이슈·PR 은 `issues`·`pull_request` 이벤트로 워크플로를 시작시키지 못한다**(GitHub 규칙). 그래서 '이슈가 열릴 때 즉시'는 사람이 한 조작(닫기·라벨·병합)에서만 돈다. 자동 초안을 만드는 워크플로(작업 C·E)는 만든 직후 `ops-inbox.yml` 을 `workflow_dispatch` 로 불러야 한다(`pages.yml`·`guardrails.yml` 을 부르는 것과 같은 이유). 계획 보고가 놓친 사실이라 D-72 에 적었다. Actions 실행은 하지 못해 `opened`·`labeled` 중 어느 이벤트가 도는지는 병합 뒤 관측한다.
+- **'가장 오래된' 칸은 하루에 한 번 바뀐다** — 점검 시각을 본문에 넣지 않는다는 기존 원칙의 유일한 예외다(대기 초안이 있는 채널마다 하루 한 번 본문이 다시 쓰인다, 알림 없음).
+- **Blogger 실행 요약 본문의 안내 문구는 바꾸지 않았다**: `draft_uploaded` 요약에는 이미 "Blogger 초안함에 올렸습니다 … Blogger 화면에서 확인한 뒤 직접 게시하세요" 줄이 있다. '대시보드 → 초안'으로 더 구체화하면 요약 줄 diff 가 생겨 "첫 줄 외 diff 0" 증명과 충돌해 그대로 두고, 대신 모음의 표 아래 안내(정지가 아닌 Blogger 채널이 있을 때)에 같은 말을 적었다.
+- 건너뜀 실행: 모든 이슈·PR 이벤트가 이 워크플로의 실행을 하나씩 만들고 `초안` 라벨이 없으면 job 이 건너뜀으로 끝난다(정상). `concurrency` 를 job 수준으로 옮겼는데, 건너뛴 job 이 줄에 서지 않는다는 것은 GitHub 동작에 대한 지식이라 병합 뒤 관측이 필요하다(틀렸어도 최악은 다음 예약 때까지 갱신이 늦어지는 것).
+- 이 PR 은 `WORKLOG.md` 맨 위와 `docs/DEFECT_REGISTER.md` 의 D-66 아래에 쓴다 — 같은 자리에 쓰는 작업 C·E 의 브랜치와 병합 때 충돌한다(총괄이 푼다).
+- 독립 검증 8건(작업 A, N1·N3~N7)은 이 작업 범위와 겹치지 않아 다루지 않았다.
+
+### 검증 증거
+- **L1**: `python -X utf8 -m unittest discover -s tests` — 기준 5c57a7c **2217개 통과**(505.2초) → 브랜치 **2388개 통과**(867.2초 — 다른 작업과 CPU 를 나눠 기준보다 느리다, 새 시험 171개 = `test_ops_inbox_drafts` 162 + `test_run` 9). 네트워크 없이 돈다.
+- **L0**: `python scripts/validate_repo.py --base origin/ai/claude/channel-names` 오류 0·경고 1(LIQUID-1, main 과 같음), `actionlint` 1.7.12 워크플로 10개 지적 0, `pyflakes` 새 경고 0(기준과 같은 16건), `vermin --target=3.10-` 최소 3.10, 3.12 전용 f-string 검사 0건, `git diff --check` 0.
+- **동작 불변**: ① Blogger 러너 — 가짜 게시자·LLM 으로 **2155개 시나리오**(입력 조합 전수 1728 = 모드 3 × `BLOGGER_PUBLISH` 9 × 연습 2 × 시크릿 16 × 하루 상한 2, 인증 점검만 192, 그 밖 235 = 인증·게시 실패 분류·가짜 LLM 5종 × 언어 2 × 모드 3·수동 주제·일시정지·이력 상태·쓰기 실패 9·설정 오류·실제 명령줄 9)에서 종료 코드·로그·이력 파일·초안 파일·가짜 게시자 호출·LLM 호출이 기준과 바이트 단위로 같고 **요약만 첫 줄 하나**(`### blogger_macat` → `### [Blogger] Blogger (macat0722)`)가 다르다(요약이 있는 2144개 전부, 약 158만 바이트 비교, 비교기는 한 글자 변조 5곳을 모두 잡는다). ② CLI 21개(`pipeline.registry`·`plan`·`run`·`validate_repo --json`) 63개 출력 파일 바이트 동일. ③ 확인 필요 모음 — 채널 없는 레지스트리·초안 없음 입력의 12개 시나리오 22번 실행에서 이슈 본문·코멘트·상태·실행 요약·로그·종료 코드가 기준과 같고 다른 것은 호출 수 문구·초안 조회·라벨 호출뿐. ④ 워크플로 YAML — `ops-inbox.yml` 하나만 바뀌었고 `yaml.safe_load` 차이는 의도한 8곳(`on` 둘, `run-name`, `if`, 체크아웃 `ref`, `timeout-minutes`, `concurrency` 이동 둘), 나머지 9개 워크플로는 diff 0.
+- **변이(직접 돌림)**: 서로 다른 변이 138개(`pipeline/inbox.py` 72·`scripts/ops_inbox.py` 28·`pipeline/run.py` 10·워크플로 21·문서↔코드 7), 처음에 7개가 살아남았고(시험의 허공 단언·무력화 누락·동시각 최신 선택·시각 모름·상수 고정·키 대체 접기) 시험을 보강해 모두 탐지됐다. 동등 변이 없음(의미 없는 변이 하나는 정의에서 뺐다).
+- **연습 실행 출력**(`INBOX_DRY_RUN`, 가짜 GitHub): 실제 레지스트리(병합 직후 #22 모양), 티스토리 초안 둘·Blogger 초안함 둘이 있는 가짜 레지스트리, 초안 목록 조회 실패, 초안 0건 — 모두 쓰기 호출 0회로 끝난다(PR 설명·보고서에 붙임).
+
+### 못 한 검증
+- **Actions 에서의 실제 실행**: #22 에 표가 보이는지, 초안 이슈를 열고 닫을 때 곧바로 갱신되는지(그리고 `opened`·`labeled` 중 어느 이벤트가 도는지), 라벨이 만들어지는지, 건너뜀 실행의 모양, job 수준 `concurrency`, 모바일 필터 링크(이슈·PR 목록), Blogger 요약 첫 줄(정지 중이라 첫 실제 업로드 때). 병합 뒤 `docs/OPS_INBOX.md` §8 의 확인 목록으로 본다.
+- 3.10 에서 직접 돌리지 못했다(로컬은 3.12 뿐) — `vermin` 과 f-string 검사로 대신했다.
+- 독립 검증은 별도 세션 몫이다.
+
+---
+
 ## [2026-10-27] Claude – `mode: package`·초안 패키지(GitHub 이슈) 어댑터·티스토리/네이버 래퍼 워크플로 (작업요청서 5 PR-C, T2·T3, 레지스트리 항목 없음 = 대상 0개)
 
 **작업자**: Claude (구현 세션, 독립 검증은 별도 세션)

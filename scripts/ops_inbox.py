@@ -4,9 +4,12 @@
 운영자가 해야 할 일·확인할 일(워치독 알림, 병합 대기 PR, 실패한 워크플로, 승인 대기 실행, 일시정지, Blogger 게시 설정 등)을
 한 곳에 모은다. 판단 규칙은 pipeline/inbox.py(순수 함수), 이 스크립트는 입출력만 맡는다. 설명서: docs/OPS_INBOX.md
 
+초안 현황(작업요청서 5 PR-B): 라벨 `초안`이 붙은 열린 이슈·PR 을 읽어(최대 3쪽 × 100건) 채널별 표와 항목을 만들고, 초안 모델의 라벨(초안·폐기·채널:<채널>)이
+저장소에 없으면 점검 끝에 만든다(색·설명 고정, 실패해도 점검 결과에는 영향이 없다). 워크플로는 초안 이슈·PR 이 열리고 닫히고 라벨이 바뀔 때도 이 스크립트를 부른다.
+
 필요 환경변수: GITHUB_REPOSITORY(소유자/저장소)
 쓰기에 필요: GITHUB_TOKEN (권한: contents:read, actions:read, checks:read, pull-requests:read, issues:write)
-옵션: INBOX_DRY_RUN=true    이슈·코멘트를 쓰지 않는다(읽기만 하고 할 일을 출력)
+옵션: INBOX_DRY_RUN=true    이슈·코멘트·라벨을 쓰지 않는다(읽기만 하고 할 일을 출력)
       PIPELINE_PAUSE        워크플로가 저장소 변수를 넘긴다(1/true/yes/on 이면 '일시정지' 항목을 만든다)
       DEFAULT_BRANCH        실행 기록을 볼 브랜치(기본 main)
       GITHUB_REPOSITORY_OWNER  담당자·@멘션 대상(기본: 저장소 이름의 소유자)
@@ -50,6 +53,9 @@ ERROR_COMMENT_FAILED = "::error::알림 코멘트를 쓰지 못했습니다. 다
 ERROR_ISSUE_FAILED = "::error::이슈를 읽거나 쓰지 못했습니다. 이유는 실행 로그의 바로 다음 줄에 있습니다."
 # ::error:: 주석에는 이 고정 문장만 쓴다(R9). 오류 문구는 접고 마스킹한 일반 로그 줄로 따로 낸다
 MAX_PULLS = 8            # PR 은 상세·검사 조회에 호출이 둘씩 들어가므로 처음 8건까지만 본다
+MAX_DRAFT_PAGES = 3      # 열린 `초안` 이슈·PR 은 한 쪽 100건씩 최대 3쪽(300건)까지 읽는다(그보다 많으면 참고 항목으로 알린다)
+DRAFTS_PER_PAGE = 100
+MAX_LABEL_CREATES = 10   # 초안 모델 라벨을 한 번의 점검에서 새로 만드는 수의 상한(초안·폐기 + 채널 라벨 — 채널 라벨 종류가 6개라 모두 있어도 8개). 목록 읽기 1회와 합해 라벨에 쓰는 호출은 11회 이하
 MAX_JOBS_PER_RUN = 6
 MAX_READ_SECONDS = 300    # 읽기에 쓰는 시간 상한(잡 제한 10분 안에 쓰기까지 끝내려고). 호출 하나는 20초에서 끊긴다
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -274,6 +280,28 @@ def fetch_issues(client, failures):
     return [i for i in data if isinstance(i, dict) and "pull_request" not in i] if isinstance(data, list) else []
 
 
+def fetch_drafts(client, failures, notes):
+    """열린 `초안` 라벨 이슈·PR(GET /issues 는 PR 도 돌려준다)을 한 쪽 100건씩 최대 MAX_DRAFT_PAGES 쪽 읽어 normalize_draft 한 목록으로 돌려준다.
+    어느 쪽이든 읽지 못하면 일부만 센 숫자가 '정상'으로 보이지 않게 전부 버리고 ('drafts', 사유) 하나만 남긴다(표는 그 칸을 '조회 실패'로 보인다).
+    모든 쪽이 가득 차 있으면 더 있을 수 있어 참고 항목으로 알린다."""
+    found = []
+    for page in range(1, MAX_DRAFT_PAGES + 1):
+        try:
+            data = client.get("/issues", state="open", labels=inbox.DRAFT_LABEL, per_page=DRAFTS_PER_PAGE, page=page)
+        except ApiError as exc:
+            failures.append(("drafts", str(exc)))
+            return []
+        if not isinstance(data, list):
+            failures.append(("drafts", "응답이 목록이 아닙니다"))
+            return []
+        found += data
+        if len(data) < DRAFTS_PER_PAGE:
+            break
+    else:
+        notes.append(("drafts_cap", f"열린 초안(이슈·PR)이 {MAX_DRAFT_PAGES * DRAFTS_PER_PAGE}건을 넘을 수 있어 처음 {MAX_DRAFT_PAGES * DRAFTS_PER_PAGE}건만 셉니다."))
+    return [draft for draft in (inbox.normalize_draft(raw) for raw in found) if draft is not None]
+
+
 def _ask_again_while_computing(client, entries, sleep):
     """GitHub 는 병합 가능 여부(mergeable)를 첫 조회 때 계산하기 시작해 null 로 답하는 일이 잦다(main 에 새 커밋이 생긴 직후). 첫 조회가 모두 끝난 뒤
     한 번만 기다렸다가(그동안의 호출도 기다림이 된다) null 인 PR 의 상세만 한 번 더 묻는다. 읽기 호출 상한 안에서만 하고, 실패하면 첫 답을 그대로 쓴다."""
@@ -427,6 +455,39 @@ def ensure_label(client, out):
             out(f"[참고] 라벨 {inbox.LABEL} 을 만들지 못했습니다(계속 진행합니다): {inbox.ext(exc, 200)}")
 
 
+def ensure_draft_labels(client, specs, out):
+    """초안 모델의 라벨(초안·폐기·채널:<채널>)이 저장소에 없으면 만든다 — 이름·색·설명은 고정(inbox.draft_label_specs). 운영자가 휴대폰에서 라벨을 고르고
+    초안 목록을 거르려면 라벨이 미리 있어야 한다. 점검 끝에 하는 '있으면 좋은' 일이라 실패해도 점검 결과·종료 코드에는 영향이 없다(로그 한 줄만, 다음 점검이 다시 시도).
+    라벨 목록을 한 번 읽어(GET /labels, 100건) 없는 것만 만든다 — 목록을 못 읽으면 모두 만들기를 시도하고 이미 있는 것은 422 로 끝난다.
+    422 가 아닌 오류(권한·서버 오류)나 호출 상한에서는 거기서 멈춘다 — 같은 원인이 나머지 라벨에도 똑같이 나서 줄만 늘기 때문이다(다음 점검이 이어서 만든다).
+    한 번에 만드는 수는 MAX_LABEL_CREATES 이하."""
+    existing = set()
+    try:
+        data = client.get("/labels", per_page=100)
+        existing = {str(label.get("name") or "").casefold() for label in data if isinstance(label, dict)} if isinstance(data, list) else set()
+    except ApiBudgetError as exc:
+        out(f"[참고] 초안 라벨 목록을 읽지 못해 라벨 확인을 건너뜁니다(다음 점검에서 다시 시도합니다): {inbox.ext(exc, 200)}")
+        return
+    except ApiError:
+        existing = set()
+    made = []
+    for spec in specs:
+        if spec["name"].casefold() in existing:
+            continue
+        if len(made) >= MAX_LABEL_CREATES:
+            break
+        try:
+            client.post("/labels", {"name": spec["name"], "color": spec["color"], "description": spec["description"]})
+            made.append(spec["name"])
+        except ApiError as exc:
+            if exc.status == 422:                   # 422 = 이미 있음(목록을 못 읽었거나 사이에 누가 만들었다)
+                continue
+            out(f"[참고] 초안 라벨 {inbox.ext(spec['name'], 60)} 을 만들지 못해 라벨 만들기를 멈춥니다(다음 점검에서 이어서 만듭니다): {inbox.ext(exc, 200)}")
+            break
+    if made:
+        out(f"[라벨] 초안 모델의 라벨 {len(made)}개를 만들었습니다: {', '.join(inbox.ext(name, 60) for name in made)}")
+
+
 def create_issue(client, body, owner, out):
     """이슈를 만든다. 담당자 지정이 거부되면(HTTP 422) 담당자 없이 한 번 더 만든다 — 담당자 하나 때문에 모음 자체가 없어지면 안 된다."""
     payload = {"title": inbox.ISSUE_TITLE, "body": body, "labels": [inbox.LABEL]}
@@ -569,6 +630,7 @@ def run(environ=None, client=None, now=None, root=ROOT, out=print, sleep=time.sl
     histories = read_histories(root, blogs, failures)
     issues = fetch_issues(client, failures)
     pulls = fetch_pulls(client, failures, notes, sleep)
+    drafts = fetch_drafts(client, failures, notes)
     files = list_workflow_files(root)
     names = read_workflow_names(root, files)
     runs = fetch_runs(client, files, now, branch, failures, repo)
@@ -577,14 +639,15 @@ def run(environ=None, client=None, now=None, root=ROOT, out=print, sleep=time.sl
     snapshot = inbox.Snapshot(
         now=now, repo=repo, issues=issues, pulls=pulls, runs=runs, approvals=approvals, annotations=annotations,
         paused=inbox.is_truthy(environ.get("PIPELINE_PAUSE")), blogs=blogs, histories=histories, failures=failures, notes=notes,
-        workflow_names=names)
+        workflow_names=names, drafts=drafts)
     items = inbox.build_items(snapshot)
+    board = inbox.draft_board(snapshot)
 
     counts = {level: sum(1 for i in items if i.level == level) for level in inbox.LEVELS}
     out(f"[점검] 지금 해야 할 일 {counts['action']}건 · 확인하면 좋은 것 {counts['check']}건 · 참고 {counts['info']}건 "
         f"(조회 실패 {len(failures)}건, GitHub API 호출 {getattr(client, 'calls', 0)}회)")
-    visible = inbox.render(items, repo_url, inbox.BODY_LIMIT)
-    summary_md = inbox.render(items, repo_url, inbox.SUMMARY_LIMIT)
+    visible = inbox.render(items, repo_url, inbox.BODY_LIMIT, board=board)
+    summary_md = inbox.render(items, repo_url, inbox.SUMMARY_LIMIT, board=board)
     out(summary_md)
     _write_summary(environ, summary_md, out)
 
@@ -602,6 +665,8 @@ def run(environ=None, client=None, now=None, root=ROOT, out=print, sleep=time.sl
         out(f"[이슈 오류 이유] {inbox.ext(exc, 200)}")
         _write_summary(environ, f"### 이번 점검\n- **이슈를 읽거나 쓰지 못했습니다**: {inbox.ext(exc, 200)}", out)
         return EXIT_WRITE_FAILED
+    if not dry:
+        ensure_draft_labels(client, inbox.draft_label_specs(blogs), out)       # 이슈를 쓴 뒤에 한다 — 있으면 좋은 일이 이슈 쓰기에 쓸 호출을 먹지 않게
     line = describe(result)
     out(f"[이슈] {line}")
     _write_summary(environ, f"### 이번 점검\n- 점검 시각: {inbox.fmt_kst(now)} · GitHub API 호출 {getattr(client, 'calls', 0)}회\n"

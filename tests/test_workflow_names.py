@@ -383,6 +383,9 @@ class RunNameTest(unittest.TestCase):
         self.assertEqual(self.title("ops-inbox.yml", "workflow_dispatch", {"dry_run": False}), "[공통] 확인 필요 모음 갱신 · 수동")
         self.assertEqual(self.title("ops-inbox.yml", "workflow_dispatch", {"dry_run": True}),
                          "[공통] 확인 필요 모음 갱신 · 수동(연습: 이슈·코멘트 안 씀)")
+        # 초안 이슈·PR 이벤트(2026-10-27): 모든 이슈·PR 이벤트에서 시작되지만 job 이 초안 라벨이 있는 것만 처리하므로 제목에 '초안만 점검'이라고 적는다
+        self.assertEqual(self.title("ops-inbox.yml", "issues", issue=12), "[공통] 확인 필요 모음 갱신 · 이슈 변경(초안만 점검)")
+        self.assertEqual(self.title("ops-inbox.yml", "pull_request"), "[공통] 확인 필요 모음 갱신 · PR 변경(초안만 점검)")
 
     def test_issue_edit_titles_show_the_issue_number(self):
         self.assertEqual(self.title("issue-edit.yml", "issues", issue=12), "[Chance] 이슈 #12 수정 요청 처리 · 자동(이슈 등록 시)")
