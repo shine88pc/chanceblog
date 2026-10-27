@@ -229,6 +229,30 @@ class MarkdownTest(unittest.TestCase):
     def test_headings_never_contain_a_hard_break_or_nest(self):
         self.assertEqual(self.md("<h3>가<br>나</h3>"), "#### 가 나")
 
+    def test_empty_list_items_are_dropped_and_the_numbers_stay_consecutive(self):
+        """빈 `<li>`가 마커만 남은 "1." 한 줄이 되거나 번호를 건너뛰게 하지 않는다(마크다운·평문 모두)."""
+        for html, expected in (
+                ("<ol><li></li><li>둘</li></ol>", "1. 둘"),
+                ("<ol><li>가</li><li></li><li>나</li></ol>", "1. 가\n2. 나"),
+                ("<ul><li> </li><li>a</li><li><p></p></li><li>b</li></ul>", "- a\n- b"),
+                ("<ol><li></li></ol><p>끝</p>", "끝")):
+            self.assertEqual(self.md(html), expected, html)
+            self.assertEqual(ip.to_plain(gates.sanitize_html(html)[0]), expected, html)
+
+    def test_a_paragraph_nested_in_a_paragraph_or_holding_a_list_is_split_into_blocks(self):
+        """문단 안의 문단·목록이 앞뒤 글과 붙어("ab") 보이지 않게 따로 뗀다(마크다운·평문 모두)."""
+        for html, expected in (
+                ("<p>a<p>b</p></p>", "a\n\nb"),
+                ("<p>a<p>b<p>c</p></p></p>", "a\n\nb\n\nc"),
+                ("<p>앞<ul><li>x</li></ul>뒤</p>", "앞\n\n- x\n\n뒤")):
+            self.assertEqual(self.md(html), expected, html)
+            self.assertEqual(ip.to_plain(gates.sanitize_html(html)[0]), expected, html)
+
+    def test_text_directly_inside_a_list_is_kept_as_an_item_in_both_forms(self):
+        html = "<ul>글<li>항목</li></ul>"
+        self.assertEqual(self.md(html), "- 글\n- 항목")
+        self.assertEqual(ip.to_plain(gates.sanitize_html(html)[0]), "- 글\n- 항목")
+
     def test_plain_text_keeps_structure_without_markdown_characters(self):
         html = ("<h3>1. 소제목</h3><p>문단 <strong>굵게</strong><br>다음 줄</p><ul><li>하나</li><li>둘<ul><li>속</li></ul></li></ul>"
                 "<ol><li>첫째</li><li>둘째</li></ol><blockquote><p>인용</p></blockquote>")

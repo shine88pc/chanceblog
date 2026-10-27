@@ -309,7 +309,7 @@ def _blocks_md(nodes):
             if text:
                 blocks.append(f"{_HEADING_MARK[node.tag]} {text}")
         elif node.tag == "p":
-            paragraph(node.children)
+            blocks.extend(_blocks_md(node.children))      # 문단 안에 문단·목록이 중첩돼 오면 따로 떼어 낸다(글자만 있으면 문단 하나)
         elif node.tag in ("ul", "ol"):
             blocks.append(_list_md(node))
         elif node.tag == "li":
@@ -324,7 +324,7 @@ def _blocks_md(nodes):
 def _item_md(item, marker):
     blocks = _blocks_md(item.children)
     if not blocks:
-        return marker.rstrip()
+        return ""                                  # 빈 항목은 만들지 않는다(마커만 남아 "1." 한 줄이 되지 않게)
     pad = " " * len(marker)
     out = []
     for index, block in enumerate(blocks):
@@ -339,21 +339,24 @@ def _item_md(item, marker):
     return "\n".join(out)
 
 
-def _list_md(node):
-    ordered, items, number = node.tag == "ol", [], 1
+def _list_items(node):
+    """목록의 항목(li). 목록 바로 아래의 글·다른 태그는 항목으로 감싸 살린다(AI 글이 `<ul>글<li>…` 모양으로 와도 글자를 잃지 않는다)."""
     for child in node.children:
-        if isinstance(child, str):
-            if not child.strip():
-                continue
+        if isinstance(child, str) and not child.strip():
+            continue
+        if isinstance(child, str) or child.tag != "li":
             wrapped = _Node("li")
             wrapped.children.append(child)
             child = wrapped
-        elif child.tag != "li":
-            wrapped = _Node("li")
-            wrapped.children.append(child)
-            child = wrapped
-        items.append(_item_md(child, f"{number}. " if ordered else "- "))
-        number += 1
+        yield child
+
+
+def _list_md(node):
+    ordered, items = node.tag == "ol", []
+    for child in _list_items(node):
+        text = _item_md(child, f"{len(items) + 1}. " if ordered else "- ")
+        if text:                                   # 빈 항목은 건너뛰고 번호를 이어서 센다
+            items.append(text)
     return "\n".join(items)
 
 
@@ -389,18 +392,18 @@ def _blocks_plain(nodes):
         paragraph(run)
         run.clear()
         if node.tag in ("ul", "ol"):
-            lines, number = [], 1
-            for child in node.children:
-                if isinstance(child, str) or child.tag != "li":
-                    continue
-                marker = f"{number}. " if node.tag == "ol" else "- "
+            lines = []
+            for child in _list_items(node):
                 text = "\n".join(_blocks_plain(child.children)).strip()
-                lines.append(marker + text.replace("\n", "\n" + " " * len(marker)))
-                number += 1
+                if text:
+                    marker = f"{len(lines) + 1}. " if node.tag == "ol" else "- "
+                    lines.append(marker + text.replace("\n", "\n" + " " * len(marker)))
             blocks.append("\n".join(lines))
         elif node.tag == "blockquote":
             inner = "\n\n".join(_blocks_plain(node.children))
             blocks.append("\n".join(("> " + line) if line else ">" for line in inner.split("\n")))
+        elif node.tag == "p":
+            blocks.extend(_blocks_plain(node.children))
         else:
             paragraph(node.children)
     paragraph(run)

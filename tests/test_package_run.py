@@ -359,6 +359,14 @@ class DryRunTest(PackageRunBase):
         self.assertIn("## 7. 발행 체크리스트", summary)
         self.assertIn("- [ ] 발행 후 주소 기록하고 이 이슈 닫기", summary)
 
+    def test_the_dry_run_summary_shows_the_issue_title_as_plain_text_and_not_inside_a_code_span(self):
+        """실행 요약은 마크다운이다. md_cell 이 바꾼 `&#91;` 같은 표기는 코드 스팬(백틱) 안에서는 글자 그대로 보이므로 백틱 밖에 둔다."""
+        code, out = self.go(env={**self.dry_env()}, extra=["--dry-run"])
+        self.assertEqual(code, 0, out)
+        line = next(line for line in self.summary().splitlines() if line.startswith("- 이슈 제목:"))
+        self.assertTrue(line.startswith("- 이슈 제목: &#91;초안&#93;&#91;티스토리&#93; "), line)
+        self.assertNotIn("`", line)
+
     def test_a_dry_run_with_the_real_adapter_still_makes_no_request(self):
         github = FakeGitHub()
         out = []
