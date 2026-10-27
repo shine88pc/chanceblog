@@ -74,7 +74,7 @@ BLOGGER_REFRESH_TOKEN=...
 
 ## 4. 동작 방식
 
-워크플로 `Blogger 글 자동 작성`(`blogger.yml`)이 `python -m pipeline.run --blog <key>`를 실행합니다.
+워크플로 `[Blogger] 글 자동 작성(초안함 업로드)`(`blogger.yml`)이 `python -m pipeline.run --blog <key>`를 실행합니다.
 
 1. 레지스트리 `mode`와 수동 실행 입력 `publish`로 글을 어디까지 보낼지 정합니다(아래 표).
 2. Blogger에 쓰기 전에, 글을 만들기 전에 **인증 점검**(쓰기 없음)을 합니다: refresh token으로 access token 갱신 → `blogs.get`으로 블로그 조회 → 돌려준 블로그 주소가 `blogs.json`의 `url`과 같은지 확인. 하나라도 실패하면 Gemini 호출·업로드·게시 없이 빨강으로 끝납니다(분류와 할 일은 `docs/ARCHITECTURE.md` §4-1 '인증 점검 실패의 분류').
@@ -113,7 +113,7 @@ BLOGGER_REFRESH_TOKEN=...
 
 ## 6. 수동 테스트
 
-가장 쉬운 방법은 GitHub → Actions → `Blogger 글 자동 작성` → Run workflow입니다.
+가장 쉬운 방법은 GitHub → Actions → `[Blogger] 글 자동 작성(초안함 업로드)` → Run workflow입니다.
 
 - **`인증 점검만 실행` 체크(기본 꺼짐)**: 글을 만들지 않고(Gemini 호출 0회, 저장소 변경·커밋 없음) Blogger 인증만 확인합니다 — 토큰 갱신, 블로그 조회, 돌려준 블로그 주소가 `blogs.json`의 `url`과 같은지. **시크릿을 등록한 직후와 토큰을 새로 받은 직후에 1회 실행**하세요. 통과하면 요약에 `AUTH_CHECK_OK`(확인한 시크릿 이름만, 값은 없음)가 나옵니다. 시크릿이 없으면 '시크릿 없음'으로 빨강(종료 2)입니다. 정지(`mode: off`) 중에도, `연습 실행`이 체크돼 있어도 실제로 점검합니다(쓰기가 없으므로). 체크하면 `publish`·`topic` 선택은 쓰이지 않습니다.
 - `연습 실행` 체크: 가짜 AI 응답으로 흐름만 확인합니다(저장·업로드·게시 없음, Blogger 접속 없음).

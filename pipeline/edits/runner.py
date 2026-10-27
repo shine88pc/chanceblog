@@ -269,7 +269,7 @@ def _paused(req):
     """정지 스위치가 켜졌을 때의 결과: AI·이미지 검색을 부르지 않고 파일·PR 도 만들지 않으며 이슈 코멘트로만 알린다(종료 코드 0)."""
     comment = ("⏸️ **일시정지 중입니다.**\n\n저장소 변수 `PIPELINE_PAUSE` 가 켜져 있어 이 요청을 처리하지 않았습니다"
                "(AI·이미지 검색도 부르지 않았고 저장소는 변경되지 않았습니다).\n\n"
-               "변수를 지운 뒤 Actions 의 `이슈 수정 요청 처리(수정안 PR 만들기)` 에서 이 이슈 번호로, `연습 실행` 체크를 풀고 다시 실행해 주세요.")
+               "변수를 지운 뒤 Actions 의 `[Chance] 이슈 수정 요청 처리(수정안 PR 만들기)` 에서 이 이슈 번호로, `연습 실행` 체크를 풀고 다시 실행해 주세요.")
     note = ("저장소 변수 PIPELINE_PAUSE 가 켜져 있어 이슈 수정 요청을 처리하지 않았습니다. 계속 멈춰 둘 것이 아니라면 "
             "Settings > Secrets and variables > Actions > Variables 에서 PIPELINE_PAUSE 를 지우세요.")
     return Result("paused", message="PIPELINE_PAUSE 가 켜져 있어 처리하지 않았습니다.", comment=comment, notes=[note],

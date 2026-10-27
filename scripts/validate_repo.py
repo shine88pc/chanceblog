@@ -227,10 +227,16 @@ def _has_hangul(value):
     return isinstance(value, str) and bool(_HANGUL_RX.search(value))
 
 
+def _without_label(name):
+    """name 맨 앞의 `[구분] ` 접두사를 뗀 나머지(접두사가 없으면 그대로). `[공통]`·`[네이버]` 같은 한글 구분이 한글 이름 검사(WF-11)를
+    대신 통과시키지 않게 한다 — 이름 본문에 한글이 있어야 하는 것이지 접두사가 아니다."""
+    return name.split("] ", 1)[1] if reg_mod.name_label(name) is not None else name
+
+
 def check_workflow_names(root, files):
     """WF-11: 워크플로 name 과 job name 에 한글을 쓴다(운영자가 Actions 탭에서 이름만 보고 하는 일을 짐작하게).
 
-    워크플로 name 이 없거나 한글이 없으면 오류, job name 이 없거나 한글이 없으면 경고.
+    워크플로 name 이 없거나 한글이 없으면 오류, job name 이 없거나 한글이 없으면 경고. name 의 `[구분] ` 접두사는 빼고 본다(WF-12).
     YAML 문법 오류는 WF-0 이 알리므로 여기서는 건너뛴다. 규칙: docs/ENGINEERING_GUIDE.md W10."""
     if yaml is None:
         return []  # PyYAML 이 없다는 경고는 WF-0(check_workflows)이 이미 낸다
@@ -243,14 +249,59 @@ def check_workflow_names(root, files):
         if not isinstance(data, dict):
             continue
         name = data.get("name")
-        if not _has_hangul(name):
+        if not _has_hangul(_without_label(name) if isinstance(name, str) else name):
             problem = "에 name 이 없습니다" if name is None else f" name '{str(name)[:40]}' 에 한글이 없습니다"
+            if isinstance(name, str) and reg_mod.name_label(name) is not None:
+                problem += "(접두사 `[구분]` 뒤의 이름 부분에 한글이 있어야 합니다)"
             out.append(err("WF-11", f"워크플로{problem} — Actions 탭에서 이름만 보고 하는 일을 짐작할 수 있게 "
-                                    "한글로 지으세요(예: '사이트 자동 배포'). 외부 템플릿을 복사해 넣을 때는 한글 name 을 붙이세요", rel))
+                                    "한글로 지으세요(예: '[공통] 사이트 자동 배포'). 외부 템플릿을 복사해 넣을 때는 한글 name 을 붙이세요", rel))
         jobs = data.get("jobs")
         for job_id, job in (jobs.items() if isinstance(jobs, dict) else []):
             if isinstance(job, dict) and not _has_hangul(job.get("name")):
                 out.append(warn("WF-11", f"job '{job_id}' 에 name 이 없거나 한글이 없습니다 — 한글 이름을 붙이세요(예: '글 작성·게시')", rel))
+    return out
+
+
+# 워크플로 이름 접두사 `[구분] `의 허용 목록: 블로그 채널 라벨(레지스트리 channel.label) + 블로그에 속하지 않는 구분 둘
+# (`공통` = 배포·검사·감시처럼 모든 채널이 함께 쓰는 것, `내부` = 다른 워크플로가 부르는 공용 워크플로로 직접 실행하지 않는 것)
+WORKFLOW_LABELS = tuple(reg_mod.CHANNEL_LABELS) + ("공통", "내부")
+
+
+def check_workflow_prefixes(root, files):
+    """WF-12: 모든 워크플로의 name 은 `[구분] ` 으로 시작하고(구분 = 채널 라벨 또는 공통·내부), run-name 이 있으면 같은 접두사로 시작한다.
+
+    Actions 왼쪽 목록은 이름순이라 접두사가 같은 워크플로끼리 붙어 보이고, 실행 목록의 제목(run-name)에서도 어느 채널의 실행인지 읽힌다
+    (GitHub 에는 워크플로 폴더·분류가 없어 이름 접두사가 구분 수단이다). 워크플로 name 이 없거나 문자열이 아닌 것은 WF-11 이 알리므로
+    여기서는 건너뛴다. 레지스트리 블로그의 워크플로가 자기 채널 라벨로 시작하는지는 레지스트리 검증(REG-1)이 본다. 규칙: docs/ENGINEERING_GUIDE.md W10."""
+    if yaml is None:
+        return []  # PyYAML 이 없다는 경고는 WF-0(check_workflows)이 이미 낸다
+    out = []
+    allowed = " ".join(f"[{label}]" for label in WORKFLOW_LABELS)
+    for rel in _workflow_files(files):
+        try:
+            data = _load_yaml(read_text(root, rel) or "")
+        except yaml.YAMLError:
+            continue
+        if not isinstance(data, dict):
+            continue
+        name = data.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        label = reg_mod.name_label(name)
+        if label is None:
+            out.append(err("WF-12", f"워크플로 name '{name[:40]}' 이 `[구분] ` 접두사로 시작하지 않습니다 — Actions 목록에서 채널별로 묶이게 "
+                                    f"허용 구분({allowed}) 중 하나를 맨 앞에 붙이세요. 대괄호로 시작하는 값은 YAML 에서 따옴표가 필요합니다"
+                                    "(예: name: \"[공통] 사이트 자동 배포\")", rel))
+            continue
+        if label not in WORKFLOW_LABELS:
+            out.append(err("WF-12", f"워크플로 name 의 구분 '[{label}]' 은(는) 허용 목록에 없습니다 — 허용: {allowed}. "
+                                    "새 채널이면 레지스트리 CHANNEL_LABELS(pipeline/registry.py)와 문서를 같이 고칩니다", rel))
+            continue
+        run_name = data.get("run-name")
+        if run_name is not None and reg_mod.name_label(run_name) != label:
+            shown = run_name[:40] if isinstance(run_name, str) else repr(run_name)[:40]
+            out.append(err("WF-12", f"run-name '{shown}' 이 name 과 같은 접두사 `[{label}] ` 로 시작하지 않습니다 — 실행 목록의 제목에서도 "
+                                    "채널이 읽히게 같은 접두사를 붙이세요", rel))
     return out
 
 
@@ -268,6 +319,35 @@ def _workflow_crons(root, rel):
 # ----------------------------------------------------------------------------
 # 3. 레지스트리·계약 (문서/코드/설정 드리프트 방지)
 # ----------------------------------------------------------------------------
+# REG-5 가 찾는 광고 코드 모양. pipeline/edits/checks.py 의 AD_PATTERNS 와 같은 목록이다(그쪽은 PyYAML 이 필요한 모듈이라 가져오지 않고,
+# 두 목록이 같은지는 tests/test_validate_repo.py 가 대조한다).
+_AD_CODE_PATTERNS = [re.compile(p, re.IGNORECASE) for p in (r"adsbygoogle", r"googlesyndication", r"ca-pub-\d+")]
+
+
+def _ads_drift(root, files, blog):
+    """REG-5: 레지스트리의 ads 선언이 사이트의 실제 광고 코드와 맞는지. 광고 코드를 가진 사이트가 이 저장소에 있는 jekyll-git 블로그만 본다
+    (다른 플랫폼의 광고는 플랫폼 화면에서 켜므로 저장소에서는 확인할 수 없다 — 레지스트리 검증이 그쪽 on 을 막는다).
+    광고 표면(protected_paths)의 파일에 광고 코드가 있으면 ads 는 on 이어야 하고, ads 가 on 이면 광고 코드가 있어야 한다."""
+    if blog.get("platform") != "jekyll-git":
+        return []
+    protected = [p for p in blog.get("protected_paths") or [] if isinstance(p, str)]
+    hits = []
+    for rel in files:
+        if any(rel == p or (p.endswith("/") and rel.startswith(p)) for p in protected):
+            text = read_text(root, rel)
+            if text and any(rx.search(text) for rx in _AD_CODE_PATTERNS):
+                hits.append(rel)
+    ads, key = blog.get("ads"), blog["key"]
+    approval = "사용자 승인(T3)과 커밋 메시지의 'Ad-Surface-Approved: <사유>' 가 필요합니다 (G-C6·G-C10)"
+    if ads == "on" and not hits:
+        return [err("REG-5", f"블로그 '{key}' 는 ads=on 인데 광고 표면(protected_paths)에서 광고 코드(adsbygoogle·googlesyndication·ca-pub-)를 "
+                             f"찾지 못했습니다 — 광고 코드를 일부러 뺐다면 ads 를 off 로 같이 고치세요. 둘 다 {approval}", "pipeline/blogs.json")]
+    if ads != "on" and hits:
+        return [err("REG-5", f"블로그 '{key}' 는 ads={ads} 인데 광고 표면에 광고 코드가 있습니다({', '.join(hits)}) — 코드가 잘못 들어간 것이면 "
+                             f"빼고, 광고를 켜는 것이 맞다면 품질 게이트를 통과한 뒤 ads 를 on 으로 고치세요. 둘 다 {approval}", "pipeline/blogs.json")]
+    return []
+
+
 def check_registry(root, files):
     out = []
     path = Path(root) / "pipeline" / "blogs.json"
@@ -297,6 +377,7 @@ def check_registry(root, files):
         if blog["platform"] == "jekyll-git" and "git push" in wf_text and "gh workflow run" not in wf_text:
             out.append(warn("WF-10", "GITHUB_TOKEN 으로 push 한 커밋은 push 트리거(Pages 배포)를 일으키지 않습니다 — "
                                      "배포 워크플로를 dispatch 해야 합니다 (D-02)", blog["workflow"]))
+        out.extend(_ads_drift(root, files, blog))
     gen = read_text(root, "generator.py") or ""
     m = re.search(r"MODEL_CANDIDATES\s*=\s*\[(.*?)\]", gen, re.S)
     if m:
@@ -578,6 +659,7 @@ def run_checks(root, base=None):
     findings += check_secret_patterns(root, files)
     findings += check_workflows(root, files)
     findings += check_workflow_names(root, files)
+    findings += check_workflow_prefixes(root, files)
     findings += check_registry(root, files)
     findings += check_issue_contract(root, files)
     findings += check_edit_system(root, files)

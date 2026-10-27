@@ -1,6 +1,6 @@
 """줄 끝(LF/CRLF) 처리의 회귀 테스트 — docs/DEFECT_REGISTER.md D-23(줄 끝만 바뀐 PR이 통과로 보임).
 
-실제 git 임시 저장소(autocrlf 끔)로 PR 변경 범위 검사의 판정을 확인하고, 러너는 줄 끝이 섞인 파일을 거부(fail closed)한다.
+실제 git 임시 저장소(autocrlf 끔)로 [공통] PR 변경 범위 검사의 판정을 확인하고, 러너는 줄 끝이 섞인 파일을 거부(fail closed)한다.
 """
 import subprocess
 import tempfile

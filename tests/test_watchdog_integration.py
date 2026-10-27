@@ -82,7 +82,11 @@ class WorkflowNamesTest(unittest.TestCase):
     def test_pages_workflow_is_a_real_workflow_file(self):
         path = WORKFLOW_DIR / watchdog.PAGES_WORKFLOW
         self.assertTrue(path.is_file(), f"{path} 가 없다: 사이트 배포 점검이 항상 건너뛰어진다")
-        self.assertIn("name: 사이트 자동 배포", path.read_text(encoding="utf-8"))  # 점검 메시지가 부르는 이름
+        self.assertIn('name: "[공통] 사이트 자동 배포"', path.read_text(encoding="utf-8"))
+        # 점검 메시지(pipeline/health.py)가 부르는 이름은 이 파일의 실제 이름이다 — 이름을 바꾸면 메시지도 같이 고친다
+        health_source = (_bootstrap.ROOT / "pipeline" / "health.py").read_text(encoding="utf-8")
+        self.assertEqual(health_source.count("'[공통] 사이트 자동 배포'"), 2)           # PAGES_NOT_DEPLOYED · PAGES_FAILED
+        self.assertNotIn("'사이트 자동 배포'", health_source)
 
     def test_every_registered_blog_workflow_is_a_real_workflow_file(self):
         for blog in enabled_blogs(load_registry()):
