@@ -150,6 +150,19 @@ def _workflow_files(files):
     return [f for f in files if re.match(r"^\.github/workflows/[^/]+\.ya?ml$", f)]
 
 
+# 알림 단계(pipeline/notify.py)의 모양: run 이 정확히 `python -m pipeline.notify <이벤트> [--commit HEAD|해시]` 한 줄. 이 모양의 단계만 continue-on-error 를 써도
+# 경고(WF-6)가 나지 않는다 — 알림은 보조라 실패해도 글 게시 실행을 실패시키지 않아야 하고, 실패는 알림 명령이 스스로 `::warning::`(과 로그 줄)로 드러내므로
+# '조용한 실패'가 아니다(G-O2). timeout-minutes 가 있어야 하고, 다른 명령에 붙은 continue-on-error 는 그대로 경고한다.
+_ALERT_RUN = re.compile(r"python3? -m pipeline\.notify [a-z][a-z-]*(?: --commit (?:HEAD|[0-9a-fA-F]{7,40}))?")
+
+
+def _is_alert_step(step):
+    run = step.get("run")
+    timeout = step.get("timeout-minutes")
+    return (isinstance(run, str) and _ALERT_RUN.fullmatch(run.strip()) is not None
+            and isinstance(timeout, (int, float)) and not isinstance(timeout, bool) and timeout > 0)
+
+
 def _load_yaml(text):
     return yaml.safe_load(text) if yaml else None
 
@@ -210,13 +223,65 @@ def check_workflows(root, files):
                         out.append(warn("WF-6", "'|| true' 로 오류를 숨기고 있습니다 (G-O2: 조용한 실패 금지)", rel))
                     if re.search(r"echo\b[^\n]*\$\{\{\s*secrets\.", run):
                         out.append(err("WF-9", "시크릿을 echo 로 출력합니다 (G-S3)", rel))
-                if step.get("continue-on-error") is True:
+                if step.get("continue-on-error") is True and not _is_alert_step(step):
                     out.append(warn("WF-6", "continue-on-error: true 로 실패를 숨기고 있습니다 (G-O2)", rel))
                 uses = step.get("uses")
                 if isinstance(uses, str) and not uses.startswith("./") and not uses.startswith("docker://"):
                     m = _USES_RX.match(uses)
                     if m and m.group(1) not in FIRST_PARTY_OWNERS and not _SHA_RX.match(m.group(3)):
                         out.append(err("WF-5", f"외부 액션 {uses} 는 커밋 SHA 로 고정해야 합니다 (G-A4)", rel))
+    return out
+
+
+TELEGRAM_SECRETS = ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")
+_TELEGRAM_NAME = re.compile("|".join(TELEGRAM_SECRETS), re.IGNORECASE)   # GitHub 시크릿 이름은 대소문자를 가리지 않는다: secrets.telegram_bot_token 도 같은 값이다
+_TELEGRAM_ENV_VALUE = re.compile(r"\$\{\{\s*secrets\.(TELEGRAM_BOT_TOKEN|TELEGRAM_CHAT_ID)\s*\}\}")
+
+
+def _walk_strings(node, path=()):
+    """파싱한 워크플로의 모든 문자열 값과 그 위치(키·번호의 튜플)."""
+    if isinstance(node, str):
+        yield path, node
+    elif isinstance(node, dict):
+        for key, value in node.items():
+            yield from _walk_strings(value, path + (key,))
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            yield from _walk_strings(value, path + (index,))
+
+
+def check_telegram_secrets(root, files):
+    """WF-13: 텔레그램 시크릿(TELEGRAM_BOT_TOKEN·TELEGRAM_CHAT_ID)은 워크플로의 **단계 env 값**으로만 나타난다 — 같은 이름의 환경변수에
+    `${{ secrets.그 이름 }}` 그대로. run 본문·with·if·job/워크플로 env·outputs·이름 등 어디에도 나타나면 오류다.
+
+    이 토큰은 요청 주소의 경로(https://api.telegram.org/bot<토큰>/…)에 들어가는 서비스의 열쇠라, 셸 명령 줄(echo·set -x·`::set-output`·GITHUB_ENV 에 쓰기)이나
+    외부 액션의 입력(with)으로 흘러가면 공개 Actions 로그로 샐 수 있다. 값은 `env:` 로 파이썬 프로세스에 넘기고 pipeline/notify.py 가 환경변수에서만 읽는다
+    (G-C12). 문자열 안에 두 이름 중 하나라도 들어 있으면(`$TELEGRAM_BOT_TOKEN`·`${TELEGRAM_CHAT_ID}` 처럼 환경변수를 셸에서 펼치는 것 포함, 대소문자를 바꾼
+    `secrets.telegram_bot_token` 도 같은 시크릿이라 같게 본다) 허용된 모양이 아닌 한 오류다.
+
+    한계(문서에도 적었다): 이름이 **글자로** 나오는 곳만 본다 — `toJSON(secrets)`·`secrets[format(…)]`·`secrets: inherit` 처럼 이름 없이 시크릿을 넘기는 길과,
+    외부 `uses:` 단계의 env 는 못 잡는다. 호출 쪽 재사용 워크플로의 `secrets:` 매핑(`jobs.<잡>.secrets.TELEGRAM_*`)은 허용된 자리가 아니라 오류다."""
+    if yaml is None:
+        return []  # PyYAML 이 없다는 경고는 WF-0(check_workflows)이 이미 낸다
+    out = []
+    for rel in _workflow_files(files):
+        try:
+            data = _load_yaml(read_text(root, rel) or "")
+        except yaml.YAMLError:
+            continue
+        if not isinstance(data, dict):
+            continue
+        for path, value in _walk_strings(data):
+            names = sorted({found.upper() for found in _TELEGRAM_NAME.findall(value)})
+            if not names:
+                continue
+            in_step_env = len(path) == 6 and path[0] == "jobs" and path[2] == "steps" and path[4] == "env"
+            match = _TELEGRAM_ENV_VALUE.fullmatch(value.strip()) if in_step_env else None
+            if match is None or match.group(1) != path[5]:       # 단계 env 의 같은 이름 환경변수에 `${{ secrets.이름 }}` 그대로일 때만 허용
+                where = ".".join(str(part) for part in path)
+                out.append(err("WF-13", f"텔레그램 시크릿 이름({', '.join(names)})이 허용되지 않은 자리({where})에 있습니다 — 단계의 env 에서 같은 이름의 환경변수로만 "
+                                        "`${{ secrets.이름 }}` 그대로 넘기세요(run·with·if·job/워크플로 env 에는 쓰지 않습니다). "
+                                        "토큰이 셸 명령 줄이나 로그로 새는 길을 막는 규칙입니다 (G-C12)", rel))
     return out
 
 
@@ -658,6 +723,7 @@ def run_checks(root, base=None):
     findings += check_forbidden_files(files)
     findings += check_secret_patterns(root, files)
     findings += check_workflows(root, files)
+    findings += check_telegram_secrets(root, files)
     findings += check_workflow_names(root, files)
     findings += check_workflow_prefixes(root, files)
     findings += check_registry(root, files)

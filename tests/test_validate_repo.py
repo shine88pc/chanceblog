@@ -1,5 +1,6 @@
 import io
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -763,6 +764,217 @@ class BriefingTest(TmpCase):
 
     def test_real_briefing_covers_current_repository(self):
         self.assertEqual(vr.check_briefing(REAL, vr.list_files(REAL)), [])
+
+
+TG_TOKEN = "${{ secrets.TELEGRAM_BOT_TOKEN }}"
+TG_CHAT = "${{ secrets.TELEGRAM_CHAT_ID }}"
+TG_GOOD_ENV = f"TELEGRAM_BOT_TOKEN: {TG_TOKEN}\nTELEGRAM_CHAT_ID: {TG_CHAT}"
+
+
+def tg_step(run="python -m pipeline.notify test", env="", extra=()):
+    """steps 항목 하나(YAML 줄들, 들여쓰기 없음). run 은 블록 문자열이라 특수 문자를 따옴표로 감쌀 필요가 없다."""
+    lines = ["- name: 단계", *[f"  {line}" for line in extra]]
+    if env:
+        lines += ["  env:", *[f"    {line}" for line in env.splitlines()]]
+    lines += ["  run: |", f"    {run}"]
+    return "\n".join(lines)
+
+
+def tg_yaml(*steps, job_env="", top_env="", step_text=None, job_extra=()):
+    """텔레그램 시크릿 규칙·알림 단계 예외 시험용 워크플로 YAML(들여쓰기 없이 만든다). step_text 가 있으면 steps 항목을 그대로 쓴다.
+    job_extra: 잡(j)의 키 아래에 그대로 넣을 줄들(예: container·services — 들여쓰기는 잡 기준)."""
+    body = step_text if step_text is not None else "\n".join(steps)
+    lines = ['name: "[공통] 시험"', "on:", "  workflow_dispatch:", "permissions:", "  contents: read"]
+    if top_env:
+        lines += ["env:", f"  {top_env}"]
+    lines += ["jobs:", "  j:", "    name: 시험", "    runs-on: ubuntu-latest", "    timeout-minutes: 5"]
+    lines += [f"    {line}" for line in job_extra]
+    if job_env:
+        lines += ["    env:", f"      {job_env}"]
+    lines += ["    steps:", *["      " + line for line in body.splitlines()]]
+    return "\n".join(lines) + "\n"
+
+
+class TelegramSecretRuleTest(TmpCase):
+    """WF-13: 텔레그램 시크릿 이름(TELEGRAM_BOT_TOKEN·TELEGRAM_CHAT_ID)은 단계 env 의 같은 이름 환경변수에 `secrets.그 이름` 표현식 그대로일 때만 허용된다."""
+
+    def check(self, *steps, rel=".github/workflows/w.yml", **kwargs):
+        (self.root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (self.root / rel).write_text(tg_yaml(*steps, **kwargs), encoding="utf-8")
+        return vr.check_telegram_secrets(self.root, vr.list_files(self.root))
+
+    @staticmethod
+    def marks(found):
+        return [(f.check, f.level) for f in found]
+
+    @staticmethod
+    def place(finding):
+        return re.search(r"자리\((.*?)\)에", finding.message).group(1)
+
+    def test_the_allowed_shape_is_clean(self):
+        self.assertEqual(self.check(tg_step(env=TG_GOOD_ENV)), [])
+
+    def test_whitespace_inside_the_expression_is_fine(self):
+        env = "TELEGRAM_BOT_TOKEN: ${{secrets.TELEGRAM_BOT_TOKEN}}\nTELEGRAM_CHAT_ID: ${{   secrets.TELEGRAM_CHAT_ID   }}"
+        self.assertEqual(self.check(tg_step(env=env)), [])
+
+    def test_only_one_of_the_two_is_fine_too(self):
+        self.assertEqual(self.check(tg_step(env=f"TELEGRAM_CHAT_ID: {TG_CHAT}")), [])
+
+    def test_the_yaml_extension_is_checked_too(self):
+        found = self.check(tg_step(run="echo $TELEGRAM_BOT_TOKEN"), rel=".github/workflows/w.yaml")
+        self.assertEqual(self.marks(found), [("WF-13", "ERROR")])
+
+    def test_workflows_without_the_names_are_untouched(self):
+        self.assertEqual(self.check(tg_step(run="python generator.py", env="A: ${{ secrets.GEMINI_API_KEY }}")), [])
+
+    def test_the_names_in_a_run_body_are_errors_in_every_spelling(self):
+        for run in ('echo "$TELEGRAM_BOT_TOKEN"', "echo ${TELEGRAM_BOT_TOKEN}", 'curl "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMe"',
+                    f'echo "t={TG_TOKEN}" >> "$GITHUB_ENV"', f"python x.py {TG_CHAT}", "echo ::set-output name=t::$TELEGRAM_CHAT_ID", "env | grep TELEGRAM_CHAT_ID",
+                    "python -m pipeline.notify test  # TELEGRAM_BOT_TOKEN"):
+            with self.subTest(run=run[:40]):
+                found = self.check(tg_step(run=run, env=TG_GOOD_ENV))
+                self.assertEqual(self.marks(found), [("WF-13", "ERROR")])
+                self.assertEqual(self.place(found[0]), "jobs.j.steps.0.run")
+
+    def test_a_step_input_for_an_action_is_an_error(self):
+        step = f"- uses: someone/ok-action@0123456789abcdef0123456789abcdef01234567\n  with:\n    token: {TG_TOKEN}"
+        found = self.check(step_text=step)
+        self.assertEqual(self.marks(found), [("WF-13", "ERROR")])
+        self.assertEqual(self.place(found[0]), "jobs.j.steps.0.with.token")
+
+    def test_job_level_and_workflow_level_env_are_errors(self):
+        found = self.check(tg_step(env=TG_GOOD_ENV), job_env=f"TELEGRAM_BOT_TOKEN: {TG_TOKEN}")
+        self.assertEqual((self.marks(found), self.place(found[0])), ([("WF-13", "ERROR")], "jobs.j.env.TELEGRAM_BOT_TOKEN"))
+        found = self.check(tg_step(env=TG_GOOD_ENV), top_env=f"TELEGRAM_CHAT_ID: {TG_CHAT}")
+        self.assertEqual((self.marks(found), self.place(found[0])), ([("WF-13", "ERROR")], "env.TELEGRAM_CHAT_ID"))
+
+    def test_conditions_ids_and_names_are_errors(self):
+        name_step = "- name: TELEGRAM_BOT_TOKEN 단계\n  run: |\n    python -m pipeline.notify test"
+        cases =((tg_step(env=TG_GOOD_ENV, extra=["if: secrets.TELEGRAM_BOT_TOKEN != ''"]), "if"),
+                 (tg_step(env=TG_GOOD_ENV, extra=["id: TELEGRAM_CHAT_ID"]), "id"), (name_step, "name"))
+        for step, where in cases:
+            with self.subTest(where=where):
+                found = self.check(step_text=step)
+                self.assertEqual(self.marks(found), [("WF-13", "ERROR")])
+                self.assertEqual(self.place(found[0]), f"jobs.j.steps.0.{where}")
+
+    def test_an_env_name_that_does_not_match_the_secret_is_an_error(self):
+        for env in (f"FOO: {TG_TOKEN}", f"TELEGRAM_BOT_TOKEN: {TG_CHAT}", f"TELEGRAM_CHAT_ID: {TG_TOKEN}", f"TOKEN: {TG_CHAT}"):
+            with self.subTest(env=env):
+                self.assertEqual(self.marks(self.check(tg_step(env=env))), [("WF-13", "ERROR")])
+
+    def test_decorated_values_are_errors(self):
+        values = (f'"{TG_TOKEN}-x"', f'"x{TG_TOKEN}"', f'"{TG_TOKEN} {TG_CHAT}"', f"'{TG_TOKEN}{TG_TOKEN}'",
+                  "\"${{ secrets.TELEGRAM_BOT_TOKEN || 'x' }}\"", "\"${{ format('{0}', secrets.TELEGRAM_BOT_TOKEN) }}\"", "plain TELEGRAM_BOT_TOKEN", "TELEGRAM_BOT_TOKEN")
+        for value in values:
+            with self.subTest(value=value[:40]):
+                self.assertEqual(self.marks(self.check(tg_step(env=f"TELEGRAM_BOT_TOKEN: {value}"))), [("WF-13", "ERROR")])
+
+    def test_other_letter_cases_of_the_names_are_errors_too(self):
+        """독립 검증 N-3: GitHub 시크릿 이름은 대소문자를 가리지 않는다 — `secrets.telegram_bot_token` 은 같은 시크릿이라 같은 규칙을 받는다."""
+        for run in ('echo "${{ secrets.telegram_bot_token }}"', "echo ${{ secrets.Telegram_Bot_Token }}", "echo ${{ secrets.telegram_chat_id }}",
+                    'curl "https://api.telegram.org/bot${{ secrets.Telegram_Bot_Token }}/getMe"', "echo $Telegram_Chat_Id"):
+            with self.subTest(run=run[:40]):
+                found = self.check(tg_step(run=run, env=TG_GOOD_ENV))
+                self.assertEqual(self.marks(found), [("WF-13", "ERROR")])
+                self.assertEqual(self.place(found[0]), "jobs.j.steps.0.run")
+                self.assertRegex(found[0].message, r"\(TELEGRAM_(BOT_TOKEN|CHAT_ID)\)")          # 메시지는 등록된 이름(대문자)으로 알린다
+
+    def test_other_letter_cases_in_the_allowed_place_are_errors_too(self):
+        """허용 자리(단계 env)에서도 표현식은 정확히 `secrets.TELEGRAM_…` 여야 하고 환경변수 이름과 같아야 한다 — 대소문자만 다른 것도 오류."""
+        for env in ("TELEGRAM_BOT_TOKEN: ${{ secrets.telegram_bot_token }}", "telegram_bot_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}",
+                    "Telegram_Chat_Id: ${{ secrets.Telegram_Chat_Id }}"):
+            with self.subTest(env=env):
+                found = self.check(tg_step(env=env))
+                self.assertEqual(self.marks(found), [("WF-13", "ERROR")])
+        step = "- uses: someone/ok-action@0123456789abcdef0123456789abcdef01234567\n  with:\n    token: ${{ secrets.Telegram_Bot_Token }}"
+        found = self.check(step_text=step)
+        self.assertEqual((self.marks(found), self.place(found[0])), ([("WF-13", "ERROR")], "jobs.j.steps.0.with.token"))
+
+    def test_container_and_service_env_are_errors(self):
+        """독립 검증 V02: 잡의 container.env·services.<이름>.env 에 시크릿을 넘기는 것은 단계 env 가 아니라서 오류다(경로 모양이 달라도 막는다)."""
+        cases = (("container", ["container:", "  image: python:3.10", "  env:", f"    TELEGRAM_BOT_TOKEN: {TG_TOKEN}"], "jobs.j.container.env.TELEGRAM_BOT_TOKEN"),
+                 ("services", ["services:", "  s:", "    image: redis", "    env:", f"      TELEGRAM_CHAT_ID: {TG_CHAT}"], "jobs.j.services.s.env.TELEGRAM_CHAT_ID"))
+        for name, extra, where in cases:
+            with self.subTest(case=name):
+                found = self.check(tg_step(env=TG_GOOD_ENV), job_extra=extra)
+                self.assertEqual((self.marks(found), self.place(found[0])), ([("WF-13", "ERROR")], where))
+
+    def test_each_misplaced_use_is_reported_separately_with_its_place(self):
+        found = self.check(tg_step(run="echo $TELEGRAM_BOT_TOKEN $TELEGRAM_CHAT_ID", env=TG_GOOD_ENV), job_env=f"TELEGRAM_CHAT_ID: {TG_CHAT}")
+        self.assertEqual(sorted(self.place(f) for f in found), ["jobs.j.env.TELEGRAM_CHAT_ID", "jobs.j.steps.0.run"])
+        by_place = {self.place(f): f for f in found}
+        self.assertIn("TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID", by_place["jobs.j.steps.0.run"].message)       # 한 문자열에 둘이 함께 있으면 이름을 모두 알린다
+        self.assertIn("(TELEGRAM_CHAT_ID)", by_place["jobs.j.env.TELEGRAM_CHAT_ID"].message)
+
+    def test_the_message_names_the_rule_and_never_contains_a_value(self):
+        found = self.check(tg_step(run="echo $TELEGRAM_BOT_TOKEN", env=TG_GOOD_ENV))
+        self.assertIn("G-C12", found[0].message)
+        self.assertEqual(found[0].path, ".github/workflows/w.yml")
+        self.assertNotRegex(found[0].message, r"[0-9]{6,}:[A-Za-z0-9_-]{30}")
+
+    def test_a_yaml_syntax_error_is_left_to_wf0(self):
+        write(self.root, ".github/workflows/w.yml", "name: [unclosed\n")
+        self.assertEqual(vr.check_telegram_secrets(self.root, vr.list_files(self.root)), [])
+
+    def test_a_missing_yaml_library_is_skipped(self):
+        (self.root / ".github" / "workflows").mkdir(parents=True)
+        (self.root / ".github" / "workflows" / "w.yml").write_text(tg_yaml(tg_step(run="echo $TELEGRAM_BOT_TOKEN")), encoding="utf-8")
+        original, vr.yaml = vr.yaml, None
+        try:
+            self.assertEqual(vr.check_telegram_secrets(self.root, vr.list_files(self.root)), [])
+        finally:
+            vr.yaml = original
+
+    def test_files_outside_the_workflows_folder_are_ignored(self):
+        self.assertEqual(self.check(tg_step(run="echo $TELEGRAM_BOT_TOKEN"), rel=".github/other/w.yml"), [])
+
+    def test_run_checks_includes_the_rule(self):
+        root = registry_root(self.root, chance_extra=DEPLOY_STEP)
+        self.assertNotIn("WF-13", checks(vr.run_checks(root)))
+        (root / ".github" / "workflows" / "extra.yml").write_text(tg_yaml(tg_step(run="echo $TELEGRAM_BOT_TOKEN")), encoding="utf-8")
+        self.assertIn(("WF-13", "ERROR"), [(f.check, f.level) for f in vr.run_checks(root)])
+
+    def test_the_real_repository_passes(self):
+        self.assertEqual(vr.check_telegram_secrets(REAL, vr.list_files(REAL)), [])
+
+
+class AlertStepExemptionTest(TmpCase):
+    """WF-6 의 예외: run 이 정확히 `python -m pipeline.notify <이벤트> [--commit …]` 한 줄이고 timeout-minutes 가 있는 단계만 continue-on-error 를 써도 경고가 없다."""
+
+    def check(self, run="python -m pipeline.notify chance-published --commit HEAD", timeout="timeout-minutes: 2", coe="continue-on-error: true"):
+        extra = [line for line in (coe, timeout) if line]
+        (self.root / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
+        (self.root / ".github" / "workflows" / "w.yml").write_text(tg_yaml(tg_step(run=run, extra=extra)), encoding="utf-8")
+        return vr.check_workflows(self.root, vr.list_files(self.root))
+
+    def test_the_alert_step_shape_is_not_warned(self):
+        for run in ("python -m pipeline.notify chance-published --commit HEAD", "python -m pipeline.notify test", "python3 -m pipeline.notify status",
+                    "python -m pipeline.notify chance-published --commit 0123abcd"):
+            with self.subTest(run=run):
+                self.assertEqual(levels(self.check(run=run), "WF-6"), [])
+
+    def test_without_a_positive_step_timeout_it_is_warned(self):
+        for timeout in ("", "timeout-minutes: 0", "timeout-minutes: -1", "timeout-minutes: '2'", "timeout-minutes: true"):
+            with self.subTest(timeout=timeout):
+                self.assertEqual(levels(self.check(timeout=timeout), "WF-6"), ["WARN"])
+
+    def test_other_commands_with_continue_on_error_are_still_warned(self):
+        for run in ("python -m pipeline.run --blog x", "python generator.py", "python -m pipeline.notify chance-published --commit HEAD; echo hi",
+                    "python -m pipeline.notify test && curl x", "python -m pipeline.notify test | tee log", "python -m pipeline.notifyx test",
+                    "python -m pipeline.notify", "python -m pipeline.notify Test", "python -m pipeline.notify test --token x", "bash -c 'python -m pipeline.notify test'",
+                    "pip install x && python -m pipeline.notify test", "python -m pipeline.notify test $(id)", "python -m pipeline.notify chance-published --commit HEAD~1"):
+            with self.subTest(run=run):
+                self.assertEqual(levels(self.check(run=run), "WF-6"), ["WARN"])
+
+    def test_the_other_warning_about_hidden_failures_is_unchanged(self):
+        self.assertEqual(levels(self.check(run="python -m pipeline.notify test || true"), "WF-6"), ["WARN", "WARN"])      # 알림 모양이 아니라 continue-on-error 와 `|| true` 둘 다
+        self.assertEqual(self.check(coe="continue-on-error: false", run="python generator.py", timeout=""), [])
+
+    def test_the_real_repository_has_no_hidden_failure_warning(self):
+        found = [f for f in vr.check_workflows(REAL, vr.list_files(REAL)) if f.check == "WF-6"]
+        self.assertEqual([f.line() for f in found], [])
 
 
 class CliTest(TmpCase):

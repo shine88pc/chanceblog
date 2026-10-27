@@ -25,6 +25,7 @@ on:
 permissions:
   contents: write
   actions: write  # 새 커밋이 생기면 Pages 배포 워크플로를 dispatch 하기 위해 필요
+  pull-requests: write  # 승인 흐름(레지스트리 publish_flow: pr)에서 초안 PR 을 열고 라벨을 붙이기 위해 필요(direct 에서는 쓰지 않는다)
 
 concurrency:
   group: chanceblog
@@ -41,6 +42,22 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+
+      # 발행 흐름은 레지스트리(pipeline/blogs.json)의 chance.publish_flow 가 정한다. direct(기본)는 지금처럼 글을 main 에 바로 커밋해 게시하고,
+      # pr 은 초안 브랜치와 승인 PR 로 올린다(병합 = 공개). 값을 읽지 못하면 이 단계가 실패해 글을 만들기 전에 멈춘다 —
+      # 승인 흐름이 켜진 채 레지스트리 오류 때문에 직접 게시로 떨어지지 않게 한다. direct 에서는 출력이 없다.
+      - name: 발행 흐름 확인 (레지스트리 publish_flow)
+        id: flow
+        run: |
+          set -euo pipefail
+          flow=$(python -m pipeline.draft_flow flow)
+          echo "flow=${flow}" >> "$GITHUB_OUTPUT"
+          if [ "${flow}" = "pr" ]; then
+            {
+              echo "### 발행 흐름"
+              echo "- 승인 흐름(pr): 글은 초안 브랜치와 PR 로 올라가고, 병합하면 공개됩니다(닫으면 폐기)"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: 의존성 설치
         run: |
@@ -59,9 +76,10 @@ jobs:
           PIPELINE_PAUSE: ${{ vars.PIPELINE_PAUSE }}
         run: python generator.py
 
+      # 승인 흐름(pr)에서는 main 에 직접 커밋·배포 요청을 하지 않는다(글은 아래 '초안 올리기' 단계가 PR 로 올린다).
       - name: 변경 사항 커밋
         id: commit
-        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) && steps.flow.outputs.flow != 'pr' }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -88,3 +106,27 @@ jobs:
           deploy=$(gh workflow run pages.yml --ref "${GITHUB_REF_NAME}")
           echo "$deploy"
           echo "- Pages 배포 실행 요청: ${deploy:-요청함}" >> "$GITHUB_STEP_SUMMARY"
+
+      # 승인 흐름(pr): 만든 글 두 개를 초안 브랜치(ai/draft/…)로 올리고 승인 PR 을 연 뒤, 남은 초안(PR 없는 브랜치·오래된 브랜치)을 정리한다.
+      # 이력 항목만 main 에 커밋하고(슬롯·제목 중복 검사용), 글은 PR 을 병합할 때 main 에 들어간다. 병합은 사람의 push 라서 사이트 배포(pages.yml)가
+      # 저절로 실행되므로 여기서 배포를 요청하지 않는다. PR 을 열지 못하면(저장소 설정이 꺼져 있는 경우 등) 브랜치는 남고 이 단계가 빨강으로 끝난다.
+      # 연습 실행은 아무것도 쓰지 않는다. 설명: docs/ARCHITECTURE.md §4-4
+      - name: 초안 올리기와 승인 PR 열기 (승인 흐름일 때만)
+        if: ${{ steps.flow.outputs.flow == 'pr' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '1' || '0' }}
+          PIPELINE_PAUSE: ${{ vars.PIPELINE_PAUSE }}
+        run: python -m pipeline.draft_flow deliver
+
+      # 새 글을 push 했을 때만 휴대폰(텔레그램)으로 알린다. 시크릿 TELEGRAM_BOT_TOKEN·TELEGRAM_CHAT_ID 가 없으면 아무것도 보내지 않고 한 줄만 남긴다.
+      # 알림이 실패해도 글 게시 실행은 실패시키지 않는다(실패는 ::warning:: 로 드러난다). 연습 실행은 push 가 없어 이 단계가 돌지 않는다.
+      # 시크릿은 이 단계의 env 로만 넘긴다(검증기 WF-13). 설명: .github/editorial/TELEGRAM_SETUP.md
+      - name: 텔레그램 알림(새 글)
+        if: steps.commit.outputs.pushed == 'true'
+        continue-on-error: true
+        timeout-minutes: 2
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m pipeline.notify chance-published --commit HEAD

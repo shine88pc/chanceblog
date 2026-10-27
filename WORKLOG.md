@@ -7,6 +7,200 @@
 
 ---
 
+## [2026-10-27] Claude – 묶음 2 통합: Chance 승인 흐름(E)·티스토리/네이버 초안 패키지(C)·초안 현황판(B)·텔레그램 알림(TG)을 main 위 한 브랜치로 (작업 INT, T2, 새 기능 없음·기본 꺼짐)
+
+**작업자**: Claude (통합 세션, 독립 검증은 별도 세션)
+**대상**: 공통
+**등급**: T2(독립 검증을 받은 네 브랜치를 합치고 서로 어긋난 번호·가정·문장을 고침 — 새 기능·새 호출 없음). `mode`(Chance `auto`·Blogger `off`)·시크릿 값·광고 표면(`index.html`·`_config.yml`)·`pipeline/blogs.json`(`publish_flow: direct` 한 줄 외 변경 없음, 티스토리·네이버 항목 없음)·`인수인계/작업내용.md`·`docs/SESSION_START.md` 는 바꾸지 않았다. `docs/REQUEST_BRIEFING.md` 는 이번 통합에서만 고쳤다(표 패치 둘을 합침).
+**승인 근거**: 운영자 채팅 2026-10-27 "추천대로 진행해줘"(채널 관리 계획 D1~D7)와 텔레그램 알림 요청(2026-10-27). 켜는 일(`publish_flow: pr`, 티스토리·네이버 블로그 항목과 `mode: package`, 텔레그램 시크릿 등록)은 모두 별도 승인·운영자 입력이다.
+**목적**: 운영자는 PR 을 직접 병합해야 하는데 PR 여러 개를 차례로 병합하면 두 번째부터 `WORKLOG.md` 맨 위가 겹쳐 충돌하고 비개발자는 풀 수 없다. 독립 검증 "병합 가능"을 받은 네 브랜치를 미리 합치고 충돌을 풀어 시험까지 마친 한 브랜치로 낸다.
+**브랜치**: `ai/claude/batch-2`(기준 `origin/main` `f8724b7`). 합친 head: E `chance-approval-flow` `49face5`·C `package-mode` `942be8f`·B `draft-board` `6d426a2`·TG `telegram-alerts` `fbe66c1`(넷 모두 작업 A 의 옛 브랜치 끝 `5c57a7c` 위, main 은 그 뒤 A 를 스쿼시로 병합했다). PR·병합·main push·Actions 실행은 하지 않았다(총괄이 처리).
+
+### 한 일
+- **합치기**: `git cherry-pick 5c57a7c..<브랜치>` 를 E→C→B→TG 순서로 했다(커밋 18개). 충돌은 `WORKLOG.md`(브랜치마다 자기 항목을 더하는 커밋 — 모든 항목을 남기고 `---` 유지, 마지막에 올린 것이 위)와 문서 표·절(`docs/ACTIONS_GUIDE.md`·`ARCHITECTURE.md`·`SECURITY_GUARDRAILS.md`·`DEFECT_REGISTER.md`·`OPS_INBOX.md`·`HANDLER.md`)에서 났고, 코드·시험·워크플로 충돌은 TG 첫 커밋의 `.github/workflows/chanceblog.yml`(E 의 단계 뒤에 TG 의 알림 단계)·`tests/test_manual_run_defaults.py`·`tests/test_workflow_names.py` 뿐이었다. 같은 줄을 두 쪽이 다른 자리에서 고친 곳은 3-way 로 둘 다 살렸고(`pipeline/registry.py`·`health.py`·`run.py` 등 코드는 자동 병합이 의미까지 맞았다) 양쪽 변경이 모두 남았는지는 '브랜치별 더한 줄이 통합 트리에 그대로 있는지' 기계로 대조했다.
+- **겹친 번호 재배정**(각 작업이 서로를 모르고 같은 번호를 썼다): 가드레일 `G-L8`(E, C → C 는 `G-L9`)·`G-C11`(E, TG → TG 는 `G-C12`), ACTIONS_GUIDE 3장 `3-17`(E·C·TG → E 는 `3-17`, TG `3-18`, C `3-19`), 6장 `6-12`(C·TG → C 는 `6-12`·`6-13`, TG `6-14`), ARCHITECTURE `§4-4`(E·TG → TG `§4-5`). 바꾼 곳은 그 작업이 더한 줄(본문 참조·앵커 링크·코드 주석·실행 요약 안내 문구·시험이 읽는 번호·그 작업의 WORKLOG 항목)이다. 브리핑은 `G-C11`·`3-17`·`§4-4` 의 E·TG 겹침만 알았고 C 의 `3-17`·`G-L8`·`6-12` 겹침은 통합 중에 찾았다. 결함 번호는 새로 만들지 않았다(D-72 B, D-73·D-74 C, 번호 순서로 두고 문서 머리의 갱신 날짜 줄을 맞췄다).
+- **의미 조정**: ① 러너 요약 머리(C↔B): C 의 `_summary_head()`(`### <key>`)를 없애고 초안 패키지 경로도 B 의 `summary_head()`(`### [채널 라벨] 블로그 이름`)를 쓴다. ② chanceblog.yml 은 9단계(기준 6 + E 의 `발행 흐름 확인`·`초안 올리기` + TG 의 `텔레그램 알림(새 글)`)이고 알림이 맨 끝이다 — E·TG 의 시험 네 곳(`FlowStepTest`·`ChanceSplitTest`·`WorkflowStructureTest` 둘)이 서로의 단계를 몰라 고쳤고(단계 수 8→9, 마지막 단계, 이름 목록, `pull-requests: write` 권한), 충돌로 만난 시험(`test_workflow_names` 둘·`test_manual_run_defaults`)은 풀면서 맞췄다. ③ E 의 낡은 문장('초안 PR 은 확인 필요 모음에 `검사 결과 없음`으로 보인다')을 B 의 사실('초안 대기' 한 줄 + @멘션 코멘트)로 고쳤다(ACTIONS_GUIDE 3곳·ARCHITECTURE·DEFECT_REGISTER·OPS_INBOX). ④ `docs/REQUEST_BRIEFING.md`: C·TG 의 표 패치를 손으로 합쳐 새 워크플로 3개(`[티스토리] 초안 패키지 만들기`·`[네이버] 초안 패키지 만들기`·`[공통] 텔레그램 알림 시험`)와 제어 줄·소개 문장을 반영했다. ⑤ 라벨 이름은 E·C·B 가 같지만 색·설명이 세 곳에서 다르다 — 코드는 그대로 두고 `docs/OPS_INBOX.md` §3-1 에 사실과 권고만 적었다.
+- **켜기 전에 연결할 것**(일부러 연결하지 않았다 — `docs/ARCHITECTURE.md` §4-2-1 끝): E·C 가 초안을 만든 직후 `ops-inbox.yml` 즉시 실행(workflow_dispatch)과 텔레그램 발행 대기 알림(`notify_draft_waiting`). 승인 흐름에서는 글을 main 에 커밋하지 않아 새 글 알림 단계도 돌지 않는다.
+- **통합 시험 19개**(`tests/test_batch2_integration.py`): 라벨·제목 약속, E 의 승인 PR·C 의 초안 이슈가 확인 필요 모음에 '초안 대기' 한 줄·코멘트 하나·휴대폰 한 통으로 나오는 길(가짜 GitHub·가짜 텔레그램 HTTP), 레지스트리에서 두 기능이 함께 사는 것, chanceblog.yml 단계 순서와 '연결하지 않은 것'이 문서와 코드에서 같게 말해지는지, 옮긴 번호가 겹치지 않는지.
+
+### 검증 증거
+- 전체 시험 **3263개 통과**(`python -X utf8 -m unittest discover -s tests`, 기준 main 2222개 + E 275 + C 232 + B 217 + TG 298 + 통합 19 = 3263). `validate_repo.py --base origin/main` 오류 0·경고 2(둘 다 `인수인계/` 문서의 LIQUID-1, main 과 같음), `actionlint` 13개 워크플로 0건, `pyflakes` main 과 같은 16건(새 경고 0), `vermin --target=3.10-` 위반 0(최소 3.10), 3.12 전용 f-string 검사 101개 파일 0건, `git diff --check` 0.
+- **동작 불변**(시크릿 없음·`publish_flow: direct`·티스토리/네이버 항목 없음, 직접 만든 비교 도구로 main `f8724b7` 대 통합 트리): `generator.py` 정기·수동·이미지 교체 24개 시나리오 **24/24 바이트 동일**(음성 대조는 '다름'으로 잡힘). Blogger 러너 시나리오 2155개는 요약 머리 줄(B 의 의도한 변경)을 빼고 2153개가 바이트 동일, 나머지 2개는 C 의 의도한 안내문 변경(`platform=blogger 만` → `platform=blogger·tistory·naver 만`)뿐이고 종료 코드는 2155개 모두 같다. CLI 21개(63개 출력 파일) **63/63 동일**, 확인 필요 모음 12개 시나리오 22번 실행은 의도한 정규화(호출 수 문구·초안 조회·라벨 만들기) 밖 차이 0. 워크플로 YAML 은 허용된 차이만(새 파일 3개, chanceblog.yml 의 E 두 단계·권한 한 줄·조건 한 조각·TG 알림 단계, watchdog.yml 의 `pull-requests: read`, ops-inbox.yml 의 B 8곳·TG env, blogger.yml 의 TG env 둘) — 그것들을 걷어 내면 main 과 같다.
+- **교차 상호작용**: E 의 실제 승인 흐름 이야기(실제 git·생성기)가 연 PR 둘을 B 의 확인 필요 모음 + TG 의 알림(가짜 HTTP)에 흘렸다: 표 `Chance | 2`, '초안 대기' 줄 2개·`검사 결과 없음` 줄 0, 코멘트 1개·휴대폰 1통('2건'), 둘째 점검은 쓰기·알림 0, 토큰 누출 0.
+- 통합 시험의 변이 시험 24개 중 23개를 그 시험이 잡았고 1개(요약 머리의 이름 없을 때 대체값)는 B 의 `SummaryHeadTest` 가 잡는다.
+
+### 남긴 것 / 다음 AI 에게 남기는 주의사항
+- **실제 Actions·실제 GitHub·실제 텔레그램은 한 번도 돌려 보지 못했다**(각 작업 항목의 병합 직후·켠 뒤 관측 목록이 그대로 유효하다). 병합 직후 볼 것: `[공통] 저장소 규칙·테스트 자동 검사` 초록(시험이 3000개 넘어 시간 제한 10분 안인지), 다음 `[Chance] 글 자동 작성·게시` 정기 실행(새 단계 `발행 흐름 확인`·`텔레그램 알림(새 글)`이 보이고 알림은 시크릿이 없어 건너뜀, 결과 그대로), Actions 목록의 새 워크플로 2개(대상 0개로 초록)·`[공통] 텔레그램 알림 시험`(수동).
+- 켜는 것은 모두 별도다: Chance 승인 흐름(T3 + 저장소 설정 확인), 티스토리·네이버(운영자 입력 D8 + T3), 텔레그램(시크릿 등록 + 시험 워크플로 1회). 켜기 전에 '연결할 것'(위)과 라벨 색 통일을 한다.
+- 두 모듈이 아직 모르는 곳: `scripts/watchdog.py` 요약표·`pipeline/inbox.py` 의 `package_issued`(C 보고 §10-5), 초안 PR 이 `pr:<번호>:ready` 와 `draft:<번호>:wait` 로 한 번 더 알려질 수 있는 경우(B 의 N1, 켜기 전 권고).
+
+---
+
+## [2026-10-27] Claude – 텔레그램 알림: 새 글 발행·Blogger 초안 발행 대기·확인 필요를 휴대폰으로 (운영자 요청, 작업 TG, T2, 시크릿이 없으면 동작 변화 없음)
+
+**작업자**: Claude (구현 세션, 독립 검증은 별도 세션)
+**대상**: 공통 (알림 모듈·워크플로·검증기·문서; 호출 자리는 Chance·Blogger·확인 필요 모음)
+**등급**: T2(새 모듈·새 워크플로·워크플로 단계와 env 추가·검증기 규칙). 시크릿 사용(T3 항목)에 대한 승인은 운영자의 2026-10-27 채팅 요청("새 글 발행이나 초안 작성 후에 발행 대기중 같이 필요한 알람에 대해서 텔레그램 메세지로 받을 수 있게 해줘")이다. **시크릿 값은 만들지도 쓰지도 않았다**(이름 `TELEGRAM_BOT_TOKEN`·`TELEGRAM_CHAT_ID`만) — 운영자가 GitHub 화면에서 직접 등록하고, 등록하기 전에는 알림이 꺼져 있다(아무 일도 하지 않음). `mode`·광고 표면(`index.html`·`_config.yml`)·`generator.py`·글 생성 로직은 바꾸지 않았다.
+**목적**: 새 글이 올라갔을 때, Blogger 초안이 초안함에서 게시를 기다릴 때, 확인 필요 모음에 새로 해야 할 일이 생겼을 때를 운영자가 휴대폰(텔레그램)으로 바로 안다. 이 PC 의 회사망이 텔레그램 사이트를 막아 공식 문서는 읽지 못했고(HTTP 403) 한도·형식은 조사 보고(미러 문서·공식 채널·소스)의 값이다. 실제 텔레그램 서버로는 한 번도 요청하지 않았다(토큰도 없다) — 시험은 가짜 HTTP 와 127.0.0.1 임시 서버뿐이다.
+**브랜치**: `ai/claude/telegram-alerts`(기준 `origin/ai/claude/channel-names` 5c57a7c). PR 생성·병합·main push·Actions 실행·브라우저는 쓰지 않았다(총괄이 처리).
+
+### 한 일
+- **`pipeline/notify.py`**(새 모듈, 표준 라이브러리만, Python 3.10 호환): `Notifier`(환경변수에서 토큰·채팅 ID 를 읽는다 — 둘 중 하나라도 비면 비활성, 아무것도 보내지 않음) + `send_message`·`notify_chance_published`·`notify_draft_waiting`(티스토리·네이버 초안 패키지·Chance 승인 대기·Blogger 초안 공통)·`notify_blogger_result`·`notify_ops_alert`·`notify_test` + 명령 줄 `python -m pipeline.notify chance-published --commit HEAD | test | status`. 모든 공개 함수는 예외를 던지지 않고 `Result(ok, sent, status, reason, detail)`를 돌려준다. **토큰·채팅 ID 는 로그·예외·출력·명령 줄 어디에도 나오지 않는다**: 예외는 클래스 이름만 쓰고(문구·요청 객체·원 예외 사슬 금지 — 토큰이 요청 주소 경로에 들어가 `requests` 식 예외 문자열이 주소째 새는 사고를 막는다), 돌려주는 모든 글에서 토큰·채팅 ID(와 URL 인코딩·토큰 절반)를 글자 그대로 지운 뒤 비밀 패턴(`mask`)으로 한 번 더 가리며, argparse 오류도 잘못 넘긴 값을 되풀이하지 않는다. JSON POST 15초 제한·링크 미리보기 끔·429 는 `retry_after`(최대 10초)만큼 기다려 한 번·네트워크 오류와 5xx 는 한 번·서식 해석 오류(400)는 평문으로 한 번·버튼 거부는 버튼 없이 한 번(요청은 한 통에 최대 5번)·본문 3,800자(UTF-16 단위)·한 실행 5통·통 사이 1.1초. 외부·AI 유래 글은 소독하고(비밀 모양 가리기·보이지 않는 문자 제거·한 줄 접기·길이 제한·HTML 이스케이프) 주소는 허용 목록(`shine88pc.github.io`·`github.com/shine88pc/chanceblog`·`www.blogger.com` + 코드가 주는 블로그 주소)만 링크·버튼으로 건다. 새 글 주소는 `scripts/verify_pages_deploy.py` 의 계산(배포 확인이 여는 주소와 같은 규칙)을 그대로 쓴다.
+- **호출 자리**: `chanceblog.yml` 마지막 단계 `텔레그램 알림(새 글)`(`if: steps.commit.outputs.pushed == 'true'`·`continue-on-error: true`·`timeout-minutes: 2`, 이 단계 `env` 에만 시크릿 두 개 — 연습 실행은 push 가 없어 돌지 않고, 전송이 실패해도 종료 코드 0 에 `::warning::` 고정 문장) · `pipeline/run.py`(Blogger 러너: 초안함 업로드·즉시 게시에 성공했을 때 이력·초안 파일·실행 요약을 모두 쓴 **맨 마지막에** 알림, 연습·실패·파일만 저장에서는 부르지 않고 어떤 실패도 결과·이력·요약·종료 코드를 바꾸지 않음) + `blogger.yml` 러너 단계 `env` 두 줄 · `scripts/ops_inbox.py`(코멘트를 쓰려고 할 때마다 같은 새 항목 판정으로 같은 제목 줄(`inbox.alert_lines`)을 평문 한 통, 코멘트 성공 여부와 무관·서로 영향 없음) + `ops-inbox.yml` `env` 두 줄 · 새 워크플로 `[공통] 텔레그램 알림 시험`(`telegram-test.yml`, 수동 전용, 읽기 권한: 시크릿 등록 여부를 이름별 `등록됨/없음`만 요약에 쓰고 둘 다 있으면 시험 메시지 한 통, 실패는 분류(토큰 틀림 401·채팅 ID 틀림 400·`/start` 안 함 403·네트워크…)와 조치를 요약에).
+- **검증기**: **WF-13** — 텔레그램 시크릿 이름은 단계 `env` 의 같은 이름 환경변수에 `secrets.그 이름` 표현식 그대로일 때만 허용(`run`·`with`·`if`·job/워크플로 `env`·이름 등 어디든 나오면 오류, `$TELEGRAM_BOT_TOKEN` 같은 셸 확장도 같음). **WF-6 예외** — run 이 정확히 `python -m pipeline.notify <이벤트> [--commit …]` 한 줄이고 `timeout-minutes` 가 있는 단계만 `continue-on-error` 에 경고하지 않는다(알림은 보조라 게시 실행을 실패시키면 안 되고 알림 명령이 스스로 경고를 낸다 — W4 의 유일한 예외). 비밀 패턴(`pipeline/secret_patterns.py`)에 `Telegram 봇 토큰`(`숫자:영문숫자 30~50자`, 주소 경로의 `bot` 바로 뒤에서도 걸림) — SEC-2 와 런타임 `mask()` 가 함께 쓴다.
+- **문서**: 운영자 안내 `.github/editorial/TELEGRAM_SETUP.md`(봇 `@chance_auto_post_bot`, 휴대폰에서 `/start`, 채팅 ID 확인 방법(미확인 표시), 시크릿 등록 순서, 시험 실행과 결과 읽는 법, 알림 표, 끄는 법, 노출 시 BotFather `/revoke`, 종단간 암호화 한계, "AI 는 값을 대신 입력하지 않는다"), `docs/ACTIONS_GUIDE.md`(3-18·6-14·이름 표·알려진 상태), `docs/ARCHITECTURE.md`(§4-5 알림 계층·§2-1 표·§6), `docs/SECURITY_GUARDRAILS.md`(**G-C12** 토큰 취급·WF-13·SEC-2·WF-6 예외·§1·§3·§4·§5·§6), `docs/OPS_INBOX.md`(코멘트 알림과 텔레그램의 관계), `docs/ENGINEERING_GUIDE.md`(W4 예외·W8·확장 표), `HANDLER.md`.
+- **시험**: 새 시험 파일 4개(`test_notify.py`·`test_notify_cli.py`·`test_notify_integration.py`·도구 `notify_helpers.py`)와 `test_validate_repo.py`·`test_security_settings.py` 보강, 기존 시험 8곳 갱신(워크플로 이름 표·env 목록·새 단계·시크릿 표본). 전부 가짜 HTTP(`urllib.request.urlopen` 자리)·가짜 git·127.0.0.1 임시 서버뿐이고 `tests/_bootstrap.py` 가 시험 PC 의 텔레그램 환경변수를 지운다.
+
+### 알아 둘 것
+- **총괄 소유 문서(`docs/REQUEST_BRIEFING.md`)는 이 브랜치에서 고치지 않았다.** 새 워크플로가 그 표에 없으면 시험 2개(`test_docs_tables_list_every_workflow_with_its_current_name`·`test_real_briefing_covers_current_repository`)와 검증기 BRIEF-1 경고가 나온다 — 패치 `TG_request_briefing_table.patch`(행 1줄·한 구절)를 얹으면 전부 통과한다.
+- **확인 필요 모음의 휴대폰 알림은 코멘트 성공 여부와 무관하게 간다**(서로 영향 없음, 기존 새 항목 판정 그대로). 코멘트가 실패해 다음 점검이 같은 항목을 다시 알릴 때는 휴대폰 알림도 한 번 더 간다(기존 "놓치는 쪽보다 한 번 더 알리는 쪽이 낫다" 원칙). 코멘트가 성공한 점검에서만 보내려면 `scripts/ops_inbox.py` 의 `send_alert` 호출 두 곳을 `if ok:` 안으로 옮기면 된다.
+- 티스토리·네이버 초안 패키지(작업 C)와 Chance 승인 대기(작업 E)의 호출은 넣지 않았다 — 초안을 만든 직후 `notify_draft_waiting(channel_label, title, where, url=None)` 을 부르면 같은 모양의 `📝 발행 대기` 알림이 간다(`docs/ARCHITECTURE.md` §4-5).
+- 텔레그램 전송에는 멱등성 키가 없어 타임아웃 뒤 재시도로 같은 알림이 드물게 두 번 갈 수 있다(최소 한 번 가는 쪽을 택했다). `blogger.yml` 을 재사용 워크플로로 바꾸는 작업 D 는 러너 단계 `env` 두 줄을 그대로 옮겨야 하고, 호출 쪽 `jobs.<잡>.secrets` 에 텔레그램 시크릿을 매핑하면 WF-13 오류가 되므로 `secrets: inherit` 를 쓰거나 규칙의 허용 자리를 넓혀야 한다(`docs/ARCHITECTURE.md` §4-5).
+
+### 독립 검증 1차(판정 "병합 가능", 막는 결함 0) 뒤에 반영한 것
+검증자가 새 clone 에서 변이 183개·누출 탐침 수백 건·동작 불변 비교(러너 162·확인 필요 모음 36)·rebase 시뮬레이션을 직접 돌렸다. 권고 중 아래를 새 커밋으로 반영했다.
+- **N-1(중간) 러너 알림 순서**: 알림을 이력 기록·초안 파일 저장·실행 요약 쓰기보다 **뒤**(함수 맨 끝)로 옮겼다. 알림이 오래 걸리거나 그 사이 프로세스가 끊겨도 올라간 글·초안의 이력이 먼저 남아 같은 날 재실행이 하루 상한·중복 방지를 볼 수 있다. 알림 요청이 나가는 순간 이력·초안 파일·요약이 이미 있음을 고정하는 시험을 더했다(성공 경로의 출력 줄 순서는 알림 줄이 맨 끝으로 가는 것 말고 그대로).
+- **N-2(중간) 새 글 알림의 배포 안내**: "배포가 끝나기까지 약 3분 — 일찍 열면 404 가 최대 약 18분 보관될 수 있으니 3분 뒤에 열어 보세요"(저장소 D-41: 공개 CDN 이 없는 주소의 404 도 최대 약 18분 보관). `TELEGRAM_SETUP.md` §1·`ARCHITECTURE.md` §4-5·`ACTIONS_GUIDE.md` 3-18 에도 적었다. 알림을 `pages.yml` 의 사이트 반영 확인 성공 뒤로 옮기는 안은 **코드로 하지 않고** 문서의 '후속' 줄로만 남겼다.
+- **N-3(낮음) WF-13 대소문자**: 이름 검색을 대소문자 무시로(`secrets.telegram_bot_token` 도 같은 시크릿). 오류 메시지는 등록된 대문자 이름으로 알린다.
+- **N-5(시험 구멍)**: 검증자의 생존 변이 E08(새 글 출처 이스케이프)·E12(게시됨 제목 이스케이프)·U16(주소 줄 `&`)·V02(`container.env`·`services.*.env`)·H12(두 번째 Blogger 채널 라벨)·C07(응답 읽기 상한 값 65536)·X11(시험 요약의 설명 `md_cell`)을 잡는 시험을 더했다.
+- **N-7(낮음) 제목·출처 속 주소**: 새 글·발행 대기·게시됨 알림의 제목·분야·출처·라벨·안내 문구 속 `https://…`·`tg://…` 를 글자로만 두도록(`safe_text` = `clean_text` → `defang_urls` → HTML 이스케이프) 했다(확인 필요 알림은 이미 그랬다).
+- **문서에 한계로만 적은 것(코드 변경 없음)**: N-4(WF-13 은 이름이 글자로 나오는 곳만 본다 — `toJSON(secrets)`·`secrets[…]`·`secrets: inherit`·외부 `uses:` 의 env 는 못 잡는다. 작업 D 가 재사용 워크플로로 바꿀 때 호출 쪽 `jobs.<잡>.secrets` 의 텔레그램 시크릿 매핑은 WF-13 오류가 된다) · N-8(`Pages 배포 실행` 단계가 실패하면 알림 단계도 건너뛴다 — Actions 실패 알림이 대신한다) · N-10(제3자 'ID 알려 주는 봇'은 사칭 위험이 있어 마지막 선택지) · N-11(저장소 시크릿은 모든 브랜치의 워크플로가 읽을 수 있으니 `[공통] 텔레그램 알림 시험` 은 `main` 에서만 실행).
+- **일부러 하지 않은 것**: N-6(텔레그램이 준 설명 안에서 공백·개행으로 쪼개진 토큰까지 지우기 — 텔레그램은 요청을 되풀이하지 않아 현실성이 낮다)과 정보성 지적 하나(조치 불필요).
+
+### 검증 증거
+- **L1**: `python -X utf8 -m unittest discover -s tests` — 기준 5c57a7c **2217개 통과**(447.5초) → 이 브랜치(독립 검증 반영 뒤 head 53d7748) 패치 없음 **2515개 중 2513개 통과·2개 실패**(285.5초; 실패는 `docs/REQUEST_BRIEFING.md` 표를 보는 시험 둘 `test_real_briefing_covers_current_repository`·`test_docs_tables_list_every_workflow_with_its_current_name` 뿐), 총괄 패치 `TG_request_briefing_table.patch` 를 얹으면 **2515개 모두 통과**(285.1초). 새 시험 298개(`test_notify` 147·`test_notify_cli` 63·`test_notify_integration` 56·`test_validate_repo` +26·`test_security_settings` +6). main f8724b7(작업 A 병합 뒤) 위로 옮긴 임시 작업 트리(충돌은 WORKLOG 한 곳뿐) + 패치: **2520개 모두 통과**(292.0초 — main 의 2222개 + 새 298개).
+- **L0**: `python scripts/validate_repo.py --base origin/ai/claude/channel-names` 오류 0·경고 1(LIQUID-1, 기준과 같음; 패치 없이는 BRIEF-1 한 건 더), `actionlint` 1.7.12 워크플로 11개 지적 0, `pyflakes` 기준과 같은 16건(새 경고 0), `vermin --target=3.10-` 위반 0(전체 최소 3.10), 3.12 전용 f-string 검사 0건, `git diff --check` 0(전부 독립 검증 반영 뒤 head 에서 다시 돌림).
+- **동작 불변**: 시크릿이 없을 때 Blogger 러너 시나리오 10개와 확인 필요 모음 시나리오 5개의 출력·종료 코드·이력·초안·요약·쓰기 로그 **80개 파일이 5c57a7c 와 바이트 단위로 같다**(대조군: 가짜 시크릿·가짜 HTTP 를 주면 5개 출력만 `[참고] 텔레그램 알림: 보냈습니다` 한 줄 등이 더해져 달라짐). 워크플로 YAML 은 더한 것(알림 단계 1개·env 5줄·새 파일)을 빼면 기존 10개가 `yaml.safe_load` 결과까지 같다. `generator.py` 는 한 줄도 바뀌지 않았다. 알림 호출 위치를 옮긴 뒤(53d7748)에도 같은 80개를 다시 비교해 80/80 같고, 독립 검증자의 하니스(러너 27개 시나리오×시크릿 6가지 = 162개, 확인 필요 모음 9개 시나리오×4가지 = 36개)로 돌려도 기준과 바이트 단위로 같다(162/162·36/36).
+- **누출 시험**: 요청 주소가 든 예외 문자열(`requests` 식 연결 실패·`InvalidURL`·`URLError`·원인 사슬·응답 설명에 토큰 등) 15가지 + 명령 줄 2가지 실패 모양에서 결과·설명·로그·요약·단계 출력·argparse 오류에 토큰·채팅 ID 가 없다.
+- **변이(직접 돌림)**: 원래 121개(`pipeline/notify.py`·`scripts/validate_repo.py`·`pipeline/secret_patterns.py`·`pipeline/run.py`·`scripts/ops_inbox.py`·`pipeline/inbox.py`·워크플로 4개)를 독립 검증 반영 뒤의 최종 코드에서 다시 돌려 **121개 모두 시험이 잡는다**(코드가 바뀐 정의 4개 H04·H05·W04·V04 는 새 코드에 맞게 고쳤다). 거기에 검증자의 생존 변이(E08·E12·U16·V02·H12·C07·X11)와 이번 수정 — 러너 알림 순서 4가지(검증자의 X19 안 = 이력 기록 직후로 옮기는 변이 포함)·배포 안내 문구 3가지·WF-13 대소문자 2가지(X20 포함)·시험 구멍 9가지·주소 풀어 쓰기 9가지 — 를 가르는 변이 27개를 더해 **27개 모두 시험이 잡는다**. 수정 전 코드의 첫 판에서는 122개 중 4개가 살아남았다 — 둘(U02 포트 검사·U04 백슬래시 검사)은 다른 검사(netloc 일치·허용 글자 목록)가 이미 막는 중복 검사라 코드에서 지웠고, 둘(W04·W05)은 '알림 함수가 불리지 않는다'를 따로 고정하는 시험 3개로 메웠다.
+- **실제 서버 없이 실제 urllib**: 127.0.0.1 임시 서버로 200·401·400·403·404·429(대기 후 성공)·5xx(HTML 본문)·소켓 제한 시간·연결 거부가 분류로 이어지는지 확인(텔레그램으로는 나가지 않음).
+
+### 못 한 검증
+- **실제 텔레그램 호출**(시크릿 등록 뒤 `[공통] 텔레그램 알림 시험`이 첫 검증), 휴대폰 앱의 버튼·알림 도착, 새 글 알림의 주소가 배포 뒤 열리는지, Actions 에서 `텔레그램 알림(새 글)` 단계의 실제 실행. 텔레그램 공식 문서(core.telegram.org)는 이 PC 에서 읽을 수 없어 미러·소스로 확인한 값이다. 3.10 에서 직접 돌리지는 못했다(로컬 3.12 — `vermin`과 3.12 전용 f-string 검사로 대신).
+
+---
+
+## [2026-10-27] Claude – 초안 현황판(확인 필요 모음 안 구역)·초안 모델·초안 이벤트 갱신·Blogger 요약 `[채널]` 머리 (작업요청서 5 PR-B, T2, D-72)
+
+**작업자**: Claude (구현 세션, 독립 검증은 별도 세션)
+**대상**: 공통 (확인 필요 모음: `pipeline/inbox.py`·`scripts/ops_inbox.py`·`ops-inbox.yml`) + Blogger 러너의 실행 요약 첫 줄(`pipeline/run.py`)
+**등급**: T2(코드·시험·워크플로 트리거·문서). 광고 표면(`index.html`·`_config.yml`)·`mode`·시크릿·레지스트리·다른 워크플로 9개는 바꾸지 않았다. 승인 근거: 운영자가 2026-10-27 채팅으로 계획 보고의 추천을 전부 승인("추천대로 진행해줘") — D3(초안 현황판은 확인 필요 모음 #22 안의 구역 + 초안 이슈가 생기거나 닫힐 때 즉시 갱신)와 계획 §5(Blogger 실행 요약 첫 줄에 `[채널] 블로그 이름`). D1 (a)·D4·D5 같은 T3 항목은 이 PR 에 없다(초안을 만드는 쪽은 작업 C·E).
+**목적**: 운영자가 "이슈 하나만 보면 된다"는 `[운영] 확인 필요 모음`(#22)에서 채널별 발행 대기 초안을 한눈에 보게 한다. 초안 모델(라벨 규칙)을 이 작업이 정해 작업 C(티스토리·네이버 초안 이슈)·E(Chance 승인 PR)가 따른다.
+**브랜치**: `ai/claude/draft-board`(`origin/ai/claude/channel-names` 5c57a7c 에서 시작 = origin/main e71a6ec + 작업 A). PR 생성·병합·Actions 실행은 하지 않았다(총괄이 처리).
+
+### 한 일
+- **초안 모델**(`pipeline/inbox.py`, 순수 함수): 초안 1건 = 이슈 1개 또는 PR 1개. 라벨 `초안`(대기)·`채널:<채널 라벨>`(레지스트리 `channel.label` 에서 만든 글자)·`폐기`(쓰지 않음), 닫으면 발행 완료 또는 폐기. 센다 = 열림 · 라벨 `초안` · 라벨 `폐기` 없음 · 작성자가 봇이거나 소유자·멤버·협업자(낯선 사람의 위장은 안 센다). `normalize_draft`·`pending_drafts`·`draft_label_specs`.
+- **항목**(`draft_items`): 열린 초안(이슈·PR)이 3일 이하면 action(`draft:<번호>:wait`, 새 항목이라 코멘트 알림), 넘으면 check(`draft:<번호>:stale`, 알림 없음). **초안 PR 은 한 줄만 남긴다**: 열린 PR 규칙이 이미 action 으로 올린 PR(`pr:<번호>:ready`·`conflict`·`ci_fail`)은 그 줄이 알리고 초안 항목을 만들지 않으며(이중 알림 방지), 그 밖의 상태에서는 그 PR 의 열린 PR 줄을 빼고 초안 항목이 알린다. 저장소 기본 토큰이 연 PR(작업 E 의 Chance 승인 PR)은 GitHub 규칙상 검사가 돌지 않아 열린 PR 규칙만으로는 알림 없는 `검사 결과 없음`(check)으로 남아, 승인을 기다리는 초안이 아무 알림 없이 쌓이기 때문이다(작업 E 보고가 확인 항목으로 둔 사실). 초안 목록 조회가 실패하면 이미 알린 `draft:` id 를 표식에 남긴다(`SOURCE_PREFIXES["drafts"]`).
+- **초안 현황 표**(`draft_board`·`board_rows`, `render(board=…)`): 본문 머리 바로 아래. 채널(레지스트리 순서, 대기 0 이어도 유지) | 대기 초안 | 가장 오래된(일수) | 최신 초안(링크). `mode: off` → `정지`, 승인 흐름이 아닌 Chance(`publish_flow` 없음·`direct`) → `자동 공개`, Blogger → 이력의 `draft_uploaded` 최근 14일 대략치(`N (대략)`, 공개 여부는 Blogger 쪽 사실이라 모른다고 표 아래에 적음), 조회 실패 → `조회 실패`(0 이 아님), 레지스트리에 없는 채널 라벨·채널 라벨 없는 초안 → 별도 줄(조용히 사라지지 않게). 표 아래 마지막 줄에 휴대폰 필터 링크(`is:open label:초안 label:"채널:<라벨>"` 퍼센트 인코딩; 평범한 채널 라벨일 때만). 외부 글(제목·라벨)은 기존 `ext()` 무력화를 거치고 `|` 는 전각으로 바꾼다.
+- **읽기·쓰기**(`scripts/ops_inbox.py`): `fetch_drafts`(`GET /issues?state=open&labels=초안`, 100건씩 최대 3쪽, 실패는 전부 버리고 `drafts` 조회 실패 하나), `ensure_draft_labels`(없는 라벨만, 색·설명 고정, 이슈를 쓴 뒤·실패해도 점검 결과 불변·연습/토큰 없음은 안 만듦).
+- **워크플로**(`ops-inbox.yml`): `issues`·`pull_request`(opened·closed·reopened·labeled·unlabeled) 트리거, job `if` 가 `초안` 라벨(또는 방금 뗀 `초안` 라벨)이 있는 것만·PR 은 이 저장소의 브랜치에서 온 것만 통과, PR 이벤트는 기본 브랜치 코드를 체크아웃, 이벤트 값은 셸·환경변수에 넣지 않음, `concurrency` 는 job 수준으로 옮김, `timeout-minutes` 10 → 12, 실행 제목에 `이슈 변경(초안만 점검)`·`PR 변경(초안만 점검)`. 권한은 그대로. 다른 워크플로 9개는 그대로.
+- **Blogger 실행 요약**(`pipeline/run.py`): 요약 첫 줄만 `### [채널 라벨] 블로그 이름`(`summary_head()`, 예 `### [Blogger] Blogger (macat0722)`; 3곳). 나머지 줄은 한 글자도 바꾸지 않았다.
+- **문서**: `docs/OPS_INBOX.md`(§1·§2 자주 묻는 일·§3 규칙표·**§3-1 초안 모델과 표**·§4·§5 한계 11~14·§6 이벤트 트리거 보안·§7·§8 켠 뒤 확인·§9), `docs/ACTIONS_GUIDE.md`(1장·표·시간표·6-3·6-10·3-14), `docs/ARCHITECTURE.md`(§2-1 행·§4-1·**§4-2-1**), `HANDLER.md`, `docs/SECURITY_GUARDRAILS.md`(G-O8), `docs/DEFECT_REGISTER.md`(D-72).
+- **독립 검증 1회차 권고 반영**(blocking 0 에 대한 낮음·정보 지적, 새 커밋으로 쌓음): ① 열린 초안이 읽는 상한(300건)에 닿으면 표의 GitHub 칸에 `300+`(0 도 `0+`)와 안내 줄을 붙인다 — 참고 항목이 본문 길이 제한에 잘려도 표가 알려 준다(N5) ② `scripts/ops_inbox.py` 가 `draft_board` 의 어떤 예외에도 죽지 않는다 — 표만 빼고 `[참고]` 한 줄(N3, 레지스트리 항목의 `key` 가 목록이면 예전에는 TypeError 로 모음 전체가 죽었다) ③ `ext()` 가 글 끝의 역슬래시를 지운다 — 표의 링크 글과 굵은 글씨가 깨지지 않게, PR 제목·초안 제목이 같은 처리를 받는다(N7) ④ 채널 라벨 없는 초안 항목 줄의 '채널 채널 표시 없음' 겹침을 '채널 표시 없음'으로(N7) ⑤ 문서: 표식 80개 한계(N2)·재오픈은 열린 지 3일 이내일 때만 다시 알림(N4)·초안 PR 이 한 번 더 알려지는 경우의 한계와 승인 흐름을 켜기 전 id 통일 권고(N1, 고치지 않고 문서화) ⑥ 시험 구멍 I08(채널 라벨 접두 검사)·N18(기본 인자)·X13(문서 문장) 을 잡는 시험(N6).
+- **시험**: 새 `tests/test_ops_inbox_drafts.py` 208개(초안 모델·항목·초안 PR 한 줄 규칙·표·`render(board)`·읽기·라벨·전체 실행·워크플로 `if` 를 GitHub 규칙대로 계산하는 해석기·문서↔코드), `tests/test_run.py` `SummaryHeadTest` 9개, 기존 시험 갱신(요약 첫 줄 5곳·실행 제목·라벨 시험 범위·워크플로 트리거·시간 상한), 가짜 GitHub(`ops_inbox_helpers.py`)에 `GET /labels`·쪽 넘김·초안·채널 레지스트리.
+
+### 알아 둘 것
+- **저장소 기본 토큰(`GITHUB_TOKEN`)이 만든 이슈·PR 은 `issues`·`pull_request` 이벤트로 워크플로를 시작시키지 못한다**(GitHub 규칙). 그래서 '이슈가 열릴 때 즉시'는 사람이 한 조작(닫기·라벨·병합)에서만 돈다. 자동 초안을 만드는 워크플로(작업 C·E)는 만든 직후 `ops-inbox.yml` 을 `workflow_dispatch` 로 불러야 한다(`pages.yml`·`guardrails.yml` 을 부르는 것과 같은 이유). 계획 보고가 놓친 사실이라 D-72 에 적었다. Actions 실행은 하지 못해 `opened`·`labeled` 중 어느 이벤트가 도는지는 병합 뒤 관측한다.
+- **'가장 오래된' 칸은 하루에 한 번 바뀐다** — 점검 시각을 본문에 넣지 않는다는 기존 원칙의 유일한 예외다(대기 초안이 있는 채널마다 하루 한 번 본문이 다시 쓰인다, 알림 없음).
+- **Blogger 실행 요약 본문의 안내 문구는 바꾸지 않았다**: `draft_uploaded` 요약에는 이미 "Blogger 초안함에 올렸습니다 … Blogger 화면에서 확인한 뒤 직접 게시하세요" 줄이 있다. '대시보드 → 초안'으로 더 구체화하면 요약 줄 diff 가 생겨 "첫 줄 외 diff 0" 증명과 충돌해 그대로 두고, 대신 모음의 표 아래 안내(정지가 아닌 Blogger 채널이 있을 때)에 같은 말을 적었다.
+- **초안 PR 은 검사 결과와 상관없이 '초안 대기' 한 줄로 알린다**(열린 PR 규칙이 병합 가능·충돌·검사 실패로 이미 알리는 PR 은 그 줄 하나). 그래서 작업 E 의 문서·보고에서 '초안 PR 이 `검사 결과 없음`(확인)으로 보인다'고 적힌 곳은 병합 때 '`초안 대기 — 글 제목` 한 줄로 보인다'로 고쳐야 한다(총괄 정리 몫). 검사가 나중에 끝나 `pr:<번호>:ready` 로 바뀌면 새 id 라 한 번 더 알린다(대기 → 병합 가능 상태 변화). **한계(N1, 고치지 않음)**: 이미 `pr:<번호>:ready` 로 알린 초안 PR 의 열린 PR 줄이 일시적으로 action 에서 빠지는 점검(`mergeable` 이 다시 null·상세 조회 실패·열린 PR 목록 조회 실패)에서는 `draft:<번호>:wait` 가 새 id 라 한 번 더 알린다(누락이 아니라 중복). Chance 승인 흐름(`publish_flow: pr`)을 켜기 전에 초안 PR 항목 id 를 PR 상태와 무관하게 통일하는 것이 권고다(`docs/OPS_INBOX.md` §4).
+- **알린 id 는 표식에 80개까지만 남는다**(기존 한계, N2): 열린 action 이 80개를 넘으면(초안 약 70건 이상) 정렬상 뒤의 id 가 점검마다 다시 알려진다 — 초안을 쌓아 두지 않는 운영이 전제(`docs/OPS_INBOX.md` §5 의 15).
+- **`ext()` 는 공유 함수다**: 글 끝 역슬래시를 지우는 변경은 PR 제목·주석 문구 등 외부 글 전부에 같게 적용된다(끝에 역슬래시가 없는 글은 바이트 단위로 같다 — 옛 입력 비교 12개 시나리오 22번 실행에서 차이 0).
+- 건너뜀 실행: 모든 이슈·PR 이벤트가 이 워크플로의 실행을 하나씩 만들고 `초안` 라벨이 없으면 job 이 건너뜀으로 끝난다(정상). `concurrency` 를 job 수준으로 옮겼는데, 건너뛴 job 이 줄에 서지 않는다는 것은 GitHub 동작에 대한 지식이라 병합 뒤 관측이 필요하다(틀렸어도 최악은 다음 예약 때까지 갱신이 늦어지는 것).
+- 이 PR 은 `WORKLOG.md` 맨 위와 `docs/DEFECT_REGISTER.md` 의 D-66 아래에 쓴다 — 같은 자리에 쓰는 작업 C·E 의 브랜치와 병합 때 충돌한다(총괄이 푼다).
+- 독립 검증 8건(작업 A, N1·N3~N7)은 이 작업 범위와 겹치지 않아 다루지 않았다.
+
+### 검증 증거
+- **L1**: `python -X utf8 -m unittest discover -s tests` — 기준 5c57a7c **2217개 통과** → 브랜치 **2434개 통과**(새 시험 217개 = `test_ops_inbox_drafts` 208 + `test_run` 9). 네트워크 없이 돈다.
+- **L0**: `python scripts/validate_repo.py --base origin/ai/claude/channel-names` 오류 0·경고 1(LIQUID-1, main 과 같음), `actionlint` 1.7.12 워크플로 10개 지적 0, `pyflakes` 새 경고 0(기준과 같은 16건), `vermin --target=3.10-` 최소 3.10, 3.12 전용 f-string 검사 0건, `git diff --check` 0.
+- **동작 불변**: ① Blogger 러너 — 가짜 게시자·LLM 으로 **2155개 시나리오**(입력 조합 전수 1728 = 모드 3 × `BLOGGER_PUBLISH` 9 × 연습 2 × 시크릿 16 × 하루 상한 2, 인증 점검만 192, 그 밖 235 = 인증·게시 실패 분류·가짜 LLM 5종 × 언어 2 × 모드 3·수동 주제·일시정지·이력 상태·쓰기 실패 9·설정 오류·실제 명령줄 9)에서 종료 코드·로그·이력 파일·초안 파일·가짜 게시자 호출·LLM 호출이 기준과 바이트 단위로 같고 **요약만 첫 줄 하나**(`### blogger_macat` → `### [Blogger] Blogger (macat0722)`)가 다르다(요약이 있는 2144개 전부, 약 158만 바이트 비교, 비교기는 한 글자 변조 5곳을 모두 잡는다). ② CLI 21개(`pipeline.registry`·`plan`·`run`·`validate_repo --json`) 63개 출력 파일 바이트 동일. ③ 확인 필요 모음 — 채널 없는 레지스트리·초안 없음 입력의 12개 시나리오 22번 실행에서 이슈 본문·코멘트·상태·실행 요약·로그·종료 코드가 기준과 같고 다른 것은 호출 수 문구·초안 조회·라벨 호출뿐. ④ 워크플로 YAML — `ops-inbox.yml` 하나만 바뀌었고 `yaml.safe_load` 차이는 의도한 8곳(`on` 둘, `run-name`, `if`, 체크아웃 `ref`, `timeout-minutes`, `concurrency` 이동 둘), 나머지 9개 워크플로는 diff 0.
+- **변이(직접 돌림)**: 서로 다른 변이 210개(`pipeline/inbox.py` 120·`scripts/ops_inbox.py` 35·`pipeline/run.py` 10·워크플로 21·문서↔코드 24), 처음에 7개가 살아남았고(시험의 허공 단언·무력화 누락·동시각 최신 선택·시각 모름·상수 고정·키 대체 접기) 시험을 보강해 모두 탐지됐다. 초안 PR 한 줄 규칙의 변이 27개(코드 24·문서 3)와 독립 검증 권고 반영분 45개(읽는 상한 `+`·표 만들기 방어·끝 역슬래시·채널 표시 없음 문구·재오픈 문구·문서 14, 검증자가 찾은 생존 변이 I08·N18·X13 포함)도 처음부터 모두 탐지됐다. 동등 변이 없음(의미 없는 변이 하나는 정의에서 뺐다).
+- **연습 실행 출력**(`INBOX_DRY_RUN`, 가짜 GitHub): 실제 레지스트리(병합 직후 #22 모양), 티스토리 초안 둘·Blogger 초안함 둘이 있는 가짜 레지스트리, 초안 목록 조회 실패, 초안 0건 — 모두 쓰기 호출 0회로 끝난다(PR 설명·보고서에 붙임).
+
+### 못 한 검증
+- **Actions 에서의 실제 실행**: #22 에 표가 보이는지, 초안 이슈를 열고 닫을 때 곧바로 갱신되는지(그리고 `opened`·`labeled` 중 어느 이벤트가 도는지), 라벨이 만들어지는지, 건너뜀 실행의 모양, job 수준 `concurrency`, 모바일 필터 링크(이슈·PR 목록), Blogger 요약 첫 줄(정지 중이라 첫 실제 업로드 때). 병합 뒤 `docs/OPS_INBOX.md` §8 의 확인 목록으로 본다.
+- 3.10 에서 직접 돌리지 못했다(로컬은 3.12 뿐) — `vermin` 과 f-string 검사로 대신했다.
+- 독립 검증은 별도 세션 몫이다.
+
+---
+
+## [2026-10-27] Claude – `mode: package`·초안 패키지(GitHub 이슈) 어댑터·티스토리/네이버 래퍼 워크플로 (작업요청서 5 PR-C, T2·T3, 레지스트리 항목 없음 = 대상 0개)
+
+**작업자**: Claude (구현 세션, 독립 검증은 별도 세션)
+**대상**: 공통 (레지스트리·러너·어댑터·워크플로·문서) — 티스토리·네이버 채널의 기계. 두 블로그 항목은 아직 없다.
+**등급**: T2(코드·시험·워크플로·레지스트리 스키마) + T3(새 플랫폼·게시 방식). 광고 표면(`index.html`·`_config.yml`)·`mode`·시크릿 값은 바꾸지 않았다(실제 `pipeline/blogs.json` 무변경). 승인 근거: 운영자가 2026-10-27 채팅으로 계획 보고의 추천을 전부 승인("추천대로 진행해줘") — D4(티스토리·네이버: 초안 패키지 + 운영자 복사 발행)·D7(네이버는 자체 주제, 각색 없음). D8(블로그 주소·주제 등 사용자 입력)은 아직 없어 두 블로그 항목·프로필·프롬프트는 만들지 않았다.
+**목적**: 공식 자동 게시 수단이 없는 채널(티스토리 오픈 API 2024-02 종료, 네이버 글쓰기 API 2020 종료)을 위해, 게이트를 통과한 글을 **GitHub 이슈 1개(= 초안 1건)**로 만들어 운영자가 복사해 직접 발행하게 하는 기계를 만든다. 로그인·세션·쿠키 자동화는 만들지 않고 계정 정보는 저장·처리하지 않는다.
+**브랜치**: `ai/claude/package-mode`(기준 `origin/ai/claude/channel-names` 5c57a7c = 작업 A). PR 생성·병합·Actions 실행은 하지 않았다(총괄이 처리).
+
+### 한 일
+- **레지스트리**(`pipeline/registry.py`): `MODES`에 `package`, `PLATFORMS`에 `tistory`·`naver`(필수 시크릿 `llm_api_key` 뿐). `package`는 이 두 platform에서만(blogger·jekyll-git은 오류), 이 두 platform은 `off`·`package`만, `channel.label`은 그 채널 라벨(티스토리·네이버), `profile` 필수, 시크릿은 `llm_api_key` 뿐이고 이름에 `PASSWORD`·`PASSWD`·`PWD`·`COOKIE`·`SESSION`·`LOGIN`·`CREDENTIAL`이 든 시크릿은 검증 오류(G-S7의 구조적 보장). A의 `ads` 규칙과 같이 동작(`on` 금지, 기본 `off`).
+- **러너**(`pipeline/run.py`): `decide_delivery`에 `package`, 새 경로는 삽입뿐이고 기존 Blogger 줄은 9줄(docstring 2·import 1·`COUNTED_STATUSES`·`decide_delivery` 3·플랫폼 문구 2)만 바뀌었다. `package_issued`가 하루 상한에 센다. 순서: `PIPELINE_PAUSE` → `mode off` → `--auth-check` 거절(`AUTH_CHECK_UNSUPPORTED`) → `BLOGGER_PUBLISH` 거절(`INVALID_PUBLISH`) → 수동 주제 가드레일 → 이력·상한 → LLM 키 → **사전 점검**(`GITHUB_TOKEN`·`GITHUB_REPOSITORY`, 같은 채널의 열린 `초안` 이슈 3건 이상이면 `PACKAGE_BACKLOG`로 건너뜀, 종료 0) → 주제·생성·게이트 → 이슈 만들기. 연습 실행은 이슈 본문을 만들어 실행 요약에만 보이고 GitHub 호출 0회. 실패는 `PACKAGE_FAILED`(분류별 종료 코드: `auth_failed`·`too_long` 2, 나머지 1).
+- **어댑터**(`pipeline/publishers/issue_package.py`): `build_issue()`(순수 함수)와 `IssuePackagePublisher`(urllib, 의존성 추가 없음). 멱등(본문 첫 줄 숨은 표지 `draft-id`, 열림·닫힘 모두), 라벨 `초안`·`채널:<라벨>` 보장, 제목 `[초안][<채널>] <글 제목 60자>`, 본문 구역(복사용 제목·본문·해시태그·이미지 표·근거 출처·게이트 결과·체크리스트 8항목). 소독(G-L9): `@멘션`·`#숫자`·`GH-숫자`·`<!--` 뒤 영폭 공백, 펜스를 본문의 백틱 줄보다 길게, HTML 재정화와 제어·방향 문자 제거, 네이버 마크다운 이스케이프, 고정 접두사·라벨, 이슈 한도 안에 못 들어가면 잘라 올리지 않고 `too_long`으로 실패, 정화 뒤 제목·본문이 비면 `invalid_draft`(종료 2). **이슈 만들기 요청은 한 번만 보낸다**(D-74): 만들어졌는지 모호한 실패(응답 유실·시간 초과·5xx)는 다시 만들지 않고 같은 표지를 한 번 찾아 있으면 쓰고 없으면 종료 1로 멈추며 '이슈가 만들어졌을 수 있으니 확인' 안내를 붙인다 (처음에는 바깥 루프가 확인 뒤 최대 3번 다시 만들었고 독립 검증이 응답 유실+목록 지연이면 같은 글이 둘 생긴다고 지적해 고쳤다 — N1). HTTP 4xx 거절은 다음 실행이 다시 한다. 적체 점검은 라벨 `폐기`가 붙은 열린 이슈를 세지 않는다(초안 현황판과 같은 규칙: 폐기 = 라벨 `폐기` 또는 닫기).
+- **워크플로**(`tistory.yml`·`naver.yml`): `[티스토리] 초안 패키지 만들기`·`[네이버] 초안 패키지 만들기`. `blogger.yml`의 plan→generate 구조, 권한 `contents: write`(이력)·`issues: write`뿐, 시크릿은 Gemini 키와 기본 `GITHUB_TOKEN`뿐, 입력 `blog`·`topic`·`dry_run`(기본 켜짐), `PIPELINE_PAUSE`, cron 하루 1회(UTC 05:20·06:20 — Blogger 02:00·Chance :17/:47·감시 03:30/15:30·모음 :40과 겹치지 않음), 대상 0개면 초록 + `::notice::` + 요약.
+- **감시**(`pipeline/health.py`): `OK_STATUSES`·`REAL_POST_STATUSES`에 `package_issued`(새 상태가 STALE·NO_ACTIVITY를 오판하지 않게).
+- **독립 검증 1차 반영**(별도 세션, head `e95f54d` — 병합 가능·blocking 0): 총괄이 반영하라고 한 N1(모호하면 멈춘다)·N2(문서 정정)·N3(제어·방향 문자)·N4(`invalid_draft`)·N5(시험 구멍 R14·A57·A26)·N6(6-12 `HISTORY_WRITE_FAILED`)·N7('구조적 보장' 정정)·N9(체크리스트 두 줄)·N11(공개 저장소 한 줄)을 새 커밋 `7e1cd12`로 쌓았다. N8은 통합 때 총괄, N10·N12는 하지 않았다.
+- **시험**: 새 시험 232개 — `tests/package_helpers.py`(가짜 GitHub·임시 저장소·가짜 게시자)·`test_package_registry`(31)·`test_issue_package`(106)·`test_package_run`(63)·`test_package_workflows`(19)·`test_package_docs`(13). 기존 시험 갱신: `test_workflow_names`(이름 표 2개·run-name 8개·구분 5종·`PREVIOUS_NAMES`)·`test_draft_upload`(상한 상태 집합).
+- **문서**: `docs/ARCHITECTURE.md`(§2-1 표·§3·§4 Package 행·§4-1 코드표와 분류표·§5·§7-B/B-2 + 블로그 주소·주제를 받으면 해야 할 일 체크리스트·§9), `docs/ACTIONS_GUIDE.md`(3-19 읽고 직접 발행하는 법·6-12·6-13·표·용어), `HANDLER.md`, `docs/SECURITY_GUARDRAILS.md`(G-S7·G-L9·REG-1 행·승인 없이 하면 안 되는 행동), `docs/ENGINEERING_GUIDE.md`, `docs/CHARTER.md`, `docs/DEFECT_REGISTER.md`(D-73·D-74·관측 체크리스트 2행).
+
+### 알아 둘 것
+- **`docs/REQUEST_BRIEFING.md`는 총괄 소유라 이 PR에서 고치지 않았다.** 그 표를 읽는 시험 2개(`KoreanNamesTest.test_docs_tables_list_every_workflow_with_its_current_name`·`BriefingTest.test_real_briefing_covers_current_repository`)는 패치(`C_request_briefing_table.patch`, 제어 줄 1곳·소개 문장 1곳·이름 표 2행)를 얹기 전까지 실패하고 검증기 `BRIEF-1` 경고가 1건 더 난다. 패치를 얹으면 전부 통과한다.
+- **지금은 대상 0개다.** 블로그 주소·주제(사용자 입력)를 받으면 `docs/ARCHITECTURE.md` §7-B-2 체크리스트를 따른다 — 프로필·프롬프트·레지스트리 항목은 그때 만든다. 이미지·출처를 자동으로 고르는 단계는 파이프라인에 없어(어댑터에는 표와 자리만 있다) 이슈에는 "자동으로 고른 이미지가 없다"가 나온다.
+- 이 채널에서 쓰지 않는 `BLOGGER_PUBLISH`·`--publish`·`--auth-check`는 조용히 무시하지 않고 설정 오류(종료 2)로 거절한다(읽기만 하려던 요청이 이슈를 만들어 버리지 않게). 워크플로 입력에는 그 값이 없어 로컬 실행에서만 생긴다.
+- 환경변수 이름 `BLOGGER_TOPIC`을 그대로 재사용한다(이름이 Blogger식이다 — 정리는 후속 후보).
+- 이슈 본문의 `@이름`·`#숫자` 뒤에는 눈에 안 보이는 영폭 공백이 들어간다(알림·자동 링크가 안 가게 푼 것, 이메일·주소 안은 그대로). 복사한 글에도 따라가지만 보이지 않는다.
+- 공개 저장소라 초안 이슈도 공개 페이지(검색 색인 가능)다 — 운영자가 올리기 전에 같은 글이 먼저 공개된다(승인된 D4). 이슈 본문의 주소(URL)는 소독하지 않는다. 푸시 뒤에는 이슈 본문 한도의 단위(글자 vs 바이트)도 관측한다(미확인).
+- 첫 실제 package 블로그를 레지스트리에 넣을 때 `tests/test_package_registry.py`의 `test_the_real_registry_has_no_package_blog_yet`와 실제 키 목록을 `["chance", "blogger_macat"]`로 고정한 기존 시험을 함께 고치고, 새 이력 파일을 `_config.yml` `exclude`에 더한다(광고 표면 — T3 승인). ARCHITECTURE §7-B-2 체크리스트 3-1·3-2.
+- 감시 요약표(`scripts/watchdog.py` `_history_post_stats`)와 확인 필요 모음(`pipeline/inbox.py` `PUBLISH_STAGE`·초안 분류)은 `package_issued`를 아직 모른다 — package 블로그가 실제로 등록되기 전에 반영할 것(모음은 작업 B의 초안 현황판이 이슈 라벨로 센다).
+- 확인 필요 모음(`scripts/ops_inbox.py`)은 `.github/workflows` 폴더의 모든 파일을 읽어 파일마다 최근 실행을 확인하므로(코드로 확인, 실제 동작은 미확인) 새 워크플로 2개의 실패도 따로 고치지 않아도 모인다.
+- 요약 머리(`### <key>`)는 작업 B가 `### [<채널>] <블로그 이름>`(`summary_head()`)으로 바꾼다. 이 PR의 package 요약은 `_summary_head()` 한 곳에서 머리를 쓰므로 두 PR을 합칠 때 그 한 함수를 B의 `summary_head()`로 잇고 머리를 `### tistory_test` 꼴로 단언하는 시험 3곳(`tests/test_package_run.py`)을 새 머리에 맞춰 고친다.
+- main이 `f8724b7`(작업 A 병합 묶음)로 앞서 있어, 총괄이 `git rebase --onto origin/main 5c57a7c ai/claude/package-mode`로 옮기게 된다. 임시 브랜치에서 미리 해 보니 코드·시험·워크플로·문서 커밋은 충돌 없이 얹히고 `WORKLOG.md`만 맨 위 같은 자리(main의 새 항목 2개)라 한 곳 충돌했다 — 양쪽 항목을 모두 남기면 된다(이 항목을 맨 위에).
+
+### 검증 증거
+- **전체 시험**(`python -X utf8 -m unittest discover -s tests`): 1차 커밋 `9647e41` 작업 트리 패치 없이 **2424개 중 실패 2**(REQUEST_BRIEFING 표를 읽는 시험 둘, 904초) → `cbb97fd`+패치 2430개 OK(612초) → `10a8170`+패치 2431개 OK(543초) → `6acc2a3`+패치 2433개 OK(367초) → **독립 검증 반영 코드 커밋 `7e1cd12`+패치 2449개 OK**(357초, 작업 폴더의 worktree). base 2217개 대비 +232(이 뒤 커밋은 `tests/test_package_docs.py`의 단언 한 곳과 `WORKLOG.md`뿐이다).
+- **origin/main `f8724b7` 위로 임시 재베이스**(`git rebase --onto origin/main 5c57a7c`, 임시 브랜치, 커밋 일곱 개): 코드·시험·문서 커밋은 충돌 없이 얹히고 `WORKLOG.md`만 맨 위 같은 자리(main의 새 항목 2개)라 한 곳 충돌한다 — 양쪽 항목을 모두 남기고 이 항목을 맨 위에 둬 풀고 패치를 얹은 전체 시험 **2454개 OK**(348초; main 자체 2222개 + 새 시험 232개). 이 브랜치 자체는 건드리지 않았다.
+- `python scripts/validate_repo.py --base origin/ai/claude/channel-names`: 오류 0, 경고 2(`BRIEF-1` 새 워크플로 2개가 브리핑 표에 없음 — 패치로 사라짐, `LIQUID-1` 기존).
+- `pyflakes pipeline scripts tests generator.py blogger_generator.py`: base와 같은 16건(줄 번호를 뺀 목록 동일, 새 경고 0). `vermin --target=3.10- pipeline scripts tests …`: 최소 3.10, 위반 0. 3.12 전용 f-string 문법 점검 바뀐 파일 전부 0건. `actionlint 1.7.12 .github/workflows/*.yml`(12개): 0건. `git diff --check`: 0.
+- **Blogger 경로 불변**: 시나리오 385개 중 383개 바이트 동일(비교 476,995바이트·생성 파일 195개), 2개는 의도한 문구 차이(플랫폼 안내문·모드 허용 목록, 종료 코드 같음). CLI 명령 20개 20/20 동일. `pipeline/blogs.json` diff 0줄, `run.py` 기존 줄 변경 9줄.
+- **변이 시험** 146개(1차 83·2차 25·3차 5·4차 1·5차 4·6차 27·7차 1): 시험이 잡은 것 140개, 생존 6개(동등 변이 1·시험 구멍 5 — 구멍은 시험을 보강한 뒤 같은 변이를 다시 돌려 모두 잡았다).
+
+### 못 한 검증
+- 실제 Actions 실행(대상 0개 초록, 이름 정렬), 실제 GitHub 이슈 API 호출(권한·라벨 생성·응답 모양), 이슈의 복사 가능 여부·티스토리 HTML 모드·네이버 스마트에디터 붙여넣기 서식, 새 이슈 알림 도착, 저장소 Workflow permissions 설정이 `issues: write`를 막는지, Python 3.10·Linux에서의 전체 시험(로컬은 Windows·3.12 — `vermin`으로 3.10 호환만 확인). 푸시·병합 뒤 관측이 필요하다(DEFECT_REGISTER 관측 체크리스트 마지막 두 행).
+
+---
+
+## [2026-10-27] Claude – Chance 초안 → 사람 승인 후 공개 흐름(레지스트리 publish_flow, 기본 꺼짐) 추가 (작업요청서 5 PR-E, T2, 켜는 것은 T3)
+
+**작업자**: Claude (구현 세션, 독립 검증은 별도 세션)
+**대상**: Chance_Blog
+**등급**: T2(생성기·워크플로·레지스트리 스키마의 새 선택 필드·새 모듈·워치독·시험·문서). `publish_flow`를 `pr`로 켜는 것은 별도의 T3(게시 방식)이고 이 변경은 켜지 않는다. `mode`·시크릿·광고 표면(`index.html`·`_config.yml`)·`pages.yml`·Blogger·발행 빈도·`인수인계/작업내용.md`·`docs/SESSION_START.md`·`docs/REQUEST_BRIEFING.md`는 바꾸지 않았다.
+**승인 근거**: 운영자 채팅 2026-10-27 "추천대로 진행해줘"(`docs/analysis/2026-10-27_channel-management-plan.md` D1 (a): 구현하되 **기본 꺼짐**). 켜는 승인은 아직 없다. 켜는 승인에는 저장소 설정 확인과, 병합·닫은 초안 브랜치의 7일 뒤 자동 삭제(CHARTER T3 '브랜치 삭제'에 닿음)가 함께 들어간다.
+**목적**: 구글 게시자 정책은 수동 검토 없이 자동 생성된 콘텐츠에 광고를 두지 말라고 안내한다. Chance 글을 초안 브랜치와 승인 PR 로 올리고 운영자가 PR 을 병합해야 공개(닫으면 폐기)되는 흐름을 레지스트리 스위치 하나로 고를 수 있게 한다.
+**브랜치**: `ai/claude/chance-approval-flow`(기준 `origin/ai/claude/channel-names` `5c57a7c` = main `e71a6ec` + 작업 A. 작업 A 는 그 사이 main 에 병합됐다 — #47 `f8724b7`. `git rebase --onto origin/main 5c57a7c ai/claude/chance-approval-flow` 로 옮긴다: 임시 clone 에서 해 봤고 충돌은 `WORKLOG.md` 맨 위 한 곳뿐이었다 — 이 항목을 맨 위에 두면 되고, 그 위에서 전체 시험 2497개가 통과했다). PR 생성·병합·Actions 실행은 하지 않았다(총괄이 처리).
+
+### 한 일
+- **레지스트리**: `publish_flow`(`direct` 기본·`pr`)와 검증(값 집합·`jekyll-git`에서만·`pr`이면 `mode: auto`). 작업 A 가 더한 `channel`·`ads` 필드와 나란히 있다. Chance 항목에 `"publish_flow": "direct"`. 값을 읽지 못하거나 틀리면 직접 게시로 떨어지지 않고 멈춘다.
+- **새 모듈** `pipeline/drafts.py`(슬롯 판정 `DRAFT_PENDING`·`DRAFT_CHECK_FAILED`, 브랜치 이름, PR 제목·본문 소독 `neutralize`, 표준 라이브러리 GitHub 클라이언트)·`pipeline/draft_flow.py`(초안 올리기·PR 열기·실패 시 브랜치 보존·다음 틱 PR 다시 열기·오래된 브랜치 정리, CLI `flow`·`deliver`). **이력 항목만 생성 시점에 main 에 따로 커밋**하고 PR 에는 글 파일 둘만 둔다 — 열린 초안이 여럿이어도 `history.json` 충돌이 없고 슬롯·제목·이미지 중복 검사가 지금 그대로다(이력을 PR 안에 두면 충돌함을 실제 git 으로 재현). 별도 원장 파일(`drafts.json`)은 두지 않았다.
+- **`generator.py`**: 승인 흐름이면 이력 항목에 `flow`·`branch`·`paths`, 결과 `DRAFT_CREATED`, 슬롯 판정 다듬기, 연습 실행은 '올리지 않습니다'. 직접 게시 경로는 그대로.
+- **`chanceblog.yml`**: `pull-requests: write`, `발행 흐름 확인` 단계, 커밋 단계 조건에 `&& steps.flow.outputs.flow != 'pr'`, 마지막 `초안 올리기와 승인 PR 열기` 단계. **`watchdog.yml`**: `pull-requests: read`. 워크플로 `name`·`run-name`의 `[Chance]` 접두사(작업 A)는 그대로다.
+- **워치독**: 열린 초안 PR 이 있으면 `STALE`·`NO_POSTS_DAY` 대신 `DRAFT_WAITING`(경고). 이 규칙이 맞게 돌도록 글이 올라온 시각을 병합 시각(`git log --first-parent`)으로 재고 병합하지 않은 초안 항목을 '글이 나온 날'로 세지 않는다(직접 게시에서는 결과 같음).
+- **문서**: ARCHITECTURE §4-4(새)와 §1·§2·§2-1·§3·§4·§4-1·§4-2·§9, ACTIONS_GUIDE 3-17(새)과 여러 절, HANDLER, ENGINEERING_GUIDE(W6 예외·R15), SECURITY_GUARDRAILS(G-A10·G-L8·**G-C11** — 작업 A 의 G-C10 다음), OPS_INBOX(현황판이 알아볼 PR 모양), DEFECT_REGISTER(관측 체크리스트). 워크플로 이름은 작업 A 의 새 이름(`[구분] …`)을 쓴다. 결함 번호는 쓰지 않았다.
+- **시험**: 새 시험 275개(`test_drafts`·`test_draft_flow`·`test_generator_drafts`·`test_chance_draft_workflow`·`test_draft_waiting` + 공용 `draft_helpers`, `test_workflow_names` +1)와 기존 시험 3개 파일 수정(`test_workflow_names` 권한·단계 비교, `test_manual_run_defaults` 커밋 단계 조건·배포 단계 찾기·레지스트리를 못 읽는 시험, `test_generator_slots`·`test_manual_run_defaults`의 `generator.main()`을 돌리는 두 클래스는 `draft_flow_on`을 직접 게시로 고정 — 켠 뒤에도 진짜 레지스트리 값·`git ls-remote` 네트워크 호출에 기대지 않게).
+
+### 검증 증거
+- 전체 시험 **2492개 통과**(기준 `5c57a7c` 2217개 → +275, 이 PC 354~1046초 — 다른 작업과 함께 돌 때 차이가 큼), `validate_repo.py --base origin/ai/claude/channel-names` 오류 0·경고 1(LIQUID-1, main 과 같음), pyflakes 새 경고 0(기준과 같은 16건), vermin 이 파일들 최소 3.7(저장소 전체 3.10), 3.12 전용 f-string 검사 0, actionlint 0.
+- **direct 불변**: 같은 가짜 입력으로 main(`e71a6ec`)과 이 브랜치의 `generator.py`를 정기·수동·이미지 교체 24개 시나리오에서 돌려 종료 코드·표준 출력·요약·바뀐 파일 해시·호출 기록이 바이트 단위로 같음(**24/24**, 저장소 밖 도구). 음성 대조 2건은 '다름'으로 잡힘. 워크플로 YAML 은 `yaml.safe_load` 구조 비교로 새 단계 둘·권한 한 줄·조건 한 조각을 빼면 기준과 완전히 같음.
+- **pr 흐름 시뮬레이션**(임시 bare origin + 로컬 clone + 실제 생성기 + 가짜 GitHub): 첫 틱 브랜치 push·이력 커밋·PR(403 뒤 다음 틱이 브랜치 내용으로 PR 다시 열기), 같은 슬롯 둘째 틱 `DRAFT_PENDING`, 병합 뒤 `ALREADY_PUBLISHED`, 정리 규칙, 슬롯 둘의 독립과 두 병합 순서, 대기 초안 제목 중복, 소독.
+- **변이 시험 111개**를 작업 A 위로 옮긴 뒤 다시 돌려 **111/111 사망**(옮기기 전 첫 판에서 5개가 살아남았고 모두 시험 구멍이라 시험을 보강했다). 켜는 두 줄(`blogs.json`의 `publish_flow`·`REAL_PUBLISH_FLOW`)을 `pr`로 바꾼 사본의 전체 시험도 통과했다.
+
+### 남긴 것 / 다음 AI에게 남기는 주의사항
+- **실제 GitHub 에서는 한 번도 돌려 보지 않았다**(PR 만들기·라벨·병합 뒤 배포). 병합 직후 `direct` 첫 정기 실행(새 단계 `발행 흐름 확인`만 추가)과 켠 뒤 첫 수동 실행의 관측 목록은 `docs/ACTIONS_GUIDE.md` 3-17·`docs/DEFECT_REGISTER.md` 하단. 라벨 호출이 `pull-requests: write`만으로 되는지(`issues: write` 필요 여부)는 미확인.
+- 켜기 전 운영자가 할 일: 저장소 설정 "Allow GitHub Actions to create and approve pull requests" 화면 확인(5-1 은 켜짐으로 기록, 미확인), 채팅 승인(T3). 켜는 변경은 `pipeline/blogs.json` 의 chance `publish_flow` 한 줄과, 그 값을 못 박아 둔 표지판 시험의 기준 한 줄(`tests/draft_helpers.py` 의 `REAL_PUBLISH_FLOW`)이다 — 레지스트리만 바꾸면 시험이 빨강이 된다.
+- 승인 흐름을 켜면 이력의 글이 공개된 글이 아닐 수 있다(확인 필요 모음의 '최근 24시간 글 수'는 초안도 센다). 현황판은 `ai/draft/` 접두·라벨 `초안`으로 구분해야 한다. 닫은 초안의 슬롯·주제는 다시 쓰지 않는다.
+- 봇이 연 PR 에는 검사가 안 돈다(GitHub 규칙). main 에 '상태 검사 필수'·'PR 필수' 보호를 켜면 병합과 이력 push 가 막힌다.
+- 직접 게시에서도 레지스트리를 읽지 못하면(깨진 `blogs.json`) 글을 만들기 전에 멈춘다(`발행 흐름 확인` 단계가 빨강). 승인 흐름을 켠 채 레지스트리 오류로 승인 없는 게시가 나가지 않게 하려는 것이다 — 정상 레지스트리에서는 달라지는 것이 없다.
+
+---
+
 ## [2026-10-27] Claude – 텔레그램·오토마우스 조사, 사용자 설정 메모 확인, 진행 현황 (문서 전용, 코드·워크플로·레지스트리·광고 표면 변경 없음)
 
 **작업자**: Claude

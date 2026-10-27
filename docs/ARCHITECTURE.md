@@ -14,8 +14,10 @@
   topics.py    llm.py      gates.py    publishers/*     state.py
                                │
   관측: 워치독(문제일 때만 이슈) · 실행 요약($GITHUB_STEP_SUMMARY) · Actions 실패 메일
-  제어: 레지스트리 mode(off/draft/auto) · PIPELINE_PAUSE(킬 스위치) · 일일 상한 · 쿨다운
+  제어: 레지스트리 mode(off/draft/package/auto) · PIPELINE_PAUSE(킬 스위치) · 일일 상한 · 쿨다운 · publish_flow(Chance만, direct/pr)
   수정 요청: 이슈 양식 ─► pipeline/edits(명세 범위 안에서만) ─► PR ─► 범위 검사([공통] PR 변경 범위 검사) ─► 사람이 병합
+  승인 흐름(선택, Chance): 글 한 쌍 ─► 초안 브랜치 ─► 승인 PR ─► 사람이 병합 = 공개 (기본 꺼짐, §4-4)
+  초안 패키지(티스토리·네이버): 게이트 통과 글 ─► GitHub 이슈 1개(라벨 초안, 공개 없음) ─► 운영자가 복사해 직접 발행 ─► 이슈 닫기
 ```
 
 설계 원칙은 세 가지다. ① **설정과 코드를 분리**한다(블로그 = 레지스트리 항목). ② **게시 전 게이트는 플랫폼과 무관**하게 한곳에 둔다. ③ **플랫폼 차이는 어댑터 안에** 가둔다.
@@ -29,13 +31,15 @@
 | 주제 | 약관을 읽은 직접 RSS(NASA·Pew·Federal Reserve·EU 집행위원회 계열·캐나다 통계청·영국 정부 GOV.UK 등, UN News는 보류), 신뢰 도메인 허용 목록, 72시간 이내, 출처 원문 검증 | 프로필 시드(영문 34개) + LLM 확장, 쿨다운 60일, 금지 주제 필터(주제 후보·제목·라벨·본문, §7-1), Chance 이력과 교차 중복 방지 |
 | 생성 | Gemini 모델 폴백, KR/EN 쌍, 편집 템플릿 | Gemini 모델 폴백 + 일시 오류 재시도, 형식 엄격 파싱 |
 | 게이트 | `validate_post_data`(길이·인라인 출처), 제목 유사도 | `pipeline/gates.py`(파싱·HTML 정화·정책·중복), 탈락 사유를 넣어 최대 3회 재작성 |
-| 게시 | git 커밋 → Pages 배포(`pages.yml`). 봇 커밋 뒤 `gh workflow run pages.yml`로 배포 실행 | Blogger API 어댑터(멱등 재시도, 인증 실패 구분, 초안함 업로드 `isDraft`, 쓰기 전 인증 점검 — 아래 §4·§4-1) |
-| 상태 | `history.json`(문자열·객체 혼합 스키마) | `blogger_history.json`(스키마 v1, §5) |
+| 게시 | git 커밋 → Pages 배포(`pages.yml`). 봇 커밋 뒤 `gh workflow run pages.yml`로 배포 실행. 레지스트리 `publish_flow: pr`(기본은 `direct`, 지금 꺼짐)이면 커밋 대신 초안 브랜치와 승인 PR 로 올리고 병합이 공개(§4-4) | Blogger API 어댑터(멱등 재시도, 인증 실패 구분, 초안함 업로드 `isDraft`, 쓰기 전 인증 점검 — 아래 §4·§4-1) |
+| 상태 | `history.json`(문자열·객체 혼합 스키마. 승인 흐름의 항목에는 `flow`·`branch`·`paths` 필드가 더 있다 — §4-4) | `blogger_history.json`(스키마 v1, §5) |
 | 관측 | Actions 로그 | 실행 요약 + 이력 status + 워치독 |
 | 수정 요청(이슈) | `issue-edit.yml` + `pipeline/edits`: 이슈 양식 → 문자 그대로 교체·링크·SEO·이미지(AI는 최소 패치·검색어만) → 사후 검증 → PR. 상세 [`ISSUE_EDITS.md`](./ISSUE_EDITS.md) | 해당 없음(Blogger 글은 Blogger 관리 화면) |
 | 상태(운영) | 운영 중. 단 슬롯 시각이 된 실행 13회 중 2회만 글이 나왔다(D-03: 분야 폴백·사유 기록으로 완화, 병합 뒤 관측). 이슈 수정은 `pipeline/edits`로 재구축(D-01, Actions 관측 대기) | 코드 완료(초안함 업로드 모드 포함, D-55). 정지(`mode: off`), 게시용 시크릿 미등록, refresh token 미발급(D-11). 실제 구글 호출은 한 번도 한 적이 없어 시크릿 등록 뒤 첫 수동 실행에서 처음 검증된다 |
 
 공통: 워치독 일 2회(`watchdog.yml`), 저장소 가드레일 CI(`guardrails.yml`), 레지스트리 검증(`python -m pipeline.registry`), PR 범위 검사(`pr-scope-check.yml`, 이슈를 참조하는 모든 PR).
+
+초안 패키지 채널(티스토리·네이버, 2026-10-27 운영자 승인 D4·D7, T3): 공식 자동 게시 수단이 없어(티스토리 오픈 API 2024-02 종료, 네이버 글쓰기 API 2020 종료) 글을 공개하지 않고 **GitHub 이슈 1개(= 초안 1건)**로 보여 주며 운영자가 복사해 직접 발행한다(§7-B). 코드(`mode: package`·`pipeline/publishers/issue_package.py`)·워크플로(`tistory.yml`·`naver.yml`)·검증·시험은 끝났다. **레지스트리에는 두 채널의 항목이 아직 없다**(블로그 주소·주제는 사용자 입력 대기) — 그래서 정기 실행은 '대상 0개'로 초록이다. 첫 실제 초안 이슈가 복사 가능한 모양인지는 Actions·GitHub 화면에서만 확인할 수 있어 관측 대기다.
 
 ### 2-1. GitHub Actions 탭의 이름 (2026-10-27 기준)
 
@@ -43,16 +47,19 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 어느 채널의 것인지
 
 | 옛 이름 | 새 이름 (Actions 탭) | 파일 | 하는 일 | 자동/수동 |
 |---------|----------------------|------|---------|-----------|
-| Chance_Blog Full-Auto Engine | `[Chance] 글 자동 작성·게시` | `chanceblog.yml` | 뉴스 기사를 바탕으로 Chance 글(한국어·영어)을 만들어 검증하고 저장소에 커밋해 게시 | **자동**(매시 17분 UTC에 실행, 게시 시각은 코드가 판단) + 수동 실행(연습이 기본). 실행 제목 `[Chance] 글 작성·게시 · 정기/수동` |
+| Chance_Blog Full-Auto Engine | `[Chance] 글 자동 작성·게시` | `chanceblog.yml` | 뉴스 기사를 바탕으로 Chance 글(한국어·영어)을 만들어 검증하고 저장소에 커밋해 게시(레지스트리 `publish_flow: pr`이면 커밋 대신 초안 PR 로 올려 사람이 병합해야 공개 — 기본 꺼짐, §4-4) | **자동**(매시 17분·47분 UTC에 실행, 게시 시각은 코드가 판단) + 수동 실행(연습이 기본). 실행 제목 `[Chance] 글 작성·게시 · 정기/수동`. 새 글을 push 한 실행의 마지막 단계 `텔레그램 알림(새 글)`이 휴대폰으로 알린다(§4-5) |
 | (`chanceblog.yml`의 `fix_images` 입력) | `[Chance] 기존 글 이미지 교체(수동)` | `chance-fix-images.yml` | 기존 글의 깨진·누락·중복 이미지만 교체(새 글은 만들지 않음). 2026-10-25에 글 작성 워크플로에서 분리 | **수동 전용**(연습이 기본) |
-| Blogger Generate | `[Blogger] 글 자동 작성(초안함 업로드)` | `blogger.yml` | 레지스트리의 Blogger 블로그마다 글을 만들고 검증해 저장소 초안 저장·Blogger 초안함 업로드·즉시 게시 중 하나로 보낸다(블로그 모드에 따름. `mode: off`인 블로그는 건너뛰고, 대상이 하나도 없으면 초록 + `::notice::`) | **자동**(매일 02:00 UTC = KST 11시, 모드를 따름) + 수동 실행(입력 `publish`: `off` 저장소 파일만 · `draft` 초안함 업로드(기본) · `publish` 즉시 게시, 입력 `auth_check`(`인증 점검만 실행`, 기본 꺼짐): 글을 만들지 않고 인증만 점검 — §4-1). 실행 제목 `[Blogger] 글 작성 · 정기/수동(…)` |
+| Blogger Generate | `[Blogger] 글 자동 작성(초안함 업로드)` | `blogger.yml` | 레지스트리의 Blogger 블로그마다 글을 만들고 검증해 저장소 초안 저장·Blogger 초안함 업로드·즉시 게시 중 하나로 보낸다(블로그 모드에 따름. `mode: off`인 블로그는 건너뛰고, 대상이 하나도 없으면 초록 + `::notice::`) | **자동**(매일 02:00 UTC = KST 11시, 모드를 따름) + 수동 실행(입력 `publish`: `off` 저장소 파일만 · `draft` 초안함 업로드(기본) · `publish` 즉시 게시, 입력 `auth_check`(`인증 점검만 실행`, 기본 꺼짐): 글을 만들지 않고 인증만 점검 — §4-1). 실행 제목 `[Blogger] 글 작성 · 정기/수동(…)`. 초안함 업로드·즉시 게시가 성공하면 러너가 휴대폰으로 알린다(§4-5) |
 | Deploy GitHub Pages | `[공통] 사이트 자동 배포` | `pages.yml` | Chance 사이트(GitHub Pages)를 빌드해 게시 | **자동**(main에 push될 때. 봇이 커밋한 뒤에는 `[Chance] 글 자동 작성·게시`·`[Chance] 기존 글 이미지 교체(수동)`가 직접 실행을 요청) + 수동 |
 | Guardrails | `[공통] 저장소 규칙·테스트 자동 검사` | `guardrails.yml` | 비밀 유출·워크플로 보안 규칙·문서 불일치·광고 표면 변경 검사, 단위 테스트, `actionlint` | **자동**(main push·모든 PR) + 수동. job 이름 `검사 (Python 3.10/3.12)` |
-| Watchdog | `[공통] 발행 중단 감시·알림` | `watchdog.yml` | 글이 오래 안 올라오거나 실패가 이어지거나 글 커밋 뒤 사이트 배포가 안 되면 `[Watchdog]` 이슈로 알림(담당자 지정·@멘션, 문제일 때만, 해소되면 닫음). 규칙은 §4-2 | **자동**(하루 2회, 시각은 `watchdog.yml`의 cron) + 수동. 실행 제목 `[공통] 발행 중단 감시 · 정기/수동` |
+| Watchdog | `[공통] 발행 중단 감시·알림` | `watchdog.yml` | 글이 오래 안 올라오거나 실패가 이어지거나 글 커밋 뒤 사이트 배포가 안 되면 `[Watchdog]` 이슈로 알림(담당자 지정·@멘션, 문제일 때만, 해소되면 닫음. 승인 흐름에서 승인 대기 초안 PR 이 있으면 '글이 안 나옴'을 `DRAFT_WAITING` 경고로 낮춘다). 규칙은 §4-2 | **자동**(하루 2회, 시각은 `watchdog.yml`의 cron) + 수동. 실행 제목 `[공통] 발행 중단 감시 · 정기/수동` |
 | Issue Edit | `[Chance] 이슈 수정 요청 처리(수정안 PR 만들기)` | `issue-edit.yml` | 이슈 양식으로 접수된 수정 요청을 검증해 수정안을 PR로 만든다(main에 직접 반영하지 않음) | **자동**(제어 이슈가 열릴 때) + 수동(이슈 번호 입력, 연습이 기본). 실행 제목 `[Chance] 이슈 #번호 수정 요청 처리 · …` |
 | PR Scope Check | `[공통] PR 변경 범위 검사` | `pr-scope-check.yml` | 이슈를 참조하는 PR(Copilot·사람)이 요청 범위를 지켰는지 검사해 PR에 코멘트 | **자동**(PR이 열리거나 갱신될 때) + 수동(PR 번호 입력) |
 | Sync Issue Form | `[공통] 이슈 양식 페이지 목록 갱신` | `sync-issue-form.yml` | `pages.json`과 이슈 양식의 '대상 페이지'·'수정 항목' 드롭다운을 최신으로 갱신 | **자동**(관련 파일이 main에 push될 때) + 수동 |
-| (신규) | `[공통] 확인 필요 모음` | `ops-inbox.yml` | 해야 할 일·확인할 일(워치독 알림·병합 대기 PR·실패한 워크플로·승인 대기·일시정지·Blogger 게시 설정)을 이슈 `[운영] 확인 필요 모음` 1개와 실행 요약에 모으고, 새로 해야 할 일이 생기면 코멘트(@멘션)로 알림. 설명: [`OPS_INBOX.md`](./OPS_INBOX.md) | **자동**(2시간 간격 예약, 매 짝수 시 40분 UTC — GitHub가 늦추거나 건너뛰어 실제로는 보통 3~6시간 간격) + 수동(`연습 실행` 가능). 실행 제목 `[공통] 확인 필요 모음 갱신 · 정기/수동` |
+| (신규) | `[공통] 확인 필요 모음` | `ops-inbox.yml` | 해야 할 일·확인할 일(워치독 알림·병합 대기 PR·실패한 워크플로·승인 대기·일시정지·Blogger 게시 설정·채널별 초안 현황)을 이슈 `[운영] 확인 필요 모음` 1개와 실행 요약에 모으고, 새로 해야 할 일이 생기면 코멘트(@멘션)로 알림. 설명: [`OPS_INBOX.md`](./OPS_INBOX.md) | **자동**(2시간 간격 예약, 매 짝수 시 40분 UTC — GitHub가 늦추거나 건너뛰어 실제로는 보통 3~6시간 간격 + 라벨 `초안`이 붙은 이슈·PR이 열리고 닫히고 라벨이 바뀔 때, 사람이 한 조작에 한함) + 수동(`연습 실행` 가능). 실행 제목 `[공통] 확인 필요 모음 갱신 · 정기/수동/이슈 변경(초안만 점검)/PR 변경(초안만 점검)`. 코멘트를 쓰는 새 해야 할 일은 같은 요약으로 휴대폰에도 알린다(§4-5) |
+| (신규) | `[티스토리] 초안 패키지 만들기` | `tistory.yml` | 레지스트리의 `platform: tistory` 블로그마다 글을 만들고 검증해 **GitHub 이슈 1개(초안 패키지)**로 보여 준다. 공개하지 않는다 — 운영자가 이슈의 복사 상자(제목·HTML·태그)로 티스토리에 직접 발행하고 이슈를 닫는다. 같은 채널에 열린 `초안` 이슈가 3건 이상이면 새로 만들지 않고, 대상이 없으면(블로그가 레지스트리에 없거나 `mode: off`) 초록 + `::notice::`로 끝난다. 시크릿은 Gemini 키뿐(계정 정보 없음). 설명 §7-B·[`ACTIONS_GUIDE.md`](./ACTIONS_GUIDE.md) 6-12 | **자동**(매일 05:20 UTC = KST 14:20) + 수동 실행(`연습 실행` 기본 켜짐: GitHub 호출 0회, 이슈 본문 미리보기만 실행 요약에). 실행 제목 `[티스토리] 초안 패키지 · 정기/수동(…)` |
+| (신규) | `[네이버] 초안 패키지 만들기` | `naver.yml` | 위와 같음 — 네이버 블로그용. 이슈의 '서식 있는 글'을 선택·복사해 스마트에디터에 붙여넣는다(안 되면 평문 상자). 글감은 Chance 글의 각색이 아니라 이 블로그 자체 주제다(원고 변형 복제 금지, D7). 설명 §7-B·[`ACTIONS_GUIDE.md`](./ACTIONS_GUIDE.md) 6-13 | **자동**(매일 06:20 UTC = KST 15:20) + 수동 실행(`연습 실행` 기본 켜짐). 실행 제목 `[네이버] 초안 패키지 · 정기/수동(…)` |
+| (신규) | `[공통] 텔레그램 알림 시험` | `telegram-test.yml` | 시크릿 `TELEGRAM_BOT_TOKEN`·`TELEGRAM_CHAT_ID`가 등록돼 있는지 이름별 '등록됨/없음'만 요약에 쓰고, 둘 다 있으면 휴대폰에 '알림 연결 확인' 한 통을 보낸다. 실패하면 이유(토큰 틀림·채팅 ID 틀림·봇에 /start 안 함·네트워크)를 요약에 분류해 쓴다(저장소는 읽기만). 설명: `.github/editorial/TELEGRAM_SETUP.md` | **수동 전용** |
 | (GitHub 내장) | `pages-build-deployment` | 파일 없음 | GitHub Pages가 스스로 만들어 목록에 보일 수 있는 실행. 이름을 바꿀 수 없다. **누르지 않는다**(배포는 `[공통] 사이트 자동 배포`) | GitHub 내장 |
 
 기본 제목(커밋 메시지·PR 제목)이 더 알려 주는 `[공통] 사이트 자동 배포`·`[공통] 저장소 규칙·테스트 자동 검사`·`[공통] PR 변경 범위 검사`·`[공통] 이슈 양식 페이지 목록 갱신`은 `run-name`을 따로 두지 않았다. 정기·수동·연습은 `Run workflow` 대화상자 입력(`연습 실행` 체크)과 실행 제목으로 구분한다.
@@ -78,16 +85,17 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 어느 채널의 것인지
 |------|-------------|
 | `key` | 고유 식별자 `^[a-z][a-z0-9_]{1,30}$` |
 | `name`, `role`, `url`, `languages` | 표시·문서용. `url`은 `https://` |
-| `platform` | `jekyll-git` · `blogger` (새 플랫폼은 §7.B) |
-| `channel` | **필수.** `{"key": "<영문 식별자>", "label": "<채널 라벨>"}` — 항목에 직접 적는다(`defaults`에서 물려받지 않는다). `label`은 `Chance`·`Blogger`·`Blogger 영문`·`Blogger 한글`·`티스토리`·`네이버` 중 하나(`registry.CHANNEL_LABELS`)이고, **그 블로그 `workflow` 파일의 `name`이 `"[label] …"`로 시작해야 한다**(§2-1. 대괄호로 시작하는 값이라 큰따옴표가 필요하다). `label`·`key`는 블로그끼리 겹칠 수 없다(채널 = 블로그 하나). `공통`·`내부`는 블로그에 속하지 않는 워크플로의 구분이라 여기에 쓰지 않는다. 검증: 레지스트리 검증(REG-1 — `python -m pipeline.registry`·`pipeline.plan`·`pipeline.run`이 같은 규칙을 읽는다). 그래서 **한 워크플로 파일을 채널이 다른 블로그 둘이 나눠 쓸 수 없다** — 채널마다 이름이 다른 워크플로가 필요하다 |
-| `mode` | `off` 중지 · `draft` 초안 — Blogger는 게시용 시크릿 4종(`blog_id`·`client_id`·`client_secret`·`refresh_token`)이 **모두** 있으면 글을 Blogger **초안함에 업로드**하고(`draft_uploaded`, 공개되지 않음 — 운영자가 Blogger 화면에서 확인한 뒤 직접 게시), **하나도** 없으면 저장소 파일에만 저장하며(`draft`, 오류 아님), **일부만** 있으면 설정 오류(종료 2) · `auto` 자동 게시. **`auto` 전환은 T3** |
-| `workflow`, `entrypoint`, `prompt` | 저장소에 존재하는 파일. `workflow`의 cron 목록에 `schedule.cron`이 들어 있어야 한다(검증기 REG-2, Chance는 17분·47분 두 틱이고 레지스트리에는 17분이 대표값) |
-| `profile` | `pipeline/profiles/<이름>.json`. `blogger` 플랫폼은 필수. 글 언어 검사는 `languages`(표시·문서용)가 아니라 프로필의 `language`(`ko`·`en`)가 정한다. 필드와 가드레일은 §7-1 |
+| `platform` | `jekyll-git` · `blogger` · `tistory` · `naver`(둘은 초안 패키지 전용 — §7-B-2). 게시 어댑터가 있는 새 플랫폼은 §7.B |
+| `channel` | **필수.** `{"key": "<영문 식별자>", "label": "<채널 라벨>"}` — 항목에 직접 적는다(`defaults`에서 물려받지 않는다). `label`은 `Chance`·`Blogger`·`Blogger 영문`·`Blogger 한글`·`티스토리`·`네이버` 중 하나(`registry.CHANNEL_LABELS`)이고, **그 블로그 `workflow` 파일의 `name`이 `"[label] …"`로 시작해야 한다**(§2-1. 대괄호로 시작하는 값이라 큰따옴표가 필요하다). `label`·`key`는 블로그끼리 겹칠 수 없다(채널 = 블로그 하나). `공통`·`내부`는 블로그에 속하지 않는 워크플로의 구분이라 여기에 쓰지 않는다. 검증: 레지스트리 검증(REG-1 — `python -m pipeline.registry`·`pipeline.plan`·`pipeline.run`이 같은 규칙을 읽는다). 그래서 **한 워크플로 파일을 채널이 다른 블로그 둘이 나눠 쓸 수 없다** — 채널마다 이름이 다른 워크플로가 필요하다. `tistory`·`naver` platform 블로그의 라벨은 각각 `티스토리`·`네이버`여야 한다(초안 이슈의 라벨 `채널:<라벨>`이 이 값으로 만들어진다) |
+| `mode` | `off` 중지 · `package` 초안 패키지(`tistory`·`naver` 전용이고 이 두 platform 은 `off`·`package` 만 쓴다) — 글을 만들어 GitHub 이슈 1개(라벨 `초안`)로 보여 줄 뿐 공개하지 않는다(`package_issued`, §4-1·§7-B-2) · `draft` 초안 — Blogger는 게시용 시크릿 4종(`blog_id`·`client_id`·`client_secret`·`refresh_token`)이 **모두** 있으면 글을 Blogger **초안함에 업로드**하고(`draft_uploaded`, 공개되지 않음 — 운영자가 Blogger 화면에서 확인한 뒤 직접 게시), **하나도** 없으면 저장소 파일에만 저장하며(`draft`, 오류 아님), **일부만** 있으면 설정 오류(종료 2) · `auto` 자동 게시. **`auto` 전환은 T3** |
+| `publish_flow` | (선택, `jekyll-git`만, 지금은 Chance) 글을 만든 뒤 공개되는 방식. `direct` 만들자마자 main 에 커밋해 게시(기본 — 필드가 없어도 같다, 지금 동작) · `pr` 초안 브랜치와 승인 PR 로 올리고 **사람이 병합해야 공개**(`mode`는 `auto`여야 한다. §4-4). 값이 틀리거나 읽지 못하면 직접 게시로 떨어지지 않고 멈춘다. **`pr`로 바꾸는 것은 T3**(게시 방식) |
+| `workflow`, `entrypoint`, `prompt` | 저장소에 존재하는 파일. `workflow`의 cron 목록에 `schedule.cron`이 들어 있어야 한다(검증기 REG-2, Chance는 17분·47분 두 틱이고 레지스트리에는 17분이 대표값). 초안 패키지 블로그의 `entrypoint`는 `pipeline/run.py`다(별도 생성기 파일이 없다) |
+| `profile` | `pipeline/profiles/<이름>.json`. `blogger`·`tistory`·`naver` 플랫폼은 필수. 글 언어 검사는 `languages`(표시·문서용)가 아니라 프로필의 `language`(`ko`·`en`)가 정한다. 필드와 가드레일은 §7-1 |
 | `state.history`, `state.content_dir` | 이력 파일, 산출물 폴더(저장소 상대 경로, `..` 금지) |
 | `schedule.cron` | 워크플로 cron 목록 중 하나(대표값). `slots_kst`는 참고 |
 | `limits.max_posts_per_day` | 1~24. 하루 상한(KST 날짜 기준). 수동 `--topic`은 우회 |
 | `llm.models`, `llm.max_retries` | 모델 폴백 순서, 일시 오류 재시도 횟수 |
-| `secrets` | `{역할: 환경변수(=Secrets) 이름}`. **값은 절대 쓰지 않는다.** 플랫폼별 필수 역할은 `registry.PLATFORMS` |
+| `secrets` | `{역할: 환경변수(=Secrets) 이름}`. **값은 절대 쓰지 않는다.** 플랫폼별 필수 역할은 `registry.PLATFORMS`. `tistory`·`naver`는 `llm_api_key` **뿐**이다 — 다른 역할이나 이름에 `PASSWORD`·`PASSWD`·`PWD`·`COOKIE`·`SESSION`·`LOGIN`·`CREDENTIAL`이 든 시크릿은 레지스트리 검증(REG-1)이 막는다(구조적 보장은 시크릿 역할이 `llm_api_key` 뿐이라는 것이다 — 이름 검사는 실수를 막는 보조이고 포함 검사라 `PASS_WORD`·`TISTORY_PW` 같은 우회 철자는 통과한다. [`SECURITY_GUARDRAILS.md`](./SECURITY_GUARDRAILS.md) G-S7) |
 | `ad_surface`, `protected_paths` | 광고(AdSense) 심사·수익 대상인지, 승인 없이 못 바꾸는 경로(`/`로 끝나면 폴더). `ad_surface: true`는 사이트 코드가 이 저장소에 있는 `jekyll-git` 블로그에만 쓴다 |
 | `ads` | 광고 선언 `off`·`pending_gate`·`on`(적지 않으면 `defaults.ads` = `off`). 아래 '광고 선언' 절 |
 | `health` | 워치독 기준: `max_gap_hours`, `max_failure_streak`. `max_unpublished_days`는 지금 **쓰이지 않는다**(UNPUBLISHED는 첫 발생부터 경고하도록 바뀌었다 — 호환을 위해 필드만 남김) |
@@ -119,8 +127,9 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 어느 채널의 것인지
 | **Generate** | 프롬프트 + 프로필 추가 규칙 → 원문 | LLM 전부 실패 → `llm_failed` 기록, **종료 코드 1**(Actions 실패 알림) |
 | **Gate** | 원문 → 파싱 → HTML 정화 → 정책·중복 검사 | 탈락 사유를 넣어 재작성(최대 `max_attempts`). 끝내 탈락이면 `rejected` 기록, 게시·저장 없음, 정상 종료 |
 | **Publish** | 정화된 HTML + 면책 문구 → 어댑터. `mode: auto`면 `draft=False`로 즉시 게시(`posted`), `mode: draft`+게시용 시크릿이면 `draft=True`(`isDraft`)로 Blogger 초안함에 업로드(`draft_uploaded`). 응답에 글 ID·주소(`url`)가 비어 있거나 요청과 다른 상태(초안인데 공개 등)면 실패로 본다 | 인증·API 오류 → `publish_failed` 기록, **종료 코드 1**. 어댑터가 분류하지 못한 예외(`PublishError` 밖)도 같다. 초안은 남긴다 |
+| **Package** | (`mode: package`만) 정화된 HTML + 면책 문구 + 게이트 결과 → 소독(멘션·이슈 참조·펜스·HTML, G-L9) → GitHub 이슈 1개(`package_issued`, 공개 없음). 글을 만들기 **전에** 같은 채널에 열린 `초안` 이슈 수를 읽어 3건 이상이면 건너뛴다(적체 방지). 같은 초안(본문 첫 줄의 숨은 표지 `draft-id`)의 이슈가 이미 있으면 새로 만들지 않는다(멱등). 연습 실행은 본문만 만들어 실행 요약에 보이고 GitHub를 부르지 않는다 | 점검·생성 실패 → `publish_failed` + `PACKAGE_FAILED`(분류별 종료 코드: 권한·길이 초과 **2**, 그 밖 **1**, §4-1 분류표). 만든 글은 저장소 초안 파일로 남는다. 열린 초안 3건 이상은 실패가 아니라 `PACKAGE_BACKLOG`(종료 0) |
 | **Record** | 이력 항목 추가(최근 200개 유지) + 초안 파일 저장(최근 120개) | 이력 파일이 손상돼 있으면 **덮어쓰지 않고** 종료 코드 1 (fail closed) |
-| **Deploy** | (`jekyll-git`) 커밋 push 후 `pages.yml` dispatch. 배포 뒤 `verify` 잡이 새 글의 공개 주소가 열리는지 확인(§4-3) | dispatch 실패 시 워크플로 실패. 새 글이 마감(12분)까지 공개 주소에서 안 열리면 배포 실행이 빨강이 되어 워치독이 알린다 |
+| **Deploy** | (`jekyll-git`) 커밋 push 후 `pages.yml` dispatch(승인 흐름 `pr`은 dispatch 를 하지 않는다: PR 병합이 push 이벤트를 만들어 배포를 실행시킨다 — §4-4). 배포 뒤 `verify` 잡이 새 글의 공개 주소가 열리는지 확인(§4-3) | dispatch 실패 시 워크플로 실패. 새 글이 마감(12분)까지 공개 주소에서 안 열리면 배포 실행이 빨강이 되어 워치독이 알린다 |
 | **Observe** | 워치독: 이력·마지막 커밋·최근 실행 → `[Watchdog]` 이슈 | 이슈 생성/자동 해소 |
 
 종료 코드: `0` 정상(건너뜀 포함) / `1` 인프라 실패 / `2` 설정 오류.
@@ -129,16 +138,32 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 어느 채널의 것인지
 
 "할 일이 없어서", 또는 "조건이 안 맞아서" 끝나는 실행도 **왜** 끝났는지 남긴다. 초록 체크는 "프로그램이 오류 없이 끝났다"는 뜻일 뿐 "글이 올라갔다"는 뜻이 아니기 때문이다(2026-10-25 진단: Chance는 슬롯 시각이 된 스케줄 실행 13회 중 11회가 글 없이 초록으로 끝났고, Blogger는 게시 시크릿이 없어 초안만 만든 채 초록이었다).
 
-한 줄 규격: `[SKIP] code=<코드> key=값 ...` — Actions 로그에서 `[SKIP]`로 찾고, 같은 코드가 실행 요약(Step Summary)에도 쓰인다.
+한 줄 규격: `[SKIP] code=<코드> key=값 ...` — Actions 로그에서 `[SKIP]`로 찾고, 같은 코드가 실행 요약(Step Summary)에도 쓰인다. Blogger 러너(`pipeline/run.py`)의 실행 요약은 어느 경로든(초안 패키지 경로 포함: `### [티스토리] 블로그 이름`) 첫 줄이 `### [채널 라벨] 블로그 이름`(레지스트리의 `channel.label`·`name`, 예: `### [Blogger] Blogger (macat0722)`, `summary_head()`)이고 그 아래 줄(`- 결과: **코드** — …`·URL·안내·Gemini 호출)은 이 규약의 코드와 같다(2026-10-27 이전에는 첫 줄이 블로그 key였다).
 
 | 수준 | 의미 | 처리 | 종료 | 코드 |
 |------|------|------|------|------|
-| 정상 건너뜀 | 지금 할 일이 아님 | 초록 + 로그 한 줄(Blogger의 `PAUSED`·`MODE_OFF`·`DAILY_CAP`·`UPLOAD_SKIPPED`는 `::notice::` 주석도) | 0 | `OUT_OF_WINDOW`(첫 게시 시각 전), `ALREADY_PUBLISHED`(그 슬롯 글이 이미 있음), `PAUSED`(`PIPELINE_PAUSE`), `MODE_OFF`(레지스트리 mode off), `DAILY_CAP`(Blogger 하루 상한 소진), `DRY_RUN`(연습 실행), Blogger: `UPLOAD_SKIPPED`(Blogger 초안함에 올릴 차례인데 게시용 시크릿이 하나도 없어 **저장소 파일에만 저장** — 글은 만들어지고 이력은 `draft`, 요약에 등록할 시크릿 **이름**이 남는다) |
-| 경고 | 게시하려 했는데 못 했지만 다음 실행에서 다시 시도 | 초록 + `::warning::`(노란 주석) + 요약 | 0 | `ALL_REJECTED`(후보는 있었으나 Gemini 건너뜀·제목 유사·본문 검증 탈락으로 전부 탈락. 수동 실행은 예외로 빨강), `ALL_DUPLICATES`(검증된 기사는 있었지만 모두 이미 쓴 글과 비슷 — 뉴스가 뜸한 때), `NO_CANDIDATES`(시간 상한으로 일부 분야만 시도하고 후보 없음), `NO_MATCH`(수동 주제 요청과 연결되는 검증된 기사 없음), Blogger: `NO_TOPIC`(시드·확장 후에도 쓸 주제 없음), `GATE_REJECTED`(재작성 끝에도 게이트 탈락) |
-| 실패 | 발행하려던 실행이 0건으로 끝난 이상 신호 | **빨강** + `::error::` + 요약 | 1 | `ALL_LANES_EMPTY`(모든 분야에 검증을 통과한 기사가 한 건도 없음), `SOURCES_UNREACHABLE`(시도한 뉴스 소스가 모두 수집 실패 — 네트워크·소스 장애), Blogger: `LLM_FAILED`·`EXPAND_FAILED`(주제 확장 실패)·`PUBLISH_FAILED`(게시·초안함 업로드 실패. 어댑터가 분류하지 못한 예외도 포함, `reason=`으로 분류하고 `target=draft`/`publish`로 구분)·`HISTORY_WRITE_FAILED`(업로드·게시는 끝났는데 이력 파일을 쓰지 못함 — 글 ID·주소는 로그와 요약에 남고, 같은 날 다시 실행하기 전에 Blogger를 확인)·`AUTH_CHECK_FAILED`(인증 점검 실패 중 종료 1인 분류: `auth_expired`·`network`·`bad_response`·`api_error`·`unexpected` — 아래 분류표) |
-| 설정 오류 | 사람이 고쳐야 하는 설정 | **빨강** + `::error::` + 요약 | **2** | Blogger `SECRETS_MISSING`(즉시 게시인데 게시용 시크릿이 없거나, 초안함 업로드인데 **일부만** 있음 — 글을 만들기 전에 멈춘다, 초안·이력 없음, 시크릿 **이름**만 표시)·`INVALID_PUBLISH`(`BLOGGER_PUBLISH` 값을 알 수 없음)·`TOPIC_BLOCKED`(수동 `topic`이 프로필의 금지 주제 낱말에 걸림 — Gemini·Blogger를 부르기 전에 멈추고 이력·초안은 남지 않는다. 걸린 낱말은 로그·요약에 남고 `::error::` 주석은 입력 문자열이 없는 고정 문장이다)·`AUTH_CHECK_FAILED`(인증 점검 실패 중 종료 2인 분류: `auth_failed`·`blog_mismatch`)·레지스트리 검증 실패 |
+| 정상 건너뜀 | 지금 할 일이 아님 | 초록 + 로그 한 줄(Blogger의 `PAUSED`·`MODE_OFF`·`DAILY_CAP`·`UPLOAD_SKIPPED`는 `::notice::` 주석도) | 0 | `OUT_OF_WINDOW`(첫 게시 시각 전), `ALREADY_PUBLISHED`(그 슬롯 글이 이미 있음), `DRAFT_PENDING`(승인 흐름: 그 슬롯의 초안이 승인(PR 병합)을 기다리는 중이거나 닫혀 폐기됨 — 같은 슬롯을 다시 만들지 않음, §4-4), `PAUSED`(`PIPELINE_PAUSE`), `MODE_OFF`(레지스트리 mode off), `DAILY_CAP`(Blogger 하루 상한 소진), `DRY_RUN`(연습 실행), Blogger: `UPLOAD_SKIPPED`(Blogger 초안함에 올릴 차례인데 게시용 시크릿이 하나도 없어 **저장소 파일에만 저장** — 글은 만들어지고 이력은 `draft`, 요약에 등록할 시크릿 **이름**이 남는다), 초안 패키지: `PACKAGE_BACKLOG`(같은 채널에 열린 `초안` 이슈가 3건 이상이라 **새 초안을 만들지 않음** — Gemini·이슈·이력 없음, `::notice::`와 요약. 이슈를 발행해 닫으면 다음 실행부터 풀린다) |
+| 경고 | 게시하려 했는데 못 했지만 다음 실행에서 다시 시도 | 초록 + `::warning::`(노란 주석) + 요약 | 0 | `ALL_REJECTED`(후보는 있었으나 Gemini 건너뜀·제목 유사·본문 검증 탈락으로 전부 탈락. 수동 실행은 예외로 빨강), `ALL_DUPLICATES`(검증된 기사는 있었지만 모두 이미 쓴 글과 비슷 — 뉴스가 뜸한 때), `NO_CANDIDATES`(시간 상한으로 일부 분야만 시도하고 후보 없음), `NO_MATCH`(수동 주제 요청과 연결되는 검증된 기사 없음), `DRAFT_CHECK_FAILED`(승인 흐름: 슬롯 시각인데 초안 브랜치를 확인하지 못해(`git ls-remote` 실패) 이번 실행만 건너뜀 — 다음 실행이 다시 확인, §4-4), Blogger: `NO_TOPIC`(시드·확장 후에도 쓸 주제 없음), `GATE_REJECTED`(재작성 끝에도 게이트 탈락) |
+| 실패 | 발행하려던 실행이 0건으로 끝난 이상 신호 | **빨강** + `::error::` + 요약 | 1 | `ALL_LANES_EMPTY`(모든 분야에 검증을 통과한 기사가 한 건도 없음), `SOURCES_UNREACHABLE`(시도한 뉴스 소스가 모두 수집 실패 — 네트워크·소스 장애), `DRAFT_BRANCH_ONLY`(승인 흐름: 초안 브랜치와 이력은 올라갔는데 승인 PR 을 열지 못함 — 저장소 설정 'Allow GitHub Actions to create and approve pull requests'가 꺼져 있는 경우 등. 글은 잃지 않았고 다음 실행의 정리가 PR 을 다시 연다. `초안 올리기` 단계의 실행 요약과 고정 문장 `::error::`에 남는다, §4-4), Blogger: `LLM_FAILED`·`EXPAND_FAILED`(주제 확장 실패)·`PUBLISH_FAILED`(게시·초안함 업로드 실패. 어댑터가 분류하지 못한 예외도 포함, `reason=`으로 분류하고 `target=draft`/`publish`로 구분)·`HISTORY_WRITE_FAILED`(업로드·게시는 끝났는데 이력 파일을 쓰지 못함 — 글 ID·주소는 로그와 요약에 남고, 같은 날 다시 실행하기 전에 Blogger를 확인)·`AUTH_CHECK_FAILED`(인증 점검 실패 중 종료 1인 분류: `auth_expired`·`network`·`bad_response`·`api_error`·`unexpected` — 아래 분류표), 초안 패키지: `PACKAGE_FAILED`(GitHub 이슈를 읽거나 만들지 못함 중 종료 1인 분류: `network`·`bad_response`·`api_error`·`unexpected`, `stage=precheck`(글을 만들기 전 점검)·`issue`(이슈 만들기) — 아래 분류표) |
+| 설정 오류 | 사람이 고쳐야 하는 설정 | **빨강** + `::error::` + 요약 | **2** | Blogger `SECRETS_MISSING`(즉시 게시인데 게시용 시크릿이 없거나, 초안함 업로드인데 **일부만** 있음 — 글을 만들기 전에 멈춘다, 초안·이력 없음, 시크릿 **이름**만 표시)·`INVALID_PUBLISH`(`BLOGGER_PUBLISH` 값을 알 수 없음)·`TOPIC_BLOCKED`(수동 `topic`이 프로필의 금지 주제 낱말에 걸림 — Gemini·Blogger를 부르기 전에 멈추고 이력·초안은 남지 않는다. 걸린 낱말은 로그·요약에 남고 `::error::` 주석은 입력 문자열이 없는 고정 문장이다)·`AUTH_CHECK_FAILED`(인증 점검 실패 중 종료 2인 분류: `auth_failed`·`blog_mismatch`)·레지스트리 검증 실패, 초안 패키지: `SECRETS_MISSING`(`GITHUB_TOKEN`·`GITHUB_REPOSITORY` 없음 — Gemini를 부르기 전에 멈춘다)·`INVALID_PUBLISH`(이 채널에서 `BLOGGER_PUBLISH`·`--publish`를 씀)·`AUTH_CHECK_UNSUPPORTED`(`--auth-check` — 점검할 계정 인증이 없다. 조용히 이슈를 만들지 않으려고 거절한다)·`PACKAGE_FAILED`(분류 `auth_failed`·`too_long`, `stage=build`는 연습 실행에서 본문이 한도를 넘음) |
+
+승인 흐름(`publish_flow: pr`)에서 글을 만든 실행의 결과는 `PUBLISHED` 대신 `DRAFT_CREATED`(초록, 요약 '초안을 만들었습니다')이고, 올리기 단계의 요약은 `DRAFT_OPENED`(PR 을 열었음, 종료 0) 또는 `NO_DRAFT`(이번 실행에서 만든 초안이 없음, 종료 0)이다. 위 표의 `DRAFT_*` 코드와 함께 §4-4에 정리했다.
 
 **Blogger 실행(`pipeline/run.py`)의 처리 순서**: `PIPELINE_PAUSE` → `mode: off` → `BLOGGER_PUBLISH` 값 검사(알 수 없으면 종료 2) → 게시용 시크릿 점검(즉시 게시인데 없거나 초안함 업로드인데 일부만 있으면 종료 2) → **수동 `topic` 금지 주제 검사**(프로필의 `banned_topic_patterns`에 걸리면 `TOPIC_BLOCKED`, 종료 2 — 이력 읽기보다 앞이라 상태 파일 문제에 가리지 않는다) → 초안함 업로드인데 게시용 시크릿이 하나도 없으면 `UPLOAD_SKIPPED`로 저장소 파일에만 저장(주제 검사 뒤에 둔다 — 막힌 주제로 아무것도 저장하지 않고 멈추는 실행에 '저장합니다' 안내가 먼저 나오면 모순이다. D-64 ⑦ N-7) → 이력 읽기(손상이면 종료 1) → 하루 상한(`--topic` 지정은 이것을 우회하지만 금지 주제 검사는 우회하지 못한다) → LLM 키(없으면 종료 2) → **인증 점검**(업로드·게시일 때만, 실패하면 종료 1 또는 2) → 주제 → 생성·게이트 → 연습 실행/즉시 게시/초안함 업로드/저장소 초안. 인증 점검을 글 생성 앞에 둔 이유: 인증이 깨진 날 무료 Gemini 호출을 쓰지 않고, 같은 계정의 다른 블로그 ID 를 넣은 사고를 글을 만들기 전에 막는다.
+
+**초안 패키지 실행(`mode: package`, 티스토리·네이버)의 처리 순서**: `PIPELINE_PAUSE` → `mode: off` → `--auth-check` 거절(`AUTH_CHECK_UNSUPPORTED`) → `BLOGGER_PUBLISH` 값 검사(알 수 없거나 `auto`가 아니면 종료 2 — 이 채널에는 즉시 게시·초안함·파일만 저장이 없다) → **수동 `topic` 금지 주제 검사** → 이력 읽기(손상이면 종료 1) → 하루 상한(`package_issued`도 센다, `--topic` 지정은 우회) → LLM 키(없으면 종료 2) → **초안 패키지 사전 점검**(연습 실행이 아닐 때만: `GITHUB_TOKEN`·`GITHUB_REPOSITORY`가 없으면 종료 2, 같은 채널에 열린 `초안` 이슈를 읽어 3건 이상이면 `PACKAGE_BACKLOG`로 종료 0 — `--topic`도 이것은 우회하지 못한다, 읽기에 실패하면 `PACKAGE_FAILED stage=precheck`) → 주제 → 생성·게이트 → 이슈 만들기(연습 실행은 본문만 만들어 실행 요약에 보이고 GitHub를 부르지 않는다. 호출 0회). Blogger의 시크릿 점검·인증 점검은 하지 않는다(필요한 것은 Gemini 키와 워크플로가 넘기는 `GITHUB_TOKEN`뿐). 사전 점검을 글 생성 앞에 둔 이유는 Blogger의 인증 점검과 같다: 권한이 깨진 날 무료 Gemini 호출을 쓰지 않는다.
+
+| 초안 패키지 실패 분류(`reason=`) | 뜻 | 종료 | 사람이 할 일 |
+|----------------------------------|----|------|--------------|
+| `auth_failed` | 401·403·404·410 — 이슈를 읽거나 쓸 권한이 없다·저장소를 못 찾는다·저장소의 Issues 기능이 꺼져 있다 | 2 | 워크플로 `permissions`에 `issues: write`가 있는지, Settings > Actions > General의 Workflow permissions, 저장소 Issues 기능을 확인 |
+| `too_long` | 초안이 이슈 본문 한도(65,536자, 안전 한도 60,000자)에 안 들어간다 — **잘라서 올리지 않는다**(끊긴 글이 발행되지 않게). GitHub를 부르기 전의 입력 문제(`stage=build`, 연습 실행과 같다) | 2 | 프로필 `length.max_chars`를 줄인다 |
+| `invalid_draft` | AI가 만든 제목이나 본문이 정화한 뒤 비었다(스크립트·태그뿐인 출력 — 게이트는 이런 제목을 거르지 않는다)거나 입력 모양이 어긋난다. GitHub를 부르기 전의 입력 문제(`stage=build`)라 이슈는 만들어지지 않았다 | 2 | 로그를 확인한다. 다음 실행이 새 글을 만든다. 되풀이되면 프로필의 제목·본문 규칙을 점검 |
+| `network` | 연결 실패·시간 초과(읽기는 2번 더 시도한 뒤에도). **이슈 만들기(`stage=issue`)에서는 만들어졌는지 모른다** | 1 | 이슈 목록(라벨 `초안`)을 먼저 확인한 뒤 필요하면 다시 실행. 같은 요청을 자동으로 다시 보내지 않는다 |
+| `bad_response` | 응답에 이슈 번호·주소가 없다, JSON이 아니다. **이슈 만들기에서는 만들어졌을 수 있다** | 1 | 이슈 목록에서 초안이 만들어졌는지 확인한 뒤 다시 실행 |
+| `api_error` | 429·5xx(읽기는 재시도 뒤에도), 호출 한도, 그 밖의 HTTP 오류. 이슈 만들기에서 **4xx(429 포함)는 거절된 것이라 만들어지지 않았고**, 5xx는 만들어졌는지 모른다 | 1 | 로그를 확인하고 다시 실행(5xx면 먼저 이슈 목록 확인) |
+| `unexpected` | 어댑터 밖의 예외 | 1 | 로그를 확인 |
+
+**이슈 만들기 요청은 한 번만 보낸다(자동 재시도하지 않는다) — 만들어졌는지 모호하면 멈춘다**: 서버가 이미 이슈를 만들었는데 응답만 잃은 경우(시간 초과·연결 끊김·502 등) 같은 요청을 다시 보내면 같은 글의 이슈가 둘이 되기 때문이다. 그래서 모호한 실패(응답을 못 받음·5xx·이상한 응답)는 3초 기다렸다가 같은 초안 번호(숨은 표지)를 **한 번만** 찾는다 — 있으면 그 이슈를 결과로 쓰고(성공, `[참고]` 줄), 없거나 찾는 읽기도 실패하면 다시 만들지 않고 `PACKAGE_FAILED`(종료 1)로 멈추며 안내에 '초안 이슈가 만들어졌을 수 있으니 재실행 전에 라벨 `초안` 이슈 목록을 확인하세요'가 붙는다. HTTP 4xx로 거절된 실패(권한·검증·호출 한도)는 만들어지지 않았음이 확실해 그 안내 없이 바로 실패로 끝나고 다음 실행이 다시 한다. 이슈를 만들다 실패하면 이력은 `publish_failed`(이슈 번호 없음 — 하루 상한에 세지 않는다)이고 만든 글은 저장소 초안 파일에 남는다. 표지의 해시는 제목·본문에서 만들어지므로 이 멱등은 **같은 글을 다시 올리려는 시도**만 막는다 — 같은 날 다른 글이 만들어지면(이력이 사라진 뒤의 재실행 등) 이슈가 또 생긴다.
 
 글을 어디까지 보내는지(전달 방식)는 `BLOGGER_PUBLISH`(수동 실행 입력 `publish`)와 레지스트리 `mode`로 정해진다. 정기 실행은 입력이 비어 `mode`를 따른다:
 
@@ -243,13 +268,22 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 어느 채널의 것인지
 | `STALE` | 심각 | 마지막 활동(글 파일이 **추가된** 커밋 시각 또는 이력) 이후 `max_gap_hours` 초과 |
 | `NO_ACTIVITY` | 경고 | 발행·초안 기록이 전혀 없음 |
 | `NO_POSTS_DAY` | 경고 / 심각 | mode auto: 닫힌 한국시간 하루 기준 어제 새 글 0건이면 경고, 그제도 0건이면 심각(오늘 새 글이 나왔으면 회복. `STALE`이 울리면 중복 알림 안 함) |
+| `DRAFT_WAITING` | 경고 | 승인 흐름(`publish_flow: pr`) 블로그에서 열린 초안 PR(이 저장소의 `ai/draft/…` 브랜치)이 있는 동안 위 `STALE`·`NO_POSTS_DAY`를 이것으로 **바꾼다**: 새 글이 안 나온 것은 멈춤이 아니라 승인 대기이기 때문이다(대기 N건·가장 오래된 N일 전, 병합하면 공개·닫으면 폐기, 오래 두면 글감이 낡는다는 안내). 초안 PR 이 없거나 목록을 읽지 못하면 바꾸지 않아 `STALE`이 그대로 울린다(§4-4) |
 | `FAIL_STREAK` / `REJECT_STREAK` | 심각 / 경고 | 최근 N회 연속 실패 / 5회 연속 게이트 탈락 |
 | `UNPUBLISHED` | 경고 | mode auto인데 가장 최근 실행이 게시 없이 저장소 초안만 남김(이력의 사유를 인용). 게시 대상인데 게시 시크릿이 없으면 종료 2로 빨강이라 지금은 새로 생기지 않는다. `mode: draft`의 `draft_uploaded`(Blogger 초안함에 올림)는 게시 없는 초안이 아니라 '글이 나온 날'로 센다 |
 | `PAGES_NOT_DEPLOYED` | 심각 | 글 커밋 뒤 30분(+시계 오차 여유 120초)이 지났는데 main 브랜치의 성공한 사이트 배포 실행이 없음 |
 | `PAGES_FAILED` | 경고 | 가장 최근 사이트 배포 실행이 실패 |
 | `RUN_FAIL_STREAK` | 심각 | 워크플로가 최근 N회 연속 실패 |
 
+`DRAFT_WAITING`을 가리려면 열린 PR 목록을 읽어야 해서 `watchdog.yml`에 `pull-requests: read` 권한을 더했다(읽기 전용). 승인 흐름이 아닌 블로그(지금 모두)에서는 PR 목록을 읽지 않는다.
+
 알림 방식: (블로그, 코드)마다 이슈 하나를 유지한다. 저장소 소유자를 담당자로 지정하고 본문에 @멘션하며, 열려 있는 동안 본문을 최신 내용으로 갱신하고, 심각 건이 48시간 지나도 풀리지 않으면 코멘트로 다시 알린다. 조건이 풀리거나 다른 알림으로 대체되면 자동으로 닫는다. 한 실행에서 새로 만드는 이슈는 5건까지(심각 건 먼저). 이 실행(워크플로)은 **이번에 새로 생긴 심각 건이 있을 때만 빨강(종료 1)**이 되어 Actions 실패 알림도 가고, 이미 알린 심각 건이 이어지는 동안은 초록이다. `PIPELINE_PAUSE`가 켜져 있으면 알림을 만들지 않는다. 글 파일 추가 판정은 git 이력이 필요해 워크플로가 `fetch-depth: 0`으로 받아야 한다(얕은 복제면 경고를 내고 이력 파일로만 판단한다).
+
+### 4-2-1. 초안 모델과 초안 현황 (2026-10-27, 작업요청서 5 PR-B)
+
+사람이 발행해야 하는 글(티스토리·네이버 초안 패키지, Chance 승인 흐름, Blogger 초안함)의 대기 상태를 한 약속으로 센다. **초안 1건 = GitHub 이슈 1개 또는 PR 1개**, 라벨 `초안`(대기) + `채널:<채널 라벨>`(채널 라벨은 레지스트리 `channel.label`과 같은 글자), 쓰지 않을 초안은 라벨 `폐기` 또는 닫기(닫기 = 발행 완료 또는 폐기). 초안을 만드는 쪽(작업 C·E)이 이 라벨을 붙이고, `[공통] 확인 필요 모음`이 읽어 본문 맨 위의 **초안 현황** 표(채널 | 대기 초안 | 가장 오래된 | 최신 초안)와 항목(열린 초안 이슈·PR이 새로 생기면 action — 코멘트 알림, 3일 넘으면 check)을 만든다. 초안 PR은 한 줄만 남긴다: 열린 PR 규칙이 이미 action으로 올린 PR(병합하면 됩니다·충돌·검사 실패)은 그 줄이 알리고, 그 밖의 상태(저장소 기본 토큰이 연 PR은 검사가 돌지 않아 `검사 결과 없음`이 되기 쉽다)는 열린 PR 줄을 빼고 초안 항목이 알린다. Blogger는 이력의 `draft_uploaded`(최근 14일)를 센 **대략치**다(공개 여부는 Blogger 쪽 사실). 레지스트리에 `publish_flow: pr`(작업 E)이 있는 Chance는 열린 초안 PR 수, 없거나 `direct`면 `자동 공개`다. 규칙(`pipeline/inbox.py`)·읽기와 라벨 만들기(`scripts/ops_inbox.py`)·갱신 트리거(`ops-inbox.yml`의 `issues`·`pull_request`)의 상세와 한계(기본 토큰이 만든 이벤트는 워크플로를 시작시키지 않음)는 [`OPS_INBOX.md`](./OPS_INBOX.md) §3-1·§5.
+
+**켜기 전에 연결할 것**(묶음 2 통합에서 일부러 연결하지 않았다 — 승인 흐름·초안 패키지가 모두 꺼져 있어 지금은 필요 없다): Chance 승인 흐름(E)과 티스토리·네이버 초안 패키지(C)가 초안을 만든 **직후** ① `ops-inbox.yml`을 `workflow_dispatch`로 불러 현황판을 바로 갱신하고(기본 토큰이 만든 이슈·PR 은 이벤트 트리거를 일으키지 못한다) ② `notify_draft_waiting()`(§4-5)으로 휴대폰에 `📝 발행 대기`를 보낸다(승인 흐름에서는 새 글 알림 단계가 돌지 않는다 — 글을 main 에 커밋하지 않아서다).
 
 ## 4-3. 배포 후 공개 확인 (`pages.yml`의 `verify` 잡, D-41)
 
@@ -263,21 +297,119 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 어느 채널의 것인지
 
 **한계**: 이 확인은 가장 새 글(공개 가능한 것)의 공개 여부만 본다. 글을 추가하지 않은 커밋(이미지 교체·기존 글 수정·설정 변경)의 반영 실패는 이미 공개 중인 최신 글 때문에 통과한다. Jekyll 빌드 자체가 실패하는 경우(D-24형)는 `build` 잡이 먼저 빨강이 되고 `verify`는 건너뛰어지므로(skipped) 이 잡이 새로 잡는 것이 아니다. 또 워치독이 verify 실패를 빌드 실패 문구로 설명하고 취소된 실행을 다루지 못하는 문제는 워치독 쪽 작업이다(D-44). 글 선정·주소 계산의 알려진 차이: front matter는 블록 매핑의 한 줄 `키: 값`만 읽고(키 따옴표·콜론 앞 공백은 허용), 따옴표 친 `date: "… HH:MM:SS"`는 Jekyll이 사이트 시간대로 읽지만 이 스크립트는 UTC로 읽는다(사이트 시간대가 Asia/Seoul이면 미래 판정이 9시간 어긋난다. 이 저장소의 글에는 없다). 주소의 `:title`은 결합 문자(Mark) 등 일부 유니코드 범주를 Jekyll과 다르게 처리할 수 있다(N-5, 고치지 않음 — 한글·영문 slug에는 영향이 없다).
 
+## 4-4. Chance 승인 흐름 — 초안 → 사람 승인 → 공개 (선택, 기본 꺼짐)
+
+레지스트리 `chance.publish_flow`가 `pr`이면 Chance 엔진은 글 한 쌍을 지금과 똑같이 만들되(소스 선정·게이트·Gemini 폴백·슬롯 규칙 그대로) **main 에 바로 올리지 않고** 초안 브랜치(`ai/draft/…`)와 승인 PR 로 올린다. 운영자가 휴대폰 GitHub 앱에서 **PR 을 병합하면 그것이 공개**(사람의 push 가 `pages.yml`을 자동으로 실행시킨다)이고 **닫으면 폐기**다. 이유: 구글 게시자 정책은 수동 검토·큐레이션 없이 자동 생성된 콘텐츠에 광고를 두지 말라고 안내한다. 운영자가 2026-10-27 채팅으로 이 방향(채널 관리 계획의 D1 (a))을 승인했다.
+
+**상태**: 코드와 시험은 있고 **기본값은 꺼짐(`direct`)이다.** `direct`는 이 기능을 넣기 전과 동작이 같다(레지스트리를 읽을 수 있는 한 — 읽지 못하면 아래 '스위치와 검증'처럼 멈춘다. 같은 가짜 입력으로 main 의 `generator.py`와 새 코드를 여러 시나리오에서 돌려 표준 출력·종료 코드·생성 파일·이력·실행 요약이 바이트 단위로 같음을 확인했다). `publish_flow`를 `pr`로 바꾸는 변경은 별도의 **T3**(게시 방식)이고 저장소 설정 하나가 먼저 필요하다([`ACTIONS_GUIDE.md`](./ACTIONS_GUIDE.md) 3-17). **실제 GitHub 에서는 한 번도 돌려 보지 않았다.** 시험은 임시 git 저장소(bare origin)와 가짜 GitHub 클라이언트로 한 것이라, PR 만들기·라벨·병합 뒤 배포는 켠 뒤 처음 관측해야 한다(3-17의 확인 목록, [`DEFECT_REGISTER.md`](./DEFECT_REGISTER.md) 하단 관측 체크리스트).
+
+| | `direct`(기본, 지금 동작) | `pr`(승인 흐름) |
+|---|---|---|
+| 글 만들기 | 소스 선정·게이트·Gemini 폴백·슬롯 규칙 | **같음** |
+| 글이 가는 곳 | main 에 바로 커밋 | 초안 브랜치 `ai/draft/…`(글 파일 둘뿐)와 승인 PR. main 에는 이력 항목만 따로 커밋 |
+| 공개 | 커밋 뒤 `gh workflow run pages.yml`(봇의 push 는 push 이벤트를 만들지 못한다) | 운영자가 PR 을 병합 = 사람의 push → `pages.yml` 자동 실행. 이 워크플로는 배포를 요청하지 않는다 |
+| 폐기 | 해당 없음 | PR 을 닫는다. 같은 슬롯은 같은 날 다시 만들지 않고 브랜치는 7일 뒤 자동으로 지운다 |
+| 실행 요약의 결과 | `PUBLISHED` | 만들기 `DRAFT_CREATED` → 올리기 단계 `DRAFT_OPENED`(실패 `DRAFT_BRANCH_ONLY`) |
+| 연습 실행(`dry_run`) | 파일·커밋·게시 없음 | 같음(브랜치·PR 도 없음. 원격 브랜치 확인도 하지 않는다) |
+
+**스위치와 검증**: 레지스트리 `chance` 항목의 `publish_flow`(`direct`|`pr`, 없으면 `direct`)다. 검증기(`python -m pipeline.registry`, REG-1)는 값이 둘 중 하나인지, `platform`이 `jekyll-git`인지(Blogger 의 사람 확인 단계는 `mode: draft`의 초안함이다), `pr`이면 `mode`가 `auto`인지(자동으로 만들고 사람이 승인) 본다. 값은 두 곳에서 같은 함수(`pipeline/drafts.py`의 `chance_flow`)로 읽는다: 워크플로의 `발행 흐름 확인 (레지스트리 publish_flow)` 단계(`python -m pipeline.draft_flow flow`, 표준 라이브러리만 써서 의존성 설치 전에 돈다 — 출력은 `steps.flow.outputs.flow`)와 `generator.py`. **읽지 못하거나 값이 틀리면 직접 게시로 떨어지지 않고 멈춘다**(단계가 빨강으로 끝나 글을 만들기 전에 종료). 승인 흐름을 켜 둔 채 레지스트리 오류 때문에 승인 없는 게시가 나가는 일을 막으려는 것이다. 같은 이유로 **직접 게시(`direct`)에서도 깨진 레지스트리면 글을 만들기 전에 멈춘다**(레지스트리는 CI 가 PR 마다 검증하므로 정상 운영에서는 달라지는 것이 없다). **켜는 변경(T3)은 두 줄이다**: `pipeline/blogs.json`의 `publish_flow`와, 그 값을 지금 값으로 못 박아 둔 표지판 시험의 기준 `tests/draft_helpers.py`의 `REAL_PUBLISH_FLOW` — 레지스트리만 바뀌면 시험 4개가 빨강이 되고, 둘을 함께 바꾸면 전체 시험이 통과한다(`pr`로 바꾼 사본의 전체 시험으로 확인).
+
+**실행 순서(`pr`)**: ① `발행 흐름 확인`이 `pr`을 읽고 실행 요약에 한 블록을 남긴다. ② `generator.py`가 평소처럼 `_posts/`에 글 둘을 쓰고 `history.json`에 항목을 더한다. 항목에 `flow: "pr"`·`branch`·`paths`(글 파일 둘의 저장소 상대 경로)가 더해지고 결과는 `DRAFT_CREATED`다. ③ `변경 사항 커밋`·`Pages 배포 실행` 단계는 건너뛴다(`steps.flow.outputs.flow != 'pr'`). ④ `초안 올리기와 승인 PR 열기 (승인 흐름일 때만)` 단계(`python -m pipeline.draft_flow deliver`)가 다음을 한다.
+
+1. 글 둘만 담은 커밋을 새 초안 브랜치에 만들고, 기준 브랜치(main)로 돌아와 **이력 파일만 담은 커밋**을 만든다(커밋 작성자는 `github-actions[bot]`).
+2. 초안 브랜치를 push 하고, 이어서 이력 커밋을 main 에 push 한다(거절되면 `pull --rebase` 뒤 최대 3번). 이력 push 가 끝내 실패하면 **방금 올린 초안 브랜치를 지우고(롤백)** 빨강(종료 1)으로 끝난다 — 이력 없는 초안이 남아 같은 슬롯을 또 만들지 않게, 다음 정기 실행이 그 슬롯을 처음부터 다시 만든다.
+3. PR 을 연다(5xx·네트워크 오류는 2초·5초 간격으로 재시도, 이미 같은 브랜치의 PR 이 있으면 그 번호를 쓴다). 라벨 `초안`·`채널:Chance`를 붙인다(없으면 만든다. 실패해도 경고만).
+4. 남은 초안을 정리한다(아래 '정리').
+
+직접 게시 단계와 이 단계는 서로 배타적이다(`if` 조건이 반대). 이 단계는 연습 실행이면 실행되지 않고, 프로그램 안에서도 `DRY_RUN`·`PIPELINE_PAUSE`가 켜져 있거나 `GITHUB_TOKEN`·`GITHUB_REPOSITORY`가 없으면(로컬 실행) 아무것도 쓰지 않는다.
+
+**이력 항목만 main 에 따로 커밋하는 이유**(설계 결정과 대안): 이력 파일을 글과 같은 PR 에 두면 슬롯 중복 방지가 초안 브랜치의 존재에만 의존하고, 열린 PR 이 둘이 되면 `history.json`의 같은 줄을 둘 다 고쳐 하나를 병합한 뒤 다른 쪽이 충돌한다(휴대폰에서 풀 수 없다. 임시 저장소 시험으로 재현했다). 별도 원장 파일(`drafts.json`)을 두면 `history.json`과 이중 장부가 되고 소비자(워치독·현황판)가 읽을 파일이 하나 더 늘어난다. 그래서 이력 항목(필드 셋 추가)을 생성 시점에 main 에 커밋하고 PR 에는 글 파일 둘만 둔다: 슬롯·제목(0.6/0.7)·이미지·분야 중복 검사가 지금처럼 main 의 이력만 읽고, 초안이 몇 개 열려 있어도 PR 끼리 충돌하지 않는다. **대가**: 닫아서 폐기한 초안의 이력 항목도 남아 그 슬롯·주제·이미지는 다시 쓰지 않는다(의도한 동작이지만 '이력에 있는 글 = 공개된 글'이 더는 아니다). 이력으로 글 수를 세는 곳(예: 확인 필요 모음의 '최근 24시간 글 수' 현황)은 초안도 센다 — 공개 여부는 글 파일이 main 에 있는지로 판단한다.
+
+**슬롯 상태와 결과 코드**(`generator.py`의 `slot_state`가 이력으로 판정한 것을 `pipeline/drafts.py`의 `refine_slot_state`가 다듬는다):
+
+| 그 슬롯의 상태 | 판정 | `[SKIP] code=` (종료) |
+|---|---|---|
+| 이력 항목 없음, 초안 브랜치도 원격에 없음 | 만든다 | (없음) |
+| 이력 항목이 `flow: "pr"`이고 `paths`의 글이 main 에 있음(병합됨) | 이미 공개됨 | `ALREADY_PUBLISHED` (0) |
+| 이력 항목이 `flow: "pr"`이고 글이 main 에 없음(승인 대기이거나 닫혀 폐기됨) | 같은 슬롯을 다시 만들지 않음 | `DRAFT_PENDING` (0, 정상 건너뜀) |
+| 이력 항목은 없는데 그 슬롯의 초안 브랜치(`ai/draft/<날짜>-s<슬롯>`)가 원격에 있음(이력 쓰기가 실패한 드문 경우) | 같은 슬롯을 다시 만들지 않음 | `DRAFT_PENDING` (0) |
+| 원격 브랜치를 확인하지 못함(`git ls-remote` 실패) | 이번 실행만 건너뜀, 다음 실행이 다시 본다 | `DRAFT_CHECK_FAILED` (0, `::warning::` 고정 문장) |
+
+수동 실행에는 슬롯이 없다(`slot=None`): 브랜치 이름은 `ai/draft/<날짜>-m<HHMMSS>`(KST 생성 시각)이고 슬롯 판정은 하지 않는다(수동 실행은 원래 하루 상한·슬롯 규칙과 무관하다). 슬롯 둘(9시·18시)은 서로 다른 브랜치·이력 항목이라 간섭하지 않는다.
+
+**승인 PR 의 모양**(운영자가 읽고, 현황판·워치독이 알아보는 값):
+
+| 항목 | 값 |
+|---|---|
+| 작성자 | `github-actions[bot]`(`GITHUB_TOKEN`) |
+| head → base | `ai/draft/<YYYY-MM-DD>-s<슬롯>`(정기) 또는 `ai/draft/<YYYY-MM-DD>-m<HHMMSS>`(수동) → `main` |
+| 제목 | `[초안][Chance] <한국어 제목> / <영어 제목>` — 제목마다 80자, 전체 200자 이하, 소독됨 |
+| 라벨 | `초안`(색 `d4c5f9`)·`채널:Chance`(색 `1d76db`). 없으면 만든다 |
+| 바뀐 파일 | `_posts/…` 두 개(한국어·영어)뿐. `history.json`은 PR 에 없다 |
+| 본문 | 승인 안내(운영자 @멘션) · 요약(분야·출처·원문 링크·발행 슬롯) · 제목 · 첫 문단 발췌 · 자동 점검 결과(분량·원문 인용·출처 목록·고지문·제목 유사도) · 승인 체크리스트 · 안내. 9,000자 이하 |
+| 체크리스트 | 정확히 `- [ ] 원문과 수치·사실을 대조했다` / `- [ ] 제목·요약에 문제가 없다` / `- [ ] 병합 = 공개(사람 검토 단계)` 세 줄 |
+| 검사(CI) | **돌지 않는다**: `GITHUB_TOKEN`으로 연 PR 은 `pull_request` 워크플로를 시작시키지 않는다(GitHub 규칙, 켠 뒤 관측). 글 파일만 바뀌어 병합에 필요하지 않다. 라벨 `초안`이 붙은 PR 은 확인 필요 모음이 '초안 대기'(지금 해야 할 일) 한 줄로 보여 준다([`OPS_INBOX.md`](./OPS_INBOX.md) §3 의 `초안(PR)` 행) |
+
+이력 항목(`history.json`)은 Chance 의 기존 필드(`date`·`topic`·`kr_title`·`en_title`·`kr_image`·`en_image`·`slot`·`lane`·`source`·`source_url`)에 `flow`(`"pr"`)·`branch`·`paths`가 더해진 것이다. 별도 원장 파일은 없다.
+
+**PR 본문 소독**: PR 제목·본문에는 AI 가 쓴 글과 외부 피드 문구가 섞인다. 모두 `pipeline/drafts.py`의 `neutralize()`를 거친다 — 보이지 않는 글자·방향 제어 문자 제거, HTML 주석과 `script`·`style` 류 블록 제거, 비밀 모양 가리기(`mask`), 한 줄로 접기(`::`·`##[` 포함), `<`·`>`·`[`·`]`은 전각으로, 백틱은 작은따옴표로, `~`는 전각으로, 문자 참조(`&#64;` 등)는 `&amp;`로 감싸고, `@`·`#`·`://`·`www.` 뒤에는 폭 없는 공백을 넣어(멘션·이슈 참조·자동 링크 무력화) 길이를 제한한다. 운영자 멘션과 원문 링크(안전한 단순 https 주소만)는 이 모듈이 직접 붙인다. 토큰은 환경변수로만 받고 로그·오류·요약에 쓰지 않으며, `::error::`·`::warning::` 줄에는 외부 문자열이 없는 고정 문장만 쓴다. REST 호출은 표준 라이브러리(`urllib`)만 쓴다.
+
+**실패 안전**(만든 글을 잃지 않는다):
+
+| 상황 | 결과 | 종료 | 사람이 할 일 |
+|---|---|---|---|
+| PR 열기가 거부됨(403 — 저장소 설정 'Allow GitHub Actions to create and approve pull requests'가 꺼져 있는 경우 등)·API 오류·재시도 뒤에도 5xx | 초안 브랜치와 이력은 그대로. 요약 `DRAFT_BRANCH_ONLY` + 안내(설정을 켜거나 GitHub 화면에서 직접 PR 열기). 슬롯은 처리된 것으로 취급해 다시 만들지 않는다. 다음 정기 실행의 정리가 최대 3일 동안 PR 열기를 다시 시도한다(경고만) | **1(빨강)**, Actions 실패 알림이 간다 | 설정을 켜면 다음 실행(30분 안)이 PR 을 다시 연다. 급하면 브랜치 화면의 'Compare & pull request' |
+| 초안 브랜치 push 실패 | 이력이 아직 없으므로 슬롯은 처리되지 않았고 다음 정기 실행이 처음부터 다시 만든다 | 1 | 로그 확인 |
+| 이력 push 가 3번 모두 거절됨 | 방금 올린 브랜치를 지운다(롤백) | 1 | 다음 실행을 기다린다 |
+| 라벨 실패·정리 실패·정리 중 예상 밖 오류 | PR 은 열렸고 발행에는 영향 없음. 로그와 요약에 사유, `::warning::` 고정 문장 | 0 | 다음 실행이 다시 시도 |
+
+**정리**(`deliver` 단계 끝, 열린 PR 목록은 저장소 안의 `ai/draft/` 브랜치에서 연 것만): PR 이 없는 초안 브랜치는 만든 지 3일 안이면 PR 을 다시 연다(글은 원격 브랜치에서 읽는다). 병합됐거나 닫힌 브랜치, 그리고 PR 이 없는 오래된 브랜치는 이름의 날짜로 7일이 지나면 지운다. **열린 PR 이 있는 브랜치는 오래돼도 지우지 않는다.** `ai/draft/` 아래라도 이름 형식(`<날짜>-s<슬롯>`·`<날짜>-m<HHMMSS>`)이 아니면 건드리지 않는다. PR 목록은 저장소의 최근 PR 300건까지만 읽으므로, 끝까지 읽지 못했으면 '목록에 PR 이 안 보이는' 브랜치는 PR 이 없다는 증거가 아니라서 지우지 않는다(닫힌 PR 이 보이는 브랜치는 지운다). 정리 실패는 경고일 뿐 발행을 실패시키지 않는다. 정리는 이 단계에서만 돌므로 `direct`로 되돌린 뒤 남은 `ai/draft/…` 브랜치는 직접 지운다.
+
+**워치독**: 승인 흐름에서는 새 글이 안 나온 것이 멈춤이 아니라 승인 대기일 수 있다. `pipeline/health.py`는 `publish_flow: pr` 블로그에 열린 초안 PR 이 있으면 `STALE`·`NO_POSTS_DAY`를 `DRAFT_WAITING`(경고, 대기 N건·가장 오래된 N일)으로 바꾼다(§4-2). 열린 초안이 없거나 목록을 읽지 못했으면 예전처럼 `STALE`이 울린다 — 초안을 닫기만 하고 새 글이 안 나오는 것은 정말 멈춘 것이다. 이 규칙이 맞게 돌도록 워치독의 두 판정을 바꿨다(직접 게시에서는 결과가 같다): ① 글이 올라온 시각은 초안을 만든 시각이 아니라 **병합 시각**이다 — 글 파일을 더한 커밋을 `git log --first-parent`로 찾는다(기본 이력 단순화는 병합 대신 초안 브랜치의 커밋을 보여 줘 늦게 병합하면 `STALE`이 헛울리고 `PAGES_NOT_DEPLOYED`의 기준 시각이 어긋난다). ② 병합하지 않은 초안의 이력 항목(`flow: "pr"`)은 글 커밋 날짜를 알 때 '글이 나온 날'로 세지 않는다(`NO_POSTS_DAY`가 가려지지 않게. 얕은 복제라 날짜를 모르면 예전처럼 이력으로 판단).
+
+**사이트 반영 확인**: PR 병합은 main 에 push 이벤트를 만들어 `pages.yml`이 자동으로 돌고 `verify` 잡(§4-3)이 가장 새 글 쌍의 공개 주소를 확인한다. 글에는 front matter `date`가 없어 Jekyll 은 파일 이름의 날짜(만든 날) 자정을 글 날짜로 쓰는데, 이는 병합 시점에 과거이거나 같은 날이라 `future: false`에 걸리지 않는다. 대신 늦게 병합한 글은 공개된 시각이 아니라 만든 날짜 자리에 놓인다(사이트 목록·피드의 순서와 날짜 표시가 병합일이 아니라 만든 날을 따른다). 알려진 한계: `verify`는 가장 새 글 쌍만 보므로 **오래된 초안을 더 새 글보다 늦게 병합하면 그 글은 따로 확인되지 않는다**(새 글이 이미 열려 있으면 통과). 병합 방식(Merge commit·Squash·Rebase)은 글 파일이 main 에 생기기만 하면 되므로 무엇이든 슬롯 판정에 영향이 없고, 워치독은 어느 방식이든 main 줄기에서 글 파일을 더한 커밋의 시각을 글이 올라온 시각으로 본다(위 '워치독' ①).
+
+**알려진 한계와 미관측**: ① PR 만들기·라벨 붙이기·병합 뒤 배포가 실제 GitHub 에서 의도대로 도는지는 켠 뒤 처음 관측한다. ② 저장소 설정 'Allow GitHub Actions to create and approve pull requests'는 [`ACTIONS_GUIDE.md`](./ACTIONS_GUIDE.md) 5-1에 켜짐(이슈 수정이 PR 을 만든 것이 근거)으로 기록돼 있으나 이 변경을 만든 쪽에서 화면을 확인하지 못했다. ③ 초안을 만든 실행이 도중에 죽으면 두 가지가 남을 수 있다. 이력 push 뒤 PR 열기 전이면 PR 없는 브랜치가 남고 정리가 3일 동안 PR 을 다시 열어 본다. 초안 브랜치 push 뒤 이력 push 전이면 이력 항목이 없는 브랜치가 남는다: 그 슬롯은 `DRAFT_PENDING`(원격 브랜치 확인)이라 다시 만들지 않지만 PR 은 열리지 않고 브랜치는 7일 뒤 지워진다 — 로그의 '이력 항목이 없어 다시 열지 못합니다' 줄이 단서이고, 급하면 브랜치에서 직접 PR 을 연다. ④ 이력 항목은 초안을 만들 때 main 에 들어가고 글은 병합 때 들어오므로, 병합 전에는 이력에 있는 글이 사이트에 없다. 이력을 읽는 곳(중복 검사·확인 필요 모음의 현황)은 이를 구분하지 못한다(위 '대가'). ⑤ 봇 PR 에는 검사가 돌지 않아 병합 전에 사람이 글을 읽는 것이 유일한 검증이다(그래서 이 흐름이 있다). ⑥ main 에 '상태 검사 필수'나 'PR 필수' 보호 규칙을 켜면 봇이 연 초안 PR 은 검사가 없어 병합이 막히고 봇의 이력 push 도 거부된다([`ACTIONS_GUIDE.md`](./ACTIONS_GUIDE.md) 5장 경고와 같다). ⑦ 라벨을 붙이는 호출이 `pull-requests: write`만으로 되는지(`issues: write`가 필요한지)는 켠 뒤 관측한다 — 안 되면 라벨 없이 PR 만 열리고 경고 한 줄이 남으며, 제목 접두 `[초안][Chance]`와 브랜치 이름은 그대로라 알아볼 수 있다.
+
+## 4-5. 텔레그램 알림 계층 (`pipeline/notify.py`, 2026-10-27)
+
+새 글 발행·초안 발행 대기·확인 필요를 **휴대폰 텔레그램**으로 알리는 보조 계층이다(운영자 요청). 표준 라이브러리만 쓰고(`urllib`, Python 3.10 호환 — Chance 워크플로는 `google-genai` 외에 설치하는 것이 없다), 시크릿 `TELEGRAM_BOT_TOKEN`·`TELEGRAM_CHAT_ID`가 **둘 다** 있을 때만 켜진다. 하나라도 없으면 아무것도 보내지 않고, 호출하는 쪽의 출력도 예전과 바이트 단위로 같다(알림 단계 명령만 `텔레그램 알림: 건너뜀(시크릿 없음)` 한 줄을 남긴다). 운영자용 설정: `.github/editorial/TELEGRAM_SETUP.md`.
+
+| 이벤트 | 함수(`Notifier`의 메서드이자 같은 이름의 모듈 함수) | 호출 자리 | 내용 |
+|--------|------|------|------|
+| 새 글 발행 | `notify_chance_published(posts, run_info)` | `chanceblog.yml`의 마지막 단계 `텔레그램 알림(새 글)` → `python -m pipeline.notify chance-published --commit HEAD` | 방금 push 한 커밋이 **새로 더한** `_posts/**.md`(부모가 있는 커밋만, `published: false` 제외)를 (날짜·시각)으로 짝지어 한·영 한 쌍을 한 통으로: 제목 둘·분야·출처·예상 공개 주소 둘(`scripts/verify_pages_deploy.py`의 주소 계산을 그대로 씀)·배포 안내("배포가 끝나기까지 약 3분 — 일찍 열면 404 가 최대 약 18분 보관될 수 있으니 3분 뒤에 열어 보세요", D-41)·실행 기록 링크, 버튼 `한글 글`·`English` |
+| 발행 대기 | `notify_draft_waiting(channel_label, title, where, url=None)` | `notify_blogger_result`가 `draft_uploaded`에서 부른다. **티스토리·네이버 초안 패키지와 Chance 승인 대기가 초안을 만든 직후 같은 함수를 부른다(호출은 아직 연결하지 않았다 — 켜기 전에 연결할 것, §4-2-1)** | `📝 발행 대기 — 채널: 제목 → 어디서 무엇을 하면 되는지` + 허용된 주소면 `열기` 버튼 |
+| Blogger 결과 | `notify_blogger_result(result_code, title, url, blog_label, extra_prefixes)` | `pipeline/run.py`가 게시·초안 업로드에 성공했을 때(`posted`·`draft_uploaded`), 이력·초안 파일·실행 요약을 모두 쓴 **맨 마지막에**(알림이 느리거나 그 사이 실행이 끊겨도 올라간 글의 기록이 먼저 남는다) | `draft_uploaded` → 발행 대기 문구(Blogger 대시보드 → 초안에서 확인·게시), `posted` → `✅ 게시됨`(글 주소가 레지스트리의 블로그 주소 아래일 때만 `글 보기` 버튼). 실패·저장소 파일만 저장·연습 실행은 보내지 않는다(실패는 확인 필요 모음·Actions 실패 알림이 맡는다) |
+| 확인 필요 | `notify_ops_alert(item_lines, inbox_url, count)` | `scripts/ops_inbox.py`가 코멘트(@멘션)를 쓰려고 할 때(연습 제외) — 같은 `new_items`, `inbox.alert_lines()`가 코멘트와 같은 제목 줄을 만든다 | **평문** 한 통(`📌 확인 필요 모음 — 새로 해야 할 일 N건` + 항목 제목 줄 최대 10줄), 버튼 `확인 필요 모음 열기` |
+| 연결 확인 | `notify_test()` | `python -m pipeline.notify test`(`[공통] 텔레그램 알림 시험`) | `✅ 알림 연결 확인` |
+
+**실패 격리**: ① 모든 공개 함수는 예외를 던지지 않고 `Result(ok, sent, status, reason, detail)`를 돌려준다(분류 코드: `sent`·`disabled`·`not_applicable`·`invalid_token`·`invalid_chat_id`·`unauthorized`(401)·`chat_not_found`(400)·`forbidden`(403)·`not_found`(404)·`rate_limited`(429)·`server_error`(5xx)·`network`·`timeout`·`bad_request`·`parse_error`·`button_error`·`bad_response`·`limit`·`internal_error`). 호출하는 쪽도 한 번 더 감싼다 — Blogger 러너는 알림이 실패하거나 예외를 던져도 게시 결과·이력·요약·종료 코드를 바꾸지 않고(로그에 `[참고]` 한 줄과 고정 문장 `::warning::`만), 점검 모음은 코멘트·표식·종료 코드를 바꾸지 않는다(코멘트가 실패해 다음 점검이 같은 항목을 다시 알릴 때는 휴대폰 알림도 한 번 더 간다 — "놓치는 것보다 한 번 더 알리는 쪽이 낫다"는 기존 원칙, `docs/OPS_INBOX.md` §4). ② Chance 알림 단계는 `if: steps.commit.outputs.pushed == 'true'`(연습 실행은 push 가 없어 안 돈다)·`continue-on-error: true`·`timeout-minutes: 2`이고, 명령은 전송이 실패해도 종료 코드 0으로 끝나며 `::warning::`으로 드러낸다 — 확인 필요 모음이 "실행은 성공했지만 경고가 있습니다"로 모은다. `continue-on-error`는 이 단계 모양(run 이 `python -m pipeline.notify …` 한 줄 + `timeout-minutes`)에만 검증기 WF-6 이 경고하지 않는다. ③ 알림 시험(`test`)만 실패 때 종료 1(빨강)이다.
+
+**전송 규칙**: JSON `POST https://api.telegram.org/bot<토큰>/sendMessage`, 제한 시간 15초, 링크 미리보기 끔. 본문 3,800자(UTF-16 코드 단위로 센다 — 이모지는 2, 텔레그램 한도는 4,096) 안으로 줄이고(잘리면 `…`), HTML 알림이 너무 길면 서식을 버리고 평문으로 보낸다. 한 실행(프로세스)에서 5통까지, 통 사이 1.1초(같은 채팅에는 초당 1통이 안전). 429 는 `retry_after`(최대 10초)만큼 기다려 한 번, 네트워크 오류·5xx 는 2초 뒤 한 번, HTML 해석 오류(400)는 서식 없이 한 번, 버튼 거부(400)는 버튼 없이 한 번 다시 보낸다(한 통에 요청은 최대 5번). 400·401·403·404 는 다시 시도하지 않는다. 텔레그램 전송에는 멱등성 키가 없어 타임아웃 뒤 재시도로 같은 알림이 드물게 두 번 갈 수 있다(알림은 최소 한 번 가는 쪽을 택했다).
+
+**토큰 취급**(G-C12): 시크릿은 단계 `env`로만 넘기고(검증기 WF-13), 코드는 환경변수에서만 읽는다. 토큰이 요청 주소의 경로에 들어가므로 **예외 문구를 어디에도 쓰지 않고** 클래스 이름·HTTP 상태·텔레그램이 준 짧은 설명만 남기며, 돌려주는 모든 글에서 토큰·채팅 ID(와 URL 인코딩 형태·토큰 절반)를 지운 뒤 비밀 모양 패턴(`Telegram 봇 토큰`)으로 한 번 더 가린다. 외부·AI 유래 글(제목·출처 이름·항목 제목)은 비밀 모양 가리기 → 보이지 않는 문자·제어 문자 제거 → 한 줄로 접기 → 길이 제한 → HTML 이스케이프 순으로 소독하고(수백만 자짜리 입력에 정규식을 통째로 돌리지 않게 보이는 길이의 10배(최소 2,000자)까지만 읽는다), 주소는 허용 목록(`https://shine88pc.github.io/…`·`https://github.com/shine88pc/chanceblog/…`·`https://www.blogger.com/…`, 그리고 코드가 직접 주는 레지스트리의 블로그 주소)만 링크·버튼으로 건다(허용 밖 주소와, 제목·출처 같은 외부 글 속의 `https://…`·`tg://…` 는 `://`를 전각 콜론으로 바꿔 글자로만 둔다 — 텔레그램이 글자 그대로를 링크로 바꾸지 못하게).
+
+**한계와 후속**(독립 검증 1차 반영): ① 새 글 알림은 사이트 배포를 요청한 직후에 오고 주소·버튼이 같이 간다. 배포가 퍼지기 전에 열면 공개 CDN 이 그 404 를 최대 약 18분 보관해(D-41) 독자에게도 한동안 404 가 보일 수 있어, 알림 문구와 안내서에 "3분 뒤에 열어 보세요"를 적었다. **후속 후보(코드는 아직 하지 않음)**: 알림을 `pages.yml`의 `verify` 잡(사이트 반영 확인) 성공 뒤로 옮기거나, 반영이 확인된 뒤에만 주소를 다는 것. ② 알림 단계의 조건은 `if: steps.commit.outputs.pushed == 'true'`뿐이라 암묵적으로 `success()`도 따른다 — 바로 앞 `Pages 배포 실행` 단계가 실패하면 알림도 건너뛴다(그때는 Actions 실패 알림 메일이 대신한다). ③ **WF-13 은 시크릿 이름이 글자로 나오는 곳만 본다**: `toJSON(secrets)`·`secrets[format(…)]`·`secrets: inherit` 처럼 이름 없이 넘기는 길과 외부 `uses:` 단계의 env 는 못 잡는다(기존 규칙도 못 잡던 것). **작업 D(`blogger.yml`을 재사용 워크플로로 바꾸는 일) 인수인계**: 호출 쪽 `jobs.<잡>.secrets` 에 `TELEGRAM_BOT_TOKEN`·`TELEGRAM_CHAT_ID` 시크릿 표현식을 넣는 매핑은 허용된 자리가 아니라 WF-13 오류가 된다 — 호출 쪽이 `secrets: inherit` 를 쓰거나(모든 시크릿을 넘기므로 신중히), WF-13 의 허용 자리에 그 매핑을 더하는 규칙 조정이 필요하다. 러너 단계 `env` 두 줄은 그대로 옮긴다. ④ 저장소 시크릿은 모든 브랜치의 워크플로가 읽을 수 있어 `[공통] 텔레그램 알림 시험`은 `main` 에서만 실행한다(후속 후보: 두 값을 main 만 허용하는 Environment 시크릿으로 두고 단계에 `environment:` 를 다는 것 — 운영자의 등록 절차가 바뀐다).
+
+**관측이 필요한 것**(실제 텔레그램을 호출하지 못했다): 시크릿 등록 뒤 `[공통] 텔레그램 알림 시험` 실행, 다음 새 글 1쌍의 알림(주소·버튼이 열리는지), 휴대폰 앱의 버튼(`url`) 동작. 텔레그램 공식 문서는 이 PC 에서 읽을 수 없어 한도·형식은 라이브러리 문서·공식 채널·소스로 확인한 값이다(근거: 2026-10-27 조사 보고).
+
 ## 5. 상태·멱등성·동시성
 
 - **이력 스키마 v1**: `v`, `blog`, `date`(KST `YYYY-MM-DD`), `generated_at`(ISO, KST), `status`, `topic`, `topic_source`(`seed`·`llm`·`override`), `title`, `labels`, `url`, `post_id`, `model`, `attempts`, `reasons[]`.
-  `status`: `posted`(즉시 게시) · `draft_uploaded`(Blogger 초안함에 업로드 — `post_id`·`url`은 API 응답, 블로그 ID는 기록하지 않는다) · `draft`(저장소 파일에만 저장) · `generated_unpublished`(옛 기록: 게시 시크릿이 없던 때의 초안 — 지금은 게시 대상이 시크릿이 없으면 종료 2로 멈추고 기록하지 않는다) · `rejected` · `publish_failed`(게시·업로드·인증 점검 실패 — 인증 점검 실패는 글을 만들기 전이라 `topic`이 비어 있다) · `llm_failed` · `skipped_no_topic`.
-- **일일 상한**: `posted`·`draft`·`draft_uploaded`·`generated_unpublished` 건수가 `max_posts_per_day`에 도달하면 건너뛴다(`rejected`·`llm_failed` 등 글이 안 나온 실행은 세지 않는다). 예외로 `publish_failed`는 **응답에서 글 ID(`post_id`)를 읽은 것만** 센다 — 올리다 실패했어도 초안·글이 이미 Blogger에 만들어졌을 수 있어, 세지 않으면 같은 날 재실행이 초안을 또 만든다. 글 ID가 없는 실패(인증·네트워크 등)는 세지 않는다. 이 이유는 `DAILY_CAP` 주석과 요약에 적히고, 운영자는 Blogger 초안함·글 목록을 확인한다(`topic` 입력은 상한을 건너뛴다). 워치독은 `posted`·`draft_uploaded`를 '글이 나온 날'로 센다.
+  `status`: `posted`(즉시 게시) · `draft_uploaded`(Blogger 초안함에 업로드 — `post_id`·`url`은 API 응답, 블로그 ID는 기록하지 않는다) · `package_issued`(티스토리·네이버 초안 패키지 이슈를 만듦 — `post_id`는 이슈 번호, `url`은 이슈 주소, 공개되지 않음) · `draft`(저장소 파일에만 저장) · `generated_unpublished`(옛 기록: 게시 시크릿이 없던 때의 초안 — 지금은 게시 대상이 시크릿이 없으면 종료 2로 멈추고 기록하지 않는다) · `rejected` · `publish_failed`(게시·업로드·인증 점검 실패 — 인증 점검 실패는 글을 만들기 전이라 `topic`이 비어 있다) · `llm_failed` · `skipped_no_topic`.
+- **일일 상한**: `posted`·`draft`·`draft_uploaded`·`generated_unpublished`·`package_issued` 건수가 `max_posts_per_day`에 도달하면 건너뛴다(`rejected`·`llm_failed` 등 글이 안 나온 실행은 세지 않는다). 예외로 `publish_failed`는 **응답에서 글 ID(`post_id`)를 읽은 것만** 센다 — 올리다 실패했어도 초안·글이 이미 Blogger에 만들어졌을 수 있어, 세지 않으면 같은 날 재실행이 초안을 또 만든다. 글 ID가 없는 실패(인증·네트워크 등)는 세지 않는다. 이 이유는 `DAILY_CAP` 주석과 요약에 적히고, 운영자는 Blogger 초안함·글 목록을 확인한다(`topic` 입력은 상한을 건너뛴다). 워치독은 `posted`·`draft_uploaded`를 '글이 나온 날'로 센다.
 - **쿨다운**: 프로필 `topic_cooldown_days` 안에 같은 주제(유사도 0.8 이상)는 다시 쓰지 않는다.
 - **교차 중복**: 다른 블로그의 이력 제목과 유사도 `other_blogs`(0.6) 이상이면 주제·제목 모두 탈락. (Chance 이력은 문자열·객체 혼합이라 `state.entry_titles`가 모두 처리한다.)
-- **멱등 게시**: 게시 재시도 전에 같은 제목 글이 방금 올라갔는지 확인한다(응답만 실패한 경우의 중복 방지).
+- **멱등 게시**: 게시 재시도 전에 같은 제목 글이 방금 올라갔는지 확인한다(응답만 실패한 경우의 중복 방지). 초안 패키지는 이슈 본문 첫 줄의 숨은 표지(`<!-- draft-id: <블로그키>-<날짜>-<해시> -->`)로 같은 초안의 이슈(열림·닫힘 모두)를 찾아 중복을 막는다(같은 글을 다시 올리려는 재시도만 막는다 — 표지의 해시가 제목·본문에서 만들어지므로 이력 파일이 사라진 날 다른 글이 만들어지면 이슈가 또 생긴다. 하루 상한은 이력 파일이 지킨다).
 - **원자적 쓰기**: 임시 파일에 쓰고 교체한다. 손상된 이력은 읽지 못하면 실행을 멈춘다.
-- **동시성**: 블로그마다 `concurrency: blogger-<key>`, 매트릭스는 `max-parallel: 1`, push는 `pull --rebase` 후 최대 3회 재시도.
+- **동시성**: 블로그마다 `concurrency: blogger-<key>`(초안 패키지는 `tistory-<key>`·`naver-<key>`), 매트릭스는 `max-parallel: 1`, push는 `pull --rebase` 후 최대 3회 재시도.
 - **시간**: 내부는 UTC aware, 날짜 경계는 KST, cron은 UTC.
 
 ## 6. 시크릿 전달 방식
 
 레지스트리에는 역할별 **Secrets 이름**만 있다. 워크플로가 `secrets[matrix.secret_<역할>]`로 값을 읽어 `PIPELINE_SECRET_<ROLE>` 환경변수로 넘기면 러너가 그 값을 쓴다(`registry.resolve_secrets`). 로컬 수동 실행은 레지스트리에 적힌 이름(`BLOGGER_BLOG_ID` 등)을 그대로 읽는다. 그래서 **블로그를 추가해도 워크플로를 고치지 않는다.**
+
+텔레그램 알림용 시크릿 `TELEGRAM_BOT_TOKEN`·`TELEGRAM_CHAT_ID`는 블로그 시크릿이 아니라 저장소 공통 값이라 레지스트리를 거치지 않는다. 워크플로가 알림을 부르는 단계(`chanceblog.yml`의 알림 단계·`blogger.yml`의 러너 단계·`ops-inbox.yml`·`telegram-test.yml`)의 `env`에 같은 이름으로 넘기고 (그 밖의 자리에 쓰면 검증기 WF-13 이 오류), `pipeline/notify.py`가 환경변수에서만 읽는다(§4-5). 시크릿이 없으면 알림은 꺼져 있고 다른 동작은 바뀌지 않는다.
 
 ## 7. 블로그 추가 플레이북
 
@@ -297,13 +429,57 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 어느 채널의 것인지
 
 블로그 언어가 기존 프로필과 다르면(예: 영문) 3단계의 프로필·프롬프트·스텁을 §7-1의 체크리스트로 새로 만든다. 글 언어 검사·주제 가드레일 목록·시드·시험이 언어마다 필요하다. 블로그의 `languages`에 프로필의 `language`가 없으면 검증기가 오류로 막는다(D-32 재발 방지).
 
-### B. 새 플랫폼(WordPress, Tistory, Medium, 다른 Jekyll 저장소 등)
+### B. 새 플랫폼(WordPress, Medium, 다른 Jekyll 저장소 등) — 게시 어댑터가 있는 채널
 
-1. **정책 확인(T3)**: 해당 플랫폼 약관이 자동 게시를 허용하는지, 계정·API 방식이 무엇인지 사용자와 확정한다.
+1. **정책 확인(T3)**: 해당 플랫폼 약관이 자동 게시를 허용하는지, 계정·API 방식이 무엇인지 사용자와 확정한다. **공식 자동 게시 수단이 없으면 어댑터를 만들지 않고 §7-B-2의 초안 패키지로 간다**(티스토리·네이버가 그렇다).
 2. `registry.PLATFORMS`에 필수 시크릿 역할을 등록한다.
 3. `pipeline/publishers/<platform>.py`에 어댑터를 만든다. 계약: `healthcheck()`, `publish(title, html, labels, draft)`, 인증 실패와 API 오류의 `PublishError(code)` 구분, **재시도 전 중복 확인**, 오류 메시지 시크릿 마스킹, `service_factory` 주입으로 가짜 서비스 테스트.
-4. `pipeline/run.py`의 플랫폼 분기를 확장한다(현재는 `blogger`만 — Phase 2에서 어댑터 레지스트리로 일반화).
+4. `pipeline/run.py`의 플랫폼 분기를 확장한다(지금은 `blogger`(게시 어댑터)와 `tistory`·`naver`(초안 패키지, `default_publisher_factory`)가 있다 — Phase 2에서 어댑터 레지스트리로 일반화).
 5. 이후 A의 3~7단계.
+
+### B-2. 공식 자동 게시 수단이 없는 채널 — 초안 패키지(티스토리·네이버, 2026-10-27 운영자 승인 D4·D7, T3)
+
+**왜 어댑터가 아니라 패키지인가**(2026-10-27 확인, 근거: [`docs/analysis/2026-10-27_channel-management-plan.md`](./analysis/2026-10-27_channel-management-plan.md) §5-1·§11):
+
+| | 티스토리 | 네이버 블로그 |
+|---|---|---|
+| 자동 게시 수단 | 없음. 오픈 API는 2024-02 종료(공지 2664). 약관·운영정책에 자동화·AI 생성물 조항은 없고 동일 내용 반복·스팸성 게시물 금지 같은 일반 조항만 있다 | 공식 글쓰기 API 2020 종료. 허락 없는 자동 게재는 약관상 금지(`docs/REQUEST_BRIEFING.md`) |
+| 에디터 | PC 웹 에디터 3모드(기본·마크다운·HTML), 모드를 바꾸면 서식이 달라질 수 있다는 공식 경고. **모바일 앱 에디터에는 HTML 블록이 없다** → HTML 붙여넣기는 PC 웹 필요 | 스마트에디터. HTML 직접 입력 모드는 없다고 알고 있으나 **미확인**, 서식 있는 글을 붙여넣을 때의 서식 보존도 **미확인** |
+| 이미지 | 업로드 개당 20MB. **외부 URL `<img>`는 본문에는 보이나 목록 썸네일에는 안 나온다**(공식 FAQ 39670) → 대표 이미지 1장은 직접 업로드 | 미확인 |
+| 정책 신호 | 공지 2705(2026-10-12): 크리에이터 선정에서 아쉬운 사례로 'AI가 쓴 글을 거의 그대로 발행해 경험·생각이 드러나지 않는 글'(적용 2027-01-02, 발행 자체에는 영향 없다고 밝힘) | — |
+| 설계 | **초안 패키지 + 운영자 복사 발행**. 로그인·세션 자동화는 만들지 않는다 | 같음. 글감은 Chance 글의 한국어 각색이 아니라 **자체 주제**(원고 변형 복제 금지, D7) |
+
+**무엇을 만들었나**
+
+- 레지스트리: `mode: package`, `platform: tistory`·`naver`(필수 시크릿은 `llm_api_key` 뿐), 금지 시크릿 검증(§3). **실제 `pipeline/blogs.json`에는 두 채널의 항목이 없다** — 블로그 주소·주제(사용자 입력)를 받기 전이라 대상 0개로 초록이다.
+- 러너: `pipeline/run.py`의 `delivery == "package"` 경로(기존 Blogger 경로는 바꾸지 않았다 — `tests/`와 바이트 비교로 증명, WORKLOG). 프로필·게이트·주제 선정·하루 상한·이력 규약은 그대로 재사용하고 이력 상태 `package_issued`를 더했다.
+- 어댑터: `pipeline/publishers/issue_package.py` — `build_issue()`(순수 함수: 제목·본문·라벨·초안 번호)와 `IssuePackagePublisher`(GitHub REST, urllib, 의존성 추가 없음).
+- 워크플로 2개: `tistory.yml`(`[티스토리] 초안 패키지 만들기`)·`naver.yml`(`[네이버] 초안 패키지 만들기`). 권한은 `contents: write`(이력)·`issues: write`뿐이고 시크릿은 Gemini 키뿐이다.
+
+**이슈 한 개의 모양**(제목 `[초안][<채널>] <글 제목 60자>`, 라벨 `초안`·`채널:<라벨>`, 본문 맨 위 숨은 표지 `draft-id`): ① 복사용 제목(코드 상자) ② 본문 — 티스토리: HTML 모드에 붙여넣을 순수 HTML(코드 상자, `h2~h4`·`p`·`ul`·`ol`·`strong`·`em`·`br`·`blockquote`만 — 스타일·스크립트·iframe 없음) / 네이버: 이슈 화면에서 선택·복사할 서식 있는 글(렌더링되는 마크다운)과 평문 상자 ③ 해시태그(쉼표 구분, `#` 없음, 코드 상자) ④ 이미지 표(번호·용도·주소·출처·라이선스·**AI 생성 이미지 여부**, Unsplash는 작가·Unsplash 링크 표기 문구) ⑤ 근거 출처 ⑥ 게이트 점검 결과(**사실 확인은 하지 않았다**고 적는다) ⑦ 발행 체크리스트(8항목: 제목 붙여넣기 · HTML 모드 본문 · 대표 이미지 업로드 · 카테고리·홈주제 · 태그 · **직접 경험·판단 문단을 더했다** · 광고·협찬 표기 · 발행 후 주소 기록하고 이슈 닫기). 닫으면 '발행 완료', 쓰지 않을 초안은 라벨 `폐기`를 붙이거나 닫는다. 현재 자동으로 채워지는 이미지·출처는 없고(생성 파이프라인에 그 단계가 없다) 어댑터가 받을 자리와 표만 있다.
+
+**AI 출력은 신뢰하지 않는다**(G-L9): 이슈 본문·제목이 되기 전에 `@멘션`·`#123`·`GH-123`·HTML 주석 시작(`<!--`) 뒤에 영(0)폭 공백을 넣어 알림·자동 링크·숨은 표지 위조가 되지 않게 하고(코드 상자 안도 같다. 주소·이메일 안의 것은 그대로), 복사 상자는 본문 안의 가장 긴 백틱 줄보다 한 칸 더 긴 펜스로 감싸 빠져나오지 못하게 하며, HTML 은 `gates.sanitize_html`을 한 번 더 거친 뒤 제어 문자(NUL·ESC)와 글자 방향 서식 문자(U+202E 등)를 지우고(영폭 공백은 남긴다) 네이버 마크다운은 `< > & [ ] | $ \` 같은 문법 문자를 모두 이스케이프한다. 제목 접두사·라벨은 고정값, 길이는 이슈 한도 안(넘으면 잘라 올리지 않고 `too_long`으로 실패). 이슈를 셸로 넘기지 않고 파이썬에서 API로만 쓴다.
+
+**공개 저장소라는 점**: 이 저장소는 공개라 초안 이슈도 공개 페이지(검색 색인 가능)다 — 운영자가 블로그에 올리기 전에 같은 글이 먼저 공개되는 셈이다(승인된 D4, 공개 저장소에서 볼 수 있는 `_blogger_drafts/` 저장소 사본과 같은 수준의 노출). 이슈 본문의 주소(URL)는 소독하지 않는다(주소 안의 `@`·`#`은 링크의 일부 — AI 가 GitHub 이슈 주소를 쓰면 GitHub 이 그 이슈에 역링크를 만들 수 있다, 미확인).
+
+**멱등·적체**: 같은 초안 번호의 이슈가 이미 있으면(열림·닫힘 모두) 새로 만들지 않는다. 이슈 만들기 요청은 한 번만 보내며 만들어졌는지 모호하면 다시 만들지 않고 멈춘다(§4-1). 같은 채널에 열린 `초안` 이슈가 3건 이상이면 새로 만들지 않는다(`PACKAGE_BACKLOG`; 라벨 `폐기`가 붙은 것은 세지 않는다 — 폐기 = 라벨 `폐기` 또는 닫기, `[운영] 확인 필요 모음`의 초안 현황판과 같은 규칙). 라벨은 없으면 만든다(색·설명 고정).
+
+**하지 않는 것**: 티스토리·네이버 로그인·글쓰기·세션·쿠키 자동화, 계정 정보의 저장·처리, 블로그·계정 자동 개설, 채널 간 상호 링크, 원고 변형 복제. 신규 채널은 품질 게이트를 통과하기 전까지 광고 없이 시작한다(G-C10).
+
+**블로그 주소·주제를 받으면 해야 할 일 체크리스트**(지금은 사용자 입력 대기라 만들지 않았다)
+
+| # | 누가 | 할 일 |
+|---|------|-------|
+| 1 | 사용자 | 블로그 개설과 **주소·주제·카테고리 이름** 결정(네이버는 자체 주제 — Chance 글 각색 아님). 새 시크릿은 없다(Gemini 키 `GEMINI_API_KEY` 공유) |
+| 2 | AI (T3 승인 후) | 프로필 `pipeline/profiles/<이름>.json`(한국어 Blogger 프로필 구조를 따라: 길이·제목·라벨 한도, 금지 패턴·주제 가드레일, `allow_links`, 시드 주제, `topic_expand_prompt`, AI 사용 고지 `disclosure_html`, 지어낸 경험·제품 광고 어조 금지 `prompt_extra`)과 프롬프트 파일(```text 블록과 `{topic}`) |
+| 3 | AI | `blogs.json` 항목 추가: `key`, `name`, `channel`(`티스토리` 또는 `네이버`), `platform`, `url`(https), **`mode`**(T3 승인 뒤 `"package"` — 공개되지 않는 모드라 이 값으로 시작해도 사이트·블로그에는 아무 일도 없다. 승인 전에 항목만 넣어 두려면 `"off"`, 그동안 대상 0개), `workflow`(`.github/workflows/tistory.yml`·`naver.yml`), `entrypoint: pipeline/run.py`, `prompt`, `profile`, `state`(전용 history·content_dir), `schedule.cron`(워크플로와 같게: 티스토리 `20 5 * * *`, 네이버 `20 6 * * *`), `limits.max_posts_per_day`, `secrets: {"llm_api_key": "GEMINI_API_KEY"}`, `ads: "off"` |
+| 3-1 | AI | 첫 실제 package 블로그를 넣는 PR에서 **걸림돌 시험을 함께 고친다**: `tests/test_package_registry.py`의 `test_the_real_registry_has_no_package_blog_yet`는 실제 레지스트리에 package 블로그가 없다고 못 박은 시험이다. 실제 레지스트리의 키 목록을 `["chance", "blogger_macat"]`로 고정한 기존 시험(`grep '"chance", "blogger_macat"' tests/*.py` — `tests/test_registry.py`·`tests/test_plan_and_watchdog.py`·`tests/test_auth_check_only.py`·`tests/test_ops_inbox_script.py`)도 새 키를 반영한다(블로그를 하나 더 하는 PR이면 늘 걸린다) |
+| 3-2 | AI (**T3 승인**) | 새 블로그의 이력 파일(`state.history`, 루트의 `*.json`)을 `_config.yml`의 `exclude`에 더한다. Jekyll은 밑줄로 시작하지 않는 루트 파일을 사이트에 그대로 내므로(기존 `history.json`·`blogger_history.json`이 `exclude`에 있는 이유와 같다) 안 넣으면 이력이 공개 주소가 된다. `_config.yml`은 광고 표면이라 T3 승인이 필요하고, 봇 커밋은 시험을 돌리지 않으므로(`tests/test_site_cleanup.py`가 새 루트 파일을 잡는 것은 다음 PR부터) 항목을 넣는 PR에서 미리 더한다. 저장소 초안 사본 폴더(`content_dir`)는 밑줄로 시작하는 이름(`_tistory_drafts` 등)으로 정해 사이트에 내보내지 않게 한다 |
+| 4 | AI | `python -m pipeline.registry` · `python scripts/validate_repo.py` · 전체 시험. 프로필 시험(시드 전부 가드레일 통과, 정상·위험 문장 표본) |
+| 5 | 사용자 | 병합 직후, 첫 정기 실행(티스토리 14:20·네이버 15:20 KST) 전에: Actions → `[티스토리] 초안 패키지 만들기`(또는 `[네이버] …`) → Run workflow(`연습 실행` 체크 유지) → 실행 요약의 이슈 본문 미리보기 확인(`mode: off`인 동안은 정지라 연습도 대상 0개). 정기 실행이 먼저 돌아도 첫 초안 이슈가 만들어질 뿐 공개되는 것은 없다 |
+| 6 | 사용자 | **비공개 시험 글 1건**으로 확인: 태그 입력 방식·HTML 붙여넣기 뒤 서식·대표 이미지 업로드(회사 PC에서 파일 업로드가 되는지)·예약 발행 화면 |
+| 7 | 사용자 | 첫 실제 초안 이슈(정기 실행 또는 `연습 실행`을 푼 수동 실행)를 열어 복사 상자·표·체크리스트가 보이고 위 시험 글에 붙여넣을 수 있는지 확인. 항목을 `off`로 넣어 두었다면 먼저 `mode`를 `package`로 바꾸는 T3 승인과 한 줄 수정이 필요하다 |
+| 8 | 워치독 | 3일 이상 운영하며 실패·방치 이슈가 없는지 본다 |
 
 ### C. 또 하나의 Jekyll(git) 블로그
 
@@ -448,4 +624,6 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 어느 채널의 것인지
 | 게이트 fail closed | 자동 게시의 최대 위험은 "나쁜 글이 나가는 것" | 탈락률이 높으면 프롬프트·프로필 조정(워치독 REJECT_STREAK) |
 | 이슈로 알림 | 사용자가 따로 대시보드를 볼 필요 없이 메일로 온다 | 알림이 많아지면 요약형으로 전환 |
 | `workflow_dispatch`로 배포 | `GITHUB_TOKEN` push는 push 이벤트를 만들지 않으므로(예외: dispatch) | PAT·GitHub App 방식은 시크릿이 늘어 채택하지 않음 |
+| Chance 승인 흐름은 초안 PR + 이력 항목만 main 에 따로 커밋(§4-4) | 사람이 병합해야 공개(수동 검토 없는 자동 생성 콘텐츠에 광고를 두지 말라는 게시자 정책 안내). 병합이 push 이벤트라 배포가 저절로 실행되고, 슬롯·제목·이미지 중복 검사는 main 의 이력만 읽는 지금 구조 그대로이며, 열린 초안이 여럿이어도 `history.json` 충돌이 없다 | 닫아서 폐기한 초안의 이력도 남아 그 슬롯·주제는 다시 안 쓴다. 이력의 글이 공개된 글이 아닐 수 있다. 봇 PR 에는 검사가 안 돈다. 대안: 이력을 PR 안에 두기(충돌), 별도 원장 파일(이중 장부), 사람이 PR 대신 이슈로 승인(휴대폰 병합 한 번보다 번거로움) |
+| 티스토리·네이버는 어댑터 없이 **초안 패키지(GitHub 이슈) + 운영자 복사 발행** | 공식 자동 게시 수단이 없고(티스토리 API 종료, 네이버 약관) 로그인·세션 자동화는 계정 위험과 약관 위험이 크다. 사람이 읽고 경험·판단을 더한 뒤 올리는 단계가 광고 정책의 '수동 검토·큐레이션'과 방향이 같다 | 운영자가 한 편마다 복사해야 한다(7단계 안팎). 이슈가 쌓이면 새 초안을 멈춘다(3건). 모바일 티스토리 앱에는 HTML 모드가 없어 PC 웹이 필요 |
 | 수정 요청은 구조화된 이슈 양식 + 문자 그대로 교체 + PR | 비개발자의 자유 문장 요청을 AI가 해석하면 요청 밖을 고치거나 일부만 읽고 추정할 수 있다(D-14). 양식으로 대상·수정 항목을 고정하고, 가능한 곳은 AI 없이 교체하며, 결과는 기계 검사 후 사람이 병합 | 한 요청은 한 파일만. AI 패치(`layout`, 변경 전이 없는 `text_change`)는 범위만 증명하고 내용의 정확성은 사람이 본다 |

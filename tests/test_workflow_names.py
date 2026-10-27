@@ -383,6 +383,9 @@ class RunNameTest(unittest.TestCase):
         self.assertEqual(self.title("ops-inbox.yml", "workflow_dispatch", {"dry_run": False}), "[공통] 확인 필요 모음 갱신 · 수동")
         self.assertEqual(self.title("ops-inbox.yml", "workflow_dispatch", {"dry_run": True}),
                          "[공통] 확인 필요 모음 갱신 · 수동(연습: 이슈·코멘트 안 씀)")
+        # 초안 이슈·PR 이벤트(2026-10-27): 모든 이슈·PR 이벤트에서 시작되지만 job 이 초안 라벨이 있는 것만 처리하므로 제목에 '초안만 점검'이라고 적는다
+        self.assertEqual(self.title("ops-inbox.yml", "issues", issue=12), "[공통] 확인 필요 모음 갱신 · 이슈 변경(초안만 점검)")
+        self.assertEqual(self.title("ops-inbox.yml", "pull_request"), "[공통] 확인 필요 모음 갱신 · PR 변경(초안만 점검)")
 
     def test_issue_edit_titles_show_the_issue_number(self):
         self.assertEqual(self.title("issue-edit.yml", "issues", issue=12), "[Chance] 이슈 #12 수정 요청 처리 · 자동(이슈 등록 시)")
@@ -466,8 +469,9 @@ class ChanceSplitTest(unittest.TestCase):
         self.assertEqual(env["UNSPLASH_ACCESS_KEY"], "${{ secrets.UNSPLASH_ACCESS_KEY }}")
 
     def test_permissions_concurrency_and_job_limits_are_the_same(self):
-        self.assertEqual(self.fix["permissions"], self.chance["permissions"])
+        # 승인 흐름(publish_flow: pr)이 PR 을 열려고 chanceblog.yml 만 pull-requests: write 를 더 가진다(이미지 교체는 PR 을 열지 않는다)
         self.assertEqual(self.fix["permissions"], {"contents": "write", "actions": "write"})
+        self.assertEqual(self.chance["permissions"], {**self.fix["permissions"], "pull-requests": "write"})
         # 같은 그룹이라 글 작성 실행과 이미지 교체 실행이 동시에 돌아 커밋이 겹치는 일이 없다
         self.assertEqual(self.fix["concurrency"], self.chance["concurrency"])
         self.assertEqual(self.fix["concurrency"], {"group": "chanceblog", "cancel-in-progress": False})
@@ -475,11 +479,35 @@ class ChanceSplitTest(unittest.TestCase):
         for key in ("runs-on", "timeout-minutes"):
             self.assertEqual(self.fix["jobs"]["build"][key], self.chance["jobs"]["build"][key], key)
 
+    @staticmethod
+    def direct_path(step):
+        """chanceblog.yml 의 직접 게시(direct) 경로 비교용: 커밋 단계 조건에서 승인 흐름 한 조각을 뗀다(그 조각이 direct 에서 참이라는 것은
+        test_chance_draft_workflow.py 가 모든 조합으로 대조한다)."""
+        step = dict(step)
+        if isinstance(step.get("if"), str):
+            step["if"] = step["if"].replace(" && steps.flow.outputs.flow != 'pr'", "")
+        return step
+
+    def chance_direct_steps(self):
+        """승인 흐름이 더한 두 단계('발행 흐름 확인'·'초안 올리기')를 뺀 chanceblog.yml 단계."""
+        return [self.direct_path(s) for s in self.steps(self.chance)
+                if s.get("id") != "flow" and "pipeline.draft_flow" not in s.get("run", "")]
+
     def test_steps_are_identical_except_the_fix_images_switch(self):
-        a = [self.normalized(s) for s in self.steps(self.chance)]
+        # chanceblog.yml 에만 새 글 텔레그램 알림 단계가 더 있다(이미지 교체는 새 글이 없어 알리지 않는다) — 그 단계를 뺀 나머지가 같아야 한다
+        alert = [s for s in self.steps(self.chance) if "pipeline.notify" in str(s.get("run", ""))]
+        self.assertEqual([s["name"] for s in alert], ["텔레그램 알림(새 글)"])
+        a = [self.normalized(s) for s in self.chance_direct_steps() if s not in alert]
         b = [self.normalized(s, drop_env=("FIX_IMAGES",)) for s in self.steps(self.fix)]
         self.assertEqual(len(a), 6)  # checkout · setup-python · 의존성 · 생성기 · 커밋 · Pages 배포 요청
         self.assertEqual(a, b)
+        self.assertNotIn("pipeline.notify", " ".join(str(s.get("run", "")) for s in self.steps(self.fix)))
+
+    def test_the_draft_flow_added_exactly_two_steps_to_chanceblog(self):
+        added = [s for s in self.steps(self.chance) if s.get("id") == "flow" or "pipeline.draft_flow" in s.get("run", "")]
+        self.assertEqual(len(added), 2)
+        self.assertEqual(len(self.steps(self.chance)), 9)               # 기준 6 + 승인 흐름 2 + 텔레그램 알림(새 글) 1(알림 단계는 test_steps_are_identical_except_the_fix_images_switch 가 따로 뺀다)
+        self.assertEqual(len(self.steps(self.fix)), 6)                  # 이미지 교체 워크플로는 승인 흐름과 무관하다(새 글을 만들지 않는다)
 
     def test_fix_images_workflow_still_commits_and_requests_the_pages_deploy(self):
         commit = next(s for s in self.steps(self.fix) if s.get("id") == "commit")
@@ -509,6 +537,11 @@ PREVIOUS_NAMES = {
     "이슈 양식 페이지 목록 갱신": "[공통] 이슈 양식 페이지 목록 갱신",
     "발행 중단 감시·알림": "[공통] 발행 중단 감시·알림",
     "확인 필요 모음": "[공통] 확인 필요 모음",
+    # 새로 만든 채널 워크플로(2026-10-27)는 접두사 없던 시절이 없다. 문서가 `[구분]` 을 빼고 인용하지 않게 접두사 없는 모양을 같은 표에 둔다
+    "티스토리 초안 패키지 만들기": "[티스토리] 초안 패키지 만들기",
+    "네이버 초안 패키지 만들기": "[네이버] 초안 패키지 만들기",
+    # 처음부터 접두사와 함께 만든 워크플로(옛 이름 없음): 접두사 없이 이름만 인용하는 안내(예: `텔레그램 알림 시험`)가 남지 않게 접두사 뗀 모양을 둔다
+    "텔레그램 알림 시험": "[공통] 텔레그램 알림 시험",
 }
 # 이전 이름 인용 검색(find_previous_name_quotes)에서 빼는 곳(이유를 적는다). 안내 문서·코드·워크플로는 지금 이름으로 인용해야 하고,
 # 아래는 날짜가 붙은 기록이거나 총괄이 따로 갱신하는 현황·브리핑 문서이거나 시험 자료다. '/' 로 끝나면 폴더 전체다.
@@ -560,6 +593,9 @@ class NamePrefixTest(unittest.TestCase):
         "sync-issue-form.yml": "[공통] 이슈 양식 페이지 목록 갱신",
         "watchdog.yml": "[공통] 발행 중단 감시·알림",
         "ops-inbox.yml": "[공통] 확인 필요 모음",
+        "tistory.yml": "[티스토리] 초안 패키지 만들기",
+        "naver.yml": "[네이버] 초안 패키지 만들기",
+        "telegram-test.yml": "[공통] 텔레그램 알림 시험",
     }
 
     def test_every_workflow_has_its_approved_name(self):
@@ -578,7 +614,7 @@ class NamePrefixTest(unittest.TestCase):
                 continue
             seen += 1
             self.assertEqual(registry.name_label(run_name), registry.name_label(name), f"{file}: {run_name!r}")
-        self.assertEqual(seen, 6)  # chanceblog · chance-fix-images · issue-edit · blogger · watchdog · ops-inbox
+        self.assertEqual(seen, 8)  # chanceblog · chance-fix-images · issue-edit · blogger · watchdog · ops-inbox · tistory · naver
 
     def test_registered_blog_workflows_use_their_channel_label(self):
         """레지스트리 channel.label 과 그 블로그 워크플로 이름의 접두사는 같은 글자다(레지스트리 검증도 같은 것을 본다)."""
@@ -604,7 +640,7 @@ class NamePrefixTest(unittest.TestCase):
         labels = [registry.name_label(name) for name in sorted(current_names().values())]
         groups = [label for index, label in enumerate(labels) if index == 0 or label != labels[index - 1]]
         self.assertEqual(len(groups), len(set(groups)), f"같은 구분이 떨어져 있습니다: {groups}")
-        self.assertEqual(set(groups), {"Blogger", "Chance", "공통"})
+        self.assertEqual(set(groups), {"Blogger", "Chance", "공통", "티스토리", "네이버"})
 
     def test_operator_guide_lists_every_current_name(self):
         guide = (REAL / "docs" / "ACTIONS_GUIDE.md").read_text(encoding="utf-8")

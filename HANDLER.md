@@ -25,15 +25,18 @@
 | Blogger 코드 | 완료 — `pipeline/`(레지스트리·게이트·어댑터·러너) + `blogger.yml` 매트릭스. 테스트·`actionlint` 통과 |
 | Blogger 실게시 | ⏳ 미완료 — ① OAuth 동의 화면 **"프로덕션"** 전환(테스트 상태면 토큰 7일 만료, D-11) ② refresh token 발급 ③ GitHub Secrets(`BLOGGER_*`) 등록 (§3 P1, §10) |
 | 풀오토 가이드 체계 | `AGENTS.md`(상시 규칙) · `docs/CHARTER`·`ARCHITECTURE`·`ENGINEERING_GUIDE`·`SECURITY_GUARDRAILS` · `docs/DEFECT_REGISTER`. 총괄 역할: Claude(2026-10-20) |
-| 확인 필요 모음 | 사람이 확인해야 할 것(워치독 알림·병합 대기 PR·실패한 워크플로·승인 대기·일시정지·Blogger 게시 설정·블로그 현황)을 이슈 **`[운영] 확인 필요 모음`** 1개(라벨 `ops-inbox`, 이슈 목록 맨 위에 고정, 현재 #22)와 실행 요약에 모은다. 워크플로 `[공통] 확인 필요 모음`(`ops-inbox.yml`): 2시간 간격 예약(GitHub 사정으로 실제로는 보통 3~6시간) + 수동(`연습 실행`). 새로 해야 할 일이 생길 때만 담당자(저장소 소유자)에게 @멘션 코멘트(휴대폰 알림). 설명 `docs/OPS_INBOX.md`. 독립 검증 2회(차단 0건) + 후속 수정 병합, 실제 실행에서 이슈 생성·고정·"변경 없음" 확인(2026-10-25). 잔여·후속(자기 멈춤 감시, F8·F9 등)은 `docs/DEFECT_REGISTER.md` D-58 |
+| 확인 필요 모음 | 사람이 확인해야 할 것(워치독 알림·병합 대기 PR·실패한 워크플로·승인 대기·일시정지·Blogger 게시 설정·블로그 현황·**채널별 초안 현황**)을 이슈 **`[운영] 확인 필요 모음`** 1개(라벨 `ops-inbox`, 이슈 목록 맨 위에 고정, 현재 #22)와 실행 요약에 모은다. 본문 맨 위의 **초안 현황** 표는 라벨 `초안`(+ `채널:<채널 라벨>`)이 붙은 열린 이슈·PR을 채널별로 센다(발행했으면 이슈를 닫고(초안 PR은 병합), 쓰지 않을 글은 라벨 `폐기` — 초안 모델·칸의 뜻은 `docs/OPS_INBOX.md` §3-1). 워크플로 `[공통] 확인 필요 모음`(`ops-inbox.yml`): 2시간 간격 예약(GitHub 사정으로 실제로는 보통 3~6시간) + 수동(`연습 실행`) + 초안 이슈·PR 이벤트(`issues`·`pull_request`, `초안` 라벨이 있는 것·이 저장소의 PR만; **기본 토큰이 만든 이슈·PR은 이 이벤트를 일으키지 않으므로 자동 초안을 만드는 워크플로가 직접 불러야 한다**). 새로 해야 할 일이 생길 때만 담당자(저장소 소유자)에게 @멘션 코멘트(휴대폰 알림). 설명 `docs/OPS_INBOX.md`. 독립 검증 2회(차단 0건) + 후속 수정 병합, 실제 실행에서 이슈 생성·고정·"변경 없음" 확인(2026-10-25). 잔여·후속(자기 멈춤 감시, F8·F9 등)은 `docs/DEFECT_REGISTER.md` D-58 |
+| 텔레그램 알림 | **휴대폰으로 알림**(2026-10-27 운영자 요청): 새 글 발행(`chanceblog.yml` 마지막 단계) · Blogger 초안함 업로드 "발행 대기"/게시됨(`pipeline/run.py`) · 확인 필요 모음의 새 "해야 할 일"(`scripts/ops_inbox.py`). 코드 `pipeline/notify.py`(표준 라이브러리만), 시크릿 `TELEGRAM_BOT_TOKEN`·`TELEGRAM_CHAT_ID`는 **운영자가 직접 등록**(없으면 조용히 꺼짐), 시험 워크플로 `[공통] 텔레그램 알림 시험`(`telegram-test.yml`), 설정 안내 `.github/editorial/TELEGRAM_SETUP.md`, 규칙 `docs/SECURITY_GUARDRAILS.md` G-C12·검증기 WF-13. 알림은 보조라 실패해도 게시·점검 결과는 바뀌지 않는다. ⏳ 실제 텔레그램 호출은 아직 한 번도 못 했다(시크릿 등록 뒤 시험 워크플로가 첫 검증) |
 | 가드레일 자동화 | `scripts/validate_repo.py` + `guardrails.yml`(CI, Actions 이름 `[공통] 저장소 규칙·테스트 자동 검사`) + `watchdog.yml`(`[공통] 발행 중단 감시·알림`, 문제일 때만 이슈 알림) |
 | Actions 탭 이름 | 워크플로 이름을 **이름만 보고 자동/수동과 하는 일을 알 수 있게 한글로** 바꿨다(2026-10-25). 기존 글 이미지 교체는 글 작성 워크플로에서 분리해 수동 전용 `chance-fix-images.yml`(`[Chance] 기존 글 이미지 교체(수동)`)이 됐다. 2026-10-27에는 이름 맨 앞에 채널 접두사 `[구분] `(`[Chance]`·`[Blogger]`·`[공통]` 등 — Actions 목록이 이름순이라 같은 채널끼리 붙어 보인다)을 붙였고 `run-name`도 같다. 블로그 항목에는 `channel`(접두사와 같은 라벨)·`ads`(광고 선언)가 있다 — 신규 채널은 품질 게이트를 통과하기 전까지 광고를 켜지 않는다(`docs/ARCHITECTURE.md` §3 '광고 선언', `docs/SECURITY_GUARDRAILS.md` G-C10). 옛 이름 → 새 이름 · 파일 · 하는 일 · 자동/수동 표는 `docs/ARCHITECTURE.md` §2-1. 새 워크플로·job 이름도 한글로 짓고 접두사를 붙인다(검증기 WF-11·WF-12) |
 | Pages 배포 후 확인 | 배포가 초록이어도 새 글이 공개 주소에서 열린다는 보장은 없어서, `pages.yml`의 `verify` 잡(`사이트 반영 확인`, `scripts/verify_pages_deploy.py`)이 배포 뒤 공개될 가장 새 글(`published: false`·미래 날짜 제외)의 주소가 HTTP 200으로 열리는지 마감 12분까지 확인하고 끝내 안 열리면 실행이 빨강이 된다. 공개 CDN이 404를 최대 약 18분 보관하므로(1회 측정, 불확실) 시도마다 요청 모양(`index.html`·`Accept-Encoding`·`//`·`./`)을 바꾸고 대기를 10초에서 2배씩 늘린다(D-41, 구조 `docs/ARCHITECTURE.md` §4-3). 한계: 가장 새 글만 본다(이미지 교체 같은 커밋의 반영은 못 봄). ⏳ 병합 뒤 첫 배포 요약에서 '시도 기록'·`X-Cache`·`Age`·`Last-Modified`를 관측해야 한다(`docs/DEFECT_REGISTER.md` 체크리스트) |
+| Chance 승인 흐름(`publish_flow`) | **꺼짐(`direct`)**. 레지스트리 `chance.publish_flow`를 `pr`로 바꾸면 Chance 글 한 쌍이 main 에 바로 올라가지 않고 초안 브랜치 `ai/draft/…`와 승인 PR(`[초안][Chance] …`, 라벨 `초안`·`채널:Chance`)로 올라가 운영자가 **병합해야 공개**(닫으면 폐기)된다 — 구글 게시자 정책의 '수동 검토 없는 자동 생성 콘텐츠에 광고 금지' 안내에 대한 대응이고 운영자가 2026-10-27 채팅으로 승인했다(채널 관리 계획 D1 (a)). 코드·시험은 있다(`pipeline/drafts.py`·`pipeline/draft_flow.py`, `generator.py`·`chanceblog.yml`, 워치독 `DRAFT_WAITING`). **실제 GitHub 에서는 한 번도 돌려 보지 않았다.** 켜는 것은 별도 T3이고 저장소 설정 "Allow GitHub Actions to create and approve pull requests"를 먼저 확인한다. 설명 `docs/ARCHITECTURE.md` §4-4, 운영 `docs/ACTIONS_GUIDE.md` 3-17 |
 | 이슈로 수정 요청 | 이슈 양식(고정 페이지 수정·게시글 이미지 변경) → `issue-edit.yml`이 **PR로** 올림, `pr-scope-check.yml`이 Copilot 등 모든 PR의 요청 범위를 검증. 사용법 `docs/COPILOT_GUIDE.md`, 구조 `docs/ISSUE_EDITS.md` (첫 실행 관측 필요) |
 | 작업요청서 | 저장소를 볼 수 없는 AI(모바일 Claude 등)에게 `docs/REQUEST_BRIEFING.md`를 통째로 붙여 넣으면 이 프로그램에 맞는 요청서를 만든다. 요청서는 `인수인계/작업요청/`에 올리거나 채팅에 붙여 넣는다. 처리 규칙은 그 폴더의 README |
 | 통합 성과 대시보드 | **제안 단계 — 사용자 결정 대기.** 블로그별 방문자·인기 글·AdSense 사이트별 수익을 한곳에서 보는 방안(Looker Studio 먼저). 검토 결과·결정 항목은 `docs/ANALYTICS_PLAN.md` §7. 결정 전에는 사이트에 GA 등을 설치하지 않는다(T3) |
 | 알려진 결함 | D-03 봇 글이 슬롯 대부분에서 안 나옴(원인: 비기술 분야 후보 0건 + 대체 분야 시도 없음 → 폴백으로 완화, 비기술 분야 후보 부족은 열림) · D-11 OAuth 7일 · D-08 내부 문서·코드의 사이트 공개(해결: 사이트에서 뺌, 2026-10-26) · D-15/D-16 Copilot PR 승인·PR 생성 설정(사용자 조치) — 상세는 `docs/DEFECT_REGISTER.md` (D-01 이슈 이미지 흐름은 `issue-edit`로 대체, 관측 대기) |
 | Blogger 워크플로(Actions 이름 `[Blogger] 글 자동 작성(초안함 업로드)`) | `blogger_macat`은 **정지(mode off)** — 영문 블로그인데 프로필이 한글이라 멈췄고(운영자 결정 2026-10-25), **영문 프로필·영어 프롬프트·주제 가드레일(제목·라벨·본문)은 병합됨**(PR #40 362ba8f·보강 PR #43 0da8221; 레지스트리는 영문 프로필을 가리키지만 `mode`는 off 그대로, 켜기 전에 2차 보강 `docs/DEFECT_REGISTER.md` D-64 ⑦, 설계 `docs/ARCHITECTURE.md` §7-1). 정지 중에도 매일 02:00 UTC 실행은 돌고 대상 0개로 초록 + `::notice::`로 끝난다. 켜면 `mode: draft`는 게시 Secrets 4종이 모두 있을 때 Blogger **초안함**에 업로드(공개되지 않음, 운영자가 Blogger 화면에서 확인한 뒤 직접 게시)하고, 하나도 없으면 저장소 파일에만 저장하며, 일부만 있거나 `mode: auto`(즉시 게시)인데 없으면 글을 만들기 전에 종료 2(빨강). 올리기 전에 인증 점검(토큰 갱신·블로그 조회·주소 일치)을 먼저 한다. 재개 절차는 §3 P1 |
+| 초안 패키지(티스토리·네이버, 2026-10-27, T3 승인 D4·D7) | 두 채널은 공식 자동 게시 수단이 없어(티스토리 오픈 API 2024-02 종료, 네이버 글쓰기 API 2020 종료) 글을 **GitHub 이슈 1개(라벨 `초안`)로 만들어 보여 주기만** 하고 운영자가 복사해 직접 발행한 뒤 이슈를 닫는다. 레지스트리 `mode: package`·`platform: tistory`·`naver`, 러너 `pipeline/run.py`의 package 경로, 어댑터 `pipeline/publishers/issue_package.py`, 워크플로 `[티스토리] 초안 패키지 만들기`(`tistory.yml`)·`[네이버] 초안 패키지 만들기`(`naver.yml`). **코드·시험은 끝났지만 레지스트리에 두 블로그가 없다**(블로그 주소·주제는 사용자 입력 대기) — 정기 실행은 "대상 0개"로 초록. 시크릿은 Gemini 키뿐이고 **티스토리·네이버 계정 정보는 저장·처리하지 않는다**(G-S7). AI 출력은 이슈가 되기 전에 소독한다(G-L9). 읽고 발행하는 법 `docs/ACTIONS_GUIDE.md` 3-19, 구조·받은 뒤 할 일 체크리스트 `docs/ARCHITECTURE.md` §7-B-2. 첫 실제 이슈의 복사 가능 여부는 관측 대기 |
 | 비밀 파일 | `client_secret.json`은 저장소에 없음 (`.gitignore`로 차단) |
 | 자동 push 스크립트 | `auto_sync.bat` 제거됨. 같은 동작 재도입 금지 |
 | 오래된 브랜치 | `feature/image-fix-20261019-0000` 병합 금지 (§11) |
@@ -214,7 +217,7 @@ VS Code:
 - 설정에서 Git: Autofetch 켜기 권장
 - 원격과 어긋나면 무조건 pull 먼저
 - 충돌 시 HANDLER/WORKLOG 기준으로 수동 병합, 추측으로 덮지 말 것
-- 봇(`chanceblog.yml`, 앞으로 `blogger.yml`)이 `main`에 직접 커밋한다 → 작업 전 항상 `git pull --rebase origin main`
+- 봇(`chanceblog.yml`, 앞으로 `blogger.yml`)이 `main`에 직접 커밋한다(Chance 승인 흐름을 켜면 main 에는 이력만 커밋하고 글은 `ai/draft/…` 브랜치·PR 로 올린다) → 작업 전 항상 `git pull --rebase origin main`
 - `auto_sync.bat` 같은 자동 commit/push 스크립트·예약 작업 금지 (사용자 확인 없이 push 금지)
 - Windows는 시스템 설정 `core.autocrlf=true`가 기본이다 — 끄지 말 것 (끄면 거의 모든 파일이 수정으로 보인다)
 
@@ -261,7 +264,7 @@ VS Code:
 | Blogger API 설정 | `.github/editorial/BLOGGER_API_SETUP.md` |
 | Chance 편집 기준 | `.github/editorial/CHANCE_BLOG_TEMPLATE.md` |
 | 생성기 | `blogger_generator.py` / `generator.py` |
-| 워크플로 | `.github/workflows/blogger.yml` / `chanceblog.yml` / `chance-fix-images.yml` (Actions 탭 이름 표: `docs/ARCHITECTURE.md` §2-1) |
+| 워크플로 | `.github/workflows/blogger.yml` / `tistory.yml` / `naver.yml` / `chanceblog.yml` / `chance-fix-images.yml` (Actions 탭 이름 표: `docs/ARCHITECTURE.md` §2-1) |
 | 이슈 기반 이미지 수정 | `인수인계/이슈_기반_게시글_이미지_수정_인수인계.md` |
 | 상시 규칙(모든 AI) | `AGENTS.md` |
 | 헌장·협업·변경 등급 | `docs/CHARTER.md` |
@@ -278,6 +281,7 @@ VS Code:
 | 운영자용 Actions 사용 가이드(이럴 땐 이렇게·보안 점검표) | `docs/ACTIONS_GUIDE.md` |
 | 작업 내용(현황·진행·결정 대기·이력을 한 파일로 관리) | `인수인계/작업내용.md` |
 | 확인 필요 모음(이슈 1개로 모아 보기) | `docs/OPS_INBOX.md` |
+| Chance 승인 흐름(초안 PR → 병합 = 공개, 지금 꺼짐) | 설계 `docs/ARCHITECTURE.md` §4-4 · 운영 `docs/ACTIONS_GUIDE.md` 3-17 · 코드 `pipeline/drafts.py`·`pipeline/draft_flow.py` |
 | 진단·조사 보고서(발행 진단, AI 검색 노출) | `docs/analysis/` |
 
 ---

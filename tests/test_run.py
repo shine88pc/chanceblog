@@ -618,7 +618,7 @@ class VisibilityTest(RunBase):
                 self.assertNotIn("위조된 명령", annotations[0])
                 self.assertIn(title, out)                                 # 어떤 제목과 겹쳤는지는 로그에 남는다
                 summary_lines = self.summary().splitlines()
-                self.assertEqual(len(summary_lines), 2, summary_lines)    # '### 키' 와 '- 결과' 두 줄뿐(끼워 넣은 줄 없음)
+                self.assertEqual(len(summary_lines), 2, summary_lines)    # '### [채널] 이름' 과 '- 결과' 두 줄뿐(끼워 넣은 줄 없음)
                 for char in "|<>`":
                     self.assertNotIn(char, summary_lines[1])
                 self.assertNotIn("](", summary_lines[1])
@@ -634,8 +634,8 @@ class VisibilityTest(RunBase):
         self.assertEqual(code, 0)
         self.assertIn("위조된 제목 줄", pub.published[0]["title"])        # 전제: 위조 문구가 제목에 실제로 들어갔다
         lines = self.summary().splitlines()
-        self.assertEqual(len(lines), 3, lines)                           # '### 키', '- 결과', '- URL' 세 줄뿐
-        self.assertEqual([line for line in lines if line.startswith("#")], ["### blogger_macat"])
+        self.assertEqual(len(lines), 3, lines)                           # '### [채널] 이름', '- 결과', '- URL' 세 줄뿐
+        self.assertEqual([line for line in lines if line.startswith("#")], ["### [Blogger] Blogger (macat0722)"])
         for char in "|<>`":
             self.assertNotIn(char, lines[1])
         self.assertNotIn("](", self.summary())
@@ -898,6 +898,130 @@ class ManualTopicGuardTest(RunBase):
         self.assertIn("word=Blood-pressure", out)
         code, out = self.go(env=self.env(**NO_PUBLISH), extra=["--topic", "A calm ten-minute walk after dinner"], root=root)
         self.assertEqual(code, 0, out)
+
+
+class SummaryHeadTest(RunBase):
+    """실행 요약의 첫 줄은 `### [채널 라벨] 블로그 이름`이다(작업요청서 5 PR-B). 어느 경로의 요약이든 같고, 값은 레지스트리(channel.label·name)에서 읽는다.
+    요약의 나머지 줄은 예전과 같다 — 그것은 기준 브랜치와 바이트 단위로 비교해 확인했다(시나리오 2155개, WORKLOG)."""
+    HEAD = "### [Blogger] Blogger (macat0722)"
+
+    def setUp(self):
+        super().setUp()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.summary_path = Path(tmp.name) / "summary.md"
+
+    def env(self, **extra):
+        return {"GITHUB_STEP_SUMMARY": str(self.summary_path), **extra}
+
+    def summary(self):
+        return self.summary_path.read_text(encoding="utf-8") if self.summary_path.exists() else ""
+
+    def lines(self):
+        return self.summary().splitlines()
+
+    def test_the_real_registry_gives_channel_label_and_blog_name(self):
+        blog = registry.get_blog(registry.load_registry(REAL / "pipeline" / "blogs.json"), "blogger_macat")
+        self.assertEqual((blog["channel"]["label"], blog["name"]), ("Blogger", "Blogger (macat0722)"))
+        self.assertEqual(run_mod.summary_head(blog), self.HEAD)
+
+    def test_every_kind_of_run_starts_its_summary_with_the_head_and_has_no_other_heading(self):
+        dry = {**FULL_ENV, "DRY_RUN": "1"}
+        cases = {
+            "posted": (dict(env=self.env(**FULL_ENV)), "posted"),
+            "draft_uploaded": (dict(env=self.env(**FULL_ENV), extra=["--publish", "draft"]), "draft_uploaded"),
+            "draft(파일만)": (dict(env=self.env(**NO_PUBLISH)), "draft"),
+            "DRY_RUN": (dict(env=self.env(**dry)), "DRY_RUN"),
+            "PAUSED": (dict(env=self.env(**FULL_ENV, PIPELINE_PAUSE="1")), "PAUSED"),
+            "SECRETS_MISSING": (dict(env=self.env(GEMINI_API_KEY="k")), "SECRETS_MISSING"),
+            "INVALID_PUBLISH": (dict(env=self.env(**FULL_ENV, BLOGGER_PUBLISH="bogus")), "INVALID_PUBLISH"),
+            "TOPIC_BLOCKED": (dict(env=self.env(**FULL_ENV), extra=["--topic", "다이어트 보충제 후기"]), "TOPIC_BLOCKED"),
+            "AUTH_CHECK_OK": (dict(env=self.env(**FULL_ENV), extra=["--auth-check"]), "AUTH_CHECK_OK"),
+            "AUTH_CHECK_FAILED": (dict(env=self.env(**FULL_ENV), extra=["--auth-check"],
+                                       publisher=FakePublisher(check=PublishError("실패", code="auth_failed"))), "AUTH_CHECK_FAILED"),
+            "publish_failed": (dict(env=self.env(**FULL_ENV), publisher=FakePublisher(fail=PublishError("실패", code="api_error"))), "publish_failed"),
+            "LLM_FAILED": (dict(env=self.env(**FULL_ENV), llm=lambda prompt: (_ for _ in ()).throw(LLMError("실패"))), "LLM_FAILED"),
+            "GATE_REJECTED": (dict(env=self.env(**FULL_ENV), llm=lambda prompt: ("형식이 없는 응답", "m")), "GATE_REJECTED"),
+        }
+        for label, (kwargs, code_word) in cases.items():
+            with self.subTest(label):
+                self.summary_path.unlink(missing_ok=True)
+                (self.root / "blogger_history.json").unlink(missing_ok=True)
+                self.go(**kwargs)
+                lines = self.lines()
+                self.assertEqual(lines[0], self.HEAD, lines)
+                self.assertIn(code_word, lines[1])
+                self.assertEqual([line for line in lines if line.startswith("#")], [self.HEAD])
+                self.assertEqual(len([line for line in lines if line.startswith("- 결과:")]), 1)
+
+    def test_a_stopped_blog_and_a_daily_cap_also_carry_the_head(self):
+        root = make_root(tempfile.mkdtemp(), mode="off")
+        self.addCleanup(shutil.rmtree, str(root), True)
+        self.go(env=self.env(**FULL_ENV), root=root)
+        self.assertEqual(self.lines()[0], self.HEAD)
+        self.assertIn("MODE_OFF", self.lines()[1])
+        self.summary_path.unlink()
+        self.go(env=self.env(**NO_PUBLISH))
+        self.summary_path.unlink()
+        self.go(env=self.env(**NO_PUBLISH))
+        self.assertEqual(self.lines()[0], self.HEAD)
+        self.assertIn("DAILY_CAP", self.lines()[1])
+
+    def test_the_head_is_the_only_line_that_names_the_channel_and_the_blog_key_is_not_in_it(self):
+        self.go(env=self.env(**FULL_ENV))
+        head = self.lines()[0]
+        self.assertNotIn("blogger_macat", head)
+        self.assertEqual(head.count("["), 1)
+        self.assertEqual(self.lines()[1].split(" — ")[0], "- 결과: **posted**")             # 결과 줄은 예전과 같은 모양
+
+    def test_the_head_follows_the_registry_not_a_hard_coded_name(self):
+        root = make_root(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, str(root), True)
+        path = root / "pipeline" / "blogs.json"
+        reg = json.loads(path.read_text(encoding="utf-8"))
+        for blog in reg["blogs"]:
+            if blog["key"] == "blogger_macat":
+                blog["name"] = "다른 이름의 블로그"
+                blog["channel"] = {"key": "blogger_en", "label": "Blogger 영문"}
+        path.write_text(json.dumps(reg, ensure_ascii=False), encoding="utf-8")
+        (root / ".github" / "workflows" / "blogger.yml").write_text('name: "[Blogger 영문] 글 자동 작성(초안함 업로드)"\n', encoding="utf-8")
+        code, out = self.go(env=self.env(**FULL_ENV), root=root)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.lines()[0], "### [Blogger 영문] 다른 이름의 블로그")
+
+    def test_the_helper_makes_one_safe_line_from_hostile_registry_text(self):
+        blog = {"key": "k", "name": "이름 [링크](https://e.io)|<b>굵게</b>`코드`\r\n::error::위조 " + "가" * 100,
+                "channel": {"key": "x", "label": "라벨\n## 가짜 제목"}}
+        head = run_mod.summary_head(blog)
+        self.assertEqual(len(head.splitlines()), 1)
+        self.assertTrue(head.startswith("### [라벨 ## 가짜 제목] 이름 "))
+        for char in ("|", "<", ">", "`", "\r", "\n", "](", "::"):
+            self.assertNotIn(char, head, char)
+        self.assertLess(len(head), 400)                                       # 길이는 md_cell 의 자르기(30·60자)에 묶인다(문법 문자는 문자 참조로 늘어난다)
+
+    def test_the_helper_clips_a_long_label_to_30_characters_and_a_long_name_to_60(self):
+        head = run_mod.summary_head({"key": "k", "name": "나" * 100, "channel": {"label": "가" * 100}})
+        self.assertEqual(head, "### [" + "가" * 29 + "…] " + "나" * 59 + "…")
+
+    def test_the_helper_falls_back_to_the_name_and_then_the_key(self):
+        self.assertEqual(run_mod.summary_head({"key": "k", "name": "이름"}), "### 이름")
+        self.assertEqual(run_mod.summary_head({"key": "k", "name": "이름", "channel": None}), "### 이름")
+        self.assertEqual(run_mod.summary_head({"key": "k", "name": "이름", "channel": "문자열"}), "### 이름")
+        self.assertEqual(run_mod.summary_head({"key": "k", "name": "이름", "channel": {"label": ""}}), "### 이름")
+        self.assertEqual(run_mod.summary_head({"key": "k", "name": "이름", "channel": {"key": "a"}}), "### 이름")
+        self.assertEqual(run_mod.summary_head({"key": "k", "channel": {"label": "라벨"}}), "### k")
+        self.assertEqual(run_mod.summary_head({"key": "blogger_macat", "name": "", "channel": {"label": "라벨"}}), "### blogger_macat")
+        self.assertEqual(run_mod.summary_head({"key": "k", "name": "이름", "channel": {"label": "라벨"}}), "### [라벨] 이름")
+        hostile_key = run_mod.summary_head({"key": "키\n::error::위조" + "가" * 100})              # 이름도 없으면 key 를 쓰는데 key 도 한 줄·60자로 접는다
+        self.assertEqual(len(hostile_key.splitlines()), 1)
+        self.assertNotIn("::", hostile_key)
+        self.assertLessEqual(len(hostile_key), len("### ") + 60)
+
+    def test_no_summary_line_of_the_runner_still_starts_with_the_bare_key(self):
+        """러너의 요약 쓰기 다섯 곳(일반 경로 셋 + 초안 패키지 경로 둘)이 모두 summary_head 를 쓴다(예전 `### <key>` 를 직접 쓰는 곳이 남아 있으면 안 된다)."""
+        source = (REAL / "pipeline" / "run.py").read_text(encoding="utf-8")
+        self.assertNotIn('f"### {blog[\'key\']}', source)
+        self.assertEqual(source.replace("def summary_head(blog)", "").count("summary_head(blog)"), 5)
 
 
 class PolicyTest(unittest.TestCase):

@@ -1270,7 +1270,9 @@ class RunTest(unittest.TestCase):
         code = oi.run(env, fake, NOW, root, self.out.append)
         self.assertEqual(code, 0)
         self.assertEqual(fake.writes(), [])
-        self.assertFalse(any(p == "/issues" and params.get("labels") for m, p, params in fake.log))
+        self.assertFalse(any(p == "/issues" and params.get("labels") == inbox.LABEL for m, p, params in fake.log))      # 모음 이슈(라벨 ops-inbox)는 찾지도 않는다. 초안(라벨 초안)은 읽는다
+        self.assertFalse(any(p == "/issues" and params.get("creator") for m, p, params in fake.log))
+        self.assertFalse(any(p == "/labels" for m, p, params in fake.log))                                              # 라벨 목록도 읽지 않는다(라벨을 만들 수 없으니)
         self.assertTrue(any("토큰이 없어 읽기 전용" in line for line in self.out))
         self.assertTrue(any("# 확인 필요 모음" in line for line in self.out))
         # 정확한 문구: 열린 이슈 목록(워치독 알림용)은 읽지만 모음 이슈는 읽지도 쓰지도 않는다
@@ -1423,7 +1425,7 @@ class RunTest(unittest.TestCase):
         fake.fail = [(r"POST /labels", oi.ApiError(self.HOSTILE, status=403))]
         self.assertEqual(self.run_script(fake, root), 0)
         self.assert_only_the_fixed_annotations(fake, ())
-        lines = self.reason_lines("라벨")
+        lines = self.reason_lines("라벨 ops-inbox")                       # 모음 이슈의 라벨. 초안 모델 라벨의 실패 줄은 DraftLabelsTest 가 따로 본다
         self.assertEqual(len(lines), 1)
         for raw in ("\n", "::", "@", "<", TOKEN):
             self.assertNotIn(raw, lines[0], raw)
@@ -1620,8 +1622,9 @@ class WorkflowFileTest(unittest.TestCase):
             refs = set(re.findall(r"[A-Za-z_][A-Za-z0-9_\-]*(?:\.[A-Za-z0-9_\-]+)+", code))
             self.assertLessEqual(refs, {"github.event_name", "inputs.dry_run"})
 
-    def test_triggers_are_a_two_hourly_schedule_and_manual_dispatch_only(self):
-        self.assertEqual(set(self.wf["on"]), {"schedule", "workflow_dispatch"})
+    def test_triggers_are_a_two_hourly_schedule_manual_dispatch_and_the_draft_issue_and_pull_request_events(self):
+        """이벤트 트리거(issues·pull_request)의 세부(종류·job if·포크 PR 제외)는 test_ops_inbox_drafts.py 의 DraftWorkflowTest 가 본다."""
+        self.assertEqual(set(self.wf["on"]), {"schedule", "workflow_dispatch", "issues", "pull_request"})
         self.assertNotIn("workflow_run", self.wf["on"])                 # 다른 워크플로 이름에 기대지 않는다
         self.assertEqual([entry["cron"] for entry in self.wf["on"]["schedule"]], ["40 */2 * * *"])
         fields = self.wf["on"]["schedule"][0]["cron"].split()
@@ -1635,14 +1638,17 @@ class WorkflowFileTest(unittest.TestCase):
         self.assertNotIn("permissions", self.wf["jobs"]["inbox"])        # job 에서 권한을 늘리지 않는다
 
     def test_one_run_at_a_time_and_never_cancelled(self):
-        self.assertEqual(self.wf["concurrency"], {"group": "ops-inbox", "cancel-in-progress": False})
+        """job 수준이다(2026-10-27): 이벤트 트리거가 생긴 뒤로 초안과 무관해 job 이 건너뛰어질 이벤트의 실행이 워크플로 수준 줄에 서서 기다리던 진짜 갱신을 밀어내지 않게."""
+        self.assertNotIn("concurrency", self.wf)
+        self.assertEqual(self.wf["jobs"]["inbox"]["concurrency"], {"group": "ops-inbox", "cancel-in-progress": False})
         self.assertLessEqual(self.wf["jobs"]["inbox"]["timeout-minutes"], 15)
 
     def test_read_time_limit_and_write_reserve_fit_inside_the_job_timeout(self):
         """읽기 시간 상한 + 쓰기 단계 최악(호출 7회 × 호출당 20초에서 끊김)이 잡 제한 안에 끝나야 하고, 쓰기용으로 남긴 호출이 최악 호출 수 이상이어야 한다."""
         worst_write_calls = 7           # 이슈 찾기 2 + 라벨 1 + 이슈 만들기 2(담당자 거부 때 한 번 더) + 코멘트 1 + 본문 고치기 1
+        worst_label_calls = 1 + oi.MAX_LABEL_CREATES      # 초안 모델 라벨: 이슈를 쓴 뒤 '있으면 좋은 일' — 목록 읽기 1 + 만들기 최대 MAX_LABEL_CREATES(쓰기용 호출 수에는 넣지 않는다)
         timeout_seconds = self.wf["jobs"]["inbox"]["timeout-minutes"] * 60
-        self.assertLess(oi.MAX_READ_SECONDS + worst_write_calls * 20, timeout_seconds)
+        self.assertLess(oi.MAX_READ_SECONDS + (worst_write_calls + worst_label_calls) * 20, timeout_seconds)
         self.assertGreaterEqual(oi.WRITE_RESERVE, worst_write_calls)
 
     def test_checkout_does_not_keep_credentials_and_python_is_3_12(self):
@@ -1660,14 +1666,21 @@ class WorkflowFileTest(unittest.TestCase):
         self.assertIn("workflow_dispatch", env["INBOX_DRY_RUN"])
         self.assertEqual(env["DEFAULT_BRANCH"], "${{ github.event.repository.default_branch }}")
         source = (_bootstrap.ROOT / "scripts" / "ops_inbox.py").read_text(encoding="utf-8")
+        notify_source = (_bootstrap.ROOT / "pipeline" / "notify.py").read_text(encoding="utf-8")
         for name in env:                                                  # 따옴표 모양(큰·작은)과 무관하게 스크립트가 그 이름을 읽는지
-            self.assertRegex(source, "[\"']" + name + "[\"']", f"스크립트가 읽지 않는 환경변수 {name}")
+            # 텔레그램 시크릿 두 개는 스크립트가 environ 째로 pipeline/notify.py 에 넘기고 그쪽이 읽는다(그 밖의 이름은 스크립트가 직접 읽는다)
+            reader = notify_source if name in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID") else source
+            self.assertRegex(reader, "[\"']" + name + "[\"']", f"스크립트가 읽지 않는 환경변수 {name}")
+        self.assertEqual(env["TELEGRAM_BOT_TOKEN"], "${{ secrets.TELEGRAM_BOT_TOKEN }}")
+        self.assertEqual(env["TELEGRAM_CHAT_ID"], "${{ secrets.TELEGRAM_CHAT_ID }}")
 
     def test_only_the_workflow_token_is_used_and_nothing_is_interpolated_into_the_shell(self):
         text = (WORKFLOWS / "ops-inbox.yml").read_text(encoding="utf-8")
         self.assertEqual(self.step["run"].strip(), "python scripts/ops_inbox.py")
         self.assertNotIn("${{", self.step["run"])
-        self.assertEqual(text.count("secrets."), text.count("secrets.GITHUB_TOKEN"))
+        # 시크릿은 워크플로 토큰과, 휴대폰(텔레그램) 알림용 두 개(같은 이름의 환경변수로만, 검증기 WF-13)뿐이다
+        self.assertEqual(text.count("secrets."), text.count("secrets.GITHUB_TOKEN") + text.count("secrets.TELEGRAM_BOT_TOKEN") + text.count("secrets.TELEGRAM_CHAT_ID"))
+        self.assertEqual((text.count("secrets.GITHUB_TOKEN"), text.count("secrets.TELEGRAM_BOT_TOKEN"), text.count("secrets.TELEGRAM_CHAT_ID")), (1, 1, 1))
         for forbidden in ("|| true", "continue-on-error", "pull_request_target", "write-all", "git push", "gh "):
             self.assertNotIn(forbidden, text, forbidden)
 
@@ -1676,7 +1689,7 @@ class WorkflowFileTest(unittest.TestCase):
         self.assertNotIn("pip install", text)
         # 스크립트와, 스크립트가 (직접·간접으로) 가져오는 저장소 모듈은 표준 라이브러리만 최상위에서 가져온다(함수 안의 지연 import 는 부를 때만 필요)
         for rel in ("scripts/ops_inbox.py", "pipeline/inbox.py", "pipeline/console.py", "pipeline/llm.py", "pipeline/registry.py",
-                    "pipeline/state.py", "pipeline/secret_patterns.py"):
+                    "pipeline/state.py", "pipeline/secret_patterns.py", "pipeline/notify.py"):
             tree = ast.parse((_bootstrap.ROOT / rel).read_text(encoding="utf-8"))
             imported = set()
             for node in tree.body:

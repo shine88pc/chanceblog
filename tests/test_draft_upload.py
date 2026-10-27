@@ -169,7 +169,7 @@ class ScenarioTest(unittest.TestCase):
         self.assertIn('url: "https://macat.example/p1"', text)
         self.assertNotIn(SECRET_VALUES["BLOGGER_BLOG_ID"], res.everything())    # 블로그 ID 는 어디에도 기록하지 않는다
         self.assertEqual(len(res.summary_lines), 4, res.summary)
-        self.assertEqual(res.summary_lines[0], "### blogger_macat")
+        self.assertEqual(res.summary_lines[0], "### [Blogger] Blogger (macat0722)")
         self.assertIn("**draft_uploaded**", res.summary_lines[1])
         self.assertIn("https://macat.example/p1", res.summary_lines[2])
         self.assertIn("Blogger 초안함에 올렸습니다", res.summary_lines[3])
@@ -214,7 +214,7 @@ class ScenarioTest(unittest.TestCase):
         self.assertEqual(res.code, 0, res.out)
         self.assertEqual([p["draft"] for p in pub.published], [False])
         self.assertEqual((pub.health_calls, res.last["status"]), (1, "posted"))
-        self.assertEqual(len(res.summary_lines), 3, res.summary)                  # '### 키', '- 결과', '- URL'
+        self.assertEqual(len(res.summary_lines), 3, res.summary)                  # '### [채널] 이름', '- 결과', '- URL'
 
     def test_manual_choice_decides_where_the_post_goes_whatever_the_mode(self):
         # (레지스트리 mode, BLOGGER_PUBLISH 값) → (publish 호출의 draft 플래그, 이력 상태)
@@ -486,8 +486,8 @@ class ScenarioTest(unittest.TestCase):
         self.assertEqual(health.evaluate({**blog, "mode": "auto"}, res.history, later), [])
 
     def test_statuses_and_the_daily_cap_agree_with_the_watchdog(self):
-        self.assertEqual(run_mod.COUNTED_STATUSES, {"posted", "draft", "draft_uploaded", "generated_unpublished"})
-        self.assertLessEqual(health.REAL_POST_STATUSES, run_mod.COUNTED_STATUSES)   # 독자에게 가는(또는 초안함에 올린) 글은 상한에 센다
+        self.assertEqual(run_mod.COUNTED_STATUSES, {"posted", "draft", "draft_uploaded", "generated_unpublished", "package_issued"})   # package_issued: 티스토리·네이버 초안 이슈
+        self.assertLessEqual(health.REAL_POST_STATUSES, run_mod.COUNTED_STATUSES)   # 독자에게 가는(또는 초안함·초안 이슈에 올린) 글은 상한에 센다
         self.assertEqual(run_mod.COUNTED_STATUSES - health.REAL_POST_STATUSES, {"draft", "generated_unpublished"})
         for status in ("publish_failed", "rejected", "llm_failed", "skipped_no_topic"):
             self.assertNotIn(status, run_mod.COUNTED_STATUSES)
@@ -795,7 +795,7 @@ def check_invariants(res, mode, policy, dry, before):
         bad.append("이유 없이 초록(건너뜀 코드·새 기록·연습 표시가 모두 없음)")
     if res.code != 0 and len([a for a in res.annotations if a.startswith("::error::")]) != 1:
         bad.append(f"빨강인데 ::error:: 주석이 1개가 아님: {res.annotations}")
-    if "### blogger_macat" not in res.summary:
+    if "### [Blogger] Blogger (macat0722)" not in res.summary:
         bad.append("실행 요약이 없음")
     pub = res.publisher
     live = [p for p in pub.published if not p["draft"]] if pub else []
@@ -1077,8 +1077,11 @@ class WorkflowPublishInputTest(unittest.TestCase):
         self.assertEqual({k: v for k, v in env.items() if k.startswith("PIPELINE_SECRET_")}, expected)
         for key, value in env.items():
             if "secrets." in str(value) or "secrets[" in str(value):
-                self.assertTrue(key.startswith("PIPELINE_SECRET_"), key)     # 시크릿은 이 이름들로만 나간다
-        self.assertEqual(set(env) - set(expected), {"BLOG_KEY", "BLOGGER_TOPIC", "BLOGGER_PUBLISH", "BLOGGER_AUTH_CHECK"})
+                # 시크릿은 이 이름들로만 나간다: 블로그 시크릿은 PIPELINE_SECRET_*, 텔레그램 알림용 둘은 같은 이름의 환경변수(검증기 WF-13)
+                self.assertTrue(key.startswith("PIPELINE_SECRET_") or key in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"), key)
+        self.assertEqual(set(env) - set(expected), {"BLOG_KEY", "BLOGGER_TOPIC", "BLOGGER_PUBLISH", "BLOGGER_AUTH_CHECK", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"})
+        for name in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"):
+            self.assertEqual(env[name], "${{ secrets.%s }}" % name)
 
     def test_permissions_and_the_generate_condition_did_not_widen(self):
         self.assertEqual(self.data["permissions"], {"contents": "read"})

@@ -68,7 +68,7 @@ class ScenarioTest(unittest.TestCase):
                 self.assertIn("인증 점검 통과", res.out)
                 # 실행 요약: 이름만, 값은 없다
                 self.assertEqual(len(res.summary_lines), 4, res.summary)
-                self.assertEqual(res.summary_lines[0], "### blogger_macat")
+                self.assertEqual(res.summary_lines[0], "### [Blogger] Blogger (macat0722)")
                 self.assertIn("**AUTH_CHECK_OK**", res.summary_lines[1])
                 self.assertIn("쓰기 없음", res.summary_lines[1])
                 for name in SECRET_NAMES:
@@ -269,7 +269,7 @@ class EnumerationTest(unittest.TestCase):
                             mismatches.append(f"{label}: 실제 {got} / 기준 {want}")
                         if res.history or res.drafts or pub.published or res.llm_calls.calls:
                             mismatches.append(f"{label}: 쓰기 또는 Gemini 호출이 있음")
-                        if "### blogger_macat" not in res.summary or len(res.annotations) != 1:
+                        if "### [Blogger] Blogger (macat0722)" not in res.summary or len(res.annotations) != 1:
                             mismatches.append(f"{label}: 요약·주석이 하나씩이 아님 {res.annotations}")
                         if complete and not res.annotations[0].startswith("::notice::"):
                             mismatches.append(f"{label}: 통과인데 notice 가 아님")
@@ -472,7 +472,9 @@ class WorkflowAuthCheckInputTest(unittest.TestCase):
         expected = {"PIPELINE_SECRET_" + role.upper(): "${{ secrets[matrix.secret_%s] }}" % role for role in roles}
         env = self.run_step["env"]
         self.assertEqual({k: v for k, v in env.items() if k.startswith("PIPELINE_SECRET_")}, expected)
-        self.assertEqual(set(env) - set(expected), {"BLOG_KEY", "BLOGGER_TOPIC", "BLOGGER_PUBLISH", "BLOGGER_AUTH_CHECK"})
+        self.assertEqual(set(env) - set(expected), {"BLOG_KEY", "BLOGGER_TOPIC", "BLOGGER_PUBLISH", "BLOGGER_AUTH_CHECK", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"})
+        for name in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"):          # 알림용 시크릿은 같은 이름의 환경변수로만 나간다(검증기 WF-13)
+            self.assertEqual(env[name], "${{ secrets.%s }}" % name)
         self.assertEqual(set(self.plan_step["env"]), {"ONLY_BLOG", "AUTH_CHECK_ONLY"})            # plan 단계에는 시크릿이 없다
 
 

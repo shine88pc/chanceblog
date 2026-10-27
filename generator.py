@@ -25,6 +25,7 @@ import xml.etree.ElementTree as ET
 from datetime import timezone, timedelta
 from pathlib import Path
 
+from pipeline import drafts  # 승인 흐름(레지스트리 publish_flow: pr)의 이름·판정 규칙. direct(기본)에서는 흐름을 읽는 것 말고 아무것도 하지 않는다
 from pipeline.llm import CallLog, scrub  # Gemini 요청 기록·시크릿 가리기는 Blogger·이슈 수정과 같은 코드를 쓴다(D-52)
 
 # ============================================================
@@ -1687,9 +1688,11 @@ def collect_candidates(titles, allow_auto_topic, lane_order, report, fallback=Tr
 
 
 def generate_blog_posts(topic_override=None, category_hint="", slot=None,
-                        allow_auto_topic=True, report=None):
+                        allow_auto_topic=True, report=None, draft_flow=False):
     """KR/EN 글 한 쌍을 만든다. 만들면 (kr_path, en_path), 만들 수 없으면 None.
-    report(dict)를 넘기면 분야별 수집 결과와 최종 결과 코드(outcome)를 채워 준다."""
+    report(dict)를 넘기면 분야별 수집 결과와 최종 결과 코드(outcome)를 채워 준다.
+    draft_flow=True 는 승인 흐름(publish_flow: pr)이다: 글을 만드는 방법은 같고, 이력 항목에 flow·branch·paths 를 더하며 결과 코드는
+    PUBLISHED 대신 DRAFT_CREATED 다(공개는 PR 병합이라 '발행했다'고 쓰지 않는다). 파일 올리기는 pipeline/draft_flow.py 가 맡는다."""
     report = report if report is not None else {}
     report.setdefault("lanes", [])
     posts = load_posts()
@@ -1813,23 +1816,30 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
             kr_path.unlink(missing_ok=True)
         raise
 
-    history.append({
+    entry = {
         "date": date_str, "topic": selected or "(자동 선정)",
         "kr_title": data["kr_title"], "en_title": data["en_title"],
         "kr_image": kr_image, "en_image": en_image, "slot": slot,
         "lane": editorial_lane,
         "source": (selected_item or {}).get("source", ""),
         "source_url": (selected_item or {}).get("link", ""),
-    })
+    }
+    if draft_flow:
+        entry.update(drafts.entry_fields(date_str, slot, time_str, [kr_path, en_path]))
+        report["draft_branch"] = entry["branch"]
+    history.append(entry)
     write_history(history)
     trigger_download(kr_image)
     trigger_download(en_image)
-    report.update(outcome="PUBLISHED", title=data["kr_title"], en_title=data["en_title"],
+    report.update(outcome="DRAFT_CREATED" if draft_flow else "PUBLISHED", title=data["kr_title"], en_title=data["en_title"],
                   source=(selected_item or {}).get("source", ""),
                   paths=[str(kr_path), str(en_path)])
     print("블로그 글 생성 완료" + (" (DRY_RUN: 파일·기록은 저장되지 않았습니다):" if DRY_RUN else ":"))
     print(f"- KR: {kr_path}\n- EN: {en_path}\n- 편집 축: {EDITORIAL_LANES[editorial_lane]['label']}\n- 주제: {_one_line(selected or '(자동 선정)', 200)}")
     print(f"- 이미지: {kr_image}\n         {en_image}")
+    if draft_flow:
+        print(f"- 승인 흐름: 연습 실행이라 초안 브랜치 {entry['branch']} 를 올리지 않습니다" if DRY_RUN
+              else f"- 승인 흐름: 초안 브랜치 {entry['branch']} 로 올립니다(PR 을 병합하면 공개, 닫으면 폐기)")
     return kr_path, en_path
 
 
@@ -1839,6 +1849,7 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
 PRACTICE_PUBLISHED_TEXT = "연습으로 글을 만들어 봤습니다(저장하지 않았습니다)"   # 연습 실행의 PUBLISHED: 아무것도 저장하지 않았는데 발행된 것처럼 읽히지 않게
 OUTCOME_TEXT = {
     "PUBLISHED": "글을 만들었습니다",
+    "DRAFT_CREATED": "초안을 만들었습니다(승인 흐름: PR 을 병합하면 공개, 닫으면 폐기 — 올리기는 다음 단계)",
     "ALL_LANES_EMPTY": "모든 분야를 시도했지만 검증을 통과한 기사가 한 건도 없습니다",
     "SOURCES_UNREACHABLE": "뉴스 소스에 접속하지 못했습니다(시도한 소스가 모두 수집 실패)",
     "ALL_DUPLICATES": "검증된 기사는 있었지만 모두 이미 쓴 글과 비슷해 새 글감이 없습니다(뉴스가 뜸한 때)",
@@ -1885,7 +1896,8 @@ def render_run_summary(event, now, slot, report):
     mode = "스케줄" if event == "schedule" else "수동"
     if DRY_RUN:
         mode += " (DRY_RUN: 파일·기록 저장 안 함)"
-    outcome_text = PRACTICE_PUBLISHED_TEXT if DRY_RUN and outcome == "PUBLISHED" else OUTCOME_TEXT.get(outcome, "알 수 없음")
+    created = outcome in ("PUBLISHED", "DRAFT_CREATED")   # 글 한 쌍을 만든 결과(승인 흐름이면 DRAFT_CREATED)
+    outcome_text = PRACTICE_PUBLISHED_TEXT if DRY_RUN and created else OUTCOME_TEXT.get(outcome, "알 수 없음")
     lines = ["### Chance_Blog 실행 요약",
              f"- 실행: {mode} · {now:%Y-%m-%d %H:%M} KST" + (f" · {slot}시 슬롯" if slot is not None else ""),
              f"- 결과: **{outcome}** — {outcome_text}"]
@@ -1896,10 +1908,14 @@ def render_run_summary(event, now, slot, report):
     if over:
         lines.append(f"- 경고: 수동 실행은 게시 시각·하루 상한을 따지지 않습니다 — 오늘({over['date']}) 이미 {over['posted']}건이 "
                      f"게시되어 상한({over['cap']}건) 이상입니다")
-    if outcome == "PUBLISHED":
+    if created:
         lines.append(f"- 제목: {_md_cell(report.get('title', ''))}")
         lines.append(f"- 편집 축: {report.get('lane_label', '')} · 출처: {_md_cell(report.get('source', ''), 60)}")
         lines.append("- 파일: " + ", ".join(f"`{str(p).replace(chr(96), '')}`" for p in report.get("paths", [])))
+        if report.get("draft_branch"):
+            branch = str(report["draft_branch"]).replace(chr(96), "")
+            lines.append(f"- 승인 흐름: 연습 실행이라 초안 브랜치 `{branch}` 를 올리지 않습니다" if DRY_RUN
+                         else f"- 승인 흐름: 초안 브랜치 `{branch}` 로 올립니다 — PR 을 병합하면 공개, 닫으면 폐기")
     calls = report.get("gemini_calls")
     if isinstance(calls, dict) and "attempts" in calls:   # 0회도 적는다(finish_run 이 항상 넣는다). 항목 자체가 없으면 값을 지어내지 않는다
         lines.append(f"- {_gemini_count_line(calls)}")
@@ -1977,6 +1993,31 @@ def note_manual_over_cap(report):
               "수동 실행은 게시 시각·하루 상한을 따지지 않고 글을 만듭니다(막지 않습니다).")
 
 
+# 승인 흐름(publish_flow: pr)에서만 생기는 건너뜀 코드의 사유 문구(docs/ARCHITECTURE.md §4-1·§4-4). direct 에서는 쓰이지 않는다.
+DRAFT_SKIP_REASONS = {
+    drafts.STATE_PENDING: "{slot}시 슬롯 초안이 승인(PR 병합)을 기다리는 중이거나 닫혀 폐기됨 — 같은 슬롯을 다시 만들지 않음",
+    drafts.STATE_CHECK_FAILED: "초안 브랜치를 확인하지 못함",
+}
+
+
+def draft_flow_on():
+    """레지스트리의 chance 발행 흐름이 승인 흐름(pr)인가. direct(기본)면 False. 레지스트리를 읽지 못하거나 값이 올바르지 않으면
+    DraftFlowError 로 멈춘다 — 직접 게시로 조용히 떨어지면 승인 없는 게시가 나가기 때문이다."""
+    return drafts.chance_flow() == drafts.FLOW_PR
+
+
+def refine_for_drafts(state, slot, history, now):
+    """승인 흐름에서 slot_state 의 결과를 다듬는다(drafts.refine_slot_state): 글이 아직 main 에 없는 초안 슬롯은 DRAFT_PENDING,
+    만들 차례인데 그 슬롯의 초안 브랜치가 이미 원격에 있으면 DRAFT_PENDING, 브랜치를 확인하지 못했으면 DRAFT_CHECK_FAILED.
+    연습 실행(DRY_RUN)은 네트워크를 쓰지 않으므로 브랜치를 확인하지 않는다."""
+    date_str = now.strftime("%Y-%m-%d")
+    exists = False
+    if state == "DUE" and not DRY_RUN:
+        from pipeline import draft_flow   # git 을 부르는 모듈은 승인 흐름에서만 읽는다
+        exists = draft_flow.remote_branch_exists(drafts.branch_name(date_str, slot))
+    return drafts.refine_slot_state(state, slot, history, date_str, exists)
+
+
 def main():
     if _pause_on():
         print(skip_line("PAUSED", var="PIPELINE_PAUSE"))
@@ -1996,25 +2037,33 @@ def main():
         write_step_summary(f"### Chance_Blog 실행 요약\n- {fix_images()}" + "".join(f"\n- {line}" for line in usage_lines()))
     elif EVENT_NAME == "schedule":
         now = now_kst()
-        slot, state = slot_state(read_history(), now)
+        history = read_history()
+        slot, state = slot_state(history, now)
+        draft_flow = draft_flow_on()
+        if draft_flow:
+            state = refine_for_drafts(state, slot, history, now)
         if state != "DUE":
-            reason = ("첫 게시 시각 전" if state == "OUT_OF_WINDOW"
+            reason = (DRAFT_SKIP_REASONS[state].format(slot=slot) if state in DRAFT_SKIP_REASONS
+                      else "첫 게시 시각 전" if state == "OUT_OF_WINDOW"
                       else f"{slot}시 슬롯 글이 이미 있음")
             print(skip_line(state, now=now.isoformat(timespec="minutes"),
                             slots=",".join(str(h) for h in SLOT_HOURS)))
             print(f"[스케줄] {now:%Y-%m-%d %H:%M} KST - 지금 만들 글이 없습니다 "
                   f"({reason}; 게시 시각 KST {SLOT_HOURS}시).")
+            if state == drafts.STATE_CHECK_FAILED:
+                print("::warning::초안 브랜치를 확인하지 못해 이번 실행은 글을 만들지 않았습니다. 다음 실행에서 다시 시도합니다.")
             write_step_summary(f"### Chance_Blog 실행 요약\n- 실행: 스케줄 · {now:%Y-%m-%d %H:%M} KST\n"
-                               f"- 결과: **{state}** — {reason}(정상 건너뜀)")
+                               f"- 결과: **{state}** — {reason}"
+                               f"({'다음 실행에서 다시 확인' if state == drafts.STATE_CHECK_FAILED else '정상 건너뜀'})")
             return
         print(f"[스케줄] {now:%Y-%m-%d %H:%M} KST - {slot}시 슬롯 글을 생성합니다.")
         report = {}
-        result = generate_blog_posts(slot=slot, allow_auto_topic=False, report=report)
+        result = generate_blog_posts(slot=slot, allow_auto_topic=False, report=report, draft_flow=draft_flow)
         finish_run(result, report, "schedule", now, slot)
     else:
         report = {}
         note_manual_over_cap(report)
-        result = generate_blog_posts(report=report)
+        result = generate_blog_posts(report=report, draft_flow=draft_flow_on())
         finish_run(result, report, EVENT_NAME or "manual", now_kst())
 
 
