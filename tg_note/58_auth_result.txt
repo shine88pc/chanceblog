@@ -1,0 +1,22 @@
+# 🔔 인증 점검 결과 — 시크릿이 일부만 등록돼 있습니다
+
+방금(08:52) 실행하신 "[Blogger] 인증 점검만 실행" 결과입니다. 글은 올라가지 않았고(쓰기 없음) 점검이 일부러 멈췄습니다. 빨간 실행이지만 문제가 생긴 것이 아니라 "등록이 덜 됐다"는 안내입니다.
+
+## ❌ 등록이 안 보이는 것 3가지
+BLOGGER_BLOG_ID · BLOGGER_CLIENT_ID · BLOGGER_REFRESH_TOKEN
+(BLOGGER_CLIENT_SECRET 은 등록돼 있는 것으로 보입니다.)
+
+## 🔧 해 주실 일
+저장소 Settings → Secrets and variables → Actions → "Secrets" 탭에서 New repository secret 으로 위 3개를 등록하세요.
+• 이름은 글자 그대로(대문자·밑줄), 값은 원본에서 바로 붙여넣기. 채팅 앱에서 복사하면 보이지 않는 문자가 섞일 수 있습니다.
+• BLOGGER_CLIENT_ID 를 이미 만드셨다면 "Variables" 탭이 아니라 "Secrets" 탭에 있는지 확인하세요. Variables 에 넣으면 시크릿으로 읽히지 않습니다.
+• BLOGGER_REFRESH_TOKEN 은 CLIENT_ID·CLIENT_SECRET 과 같은 OAuth 클라이언트로 한 번에 발급한 값이어야 합니다(scripts/get_blogger_token.py 가 3줄을 같이 출력). ID·시크릿을 새로 만드셨다면 토큰도 새로 발급해 함께 등록하세요.
+• BLOGGER_BLOG_ID 는 블로그 관리 화면 주소의 숫자입니다.
+
+## ✅ 다 등록한 뒤
+같은 점검을 한 번 더 실행해 요약에 AUTH_CHECK_OK 가 나오는지 보세요. 결과는 제가 공개 정보로 자동 확인하니 따로 알리지 않으셔도 됩니다.
+
+(참고: 값은 제가 볼 수 없고, 이 점검은 이름이 비었는지·인증이 되는지만 알려 줍니다. 값은 이슈·채팅에 쓰지 마세요.)
+
+[버튼] Actions 열기 | https://github.com/shine88pc/chanceblog/actions/workflows/blogger.yml
+[버튼] 설정 가이드 | https://github.com/shine88pc/chanceblog/blob/main/.github/editorial/BLOGGER_API_SETUP.md
