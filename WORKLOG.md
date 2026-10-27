@@ -7,6 +7,43 @@
 
 ---
 
+## [2026-10-27] Claude – 한글 Blogger(kcyoon) 등록(mode: off)과 Blogger 워크플로 영문/한글 분리: `blogger.yml` 재사용 워크플로화·채널 래퍼 2개·한글 AI·도구 프로필 (작업 D, T3 — 켜지 않음)
+
+**작업자**: Claude (구현 세션, 독립 검증은 별도 세션)
+**대상**: Blogger
+**등급**: T3(새 블로그 등록 D5·광고 선언 D6) — **등록만 하고 켜지 않았다**: `blogger_kcyoon` 은 `mode: off`·`ads: off`·`ad_surface: false` 이고 시크릿·구글 계정·OAuth 는 운영자 몫이다. `mode`(Chance `auto`·영문 Blogger `off`·한글 `off`)·시크릿 값·광고 표면(`index.html`·`_config.yml`)·`인수인계/작업내용.md`·`docs/SESSION_START.md`·`docs/REQUEST_BRIEFING.md`(총괄 소유 — 패치 파일로 따로 낸다)는 건드리지 않았다.
+**승인 근거**: 운영자 채팅 2026-10-27 "추천대로 진행해줘"(채널 관리 계획 D1~D7 중 D5 한글 Blogger `kcyoon` 을 `mode: off` 로 등록·시크릿 이름 `BLOGGER_KO_*`, D6 신규 채널 광고 금지). 켜기(`mode: draft`)·한글 프로필 톤·시드 36개·AI 고지 문구는 운영자가 읽고 따로 승인한다.
+**목적**: 한글 Blogger 를 영문과 계정·OAuth·시크릿·이력·워크플로를 나눠 레지스트리에 두고, 한 파일(`blogger.yml`)이 두 채널을 나눠 쓸 수 없다는 레지스트리 규칙(채널 = 블로그 하나, 워크플로 `name` 접두사 일치)을 지키면서 영문의 정기·수동 동작은 바이트 단위로 그대로 둔다.
+**브랜치**: `ai/claude/kcyoon-blogger-split`(기준 `origin/main` `c6c9acd` — 작업 A·R3·E·C·B·TG 가 병합된 상태). PR·병합·main push·Actions 실행은 하지 않았다(총괄이 처리).
+
+### 한 일
+- **재사용 워크플로**: `.github/workflows/blogger.yml` 이 `on: workflow_call` 뿐인 `[내부] Blogger 글 작성 공용(직접 실행하지 마세요)` 가 됐다. 입력 5개(`blog`·`topic`·`dry_run`·`publish`·`auth_check`)와 선택 시크릿 7개(`PIPELINE_SECRET_<역할>` 5 + `TELEGRAM_*` 2)를 받고 부르는 쪽 이벤트(`github.event_name`·`github.event.inputs`)는 읽지 않는다. plan 스크립트·`generate` 잡의 단계·`timeout-minutes`·`PIPELINE_PAUSE`·블로그별 동시 실행 줄(`blogger-` 뒤에 블로그 key)은 그대로다.
+- **채널 래퍼**: `blogger-en.yml`(`[Blogger 영문] 글 자동 작성`, cron `0 2 * * *`)·`blogger-ko.yml`(`[Blogger 한글] 글 자동 작성`, cron `30 3 * * *`). 정기·수동 입력(`topic`·`dry_run` 기본 켜짐·`publish` off/draft/publish 기본 draft·`auth_check`)을 갖고 정기·수동 판단을 여기서 해 `with:` 로 명시해 넘긴다. 시크릿은 `secrets: inherit` 가 아니라 그 블로그 것만 이름으로 하나씩(영문 `BLOGGER_*`, 한글 `BLOGGER_KO_*`, `GEMINI_API_KEY`·`TELEGRAM_*` 공유), 부르는 잡에 `contents: write`(재사용 워크플로의 권한은 부르는 쪽을 넘지 못한다), 워크플로 단위 동시 실행 줄 `blogger-en`·`blogger-ko`(안쪽 `blogger-<key>` 와 이름이 같으면 서로 기다려 멈춘다). 이름에서 '(초안함 업로드)' 를 뺐다(`mode: auto` 면 즉시 게시라 어긋난다 — 독립 검증 N7).
+- **레지스트리**: `blogger_kcyoon`(채널 `{"key":"blogger_ko","label":"Blogger 한글"}`, 이력 `blogger_ko_history.json`·초안 `_blogger_ko_drafts/`, 시크릿 `BLOGGER_KO_*` 4 + `GEMINI_API_KEY`, 프로필 `blogger_ai_tools_ko`, 프롬프트 `BLOGGER_PROMPT_KO_AI.md`, `mode: off`). 영문 `blogger_macat` 의 채널은 `Blogger 영문`, `workflow` 는 `blogger-en.yml`. `registry.CHANNEL_LABELS` 에서 `Blogger` 삭제. 워치독·확인 필요 모음은 레지스트리 `workflow`(= 래퍼)로 마지막 실행을 찾으므로 코드 변경이 없고(재사용 워크플로를 부른 실행은 부른 쪽 아래 기록된다), 시험이 가짜 실행으로 연속성을 고정한다.
+- **검증기**: WF-13 이 재사용 워크플로를 부르는 잡의 `secrets.<이름>` 항목에 같은 이름의 시크릿 표현식 하나를 넣은 것과 불린 쪽 `on.workflow_call.secrets` 의 선택·대문자 정의를 허용하고 `secrets: inherit`·다른 값·다른 저장소 워크플로·`required: true` 는 오류로 막는다(텔레그램 PR 독립 검증 N-4). 새 **REG-6**: 래퍼가 공용 워크플로를 부르는 잡이 하나, `with.blog`·넘기는 시크릿 이름이 레지스트리와 같음, `contents: write`, 동시 실행 줄이 래퍼끼리·안쪽 줄과 다름. 가드레일 **G-S8**(블로그마다 계정·시크릿 분리).
+- **한글 AI·도구 프로필**: `pipeline/profiles/blogger_ai_tools_ko.json`(시드 36개 = AI·디지털 26 + 집·살림 10, `topic_expand_prompt` 70:30, `banned_patterns` 30·`banned_topic_patterns`/`body_banned_patterns` 63(법률·세금·대출·투자·보험 어휘 추가, 일상어 오탐을 좁힘)·`leak_patterns` 16, `allow_links: false`, 솔직한 AI 고지) + 프롬프트 `.github/editorial/BLOGGER_PROMPT_KO_AI.md`(§6 켜기 전에 운영자가 읽을 것).
+- **문서**: BLOGGER_API_SETUP §7(둘째 블로그 — 별도 계정·Cloud 프로젝트·OAuth 클라이언트, `BLOGGER_KO_*` 등록 순서, "AI가 대신 하지 않는 것"), ACTIONS_GUIDE(이름 표·3-12 한글 켜기·6-3), ARCHITECTURE(§2·§2-1·§3·§4-5·§6·§7-A·§7-1 한글 AI·도구 프로필), OPS_INBOX, SECURITY_GUARDRAILS(WF-13·REG-6·G-S8), ENGINEERING_GUIDE, HANDLER, DEFECT_REGISTER(D-75·D-76·관측 행), CODEOWNERS 주석. `docs/REQUEST_BRIEFING.md` 는 `D_request_briefing_table.patch` 로 낸다.
+
+### 검증 증거
+- **전체 시험**: `python -X utf8 -m unittest discover -s tests` — 기준 main(`c6c9acd`) 3263개 → 이 브랜치 **3427개**(+164: `test_blogger_split` 38·`test_blogger_ko` 36·`test_profile_ko_ai` 39·`test_validate_repo` +44·`test_notify_integration` +5·`test_registry` +1·`test_run` +1). `D_request_briefing_table.patch` 를 얹은 새 clone(`git clone` 한 작업 트리, `git apply`): **3427개 중 3427개 통과**(377초, OK). 패치 없이 이 브랜치: **3427개 중 3424개 통과·3개 실패**(376초) — 실패는 `test_real_briefing_covers_current_repository.test_real_briefing_covers_current_repository`, `test_docs_tables_list_every_workflow_with_its_current_name.test_docs_tables_list_every_workflow_with_its_current_name`, `test_operator_docs_do_not_use_the_old_english_names.test_operator_docs_do_not_use_the_old_english_names` 뿐이고 모두 `docs/REQUEST_BRIEFING.md` 의 워크플로 표(총괄 소유)를 읽는 시험이라 `D_request_briefing_table.patch` 를 얹으면 사라집니다.
+- **검증기·도구**: `validate_repo.py --base origin/main` 오류 0·경고 3(패치 없이: `BRIEF-1`(새 항목이 브리핑에 없음) + `인수인계/` 문서의 LIQUID-1 2건 = main 과 같음), 패치를 얹으면 경고 2(LIQUID-1 2건, main 과 같음). `actionlint` 1.7.12 워크플로 15개 지적 0. `pyflakes pipeline scripts tests generator.py blogger_generator.py` 16건 = 기준과 같은 집합(새 경고 0). `vermin --target=3.10-` 저장소 전체 최소 3.10·이 PR 의 새 파일 최소 3.7, 3.12 전용 f-string 검사 106개 파일 0건, `git diff --check` 0.
+- **영문 Blogger 동작 불변(러너 시나리오 2155개)**: 기준(origin/main 트리)과 이 브랜치를 같은 시나리오(모드 3 × 게시 정책 9 × 연습 여부 × 시크릿 16조합 × 하루 상한, 인증 점검 CLI·환경변수, 인증 실패 7분류, 게시 실패 5분류·예외·ID 없음·주소 없음, 영문·한글 프로필 × 가짜 LLM 5종, 금지 주제·수동 주제·깨진 이력·쓰기 실패, 실제 `python -m pipeline.run` 9개)로 돌려 **요약의 머리 줄(`### [Blogger] …` → `### [Blogger 영문] …`) 외에 종료 코드·로그·실행 요약·이력·초안 파일·가짜 게시자 호출·LLM 호출이 모두 바이트 동일**(요약이 있는 2144개 + 요약 없는 설정 오류 11개, 비교 약 1,578,566바이트, 한글 파일 생성 0). 음성 대조(실행 메시지 한 문장을 바꾼 사본)는 634개가 다름으로 잡혀 비교 도구가 실제로 가려냄을 확인했다.
+- **정기·수동 입력 식 동등성**: 이벤트·입력 220조합(래퍼 둘 × (정기 2 + 수동 108))에서 (래퍼 `with:` → 공용 워크플로 환경변수)가 분리 전 `blogger.yml` 의 식 값과 같다(`AUTH_CHECK_ONLY`·`DRY_RUN`·`BLOGGER_TOPIC`·`BLOGGER_PUBLISH`·`BLOGGER_AUTH_CHECK`, 불일치 0). 공용 워크플로 YAML 의미 비교: 분리 전과 달라진 곳은 plan 단계 env 2개·`DRY_RUN`·러너 단계 env(입력·시크릿 이름)·`run-name`(래퍼로 이동)뿐이고 단계·명령·`if`·`timeout-minutes`·권한·매트릭스·동시 실행 줄은 같다.
+- **plan·CLI 출력**: `pipeline.plan --platform blogger`(기본)·`--only blogger_macat`(+`--include-off`·`--count`)·`pipeline.run --blog blogger_macat`(연습·정지·인증 점검 시크릿 없음) 출력이 기준과 바이트 동일(12/17). 달라진 5건은 의도한 것뿐이다: `--include-off` 에 한글이 더해져 둘, 레지스트리 목록·`--only` 오류 안내의 key 목록에 한글이 더해짐.
+- **감시 연속성(가짜 실행, `tests/test_blogger_split.py` `MonitoringContinuityTest`)**: 워치독이 `blogger-en.yml`·`blogger-ko.yml` 의 실행을 묻고 공용 `blogger.yml` 은 묻지 않는다. 래퍼별 연속 실패 3회가 해당 블로그에만 `RUN_FAIL_STREAK` 이고, 공용 파일 아래의 실패는 보이지 않음을(그래서 레지스트리가 래퍼를 가리켜야 함을) 고정했다. 확인 필요 모음은 래퍼 실패를 현재 이름(`［Blogger 영문］ 글 자동 작성`)으로 보이고 호출 예산(워크플로 15개) 안이다.
+- **시크릿 격리·알림**: 한글 래퍼가 영문 시크릿을 넘기는 일이 없고(래퍼 매핑 시험·REG-6), 영문 값이 한글 실행에 섞이면 `blog_mismatch` 로 글 생성 전에 종료 2·이력 `publish_failed` 한 줄뿐이며 영문 주소를 로그에 쓰지 않는다. 한글 실행의 텔레그램 알림은 레지스트리 `channel.label`(`Blogger 한글`)과 한글 블로그 주소를 쓴다(시험 5개). 교차 중복 방지는 영문→한글·한글→영문·Chance→한글 세 방향 모두 시험한다.
+- **변이 시험(직접)**: 70개(한글 프로필 27·검증기 WF-13/REG-6 12·워크플로 21·레지스트리 8·코드 2) 중 처음에 2개(`P18` 요금·한도 패턴의 '제한'·'이하' 갈래, `V04` 이 저장소 밖 워크플로를 '부분 일치'로 받아들임)가 살아남아 규칙 표 표본 2개와 검증기 시험 항목 3개를 더했고, 다시 돌려 **70개 모두 잡힘**. 변이 도구는 사본 트리에서 한 번에 한 곳만 망가뜨리고 해당 시험 묶음의 종료 코드로 판정한다.
+
+### 알아 둘 것
+- **`docs/REQUEST_BRIEFING.md`(총괄 소유)는 이 PR 에서 고치지 않았다.** 워크플로 표·블로그 표에 새 항목이 없으면 시험 3개(`test_real_briefing_covers_current_repository`·`test_docs_tables_list_every_workflow_with_its_current_name`·`test_operator_docs_do_not_use_the_old_english_names`)와 검증기 BRIEF-1 경고가 나오므로 `D_request_briefing_table.patch`(PR 본문에 명령)를 이 브랜치에 얹어야 한다.
+- **한글 Blogger 는 켜지지 않았다.** `mode: off`·시크릿 미등록·구글 계정 미개설이라 어떤 글도 만들어지지 않고 구글·Gemini 호출도 없다. 켜기 전에 운영자가 읽고 승인할 것(시드 36개·프롬프트·금지 범위·AI 고지·톤)은 `.github/editorial/BLOGGER_PROMPT_KO_AI.md` §6 과 `docs/ACTIONS_GUIDE.md` 3-12 에 있다.
+- **켜기 전에 `_config.yml` 의 `exclude` 에 `blogger_ko_history.json` 을 더해야 한다**(Jekyll 은 밑줄로 시작하지 않는 루트 파일을 사이트에 낸다 — 영문 `blogger_history.json` 이 거기 있는 이유와 같다). `_config.yml` 은 광고 표면이라 T3 승인과 `Ad-Surface-Approved` 표시가 필요해 이번 등록(D5 는 '등록만')에서는 건드리지 않았고, `tests/test_blogger_ko.py` 가 exclude 없이 `mode` 를 `off` 밖으로 못 바꾸게 막는다.
+- **실제 GitHub 실행은 아직 없다**: 재사용 워크플로 호출·`secrets:` 명시 전달·`contents: write` 위임은 `actionlint` 와 시험의 표현식 평가기로만 확인했다. 병합 직후의 첫 정기 실행(02:00·03:30 UTC)이 첫 실제 관측이다(`docs/DEFECT_REGISTER.md` 관측 체크리스트 3행). 분리 전 `blogger.yml` 실행 기록은 래퍼와 이어지지 않는다.
+- **영문 `TOPIC_BLOCKED` 안내 문장은 일부러 그대로 뒀다**(건강 낱말 예시만 든다). 한글 블로그에서 법률·금융 낱말에 걸려도 같은 문장이 나오지만 걸린 낱말은 같이 보인다 — 영문 출력의 바이트 불변을 지키려고 바꾸지 않았다.
+- 새 가드레일 번호 `G-S8`·검증기 `REG-6`·결함 `D-75`·`D-76` 은 이 브랜치가 정했다. 다른 진행 중인 브랜치와 겹치면 통합 때 재배정한다.
+
+---
+
 ## [2026-10-27] Claude – 묶음 2 통합: Chance 승인 흐름(E)·티스토리/네이버 초안 패키지(C)·초안 현황판(B)·텔레그램 알림(TG)을 main 위 한 브랜치로 (작업 INT, T2, 새 기능 없음·기본 꺼짐)
 
 **작업자**: Claude (통합 세션, 독립 검증은 별도 세션)

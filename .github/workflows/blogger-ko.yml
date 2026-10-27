@@ -3,7 +3,7 @@ run-name: "[Blogger 한글] 글 작성 · ${{ github.event_name == 'workflow_dis
 
 # 한글 Blogger(blogger_kcyoon, kcyoon) 전용 래퍼다. 글을 만드는 공용 로직은 blogger.yml(`[내부] Blogger 글 작성 공용`)에 있고, 이 파일은
 # 한글 채널의 예약(cron)·수동 입력·동시 실행 줄·시크릿 이름만 갖고 한 블로그(`blog: blogger_kcyoon`)만 돌린다. 영문 Blogger 는 blogger-en.yml 이 따로 돈다.
-# 지금은 레지스트리에서 mode: off 라 정기·수동 실행이 모두 "대상 0개"로 끝난다(인증 점검만 실행은 정지 중에도 점검한다). 켜는 순서: .github/editorial/BLOGGER_API_SETUP.md 의 '두 번째 블로그' 절과 docs/ACTIONS_GUIDE.md 3-12.
+# 지금은 레지스트리에서 mode: off 라 정기·수동 실행이 모두 "대상 0개"로 끝난다(인증 점검만 실행은 정지 중에도 점검한다). 켜는 순서: .github/editorial/BLOGGER_API_SETUP.md §7 '둘째 블로그(한글 kcyoon) 연동'과 docs/ACTIONS_GUIDE.md 3-12.
 # 한글 Blogger 는 영문과 계정·Cloud 프로젝트·OAuth 클라이언트가 달라야 하므로 시크릿 이름이 BLOGGER_KO_* 다. 영문 시크릿(BLOGGER_*)을 이 파일에서 넘기면 검증기 REG-6 이 오류로 막는다.
 # 정기·수동 판단(github.event_name·github.event.inputs)은 여기서 하고 결과를 `with:` 로 명시해 넘긴다 — 정기 실행은 연습 실행이 아니고 publish·인증 점검 입력을 쓰지 않는다.
 # 워치독·확인 필요 모음은 레지스트리 workflow 필드(이 파일)로 '마지막 실행'을 찾는다: 재사용 워크플로를 부른 실행은 부른 쪽(이 파일) 아래에 기록된다.
