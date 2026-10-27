@@ -147,7 +147,7 @@
 
 | 검사 ID | 내용 | 가드레일 |
 |---------|------|----------|
-| SEC-1 / SEC-2 | 금지 파일, 키·토큰 패턴(텔레그램 봇 토큰 모양 `숫자:영문숫자 35자` 포함 — 같은 패턴 목록을 런타임 `mask()`도 쓴다) | G-S1, G-C11 |
+| SEC-1 / SEC-2 | 금지 파일, 키·토큰 패턴(텔레그램 봇 토큰 모양 `숫자 6~12자리:영문숫자·-·_ 30~50자`(실제 토큰은 35자 안팎) 포함 — 같은 패턴 목록을 런타임 `mask()`도 쓴다) | G-S1, G-C11 |
 | WF-0 / WF-1 / WF-3 / WF-4 / WF-5 / WF-9 | 워크플로 문법, permissions, `pull_request_target`, 입력 보간, 외부 액션 고정, 시크릿 echo | G-A1~A4, G-S3 |
 | WF-6 / WF-7 / WF-8 / WF-10 | 오류 은폐(`\|\| true`·`continue-on-error: true`; 예외: 알림 단계 — run 이 정확히 `python -m pipeline.notify <이벤트> [--commit …]` 한 줄이고 `timeout-minutes` 가 있는 단계는 `continue-on-error` 를 써도 경고하지 않는다, 알림 명령이 스스로 `::warning::` 으로 실패를 드러내므로 조용한 실패가 아니다), timeout, concurrency, 배포 dispatch 누락 | G-O2, G-A6, G-A8, G-C11 |
 | WF-13 | 텔레그램 시크릿 이름(`TELEGRAM_BOT_TOKEN`·`TELEGRAM_CHAT_ID`)이 단계 `env`의 같은 이름 환경변수에 `secrets.그 이름` 표현식 하나만(달러 기호와 이중 중괄호로 감싼 모양) 넣은 것이 아닌 곳(`run`·`with`·`if`·job/워크플로 `env`·이름 등)에 있음 — 토큰이 셸 명령 줄·로그·외부 액션으로 새는 길을 구조로 막는다(`$TELEGRAM_BOT_TOKEN` 처럼 셸에서 펼치는 것도 같다) | G-C11, G-S3 |
