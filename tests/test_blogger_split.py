@@ -91,6 +91,16 @@ class ReusableWorkflowTest(unittest.TestCase):
         for job in jobs.values():
             self.assertEqual(job["steps"][1]["with"], {"python-version": "3.12"})
 
+    def test_both_jobs_run_on_ubuntu_latest_because_their_scripts_are_bash(self):
+        """독립 검증 N7(변이 X03): plan 잡의 runs-on 은 위 시험이 고정했지만 generate 잡의 것은 아무 시험·검증기·actionlint 도 보지 않았다. 두 잡의 `run:` 은 bash
+        스크립트(`set -euo pipefail`·배열·`$GITHUB_OUTPUT`)라 윈도 러너로 바뀌면 첫 정기 실행에서 깨진다."""
+        jobs = self.data["jobs"]
+        self.assertEqual({name: job["runs-on"] for name, job in jobs.items()}, {"plan": "ubuntu-latest", "generate": "ubuntu-latest"})
+        for name, job in jobs.items():
+            self.assertNotIn("shell", job.get("defaults", {}).get("run", {}), name)               # 기본 셸을 바꾸지도 않는다(바꾸면 bash 가정이 깨진다)
+            for step in job["steps"]:
+                self.assertNotIn("shell", step, (name, step.get("name")))
+
     def test_the_plan_script_and_the_commit_script_keep_their_behavior_lines(self):
         plan_step, generate, run_step = wf.callee_steps()
         script = plan_step["run"]
@@ -461,6 +471,33 @@ class MonitoringContinuityTest(unittest.TestCase):
         calls = len([f for f in files if f != inbox.OWN_WORKFLOW])
         self.assertLessEqual(calls + 12, oi.MAX_CALLS_WITH_TOKEN, (calls, oi.MAX_CALLS_WITH_TOKEN))   # 워크플로 파일마다 한 번 + 이슈·PR·검사 읽기: 한도(150) 안이다
         self.assertEqual(len(files), 15)                                                                  # 열두 개였다가 공용 하나·래퍼 둘이 더해져 열다섯
+
+
+class SplitDocsAreCurrentTest(unittest.TestCase):
+    """독립 검증 N8: 영문/한글 분리 뒤에도 옛 문장이 남은 곳 — 요약 머리 예시(`### [Blogger] …`)·워크플로 접두사 예시(`[Blogger]`)·`pipeline/plan.py` 첫 줄('워크플로 수정 없이 잡이 늘어난다')."""
+
+    def test_the_summary_head_example_in_the_architecture_doc_uses_the_two_current_channel_labels(self):
+        text = (REAL / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
+        self.assertNotIn("### [Blogger] ", text)
+        self.assertIn("### [Blogger 영문] Blogger (macat0722)", text)
+        self.assertIn("### [Blogger 한글] Blogger (kcyoon)", text)
+
+    def test_the_workflow_editing_rules_name_the_two_blogger_prefixes_not_the_old_single_one(self):
+        text = (REAL / ".github" / "instructions" / "workflows.instructions.md").read_text(encoding="utf-8")
+        self.assertNotIn("`[Blogger]`", text)
+        self.assertIn("`[Blogger 영문]`·`[Blogger 한글]`", text)
+        for label in ("Blogger 영문", "Blogger 한글"):
+            self.assertIn(label, registry.CHANNEL_LABELS)                                       # 예시가 실제 허용 라벨이다
+
+    def test_the_plan_module_no_longer_promises_that_adding_any_blog_needs_no_workflow_change(self):
+        first = plan.__doc__.splitlines()[0]
+        self.assertNotIn("블로그를 추가하면 워크플로 수정 없이 잡이 늘어난다", first)
+        self.assertIn("Blogger 는 블로그마다 채널 래퍼 워크플로 하나를 더해야 한다", first)
+        # 말이 맞는지: 티스토리·네이버 워크플로는 plan 의 매트릭스만 읽고, Blogger 는 래퍼가 `with.blog` 로 key 를 박는다
+        for name in ("tistory.yml", "naver.yml"):
+            self.assertIn("--platform " + name.split(".")[0], code_text(name))
+        for wrapper in WRAPPERS.values():
+            self.assertIn("blog:", code_text(wrapper))
 
 
 class PlanCliTest(unittest.TestCase):

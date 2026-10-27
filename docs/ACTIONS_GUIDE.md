@@ -390,7 +390,7 @@ PR → **Files changed**와 하단 **Checks**에서 봅니다. 병합을 막아 
 | 3 | 시크릿 4종을 모두 등록: `BLOGGER_KO_BLOG_ID`·`BLOGGER_KO_CLIENT_ID`·`BLOGGER_KO_CLIENT_SECRET`·`BLOGGER_KO_REFRESH_TOKEN` | 운영자(직접) | 값은 채팅·저장소·메일에 쓰지 않고 GitHub 입력칸에 직접 붙여 넣음. 영문 `BLOGGER_*`는 건드리지 않음. `GEMINI_API_KEY`는 영문과 같은 키를 씁니다 |
 | 4 | `[Blogger 한글] 글 자동 작성` → Run workflow → `인증 점검만 실행` 체크 | 운영자 | 정지 중에도 점검합니다. 요약의 `AUTH_CHECK_OK`가 통과 신호(블로그 주소가 `https://kcyoon.blogspot.com/`와 같은지도 봅니다) |
 | 5 | 같은 PR에서 `_config.yml`의 `exclude`에 `blogger_ko_history.json`을 더하고, 레지스트리 `blogger_kcyoon`의 `mode`를 `draft`로 켜기 | AI | 운영자 채팅 승인(T3) 뒤에만. `_config.yml`은 광고 표면이라 별도 승인과 `Ad-Surface-Approved` 표시가 필요하고, 안 더하고 켜면 이력 파일이 공개 사이트에 나옵니다(시험이 막음). 영문 `mode`는 따로 정합니다 |
-| 6 | 초안 1건을 Blogger 초안함에서 읽고, 며칠 초안 모드로 운영 | 운영자 | 문제가 없으면 `auto` 전환(T3) |
+| 6 | 초안 1건을 Blogger 초안함에서 읽고, 며칠 초안 모드로 운영 | 운영자 | 초안을 읽을 때 **영문 블로그(macat0722)의 글을 번역·복제한 글이 아닌지**도 눈으로 봅니다(제목 중복 검사는 같은 언어 안에서만 걸려 코드가 못 잡습니다). 문제가 없으면 `auto` 전환(T3) |
 
 - 한글 정기 실행은 매일 12:30(KST, cron `30 3 * * *`)입니다. 영문(11:00)과 시각이 겹치지 않고, 이력·초안 폴더(`blogger_ko_history.json`·`_blogger_ko_drafts/`)도 영문과 따로입니다.
 - 영문 시크릿 이름이 환경에 있어도 한글 블로그는 쓰지 않고, 한글 래퍼가 영문 시크릿을 넘기지 못하게 검증기(REG-6)가 막습니다. 실수로 영문 계정 값이 들어가도 블로그 주소가 레지스트리와 다르면(`blog_mismatch`) 글을 만들기 전에 빨강으로 멈춥니다.
@@ -560,7 +560,7 @@ PR → **Files changed**와 하단 **Checks**에서 봅니다. 병합을 막아 
 코드로 못 바꾸고 운영자만 GitHub 설정에서 할 수 있는 항목입니다. 상태 칸은 운영자가 2026-10-25에 화면을 읽어 둔 **2차 기록**(캡처 없음)이거나 이 저장소에서 확인한 사실입니다. 바꾸기 직전에 같은 화면을 다시 확인하세요. **클릭 순서는 외부 지식이라 이 저장소에서 시험하지 못했고, 화면 구성은 GitHub 업데이트로 달라질 수 있습니다.**
 
 > **경고: main 브랜치 보호 규칙을 함부로 켜지 마세요.**
-> 자동 발행 5종(`[Chance] 글 자동 작성·게시`·`[Chance] 기존 글 이미지 교체(수동)`·`[Blogger 영문] 글 자동 작성`·`[Blogger 한글] 글 자동 작성`·`[공통] 이슈 양식 페이지 목록 갱신`)은 `GITHUB_TOKEN`으로 **main에 직접 push**합니다.
+> 자동 발행 7종(`[Chance] 글 자동 작성·게시`·`[Chance] 기존 글 이미지 교체(수동)`·`[Blogger 영문] 글 자동 작성`·`[Blogger 한글] 글 자동 작성`·`[티스토리] 초안 패키지 만들기`·`[네이버] 초안 패키지 만들기`·`[공통] 이슈 양식 페이지 목록 갱신`)은 `GITHUB_TOKEN`으로 **main에 직접 push**합니다.
 > 아래를 main에 켜면 이 push가 거부되어 **자동 발행이 멈출 수 있습니다**: "Require a pull request before merging"(PR 필수) · 승인·코드 소유자 리뷰 필수 · "Require status checks to pass"(상태 검사 필수) · "Require signed commits" · "Restrict updates" · "Lock branch". (외부 지식, 이 저장소에서 시험하지 않음) 승인 흐름(3-17)을 켠 뒤에도 이력 커밋은 main에 직접 push하고 초안 브랜치(`ai/draft/…`)도 push하므로 같은 규칙이 적용됩니다.
 > 개인 계정 저장소에서 봇만 이 규칙을 건너뛰게 하는 방법은 확인된 근거가 없습니다(미확인). 안전한 설정은 **삭제 금지 + 강제 push 금지**만 거는 룰셋입니다(5-2 A, 운영자 결정 2026-10-25). 봇은 일반 push만 하므로 이 둘은 막지 않습니다(코드 기준).
 

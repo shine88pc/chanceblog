@@ -17,6 +17,7 @@ from pathlib import Path
 
 import _bootstrap  # noqa: F401
 from pipeline import gates, registry, topics
+from pipeline import run as run_mod
 from pipeline.state import entry_titles, other_blog_titles, read_json_list
 from pipeline.stubs import stub_llm, stub_post, stub_post_en
 
@@ -372,6 +373,15 @@ class StructureTest(unittest.TestCase):
         self.assertEqual(model, "stub")
         self.assertTrue(topics.parse_topic_list(answer))
 
+    def test_the_expansion_prompt_gives_the_seventy_thirty_mix_in_its_opening_and_again_in_its_own_composition_line(self):
+        """독립 검증 N7(변이 X22): '약 70%'·'약 30%' 는 첫 문장에도 있어서 위 시험은 `구성:` 줄을 통째로 지워도 통과했다. 비율을 직접 지시하는 줄을 따로 고정한다."""
+        lines = PROFILE["topic_expand_prompt"].splitlines()
+        self.assertRegex(lines[0], r"AI·디지털 도구 활용법\(약 70%\)과 집·살림 정리 습관\(약 30%\)")
+        composition = [line for line in lines if line.startswith("구성:")]
+        self.assertEqual(len(composition), 1, lines)
+        self.assertRegex(composition[0], r"^구성: AI·디지털 도구 활용 주제를 약 70%, 집·살림\(정리·수납·청소 순서, 절약·계획 습관, 계절 점검 체크리스트\) 주제를 약 30%로 섞는다\.$")
+        self.assertLess(lines.index(composition[0]), next(index for index, line in enumerate(lines) if line.startswith("조건:")))      # 조건(제외 범위)보다 앞에서 구성을 정한다
+
     def test_the_expansion_stub_answers_pass_the_same_topic_filter_as_seeds(self):
         picked = topics.pick_topic(PROFILE, [{"topic": seed, "date": "2026-10-20"} for seed in SEEDS], datetime.date(2026, 10, 21), [], random.Random(1), llm=stub_llm)
         self.assertEqual(picked[1], "llm")
@@ -645,6 +655,173 @@ class RuleTableTest(unittest.TestCase):
             self.assertEqual(gates.body_risk_hit(sentence, PROFILE), (None, None), sentence)
             self.assertIsNone(gates.matches_any(PROFILE["banned_patterns"], sentence), sentence)
         self.assertIsNotNone(gates.body_risk_hit("독감에 감염된 사람과 접촉했다면 쉬세요.", PROFILE)[0])
+
+
+PROMPT_KO = ".github/editorial/BLOGGER_PROMPT_KO_AI.md"
+PROMPT_EN = ".github/editorial/BLOGGER_PROMPT_EN.md"
+# 모델에 가는 `text` 블록의 번호 규칙마다 '그 규칙이 말해야 하는 것'. 규칙 줄(하위 목록 포함)에 이 조각이 모두 있어야 한다 — 규칙 하나를 지우거나 뜻을 바꾸면 여기서 걸린다.
+PROMPT_RULES = {
+    1: ("톤:", "차분하고 친근한 존댓말", "광고·홍보 말투는 쓰지 않는다"),
+    2: ("글 길이:", "1,200~2,000자"),
+    3: ("반드시 포함할 구조", "도입:", "2~4문장", "본론:", "3~5개", "<h3> 소제목", "점검 목록:", "<ul> 목록", "마무리:", "질문 하나"),
+    4: ("경험을 지어내지 않는다:", '"써 봤더니"', '"직접 해 본 결과"', "개인 경험·수치·벤치마크·인터뷰·사용자 후기·전문가의 말·연구 결과를 쓰지 않는다", "저는·제가", "~해 보세요"),
+    5: ("자주 바뀌는 사실은 단정하지 않는다", "가격, 요금제, 무료 한도, 기능 이름, 메뉴 위치, 버전", "직접 확인하는 방법"),
+    6: ("홍보하거나 순위를 매기거나 구매·가입을 권하지 않는다", "챗봇, 번역기, 메모 앱"),
+    7: ("건강·의료(질병, 치료, 약, 보충제, 진단, 임신, 영유아, 체중 감량)", "법률·세금·대출·투자·보험", "경고나 조언으로도 쓰지 않는다"),
+    8: ("AI의 답이 틀릴 수 있으니 중요한 내용은 직접 확인하라고 안내", "개인정보·비밀번호·계정 정보·회사 기밀을 입력하지 말라고"),
+    9: ("링크, 웹 주소, 이메일 주소, 이미지, 표를 넣지 않는다",),
+    10: ("면책·고지 문장은 쓰지 않는다",),
+    11: ("제목:", "20~45자", "\"충격\"", "\"TOP 5\"", "후기"),
+    12: ("라벨:", "3개 내외"),
+}
+
+
+def prompt_template(relative=PROMPT_KO):
+    """러너가 읽는 그대로(`text` 코드 블록) — 모델에 실제로 가는 글이다."""
+    return run_mod.load_prompt_template(REAL, {"prompt": relative})
+
+
+def numbered_rules(template):
+    """{번호: 규칙 글(들여 쓴 하위 줄 포함)}."""
+    rules, current = {}, None
+    for line in template.splitlines():
+        match = re.match(r"^(\d{1,2})\. ", line)
+        if match:
+            current = int(match.group(1))
+            rules[current] = line
+        elif current is not None and line.startswith(" "):
+            rules[current] += "\n" + line
+        else:
+            current = None
+    return rules
+
+
+def output_format_markers(template):
+    """`출력 형식`/`Output format` 블록이 모델에게 요구하는 머리표 [(머리표, 그 줄의 나머지)] — 줄 맨 앞 `이름:` 모양만."""
+    start = max(template.find("출력 형식"), template.find("Output format"))
+    assert start >= 0, "출력 형식 블록이 없습니다"
+    return re.findall(r"^([^\s:]+):[ \t]*(.*)$", template[start:], re.M)
+
+
+class PromptFileTest(unittest.TestCase):
+    """한글 프롬프트 파일(`BLOGGER_PROMPT_KO_AI.md`)의 `text` 블록은 모델에 가는 글이다. 영문 프롬프트는 몇 줄을 고정하는 시험이 있었지만 한글 프롬프트는 `{topic}` 자리표시자
+    말고는 아무것도 지키지 않아 규칙 문장·머리·글 길이·구조·출력 머리표를 지워도 모든 시험이 통과했다(독립 검증 N7: P19·X24~X27·Y01~Y07). 규칙마다 말해야 하는 것을 고정하고,
+    프롬프트가 요구하는 머리표·범위가 러너의 파서와 프로필 게이트가 받아들이는 것과 같은지 대조한다."""
+
+    def setUp(self):
+        self.template = prompt_template()
+        self.rules = numbered_rules(self.template)
+        self.blog = registry.get_blog(registry.load_registry(REAL / "pipeline" / "blogs.json"), "blogger_kcyoon")
+
+    def test_the_registry_points_at_this_prompt_and_the_runner_accepts_it(self):
+        self.assertEqual(self.blog["prompt"], PROMPT_KO)
+        self.assertEqual(self.template.count("{topic}"), 1)
+        self.assertIn("\n주제: {topic}\n", self.template)
+        self.assertNotIn("{{", self.template)
+
+    def test_the_head_names_the_korean_channel_exactly_as_the_registry_labels_it(self):
+        first = next(line for line in self.template.splitlines() if line.strip())
+        self.assertEqual(first, f"[대상: {self.blog['channel']['label']}]")
+        self.assertEqual(first, "[대상: Blogger 한글]")
+
+    def test_the_twelve_numbered_rules_are_all_there_in_order(self):
+        self.assertEqual(list(self.rules), list(range(1, 13)))
+        self.assertIn("작성 규칙:", self.template)
+
+    def test_each_rule_still_says_what_it_is_for(self):
+        for number, fragments in PROMPT_RULES.items():
+            for fragment in fragments:
+                with self.subTest(rule=number, fragment=fragment):
+                    self.assertIn(fragment, self.rules[number])
+
+    def test_the_numbers_the_prompt_asks_for_fit_inside_what_the_profile_gate_accepts(self):
+        """프롬프트가 요구하는 글 길이·제목 길이·소제목 수·라벨 수가 프로필 게이트 범위 안이다(예전 변이: 글 길이 100~200자·제목 100자·라벨 20개가 모두 통과했다)."""
+        low, high = (int(value.replace(",", "")) for value in re.search(r"글 길이: ([\d,]+)~([\d,]+)자", self.rules[2]).groups())
+        self.assertTrue(PROFILE["length"]["min_chars"] <= low < high <= PROFILE["length"]["max_chars"], (low, high, PROFILE["length"]))
+        low, high = (int(value) for value in re.search(r"제목: (\d+)~(\d+)자", self.rules[11]).groups())
+        self.assertTrue(PROFILE["title"]["min_chars"] <= low < high <= PROFILE["title"]["max_chars"], (low, high, PROFILE["title"]))
+        low, high = (int(value) for value in re.search(r"단계 (\d+)~(\d+)개", self.rules[3]).groups())
+        self.assertTrue(low >= PROFILE["structure"]["min_h3"] and low <= high, (low, high, PROFILE["structure"]))      # 소제목이 게이트의 최소(3개)를 채운다
+        self.assertIs(PROFILE["structure"]["require_list"], True)
+        self.assertRegex(self.rules[3], r"점검 목록:.*<ul>")                                                             # 게이트가 요구하는 목록(<ul>)을 프롬프트도 요구한다
+        count = int(re.search(r"라벨: (\d+)개 내외", self.rules[12]).group(1))
+        self.assertTrue(PROFILE["labels"]["min"] <= count <= PROFILE["labels"]["max"], (count, PROFILE["labels"]))
+
+    def test_the_output_format_asks_for_the_markers_the_runner_parser_reads(self):
+        """모델이 프롬프트대로 답하면 러너의 파서(`gates.parse_labeled_post`)가 읽을 수 있어야 한다 — 머리표가 어긋나면(예: `제목:` → `T:`) 매번 형식 오류로 재작성 3회 끝에 탈락한다(독립 검증 Y06)."""
+        markers = output_format_markers(self.template)
+        self.assertEqual([name for name, _rest in markers], list(gates._MARKER_SETS[0][0]))          # 제목:/라벨:/내용: — 파서가 먼저 보는 머리표 묶음
+        lines = self.template.splitlines()
+        self.assertTrue(lines[lines.index("내용:") + 1].startswith("(HTML"))                          # 머리표 다음 줄이 본문 형식 안내(HTML)다
+
+    def test_an_answer_written_exactly_in_the_format_the_prompt_asks_for_parses(self):
+        (title_marker, _), (labels_marker, _), (content_marker, _) = output_format_markers(self.template)
+        answer = f"{title_marker}: 샘플 제목입니다\n{labels_marker}: 라벨하나, 라벨둘, 라벨셋\n{content_marker}:\n<p>본문 문단입니다.</p>\n<h3>소제목</h3>\n<ul><li>항목</li></ul>"
+        self.assertEqual(gates.parse_labeled_post(answer),
+                         {"title": "샘플 제목입니다", "labels": ["라벨하나", "라벨둘", "라벨셋"], "content": "<p>본문 문단입니다.</p>\n<h3>소제목</h3>\n<ul><li>항목</li></ul>"})
+
+    def test_the_english_prompt_asks_for_markers_the_same_parser_reads_too(self):
+        """같은 대조를 영문 프롬프트에도: 두 프롬프트의 머리표가 모두 파서가 아는 묶음 중 하나다."""
+        template = prompt_template(PROMPT_EN)
+        markers = output_format_markers(template)
+        self.assertEqual([name for name, _rest in markers], list(gates._MARKER_SETS[1][0]))
+        (title_marker, _), (labels_marker, _), (content_marker, _) = markers
+        parsed = gates.parse_labeled_post(f"{title_marker}: A sample title\n{labels_marker}: one, two\n{content_marker}:\n<p>Body.</p>")
+        self.assertEqual((parsed["title"], parsed["labels"], parsed["content"]), ("A sample title", ["one", "two"], "<p>Body.</p>"))
+
+    def test_the_helper_finds_a_changed_marker(self):
+        """대조 도우미가 헛돌지 않는다: 머리표를 바꾼 틀에서는 이름이 달라지고 그 틀대로 쓴 답은 파싱되지 못한다."""
+        broken = self.template.replace("제목: (제목)", "T: (제목)")
+        self.assertNotEqual([name for name, _rest in output_format_markers(broken)], list(gates._MARKER_SETS[0][0]))
+        (title_marker, _), (labels_marker, _), (content_marker, _) = output_format_markers(broken)
+        with self.assertRaises(gates.GateError):
+            gates.parse_labeled_post(f"{title_marker}: 제목\n{labels_marker}: 가, 나\n{content_marker}:\n<p>본문</p>")
+
+    def test_the_prompt_file_says_only_the_same_language_check_is_in_code_and_the_operator_checks_the_rest(self):
+        """독립 검증 N2: 예전 문장('제목은 서로의 이력과 비교해 비슷하면 탈락한다')은 번역·복제 금지를 코드가 보장하는 것처럼 읽혔다. 제목 유사도는 같은 언어 안에서만 걸린다."""
+        text = (REAL / PROMPT_KO).read_text(encoding="utf-8")
+        line = next(line for line in text.splitlines() if line.startswith("- 같은 글을 영문·한글로 옮겨 올리지 않는다"))
+        for fragment in ("코드가 막는 것은 같은 언어 안의 제목 중복뿐이다", "`DUP_OTHER`", "코드가 못 잡는다", "눈으로 확인한다"):
+            self.assertIn(fragment, line)
+        self.assertNotIn("제목은 서로의 이력과 비교해 비슷하면(`DUP_OTHER`) 탈락한다.", text)
+        section_6 = text[text.index("## 6."):text.index("## 7.")]
+        item_7 = next(line for line in section_6.splitlines() if line.startswith("7. "))
+        for fragment in ("영문 블로그(macat0722)", "번역·복제", "눈으로 확인", "같은 언어 안에서만"):
+            self.assertIn(fragment, item_7)
+        self.assertIn("같은 언어 안에서만 걸리므로", text[text.index("## 7."):])                           # 7. 사용 시 주의사항의 '게이트가 제목 유사도로도 막는다'도 같은 한계를 말한다
+        self.assertIn("영문 글의 번역·복제는 코드가 못 잡아 운영자가 확인한다", text[:text.index("## 1.")])
+
+    def test_the_operator_docs_carry_the_same_limit(self):
+        def read(relative):
+            return (REAL / relative).read_text(encoding="utf-8")
+        architecture = read("docs/ARCHITECTURE.md")
+        self.assertIn("**영문 글의 번역·복제는 코드가 못 잡는다**", architecture)
+        self.assertIn("글자 유사도라 같은 언어 안에서만 걸린다", architecture)
+        self.assertIn("문자열 비교라 같은 언어 안의 중복만 막는다", architecture)
+        self.assertIn("같은 언어 안에서만", next(line for line in read("docs/SECURITY_GUARDRAILS.md").splitlines() if line.startswith("| G-C5 ")))
+        self.assertIn("영문 블로그(macat0722)의 글을 번역·복제한 글이 아닌지", next(line for line in read("docs/ACTIONS_GUIDE.md").splitlines() if line.startswith("| 6 | 초안 1건을 Blogger 초안함")))
+        self.assertIn("번역·복제", next(line for line in read("HANDLER.md").splitlines() if line.startswith("| 한글 Blogger `blogger_kcyoon`")))
+
+    def test_the_measurement_the_docs_rely_on_still_holds(self):
+        """문서의 '번역 제목은 유사도가 대체로 0.2 이하'가 실제 유사도 함수로 맞는지 — 영·한 번역 쌍은 탈락 기준(0.6)에 한참 못 미치고, 같은 언어의 거의 같은 제목은 걸린다."""
+        pairs = (("A Gentle Evening Routine for Better Sleep", "더 나은 수면을 위한 차분한 저녁 루틴"), ("5 Small Habits for a Calmer Morning", "더 차분한 아침을 위한 작은 습관 5가지"),
+                 ("How to Ask an AI Chatbot Better Questions", "AI 챗봇에게 더 나은 질문을 하는 방법"), ("Organize Your Phone Photos by Date and Album", "스마트폰 사진을 날짜와 앨범으로 정리하는 방법"),
+                 ("Turn On Two-Step Verification for Your Account", "계정의 2단계 인증을 켜는 방법"), ("A Simple Weekly Bathroom Cleaning Plan", "간단한 주간 욕실 청소 계획"))
+        limit = PROFILE["similarity"]["other_blogs"]
+        for english, korean in pairs:
+            with self.subTest(english):
+                self.assertLess(gates.similarity(english, korean), 0.25)
+                self.assertNotIn("DUP_OTHER", codes_of(good_post(korean)[0], other=[english]))        # 번역 제목은 교차 중복 검사를 그냥 지나간다
+        near = ("AI 챗봇에게 더 정확한 답을 받는 질문 요령 5가지", "AI 챗봇에게 더 정확한 답을 받는 질문 요령 다섯 가지")
+        self.assertGreaterEqual(gates.similarity(*near), limit)                                       # 같은 언어에서는 걸린다
+        self.assertIn("DUP_OTHER", codes_of(good_post(near[0])[0], other=[near[1]]))
+
+    def test_the_prompt_and_its_extra_rules_do_not_contradict_each_other_on_the_html_tags(self):
+        """프롬프트(본문 HTML 태그 목록)와 프로필 `prompt_extra`(허용 태그)가 같은 태그를 허용한다 — 한쪽만 고치면 모델이 받는 지시가 어긋난다."""
+        allowed_in_extra = set(re.findall(r"\b(p|h3|ul|ol|li|strong|em|br)\b", re.search(r"허용 태그는 ([^.]*?) 뿐이다", "\n".join(PROFILE["prompt_extra"])).group(1)))
+        in_prompt = set(re.findall(r"<(\w+)>", re.search(r"\(HTML 형식\. ([^)]*)\)", self.template).group(1)))
+        self.assertTrue(in_prompt <= allowed_in_extra, (in_prompt, allowed_in_extra))                # 프롬프트가 권하는 태그는 모두 허용 태그다
+        self.assertEqual(in_prompt, {"p", "h3", "ul", "li", "strong", "em"})
 
 
 if __name__ == "__main__":

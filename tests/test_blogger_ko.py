@@ -565,6 +565,14 @@ class RegistryContractTest(unittest.TestCase):
         self.assertIn("blogger_history.json", excluded)                              # 영문 이력은 이미 빠져 있다(같은 이유)
         self.assertTrue(self.blog["state"]["content_dir"].startswith("_"))           # 밑줄로 시작하는 초안 폴더는 Jekyll 이 처음부터 무시한다
 
+    def test_the_watch_thresholds_are_the_english_blogs_and_the_role_names_the_seventy_thirty_split(self):
+        """독립 검증 N7(변이 X28·X29): 워치독 기준(공백 50시간·연속 실패 3회·미게시 3일)은 영문과 같은 기준이고, `role` 문구는 70:30(보조 30% 이내)을 말한다."""
+        english = registry.get_blog(self.reg, EN)
+        self.assertEqual(self.blog["health"], {"max_gap_hours": 50, "max_failure_streak": 3, "max_unpublished_days": 3})
+        self.assertEqual(self.blog["health"], english["health"])
+        self.assertEqual(self.blog["role"], "일상 속 AI·디지털 도구 활용기(주력) + 집·살림 실사용 기록(보조 30% 이내) (KO)")
+        self.assertTrue(english["role"].endswith("(EN)") and self.blog["role"].endswith("(KO)"))     # 영문과 같은 모양: `<설명> (<언어>)`
+
     def test_the_default_plan_has_no_korean_target_until_it_is_turned_on(self):
         from pipeline import plan
         self.assertEqual([item["key"] for item in plan.build_matrix(self.reg, "blogger", include_off=True)["include"]], [EN, KO])
