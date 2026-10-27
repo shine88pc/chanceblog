@@ -201,13 +201,48 @@ class DraftItemsTest(unittest.TestCase):
         new, kept = inbox.plan_notice(late_items, sorted(early))
         self.assertEqual((new, kept), ([], []))                              # 알림 없음, 표식에서는 빠진다
 
-    def test_pull_request_drafts_get_no_item_here_because_the_pull_rule_already_shows_them(self):
-        self.assertEqual(self.items([h.make_draft(15, pull=True, channel="Chance")]), [])
-        both = [h.make_draft(15, pull=True, channel="Chance"), h.make_draft(16, channel="티스토리")]
-        self.assertEqual([i.id for i in self.items(both)], ["draft:16:wait"])
-        pulls = [h.make_pull(15)]
-        ids = {i.id for i in inbox.build_items(snap(pulls=pulls, drafts=[h.make_draft(15, pull=True, channel="Chance")]))}
-        self.assertEqual(ids, {"pr:15:ready"})                              # 같은 PR 이 두 번 알림이 되지 않는다
+    def test_a_new_pull_request_draft_is_an_action_with_a_pull_link_and_merge_instructions(self):
+        item, = self.items([h.make_draft(15, "[초안][Chance] 승인 대기 글", "Chance", hours=3, pull=True)])
+        self.assertEqual((item.id, item.level), ("draft:15:wait", "action"))
+        self.assertEqual(item.title, "초안 대기 — 승인 대기 글")
+        self.assertEqual(item.detail, "채널 Chance · PR #15 · 검토·병합을 기다립니다")
+        self.assertEqual(item.url, f"{URL}/pull/15")                          # PR 은 /pull/번호 — 이슈 주소로 열면 PR 로 넘어가긴 하지만 링크는 바르게 만든다
+        self.assertEqual(item.since, inbox.parse_time(ago(hours=3)))
+        self.assertIn("병합하면 공개", item.hint)
+        self.assertIn("`폐기`", item.hint)
+        self.assertNotIn("이슈", item.hint + item.detail)                      # 이슈 초안의 '복사해 발행하고 닫기' 안내가 섞이지 않는다
+        self.assertNotIn("복사", item.hint)
+
+    def test_a_stale_pull_request_draft_is_a_check_item_that_says_to_merge_or_discard(self):
+        item, = self.items([h.make_draft(15, "[초안][Chance] 오래된 승인 글", "Chance", hours=100, pull=True)])
+        self.assertEqual((item.id, item.level), ("draft:15:stale", "check"))
+        self.assertEqual(item.title, "초안 3일 넘게 대기 — 오래된 승인 글")
+        self.assertEqual(item.detail, "채널 Chance · PR #15 · 3일 넘게 열려 있음")
+        self.assertEqual(item.url, f"{URL}/pull/15")
+        self.assertIn("병합", item.hint)
+        self.assertIn("`폐기`", item.hint)
+        self.assertNotIn("이슈", item.hint + item.detail)
+
+    def test_an_issue_and_a_pull_request_draft_say_where_they_are_in_their_own_words(self):
+        issue, pull = self.items([h.make_draft(16, channel="티스토리"), h.make_draft(15, channel="Chance", pull=True)])[::-1]
+        self.assertEqual((issue.detail, pull.detail), ("채널 티스토리 · 이슈 #16 · 발행을 기다립니다", "채널 Chance · PR #15 · 검토·병합을 기다립니다"))
+        self.assertEqual((issue.url, pull.url), (f"{URL}/issues/16", f"{URL}/pull/15"))
+        self.assertNotEqual(issue.hint, pull.hint)
+
+    def test_a_pull_request_the_pull_rule_already_alerts_on_gets_no_second_item(self):
+        both = [h.make_draft(15, pull=True, channel="Chance"), h.make_draft(16, channel="티스토리"), h.make_draft(17, pull=True, channel="Chance")]
+        self.assertEqual([i.id for i in inbox.draft_items(both, NOW, URL, acting_pulls={15})], ["draft:16:wait", "draft:17:wait"])
+        self.assertEqual([i.id for i in inbox.draft_items(both, NOW, URL, acting_pulls={15, 17})], ["draft:16:wait"])
+        self.assertEqual([i.id for i in inbox.draft_items(both, NOW, URL)], ["draft:15:wait", "draft:16:wait", "draft:17:wait"])      # 기본값: 모두 만든다
+
+    def test_the_skip_list_is_for_pull_requests_only_an_issue_with_the_same_number_keeps_its_item(self):
+        # 이슈와 PR 은 번호를 함께 쓰므로 실제로는 겹치지 않는다 — 종류를 번호만으로 가리지 않는다는 방어
+        self.assertEqual([i.id for i in inbox.draft_items([h.make_draft(15)], NOW, URL, acting_pulls={15})], ["draft:15:wait"])
+
+    def test_a_pull_request_draft_keeps_no_item_when_it_is_closed_discarded_or_from_a_stranger(self):
+        drafts = [h.make_draft(1, pull=True, state="closed"), h.make_draft(2, pull=True, extra_labels=("폐기",)),
+                  h.make_draft(3, pull=True, login="stranger", assoc="NONE"), h.make_draft(4, pull=True, draft_label=False)]
+        self.assertEqual(self.items(drafts), [])
 
     def test_closed_discarded_and_stranger_drafts_make_no_item(self):
         drafts = [h.make_draft(1, state="closed"), h.make_draft(2, extra_labels=("폐기",)), h.make_draft(3, login="stranger", assoc="NONE"),
@@ -264,6 +299,93 @@ class DraftItemsTest(unittest.TestCase):
         self.assertEqual(inbox.SOURCE_PREFIXES["drafts"], ("draft:",))
         item, = inbox.failure_items([("drafts", "HTTP 500")], URL)
         self.assertEqual((item.id, item.level, item.title), ("source:drafts", "check", "조회 실패 — 열린 초안(이슈·PR) 목록"))
+
+
+class PullRequestDraftAlertTest(unittest.TestCase):
+    """초안 PR 한 건은 한 줄만 남는다: 열린 PR 규칙이 이미 action 이면 그 줄, 아니면 초안 항목.
+    저장소 기본 토큰이 연 PR 은 검사가 돌지 않아 열린 PR 규칙으로는 알림 없는 '검사 결과 없음'(check)으로 남기 때문이다(GitHub 규칙)."""
+
+    def ids(self, pulls=(), drafts=(), **kw):
+        return {i.id for i in inbox.build_items(snap(pulls=list(pulls), drafts=list(drafts), **kw))}
+
+    def pr_draft(self, number=15, **kw):
+        kw.setdefault("hours", 3)
+        return h.make_draft(number, "[초안][Chance] 승인 대기 글", "Chance", pull=True, **kw)
+
+    def test_a_pull_request_without_checks_is_announced_by_the_draft_item_and_the_silent_pull_item_goes(self):
+        alone = inbox.build_items(snap(pulls=[h.make_pull(15, ci="none")]))
+        self.assertEqual([(i.id, i.level) for i in alone], [("pr:15:no_ci", "check")])                # 초안 표시가 없으면 알림 없는 확인 항목
+        items = inbox.build_items(snap(pulls=[h.make_pull(15, ci="none")], drafts=[self.pr_draft()]))
+        self.assertEqual([(i.id, i.level) for i in items], [("draft:15:wait", "action")])
+        self.assertEqual(inbox.plan_notice(items, None), (["draft:15:wait"], ["draft:15:wait"]))
+
+    def test_every_pull_state_that_is_not_an_action_is_replaced_by_the_draft_item(self):
+        states = {"no_ci": h.make_pull(15, ci="none"), "pending": h.make_pull(15, ci="pending"), "unknown": h.make_pull(15, ci="unknown"),
+                  "blocked": h.make_pull(15, state="blocked"), "calculating": h.make_pull(15, mergeable=None), "error": dict(h.make_pull(15), error="HTTP 500")}
+        for name, pull in states.items():
+            alone = {i.level for i in inbox.build_items(snap(pulls=[pull]))}
+            self.assertNotIn("action", alone, name)                                                # 대조: 초안 표시가 없으면 어느 것도 알림이 아니다
+            self.assertEqual(self.ids([pull], [self.pr_draft()]), {"draft:15:wait"}, name)
+
+    def test_every_pull_state_the_pull_rule_alerts_on_stays_and_the_draft_item_steps_aside(self):
+        states = {"ready": h.make_pull(15), "conflict": h.make_pull(15, mergeable=False, state="dirty"), "ci_fail": h.make_pull(15, ci="fail")}
+        for name, pull in states.items():
+            self.assertEqual(self.ids([pull], [self.pr_draft()]), {f"pr:15:{name}"}, name)         # 같은 PR 이 두 번 알림이 되지 않는다
+            self.assertEqual(self.ids([pull], [self.pr_draft(hours=100)]), {f"pr:15:{name}"}, name)
+
+    def test_a_github_draft_pull_request_or_an_unlisted_one_is_still_announced(self):
+        # 열린 PR 규칙은 GitHub 의 draft 상태 PR 을 건너뛰므로 초안 항목이 유일한 알림이다
+        self.assertEqual(self.ids([h.make_pull(15, draft=True)], [self.pr_draft()]), {"draft:15:wait"})
+        self.assertEqual(self.ids([], [self.pr_draft()]), {"draft:15:wait"})
+
+    def test_only_the_draft_pull_requests_own_item_is_replaced(self):
+        pulls = [h.make_pull(15, ci="none"), h.make_pull(16, ci="none"), h.make_pull(17)]
+        self.assertEqual(self.ids(pulls, [self.pr_draft(15)]), {"draft:15:wait", "pr:16:no_ci", "pr:17:ready"})
+
+    def test_an_issue_draft_never_replaces_a_pull_item_even_with_the_same_number(self):
+        self.assertEqual(self.ids([h.make_pull(15, ci="none")], [h.make_draft(15)]), {"draft:15:wait", "pr:15:no_ci"})
+
+    def test_a_pull_request_that_is_not_a_pending_draft_keeps_its_pull_item(self):
+        for kw in ({"state": "closed"}, {"extra_labels": ("폐기",)}, {"login": "stranger", "assoc": "NONE"}, {"draft_label": False}):
+            draft = h.make_draft(15, "[초안][Chance] 글", "Chance", pull=True, **kw)
+            self.assertEqual(self.ids([h.make_pull(15, ci="none")], [draft]), {"pr:15:no_ci"}, kw)
+
+    def test_a_stranger_pull_request_with_the_label_is_never_hidden_or_announced_as_a_draft(self):
+        # 라벨은 누구든 흉내 낼 수 있는 표시다: 낯선 작성자의 포크 PR 은 라벨이 있어도 '외부 사용자의 PR' 확인 항목 그대로다
+        fork = h.make_pull(15, login="stranger", assoc="NONE", fork=True)
+        draft = h.make_draft(15, "[초안][Chance] 글", "Chance", pull=True, login="stranger", assoc="NONE")
+        self.assertEqual({(i.id, i.level) for i in inbox.build_items(snap(pulls=[fork], drafts=[draft]))}, {("pr:15:external", "check")})
+
+    def test_a_stale_pull_request_draft_is_one_check_line_and_not_a_new_alert(self):
+        pull = h.make_pull(15, ci="none", created=ago(hours=100))
+        items = inbox.build_items(snap(pulls=[pull], drafts=[self.pr_draft(hours=100)]))
+        self.assertEqual([(i.id, i.level) for i in items], [("draft:15:stale", "check")])
+        self.assertEqual(inbox.plan_notice(items, ["draft:15:wait"]), ([], []))
+
+    def test_when_the_checks_finish_the_pull_rule_takes_over_and_that_is_announced_as_a_new_state(self):
+        waiting = inbox.build_items(snap(pulls=[h.make_pull(15, ci="pending")], drafts=[self.pr_draft()]))
+        _, kept = inbox.plan_notice(waiting, None)
+        self.assertEqual(kept, ["draft:15:wait"])
+        done = inbox.build_items(snap(pulls=[h.make_pull(15)], drafts=[self.pr_draft()]))
+        self.assertEqual(inbox.plan_notice(done, kept), (["pr:15:ready"], ["pr:15:ready"]))
+
+    def test_a_failed_pull_lookup_still_announces_the_draft(self):
+        for source in ("pulls", "pull_details"):
+            items = inbox.build_items(snap(pulls=[], drafts=[self.pr_draft()], failures=[(source, "HTTP 500")]))
+            self.assertIn(("draft:15:wait", "action"), [(i.id, i.level) for i in items], source)
+
+    def test_the_result_does_not_depend_on_input_order_or_repeats(self):
+        pulls = [h.make_pull(n, ci="none") for n in (17, 15, 16)]
+        drafts = [self.pr_draft(16), self.pr_draft(15), self.pr_draft(15)]
+        first = inbox.build_items(snap(pulls=pulls, drafts=drafts))
+        self.assertEqual([i.id for i in first], ["draft:15:wait", "draft:16:wait", "pr:17:no_ci"])
+        self.assertEqual(first, inbox.build_items(snap(pulls=list(reversed(pulls)), drafts=list(reversed(drafts)))))
+
+    def test_the_pull_helper_reads_only_pull_item_ids(self):
+        read = inbox._pull_number
+        item = lambda item_id: inbox.Item(item_id, "info", "x")
+        self.assertEqual([read(item(i)) for i in ("pr:15:ready", "pr:7:no_ci", "pr:x:ready", "draft:15:wait", "pr:15", "pr:15:a:b", "run:15:x", "pr::x")],
+                         [15, 7, None, None, None, None, None, None])
 
 
 class DraftNoticeTest(unittest.TestCase):
@@ -403,6 +525,13 @@ class DraftBoardTest(unittest.TestCase):
         note = next(line for line in board.splitlines() if "Blogger 대시보드" in line)
         self.assertNotIn("](", note)
         self.assertNotIn("blogger.com", board)
+
+    def test_the_model_note_says_how_an_issue_draft_and_a_pull_request_draft_each_leave_the_table(self):
+        board = self.board(histories={"blogger_macat": []})
+        note = next(line for line in board.splitlines() if "라벨 `초안`과" in line)
+        self.assertEqual(note, f"- {inbox.BOARD_NOTE_MODEL}")
+        for phrase in ("열린 이슈·PR 입니다", "이슈 초안은 발행한 뒤 닫고", "PR 초안은 병합하면 빠지며", "라벨 `폐기`를 붙이거나 닫으세요", "하루에 한 번 바뀝니다"):
+            self.assertIn(phrase, note, phrase)
 
     def test_the_blogger_note_is_left_out_when_no_blogger_channel_exists(self):
         blogs = [b for b in blogs4() if b["platform"] != "blogger"]
@@ -1012,18 +1141,50 @@ class RunWithDraftsTest(unittest.TestCase):
         self.assertEqual(self.inbox_issue(fake)["number"] in fake.comments, False)
         self.assertEqual(table_rows(body)[2][:3], ["티스토리", "1", "4일"])
 
-    def test_a_pull_request_draft_is_counted_but_only_the_pull_rule_alerts(self):
-        pull = h.make_draft_raw(15, "[초안][Chance] 승인 대기 글", "Chance", hours=3, pull=True, login="octo", assoc="OWNER")
-        fake, root = self.world([pull])
-        fake.pulls = [h.make_pull_raw(15, title="[초안][Chance] 승인 대기 글", sha="c" * 40)]
+    def pull_world(self, checks, **pull_kw):
+        """Chance 승인 흐름의 초안 PR 한 건(작성자 github-actions 봇)과 그 PR 의 열린 PR 목록·상세·검사 기록."""
+        draft = h.make_draft_raw(15, "[초안][Chance] 승인 대기 글", "Chance", hours=3, pull=True)
+        fake, root = self.world([draft])
+        fake.pulls = [h.make_pull_raw(15, title="[초안][Chance] 승인 대기 글", sha="c" * 40, login=h.BOT, user_type="Bot", assoc="CONTRIBUTOR", **pull_kw)]
         fake.details = {15: {"mergeable": True, "mergeable_state": "clean"}}
-        fake.check_runs = {"c" * 40: [h.make_check("validate")]}
+        fake.check_runs = {"c" * 40: checks}
+        return fake, root
+
+    def test_a_pull_request_draft_the_pull_rule_alerts_on_is_counted_but_alerted_only_once(self):
+        fake, root = self.pull_world([h.make_check("validate")])
         self.run_script(fake, root)
         body = self.body(fake)
         self.assertEqual(table_rows(body)[0][:3], ["Chance", "1", "1일 미만"])
         self.assertEqual(body.count("PR #15 병합하면 됩니다"), 1)
         self.assertNotIn("초안 대기", body)
         self.assertEqual(inbox.parse_marker(body).items, ("pr:15:ready",))
+
+    def test_a_pull_request_draft_without_checks_is_announced_as_a_draft_with_one_comment(self):
+        # 저장소 기본 토큰이 연 PR 은 검사가 돌지 않는다 — 열린 PR 규칙만으로는 알림 없는 '검사 결과 없음'이 되던 경우
+        fake, root = self.pull_world([])
+        self.assertEqual(self.run_script(fake, root), 0)
+        body = self.body(fake)
+        self.assertIn("초안 대기 — 승인 대기 글", body)
+        self.assertIn("PR #15", body)
+        self.assertIn(f"{URL}/pull/15", body)
+        self.assertNotIn("검사 결과 없음", body)                                   # 같은 PR 의 열린 PR 줄은 빠졌다
+        self.assertEqual(body.count("#15"), body.count("PR #15") + body.count("[#15 "))     # 번호는 PR 로만 나온다(이슈 #15 로 읽히지 않는다)
+        self.assertEqual(table_rows(body)[0][:3], ["Chance", "1", "1일 미만"])
+        self.assertEqual(inbox.parse_marker(body).items, ("draft:15:wait",))
+        comments = fake.comments[self.inbox_issue(fake)["number"]]
+        self.assertEqual(len(comments), 1)
+        self.assertTrue(comments[0].startswith("@octo "))
+        self.assertIn("초안 대기 — 승인 대기 글", comments[0])
+        before = len(fake.writes())
+        self.run_script(fake, root)
+        self.assertEqual(len(fake.writes()), before)                              # 두 번째 점검은 아무것도 쓰지 않는다
+
+    def test_a_github_draft_state_pull_request_with_the_label_is_announced(self):
+        fake, root = self.pull_world([], draft=True)
+        self.run_script(fake, root)
+        body = self.body(fake)
+        self.assertIn("초안 대기 — 승인 대기 글", body)
+        self.assertEqual(inbox.parse_marker(body).items, ("draft:15:wait",))
 
     def test_a_failed_draft_lookup_shows_in_the_board_and_as_a_check_item_and_keeps_the_marker(self):
         fake, root = self.world([h.make_draft_raw(41)])
@@ -1471,6 +1632,21 @@ class DraftGuideMatchesCodeTest(unittest.TestCase):
         items = inbox.draft_items([h.make_draft(41, hours=30), h.make_draft(43, hours=100)], NOW, URL)
         wait, stale = sorted(items, key=lambda item: item.id)
         self.assertEqual((wait.id, wait.level, stale.id, stale.level), ("draft:41:wait", "action", "draft:43:stale", "check"))
+
+    def test_the_pull_request_draft_rule_in_the_guide_is_what_the_code_does(self):
+        rows = [line for line in self.doc.splitlines() if line.startswith("| 초안(PR) |")]
+        self.assertEqual(len(rows), 1)
+        for phrase in ("열린 PR 줄(`pr:<번호>:…`)은 빼서", "`draft:<번호>:wait`", "`/pull/번호`", "검사 결과 없음"):
+            self.assertIn(phrase, rows[0], phrase)
+        for phrase in ("`pr:<번호>:ready`·`conflict`·`ci_fail`", "새 id라 **한 번 더** 알립니다", "초안 PR은 한 줄만 남깁니다"):
+            self.assertIn(phrase, self.doc, phrase)
+        self.assertIn("초안 PR은 한 줄만 남긴다", self.arch)
+        # 문서가 action 으로 꼽은 세 상태가 실제로 열린 PR 규칙의 action 이다(그 밖의 상태는 action 이 아니다)
+        made = {i.id.rsplit(":", 1)[1] for i in inbox.pull_items([h.make_pull(15), h.make_pull(16, mergeable=False, state="dirty"), h.make_pull(17, ci="fail")], NOW, URL)
+                if i.level == "action"}
+        self.assertEqual(made, {"ready", "conflict", "ci_fail"})
+        quiet = {i.id.rsplit(":", 1)[1] for i in inbox.pull_items([h.make_pull(18, ci="none"), h.make_pull(19, ci="pending"), h.make_pull(20, state="blocked")], NOW, URL)}
+        self.assertEqual(quiet, {"no_ci", "pending", "blocked"})
 
     def test_the_event_types_and_the_run_titles_are_in_the_guide(self):
         wf = load_workflow()
