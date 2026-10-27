@@ -5,12 +5,14 @@
 기존 모음 시험(test_ops_inbox.py·test_ops_inbox_script.py)은 board 인자·초안 읽기가 생기기 전과 같은 입력에서 같은 결과를 내는지의 회귀 시험이다.
 """
 import copy
+import inspect
 import json
 import random
 import re
 import tempfile
 import unittest
 import urllib.parse
+from unittest import mock
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -109,6 +111,16 @@ class DraftModelTest(unittest.TestCase):
     def test_a_channel_label_without_a_name_is_no_channel(self):
         raw = h.make_draft_raw(5, channel=None, extra_labels=("채널:", "채널:  "))
         self.assertIsNone(inbox.normalize_draft(raw)["channel"])
+
+    def test_only_a_label_that_starts_with_the_channel_prefix_names_a_channel(self):
+        # 라벨 이름 한가운데·끝에 '채널:' 이 든 것은 채널 라벨이 아니다(포함 검사로 읽으면 엉뚱한 글자가 채널 이름이 된다)
+        for odd in ("비채널:티스토리", "x채널:Chance", "채널 :티스토리", "[채널:티스토리]", "채널-티스토리", "티스토리채널:"):
+            raw = h.make_draft_raw(5, channel=None, extra_labels=(odd,))
+            self.assertIsNone(inbox.normalize_draft(raw)["channel"], odd)
+        raw = h.make_draft_raw(5, channel=None, extra_labels=("비채널:가나", "채널:다라", "x채널:마바"))
+        self.assertEqual(inbox.normalize_draft(raw)["channel"], "다라")
+        raw = h.make_draft_raw(5, channel=None, extra_labels=("가채널:가", "채널:나"))              # 글자 순으로 앞서는 가짜가 진짜를 밀어내지 못한다
+        self.assertEqual(inbox.normalize_draft(raw)["channel"], "나")
 
     def test_normalize_rejects_what_has_no_usable_number(self):
         for bad in (None, "x", [], {}, {"number": "7"}, {"number": True}, {"number": 0}, {"number": -3}, {"number": 1.5}):
@@ -267,9 +279,36 @@ class DraftItemsTest(unittest.TestCase):
             item, = self.items([h.make_draft(1, title, "티스토리")])
             self.assertEqual(item.title, f"초안 대기 — {shown}", title)
 
-    def test_a_draft_without_a_channel_label_says_so(self):
+    def test_a_draft_without_a_channel_label_says_so_once(self):
         item, = self.items([h.make_draft(1, "제목", None)])
-        self.assertEqual(item.detail, "채널 채널 표시 없음 · 이슈 #1 · 발행을 기다립니다")
+        self.assertEqual(item.detail, "채널 표시 없음 · 이슈 #1 · 발행을 기다립니다")
+        stale, = self.items([h.make_draft(2, "제목", None, hours=100)])
+        self.assertEqual(stale.detail, "채널 표시 없음 · 이슈 #2 · 3일 넘게 열려 있음")
+        pull, = self.items([h.make_draft(3, "제목", None, pull=True)])
+        self.assertEqual(pull.detail, "채널 표시 없음 · PR #3 · 검토·병합을 기다립니다")
+        for shown in (item, stale, pull):
+            self.assertNotIn("채널 채널", shown.detail)                                   # '채널' 이 겹쳐 보이지 않는다
+        labelled, = self.items([h.make_draft(4, "제목", "티스토리")])
+        self.assertEqual(labelled.detail, "채널 티스토리 · 이슈 #4 · 발행을 기다립니다")      # 라벨이 있으면 예전 그대로
+        odd, = self.items([h.make_draft(5, "제목", "\\")])                                   # 무력화하면 사라지는 글자뿐인 라벨은 없는 것과 같다
+        self.assertEqual(odd.detail, "채널 표시 없음 · 이슈 #5 · 발행을 기다립니다")
+
+    def test_the_skip_list_is_empty_by_default_so_no_pull_request_number_is_skipped(self):
+        self.assertEqual(inspect.signature(inbox.draft_items).parameters["acting_pulls"].default, ())
+        numbers = list(range(1, 130)) + [255, 300, 401]                                       # 7·77 처럼 눈에 띄는 번호도 빠짐없이
+        drafts = [h.make_draft(n, pull=True, channel="Chance") for n in numbers]
+        self.assertEqual([i.id for i in inbox.draft_items(drafts, NOW, URL)], [f"draft:{n}:wait" for n in numbers])
+        self.assertEqual([i.id for i in inbox.draft_items(drafts, NOW, URL, ())], [f"draft:{n}:wait" for n in numbers])
+
+    def test_a_title_ending_in_a_backslash_cannot_break_the_bold_title(self):
+        for title in ("[초안][티스토리] 제목\\", "[초안][티스토리] 제목 \\ \\", "[초안][티스토리] 제목\\\\\\"):
+            item, = self.items([h.make_draft(1, title, "티스토리")])
+            self.assertEqual(item.title, "초안 대기 — 제목", title)
+            self.assertTrue(inbox.render([item], URL).count("\n- **초안 대기 — 제목**\n") == 1, title)       # 굵은 글씨의 닫는 ** 가 이스케이프되지 않는다
+        only, = self.items([h.make_draft(2, "[초안][티스토리] \\", "티스토리")])
+        self.assertEqual(only.title, "초안 대기 — 제목 없음")
+        middle, = self.items([h.make_draft(3, "[초안][티스토리] 경로 C:\\temp\\글", "티스토리")])
+        self.assertEqual(middle.title, "초안 대기 — 경로 C:\\temp\\글")                         # 가운데 역슬래시는 그대로
 
     def test_external_text_cannot_mention_inject_html_forge_commands_or_leak_secrets(self):
         item, = self.items([h.make_draft(41, "[초안][티스토리] " + EVIL, "티스토리" + EVIL)])
@@ -388,6 +427,35 @@ class PullRequestDraftAlertTest(unittest.TestCase):
                          [15, 7, None, None, None, None, None, None])
 
 
+class TrailingBackslashTest(unittest.TestCase):
+    """글 끝의 역슬래시는 바로 뒤에 붙는 마크다운 기호(링크 글 뒤의 ']'·굵은 글씨의 '**')를 이스케이프해 링크·굵게를 깨뜨린다 — ext() 가 지운다.
+    PR 제목과 초안 제목이 같은 처리를 받는다(초안만 따로 고치지 않는다)."""
+
+    def test_ext_drops_backslashes_and_spaces_at_the_end_only(self):
+        cases = {"제목\\": "제목", "제목\\\\\\": "제목", "제목 \\": "제목", "제목 \\ \\": "제목", "제목\\\n": "제목", "\\": "", " \\ ": "", "": "",
+                 "a\\b": "a\\b", "a\\b\\": "a\\b", "C:\\dir\\": "C:\\dir", "\\앞": "\\앞", "끝 ": "끝"}
+        for raw, shown in cases.items():
+            self.assertEqual(inbox.ext(raw), shown, repr(raw))
+        self.assertEqual(inbox.ext(None), "")
+
+    def test_a_clipped_text_ends_with_the_ellipsis_and_keeps_a_backslash_in_the_middle(self):
+        self.assertEqual(inbox.ext("가" * 5 + "\\", 6), "가" * 5)                       # 딱 맞으면 자르지 않고 끝의 역슬래시만 지운다
+        self.assertEqual(inbox.ext("가" * 4 + "\\" + "나" * 3, 6), "가" * 4 + "\\…")   # 줄이면 '…' 로 끝나므로 가운데 역슬래시는 그대로
+        self.assertEqual(inbox.ext("가" * 10 + "\\", 6), "가" * 5 + "…")
+
+    def test_the_open_pull_rule_and_the_draft_rule_treat_titles_the_same_way(self):
+        pull, = inbox.pull_items([h.make_pull(5, title="고치기\\")], NOW, URL)
+        self.assertTrue(pull.title.endswith("— 고치기"), pull.title)
+        self.assertEqual(inbox.render([pull], URL).count(f"- **{pull.title}**\n"), 1)
+        draft, = inbox.draft_items([h.make_draft(6, "[초안][티스토리] 고치기\\", "티스토리")], NOW, URL)
+        self.assertTrue(draft.title.endswith("— 고치기"), draft.title)
+
+    def test_the_other_neutralizing_steps_still_apply_next_to_the_backslash_rule(self):
+        self.assertEqual(inbox.ext("[x]\\"), chr(0xFF3B) + "x" + chr(0xFF3D))              # 대괄호는 전각으로, 끝 역슬래시는 지움
+        self.assertEqual(inbox.ext("@a <b> &c\\"), chr(0xFF20) + "a " + chr(0xFF1C) + "b> " + chr(0xFF06) + "c")
+        self.assertNotIn("\\", inbox.ext("x" * 300 + "\\", 50))
+
+
 class DraftNoticeTest(unittest.TestCase):
     """새 초안만 코멘트로 알리는 규칙(기존 표식 방식 그대로)."""
 
@@ -404,6 +472,12 @@ class DraftNoticeTest(unittest.TestCase):
         new, kept_after = inbox.plan_notice(gone, kept)
         self.assertEqual((new, kept_after), ([], []))
         self.assertEqual(inbox.plan_notice(listed, kept_after)[0], ["draft:41:wait"])
+
+    def test_reopening_alerts_again_only_for_a_draft_that_is_still_within_the_three_days(self):
+        young, old = h.make_draft(41, hours=30), h.make_draft(42, hours=100)             # 닫았다 다시 열어도 생성 시각(created_at)은 그대로다
+        items = inbox.build_items(snap(drafts=[young, old]))
+        self.assertEqual(inbox.plan_notice(items, [])[0], ["draft:41:wait"])             # 젊은 초안만 새 알림
+        self.assertEqual([(i.id, i.level) for i in items if i.id.startswith("draft:")], [("draft:41:wait", "action"), ("draft:42:stale", "check")])
 
     def test_a_failed_draft_lookup_keeps_the_announced_ids_so_recovery_is_silent(self):
         listed = inbox.build_items(snap(drafts=[h.make_draft(41)]))
@@ -546,6 +620,72 @@ class DraftBoardTest(unittest.TestCase):
             self.assertIn("Blogger 대시보드", self.board(blogs=blogs4(blogger_mode=mode), histories={"blogger_macat": []}), mode)
         self.assertEqual(inbox.board_rows(snap(blogs=blogs4(blogger_mode="off")))[2], False)
         self.assertEqual(inbox.board_rows(snap(blogs=blogs4(blogger_mode="draft"), histories={"blogger_macat": []}))[2], True)
+
+    # --- 읽는 상한(N+)
+    CAP = [(inbox.DRAFTS_CAP_NOTE_ID, "열린 초안(이슈·PR)이 300건을 넘을 수 있어 처음 300건만 셉니다.")]
+
+    def test_a_list_cut_at_the_reading_cap_marks_every_github_count_as_at_least(self):
+        drafts = [h.make_draft(n, "[초안][티스토리] 글 %d" % n, "티스토리") for n in (41, 42, 43)] + [h.make_draft(51, channel="새채널"), h.make_draft(52, channel=None)]
+        board = self.board(drafts=drafts, notes=self.CAP, histories={"blogger_macat": []})
+        rows = table_rows(board)
+        self.assertEqual([r[0] for r in rows], ["Chance", "Blogger", "티스토리", "네이버", "새채널 (미등록)", "(채널 표시 없음)"])
+        self.assertEqual([r[1] for r in rows], ["자동 공개", "0", "3+", "정지", "1+", "1+"])        # GitHub 에서 센 칸만 '+', 나머지는 그대로
+        plain = table_rows(self.board(drafts=drafts, histories={"blogger_macat": []}))
+        self.assertEqual([r[1] for r in plain], ["자동 공개", "0", "3", "정지", "1", "1"])           # 상한 표시가 없으면 '+' 도 없다
+
+    def test_a_full_first_300_reads_as_300_plus_and_fewer_than_that_is_exact(self):
+        many = [h.make_draft(n, channel="티스토리") for n in range(100, 400)]
+        self.assertEqual(len(many), 300)
+        self.assertEqual(table_rows(self.board(drafts=many, notes=self.CAP, histories={"blogger_macat": []}))[2][1], "300+")
+        self.assertEqual(table_rows(self.board(drafts=many[:299], histories={"blogger_macat": []}))[2][1], "299")
+
+    def test_github_channels_without_a_draft_say_0_plus_when_the_list_was_cut(self):
+        board = self.board(blogs=blogs4("pr"), notes=self.CAP, histories={"blogger_macat": []})
+        self.assertEqual([r[1] for r in table_rows(board)], ["0+", "0", "0+", "정지"])           # Chance(승인 흐름)·티스토리는 '0+', Blogger(이력)·정지는 그대로
+
+    def test_a_stopped_channel_with_drafts_keeps_its_note_after_the_plus(self):
+        blogs = blogs4()
+        drafts = [h.make_draft(61, channel="네이버"), h.make_draft(62, channel="네이버")]
+        rows = table_rows(self.board(blogs=blogs, drafts=drafts, notes=self.CAP, histories={"blogger_macat": []}))
+        self.assertEqual(rows[3][1], "2+ (정지 중)")
+
+    def test_the_blogger_estimate_never_gets_a_plus_unless_github_drafts_share_the_channel(self):
+        history = [h.make_entry("draft_uploaded", ago(days=2)), h.make_entry("draft_uploaded", ago(days=3))]
+        rows = table_rows(self.board(notes=self.CAP, histories={"blogger_macat": history}))
+        self.assertEqual(rows[1][1], "2 (대략)")                                                # 이력에서 센 값은 GitHub 목록의 상한과 무관하다
+        mixed = table_rows(self.board(drafts=[h.make_draft(71, channel="Blogger")], notes=self.CAP, histories={"blogger_macat": history}))
+        self.assertEqual(mixed[1][1], "3+ (대략)")                                              # 같은 채널 이름의 GitHub 초안이 섞이면 그쪽이 더 있을 수 있다
+
+    def test_the_rolled_up_row_of_extra_channels_also_gets_the_plus(self):
+        drafts = [h.make_draft(100 + n, channel="가%02d" % n) for n in range(20)]
+        rows = table_rows(self.board(drafts=drafts, notes=self.CAP, histories={"blogger_macat": []}))
+        self.assertTrue(rows[-1][0].startswith("그 밖의 채널"), rows[-1])
+        self.assertRegex(rows[-1][1], r"^\d+\+$")
+        for row in rows[4:-1]:
+            self.assertEqual(row[1], "1+", row)
+        self.assertNotIn("+", table_rows(self.board(drafts=drafts, histories={"blogger_macat": []}))[-1][1])
+
+    def test_a_note_line_explains_the_plus_only_when_the_list_was_cut(self):
+        capped = self.board(notes=self.CAP, histories={"blogger_macat": []})
+        self.assertEqual(capped.count(f"- {inbox.BOARD_NOTE_CAP}\n"), 1)
+        self.assertIn("`+` 가 붙은 칸은 그 이상일 수 있고", capped)
+        self.assertLess(capped.index(inbox.BOARD_NOTE_MODEL), capped.index(inbox.BOARD_NOTE_CAP))
+        self.assertLess(capped.index(inbox.BOARD_NOTE_CAP), capped.index("휴대폰에서 거르기"))
+        self.assertNotIn(inbox.BOARD_NOTE_CAP, self.board(histories={"blogger_macat": []}))
+
+    def test_the_cut_is_read_from_the_note_id_and_garbage_notes_do_not_matter(self):
+        self.assertEqual(inbox.DRAFTS_CAP_NOTE_ID, "drafts_cap")                                # 스크립트가 남기는 참고 항목의 id 와 같은 글자
+        self.assertTrue(inbox._drafts_capped(snap(notes=[("pulls_cap", "x"), ["drafts_cap", "y"]])))
+        for notes in ([], [("pulls_cap", "x")], [None, "drafts_cap", (), 5, ("note", "drafts_cap")], None, "drafts_cap", 7):
+            self.assertFalse(inbox._drafts_capped(snap(notes=notes)), notes)
+            inbox.draft_board(snap(blogs=blogs4(), notes=notes))                              # 이상한 notes 가 표를 죽이지 않는다
+
+    def test_a_backslash_at_the_end_of_a_title_cannot_break_the_table_link(self):
+        for title in ("[초안][Chance] 제목\\", "[초안][Chance] 제목 \\ ", "[초안][Chance] 제목\\\\\\"):
+            board = self.board(blogs=blogs4("pr"), drafts=[h.make_draft(15, title, "Chance", pull=True)], histories={"blogger_macat": []})
+            self.assertEqual(table_rows(board)[0][3], f"[#15 제목]({URL}/pull/15)", title)
+        board = self.board(blogs=blogs4("pr"), drafts=[h.make_draft(15, "[초안][Chance] \\", "Chance", pull=True)], histories={"blogger_macat": []})
+        self.assertEqual(table_rows(board)[0][3], f"[#15 제목 없음]({URL}/pull/15)")
 
     # --- 조회 실패
     def test_a_failed_draft_lookup_marks_the_github_rows_but_not_the_static_ones(self):
@@ -1186,6 +1326,82 @@ class RunWithDraftsTest(unittest.TestCase):
         self.assertIn("초안 대기 — 승인 대기 글", body)
         self.assertEqual(inbox.parse_marker(body).items, ("draft:15:wait",))
 
+    BOARD_NOTE = "[참고] 초안 현황 표를 만들지 못해 이번 점검에서는 뺍니다(점검 결과에는 영향 없음)"
+
+    def board_notes(self):
+        return [line for line in self.out if line.startswith("[참고] 초안 현황 표를 만들지 못해")]
+
+    def unhashable_key_registry(self):
+        registry = json.loads(h.CHANNEL_REGISTRY)
+        for blog in registry["blogs"]:
+            if blog["platform"] == "blogger":
+                blog["key"] = ["blogger_macat"]          # 레지스트리 모양 오류(CI 의 검증이 막는 값) — 표 만들기는 이것에 죽지 않아야 한다
+        return json.dumps(registry, ensure_ascii=False)
+
+    def test_a_healthy_run_prints_no_board_note(self):
+        fake, root = self.world([h.make_draft_raw(41)])
+        self.run_script(fake, root)
+        self.assertEqual(self.board_notes(), [])
+        self.assertIn("## 초안 현황", self.body(fake))
+
+    def test_a_board_that_cannot_be_built_leaves_only_the_board_out_and_the_run_goes_on(self):
+        fake, root = self.world([h.make_draft_raw(41, "[초안][티스토리] 맛집 지도 만드는 법", "티스토리", hours=30)], registry=self.unhashable_key_registry())
+        self.assertEqual(self.run_script(fake, root), 0)                                  # 예전에는 TypeError 로 모음 전체가 죽었다
+        body = self.body(fake)
+        self.assertNotIn("## 초안 현황", body)                                              # 표만 빠졌다
+        self.assertIn("초안 대기 — 맛집 지도 만드는 법", body)                               # 항목·알림은 그대로
+        self.assertIn("draft:41:wait", inbox.parse_marker(body).items)
+        self.assertEqual(len(fake.comments[self.inbox_issue(fake)["number"]]), 1)
+        notes = self.board_notes()
+        self.assertEqual(len(notes), 1)
+        self.assertTrue(notes[0].startswith(self.BOARD_NOTE), notes[0])
+        self.assertIn("unhashable", notes[0])
+        self.assertNotIn("## 초안 현황", self.summary.read_text(encoding="utf-8"))           # 실행 요약에서도 같다
+        self.assertTrue(any(line.startswith("[라벨] ") for line in self.out))                # 라벨 만들기도 이어졌다
+        writes = len(fake.writes())
+        self.run_script(fake, root)
+        self.assertEqual(len(fake.writes()), writes)                                      # 다음 점검도 조용하다
+        self.assertEqual(len(self.board_notes()), 2)                                       # 점검마다 한 줄
+
+    def test_any_error_from_the_board_is_survived_and_told_on_one_short_line(self):
+        for error in (ValueError("boom"), RuntimeError("줄 하나\n줄 둘 " + "가" * 400), KeyError("k"), TypeError("x")):
+            fake, root = self.world([h.make_draft_raw(41)])
+            self.out.clear()
+            with mock.patch.object(inbox, "draft_board", side_effect=error):
+                self.assertEqual(self.run_script(fake, root), 0, repr(error))
+            notes = self.board_notes()
+            self.assertEqual(len(notes), 1, repr(error))
+            self.assertNotIn("\n", notes[0])
+            self.assertLessEqual(len(notes[0]), len(self.BOARD_NOTE) + len(": ") + 150, repr(error))       # 오류 글은 접고 150자로 줄인다
+            self.assertNotIn("## 초안 현황", self.body(fake))
+            self.assertIn("초안 대기", self.body(fake))
+
+    def test_the_same_holds_without_a_token_and_in_a_practice_run(self):
+        for env in ({"GITHUB_TOKEN": ""}, {"INBOX_DRY_RUN": "true"}):
+            fake, root = self.world([h.make_draft_raw(41)])
+            self.out.clear()
+            with mock.patch.object(inbox, "draft_board", side_effect=ValueError("boom")):
+                self.assertEqual(self.run_script(fake, root, env=env), 0, env)
+            self.assertEqual(len(self.board_notes()), 1, env)
+            self.assertEqual(len(fake.writes()), 0, env)                                      # 토큰이 없거나 연습이면 원래도 쓰지 않는다
+
+    def test_a_draft_list_cut_at_300_shows_300_plus_in_the_table_even_when_the_cut_note_does_not_fit_the_body(self):
+        drafts = [h.make_draft_raw(1000 + n, f"[초안][티스토리] 글 {n} " + "가" * 60, "티스토리", hours=30 + n % 40) for n in range(350)]
+        fake, root = self.world(drafts)
+        self.assertEqual(self.run_script(fake, root), 0)
+        body = self.body(fake)
+        self.assertEqual(table_rows(body)[2][:2], ["티스토리", "300+"])
+        self.assertIn(inbox.BOARD_NOTE_CAP, body)                                          # 표 아래 안내 줄도 본문에 있다
+        self.assertNotIn("처음 300건만 셉니다", body)                                       # 참고 항목은 길이 제한에 잘려 본문에는 없다 — 그래도 표가 알려 준다
+        self.assertIn("처음 300건만 셉니다", self.summary.read_text(encoding="utf-8"))        # 실행 요약(한도가 훨씬 큼)에는 있다
+        self.assertLessEqual(len(body), 65536)
+
+    def test_exactly_three_full_pages_read_as_300_plus_while_fewer_read_exactly(self):
+        for count, shown in ((300, "300+"), (299, "299"), (120, "120"), (1, "1")):
+            fake, root = self.world([h.make_draft_raw(1000 + n, channel="티스토리") for n in range(count)])
+            self.run_script(fake, root)
+            self.assertEqual(table_rows(self.body(fake))[2][1], shown, count)
+
     def test_a_failed_draft_lookup_shows_in_the_board_and_as_a_check_item_and_keeps_the_marker(self):
         fake, root = self.world([h.make_draft_raw(41)])
         self.run_script(fake, root)
@@ -1638,7 +1854,8 @@ class DraftGuideMatchesCodeTest(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         for phrase in ("열린 PR 줄(`pr:<번호>:…`)은 빼서", "`draft:<번호>:wait`", "`/pull/번호`", "검사 결과 없음"):
             self.assertIn(phrase, rows[0], phrase)
-        for phrase in ("`pr:<번호>:ready`·`conflict`·`ci_fail`", "새 id라 **한 번 더** 알립니다", "초안 PR은 한 줄만 남깁니다"):
+        for phrase in ("`pr:<번호>:ready`·`conflict`·`ci_fail`", "새 id라 **한 번 더** 알립니다", "초안 PR은 한 줄만 남깁니다",
+                       "PR 목록이나 상세를 읽지 못한 점검에서도 초안 항목은 그대로 알립니다."):
             self.assertIn(phrase, self.doc, phrase)
         self.assertIn("초안 PR은 한 줄만 남긴다", self.arch)
         # 문서가 action 으로 꼽은 세 상태가 실제로 열린 PR 규칙의 action 이다(그 밖의 상태는 action 이 아니다)
@@ -1647,6 +1864,32 @@ class DraftGuideMatchesCodeTest(unittest.TestCase):
         self.assertEqual(made, {"ready", "conflict", "ci_fail"})
         quiet = {i.id.rsplit(":", 1)[1] for i in inbox.pull_items([h.make_pull(18, ci="none"), h.make_pull(19, ci="pending"), h.make_pull(20, state="blocked")], NOW, URL)}
         self.assertEqual(quiet, {"no_ci", "pending", "blocked"})
+
+    def test_the_limits_found_in_the_first_review_are_written_down_as_the_code_behaves(self):
+        # 초안 PR 이 한 번 더 알려지는 경우(승인 흐름을 켜기 전에 정할 일)
+        for phrase in ("**한계(초안 PR이 한 번 더 알려지는 경우)**", "초안 PR이 이미 `pr:<번호>:ready`로 알려진 뒤 열린 PR 줄이 일시적으로 action에서 빠지는 점검",
+                       "`mergeable`)가 다시 null로 돌아옴·상세 조회 실패·열린 PR 목록 조회 실패", "`draft:<번호>:wait`가 새 id라 한 번 더 알립니다",
+                       "승인 흐름(`publish_flow: pr`)을 켜기 전에 초안 PR 항목 id를 PR 상태와 무관하게 통일하는 것이 권고입니다"):
+            self.assertIn(phrase, self.doc, phrase)
+        # 표식은 알린 id 를 80개까지만 남긴다
+        self.assertIn(f"알린 action id를 {inbox.MARKER_IDS_MAX}개(`MARKER_IDS_MAX`)까지만 남깁니다", self.doc)
+        self.assertIn("초안 약 70건 이상", self.doc)
+        self.assertEqual(inbox.MARKER_IDS_MAX, 80)
+        # 초안 현황 표를 만들다 실패해도 모음은 죽지 않는다(실행 로그 한 줄)
+        script = (_bootstrap.ROOT / "scripts" / "ops_inbox.py").read_text(encoding="utf-8")
+        for source in (self.doc, script):
+            self.assertIn("[참고] 초안 현황 표를 만들지 못해 이번 점검에서는 뺍니다", source)
+        # 닫았다 다시 열어도 알리는 것은 열린 지 3일 이내일 때뿐이다(규칙표·알림 규칙·관측 목록 세 곳)
+        self.assertGreaterEqual(self.doc.count("열린 지 3일 이내일 때"), 3)
+        self.assertGreaterEqual(self.doc.count("다시 열어도 확인 항목으로만 보입니다"), 2)                       # 규칙표와 알림 규칙 두 곳
+        self.assertIn("열린 지 DRAFT_STALE_DAYS 일 이내일 때만 새 항목으로 다시 알린다", inspect.getdoc(inbox.draft_items))
+        # 읽는 상한에 닿으면 칸에 '+'
+        self.assertIn("| `N+` |", self.doc)
+        self.assertIn(f"`{oi.MAX_DRAFT_PAGES * oi.DRAFTS_PER_PAGE}+`", self.doc)
+        self.assertIn(f"`{oi.MAX_DRAFT_PAGES * oi.DRAFTS_PER_PAGE}+`", self.guide)
+        # 글 끝의 역슬래시는 지운다(PR 제목도 같은 ext 를 거친다)
+        self.assertIn("글 끝의 역슬래시는 지우고", self.doc)
+        self.assertIn("끝의 역슬래시를 지운다", (_bootstrap.ROOT / "pipeline" / "inbox.py").read_text(encoding="utf-8"))
 
     def test_the_event_types_and_the_run_titles_are_in_the_guide(self):
         wf = load_workflow()

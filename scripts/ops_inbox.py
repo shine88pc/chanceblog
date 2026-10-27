@@ -283,7 +283,7 @@ def fetch_issues(client, failures):
 def fetch_drafts(client, failures, notes):
     """열린 `초안` 라벨 이슈·PR(GET /issues 는 PR 도 돌려준다)을 한 쪽 100건씩 최대 MAX_DRAFT_PAGES 쪽 읽어 normalize_draft 한 목록으로 돌려준다.
     어느 쪽이든 읽지 못하면 일부만 센 숫자가 '정상'으로 보이지 않게 전부 버리고 ('drafts', 사유) 하나만 남긴다(표는 그 칸을 '조회 실패'로 보인다).
-    모든 쪽이 가득 차 있으면 더 있을 수 있어 참고 항목으로 알린다."""
+    모든 쪽이 가득 차 있으면 더 있을 수 있어 참고 항목으로 알린다(초안 현황 표는 같은 사실을 보고 센 값에 '+' 를 붙인다 — 참고 항목이 본문 길이 제한에 잘려도 보이게)."""
     found = []
     for page in range(1, MAX_DRAFT_PAGES + 1):
         try:
@@ -298,7 +298,7 @@ def fetch_drafts(client, failures, notes):
         if len(data) < DRAFTS_PER_PAGE:
             break
     else:
-        notes.append(("drafts_cap", f"열린 초안(이슈·PR)이 {MAX_DRAFT_PAGES * DRAFTS_PER_PAGE}건을 넘을 수 있어 처음 {MAX_DRAFT_PAGES * DRAFTS_PER_PAGE}건만 셉니다."))
+        notes.append((inbox.DRAFTS_CAP_NOTE_ID, f"열린 초안(이슈·PR)이 {MAX_DRAFT_PAGES * DRAFTS_PER_PAGE}건을 넘을 수 있어 처음 {MAX_DRAFT_PAGES * DRAFTS_PER_PAGE}건만 셉니다."))
     return [draft for draft in (inbox.normalize_draft(raw) for raw in found) if draft is not None]
 
 
@@ -641,7 +641,11 @@ def run(environ=None, client=None, now=None, root=ROOT, out=print, sleep=time.sl
         paused=inbox.is_truthy(environ.get("PIPELINE_PAUSE")), blogs=blogs, histories=histories, failures=failures, notes=notes,
         workflow_names=names, drafts=drafts)
     items = inbox.build_items(snapshot)
-    board = inbox.draft_board(snapshot)
+    try:
+        board = inbox.draft_board(snapshot)
+    except Exception as exc:        # 초안 현황 표는 있으면 좋은 구역이다 — 만들다 실패하면(레지스트리 모양 오류 등) 표만 빼고 점검은 그대로 이어 간다
+        board = ""
+        out(f"[참고] 초안 현황 표를 만들지 못해 이번 점검에서는 뺍니다(점검 결과에는 영향 없음): {inbox.fold(exc, 150)}")
 
     counts = {level: sum(1 for i in items if i.level == level) for level in inbox.LEVELS}
     out(f"[점검] 지금 해야 할 일 {counts['action']}건 · 확인하면 좋은 것 {counts['check']}건 · 참고 {counts['info']}건 "

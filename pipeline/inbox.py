@@ -16,7 +16,8 @@ action(코멘트 알림), 3일 넘게 열려 있으면 check. 초안 PR 은 열�
 표는 항목(Item)이 아니라 render() 의 board 인자로 본문 위쪽에 들어간다.
 
 보안: 외부에서 온 텍스트(PR 제목·주석 문구·이슈 제목·이력 사유)는 ext() 로 한 줄로 접고, 비밀 값 모양을 가리고, '@'·'<'·'&' 를
-전각으로 바꾸고, 링크 문법 문자를 바꾸고, '::'·'##[' 를 풀어 쓴다. 렌더러는 한 번 더 같은 안전망(safe_text)을 거친다.
+전각으로 바꾸고, 링크 문법 문자를 바꾸고, '::'·'##[' 를 풀어 쓰고, 끝의 역슬래시를 지운다(뒤에 붙는 ']'·'**' 를 이스케이프해 링크·굵은 글씨를 깨므로).
+렌더러는 한 번 더 같은 안전망(safe_text)을 거친다.
 링크는 숫자 id 로 직접 만들며 API 가 준 URL 은 쓰지 않는다. 이 이슈는 공개 저장소의 공개 이슈이므로 수익·방문 수치와
 비밀 값은 싣지 않는다(docs/SECURITY_GUARDRAILS.md G-O7).
 """
@@ -159,10 +160,15 @@ def safe_text(text, limit=300):
     return _clip(fold(text, None).translate(_SAFE_MAP), limit)
 
 
+_TRAILING_RE = re.compile(r"[\\\s]+\Z")
+
+
 def ext(text, limit=120):
-    """외부에서 온 값을 항목에 넣을 때 쓴다: 비밀 값 모양을 가리고, safe_text 에 더해 링크 문법([ ])과 코드 스팬(`)을 무력화한다."""
+    """외부에서 온 값을 항목에 넣을 때 쓴다: 비밀 값 모양을 가리고, safe_text 에 더해 링크 문법([ ])과 코드 스팬(`)을 무력화한다.
+    끝의 역슬래시(와 그 앞 공백)는 지운다 — 이 글 바로 뒤에는 늘 마크다운 기호(링크 글 뒤의 ']', 굵은 글씨의 '**')가 붙는데 역슬래시가 그것을 이스케이프하면
+    링크·굵은 글씨가 깨져 보인다(주소는 안전하고 모양만 깨진다). 줄여서 '…' 로 끝나는 글에는 해당 없다."""
     raw = "" if text is None else mask(str(text))
-    return _clip(safe_text(raw, None).translate(_EXT_MAP), limit)
+    return _TRAILING_RE.sub("", _clip(safe_text(raw, None).translate(_EXT_MAP), limit))
 
 
 _URL_RE = re.compile(r"^https://(?:github\.com|www\.blogger\.com)/[A-Za-z0-9._~:/?#@!$*+,;=%\-]*$")
@@ -848,7 +854,8 @@ def _pull_number(item):
 def draft_items(drafts, now, repo_url, acting_pulls=()):
     """열린 초안(이슈·PR)마다 한 줄. DRAFT_STALE_DAYS 일 이하로 열려 있으면 action(새 초안 — 새 항목이라 코멘트(@멘션)로 알림), 그보다 오래면 check(알림 없음).
 
-    상태가 id 에 들어 있다(draft:<번호>:wait · draft:<번호>:stale) — 같은 초안이 오래되면 새 알림 없이 check 로 옮겨 가고, 닫았다가 다시 열면 새 항목으로 다시 알린다.
+    상태가 id 에 들어 있다(draft:<번호>:wait · draft:<번호>:stale) — 같은 초안이 오래되면 새 알림 없이 check 로 옮겨 가고,
+    닫았다가 다시 열면 열린 지 DRAFT_STALE_DAYS 일 이내일 때만 새 항목으로 다시 알린다(생성 시각은 그대로라 넘은 초안은 다시 열어도 check 다).
     PR 초안(kind 'pull')은 열린 PR 규칙(pull_items)도 한 줄로 다룬다. 그 규칙이 이미 action(병합하면 됩니다·충돌·검사 실패)으로 올린 PR — acting_pulls 의 번호 — 은
     그 항목이 알리므로 초안 항목을 또 만들지 않는다(같은 PR 이 두 번 알림이 되지 않게). 그 밖의 상태(검사 결과 없음·진행 중·계산 중·병합 막힘)에서는 build_items 가
     그 PR 의 열린 PR 항목을 빼고 이 초안 항목이 대신 알린다: 저장소 기본 토큰으로 연 PR 은 검사가 돌지 않아 '검사 결과 없음'(check, 알림 없음)으로 남기 쉬워서, 이렇게 하지 않으면
@@ -861,7 +868,8 @@ def draft_items(drafts, now, repo_url, acting_pulls=()):
             continue
         created = parse_time(draft.get("created_at"))
         stale = created is not None and now - created > timedelta(days=DRAFT_STALE_DAYS)
-        channel = ext(draft.get("channel") or "채널 표시 없음", 30)
+        channel = ext(draft.get("channel") or "", 30)
+        where_channel = f"채널 {channel}" if channel else "채널 표시 없음"          # 채널 라벨이 없으면 '채널 채널 표시 없음'처럼 겹치지 않게
         title = _draft_title_text(draft, DRAFT_TITLE_MAX)
         url = f"{repo_url}/{'pull' if pull else 'issues'}/{number}"
         where = f"PR #{number}" if pull else f"이슈 #{number}"
@@ -869,14 +877,14 @@ def draft_items(drafts, now, repo_url, acting_pulls=()):
             out.append(Item(
                 id=f"draft:{number}:stale", level=LEVEL_CHECK, since=created, url=url,
                 title=f"초안 {DRAFT_STALE_DAYS}일 넘게 대기 — {title}",
-                detail=f"채널 {channel} · {where} · {DRAFT_STALE_DAYS}일 넘게 열려 있음",
+                detail=f"{where_channel} · {where} · {DRAFT_STALE_DAYS}일 넘게 열려 있음",
                 hint=("공개하려면 PR 을 병합하고, 쓰지 않기로 했다면 라벨 `폐기`를 붙이거나 PR 을 닫으세요. 병합하거나 닫으면 이 목록에서 사라집니다." if pull else
                       "발행했다면 이슈를 닫고, 쓰지 않기로 했다면 라벨 `폐기`를 붙이거나 닫으세요. 닫으면 이 목록에서 사라집니다.")))
         else:
             out.append(Item(
                 id=f"draft:{number}:wait", level=LEVEL_ACTION, since=created, url=url,
                 title=f"초안 대기 — {title}",
-                detail=f"채널 {channel} · {where} · " + ("검토·병합을 기다립니다" if pull else "발행을 기다립니다"),
+                detail=f"{where_channel} · {where} · " + ("검토·병합을 기다립니다" if pull else "발행을 기다립니다"),
                 hint=("PR 을 열어 글을 읽고 병합하면 공개되고(닫으면 폐기), 검사·충돌 상태도 PR 화면에서 봅니다. 쓰지 않을 글은 라벨 `폐기`를 붙이거나 PR 을 닫으세요." if pull else
                       "이슈 본문의 제목·본문·태그를 복사해 직접 발행한 뒤 이슈를 닫으세요(닫기 = 발행 완료). 쓰지 않을 글은 라벨 `폐기`를 붙이거나 닫으세요.")))
     return out
@@ -908,6 +916,8 @@ _LINKABLE_LABEL_RE = re.compile(r"^[0-9A-Za-z가-힣][0-9A-Za-z가-힣 _.\-]{0,3
 BOARD_HEADER = ("채널", "대기 초안", "가장 오래된", "최신 초안")
 BOARD_NOTE_MODEL = ("초안은 라벨 `초안`과 `채널:티스토리` 같은 채널 라벨이 붙은 열린 이슈·PR 입니다. 이슈 초안은 발행한 뒤 닫고, PR 초안은 병합하면 빠지며, "
                     "쓰지 않을 글은 라벨 `폐기`를 붙이거나 닫으세요(모두 이 표에서 빠집니다). '가장 오래된'은 하루 단위라 하루에 한 번 바뀝니다.")
+DRAFTS_CAP_NOTE_ID = "drafts_cap"     # scripts/ops_inbox.py 가 열린 초안을 읽는 상한까지 읽었을 때 남기는 참고 항목의 id — 표는 이것을 보고 센 값에 '+' 를 붙인다
+BOARD_NOTE_CAP = "열린 초안이 읽는 상한을 넘을 수 있어 `+` 가 붙은 칸은 그 이상일 수 있고, '가장 오래된'도 읽은 범위 안의 값입니다."
 BOARD_NOTE_BLOGGER = (f"Blogger 는 초안함에 올린 기록(최근 {DRAFT_WINDOW_DAYS}일)을 센 대략치입니다 — 이미 게시했는지는 Blogger 쪽 사실이라 여기서는 알 수 없습니다. "
                       "확인·게시: Blogger 대시보드 → 글 → 초안(블로그 ID 가 시크릿이라 링크는 싣지 않습니다).")
 
@@ -942,6 +952,12 @@ def _depends_on_github(blog):
     return not (platform == "jekyll-git" and blog.get("publish_flow") != "pr")
 
 
+def _drafts_capped(snap):
+    """열린 초안 목록이 읽는 상한에 닿았는가(scripts/ops_inbox.py 가 참고 항목 DRAFTS_CAP_NOTE_ID 를 남겼는가). 그러면 GitHub 에서 센 값은 '그 이상'일 수 있다."""
+    notes = snap.notes if isinstance(snap.notes, (list, tuple)) else ()
+    return any(isinstance(note, (list, tuple)) and bool(note) and note[0] == DRAFTS_CAP_NOTE_ID for note in notes)
+
+
 def _candidate_from_draft(draft, repo_url):
     """(생성 시각, 번호, 최신 초안 칸 글, 대략치인가) — GitHub 초안은 번호와 제목이 든 링크."""
     number = draft["number"]
@@ -950,11 +966,12 @@ def _candidate_from_draft(draft, repo_url):
     return parse_time(draft.get("created_at")), number, f"[#{number} {title}]({repo_url}/{path}/{number})", False
 
 
-def _row_cells(label, blog, candidates, now, lookup_failed):
-    """표의 한 줄 [채널, 대기 초안, 가장 오래된, 최신 초안]. candidates: _candidate_* 목록."""
+def _row_cells(label, blog, candidates, now, lookup_failed, more=False):
+    """표의 한 줄 [채널, 대기 초안, 가장 오래된, 최신 초안]. candidates: _candidate_* 목록. more: GitHub 목록이 읽는 상한에서 잘려 센 값이 '그 이상'일 수 있다('N+', 0 도 '0+')."""
     mode = str(blog.get("mode") or "draft") if blog else "draft"
     if candidates:
-        text = str(len(candidates)) + (" (대략)" if any(c[3] for c in candidates) else "") + (" (정지 중)" if mode == "off" else "")
+        text = (str(len(candidates)) + ("+" if more else "") + (" (대략)" if any(c[3] for c in candidates) else "")
+                + (" (정지 중)" if mode == "off" else ""))
         moments = [c[0] for c in candidates if c[0] is not None]
         newest = max(candidates, key=lambda c: (c[0] or _EPOCH, c[1]))
         return [label, text, _age_text(now, min(moments)) if moments else "-", newest[2]]
@@ -965,7 +982,7 @@ def _row_cells(label, blog, candidates, now, lookup_failed):
     elif blog and str(blog.get("platform") or "") == "jekyll-git" and blog.get("publish_flow") != "pr":
         text = "자동 공개"
     else:
-        text = "0"
+        text = "0+" if more else "0"
     return [label, text, "-", "-"]
 
 
@@ -981,6 +998,7 @@ def board_rows(snap, now=None):
     for draft in pending_drafts(snap.drafts):
         by_channel.setdefault((draft.get("channel") or "").casefold(), []).append(draft)
     drafts_failed = any(source == "drafts" for source, _reason in snap.failures)
+    capped = _drafts_capped(snap)
     rows, links, known, blogger = [], [], set(), False
     for blog in snap.blogs:
         label = _registry_channel(blog)
@@ -998,7 +1016,7 @@ def board_rows(snap, now=None):
                 candidates += [(moment[0], 0, _last_text(moment), True) for moment in history_drafts(history, now)]
             else:
                 failed = True
-        rows.append(_row_cells(_cell(ext(label, 30)), blog, candidates, now, failed))
+        rows.append(_row_cells(_cell(ext(label, 30)), blog, candidates, now, failed, capped and (github or bool(mine))))
         if github or mine:
             links += _filter_links(label, repo_url, blog.get("publish_flow") == "pr" or any(draft["kind"] == "pull" for draft in mine))
     extra = []
@@ -1010,12 +1028,12 @@ def board_rows(snap, now=None):
         extra.append((shown, group, group[0]["channel"] if key else None))
     room = max(BOARD_ROWS_MAX - len(rows), 1)
     for shown, group, raw_label in extra[:room - 1 if len(extra) > room else room]:
-        rows.append(_row_cells(shown, None, [_candidate_from_draft(draft, repo_url) for draft in group], now, False))
+        rows.append(_row_cells(shown, None, [_candidate_from_draft(draft, repo_url) for draft in group], now, False, capped))
         if raw_label:
             links += _filter_links(raw_label, repo_url, any(draft["kind"] == "pull" for draft in group))
     if len(extra) > room:
         rest = [draft for _shown, group, _label in extra[room - 1:] for draft in group]
-        rows.append(_row_cells(f"그 밖의 채널 {len(extra) - room + 1}개", None, [_candidate_from_draft(draft, repo_url) for draft in rest], now, False))
+        rows.append(_row_cells(f"그 밖의 채널 {len(extra) - room + 1}개", None, [_candidate_from_draft(draft, repo_url) for draft in rest], now, False, capped))
     return rows, links, blogger
 
 
@@ -1031,6 +1049,8 @@ def draft_board(snap):
     lines = ["## 초안 현황", "", "| " + " | ".join(BOARD_HEADER) + " |", "|" + "|".join("---" for _ in BOARD_HEADER) + "|"]
     lines += ["| " + " | ".join(row) + " |" for row in rows]
     lines += ["", f"- {BOARD_NOTE_MODEL}"]
+    if _drafts_capped(snap):
+        lines.append(f"- {BOARD_NOTE_CAP}")
     if blogger:
         lines.append(f"- {BOARD_NOTE_BLOGGER}")
     shortcut = [("대기 초안 전체(이슈)", draft_filter_url(repo_url)), ("대기 초안 전체(PR)", draft_filter_url(repo_url, pulls=True))] + links
