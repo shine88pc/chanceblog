@@ -14,7 +14,7 @@
 **등급**: T2(생성기·워크플로·레지스트리 스키마의 새 선택 필드·새 모듈·워치독·시험·문서). `publish_flow`를 `pr`로 켜는 것은 별도의 T3(게시 방식)이고 이 변경은 켜지 않는다. `mode`·시크릿·광고 표면(`index.html`·`_config.yml`)·`pages.yml`·Blogger·발행 빈도·`인수인계/작업내용.md`·`docs/SESSION_START.md`·`docs/REQUEST_BRIEFING.md`는 바꾸지 않았다.
 **승인 근거**: 운영자 채팅 2026-10-27 "추천대로 진행해줘"(`docs/analysis/2026-10-27_channel-management-plan.md` D1 (a): 구현하되 **기본 꺼짐**). 켜는 승인은 아직 없다. 켜는 승인에는 저장소 설정 확인과, 병합·닫은 초안 브랜치의 7일 뒤 자동 삭제(CHARTER T3 '브랜치 삭제'에 닿음)가 함께 들어간다.
 **목적**: 구글 게시자 정책은 수동 검토 없이 자동 생성된 콘텐츠에 광고를 두지 말라고 안내한다. Chance 글을 초안 브랜치와 승인 PR 로 올리고 운영자가 PR 을 병합해야 공개(닫으면 폐기)되는 흐름을 레지스트리 스위치 하나로 고를 수 있게 한다.
-**브랜치**: `ai/claude/chance-approval-flow`(기준 `origin/ai/claude/channel-names` `5c57a7c` = main `e71a6ec` + 작업 A. 작업 A 는 그 사이 main 에 병합됐다 — #47 `f8724b7`. `git rebase --onto origin/main 5c57a7c ai/claude/chance-approval-flow` 로 옮긴다: 임시 clone 에서 충돌 없이 됨을 확인했다). PR 생성·병합·Actions 실행은 하지 않았다(총괄이 처리).
+**브랜치**: `ai/claude/chance-approval-flow`(기준 `origin/ai/claude/channel-names` `5c57a7c` = main `e71a6ec` + 작업 A. 작업 A 는 그 사이 main 에 병합됐다 — #47 `f8724b7`. `git rebase --onto origin/main 5c57a7c ai/claude/chance-approval-flow` 로 옮긴다: 임시 clone 에서 해 봤고 충돌은 `WORKLOG.md` 맨 위 한 곳뿐이었다 — 이 항목을 맨 위에 두면 되고, 그 위에서 전체 시험 2497개가 통과했다). PR 생성·병합·Actions 실행은 하지 않았다(총괄이 처리).
 
 ### 한 일
 - **레지스트리**: `publish_flow`(`direct` 기본·`pr`)와 검증(값 집합·`jekyll-git`에서만·`pr`이면 `mode: auto`). 작업 A 가 더한 `channel`·`ads` 필드와 나란히 있다. Chance 항목에 `"publish_flow": "direct"`. 값을 읽지 못하거나 틀리면 직접 게시로 떨어지지 않고 멈춘다.
