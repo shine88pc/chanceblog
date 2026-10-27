@@ -1485,7 +1485,7 @@ GRID_CLOSED_EN = [", but ", " but ", ", yet ", " yet ", ", so ", " so ", ", whil
                   ", for that reason ", ", nevertheless ", ", nonetheless ", ", that said, ", ", even so, "]    # 'even so'는 연결어 `so`가 가른다
 GRID_OPEN_EN = [", ", ", if you want, ", ", also ", ", just ", ", please ", ", of course, ", ", remember to ", ", be sure to ", ", make sure to ",
                 # D-64 ⑧: 연결어 뒤의 부사절 도입구('조건절 + 쉼표 + 상담 구절'과 구별되지 않는다)와 상담 구절을 앞세우지 않는 연결어
-                " so if in doubt, ", " so to be safe, ", " so of course, ", ", to be safe, ", ", still ", ", in case you want to ", " so that you can "]
+                " so if in doubt, ", " so to be safe, ", " so of course, ", ", to be safe, ", ", to be sure, ", ", for safety ", ", still ", ", in case you want to ", " so that you can "]
 GRID_STEMS_KO = ["마그네슘 보충제는 잠드는 데 도움이 되", "멜라토닌을 먹으면 잠이 잘 오", "이 영양제는 혈압을 낮춰 주"]
 GRID_REFERRAL_KO = "먼저 의사와 상담하세요."
 GRID_CLOSED_KO = ["{a}지만 {r}", "{a}지만, {r}", "{a}는데 {r}", "{a}는데, {r}", "{a}으니 {r}", "{a}니까 {r}", "{a}면서 {r}", "{a}으며 {r}", "{a}하되 {r}", "{a}고 {r}",
