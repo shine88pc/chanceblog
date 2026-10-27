@@ -36,6 +36,15 @@ def levels(findings, check):
     return sorted(f.level for f in findings if f.check == check)
 
 
+def assert_one_plain_line(test, finding, folded):
+    """finding 의 메시지·출력 줄이 한 줄이고 워크플로 명령(`::`)·로그 서식(`##[`) 표기가 없으며, 저장소 파일에서 온 값이 접힌 모양(folded)으로 들어 있다."""
+    test.assertIn(folded, finding.message)
+    for text in (finding.message, finding.line()):
+        test.assertEqual(len(text.splitlines()), 1, text)
+        test.assertNotIn("::", text)
+        test.assertNotIn("##[", text)
+
+
 class TmpCase(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -243,6 +252,17 @@ class WorkflowNameTest(TmpCase):
         self.assertEqual([(f.check, f.level) for f in self.names(f'name: "[Chance] Full-Auto Engine"\n{job}')], [("WF-11", "ERROR")])
         self.assertEqual(self.names(f'name: "사이트 [공통] 배포"\n{job}'), [])  # 맨 앞이 아닌 대괄호는 접두사가 아니라 이름의 일부다
 
+    def test_a_name_with_line_breaks_and_command_marks_is_folded_to_one_line_in_the_message(self):
+        """워크플로 name 은 저장소 파일의 값이다 — 줄바꿈·`::`·`##[` 가 들어 있어도 오류 줄이 여러 줄이 되거나 워크플로 명령으로 읽히지 않는다(G-L2)."""
+        found = self.names('name: "Build\\n::error::forged ##[group]g"\njobs:\n  j:\n    name: 배포\n')      # 한글이 없는 값만 WF-11 오류가 된다
+        self.assertEqual([(f.check, f.level) for f in found], [("WF-11", "ERROR")])
+        assert_one_plain_line(self, found[0], "Build : :error: :forged # [group]g")
+
+    def test_a_long_name_is_still_cut_at_forty_characters_in_the_message(self):
+        found = self.names(f'name: "{"B" * 45}"\njobs:\n  j:\n    name: 배포\n')
+        self.assertIn("B" * 40, found[0].message)
+        self.assertNotIn("B" * 41, found[0].message)
+
 
 AD_SCRIPT = ('<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1234567890123456"\n'
              '     crossorigin="anonymous"></script>\n')
@@ -361,6 +381,32 @@ class WorkflowPrefixTest(TmpCase):
     def test_labels_are_the_registry_channel_labels_plus_common_and_internal(self):
         self.assertEqual(vr.WORKFLOW_LABELS, tuple(reg_mod.CHANNEL_LABELS) + ("공통", "내부"))
         self.assertEqual(reg_mod.CHANNEL_LABELS, ("Chance", "Blogger", "Blogger 영문", "Blogger 한글", "티스토리", "네이버"))
+
+    def test_the_name_in_the_missing_prefix_message_is_folded_to_one_line(self):
+        """name·run-name·구분(라벨)은 저장소 파일의 값이다 — 줄바꿈·`::`·`##[` 가 든 값이 오류 줄을 여러 줄로 쪼개거나 워크플로 명령(`::error::`)으로 읽히게 하지 않는다(G-L2)."""
+        found = self.prefixes('name: "사이트\\n::error::위조 ##[group]g"\n')
+        self.assertEqual([(f.check, f.level) for f in found], [("WF-12", "ERROR")])
+        assert_one_plain_line(self, found[0], "사이트 : :error: :위조 # [group]g")
+
+    def test_the_label_in_the_unknown_label_message_is_folded_to_one_line(self):
+        found = self.prefixes('name: "[기\\n::error::타] 이름"\n')
+        self.assertEqual([(f.check, f.level) for f in found], [("WF-12", "ERROR")])
+        self.assertIn("허용 목록에 없습니다", found[0].message)
+        assert_one_plain_line(self, found[0], "[기 : :error: :타]")
+
+    def test_the_run_name_in_the_other_prefix_message_is_folded_to_one_line(self):
+        found = self.prefixes('name: "[Chance] 이름"\nrun-name: "[공통] 제목\\n::error::위조 ##[group]g"\n')
+        self.assertEqual([(f.check, f.level) for f in found], [("WF-12", "ERROR")])
+        self.assertIn("run-name", found[0].message)
+        assert_one_plain_line(self, found[0], "[공통] 제목 : :error: :위조 # [group]g")
+
+    def test_a_long_name_and_run_name_are_still_cut_at_forty_characters_in_the_messages(self):
+        found = self.prefixes(f'name: "{"가" * 45}"\n')
+        self.assertIn("가" * 40, found[0].message)
+        self.assertNotIn("가" * 41, found[0].message)
+        found = self.prefixes(f'name: "[Chance] 이름"\nrun-name: "{"나" * 45}"\n')
+        self.assertIn("나" * 40, found[0].message)
+        self.assertNotIn("나" * 41, found[0].message)
 
     def test_run_checks_and_cli_report_a_missing_prefix_as_error(self):
         root = registry_root(self.root, chance_extra=DEPLOY_STEP)

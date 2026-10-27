@@ -25,7 +25,9 @@ REPO = "shine88pc/chanceblog"
 
 # 진짜 레지스트리(pipeline/blogs.json)의 chance.publish_flow 가 지금 가져야 할 값. 승인 흐름을 켜는 변경(T3, 게시 방식)은 blogs.json 의 한 줄과
 # 이 한 줄을 함께 바꾼다. 시험이 값을 못 박아 두므로 레지스트리만 슬쩍 바뀌면 빨강이 되고(표지판), 둘을 함께 바꾸면 나머지 시험이 모두 통과한다
-# (docs/ACTIONS_GUIDE.md 3-17 '켜는 법', `pr` 로 바꾼 사본의 전체 시험 통과를 확인했다).
+# (docs/ACTIONS_GUIDE.md 3-17 '켜는 법', `pr` 로 바꾼 사본의 전체 시험 통과를 확인했다). 이 값을 읽는 표지판 시험: tests/test_drafts.py(셋)·
+# tests/test_generator_drafts.py·tests/test_batch2_integration.py(test_the_real_registry_is_unchanged_by_the_merge)·
+# tests/test_ops_inbox_drafts.py(test_the_real_registry_gives_chance_and_blogger_rows_with_nothing_pending) — 값을 따로 적은 시험이 없어야 두 줄로 끝난다.
 REAL_PUBLISH_FLOW = "direct"
 
 
