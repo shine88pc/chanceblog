@@ -60,7 +60,9 @@ class FlowStepTest(unittest.TestCase):
         self.assertLess(generator_index, ids.index("commit"))
         self.assertLess(ids.index("commit"), steps_of().index(pages_step()))
         self.assertLess(steps_of().index(pages_step()), steps_of().index(deliver_step()))
-        self.assertEqual(steps_of()[-1], deliver_step())
+        # 알림 단계(텔레그램 새 글, 통합)가 항상 맨 끝이다. 승인 PR 올리기 단계는 그 바로 앞이다.
+        self.assertEqual(steps_of()[-2], deliver_step())
+        self.assertEqual(steps_of()[-1].get("name"), "텔레그램 알림(새 글)")
 
     def test_the_flow_step_uses_the_registry_cli_and_stops_on_error(self):
         run = by_id("flow")["run"]

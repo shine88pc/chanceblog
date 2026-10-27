@@ -327,10 +327,6 @@ def _package_exit(code):
     return EXIT_CONFIG if code in PACKAGE_CONFIG_CODES else EXIT_INFRA
 
 
-def _summary_head(blog):
-    return f"### {blog['key']}"
-
-
 def _run_url(environ):
     """만든 Actions 실행의 주소(GITHUB_REPOSITORY·GITHUB_RUN_ID 가 모양에 맞을 때만). 어댑터가 한 번 더 모양을 확인한다."""
     repo, run_id = str(environ.get("GITHUB_REPOSITORY") or "").strip(), str(environ.get("GITHUB_RUN_ID") or "").strip()
@@ -423,7 +419,7 @@ def _package_dry_run(out, environ, blog, draft, post, accepted, ai_lines):
     out(f"  제목: {one_line(post['title'], TITLE_SHOWN)} / 라벨: {post['labels']} / 본문 {gates.text_length(gates.plain_text(accepted['content']))}자")
     out(f"  이슈 제목: {one_line(spec.title, 120)} / 이슈 라벨: {', '.join(spec.labels)} / 이슈 본문 {len(spec.body)}자(미리보기는 실행 요약에 있습니다)")
     _write_summary(environ, "\n".join([
-        _summary_head(blog), f"- 결과: **DRY_RUN** — 게이트 통과, 이슈·저장 없이 종료(제목: {md_cell(post['title'], TITLE_SHOWN)})",
+        summary_head(blog), f"- 결과: **DRY_RUN** — 게이트 통과, 이슈·저장 없이 종료(제목: {md_cell(post['title'], TITLE_SHOWN)})",
         "- GitHub API 호출: 0회(연습 실행은 이슈를 만들지 않고 적체도 점검하지 않습니다)",
         f"- 이슈 제목: {md_cell(spec.title, 120)}", f"- 이슈 라벨: {', '.join(f'`{label}`' for label in spec.labels)}",
         *[f"- {line}" for line in ai_lines()], "",
@@ -474,7 +470,7 @@ def _package_deliver(out, environ, blog, root, local_now, draft, post, topic, so
         out(f"::warning::[{blog['key']}] 저장소 초안 파일(감사용 사본)을 저장하지 못했습니다. 이 단계의 로그를 확인하세요.")
         out(f"[인프라 오류] 초안 파일 저장 실패(상태: {status})")
     service = issue_package.PACKAGE_INFO[blog["platform"]]["service"]
-    lines = [_summary_head(blog), f"- 결과: **{status}** — {md_cell(post['title'], TITLE_SHOWN)}", f"- 초안 이슈: {md_cell(url, 300) or '(없음)'}"]
+    lines = [summary_head(blog), f"- 결과: **{status}** — {md_cell(post['title'], TITLE_SHOWN)}", f"- 초안 이슈: {md_cell(url, 300) or '(없음)'}"]
     if status == "package_issued":
         lines.append(f"- 안내: 공개된 글이 아닙니다. 이슈의 복사 상자로 {service}에 직접 발행하고 이슈를 닫으세요(읽는 법: docs/ACTIONS_GUIDE.md 3-19).")
     if status == "publish_failed":

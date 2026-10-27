@@ -506,7 +506,7 @@ class ChanceSplitTest(unittest.TestCase):
     def test_the_draft_flow_added_exactly_two_steps_to_chanceblog(self):
         added = [s for s in self.steps(self.chance) if s.get("id") == "flow" or "pipeline.draft_flow" in s.get("run", "")]
         self.assertEqual(len(added), 2)
-        self.assertEqual(len(self.steps(self.chance)), 8)
+        self.assertEqual(len(self.steps(self.chance)), 9)               # 기준 6 + 승인 흐름 2 + 텔레그램 알림(새 글) 1(알림 단계는 test_steps_are_identical_except_the_fix_images_switch 가 따로 뺀다)
         self.assertEqual(len(self.steps(self.fix)), 6)                  # 이미지 교체 워크플로는 승인 흐름과 무관하다(새 글을 만들지 않는다)
 
     def test_fix_images_workflow_still_commits_and_requests_the_pages_deploy(self):

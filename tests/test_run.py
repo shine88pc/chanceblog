@@ -1018,10 +1018,10 @@ class SummaryHeadTest(RunBase):
         self.assertLessEqual(len(hostile_key), len("### ") + 60)
 
     def test_no_summary_line_of_the_runner_still_starts_with_the_bare_key(self):
-        """러너의 요약 쓰기 세 곳이 모두 summary_head 를 쓴다(예전 `### <key>` 를 직접 쓰는 곳이 남아 있으면 안 된다)."""
+        """러너의 요약 쓰기 다섯 곳(일반 경로 셋 + 초안 패키지 경로 둘)이 모두 summary_head 를 쓴다(예전 `### <key>` 를 직접 쓰는 곳이 남아 있으면 안 된다)."""
         source = (REAL / "pipeline" / "run.py").read_text(encoding="utf-8")
         self.assertNotIn('f"### {blog[\'key\']}', source)
-        self.assertEqual(source.replace("def summary_head(blog)", "").count("summary_head(blog)"), 3)
+        self.assertEqual(source.replace("def summary_head(blog)", "").count("summary_head(blog)"), 5)
 
 
 class PolicyTest(unittest.TestCase):

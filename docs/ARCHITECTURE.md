@@ -138,7 +138,7 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 어느 채널의 것인지
 
 "할 일이 없어서", 또는 "조건이 안 맞아서" 끝나는 실행도 **왜** 끝났는지 남긴다. 초록 체크는 "프로그램이 오류 없이 끝났다"는 뜻일 뿐 "글이 올라갔다"는 뜻이 아니기 때문이다(2026-10-25 진단: Chance는 슬롯 시각이 된 스케줄 실행 13회 중 11회가 글 없이 초록으로 끝났고, Blogger는 게시 시크릿이 없어 초안만 만든 채 초록이었다).
 
-한 줄 규격: `[SKIP] code=<코드> key=값 ...` — Actions 로그에서 `[SKIP]`로 찾고, 같은 코드가 실행 요약(Step Summary)에도 쓰인다. Blogger 러너(`pipeline/run.py`)의 실행 요약은 어느 경로든 첫 줄이 `### [채널 라벨] 블로그 이름`(레지스트리의 `channel.label`·`name`, 예: `### [Blogger] Blogger (macat0722)`, `summary_head()`)이고 그 아래 줄(`- 결과: **코드** — …`·URL·안내·Gemini 호출)은 이 규약의 코드와 같다(2026-10-27 이전에는 첫 줄이 블로그 key였다).
+한 줄 규격: `[SKIP] code=<코드> key=값 ...` — Actions 로그에서 `[SKIP]`로 찾고, 같은 코드가 실행 요약(Step Summary)에도 쓰인다. Blogger 러너(`pipeline/run.py`)의 실행 요약은 어느 경로든(초안 패키지 경로 포함: `### [티스토리] 블로그 이름`) 첫 줄이 `### [채널 라벨] 블로그 이름`(레지스트리의 `channel.label`·`name`, 예: `### [Blogger] Blogger (macat0722)`, `summary_head()`)이고 그 아래 줄(`- 결과: **코드** — …`·URL·안내·Gemini 호출)은 이 규약의 코드와 같다(2026-10-27 이전에는 첫 줄이 블로그 key였다).
 
 | 수준 | 의미 | 처리 | 종료 | 코드 |
 |------|------|------|------|------|
@@ -283,6 +283,8 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 어느 채널의 것인지
 
 사람이 발행해야 하는 글(티스토리·네이버 초안 패키지, Chance 승인 흐름, Blogger 초안함)의 대기 상태를 한 약속으로 센다. **초안 1건 = GitHub 이슈 1개 또는 PR 1개**, 라벨 `초안`(대기) + `채널:<채널 라벨>`(채널 라벨은 레지스트리 `channel.label`과 같은 글자), 쓰지 않을 초안은 라벨 `폐기` 또는 닫기(닫기 = 발행 완료 또는 폐기). 초안을 만드는 쪽(작업 C·E)이 이 라벨을 붙이고, `[공통] 확인 필요 모음`이 읽어 본문 맨 위의 **초안 현황** 표(채널 | 대기 초안 | 가장 오래된 | 최신 초안)와 항목(열린 초안 이슈·PR이 새로 생기면 action — 코멘트 알림, 3일 넘으면 check)을 만든다. 초안 PR은 한 줄만 남긴다: 열린 PR 규칙이 이미 action으로 올린 PR(병합하면 됩니다·충돌·검사 실패)은 그 줄이 알리고, 그 밖의 상태(저장소 기본 토큰이 연 PR은 검사가 돌지 않아 `검사 결과 없음`이 되기 쉽다)는 열린 PR 줄을 빼고 초안 항목이 알린다. Blogger는 이력의 `draft_uploaded`(최근 14일)를 센 **대략치**다(공개 여부는 Blogger 쪽 사실). 레지스트리에 `publish_flow: pr`(작업 E)이 있는 Chance는 열린 초안 PR 수, 없거나 `direct`면 `자동 공개`다. 규칙(`pipeline/inbox.py`)·읽기와 라벨 만들기(`scripts/ops_inbox.py`)·갱신 트리거(`ops-inbox.yml`의 `issues`·`pull_request`)의 상세와 한계(기본 토큰이 만든 이벤트는 워크플로를 시작시키지 않음)는 [`OPS_INBOX.md`](./OPS_INBOX.md) §3-1·§5.
 
+**켜기 전에 연결할 것**(묶음 2 통합에서 일부러 연결하지 않았다 — 승인 흐름·초안 패키지가 모두 꺼져 있어 지금은 필요 없다): Chance 승인 흐름(E)과 티스토리·네이버 초안 패키지(C)가 초안을 만든 **직후** ① `ops-inbox.yml`을 `workflow_dispatch`로 불러 현황판을 바로 갱신하고(기본 토큰이 만든 이슈·PR 은 이벤트 트리거를 일으키지 못한다) ② `notify_draft_waiting()`(§4-5)으로 휴대폰에 `📝 발행 대기`를 보낸다(승인 흐름에서는 새 글 알림 단계가 돌지 않는다 — 글을 main 에 커밋하지 않아서다).
+
 ## 4-3. 배포 후 공개 확인 (`pages.yml`의 `verify` 잡, D-41)
 
 배포 워크플로가 초록이어도 "새 글이 공개 주소에서 열린다"는 보장은 없다(빌드 산출물에서 글이 빠졌거나 공개 CDN이 이전 응답을 들고 있을 수 있다). `deploy` 잡 뒤의 `verify` 잡이 `scripts/verify_pages_deploy.py`로 다음을 확인한다(표준 라이브러리만 사용, 잡 제한 15분).
@@ -346,7 +348,7 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 어느 채널의 것인지
 | 바뀐 파일 | `_posts/…` 두 개(한국어·영어)뿐. `history.json`은 PR 에 없다 |
 | 본문 | 승인 안내(운영자 @멘션) · 요약(분야·출처·원문 링크·발행 슬롯) · 제목 · 첫 문단 발췌 · 자동 점검 결과(분량·원문 인용·출처 목록·고지문·제목 유사도) · 승인 체크리스트 · 안내. 9,000자 이하 |
 | 체크리스트 | 정확히 `- [ ] 원문과 수치·사실을 대조했다` / `- [ ] 제목·요약에 문제가 없다` / `- [ ] 병합 = 공개(사람 검토 단계)` 세 줄 |
-| 검사(CI) | **돌지 않는다**: `GITHUB_TOKEN`으로 연 PR 은 `pull_request` 워크플로를 시작시키지 않는다(GitHub 규칙, 켠 뒤 관측). 글 파일만 바뀌어 병합에 필요하지 않다. 확인 필요 모음의 PR 규칙은 이를 '검사 결과 없음'(확인)으로 보여 준다([`OPS_INBOX.md`](./OPS_INBOX.md) §3) |
+| 검사(CI) | **돌지 않는다**: `GITHUB_TOKEN`으로 연 PR 은 `pull_request` 워크플로를 시작시키지 않는다(GitHub 규칙, 켠 뒤 관측). 글 파일만 바뀌어 병합에 필요하지 않다. 라벨 `초안`이 붙은 PR 은 확인 필요 모음이 '초안 대기'(지금 해야 할 일) 한 줄로 보여 준다([`OPS_INBOX.md`](./OPS_INBOX.md) §3 의 `초안(PR)` 행) |
 
 이력 항목(`history.json`)은 Chance 의 기존 필드(`date`·`topic`·`kr_title`·`en_title`·`kr_image`·`en_image`·`slot`·`lane`·`source`·`source_url`)에 `flow`(`"pr"`)·`branch`·`paths`가 더해진 것이다. 별도 원장 파일은 없다.
 
@@ -376,7 +378,7 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 어느 채널의 것인지
 | 이벤트 | 함수(`Notifier`의 메서드이자 같은 이름의 모듈 함수) | 호출 자리 | 내용 |
 |--------|------|------|------|
 | 새 글 발행 | `notify_chance_published(posts, run_info)` | `chanceblog.yml`의 마지막 단계 `텔레그램 알림(새 글)` → `python -m pipeline.notify chance-published --commit HEAD` | 방금 push 한 커밋이 **새로 더한** `_posts/**.md`(부모가 있는 커밋만, `published: false` 제외)를 (날짜·시각)으로 짝지어 한·영 한 쌍을 한 통으로: 제목 둘·분야·출처·예상 공개 주소 둘(`scripts/verify_pages_deploy.py`의 주소 계산을 그대로 씀)·배포 안내("배포가 끝나기까지 약 3분 — 일찍 열면 404 가 최대 약 18분 보관될 수 있으니 3분 뒤에 열어 보세요", D-41)·실행 기록 링크, 버튼 `한글 글`·`English` |
-| 발행 대기 | `notify_draft_waiting(channel_label, title, where, url=None)` | `notify_blogger_result`가 `draft_uploaded`에서 부른다. **티스토리·네이버 초안 패키지와 Chance 승인 대기가 초안을 만든 직후 같은 함수를 부른다(호출 자리는 그 작업들이 병합된 뒤 총괄이 잇는다 — 이 작업에는 넣지 않았다)** | `📝 발행 대기 — 채널: 제목 → 어디서 무엇을 하면 되는지` + 허용된 주소면 `열기` 버튼 |
+| 발행 대기 | `notify_draft_waiting(channel_label, title, where, url=None)` | `notify_blogger_result`가 `draft_uploaded`에서 부른다. **티스토리·네이버 초안 패키지와 Chance 승인 대기가 초안을 만든 직후 같은 함수를 부른다(호출은 아직 연결하지 않았다 — 켜기 전에 연결할 것, §4-2-1)** | `📝 발행 대기 — 채널: 제목 → 어디서 무엇을 하면 되는지` + 허용된 주소면 `열기` 버튼 |
 | Blogger 결과 | `notify_blogger_result(result_code, title, url, blog_label, extra_prefixes)` | `pipeline/run.py`가 게시·초안 업로드에 성공했을 때(`posted`·`draft_uploaded`), 이력·초안 파일·실행 요약을 모두 쓴 **맨 마지막에**(알림이 느리거나 그 사이 실행이 끊겨도 올라간 글의 기록이 먼저 남는다) | `draft_uploaded` → 발행 대기 문구(Blogger 대시보드 → 초안에서 확인·게시), `posted` → `✅ 게시됨`(글 주소가 레지스트리의 블로그 주소 아래일 때만 `글 보기` 버튼). 실패·저장소 파일만 저장·연습 실행은 보내지 않는다(실패는 확인 필요 모음·Actions 실패 알림이 맡는다) |
 | 확인 필요 | `notify_ops_alert(item_lines, inbox_url, count)` | `scripts/ops_inbox.py`가 코멘트(@멘션)를 쓰려고 할 때(연습 제외) — 같은 `new_items`, `inbox.alert_lines()`가 코멘트와 같은 제목 줄을 만든다 | **평문** 한 통(`📌 확인 필요 모음 — 새로 해야 할 일 N건` + 항목 제목 줄 최대 10줄), 버튼 `확인 필요 모음 열기` |
 | 연결 확인 | `notify_test()` | `python -m pipeline.notify test`(`[공통] 텔레그램 알림 시험`) | `✅ 알림 연결 확인` |

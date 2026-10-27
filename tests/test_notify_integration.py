@@ -472,8 +472,10 @@ class WorkflowStructureTest(unittest.TestCase):
         self.assertEqual(step["env"], TELEGRAM_ENV)
         self.assertEqual(step["run"], "python -m pipeline.notify chance-published --commit HEAD")
         self.assertEqual(set(step), {"name", "if", "continue-on-error", "timeout-minutes", "env", "run"})
-        deploy = steps[-2]
-        self.assertIn("gh workflow run pages.yml", deploy["run"])             # 배포 요청 단계가 바로 앞에 그대로 있다
+        # 승인 흐름의 '초안 올리기' 단계가 알림 바로 앞에 있다(직접 게시에서는 건너뜀). 배포 요청 단계는 그 앞에 그대로 있다.
+        self.assertIn("pipeline.draft_flow deliver", steps[-2]["run"])
+        deploy = steps[-3]
+        self.assertIn("gh workflow run pages.yml", deploy["run"])
         self.assertEqual(deploy["if"], "steps.commit.outputs.pushed == 'true'")
 
     def test_the_alert_never_runs_for_a_practice_run(self):
@@ -487,10 +489,13 @@ class WorkflowStructureTest(unittest.TestCase):
 
     def test_the_other_chanceblog_steps_did_not_change(self):
         names = [s.get("name") or s.get("uses") for s in steps_of("chanceblog.yml", "build")]
-        self.assertEqual(names, ["actions/checkout@v4", "actions/setup-python@v5", "의존성 설치", "AI 블로그 제너레이터 실행", "변경 사항 커밋",
-                                 "Pages 배포 실행 (새 커밋이 있을 때만)", "텔레그램 알림(새 글)"])
+        # 알림 말고 단계 목록은 승인 흐름(Chance 승인 PR)이 더한 두 단계('발행 흐름 확인'·'초안 올리기')를 포함한다
+        self.assertEqual(names, ["actions/checkout@v4", "actions/setup-python@v5", "발행 흐름 확인 (레지스트리 publish_flow)", "의존성 설치",
+                                 "AI 블로그 제너레이터 실행", "변경 사항 커밋", "Pages 배포 실행 (새 커밋이 있을 때만)",
+                                 "초안 올리기와 승인 PR 열기 (승인 흐름일 때만)", "텔레그램 알림(새 글)"])
         wf = load("chanceblog.yml")
-        self.assertEqual(wf["permissions"], {"contents": "write", "actions": "write"})
+        # pull-requests: write 는 승인 흐름이 PR 을 열려고 더한 것이다(알림은 이 권한을 쓰지 않는다)
+        self.assertEqual(wf["permissions"], {"contents": "write", "actions": "write", "pull-requests": "write"})
         self.assertEqual(wf["concurrency"], {"group": "chanceblog", "cancel-in-progress": False})
         self.assertEqual(wf["jobs"]["build"]["timeout-minutes"], 20)
         python = steps_of("chanceblog.yml", "build")[1]

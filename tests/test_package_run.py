@@ -108,13 +108,14 @@ class FlowTest(PackageRunBase):
     def test_the_summary_tells_the_operator_what_to_do_and_that_nothing_was_published(self):
         self.go()
         text = self.summary()
-        self.assertEqual(text.splitlines()[0], f"### {self.key}")
+        self.assertEqual(text.splitlines()[0], "### [티스토리] 티스토리 시험 블로그")          # 머리는 Blogger 와 같은 `### [채널 라벨] 블로그 이름`(run.summary_head)
         self.assertIn("공개된 글이 아닙니다", text)
         self.assertIn("티스토리에 직접 발행하고 이슈를 닫으세요", text)
         self.assertIn("docs/ACTIONS_GUIDE.md 3-19", text)
         self.summary_path.unlink()
         self.go(key="naver_test")
         self.assertIn("네이버 블로그에 직접 발행하고 이슈를 닫으세요", self.summary())
+        self.assertEqual(self.summary().splitlines()[0], "### [네이버] 네이버 시험 블로그")
 
     def test_blogger_machinery_is_never_touched(self):
         with mock.patch("pipeline.publishers.blogger.BloggerPublisher", side_effect=AssertionError("Blogger 게시자를 만들면 안 된다")), \
@@ -763,7 +764,7 @@ class FailureTest(PackageRunBase):
                 self.assertTrue(errors[0].startswith(f"::error::[tistory_test] {run_mod.PACKAGE_FAILURES[code_name][1]}"))
                 hint = "재실행 전에 라벨 `초안` 이슈 목록을 확인하세요" in errors[0]
                 self.assertEqual(hint, code_name != "auth_failed", code_name)          # 이슈가 만들어졌을 수 있는 실패에만 확인 안내(권한 오류는 만들기 전에 막힌 것)
-                self.assertEqual(self.summary().count("### tistory_test"), 1)                              # 요약은 한 블록이다
+                self.assertEqual(self.summary().count("### [티스토리] 티스토리 시험 블로그"), 1)                # 요약은 한 블록이다
                 self.assertIn("사유:", self.summary())
                 (self.root / "tistory_test_history.json").unlink()
                 for path in self.drafts():
@@ -875,7 +876,7 @@ class FailureTest(PackageRunBase):
         self.assertEqual(code, 0, out)
         self.assertEqual(self.annotations(out), [])
         lines = self.summary().splitlines()
-        self.assertEqual(lines[0], "### tistory_test")
+        self.assertEqual(lines[0], "### [티스토리] 티스토리 시험 블로그")
         for char in "|<>`":
             self.assertNotIn(char, lines[1])
         self.assertNotIn("](", self.summary())
