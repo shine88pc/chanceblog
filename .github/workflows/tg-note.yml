@@ -1,0 +1,36 @@
+name: "[공통] 텔레그램 메모 보내기(임시 브랜치 전용)"
+
+# 임시 브랜치(ai/claude/tg-note-*)에 푸시하면 tg_note/ 의 메모 한 편을 휴대폰 텔레그램으로 한 통 보낸다.
+# 이 파일은 main 에 병합하지 않는다(정식 경로는 작업 H 의 'AI 요청 텔레그램 알림'이 대신한다). 보내는 글은 AI 가 쓴 메모 파일뿐이고 외부 입력이 없다.
+# 시크릿은 이 단계의 env 로만 넘기고 명령 줄·로그에 쓰지 않는다(검증기 WF-13, docs/SECURITY_GUARDRAILS.md G-C12). 저장소는 읽기만 한다.
+
+on:
+  push:
+    branches: ['ai/claude/tg-note-**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tg-note-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  send:
+    name: 메모 보내기
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 메모를 텔레그램으로 보내기
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python tg_note/send.py tg_note/58_review.txt
