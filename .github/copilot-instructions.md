@@ -23,6 +23,10 @@
 
 광고 표면(`index.html`, `privacy.md`, `about.md`, `contact.md`, `_includes/`, `_layouts/`, `_config.yml`, `robots.txt`, `ads.txt`), `.github/workflows/`, `pipeline/`, `scripts/`, 비밀 파일. 광고 코드(`adsbygoogle`, `ca-pub-`)는 어떤 경우에도 추가·삭제하지 않는다.
 
+## 운영자 요청함 이슈는 수정 요청이 아니다
+
+이슈 제목이 `[답변] `·`[요청] ` 로 시작하면 운영자 요청함의 응답·새 일 요청이다(`blog-control` 라벨이 없고 위 수정 양식과 무관). 승인은 소유자 계정·요청 번호 일치·그 요청에 적힌 항목에 한해서만 유효하며(AGENTS.md 8번), 이 이슈로 파일을 고치는 PR 을 스스로 만들지 않는다.
+
 ## 읽을 문서
 
 [`HANDLER.md`](../HANDLER.md) · [`docs/SECURITY_GUARDRAILS.md`](../docs/SECURITY_GUARDRAILS.md) · 코드 작업이면 [`docs/ENGINEERING_GUIDE.md`](../docs/ENGINEERING_GUIDE.md)

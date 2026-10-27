@@ -190,6 +190,7 @@ Chance 승인 흐름(레지스트리 `publish_flow: pr`, 지금 꺼짐 — [`ARC
 | `issue-edit.yml` | 아니오 | 제목이 `[페이지 수정]`·`[이미지 변경]`이 아니고 라벨이 `blog-control`이 아니며, 작성자 권한(소유자·멤버·협업자) 조건도 봇(`CONTRIBUTOR`)은 통과하지 못합니다. 또 `GITHUB_TOKEN`이 만든 이슈는 워크플로를 시작시키지 않습니다. 테스트가 이 조건들을 고정합니다 |
 | `sync-issue-form.yml` | 아니오 | 이슈가 아니라 `main`에 푸시된 특정 경로(`pages.json`·`*.md` 등)에만 반응합니다. 이 문서(`docs/`)는 해당 경로가 아닙니다 |
 | `pr-scope-check.yml` | 아니오 | PR에서만 실행되고, PR 본문의 `Fixes #번호`로 연결된 이슈만 봅니다 |
+| `operator-reply.yml`(운영자 요청함, 2026-10-28) | 아니오 | 이슈가 열릴 때 **소유자 계정이** 연 `[답변]`·`[요청]` 양식 이슈만 접수합니다. 이 이슈는 작성자가 봇(`github-actions[bot]`)이고 제목이 다르며 `GITHUB_TOKEN`이 만든 이슈는 워크플로를 시작시키지 않습니다. 반대로 라벨 `운영자응답`·`운영자요청` 이슈는 이 모음이 읽지 않습니다(라벨 `초안`·`ops-inbox`가 아님). AI 의 요청·답변 알림은 이 모음과 별개의 길입니다([`ARCHITECTURE.md`](./ARCHITECTURE.md) §4-6) |
 | `scripts/watchdog.py` | 아니오 | `watchdog` 라벨의 열린 이슈 중 제목이 `[Watchdog]`로 시작하는 것만 만들고 닫습니다. 이 이슈는 라벨도 제목도 다릅니다. 반대로 이 모음은 워치독 이슈를 읽기만 합니다 |
 
 ## 7. 규칙을 추가하는 법 (AI용)
