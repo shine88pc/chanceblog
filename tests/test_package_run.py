@@ -18,7 +18,7 @@ from pipeline import health, registry
 from pipeline import run as run_mod
 from pipeline.llm import LLMError
 from pipeline.publishers import issue_package as ip
-from pipeline.publishers.base import PublishError
+from pipeline.publishers.base import PublishError, PublishResult
 from pipeline.stubs import stub_llm
 
 REAL = _bootstrap.ROOT
@@ -321,7 +321,7 @@ class BacklogTest(PackageRunBase):
         pub = FakePackagePublisher(open_drafts=2)
         code, out = self.go(publisher=pub)
         self.assertEqual((code, len(pub.created)), (0, 1))
-        self.assertIn("열린 초안 2건(상한 3건 미만)", out)
+        self.assertIn("초안 이슈 점검 통과: 열린 초안 2건(상한 3건 미만)", out)
 
     def test_open_drafts_marked_as_discarded_do_not_block_a_new_draft_with_the_real_adapter(self):
         """폐기 = 라벨 `폐기` 또는 닫기. 라벨만 붙인 열린 이슈 셋은 적체가 아니다(현황판과 같은 규칙) — 진짜 어댑터와 가짜 GitHub 로 끝까지 본다."""
@@ -440,6 +440,14 @@ class DryRunTest(PackageRunBase):
 
 
 class ConfigTest(PackageRunBase):
+    def test_the_run_link_is_built_only_from_a_well_formed_repository_and_a_numeric_run_id(self):
+        """실행 주소는 이슈 본문의 링크가 된다. 저장소 이름이 `소유자/이름` 모양이고 실행 번호가 숫자일 때만 만들고, 아니면 링크 없이 둔다(어댑터도 한 번 더 본다)."""
+        for repo, run_id, expected in ((REPO, "4242", f"https://github.com/{REPO}/actions/runs/4242"), (REPO, " 4242 ", f"https://github.com/{REPO}/actions/runs/4242"),
+                                       (REPO, "12a", ""), (REPO, "1 2", ""), (REPO, "../x", ""), (REPO, "", ""), (REPO, None, ""),
+                                       ("not a repo", "1", ""), ("a/b/c", "1", ""), ("", "1", ""), (None, "1", "")):
+            with self.subTest(repo=repo, run_id=run_id):
+                self.assertEqual(run_mod._run_url({"GITHUB_REPOSITORY": repo, "GITHUB_RUN_ID": run_id}), expected)
+
     def test_missing_github_token_or_repository_stops_before_gemini_with_names_only(self):
         for missing, expect in ((("GITHUB_TOKEN",), "missing=GITHUB_TOKEN"), (("GITHUB_REPOSITORY",), "missing=GITHUB_REPOSITORY"),
                                 (("GITHUB_TOKEN", "GITHUB_REPOSITORY"), "missing=GITHUB_TOKEN,GITHUB_REPOSITORY")):
@@ -578,6 +586,23 @@ class FailureTest(PackageRunBase):
         self.assertIn("stage=precheck reason=unexpected exit=1", out)
         self.assertIn("RuntimeError: 뜻밖", out)
         self.assertEqual(self.history()[-1]["status"], "publish_failed")
+
+    def test_a_publisher_that_returns_no_issue_number_or_address_is_not_recorded_as_a_success(self):
+        """어댑터는 자기 응답을 스스로 검사하지만, 러너도 번호나 주소가 빈 결과를 성공(package_issued)으로 적지 않는다 — 어떤 게시자가 와도 같다."""
+        url = f"https://github.com/{REPO}/issues/1"
+        for name, result in (("번호 없음", PublishResult(post_id="", url=url, draft=True)), ("주소 없음", PublishResult(post_id="1", url="", draft=True)),
+                             ("둘 다 없음", PublishResult(post_id="  ", url=" ", draft=True))):
+            with self.subTest(name):
+                code, out = self.go(publisher=FakePackagePublisher(result=result))
+                self.assertEqual(code, 1, out)
+                self.assertIn("stage=issue reason=bad_response exit=1", out)
+                self.assertIn("재실행 전에 라벨 `초안` 이슈 목록을 확인하세요", out)           # 이슈가 만들어졌을 수 있다
+                entry = self.history()[-1]
+                self.assertEqual((entry["status"], entry["post_id"], entry["url"]), ("publish_failed", "", ""))
+                self.assertNotIn("package_issued", json.dumps(self.history()))
+                (self.root / "tistory_test_history.json").unlink()
+                for path in self.drafts():
+                    path.unlink()
 
     def test_an_unknown_error_code_is_folded_into_api_error(self):
         code, out = self.go(publisher=FakePackagePublisher(fail=PublishError("x", code="something_new")))
