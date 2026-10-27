@@ -1926,7 +1926,8 @@ class DraftGuideMatchesCodeTest(unittest.TestCase):
 
     def test_the_blogger_summary_head_is_documented_where_the_runner_summary_is(self):
         self.assertIn("### [채널 라벨] 블로그 이름", self.arch)
-        self.assertIn("### [Blogger] Blogger (macat0722)", self.guide)
+        self.assertIn("### [Blogger 영문] Blogger (macat0722)", self.guide)
+        self.assertIn("### [Blogger 한글] Blogger (kcyoon)", self.guide)             # 한글 Blogger 의 머리도 같은 자리에 적혀 있다(작업 D)
         self.assertIn("summary_head", self.arch)
 
 
