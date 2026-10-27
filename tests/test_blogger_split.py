@@ -246,6 +246,29 @@ class ExpressionEquivalenceTest(unittest.TestCase):
                 self.assertEqual(wf.end_to_end_env(wrapper, event, combo)["ONLY_BLOG"], key)
             self.assertEqual(wf.old_env("schedule")["AUTH_CHECK_ONLY"], "")
 
+    def test_a_string_input_is_never_handed_over_as_null_for_any_event_or_input_combination(self):
+        """독립 검증 N9: 정기 실행(과 API 로 입력을 생략한 수동 실행)에는 github.event.inputs.topic 이 없어 식이 null 이 된다. 문자열 입력에 null 을 넘길 때의 동작은 GitHub 문서에
+        없으므로(엄격하게 거부하는 구현이면 첫 정기 실행이 실패한다) 래퍼가 `|| ''` 로 빈 문자열을 직접 넘긴다 — 모든 조합에서 문자열이고, 불린 입력은 불린이다."""
+        checked = 0
+        for wrapper in WRAPPERS.values():
+            for event, combos in (("schedule", [{}, {"dry_run": "true", "publish": "publish", "auth_check": "true", "topic": "x"}]),
+                                  ("workflow_dispatch", list(wf.dispatch_combinations()))):
+                for combo in combos:
+                    given = wf.wrapper_with(wrapper, event, combo)
+                    for name in ("blog", "topic", "publish"):
+                        self.assertIsInstance(given[name], str, (wrapper, event, combo, name))
+                    for name in wf.BOOLEAN_INPUTS:
+                        self.assertIsInstance(given[name], bool, (wrapper, event, combo, name))
+                    checked += 1
+        self.assertEqual(checked, 2 * (2 + 108))
+
+    def test_the_topic_expression_falls_back_to_an_empty_string_in_both_wrappers(self):
+        for wrapper in WRAPPERS.values():
+            self.assertEqual(wf.call_job(wrapper)[1]["with"]["topic"], "${{ github.event.inputs.topic || '' }}", wrapper)
+            self.assertEqual(wf.wrapper_with(wrapper, "schedule")["topic"], "", wrapper)                           # 정기 실행: 입력이 없다 → 빈 문자열
+            self.assertEqual(wf.wrapper_with(wrapper, "workflow_dispatch", {"dry_run": "true"})["topic"], "", wrapper)    # 수동인데 주제를 안 준 경우
+            self.assertEqual(wf.wrapper_with(wrapper, "workflow_dispatch", {"topic": "직접 정한 주제"})["topic"], "직접 정한 주제", wrapper)
+
     def test_typed_inputs_have_the_types_the_called_workflow_declares(self):
         for wrapper in WRAPPERS.values():
             for event, combo in (("schedule", {}), ("workflow_dispatch", {"dry_run": "true", "auth_check": "true", "publish": "off", "topic": "t"}), ("workflow_dispatch", {})):
