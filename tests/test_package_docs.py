@@ -27,10 +27,11 @@ def cron_of(name):
 
 class ResultCodeDocsTest(unittest.TestCase):
     CODES = ("PACKAGE_BACKLOG", "PACKAGE_FAILED", "AUTH_CHECK_UNSUPPORTED")
+    ALSO_IN_THE_GUIDE = ("HISTORY_WRITE_FAILED",)          # package 경로도 내는 기존 코드(이슈는 만들어졌는데 이력 쓰기 실패)
 
     def test_every_new_code_is_emitted_by_the_runner(self):
         source = read("pipeline/run.py")
-        for code in self.CODES:
+        for code in self.CODES + self.ALSO_IN_THE_GUIDE:
             self.assertRegex(source, rf'skip_line\("{code}"', code)
 
     def test_the_architecture_table_puts_each_code_on_the_right_level(self):
@@ -45,24 +46,41 @@ class ResultCodeDocsTest(unittest.TestCase):
         self.assertRegex(rows["설정 오류"], r"\|\s*\*\*2\*\*\s*\|")
 
     def test_the_failure_table_matches_the_runner_classification(self):
-        text = section(read("docs/ARCHITECTURE.md"), "| 초안 패키지 실패 분류(`reason=`)", "**이슈를 만드는 호출은 안에서")
+        text = section(read("docs/ARCHITECTURE.md"), "| 초안 패키지 실패 분류(`reason=`)", "**이슈 만들기 요청은 한 번만 보낸다")
         documented = {}
         for line in text.splitlines():
             match = re.match(r"^\| `(\w+)` \|.*\|\s*(\d)\s*\|[^|]*\|$", line)
             if match:
                 documented[match.group(1)] = int(match.group(2))
         self.assertEqual(documented, {code: run_mod._package_exit(code) for code in run_mod.PACKAGE_FAILURES})
-        self.assertEqual(set(documented), {"auth_failed", "too_long", "network", "bad_response", "api_error", "unexpected"})
-        self.assertEqual(run_mod.PACKAGE_CONFIG_CODES, {"auth_failed", "too_long"})
+        self.assertEqual(set(documented), {"auth_failed", "too_long", "invalid_draft", "network", "bad_response", "api_error", "unexpected"})
+        self.assertEqual(run_mod.PACKAGE_CONFIG_CODES, {"auth_failed", "too_long", "invalid_draft"})
+        self.assertEqual(run_mod.PACKAGE_BUILD_CODES, {"too_long", "invalid_draft"})
 
     def test_the_operator_guide_lists_every_code_for_both_workflows(self):
         guide = read("docs/ACTIONS_GUIDE.md")
         part = section(guide, "### 6-12.", "### 6-13.")
-        for code in self.CODES + ("TOPIC_BLOCKED", "SECRETS_MISSING", "INVALID_PUBLISH", "DAILY_CAP", "MODE_OFF", "PAUSED", "GATE_REJECTED", "NO_TOPIC"):
+        for code in self.CODES + self.ALSO_IN_THE_GUIDE + ("TOPIC_BLOCKED", "SECRETS_MISSING", "INVALID_PUBLISH", "DAILY_CAP", "MODE_OFF", "PAUSED", "GATE_REJECTED", "NO_TOPIC"):
             self.assertIn(f"`{code}`", part, code)
         for reason in run_mod.PACKAGE_FAILURES:
             self.assertIn(f"`{reason}`", part, reason)
         self.assertIn("6-12", section(guide, "### 6-13.", "## 7."))
+
+    def test_the_idempotency_and_create_once_rules_are_described_as_they_are(self):
+        """검증 지적 N1·N2: 이슈 만들기는 한 번만 보내고 모호하면 멈춘다(바깥에서 확인 뒤 다시 만들지 않는다). 표지 멱등은 같은 글의 재시도만 막는다
+        (이력 파일이 사라진 날의 다른 글까지 막는다는 낡은 문장이 없어야 한다)."""
+        arch = read("docs/ARCHITECTURE.md")
+        self.assertNotIn("이력 파일이 사라진 날의 재실행도 막는다", arch)
+        self.assertNotIn("없을 때만 다시 만든다", arch)
+        self.assertIn("같은 글을 다시 올리려는 재시도만 막는다", section(arch, "## 5.", "## 6."))
+        part = section(arch, "**이슈 만들기 요청은 한 번만 보낸다", "글을 어디까지 보내는지")
+        for needle in ("모호하면 멈춘다", "한 번만", "만들어졌을 수 있으니", "4xx", "같은 글을 다시 올리려는"):
+            self.assertIn(needle, part, needle)
+        guard = next(line for line in read("docs/SECURITY_GUARDRAILS.md").splitlines() if line.startswith("| G-L8 |"))
+        for needle in ("자동 재시도하지 않는다", "다시 만들지 않고 멈춘다", "제어"):
+            self.assertIn(needle, guard, needle)
+        register = read("docs/DEFECT_REGISTER.md")
+        self.assertIn("모호한 실패는 다시 만들지 않고 멈춘다", register)
 
     def test_the_new_status_is_documented_and_counted(self):
         arch = read("docs/ARCHITECTURE.md")
@@ -99,6 +117,11 @@ class LimitsAndPolicyDocsTest(unittest.TestCase):
         for word in registry.ACCOUNT_SECRET_WORDS:
             self.assertIn(word, row, word)
         self.assertIn("저장하지도 처리하지도 않는다", row)
+        # N7: 구조적 보장은 역할 제한이고 이름 검사는 보조(포함 검사라 우회 철자는 통과한다)
+        self.assertIn("구조적 보장은 이 채널의 시크릿 역할이 `llm_api_key` **뿐**", row)
+        self.assertIn("보조", row)
+        self.assertIn("우회 철자", row)
+        self.assertNotIn("구조로 보장한다", row)
         self.assertIn("| G-L8 |", guard)
         for needle in ("영(0)폭 공백", "펜스", "gates.sanitize_html", "too_long", "자동 재시도하지 않는다"):
             self.assertIn(needle, next(line for line in guard.splitlines() if line.startswith("| G-L8 |")), needle)
@@ -110,6 +133,14 @@ class LimitsAndPolicyDocsTest(unittest.TestCase):
         arch = section(read("docs/ARCHITECTURE.md"), "### B-2.", "### C. 또 하나의 Jekyll")
         self.assertIn("블로그 주소·주제를 받으면 해야 할 일 체크리스트", arch)
         for needle in ("프로필", "프롬프트", "`channel`", "`entrypoint: pipeline/run.py`", "연습 실행", "비공개 시험 글", "`ads: \"off\"`"):
+            self.assertIn(needle, arch, needle)
+        # N9: 첫 실제 항목을 넣을 때 함께 고칠 시험, 새 이력 파일의 공개 방지
+        for needle in ("test_the_real_registry_has_no_package_blog_yet", "tests/test_registry.py", "`_config.yml`", "`exclude`", "T3"):
+            self.assertIn(needle, arch, needle)
+        real = (REAL / "tests" / "test_package_registry.py").read_text(encoding="utf-8")
+        self.assertIn("def test_the_real_registry_has_no_package_blog_yet", real)         # 문서가 가리키는 시험이 실제로 있다
+        # N11: 공개 저장소의 이슈는 공개 페이지, 주소는 소독하지 않는다
+        for needle in ("공개 저장소", "검색 색인", "주소(URL)는 소독하지 않는다"):
             self.assertIn(needle, arch, needle)
 
     def test_the_defects_and_the_observation_list_are_recorded(self):
