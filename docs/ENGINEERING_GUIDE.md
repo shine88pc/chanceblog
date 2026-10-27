@@ -53,7 +53,7 @@
 | W7 | `schedule.cron`은 레지스트리와 같게. 수동 실행 입력(`dry_run`, `publish`(off·draft·publish 3택, 기본 draft), 대상 블로그·주제)을 제공한다 | **REG-2** |
 | W8 | 시크릿은 `secrets[...]` → `env`로만. `echo` 금지 | **WF-9**·**REG-3** |
 | W9 | 변경 후 `actionlint`가 0건이어야 한다 | CI |
-| W10 | 워크플로·job 이름(`name`)은 **한글**로, 이름만 보고 자동인지 수동인지·무엇을 하는지 짐작할 수 있게 짓는다(예: `사이트 자동 배포`, `Chance 기존 글 이미지 교체(수동)`). 이름 하나로 설명되지 않는 서로 다른 기능이 한 워크플로에 묶이면 나눈다(예: 글 작성과 이미지 교체). `run-name`에는 정기/수동·번호·불리언만 쓰고 이슈·PR 제목 같은 외부 문자열은 넣지 않는다. 외부 워크플로 템플릿을 복사해 넣을 때는 영문 `name`을 한글로 바꾼다. 이름 표는 [`ARCHITECTURE.md`](./ARCHITECTURE.md) §2-1. **어디서 강제하나**: 검증기 WF-11은 워크플로 `name`(오류)과 job `name`(경고)만 본다. 그러나 job `name`은 단위 테스트 `test_real_repository_workflow_and_job_names_are_korean`이 경고도 실패로 취급하므로 새 job에도 한글 이름이 사실상 필요하다. 입력 `description`·단계 `name`·`run-name`의 한글과 run-name이 쓸 수 있는 값은 검증기가 아니라 단위 테스트(`tests/test_workflow_names.py`)가 요구한다 | **WF-11**(워크플로 name 은 오류, job name 은 경고) + 단위 테스트 |
+| W10 | 워크플로·job 이름(`name`)은 **한글**로, 이름만 보고 자동인지 수동인지·무엇을 하는지 짐작할 수 있게 짓는다(예: `[공통] 사이트 자동 배포`, `[Chance] 기존 글 이미지 교체(수동)`). 이름 하나로 설명되지 않는 서로 다른 기능이 한 워크플로에 묶이면 나눈다(예: 글 작성과 이미지 교체). `run-name`에는 정기/수동·번호·불리언만 쓰고 이슈·PR 제목 같은 외부 문자열은 넣지 않는다. 외부 워크플로 템플릿을 복사해 넣을 때는 영문 `name`을 한글로 바꾼다. **워크플로 `name`·`run-name` 맨 앞에는 `[구분] `을 붙인다** — 블로그 채널 라벨(`Chance`·`Blogger`·`Blogger 영문`·`Blogger 한글`·`티스토리`·`네이버`)이거나, 블로그에 속하지 않으면 `공통`(배포·검사·감시·점검), 다른 워크플로가 부르는 공용 실행이면 `내부`. 대괄호로 시작하는 값은 YAML에서 따옴표가 필요하다(`name: "[공통] 사이트 자동 배포"`). job·단계 이름에는 붙이지 않는다(job 이름은 PR 검사 화면의 이름이다). 블로그 워크플로의 구분은 레지스트리 `channel.label`과 같은 글자여야 한다. 이름 표는 [`ARCHITECTURE.md`](./ARCHITECTURE.md) §2-1. **어디서 강제하나**: 검증기 WF-12는 모든 워크플로의 `name`이 허용된 `[구분] `으로 시작하고 `run-name`이 있으면 같은 접두사인지(오류) 보고, 레지스트리 검증(REG-1)은 블로그 워크플로의 `name` 접두사가 `channel.label`과 같은지 본다. 검증기 WF-11은 워크플로 `name`(오류, 접두사 뒤의 이름 부분에 한글이 있어야 한다)과 job `name`(경고)만 본다. 그러나 job `name`은 단위 테스트 `test_real_repository_workflow_and_job_names_are_korean`이 경고도 실패로 취급하므로 새 job에도 한글 이름이 사실상 필요하다. 입력 `description`·단계 `name`·`run-name`의 한글과 run-name이 쓸 수 있는 값은 검증기가 아니라 단위 테스트(`tests/test_workflow_names.py`)가 요구한다 | **WF-11**(워크플로 name 은 오류, job name 은 경고)·**WF-12**(`[구분] ` 접두사, 오류) + 단위 테스트 |
 
 ## 4. 프롬프트·프로필 규칙
 
@@ -68,7 +68,7 @@
 3. **보안 회귀 테스트**: 우회 페이로드(`<scr<script>ipt>`, 이벤트 핸들러, `javascript:` 링크 등)를 케이스로 남긴다. 새 우회가 발견되면 먼저 실패하는 테스트를 추가하고 고친다.
 4. **실제 비밀처럼 보이는 리터럴을 소스에 쓰지 않는다.** 테스트에서는 런타임에 문자열을 조합한다(검증기 SEC-2 회피용 `allow` 표시에 기대지 않는다).
 5. **테스트가 실제로 실패하는지 확인**한다. 고친 코드를 잠시 되돌렸을 때 테스트가 깨지지 않으면 그 테스트는 쓸모가 없다.
-6. 임시 저장소는 `tests/test_run.py`의 `make_root()`를 쓴다(레지스트리·프로필·프롬프트를 복사하고 나머지는 빈 파일).
+6. 임시 저장소는 `tests/test_run.py`의 `make_root()`를 쓴다(레지스트리·프로필·프롬프트를 복사하고, 워크플로 두 개(`chanceblog.yml`·`blogger.yml`)는 `name` 한 줄짜리 스텁 — 레지스트리 검증이 채널 접두사를 읽는다 — 나머지는 빈 파일).
 
 ### 자주 하는 확장 작업
 
@@ -78,7 +78,8 @@
 | 검증기 검사 추가 | `scripts/validate_repo.py`에 `check_*` 함수 + `run_checks`에 등록 → `tests/test_validate_repo.py` → [`SECURITY_GUARDRAILS.md`](./SECURITY_GUARDRAILS.md) §6 매핑표 갱신 |
 | 어댑터 추가 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) §7.B. 가짜 서비스로 재시도·중복·인증 실패 테스트(`tests/test_publisher_blogger.py` 참고) |
 | 감시 규칙 추가 | `pipeline/health.py`에 순수 함수로 추가 → `tests/test_health.py` |
-| 워크플로 추가·이름 변경 | 한글 `name`·job `name`(W10) → [`ARCHITECTURE.md`](./ARCHITECTURE.md) §2-1 표와 [`REQUEST_BRIEFING.md`](./REQUEST_BRIEFING.md) 표에 한 줄(`파일`과 `이름`을 같은 줄에 백틱으로) → `python scripts/validate_repo.py`(WF-11·BRIEF-1)·`tests/test_workflow_names.py`(표와 이름이 같은지·run-name 제목) |
+| 워크플로 추가·이름 변경 | `[구분] ` 접두사와 한글 `name`·job `name`(W10, 블로그 워크플로면 레지스트리 `channel.label`과 같은 글자) → [`ARCHITECTURE.md`](./ARCHITECTURE.md) §2-1 표와 [`REQUEST_BRIEFING.md`](./REQUEST_BRIEFING.md) 표에 한 줄(`파일`과 `이름`을 같은 줄에 백틱으로)·[`ACTIONS_GUIDE.md`](./ACTIONS_GUIDE.md) 이름 표 → `python scripts/validate_repo.py`(WF-11·WF-12·BRIEF-1)·`tests/test_workflow_names.py`(표와 이름이 같은지·run-name 제목·옛 이름 인용) |
+| 레지스트리에 블로그 추가·`channel`·`ads` 변경 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) §3(`channel`·`ads`)·§7 플레이북 → `python -m pipeline.registry` · `python scripts/validate_repo.py`(REG-1·REG-5) · `tests/test_registry.py`. `ads`를 `pending_gate`·`on`으로 올리거나 광고 코드를 넣고 빼는 것은 T3([`SECURITY_GUARDRAILS.md`](./SECURITY_GUARDRAILS.md) G-C10) |
 
 ## 6. 검증 사다리
 
@@ -87,7 +88,7 @@
 | **L0 정적** | 문법·보안 규칙·설정 일관성 | `python scripts/validate_repo.py` · `actionlint` · `python -m pipeline.registry` | 오류 0건 |
 | **L1 단위** | 로직(성공+실패 경로) | `python -m unittest discover -s tests` | 전부 통과, 네트워크 없음 |
 | **L2 드라이런** | 전체 흐름(스텁 LLM, 파일·게시 없음) | `python -m pipeline.run --blog <key> --dry-run` 또는 Actions `dry_run` 체크 | 종료 코드 0, 변경 파일 없음. 예외: Chance 드라이런은 모든 분야에 검증된 기사가 없거나 소스에 접속하지 못하면 종료 1이다(이상 신호, `docs/ARCHITECTURE.md` §4-1) — 실행 요약의 탈락 사유를 확인하고 기사가 있을 때 다시 실행한다 |
-| **L3 초안** | 실제 LLM·게이트, Blogger **초안함** 업로드 또는 저장소 초안 저장(공개 게시 없음) | Actions → `Blogger 글 자동 작성` → Run workflow(`연습 실행` 체크를 풀고 `publish`=`draft`. 시크릿 등록 전이면 `off`) | `draft_uploaded`(`mode: draft` + 게시용 시크릿 4종: 초안함에 올라감) 또는 `draft`(`off`이거나 시크릿이 하나도 없을 때: 저장소 파일만), 초안 내용 확인. 시크릿이 일부만 있으면 종료 2 |
+| **L3 초안** | 실제 LLM·게이트, Blogger **초안함** 업로드 또는 저장소 초안 저장(공개 게시 없음) | Actions → `[Blogger] 글 자동 작성(초안함 업로드)` → Run workflow(`연습 실행` 체크를 풀고 `publish`=`draft`. 시크릿 등록 전이면 `off`) | `draft_uploaded`(`mode: draft` + 게시용 시크릿 4종: 초안함에 올라감) 또는 `draft`(`off`이거나 시크릿이 하나도 없을 때: 저장소 파일만), 초안 내용 확인. 시크릿이 일부만 있으면 종료 2 |
 | **L4 카나리** | 실제 게시 소량 관찰 | `mode: auto`, 상한 1건/일, 3일 이상 | `posted` 연속, 워치독 이슈 0, 게시글 확인 |
 | **L5 운영** | 지속 감시 | 워치독 일 2회, Actions 실패 메일 | 이슈 0건 |
 

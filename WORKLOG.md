@@ -7,6 +7,38 @@
 
 ---
 
+## [2026-10-27] Claude – 워크플로 이름 `[구분]` 접두사와 레지스트리 `channel`·`ads` 필드·검증 규칙 (작업요청서 5 PR-A, T2, 동작 변화 없음)
+
+**작업자**: Claude (구현 세션, 독립 검증은 별도 세션)
+**대상**: 공통 (워크플로 이름·레지스트리 스키마·검증기·문서)
+**등급**: T2(워크플로 파일의 `name`·`run-name`, 레지스트리 스키마의 새 필드, 검증기 규칙). 광고 표면(`index.html`·`_config.yml`)·`mode`·시크릿·워크플로의 그 밖의 줄은 바꾸지 않았다. 승인 근거: 운영자가 2026-10-27 채팅으로 계획 보고의 추천을 전부 승인("추천대로 진행해줘") — D2(워크플로 `[구분]` 접두사)·D6(신규 채널 광고 금지 원칙의 레지스트리 반영).
+**목적**: 채널별로 워크플로를 구분해 보이게 한다(Actions 목록은 이름순이라 접두사가 같은 것끼리 붙는다). 한글 Blogger·티스토리·네이버를 더하기 전에 이름 규칙과 `channel`·`ads` 선언·검증을 먼저 깐다.
+**브랜치**: `ai/claude/channel-names`(origin/main 71dfde6에서 시작). PR 생성·병합·Actions 실행은 하지 않았다(총괄이 처리).
+
+### 한 일
+- **워크플로 10개의 `name`·`run-name`**(`.github/workflows/*.yml`): 맨 앞에 `[구분] ` — `[Chance]`(`chanceblog.yml`·`chance-fix-images.yml`·`issue-edit.yml`), `[Blogger]`(`blogger.yml`, 이름은 `[Blogger] 글 자동 작성(초안함 업로드)`), `[공통]`(나머지 6개). `name`은 대괄호로 시작해 큰따옴표로 감쌌다(따옴표가 없으면 YAML 문법 오류). 바뀐 줄은 `name`·`run-name` 16줄뿐이고 `on`·`jobs`·`permissions`·`concurrency` 등은 `yaml.safe_load` 결과가 main 과 같다. job 이름·단계 이름·이슈 제목 접두 `[Watchdog]`·`[운영] 확인 필요 모음`·라벨은 그대로.
+- **레지스트리**(`pipeline/blogs.json`·`pipeline/registry.py`): 블로그마다 필수 `channel: {key, label}`(chance → `Chance`, blogger_macat → `Blogger`)와 `ads`(`off`·`pending_gate`·`on`, chance `on`·blogger_macat `off`, `defaults.ads` `off`). 검증 — channel: 필수·모양, 라벨이 허용 집합(`Chance`·`Blogger`·`Blogger 영문`·`Blogger 한글`·`티스토리`·`네이버`), 블로그 사이 라벨·key 중복 없음, **그 블로그 워크플로 `name` 이 `"[라벨] …"` 로 시작**(표준 라이브러리로 `name:` 줄을 읽는다 — `blogger.yml` 의 plan 잡은 pip install 없이 이 검증을 돌린다). ads: 값, `jekyll-git` 밖의 `on` 금지, `ad_surface: true` 도 `jekyll-git` 에만, `defaults.ads` 는 `off` 로 고정. `python -m pipeline.registry`·`pipeline.plan` 출력은 main 과 바이트 단위로 같다(18개 명령).
+- **검증기**(`scripts/validate_repo.py`): **WF-12** — 모든 워크플로 `name` 이 `[구분] ` 으로 시작(구분 = 채널 라벨·`공통`·`내부`)하고 `run-name` 이 있으면 같은 접두사. WF-11 은 접두사를 뗀 이름 부분에 한글을 요구한다(`[공통]` 같은 한글 접두사가 대신 통과시키지 않게). **REG-5** — `jekyll-git` 블로그의 `ads` 선언이 광고 표면(`protected_paths`)의 실제 광고 코드(`adsbygoogle`·`googlesyndication`·`ca-pub-숫자`)와 같은지.
+- **이름을 인용하던 곳**: 코드 안내문 5곳(`pipeline/health.py` 2·`pipeline/edits/runner.py`·`pipeline/inbox.py` 꼬리글·`scripts/verify_pages_deploy.py`)과 주석 몇 곳, 시험 이름 기대값, 문서(`docs/ACTIONS_GUIDE.md` 이름 표·`[구분]` 설명, `docs/ARCHITECTURE.md` §2-1·§3(`channel`·`ads`·광고 선언·품질 게이트 기준 제안)·§7-A, `HANDLER.md`, `docs/OPS_INBOX.md`, `docs/ENGINEERING_GUIDE.md` W10, `docs/SECURITY_GUARDRAILS.md` G-C10·WF-12·REG-5, `docs/ISSUE_EDITS.md`·`docs/COPILOT_GUIDE.md`·`docs/CHARTER.md`·`docs/DEFECT_REGISTER.md`·`.github/*`). 이름을 파일 경로가 아니라 **이름으로 찾는 코드는 없다**(워치독·점검 모음·워크플로 간 호출은 모두 파일 이름. 이름은 안내문과 모음 항목 제목에만 쓰인다) — 계획 보고의 주장이 맞았다.
+- **시험**: `tests/test_workflow_names.py`(승인된 이름 10개 고정·접두사·run-name·레지스트리 채널과의 일치·job/단계 접두사 없음·정렬 인접·안내 문서에 모든 이름 있음·**접두사 없는 옛 이름 인용 검색**), `tests/test_registry.py`(channel·ads 규칙, `name:` 줄 읽기 모양), `tests/test_validate_repo.py`(WF-12·REG-5·WF-11 접두사), 이름 인용 시험 수정. `tests/test_run.py` 의 `make_root()` 는 워크플로 두 개를 `name` 한 줄짜리 스텁으로 쓴다.
+
+### 알아 둘 것
+- 모음(`[운영] 확인 필요 모음`) 이슈 본문에서는 외부 텍스트의 대괄호가 전각(［ ］)으로 바뀌어 `［Chance］ 글 자동 작성·게시` 처럼 보인다(링크 문법 무력화, 기존 동작). 시험으로 고정했다.
+- 한 워크플로 파일을 채널이 다른 블로그 둘이 나눠 쓸 수 없다(라벨 중복 금지·이름 접두사 일치) — 한글 Blogger 등록 작업(PR-D)이 `blogger.yml` 을 재사용 워크플로로 바꾸고 채널별 래퍼를 둬야 한다. 플레이북(`docs/ARCHITECTURE.md` §7-A)에 적었다.
+- 브랜치 보호의 '필수 검사' 지정 여부는 설정 화면을 보는 사용자만 확인할 수 있다. 필수 검사의 이름은 보통 job 이름이고 이 변경은 job 이름을 바꾸지 않았다(외부 지식, 미확인).
+- 총괄 소유 문서(`docs/REQUEST_BRIEFING.md` 의 워크플로 이름 표 등)는 이 PR 에서 고치지 않았다 — 표 검사 시험 2개가 그 표를 보므로 총괄이 별도 패치(`A_request_briefing_table.patch`)를 얹어야 초록이 된다.
+
+### 검증 증거
+- **L1**: `python -m unittest discover -s tests` — 기준 main 71dfde6 **2145개 통과**(189.6초) → 브랜치 **2202개**(새 시험 57개: `test_workflow_names` +11·`test_registry` +19·`test_validate_repo` +26·`test_ops_inbox` +1). 총괄 소유 `docs/REQUEST_BRIEFING.md`를 이 PR에서 고치지 않아 그 표를 읽는 시험 2개(`test_docs_tables_list_every_workflow_with_its_current_name`·`test_operator_docs_do_not_use_the_old_english_names`)는 패치 없이는 실패한다(2200 통과·2 실패). 패치 `A_request_briefing_table.patch`(13줄, `git apply --check` 통과)를 얹으면 **2202개 모두 통과**(368초, 이 WORKLOG 수치를 채우기 직전 커밋에서 돌렸고 이후 변경은 이 항목뿐이다). 네트워크 없이 돈다.
+- **L0**: `python scripts/validate_repo.py --base origin/main` 오류 0·경고 1(LIQUID-1, main과 같음)·AD-1 통과, `actionlint` 1.7.12 10개 파일 지적 0, `pyflakes` 새 경고 0, `vermin --target=3.10-` 최소 3.10, `git diff --check` 0.
+- **동작 불변**: CLI 21개(`pipeline.registry`·`pipeline.plan` 변형 18개·`pipeline.run --blog … --dry-run` 2개·`validate_repo --json`)의 표준 출력·표준 오류·종료 코드 63개 파일이 main과 바이트 단위로 같다. 워크플로 YAML은 `git diff` 상 `name`·`run-name` 16줄 외 0줄, `yaml.safe_load`로 읽은 `on`·`jobs`·`permissions`·`concurrency`·`env`가 10개 파일 모두 main과 같다.
+- **변이(직접 돌림)**: 레지스트리 27·검증기 19·데이터 15·문서/시험 코드 8 = 69개, 모두 시험이 잡는다(첫 판에서 접두사 뒤 공백이 둘인 이름을 거르는 시험이 없어 하나가 살아남았고 시험을 보강했다).
+
+### 못 한 검증
+- Actions 에서의 실제 실행(이름·실행 제목이 목록에 어떻게 보이는지, 목록의 정렬 순서), 브랜치 보호 설정 화면. 푸시·병합 뒤 관측이 필요하다.
+
+---
+
 ## [2026-10-26] Claude – 18시 슬롯 관측과 #42·#43 병합 기록 (문서 전용, 코드·광고 표면 변경 없음)
 
 **작업자**: Claude

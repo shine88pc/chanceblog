@@ -48,11 +48,14 @@ def make_root(tmp, mode="auto", lang="ko"):
     (root / ".github" / "editorial").mkdir(parents=True)
     for name in ("BLOGGER_PROMPT.md", "BLOGGER_PROMPT_EN.md"):
         shutil.copy(REAL / ".github" / "editorial" / name, root / ".github" / "editorial")
+    # 워크플로 파일은 name 한 줄만 있는 스텁이다: 레지스트리 검증이 블로그의 channel.label 과 워크플로 name 의 `[라벨] ` 접두사가 같은지 읽는다
+    stubs = {".github/workflows/chanceblog.yml": 'name: "[Chance] 글 자동 작성·게시"\n',
+             ".github/workflows/blogger.yml": 'name: "[Blogger] 글 자동 작성(초안함 업로드)"\n'}
     for rel in (".github/workflows/chanceblog.yml", ".github/workflows/blogger.yml", "generator.py",
                 "blogger_generator.py", ".github/editorial/CHANCE_BLOG_TEMPLATE.md"):
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("", encoding="utf-8")
+        path.write_text(stubs.get(rel, ""), encoding="utf-8")
     return root
 
 

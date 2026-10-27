@@ -694,7 +694,7 @@ class ReviewFollowUpTest(unittest.TestCase):
             self.assertIn(phrase, resume)                                          # 재개 절차 한 줄 안에서 이 순서로 안내한다
         self.assertLess(resume.index("인증 점검만 실행"), resume.index("mode: draft` 전환"))
         self.assertLess(resume.index("mode: draft` 전환"), resume.index("publish=draft"))
-        self.assertIn("`연습 실행` 체크를 푼", handler[handler.index("4. Actions → **Blogger 글 자동 작성**"):])   # §10 5-4 도 같은 안내
+        self.assertIn("`연습 실행` 체크를 푼", handler[handler.index("4. Actions → **[Blogger] 글 자동 작성(초안함 업로드)**"):])   # §10 5-4 도 같은 안내
 
     def test_docs_state_that_a_manual_publish_choice_can_post_live_even_in_draft_mode(self):
         for rel in ("docs/ARCHITECTURE.md", ".github/editorial/BLOGGER_API_SETUP.md"):

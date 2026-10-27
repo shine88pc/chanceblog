@@ -809,7 +809,7 @@ def render(items, repo_url, limit=BODY_LIMIT):
                  "자동으로 모은 목록입니다. 해소되면 저절로 사라지고, 새로 해야 할 일이 생기면 코멘트로 알려 드립니다."]
     head_text = "\n".join(head) + "\n\n"
     doc_url = f"{repo_url}/blob/main/docs/OPS_INBOX.md"
-    foot_text = ("\n---\n\n이 목록은 `확인 필요 모음` 워크플로가 갱신합니다(2시간 간격으로 예약돼 있지만 GitHub 사정으로 보통 3~6시간마다 갱신됩니다. 직접 고쳐도 다음 갱신 때 덮어씁니다). "
+    foot_text = ("\n---\n\n이 목록은 `[공통] 확인 필요 모음` 워크플로가 갱신합니다(2시간 간격으로 예약돼 있지만 GitHub 사정으로 보통 3~6시간마다 갱신됩니다. 직접 고쳐도 다음 갱신 때 덮어씁니다). "
                  "이 이슈는 공개입니다 — 비밀 값·수익·방문 수치는 싣지 않습니다. "
                  f"규칙·끄는 법: [docs/OPS_INBOX.md]({doc_url})\n")
     note_reserve = 200

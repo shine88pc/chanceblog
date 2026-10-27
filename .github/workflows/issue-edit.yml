@@ -1,5 +1,5 @@
-name: 이슈 수정 요청 처리(수정안 PR 만들기)
-run-name: "이슈 #${{ github.event.issue.number || inputs.issue_number }} 수정 요청 처리 · ${{ github.event_name == 'workflow_dispatch' && (inputs.dry_run && '수동(연습: PR·코멘트 안 만듦)' || '수동') || '자동(이슈 등록 시)' }}"
+name: "[Chance] 이슈 수정 요청 처리(수정안 PR 만들기)"
+run-name: "[Chance] 이슈 #${{ github.event.issue.number || inputs.issue_number }} 수정 요청 처리 · ${{ github.event_name == 'workflow_dispatch' && (inputs.dry_run && '수동(연습: PR·코멘트 안 만듦)' || '수동') || '자동(이슈 등록 시)' }}"
 
 # 이슈 양식('고정 페이지 수정' · '기존 게시글 이미지 변경')으로 접수된 수정 요청을 처리해 **PR 로** 올린다.
 # main 에 직접 push 하지 않는다. 결과는 사람이 검토·병합한다. 설명: docs/ISSUE_EDITS.md

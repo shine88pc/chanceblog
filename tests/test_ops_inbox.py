@@ -31,6 +31,12 @@ def one(items):
     return items[0]
 
 
+def fullwidth(text):
+    """외부 텍스트의 대괄호는 링크 문법이 되지 않도록 전각(［ ］)으로 바뀌어 항목에 들어간다(pipeline/inbox.py ext). 워크플로 이름 맨 앞의
+    `[구분] ` 접두사도 그렇게 보인다."""
+    return text.replace("[", chr(0xFF3B)).replace("]", chr(0xFF3D))
+
+
 # ----------------------------------------------------------------------------
 # 외부 텍스트 무력화
 # ----------------------------------------------------------------------------
@@ -448,8 +454,9 @@ def runs_for(file, *runs):
 class RunFailureTest(unittest.TestCase):
     NAMES = {"chanceblog.yml": "Chance 글 작성"}        # 스크립트가 워크플로 파일의 최상위 name 에서 읽어 오는 이름(읽지 못한 파일은 빠진다)
     # 실행(run)의 name 은 run-name 이라 실행마다 다르다. 옛 이름은 이름을 바꾸기 전에 만든 실행의 name 이 이력에 남은 것이다.
-    RUN_NAME_VARIANTS = ("Chance 기존 글 이미지 교체 · 연습(저장 안 함)", "이슈 #12 수정 요청 처리 · 수동(연습: PR·코멘트 안 만듦)",
-                         "Blogger Generate", "", None)       # Blogger Generate = Blogger 글 자동 작성 의 옛 이름
+    RUN_NAME_VARIANTS = ("[Chance] 기존 글 이미지 교체 · 연습(저장 안 함)", "[Chance] 이슈 #12 수정 요청 처리 · 수동(연습: PR·코멘트 안 만듦)",
+                         "Blogger Generate", "Blogger 글 자동 작성", "", None)   # Blogger Generate = [Blogger] 글 자동 작성(초안함 업로드) 의 옛 영문 이름
+    # 'Blogger 글 자동 작성' = 접두사 `[구분] ` 을 붙이기 전(2026-10-25~27)의 이름
 
     def build(self, runs_by_file, annotations=None, names=None):
         return inbox.run_items(runs_by_file, annotations or {}, NOW, URL, names=self.NAMES if names is None else names)
@@ -568,6 +575,17 @@ class RunFailureTest(unittest.TestCase):
             self.assertNotIn(raw, item.title, raw)
         self.assertEqual(len(item.title), len("워크플로 실패 — ") + 60)
 
+    def test_the_channel_prefix_of_a_workflow_name_is_shown_with_full_width_brackets(self):
+        """워크플로 이름 맨 앞의 `[구분] ` 접두사(2026-10-27)도 외부 텍스트와 같이 대괄호가 전각(［ ］)으로 바뀌어 링크 문법이 되지 않는다 —
+        화면에서는 같은 글자로 읽히고(［Chance］ 글 자동 작성·게시), 이슈 본문에 `[Chance]` 라는 ASCII 대괄호 글자는 남지 않는다."""
+        for name, shown in (("[Chance] 글 자동 작성·게시", "［Chance］ 글 자동 작성·게시"), ("[공통] 확인 필요 모음", "［공통］ 확인 필요 모음"),
+                            ("[Blogger 영문] 글 자동 작성", "［Blogger 영문］ 글 자동 작성")):
+            item = one(self.build(runs_for("a.yml", h.make_run(1, ago(hours=1), "failure")), names={"a.yml": name}))
+            self.assertEqual(item.title, "워크플로 실패 — " + fullwidth(name), name)
+            self.assertNotIn("[", item.title)
+            self.assertNotIn("]", item.title)
+            self.assertEqual(shown.replace(chr(0xFF3B), "[").replace(chr(0xFF3D), "]"), name)     # 위 표시용 글자가 전각 대괄호였는지 확인
+
     # --- 포크 PR 실행과 승인 대기 실행은 main 의 판단에 섞이지 않는다(F4)
     def fork_run(self, run_id, hours, conclusion, event="pull_request", **kw):
         return h.make_run(run_id, ago(hours=hours), conclusion, event=event, head_repo="stranger/blog", **kw)
@@ -643,7 +661,7 @@ class RunWarningTest(unittest.TestCase):
         self.assertIn("Chance 글 작성", item.title)
 
     def test_the_warning_title_uses_the_workflow_files_name_not_the_run_name(self):
-        runs = [h.make_run(1, ago(hours=1), name="Chance 기존 글 이미지 교체 · 연습(저장 안 함)")]
+        runs = [h.make_run(1, ago(hours=1), name="[Chance] 기존 글 이미지 교체 · 연습(저장 안 함)")]
         item = self.warn_item(self.build(runs, {1: [h.make_annotation("경고 문구")]}))
         self.assertEqual(item.title, "실행은 성공했지만 경고가 있습니다 — Chance 글 작성")
 
@@ -792,8 +810,8 @@ class PlatformNoticeTest(unittest.TestCase):
         """다른 워크플로가 돌 때마다 이 줄이 바뀌면 이슈 본문을 계속 다시 쓰게 된다(알림은 없어도 수정 이력·쓰기 호출이 늘고 '바로 한 번 더 실행하면 변경 없음'이 틀어진다)."""
         runs_a, notes_a = self.world(files=("a.yml", "b.yml"), runs_each=2)
         runs_b, notes_b = self.world(files=("a.yml", "b.yml"), runs_each=2)
-        runs_b["c.yml"] = [h.make_run(90, ago(minutes=3), name="Chance 기존 글 이미지 교체 · 연습(저장 안 함)", path=".github/workflows/c.yml"),
-                           h.make_run(91, ago(hours=30), name="Blogger Generate", path=".github/workflows/c.yml")]   # Blogger Generate = Blogger 글 자동 작성 의 옛 이름
+        runs_b["c.yml"] = [h.make_run(90, ago(minutes=3), name="[Chance] 기존 글 이미지 교체 · 연습(저장 안 함)", path=".github/workflows/c.yml"),
+                           h.make_run(91, ago(hours=30), name="Blogger Generate", path=".github/workflows/c.yml")]   # Blogger Generate = [Blogger] 글 자동 작성(초안함 업로드) 의 옛 영문 이름
         notes_b[90] = [h.make_annotation(REAL_UBUNTU_NOTICE, "notice"), h.make_annotation(REAL_NODE_WARNING)]          # 다른 순서로 달린 같은 안내
         notes_b[91] = [h.make_annotation(REAL_NODE_WARNING)]
         runs_b["a.yml"] = runs_b["a.yml"][:1]                                                                          # a.yml 의 이전 실행은 없다
@@ -935,7 +953,7 @@ class ApprovalItemsTest(unittest.TestCase):
         return h.make_run(run_id, created or ago(hours=2), None, "action_required", event="pull_request", sha=sha, **kw)
 
     def test_waiting_run_is_action_with_approve_and_run_wording(self):
-        run = self.pending(7, title="이슈 12 수정 PR", branch="copilot/fix", name="저장소 규칙·테스트 자동 검사")
+        run = self.pending(7, title="이슈 12 수정 PR", branch="copilot/fix", name="[공통] 저장소 규칙·테스트 자동 검사")
         item = one(inbox.approval_items([run], URL))
         self.assertEqual((item.id, item.level), ("approve:bbbbbbb", "action"))
         self.assertIn("Approve and run", item.title)
@@ -948,10 +966,10 @@ class ApprovalItemsTest(unittest.TestCase):
         runs = [self.pending(1, name="PR 제목이 실린 실행 이름", path=".github/workflows/guardrails.yml"),
                 self.pending(2, name="다른 변형", path=".github/workflows/pr-scope-check.yml@refs/pull/7/merge"),
                 self.pending(3, name="알 수 없는 파일의 실행 이름", path=".github/workflows/unknown.yml")]
-        names = {"guardrails.yml": "저장소 규칙·테스트 자동 검사", "pr-scope-check.yml": "PR 변경 범위 검사"}
+        names = {"guardrails.yml": "[공통] 저장소 규칙·테스트 자동 검사", "pr-scope-check.yml": "[공통] PR 변경 범위 검사"}
         detail = one(inbox.approval_items(runs, URL, names=names)).detail
-        self.assertIn("저장소 규칙·테스트 자동 검사", detail)
-        self.assertIn("PR 변경 범위 검사", detail)
+        self.assertIn(fullwidth("[공통] 저장소 규칙·테스트 자동 검사"), detail)
+        self.assertIn(fullwidth("[공통] PR 변경 범위 검사"), detail)
         self.assertIn("알 수 없는 파일의 실행 이름", detail)               # 파일을 모르면 지금까지처럼 실행의 이름
         for text in ("PR 제목이 실린", "다른 변형"):
             self.assertNotIn(text, detail)
@@ -1331,10 +1349,10 @@ class BuildItemsTest(unittest.TestCase):
         snap = sample_snapshot(
             runs={"a.yml": [h.make_run(1, ago(hours=1), "failure", name="실행 이름")]},
             approvals=[h.make_run(2, ago(hours=1), None, "action_required", sha="e" * 40, name="실행 이름", path=".github/workflows/guardrails.yml")],
-            workflow_names={"a.yml": "에이 워크플로", "guardrails.yml": "저장소 규칙·테스트 자동 검사"})
+            workflow_names={"a.yml": "에이 워크플로", "guardrails.yml": "[공통] 저장소 규칙·테스트 자동 검사"})
         items = by_id(inbox.build_items(snap))
         self.assertEqual(items["run:a.yml:failed"].title, "워크플로 실패 — 에이 워크플로")
-        self.assertIn("저장소 규칙·테스트 자동 검사", items["approve:eeeeeee"].detail)
+        self.assertIn(fullwidth("[공통] 저장소 규칙·테스트 자동 검사"), items["approve:eeeeeee"].detail)
         self.assertEqual(inbox.Snapshot(now=NOW, repo=h.REPO).workflow_names, {})
 
     def test_bad_repository_name_is_rejected(self):

@@ -127,11 +127,11 @@ class ChanceWorkflowDefaultsTest(unittest.TestCase):
 
     def test_run_names_show_whether_the_practice_run_used_the_real_ai(self):
         self.assertEqual(render(load("chanceblog.yml")["run-name"], context("workflow_dispatch", {"dry_run": True, "real_ai": True})),
-                         "Chance 글 작성·게시 · 수동(연습: 실제 AI 호출·저장 안 함)")
+                         "[Chance] 글 작성·게시 · 수동(연습: 실제 AI 호출·저장 안 함)")
         self.assertEqual(render(load("chanceblog.yml")["run-name"], context("workflow_dispatch", {"dry_run": True, "real_ai": False})),
-                         "Chance 글 작성·게시 · 수동(연습: 저장 안 함)")
+                         "[Chance] 글 작성·게시 · 수동(연습: 저장 안 함)")
         self.assertEqual(render(load("chance-fix-images.yml")["run-name"], context("workflow_dispatch", {"dry_run": True, "real_ai": True})),
-                         "Chance 기존 글 이미지 교체 · 연습(실제 AI 호출·저장 안 함)")
+                         "[Chance] 기존 글 이미지 교체 · 연습(실제 AI 호출·저장 안 함)")
 
     def test_the_cap_written_in_the_fix_images_description_is_the_cap_in_the_code(self):
         description = load("chance-fix-images.yml")["on"]["workflow_dispatch"]["inputs"]["dry_run"]["description"]
@@ -653,7 +653,9 @@ class IssueEditPauseTest(unittest.TestCase):
         res = self.go(self.literal_issue())
         self.assertIn("저장소 변수 `PIPELINE_PAUSE` 가 켜져 있어 이 요청을 처리하지 않았습니다", res.comment)
         self.assertIn("(AI·이미지 검색도 부르지 않았고 저장소는 변경되지 않았습니다)", res.comment)
-        self.assertIn("변수를 지운 뒤 Actions 의 `이슈 수정 요청 처리(수정안 PR 만들기)` 에서 이 이슈 번호로, "
+        workflow_name = load("issue-edit.yml")["name"]                              # 코멘트가 가리키는 워크플로의 실제 이름
+        self.assertEqual(workflow_name, "[Chance] 이슈 수정 요청 처리(수정안 PR 만들기)")
+        self.assertIn(f"변수를 지운 뒤 Actions 의 `{workflow_name}` 에서 이 이슈 번호로, "
                       "`연습 실행` 체크를 풀고 다시 실행해 주세요.", res.comment)
         description = load("issue-edit.yml")["on"]["workflow_dispatch"]["inputs"]["dry_run"]["description"]
         self.assertTrue(description.startswith("연습 실행"), description)          # 코멘트가 가리키는 입력의 이름
