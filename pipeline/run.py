@@ -149,6 +149,18 @@ def _write_summary(environ, text):
             fh.write(text + "\n")
 
 
+def summary_head(blog):
+    """실행 요약의 첫 줄 `### [채널 라벨] 블로그 이름`(예: `### [Blogger] Blogger (macat0722)`). 요약을 열자마자 어느 채널·블로그의 실행인지 보인다.
+    채널 라벨과 이름은 레지스트리(저장소 파일)에서 오지만 한 줄·마크다운 안전을 보장하려고 md_cell 을 거친다. 채널 라벨을 읽을 수 없으면 이름만,
+    이름도 없으면 블로그 key 를 쓴다. 이 줄만 바뀌었다 — 요약의 나머지 줄은 예전과 같다(동작 불변을 바이트 비교로 확인했다)."""
+    channel = blog.get("channel")
+    label = md_cell(channel.get("label"), 30) if isinstance(channel, dict) else ""
+    name = md_cell(blog.get("name"), 60)
+    if label and name:
+        return f"### [{label}] {name}"
+    return f"### {name or md_cell(blog.get('key'), 60)}"
+
+
 def skip_line(code, **fields):
     """건너뜀·실패를 로그에서 한 줄로 찾게 하는 규격: [SKIP] code=CODE key=value ... (docs/ARCHITECTURE.md 4-1)."""
     return " ".join([f"[SKIP] code={code}"] + [f"{key}={value}" for key, value in fields.items()])
@@ -157,7 +169,7 @@ def skip_line(code, **fields):
 def _summarize(environ, blog, code, text, ai_lines=()):
     """실행 요약 한 블록. 정상 건너뜀·경고·실패 모두 같은 모양으로 남긴다(성공 경로는 아래에서 따로 쓴다).
     ai_lines: 이번 실행의 Gemini 호출 기록 줄(무료 한도를 나눠 쓰므로 실패·예외로 끝난 실행에서도 남긴다)."""
-    _write_summary(environ, f"### {blog['key']}\n- 결과: **{code}** — {text}" + "".join(f"\n- {line}" for line in ai_lines))
+    _write_summary(environ, f"{summary_head(blog)}\n- 결과: **{code}** — {text}" + "".join(f"\n- {line}" for line in ai_lines))
 
 
 def _checked_result(result, as_draft=False):
@@ -243,7 +255,7 @@ def run_auth_check_only(out, environ, blog, publisher_factory, secret_values, dr
     out(f"[{blog['key']}] 인증 점검 통과: 토큰 갱신·블로그 조회·블로그 주소 일치(쓰기 없음).")
     out(f"::notice::[{blog['key']}] 인증 점검 통과 — 토큰 갱신·블로그 조회·블로그 주소 일치를 확인했습니다(쓰기 없음, 글은 만들지 않았습니다).")
     names = ", ".join(blog["secrets"].get(role, role) for role in PUBLISH_ROLES)
-    _write_summary(environ, f"### {blog['key']}\n"
+    _write_summary(environ, f"{summary_head(blog)}\n"
                             "- 결과: **AUTH_CHECK_OK** — 토큰 갱신·블로그 조회·블로그 주소 일치를 확인했습니다(쓰기 없음, 글은 만들지 않았습니다).\n"
                             f"- 확인한 시크릿(이름만, 값은 출력하지 않음): {names}\n"
                             f"- 레지스트리 mode: {blog['mode']}(점검은 mode와 무관하게 실행됩니다)")
@@ -588,7 +600,7 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
             out(f"::error::[{blog['key']}] 저장소 초안 파일을 저장하지 못했습니다. Blogger 에는 올리지 않는 실행이라 글이 남지 않았습니다. "
                 "이 단계의 로그를 확인하고 다시 실행하세요.")
         out(f"[인프라 오류] 초안 파일 저장 실패(상태: {status})")
-    lines = [f"### {blog['key']}", f"- 결과: **{status}** — {md_cell(post['title'], TITLE_SHOWN)}",
+    lines = [summary_head(blog), f"- 결과: **{status}** — {md_cell(post['title'], TITLE_SHOWN)}",
              f"- URL: {md_cell(url, 300) or '(없음)'}"]
     if status == "draft_uploaded":
         lines.append("- 안내: Blogger 초안함에 올렸습니다. 아직 공개되지 않았으니 Blogger 화면에서 확인한 뒤 직접 게시하세요.")

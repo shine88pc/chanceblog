@@ -68,7 +68,7 @@ class ScenarioTest(unittest.TestCase):
                 self.assertIn("인증 점검 통과", res.out)
                 # 실행 요약: 이름만, 값은 없다
                 self.assertEqual(len(res.summary_lines), 4, res.summary)
-                self.assertEqual(res.summary_lines[0], "### blogger_macat")
+                self.assertEqual(res.summary_lines[0], "### [Blogger] Blogger (macat0722)")
                 self.assertIn("**AUTH_CHECK_OK**", res.summary_lines[1])
                 self.assertIn("쓰기 없음", res.summary_lines[1])
                 for name in SECRET_NAMES:
@@ -269,7 +269,7 @@ class EnumerationTest(unittest.TestCase):
                             mismatches.append(f"{label}: 실제 {got} / 기준 {want}")
                         if res.history or res.drafts or pub.published or res.llm_calls.calls:
                             mismatches.append(f"{label}: 쓰기 또는 Gemini 호출이 있음")
-                        if "### blogger_macat" not in res.summary or len(res.annotations) != 1:
+                        if "### [Blogger] Blogger (macat0722)" not in res.summary or len(res.annotations) != 1:
                             mismatches.append(f"{label}: 요약·주석이 하나씩이 아님 {res.annotations}")
                         if complete and not res.annotations[0].startswith("::notice::"):
                             mismatches.append(f"{label}: 통과인데 notice 가 아님")

@@ -169,7 +169,7 @@ class ScenarioTest(unittest.TestCase):
         self.assertIn('url: "https://macat.example/p1"', text)
         self.assertNotIn(SECRET_VALUES["BLOGGER_BLOG_ID"], res.everything())    # 블로그 ID 는 어디에도 기록하지 않는다
         self.assertEqual(len(res.summary_lines), 4, res.summary)
-        self.assertEqual(res.summary_lines[0], "### blogger_macat")
+        self.assertEqual(res.summary_lines[0], "### [Blogger] Blogger (macat0722)")
         self.assertIn("**draft_uploaded**", res.summary_lines[1])
         self.assertIn("https://macat.example/p1", res.summary_lines[2])
         self.assertIn("Blogger 초안함에 올렸습니다", res.summary_lines[3])
@@ -214,7 +214,7 @@ class ScenarioTest(unittest.TestCase):
         self.assertEqual(res.code, 0, res.out)
         self.assertEqual([p["draft"] for p in pub.published], [False])
         self.assertEqual((pub.health_calls, res.last["status"]), (1, "posted"))
-        self.assertEqual(len(res.summary_lines), 3, res.summary)                  # '### 키', '- 결과', '- URL'
+        self.assertEqual(len(res.summary_lines), 3, res.summary)                  # '### [채널] 이름', '- 결과', '- URL'
 
     def test_manual_choice_decides_where_the_post_goes_whatever_the_mode(self):
         # (레지스트리 mode, BLOGGER_PUBLISH 값) → (publish 호출의 draft 플래그, 이력 상태)
@@ -795,7 +795,7 @@ def check_invariants(res, mode, policy, dry, before):
         bad.append("이유 없이 초록(건너뜀 코드·새 기록·연습 표시가 모두 없음)")
     if res.code != 0 and len([a for a in res.annotations if a.startswith("::error::")]) != 1:
         bad.append(f"빨강인데 ::error:: 주석이 1개가 아님: {res.annotations}")
-    if "### blogger_macat" not in res.summary:
+    if "### [Blogger] Blogger (macat0722)" not in res.summary:
         bad.append("실행 요약이 없음")
     pub = res.publisher
     live = [p for p in pub.published if not p["draft"]] if pub else []
