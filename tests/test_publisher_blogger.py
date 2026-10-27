@@ -545,6 +545,21 @@ class QuotaAndBadRequestTest(unittest.TestCase):
         self.assertIn("블로그 ID", str(ctx.exception))
         self.assertIn("status=400", str(ctx.exception))
 
+    def test_the_400_message_names_the_blog_id_secret_the_adapter_was_given_and_the_english_one_by_default(self):
+        """독립 검증 N3: 한글 Blogger 는 BLOGGER_KO_BLOG_ID 라서 영문 이름을 말하면 영문 값을 고치러 간다. 이름을 주지 않은 어댑터(영문)의 문구는 바뀌기 전과 같다."""
+        before = ("블로그 접근 확인 실패(status=400): 블로그 ID 형식이 올바르지 않은 것 같습니다 — "
+                  "BLOGGER_BLOG_ID 시크릿에 블로그 번호(숫자)만 넣었는지 확인하세요 | Invalid value for: blogId")
+        korean = {"llm_api_key": "GEMINI_API_KEY", "blog_id": "BLOGGER_KO_BLOG_ID", "client_id": "BLOGGER_KO_CLIENT_ID",
+                  "client_secret": "BLOGGER_KO_CLIENT_SECRET", "refresh_token": "BLOGGER_KO_REFRESH_TOKEN"}
+        for given, expected in ((None, before), ({}, before), ({"blog_id": "BLOGGER_BLOG_ID"}, before),
+                                (korean, before.replace("BLOGGER_BLOG_ID", "BLOGGER_KO_BLOG_ID")), ({"blog_id": "x\n::error::위조"}, before)):
+            with self.subTest(repr(given)):
+                svc = FakeService(get_error=HttpErr(400, "Invalid value for: blogId", reason="invalid"))
+                pub = BloggerPublisher("123", "cid", "cs", "rt", service_factory=lambda: svc, sleep=lambda s: None, retries=2, now=lambda: NOW, secret_names=given)
+                with self.assertRaises(PublishError) as ctx:
+                    pub.healthcheck()
+                self.assertEqual((ctx.exception.code, str(ctx.exception)), ("auth_failed", expected))
+
     def test_quota_and_rate_limit_403s_are_api_errors_that_are_not_blamed_on_permissions(self):
         for reason in ("rateLimitExceeded", "userRateLimitExceeded", "quotaExceeded", "dailyLimitExceeded",
                        "dailyLimitExceededUnreg", "sharedRateLimitExceeded"):

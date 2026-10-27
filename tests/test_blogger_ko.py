@@ -13,20 +13,28 @@
   6) 영문 불간섭: 한글 실행이 영문 이력·초안·시크릿 이름을 건드리지 않고, 그 반대도 같다.
   7) 이력 파일 공개 순서: `_config.yml` exclude 를 mode 보다 먼저 더하게 막되, 켠 뒤(봇이 이력 파일을 커밋한 뒤)에는 CI 가 빨개지지 않는다(독립 검증 N1).
 """
+import functools
 import json
+import random
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import yaml
 
 import _bootstrap
 from blogger_ko_helpers import (EN, EN_ENV, EN_NAMES, EN_VALUES, GEMINI, KO, KO_ENV, KO_NAMES, KO_URL, KO_VALUES, KO_WORKFLOW_ENV, KoreanRunBase,
                                 ko_publisher, make_pair_root)
+from pipeline import auth_check as ac
 from pipeline import registry
+from pipeline import run as run_mod
 from pipeline.publishers.base import PublishError
+from pipeline.publishers.blogger import BloggerPublisher
 from pipeline.stubs import stub_llm
-from test_run import FakePublisher
+from test_auth_check import ENGLISH_SENTENCES_BEFORE_THE_CHANGE
+from test_publisher_blogger import FakeService, HttpErr
+from test_run import NOW, FakePublisher
 
 REAL = _bootstrap.ROOT
 PROFILE = json.loads((REAL / "pipeline" / "profiles" / "blogger_ai_tools_ko.json").read_text(encoding="utf-8"))
@@ -231,6 +239,94 @@ class SecretTest(KoreanRunBase):
         self.assertEqual(code, 2, out)
         self.assertIn("GEMINI_API_KEY", out)                                                     # LLM 키는 영문·한글이 같은 Gemini 키를 쓴다(작업요청서)
         self.assertEqual(self.history(), [])
+
+
+class AuthFailureNamesTest(KoreanRunBase):
+    """독립 검증 N3: 인증 실패 안내(::error::·실행 요약·원인 줄·이력)가 한글 실행에서도 영문 시크릿 이름(BLOGGER_BLOG_ID 등)만 말해, 운영자가 영문 값을 갱신하러 갈 수 있었다.
+    실제 러너(run.py)를 끝까지 돌려 한글은 BLOGGER_KO_* 이름만, 영문은 바뀌기 전 문장 그대로 나오는지 본다."""
+    MODE = "draft"
+    CODES = ("auth_expired", "auth_failed", "blog_mismatch", "network", "bad_response", "api_error", "unexpected")
+    KOREAN_FRAGMENTS = {"auth_expired": "토큰을 새로 발급해 BLOGGER_KO_REFRESH_TOKEN 시크릿을 갱신하세요",
+                        "auth_failed": "BLOGGER_KO_BLOG_ID·BLOGGER_KO_CLIENT_ID·BLOGGER_KO_CLIENT_SECRET 시크릿",
+                        "blog_mismatch": "인증은 통과했지만 BLOGGER_KO_BLOG_ID 가 가리키는 블로그의 주소가"}
+
+    def run_failure(self, publisher, extra=(), blog=KO, root=None, env=None):
+        """인증 점검이 실패하는 실행 한 번 → (종료 코드, 출력, 실행 요약 글)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            summary = Path(tmp) / "summary.md"
+            code, out = self.go(env={**(KO_WORKFLOW_ENV if env is None else env), "GITHUB_STEP_SUMMARY": str(summary)}, publisher=publisher, extra=extra, blog=blog, root=root)
+            return code, out, summary.read_text(encoding="utf-8")
+
+    def english_root_and_env(self, tmp):
+        env = {"PIPELINE_SECRET_LLM_API_KEY": GEMINI, **{f"PIPELINE_SECRET_{role.upper()}": EN_VALUES[name] for role, name in zip(ALL_ROLES[1:], EN_NAMES)}}
+        return make_pair_root(tmp, ko_mode="off", en_mode="draft"), env
+
+    def test_every_failure_code_names_only_the_korean_secrets_in_the_annotation_the_summary_and_the_log(self):
+        ko_secrets = registry.get_blog(registry.load_registry(REAL / "pipeline" / "blogs.json"), KO)["secrets"]
+        for extra in ((), ("--auth-check",)):                                                     # 글 생성 전 사전 점검과 `인증 점검만 실행` 두 경로
+            for code in self.CODES:
+                with self.subTest(extra=extra, code=code):
+                    exit_code, out, summary = self.run_failure(ko_publisher(check=PublishError("실패", code=code)), extra=extra)
+                    sentence = ac.sentence_for(code, ko_secrets)
+                    self.assertEqual(exit_code, ac.exit_code_for(code), out)
+                    self.assertIn(f"::error::[{KO}] {sentence}", out.splitlines())
+                    self.assertIn(f"{ac.label_for(code)}({code}) — {sentence}", summary)
+                    if code in self.KOREAN_FRAGMENTS:
+                        self.assertIn(self.KOREAN_FRAGMENTS[code], out)
+                        self.assertIn(self.KOREAN_FRAGMENTS[code], summary)
+                    for name in EN_NAMES:                                                          # 영문 이름은 로그에도 요약에도 없다
+                        self.assertNotIn(name, out)
+                        self.assertNotIn(name, summary)
+
+    def test_a_real_blog_mismatch_names_the_korean_blog_id_in_the_cause_line_and_the_history_too(self):
+        publisher = ko_publisher(blog_url="https://macat0722.blogspot.com/")                     # 영문 계정의 블로그 주소가 돌아온다
+        exit_code, out, summary = self.run_failure(publisher)
+        self.assertEqual(exit_code, 2, out)
+        cause = [line for line in out.splitlines() if line.startswith("[설정 오류] 인증 점검 실패(blog_mismatch):")]
+        self.assertEqual(len(cause), 1, out)
+        self.assertIn("BLOGGER_KO_BLOG_ID 가 가리키는 블로그의 주소가 레지스트리의 url 과 다릅니다", cause[0])
+        reasons = self.history()[-1]["reasons"]
+        self.assertTrue(len(reasons) == 1 and reasons[0].startswith("[blog_mismatch] BLOGGER_KO_BLOG_ID 가 가리키는"), reasons)
+        for name in EN_NAMES:
+            self.assertNotIn(name, out + summary + "".join(reasons))
+        self.assertNotIn("macat0722", out + summary)                                              # 다른 블로그 주소는 여전히 쓰지 않는다
+
+    def test_the_real_adapter_the_runner_builds_names_the_korean_blog_id_secret_in_its_400_message(self):
+        """러너의 기본 게시자 만들기(default_publisher_factory)가 그 블로그의 시크릿 이름을 어댑터에 넘기는지 — 가짜 구글 서비스(blogs.get 400)를 단 진짜 어댑터로 끝까지 돌린다."""
+        def run(blog, root, env):
+            svc = FakeService(get_error=HttpErr(400, "Invalid value for: blogId", reason="invalid"))
+            real = functools.partial(BloggerPublisher, service_factory=lambda: svc, sleep=lambda seconds: None)
+            out = []
+            with mock.patch("pipeline.publishers.blogger.BloggerPublisher", real):
+                code = run_mod.run(["--blog", blog, "--root", str(root)], environ=env, now=NOW, llm=stub_llm, publisher_factory=None, rng=random.Random(1), out=out.append)
+            return code, "\n".join(out)
+        code, out = run(KO, self.root, KO_WORKFLOW_ENV)
+        self.assertEqual(code, 2, out)
+        self.assertIn("BLOGGER_KO_BLOG_ID 시크릿에 블로그 번호(숫자)만 넣었는지 확인하세요", out)
+        for name in EN_NAMES:
+            self.assertNotIn(name, out)
+        with tempfile.TemporaryDirectory() as tmp:
+            root, env = self.english_root_and_env(tmp)
+            code, out = run(EN, root, env)
+            self.assertEqual(code, 2, out)
+            self.assertIn("BLOGGER_BLOG_ID 시크릿에 블로그 번호(숫자)만 넣었는지 확인하세요", out)    # 영문은 예전 문구 그대로
+            self.assertNotIn("BLOGGER_KO_", out)
+
+    def test_the_english_blog_gets_the_sentences_it_got_before_in_the_same_runs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, env = self.english_root_and_env(tmp)
+            for extra in ((), ("--auth-check",)):
+                for code in self.CODES:
+                    with self.subTest(extra=extra, code=code):
+                        before = ENGLISH_SENTENCES_BEFORE_THE_CHANGE[code]
+                        exit_code, out, summary = self.run_failure(FakePublisher(check=PublishError("실패", code=code)), extra=extra, blog=EN, root=root, env=env)
+                        self.assertEqual(exit_code, ac.exit_code_for(code), out)
+                        self.assertIn(f"::error::[{EN}] {before}", out.splitlines())
+                        self.assertIn(f"{ac.label_for(code)}({code}) — {before}", summary)
+                        self.assertNotIn("BLOGGER_KO_", out + summary)
+            exit_code, out, _summary = self.run_failure(FakePublisher(blog_url=KO_URL), blog=EN, root=root, env=env)       # 영문 실행에 한글 계정 주소가 돌아온 경우
+            self.assertEqual(exit_code, 2, out)
+            self.assertIn("[설정 오류] 인증 점검 실패(blog_mismatch): BLOGGER_BLOG_ID 가 가리키는 블로그의 주소가 레지스트리의 url 과 다릅니다", out)
 
 
 class AutoModeTest(KoreanRunBase):
