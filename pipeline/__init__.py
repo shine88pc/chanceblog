@@ -10,6 +10,8 @@
 - publishers : 플랫폼 어댑터(blogger 등). 새 플랫폼은 여기에 어댑터를 추가한다
 - run        : 블로그 한 곳을 한 번 실행하는 진입점 (python -m pipeline.run --blog KEY)
 - plan       : 레지스트리에서 GitHub Actions 매트릭스를 만든다
+- drafts     : Chance 승인 흐름(publish_flow: pr)의 이름·판정·PR 본문 소독 규칙과 GitHub REST 클라이언트
+- draft_flow : 승인 흐름의 실행부(초안 브랜치 올리기·PR 열기·정리, python -m pipeline.draft_flow)
 
 설명: docs/ARCHITECTURE.md, docs/ENGINEERING_GUIDE.md
 """

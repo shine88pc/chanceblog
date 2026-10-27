@@ -29,6 +29,7 @@
 | 가드레일 자동화 | `scripts/validate_repo.py` + `guardrails.yml`(CI, Actions 이름 `[공통] 저장소 규칙·테스트 자동 검사`) + `watchdog.yml`(`[공통] 발행 중단 감시·알림`, 문제일 때만 이슈 알림) |
 | Actions 탭 이름 | 워크플로 이름을 **이름만 보고 자동/수동과 하는 일을 알 수 있게 한글로** 바꿨다(2026-10-25). 기존 글 이미지 교체는 글 작성 워크플로에서 분리해 수동 전용 `chance-fix-images.yml`(`[Chance] 기존 글 이미지 교체(수동)`)이 됐다. 2026-10-27에는 이름 맨 앞에 채널 접두사 `[구분] `(`[Chance]`·`[Blogger]`·`[공통]` 등 — Actions 목록이 이름순이라 같은 채널끼리 붙어 보인다)을 붙였고 `run-name`도 같다. 블로그 항목에는 `channel`(접두사와 같은 라벨)·`ads`(광고 선언)가 있다 — 신규 채널은 품질 게이트를 통과하기 전까지 광고를 켜지 않는다(`docs/ARCHITECTURE.md` §3 '광고 선언', `docs/SECURITY_GUARDRAILS.md` G-C10). 옛 이름 → 새 이름 · 파일 · 하는 일 · 자동/수동 표는 `docs/ARCHITECTURE.md` §2-1. 새 워크플로·job 이름도 한글로 짓고 접두사를 붙인다(검증기 WF-11·WF-12) |
 | Pages 배포 후 확인 | 배포가 초록이어도 새 글이 공개 주소에서 열린다는 보장은 없어서, `pages.yml`의 `verify` 잡(`사이트 반영 확인`, `scripts/verify_pages_deploy.py`)이 배포 뒤 공개될 가장 새 글(`published: false`·미래 날짜 제외)의 주소가 HTTP 200으로 열리는지 마감 12분까지 확인하고 끝내 안 열리면 실행이 빨강이 된다. 공개 CDN이 404를 최대 약 18분 보관하므로(1회 측정, 불확실) 시도마다 요청 모양(`index.html`·`Accept-Encoding`·`//`·`./`)을 바꾸고 대기를 10초에서 2배씩 늘린다(D-41, 구조 `docs/ARCHITECTURE.md` §4-3). 한계: 가장 새 글만 본다(이미지 교체 같은 커밋의 반영은 못 봄). ⏳ 병합 뒤 첫 배포 요약에서 '시도 기록'·`X-Cache`·`Age`·`Last-Modified`를 관측해야 한다(`docs/DEFECT_REGISTER.md` 체크리스트) |
+| Chance 승인 흐름(`publish_flow`) | **꺼짐(`direct`)**. 레지스트리 `chance.publish_flow`를 `pr`로 바꾸면 Chance 글 한 쌍이 main 에 바로 올라가지 않고 초안 브랜치 `ai/draft/…`와 승인 PR(`[초안][Chance] …`, 라벨 `초안`·`채널:Chance`)로 올라가 운영자가 **병합해야 공개**(닫으면 폐기)된다 — 구글 게시자 정책의 '수동 검토 없는 자동 생성 콘텐츠에 광고 금지' 안내에 대한 대응이고 운영자가 2026-10-27 채팅으로 승인했다(채널 관리 계획 D1 (a)). 코드·시험은 있다(`pipeline/drafts.py`·`pipeline/draft_flow.py`, `generator.py`·`chanceblog.yml`, 워치독 `DRAFT_WAITING`). **실제 GitHub 에서는 한 번도 돌려 보지 않았다.** 켜는 것은 별도 T3이고 저장소 설정 "Allow GitHub Actions to create and approve pull requests"를 먼저 확인한다. 설명 `docs/ARCHITECTURE.md` §4-4, 운영 `docs/ACTIONS_GUIDE.md` 3-17 |
 | 이슈로 수정 요청 | 이슈 양식(고정 페이지 수정·게시글 이미지 변경) → `issue-edit.yml`이 **PR로** 올림, `pr-scope-check.yml`이 Copilot 등 모든 PR의 요청 범위를 검증. 사용법 `docs/COPILOT_GUIDE.md`, 구조 `docs/ISSUE_EDITS.md` (첫 실행 관측 필요) |
 | 작업요청서 | 저장소를 볼 수 없는 AI(모바일 Claude 등)에게 `docs/REQUEST_BRIEFING.md`를 통째로 붙여 넣으면 이 프로그램에 맞는 요청서를 만든다. 요청서는 `인수인계/작업요청/`에 올리거나 채팅에 붙여 넣는다. 처리 규칙은 그 폴더의 README |
 | 통합 성과 대시보드 | **제안 단계 — 사용자 결정 대기.** 블로그별 방문자·인기 글·AdSense 사이트별 수익을 한곳에서 보는 방안(Looker Studio 먼저). 검토 결과·결정 항목은 `docs/ANALYTICS_PLAN.md` §7. 결정 전에는 사이트에 GA 등을 설치하지 않는다(T3) |
@@ -214,7 +215,7 @@ VS Code:
 - 설정에서 Git: Autofetch 켜기 권장
 - 원격과 어긋나면 무조건 pull 먼저
 - 충돌 시 HANDLER/WORKLOG 기준으로 수동 병합, 추측으로 덮지 말 것
-- 봇(`chanceblog.yml`, 앞으로 `blogger.yml`)이 `main`에 직접 커밋한다 → 작업 전 항상 `git pull --rebase origin main`
+- 봇(`chanceblog.yml`, 앞으로 `blogger.yml`)이 `main`에 직접 커밋한다(Chance 승인 흐름을 켜면 main 에는 이력만 커밋하고 글은 `ai/draft/…` 브랜치·PR 로 올린다) → 작업 전 항상 `git pull --rebase origin main`
 - `auto_sync.bat` 같은 자동 commit/push 스크립트·예약 작업 금지 (사용자 확인 없이 push 금지)
 - Windows는 시스템 설정 `core.autocrlf=true`가 기본이다 — 끄지 말 것 (끄면 거의 모든 파일이 수정으로 보인다)
 
@@ -278,6 +279,7 @@ VS Code:
 | 운영자용 Actions 사용 가이드(이럴 땐 이렇게·보안 점검표) | `docs/ACTIONS_GUIDE.md` |
 | 작업 내용(현황·진행·결정 대기·이력을 한 파일로 관리) | `인수인계/작업내용.md` |
 | 확인 필요 모음(이슈 1개로 모아 보기) | `docs/OPS_INBOX.md` |
+| Chance 승인 흐름(초안 PR → 병합 = 공개, 지금 꺼짐) | 설계 `docs/ARCHITECTURE.md` §4-4 · 운영 `docs/ACTIONS_GUIDE.md` 3-17 · 코드 `pipeline/drafts.py`·`pipeline/draft_flow.py` |
 | 진단·조사 보고서(발행 진단, AI 검색 노출) | `docs/analysis/` |
 
 ---

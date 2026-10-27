@@ -72,11 +72,13 @@ def entry_day(entry):
     return when.astimezone(KST).date() if when else None
 
 
-def post_days_from_history(entries):
-    """실제로 글이 나온 KST 날짜 집합(상태 없는 옛 항목은 정상 발행으로 본다)."""
+def post_days_from_history(entries, drafts_count=True):
+    """실제로 글이 나온 KST 날짜 집합(상태 없는 옛 항목은 정상 발행으로 본다).
+    승인 흐름(flow=pr)의 이력 항목은 초안을 만든 날에 생기고 글은 병합할 때 main 에 올라간다. 글 커밋 날짜를 따로 알 때는 drafts_count=False 로
+    초안 항목을 빼서 '병합하지 않은 초안'이 글이 나온 날로 세어지지 않게 한다."""
     days = set()
     for e in entries:
-        if e.get("status", "posted") in REAL_POST_STATUSES:
+        if e.get("status", "posted") in REAL_POST_STATUSES and (drafts_count or e.get("flow") != "pr"):
             day = entry_day(e)
             if day:
                 days.add(day)
@@ -92,10 +94,23 @@ def _parse_utc(value):
         return None
 
 
-def evaluate(blog, history, now, last_content_commit=None, recent_runs=(), post_days=None, pages_runs=None):
+def _waiting_message(pending, now):
+    """승인 대기 초안 문구: 대기 N건과 가장 오래된 초안이 기다린 시간(하루 넘으면 일, 아니면 시간)."""
+    ages = [now - t for t in (_parse_utc(d.get("created_at")) for d in pending if isinstance(d, dict)) if t is not None]
+    waited = ""
+    if ages:
+        hours = max(max(ages).total_seconds(), 0) / 3600
+        waited = f"(가장 오래된 것 {int(hours // 24)}일 전)" if hours >= 24 else f"(가장 오래된 것 {int(hours)}시간 전)"
+    return (f"승인(PR 병합)을 기다리는 초안이 {len(pending)}건 있습니다{waited}. 새 글이 안 나온 것은 멈춤이 아니라 승인 대기입니다 — "
+            "병합하면 공개, 닫으면 폐기됩니다. 오래 두면 글감이 낡습니다.")
+
+
+def evaluate(blog, history, now, last_content_commit=None, recent_runs=(), post_days=None, pages_runs=None, pending_drafts=None):
     """한 블로그의 문제 목록. recent_runs 는 최신순 [{'conclusion': ..}, ...].
     post_days: 새 글이 나온 KST 날짜 집합(없으면 이력에서 계산, jekyll-git 은 '글 파일이 추가된 커밋'에서 구해 넘긴다).
-    pages_runs: Pages 배포 워크플로의 최근 완료 실행(최신순, {'conclusion','created_at'}). 없으면 배포 검사를 하지 않는다."""
+    pages_runs: Pages 배포 워크플로의 최근 완료 실행(최신순, {'conclusion','created_at'}). 없으면 배포 검사를 하지 않는다.
+    pending_drafts: 승인 흐름(publish_flow: pr)에서 열려 있는 초안 PR 목록([{'created_at': ISO}, ...]). 없거나 비어 있으면 아무것도 바꾸지 않는다.
+    있으면 '글이 안 나옴'(STALE·NO_POSTS_DAY)을 멈춤이 아니라 승인 대기로 보고 DRAFT_WAITING(경고)으로 바꾼다."""
     if blog.get("mode") == "off":
         return []
     key = blog["key"]
@@ -146,7 +161,7 @@ def evaluate(blog, history, now, last_content_commit=None, recent_runs=(), post_
     #      (STALE 이 이미 울리면 같은 원인이므로 중복 알림을 만들지 않는다.)
     if blog.get("mode") == "auto" and not any(f.code in ("STALE", "NO_ACTIVITY") for f in findings):
         days = set(post_days) if post_days is not None else set()
-        days |= post_days_from_history(entries)
+        days |= post_days_from_history(entries, drafts_count=post_days is None)
         today = now.astimezone(KST).date()
         yesterday, before = today - timedelta(days=1), today - timedelta(days=2)
         if days and today not in days and yesterday not in days:
@@ -158,6 +173,14 @@ def evaluate(blog, history, now, last_content_commit=None, recent_runs=(), post_
                 findings.append(Finding(key, "NO_POSTS_DAY", "warning",
                                         f"어제({yesterday}) 새 글이 0건입니다. 워크플로가 초록이어도 글이 안 나온 것입니다. "
                                         "실행 요약의 [SKIP] 사유를 확인하세요."))
+
+    # 2-1-1) 승인 흐름(publish_flow: pr): 새 글이 안 나온 것이 멈춤이 아니라 승인 대기일 수 있다. 열린 초안 PR 이 있으면 '글이 안 나옴'
+    #        (STALE·NO_POSTS_DAY)을 치명 경고 대신 DRAFT_WAITING(확인 수준)으로 바꾼다. 최근 글이 있으면(위 두 경고가 없으면) 아무것도 하지 않는다.
+    #        초안이 없거나 목록을 읽지 못했으면(pending_drafts 가 비었거나 None) 그대로 STALE·NO_POSTS_DAY 가 울린다 — 정말 멈춘 것일 수 있다.
+    if blog.get("publish_flow") == "pr" and pending_drafts:
+        if any(f.code in ("STALE", "NO_POSTS_DAY") for f in findings):
+            findings = [f for f in findings if f.code not in ("STALE", "NO_POSTS_DAY")]
+            findings.append(Finding(key, "DRAFT_WAITING", "warning", _waiting_message(pending_drafts, now)))
 
     # 2-2) 사이트 배포: 글 커밋 뒤 일정 시간이 지났는데 성공한 Pages 실행이 없거나, 최근 실행이 실패(D-24형)
     if pages_runs is not None and blog.get("platform") == "jekyll-git":

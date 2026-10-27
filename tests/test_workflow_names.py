@@ -466,8 +466,9 @@ class ChanceSplitTest(unittest.TestCase):
         self.assertEqual(env["UNSPLASH_ACCESS_KEY"], "${{ secrets.UNSPLASH_ACCESS_KEY }}")
 
     def test_permissions_concurrency_and_job_limits_are_the_same(self):
-        self.assertEqual(self.fix["permissions"], self.chance["permissions"])
+        # 승인 흐름(publish_flow: pr)이 PR 을 열려고 chanceblog.yml 만 pull-requests: write 를 더 가진다(이미지 교체는 PR 을 열지 않는다)
         self.assertEqual(self.fix["permissions"], {"contents": "write", "actions": "write"})
+        self.assertEqual(self.chance["permissions"], {**self.fix["permissions"], "pull-requests": "write"})
         # 같은 그룹이라 글 작성 실행과 이미지 교체 실행이 동시에 돌아 커밋이 겹치는 일이 없다
         self.assertEqual(self.fix["concurrency"], self.chance["concurrency"])
         self.assertEqual(self.fix["concurrency"], {"group": "chanceblog", "cancel-in-progress": False})
@@ -475,11 +476,31 @@ class ChanceSplitTest(unittest.TestCase):
         for key in ("runs-on", "timeout-minutes"):
             self.assertEqual(self.fix["jobs"]["build"][key], self.chance["jobs"]["build"][key], key)
 
+    @staticmethod
+    def direct_path(step):
+        """chanceblog.yml 의 직접 게시(direct) 경로 비교용: 커밋 단계 조건에서 승인 흐름 한 조각을 뗀다(그 조각이 direct 에서 참이라는 것은
+        test_chance_draft_workflow.py 가 모든 조합으로 대조한다)."""
+        step = dict(step)
+        if isinstance(step.get("if"), str):
+            step["if"] = step["if"].replace(" && steps.flow.outputs.flow != 'pr'", "")
+        return step
+
+    def chance_direct_steps(self):
+        """승인 흐름이 더한 두 단계('발행 흐름 확인'·'초안 올리기')를 뺀 chanceblog.yml 단계."""
+        return [self.direct_path(s) for s in self.steps(self.chance)
+                if s.get("id") != "flow" and "pipeline.draft_flow" not in s.get("run", "")]
+
     def test_steps_are_identical_except_the_fix_images_switch(self):
-        a = [self.normalized(s) for s in self.steps(self.chance)]
+        a = [self.normalized(s) for s in self.chance_direct_steps()]
         b = [self.normalized(s, drop_env=("FIX_IMAGES",)) for s in self.steps(self.fix)]
         self.assertEqual(len(a), 6)  # checkout · setup-python · 의존성 · 생성기 · 커밋 · Pages 배포 요청
         self.assertEqual(a, b)
+
+    def test_the_draft_flow_added_exactly_two_steps_to_chanceblog(self):
+        added = [s for s in self.steps(self.chance) if s.get("id") == "flow" or "pipeline.draft_flow" in s.get("run", "")]
+        self.assertEqual(len(added), 2)
+        self.assertEqual(len(self.steps(self.chance)), 8)
+        self.assertEqual(len(self.steps(self.fix)), 6)                  # 이미지 교체 워크플로는 승인 흐름과 무관하다(새 글을 만들지 않는다)
 
     def test_fix_images_workflow_still_commits_and_requests_the_pages_deploy(self):
         commit = next(s for s in self.steps(self.fix) if s.get("id") == "commit")

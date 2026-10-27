@@ -25,6 +25,7 @@
       "role": "교양·분석형 매거진 (출처 기반, KR/EN)",
       "languages": ["ko", "en"],
       "mode": "auto",
+      "publish_flow": "direct",
       "workflow": ".github/workflows/chanceblog.yml",
       "entrypoint": "generator.py",
       "prompt": ".github/editorial/CHANCE_BLOG_TEMPLATE.md",

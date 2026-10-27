@@ -39,6 +39,7 @@
 | R12 | 새 플랫폼은 **어댑터**로 | 기존 블로그 코드를 복사하지 않는다([`ARCHITECTURE.md`](./ARCHITECTURE.md) §7) |
 | R13 | CLI는 **어떤 콘솔에서도 죽지 않게** | 진입점 `main()` 첫 줄에 `pipeline.console.safe_output()`. Windows 한국어 콘솔(cp949)은 `—`·이모지를 출력하면 예외로 멈춘다(CI의 Linux는 UTF-8이라 드러나지 않는다) |
 | R14 | 게시되는 문서(`.md`)에 **Liquid 구문을 쓰지 않는다** | GitHub Pages는 front matter 없는 `.md`도 Liquid로 처리해, 중괄호-퍼센트 태그 예시가 사이트 빌드를 깨뜨렸다(D-24). 예시는 문장으로 풀어 쓴다. 검증기 **LIQUID-1** |
+| R15 | 외부에서 온 값의 **모양을 검사할 때는 `re.fullmatch`**(또는 `\Z`)를 쓴다 | ✅ `_OWNER_RE.fullmatch(value)` / ❌ `^…$` + `.match()` — `$`는 끝의 줄바꿈 하나를 허용해 `"octo\n"`이 통과한다(승인 흐름 구현 중 발견, `tests/test_drafts.py`의 `test_trailing_newlines_never_pass_a_shape_check`) |
 
 ## 3. 워크플로 작성 원칙
 
@@ -49,7 +50,7 @@
 | W3 | 모든 job에 `timeout-minutes`, 스케줄 워크플로에 `concurrency` | **WF-7·WF-8** |
 | W4 | `\|\| true`, `continue-on-error`로 실패를 숨기지 않는다. 필요한 재시도는 명시적 루프로 | **WF-6** |
 | W5 | 외부 액션은 SHA 고정, 패키지는 버전 범위 | **WF-5**·**DEP-1** |
-| W6 | 커밋을 push하는 워크플로가 사이트를 바꾼다면 **배포를 dispatch**한다 | **WF-10** |
+| W6 | 커밋을 push하는 워크플로가 사이트를 바꾼다면 **배포를 dispatch**한다. 예외: Chance 승인 흐름(`publish_flow: pr`)은 글을 main 이 아니라 초안 브랜치로 push 하고, 사람이 PR 을 병합할 때 생기는 push 이벤트가 배포를 실행하므로 dispatch 하지 않는다([`ARCHITECTURE.md`](./ARCHITECTURE.md) §4-4). 직접 게시 경로(commit·`gh workflow run pages.yml`)는 그대로다 | **WF-10** |
 | W7 | `schedule.cron`은 레지스트리와 같게. 수동 실행 입력(`dry_run`, `publish`(off·draft·publish 3택, 기본 draft), 대상 블로그·주제)을 제공한다 | **REG-2** |
 | W8 | 시크릿은 `secrets[...]` → `env`로만. `echo` 금지 | **WF-9**·**REG-3** |
 | W9 | 변경 후 `actionlint`가 0건이어야 한다 | CI |
@@ -80,6 +81,7 @@
 | 감시 규칙 추가 | `pipeline/health.py`에 순수 함수로 추가 → `tests/test_health.py` |
 | 워크플로 추가·이름 변경 | `[구분] ` 접두사와 한글 `name`·job `name`(W10, 블로그 워크플로면 레지스트리 `channel.label`과 같은 글자) → [`ARCHITECTURE.md`](./ARCHITECTURE.md) §2-1 표와 [`REQUEST_BRIEFING.md`](./REQUEST_BRIEFING.md) 표에 한 줄(`파일`과 `이름`을 같은 줄에 백틱으로)·[`ACTIONS_GUIDE.md`](./ACTIONS_GUIDE.md) 이름 표 → `python scripts/validate_repo.py`(WF-11·WF-12·BRIEF-1)·`tests/test_workflow_names.py`(표와 이름이 같은지·run-name 제목·옛 이름 인용) |
 | 레지스트리에 블로그 추가·`channel`·`ads` 변경 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) §3(`channel`·`ads`)·§7 플레이북 → `python -m pipeline.registry` · `python scripts/validate_repo.py`(REG-1·REG-5) · `tests/test_registry.py`. `ads`를 `pending_gate`·`on`으로 올리거나 광고 코드를 넣고 빼는 것은 T3([`SECURITY_GUARDRAILS.md`](./SECURITY_GUARDRAILS.md) G-C10) |
+| Chance 승인 흐름(`publish_flow: pr`) 규칙 변경 | 순수 규칙·소독·GitHub 클라이언트는 `pipeline/drafts.py`, git 을 부르는 실행부·정리는 `pipeline/draft_flow.py`(둘 다 [`ARCHITECTURE.md`](./ARCHITECTURE.md) §4-4) → `tests/test_drafts.py`·`tests/test_draft_flow.py`·`tests/test_generator_drafts.py`·`tests/test_chance_draft_workflow.py`·`tests/test_draft_waiting.py`(가짜 git·가짜 GitHub, 실제 git 이야기 시험은 임시 저장소). **`direct`가 바뀌지 않았다는 증거**를 낸다: 같은 가짜 입력(피드 사본·가짜 Gemini)으로 main 의 `generator.py`와 바뀐 코드를 돌려 표준 출력·종료 코드·생성 파일·이력·요약을 바이트 단위로 비교한다. 새 시험이 `generator.main()`을 돌린다면 `g.draft_flow_on`을 고정한다(진짜 레지스트리 값에 기대지 않고, 승인 흐름이었다면 정기 실행이 부르는 `git ls-remote` 네트워크 호출도 막는다). 켜는 변경(T3)은 `pipeline/blogs.json`의 `publish_flow`와 `tests/draft_helpers.py`의 `REAL_PUBLISH_FLOW` 두 줄이다 |
 
 ## 6. 검증 사다리
 
@@ -150,6 +152,7 @@ WORKLOG 항목에 복사해서 체크한다.
 8. 문서·레지스트리·검증기와 일치하는가?
 9. 광고 표면 파일을 건드렸는가? 승인 표시가 있는가?
 10. 롤백 방법이 있는가(`git revert`, `mode: off`, `PIPELINE_PAUSE`)?
+11. 기본값이 꺼짐인 기능(예: `publish_flow`)이면 **꺼진 상태에서 이전과 같은가**를 같은 입력의 출력 비교로 확인했는가(문서의 주장이 아니라 실행 결과로)? 켜는 변경은 따로 승인을 받는가?
 
 ## 10. 롤백
 
@@ -172,3 +175,4 @@ WORKLOG 항목에 복사해서 체크한다.
 | `\|\| true`로 `git add` 오류 은폐 | 실패가 성공처럼 보임(D-05) | W4, 검증기 WF-6 |
 | CRLF 이중 변환(`\r\r\n`) 9개 파일 | git이 텍스트로 인식 못 함 | `autocrlf` 유지, 도구가 만든 파일 줄 끝 확인 |
 | `auto_sync.bat`(30초마다 `git add .` + push) | 비밀·삭제·미완성 편집이 공개 저장소로 | 자동 push 스크립트 금지 |
+| `^…$` 정규식 + `.match()`로 소유자·저장소 이름 모양을 검사(승인 흐름 구현 중, 병합 전에 발견) | 끝에 줄바꿈이 붙은 값(`"octo\n"`)이 통과 | R15 `fullmatch`, `test_trailing_newlines_never_pass_a_shape_check` |
