@@ -507,6 +507,16 @@ class TestCommandTest(CliCase):
                     self.assertIn(f"HTTP {status}", summary)
                 self.assertEqual(leaks(*lines, summary), [])
 
+    def test_the_description_telegram_gave_is_markdown_safe_in_the_summary(self):
+        """독립 검증 X11: 텔레그램이 준 설명은 외부 글이다 — 실행 요약(마크다운)에는 표·링크·HTML 문법 문자를 바꿔서 싣는다."""
+        code, lines, summary, _ = self.run_test_command(http_error(400, "Bad Request: <b>x</b> | [click](https://evil.example)"))
+        self.assertEqual(code, 1)
+        line = next(item for item in summary.splitlines() if item.startswith("- 텔레그램이 준 설명:"))
+        for raw in ("<b>", "|", "[click]"):
+            self.assertNotIn(raw, line)
+        for safe in ("&lt;b&gt;", "&#124;", "&#91;click&#93;"):
+            self.assertIn(safe, line)
+
     def test_failure_shapes_that_carry_the_request_address_do_not_leak_into_the_summary(self):
         for name, outcome in LeakShapes.scenarios().items():
             with self.subTest(name=name):

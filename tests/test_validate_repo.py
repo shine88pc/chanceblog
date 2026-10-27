@@ -780,13 +780,15 @@ def tg_step(run="python -m pipeline.notify test", env="", extra=()):
     return "\n".join(lines)
 
 
-def tg_yaml(*steps, job_env="", top_env="", step_text=None):
-    """텔레그램 시크릿 규칙·알림 단계 예외 시험용 워크플로 YAML(들여쓰기 없이 만든다). step_text 가 있으면 steps 항목을 그대로 쓴다."""
+def tg_yaml(*steps, job_env="", top_env="", step_text=None, job_extra=()):
+    """텔레그램 시크릿 규칙·알림 단계 예외 시험용 워크플로 YAML(들여쓰기 없이 만든다). step_text 가 있으면 steps 항목을 그대로 쓴다.
+    job_extra: 잡(j)의 키 아래에 그대로 넣을 줄들(예: container·services — 들여쓰기는 잡 기준)."""
     body = step_text if step_text is not None else "\n".join(steps)
     lines = ['name: "[공통] 시험"', "on:", "  workflow_dispatch:", "permissions:", "  contents: read"]
     if top_env:
         lines += ["env:", f"  {top_env}"]
     lines += ["jobs:", "  j:", "    name: 시험", "    runs-on: ubuntu-latest", "    timeout-minutes: 5"]
+    lines += [f"    {line}" for line in job_extra]
     if job_env:
         lines += ["    env:", f"      {job_env}"]
     lines += ["    steps:", *["      " + line for line in body.splitlines()]]
@@ -868,6 +870,36 @@ class TelegramSecretRuleTest(TmpCase):
         for value in values:
             with self.subTest(value=value[:40]):
                 self.assertEqual(self.marks(self.check(tg_step(env=f"TELEGRAM_BOT_TOKEN: {value}"))), [("WF-13", "ERROR")])
+
+    def test_other_letter_cases_of_the_names_are_errors_too(self):
+        """독립 검증 N-3: GitHub 시크릿 이름은 대소문자를 가리지 않는다 — `secrets.telegram_bot_token` 은 같은 시크릿이라 같은 규칙을 받는다."""
+        for run in ('echo "${{ secrets.telegram_bot_token }}"', "echo ${{ secrets.Telegram_Bot_Token }}", "echo ${{ secrets.telegram_chat_id }}",
+                    'curl "https://api.telegram.org/bot${{ secrets.Telegram_Bot_Token }}/getMe"', "echo $Telegram_Chat_Id"):
+            with self.subTest(run=run[:40]):
+                found = self.check(tg_step(run=run, env=TG_GOOD_ENV))
+                self.assertEqual(self.marks(found), [("WF-13", "ERROR")])
+                self.assertEqual(self.place(found[0]), "jobs.j.steps.0.run")
+                self.assertRegex(found[0].message, r"\(TELEGRAM_(BOT_TOKEN|CHAT_ID)\)")          # 메시지는 등록된 이름(대문자)으로 알린다
+
+    def test_other_letter_cases_in_the_allowed_place_are_errors_too(self):
+        """허용 자리(단계 env)에서도 표현식은 정확히 `secrets.TELEGRAM_…` 여야 하고 환경변수 이름과 같아야 한다 — 대소문자만 다른 것도 오류."""
+        for env in ("TELEGRAM_BOT_TOKEN: ${{ secrets.telegram_bot_token }}", "telegram_bot_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}",
+                    "Telegram_Chat_Id: ${{ secrets.Telegram_Chat_Id }}"):
+            with self.subTest(env=env):
+                found = self.check(tg_step(env=env))
+                self.assertEqual(self.marks(found), [("WF-13", "ERROR")])
+        step = "- uses: someone/ok-action@0123456789abcdef0123456789abcdef01234567\n  with:\n    token: ${{ secrets.Telegram_Bot_Token }}"
+        found = self.check(step_text=step)
+        self.assertEqual((self.marks(found), self.place(found[0])), ([("WF-13", "ERROR")], "jobs.j.steps.0.with.token"))
+
+    def test_container_and_service_env_are_errors(self):
+        """독립 검증 V02: 잡의 container.env·services.<이름>.env 에 시크릿을 넘기는 것은 단계 env 가 아니라서 오류다(경로 모양이 달라도 막는다)."""
+        cases = (("container", ["container:", "  image: python:3.10", "  env:", f"    TELEGRAM_BOT_TOKEN: {TG_TOKEN}"], "jobs.j.container.env.TELEGRAM_BOT_TOKEN"),
+                 ("services", ["services:", "  s:", "    image: redis", "    env:", f"      TELEGRAM_CHAT_ID: {TG_CHAT}"], "jobs.j.services.s.env.TELEGRAM_CHAT_ID"))
+        for name, extra, where in cases:
+            with self.subTest(case=name):
+                found = self.check(tg_step(env=TG_GOOD_ENV), job_extra=extra)
+                self.assertEqual((self.marks(found), self.place(found[0])), ([("WF-13", "ERROR")], where))
 
     def test_each_misplaced_use_is_reported_separately_with_its_place(self):
         found = self.check(tg_step(run="echo $TELEGRAM_BOT_TOKEN $TELEGRAM_CHAT_ID", env=TG_GOOD_ENV), job_env=f"TELEGRAM_CHAT_ID: {TG_CHAT}")
