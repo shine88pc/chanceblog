@@ -1,5 +1,7 @@
 # 🤖 GitHub Actions & 텔레그램 봇 알림 연동 가이드
 
+> **확인 메모(2026-10-27, Claude)**: 시크릿 이름은 구현(`pipeline/notify.py`, 작업 TG)과 같습니다. 아래 샘플 코드·워크플로는 **쓰지 않습니다** — `requests` 는 Chance 워크플로에 설치돼 있지 않고, `parse_mode: Markdown` 은 AI 가 만든 제목의 `_`·`*`·`[` 때문에 400 오류가 날 수 있으며, `print(f"…{e}")` 는 요청 예외 문자열에 `…/bot<토큰>/sendMessage` 주소가 들어가 공개 Actions 로그로 토큰이 샐 수 있습니다. 구현·운영 안내는 `.github/editorial/TELEGRAM_SETUP.md`(작업 TG)를 따릅니다. 공개 저장소라 이 문서의 채팅 ID 값은 지웠습니다.
+
 구글 블로거(Blogger) API 연동 및 GitHub Actions 포스팅 파이프라인 완료 시, 텔레그램 봇(`@chance_auto_post_bot`)을 통해 실시간 알림을 수신하기 위한 설정 가이드입니다.
 
 ---
@@ -9,7 +11,7 @@
 GitHub 저장소의 **[Settings] ➔ [Secrets and variables] ➔ [Actions]** 경로로 이동하여 아래 두 키 값을 등록합니다.
 
 * **`TELEGRAM_BOT_TOKEN`**: `@BotFather`에게 받은 API 토큰
-* **`TELEGRAM_CHAT_ID`**: `8837180789`
+* **`TELEGRAM_CHAT_ID`**: 내 텔레그램 채팅 ID(숫자) — 값은 저장소에 쓰지 않고 GitHub Secrets 에만 둔다
 
 ---
 
