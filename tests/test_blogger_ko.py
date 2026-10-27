@@ -279,17 +279,22 @@ class AuthFailureNamesTest(KoreanRunBase):
                         self.assertNotIn(name, summary)
 
     def test_a_real_blog_mismatch_names_the_korean_blog_id_in_the_cause_line_and_the_history_too(self):
-        publisher = ko_publisher(blog_url="https://macat0722.blogspot.com/")                     # 영문 계정의 블로그 주소가 돌아온다
-        exit_code, out, summary = self.run_failure(publisher)
-        self.assertEqual(exit_code, 2, out)
-        cause = [line for line in out.splitlines() if line.startswith("[설정 오류] 인증 점검 실패(blog_mismatch):")]
-        self.assertEqual(len(cause), 1, out)
-        self.assertIn("BLOGGER_KO_BLOG_ID 가 가리키는 블로그의 주소가 레지스트리의 url 과 다릅니다", cause[0])
-        reasons = self.history()[-1]["reasons"]
-        self.assertTrue(len(reasons) == 1 and reasons[0].startswith("[blog_mismatch] BLOGGER_KO_BLOG_ID 가 가리키는"), reasons)
-        for name in EN_NAMES:
-            self.assertNotIn(name, out + summary + "".join(reasons))
-        self.assertNotIn("macat0722", out + summary)                                              # 다른 블로그 주소는 여전히 쓰지 않는다
+        for extra in ((), ("--auth-check",)):                                                     # 글 생성 전 사전 점검(이력 기록 있음)과 `인증 점검만 실행`(쓰기 없음)
+            with self.subTest(extra=extra):
+                publisher = ko_publisher(blog_url="https://macat0722.blogspot.com/")             # 영문 계정의 블로그 주소가 돌아온다
+                exit_code, out, summary = self.run_failure(publisher, extra=extra)
+                self.assertEqual(exit_code, 2, out)
+                cause = [line for line in out.splitlines() if line.startswith("[설정 오류] 인증 점검 실패(blog_mismatch):")]
+                self.assertEqual(len(cause), 1, out)
+                self.assertIn("BLOGGER_KO_BLOG_ID 가 가리키는 블로그의 주소가 레지스트리의 url 과 다릅니다", cause[0])
+                reasons = self.history()[-1]["reasons"] if not extra else []                      # 단독 점검은 이력을 남기지 않는다
+                if not extra:
+                    self.assertTrue(len(reasons) == 1 and reasons[0].startswith("[blog_mismatch] BLOGGER_KO_BLOG_ID 가 가리키는"), reasons)
+                else:
+                    self.assertEqual(len(self.history()), 1)                                      # 앞의 사전 점검이 남긴 한 줄뿐이다
+                for name in EN_NAMES:
+                    self.assertNotIn(name, out + summary + "".join(reasons))
+                self.assertNotIn("macat0722", out + summary)                                      # 다른 블로그 주소는 여전히 쓰지 않는다
 
     def test_the_real_adapter_the_runner_builds_names_the_korean_blog_id_secret_in_its_400_message(self):
         """러너의 기본 게시자 만들기(default_publisher_factory)가 그 블로그의 시크릿 이름을 어댑터에 넘기는지 — 가짜 구글 서비스(blogs.get 400)를 단 진짜 어댑터로 끝까지 돌린다."""
