@@ -899,11 +899,25 @@ class BacklogTest(unittest.TestCase):
         github.add_issue(labels=["초안"])
         github.add_issue(labels=["채널:티스토리"])
         github.add_issue(labels=["초안", "채널:티스토리"], pull_request=True)
-        github.add_issue(labels=["초안", "채널:티스토리", "폐기"])
         pub, _, _ = publisher(github)
-        self.assertEqual(pub.count_open_drafts("티스토리"), 2)
+        self.assertEqual(pub.count_open_drafts("티스토리"), 1)
         self.assertEqual(pub.count_open_drafts("네이버"), 1)
         self.assertEqual(pub.count_open_drafts("Chance"), 0)
+
+    def test_an_open_draft_marked_as_discarded_is_not_counted_like_the_status_board_does(self):
+        """폐기 = 라벨 `폐기` 또는 닫기(확인 필요 모음의 현황판과 같은 규칙). 라벨만 붙이고 닫지 않아도 적체로 세지 않는다."""
+        github = FakeGitHub()
+        github.add_issue(labels=["초안", "채널:티스토리"])
+        github.add_issue(labels=["초안", "채널:티스토리", "폐기"])
+        github.add_issue(labels=["폐기", "초안", "채널:티스토리"])
+        github.add_issue(labels=["초안", "채널:티스토리", "폐기"], state="closed")
+        github.add_issue(labels=["초안", "채널:네이버", "폐기"])
+        pub, _, _ = publisher(github)
+        self.assertEqual(pub.count_open_drafts("티스토리"), 1)
+        self.assertEqual(pub.count_open_drafts("네이버"), 0)
+        for _ in range(3):
+            github.add_issue(labels=["초안", "채널:티스토리", "폐기"])
+        self.assertEqual(pub.count_open_drafts("티스토리"), 1)                          # 폐기 표시가 아무리 쌓여도 새 초안을 막지 않는다
 
     def test_pages_of_one_hundred_are_followed_up_to_the_limit_of_three_pages(self):
         github = FakeGitHub()
