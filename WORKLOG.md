@@ -7,6 +7,23 @@
 
 ---
 
+## [2026-10-27] Claude – 묶음 3: 작업 D(한글 Blogger 등록·Blogger 워크플로 분리)를 main(750c147)과 합치고 현황 문서 갱신 (총괄, 문서·표지판 시험 충돌 정리만)
+
+**작업자**: Claude (총괄 세션, 독립 검증은 별도 세션)
+**대상**: 공통
+**등급**: 충돌 정리와 현황 문서는 T0 — 이 항목에서는 코드·워크플로·레지스트리·시크릿·광고 표면을 새로 바꾸지 않았다(작업 D 의 변경은 바로 아래 항목, `mode` 는 Chance `auto`·영문 Blogger `off`·한글 Blogger `off` 그대로).
+**목적**: 운영자가 작업 D 브랜치(`ai/claude/kcyoon-blogger-split`, d575042)로 PR #57 을 먼저 만들었는데 main(750c147 = 문서 PR #55 + F1 #56)과 문서·표지판 시험 7곳이 충돌해 병합할 수 없었다. 같은 브랜치 위에 main 을 합치고(PR 을 새로 만들지 않는다) 충돌을 푼 뒤 현황 문서를 갱신했다.
+**한 일**:
+- 병합 커밋 217bd4e(부모 d575042·750c147). 충돌 7곳: `HANDLER.md` 2·`docs/ACTIONS_GUIDE.md` 2·`docs/ARCHITECTURE.md` 2·`docs/DEFECT_REGISTER.md` 3·`WORKLOG.md` 1(양쪽 항목 모두 유지)·`tests/test_batch2_integration.py` 1·`tests/test_ops_inbox_drafts.py` 1. 문서는 D 의 구조(워크플로 영문/한글 분리·한글 행·D-75·D-76·REG-6)에 F1 이 고친 사실(2·3차 보강 병합 완료·REG-5 한계·`name` 줄 모양 안내·D-77)을 얹었다. 두 시험은 실제 레지스트리의 키·mode·표 줄은 D 의 값(chance·blogger_macat·blogger_kcyoon, 줄 셋)으로 하고 발행 흐름은 F1 이 만든 `REAL_PUBLISH_FLOW`(`tests/draft_helpers.py`) 한 곳에서 읽는다. 해결은 구역 수와 "바꿀 문장이 정확히 한 번"을 확인하고 어긋나면 멈추는 스크립트로 했다(손으로 다시 쓰지 않음).
+- 0e110d1: D 구현자가 낸 `D_request_briefing_table.patch`(REQUEST_BRIEFING 표 — 없으면 표를 읽는 시험 3개와 BRIEF-1 경고가 남는다)를 그대로 적용.
+- 87b14d4: 현황 문서 갱신 — `인수인계/작업내용.md`(헤더·§1·§2·§3 3·21·25~27번·§4 6·10번·§5 새 항목·§6 표), `docs/SESSION_START.md`(PR 사전 #55~#57·§5-2), `docs/REQUEST_BRIEFING.md`(§8 날짜·반영 목록·8-3 21~26번), `인수인계/PR_병합_방법.md`, `인수인계/작업요청/README.md`. 낡은 "2차 보강 진행 중"·"구현 중" 문장을 현재 사실(2차 #46·3차 #47 병합 완료, 남은 후속 V-2·V-4·V-5·한글 프로필 점검, `mode: draft` 켜기는 T3 승인)로 고치고 F1(D-77) 관측 체크리스트와 묶음 3 관측 항목을 §2 에 더했다.
+- 사용자가 22:05 에 올린 이슈 #58("블로거 시크릿 등록 확인": 방금 등록·수정한 `BLOGGER_CLIENT_ID`·`BLOGGER_CLIENT_SECRET` 시크릿 연동·관련 코드 리뷰 요청)은 채팅 지목이 아니라 시작하지 않고 접수만 기록했다(§3 27번).
+**증거**(깨끗한 clone, Python 3.12): 깨끗한 clone(87b14d4)에서 전체 시험 3456개 통과(451초; 병합 커밋 직후 0e110d1 에서도 3456개 통과), `validate_repo.py --base 750c147` 오류 0·경고 2(`인수인계/` 문서 둘의 LIQUID-1 — main 과 같음), `actionlint` 워크플로 15개 0건, `pyflakes` 16건 = main(750c147)과 같은 집합(새 경고 0), `vermin --target=3.10-` 최소 3.10, 3.12 전용 f-string 검사 0건. main 대비 변경 파일 46개(`_config.yml`·`index.html`·`generator.py`·`pipeline/gates.py` 변경 0). 이 PC 에는 Python 3.12 뿐이라 3.10 직접 실행은 못 했다(CI 가 3.10·3.12 로 돈다). 독립 검증(D 본체): 〔D검증〕
+**관측 상황(공개 정보, 22:09 KST)**: main 은 750c147 그대로(사람 커밋 없음)·마지막 Chance 예약 실행은 06:50 UTC(#82) 이후 6시간 넘게 틱 없음(18시 슬롯 글 아직 없음, D-59 알려진 지연)·워크플로 15개 모두 active.
+**다음 AI 주의**: ① 이 PR(#57)은 독립 검증 "〔D검증〕" 뒤에만 병합 안내를 한다. ② 병합 뒤 `[Blogger 영문]`·`[Blogger 한글]` 첫 정기 실행(02:00·03:30 UTC)과 수동 실행(연습 기본)을 관측해 공용 워크플로가 접혀 보이는 모양을 이 파일에 적는다(`with:` 의 null→빈 문자열, `secrets:` 명시 전달, `contents: write` 위임은 실제 GitHub 에서 처음). ③ 한글 Blogger 를 켜기 전에 `_config.yml` `exclude` 에 `blogger_ko_history.json` 을 더해야 한다(광고 표면 T3, `tests/test_blogger_ko.py` 가 순서를 막는다).
+
+---
+
 ## [2026-10-27] Claude – 한글 Blogger(kcyoon) 등록(mode: off)과 Blogger 워크플로 영문/한글 분리: `blogger.yml` 재사용 워크플로화·채널 래퍼 2개·한글 AI·도구 프로필 (작업 D, T3 — 켜지 않음)
 
 **작업자**: Claude (구현 세션, 독립 검증은 별도 세션)
