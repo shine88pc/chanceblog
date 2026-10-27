@@ -7,6 +7,7 @@ import http.client
 import json
 import random
 import re
+import unicodedata
 import unittest
 import urllib.error
 from html.parser import HTMLParser
@@ -347,6 +348,21 @@ class BodyTest(unittest.TestCase):
             self.assertIn("쓰지 않을 초안은 라벨 `폐기`를 붙이거나 닫으세요", body)         # 적체 점검이 `폐기` 라벨을 세지 않는 규칙과 같은 말
             self.assertIn("(폐기 라벨이 붙은 것은 제외)이 3건 이상이면 새 초안은 만들어지지 않습니다", body)
 
+    def test_control_and_direction_characters_are_removed_from_every_copy_area(self):
+        """검증 지적 N3: NUL·ESC·U+202E 같은 문자는 복사해 붙이면 블로그까지 따라가거나 글자 모양을 바꾼다. 제목·평문·표 칸뿐 아니라 HTML 복사 상자와
+        네이버 서식 있는 글에서도 지운다. 영폭 공백(소독이 쓰는 글자)은 남는다."""
+        nasty = "\x00\x1b\x07\u202e\u2066\u200e\ufeff\u00ad"
+        html = f"<p>앞{nasty}뒤 @octocat</p><h3>소제{nasty}목</h3><ul><li>항{nasty}목</li></ul>"
+        for platform in ("tistory", "naver"):
+            body = ip.build_issue(make_draft(platform, html=html, title=f"제목{nasty}입니다", tags=[f"태{nasty}그"])).body
+            self.assertEqual([ch for ch in body if unicodedata.category(ch) == "Cc" and ch not in "\n\t"], [], platform)
+            self.assertEqual([ch for ch in body if ch in ip._INVISIBLE], [], platform)
+            self.assertIn(f"앞뒤 @{ZW}octocat", body, platform)                 # 글자는 남고 소독도 그대로다
+        html_box = fenced_blocks(self.build("tistory", html=html).body)[0][1][1]
+        self.assertIn("<p>앞뒤 @" + ZW + "octocat</p>", html_box)
+        rendered = self.build("naver", html=html).body
+        self.assertIn(f"앞뒤 @{ZW}octocat", rendered.split("## 3.")[0])          # 서식 있는 글 영역(평문 상자 앞)
+
     def test_tags_are_comma_separated_without_hash_marks_and_deduped(self):
         spec = self.build(tags=["#생활습관", " 루틴, ", "생활습관", "", "#", "AI 도구"])
         self.assertEqual(fenced_blocks(spec.body)[0][2][1], "생활습관, 루틴, AI 도구")
@@ -430,7 +446,15 @@ class BodyTest(unittest.TestCase):
                      dict(date="2026-10-21 "), dict(title="   "), dict(title="<b></b>"), dict(html="<script>x</script>"), dict(html="")):
             with self.assertRaises(PublishError, msg=str(over)) as caught:
                 self.build(**over)
-            self.assertEqual(caught.exception.code, "bad_response", over)
+            self.assertEqual(caught.exception.code, "invalid_draft", over)                 # 입력 문제 — GitHub 응답 문제(bad_response)가 아니다
+            self.assertFalse(getattr(caught.exception, "maybe_created", False))
+
+    def test_a_title_or_body_that_is_empty_after_sanitizing_is_an_invalid_draft_even_though_the_gate_lets_it_through(self):
+        """게이트는 `<script>…</script>` 뿐인 제목을 거르지 않는다(길이만 본다). 어댑터가 정화한 뒤 비면 invalid_draft 로 거절한다."""
+        for over in (dict(title="<script>alert(1)</script>"), dict(title="<style>p{}</style><!-- 주석 -->"), dict(html="<script>x</script><iframe>y</iframe>")):
+            with self.assertRaises(PublishError, msg=str(over)) as caught:
+                ip.build_issue(make_draft(**over))
+            self.assertEqual(caught.exception.code, "invalid_draft", over)
 
     def test_the_issue_body_limit_has_a_safety_margin(self):
         self.assertEqual(ip.BODY_LIMIT, 65536)
@@ -525,7 +549,7 @@ class FuzzTest(unittest.TestCase):
     PIECES = ["@octocat", "@org/team", "#12", "GH-7", "owner/repo#3", "```", "````", "~~~", "<script>x</script>", "<!--", "-->", "<iframe>", "\n", "\r\n", " ",
               "|", "$", "&#64;octocat", "&lt;b&gt;", "[x](javascript:alert(1))", "![i](https://e.example/i.png)", "# 제목", "- [ ] 체크", "---", "***", "> 인용",
               "https://evil.example/@u#1", "help@example.com", "`", "\\", "한글 문장입니다.", "plain text", "‮", "\x07", "<b>굵게</b>", "<h3>소제목</h3>",
-              "<ul><li>항목</li></ul>", "draft-id: x", "<p>단락</p>"]
+              "<ul><li>항목</li></ul>", "draft-id: x", "<p>단락</p>", "\x00", "\x1b", "\u2066", "\ufeff"]
 
     def test_invariants_hold_for_random_input(self):
         rng = random.Random(20261027)
@@ -540,9 +564,11 @@ class FuzzTest(unittest.TestCase):
             try:
                 spec = ip.build_issue(draft)
             except PublishError as exc:
-                self.assertIn(exc.code, ("bad_response", "too_long"), (round_number, exc))     # 비었거나(정화 뒤) 너무 긴 것만 거절한다
+                self.assertIn(exc.code, ("invalid_draft", "too_long"), (round_number, exc))     # 비었거나(정화 뒤) 너무 긴 것만 거절한다
                 continue
             body = spec.body
+            self.assertEqual([ch for ch in body if unicodedata.category(ch) == "Cc" and ch not in "\n\t"], [], round_number)      # 제어 문자 없음(N3)
+            self.assertEqual([ch for ch in body if ch in ip._INVISIBLE], [], round_number)                                        # 글자 방향 서식 문자 없음(N3)
             self.assertEqual(body.split("\n", 1)[0], f"<!-- draft-id: {spec.draft_id} -->", round_number)
             self.assertEqual(body.count("<!--"), 1, round_number)
             self.assertLessEqual(len(body), ip.BODY_BUDGET, round_number)
@@ -641,6 +667,9 @@ class CreateIssueTest(unittest.TestCase):
             self.assertEqual(request["headers"]["authorization"], f"Bearer {token}")
             self.assertNotIn(token, request["url"])
             self.assertNotIn(token, json.dumps(request["payload"] or {}))
+            for name, value in request["headers"].items():                      # 다른 헤더로 한 번 더 새지 않는다(N5)
+                if name != "authorization":
+                    self.assertNotIn(token, str(value), name)
             self.assertTrue(request["url"].startswith(f"https://api.github.com/repos/{REPO}/"))
 
     def test_labels_are_created_with_fixed_colors_only_when_missing(self):
@@ -763,7 +792,7 @@ class IdempotencyTest(unittest.TestCase):
         self.assertEqual(result.post_id, "1")
         self.assertEqual(len(github.issues), 1)                      # 같은 요청을 그대로 다시 보내지 않고 표지로 찾아 쓴다
         self.assertEqual(len(github.calls("POST", r"^/issues$")), 1)
-        self.assertEqual(sleeps, [])
+        self.assertEqual(sleeps, [ip.RECONCILE_WAIT])               # 방금 만든 이슈가 목록에 보이도록 잠깐 기다린 뒤 한 번만 찾는다
         self.assertIn("이미 만들어져 있어 그것을 씁니다", pub.notes[-1])
 
     def test_a_server_error_after_creation_is_also_checked_before_retrying(self):
@@ -794,8 +823,9 @@ class IdempotencyTest(unittest.TestCase):
         with self.assertRaises(PublishError) as caught:
             pub.publish_package(make_draft())
         self.assertEqual(caught.exception.code, "bad_response")
+        self.assertTrue(caught.exception.maybe_created)                            # 응답이 이상하면 만들어졌는지 모른다
         self.assertEqual(len(github.calls("POST", r"^/issues$")), 1)               # 응답이 이상하면 다시 만들지 않는다
-        self.assertEqual(sleeps, [])
+        self.assertEqual(sleeps, [ip.RECONCILE_WAIT])
 
 
 class FailureTest(unittest.TestCase):
@@ -859,13 +889,84 @@ class FailureTest(unittest.TestCase):
         pub, _, _ = self.failing("POST", r"^/issues$", FakeResponse({"number": True, "html_url": "https://github.com/o/r/issues/1"}))
         self.assertEqual(self.code_of(pub)[0], "bad_response")
 
-    def test_a_network_failure_on_create_retries_the_create_only_after_checking_for_a_duplicate(self):
+    def test_a_network_failure_on_create_is_not_retried_and_stops_after_one_check(self):
+        """검증 지적 N1(fail-closed): 만들어졌는지 모르는 실패 뒤에는 다시 만들지 않는다. 만들기는 한 번, 같은 표지 찾기는 처음 한 번 + 실패 뒤 한 번."""
         pub, github, sleeps = self.failing("POST", r"^/issues$", OSError("reset"), times=None)
-        self.assertEqual(self.code_of(pub)[0], "network")
-        self.assertEqual(len(github.calls("POST", r"^/issues$")), 3)               # 만들기는 모두 3번(처음 + 재시도 2번), 한 번에 한 요청씩
-        self.assertEqual(len(github.calls("GET", r"^/issues$")), 4)                # 처음 찾기 1번 + 실패할 때마다 같은 표지가 있는지 3번
-        self.assertEqual(sleeps, [3, 6])
+        with self.assertRaises(PublishError) as caught:
+            pub.publish_package(make_draft())
+        self.assertEqual(caught.exception.code, "network")
+        self.assertTrue(caught.exception.maybe_created)
+        self.assertEqual(len(github.calls("POST", r"^/issues$")), 1)
+        self.assertEqual(len(github.calls("GET", r"^/issues$")), 2)
+        self.assertEqual(sleeps, [ip.RECONCILE_WAIT])
         self.assertEqual(github.issues, [])
+        self.assertIn("이슈가 만들어졌을 수 있습니다", pub.notes[-1])
+        self.assertIn("다시 만들지 않고 멈춥니다", pub.notes[-1])
+
+    def test_a_lost_response_with_a_lagging_list_stops_instead_of_making_a_second_issue(self):
+        """N1 재현 A6: 서버는 만들었는데 응답이 유실되고 방금 만든 이슈가 다음 목록 읽기에는 아직 안 보인다 — 예전에는 같은 초안 번호의 이슈가 둘 생겼다."""
+        github = FakeGitHub()
+
+        def lost_response(record):
+            github._route(record)                                                     # 서버는 만들었다
+            github.fail_next("GET", r"^/issues$", FakeResponse([]), times=1)         # 방금 만든 이슈가 목록에 아직 없다
+            return OSError("timed out")
+        github.fail_next("POST", r"^/issues$", lost_response)
+        pub, _, sleeps = publisher(github)
+        with self.assertRaises(PublishError) as caught:
+            pub.publish_package(make_draft())
+        self.assertEqual((caught.exception.code, caught.exception.maybe_created), ("network", True))
+        self.assertEqual(len(github.issues), 1)                                       # 서버가 만든 하나뿐 — 둘째를 만들지 않았다
+        self.assertEqual(len(github.calls("POST", r"^/issues$")), 1)
+        self.assertEqual(sleeps, [ip.RECONCILE_WAIT])
+        self.assertIn("같은 초안 번호의 이슈도 찾지 못해", pub.notes[-1])
+
+    def test_a_lost_response_with_a_failing_check_read_stops_instead_of_making_a_second_issue(self):
+        """N1 재현 A7b: 응답이 유실되고 확인용 목록 읽기도 계속 실패하면 예전에는 '없음'으로 보고 다시 만들었다. 이제는 멈춘다."""
+        github = FakeGitHub()
+
+        def lost_response(record):
+            github._route(record)
+            github.fail_next("GET", r"^/issues$", OSError("reset"), times=None)
+            return OSError("timed out")
+        github.fail_next("POST", r"^/issues$", lost_response)
+        pub, _, _ = publisher(github)
+        with self.assertRaises(PublishError) as caught:
+            pub.publish_package(make_draft())
+        self.assertEqual((caught.exception.code, caught.exception.maybe_created), ("network", True))
+        self.assertEqual(len(github.issues), 1)
+        self.assertEqual(len(github.calls("POST", r"^/issues$")), 1)
+        self.assertIn("확인하는 읽기도 실패해(network)", pub.notes[-1])
+
+    def test_server_errors_on_create_are_ambiguous_and_http_rejections_are_not(self):
+        for status in (500, 502, 503, 504):
+            pub, github, sleeps = self.failing("POST", r"^/issues$", http_error(status, "boom"), times=None)
+            with self.assertRaises(PublishError) as caught:
+                pub.publish_package(make_draft())
+            self.assertEqual((caught.exception.code, caught.exception.maybe_created), ("api_error", True), status)
+            self.assertEqual((len(github.calls("POST", r"^/issues$")), len(github.calls("GET", r"^/issues$")), sleeps), (1, 2, [ip.RECONCILE_WAIT]), status)
+        for status, code in ((400, "api_error"), (401, "auth_failed"), (403, "auth_failed"), (404, "auth_failed"), (410, "auth_failed"), (422, "api_error"), (429, "api_error")):
+            pub, github, sleeps = self.failing("POST", r"^/issues$", http_error(status, "rejected"), times=None)
+            with self.assertRaises(PublishError) as caught:
+                pub.publish_package(make_draft())
+            self.assertEqual((caught.exception.code, caught.exception.maybe_created), (code, False), status)
+            self.assertEqual((len(github.calls("POST", r"^/issues$")), len(github.calls("GET", r"^/issues$")), sleeps), (1, 1, []), status)    # 확인 읽기도 없다
+            self.assertEqual(github.issues, [], status)
+
+    def test_failures_before_the_create_request_are_marked_as_not_created(self):
+        for method, pattern, error in (("GET", r"^/issues$", http_error(500, "boom")), ("GET", r"^/labels/", http_error(403, "no")), ("POST", r"^/labels$", http_error(403, "no")),
+                                       ("GET", r"^/issues$", OSError("reset"))):
+            github = FakeGitHub()
+            github.fail_next(method, pattern, error, times=None)
+            pub, _, _ = publisher(github)
+            with self.assertRaises(PublishError) as caught:
+                pub.publish_package(make_draft())
+            self.assertIs(caught.exception.maybe_created, False, (method, pattern))
+            self.assertEqual(github.calls("POST", r"^/issues$"), [], (method, pattern))
+        pub, github, _ = publisher()
+        with self.assertRaises(PublishError) as caught:
+            pub.publish_package(make_draft(html="".join(f"<p>{'가' * 990}{i}</p>" for i in range(80))))
+        self.assertEqual((caught.exception.code, caught.exception.maybe_created), ("too_long", False))
 
     def test_error_text_never_contains_the_token(self):
         token = fake_token()
@@ -876,6 +977,18 @@ class FailureTest(unittest.TestCase):
             _, text = self.code_of(pub)
             self.assertNotIn(token, text)
             self.assertNotIn(token, " ".join(pub.notes))
+
+    def test_a_token_value_that_does_not_look_like_a_token_is_still_masked_in_error_text(self):
+        """어댑터의 `_scrub` 은 토큰 값을 글자 그대로 가린다 — `ghs_…` 같은 모양 규칙에 기대지 않는다(N5)."""
+        plain = "plain-value-98765-without-any-token-shape"           # 저장소 비밀 스캔(SEC-2)이 키·토큰 할당으로 보지 않게 변수 이름을 token 으로 하지 않는다
+        self.assertEqual(ip.redact("앞 " + plain + " 뒤"), "앞 " + plain + " 뒤")      # 모양 규칙만으로는 가려지지 않는 값
+        for error in (http_error(401, f"Bad credentials {plain}"), http_error(500, f"Server said {plain}"), OSError(f"failed with {plain}")):
+            github = FakeGitHub()
+            github.fail_next("GET", r"^/issues$", error, times=None)
+            pub, _, _ = publisher(github, token=plain)
+            _, text = self.code_of(pub)
+            self.assertNotIn(plain, text)
+            self.assertIn("***", text)
 
     def test_a_bad_repository_name_stops_before_any_call(self):
         for repo in ("", "no-slash", "a/b/c", "a b/c", "../x", "owner/repo?x=1", "owner/repo#1"):

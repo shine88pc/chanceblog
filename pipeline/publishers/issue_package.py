@@ -11,13 +11,16 @@
    - `@이름` 멘션과 `#123`·`GH-123` 이슈 참조 뒤에 영(0)폭 공백(U+200B)을 넣어 알림·자동 링크가 되지 않게 한다(코드 상자 안도 같다. 주소 안의
      것과 영문·숫자 바로 뒤의 `@`(이메일)는 건드리지 않는다). HTML 주석 `<!--` 도 같은 방식으로 풀어 숨은 표지(`draft-id`)를 흉내 낼 수 없다.
    - 코드 상자(복사 상자)는 본문 안의 가장 긴 백틱 줄보다 더 긴 펜스로 감싸 상자를 빠져나오지 못하게 한다.
-   - 티스토리 HTML 상자는 gates.sanitize_html(허용 태그만, 속성 제거, 링크 기본 제거, script·iframe·style·object 내용째 제거)을 한 번 더 거친다.
+   - 티스토리 HTML 상자는 gates.sanitize_html(허용 태그만, 속성 제거, 링크 기본 제거, script·iframe·style·object 내용째 제거)을 한 번 더 거치고,
+     제어 문자(NUL·ESC 등)와 글자 방향을 바꾸는 서식 문자(U+202E 등)를 지운다. 네이버의 서식 있는 글·평문도 같은 글을 쓴다.
    - 네이버의 서식 있는 글은 정화된 HTML 을 마크다운으로 옮기며 마크다운·HTML 문법 문자를 모두 이스케이프한다(`<`·`&`·`[`·`|`·`$` 등).
    - 제목은 태그·제어 문자를 지우고 한 줄로 접어 60자로 자른다. 접두사 `[초안][<채널>]`과 라벨(`초안`·`채널:<라벨>`)은 고정값이다(모델이 정하지 않는다).
    - 본문은 이슈 한도(65,536자) 안에 안전 여유(60,000자)를 두고, 못 맞추면 잘라 내지 않고 실패한다(잘린 글을 그대로 발행하지 않게).
 2) 입출력: `IssuePackagePublisher` 가 GitHub REST API 를 urllib 로 부른다(토큰은 `GITHUB_TOKEN`, 오류 문구에서 가린다).
    - 멱등: 본문 첫 줄의 숨은 표지 `<!-- draft-id: <블로그키>-<날짜>-<해시> -->` 와 같은 표지가 있는 이슈(열림·닫힘 모두)를 만들기 전에 찾는다.
-     있으면 새로 만들지 않고 그 이슈를 돌려준다. 만들다 응답만 실패한 경우(시간 초과 등)도 다시 찾아 본다.
+     있으면 새로 만들지 않고 그 이슈를 돌려준다. 이슈 만들기 요청은 **한 번만** 보낸다: 응답을 못 받았거나 서버 오류라 만들어졌는지 모호하면 다시 만들지
+     않고(같은 글이 둘이 될 수 있다) 같은 표지를 한 번 찾아 있으면 그것을 결과로 쓰고, 없으면 멈춘다. HTTP 4xx 로 거절된 것은 만들어지지 않았으니
+     그대로 실패로 올리고 다음 실행이 다시 한다.
    - 라벨 `초안`·`채널:<라벨>` 은 없으면 만든다(색·설명 고정).
    - 같은 채널에 열린 초안 이슈 수를 센다(적체 방지, run.py 가 OPEN_DRAFT_LIMIT 이상이면 새로 만들지 않는다).
 """
@@ -50,6 +53,7 @@ BODY_LIMIT = 65536                # GitHub 이슈 본문의 최대 글자 수
 BODY_BUDGET = 60000               # 안전 여유를 둔 목표(이 안에 못 맞추면 실패한다)
 IMAGES_MAX, SOURCES_MAX, TAGS_MAX, NOTES_MAX = 12, 12, 10, 12
 SEARCH_PAGES = 3                  # 같은 표지를 찾을 때 읽는 쪽 수(쪽마다 100건)
+RECONCILE_WAIT = 3                # 이슈 만들기가 모호하게 실패한 뒤, 같은 표지를 찾기 전에 기다리는 초(방금 만든 이슈가 목록에 보이도록)
 ZWSP = "​"                   # 영(0)폭 공백: 멘션·이슈 참조·HTML 주석을 무력화하는 데 쓴다
 UNSPLASH_UTM = "utm_source=chanceblog&utm_medium=referral"   # Unsplash 표기 링크의 출처 표시(앱 이름은 운영자가 등록한 것으로 바꿀 수 있다 — 미확인)
 
@@ -534,13 +538,14 @@ def _tags_text(tags):
 
 
 def _validate(draft):
+    """입력(러너가 넘긴 초안)의 모양 검사. 어긋나면 invalid_draft — GitHub 를 부르기 전의 입력 문제이고 이슈는 만들어지지 않았다."""
     info = PACKAGE_INFO.get(draft.platform)
     if info is None:
-        raise PublishError(f"초안 패키지를 지원하지 않는 platform 입니다: {str(draft.platform)[:20]!r}", code="bad_response")
+        raise PublishError(f"초안 패키지를 지원하지 않는 platform 입니다: {str(draft.platform)[:20]!r}", code="invalid_draft")
     if draft.channel_label != info["label"]:
-        raise PublishError(f"채널 라벨이 platform 과 맞지 않습니다({str(draft.channel_label)[:20]!r} ≠ {info['label']!r})", code="bad_response")
+        raise PublishError(f"채널 라벨이 platform 과 맞지 않습니다({str(draft.channel_label)[:20]!r} ≠ {info['label']!r})", code="invalid_draft")
     if not _KEY_RX.match(str(draft.blog_key or "")) or not _DATE_RX.match(str(draft.date or "")):
-        raise PublishError("블로그 key 또는 날짜 모양이 올바르지 않습니다", code="bad_response")
+        raise PublishError("블로그 key 또는 날짜 모양이 올바르지 않습니다", code="invalid_draft")
     return info
 
 
@@ -597,14 +602,16 @@ def _compose(draft, info, level, title_text, html, draft_id):
 
 
 def build_issue(draft):
-    """초안 한 건 → IssueSpec(제목·본문·라벨·초안 번호). 입출력이 없다. 본문이 이슈 한도(안전 여유 포함)에 안 들어가면 PublishError(too_long)."""
+    """초안 한 건 → IssueSpec(제목·본문·라벨·초안 번호). 입출력이 없다. 입력이 어긋나거나 정화한 뒤 제목·본문이 비면 PublishError(invalid_draft),
+    본문이 이슈 한도(안전 여유 포함)에 안 들어가면 PublishError(too_long) — 둘 다 GitHub 를 부르기 전의 입력 문제다."""
     info = _validate(draft)
     title_text = plain_title(draft.title)
     if not title_text:
-        raise PublishError("글 제목이 비어 있습니다", code="bad_response")
+        raise PublishError("글 제목이 정화한 뒤 비어 있습니다(태그·스크립트뿐인 제목)", code="invalid_draft")
     html, _stats = gates.sanitize_html(draft.html, allow_links=bool(draft.allow_links))
+    html = clean(html, multiline=True)       # 제어 문자(NUL·ESC)·글자 방향 서식 문자(U+202E 등)를 지운다 — HTML 복사 상자·서식 있는 글·평문이 모두 이 글을 쓴다
     if not html.strip():
-        raise PublishError("정화한 뒤 본문이 비어 있습니다", code="bad_response")
+        raise PublishError("본문이 정화한 뒤 비어 있습니다(태그·스크립트뿐인 본문)", code="invalid_draft")
     draft_id = make_draft_id(draft.blog_key, draft.date, title_text, html)
     body = ""
     for level in (0, 1, 2):
@@ -637,6 +644,13 @@ def _has_label(item, name):
     return any((label.get("name") if isinstance(label, dict) else label) == name for label in item.get("labels") or ())
 
 
+def _may_have_created(exc):
+    """이슈 만들기 요청이 실패했을 때 서버가 이미 이슈를 만들었을 수 있는지. HTTP 4xx(권한·검증·호출 한도로 거절)는 요청이 처리되지 않았다는 뜻이라 아니다.
+    5xx·연결 실패·시간 초과·이상한 응답(상태 코드 없음)은 알 수 없으므로 그렇다고 본다."""
+    status = getattr(exc, "status", None)
+    return not (isinstance(status, int) and 400 <= status < 500)
+
+
 def _failure(message, code, status=None):
     exc = PublishError(message, code=code)
     exc.status = status        # HTTP 상태(연결 오류 등 응답이 없으면 None). 러너는 쓰지 않고 이 어댑터가 422(이미 있는 라벨)를 가를 때 쓴다
@@ -662,7 +676,7 @@ class IssuePackagePublisher:
         """GitHub REST 한 번 호출. 일시 오류(429·5xx·연결 오류)는 늘려 가며 재시도하고(retry), 실패는 PublishError 로 분류한다.
         auth_failed 401·403·404·410(권한·저장소·이슈 기능) / network 연결 실패 / bad_response 응답 이상 / api_error 그 밖.
         retry=False 는 되풀이하면 안 되는 호출(이슈 만들기)용이다: 서버가 이미 만들었는데 응답만 잃은 것일 수 있어 같은 요청을 그대로 다시 보내면
-        글이 둘이 된다. 그 재시도는 호출한 쪽이 같은 표지가 있는지 확인한 뒤에 한다."""
+        글이 둘이 된다. 호출한 쪽(publish_package)도 모호한 실패 뒤에 다시 만들지 않는다."""
         if not _REPO_RX.match(self.repo):
             raise _failure("저장소 이름(GITHUB_REPOSITORY)이 `소유자/이름` 모양이 아닙니다", "auth_failed")
         url = f"{API_ROOT}/repos/{self.repo}{path}" + (("?" + urllib.parse.urlencode(params)) if params else "")
@@ -756,31 +770,39 @@ class IssuePackagePublisher:
         return PublishResult(post_id=str(number), url=url, draft=True)
 
     def publish_package(self, draft):
-        """초안 한 건을 이슈로 만든다(멱등). 같은 표지의 이슈가 있으면 만들지 않고 그 이슈를 돌려준다."""
-        spec = build_issue(draft)
-        existing = self.find_existing(spec, draft.date)
-        if existing is not None:
-            result = self._result(existing)
-            self.notes.append(f"같은 초안 번호의 이슈 #{result.post_id} 가 이미 있어 새로 만들지 않았습니다")
-            return result
-        self.ensure_labels(spec.labels)
+        """초안 한 건을 이슈로 만든다(멱등). 같은 표지의 이슈가 있으면 만들지 않고 그 이슈를 돌려준다.
+
+        이슈 만들기 요청은 **한 번만** 보낸다. 만들어졌는지 모호한 실패(응답을 못 받음·시간 초과·서버 오류·이상한 응답)는 같은 요청을 다시 보내면 글이
+        둘이 될 수 있어 다시 만들지 않고 멈춘다: 잠깐 기다렸다가 같은 표지를 **한 번만** 찾아 있으면 그 이슈를 결과로 쓰고(성공), 없거나 찾는 읽기도
+        실패하면 원래 오류를 올린다(`maybe_created` 가 참 — 러너가 '이슈가 만들어졌을 수 있으니 확인' 안내를 붙이고 종료 1). HTTP 4xx 로 거절된 것은
+        만들어지지 않았음이 확실하므로 바로 올린다(`maybe_created` 가 거짓 — 다음 실행이 다시 한다). 만들기 전의 실패(입력·권한·읽기)도 거짓이다."""
+        try:
+            spec = build_issue(draft)
+            existing = self.find_existing(spec, draft.date)
+            if existing is not None:
+                result = self._result(existing)
+                self.notes.append(f"같은 초안 번호의 이슈 #{result.post_id} 가 이미 있어 새로 만들지 않았습니다")
+                return result
+            self.ensure_labels(spec.labels)
+        except PublishError as exc:
+            exc.maybe_created = False        # 이슈를 만들기 전의 실패: 만들어지지 않았다
+            raise
         payload = {"title": spec.title, "body": spec.body, "labels": spec.labels}
-        for attempt in range(self._retries + 1):
+        try:
+            return self._result(self._request("POST", "/issues", payload=payload, retry=False))
+        except PublishError as exc:
+            exc.maybe_created = _may_have_created(exc)
+            if not exc.maybe_created:
+                raise
+            self._sleep(RECONCILE_WAIT)
+            found, check = None, None
             try:
-                return self._result(self._request("POST", "/issues", payload=payload, retry=False))
-            except PublishError as exc:
-                if exc.code not in ("network", "api_error", "bad_response"):
-                    raise
-                # 서버는 이슈를 만들었는데 응답만 실패했을 수 있다: 다시 만들기 전에 같은 표지가 있는지 본다(확인에 실패하면 '없음'으로 보되 참고를 남긴다)
-                try:
-                    found = self.find_existing(spec, draft.date)
-                except PublishError as check:
-                    found = None
-                    self.notes.append(f"만들기 실패 뒤 중복 확인에도 실패해 '없음'으로 봅니다({check.code})")
-                if found is not None:
-                    self.notes.append(f"만들기 응답은 실패했지만 이슈 #{found.get('number')} 가 이미 만들어져 있어 그것을 씁니다")
-                    return self._result(found)
-                if exc.code == "bad_response" or attempt >= self._retries:
-                    raise      # 응답이 이상한 경우는 다시 만들지 않는다(이미 만들어졌을 수 있어 같은 글이 둘이 된다)
-                self._sleep(3 * (2 ** attempt))
-        raise _failure("초안 이슈 만들기 재시도 초과", "api_error")
+                found = self.find_existing(spec, draft.date)
+            except PublishError as error:
+                check = error
+            if found is not None:
+                self.notes.append(f"만들기 응답은 받지 못했지만({exc.code}) 같은 초안 번호의 이슈 #{found.get('number')} 가 이미 만들어져 있어 그것을 씁니다")
+                return self._result(found)
+            why = f"같은 초안 번호의 이슈를 확인하는 읽기도 실패해({check.code})" if check is not None else "같은 초안 번호의 이슈도 찾지 못해"
+            self.notes.append(f"만들기 응답을 받지 못했고 {why} 이슈가 만들어졌을 수 있습니다 — 같은 글이 둘이 되지 않게 다시 만들지 않고 멈춥니다")
+            raise

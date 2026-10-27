@@ -278,12 +278,15 @@ PACKAGE_FAILURES = {
     "auth_failed": ("권한·접근 불가", "GitHub 이슈를 읽거나 쓸 권한이 없습니다. 워크플로 permissions 에 issues: write 가 있는지, 저장소 Settings > Actions > General 의 "
                                       "Workflow permissions 와 Issues 기능이 막혀 있지 않은지 확인하세요."),
     "too_long": ("본문이 너무 김", "초안이 이슈 본문 한도(약 6만 자)에 들어가지 않아 만들지 않았습니다. 프로필의 length.max_chars 를 줄이세요."),
+    "invalid_draft": ("초안이 비었음", "AI 가 만든 제목이나 본문이 정화한 뒤 비어(스크립트·태그뿐인 출력 등) 이슈를 만들 수 없습니다. GitHub 는 부르지 않았고 이슈도 만들어지지 "
+                                       "않았습니다. 다음 실행이 새 글을 만듭니다."),
     "network": ("네트워크 오류", "GitHub 서버에 연결하지 못했습니다(연결 실패·시간 초과). 잠시 뒤 다시 실행하세요."),
     "bad_response": ("응답 이상", "GitHub 가 필요한 값이 빠진 응답을 돌려줬습니다. 이 단계의 로그를 확인하고 이슈 목록에서 초안이 만들어졌는지 보세요."),
     "api_error": ("API 오류", "GitHub API 가 오류를 돌려줬습니다(호출 한도·서버 오류 포함). 이 단계의 로그를 확인하고 잠시 뒤 다시 실행하세요."),
     "unexpected": ("예기치 않은 오류", "초안 이슈를 만드는 중 예기치 않은 오류가 났습니다. 이 단계의 로그를 확인하세요."),
 }
-PACKAGE_CONFIG_CODES = frozenset({"auth_failed", "too_long"})
+PACKAGE_CONFIG_CODES = frozenset({"auth_failed", "too_long", "invalid_draft"})
+PACKAGE_BUILD_CODES = frozenset({"too_long", "invalid_draft"})        # 본문을 만드는 단계의 입력 문제(GitHub 를 부르기 전). 연습 실행과 같은 stage=build 로 알린다
 PACKAGE_STAGES = {"precheck": "만들기 전 점검", "build": "본문 만들기", "issue": "만들기"}
 
 
@@ -305,15 +308,16 @@ def _run_url(environ):
     return f"https://github.com/{repo}/actions/runs/{run_id}" if re.fullmatch(r"[\w.\-]+/[\w.\-]+", repo) and run_id.isdigit() else ""
 
 
-def _package_failed(out, environ, blog, stage, code, detail, ai_lines, summarize=True):
+def _package_failed(out, environ, blog, stage, code, detail, ai_lines, summarize=True, maybe_created=True):
     """초안 패키지 실패를 한곳에서 알린다: [SKIP] 줄·원인 한 줄·고정 문장 ::error::·실행 요약. 종료 코드를 돌려준다. detail 은 이미 비밀을 가린 원인 문구다.
-    이슈를 만들다 실패한 경우(stage issue)는 이슈가 만들어졌을 수 있으니 재실행 전에 이슈 목록을 먼저 보게 한다(같은 날 정기 실행이 또 만들지 않도록).
+    이슈를 만들다 만들어졌는지 모호하게 실패한 경우(stage issue, maybe_created)는 이슈가 만들어졌을 수 있으니 재실행 전에 이슈 목록을 먼저 보게 한다
+    (같은 날 다시 실행하면 같은 글이 둘이 될 수 있다). HTTP 4xx 로 거절된 실패(maybe_created 가 거짓)는 만들어지지 않았음이 확실해 그 안내를 붙이지 않는다.
     summarize 가 거짓이면 실행 요약은 부른 쪽이 마지막에 한 번만 쓴다(이슈 단계: 이력·사본 결과와 함께)."""
     code = _package_code(code)
     exit_code = _package_exit(code)
     name, sentence = PACKAGE_FAILURES[code]
     look_first = (" 초안 이슈가 만들어졌을 수 있으니 재실행 전에 라벨 `초안` 이슈 목록을 확인하세요."
-                  if stage == "issue" and code not in PACKAGE_CONFIG_CODES else "")
+                  if stage == "issue" and code not in PACKAGE_CONFIG_CODES and maybe_created else "")
     out(skip_line("PACKAGE_FAILED", blog=blog["key"], stage=stage, reason=code, exit=exit_code))
     out(f"[{'설정' if exit_code == EXIT_CONFIG else '인프라'} 오류] 초안 이슈 {PACKAGE_STAGES[stage]} 실패({code}): {one_line(detail)}")
     out(f"::error::[{blog['key']}] {sentence}{look_first}")
@@ -412,7 +416,9 @@ def _package_deliver(out, environ, blog, root, local_now, draft, post, topic, so
         code, detail = _package_code(exc.code), redact(exc, secret_values)
         status, post_id, url = "publish_failed", "", ""
         extra, fail_text = [f"[{code}] {detail[:300]}"], f"{code}: {detail}"
-        exit_code = _package_failed(out, environ, blog, "issue", code, detail, ai_lines, summarize=False)
+        # 입력 문제(비었음·너무 김)는 연습 실행과 같은 stage=build 로, 그 밖은 stage=issue. 어댑터가 '만들어졌을 수 있다'고 표시하지 않은 게시자는 있다고 본다
+        exit_code = _package_failed(out, environ, blog, "build" if code in PACKAGE_BUILD_CODES else "issue", code, detail, ai_lines, summarize=False,
+                                    maybe_created=bool(getattr(exc, "maybe_created", True)))
     except Exception as exc:  # noqa: BLE001 - 어댑터가 분류하지 못한 예외도 기록하고 초안 사본을 남긴다
         detail = f"{type(exc).__name__}: {redact(exc, secret_values)}"
         status, post_id, url = "publish_failed", "", ""

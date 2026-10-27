@@ -775,7 +775,7 @@ PR → **Files changed**와 하단 **Checks**에서 봅니다. 병합을 막아 
 - **수동 입력**: `blog`(비우면 티스토리 블로그 전체, 오타면 plan 단계가 빨강)·`topic`(주제 지정, 하루 상한은 건너뛰지만 열린 초안 3건 상한은 건너뛰지 못함, 주제 가드레일에 걸리면 `TOPIC_BLOCKED`)·`연습 실행`(`dry_run`, **기본 켜짐**). 연습은 가짜 AI 응답으로 이슈 본문을 만들어 Summary에 미리 보여 줄 뿐 **Gemini와 GitHub를 부르지 않습니다**(호출 0회, 이슈·커밋·하루 상한 소진 없음). **체크를 풀면** 실제 Gemini로 글을 만들어 초안 이슈 1개를 만들고 그날 하루 상한을 씁니다.
 - **권한·시크릿**: plan은 contents 읽기, 생성은 contents 쓰기와 **issues 쓰기**(그 밖의 권한 없음). 시크릿은 `GEMINI_API_KEY` 하나와 워크플로가 자동으로 받는 `GITHUB_TOKEN`뿐이고, 변수 `PIPELINE_PAUSE`가 있습니다. **티스토리 계정 정보(아이디·비밀번호·쿠키·세션)는 저장하지도 쓰지도 않습니다.**
 - **정상일 때**: 이력 마지막 항목의 `status`가 `package_issued`(`url`은 이슈 주소)이고 Summary "결과: **package_issued**"에 이슈 링크가 있습니다. 같은 날 다시 실행하면 `DAILY_CAP`으로 건너뜁니다.
-- **실패하면**: 로그의 `[SKIP] code=` 줄로 판단합니다(아래 표). 이슈를 만드는 단계(`stage=issue`)에서 실패했으면 **재실행 전에 라벨 `초안` 이슈 목록을 먼저 확인합니다**(이슈가 만들어졌을 수 있습니다).
+- **실패하면**: 로그의 `[SKIP] code=` 줄로 판단합니다(아래 표). 이슈를 만드는 단계(`stage=issue`)에서 5xx·시간 초과처럼 **만들어졌는지 모르는** 실패였으면 안내에 따라 **재실행 전에 라벨 `초안` 이슈 목록을 먼저 확인합니다**(이슈가 만들어졌을 수 있습니다 — 이슈 만들기 요청은 한 번만 보내고 모호하면 다시 만들지 않고 멈춥니다). 권한 오류처럼 HTTP 4xx 로 거절된 실패는 만들어지지 않았으니 확인 없이 설정을 고치고 다시 실행하면 됩니다. 글이 비어 이슈를 만들 수 없는 `invalid_draft`·`too_long`은 `stage=build`입니다.
 
 | 코드 | 뜻 | 색 |
 |---|---|---|
@@ -786,7 +786,8 @@ PR → **Files changed**와 하단 **Checks**에서 봅니다. 병합을 막아 
 | `INVALID_PUBLISH`·`AUTH_CHECK_UNSUPPORTED` | 이 채널에서 쓰지 않는 `BLOGGER_PUBLISH`·`--auth-check`를 씀(워크플로 입력에는 없어 로컬 실행에서만 생김) | **빨강**(종료 2) |
 | `SECRETS_MISSING` | `GEMINI_API_KEY`(로컬 실행에서는 `GITHUB_TOKEN`·`GITHUB_REPOSITORY`도) 없음. 이름만 보이고 글을 만들기 전에 종료 2 | **빨강** |
 | `EXPAND_FAILED`·`LLM_FAILED` | 주제 확장·글 생성 AI 호출 실패 | **빨강** |
-| `PACKAGE_FAILED` | GitHub 이슈를 읽거나 만들지 못함. `reason=`: `auth_failed`(이슈 권한·저장소·Issues 기능)·`too_long`(본문이 이슈 한도 초과)는 종료 2, `network`·`bad_response`·`api_error`·`unexpected`는 종료 1. 분류표는 [`ARCHITECTURE.md`](./ARCHITECTURE.md) §4-1 | **빨강** |
+| `PACKAGE_FAILED` | GitHub 이슈를 읽거나 만들지 못함. `reason=`: `auth_failed`(이슈 권한·저장소·Issues 기능)·`too_long`(본문이 이슈 한도 초과)·`invalid_draft`(AI 가 만든 제목·본문이 정화한 뒤 비어 이슈를 만들 수 없음 — 이슈는 만들어지지 않았고 다음 실행이 새 글을 만든다)는 종료 2, `network`·`bad_response`·`api_error`·`unexpected`는 종료 1. 분류표는 [`ARCHITECTURE.md`](./ARCHITECTURE.md) §4-1 | **빨강** |
+| `HISTORY_WRITE_FAILED` | 이슈는 만들어졌는데 이력 파일을 쓰지 못함(종료 1). 같은 날 다시 실행하기 전에 라벨 `초안` 이슈 목록을 먼저 확인합니다(이번 결과의 이슈 번호·주소는 이 단계의 로그에 있습니다) | **빨강** |
 
 ### 6-13. `[네이버] 초안 패키지 만들기` (`naver.yml`)
 

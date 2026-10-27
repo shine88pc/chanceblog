@@ -9,7 +9,7 @@
 pip install 없이 `python -m pipeline.plan` 으로 이 검증을 실행하기 때문이다(워크플로 name 은 YAML 을 해석하지 않고 줄을 본다).
 
 초안 패키지 채널(platform tistory·naver, mode package): 공식 자동 게시 수단이 없어 글을 GitHub 이슈로 보여 주기만 한다. 이 채널은
-시크릿이 LLM 키뿐이고 계정 정보 모양의 시크릿 이름은 검증이 막는다(PACKAGE_PLATFORMS·_package_errors, docs/SECURITY_GUARDRAILS.md G-S7).
+시크릿 역할이 LLM 키뿐이고(구조적 보장) 계정 정보 낱말이 든 시크릿 이름은 보조로 막는다(PACKAGE_PLATFORMS·_package_errors, docs/SECURITY_GUARDRAILS.md G-S7).
 
 CLI: python -m pipeline.registry   (검증 후 요약 출력, 오류가 있으면 종료 코드 1)
 """
@@ -63,11 +63,12 @@ PLATFORMS = {
 
 # 초안 패키지 채널: 공식 자동 게시 수단이 없어(티스토리 오픈 API는 2024-02 종료, 네이버 글쓰기 API는 2020 종료) 글을 만들어 GitHub 이슈
 # 1개(= 초안 1건)로 보여 주기만 하고, 운영자가 복사해 직접 발행한다(pipeline/publishers/issue_package.py). 로그인·세션·쿠키 자동화는 만들지 않고
-# 계정 정보는 저장·처리하지 않는다 — 그 원칙을 구조로 보장하려고 이 채널의 시크릿은 LLM 키뿐이다(_package_errors).
+# 계정 정보는 저장·처리하지 않는다 — 구조적 보장은 '이 채널의 시크릿 역할이 llm_api_key 뿐'이라는 것이다(_package_errors ③: 이름이 무엇이든 그 값은
+# Gemini 키로만 쓰인다). 시크릿 이름의 금지 낱말 검사(아래)는 실수를 막는 보조일 뿐이라 우회 철자(PASS_WORD·TISTORY_PW 등)는 막지 못한다.
 # platform → 그 채널의 라벨(channel.label). 초안 이슈의 라벨(`채널:<라벨>`)과 현황판이 이 라벨을 쓰므로 짝이 어긋나면 안 된다.
 PACKAGE_PLATFORMS = {"tistory": "티스토리", "naver": "네이버"}
 PACKAGE_MODES = ("off", "package")       # 이 채널에서 쓸 수 있는 mode(draft·auto 는 올릴 곳이 없다)
-# 시크릿 이름에 이 낱말이 들면 막는다(계정 정보를 다루지 않는다는 원칙). 대문자 환경변수 이름 기준이다.
+# 시크릿 이름에 이 낱말이 들면 막는다(실수 방지용 보조 — 포함 검사라 우회 철자는 통과한다. 구조적 보장은 역할 제한이다). 대문자 환경변수 이름 기준이다.
 ACCOUNT_SECRET_WORDS = ("PASSWORD", "PASSWD", "PWD", "COOKIE", "SESSION", "LOGIN", "CREDENTIAL")
 
 _KEY_RE = re.compile(r"^[a-z][a-z0-9_]{1,30}$")
@@ -248,7 +249,8 @@ def _ads_errors(blog, label):
 def _package_errors(raw, blog, label, secrets):
     """초안 패키지 채널(platform tistory·naver)의 규칙. 공식 자동 게시 수단이 없어 글을 이슈로 보여 주기만 하고, 계정 정보는 저장·처리하지 않는다
     (docs/SECURITY_GUARDRAILS.md G-S7). ① mode 는 off·package 만 ② channel.label 은 그 채널의 라벨(티스토리·네이버) ③ secrets 는 llm_api_key 만
-    ④ 시크릿 이름에 PASSWORD·COOKIE·SESSION·LOGIN 같은 계정 정보 낱말이 없어야 한다. ③·④가 '계정 정보를 다루지 않는다'는 원칙의 구조적 보장이다."""
+    ④ 시크릿 이름에 PASSWORD·COOKIE·SESSION·LOGIN 같은 계정 정보 낱말이 없어야 한다. '계정 정보를 다루지 않는다'는 원칙의 구조적 보장은 ③(역할 제한)이고,
+    ④(이름 검사)는 실수를 막는 보조다(포함 검사라 PASS_WORD·TISTORY_PW 같은 우회 철자는 통과한다)."""
     errors = []
     platform, mode = blog.get("platform"), blog.get("mode")
     if mode in MODES and mode not in PACKAGE_MODES:

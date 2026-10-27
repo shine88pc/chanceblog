@@ -13,7 +13,7 @@ from pathlib import Path
 from unittest import mock
 
 import _bootstrap  # noqa: F401
-from package_helpers import (KST_DAY, NOW, REPO, FakeGitHub, FakePackagePublisher, fake_token, make_package_root, package_env)
+from package_helpers import (KST_DAY, NOW, REPO, FakeGitHub, FakePackagePublisher, FakeResponse, fake_token, http_error, make_package_root, package_env)
 from pipeline import health, registry
 from pipeline import run as run_mod
 from pipeline.llm import LLMError
@@ -202,8 +202,9 @@ class FlowTest(PackageRunBase):
         self.assertTrue(any("SANITIZED" in warning for warning in gate["warnings"]))
         self.assertNotIn("<script", pub.created[0].html)
 
-    def test_rerunning_after_a_lost_history_file_does_not_make_a_second_issue(self):
-        """이력 파일이 사라진 날 같은 글이 다시 만들어져도 숨은 표지로 같은 이슈를 찾아 쓴다(진짜 어댑터 + 가짜 GitHub)."""
+    def test_rerunning_the_same_draft_after_a_lost_history_file_does_not_make_a_second_issue(self):
+        """이력 파일이 사라진 날 **같은 글**(결정적 스텁이라 같은 글이 다시 나온다)이 다시 만들어져도 숨은 표지로 같은 이슈를 찾아 쓴다(진짜 어댑터 + 가짜 GitHub).
+        표지의 해시는 제목·본문에서 만들어지므로 이것은 같은 글의 재시도만 증명한다 — 다른 글이면 아래 시험처럼 이슈가 또 생긴다."""
         github = FakeGitHub()
         factory = self.real_adapter_factory(github)
         out1, out2 = [], []
@@ -218,6 +219,22 @@ class FlowTest(PackageRunBase):
         self.assertTrue(any("이미 있어 새로 만들지 않았습니다" in line for line in out2))
         self.assertEqual([e["post_id"] for e in self.history()], ["1"])
         self.assertEqual(self.history()[-1]["status"], "package_issued")
+
+    def test_a_different_draft_after_a_lost_history_file_makes_a_new_issue_because_the_marker_covers_the_text(self):
+        """검증 지적 N2: 이력 파일이 사라진 날의 재실행이 **다른 글**을 만들면 표지(제목·본문 해시)가 달라 이슈가 또 생긴다. 하루 상한은 이력 파일이 지킨다.
+        그래서 문서는 표지 멱등을 '같은 글의 재시도만 막는다'고 적는다."""
+        def other_title(prompt):
+            text, model = stub_llm(prompt)
+            first = text.split("\n", 1)[0]
+            return text.replace(first, "제목: 같은 날 다시 만든 다른 글의 제목입니다"), model
+        github = FakeGitHub()
+        factory = self.real_adapter_factory(github)
+        for llm in (stub_llm, other_title):
+            code, out = self.go(llm=llm, publisher=factory(None, self.env()))
+            self.assertEqual(code, 0, out)
+            (self.root / "tistory_test_history.json").unlink()                        # 이력이 사라졌다
+        self.assertEqual(len(github.issues), 2)
+        self.assertNotEqual(github.issues[0]["body"].split("\n", 1)[0], github.issues[1]["body"].split("\n", 1)[0])
 
 
 class EndToEndTest(PackageRunBase):
@@ -301,6 +318,7 @@ class EndToEndTest(PackageRunBase):
             created = run_mod.default_publisher_factory(blog, {"GITHUB_REPOSITORY": REPO, "GITHUB_TOKEN": "tok-1234567"})
             self.assertIsInstance(created, ip.IssuePackagePublisher)
             self.assertEqual(created.repo, REPO)
+            self.assertEqual(created._token, "tok-1234567")          # 실제 Actions 경로: 기본 공장이 환경의 GITHUB_TOKEN 을 어댑터에 넘긴다(빠지면 첫 실행이 auth_failed)
 
 
 class BacklogTest(PackageRunBase):
@@ -433,7 +451,7 @@ class DryRunTest(PackageRunBase):
             self.assertEqual(self.history(), [])                                       # 연습은 이력을 쓰지 않는다
             real_code, real_out = self.go(publisher=self.real_adapter_factory(github)(None, self.env()))
             self.assertEqual(real_code, 2, real_out)
-            self.assertIn("stage=issue reason=too_long exit=2", real_out)
+            self.assertIn("[SKIP] code=PACKAGE_FAILED blog=tistory_test stage=build reason=too_long exit=2", real_out)      # 연습 실행과 같은 단계로 알린다
         self.assertEqual(self.history()[-1]["status"], "publish_failed")
         self.assertEqual(github.issues, [])                                              # 잘린 글을 올리지 않는다
         self.assertEqual(len(self.drafts()), 1)                                          # 만든 글은 저장소 사본으로 남는다
@@ -559,7 +577,8 @@ class ConfigTest(PackageRunBase):
 
 class FailureTest(PackageRunBase):
     PRECHECK = (("auth_failed", 2), ("network", 1), ("api_error", 1), ("bad_response", 1))
-    ISSUE = (("auth_failed", 2), ("too_long", 2), ("network", 1), ("api_error", 1), ("bad_response", 1))
+    ISSUE = (("auth_failed", 2), ("network", 1), ("api_error", 1), ("bad_response", 1))
+    BUILD = (("too_long", 2), ("invalid_draft", 2))
 
     def test_precheck_failures_stop_before_gemini_with_the_right_exit_code(self):
         for code_name, exit_code in self.PRECHECK:
@@ -586,6 +605,124 @@ class FailureTest(PackageRunBase):
         self.assertIn("stage=precheck reason=unexpected exit=1", out)
         self.assertIn("RuntimeError: 뜻밖", out)
         self.assertEqual(self.history()[-1]["status"], "publish_failed")
+
+    def test_input_problems_are_a_build_stage_failure_without_the_check_the_issue_list_hint(self):
+        """너무 길거나(too_long) 정화한 뒤 비어(invalid_draft) 이슈를 만들 수 없는 글은 GitHub 를 부르기 전의 입력 문제다: stage=build·종료 2, 이슈가 만들어졌을 수
+        있다는 안내는 없고, 이력은 publish_failed(번호 없음)이며 만든 글은 저장소 사본으로 남는다."""
+        for code_name, exit_code in self.BUILD:
+            with self.subTest(code_name):
+                code, out = self.go(publisher=FakePackagePublisher(fail=PublishError("외부 문구 위조", code=code_name)))
+                self.assertEqual(code, exit_code, out)
+                self.assertIn(f"[SKIP] code=PACKAGE_FAILED blog=tistory_test stage=build reason={code_name} exit={exit_code}", out)
+                errors = [line for line in out.splitlines() if line.startswith("::error::")]
+                self.assertEqual(errors, [f"::error::[tistory_test] {run_mod.PACKAGE_FAILURES[code_name][1]}"])
+                self.assertNotIn("만들어졌을 수 있", errors[0])
+                entry = self.history()[-1]
+                self.assertEqual((entry["status"], entry["post_id"], entry["url"]), ("publish_failed", "", ""))
+                self.assertEqual(len(self.drafts()), 1)
+                (self.root / "tistory_test_history.json").unlink()
+                for path in self.drafts():
+                    path.unlink()
+                self.summary_path.unlink(missing_ok=True)
+
+    def test_a_title_that_is_only_a_script_block_is_an_invalid_draft_in_real_and_dry_runs(self):
+        """게이트는 제목이 정화한 뒤 비는 글(`<script>…</script>` 뿐)을 거르지 않는다. 실제 실행과 연습 실행 모두 같은 입력 문제(stage=build, invalid_draft, 종료 2)로
+        끝나야 하고 GitHub 는 한 번도 부르지 않는다. 'GitHub 가 값이 빠진 응답을 돌려줬다'는 틀린 안내(bad_response)가 아니다."""
+        def script_title(prompt):
+            text, model = stub_llm(prompt)
+            first = text.split("\n", 1)[0]
+            return text.replace(first, "제목: <script>alert(1)</script>"), model
+        github = FakeGitHub()
+        real_code, real_out = self.go(llm=script_title, publisher=self.real_adapter_factory(github)(None, self.env()))
+        self.assertEqual(real_code, 2, real_out)
+        self.assertIn("[SKIP] code=PACKAGE_FAILED blog=tistory_test stage=build reason=invalid_draft exit=2", real_out)
+        self.assertNotIn("bad_response", real_out)
+        self.assertNotIn("GitHub 가 필요한 값이 빠진 응답", real_out)
+        self.assertEqual([(r["method"], r["path"]) for r in github.requests], [("GET", "/issues")])      # 적체 점검 읽기뿐 — 라벨·이슈 만들기는 부르지 않았다
+        self.assertEqual(self.history()[-1]["status"], "publish_failed")
+        self.assertEqual(len(self.drafts()), 1)
+        (self.root / "tistory_test_history.json").unlink()
+        dry_code, dry_out = self.go(env={"GITHUB_STEP_SUMMARY": str(self.summary_path)}, llm=script_title, extra=["--dry-run"])
+        self.assertEqual(dry_code, 2, dry_out)
+        self.assertIn("[SKIP] code=PACKAGE_FAILED blog=tistory_test stage=build reason=invalid_draft exit=2", dry_out)
+
+    def test_a_rejected_create_does_not_claim_that_the_issue_may_exist(self):
+        error = PublishError("거절됨", code="api_error")
+        error.maybe_created = False                                              # 어댑터가 4xx 거절에 붙이는 표시
+        code, out = self.go(publisher=FakePackagePublisher(fail=error))
+        self.assertEqual(code, 1, out)
+        errors = [line for line in out.splitlines() if line.startswith("::error::")]
+        self.assertEqual(errors, [f"::error::[tistory_test] {run_mod.PACKAGE_FAILURES['api_error'][1]}"])
+        self.assertNotIn("만들어졌을 수 있", errors[0])
+
+    def test_a_lost_create_response_stops_without_a_second_issue_when_the_list_has_not_caught_up(self):
+        """검증 지적 N1: 응답이 유실되고 방금 만든 이슈가 목록에 아직 안 보이면 예전에는 같은 초안 번호의 이슈가 둘 생겼다. 이제는 다시 만들지 않고 멈춘다."""
+        github = FakeGitHub()
+
+        def lost_response(record):
+            github._route(record)                                                     # 서버는 이슈를 만들었다
+            github.fail_next("GET", r"^/issues$", FakeResponse([]), times=1)         # 방금 만든 이슈가 다음 목록 읽기에는 아직 안 보인다(복제 지연)
+            return OSError("timed out")                                               # 응답만 잃었다
+        github.fail_next("POST", r"^/issues$", lost_response)
+        code, out = self.go(publisher=self.real_adapter_factory(github)(None, self.env()))
+        self.assertEqual(code, 1, out)
+        self.assertEqual(len(github.issues), 1)                                       # 서버가 만든 하나뿐
+        self.assertEqual(len(github.calls("POST", r"^/issues$")), 1)                   # 만들기는 한 번만 보냈다
+        self.assertIn("[SKIP] code=PACKAGE_FAILED blog=tistory_test stage=issue reason=network exit=1", out)
+        errors = [line for line in out.splitlines() if line.startswith("::error::")]
+        self.assertEqual(len(errors), 1)
+        self.assertIn("초안 이슈가 만들어졌을 수 있으니 재실행 전에 라벨 `초안` 이슈 목록을 확인하세요", errors[0])
+        self.assertIn("[참고] 만들기 응답을 받지 못했고 같은 초안 번호의 이슈도 찾지 못해", out)
+        self.assertIn("다시 만들지 않고 멈춥니다", out)
+        entry = self.history()[-1]
+        self.assertEqual((entry["status"], entry["post_id"]), ("publish_failed", ""))
+
+    def test_a_lost_create_response_stops_without_a_second_issue_when_the_check_read_also_fails(self):
+        github = FakeGitHub()
+
+        def lost_response(record):
+            github._route(record)
+            github.fail_next("GET", r"^/issues$", OSError("reset"), times=None)       # 확인용 목록 읽기도 계속 실패한다
+            return OSError("timed out")
+        github.fail_next("POST", r"^/issues$", lost_response)
+        code, out = self.go(publisher=self.real_adapter_factory(github)(None, self.env()))
+        self.assertEqual(code, 1, out)
+        self.assertEqual((len(github.issues), len(github.calls("POST", r"^/issues$"))), (1, 1))
+        self.assertIn("같은 초안 번호의 이슈를 확인하는 읽기도 실패해(network)", out)
+        self.assertIn("만들어졌을 수 있으니", out)
+
+    def test_a_lost_create_response_is_a_success_when_the_check_finds_the_issue(self):
+        github = FakeGitHub()
+
+        def lost_response(record):
+            github._route(record)
+            return OSError("timed out")
+        github.fail_next("POST", r"^/issues$", lost_response)
+        code, out = self.go(publisher=self.real_adapter_factory(github)(None, self.env()))
+        self.assertEqual(code, 0, out)
+        self.assertEqual((len(github.issues), len(github.calls("POST", r"^/issues$"))), (1, 1))
+        self.assertIn("이미 만들어져 있어 그것을 씁니다", out)
+        self.assertEqual((self.history()[-1]["status"], self.history()[-1]["post_id"]), ("package_issued", "1"))
+
+    def test_http_rejections_and_server_errors_are_told_apart_by_the_issue_list_hint(self):
+        """4xx 로 거절되면 만들어지지 않았음이 확실해 안내가 없고 확인 읽기도 하지 않는다. 5xx 는 만들어졌는지 모르므로 안내가 붙고 한 번만 확인한다."""
+        for status, maybe in ((400, False), (401, False), (403, False), (404, False), (410, False), (422, False), (429, False),
+                              (500, True), (502, True), (503, True), (504, True)):
+            with self.subTest(status):
+                github = FakeGitHub()
+                github.fail_next("POST", r"^/issues$", http_error(status, "boom"), times=None)
+                code, out = self.go(publisher=self.real_adapter_factory(github)(None, self.env()))
+                errors = [line for line in out.splitlines() if line.startswith("::error::")]
+                self.assertEqual(len(errors), 1, out)
+                self.assertEqual("만들어졌을 수 있으니" in errors[0], maybe, (status, errors[0]))
+                self.assertEqual(len(github.calls("POST", r"^/issues$")), 1, status)             # 어느 쪽도 다시 만들지 않는다
+                self.assertEqual(len(github.calls("GET", r"^/issues$")), 3 if maybe else 2, status)   # 적체 점검 1 + 만들기 전 표지 찾기 1, 모호할 때만 만든 뒤 한 번 더
+                self.assertEqual(github.issues, [])
+                self.assertEqual(code, 2 if status in (401, 403, 404, 410) else 1, (status, out))
+                (self.root / "tistory_test_history.json").unlink()
+                for path in self.drafts():
+                    path.unlink()
+                self.summary_path.unlink(missing_ok=True)
 
     def test_a_publisher_that_returns_no_issue_number_or_address_is_not_recorded_as_a_success(self):
         """어댑터는 자기 응답을 스스로 검사하지만, 러너도 번호나 주소가 빈 결과를 성공(package_issued)으로 적지 않는다 — 어떤 게시자가 와도 같다."""
@@ -625,7 +762,7 @@ class FailureTest(PackageRunBase):
                 self.assertEqual(len(errors), 1)
                 self.assertTrue(errors[0].startswith(f"::error::[tistory_test] {run_mod.PACKAGE_FAILURES[code_name][1]}"))
                 hint = "재실행 전에 라벨 `초안` 이슈 목록을 확인하세요" in errors[0]
-                self.assertEqual(hint, code_name not in ("auth_failed", "too_long"), code_name)          # 이슈가 만들어졌을 수 있는 실패에만 확인 안내
+                self.assertEqual(hint, code_name != "auth_failed", code_name)          # 이슈가 만들어졌을 수 있는 실패에만 확인 안내(권한 오류는 만들기 전에 막힌 것)
                 self.assertEqual(self.summary().count("### tistory_test"), 1)                              # 요약은 한 블록이다
                 self.assertIn("사유:", self.summary())
                 (self.root / "tistory_test_history.json").unlink()
