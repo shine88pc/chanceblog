@@ -128,5 +128,5 @@ T3 전부, 그리고 다음: 새 계정·유료 서비스·결제, 모델·호�
 | 프로필(Profile) | 한 블로그의 콘텐츠 정책·검증 기준(`pipeline/profiles/*.json`) |
 | 게이트(Gate) | 게시 전 검증(파싱·HTML 정화·정책·중복). 하나라도 실패하면 게시하지 않는다 |
 | 어댑터(Publisher) | 플랫폼별 게시 구현(`pipeline/publishers/`) |
-| 모드(mode) | `off`(중지) · `draft`(Blogger 초안함에 업로드해 운영자가 직접 게시 — 게시용 시크릿이 없으면 저장소 파일에만 저장) · `auto`(자동 게시) |
+| 모드(mode) | `off`(중지) · `draft`(Blogger 초안함에 업로드해 운영자가 직접 게시 — 게시용 시크릿이 없으면 저장소 파일에만 저장) · `package`(티스토리·네이버 전용: 글을 GitHub 이슈 1개로 보여 주고 운영자가 직접 발행) · `auto`(자동 게시) |
 | 킬 스위치 | `PIPELINE_PAUSE=true`(저장소 Variables) 또는 레지스트리 `mode: off` |

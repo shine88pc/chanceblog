@@ -8,6 +8,9 @@
 적는다. 둘 다 이 파일이 검증한다(규칙: docs/ARCHITECTURE.md §3). 이 모듈은 표준 라이브러리만 쓴다 — blogger.yml 의 plan 잡이
 pip install 없이 `python -m pipeline.plan` 으로 이 검증을 실행하기 때문이다(워크플로 name 은 YAML 을 해석하지 않고 줄을 본다).
 
+초안 패키지 채널(platform tistory·naver, mode package): 공식 자동 게시 수단이 없어 글을 GitHub 이슈로 보여 주기만 한다. 이 채널은
+시크릿이 LLM 키뿐이고 계정 정보 모양의 시크릿 이름은 검증이 막는다(PACKAGE_PLATFORMS·_package_errors, docs/SECURITY_GUARDRAILS.md G-S7).
+
 CLI: python -m pipeline.registry   (검증 후 요약 출력, 오류가 있으면 종료 코드 1)
 """
 import copy
@@ -23,7 +26,9 @@ ROOT = Path(__file__).resolve().parent.parent
 REGISTRY_PATH = Path(__file__).resolve().parent / "blogs.json"
 PROFILE_DIR = Path(__file__).resolve().parent / "profiles"
 
-MODES = ("off", "draft", "auto")
+# 모드. off 정지 · draft 초안(Blogger: 초안함 업로드, 시크릿이 없으면 저장소 파일만) · package 초안 패키지(티스토리·네이버: 글을 만들어
+# GitHub 이슈 1개로 보여 주기만 한다 — 공개 없음, 운영자가 복사해 직접 발행) · auto 자동 게시. 앞의 셋(off·draft·package)은 공개되지 않는 쪽이다.
+MODES = ("off", "draft", "package", "auto")
 
 # 광고 선언(D6, 2026-10-27 운영자 승인). 레지스트리가 아는 것은 '의도'뿐이다 — 광고는 각 플랫폼 화면에서 운영자가 켠다.
 #   off          광고가 없다. 새 채널의 시작값이다(defaults.ads).
@@ -46,7 +51,19 @@ PLATFORMS = {
         "required_secrets": ["llm_api_key", "blog_id", "client_id", "client_secret", "refresh_token"],
         "optional_secrets": [],
     },
+    # 초안 패키지 채널(아래 PACKAGE_PLATFORMS): 시크릿은 LLM 키뿐이다. 다른 역할과 계정 정보 모양의 이름은 검증이 막는다.
+    "tistory": {"required_secrets": ["llm_api_key"], "optional_secrets": []},
+    "naver": {"required_secrets": ["llm_api_key"], "optional_secrets": []},
 }
+
+# 초안 패키지 채널: 공식 자동 게시 수단이 없어(티스토리 오픈 API는 2024-02 종료, 네이버 글쓰기 API는 2020 종료) 글을 만들어 GitHub 이슈
+# 1개(= 초안 1건)로 보여 주기만 하고, 운영자가 복사해 직접 발행한다(pipeline/publishers/issue_package.py). 로그인·세션·쿠키 자동화는 만들지 않고
+# 계정 정보는 저장·처리하지 않는다 — 그 원칙을 구조로 보장하려고 이 채널의 시크릿은 LLM 키뿐이다(_package_errors).
+# platform → 그 채널의 라벨(channel.label). 초안 이슈의 라벨(`채널:<라벨>`)과 현황판이 이 라벨을 쓰므로 짝이 어긋나면 안 된다.
+PACKAGE_PLATFORMS = {"tistory": "티스토리", "naver": "네이버"}
+PACKAGE_MODES = ("off", "package")       # 이 채널에서 쓸 수 있는 mode(draft·auto 는 올릴 곳이 없다)
+# 시크릿 이름에 이 낱말이 들면 막는다(계정 정보를 다루지 않는다는 원칙). 대문자 환경변수 이름 기준이다.
+ACCOUNT_SECRET_WORDS = ("PASSWORD", "PASSWD", "PWD", "COOKIE", "SESSION", "LOGIN", "CREDENTIAL")
 
 _KEY_RE = re.compile(r"^[a-z][a-z0-9_]{1,30}$")
 _ENV_RE = re.compile(r"^[A-Z][A-Z0-9_]{2,63}$")
@@ -223,6 +240,36 @@ def _ads_errors(blog, label):
     return errors
 
 
+def _package_errors(raw, blog, label, secrets):
+    """초안 패키지 채널(platform tistory·naver)의 규칙. 공식 자동 게시 수단이 없어 글을 이슈로 보여 주기만 하고, 계정 정보는 저장·처리하지 않는다
+    (docs/SECURITY_GUARDRAILS.md G-S7). ① mode 는 off·package 만 ② channel.label 은 그 채널의 라벨(티스토리·네이버) ③ secrets 는 llm_api_key 만
+    ④ 시크릿 이름에 PASSWORD·COOKIE·SESSION·LOGIN 같은 계정 정보 낱말이 없어야 한다. ③·④가 '계정 정보를 다루지 않는다'는 원칙의 구조적 보장이다."""
+    errors = []
+    platform, mode = blog.get("platform"), blog.get("mode")
+    if mode in MODES and mode not in PACKAGE_MODES:
+        errors.append(f"{label}: platform {platform} 블로그의 mode는 {' · '.join(PACKAGE_MODES)} 중 하나여야 합니다(지금 {mode!r}) — "
+                      "공식 자동 게시 수단이 없어 글을 이슈로 보여 주는 package 외에는 올릴 곳이 없습니다.")
+    channel = raw.get("channel")
+    wanted = PACKAGE_PLATFORMS[platform]
+    if isinstance(channel, dict) and channel.get("label") in CHANNEL_LABELS and channel["label"] != wanted:
+        # 초안 이슈 라벨(`채널:<라벨>`)과 현황판이 channel.label 을 쓴다. 짝이 어긋나면 초안이 엉뚱한 채널로 갈린다
+        errors.append(f"{label}: platform {platform} 블로그의 channel.label은 {wanted!r} 이어야 합니다(지금 {channel['label']!r}) — "
+                      "초안 이슈의 라벨 `채널:<라벨>`이 이 값으로 만들어집니다.")
+    spec = PLATFORMS[platform]
+    allowed = list(spec["required_secrets"]) + list(spec.get("optional_secrets", []))
+    for role, env_name in secrets.items():
+        if role not in allowed:
+            errors.append(f"{label}: platform {platform} 의 secrets 에는 {' · '.join(allowed)} 만 둘 수 있습니다(허용되지 않는 역할: {role}) — "
+                          "이 채널은 계정 정보(블로그 ID·클라이언트·refresh token·로그인·세션)를 저장하거나 처리하지 않습니다. "
+                          "글은 GitHub 이슈로 보여 주고 운영자가 직접 발행합니다.")
+        shown = env_name.upper() if isinstance(env_name, str) else ""
+        found = next((word for word in ACCOUNT_SECRET_WORDS if word in shown), None)
+        if found:
+            errors.append(f"{label}: secrets.{role}의 이름 {env_name}에 계정 정보를 뜻하는 낱말({found})이 있습니다 — "
+                          "이 채널은 비밀번호·쿠키·세션·로그인 정보를 저장하거나 처리하지 않습니다.")
+    return errors
+
+
 def validate_profile(profile):
     """프로필 오류 목록. 정규식은 실제로 컴파일해 본다."""
     errors = []
@@ -351,6 +398,9 @@ def validate_registry(reg, root=None):
             errors.append(f"{label}: languages는 문자열 배열이어야 합니다.")
         if blog.get("mode") not in MODES:
             errors.append(f"{label}: mode는 {MODES} 중 하나여야 합니다.")
+        elif blog.get("mode") == "package" and platform not in PACKAGE_PLATFORMS:
+            errors.append(f"{label}: mode package 는 platform {' · '.join(PACKAGE_PLATFORMS)} 에서만 쓸 수 있습니다(지금 platform: {platform!r}) — "
+                          "package 는 공식 자동 게시 수단이 없는 채널의 초안을 GitHub 이슈로 보여 주는 모드입니다.")
         if "mode" not in raw:
             # defaults.mode 를 물려받는 블로그는 defaults 가 auto 일 때 시크릿만 등록하면 곧바로 자동 게시된다. 모드는 항목마다 직접 적게 한다
             errors.append(f"{label}: mode를 이 항목에 직접 적어야 합니다(defaults.mode 를 물려받으면 새 블로그가 의도하지 않은 모드로 "
@@ -365,8 +415,8 @@ def validate_registry(reg, root=None):
         errors.extend(_channel_errors(raw.get("channel"), blog, label, root, seen_channel_labels, seen_channel_keys))
 
         profile_name = blog.get("profile")
-        if platform == "blogger" and not profile_name:
-            errors.append(f"{label}: platform blogger 는 profile 이 필요합니다.")
+        if (platform == "blogger" or platform in PACKAGE_PLATFORMS) and not profile_name:
+            errors.append(f"{label}: platform {platform} 는 profile 이 필요합니다.")
         if profile_name:
             profile_path = root / "pipeline" / "profiles" / f"{profile_name}.json"
             if not profile_path.exists():
@@ -417,6 +467,8 @@ def validate_registry(reg, root=None):
                 errors.append(
                     f"{label}: 시크릿 이름 {env_name}을(를) 블로그 '{owner}'도 쓰고 있습니다. "
                     "블로그마다 고유 이름을 쓰거나 shared_secrets에 명시하세요.")
+        if platform in PACKAGE_PLATFORMS:
+            errors.extend(_package_errors(raw, blog, label, secrets))
 
         if not isinstance(blog.get("ad_surface"), bool):
             errors.append(f"{label}: ad_surface는 true/false여야 합니다.")

@@ -1,4 +1,4 @@
-"""블로그 한 곳을 한 번 실행한다: 주제 선정 → 생성 → 게이트 → (게시 | Blogger 초안함 업로드 | 저장소 초안) → 이력 기록.
+"""블로그 한 곳을 한 번 실행한다: 주제 선정 → 생성 → 게이트 → (게시 | Blogger 초안함 업로드 | 초안 이슈 | 저장소 초안) → 이력 기록.
 
 사용: python -m pipeline.run --blog blogger_macat [--dry-run] [--publish auto|draft|publish|on|off] [--topic "..."]
       python -m pipeline.run --blog blogger_macat --auth-check     # 글을 만들지 않고 인증만 점검(쓰기 없음)
@@ -7,13 +7,17 @@
   mode auto  → 즉시 게시(posted)             mode draft → Blogger 초안함에 업로드(draft_uploaded)
   게시용 시크릿 4종이 하나도 없는 mode draft 는 저장소 파일에만 저장한다(draft). 일부만 있으면 설정 오류다.
   업로드·게시 전에는 인증 점검(pipeline/auth_check.py: 토큰 갱신·blogs.get·블로그 주소 일치)을 먼저 한다.
+  mode package(platform tistory·naver) → 글을 GitHub 이슈 1개(초안 패키지)로 만들어 보여 주기만 한다(package_issued, 공개 없음).
+  운영자가 이슈의 복사 상자로 직접 발행한다(pipeline/publishers/issue_package.py). Blogger 인증·시크릿 점검은 하지 않고(Gemini 키와
+  GITHUB_TOKEN 뿐), BLOGGER_PUBLISH 는 쓰지 않는다. 같은 채널에 열린 초안 이슈가 3건 이상이면 새로 만들지 않는다(PACKAGE_BACKLOG).
+  연습 실행은 이슈 본문을 만들어 실행 요약에만 보이고 GitHub API 를 부르지 않는다.
 
 종료 코드
   0 정상 종료(일일 상한·정지·게이트 탈락·주제 없음 등 '건너뜀' 포함). 건너뛴 사유는
     '[SKIP] code=...' 한 줄과 실행 요약에 남는다(docs/ARCHITECTURE.md 4-1)
   1 인프라 실패(LLM 호출·주제 확장·게시 API·이력 파일·인증 만료·네트워크). Actions 실행이 실패로 표시되어 알림이 간다
   2 설정 오류(레지스트리·프롬프트·LLM 키·게시용 시크릿 누락·블로그 주소 불일치·권한 없음·BLOGGER_PUBLISH 값 오류·
-    수동 주제가 금지 주제 낱말에 걸림)
+    수동 주제가 금지 주제 낱말에 걸림. 초안 패키지: GITHUB_TOKEN·GITHUB_REPOSITORY 없음·이슈 권한 없음·본문이 이슈 한도를 넘음)
 
 환경변수
   DRY_RUN=1          파일·게시 없이 전체 흐름만 확인(스텁 LLM). Blogger 에도 접속하지 않는다
@@ -25,6 +29,7 @@
   BLOGGER_TOPIC      주제 지정(수동 실행용). 프로필의 금지 주제 낱말에 걸리면 Gemini 를 부르기 전에 종료 2(TOPIC_BLOCKED)
   BLOGGER_AUTH_CHECK 1 이면 --auth-check 와 같다(워크플로의 '인증 점검만 실행' 입력). 정지(mode off) 중에도, 연습 실행이 켜져 있어도
                      실제로 점검한다(쓰기가 없다). 종료 코드: 0 통과 / 1 인증 만료·네트워크·API 오류 / 2 시크릿 없음·권한·주소 불일치
+  GITHUB_TOKEN·GITHUB_REPOSITORY  (초안 패키지 전용) 초안 이슈를 읽고 만드는 데 쓴다. 워크플로가 넘기고, 오류 문구에서 가린다
 """
 import argparse
 import json
@@ -39,8 +44,9 @@ from pipeline import gates
 from pipeline.auth_check import auth_check, exit_code_for, label_for, safe_code, sentence_for
 from pipeline.console import md_cell, one_line, safe_output
 from pipeline.llm import LLMError, call_log_of, make_gemini_llm, purpose
+from pipeline.publishers import issue_package
 from pipeline.publishers.base import PublishError, redact
-from pipeline.registry import (PLATFORMS, ROOT, RegistryError, get_blog, load_profile, load_registry,
+from pipeline.registry import (PACKAGE_PLATFORMS, PLATFORMS, ROOT, RegistryError, get_blog, load_profile, load_registry,
                                merged_blog, missing_secret_roles, resolve_secrets, validate_registry)
 from pipeline.state import KST, StateError, entry_titles, other_blog_titles, read_json_list, write_json_atomic
 from pipeline.stubs import stub_llm
@@ -53,7 +59,8 @@ TITLE_SHOWN = 120      # 로그·요약에 보여 줄 글 제목의 최대 길�
 REASONS_SHOWN = 600    # 로그·요약에 보여 줄 게이트 탈락 사유 전체의 최대 길이
 # 하루 상한에 세는 상태. draft_uploaded(Blogger 초안함에 올림)도 한 건이다. rejected·llm_failed 등 글이 안 나온 실행은 세지 않는다.
 # publish_failed 는 글 ID(post_id)가 남은 것만 센다(_counts_toward_cap): 올리다 실패했어도 글이 이미 만들어졌을 수 있다
-COUNTED_STATUSES = {"posted", "draft", "draft_uploaded", "generated_unpublished"}
+# package_issued(초안 패키지 이슈를 만듦, 티스토리·네이버)도 한 건이다: 이슈를 닫기 전까지 운영자의 손을 기다리는 초안이다.
+COUNTED_STATUSES = {"posted", "draft", "draft_uploaded", "generated_unpublished", "package_issued"}
 _TRUE = {"1", "true", "yes", "on"}
 # BLOGGER_PUBLISH·--publish 값 → 정책. on=즉시 게시, draft=Blogger 초안함 업로드, off=저장소 파일에만 저장, auto=레지스트리 mode 를 따름
 _POLICY_VALUES = {"": "auto", "auto": "auto", "draft": "draft",
@@ -87,15 +94,15 @@ def publish_policy(cli_value, environ):
 
 
 def decide_delivery(policy, mode):
-    """정책과 레지스트리 mode 로 정해지는 전달 방식: 'publish'(즉시 게시) · 'draft'(Blogger 초안함에 업로드) · 'file'(저장소 파일에만).
-    mode off 는 이 함수에 오기 전에 멈춘다(오면 'file')."""
+    """정책과 레지스트리 mode 로 정해지는 전달 방식: 'publish'(즉시 게시) · 'draft'(Blogger 초안함에 업로드) · 'package'(초안 이슈, 티스토리·네이버) ·
+    'file'(저장소 파일에만). mode off 는 이 함수에 오기 전에 멈춘다(오면 'file'). 초안 패키지 채널은 정책이 auto 일 때만 이 함수에 온다(run() 이 막는다)."""
     if policy == "on":
         return "publish"
     if policy == "draft":
         return "draft"
     if policy == "off":
         return "file"
-    return {"auto": "publish", "draft": "draft"}.get(mode, "file")
+    return {"auto": "publish", "draft": "draft", "package": "package"}.get(mode, "file")
 
 
 def load_prompt_template(root, blog):
@@ -256,7 +263,196 @@ def default_publisher_factory(blog, environ):
         from pipeline.publishers.blogger import BloggerPublisher
         return BloggerPublisher(secrets["blog_id"], secrets["client_id"],
                                 secrets["client_secret"], secrets["refresh_token"])
+    if blog["platform"] in PACKAGE_PLATFORMS:   # 초안 패키지: GitHub 이슈. 계정 정보 없이 워크플로가 넘기는 토큰으로만 쓴다
+        return issue_package.IssuePackagePublisher(environ.get("GITHUB_REPOSITORY"), environ.get("GITHUB_TOKEN"))
     raise RegistryError(f"이 러너가 지원하지 않는 platform: {blog['platform']}")
+
+
+# ----------------------------------------------------------------------------
+# 초안 패키지(mode package, platform tistory·naver) 경로. Blogger 경로는 건드리지 않고, run() 이 delivery == "package" 일 때만 여기로 온다.
+# 글을 GitHub 이슈 1개로 만들어 보여 주기만 하고(공개 없음), 운영자가 복사해 직접 발행한다. 설명: docs/ARCHITECTURE.md §4-1·§7-B
+# ----------------------------------------------------------------------------
+# 실패 분류(PublishError.code) → 이름·::error:: 고정 문장. 문장에는 외부·AI 유래 문자열을 넣지 않는다. 종료 코드는 설정(2)과 인프라(1)로 가른다:
+# 권한이 없거나(auth_failed) 글이 이슈 한도를 넘는(too_long) 것은 사람이 설정을 고쳐야 풀리고, 나머지는 시간이 지나거나 다시 실행하면 풀릴 수 있다.
+PACKAGE_FAILURES = {
+    "auth_failed": ("권한·접근 불가", "GitHub 이슈를 읽거나 쓸 권한이 없습니다. 워크플로 permissions 에 issues: write 가 있는지, 저장소 Settings > Actions > General 의 "
+                                      "Workflow permissions 와 Issues 기능이 막혀 있지 않은지 확인하세요."),
+    "too_long": ("본문이 너무 김", "초안이 이슈 본문 한도(약 6만 자)에 들어가지 않아 만들지 않았습니다. 프로필의 length.max_chars 를 줄이세요."),
+    "network": ("네트워크 오류", "GitHub 서버에 연결하지 못했습니다(연결 실패·시간 초과). 잠시 뒤 다시 실행하세요."),
+    "bad_response": ("응답 이상", "GitHub 가 필요한 값이 빠진 응답을 돌려줬습니다. 이 단계의 로그를 확인하고 이슈 목록에서 초안이 만들어졌는지 보세요."),
+    "api_error": ("API 오류", "GitHub API 가 오류를 돌려줬습니다(호출 한도·서버 오류 포함). 이 단계의 로그를 확인하고 잠시 뒤 다시 실행하세요."),
+    "unexpected": ("예기치 않은 오류", "초안 이슈를 만드는 중 예기치 않은 오류가 났습니다. 이 단계의 로그를 확인하세요."),
+}
+PACKAGE_CONFIG_CODES = frozenset({"auth_failed", "too_long"})
+PACKAGE_STAGES = {"precheck": "만들기 전 점검", "build": "본문 만들기", "issue": "만들기"}
+
+
+def _package_code(code):
+    return code if code in PACKAGE_FAILURES else "api_error"
+
+
+def _package_exit(code):
+    return EXIT_CONFIG if code in PACKAGE_CONFIG_CODES else EXIT_INFRA
+
+
+def _summary_head(blog):
+    return f"### {blog['key']}"
+
+
+def _run_url(environ):
+    """만든 Actions 실행의 주소(GITHUB_REPOSITORY·GITHUB_RUN_ID 가 모양에 맞을 때만). 어댑터가 한 번 더 모양을 확인한다."""
+    repo, run_id = str(environ.get("GITHUB_REPOSITORY") or "").strip(), str(environ.get("GITHUB_RUN_ID") or "").strip()
+    return f"https://github.com/{repo}/actions/runs/{run_id}" if re.fullmatch(r"[\w.\-]+/[\w.\-]+", repo) and run_id.isdigit() else ""
+
+
+def _package_failed(out, environ, blog, stage, code, detail, ai_lines, summarize=True):
+    """초안 패키지 실패를 한곳에서 알린다: [SKIP] 줄·원인 한 줄·고정 문장 ::error::·실행 요약. 종료 코드를 돌려준다. detail 은 이미 비밀을 가린 원인 문구다.
+    이슈를 만들다 실패한 경우(stage issue)는 이슈가 만들어졌을 수 있으니 재실행 전에 이슈 목록을 먼저 보게 한다(같은 날 정기 실행이 또 만들지 않도록).
+    summarize 가 거짓이면 실행 요약은 부른 쪽이 마지막에 한 번만 쓴다(이슈 단계: 이력·사본 결과와 함께)."""
+    code = _package_code(code)
+    exit_code = _package_exit(code)
+    name, sentence = PACKAGE_FAILURES[code]
+    look_first = (" 초안 이슈가 만들어졌을 수 있으니 재실행 전에 라벨 `초안` 이슈 목록을 확인하세요."
+                  if stage == "issue" and code not in PACKAGE_CONFIG_CODES else "")
+    out(skip_line("PACKAGE_FAILED", blog=blog["key"], stage=stage, reason=code, exit=exit_code))
+    out(f"[{'설정' if exit_code == EXIT_CONFIG else '인프라'} 오류] 초안 이슈 {PACKAGE_STAGES[stage]} 실패({code}): {one_line(detail)}")
+    out(f"::error::[{blog['key']}] {sentence}{look_first}")
+    if summarize:
+        _summarize(environ, blog, "PACKAGE_FAILED", f"{name}({code}, {PACKAGE_STAGES[stage]}) — {sentence}{look_first}", ai_lines())
+    return exit_code
+
+
+def _package_precheck(out, environ, blog, publisher_factory, record, secret_values, ai_lines):
+    """이슈를 만들기 전(Gemini 를 부르기 전)의 점검. 쓰기 없음. (게시자, 종료 코드)를 돌려주고, 종료 코드가 None 이면 계속한다.
+    ① GITHUB_TOKEN·GITHUB_REPOSITORY 가 있는지(없으면 설정 오류) ② 같은 채널에 열린 초안 이슈 수를 읽어 OPEN_DRAFT_LIMIT 이상이면 건너뛴다(적체 방지).
+    읽기에 실패하면 이슈를 만들 수 있는지 알 수 없으므로 멈춘다(fail closed)."""
+    token = str(environ.get("GITHUB_TOKEN") or "").strip()
+    repo = str(environ.get("GITHUB_REPOSITORY") or "").strip()
+    missing = [name for name, value in (("GITHUB_TOKEN", token), ("GITHUB_REPOSITORY", repo)) if not value]
+    if missing:
+        names = ", ".join(missing)
+        message = (f"초안 이슈를 만들 정보가 없습니다: {names}. 워크플로의 이 단계에 GITHUB_TOKEN 환경변수(secrets.GITHUB_TOKEN)를 넘기고 "
+                   "permissions 에 issues: write 를 두어야 합니다(로컬 실행은 --dry-run 으로 본문만 봅니다).")
+        out(skip_line("SECRETS_MISSING", blog=blog["key"], missing=names.replace(" ", "")))
+        out(f"[설정 오류] {message}")
+        out(f"::error::[{blog['key']}] {message}")
+        _summarize(environ, blog, "SECRETS_MISSING", message)
+        return None, EXIT_CONFIG
+    channel = blog["channel"]["label"]
+    try:
+        publisher = (publisher_factory or default_publisher_factory)(blog, environ)
+        open_drafts = publisher.count_open_drafts(channel)
+    except PublishError as exc:
+        detail = redact(exc, secret_values)
+        record({"status": "publish_failed", "topic": "", "reasons": [f"[{_package_code(exc.code)}] {one_line(detail, 300)}"]})
+        return None, _package_failed(out, environ, blog, "precheck", exc.code, detail, ai_lines)
+    except Exception as exc:  # noqa: BLE001 - 어댑터 밖의 예외도 기록하고 멈춘다
+        detail = f"{type(exc).__name__}: {redact(exc, secret_values)}"
+        record({"status": "publish_failed", "topic": "", "reasons": [f"[unexpected] {one_line(detail, 300)}"]})
+        return None, _package_failed(out, environ, blog, "precheck", "unexpected", detail, ai_lines)
+    limit = issue_package.OPEN_DRAFT_LIMIT
+    if open_drafts >= limit:
+        out(skip_line("PACKAGE_BACKLOG", blog=blog["key"], open=open_drafts, limit=limit))
+        out(f"::notice::[{blog['key']}] 같은 채널에 열린 초안 이슈가 {open_drafts}건(상한 {limit}건)이라 새 초안을 만들지 않고 건너뜁니다. "
+            "쌓인 초안을 발행해 이슈를 닫거나 라벨 `폐기`를 붙여 닫으면 다음 실행부터 다시 만들어집니다.")
+        _summarize(environ, blog, "PACKAGE_BACKLOG",
+                   f"같은 채널(라벨 `{issue_package.CHANNEL_LABEL_PREFIX}{channel}`)에 열린 `초안` 이슈가 {open_drafts}건(상한 {limit}건)이라 새로 만들지 않았습니다. "
+                   "발행했거나 쓰지 않을 초안은 이슈를 닫아 주세요.", ai_lines())
+        return publisher, EXIT_OK
+    out(f"[{blog['key']}] 초안 이슈 점검 통과: 열린 초안 {open_drafts}건(상한 {limit}건 미만).")
+    return publisher, None
+
+
+def _package_gate_info(profile, post, accepted, result, stats, attempts, model):
+    """이슈 본문의 '게이트 점검 결과'에 쓸 요약. 숫자와 정화 통계, 게이트 참고 사항만 담는다(탈락 사유는 통과했으므로 없다)."""
+    length, title = profile.get("length") or {}, profile.get("title") or {}
+    return {"attempts": attempts, "model": model, "chars": gates.text_length(gates.plain_text(accepted["content"])),
+            "min_chars": length.get("min_chars"), "max_chars": length.get("max_chars"),
+            "title_chars": len(post["title"]), "title_min": title.get("min_chars"), "title_max": title.get("max_chars"),
+            "warnings": list(result.warnings), "removed": {key: value for key, value in stats.items() if value}}
+
+
+def _package_draft(environ, blog, today, post, profile, gate_info):
+    return issue_package.PackageDraft(
+        blog_key=blog["key"], platform=blog["platform"], channel_label=blog["channel"]["label"], date=today.isoformat(),
+        title=post["title"], html=post["content_html"], tags=post["labels"], gate=gate_info,
+        allow_links=bool(profile.get("allow_links")), run_url=_run_url(environ))
+
+
+def _package_dry_run(out, environ, blog, draft, post, accepted, ai_lines):
+    """연습 실행: 이슈 제목·라벨·본문을 만들어 실행 요약에만 보이고 GitHub 를 부르지 않는다(호출 0회). 본문이 이슈 한도에 안 들어가면
+    실제 실행도 실패할 것이므로 연습도 같은 설정 오류로 끝낸다."""
+    try:
+        spec = issue_package.build_issue(draft)
+    except PublishError as exc:
+        return _package_failed(out, environ, blog, "build", exc.code, str(exc), ai_lines)
+    out("[DRY_RUN] 게이트 통과 — 이슈·저장 없이 종료합니다(GitHub API 호출 0회).")
+    out(f"  제목: {one_line(post['title'], TITLE_SHOWN)} / 라벨: {post['labels']} / 본문 {gates.text_length(gates.plain_text(accepted['content']))}자")
+    out(f"  이슈 제목: {one_line(spec.title, 120)} / 이슈 라벨: {', '.join(spec.labels)} / 이슈 본문 {len(spec.body)}자(미리보기는 실행 요약에 있습니다)")
+    _write_summary(environ, "\n".join([
+        _summary_head(blog), f"- 결과: **DRY_RUN** — 게이트 통과, 이슈·저장 없이 종료(제목: {md_cell(post['title'], TITLE_SHOWN)})",
+        "- GitHub API 호출: 0회(연습 실행은 이슈를 만들지 않고 적체도 점검하지 않습니다)",
+        f"- 이슈 제목: `{md_cell(spec.title, 120)}`", f"- 이슈 라벨: {', '.join(f'`{label}`' for label in spec.labels)}",
+        *[f"- {line}" for line in ai_lines()], "",
+        "아래는 실제 실행에서 만들어질 이슈 본문의 미리보기입니다(맨 위 숨은 표지 `draft-id` 는 화면에 보이지 않습니다).", "", "---", "", spec.body, "---"]))
+    return EXIT_OK
+
+
+def _package_deliver(out, environ, blog, root, local_now, draft, post, topic, source, model, attempts, publisher, secret_values, record, ai_lines):
+    """초안 이슈를 만들고(멱등) 이력·저장소 사본·실행 요약을 남긴다. 종료 코드를 돌려준다. Blogger 경로의 꼬리와 같은 순서다: 이력을 먼저 쓰고 사본은 나중에 쓴다."""
+    status, url, post_id, exit_code, extra, fail_text = "package_issued", "", "", EXIT_OK, [], ""
+    try:
+        result = publisher.publish_package(draft)
+        post_id, url = (str(getattr(result, "post_id", "") or "").strip(), str(getattr(result, "url", "") or "").strip())
+        if not post_id or not url:
+            raise PublishError("이슈 번호나 주소가 없습니다(GitHub 이슈 목록에서 초안이 만들어졌는지 확인하세요)", code="bad_response")
+        post_id, url = redact(post_id, secret_values), redact(url, secret_values)
+        out(f"  초안 이슈를 만들었습니다(공개되지 않음): {one_line(url)}")
+    except PublishError as exc:
+        code, detail = _package_code(exc.code), redact(exc, secret_values)
+        status, post_id, url = "publish_failed", "", ""
+        extra, fail_text = [f"[{code}] {detail[:300]}"], f"{code}: {detail}"
+        exit_code = _package_failed(out, environ, blog, "issue", code, detail, ai_lines, summarize=False)
+    except Exception as exc:  # noqa: BLE001 - 어댑터가 분류하지 못한 예외도 기록하고 초안 사본을 남긴다
+        detail = f"{type(exc).__name__}: {redact(exc, secret_values)}"
+        status, post_id, url = "publish_failed", "", ""
+        extra, fail_text = [f"[unexpected] {detail[:300]}"], f"unexpected: {detail}"
+        exit_code = _package_failed(out, environ, blog, "issue", "unexpected", detail, ai_lines, summarize=False)
+    for note in getattr(publisher, "notes", None) or ():       # 어댑터가 모은 참고 사항(같은 표지의 이슈를 다시 쓴 일 등)
+        out(f"[참고] {one_line(redact(str(note), secret_values))}")
+
+    meta = {"topic": topic, "status": status, "generated_at": local_now.isoformat(), "url": url}
+    history_ok, draft_path = True, None
+    try:
+        record({"status": status, "topic": topic, "topic_source": source, "title": post["title"], "labels": post["labels"], "url": url,
+                "post_id": post_id, "model": model, "attempts": attempts, "reasons": extra})
+    except OSError:
+        history_ok, exit_code = False, EXIT_INFRA
+        out(skip_line("HISTORY_WRITE_FAILED", blog=blog["key"], status=status))
+        out(f"[인프라 오류] 이력 파일을 쓰지 못했습니다. 이번 결과: 상태 {status} · 이슈 번호 {one_line(post_id) or '(없음)'} · 주소 {one_line(url) or '(없음)'}")
+        out(f"::error::[{blog['key']}] 이력 파일을 쓰지 못했습니다. 이미 초안 이슈가 만들어졌을 수 있으니 같은 날 다시 실행하기 전에 "
+            "라벨 `초안` 이슈 목록을 확인하세요(이번 결과의 이슈 번호·주소는 이 단계의 로그에 있습니다).")
+    try:
+        draft_path = save_draft(root, blog, local_now, post, meta)
+        out(f"  초안 저장: {draft_path.relative_to(root).as_posix()} / 상태: {status}")
+    except OSError:
+        out(f"::warning::[{blog['key']}] 저장소 초안 파일(감사용 사본)을 저장하지 못했습니다. 이 단계의 로그를 확인하세요.")
+        out(f"[인프라 오류] 초안 파일 저장 실패(상태: {status})")
+    service = issue_package.PACKAGE_INFO[blog["platform"]]["service"]
+    lines = [_summary_head(blog), f"- 결과: **{status}** — {md_cell(post['title'], TITLE_SHOWN)}", f"- 초안 이슈: {md_cell(url, 300) or '(없음)'}"]
+    if status == "package_issued":
+        lines.append(f"- 안내: 공개된 글이 아닙니다. 이슈의 복사 상자로 {service}에 직접 발행하고 이슈를 닫으세요(읽는 법: docs/ACTIONS_GUIDE.md 3-17).")
+    if status == "publish_failed":
+        lines.append(f"- 사유: {md_cell(fail_text, REASONS_SHOWN)}")
+        lines.append("- 안내: 이슈를 만들지 못했습니다. 만든 글은 저장소 초안 파일에 남았습니다." if draft_path is not None else "- 안내: 이슈를 만들지 못했습니다.")
+    lines += [f"- 참고: {md_cell(redact(str(note), secret_values), 200)}" for note in getattr(publisher, "notes", None) or ()]
+    if not history_ok:
+        lines.append("- 이력 기록 실패: 이력 파일을 쓰지 못했습니다. 이미 초안 이슈가 만들어졌을 수 있으니 같은 날 다시 실행하기 전에 라벨 `초안` 이슈 목록을 확인하세요.")
+    if draft_path is None:
+        lines.append("- 초안 파일 저장 실패: 저장소 초안 파일(감사용 사본)을 저장하지 못했습니다.")
+    lines += [f"- {line}" for line in ai_lines()]
+    _write_summary(environ, "\n".join(lines))
+    return exit_code
 
 
 def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng=None, out=print):
@@ -275,8 +471,8 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
             out("[설정 오류] 레지스트리 검증 실패:\n  - " + "\n  - ".join(errors))
             return EXIT_CONFIG
         blog = get_blog(reg, args.blog)
-        if blog["platform"] != "blogger":
-            out(f"[설정 오류] 이 러너는 platform=blogger 만 지원합니다 ({blog['platform']}). "
+        if blog["platform"] != "blogger" and blog["platform"] not in PACKAGE_PLATFORMS:
+            out(f"[설정 오류] 이 러너는 platform=blogger·tistory·naver 만 지원합니다 ({blog['platform']}). "
                 "다른 플랫폼은 docs/ARCHITECTURE.md 로드맵을 따릅니다.")
             return EXIT_CONFIG
         profile = load_profile(blog["profile"], root / "pipeline" / "profiles")
@@ -303,6 +499,17 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
         _summarize(environ, blog, "MODE_OFF", "레지스트리(pipeline/blogs.json)에서 mode=off 로 정지된 블로그입니다.")
         return EXIT_OK
 
+    is_package = blog["platform"] in PACKAGE_PLATFORMS   # 초안 패키지 채널(티스토리·네이버): Blogger 의 인증·게시 방식이 없다
+    if auth_only and is_package:
+        # 점검할 계정 인증이 없다. 조용히 글을 만들면 읽기만 하려던 요청이 이슈를 만들어 버리므로 멈춘다
+        message = ("인증 점검(--auth-check·BLOGGER_AUTH_CHECK)은 Blogger 블로그 전용입니다. 티스토리·네이버 초안 패키지 채널은 "
+                   "계정 정보를 쓰지 않아 점검할 인증이 없습니다(GitHub 이슈 권한은 실행할 때 확인합니다).")
+        out(skip_line("AUTH_CHECK_UNSUPPORTED", blog=blog["key"], platform=blog["platform"]))
+        out(f"[설정 오류] {message}")
+        out(f"::error::[{blog['key']}] {message}")
+        _summarize(environ, blog, "AUTH_CHECK_UNSUPPORTED", message)
+        return EXIT_CONFIG
+
     if auth_only:  # 인증만 점검한다: 글 생성·게시 입력(BLOGGER_PUBLISH·topic)은 읽지 않고, 이력·초안·Gemini 도 건드리지 않는다
         return run_auth_check_only(out, environ, blog, publisher_factory, _secret_values(blog, environ), dry)
 
@@ -315,8 +522,19 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
         out(f"::error::[{blog['key']}] {message}")
         _summarize(environ, blog, "INVALID_PUBLISH", message)
         return EXIT_CONFIG
+    if is_package and policy != "auto":
+        # 초안 패키지 채널에는 즉시 게시·Blogger 초안함·저장소 파일만 저장이 없다(글은 항상 초안 이슈로 간다). 값을 무시하면 조용히 다른 일이 일어난다
+        message = ("이 채널(초안 패키지)에서는 BLOGGER_PUBLISH·--publish 를 쓰지 않습니다. 글은 항상 GitHub 이슈(초안)로만 만들어지고 공개되지 않습니다. "
+                   "값을 비우거나 auto 로 두세요.")
+        out(skip_line("INVALID_PUBLISH", blog=blog["key"]))
+        out(f"[설정 오류] {message}")
+        out(f"::error::[{blog['key']}] {message}")
+        _summarize(environ, blog, "INVALID_PUBLISH", message)
+        return EXIT_CONFIG
     delivery = decide_delivery(policy, blog["mode"])
     secret_values = _secret_values(blog, environ)  # 오류 문구에서 실제 값을 가린다
+    if is_package:
+        secret_values = secret_values + [str(environ.get("GITHUB_TOKEN") or "").strip()]   # 이슈 API 오류 문구에 실릴 수 있는 토큰도 가린다
 
     # 즉시 게시, 또는 시크릿이 일부만 있는 초안함 업로드인데 게시용 시크릿이 없으면 글을 만들기 전에 멈춘다. 예전에는
     # 초안만 저장하고 초록으로 끝나 게시가 한 번도 안 된 채 며칠이 지나도 눈에 띄지 않았다(D-25). 시크릿은 '이름'만 표시한다.
@@ -442,6 +660,13 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
                                       f"{type(exc).__name__}: {redact(exc, secret_values)}")
         out(f"[{blog['key']}] 인증 점검 통과: 토큰 갱신·블로그 조회·주소 일치(쓰기 없음).")
 
+    # ---- 초안 패키지 사전 점검(Gemini 를 부르기 전, 쓰기 없음) -----------------------
+    # GITHUB_TOKEN·저장소가 있는지, 같은 채널에 열린 초안 이슈가 상한(3건) 미만인지. 연습 실행은 GitHub 를 부르지 않으므로 건너뛴다.
+    if delivery == "package" and not dry:
+        publisher, early = _package_precheck(out, environ, blog, publisher_factory, record, secret_values, ai_lines)
+        if early is not None:
+            return early
+
     # ---- 주제 -------------------------------------------------------------
     recent_titles = entry_titles(history[-100:])
     other_titles = other_blog_titles(root, [merged_blog(reg, b) for b in reg["blogs"]], blog["key"])
@@ -515,6 +740,15 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
 
     # ---- 게시 / 초안 ------------------------------------------------------
     status, url, post_id, exit_code, extra, fail_text = "draft", "", "", EXIT_OK, [], ""
+    if delivery == "package":
+        # 초안 패키지: 게이트를 통과한 글을 이슈 1개로 만든다(연습 실행은 본문만 만들어 실행 요약에 보인다). 이력·사본·요약은 이 경로가 따로 쓴다.
+        # 루프를 break 로 빠져나온 마지막 result·stats 가 통과한 시도의 것이다.
+        draft = _package_draft(environ, blog, today, post, profile,
+                               _package_gate_info(profile, post, accepted, result, stats, attempts, model))
+        if dry:
+            return _package_dry_run(out, environ, blog, draft, post, accepted, ai_lines)
+        return _package_deliver(out, environ, blog, root, local_now, draft, post, topic, source, model, attempts,
+                                publisher, secret_values, record, ai_lines)
     if dry:
         out("[DRY_RUN] 게이트 통과 — 게시·저장 없이 종료합니다.")
         out(f"  제목: {one_line(post['title'], TITLE_SHOWN)} / 라벨: {post['labels']} / 본문 {gates.text_length(gates.plain_text(accepted['content']))}자")

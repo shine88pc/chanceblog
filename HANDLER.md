@@ -34,6 +34,7 @@
 | 통합 성과 대시보드 | **제안 단계 — 사용자 결정 대기.** 블로그별 방문자·인기 글·AdSense 사이트별 수익을 한곳에서 보는 방안(Looker Studio 먼저). 검토 결과·결정 항목은 `docs/ANALYTICS_PLAN.md` §7. 결정 전에는 사이트에 GA 등을 설치하지 않는다(T3) |
 | 알려진 결함 | D-03 봇 글이 슬롯 대부분에서 안 나옴(원인: 비기술 분야 후보 0건 + 대체 분야 시도 없음 → 폴백으로 완화, 비기술 분야 후보 부족은 열림) · D-11 OAuth 7일 · D-08 내부 문서·코드의 사이트 공개(해결: 사이트에서 뺌, 2026-10-26) · D-15/D-16 Copilot PR 승인·PR 생성 설정(사용자 조치) — 상세는 `docs/DEFECT_REGISTER.md` (D-01 이슈 이미지 흐름은 `issue-edit`로 대체, 관측 대기) |
 | Blogger 워크플로(Actions 이름 `[Blogger] 글 자동 작성(초안함 업로드)`) | `blogger_macat`은 **정지(mode off)** — 영문 블로그인데 프로필이 한글이라 멈췄고(운영자 결정 2026-10-25), **영문 프로필·영어 프롬프트·주제 가드레일(제목·라벨·본문)은 병합됨**(PR #40 362ba8f·보강 PR #43 0da8221; 레지스트리는 영문 프로필을 가리키지만 `mode`는 off 그대로, 켜기 전에 2차 보강 `docs/DEFECT_REGISTER.md` D-64 ⑦, 설계 `docs/ARCHITECTURE.md` §7-1). 정지 중에도 매일 02:00 UTC 실행은 돌고 대상 0개로 초록 + `::notice::`로 끝난다. 켜면 `mode: draft`는 게시 Secrets 4종이 모두 있을 때 Blogger **초안함**에 업로드(공개되지 않음, 운영자가 Blogger 화면에서 확인한 뒤 직접 게시)하고, 하나도 없으면 저장소 파일에만 저장하며, 일부만 있거나 `mode: auto`(즉시 게시)인데 없으면 글을 만들기 전에 종료 2(빨강). 올리기 전에 인증 점검(토큰 갱신·블로그 조회·주소 일치)을 먼저 한다. 재개 절차는 §3 P1 |
+| 초안 패키지(티스토리·네이버, 2026-10-27, T3 승인 D4·D7) | 두 채널은 공식 자동 게시 수단이 없어(티스토리 오픈 API 2024-02 종료, 네이버 글쓰기 API 2020 종료) 글을 **GitHub 이슈 1개(라벨 `초안`)로 만들어 보여 주기만** 하고 운영자가 복사해 직접 발행한 뒤 이슈를 닫는다. 레지스트리 `mode: package`·`platform: tistory`·`naver`, 러너 `pipeline/run.py`의 package 경로, 어댑터 `pipeline/publishers/issue_package.py`, 워크플로 `[티스토리] 초안 패키지 만들기`(`tistory.yml`)·`[네이버] 초안 패키지 만들기`(`naver.yml`). **코드·시험은 끝났지만 레지스트리에 두 블로그가 없다**(블로그 주소·주제는 사용자 입력 대기) — 정기 실행은 "대상 0개"로 초록. 시크릿은 Gemini 키뿐이고 **티스토리·네이버 계정 정보는 저장·처리하지 않는다**(G-S7). AI 출력은 이슈가 되기 전에 소독한다(G-L8). 읽고 발행하는 법 `docs/ACTIONS_GUIDE.md` 3-17, 구조·받은 뒤 할 일 체크리스트 `docs/ARCHITECTURE.md` §7-B-2. 첫 실제 이슈의 복사 가능 여부는 관측 대기 |
 | 비밀 파일 | `client_secret.json`은 저장소에 없음 (`.gitignore`로 차단) |
 | 자동 push 스크립트 | `auto_sync.bat` 제거됨. 같은 동작 재도입 금지 |
 | 오래된 브랜치 | `feature/image-fix-20261019-0000` 병합 금지 (§11) |
@@ -261,7 +262,7 @@ VS Code:
 | Blogger API 설정 | `.github/editorial/BLOGGER_API_SETUP.md` |
 | Chance 편집 기준 | `.github/editorial/CHANCE_BLOG_TEMPLATE.md` |
 | 생성기 | `blogger_generator.py` / `generator.py` |
-| 워크플로 | `.github/workflows/blogger.yml` / `chanceblog.yml` / `chance-fix-images.yml` (Actions 탭 이름 표: `docs/ARCHITECTURE.md` §2-1) |
+| 워크플로 | `.github/workflows/blogger.yml` / `tistory.yml` / `naver.yml` / `chanceblog.yml` / `chance-fix-images.yml` (Actions 탭 이름 표: `docs/ARCHITECTURE.md` §2-1) |
 | 이슈 기반 이미지 수정 | `인수인계/이슈_기반_게시글_이미지_수정_인수인계.md` |
 | 상시 규칙(모든 AI) | `AGENTS.md` |
 | 헌장·협업·변경 등급 | `docs/CHARTER.md` |
