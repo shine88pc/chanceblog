@@ -323,6 +323,25 @@ class BacklogTest(PackageRunBase):
         self.assertEqual((code, len(pub.created)), (0, 1))
         self.assertIn("열린 초안 2건(상한 3건 미만)", out)
 
+    def test_open_drafts_marked_as_discarded_do_not_block_a_new_draft_with_the_real_adapter(self):
+        """폐기 = 라벨 `폐기` 또는 닫기. 라벨만 붙인 열린 이슈 셋은 적체가 아니다(현황판과 같은 규칙) — 진짜 어댑터와 가짜 GitHub 로 끝까지 본다."""
+        github = FakeGitHub()
+        for _ in range(3):
+            github.add_issue(labels=["초안", "채널:티스토리", "폐기"])
+        code, out = self.go(publisher=self.real_adapter_factory(github)(None, self.env()))
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("PACKAGE_BACKLOG", out)
+        self.assertIn("열린 초안 0건(상한 3건 미만)", out)
+        self.assertEqual(len(github.issues), 4)
+        self.assertEqual(self.history()[-1]["status"], "package_issued")
+        for _ in range(3):
+            github.add_issue(labels=["초안", "채널:티스토리"])                       # 폐기 표시가 없는 열린 초안 셋이면 막는다
+        (self.root / "tistory_test_history.json").unlink()                              # 같은 날 상한을 지워 적체 점검까지 가게 한다
+        code, out = self.go(publisher=self.real_adapter_factory(github)(None, self.env()))
+        self.assertEqual(code, 0, out)
+        self.assertIn("[SKIP] code=PACKAGE_BACKLOG blog=tistory_test open=4 limit=3", out)       # 방금 만든 초안 하나 + 새로 만든 셋(폐기 셋은 제외)
+        self.assertEqual(len(github.issues), 7)
+
     def test_the_daily_cap_is_reported_before_the_backlog_and_costs_no_api_call(self):
         self.go()
         pub = FakePackagePublisher(open_drafts=5)

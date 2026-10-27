@@ -42,7 +42,7 @@ from pipeline.state import KST
 API_ROOT = "https://api.github.com"
 DRAFT_LABEL = "초안"
 CHANNEL_LABEL_PREFIX = "채널:"
-DISCARD_LABEL = "폐기"            # 운영자가 쓰지 않을 초안에 붙이고 닫는다(이 어댑터는 만들지 않는다 — 현황판이 읽는다)
+DISCARD_LABEL = "폐기"            # 운영자가 쓰지 않을 초안에 붙인다(이 어댑터는 만들지 않는다). 붙은 이슈는 적체 점검에서 세지 않는다
 OPEN_DRAFT_LIMIT = 3              # 같은 채널에 열린 초안 이슈가 이만큼이면 새 초안을 만들지 않는다(적체 방지)
 TITLE_SHOWN = 60                  # 이슈 제목에 쓰는 글 제목의 최대 글자 수
 COPY_TITLE_MAX = 200              # 복사용 제목 상자의 최대 글자 수
@@ -591,8 +591,8 @@ def _compose(draft, info, level, title_text, html, draft_id):
     out.extend(_gate_section(draft.gate) if level < 2 else ["- 결과: **통과**(자세한 내용은 이슈 본문 한도 때문에 생략했습니다)"])
     heading("발행 체크리스트")
     out.extend(_checklist(info))
-    out.extend(["", f"발행하면 주소를 이 이슈에 코멘트로 남기고 이슈를 닫으세요(닫으면 발행 완료로 봅니다). 쓰지 않을 초안은 라벨 `{DISCARD_LABEL}`를 붙이고 닫으세요. "
-                f"같은 채널에 열린 초안이 {OPEN_DRAFT_LIMIT}건 이상이면 새 초안은 만들어지지 않습니다."])
+    out.extend(["", f"발행하면 주소를 이 이슈에 코멘트로 남기고 이슈를 닫으세요(닫으면 발행 완료로 봅니다). 쓰지 않을 초안은 라벨 `{DISCARD_LABEL}`를 붙이거나 닫으세요. "
+                f"같은 채널에 열린 초안({DISCARD_LABEL} 라벨이 붙은 것은 제외)이 {OPEN_DRAFT_LIMIT}건 이상이면 새 초안은 만들어지지 않습니다."])
     return "\n".join(out) + "\n"
 
 
@@ -630,6 +630,11 @@ def _http_detail(exc):
         return str(data.get("message") or "") if isinstance(data, dict) else ""
     except (OSError, ValueError, AttributeError):
         return ""
+
+
+def _has_label(item, name):
+    """GitHub 이슈 항목에 그 이름의 라벨이 붙어 있는지(라벨은 {"name": …} 객체 목록이다)."""
+    return any((label.get("name") if isinstance(label, dict) else label) == name for label in item.get("labels") or ())
 
 
 def _failure(message, code, status=None):
@@ -716,8 +721,10 @@ class IssuePackagePublisher:
         return found
 
     def count_open_drafts(self, channel_label):
-        """같은 채널에 열려 있는 초안 이슈 수(적체 점검). 읽기만 한다."""
-        return len(self._issues([DRAFT_LABEL, CHANNEL_LABEL_PREFIX + channel_label], "open"))
+        """같은 채널에 열려 있는 초안 이슈 수(적체 점검). 라벨 `폐기`가 붙은 것은 쓰지 않기로 한 초안이라 세지 않는다(확인 필요 모음의 현황판과 같은 규칙:
+        폐기 = 라벨 `폐기` 또는 닫기). 읽기만 한다."""
+        items = self._issues([DRAFT_LABEL, CHANNEL_LABEL_PREFIX + channel_label], "open")
+        return sum(1 for item in items if not _has_label(item, DISCARD_LABEL))
 
     def ensure_labels(self, labels):
         """라벨이 없으면 만든다(있으면 그대로). 같은 이름을 동시에 만들어 422 가 나면 이미 있는 것으로 본다."""

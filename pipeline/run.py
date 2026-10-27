@@ -354,10 +354,10 @@ def _package_precheck(out, environ, blog, publisher_factory, record, secret_valu
     if open_drafts >= limit:
         out(skip_line("PACKAGE_BACKLOG", blog=blog["key"], open=open_drafts, limit=limit))
         out(f"::notice::[{blog['key']}] 같은 채널에 열린 초안 이슈가 {open_drafts}건(상한 {limit}건)이라 새 초안을 만들지 않고 건너뜁니다. "
-            "쌓인 초안을 발행해 이슈를 닫거나 라벨 `폐기`를 붙여 닫으면 다음 실행부터 다시 만들어집니다.")
+            "쌓인 초안을 발행해 이슈를 닫거나, 쓰지 않을 초안에 라벨 `폐기`를 붙이면 다음 실행부터 다시 만들어집니다.")
         _summarize(environ, blog, "PACKAGE_BACKLOG",
                    f"같은 채널(라벨 `{issue_package.CHANNEL_LABEL_PREFIX}{channel}`)에 열린 `초안` 이슈가 {open_drafts}건(상한 {limit}건)이라 새로 만들지 않았습니다. "
-                   "발행했거나 쓰지 않을 초안은 이슈를 닫아 주세요.", ai_lines())
+                   "발행했으면 이슈를 닫고, 쓰지 않을 초안에는 라벨 `폐기`를 붙이거나 닫아 주세요(`폐기` 라벨이 붙은 것은 세지 않습니다).", ai_lines())
         return publisher, EXIT_OK
     out(f"[{blog['key']}] 초안 이슈 점검 통과: 열린 초안 {open_drafts}건(상한 {limit}건 미만).")
     return publisher, None
