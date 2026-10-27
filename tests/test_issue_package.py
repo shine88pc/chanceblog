@@ -344,7 +344,8 @@ class BodyTest(unittest.TestCase):
             self.assertIn(f"아직 {service}에 공개되지 않았습니다", body)
             self.assertIn("AI가 만든 초안", body)
             self.assertIn("사실 확인은 하지 않았습니다", body)
-            self.assertIn("라벨 `폐기`", body)
+            self.assertIn("쓰지 않을 초안은 라벨 `폐기`를 붙이거나 닫으세요", body)         # 적체 점검이 `폐기` 라벨을 세지 않는 규칙과 같은 말
+            self.assertIn("(폐기 라벨이 붙은 것은 제외)이 3건 이상이면 새 초안은 만들어지지 않습니다", body)
 
     def test_tags_are_comma_separated_without_hash_marks_and_deduped(self):
         spec = self.build(tags=["#생활습관", " 루틴, ", "생활습관", "", "#", "AI 도구"])
