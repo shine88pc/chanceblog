@@ -297,8 +297,10 @@ def topic_allowed(topic, profile):
 # 면제는 '문장'이 아니라 '절' 단위다. "마그네슘 보충제가 잠에 도움이 될 수 있지만 먼저 의사와 상담하세요"처럼 위험한 권유 뒤에 상담 구절을 붙인
 # 문장이 통째로 면제되면 안 되기 때문이다(D-64 ⑥ a). 문장을 문장부호(; : — -- 띄어 쓴 하이픈)와 프로필의 body_clause_split_patterns(영어 ', but'·', so'·
 # '지만' 같은 접속어)에서 절로 더 쪼개고, 상담 구절이 없는 절은 따로 검사한다. 또 body_safe_veto_patterns(용량 같은 것)에 맞는 절은 상담 구절이
-# 있어도 면제하지 않는다. 접속어는 쉼표가 없어도("…may lower your blood pressure so ask your doctor") 바로 뒤에 상담 구절이 올 때 가른다(D-64 ⑦ N-1). 접속어 없이 쉼표로만
-# 이은 경우("…를 챙기세요, 의사와 상담한 뒤에")는 여전히 면제된다 — 'If you are pregnant, talk to your doctor'와 구별할 수 없는 알려진 한계다.
+# 있어도 면제하지 않는다. 접속어는 앞뒤의 쉼표가 있든 없든("…may lower your blood pressure so ask your doctor"·"…, therefore, ask your doctor") 바로 뒤에 상담 구절이
+# (도입구 'you might want to'·'people should'나 상담 부사가 끼어도) 올 때 가른다(D-64 ⑦ N-1, ⑧ N2-1·N2-4). 한국어 '~에 대해서'·'~위해서'처럼 후치사로 쓰인 '~서'는 접속 어미가
+# 아니라서 가르지 않는다(⑧ N2-3). 접속어 없이 쉼표로만 이은 경우("…를 챙기세요, 의사와 상담한 뒤에")는 여전히 면제된다 — 'If you are pregnant, talk to your doctor'와
+# 구별할 수 없는 알려진 한계다.
 # ----------------------------------------------------------------------------
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?。！？])\s+|\n+")
 # 모든 언어에 공통인 절 경계: ; : — ― 줄표(--)와 양쪽에 공백이 있는 하이픈(엔 대시는 비교 전에 하이픈으로 바뀐다). 낱말 안의 하이픈(high-dose)은 가르지 않는다
