@@ -128,8 +128,7 @@ class EverySourcePromptTest(unittest.TestCase):
         for family in ("European Commission", "EU Digital Strategy", "Statistics Canada", "GOV.UK", "NASA", "Pew Research Center", "Federal Reserve", "UN News"):
             with self.subTest(family=family):
                 self.assertTrue(any(name.startswith(family) for name in names), names)
-        self.assertGreaterEqual(len(names), 14)
-        self.assertIn("pending", {src["terms"]["status"] for src in g.NEWS_SOURCES})     # 보류 소스(UN News)도 훑는다
+        # 소스를 빼거나 보류가 풀려도 이 시험은 그대로다(풀린 소스는 '읽는 소스' 순회가 맡는다). 소스 이름 목록은 test_generator_slots.SourceListTest 가 따로 고정한다.
 
     def test_every_source_prompt_has_every_rule_exactly_once_as_its_own_line(self):
         for src in g.NEWS_SOURCES:
@@ -153,8 +152,7 @@ class EverySourcePromptTest(unittest.TestCase):
                     self.assertEqual(lines[positions[2] + 2], LINE_AFTER)
 
     def test_a_source_without_its_own_rule_still_gets_the_rules_and_no_empty_rule_line(self):
-        bare = [src for src in g.NEWS_SOURCES if not src.get("prompt_rule")]
-        self.assertTrue({"Federal Reserve", "UN News"} <= {src["name"] for src in bare}, [src["name"] for src in bare])
+        bare = [src for src in g.NEWS_SOURCES if not src.get("prompt_rule")]      # 지금은 연준·UN News — 규칙 없는 소스가 없어지면 이 시험은 비고, 아래 순회가 모든 소스를 계속 본다
         for src in bare:
             with self.subTest(source=src["name"]):
                 prompt = prompt_for(src)
@@ -165,7 +163,7 @@ class EverySourcePromptTest(unittest.TestCase):
 
     def test_the_candidate_the_engine_builds_for_each_readable_source_carries_the_rules_and_the_sources_own_rule(self):
         readable = [src for src in g.NEWS_SOURCES if src["terms"]["status"] != "pending"]
-        self.assertGreaterEqual(len(readable), 13)
+        self.assertTrue(readable)
         for src in readable:
             with self.subTest(source=src["name"]):
                 item = fetched_item(src)
@@ -179,11 +177,12 @@ class EverySourcePromptTest(unittest.TestCase):
                     self.assertIn(f"- {src['prompt_rule']}\n", prompt)
 
     def test_the_held_source_is_never_read_by_the_engine_but_its_prompt_still_carries_the_rules(self):
-        held = [src for src in g.NEWS_SOURCES if src["terms"]["status"] == "pending"]
-        self.assertEqual([src["name"] for src in held], ["UN News"])
-        self.assertIsNone(fetched_item(held[0]))
-        for rule in g.GROUNDING_RULES:
-            self.assertIn(f"- {rule}\n", prompt_for(held[0]))
+        held = [src for src in g.NEWS_SOURCES if src["terms"]["status"] == "pending"]      # 지금은 UN News — 보류가 풀리면 읽는 소스로 넘어가 위 시험이 본다
+        for src in held:
+            with self.subTest(source=src["name"]):
+                self.assertIsNone(fetched_item(src))
+                for rule in g.GROUNDING_RULES:
+                    self.assertIn(f"- {rule}\n", prompt_for(src))
 
     def test_no_instruction_line_appears_twice_in_any_sources_prompt(self):
         for src in g.NEWS_SOURCES:
