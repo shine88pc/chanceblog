@@ -1,0 +1,52 @@
+name: "AI 요청에 답하기(결정·확인)"
+description: "텔레그램으로 받은 AI 의 요청(R-번호)에 승인·거절·보류 등으로 답합니다. 올리면 접수 확인(코멘트와 텔레그램)이 오고, AI 가 이어서 진행합니다."
+title: "[답변] "
+labels: ["운영자응답"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **비밀번호·토큰·키 값은 절대 쓰지 마세요.** 이 이슈는 공개입니다(누구나 읽을 수 있습니다). 값이 필요한 일은 AI 가 안내하는 대로 GitHub 설정 화면에 직접 입력하세요.
+
+        이 양식은 **저장소 소유자 계정으로 올린 것만** 접수됩니다. 승인(T3)은 **요청에 적힌 항목에 한해서만** 유효합니다 — 요청에 없는 일을 이 답으로 승인한 것으로 보지 않습니다.
+        요청 번호는 텔레그램 메시지 맨 위의 `R-001` 같은 번호입니다.
+
+  - type: input
+    id: request_id
+    attributes:
+      label: "요청 번호"
+      description: "텔레그램 메시지 맨 위의 R-번호를 그대로 쓰세요(예: R-001)."
+      placeholder: "R-001"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: answer
+    attributes:
+      label: "답변"
+      description: "하나를 고르세요. 'AI 가 못 하는 일'을 직접 하셨다면 '했어요', 잘 안 되면 '문제'를 고르고 아래 메모에 보이는 화면의 문구를 적어 주세요."
+      options:
+        - "승인 — 제안한 대로 진행해 주세요"
+        - "거절 — 하지 마세요"
+        - "보류 — 나중에 다시 물어 주세요"
+        - "했어요 — 제가 직접 처리했습니다"
+        - "문제 — 아래 메모를 보세요"
+    validations:
+      required: true
+
+  - type: input
+    id: choice
+    attributes:
+      label: "선택"
+      description: "요청에 선택지(A·B·C 또는 1·2·3)가 있을 때만 그 글자를 쓰세요. 없으면 비워 두세요."
+      placeholder: "B"
+    validations:
+      required: false
+
+  - type: textarea
+    id: memo
+    attributes:
+      label: "메모"
+      description: "AI 에게 전할 말(선택). 화면에 보인 문구는 적어도 되지만 비밀번호·토큰·키 값은 쓰지 마세요."
+    validations:
+      required: false

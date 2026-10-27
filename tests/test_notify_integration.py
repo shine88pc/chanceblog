@@ -486,9 +486,9 @@ TELEGRAM_ENV = {"TELEGRAM_BOT_TOKEN": "${{ secrets.TELEGRAM_BOT_TOKEN }}", "TELE
 
 class WorkflowStructureTest(unittest.TestCase):
     def test_the_secret_names_appear_only_in_the_expected_workflows(self):
-        """텔레그램 시크릿 이름은 알림을 보내는 워크플로(chanceblog·ops-inbox·telegram-test), Blogger 공용 워크플로(정의와 러너 단계 env), 그것을 부르는 두 래퍼(`secrets:` 매핑)에만 있다."""
+        """텔레그램 시크릿 이름은 알림을 보내는 워크플로(chanceblog·ops-inbox·telegram-test·운영자 요청함의 ai-request·operator-reply), Blogger 공용 워크플로(정의와 러너 단계 env), 그것을 부르는 두 래퍼(`secrets:` 매핑)에만 있다."""
         found = sorted(p.name for p in WORKFLOWS.iterdir() if "TELEGRAM_" in p.read_text(encoding="utf-8"))
-        self.assertEqual(found, ["blogger-en.yml", "blogger-ko.yml", "blogger.yml", "chanceblog.yml", "ops-inbox.yml", "telegram-test.yml"])
+        self.assertEqual(found, ["ai-request.yml", "blogger-en.yml", "blogger-ko.yml", "blogger.yml", "chanceblog.yml", "operator-reply.yml", "ops-inbox.yml", "telegram-test.yml"])
 
     def test_the_blogger_wrappers_hand_the_two_secrets_over_only_by_name_in_the_secrets_mapping(self):
         for wrapper in ("blogger-en.yml", "blogger-ko.yml"):

@@ -545,6 +545,9 @@ PREVIOUS_NAMES = {
     "네이버 초안 패키지 만들기": "[네이버] 초안 패키지 만들기",
     # 처음부터 접두사와 함께 만든 워크플로(옛 이름 없음): 접두사 없이 이름만 인용하는 안내(예: `텔레그램 알림 시험`)가 남지 않게 접두사 뗀 모양을 둔다
     "텔레그램 알림 시험": "[공통] 텔레그램 알림 시험",
+    # 운영자 요청함(2026-10-28)의 두 워크플로도 처음부터 접두사와 함께 만들었다
+    "AI 요청 텔레그램 알림": "[공통] AI 요청 텔레그램 알림",
+    "운영자 응답 접수": "[공통] 운영자 응답 접수",
     # 영문·한글로 나눈 Blogger 워크플로(2026-10-27): 한글 래퍼와 공용 워크플로도 접두사 뗀 모양을 둔다(영문의 옛 이름은 위 `Blogger 글 자동 작성`)
     "Blogger 한글 글 자동 작성": "[Blogger 한글] 글 자동 작성",
     "Blogger 글 작성 공용(직접 실행하지 마세요)": "[내부] Blogger 글 작성 공용(직접 실행하지 마세요)",
@@ -604,6 +607,8 @@ class NamePrefixTest(unittest.TestCase):
         "tistory.yml": "[티스토리] 초안 패키지 만들기",
         "naver.yml": "[네이버] 초안 패키지 만들기",
         "telegram-test.yml": "[공통] 텔레그램 알림 시험",
+        "ai-request.yml": "[공통] AI 요청 텔레그램 알림",
+        "operator-reply.yml": "[공통] 운영자 응답 접수",
     }
 
     def test_every_workflow_has_its_approved_name(self):
@@ -622,7 +627,7 @@ class NamePrefixTest(unittest.TestCase):
                 continue
             seen += 1
             self.assertEqual(registry.name_label(run_name), registry.name_label(name), f"{file}: {run_name!r}")
-        self.assertEqual(seen, 9)  # chanceblog · chance-fix-images · issue-edit · blogger-en · blogger-ko · watchdog · ops-inbox · tistory · naver(공용 blogger.yml 은 run-name 이 없다)
+        self.assertEqual(seen, 10)  # chanceblog · chance-fix-images · issue-edit · blogger-en · blogger-ko · watchdog · ops-inbox · tistory · naver · operator-reply(공용 blogger.yml 과 ai-request 는 run-name 이 없다)
 
     def test_registered_blog_workflows_use_their_channel_label(self):
         """레지스트리 channel.label 과 그 블로그 워크플로 이름의 접두사는 같은 글자다(레지스트리 검증도 같은 것을 본다)."""
