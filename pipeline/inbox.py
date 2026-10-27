@@ -10,8 +10,9 @@ GitHub 읽기·쓰기와 이슈 관리는 scripts/ops_inbox.py 가 맡는다. �
   info    참고 — 현황(블로그별 마지막 글 등)과 진행 중인 것.
 
 초안 현황(2026-10-27, 작업요청서 5 PR-B): 채널별로 발행을 기다리는 초안을 한 표로 보여 준다. 초안 모델 — 초안 1건 = 이슈 1개 또는 PR 1개,
-라벨 `초안` + `채널:<채널 라벨>`(채널 라벨은 레지스트리 channel.label), 쓰지 않을 초안은 라벨 `폐기` 또는 닫기. 열린 초안 이슈가 새로 생기면
-action(코멘트 알림), 3일 넘게 열려 있으면 check. Blogger 는 이력의 draft_uploaded 를 센 대략치다(공개 여부는 Blogger 쪽 사실).
+라벨 `초안` + `채널:<채널 라벨>`(채널 라벨은 레지스트리 channel.label), 쓰지 않을 초안은 라벨 `폐기` 또는 닫기. 열린 초안(이슈·PR)이 새로 생기면
+action(코멘트 알림), 3일 넘게 열려 있으면 check. 초안 PR 은 열린 PR 규칙이 이미 action 으로 올린 것(병합하면 됩니다·충돌·검사 실패)이면 그 줄 하나로,
+아니면(검사가 안 돈 PR 등) 초안 항목 하나로만 보인다(같은 PR 이 두 줄이 되지 않게). Blogger 는 이력의 draft_uploaded 를 센 대략치다(공개 여부는 Blogger 쪽 사실).
 표는 항목(Item)이 아니라 render() 의 board 인자로 본문 위쪽에 들어간다.
 
 보안: 외부에서 온 텍스트(PR 제목·주석 문구·이슈 제목·이력 사유)는 ext() 로 한 줄로 접고, 비밀 값 모양을 가리고, '@'·'<'·'&' 를
@@ -838,33 +839,46 @@ def _draft_title_text(draft, limit):
     return ext(text, limit) or "제목 없음"
 
 
-def draft_items(drafts, now, repo_url):
-    """열린 초안 '이슈'마다 한 줄. DRAFT_STALE_DAYS 일 이하로 열려 있으면 action(새 초안 — 새 항목이라 코멘트(@멘션)로 알림), 그보다 오래면 check(알림 없음).
+def _pull_number(item):
+    """열린 PR 규칙(pull_items)의 항목 id `pr:<번호>:<상태>` 에서 PR 번호. 다른 항목이면 None."""
+    parts = item.id.split(":")
+    return int(parts[1]) if len(parts) == 3 and parts[0] == "pr" and parts[1].isdigit() else None
+
+
+def draft_items(drafts, now, repo_url, acting_pulls=()):
+    """열린 초안(이슈·PR)마다 한 줄. DRAFT_STALE_DAYS 일 이하로 열려 있으면 action(새 초안 — 새 항목이라 코멘트(@멘션)로 알림), 그보다 오래면 check(알림 없음).
 
     상태가 id 에 들어 있다(draft:<번호>:wait · draft:<번호>:stale) — 같은 초안이 오래되면 새 알림 없이 check 로 옮겨 가고, 닫았다가 다시 열면 새 항목으로 다시 알린다.
-    PR 초안(kind 'pull')은 여기서 항목을 만들지 않는다: 열린 PR 규칙(pull_items)이 같은 PR 을 검사·병합 상태와 함께 이미 한 줄로 다루므로 또 만들면 같은 PR 이 두 번 알림이 된다.
-    PR 초안도 초안 현황 표(draft_board)에는 센다."""
+    PR 초안(kind 'pull')은 열린 PR 규칙(pull_items)도 한 줄로 다룬다. 그 규칙이 이미 action(병합하면 됩니다·충돌·검사 실패)으로 올린 PR — acting_pulls 의 번호 — 은
+    그 항목이 알리므로 초안 항목을 또 만들지 않는다(같은 PR 이 두 번 알림이 되지 않게). 그 밖의 상태(검사 결과 없음·진행 중·계산 중·병합 막힘)에서는 build_items 가
+    그 PR 의 열린 PR 항목을 빼고 이 초안 항목이 대신 알린다: 저장소 기본 토큰으로 연 PR 은 검사가 돌지 않아 '검사 결과 없음'(check, 알림 없음)으로 남기 쉬워서, 이렇게 하지 않으면
+    승인을 기다리는 초안 PR 이 아무 알림 없이 쌓인다."""
     out = []
     for draft in pending_drafts(drafts):
-        if draft["kind"] != "issue":
-            continue
         number = draft["number"]
+        pull = draft["kind"] == "pull"
+        if pull and number in acting_pulls:
+            continue
         created = parse_time(draft.get("created_at"))
         stale = created is not None and now - created > timedelta(days=DRAFT_STALE_DAYS)
         channel = ext(draft.get("channel") or "채널 표시 없음", 30)
         title = _draft_title_text(draft, DRAFT_TITLE_MAX)
-        url = f"{repo_url}/issues/{number}"
+        url = f"{repo_url}/{'pull' if pull else 'issues'}/{number}"
+        where = f"PR #{number}" if pull else f"이슈 #{number}"
         if stale:
             out.append(Item(
                 id=f"draft:{number}:stale", level=LEVEL_CHECK, since=created, url=url,
                 title=f"초안 {DRAFT_STALE_DAYS}일 넘게 대기 — {title}",
-                detail=f"채널 {channel} · 이슈 #{number} · {DRAFT_STALE_DAYS}일 넘게 열려 있음",
-                hint="발행했다면 이슈를 닫고, 쓰지 않기로 했다면 라벨 `폐기`를 붙이거나 닫으세요. 닫으면 이 목록에서 사라집니다."))
+                detail=f"채널 {channel} · {where} · {DRAFT_STALE_DAYS}일 넘게 열려 있음",
+                hint=("공개하려면 PR 을 병합하고, 쓰지 않기로 했다면 라벨 `폐기`를 붙이거나 PR 을 닫으세요. 병합하거나 닫으면 이 목록에서 사라집니다." if pull else
+                      "발행했다면 이슈를 닫고, 쓰지 않기로 했다면 라벨 `폐기`를 붙이거나 닫으세요. 닫으면 이 목록에서 사라집니다.")))
         else:
             out.append(Item(
                 id=f"draft:{number}:wait", level=LEVEL_ACTION, since=created, url=url,
-                title=f"초안 대기 — {title}", detail=f"채널 {channel} · 이슈 #{number} · 발행을 기다립니다",
-                hint="이슈 본문의 제목·본문·태그를 복사해 직접 발행한 뒤 이슈를 닫으세요(닫기 = 발행 완료). 쓰지 않을 글은 라벨 `폐기`를 붙이거나 닫으세요."))
+                title=f"초안 대기 — {title}",
+                detail=f"채널 {channel} · {where} · " + ("검토·병합을 기다립니다" if pull else "발행을 기다립니다"),
+                hint=("PR 을 열어 글을 읽고 병합하면 공개되고(닫으면 폐기), 검사·충돌 상태도 PR 화면에서 봅니다. 쓰지 않을 글은 라벨 `폐기`를 붙이거나 PR 을 닫으세요." if pull else
+                      "이슈 본문의 제목·본문·태그를 복사해 직접 발행한 뒤 이슈를 닫으세요(닫기 = 발행 완료). 쓰지 않을 글은 라벨 `폐기`를 붙이거나 닫으세요.")))
     return out
 
 
@@ -892,8 +906,8 @@ _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 _BAR = chr(0xFF5C)         # '｜' — 표 칸 구분자 '|' 를 대신하는 전각 문자
 _LINKABLE_LABEL_RE = re.compile(r"^[0-9A-Za-z가-힣][0-9A-Za-z가-힣 _.\-]{0,39}$")
 BOARD_HEADER = ("채널", "대기 초안", "가장 오래된", "최신 초안")
-BOARD_NOTE_MODEL = ("초안은 라벨 `초안`과 `채널:티스토리` 같은 채널 라벨이 붙은 열린 이슈·PR 입니다. 발행했으면 이슈를 닫고, 쓰지 않을 글은 라벨 `폐기`를 붙이거나 닫으세요"
-                    "(둘 다 이 표에서 빠집니다). '가장 오래된'은 하루 단위라 하루에 한 번 바뀝니다.")
+BOARD_NOTE_MODEL = ("초안은 라벨 `초안`과 `채널:티스토리` 같은 채널 라벨이 붙은 열린 이슈·PR 입니다. 이슈 초안은 발행한 뒤 닫고, PR 초안은 병합하면 빠지며, "
+                    "쓰지 않을 글은 라벨 `폐기`를 붙이거나 닫으세요(모두 이 표에서 빠집니다). '가장 오래된'은 하루 단위라 하루에 한 번 바뀝니다.")
 BOARD_NOTE_BLOGGER = (f"Blogger 는 초안함에 올린 기록(최근 {DRAFT_WINDOW_DAYS}일)을 센 대략치입니다 — 이미 게시했는지는 Blogger 쪽 사실이라 여기서는 알 수 없습니다. "
                       "확인·게시: Blogger 대시보드 → 글 → 초안(블로그 ID 가 시크릿이라 링크는 싣지 않습니다).")
 
@@ -1049,17 +1063,28 @@ def sort_items(items):
     return sorted(items, key=lambda i: (LEVELS.index(i.level), i.since is None, i.since.timestamp() if i.since else 0.0, i.id))
 
 
+def _pull_items_without_draft_duplicates(pulls, drafts):
+    """(열린 PR 항목, 초안 항목이 건너뛸 PR 번호). 초안 PR 은 한 줄만 남긴다.
+
+    열린 PR 규칙이 action 으로 올린 PR(병합하면 됩니다·충돌·검사 실패)은 그 항목이 알리니 초안 항목을 만들지 않는다(두 번째 값으로 돌려준다).
+    그 밖의 상태(검사 기록 없음·진행 중·계산 중·병합 막힘)인 초안 PR 은 초안 항목(action)이 대신 알리므로 열린 PR 항목을 뺀다."""
+    acting = {n for n in (_pull_number(i) for i in pulls if i.level == LEVEL_ACTION) if n is not None}
+    replaced = {d["number"] for d in pending_drafts(drafts) if d["kind"] == "pull"} - acting
+    return [i for i in pulls if _pull_number(i) not in replaced], acting
+
+
 def build_items(snap):
     """Snapshot → 정렬된 항목 목록(같은 id 는 먼저 만든 것만 남긴다)."""
     if not is_valid_repo(snap.repo):
         raise ValueError(f"저장소 이름 형식이 올바르지 않습니다: {snap.repo!r}")
     repo_url = f"https://github.com/{snap.repo}"
     now = _aware(snap.now)
-    items = (watchdog_items(snap.issues, repo_url) + pull_items(snap.pulls, now, repo_url)
+    pulls, acting_pulls = _pull_items_without_draft_duplicates(pull_items(snap.pulls, now, repo_url), snap.drafts)
+    items = (watchdog_items(snap.issues, repo_url) + pulls
              + run_items(snap.runs, snap.annotations, now, repo_url, names=snap.workflow_names)
              + approval_items(snap.approvals, repo_url, names=snap.workflow_names)
              + pause_items(snap.paused, repo_url) + blog_items(snap.blogs, snap.histories, now, repo_url)
-             + stats_items(snap.blogs, snap.histories, now) + draft_items(snap.drafts, now, repo_url)
+             + stats_items(snap.blogs, snap.histories, now) + draft_items(snap.drafts, now, repo_url, acting_pulls)
              + failure_items(snap.failures, repo_url) + note_items(snap.notes))
     unique, seen = [], set()
     for item in items:
