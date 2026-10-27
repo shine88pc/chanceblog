@@ -256,7 +256,7 @@ def check_telegram_secrets(root, files):
 
     이 토큰은 요청 주소의 경로(https://api.telegram.org/bot<토큰>/…)에 들어가는 서비스의 열쇠라, 셸 명령 줄(echo·set -x·`::set-output`·GITHUB_ENV 에 쓰기)이나
     외부 액션의 입력(with)으로 흘러가면 공개 Actions 로그로 샐 수 있다. 값은 `env:` 로 파이썬 프로세스에 넘기고 pipeline/notify.py 가 환경변수에서만 읽는다
-    (G-C11). 문자열 안에 두 이름 중 하나라도 들어 있으면(`$TELEGRAM_BOT_TOKEN`·`${TELEGRAM_CHAT_ID}` 처럼 환경변수를 셸에서 펼치는 것 포함, 대소문자를 바꾼
+    (G-C12). 문자열 안에 두 이름 중 하나라도 들어 있으면(`$TELEGRAM_BOT_TOKEN`·`${TELEGRAM_CHAT_ID}` 처럼 환경변수를 셸에서 펼치는 것 포함, 대소문자를 바꾼
     `secrets.telegram_bot_token` 도 같은 시크릿이라 같게 본다) 허용된 모양이 아닌 한 오류다.
 
     한계(문서에도 적었다): 이름이 **글자로** 나오는 곳만 본다 — `toJSON(secrets)`·`secrets[format(…)]`·`secrets: inherit` 처럼 이름 없이 시크릿을 넘기는 길과,
@@ -281,7 +281,7 @@ def check_telegram_secrets(root, files):
                 where = ".".join(str(part) for part in path)
                 out.append(err("WF-13", f"텔레그램 시크릿 이름({', '.join(names)})이 허용되지 않은 자리({where})에 있습니다 — 단계의 env 에서 같은 이름의 환경변수로만 "
                                         "`${{ secrets.이름 }}` 그대로 넘기세요(run·with·if·job/워크플로 env 에는 쓰지 않습니다). "
-                                        "토큰이 셸 명령 줄이나 로그로 새는 길을 막는 규칙입니다 (G-C11)", rel))
+                                        "토큰이 셸 명령 줄이나 로그로 새는 길을 막는 규칙입니다 (G-C12)", rel))
     return out
 
 

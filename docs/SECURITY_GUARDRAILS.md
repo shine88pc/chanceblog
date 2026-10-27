@@ -12,7 +12,7 @@
 | 사이트 무결성·AdSense 심사 | AI의 무승인 수정, 낡은 사본 덮어쓰기, 정책 위반 콘텐츠, 이슈·PR 본문을 통한 수정 범위 확대, 신규 채널의 이른 광고 게재(계정 단위 조치로 번질 수 있음) | G-C6, G-C10, G-L3, G-L7, G-O6 |
 | 성과·수익 수치(AdSense·방문 통계) | 공개 저장소·Pages·Actions 로그로 노출, 광고 프로그램 약관 위반 가능성 | G-O7 |
 | 계정(GitHub·Google·Blogger) | 토큰 탈취, 과도한 권한 | G-S2, G-S6, G-A1 |
-| 알림 채널(텔레그램 봇 토큰·채팅 ID) | 토큰이 요청 주소 경로에 들어가 오류 문구·로그·명령 줄로 유출, 알림 스팸·낚시 링크, 비공개 정보의 유출 | G-S1~S6, G-C11 |
+| 알림 채널(텔레그램 봇 토큰·채팅 ID) | 토큰이 요청 주소 경로에 들어가 오류 문구·로그·명령 줄로 유출, 알림 스팸·낚시 링크, 비공개 정보의 유출 | G-S1~S6, G-C12 |
 | 콘텐츠 신뢰도 | 환각·가짜 경험, 의학적 단정, 복제·양산, 프롬프트 인젝션 | G-L*, G-C* |
 | 실행 환경(Actions) | 입력 인젝션, 공급망(외부 액션·패키지), 과도한 권한 | G-A* |
 | 비용·할당량 | 재시도·반복 호출 폭주 | G-L5 |
@@ -78,7 +78,7 @@
 | G-C9 | 개인·내부 정보(사용자 이름·로컬 경로·소속)를 문서·커밋·로그에 넣지 않는다 | 정책(오늘 WORKLOG의 로컬 경로를 게시 전에 제거함) |
 | G-C10 | **신규 채널(한글 Blogger·티스토리·네이버)은 품질 게이트를 통과하기 전까지 광고를 켜지 않는다 — 플랫폼 화면에서도**(운영자 승인 2026-10-27). 광고 정책의 반복·중대한 위반은 사이트가 아니라 계정 단위 조치로 이어질 수 있어, 새 채널을 광고 없이 시작하게 해 한 채널의 문제가 같은 계정의 다른 사이트로 번지지 않게 한다. 레지스트리 `ads` 선언은 새 채널을 `off`로 시작하게 하고(`defaults.ads`는 `off`로 고정), `pending_gate`·`on`으로 올리는 편집과 광고 코드를 넣고 빼는 변경은 사용자 승인(T3)이 필요하다. 품질 게이트 기준(제안, 운영자 승인 전): 사람이 읽고 승인한 글 10편 이상 · 표본 5편의 사실 확인 오류 0 · 가드레일 탈락·오탐 기록 검토 · 해당 플랫폼의 광고 정책 확인. 설명: [`ARCHITECTURE.md`](./ARCHITECTURE.md) §3 '광고 선언' | 자동: 레지스트리 검증(`ads` 값·`jekyll-git` 밖의 `on` 금지·`defaults.ads` = `off`, REG-1)과 검증기 **REG-5**(선언과 광고 표면의 실제 광고 코드 일치) / 정책(플랫폼 화면에서 광고를 켜는 것은 코드로 막을 수 없다 — 운영자가 게이트를 통과하기 전에는 켜지 않는다) |
 | G-C11 | 광고가 붙는 사이트의 자동 생성 글은 사람이 검토한 뒤 공개할 수 있어야 한다(구글 게시자 정책은 수동 검토나 큐레이션 없이 자동 생성된 콘텐츠에 광고를 두지 말라고 안내한다). Chance 는 레지스트리 `publish_flow: pr`로 **초안 PR → 사람이 병합 = 공개 → 닫으면 폐기** 흐름을 켤 수 있다(기본 `direct` = 꺼짐, **켜는 것은 T3**, 방향은 운영자 승인 2026-10-27). 켜면 닫은 뒤에도 같은 슬롯·같은 주제를 다시 만들지 않고, 승인 PR 본문의 체크리스트(원문 수치·사실 대조, 제목·요약, 병합 = 공개)가 검토를 안내하며, 자동 점검 결과는 사람의 확인을 대신하지 않는다고 적는다 | 자동: 레지스트리 검증(`pr`은 `jekyll-git`·`mode: auto`만), 값을 읽지 못하면 직접 게시로 떨어지지 않고 멈춤(`tests/test_drafts.py`·`tests/test_chance_draft_workflow.py`) / 정책 |
-| G-C11 | **텔레그램 알림의 봇 토큰·채팅 ID 는 로그·예외·출력·명령 줄 어디에도 나오지 않는다**(운영자 요청 2026-10-27). 이 서비스는 토큰이 요청 주소의 경로(`https://api.telegram.org/bot<토큰>/…`)에 들어가서, 연결 오류 문구를 그대로 출력하면 공개 Actions 로그로 토큰이 샌다(`requests`의 예외 문자열이 요청 주소를 담는 것이 전형이고, OpenClaw의 CVE-2026-27003이 같은 사고다). 그래서 ① 시크릿은 워크플로의 **단계 `env`로만**(같은 이름의 환경변수에 `secrets.그 이름` 표현식 하나만, 달러 기호와 이중 중괄호로 감싼 모양 그대로) 넘기고 `run:` 본문·`with:`·`echo`·`::set-output`·`GITHUB_ENV`·job/워크플로 `env`에는 쓰지 않는다. ② 알림 코드(`pipeline/notify.py`, 표준 라이브러리만 — `requests`·외부 알림 액션은 쓰지 않는다)는 모든 예외를 잡아 **클래스 이름·HTTP 상태·텔레그램이 준 짧은 설명**만 남기고, 예외 문구·요청 객체·원 예외 사슬을 어디에도 쓰지 않으며, 돌려주는 모든 글에서 토큰·채팅 ID(와 URL 인코딩 형태·토큰의 절반)를 글자 그대로 지우고 비밀 모양 패턴(SEC-2 `Telegram 봇 토큰`)으로 한 번 더 가린다. ③ 알림에는 **이미 공개되는 정보**(글 제목·출처 이름·공개 주소·공개 이슈의 항목 제목)만 싣는다 — 일반 채팅은 종단간 암호화가 아니다. 외부·AI 유래 글은 소독하고(비밀 모양 가리기·한 줄 접기·길이 제한·글 속 `https://…`·`tg://…` 를 글자로만·HTML 이스케이프) 주소는 허용 목록(`https://shine88pc.github.io/…`·`https://github.com/shine88pc/chanceblog/…`·`https://www.blogger.com/…`)만 링크로 건다. ④ 알림은 보조라 실패해도 게시·점검 결과와 종료 코드를 바꾸지 않는다 — 알림 단계(`python -m pipeline.notify …`)만 `continue-on-error`를 쓸 수 있고(WF-6의 예외, `timeout-minutes` 필수) 실패는 고정 문장 `::warning::`으로 드러낸다. 값은 운영자만 GitHub 화면에서 등록한다(AI는 입력하지 않는다). 노출되면 BotFather `/revoke` 후 Secrets 교체(§4 A). 설명: [`TELEGRAM_SETUP.md`](../.github/editorial/TELEGRAM_SETUP.md), [`ARCHITECTURE.md`](./ARCHITECTURE.md) §4-4 | 자동: 검증기 **WF-13**(시크릿 이름은 단계 env 값으로만)·**SEC-2**(토큰 모양)·**WF-6** 예외 조건, `tests/test_notify*.py`(요청 주소가 든 예외 문자열을 포함한 실패 모양 15종에서 값이 결과·로그·요약에 없음, 소스 불변식) / 정책(값 등록·수신자 한 명) |
+| G-C12 | **텔레그램 알림의 봇 토큰·채팅 ID 는 로그·예외·출력·명령 줄 어디에도 나오지 않는다**(운영자 요청 2026-10-27). 이 서비스는 토큰이 요청 주소의 경로(`https://api.telegram.org/bot<토큰>/…`)에 들어가서, 연결 오류 문구를 그대로 출력하면 공개 Actions 로그로 토큰이 샌다(`requests`의 예외 문자열이 요청 주소를 담는 것이 전형이고, OpenClaw의 CVE-2026-27003이 같은 사고다). 그래서 ① 시크릿은 워크플로의 **단계 `env`로만**(같은 이름의 환경변수에 `secrets.그 이름` 표현식 하나만, 달러 기호와 이중 중괄호로 감싼 모양 그대로) 넘기고 `run:` 본문·`with:`·`echo`·`::set-output`·`GITHUB_ENV`·job/워크플로 `env`에는 쓰지 않는다. ② 알림 코드(`pipeline/notify.py`, 표준 라이브러리만 — `requests`·외부 알림 액션은 쓰지 않는다)는 모든 예외를 잡아 **클래스 이름·HTTP 상태·텔레그램이 준 짧은 설명**만 남기고, 예외 문구·요청 객체·원 예외 사슬을 어디에도 쓰지 않으며, 돌려주는 모든 글에서 토큰·채팅 ID(와 URL 인코딩 형태·토큰의 절반)를 글자 그대로 지우고 비밀 모양 패턴(SEC-2 `Telegram 봇 토큰`)으로 한 번 더 가린다. ③ 알림에는 **이미 공개되는 정보**(글 제목·출처 이름·공개 주소·공개 이슈의 항목 제목)만 싣는다 — 일반 채팅은 종단간 암호화가 아니다. 외부·AI 유래 글은 소독하고(비밀 모양 가리기·한 줄 접기·길이 제한·글 속 `https://…`·`tg://…` 를 글자로만·HTML 이스케이프) 주소는 허용 목록(`https://shine88pc.github.io/…`·`https://github.com/shine88pc/chanceblog/…`·`https://www.blogger.com/…`)만 링크로 건다. ④ 알림은 보조라 실패해도 게시·점검 결과와 종료 코드를 바꾸지 않는다 — 알림 단계(`python -m pipeline.notify …`)만 `continue-on-error`를 쓸 수 있고(WF-6의 예외, `timeout-minutes` 필수) 실패는 고정 문장 `::warning::`으로 드러낸다. 값은 운영자만 GitHub 화면에서 등록한다(AI는 입력하지 않는다). 노출되면 BotFather `/revoke` 후 Secrets 교체(§4 A). 설명: [`TELEGRAM_SETUP.md`](../.github/editorial/TELEGRAM_SETUP.md), [`ARCHITECTURE.md`](./ARCHITECTURE.md) §4-5 | 자동: 검증기 **WF-13**(시크릿 이름은 단계 env 값으로만)·**SEC-2**(토큰 모양)·**WF-6** 예외 조건, `tests/test_notify*.py`(요청 주소가 든 예외 문자열을 포함한 실패 모양 15종에서 값이 결과·로그·요약에 없음, 소스 불변식) / 정책(값 등록·수신자 한 명) |
 
 **정책 위험에 대한 솔직한 평가.** "AI로 만든 글을 자동·대량으로 게시"하는 구조는 가장 큰 사업 위험이다. 검색엔진의 스팸 정책(대량 생성 콘텐츠 남용)과 광고 프로그램 정책은 만드는 방식이 아니라 **독자에게 주는 가치**를 본다. 자동 게이트는 위험을 줄이지만 승인·노출을 보장하지 못한다. 그래서 (1) 일일 상한을 낮게 유지하고, (2) 출처·구체적 실천 가이드처럼 독자 가치를 요구하고, (3) 블로그를 늘릴 때는 카나리([`ARCHITECTURE.md`](./ARCHITECTURE.md) §7 A-6)를 거치며, (4) 필요하면 월 1회 5건 정도 샘플을 눈으로 점검하는 것을 권한다(선택), (5) Chance 승인 흐름(G-C11)을 켜면 모든 글을 병합 전에 사람이 읽는다(지금은 꺼져 있다).
 
@@ -101,7 +101,7 @@
 - `mode: auto` 전환, 게시 방식 변경(Chance `publish_flow`를 `direct`↔`pr`로 바꾸는 것), 게시 빈도·모델·호출 횟수 상향, 새 블로그·플랫폼·도메인 추가
 - 광고 표면 파일 수정(G-C6), 정책·톤·면책 문구 변경
 - 레지스트리 `ads`를 `pending_gate`·`on`으로 올리기, 신규 채널의 플랫폼 화면에서 광고 켜기(G-C10)
-- 텔레그램 알림의 수신 채팅 추가·변경(수신자는 운영자 본인 한 명), 알림 코드에 외부 라이브러리·외부 액션 도입, 알림에 공개되지 않는 정보 싣기(G-C11)
+- 텔레그램 알림의 수신 채팅 추가·변경(수신자는 운영자 본인 한 명), 알림 코드에 외부 라이브러리·외부 액션 도입, 알림에 공개되지 않는 정보 싣기(G-C12)
 - 분석·추적 코드(GA 등)나 외부 스크립트를 사이트에 삽입 (`<head>` 변경이며 개인정보처리방침에 영향)
 - 글·파일·브랜치 삭제, force push, 히스토리 재작성, 다른 저장소 수정
 - 자동 commit/push 스크립트·예약 작업·Webhook 생성
@@ -111,7 +111,7 @@
 ## 4. 사고 대응 플레이북
 
 ### A. 비밀 유출(저장소·로그·채팅에 노출)
-1. **즉시 폐기·재발급**: Google Cloud Console에서 OAuth 클라이언트 보안 비밀번호 삭제·재생성, Google 계정의 서드파티 액세스에서 앱 연결 해제(refresh token 폐기), Gemini·Unsplash 키 삭제 후 재발급, GitHub PAT는 revoke, 텔레그램 봇 토큰은 BotFather에서 `/revoke`로 폐기·재발급(G-C11).
+1. **즉시 폐기·재발급**: Google Cloud Console에서 OAuth 클라이언트 보안 비밀번호 삭제·재생성, Google 계정의 서드파티 액세스에서 앱 연결 해제(refresh token 폐기), Gemini·Unsplash 키 삭제 후 재발급, GitHub PAT는 revoke, 텔레그램 봇 토큰은 BotFather에서 `/revoke`로 폐기·재발급(G-C12).
 2. GitHub Secrets를 새 값으로 교체한다.
 3. 저장소에서 파일을 지운다. **히스토리를 정리해도 공개된 순간 유출로 본다** — 핵심은 키 교체다.
 4. `WORKLOG.md`에 원인과 재발 방지(누락된 `.gitignore`·검증 규칙 추가)를 기록한다.
@@ -141,16 +141,16 @@
 | GitHub → Settings → Actions: 기본 `GITHUB_TOKEN` 권한 Read, 포크 PR 워크플로 승인 요구 | G-A1·G-A3 보강 |
 | main 브랜치 룰셋: **삭제 차단과 force push 차단만** 켜기(권장). PR 필수·코드 오너 승인 필수·상태 검사 필수·서명 필수는 **켜지 않는다** | 자동 발행은 봇(`github-actions`)이 main에 직접 push하므로 그 규칙을 켜면 발행이 멈춘다(운영자 결정 2026-10-25). 켜려면 봇을 우회 대상에 넣을 수 있는지 먼저 확인해야 한다(미검증). 1인 저장소에서 '코드 오너 검토 필수'는 본인이 연 PR을 본인이 승인할 수 없다. 낡은 사본 덮어쓰기 같은 사고는 CI가 사후 탐지한다 |
 | GitHub·Google 계정 2단계 인증 | 계정 탈취 방지 |
-| (선택) 텔레그램 알림: 시크릿 `TELEGRAM_BOT_TOKEN`·`TELEGRAM_CHAT_ID` 등록과 `[공통] 텔레그램 알림 시험` 1회 실행 | 값은 운영자만 GitHub 화면에 입력할 수 있다(G-C11). 등록하지 않으면 알림은 조용히 꺼져 있다. 순서: [`TELEGRAM_SETUP.md`](../.github/editorial/TELEGRAM_SETUP.md) |
+| (선택) 텔레그램 알림: 시크릿 `TELEGRAM_BOT_TOKEN`·`TELEGRAM_CHAT_ID` 등록과 `[공통] 텔레그램 알림 시험` 1회 실행 | 값은 운영자만 GitHub 화면에 입력할 수 있다(G-C12). 등록하지 않으면 알림은 조용히 꺼져 있다. 순서: [`TELEGRAM_SETUP.md`](../.github/editorial/TELEGRAM_SETUP.md) |
 
 ## 6. 자동 검증 매핑
 
 | 검사 ID | 내용 | 가드레일 |
 |---------|------|----------|
-| SEC-1 / SEC-2 | 금지 파일, 키·토큰 패턴(텔레그램 봇 토큰 모양 `숫자 6~12자리:영문숫자·-·_ 30~50자`(실제 토큰은 35자 안팎) 포함 — 같은 패턴 목록을 런타임 `mask()`도 쓴다) | G-S1, G-C11 |
+| SEC-1 / SEC-2 | 금지 파일, 키·토큰 패턴(텔레그램 봇 토큰 모양 `숫자 6~12자리:영문숫자·-·_ 30~50자`(실제 토큰은 35자 안팎) 포함 — 같은 패턴 목록을 런타임 `mask()`도 쓴다) | G-S1, G-C12 |
 | WF-0 / WF-1 / WF-3 / WF-4 / WF-5 / WF-9 | 워크플로 문법, permissions, `pull_request_target`, 입력 보간, 외부 액션 고정, 시크릿 echo | G-A1~A4, G-S3 |
-| WF-6 / WF-7 / WF-8 / WF-10 | 오류 은폐(`\|\| true`·`continue-on-error: true`; 예외: 알림 단계 — run 이 정확히 `python -m pipeline.notify <이벤트> [--commit …]` 한 줄이고 `timeout-minutes` 가 있는 단계는 `continue-on-error` 를 써도 경고하지 않는다, 알림 명령이 스스로 `::warning::` 으로 실패를 드러내므로 조용한 실패가 아니다), timeout, concurrency, 배포 dispatch 누락 | G-O2, G-A6, G-A8, G-C11 |
-| WF-13 | 텔레그램 시크릿 이름(`TELEGRAM_BOT_TOKEN`·`TELEGRAM_CHAT_ID`)이 단계 `env`의 같은 이름 환경변수에 `secrets.그 이름` 표현식 하나만(달러 기호와 이중 중괄호로 감싼 모양) 넣은 것이 아닌 곳(`run`·`with`·`if`·job/워크플로 `env`·이름 등)에 있음 — 토큰이 셸 명령 줄·로그·외부 액션으로 새는 길을 구조로 막는다(`$TELEGRAM_BOT_TOKEN` 처럼 셸에서 펼치는 것도 같다. 대소문자를 바꾼 `secrets.telegram_bot_token` 도 같은 시크릿이라 같게 본다). **한계**: 이름이 글자로 나오는 곳만 본다 — `toJSON(secrets)`·`secrets[format(…)]`·`secrets: inherit` 처럼 이름 없이 넘기는 길과 외부 `uses:` 단계의 env 는 못 잡는다. 작업 D(`blogger.yml` 재사용 워크플로화)는 호출 쪽 `jobs.<잡>.secrets` 의 텔레그램 시크릿 매핑이 허용된 자리가 아니라 이 규칙의 오류가 되는 점을 처리해야 한다(`ARCHITECTURE.md` §4-4) | G-C11, G-S3 |
+| WF-6 / WF-7 / WF-8 / WF-10 | 오류 은폐(`\|\| true`·`continue-on-error: true`; 예외: 알림 단계 — run 이 정확히 `python -m pipeline.notify <이벤트> [--commit …]` 한 줄이고 `timeout-minutes` 가 있는 단계는 `continue-on-error` 를 써도 경고하지 않는다, 알림 명령이 스스로 `::warning::` 으로 실패를 드러내므로 조용한 실패가 아니다), timeout, concurrency, 배포 dispatch 누락 | G-O2, G-A6, G-A8, G-C12 |
+| WF-13 | 텔레그램 시크릿 이름(`TELEGRAM_BOT_TOKEN`·`TELEGRAM_CHAT_ID`)이 단계 `env`의 같은 이름 환경변수에 `secrets.그 이름` 표현식 하나만(달러 기호와 이중 중괄호로 감싼 모양) 넣은 것이 아닌 곳(`run`·`with`·`if`·job/워크플로 `env`·이름 등)에 있음 — 토큰이 셸 명령 줄·로그·외부 액션으로 새는 길을 구조로 막는다(`$TELEGRAM_BOT_TOKEN` 처럼 셸에서 펼치는 것도 같다. 대소문자를 바꾼 `secrets.telegram_bot_token` 도 같은 시크릿이라 같게 본다). **한계**: 이름이 글자로 나오는 곳만 본다 — `toJSON(secrets)`·`secrets[format(…)]`·`secrets: inherit` 처럼 이름 없이 넘기는 길과 외부 `uses:` 단계의 env 는 못 잡는다. 작업 D(`blogger.yml` 재사용 워크플로화)는 호출 쪽 `jobs.<잡>.secrets` 의 텔레그램 시크릿 매핑이 허용된 자리가 아니라 이 규칙의 오류가 되는 점을 처리해야 한다(`ARCHITECTURE.md` §4-5) | G-C12, G-S3 |
 | WF-11 | 워크플로 `name`(오류, `[구분] ` 접두사 뒤의 이름 부분)·job `name`(경고)에 한글이 없음 — 운영자가 Actions 탭에서 이름만 보고 하는 일을 짐작할 수 있어야 한다. job `name`은 검증기에서는 경고지만 `test_real_repository_workflow_and_job_names_are_korean`이 경고도 실패로 취급하므로 새 job에도 한글 이름이 사실상 필요하다. 입력 `description`·단계 `name`·`run-name`의 한글은 검증기가 아니라 `tests/test_workflow_names.py`가 요구한다. 외부 템플릿을 복사해 넣을 때는 한글 `name`을 붙인다 | 운영 접근성(보안 규칙은 아님, `ENGINEERING_GUIDE` W10) |
 | WF-12 | 워크플로 `name`이 `[구분] `(채널 라벨·`공통`·`내부`)으로 시작하지 않거나 `run-name`의 접두사가 `name`과 다름 — Actions 목록에서 채널별로 묶여 보이게 하는 이름 규칙(`ENGINEERING_GUIDE` W10). 대괄호로 시작하는 값은 YAML에서 따옴표가 필요하다 | 운영 접근성(보안 규칙은 아님) |
 | REG-0~4 | 레지스트리 검증(블로그의 `channel`: 필수·허용 라벨·중복 없음·워크플로 `name` 접두사 일치, `ads`: 값·`jekyll-git` 밖의 `on` 금지·`ad_surface`·`defaults.ads`, `publish_flow`: 값 집합·`jekyll-git`에서만·`pr`이면 `mode: auto`는 REG-1), cron·시크릿·모델 드리프트 | G-S2, G-C10, G-C11, P2·P10 |

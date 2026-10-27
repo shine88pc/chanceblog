@@ -117,4 +117,4 @@
 - 알림 코드는 `pipeline/notify.py`(표준 라이브러리만)입니다. 시크릿은 워크플로의 **단계 `env`로만** 넘어가고(`run:` 명령 줄·`with:`·로그에는 쓰지 않습니다), 코드는 환경변수에서만 읽습니다. 토큰이 요청 주소의 경로에 들어가는 서비스라 오류 문구를 그대로 출력하면 새기 쉬워서, 코드는 예외의 문구를 어디에도 쓰지 않고 분류(클래스 이름·HTTP 상태·텔레그램이 준 짧은 설명)만 남기며 값은 글자 그대로도 지웁니다.
 - 한 통의 길이는 3,800자 안으로 줄이고(텔레그램 한도 4,096), 요청 하나의 제한 시간은 15초, 한도(429)에 걸리면 알려 준 시간(최대 10초)만큼 기다려 한 번, 네트워크 오류는 한 번 다시 시도합니다.
 - Blogger 러너는 알림을 **맨 마지막**에 보냅니다. 이력·초안 파일·실행 요약을 모두 쓴 뒤라서, 알림이 느리거나 그 사이 실행이 끊겨도 이미 올라간 글·초안의 기록은 남습니다.
-- 구조·실패 격리: [`docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md) §4-4, 토큰 취급 규칙: [`docs/SECURITY_GUARDRAILS.md`](../../docs/SECURITY_GUARDRAILS.md) G-C11, Actions 이름 표: [`docs/ACTIONS_GUIDE.md`](../../docs/ACTIONS_GUIDE.md).
+- 구조·실패 격리: [`docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md) §4-5, 토큰 취급 규칙: [`docs/SECURITY_GUARDRAILS.md`](../../docs/SECURITY_GUARDRAILS.md) G-C12, Actions 이름 표: [`docs/ACTIONS_GUIDE.md`](../../docs/ACTIONS_GUIDE.md).

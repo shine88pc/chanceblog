@@ -910,7 +910,7 @@ class TelegramSecretRuleTest(TmpCase):
 
     def test_the_message_names_the_rule_and_never_contains_a_value(self):
         found = self.check(tg_step(run="echo $TELEGRAM_BOT_TOKEN", env=TG_GOOD_ENV))
-        self.assertIn("G-C11", found[0].message)
+        self.assertIn("G-C12", found[0].message)
         self.assertEqual(found[0].path, ".github/workflows/w.yml")
         self.assertNotRegex(found[0].message, r"[0-9]{6,}:[A-Za-z0-9_-]{30}")
 

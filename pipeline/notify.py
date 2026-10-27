@@ -1,7 +1,7 @@
 """텔레그램 알림 — 새 글 발행·초안 발행 대기·확인 필요를 휴대폰으로 알린다(표준 라이브러리만, Python 3.10 이상).
 
 운영자가 GitHub 화면을 열지 않아도 '새 글이 올라갔다', 'Blogger 초안이 올라와 게시를 기다린다', '확인할 일이 생겼다'를 휴대폰 알림으로 받게 하는 알림 계층이다.
-운영자용 설명서: .github/editorial/TELEGRAM_SETUP.md / 구조·실패 격리: docs/ARCHITECTURE.md §4-4 / 토큰 취급 규칙: docs/SECURITY_GUARDRAILS.md G-C11
+운영자용 설명서: .github/editorial/TELEGRAM_SETUP.md / 구조·실패 격리: docs/ARCHITECTURE.md §4-5 / 토큰 취급 규칙: docs/SECURITY_GUARDRAILS.md G-C12
 
 설정: 환경변수 TELEGRAM_BOT_TOKEN·TELEGRAM_CHAT_ID(GitHub Secrets → 단계의 env). 둘 중 하나라도 비면 **비활성**이다 — 아무것도 보내지 않고 성공으로 끝난다.
 

@@ -626,7 +626,7 @@ class DocsMatchCodeTest(unittest.TestCase):
 
     def test_the_security_guardrails_have_the_token_rule_and_the_validator_rule(self):
         text = read("docs/SECURITY_GUARDRAILS.md")
-        self.assertRegex(text, r"\| G-C11 \|")
+        self.assertRegex(text, r"\| G-C12 \|")
         self.assertRegex(text, r"\| WF-13 ")
         for needle in ("TELEGRAM_BOT_TOKEN", "requests", "/revoke", "env"):
             self.assertIn(needle, text, needle)
