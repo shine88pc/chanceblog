@@ -15,6 +15,7 @@ on:
 permissions:
   contents: read
   actions: read
+  pull-requests: read  # 승인 흐름(publish_flow: pr)에서 승인 대기 초안 PR 을 세기 위해(읽기만)
   issues: write
 
 concurrency:

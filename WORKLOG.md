@@ -7,6 +7,39 @@
 
 ---
 
+## [2026-10-27] Claude – Chance 초안 → 사람 승인 후 공개 흐름(레지스트리 publish_flow, 기본 꺼짐) 추가 (작업요청서 5 PR-E, T2, 켜는 것은 T3)
+
+**작업자**: Claude (구현 세션, 독립 검증은 별도 세션)
+**대상**: Chance_Blog
+**등급**: T2(생성기·워크플로·레지스트리 스키마의 새 선택 필드·새 모듈·워치독·시험·문서). `publish_flow`를 `pr`로 켜는 것은 별도의 T3(게시 방식)이고 이 변경은 켜지 않는다. `mode`·시크릿·광고 표면(`index.html`·`_config.yml`)·`pages.yml`·Blogger·발행 빈도·`인수인계/작업내용.md`·`docs/SESSION_START.md`·`docs/REQUEST_BRIEFING.md`는 바꾸지 않았다.
+**승인 근거**: 운영자 채팅 2026-10-27 "추천대로 진행해줘"(`docs/analysis/2026-10-27_channel-management-plan.md` D1 (a): 구현하되 **기본 꺼짐**). 켜는 승인은 아직 없다. 켜는 승인에는 저장소 설정 확인과, 병합·닫은 초안 브랜치의 7일 뒤 자동 삭제(CHARTER T3 '브랜치 삭제'에 닿음)가 함께 들어간다.
+**목적**: 구글 게시자 정책은 수동 검토 없이 자동 생성된 콘텐츠에 광고를 두지 말라고 안내한다. Chance 글을 초안 브랜치와 승인 PR 로 올리고 운영자가 PR 을 병합해야 공개(닫으면 폐기)되는 흐름을 레지스트리 스위치 하나로 고를 수 있게 한다.
+**브랜치**: `ai/claude/chance-approval-flow`(기준 `origin/ai/claude/channel-names` `5c57a7c` = main `e71a6ec` + 작업 A. 작업 A 는 그 사이 main 에 병합됐다 — #47 `f8724b7`. `git rebase --onto origin/main 5c57a7c ai/claude/chance-approval-flow` 로 옮긴다: 임시 clone 에서 충돌 없이 됨을 확인했다). PR 생성·병합·Actions 실행은 하지 않았다(총괄이 처리).
+
+### 한 일
+- **레지스트리**: `publish_flow`(`direct` 기본·`pr`)와 검증(값 집합·`jekyll-git`에서만·`pr`이면 `mode: auto`). 작업 A 가 더한 `channel`·`ads` 필드와 나란히 있다. Chance 항목에 `"publish_flow": "direct"`. 값을 읽지 못하거나 틀리면 직접 게시로 떨어지지 않고 멈춘다.
+- **새 모듈** `pipeline/drafts.py`(슬롯 판정 `DRAFT_PENDING`·`DRAFT_CHECK_FAILED`, 브랜치 이름, PR 제목·본문 소독 `neutralize`, 표준 라이브러리 GitHub 클라이언트)·`pipeline/draft_flow.py`(초안 올리기·PR 열기·실패 시 브랜치 보존·다음 틱 PR 다시 열기·오래된 브랜치 정리, CLI `flow`·`deliver`). **이력 항목만 생성 시점에 main 에 따로 커밋**하고 PR 에는 글 파일 둘만 둔다 — 열린 초안이 여럿이어도 `history.json` 충돌이 없고 슬롯·제목·이미지 중복 검사가 지금 그대로다(이력을 PR 안에 두면 충돌함을 실제 git 으로 재현). 별도 원장 파일(`drafts.json`)은 두지 않았다.
+- **`generator.py`**: 승인 흐름이면 이력 항목에 `flow`·`branch`·`paths`, 결과 `DRAFT_CREATED`, 슬롯 판정 다듬기, 연습 실행은 '올리지 않습니다'. 직접 게시 경로는 그대로.
+- **`chanceblog.yml`**: `pull-requests: write`, `발행 흐름 확인` 단계, 커밋 단계 조건에 `&& steps.flow.outputs.flow != 'pr'`, 마지막 `초안 올리기와 승인 PR 열기` 단계. **`watchdog.yml`**: `pull-requests: read`. 워크플로 `name`·`run-name`의 `[Chance]` 접두사(작업 A)는 그대로다.
+- **워치독**: 열린 초안 PR 이 있으면 `STALE`·`NO_POSTS_DAY` 대신 `DRAFT_WAITING`(경고). 이 규칙이 맞게 돌도록 글이 올라온 시각을 병합 시각(`git log --first-parent`)으로 재고 병합하지 않은 초안 항목을 '글이 나온 날'로 세지 않는다(직접 게시에서는 결과 같음).
+- **문서**: ARCHITECTURE §4-4(새)와 §1·§2·§2-1·§3·§4·§4-1·§4-2·§9, ACTIONS_GUIDE 3-17(새)과 여러 절, HANDLER, ENGINEERING_GUIDE(W6 예외·R15), SECURITY_GUARDRAILS(G-A10·G-L8·**G-C11** — 작업 A 의 G-C10 다음), OPS_INBOX(현황판이 알아볼 PR 모양), DEFECT_REGISTER(관측 체크리스트). 워크플로 이름은 작업 A 의 새 이름(`[구분] …`)을 쓴다. 결함 번호는 쓰지 않았다.
+- **시험**: 새 시험 275개(`test_drafts`·`test_draft_flow`·`test_generator_drafts`·`test_chance_draft_workflow`·`test_draft_waiting` + 공용 `draft_helpers`, `test_workflow_names` +1)와 기존 시험 3개 파일 수정(`test_workflow_names` 권한·단계 비교, `test_manual_run_defaults` 커밋 단계 조건·배포 단계 찾기·레지스트리를 못 읽는 시험, `test_generator_slots`·`test_manual_run_defaults`의 `generator.main()`을 돌리는 두 클래스는 `draft_flow_on`을 직접 게시로 고정 — 켠 뒤에도 진짜 레지스트리 값·`git ls-remote` 네트워크 호출에 기대지 않게).
+
+### 검증 증거
+- 전체 시험 **2492개 통과**(기준 `5c57a7c` 2217개 → +275, 이 PC 354~1046초 — 다른 작업과 함께 돌 때 차이가 큼), `validate_repo.py --base origin/ai/claude/channel-names` 오류 0·경고 1(LIQUID-1, main 과 같음), pyflakes 새 경고 0(기준과 같은 16건), vermin 이 파일들 최소 3.7(저장소 전체 3.10), 3.12 전용 f-string 검사 0, actionlint 0.
+- **direct 불변**: 같은 가짜 입력으로 main(`e71a6ec`)과 이 브랜치의 `generator.py`를 정기·수동·이미지 교체 24개 시나리오에서 돌려 종료 코드·표준 출력·요약·바뀐 파일 해시·호출 기록이 바이트 단위로 같음(**24/24**, 저장소 밖 도구). 음성 대조 2건은 '다름'으로 잡힘. 워크플로 YAML 은 `yaml.safe_load` 구조 비교로 새 단계 둘·권한 한 줄·조건 한 조각을 빼면 기준과 완전히 같음.
+- **pr 흐름 시뮬레이션**(임시 bare origin + 로컬 clone + 실제 생성기 + 가짜 GitHub): 첫 틱 브랜치 push·이력 커밋·PR(403 뒤 다음 틱이 브랜치 내용으로 PR 다시 열기), 같은 슬롯 둘째 틱 `DRAFT_PENDING`, 병합 뒤 `ALREADY_PUBLISHED`, 정리 규칙, 슬롯 둘의 독립과 두 병합 순서, 대기 초안 제목 중복, 소독.
+- **변이 시험 111개**를 작업 A 위로 옮긴 뒤 다시 돌려 **111/111 사망**(옮기기 전 첫 판에서 5개가 살아남았고 모두 시험 구멍이라 시험을 보강했다). 켜는 두 줄(`blogs.json`의 `publish_flow`·`REAL_PUBLISH_FLOW`)을 `pr`로 바꾼 사본의 전체 시험도 통과했다.
+
+### 남긴 것 / 다음 AI에게 남기는 주의사항
+- **실제 GitHub 에서는 한 번도 돌려 보지 않았다**(PR 만들기·라벨·병합 뒤 배포). 병합 직후 `direct` 첫 정기 실행(새 단계 `발행 흐름 확인`만 추가)과 켠 뒤 첫 수동 실행의 관측 목록은 `docs/ACTIONS_GUIDE.md` 3-17·`docs/DEFECT_REGISTER.md` 하단. 라벨 호출이 `pull-requests: write`만으로 되는지(`issues: write` 필요 여부)는 미확인.
+- 켜기 전 운영자가 할 일: 저장소 설정 "Allow GitHub Actions to create and approve pull requests" 화면 확인(5-1 은 켜짐으로 기록, 미확인), 채팅 승인(T3). 켜는 변경은 `pipeline/blogs.json` 의 chance `publish_flow` 한 줄과, 그 값을 못 박아 둔 표지판 시험의 기준 한 줄(`tests/draft_helpers.py` 의 `REAL_PUBLISH_FLOW`)이다 — 레지스트리만 바꾸면 시험이 빨강이 된다.
+- 승인 흐름을 켜면 이력의 글이 공개된 글이 아닐 수 있다(확인 필요 모음의 '최근 24시간 글 수'는 초안도 센다). 현황판은 `ai/draft/` 접두·라벨 `초안`으로 구분해야 한다. 닫은 초안의 슬롯·주제는 다시 쓰지 않는다.
+- 봇이 연 PR 에는 검사가 안 돈다(GitHub 규칙). main 에 '상태 검사 필수'·'PR 필수' 보호를 켜면 병합과 이력 push 가 막힌다.
+- 직접 게시에서도 레지스트리를 읽지 못하면(깨진 `blogs.json`) 글을 만들기 전에 멈춘다(`발행 흐름 확인` 단계가 빨강). 승인 흐름을 켠 채 레지스트리 오류로 승인 없는 게시가 나가지 않게 하려는 것이다 — 정상 레지스트리에서는 달라지는 것이 없다.
+
+---
+
 ## [2026-10-27] Claude – 텔레그램·오토마우스 조사, 사용자 설정 메모 확인, 진행 현황 (문서 전용, 코드·워크플로·레지스트리·광고 표면 변경 없음)
 
 **작업자**: Claude

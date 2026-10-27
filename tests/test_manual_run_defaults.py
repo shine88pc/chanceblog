@@ -21,7 +21,7 @@ from unittest import mock
 import _bootstrap
 import generator as g
 from edits_helpers import ABOUT, image_body, issue, make_edit_root, page_body
-from pipeline import registry
+from pipeline import drafts, registry
 from pipeline import run as run_mod
 from pipeline.edits import runner
 from pipeline.stubs import stub_llm
@@ -400,6 +400,11 @@ class ManualOverCapTest(unittest.TestCase):
         patcher = mock.patch.object(g, "now_kst", return_value=at(10, 12))
         patcher.start()
         self.addCleanup(patcher.stop)
+        # 이 시험들은 직접 게시 경로의 정책(상한 경고)을 본다. 진짜 레지스트리의 publish_flow 값(승인 흐름을 켜면 pr)에 기대지 않고, 승인 흐름이었다면
+        # 정기 실행이 부르는 원격 브랜치 확인(git ls-remote, 네트워크)도 시험에서 일어나지 않게 직접 게시로 고정한다.
+        patcher = mock.patch.object(g, "draft_flow_on", return_value=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.summary = Path(tmp.name) / "summary.md"
@@ -484,8 +489,9 @@ class ManualOverCapTest(unittest.TestCase):
         self.assertNotIn("manual_over_cap", self.summary_text())
 
     def test_an_unreadable_registry_skips_the_warning_and_says_so(self):
+        # 이 시험의 대상은 상한 경고(daily_cap)다. 발행 흐름은 direct 로 고정한다(발행 흐름을 읽지 못하면 엔진이 멈추는 것은 test_generator_drafts.py 가 본다).
         for broken in (registry.RegistryError("없음"), ):
-            with mock.patch.object(registry, "load_registry", side_effect=broken):
+            with mock.patch.object(registry, "load_registry", side_effect=broken), mock.patch.object(drafts, "chance_flow", return_value="direct"):
                 value, out = self.run_main(self.today(5))
             self.assertNotIn("::warning::", out)
             self.assertIn("하루 게시 상한을 읽지 못해 수동 실행의 상한 초과 경고를 건너뜁니다.", out)
@@ -733,8 +739,10 @@ class UntouchedPathsTest(unittest.TestCase):
         self.assertEqual(chance["on"]["schedule"], [{"cron": "17 * * * *"}, {"cron": "47 * * * *"}])
         steps = chance["jobs"]["build"]["steps"]
         commit = next(s for s in steps if s.get("id") == "commit")
-        self.assertEqual(commit["if"], "${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}")
-        deploy = steps[-1]
+        # 승인 흐름(publish_flow: pr)을 더하면서 커밋 단계에 `&& steps.flow.outputs.flow != 'pr'` 한 조각이 붙었다. direct 에서 이 조건이 예전 식과
+        # 같은 결과를 내는지는 test_chance_draft_workflow.py 가 모든 이벤트·입력 조합으로 대조한다.
+        self.assertEqual(commit["if"], "${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) && steps.flow.outputs.flow != 'pr' }}")
+        deploy = next(s for s in steps if "gh workflow run pages.yml" in s.get("run", ""))
         self.assertEqual(deploy["if"], "steps.commit.outputs.pushed == 'true'")
 
     def test_blogger_keeps_its_cron_and_matrix_flow(self):

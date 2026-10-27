@@ -3,7 +3,7 @@
 사람은 평소에 아무 것도 하지 않는다. 문제가 생기면 이슈([Watchdog] ...)가 열려 알림이 가고,
 해소되면 자동으로 닫힌다. 판단 규칙은 pipeline/health.py(순수 함수), 이 스크립트는 I/O만 맡는다.
 
-필요 환경변수: GITHUB_TOKEN, GITHUB_REPOSITORY  (권한: contents:read, actions:read, issues:write)
+필요 환경변수: GITHUB_TOKEN, GITHUB_REPOSITORY  (권한: contents:read, actions:read, pull-requests:read, issues:write)
 옵션: WATCHDOG_DRY_RUN=1 이면 이슈를 만들지 않고 결과만 출력한다. 토큰이 없어도 dry-run 으로 동작한다.
       PIPELINE_PAUSE=true 이면 알림을 만들지 않는다(운영자가 일부러 멈춘 동안의 소음 방지).
 
@@ -93,6 +93,19 @@ class GitHubClient:
 
     def close(self, number):
         return self._request("PATCH", f"/repos/{self.repo}/issues/{number}", {"state": "closed"})
+
+    def list_open_draft_pulls(self):
+        """승인 흐름(publish_flow: pr)에서 열려 있는 초안 PR(이 저장소의 ai/draft/… 브랜치에서 연 것): [{'number', 'created_at'}, ...].
+        포크의 PR 은 뺀다. 읽기 전용(권한 pull-requests: read)."""
+        items = self._request("GET", f"/repos/{self.repo}/pulls?state=open&per_page=100") or []
+        found = []
+        for pr in items:
+            head = pr.get("head") if isinstance(pr, dict) and isinstance(pr.get("head"), dict) else {}
+            repo = head.get("repo") if isinstance(head.get("repo"), dict) else {}
+            if (str(head.get("ref") or "").startswith("ai/draft/")
+                    and str(repo.get("full_name") or "").lower() == str(self.repo).lower()):
+                found.append({"number": pr.get("number"), "created_at": pr.get("created_at")})
+        return found
 
     def workflow_runs(self, workflow_file, branch=None):
         """워크플로의 최근 완료 실행(최신순). branch 를 주면 그 브랜치에서 돈 실행만 받는다."""
@@ -231,7 +244,10 @@ def commit_times(root, path, added_only=False, limit=None, since="30 days ago"):
         return None
     cmd = ["git", "log", f"--since={since}", "--format=%ct"]
     if added_only:
-        cmd.append("--diff-filter=A")
+        # --first-parent: 승인 흐름(publish_flow: pr)의 글은 PR 병합 커밋으로 main 에 들어온다. 기본 이력 단순화는 병합 대신 초안 브랜치의 커밋(초안을
+        # 만든 시각)을 보여 줘 '글이 올라온 시각'이 병합 시각보다 하루 이상 앞설 수 있다. main 줄기만 따라가면 병합 커밋이 글을 더한 커밋으로 잡힌다.
+        # 직접 게시(봇이 main 에 한 줄로 커밋)에서는 결과가 같다.
+        cmd += ["--first-parent", "--diff-filter=A"]
     if limit:
         cmd.append(f"-{int(limit)}")
     try:
@@ -297,8 +313,15 @@ def collect(reg, root, now, client=None):
             post_days = None
             posts_7d, last_post = _history_post_stats(history, now)
             pages = None
+        pending = None
+        if client is not None and blog.get("publish_flow") == "pr":
+            # 승인 흐름: 글이 안 나온 것이 멈춤인지 승인 대기인지 가르려고 열린 초안 PR 을 읽는다. 읽지 못하면 None(예전처럼 STALE 등이 그대로 울린다).
+            try:
+                pending = client.list_open_draft_pulls()
+            except Exception as exc:  # noqa: BLE001 - 조회 실패는 이 구분만 건너뛰고 다른 검사를 막지 않는다
+                print(f"[참고] {blog['key']} 초안 PR 목록 조회 실패(승인 대기 구분을 건너뜀): {_oneline(exc)}")
         blog_findings = evaluate(blog, history, now, last_content_commit=last_content, recent_runs=runs,
-                                 post_days=post_days, pages_runs=pages)
+                                 post_days=post_days, pages_runs=pages, pending_drafts=pending)
         findings.extend(blog_findings)
         stats.append({"key": blog["key"], "mode": blog.get("mode"), "last_post": last_post, "posts_7d": posts_7d,
                       "codes": [f.code for f in blog_findings]})

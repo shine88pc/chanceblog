@@ -36,6 +36,11 @@ ADS_STATES = ("off", "pending_gate", "on")
 # 워크플로의 구분(`공통`·`내부`)은 레지스트리 밖이라 여기에 없다(scripts/validate_repo.py WF-12 가 합쳐서 쓴다).
 CHANNEL_LABELS = ("Chance", "Blogger", "Blogger 영문", "Blogger 한글", "티스토리", "네이버")
 
+# 글을 만든 뒤 공개되는 방식(jekyll-git 전용). direct = 만들자마자 main 에 커밋해 공개(기본, 지금 동작), pr = 초안 브랜치와 PR 로 올리고
+# 운영자가 PR 을 병합하면 공개(사람 승인 흐름, pipeline/drafts.py). 항목에 적지 않으면 direct. pr 로 바꾸는 것은 T3(게시 방식)다.
+PUBLISH_FLOWS = ("direct", "pr")
+DEFAULT_PUBLISH_FLOW = "direct"
+
 # 플랫폼별 필수 시크릿 역할. 새 플랫폼을 지원하려면 여기와 publishers/ 어댑터를 함께 추가한다.
 PLATFORMS = {
     "jekyll-git": {
@@ -355,6 +360,17 @@ def validate_registry(reg, root=None):
             # defaults.mode 를 물려받는 블로그는 defaults 가 auto 일 때 시크릿만 등록하면 곧바로 자동 게시된다. 모드는 항목마다 직접 적게 한다
             errors.append(f"{label}: mode를 이 항목에 직접 적어야 합니다(defaults.mode 를 물려받으면 새 블로그가 의도하지 않은 모드로 "
                           "바로 동작할 수 있습니다. 새 블로그는 off 로 시작하세요).")
+        if "publish_flow" in blog:
+            flow = blog["publish_flow"]
+            if flow not in PUBLISH_FLOWS:
+                errors.append(f"{label}: publish_flow는 {PUBLISH_FLOWS} 중 하나여야 합니다: {flow!r}")
+            elif platform != "jekyll-git":
+                errors.append(f"{label}: publish_flow는 platform jekyll-git 에서만 쓸 수 있습니다(지금 platform: {platform!r}). "
+                              "Blogger 의 사람 확인 단계는 mode draft(초안함 업로드)입니다.")
+            elif flow == "pr" and raw.get("mode") in MODES and raw.get("mode") != "auto":
+                # mode 를 적지 않았거나 올바르지 않은 값이면 위의 mode 오류가 이미 원인을 알려 준다(같은 원인으로 오류를 두 번 내지 않는다)
+                errors.append(f"{label}: publish_flow 가 pr 이면 mode 는 auto 여야 합니다(자동으로 만들고 사람이 PR 을 병합해 공개). "
+                              f"지금 mode: {raw.get('mode')!r}")
 
         for field in ("workflow", "entrypoint", "prompt"):
             value = blog.get(field)
