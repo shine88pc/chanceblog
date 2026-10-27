@@ -111,7 +111,7 @@ class FlowTest(PackageRunBase):
         self.assertEqual(text.splitlines()[0], f"### {self.key}")
         self.assertIn("공개된 글이 아닙니다", text)
         self.assertIn("티스토리에 직접 발행하고 이슈를 닫으세요", text)
-        self.assertIn("docs/ACTIONS_GUIDE.md 3-17", text)
+        self.assertIn("docs/ACTIONS_GUIDE.md 3-19", text)
         self.summary_path.unlink()
         self.go(key="naver_test")
         self.assertIn("네이버 블로그에 직접 발행하고 이슈를 닫으세요", self.summary())

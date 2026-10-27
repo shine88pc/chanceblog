@@ -76,7 +76,7 @@ class ResultCodeDocsTest(unittest.TestCase):
         part = section(arch, "**이슈 만들기 요청은 한 번만 보낸다", "글을 어디까지 보내는지")
         for needle in ("모호하면 멈춘다", "한 번만", "만들어졌을 수 있으니", "4xx", "같은 글을 다시 올리려는"):
             self.assertIn(needle, part, needle)
-        guard = next(line for line in read("docs/SECURITY_GUARDRAILS.md").splitlines() if line.startswith("| G-L8 |"))
+        guard = next(line for line in read("docs/SECURITY_GUARDRAILS.md").splitlines() if line.startswith("| G-L9 |"))
         for needle in ("자동 재시도하지 않는다", "다시 만들지 않고 멈춘다", "제어"):
             self.assertIn(needle, guard, needle)
         register = read("docs/DEFECT_REGISTER.md")
@@ -98,7 +98,7 @@ class LimitsAndPolicyDocsTest(unittest.TestCase):
         self.assertIn("60,000자", arch)
         self.assertIn("글 제목 60자", arch)
         guide = read("docs/ACTIONS_GUIDE.md")
-        self.assertIn("3건 이상", section(guide, "### 3-17.", "## 4."))
+        self.assertIn("3건 이상", section(guide, "### 3-19.", "## 4."))
 
     def test_the_documented_crons_are_the_workflows_crons(self):
         arch = section(read("docs/ARCHITECTURE.md"), "### B-2.", "### C. 또 하나의 Jekyll")
@@ -122,9 +122,9 @@ class LimitsAndPolicyDocsTest(unittest.TestCase):
         self.assertIn("보조", row)
         self.assertIn("우회 철자", row)
         self.assertNotIn("구조로 보장한다", row)
-        self.assertIn("| G-L8 |", guard)
+        self.assertIn("| G-L9 |", guard)
         for needle in ("영(0)폭 공백", "펜스", "gates.sanitize_html", "too_long", "자동 재시도하지 않는다"):
-            self.assertIn(needle, next(line for line in guard.splitlines() if line.startswith("| G-L8 |")), needle)
+            self.assertIn(needle, next(line for line in guard.splitlines() if line.startswith("| G-L9 |")), needle)
         self.assertIn("REG-1(초안 패키지)", guard)
         self.assertIn("G-S7", read("docs/ARCHITECTURE.md"))
         self.assertIn("G-S7", read("HANDLER.md"))
@@ -151,7 +151,7 @@ class LimitsAndPolicyDocsTest(unittest.TestCase):
         self.assertIn("초안 패키지(D-73·D-74) 병합 직후", register)
 
     def test_the_operator_guide_has_the_copy_and_publish_steps(self):
-        part = section(read("docs/ACTIONS_GUIDE.md"), "### 3-17.", "## 4.")
+        part = section(read("docs/ACTIONS_GUIDE.md"), "### 3-19.", "## 4.")
         for needle in ("복사용 제목", "HTML", "직접 겪은 일·판단", "이슈를 닫습니다", "`폐기`", "미확인", "G-C10"):
             self.assertIn(needle, part, needle)
 

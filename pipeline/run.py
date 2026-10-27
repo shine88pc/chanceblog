@@ -447,7 +447,7 @@ def _package_deliver(out, environ, blog, root, local_now, draft, post, topic, so
     service = issue_package.PACKAGE_INFO[blog["platform"]]["service"]
     lines = [_summary_head(blog), f"- 결과: **{status}** — {md_cell(post['title'], TITLE_SHOWN)}", f"- 초안 이슈: {md_cell(url, 300) or '(없음)'}"]
     if status == "package_issued":
-        lines.append(f"- 안내: 공개된 글이 아닙니다. 이슈의 복사 상자로 {service}에 직접 발행하고 이슈를 닫으세요(읽는 법: docs/ACTIONS_GUIDE.md 3-17).")
+        lines.append(f"- 안내: 공개된 글이 아닙니다. 이슈의 복사 상자로 {service}에 직접 발행하고 이슈를 닫으세요(읽는 법: docs/ACTIONS_GUIDE.md 3-19).")
     if status == "publish_failed":
         lines.append(f"- 사유: {md_cell(fail_text, REASONS_SHOWN)}")
         lines.append("- 안내: 이슈를 만들지 못했습니다. 만든 글은 저장소 초안 파일에 남았습니다." if draft_path is not None else "- 안내: 이슈를 만들지 못했습니다.")
