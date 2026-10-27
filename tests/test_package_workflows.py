@@ -11,6 +11,7 @@ import unittest
 import yaml
 
 import _bootstrap  # noqa: F401
+import blogger_workflow_helpers as wf
 from package_helpers import make_package_root, package_entry, registry_of
 from pipeline import plan, registry
 from test_workflow_names import context, load, render, workflow_paths
@@ -137,12 +138,16 @@ class SecurityTest(unittest.TestCase):
             self.assertEqual(uses, {"actions/checkout@v4", "actions/setup-python@v5"}, platform)
 
     def test_the_kill_switch_and_practice_flag_are_wired_like_the_blogger_workflow(self):
+        """킬 스위치는 Blogger 공용 워크플로(blogger.yml)와 같은 글자이고, 연습 실행 값은 Blogger 채널 래퍼를 거친 값과 모든 이벤트·입력에서 같다
+        (Blogger 는 정기·수동 판단을 래퍼의 `with.dry_run` 으로 옮겼으므로 식 글자는 다르다 — 값으로 비교한다)."""
         blogger = load("blogger.yml")["jobs"]["generate"]["env"]
         for platform in BOTH:
             env = load(f"{platform}.yml")["jobs"]["generate"]["env"]
             self.assertEqual(env["PIPELINE_PAUSE"], "${{ vars.PIPELINE_PAUSE }}", platform)
             self.assertEqual(env["DRY_RUN"], "${{ github.event.inputs.dry_run == 'true' && 'true' || 'false' }}", platform)
-            self.assertEqual((env["PIPELINE_PAUSE"], env["DRY_RUN"]), (blogger["PIPELINE_PAUSE"], blogger["DRY_RUN"]), platform)
+            self.assertEqual(env["PIPELINE_PAUSE"], blogger["PIPELINE_PAUSE"], platform)
+            for event, inputs in (("schedule", {}), ("workflow_dispatch", {"dry_run": "true"}), ("workflow_dispatch", {"dry_run": "false"}), ("workflow_dispatch", {})):
+                self.assertEqual(render(env["DRY_RUN"], wf.event_context(event, inputs)), wf.end_to_end_env("blogger-en.yml", event, inputs)["DRY_RUN"], (platform, event, inputs))
 
 
 class PlanAndRunTest(unittest.TestCase):

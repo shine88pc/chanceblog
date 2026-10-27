@@ -69,7 +69,7 @@
 3. **보안 회귀 테스트**: 우회 페이로드(`<scr<script>ipt>`, 이벤트 핸들러, `javascript:` 링크 등)를 케이스로 남긴다. 새 우회가 발견되면 먼저 실패하는 테스트를 추가하고 고친다.
 4. **실제 비밀처럼 보이는 리터럴을 소스에 쓰지 않는다.** 테스트에서는 런타임에 문자열을 조합한다(검증기 SEC-2 회피용 `allow` 표시에 기대지 않는다).
 5. **테스트가 실제로 실패하는지 확인**한다. 고친 코드를 잠시 되돌렸을 때 테스트가 깨지지 않으면 그 테스트는 쓸모가 없다.
-6. 임시 저장소는 `tests/test_run.py`의 `make_root()`를 쓴다(레지스트리·프로필·프롬프트를 복사하고, 워크플로 두 개(`chanceblog.yml`·`blogger.yml`)는 `name` 한 줄짜리 스텁 — 레지스트리 검증이 채널 접두사를 읽는다 — 나머지는 빈 파일).
+6. 임시 저장소는 `tests/test_run.py`의 `make_root()`를 쓴다(레지스트리·프로필·프롬프트를 복사하고, 레지스트리의 각 블로그 `workflow` 파일(`chanceblog.yml`·`blogger-en.yml`·`blogger-ko.yml`)은 그 블로그의 채널 라벨로 만든 `name` 한 줄짜리 스텁 — 레지스트리 검증이 채널 접두사를 읽는다 — 나머지는 빈 파일). 한글 Blogger(`blogger_kcyoon`)까지 함께 돌리는 시험은 `tests/blogger_ko_helpers.py`의 `make_pair_root()`·`KoreanRunBase`를 쓰고(영문·한글 이력이 따로 만들어진다), 워크플로 표현식을 이벤트·입력별로 평가하는 도구는 `tests/blogger_workflow_helpers.py`(`wrapper_with`·`end_to_end_env`·`old_env`)다.
 
 ### 자주 하는 확장 작업
 
@@ -92,7 +92,7 @@
 | **L0 정적** | 문법·보안 규칙·설정 일관성 | `python scripts/validate_repo.py` · `actionlint` · `python -m pipeline.registry` | 오류 0건 |
 | **L1 단위** | 로직(성공+실패 경로) | `python -m unittest discover -s tests` | 전부 통과, 네트워크 없음 |
 | **L2 드라이런** | 전체 흐름(스텁 LLM, 파일·게시 없음) | `python -m pipeline.run --blog <key> --dry-run` 또는 Actions `dry_run` 체크 | 종료 코드 0, 변경 파일 없음. 예외: Chance 드라이런은 모든 분야에 검증된 기사가 없거나 소스에 접속하지 못하면 종료 1이다(이상 신호, `docs/ARCHITECTURE.md` §4-1) — 실행 요약의 탈락 사유를 확인하고 기사가 있을 때 다시 실행한다 |
-| **L3 초안** | 실제 LLM·게이트, Blogger **초안함** 업로드 또는 저장소 초안 저장(공개 게시 없음) | Actions → `[Blogger] 글 자동 작성(초안함 업로드)` → Run workflow(`연습 실행` 체크를 풀고 `publish`=`draft`. 시크릿 등록 전이면 `off`) | `draft_uploaded`(`mode: draft` + 게시용 시크릿 4종: 초안함에 올라감) 또는 `draft`(`off`이거나 시크릿이 하나도 없을 때: 저장소 파일만), 초안 내용 확인. 시크릿이 일부만 있으면 종료 2 |
+| **L3 초안** | 실제 LLM·게이트, Blogger **초안함** 업로드 또는 저장소 초안 저장(공개 게시 없음) | Actions → `[Blogger 영문] 글 자동 작성`(한글은 `[Blogger 한글] 글 자동 작성`) → Run workflow(`연습 실행` 체크를 풀고 `publish`=`draft`. 시크릿 등록 전이면 `off`) | `draft_uploaded`(`mode: draft` + 게시용 시크릿 4종: 초안함에 올라감) 또는 `draft`(`off`이거나 시크릿이 하나도 없을 때: 저장소 파일만), 초안 내용 확인. 시크릿이 일부만 있으면 종료 2 |
 | **L4 카나리** | 실제 게시 소량 관찰 | `mode: auto`, 상한 1건/일, 3일 이상 | `posted` 연속, 워치독 이슈 0, 게시글 확인 |
 | **L5 운영** | 지속 감시 | 워치독 일 2회, Actions 실패 메일 | 이슈 0건 |
 

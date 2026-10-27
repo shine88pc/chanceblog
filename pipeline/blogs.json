@@ -46,13 +46,13 @@
     {
       "key": "blogger_macat",
       "name": "Blogger (macat0722)",
-      "channel": {"key": "blogger", "label": "Blogger"},
+      "channel": {"key": "blogger_en", "label": "Blogger 영문"},
       "platform": "blogger",
       "url": "https://macat0722.blogspot.com/",
       "role": "생활 습관 실용형 (EN)",
       "languages": ["en"],
       "mode": "off",
-      "workflow": ".github/workflows/blogger.yml",
+      "workflow": ".github/workflows/blogger-en.yml",
       "entrypoint": "blogger_generator.py",
       "prompt": ".github/editorial/BLOGGER_PROMPT_EN.md",
       "profile": "blogger_practical_en",
@@ -66,6 +66,33 @@
         "client_secret": "BLOGGER_CLIENT_SECRET",
         "refresh_token": "BLOGGER_REFRESH_TOKEN"
       },
+      "ads": "off",
+      "health": {"max_gap_hours": 50, "max_failure_streak": 3, "max_unpublished_days": 3}
+    },
+    {
+      "key": "blogger_kcyoon",
+      "name": "Blogger (kcyoon)",
+      "channel": {"key": "blogger_ko", "label": "Blogger 한글"},
+      "platform": "blogger",
+      "url": "https://kcyoon.blogspot.com/",
+      "role": "일상 속 AI·디지털 도구 활용기(주력) + 집·살림 실사용 기록(보조 30% 이내) (KO)",
+      "languages": ["ko"],
+      "mode": "off",
+      "workflow": ".github/workflows/blogger-ko.yml",
+      "entrypoint": "blogger_generator.py",
+      "prompt": ".github/editorial/BLOGGER_PROMPT_KO_AI.md",
+      "profile": "blogger_ai_tools_ko",
+      "state": {"history": "blogger_ko_history.json", "content_dir": "_blogger_ko_drafts"},
+      "schedule": {"cron": "30 3 * * *"},
+      "limits": {"max_posts_per_day": 1},
+      "secrets": {
+        "llm_api_key": "GEMINI_API_KEY",
+        "blog_id": "BLOGGER_KO_BLOG_ID",
+        "client_id": "BLOGGER_KO_CLIENT_ID",
+        "client_secret": "BLOGGER_KO_CLIENT_SECRET",
+        "refresh_token": "BLOGGER_KO_REFRESH_TOKEN"
+      },
+      "ad_surface": false,
       "ads": "off",
       "health": {"max_gap_hours": 50, "max_failure_streak": 3, "max_unpublished_days": 3}
     }

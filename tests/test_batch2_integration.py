@@ -199,8 +199,8 @@ class RegistryCombinationTest(unittest.TestCase):
     def test_the_real_registry_is_unchanged_by_the_merge(self):
         reg = registry.load_registry(REAL / "pipeline" / "blogs.json")
         blogs = [registry.merged_blog(reg, raw) for raw in reg["blogs"]]
-        self.assertEqual([blog["key"] for blog in blogs], ["chance", "blogger_macat"])
-        self.assertEqual({blog["key"]: blog["mode"] for blog in blogs}, {"chance": "auto", "blogger_macat": "off"})
+        self.assertEqual([blog["key"] for blog in blogs], ["chance", "blogger_macat", "blogger_kcyoon"])       # 한글 Blogger(작업 D)가 정지 상태로 더해졌다
+        self.assertEqual({blog["key"]: blog["mode"] for blog in blogs}, {"chance": "auto", "blogger_macat": "off", "blogger_kcyoon": "off"})
         self.assertEqual(blogs[0]["publish_flow"], "direct")
         self.assertFalse(any(blog["platform"] in registry.PACKAGE_PLATFORMS for blog in blogs))
 

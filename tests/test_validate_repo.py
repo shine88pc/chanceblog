@@ -248,7 +248,7 @@ AD_SCRIPT = ('<script async src="https://pagead2.googlesyndication.com/pagead/js
              '     crossorigin="anonymous"></script>\n')
 
 
-def registry_root(tmp, chance_cron="17 * * * *", blogger_cron="0 2 * * *", chance_extra="", blogger_matrix=True):
+def registry_root(tmp, chance_cron="17 * * * *", blogger_cron="0 2 * * *", chance_extra="", blogger_matrix=True, korean_cron="30 3 * * *"):
     root = make_root(tmp)
     write(root, "index.html", AD_SCRIPT)   # Chance 의 광고 표면(protected_paths)에 광고 코드가 있다 — 레지스트리의 ads=on 과 맞는다(REG-5)
     write(root, ".github/workflows/chanceblog.yml", f"""
@@ -272,27 +272,72 @@ def registry_root(tmp, chance_cron="17 * * * *", blogger_cron="0 2 * * *", chanc
                 run: git push
 {chance_extra}
         """)
-    secrets_line = "S: ${{ secrets[matrix.secret_blog_id] }}" if blogger_matrix else "S: nothing"
-    write(root, ".github/workflows/blogger.yml", f"""
-        name: "[Blogger] 블로거 글 자동 작성"
+    write(root, ".github/workflows/blogger.yml", BLOGGER_REUSABLE_TEXT)
+    names = {"macat": reg_mod.get_blog(reg_mod.load_registry(root / "pipeline" / "blogs.json"), "blogger_macat")["secrets"],
+             "kcyoon": reg_mod.get_blog(reg_mod.load_registry(root / "pipeline" / "blogs.json"), "blogger_kcyoon")["secrets"]}
+    write(root, ".github/workflows/blogger-en.yml", blogger_wrapper("Blogger 영문", blogger_cron, "blogger_macat", "blogger-en", names["macat"], wired=blogger_matrix))
+    write(root, ".github/workflows/blogger-ko.yml", blogger_wrapper("Blogger 한글", korean_cron, "blogger_kcyoon", "blogger-ko", names["kcyoon"], wired=blogger_matrix))
+    return root
+
+
+BLOGGER_REUSABLE_TEXT = """
+    name: "[내부] Blogger 글 작성 공용(직접 실행하지 마세요)"
+    on:
+      workflow_call:
+        inputs:
+          blog: {type: string, required: true}
+          topic: {type: string, required: false, default: ''}
+          dry_run: {type: boolean, required: false, default: true}
+          publish: {type: string, required: false, default: ''}
+          auth_check: {type: boolean, required: false, default: false}
+        secrets:
+          PIPELINE_SECRET_LLM_API_KEY: {required: false}
+          PIPELINE_SECRET_BLOG_ID: {required: false}
+          PIPELINE_SECRET_CLIENT_ID: {required: false}
+          PIPELINE_SECRET_CLIENT_SECRET: {required: false}
+          PIPELINE_SECRET_REFRESH_TOKEN: {required: false}
+          TELEGRAM_BOT_TOKEN: {required: false}
+          TELEGRAM_CHAT_ID: {required: false}
+    permissions:
+      contents: read
+    jobs:
+      plan:
+        name: 대상 블로그 계획
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+        steps:
+          - run: echo ok
+    """
+
+
+def blogger_wrapper(label, cron, key, group, names, wired=True):
+    """Blogger 채널 래퍼(blogger-en.yml·blogger-ko.yml 모양) 텍스트. names: 레지스트리 secrets({역할: 환경변수 이름}). wired=False 면 secrets 매핑을 뺀다."""
+    secrets = "\n".join(f"              PIPELINE_SECRET_{role.upper()}: ${{{{ secrets.{name} }}}}" for role, name in names.items())
+    return f"""
+        name: "[{label}] 글 자동 작성"
         on:
           schedule:
-            - cron: '{blogger_cron}'
+            - cron: '{cron}'
+          workflow_dispatch:
         permissions:
           contents: read
         concurrency:
-          group: b
+          group: {group}
         jobs:
-          j:
-            name: 글 생성
-            runs-on: ubuntu-latest
-            timeout-minutes: 5
-            steps:
-              - env:
-                  {secrets_line}
-                run: echo ok
-        """)
-    return root
+          blogger:
+            name: 글 작성
+            permissions:
+              contents: write
+            uses: ./.github/workflows/blogger.yml
+            with:
+              blog: {key}
+              topic: ${{{{ github.event.inputs.topic }}}}
+              dry_run: ${{{{ github.event.inputs.dry_run == 'true' }}}}
+              publish: ${{{{ github.event_name == 'workflow_dispatch' && github.event.inputs.publish || '' }}}}
+              auth_check: ${{{{ github.event_name == 'workflow_dispatch' && github.event.inputs.auth_check == 'true' }}}}
+""" + (f"""            secrets:
+{secrets}
+""" if wired else "")
 
 
 DEPLOY_STEP = "              - run: gh workflow run pages.yml\n"
@@ -306,7 +351,7 @@ class WorkflowPrefixTest(TmpCase):
         return vr.check_workflow_prefixes(self.root, vr.list_files(self.root))
 
     def test_every_allowed_label_passes(self):
-        for label in ("Chance", "Blogger", "Blogger 영문", "Blogger 한글", "티스토리", "네이버", "공통", "내부"):
+        for label in ("Chance", "Blogger 영문", "Blogger 한글", "티스토리", "네이버", "공통", "내부"):
             self.assertEqual(self.prefixes(f'name: "[{label}] 이름"\n'), [], label)
 
     def test_a_name_without_the_prefix_is_an_error(self):
@@ -320,7 +365,7 @@ class WorkflowPrefixTest(TmpCase):
         self.assertEqual([(f.check, f.level) for f in found], [("WF-12", "ERROR")])
         self.assertIn("[기타]", found[0].message)
         self.assertIn("CHANNEL_LABELS", found[0].message)
-        for label in ("chance", "CHANCE", "Blogger 영어", "블로거"):      # 대소문자·표기가 다르면 다른 라벨이다
+        for label in ("chance", "CHANCE", "Blogger 영어", "블로거", "Blogger"):      # 대소문자·표기가 다르면 다른 라벨이다(영문·한글로 나누기 전의 임시 라벨 `Blogger` 도 더 이상 허용 목록에 없다)
             self.assertEqual(levels(self.prefixes(f'name: "[{label}] 이름"\n'), "WF-12"), ["ERROR"], label)
 
     def test_malformed_prefixes_are_errors(self):
@@ -360,7 +405,7 @@ class WorkflowPrefixTest(TmpCase):
 
     def test_labels_are_the_registry_channel_labels_plus_common_and_internal(self):
         self.assertEqual(vr.WORKFLOW_LABELS, tuple(reg_mod.CHANNEL_LABELS) + ("공통", "내부"))
-        self.assertEqual(reg_mod.CHANNEL_LABELS, ("Chance", "Blogger", "Blogger 영문", "Blogger 한글", "티스토리", "네이버"))
+        self.assertEqual(reg_mod.CHANNEL_LABELS, ("Chance", "Blogger 영문", "Blogger 한글", "티스토리", "네이버"))
 
     def test_run_checks_and_cli_report_a_missing_prefix_as_error(self):
         root = registry_root(self.root, chance_extra=DEPLOY_STEP)
@@ -440,13 +485,13 @@ class RegistryContractTest(TmpCase):
     def test_a_workflow_name_that_does_not_match_the_channel_label_is_a_REG_1_error(self):
         """블로그의 channel.label 과 그 워크플로 name 의 `[라벨] ` 이 다르면 레지스트리 검증(REG-1)이 알린다."""
         root = registry_root(self.root, chance_extra=DEPLOY_STEP)
-        wf = root / ".github" / "workflows" / "blogger.yml"
-        wf.write_text(wf.read_text(encoding="utf-8").replace('"[Blogger] ', '"[Chance] '), encoding="utf-8")
+        wf = root / ".github" / "workflows" / "blogger-en.yml"
+        wf.write_text(wf.read_text(encoding="utf-8").replace('"[Blogger 영문] ', '"[Chance] '), encoding="utf-8")
         found = vr.check_registry(root, vr.list_files(root))
         self.assertEqual(levels(found, "REG-1"), ["ERROR"])
         message = next(f.message for f in found if f.check == "REG-1")
         self.assertIn("blogger_macat", message)
-        self.assertIn("[Blogger] ", message)
+        self.assertIn("[Blogger 영문] ", message)
 
 
 class AdsDriftTest(TmpCase):
@@ -731,7 +776,7 @@ class LiquidInDocsTest(TmpCase):
 
 
 class BriefingTest(TmpCase):
-    FULL = "`chance` `blogger_macat` `alpha.yml` `beta.yaml` `text_change` `link_change`\n"
+    FULL = "`chance` `blogger_macat` `blogger_kcyoon` `alpha.yml` `beta.yaml` `text_change` `link_change`\n"
 
     def build(self, briefing):
         (self.root / "pipeline").mkdir()
@@ -975,6 +1020,330 @@ class AlertStepExemptionTest(TmpCase):
     def test_the_real_repository_has_no_hidden_failure_warning(self):
         found = [f for f in vr.check_workflows(REAL, vr.list_files(REAL)) if f.check == "WF-6"]
         self.assertEqual([f.line() for f in found], [])
+
+
+def call_yaml(secrets="", uses="./.github/workflows/callee.yml", with_text="", job_extra=(), name="[공통] 부르는 쪽 시험"):
+    """재사용 워크플로를 부르는 워크플로 YAML. secrets 는 `jobs.call.secrets` 아래에 그대로 넣을 줄들(들여쓰기 없이), with_text 는 `with:` 아래 줄들."""
+    lines = [f'name: "{name}"', "on:", "  workflow_dispatch:", "permissions:", "  contents: read", "jobs:", "  call:", "    name: 부르기"]
+    lines += [f"    uses: {uses}"]
+    lines += [f"    {line}" for line in job_extra]
+    if with_text:
+        lines += ["    with:", *[f"      {line}" for line in with_text.splitlines()]]
+    if secrets:
+        lines += ["    secrets:", *[f"      {line}" for line in secrets.splitlines()]]
+    return "\n".join(lines) + "\n"
+
+
+def callee_yaml(declared="", steps="", description=None):
+    """`on: workflow_call` 로 시크릿을 받는 쪽 워크플로 YAML. declared 는 `on.workflow_call.secrets` 아래에 그대로 넣을 줄들(들여쓰기 없이)."""
+    lines = ['name: "[내부] 불리는 쪽 시험"', "on:", "  workflow_call:"]
+    if declared:
+        lines += ["    secrets:", *[f"      {line}" for line in declared.splitlines()]]
+    lines += ["permissions:", "  contents: read", "jobs:", "  j:", "    name: 시험", "    runs-on: ubuntu-latest", "    timeout-minutes: 5", "    steps:"]
+    lines += [f"      {line}" for line in (steps or "- run: echo ok").splitlines()]
+    return "\n".join(lines) + "\n"
+
+
+class TelegramReusableWorkflowTest(TmpCase):
+    """WF-13 확장(작업 D, 독립 검증 N-4): 재사용 워크플로로 텔레그램 시크릿이 지나갈 때 허용되는 자리는 정확히 둘이다 —
+    ① 이 저장소의 재사용 워크플로를 부르는 잡의 `secrets:` 에서 같은 이름으로(`${{ secrets.이름 }}` 그대로) ② 불리는 쪽 `on.workflow_call.secrets` 의 정의(선택 항목)."""
+
+    def check(self, text, rel=".github/workflows/w.yml"):
+        write(self.root, rel, text)
+        return vr.check_telegram_secrets(self.root, vr.list_files(self.root))
+
+    @staticmethod
+    def marks(found):
+        return [(f.check, f.level) for f in found]
+
+    @staticmethod
+    def place(finding):
+        return re.search(r"자리\((.*?)\)에", finding.message).group(1)
+
+    def test_the_caller_may_hand_both_secrets_over_by_the_same_name(self):
+        self.assertEqual(self.check(call_yaml(secrets=TG_GOOD_ENV)), [])
+        self.assertEqual(self.check(call_yaml(secrets=f"TELEGRAM_CHAT_ID: {TG_CHAT}")), [])                    # 하나만도 된다
+        self.assertEqual(self.check(call_yaml(secrets="TELEGRAM_BOT_TOKEN: ${{secrets.TELEGRAM_BOT_TOKEN}}")), [])   # 식 안의 공백
+
+    def test_a_caller_with_other_secrets_around_is_fine(self):
+        secrets = "PIPELINE_SECRET_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}\n" + TG_GOOD_ENV
+        self.assertEqual(self.check(call_yaml(secrets=secrets)), [])
+
+    def test_the_callee_may_declare_both_secrets_as_optional(self):
+        declared = "TELEGRAM_BOT_TOKEN:\n  required: false\n  description: '휴대폰 알림용(선택)'\nTELEGRAM_CHAT_ID:\n  required: false"
+        self.assertEqual(self.check(callee_yaml(declared)), [])
+        self.assertEqual(self.check(callee_yaml("TELEGRAM_BOT_TOKEN:\nTELEGRAM_CHAT_ID: {}")), [])                 # 정의가 비어 있어도(선택) 된다
+
+    def test_the_callee_still_uses_the_secret_only_in_a_step_env(self):
+        declared = "TELEGRAM_BOT_TOKEN:\n  required: false"
+        step_env = "- name: 알림\n  run: python -m pipeline.notify test\n  env:\n    TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}"
+        self.assertEqual(self.check(callee_yaml(declared, steps=step_env)), [])
+        found = self.check(callee_yaml(declared, steps="- run: echo ${{ secrets.TELEGRAM_BOT_TOKEN }}"))
+        self.assertEqual((self.marks(found), self.place(found[0])), ([("WF-13", "ERROR")], "jobs.j.steps.0.run"))
+
+    def test_a_different_value_under_a_telegram_name_is_an_error(self):
+        for secrets in (f"TELEGRAM_BOT_TOKEN: {TG_CHAT}", f"TELEGRAM_CHAT_ID: {TG_TOKEN}"):
+            with self.subTest(secrets=secrets):
+                found = self.check(call_yaml(secrets=secrets))
+                self.assertEqual(self.marks(found), [("WF-13", "ERROR")])
+
+    def test_decorated_or_computed_values_are_errors(self):
+        values = (f'"{TG_TOKEN}-x"', "\"${{ secrets.TELEGRAM_BOT_TOKEN || 'x' }}\"", "\"${{ format('{0}', secrets.TELEGRAM_BOT_TOKEN) }}\"", f'"{TG_TOKEN} {TG_CHAT}"')
+        for value in values:
+            with self.subTest(value=value[:40]):
+                found = self.check(call_yaml(secrets=f"TELEGRAM_BOT_TOKEN: {value}"))
+                self.assertEqual((self.marks(found), self.place(found[0])), ([("WF-13", "ERROR")], "jobs.call.secrets.TELEGRAM_BOT_TOKEN"))
+
+    def test_a_key_that_only_differs_in_letter_case_is_an_error(self):
+        for secrets in (f"telegram_bot_token: {TG_TOKEN}", "TELEGRAM_BOT_TOKEN: ${{ secrets.telegram_bot_token }}", f"Telegram_Chat_Id: {TG_CHAT}"):
+            with self.subTest(secrets=secrets):
+                self.assertEqual(self.marks(self.check(call_yaml(secrets=secrets))), [("WF-13", "ERROR")])
+
+    def test_a_telegram_name_with_an_unrelated_value_is_an_error_even_though_the_value_has_no_name(self):
+        found = self.check(call_yaml(secrets="TELEGRAM_BOT_TOKEN: ${{ secrets.GEMINI_API_KEY }}"))
+        self.assertEqual(self.marks(found), [("WF-13", "ERROR")])
+        self.assertIn("jobs.call.secrets.TELEGRAM_BOT_TOKEN", found[0].message)
+        self.assertEqual(self.marks(self.check(call_yaml(secrets="TELEGRAM_CHAT_ID: plain"))), [("WF-13", "ERROR")])
+
+    def test_handing_the_secrets_to_a_workflow_in_another_repository_is_an_error(self):
+        for uses in ("octo/repo/.github/workflows/x.yml@0123456789abcdef0123456789abcdef01234567", "./not-a-workflow-folder/x.yml", "./.github/workflows/sub/x.yml",
+                     "./.github/actions/x", "docker://image",
+                     "./.github/workflows/x.yml@main", "./.github/workflows/x.yml/extra", "octo/./.github/workflows/x.yml"):    # 이 저장소 것처럼 보이지만 앞뒤에 더 붙은 것(변이 V04: 부분 일치로 바뀌면 통과해 버린다)
+            with self.subTest(uses=uses):
+                found = self.check(call_yaml(secrets=TG_GOOD_ENV, uses=uses))
+                self.assertEqual([self.place(f) for f in found], ["jobs.call.secrets.TELEGRAM_BOT_TOKEN", "jobs.call.secrets.TELEGRAM_CHAT_ID"])
+
+    def test_a_job_that_is_not_a_reusable_call_cannot_carry_a_secrets_mapping(self):
+        text = tg_yaml(tg_step(env=TG_GOOD_ENV), job_extra=["secrets:", f"  TELEGRAM_BOT_TOKEN: {TG_TOKEN}"])
+        found = self.check(text)
+        self.assertEqual((self.marks(found), self.place(found[0])), ([("WF-13", "ERROR")], "jobs.j.secrets.TELEGRAM_BOT_TOKEN"))
+
+    def test_secrets_inherit_is_an_error_because_it_hands_over_every_secret_without_a_name(self):
+        for text in ("inherit", " Inherit ", "INHERIT"):
+            with self.subTest(text=text):
+                found = self.check(call_yaml(job_extra=[f"secrets: '{text}'"]))
+                self.assertEqual(self.marks(found), [("WF-13", "ERROR")])
+                self.assertIn("jobs.call.secrets", found[0].message)
+                self.assertIn("inherit", found[0].message)
+        self.assertEqual(self.check(call_yaml(job_extra=["secrets: inherit"]))[0].check, "WF-13")     # 따옴표 없는 inherit 도 같다
+
+    def test_inheriting_is_reported_for_any_job_even_with_no_telegram_name_anywhere(self):
+        self.assertEqual(self.marks(self.check(call_yaml(job_extra=["secrets: inherit"], uses="./.github/workflows/tistory.yml"))), [("WF-13", "ERROR")])
+
+    def test_the_with_inputs_of_a_call_cannot_carry_the_secret(self):
+        found = self.check(call_yaml(with_text=f"token: {TG_TOKEN}", secrets=TG_GOOD_ENV))
+        self.assertEqual((self.marks(found), self.place(found[0])), ([("WF-13", "ERROR")], "jobs.call.with.token"))
+
+    def test_the_callee_declaration_must_be_optional(self):
+        found = self.check(callee_yaml("TELEGRAM_BOT_TOKEN:\n  required: true"))
+        self.assertEqual(self.marks(found), [("WF-13", "ERROR")])
+        self.assertIn("required: true", found[0].message)
+        self.assertIn("on.workflow_call.secrets.TELEGRAM_BOT_TOKEN", found[0].message)
+
+    def test_the_callee_declaration_name_must_be_exactly_upper_case(self):
+        for declared in ("telegram_bot_token:\n  required: false", "Telegram_Chat_Id: {}"):
+            with self.subTest(declared=declared):
+                found = self.check(callee_yaml(declared))
+                self.assertEqual(self.marks(found), [("WF-13", "ERROR")])
+                self.assertIn("대문자", found[0].message)
+
+    def test_the_callee_declaration_allows_only_required_and_description(self):
+        found = self.check(callee_yaml("TELEGRAM_BOT_TOKEN:\n  required: false\n  default: abc"))
+        self.assertEqual(self.marks(found), [("WF-13", "ERROR")])
+        self.assertIn("default", found[0].message)
+        found = self.check(callee_yaml("TELEGRAM_BOT_TOKEN: abc"))                                             # 문자열 정의 — 값처럼 보이는 것을 정의에 두지 않는다
+        self.assertTrue(found and all(f.check == "WF-13" for f in found))
+
+    def test_the_description_of_a_declared_secret_cannot_repeat_the_name(self):
+        found = self.check(callee_yaml("TELEGRAM_BOT_TOKEN:\n  required: false\n  description: 'TELEGRAM_BOT_TOKEN 알림용'"))
+        self.assertEqual(self.marks(found), [("WF-13", "ERROR")])
+        self.assertTrue(self.place(found[0]).endswith("secrets.TELEGRAM_BOT_TOKEN.description"), self.place(found[0]))
+
+    def test_declaring_other_secrets_is_not_judged(self):
+        self.assertEqual(self.check(callee_yaml("PIPELINE_SECRET_BLOG_ID:\n  required: true\nOTHER: {}")), [])
+
+    def test_the_rule_runs_inside_run_checks(self):
+        root = registry_root(self.root, chance_extra=DEPLOY_STEP)
+        self.assertNotIn("WF-13", checks(vr.run_checks(root)))
+        write(root, ".github/workflows/bad.yml", call_yaml(job_extra=["secrets: inherit"], uses="./.github/workflows/blogger.yml"))
+        self.assertIn(("WF-13", "ERROR"), [(f.check, f.level) for f in vr.run_checks(root)])
+
+    def test_the_real_blogger_wrappers_and_the_reusable_workflow_pass(self):
+        found = vr.check_telegram_secrets(REAL, vr.list_files(REAL))
+        self.assertEqual([f.line() for f in found], [])
+        for wrapper in ("blogger-en.yml", "blogger-ko.yml"):
+            self.assertIn("TELEGRAM_BOT_TOKEN", (REAL / ".github" / "workflows" / wrapper).read_text(encoding="utf-8"))   # 시험이 비어 있지 않다
+
+
+class BloggerWrapperRuleTest(TmpCase):
+    """REG-6(작업 D): Blogger 블로그의 워크플로(채널별 래퍼)가 레지스트리와 맞는지 — 어느 블로그를 어느 시크릿 이름으로 돌리는지가 레지스트리가 아니라 래퍼의 글자로 정해지기 때문이다."""
+
+    def setUp(self):
+        super().setUp()
+        self.reg_root = registry_root(self.root, chance_extra=DEPLOY_STEP)
+
+    def check(self, root=None):
+        root = root or self.reg_root
+        return vr.check_blogger_wrappers(root, vr.list_files(root))
+
+    def edit(self, wrapper, old, new, count=1):
+        path = self.reg_root / ".github" / "workflows" / wrapper
+        text = path.read_text(encoding="utf-8")
+        self.assertEqual(text.count(old), count, (old, text))
+        path.write_text(text.replace(old, new), encoding="utf-8")
+
+    def messages(self):
+        return [f.message for f in self.check()]
+
+    def test_consistent_wrappers_pass(self):
+        self.assertEqual(self.check(), [])
+
+    def test_a_wrapper_that_runs_the_other_blog_is_an_error(self):
+        self.edit("blogger-en.yml", "blog: blogger_macat", "blog: blogger_kcyoon")
+        found = self.check()
+        self.assertEqual([(f.check, f.level, f.path) for f in found], [("REG-6", "ERROR", ".github/workflows/blogger-en.yml")])
+        self.assertIn("blogger_macat", found[0].message)
+        self.assertIn("with.blog", found[0].message)
+
+    def test_the_blog_key_must_be_a_literal_not_an_expression(self):
+        self.edit("blogger-ko.yml", "blog: blogger_kcyoon", "blog: ${{ github.event.inputs.blog }}")
+        self.assertTrue(any("with.blog" in m for m in self.messages()))
+
+    def test_every_input_must_be_handed_over_explicitly(self):
+        self.edit("blogger-en.yml", "      auth_check: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.auth_check == 'true' }}\n", "")
+        messages = self.messages()
+        self.assertEqual(len(messages), 1, messages)
+        self.assertIn("빠진 것: auth_check", messages[0])
+
+    def test_an_unknown_input_is_an_error(self):
+        self.edit("blogger-en.yml", "      blog: blogger_macat\n", "      blog: blogger_macat\n      dry_runn: 'true'\n")
+        self.assertTrue(any("모르는 것: dry_runn" in m for m in self.messages()))
+
+    def test_the_korean_wrapper_may_not_hand_over_the_english_secrets(self):
+        """한글 Blogger 는 영문과 계정·OAuth 클라이언트가 달라야 한다 — 한글 래퍼가 영문 시크릿 이름(BLOGGER_*)을 넘기면 오류다(역할마다 따로 알린다)."""
+        for name in ("BLOGGER_KO_BLOG_ID", "BLOGGER_KO_CLIENT_ID", "BLOGGER_KO_CLIENT_SECRET", "BLOGGER_KO_REFRESH_TOKEN"):
+            self.edit("blogger-ko.yml", f"secrets.{name}", f"secrets.{name.replace('BLOGGER_KO_', 'BLOGGER_')}")
+        messages = self.messages()
+        self.assertEqual(len(messages), 4, messages)
+        for role in ("BLOG_ID", "CLIENT_ID", "CLIENT_SECRET", "REFRESH_TOKEN"):
+            self.assertTrue(any(f"PIPELINE_SECRET_{role}" in m and f"BLOGGER_KO_{role}" in m for m in messages), (role, messages))
+
+    def test_one_swapped_secret_is_reported_once(self):
+        self.edit("blogger-ko.yml", "secrets.BLOGGER_KO_REFRESH_TOKEN", "secrets.BLOGGER_REFRESH_TOKEN")
+        messages = self.messages()
+        self.assertEqual(len(messages), 1, messages)
+        self.assertIn("PIPELINE_SECRET_REFRESH_TOKEN", messages[0])
+
+    def test_a_missing_role_is_an_error(self):
+        self.edit("blogger-en.yml", "      PIPELINE_SECRET_CLIENT_ID: ${{ secrets.BLOGGER_CLIENT_ID }}\n", "")
+        messages = self.messages()
+        self.assertEqual(len(messages), 1, messages)
+        self.assertIn("PIPELINE_SECRET_CLIENT_ID", messages[0])
+
+    def test_a_secret_that_is_not_this_blogs_is_an_error(self):
+        self.edit("blogger-en.yml", "    secrets:\n", "    secrets:\n      PIPELINE_SECRET_EXTRA: ${{ secrets.BLOGGER_KO_BLOG_ID }}\n")
+        self.assertTrue(any("이 블로그의 것이 아닌 시크릿이 있습니다(PIPELINE_SECRET_EXTRA)" in m for m in self.messages()))
+
+    def test_the_telegram_names_are_the_only_other_secrets_a_wrapper_may_hand_over(self):
+        self.edit("blogger-en.yml", "    secrets:\n", f"    secrets:\n      TELEGRAM_BOT_TOKEN: {TG_TOKEN}\n      TELEGRAM_CHAT_ID: {TG_CHAT}\n")
+        self.assertEqual(self.check(), [])                                    # 모양 자체는 WF-13 이 따로 본다
+
+    def test_secrets_inherit_leaves_every_role_missing(self):
+        path = self.reg_root / ".github" / "workflows" / "blogger-en.yml"
+        text = path.read_text(encoding="utf-8")
+        head = text[:text.index("    secrets:\n")]
+        path.write_text(head + "    secrets: inherit\n", encoding="utf-8")
+        self.assertEqual(len(self.messages()), 4 + 1, self.messages())         # 역할 5개(llm_api_key 포함) 모두 빠짐
+        self.assertIn(("WF-13", "ERROR"), [(f.check, f.level) for f in vr.run_checks(self.reg_root)])
+
+    def test_the_call_job_needs_contents_write_because_a_called_workflow_cannot_raise_permissions(self):
+        self.edit("blogger-en.yml", "    permissions:\n      contents: write\n", "")
+        messages = self.messages()
+        self.assertEqual(len(messages), 1, messages)
+        self.assertIn("contents: write", messages[0])
+        self.edit("blogger-ko.yml", "contents: write", "contents: read")
+        self.assertEqual(len(self.messages()), 2)
+
+    def test_the_concurrency_group_is_required_and_cannot_collide_with_the_reusable_workflows_own_group(self):
+        self.edit("blogger-en.yml", "  group: blogger-en\n", "  group: blogger-blogger_macat\n")
+        messages = self.messages()
+        self.assertEqual(len(messages), 1, messages)
+        self.assertIn("blogger-blogger_macat", messages[0])
+        self.assertIn("서로를 기다려", messages[0])
+        self.edit("blogger-en.yml", "  group: blogger-blogger_macat\n", "  group: blogger-en\n")
+        path = self.reg_root / ".github" / "workflows" / "blogger-ko.yml"
+        path.write_text(path.read_text(encoding="utf-8").replace("concurrency:\n  group: blogger-ko\n", ""), encoding="utf-8")
+        self.assertTrue(any("concurrency.group 이 없습니다" in m for m in self.messages()))
+
+    def test_two_wrappers_cannot_share_one_group(self):
+        self.edit("blogger-ko.yml", "  group: blogger-ko\n", "  group: blogger-en\n")
+        messages = self.messages()
+        self.assertEqual(len(messages), 1, messages)
+        self.assertIn("영문·한글 실행이 서로를 막지 않습니다", messages[0])
+
+    def test_a_workflow_that_does_not_call_the_reusable_one_is_an_error(self):
+        write(self.reg_root, ".github/workflows/blogger-ko.yml", blogger_wrapper("Blogger 한글", "30 3 * * *", "blogger_kcyoon", "blogger-ko", {}, wired=False).replace(
+            "uses: ./.github/workflows/blogger.yml", "runs-on: ubuntu-latest"))
+        messages = self.messages()
+        self.assertEqual(len(messages), 1, messages)
+        self.assertIn("정확히 하나여야 합니다(지금 0개)", messages[0])
+
+    def test_two_call_jobs_are_an_error(self):
+        path = self.reg_root / ".github" / "workflows" / "blogger-en.yml"
+        text = path.read_text(encoding="utf-8")
+        job = text[text.index("jobs:\n") + len("jobs:\n"):]
+        path.write_text(text + job.replace("blogger:", "blogger_two:", 1), encoding="utf-8")
+        self.assertTrue(any("정확히 하나여야 합니다(지금 2개)" in m for m in self.messages()))
+
+    def test_chance_and_other_platforms_are_not_judged(self):
+        write(self.reg_root, ".github/workflows/chanceblog.yml", "name: '[Chance] 챈스 글'\non: push\npermissions:\n  contents: read\njobs: {}\n")
+        self.assertEqual(self.check(), [])
+
+    def test_a_yaml_syntax_error_is_left_to_wf0(self):
+        write(self.reg_root, ".github/workflows/blogger-en.yml", "name: [unclosed\n")
+        self.assertEqual(self.check(), [])
+
+    def test_an_invalid_registry_is_left_to_reg1(self):
+        path = self.reg_root / "pipeline" / "blogs.json"
+        reg = json.loads(path.read_text(encoding="utf-8"))
+        reg["blogs"][1]["mode"] = "yolo"
+        path.write_text(json.dumps(reg), encoding="utf-8")
+        self.assertEqual(self.check(), [])
+        self.assertIn("REG-1", checks(vr.run_checks(self.reg_root)))
+
+    def test_a_missing_yaml_library_is_skipped(self):
+        original, vr.yaml = vr.yaml, None
+        try:
+            self.assertEqual(vr.check_blogger_wrappers(self.reg_root, vr.list_files(self.reg_root)), [])
+        finally:
+            vr.yaml = original
+
+    def test_run_checks_includes_the_rule_and_the_cli_fails_on_it(self):
+        self.assertNotIn("REG-6", checks(vr.run_checks(self.reg_root)))
+        self.edit("blogger-ko.yml", "secrets.BLOGGER_KO_BLOG_ID", "secrets.BLOGGER_BLOG_ID")
+        self.assertIn(("REG-6", "ERROR"), [(f.check, f.level) for f in vr.run_checks(self.reg_root)])
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = vr.main(["--root", str(self.reg_root)])
+        self.assertEqual(code, 1)
+        self.assertIn("[REG-6]", out.getvalue())
+
+    def test_the_messages_name_the_file_and_never_contain_a_secret_value(self):
+        self.edit("blogger-ko.yml", "secrets.BLOGGER_KO_BLOG_ID", "secrets.BLOGGER_BLOG_ID")
+        found = self.check()
+        self.assertEqual(found[0].path, ".github/workflows/blogger-ko.yml")
+        self.assertIn("BLOGGER_KO_BLOG_ID", found[0].message)               # 이름은 알려 준다(값은 저장소에 없다)
+
+    def test_the_real_repository_passes(self):
+        found = vr.check_blogger_wrappers(REAL, vr.list_files(REAL))
+        self.assertEqual([f.line() for f in found], [])
+
+    def test_the_real_wrappers_match_the_registry_workflow_field(self):
+        reg = reg_mod.load_registry(REAL / "pipeline" / "blogs.json")
+        files = {blog["key"]: blog["workflow"] for blog in reg["blogs"] if blog["platform"] == "blogger"}
+        self.assertEqual(files, {"blogger_macat": ".github/workflows/blogger-en.yml", "blogger_kcyoon": ".github/workflows/blogger-ko.yml"})
+        self.assertEqual(vr.BLOGGER_REUSABLE, "./.github/workflows/blogger.yml")
+        self.assertEqual(vr.BLOGGER_CALL_INPUTS, ("blog", "topic", "dry_run", "publish", "auth_check"))
 
 
 class CliTest(TmpCase):

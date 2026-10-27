@@ -455,7 +455,7 @@ class RunFailureTest(unittest.TestCase):
     NAMES = {"chanceblog.yml": "Chance 글 작성"}        # 스크립트가 워크플로 파일의 최상위 name 에서 읽어 오는 이름(읽지 못한 파일은 빠진다)
     # 실행(run)의 name 은 run-name 이라 실행마다 다르다. 옛 이름은 이름을 바꾸기 전에 만든 실행의 name 이 이력에 남은 것이다.
     RUN_NAME_VARIANTS = ("[Chance] 기존 글 이미지 교체 · 연습(저장 안 함)", "[Chance] 이슈 #12 수정 요청 처리 · 수동(연습: PR·코멘트 안 만듦)",
-                         "Blogger Generate", "Blogger 글 자동 작성", "", None)   # Blogger Generate = [Blogger] 글 자동 작성(초안함 업로드) 의 옛 영문 이름
+                         "Blogger Generate", "Blogger 글 자동 작성", "", None)   # Blogger Generate = [Blogger 영문] 글 자동 작성(옛 [Blogger] 글 자동 작성(초안함 업로드)) 의 옛 영문 이름
     # 'Blogger 글 자동 작성' = 접두사 `[구분] ` 을 붙이기 전(2026-10-25~27)의 이름
 
     def build(self, runs_by_file, annotations=None, names=None):
@@ -811,7 +811,7 @@ class PlatformNoticeTest(unittest.TestCase):
         runs_a, notes_a = self.world(files=("a.yml", "b.yml"), runs_each=2)
         runs_b, notes_b = self.world(files=("a.yml", "b.yml"), runs_each=2)
         runs_b["c.yml"] = [h.make_run(90, ago(minutes=3), name="[Chance] 기존 글 이미지 교체 · 연습(저장 안 함)", path=".github/workflows/c.yml"),
-                           h.make_run(91, ago(hours=30), name="Blogger Generate", path=".github/workflows/c.yml")]   # Blogger Generate = [Blogger] 글 자동 작성(초안함 업로드) 의 옛 영문 이름
+                           h.make_run(91, ago(hours=30), name="Blogger Generate", path=".github/workflows/c.yml")]   # Blogger Generate = [Blogger 영문] 글 자동 작성(옛 [Blogger] 글 자동 작성(초안함 업로드)) 의 옛 영문 이름
         notes_b[90] = [h.make_annotation(REAL_UBUNTU_NOTICE, "notice"), h.make_annotation(REAL_NODE_WARNING)]          # 다른 순서로 달린 같은 안내
         notes_b[91] = [h.make_annotation(REAL_NODE_WARNING)]
         runs_b["a.yml"] = runs_b["a.yml"][:1]                                                                          # a.yml 의 이전 실행은 없다

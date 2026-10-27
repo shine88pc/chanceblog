@@ -1451,8 +1451,9 @@ class RunWithDraftsTest(unittest.TestCase):
         self.run_script(fake, root)
         rows = table_rows(self.body(fake))
         self.assertEqual(rows[0], ["Chance", "자동 공개", "-", "-"])
-        self.assertEqual(rows[1], ["Blogger", "정지", "-", "-"])
-        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[1], ["Blogger 영문", "정지", "-", "-"])
+        self.assertEqual(rows[2], ["Blogger 한글", "정지", "-", "-"])
+        self.assertEqual(len(rows), 3)
         self.assertNotIn("Blogger 대시보드", self.body(fake))                          # 정지 중인 Blogger 의 대략치 안내는 붙이지 않는다
         self.assertEqual(self.body(fake).count("- 휴대폰에서 거르기:"), 1)
 

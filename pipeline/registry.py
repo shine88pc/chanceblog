@@ -5,8 +5,10 @@
 시크릿 '값'은 여기에 두지 않는다. 항목에는 환경변수(= GitHub Secrets) '이름'만 둔다.
 
 블로그마다 `channel`(채널 라벨 — 그 블로그 워크플로 name 맨 앞의 `[라벨] `과 같은 글자)과 `ads`(광고 선언: off·pending_gate·on)를
-적는다. 둘 다 이 파일이 검증한다(규칙: docs/ARCHITECTURE.md §3). 이 모듈은 표준 라이브러리만 쓴다 — blogger.yml 의 plan 잡이
+적는다. 둘 다 이 파일이 검증한다(규칙: docs/ARCHITECTURE.md §3). 이 모듈은 표준 라이브러리만 쓴다 — 공용 워크플로 blogger.yml 의 plan 잡이
 pip install 없이 `python -m pipeline.plan` 으로 이 검증을 실행하기 때문이다(워크플로 name 은 YAML 을 해석하지 않고 줄을 본다).
+블로그의 `workflow` 는 그 블로그를 실행하는 워크플로 파일이다 — Blogger 는 공용 워크플로(blogger.yml)가 아니라 그것을 부르는 채널별 래퍼
+(blogger-en.yml·blogger-ko.yml)다. 워치독·확인 필요 모음이 '마지막 실행'을 이 파일로 찾고, 재사용 워크플로를 부른 실행은 부른 쪽(래퍼) 파일 아래 기록되기 때문이다.
 
 초안 패키지 채널(platform tistory·naver, mode package): 공식 자동 게시 수단이 없어 글을 GitHub 이슈로 보여 주기만 한다. 이 채널은
 시크릿 역할이 LLM 키뿐이고(구조적 보장) 계정 정보 낱말이 든 시크릿 이름은 보조로 막는다(PACKAGE_PLATFORMS·_package_errors, docs/SECURITY_GUARDRAILS.md G-S7).
@@ -39,7 +41,9 @@ ADS_STATES = ("off", "pending_gate", "on")
 
 # 채널 라벨 = 그 블로그 워크플로 `name:` 맨 앞의 `[라벨] `(운영자가 Actions 목록에서 채널별로 묶어 본다). 블로그에 속하지 않는
 # 워크플로의 구분(`공통`·`내부`)은 레지스트리 밖이라 여기에 없다(scripts/validate_repo.py WF-12 가 합쳐서 쓴다).
-CHANNEL_LABELS = ("Chance", "Blogger", "Blogger 영문", "Blogger 한글", "티스토리", "네이버")
+# Blogger 는 영문(macat0722)·한글(kcyoon) 두 채널이라 라벨이 둘이다. 한글 Blogger 를 등록하기 전까지 영문 하나일 때 쓰던 임시 라벨 `Blogger` 는 없앴다
+# (blogger.yml 이 공용 워크플로 `[내부]` 가 되고 채널별 래퍼 blogger-en.yml·blogger-ko.yml 이 `[Blogger 영문]`·`[Blogger 한글]` 을 쓴다).
+CHANNEL_LABELS = ("Chance", "Blogger 영문", "Blogger 한글", "티스토리", "네이버")
 
 # 글을 만든 뒤 공개되는 방식(jekyll-git 전용). direct = 만들자마자 main 에 커밋해 공개(기본, 지금 동작), pr = 초안 브랜치와 PR 로 올리고
 # 운영자가 PR 을 병합하면 공개(사람 승인 흐름, pipeline/drafts.py). 항목에 적지 않으면 direct. pr 로 바꾸는 것은 T3(게시 방식)다.

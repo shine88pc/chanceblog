@@ -20,6 +20,7 @@ import ops_inbox_helpers as h          # scripts/ 를 import 경로에 올린다
 import ops_inbox as oi  # noqa: E402
 from notify_helpers import CHAT, ENV, TOKEN, FakeNet, http_error, leaks
 from pipeline import inbox, notify
+from blogger_ko_helpers import EN_URL, KO_ENV, KO_URL, KoreanRunBase, ko_publisher
 from pipeline.publishers.base import PublishResult
 from test_run import BLOG_URL, FULL_ENV, FakePublisher, RunBase
 from test_workflow_names import context, load, render
@@ -69,7 +70,7 @@ class BloggerRunnerAlertTest(RunBase):
         self.assertEqual(code, 0)
         self.assertEqual(net.calls, 1)
         body = net.bodies()[0]
-        self.assertTrue(body["text"].startswith(f"{notify.OK_MARK} <b>게시됨</b> — Blogger: "))
+        self.assertTrue(body["text"].startswith(f"{notify.OK_MARK} <b>게시됨</b> — Blogger 영문: "))
         self.assertEqual(body["reply_markup"]["inline_keyboard"][0][0], {"text": "글 보기", "url": BLOG_URL + "2026/10/x.html"})
         self.assertIn("[참고] 텔레그램 알림: 보냈습니다", out)
         self.assertEqual(self.history()[-1]["status"], "posted")
@@ -80,7 +81,7 @@ class BloggerRunnerAlertTest(RunBase):
         self.assertEqual((code, net.calls), (0, 1))
         self.assertTrue(pub.published[0]["draft"])
         text = net.bodies()[0]["text"]
-        self.assertTrue(text.startswith(f"{notify.MEMO_MARK} <b>발행 대기</b> — Blogger: "))
+        self.assertTrue(text.startswith(f"{notify.MEMO_MARK} <b>발행 대기</b> — Blogger 영문: "))
         self.assertIn("초안함에 올라왔습니다 — Blogger 대시보드 → 초안에서 확인하고 게시하세요", text)
         self.assertEqual(self.history()[-1]["status"], "draft_uploaded")
 
@@ -123,7 +124,7 @@ class BloggerRunnerAlertTest(RunBase):
         self.assertEqual(spy.call_count, 1)
         args, kwargs = spy.call_args
         self.assertEqual(args[1], "draft_uploaded")
-        self.assertEqual(kwargs["blog_label"], "Blogger")
+        self.assertEqual(kwargs["blog_label"], "Blogger 영문")
         self.assertEqual(kwargs["extra_prefixes"], (BLOG_URL,))
         self.assertEqual(args[2], self.history()[-1]["title"])
 
@@ -210,30 +211,8 @@ class BloggerRunnerAlertTest(RunBase):
 
     def test_the_blogger_message_uses_the_registry_channel_label(self):
         code, out, net = self.go_alert(extra=("--publish", "draft"))
-        self.assertIn("Blogger: ", net.bodies()[0]["text"])
-
-    def relabel_the_channel(self, label):
-        """레지스트리의 blogger_macat 채널 라벨을 바꾼다(예: 두 번째 Blogger 채널 'Blogger 한글'). 레지스트리 검증이 워크플로 name 의 [라벨] 접두사를 읽으므로 스텁도 맞춘다."""
-        path = self.root / "pipeline" / "blogs.json"
-        reg = json.loads(path.read_text(encoding="utf-8"))
-        for blog in reg["blogs"]:
-            if blog["key"] == "blogger_macat":
-                blog["channel"] = {"key": "blogger_ko", "label": label}
-        path.write_text(json.dumps(reg, ensure_ascii=False), encoding="utf-8")
-        (self.root / ".github" / "workflows" / "blogger.yml").write_text(f'name: "[{label}] 글 자동 작성(초안함 업로드)"\n', encoding="utf-8")
-
-    def test_the_draft_message_uses_the_label_of_the_blogs_own_channel(self):
-        """독립 검증 H12: 한글 Blogger 처럼 두 번째 Blogger 채널이 켜지면 알림은 그 블로그의 채널 라벨을 쓴다(상수 'Blogger' 가 아니라)."""
-        self.relabel_the_channel("Blogger 한글")
-        code, out, net = self.go_alert(extra=("--publish", "draft"))
-        self.assertEqual((code, net.calls), (0, 1), out)
-        self.assertIn("<b>발행 대기</b> — Blogger 한글: ", net.bodies()[0]["text"])
-
-    def test_the_posted_message_uses_the_label_of_the_blogs_own_channel(self):
-        self.relabel_the_channel("Blogger 한글")
-        code, out, net = self.go_alert()
-        self.assertEqual((code, net.calls), (0, 1), out)
-        self.assertIn("<b>게시됨</b> — Blogger 한글: ", net.bodies()[0]["text"])
+        self.assertIn("Blogger 영문: ", net.bodies()[0]["text"])
+        self.assertNotIn("Blogger 한글", net.bodies()[0]["text"])
 
     def test_the_alert_is_sent_last_after_the_history_the_draft_file_and_the_summary_are_written(self):
         """독립 검증 N-1: 알림이 오래 걸리거나 그 사이 프로세스가 끊겨도, 이미 올라간 글·초안의 이력·초안 파일·실행 요약은 남아 있어야 한다 — 같은 날 재실행이
@@ -261,6 +240,58 @@ class BloggerRunnerAlertTest(RunBase):
     def test_the_run_never_prints_the_values_even_when_telegram_answers_with_them(self):
         code, out, net = self.go_alert(net=FakeNet(http_error(401, f"Unauthorized: {TOKEN} {CHAT}")))
         self.assertEqual(leaks(out), [])
+
+
+class KoreanBloggerAlertTest(KoreanRunBase):
+    """독립 검증 H12 가 예고한 일: 두 번째 Blogger 채널(한글, kcyoon)이 켜지면 알림은 상수 'Blogger' 가 아니라 그 블로그의 레지스트리 채널 라벨(Blogger 한글)로 나간다.
+    러너 코드는 영문과 같고 레지스트리 값만 다르다 — 실제 레지스트리의 한글 항목(mode 만 시험이 켠다)으로 돌려 확인한다."""
+    ENV_ON = dict(KO_ENV, **ENV)
+
+    def setUp(self):
+        super().setUp()
+        notify.reset_budget()
+        self.addCleanup(notify.reset_budget)
+
+    def go_alert(self, net=None, env=None, publisher=None, extra=()):
+        net = net if net is not None else FakeNet()
+        with patched_network(net):
+            code, out = self.go(env=self.ENV_ON if env is None else env, publisher=publisher, extra=extra)
+        return code, out, net
+
+    def test_the_draft_message_uses_the_label_of_the_blogs_own_channel(self):
+        code, out, net = self.go_alert(extra=("--publish", "draft"))
+        self.assertEqual((code, net.calls), (0, 1), out)
+        text = net.bodies()[0]["text"]
+        self.assertTrue(text.startswith(f"{notify.MEMO_MARK} <b>발행 대기</b> — Blogger 한글: "), text)
+        self.assertNotIn("Blogger 영문", text)
+        self.assertEqual(self.history()[-1]["status"], "draft_uploaded")
+
+    def test_the_posted_message_uses_the_label_and_the_blog_address_of_the_korean_blog(self):
+        code, out, net = self.go_alert(extra=("--publish", "publish"))
+        self.assertEqual((code, net.calls), (0, 1), out)
+        body = net.bodies()[0]
+        self.assertTrue(body["text"].startswith(f"{notify.OK_MARK} <b>게시됨</b> — Blogger 한글: "), body["text"])
+        self.assertEqual(body["reply_markup"]["inline_keyboard"][0][0], {"text": "글 보기", "url": KO_URL + "2026/10/x.html"})      # 한글 블로그 주소만 버튼이 된다
+
+    def test_the_english_blog_address_is_not_allowed_as_a_button_of_the_korean_alert(self):
+        publisher = ko_publisher(result=PublishResult(post_id="ko1", url=EN_URL + "2026/10/x.html"))
+        code, out, net = self.go_alert(publisher=publisher, extra=("--publish", "publish"))
+        self.assertEqual((code, net.calls), (0, 1), out)
+        self.assertEqual(net.bodies()[0].get("reply_markup", {}).get("inline_keyboard", []), [])       # 주소가 이 블로그(kcyoon) 것이 아니면 버튼을 만들지 않는다
+
+    def test_the_registry_label_and_the_blog_address_are_what_the_runner_hands_to_the_alert(self):
+        with mock.patch.object(notify.Notifier, "notify_blogger_result", autospec=True, return_value=notify.Result(True, False, None, "not_applicable", "")) as spy:
+            code, out, net = self.go_alert(extra=("--publish", "draft"))
+        self.assertEqual(spy.call_count, 1)
+        args, kwargs = spy.call_args
+        self.assertEqual(kwargs["blog_label"], "Blogger 한글")
+        self.assertEqual(kwargs["extra_prefixes"], (KO_URL,))
+
+    def test_without_the_telegram_secrets_the_korean_run_prints_exactly_what_it_printed_before(self):
+        with patched_network(FakeNet()) as net:
+            code, out = self.go(env=KO_ENV, publisher=ko_publisher(), extra=("--publish", "draft"))
+        self.assertEqual((code, net.calls), (0, 0))
+        self.assertNotIn("텔레그램", out)
 
 
 # ----------------------------------------------------------------------------
@@ -454,9 +485,25 @@ TELEGRAM_ENV = {"TELEGRAM_BOT_TOKEN": "${{ secrets.TELEGRAM_BOT_TOKEN }}", "TELE
 
 
 class WorkflowStructureTest(unittest.TestCase):
-    def test_the_secret_names_appear_only_in_the_four_expected_workflows(self):
+    def test_the_secret_names_appear_only_in_the_expected_workflows(self):
+        """텔레그램 시크릿 이름은 알림을 보내는 워크플로(chanceblog·ops-inbox·telegram-test), Blogger 공용 워크플로(정의와 러너 단계 env), 그것을 부르는 두 래퍼(`secrets:` 매핑)에만 있다."""
         found = sorted(p.name for p in WORKFLOWS.iterdir() if "TELEGRAM_" in p.read_text(encoding="utf-8"))
-        self.assertEqual(found, ["blogger.yml", "chanceblog.yml", "ops-inbox.yml", "telegram-test.yml"])
+        self.assertEqual(found, ["blogger-en.yml", "blogger-ko.yml", "blogger.yml", "chanceblog.yml", "ops-inbox.yml", "telegram-test.yml"])
+
+    def test_the_blogger_wrappers_hand_the_two_secrets_over_only_by_name_in_the_secrets_mapping(self):
+        for wrapper in ("blogger-en.yml", "blogger-ko.yml"):
+            data = load(wrapper)
+            job = next(iter(data["jobs"].values()))
+            self.assertEqual({key: value for key, value in job["secrets"].items() if "TELEGRAM" in key}, TELEGRAM_ENV, wrapper)
+            self.assertNotIn("TELEGRAM", json.dumps(job["with"]), wrapper)                 # 입력(with)으로는 넘기지 않는다
+            self.assertNotIn("TELEGRAM", json.dumps({k: v for k, v in data.items() if k != "jobs"}), wrapper)
+            self.assertNotEqual(job["secrets"], "inherit", wrapper)
+
+    def test_the_reusable_workflow_declares_the_two_secrets_as_optional_and_uses_them_only_in_the_runner_step_env(self):
+        data = load("blogger.yml")
+        declared = data["on"]["workflow_call"]["secrets"]
+        for name in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"):
+            self.assertIs(declared[name]["required"], False, name)           # 알림은 보조 — 시크릿이 없어도 호출이 실패하지 않는다
 
     def test_every_use_of_the_secrets_passes_the_validator_rule(self):
         import validate_repo

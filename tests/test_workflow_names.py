@@ -39,7 +39,7 @@ def load(name):
 # ----------------------------------------------------------------------------
 OLD_NAMES = {
     "Chance_Blog Full-Auto Engine": "[Chance] 글 자동 작성·게시",
-    "Blogger Generate": "[Blogger] 글 자동 작성(초안함 업로드)",
+    "Blogger Generate": "[Blogger 영문] 글 자동 작성",
     "Deploy GitHub Pages": "[공통] 사이트 자동 배포",
     "Guardrails": "[공통] 저장소 규칙·테스트 자동 검사",
     "PR Scope Check": "[공통] PR 변경 범위 검사",
@@ -267,12 +267,13 @@ class KoreanNamesTest(unittest.TestCase):
         self.assertGreaterEqual(seen, 5)  # chanceblog · chance-fix-images · blogger · watchdog · issue-edit
 
     def test_blogger_dry_run_description_says_what_unchecking_it_does(self):
-        """blogger.yml 의 dry_run 은 기본이 켜짐이다(2026-10-25 수동 실행 기본값 변경, D-51). 체크를 풀면 실제 Gemini 로 초안을 만들어 저장소에
-        커밋하고 하루 상한을 쓴다 — Run workflow 대화상자의 입력 설명이 그 사실을 알려야 한다(기본값 자체는 test_manual_run_defaults.py 가 고정한다)."""
-        description = load("blogger.yml")["on"]["workflow_dispatch"]["inputs"]["dry_run"]["description"]
-        self.assertIn("체크를 풀면", description)
-        self.assertIn("커밋", description)
-        self.assertIn("하루 상한", description)
+        """Blogger 래퍼(blogger-en.yml·blogger-ko.yml)의 dry_run 은 기본이 켜짐이다(2026-10-25 수동 실행 기본값 변경, D-51). 체크를 풀면 실제 Gemini 로 초안을
+        만들어 저장소에 커밋하고 하루 상한을 쓴다 — Run workflow 대화상자의 입력 설명이 그 사실을 알려야 한다(기본값 자체는 test_manual_run_defaults.py 가 고정한다)."""
+        for wrapper in ("blogger-en.yml", "blogger-ko.yml"):
+            description = load(wrapper)["on"]["workflow_dispatch"]["inputs"]["dry_run"]["description"]
+            self.assertIn("체크를 풀면", description, wrapper)
+            self.assertIn("커밋", description, wrapper)
+            self.assertIn("하루 상한", description, wrapper)
 
     def test_docs_tables_list_every_workflow_with_its_current_name(self):
         """워크플로 이름을 바꾸거나 새 워크플로를 만들면 두 문서의 대응표(`파일`과 `이름`이 같은 줄)도 고쳐야 한다."""
@@ -350,29 +351,31 @@ class RunNameTest(unittest.TestCase):
                          "[Chance] 기존 글 이미지 교체 · 연습(실제 AI 호출·저장 안 함)")
 
     def test_blogger_titles(self):
-        self.assertEqual(self.title("blogger.yml", "schedule"), "[Blogger] 글 작성 · 정기")
-        # 수동 실행의 publish 는 3택(off=저장소 파일만, draft=Blogger 초안함 업로드, publish=즉시 게시)이다
-        manual = {"dry_run": False, "publish": "draft"}
-        self.assertEqual(self.title("blogger.yml", "workflow_dispatch", manual), "[Blogger] 글 작성 · 수동(Blogger 초안함 업로드)")
-        self.assertEqual(self.title("blogger.yml", "workflow_dispatch", {**manual, "publish": "off"}),
-                         "[Blogger] 글 작성 · 수동(저장소 파일만 저장)")
-        self.assertEqual(self.title("blogger.yml", "workflow_dispatch", {**manual, "publish": "publish"}),
-                         "[Blogger] 글 작성 · 수동(즉시 게시)")
-        self.assertEqual(self.title("blogger.yml", "workflow_dispatch", {"dry_run": True, "publish": "off"}),
-                         "[Blogger] 글 작성 · 수동(연습: 저장·게시 안 함)")
-        # 연습이면 선택과 무관하게 아무것도 올리지 않는다(blogger.yml 의 DRY_RUN 이 우선)
-        for choice in ("off", "draft", "publish"):
-            self.assertEqual(self.title("blogger.yml", "workflow_dispatch", {"dry_run": True, "publish": choice}),
-                             "[Blogger] 글 작성 · 수동(연습: 저장·게시 안 함)")
-        # '인증 점검만 실행'은 글을 만들지 않으므로 다른 선택(연습·publish)보다 제목에 먼저 드러난다
-        for dry_run in (False, True):
-            for choice in ("off", "draft", "publish"):
-                self.assertEqual(self.title("blogger.yml", "workflow_dispatch",
-                                            {"auth_check": True, "dry_run": dry_run, "publish": choice}),
-                                 "[Blogger] 글 작성 · 수동(인증 점검만: 글 안 만듦)")
-        self.assertEqual(self.title("blogger.yml", "workflow_dispatch", {"auth_check": False, "dry_run": False, "publish": "draft"}),
-                         "[Blogger] 글 작성 · 수동(Blogger 초안함 업로드)")
-        self.assertEqual(self.title("blogger.yml", "schedule", {"auth_check": True}), "[Blogger] 글 작성 · 정기")
+        for wrapper, prefix in (("blogger-en.yml", "[Blogger 영문]"), ("blogger-ko.yml", "[Blogger 한글]")):
+            with self.subTest(wrapper):
+                self.assertEqual(self.title(wrapper, "schedule"), f"{prefix} 글 작성 · 정기")
+                # 수동 실행의 publish 는 3택(off=저장소 파일만, draft=Blogger 초안함 업로드, publish=즉시 게시)이다
+                manual = {"dry_run": False, "publish": "draft"}
+                self.assertEqual(self.title(wrapper, "workflow_dispatch", manual), f"{prefix} 글 작성 · 수동(Blogger 초안함 업로드)")
+                self.assertEqual(self.title(wrapper, "workflow_dispatch", {**manual, "publish": "off"}),
+                                 f"{prefix} 글 작성 · 수동(저장소 파일만 저장)")
+                self.assertEqual(self.title(wrapper, "workflow_dispatch", {**manual, "publish": "publish"}),
+                                 f"{prefix} 글 작성 · 수동(즉시 게시)")
+                self.assertEqual(self.title(wrapper, "workflow_dispatch", {"dry_run": True, "publish": "off"}),
+                                 f"{prefix} 글 작성 · 수동(연습: 저장·게시 안 함)")
+                # 연습이면 선택과 무관하게 아무것도 올리지 않는다(공용 워크플로의 DRY_RUN 이 우선)
+                for choice in ("off", "draft", "publish"):
+                    self.assertEqual(self.title(wrapper, "workflow_dispatch", {"dry_run": True, "publish": choice}),
+                                     f"{prefix} 글 작성 · 수동(연습: 저장·게시 안 함)")
+                # '인증 점검만 실행'은 글을 만들지 않으므로 다른 선택(연습·publish)보다 제목에 먼저 드러난다
+                for dry_run in (False, True):
+                    for choice in ("off", "draft", "publish"):
+                        self.assertEqual(self.title(wrapper, "workflow_dispatch",
+                                                    {"auth_check": True, "dry_run": dry_run, "publish": choice}),
+                                         f"{prefix} 글 작성 · 수동(인증 점검만: 글 안 만듦)")
+                self.assertEqual(self.title(wrapper, "workflow_dispatch", {"auth_check": False, "dry_run": False, "publish": "draft"}),
+                                 f"{prefix} 글 작성 · 수동(Blogger 초안함 업로드)")
+                self.assertEqual(self.title(wrapper, "schedule", {"auth_check": True}), f"{prefix} 글 작성 · 정기")
 
     def test_watchdog_titles(self):
         self.assertEqual(self.title("watchdog.yml", "schedule"), "[공통] 발행 중단 감시 · 정기")
@@ -530,7 +533,7 @@ PREVIOUS_NAMES = {
     "Chance 글 자동 작성·게시": "[Chance] 글 자동 작성·게시",
     "Chance 기존 글 이미지 교체(수동)": "[Chance] 기존 글 이미지 교체(수동)",
     "이슈 수정 요청 처리(수정안 PR 만들기)": "[Chance] 이슈 수정 요청 처리(수정안 PR 만들기)",
-    "Blogger 글 자동 작성": "[Blogger] 글 자동 작성(초안함 업로드)",
+    "Blogger 글 자동 작성": "[Blogger 영문] 글 자동 작성",
     "사이트 자동 배포": "[공통] 사이트 자동 배포",
     "저장소 규칙·테스트 자동 검사": "[공통] 저장소 규칙·테스트 자동 검사",
     "PR 변경 범위 검사": "[공통] PR 변경 범위 검사",
@@ -542,6 +545,9 @@ PREVIOUS_NAMES = {
     "네이버 초안 패키지 만들기": "[네이버] 초안 패키지 만들기",
     # 처음부터 접두사와 함께 만든 워크플로(옛 이름 없음): 접두사 없이 이름만 인용하는 안내(예: `텔레그램 알림 시험`)가 남지 않게 접두사 뗀 모양을 둔다
     "텔레그램 알림 시험": "[공통] 텔레그램 알림 시험",
+    # 영문·한글로 나눈 Blogger 워크플로(2026-10-27): 한글 래퍼와 공용 워크플로도 접두사 뗀 모양을 둔다(영문의 옛 이름은 위 `Blogger 글 자동 작성`)
+    "Blogger 한글 글 자동 작성": "[Blogger 한글] 글 자동 작성",
+    "Blogger 글 작성 공용(직접 실행하지 마세요)": "[내부] Blogger 글 작성 공용(직접 실행하지 마세요)",
 }
 # 이전 이름 인용 검색(find_previous_name_quotes)에서 빼는 곳(이유를 적는다). 안내 문서·코드·워크플로는 지금 이름으로 인용해야 하고,
 # 아래는 날짜가 붙은 기록이거나 총괄이 따로 갱신하는 현황·브리핑 문서이거나 시험 자료다. '/' 로 끝나면 폴더 전체다.
@@ -586,7 +592,9 @@ class NamePrefixTest(unittest.TestCase):
         "chanceblog.yml": "[Chance] 글 자동 작성·게시",
         "chance-fix-images.yml": "[Chance] 기존 글 이미지 교체(수동)",
         "issue-edit.yml": "[Chance] 이슈 수정 요청 처리(수정안 PR 만들기)",
-        "blogger.yml": "[Blogger] 글 자동 작성(초안함 업로드)",
+        "blogger.yml": "[내부] Blogger 글 작성 공용(직접 실행하지 마세요)",
+        "blogger-en.yml": "[Blogger 영문] 글 자동 작성",
+        "blogger-ko.yml": "[Blogger 한글] 글 자동 작성",
         "pages.yml": "[공통] 사이트 자동 배포",
         "guardrails.yml": "[공통] 저장소 규칙·테스트 자동 검사",
         "pr-scope-check.yml": "[공통] PR 변경 범위 검사",
@@ -614,7 +622,7 @@ class NamePrefixTest(unittest.TestCase):
                 continue
             seen += 1
             self.assertEqual(registry.name_label(run_name), registry.name_label(name), f"{file}: {run_name!r}")
-        self.assertEqual(seen, 8)  # chanceblog · chance-fix-images · issue-edit · blogger · watchdog · ops-inbox · tistory · naver
+        self.assertEqual(seen, 9)  # chanceblog · chance-fix-images · issue-edit · blogger-en · blogger-ko · watchdog · ops-inbox · tistory · naver(공용 blogger.yml 은 run-name 이 없다)
 
     def test_registered_blog_workflows_use_their_channel_label(self):
         """레지스트리 channel.label 과 그 블로그 워크플로 이름의 접두사는 같은 글자다(레지스트리 검증도 같은 것을 본다)."""
@@ -640,7 +648,7 @@ class NamePrefixTest(unittest.TestCase):
         labels = [registry.name_label(name) for name in sorted(current_names().values())]
         groups = [label for index, label in enumerate(labels) if index == 0 or label != labels[index - 1]]
         self.assertEqual(len(groups), len(set(groups)), f"같은 구분이 떨어져 있습니다: {groups}")
-        self.assertEqual(set(groups), {"Blogger", "Chance", "공통", "티스토리", "네이버"})
+        self.assertEqual(set(groups), {"Blogger 영문", "Blogger 한글", "Chance", "내부", "공통", "티스토리", "네이버"})
 
     def test_operator_guide_lists_every_current_name(self):
         guide = (REAL / "docs" / "ACTIONS_GUIDE.md").read_text(encoding="utf-8")

@@ -5,7 +5,7 @@
   2) 열거 시험: 입력 조건 전수(모드 3 × BLOGGER_PUBLISH 7 × 연습 2 × 시크릿 16가지 × 하루 상한 2)와 단계 경로 전수(인증 점검 11 ×
      글 생성 5 × 게시 결과 11 × 전달 방식 2)를 문서의 처리 순서를 옮긴 기준 모델과 비교하고, '게시 대상 실행이 이유 없이 초록으로
      끝나는 경로 없음'을 포함한 불변식을 모든 조합에서 확인한다(진단의 12,960가지 열거와 같은 취지).
-  3) blogger.yml 불변식: 수동 입력 3택·기본값, 입력이 환경 변수로만 흐르는지, PIPELINE_SECRET_* 전달과 권한이 그대로인지.
+  3) Blogger 워크플로 불변식(분리 뒤: 채널별 래퍼 둘 + 공용 blogger.yml): 수동 입력 3택·기본값, 입력이 환경 변수로만 흐르는지, PIPELINE_SECRET_* 전달과 권한이 그대로인지.
 
 실제 구글·Blogger·Gemini 호출은 없다(가짜 게시자·가짜 LLM). 시크릿 값은 런타임에 조합한 가짜다.
 """
@@ -21,6 +21,7 @@ from pathlib import Path
 from unittest import mock
 
 import _bootstrap  # noqa: F401
+import blogger_workflow_helpers as wf
 from pipeline import auth_check as ac
 from pipeline import health, registry
 from pipeline import run as run_mod
@@ -169,7 +170,7 @@ class ScenarioTest(unittest.TestCase):
         self.assertIn('url: "https://macat.example/p1"', text)
         self.assertNotIn(SECRET_VALUES["BLOGGER_BLOG_ID"], res.everything())    # 블로그 ID 는 어디에도 기록하지 않는다
         self.assertEqual(len(res.summary_lines), 4, res.summary)
-        self.assertEqual(res.summary_lines[0], "### [Blogger] Blogger (macat0722)")
+        self.assertEqual(res.summary_lines[0], "### [Blogger 영문] Blogger (macat0722)")
         self.assertIn("**draft_uploaded**", res.summary_lines[1])
         self.assertIn("https://macat.example/p1", res.summary_lines[2])
         self.assertIn("Blogger 초안함에 올렸습니다", res.summary_lines[3])
@@ -694,7 +695,7 @@ class ReviewFollowUpTest(unittest.TestCase):
             self.assertIn(phrase, resume)                                          # 재개 절차 한 줄 안에서 이 순서로 안내한다
         self.assertLess(resume.index("인증 점검만 실행"), resume.index("mode: draft` 전환"))
         self.assertLess(resume.index("mode: draft` 전환"), resume.index("publish=draft"))
-        self.assertIn("`연습 실행` 체크를 푼", handler[handler.index("4. Actions → **[Blogger] 글 자동 작성(초안함 업로드)**"):])   # §10 5-4 도 같은 안내
+        self.assertIn("`연습 실행` 체크를 푼", handler[handler.index("4. Actions → **[Blogger 영문] 글 자동 작성**"):])   # §10 5-4 도 같은 안내
 
     def test_docs_state_that_a_manual_publish_choice_can_post_live_even_in_draft_mode(self):
         for rel in ("docs/ARCHITECTURE.md", ".github/editorial/BLOGGER_API_SETUP.md"):
@@ -795,7 +796,7 @@ def check_invariants(res, mode, policy, dry, before):
         bad.append("이유 없이 초록(건너뜀 코드·새 기록·연습 표시가 모두 없음)")
     if res.code != 0 and len([a for a in res.annotations if a.startswith("::error::")]) != 1:
         bad.append(f"빨강인데 ::error:: 주석이 1개가 아님: {res.annotations}")
-    if "### [Blogger] Blogger (macat0722)" not in res.summary:
+    if "### [Blogger 영문] Blogger (macat0722)" not in res.summary:
         bad.append("실행 요약이 없음")
     pub = res.publisher
     live = [p for p in pub.published if not p["draft"]] if pub else []
@@ -994,86 +995,82 @@ class EnumerationTest(unittest.TestCase):
 
 
 # ----------------------------------------------------------------------------
-# 3) blogger.yml 불변식
+# 3) Blogger 워크플로 불변식: 채널별 래퍼(blogger-en.yml·blogger-ko.yml)가 이벤트·수동 입력을 읽어 `with:` 로 넘기고, 공용 blogger.yml 이 환경변수로 러너에 준다
 # ----------------------------------------------------------------------------
 @unittest.skipUnless(yaml is not None, "PyYAML(requirements-dev.txt)이 필요합니다(CI 에서는 항상 실행됩니다)")
 class WorkflowPublishInputTest(unittest.TestCase):
+    WRAPPERS = tuple(wf.WRAPPERS.values())
+
     @classmethod
     def setUpClass(cls):
-        cls.text = (REAL / ".github" / "workflows" / "blogger.yml").read_text(encoding="utf-8")
-        data = yaml.safe_load(cls.text)
-        if True in data and "on" not in data:  # YAML 1.1 은 키 on 을 True 로 읽는다
-            data["on"] = data.pop(True)
-        cls.data = data
-        cls.inputs = data["on"]["workflow_dispatch"]["inputs"]
-        cls.run_step = next(step for step in data["jobs"]["generate"]["steps"] if "pipeline.run" in str(step.get("run", "")))
+        cls.callee = wf.load(wf.REUSABLE)
+        cls.plan_step, cls.generate, cls.run_step = wf.callee_steps()
+
+    def inputs(self, wrapper):
+        return wf.load(wrapper)["on"]["workflow_dispatch"]["inputs"]
 
     def test_publish_input_is_a_three_way_choice_that_defaults_to_the_blogger_drafts(self):
-        spec = self.inputs["publish"]
-        self.assertEqual(spec["type"], "choice")
-        self.assertEqual(spec["options"], ["off", "draft", "publish"])
-        self.assertEqual(spec["default"], "draft")
-        self.assertIn(spec["default"], spec["options"])
-        description = spec["description"]
-        self.assertRegex(description, r"[가-힣]")
-        for word in ("off", "draft", "publish", "저장소 파일", "초안함", "즉시 게시", "기본", "정기 실행", "BLOGGER_API_SETUP.md"):
-            self.assertIn(word, description)
+        for wrapper in self.WRAPPERS:
+            spec = self.inputs(wrapper)["publish"]
+            self.assertEqual(spec["type"], "choice", wrapper)
+            self.assertEqual(spec["options"], ["off", "draft", "publish"], wrapper)
+            self.assertEqual(spec["default"], "draft", wrapper)
+            self.assertIn(spec["default"], spec["options"], wrapper)
+            description = spec["description"]
+            self.assertRegex(description, r"[가-힣]")
+            for word in ("off", "draft", "publish", "저장소 파일", "초안함", "즉시 게시", "기본", "정기 실행", "BLOGGER_API_SETUP.md"):
+                self.assertIn(word, description, wrapper)
 
     def test_input_descriptions_stay_short_enough_to_read_in_the_run_workflow_dialog(self):
         """이 변경이 넣은 입력(publish, 점검 전용 입력이 있으면 그것도)의 설명은 120자 이하다. 300자가 넘는 설명은 실행 대화상자에서
         읽히지 않으니 한 줄 요약 + 문서 링크로 둔다(V-16). 다른 입력의 설명(dry_run 등)은 이 시험의 대상이 아니다."""
-        owned = [name for name in ("publish", "auth_check") if name in self.inputs]
-        self.assertIn("publish", owned)
-        for name in owned:
-            description = self.inputs[name]["description"]
-            self.assertRegex(description, r"[가-힣]", name)
-            self.assertIn("BLOGGER_API_SETUP.md", description, name)
-            self.assertLessEqual(len(description), 120, f"{name} 입력 설명이 너무 깁니다({len(description)}자)")
+        for wrapper in self.WRAPPERS:
+            inputs = self.inputs(wrapper)
+            owned = [name for name in ("publish", "auth_check") if name in inputs]
+            self.assertIn("publish", owned)
+            for name in owned:
+                description = inputs[name]["description"]
+                self.assertRegex(description, r"[가-힣]", name)
+                self.assertIn("BLOGGER_API_SETUP.md", description, name)
+                self.assertLessEqual(len(description), 120, f"{wrapper} {name} 입력 설명이 너무 깁니다({len(description)}자)")
 
     def test_the_dry_run_checkbox_reaches_the_runner_as_DRY_RUN(self):
-        """연습 실행 체크가 환경변수로 전달되지 않으면 연습이 실제 업로드가 된다. 정기 실행은 연습이 아니다."""
-        import test_workflow_names as names
-        template = self.data["jobs"]["generate"]["env"]["DRY_RUN"]
-
-        def render(event, dry_run):
-            inputs = {} if dry_run is None else {"dry_run": dry_run}
-            ctx = {"github": {"event_name": event, "event": {"inputs": inputs}}, "inputs": inputs}
-            return names.render(template, ctx)
-        self.assertTrue(run_mod._flag({"DRY_RUN": render("workflow_dispatch", "true")}, "DRY_RUN"))
-        self.assertFalse(run_mod._flag({"DRY_RUN": render("workflow_dispatch", "false")}, "DRY_RUN"))
-        self.assertFalse(run_mod._flag({"DRY_RUN": render("schedule", None)}, "DRY_RUN"))    # 정기 실행에는 입력이 없다
+        """연습 실행 체크가 환경변수로 전달되지 않으면 연습이 실제 업로드가 된다. 정기 실행은 연습이 아니다(래퍼가 정기·수동을 가려 `with:` 로 넘기고 공용 워크플로가 환경변수로 만든다)."""
+        for wrapper in self.WRAPPERS:
+            self.assertTrue(run_mod._flag({"DRY_RUN": wf.end_to_end_env(wrapper, "workflow_dispatch", {"dry_run": "true"})["DRY_RUN"]}, "DRY_RUN"), wrapper)
+            self.assertFalse(run_mod._flag({"DRY_RUN": wf.end_to_end_env(wrapper, "workflow_dispatch", {"dry_run": "false"})["DRY_RUN"]}, "DRY_RUN"), wrapper)
+            self.assertFalse(run_mod._flag({"DRY_RUN": wf.end_to_end_env(wrapper, "schedule")["DRY_RUN"]}, "DRY_RUN"), wrapper)    # 정기 실행에는 입력이 없다
 
     def test_the_other_inputs_are_still_there(self):
-        self.assertEqual(set(self.inputs), {"blog", "topic", "dry_run", "publish", "auth_check"})
+        for wrapper in self.WRAPPERS:
+            # `blog`(실행할 블로그 key)는 래퍼가 채널마다 정해 `with:` 로 넘긴다 — 수동 실행 입력으로는 더 받지 않는다
+            self.assertEqual(set(self.inputs(wrapper)), {"topic", "dry_run", "publish", "auth_check"}, wrapper)
+        self.assertEqual(set(self.callee["on"]["workflow_call"]["inputs"]), set(wf.CALL_INPUTS))
 
     def test_the_choice_reaches_the_runner_only_through_an_environment_variable(self):
         env = self.run_step["env"]
         self.assertIn("BLOGGER_PUBLISH", env)
-        for step in self.data["jobs"]["generate"]["steps"] + self.data["jobs"]["plan"]["steps"]:
+        for step in self.generate["steps"] + self.callee["jobs"]["plan"]["steps"]:
             self.assertNotIn("inputs.publish", str(step.get("run", "")))      # run 에 직접 보간하지 않는다(WF-4)
         self.assertEqual(self.run_step["run"], 'python -m pipeline.run --blog "$BLOG_KEY"')
 
     def test_blogger_publish_is_the_chosen_value_for_manual_runs_and_empty_for_scheduled_runs(self):
-        import test_workflow_names as names
-        template = self.run_step["env"]["BLOGGER_PUBLISH"]
-
-        def render(event, publish):
-            inputs = {} if publish is None else {"publish": publish}
-            ctx = {"github": {"event_name": event, "event": {"inputs": inputs}}, "inputs": inputs}
-            return names.render(template, ctx)
-        for choice in self.inputs["publish"]["options"]:
-            self.assertEqual(render("workflow_dispatch", choice), choice)
-            self.assertEqual(render("schedule", choice), "")                  # 정기 실행은 입력을 쓰지 않고 레지스트리 mode 를 따른다
-        self.assertEqual(render("schedule", None), "")
-        self.assertEqual(render("workflow_dispatch", None), "")              # 입력이 비면 레지스트리 mode(auto)로 읽힌다
-        # 워크플로가 넘기는 모든 값을 러너가 알아듣는다
-        for choice in self.inputs["publish"]["options"]:
-            self.assertIsNotNone(run_mod.publish_policy(None, {"BLOGGER_PUBLISH": choice}), choice)
+        for wrapper in self.WRAPPERS:
+            options = self.inputs(wrapper)["publish"]["options"]
+            for choice in options:
+                self.assertEqual(wf.end_to_end_env(wrapper, "workflow_dispatch", {"publish": choice})["BLOGGER_PUBLISH"], choice, wrapper)
+                self.assertEqual(wf.end_to_end_env(wrapper, "schedule", {"publish": choice})["BLOGGER_PUBLISH"], "", wrapper)    # 정기 실행은 입력을 쓰지 않고 레지스트리 mode 를 따른다
+            self.assertEqual(wf.end_to_end_env(wrapper, "schedule")["BLOGGER_PUBLISH"], "", wrapper)
+            self.assertEqual(wf.end_to_end_env(wrapper, "workflow_dispatch", {})["BLOGGER_PUBLISH"], "", wrapper)               # 입력이 비면 레지스트리 mode(auto)로 읽힌다
+            # 워크플로가 넘기는 모든 값을 러너가 알아듣는다
+            for choice in options:
+                self.assertIsNotNone(run_mod.publish_policy(None, {"BLOGGER_PUBLISH": choice}), choice)
 
     def test_secrets_are_still_passed_only_as_pipeline_secret_variables(self):
         env = self.run_step["env"]
         roles = registry.get_blog(registry.load_registry(REAL / "pipeline" / "blogs.json"), "blogger_macat")["secrets"]
-        expected = {"PIPELINE_SECRET_" + role.upper(): "${{ secrets[matrix.secret_%s] }}" % role for role in roles}
+        # 공용 워크플로는 래퍼가 역할 이름으로 넘긴 시크릿(on.workflow_call.secrets)만 같은 이름의 환경변수로 러너에 준다 — `secrets: inherit`·`secrets[...]` 로 이름 없이 읽지 않는다
+        expected = {"PIPELINE_SECRET_" + role.upper(): "${{ secrets.PIPELINE_SECRET_%s }}" % role.upper() for role in roles}
         self.assertEqual({k: v for k, v in env.items() if k.startswith("PIPELINE_SECRET_")}, expected)
         for key, value in env.items():
             if "secrets." in str(value) or "secrets[" in str(value):
@@ -1082,12 +1079,17 @@ class WorkflowPublishInputTest(unittest.TestCase):
         self.assertEqual(set(env) - set(expected), {"BLOG_KEY", "BLOGGER_TOPIC", "BLOGGER_PUBLISH", "BLOGGER_AUTH_CHECK", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"})
         for name in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"):
             self.assertEqual(env[name], "${{ secrets.%s }}" % name)
+        self.assertNotIn("secrets[", json.dumps(self.callee, ensure_ascii=False))
 
     def test_permissions_and_the_generate_condition_did_not_widen(self):
-        self.assertEqual(self.data["permissions"], {"contents": "read"})
-        self.assertEqual(self.data["jobs"]["generate"]["permissions"], {"contents": "write"})
-        self.assertEqual(self.data["jobs"]["generate"]["if"], "needs.plan.outputs.count != '0'")
-        self.assertEqual(self.data["jobs"]["plan"].get("permissions"), None)
+        self.assertEqual(self.callee["permissions"], {"contents": "read"})
+        self.assertEqual(self.callee["jobs"]["generate"]["permissions"], {"contents": "write"})
+        self.assertEqual(self.callee["jobs"]["generate"]["if"], "needs.plan.outputs.count != '0'")
+        self.assertEqual(self.callee["jobs"]["plan"].get("permissions"), None)
+        for wrapper in self.WRAPPERS:
+            data = wf.load(wrapper)
+            self.assertEqual(data["permissions"], {"contents": "read"}, wrapper)
+            self.assertEqual(wf.call_job(wrapper)[1]["permissions"], {"contents": "write"}, wrapper)       # 재사용 워크플로의 권한은 부르는 쪽 범위를 넘을 수 없다
 
 
 if __name__ == "__main__":

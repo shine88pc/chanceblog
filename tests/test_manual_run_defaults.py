@@ -19,6 +19,7 @@ from pathlib import Path
 from unittest import mock
 
 import _bootstrap
+import blogger_workflow_helpers as bwf
 import generator as g
 from edits_helpers import ABOUT, image_body, issue, make_edit_root, page_body
 from pipeline import drafts, registry
@@ -513,32 +514,37 @@ class ManualOverCapTest(unittest.TestCase):
 # 4) Blogger 수동 실행: dry_run 기본이 켜짐
 # ----------------------------------------------------------------------------
 class BloggerManualDefaultsTest(RunBase):
-    def workflow_inputs(self):
-        return load("blogger.yml")["on"]["workflow_dispatch"]["inputs"]
+    """수동 실행 기본값(D-51): 채널별 래퍼(blogger-en.yml·blogger-ko.yml)의 `연습 실행`은 기본이 켜짐이고, 래퍼가 그 입력을 `with:` 로 공용 workflow 에 넘긴다."""
+    WRAPPERS = tuple(bwf.WRAPPERS.values())
 
-    def dry_env_for(self, event, dry_input=None):
-        template = load("blogger.yml")["jobs"]["generate"]["env"]["DRY_RUN"]
+    def workflow_inputs(self, wrapper="blogger-en.yml"):
+        return load(wrapper)["on"]["workflow_dispatch"]["inputs"]
+
+    def dry_env_for(self, event, dry_input=None, wrapper="blogger-en.yml"):
+        """이벤트·입력 → 래퍼의 `with:` → 공용 워크플로의 DRY_RUN 환경변수(GitHub 의 github.event.inputs 는 불리언도 'true'/'false' 문자열이다)."""
         inputs = {} if dry_input is None else {"dry_run": dry_input}
-        return value_of(template, event, event_inputs=inputs)
+        return bwf.end_to_end_env(wrapper, event, inputs)["DRY_RUN"]
 
     def test_dry_run_is_on_by_default(self):
-        inputs = self.workflow_inputs()
-        self.assertEqual((inputs["dry_run"]["type"], inputs["dry_run"]["default"]), ("boolean", True))
+        for wrapper in self.WRAPPERS:
+            inputs = self.workflow_inputs(wrapper)
+            self.assertEqual((inputs["dry_run"]["type"], inputs["dry_run"]["default"]), ("boolean", True), wrapper)
 
     def test_the_descriptions_say_what_is_saved_and_what_uses_the_daily_cap(self):
-        inputs = self.workflow_inputs()
-        description = inputs["dry_run"]["description"]
-        for fragment in ("기본 켜짐", "가짜 AI 응답", "호출하지 않", "체크를 풀면", "초안", "커밋", "하루 상한"):
-            self.assertIn(fragment, description)
-        # 독립 검증 BL07: 낱말이 아니라 뜻을 고정한다 — 연습은 하루 상한을 쓰지 않고, 체크를 풀면 쓴다(앞뒤가 뒤바뀌면 운영자가 상한을 소진한다)
-        self.assertIn("파일 저장·게시·하루 상한 소진 없이 로그만 남깁니다", description)
-        self.assertIn("체크를 풀면 실제 Gemini로 글을 만들어 초안을 저장소에 커밋하고 그날 하루 상한을 씁니다", description)
+        for wrapper in self.WRAPPERS:
+            description = self.workflow_inputs(wrapper)["dry_run"]["description"]
+            for fragment in ("기본 켜짐", "가짜 AI 응답", "호출하지 않", "체크를 풀면", "초안", "커밋", "하루 상한"):
+                self.assertIn(fragment, description, wrapper)
+            # 독립 검증 BL07: 낱말이 아니라 뜻을 고정한다 — 연습은 하루 상한을 쓰지 않고, 체크를 풀면 쓴다(앞뒤가 뒤바뀌면 운영자가 상한을 소진한다)
+            self.assertIn("파일 저장·게시·하루 상한 소진 없이 로그만 남깁니다", description, wrapper)
+            self.assertIn("체크를 풀면 실제 Gemini로 글을 만들어 초안을 저장소에 커밋하고 그날 하루 상한을 씁니다", description, wrapper)
 
     def test_the_default_value_reaches_the_runner_as_a_dry_run_and_scheduled_runs_never_are(self):
-        default = self.workflow_inputs()["dry_run"]["default"]
-        self.assertEqual(self.dry_env_for("workflow_dispatch", str(default).lower()), "true")   # GitHub 은 boolean 입력을 'true'/'false' 로 넘긴다
-        self.assertEqual(self.dry_env_for("workflow_dispatch", "false"), "false")
-        self.assertEqual(self.dry_env_for("schedule"), "false")
+        for wrapper in self.WRAPPERS:
+            default = self.workflow_inputs(wrapper)["dry_run"]["default"]
+            self.assertEqual(self.dry_env_for("workflow_dispatch", str(default).lower(), wrapper), "true", wrapper)   # GitHub 은 boolean 입력을 'true'/'false' 로 넘긴다
+            self.assertEqual(self.dry_env_for("workflow_dispatch", "false", wrapper), "false", wrapper)
+            self.assertEqual(self.dry_env_for("schedule", None, wrapper), "false", wrapper)
 
     def test_a_default_manual_run_saves_nothing_and_calls_no_gemini(self):
         """입력을 건드리지 않고 Run workflow 를 누른 것과 같다: 파일·이력이 생기지 않고 가짜 AI 응답을 쓴다."""
@@ -747,11 +753,17 @@ class UntouchedPathsTest(unittest.TestCase):
         self.assertEqual(steps.index(deploy), steps.index(commit) + 1)                                      # 커밋 바로 다음이 배포 요청이다(알림은 그 뒤)
 
     def test_blogger_keeps_its_cron_and_matrix_flow(self):
-        wf = load("blogger.yml")
-        self.assertEqual(wf["on"]["schedule"], [{"cron": "0 2 * * *"}])
+        # 영문 Blogger 의 예약은 그대로(0 2 * * *)이고, 한글은 겹치지 않는 시각을 따로 가진다
+        self.assertEqual(load("blogger-en.yml")["on"]["schedule"], [{"cron": "0 2 * * *"}])
+        self.assertEqual(load("blogger-ko.yml")["on"]["schedule"], [{"cron": "30 3 * * *"}])
         # 독립 검증 V-06: 목록 전체가 아니라 필수 입력을 포함하는지만 본다 — 인증 점검 입력(auth_check) 같은 새 입력이 더해져도 이 시험이 깨지지 않게
-        for name in ("blog", "topic", "dry_run", "publish"):
-            self.assertIn(name, wf["on"]["workflow_dispatch"]["inputs"])
+        for wrapper in bwf.WRAPPERS.values():
+            for name in ("topic", "dry_run", "publish"):
+                self.assertIn(name, load(wrapper)["on"]["workflow_dispatch"]["inputs"], wrapper)
+        # 공용 워크플로는 plan → generate(블로그별 매트릭스) 흐름 그대로다
+        callee = load("blogger.yml")
+        self.assertEqual(list(callee["jobs"]), ["plan", "generate"])
+        self.assertEqual(callee["jobs"]["generate"]["strategy"]["matrix"], "${{ fromJSON(needs.plan.outputs.matrix) }}")
 
     def test_pause_variable_is_still_passed_to_the_other_workflows(self):
         for wf in ("chanceblog.yml", "chance-fix-images.yml"):
@@ -772,30 +784,33 @@ class BloggerPublishSwitchTest(unittest.TestCase):
 
     CHOICES = ("off", "draft", "publish")
 
-    def publish_input(self):
-        return load("blogger.yml")["on"]["workflow_dispatch"]["inputs"]["publish"]
+    def publish_input(self, wrapper="blogger-en.yml"):
+        return load(wrapper)["on"]["workflow_dispatch"]["inputs"]["publish"]
 
-    def publish_value(self, event, publish=None):
-        step = next(s for s in load("blogger.yml")["jobs"]["generate"]["steps"] if "BLOGGER_PUBLISH" in s.get("env", {}))
+    def publish_value(self, event, publish=None, wrapper="blogger-en.yml"):
+        """이벤트·입력 → 래퍼의 `with.publish` → 공용 워크플로 러너 단계의 BLOGGER_PUBLISH 환경변수."""
         event_inputs = None if publish is None else {"publish": publish}
-        return value_of(step["env"]["BLOGGER_PUBLISH"], event, event_inputs=event_inputs)
+        return bwf.end_to_end_env(wrapper, event, event_inputs)["BLOGGER_PUBLISH"]
 
     def test_a_scheduled_run_leaves_it_empty_so_the_registry_mode_decides(self):
-        self.assertEqual(self.publish_value("schedule"), "")
-        for value in (*self.CHOICES, "true", "false"):                       # 정기 실행에는 입력이 없지만 있어도 무시한다(모드는 레지스트리가 정한다)
-            self.assertEqual(self.publish_value("schedule", value), "", value)
+        for wrapper in bwf.WRAPPERS.values():
+            self.assertEqual(self.publish_value("schedule", None, wrapper), "", wrapper)
+            for value in (*self.CHOICES, "true", "false"):                   # 정기 실행에는 입력이 없지만 있어도 무시한다(모드는 레지스트리가 정한다)
+                self.assertEqual(self.publish_value("schedule", value, wrapper), "", (wrapper, value))
 
     def test_a_manual_run_passes_the_chosen_value_and_only_an_explicit_publish_publishes(self):
-        for choice in self.CHOICES:
-            self.assertEqual(self.publish_value("workflow_dispatch", choice), choice)
+        for wrapper in bwf.WRAPPERS.values():
+            for choice in self.CHOICES:
+                self.assertEqual(self.publish_value("workflow_dispatch", choice, wrapper), choice, wrapper)
         # 러너가 그 값을 읽는 방식: 즉시 게시('on')는 publish 를 고를 때뿐이다
         self.assertEqual({choice: run_mod.publish_policy(None, {"BLOGGER_PUBLISH": choice}) for choice in self.CHOICES},
                          {"off": "off", "draft": "draft", "publish": "on"})
 
     def test_the_publish_input_is_a_three_way_choice_whose_default_never_publishes(self):
         """GitHub 는 생략된 입력(API 로 부른 경우 포함)에 기본값을 채운다. 그 기본값이 즉시 게시면 입력을 안 건드린 실행이 게시한다."""
-        publish = self.publish_input()
-        self.assertEqual((publish["type"], publish["options"], publish["default"]), ("choice", list(self.CHOICES), "draft"))
+        for wrapper in bwf.WRAPPERS.values():
+            publish = self.publish_input(wrapper)
+            self.assertEqual((publish["type"], publish["options"], publish["default"]), ("choice", list(self.CHOICES), "draft"), wrapper)
 
 
 SHIM = """#!/usr/bin/env bash
@@ -961,7 +976,7 @@ class ManualRunGuidanceTest(unittest.TestCase):
     def test_every_blogger_first_run_guidance_tells_to_uncheck_the_practice_run(self):
         # `publish` 가 off/draft/publish 3택이 된 뒤의 첫 실행 안내: HANDLER 는 재개 절차(`publish=draft`)와 §10 5번 4(`publish`를 `draft`(기본값)로 두면)
         for doc, needle in (("HANDLER.md", "`publish=draft`"), ("HANDLER.md", "`publish`를 `draft`(기본값)"),
-                            ("docs/ENGINEERING_GUIDE.md", "**L3 초안**"), ("docs/ARCHITECTURE.md", "`blog=<key>`")):
+                            ("docs/ENGINEERING_GUIDE.md", "**L3 초안**"), ("docs/ARCHITECTURE.md", "그 블로그의 래퍼(예: `[Blogger 한글] 글 자동 작성`)")):
             found = self.lines(doc, needle)
             self.assertTrue(found, (doc, needle))
             for line in found:
@@ -970,7 +985,7 @@ class ManualRunGuidanceTest(unittest.TestCase):
     def test_the_architecture_first_run_row_names_the_publish_choices(self):
         """`publish` 는 off/draft/publish 3택이다. 첫 실행 행은 초안함 업로드(`publish=draft`)를 안내하고, 시크릿을 등록하기 전에는 저장소 초안만
         남기는 `publish=off` 를 안내한다. 즉시 게시(`publish=publish`)는 처음에 고르라고 하지 않는다."""
-        row = self.lines("docs/ARCHITECTURE.md", "`blog=<key>`")[0]
+        row = self.lines("docs/ARCHITECTURE.md", "그 블로그의 래퍼(예: `[Blogger 한글] 글 자동 작성`)")[0]
         self.assertIn("`publish=draft`", row)
         self.assertIn("`publish=off`", row)
         self.assertNotIn("publish=publish", row)

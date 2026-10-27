@@ -160,7 +160,7 @@ def _write_summary(environ, text):
 
 
 def summary_head(blog):
-    """실행 요약의 첫 줄 `### [채널 라벨] 블로그 이름`(예: `### [Blogger] Blogger (macat0722)`). 요약을 열자마자 어느 채널·블로그의 실행인지 보인다.
+    """실행 요약의 첫 줄 `### [채널 라벨] 블로그 이름`(예: `### [Blogger 영문] Blogger (macat0722)`, 한글은 `### [Blogger 한글] Blogger (kcyoon)`). 요약을 열자마자 어느 채널·블로그의 실행인지 보인다.
     채널 라벨과 이름은 레지스트리(저장소 파일)에서 오지만 한 줄·마크다운 안전을 보장하려고 md_cell 을 거친다. 채널 라벨을 읽을 수 없으면 이름만,
     이름도 없으면 블로그 key 를 쓴다. 이 줄만 바뀌었다 — 요약의 나머지 줄은 예전과 같다(동작 불변을 바이트 비교로 확인했다)."""
     channel = blog.get("channel")

@@ -566,7 +566,7 @@ class ConfigTest(PackageRunBase):
     def test_an_invalid_package_registry_is_a_config_error(self):
         reg_path = self.root / "pipeline" / "blogs.json"
         reg = json.loads(reg_path.read_text(encoding="utf-8"))
-        reg["blogs"][2]["secrets"]["login_password"] = "TISTORY_PASSWORD"
+        next(blog for blog in reg["blogs"] if blog["key"] == "tistory_test")["secrets"]["login_password"] = "TISTORY_PASSWORD"
         reg_path.write_text(json.dumps(reg, ensure_ascii=False), encoding="utf-8")
         pub = FakePackagePublisher()
         code, out = self.go(publisher=pub)

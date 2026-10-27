@@ -250,6 +250,15 @@ def _walk_strings(node, path=()):
             yield from _walk_strings(value, path + (index,))
 
 
+_LOCAL_REUSABLE_USES = re.compile(r"\./\.github/workflows/[A-Za-z0-9._\-]+\.ya?ml")
+
+
+def _is_local_reusable_call(job):
+    """이 저장소 안의 재사용 워크플로를 부르는 잡인가(`uses: ./.github/workflows/<파일>.yml`). 다른 저장소의 `owner/repo/.github/workflows/x.yml@ref` 는 아니다."""
+    uses = job.get("uses") if isinstance(job, dict) else None
+    return isinstance(uses, str) and _LOCAL_REUSABLE_USES.fullmatch(uses.strip()) is not None
+
+
 def check_telegram_secrets(root, files):
     """WF-13: 텔레그램 시크릿(TELEGRAM_BOT_TOKEN·TELEGRAM_CHAT_ID)은 워크플로의 **단계 env 값**으로만 나타난다 — 같은 이름의 환경변수에
     `${{ secrets.그 이름 }}` 그대로. run 본문·with·if·job/워크플로 env·outputs·이름 등 어디에도 나타나면 오류다.
@@ -259,8 +268,15 @@ def check_telegram_secrets(root, files):
     (G-C12). 문자열 안에 두 이름 중 하나라도 들어 있으면(`$TELEGRAM_BOT_TOKEN`·`${TELEGRAM_CHAT_ID}` 처럼 환경변수를 셸에서 펼치는 것 포함, 대소문자를 바꾼
     `secrets.telegram_bot_token` 도 같은 시크릿이라 같게 본다) 허용된 모양이 아닌 한 오류다.
 
-    한계(문서에도 적었다): 이름이 **글자로** 나오는 곳만 본다 — `toJSON(secrets)`·`secrets[format(…)]`·`secrets: inherit` 처럼 이름 없이 시크릿을 넘기는 길과,
-    외부 `uses:` 단계의 env 는 못 잡는다. 호출 쪽 재사용 워크플로의 `secrets:` 매핑(`jobs.<잡>.secrets.TELEGRAM_*`)은 허용된 자리가 아니라 오류다."""
+    재사용 워크플로(`on: workflow_call`)를 쓸 때 시크릿이 지나가는 길이 둘 더 있어 그 자리만 정확히 허용한다(작업 D, 독립 검증 N-4):
+      ① 부르는 쪽 `jobs.<잡>.secrets.<이름>: ${{ secrets.<같은 이름> }}` — 이 저장소 안의 재사용 워크플로(`uses: ./.github/workflows/…`)를 부르는 잡이어야 한다.
+         다른 저장소의 워크플로로 텔레그램 시크릿을 넘기는 것은 오류다.
+      ② 부르는 대상 `on.workflow_call.secrets.<이름>` 의 정의 — 이름은 정확히 대문자, 항목은 `required`·`description` 뿐, 선택(`required: true` 가 아님)이어야 한다
+         (필수로 정의하면 시크릿을 등록하지 않은 저장소에서 호출이 통째로 실패한다. 알림은 보조다). 부르는 대상에서 시크릿을 쓰는 자리는 여전히 단계 env 뿐이다.
+    `jobs.<잡>.secrets: inherit` 는 시크릿을 이름 없이 모두 넘기므로(텔레그램 시크릿 포함) 오류다 — 필요한 것만 이름으로 적는다.
+
+    한계(문서에도 적었다): 이름이 **글자로** 나오는 곳만 본다 — `toJSON(secrets)`·`secrets[format(…)]` 처럼 이름 없이 시크릿을 쓰는 길과,
+    외부 `uses:` 단계의 env 는 못 잡는다."""
     if yaml is None:
         return []  # PyYAML 이 없다는 경고는 WF-0(check_workflows)이 이미 낸다
     out = []
@@ -271,17 +287,48 @@ def check_telegram_secrets(root, files):
             continue
         if not isinstance(data, dict):
             continue
+        jobs = data.get("jobs") if isinstance(data.get("jobs"), dict) else {}
         for path, value in _walk_strings(data):
             names = sorted({found.upper() for found in _TELEGRAM_NAME.findall(value)})
             if not names:
                 continue
             in_step_env = len(path) == 6 and path[0] == "jobs" and path[2] == "steps" and path[4] == "env"
-            match = _TELEGRAM_ENV_VALUE.fullmatch(value.strip()) if in_step_env else None
-            if match is None or match.group(1) != path[5]:       # 단계 env 의 같은 이름 환경변수에 `${{ secrets.이름 }}` 그대로일 때만 허용
+            in_call_secrets = len(path) == 4 and path[0] == "jobs" and path[2] == "secrets" and _is_local_reusable_call(jobs.get(path[1]))
+            allowed_name = path[5] if in_step_env else path[3] if in_call_secrets else None
+            match = _TELEGRAM_ENV_VALUE.fullmatch(value.strip()) if allowed_name is not None else None
+            # 단계 env 의 같은 이름 환경변수, 또는 재사용 워크플로를 부르는 잡의 secrets 의 같은 이름 항목에 `${{ secrets.이름 }}` 그대로일 때만 허용
+            if match is None or match.group(1) != allowed_name:
                 where = ".".join(str(part) for part in path)
                 out.append(err("WF-13", f"텔레그램 시크릿 이름({', '.join(names)})이 허용되지 않은 자리({where})에 있습니다 — 단계의 env 에서 같은 이름의 환경변수로만 "
-                                        "`${{ secrets.이름 }}` 그대로 넘기세요(run·with·if·job/워크플로 env 에는 쓰지 않습니다). "
-                                        "토큰이 셸 명령 줄이나 로그로 새는 길을 막는 규칙입니다 (G-C12)", rel))
+                                        "`${{ secrets.이름 }}` 그대로 넘기세요(run·with·if·job/워크플로 env 에는 쓰지 않습니다. 이 저장소의 재사용 워크플로를 부르는 잡은 "
+                                        "`secrets:` 에 같은 이름으로만 넘길 수 있습니다). 토큰이 셸 명령 줄이나 로그로 새는 길을 막는 규칙입니다 (G-C12)", rel))
+        for job_id, job in jobs.items():
+            secrets = job.get("secrets") if isinstance(job, dict) else None
+            if isinstance(secrets, str) and secrets.strip().lower() == "inherit":
+                out.append(err("WF-13", f"jobs.{job_id}.secrets 가 inherit 입니다 — 텔레그램 시크릿을 포함해 모든 시크릿이 이름 없이 넘어갑니다. "
+                                        "부르는 쪽 잡의 secrets 에 필요한 시크릿만 이름으로 적으세요(`secrets: inherit` 는 쓰지 않습니다) (G-C12)", rel))
+            elif isinstance(secrets, dict):
+                for key, value in secrets.items():
+                    # 값에 텔레그램 이름이 있으면 위 문자열 검사가 이미 알렸다. 키만 텔레그램 이름이고 값이 다른 것(다른 시크릿을 그 이름으로 넘기는 것)을 잡는다
+                    if isinstance(key, str) and _TELEGRAM_NAME.fullmatch(key) and not (isinstance(value, str) and _TELEGRAM_NAME.search(value)):
+                        out.append(err("WF-13", f"jobs.{job_id}.secrets.{key} 는 텔레그램 시크릿 이름인데 값이 같은 이름의 `${{{{ secrets.{key.upper()} }}}}` 가 아닙니다 — "
+                                                "다른 값을 그 이름으로 넘기지 마세요 (G-C12)", rel))
+        workflow_call = _triggers(data).get("workflow_call")
+        declared = workflow_call.get("secrets") if isinstance(workflow_call, dict) else None
+        for key, spec in (declared.items() if isinstance(declared, dict) else []):
+            if not (isinstance(key, str) and _TELEGRAM_NAME.fullmatch(key)):
+                continue
+            where = f"on.workflow_call.secrets.{key}"
+            if key != key.upper():
+                out.append(err("WF-13", f"{where}: 텔레그램 시크릿의 정의 이름은 정확히 대문자({key.upper()})여야 합니다 — 이름이 다르면 부르는 쪽·단계 env 의 이름과 어긋납니다 (G-C12)", rel))
+            if spec is not None and not isinstance(spec, dict):
+                out.append(err("WF-13", f"{where}: 정의는 required·description 만 가진 항목이어야 합니다 (G-C12)", rel))
+            elif isinstance(spec, dict):
+                extra = sorted(str(item) for item in set(spec) - {"required", "description"})
+                if extra:
+                    out.append(err("WF-13", f"{where}: 정의에 허용되지 않은 항목이 있습니다({', '.join(extra)}) — required·description 만 쓸 수 있습니다 (G-C12)", rel))
+                if spec.get("required") is True:
+                    out.append(err("WF-13", f"{where}: required: true 로 정의하면 시크릿을 등록하지 않은 저장소에서 호출이 통째로 실패합니다 — 알림은 보조라 선택(required: false)으로 둡니다 (G-C12)", rel))
     return out
 
 
@@ -451,6 +498,90 @@ def check_registry(root, files):
         if code_models and code_models != reg_models:
             out.append(warn("REG-4", f"generator.py MODEL_CANDIDATES {code_models} 가 레지스트리 {reg_models} 와 다릅니다 "
                                      "(모델 목록은 한 곳에서 관리)", "generator.py"))
+    return out
+
+
+# Blogger 채널 래퍼(blogger-en.yml·blogger-ko.yml)가 부르는 공용 워크플로와 그 입력. 공용 워크플로 쪽 정의는 actionlint 가 래퍼의 호출과 대조한다.
+BLOGGER_REUSABLE = "./.github/workflows/blogger.yml"
+BLOGGER_CALL_INPUTS = ("blog", "topic", "dry_run", "publish", "auth_check")
+_CALL_SECRET_VALUE = re.compile(r"\$\{\{\s*secrets\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
+
+
+def _blogger_wrapper_errors(rel, data, blog, all_keys):
+    """래퍼 한 개(워크플로 파일 rel, 파싱한 data)가 레지스트리 블로그 blog 와 맞는지: (오류 문구 목록, 최상위 concurrency 줄 이름 또는 None)."""
+    key = blog["key"]
+    problems = []
+    jobs = data.get("jobs") if isinstance(data.get("jobs"), dict) else {}
+    calls = {job_id: job for job_id, job in jobs.items() if isinstance(job, dict) and str(job.get("uses", "")).strip() == BLOGGER_REUSABLE}
+    if len(calls) != 1:
+        return [f"블로그 '{key}' 의 워크플로 {rel} 는 공용 워크플로({BLOGGER_REUSABLE[2:]})를 부르는 잡이 정확히 하나여야 합니다(지금 {len(calls)}개) — "
+                "Blogger 블로그의 워크플로는 공용 로직을 직접 갖지 않고 채널별 래퍼로 부릅니다(docs/ARCHITECTURE.md §2-1)"], None
+    job_id, job = next(iter(calls.items()))
+    given = job.get("with") if isinstance(job.get("with"), dict) else {}
+    if given.get("blog") != key:
+        problems.append(f"{rel} 의 jobs.{job_id}.with.blog 가 {given.get('blog')!r} 입니다 — 이 래퍼의 블로그(레지스트리 key)인 {key!r} 이어야 합니다"
+                        "(식이 아니라 글자 그대로. 다른 블로그의 key 를 넘기면 그 블로그가 이 채널 이름으로 돕니다)")
+    missing, extra = sorted(set(BLOGGER_CALL_INPUTS) - set(given)), sorted(str(name) for name in set(given) - set(BLOGGER_CALL_INPUTS))
+    if missing or extra:
+        problems.append(f"{rel} 의 jobs.{job_id}.with 는 {', '.join(BLOGGER_CALL_INPUTS)} 를 모두 명시해야 합니다(빠진 것: {', '.join(missing) or '없음'} / 모르는 것: "
+                        f"{', '.join(extra) or '없음'}) — 정기·수동 판단은 래퍼가 하고 공용 워크플로는 부르는 쪽 이벤트를 가정하지 않습니다")
+    wanted = {"PIPELINE_SECRET_" + role.upper(): name for role, name in blog["secrets"].items()}
+    passed = job.get("secrets") if isinstance(job.get("secrets"), dict) else {}
+    for secret, name in sorted(wanted.items()):
+        match = _CALL_SECRET_VALUE.fullmatch(str(passed.get(secret, "")).strip())
+        if match is None or match.group(1) != name:
+            problems.append(f"{rel} 의 jobs.{job_id}.secrets.{secret} 는 `${{{{ secrets.{name} }}}}` 여야 합니다(레지스트리 블로그 '{key}' 의 시크릿 이름) — "
+                            f"지금 {passed.get(secret)!r}. 한글 Blogger 는 영문과 다른 계정·OAuth 클라이언트를 쓰므로 다른 블로그의 시크릿 이름을 넘기면 안 됩니다")
+    unknown = sorted(str(name) for name in passed if name not in wanted and not (isinstance(name, str) and _TELEGRAM_NAME.fullmatch(name)))
+    if unknown:
+        problems.append(f"{rel} 의 jobs.{job_id}.secrets 에 이 블로그의 것이 아닌 시크릿이 있습니다({', '.join(unknown)}) — 역할 이름(PIPELINE_SECRET_<역할>)과 "
+                        "텔레그램 알림용 두 개만 넘길 수 있습니다")
+    if not (isinstance(job.get("permissions"), dict) and job["permissions"].get("contents") == "write"):
+        problems.append(f"{rel} 의 jobs.{job_id} 에 permissions: contents: write 가 없습니다 — 재사용 워크플로의 권한은 부르는 쪽이 정한 범위를 넘을 수 없어, "
+                        "없으면 공용 워크플로가 이력·초안을 커밋하지 못합니다")
+    group = (data.get("concurrency") or {}).get("group") if isinstance(data.get("concurrency"), dict) else None
+    if not isinstance(group, str) or not group.strip():
+        problems.append(f"{rel} 에 최상위 concurrency.group 이 없습니다 — 같은 채널의 실행이 겹치지 않게 줄을 세웁니다")
+    elif group.strip() in {f"blogger-{other}" for other in all_keys}:
+        problems.append(f"{rel} 의 concurrency.group({group.strip()!r}) 이 공용 워크플로 안의 블로그별 줄(`blogger-<블로그 key>`)과 같습니다 — 이름이 같으면 "
+                        "부르는 쪽과 불린 잡이 서로를 기다려 멈춥니다. 다른 이름을 쓰세요")
+    return problems, (group.strip() if isinstance(group, str) else None)
+
+
+def check_blogger_wrappers(root, files):
+    """REG-6: Blogger 블로그의 워크플로(채널별 래퍼)가 레지스트리와 맞는지. blogger.yml 이 재사용 워크플로가 되면서 '어느 블로그를 어느 시크릿으로 돌리는지'가
+    레지스트리가 아니라 래퍼의 글자로 정해지므로, 둘이 어긋나는 것을 PR 단계에서 잡는다: ① 래퍼가 부르는 `with.blog` 가 그 래퍼를 `workflow` 로 가진 블로그의 key 와
+    같다 ② `with` 가 다섯 입력을 모두 명시한다 ③ 넘기는 시크릿(역할 이름)이 레지스트리의 그 블로그 시크릿 이름과 정확히 같고 다른 블로그의 것이 없다(영문·한글이 계정과
+    OAuth 클라이언트를 공유하지 않는 보장) ④ 부르는 잡에 contents: write 가 있다 ⑤ 래퍼의 concurrency 줄 이름이 채널마다 다르고 공용 워크플로 안의 줄과 같지 않다.
+    정기·수동 입력의 식(연습 실행 기본값 등)은 tests/test_blogger_split.py 가 모든 이벤트·입력 조합으로 대조한다. 레지스트리 오류는 REG-1 이 알린다."""
+    if yaml is None:
+        return []  # PyYAML 이 없다는 경고는 WF-0(check_workflows)이 이미 낸다
+    path = Path(root) / "pipeline" / "blogs.json"
+    try:
+        reg = reg_mod.load_registry(path)
+    except reg_mod.RegistryError:
+        return []  # REG-0
+    if reg_mod.validate_registry(reg, root):
+        return []  # REG-1
+    blogs = [reg_mod.merged_blog(reg, raw) for raw in reg["blogs"]]
+    all_keys = [blog["key"] for blog in blogs]
+    out, seen_groups = [], {}
+    for blog in blogs:
+        if blog.get("platform") != "blogger":
+            continue
+        rel = blog["workflow"]
+        try:
+            data = _load_yaml(read_text(root, rel) or "")
+        except yaml.YAMLError:
+            continue  # WF-0
+        if not isinstance(data, dict):
+            continue
+        problems, group = _blogger_wrapper_errors(rel, data, blog, all_keys)
+        out.extend(err("REG-6", message, rel) for message in problems)
+        if group:
+            if group in seen_groups:
+                out.append(err("REG-6", f"{rel} 의 concurrency.group({group!r}) 이 {seen_groups[group]} 와 같습니다 — 채널마다 다른 줄을 써야 영문·한글 실행이 서로를 막지 않습니다", rel))
+            seen_groups[group] = rel
     return out
 
 
@@ -727,6 +858,7 @@ def run_checks(root, base=None):
     findings += check_workflow_names(root, files)
     findings += check_workflow_prefixes(root, files)
     findings += check_registry(root, files)
+    findings += check_blogger_wrappers(root, files)
     findings += check_issue_contract(root, files)
     findings += check_edit_system(root, files)
     findings += check_python(root, files)
