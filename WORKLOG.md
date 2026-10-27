@@ -7,6 +7,47 @@
 
 ---
 
+## [2026-10-27] Claude – `mode: package`·초안 패키지(GitHub 이슈) 어댑터·티스토리/네이버 래퍼 워크플로 (작업요청서 5 PR-C, T2·T3, 레지스트리 항목 없음 = 대상 0개)
+
+**작업자**: Claude (구현 세션, 독립 검증은 별도 세션)
+**대상**: 공통 (레지스트리·러너·어댑터·워크플로·문서) — 티스토리·네이버 채널의 기계. 두 블로그 항목은 아직 없다.
+**등급**: T2(코드·시험·워크플로·레지스트리 스키마) + T3(새 플랫폼·게시 방식). 광고 표면(`index.html`·`_config.yml`)·`mode`·시크릿 값은 바꾸지 않았다(실제 `pipeline/blogs.json` 무변경). 승인 근거: 운영자가 2026-10-27 채팅으로 계획 보고의 추천을 전부 승인("추천대로 진행해줘") — D4(티스토리·네이버: 초안 패키지 + 운영자 복사 발행)·D7(네이버는 자체 주제, 각색 없음). D8(블로그 주소·주제 등 사용자 입력)은 아직 없어 두 블로그 항목·프로필·프롬프트는 만들지 않았다.
+**목적**: 공식 자동 게시 수단이 없는 채널(티스토리 오픈 API 2024-02 종료, 네이버 글쓰기 API 2020 종료)을 위해, 게이트를 통과한 글을 **GitHub 이슈 1개(= 초안 1건)**로 만들어 운영자가 복사해 직접 발행하게 하는 기계를 만든다. 로그인·세션·쿠키 자동화는 만들지 않고 계정 정보는 저장·처리하지 않는다.
+**브랜치**: `ai/claude/package-mode`(기준 `origin/ai/claude/channel-names` 5c57a7c = 작업 A). PR 생성·병합·Actions 실행은 하지 않았다(총괄이 처리).
+
+### 한 일
+- **레지스트리**(`pipeline/registry.py`): `MODES`에 `package`, `PLATFORMS`에 `tistory`·`naver`(필수 시크릿 `llm_api_key` 뿐). `package`는 이 두 platform에서만(blogger·jekyll-git은 오류), 이 두 platform은 `off`·`package`만, `channel.label`은 그 채널 라벨(티스토리·네이버), `profile` 필수, 시크릿은 `llm_api_key` 뿐이고 이름에 `PASSWORD`·`PASSWD`·`PWD`·`COOKIE`·`SESSION`·`LOGIN`·`CREDENTIAL`이 든 시크릿은 검증 오류(G-S7의 구조적 보장). A의 `ads` 규칙과 같이 동작(`on` 금지, 기본 `off`).
+- **러너**(`pipeline/run.py`): `decide_delivery`에 `package`, 새 경로는 삽입뿐이고 기존 Blogger 줄은 9줄(docstring 2·import 1·`COUNTED_STATUSES`·`decide_delivery` 3·플랫폼 문구 2)만 바뀌었다. `package_issued`가 하루 상한에 센다. 순서: `PIPELINE_PAUSE` → `mode off` → `--auth-check` 거절(`AUTH_CHECK_UNSUPPORTED`) → `BLOGGER_PUBLISH` 거절(`INVALID_PUBLISH`) → 수동 주제 가드레일 → 이력·상한 → LLM 키 → **사전 점검**(`GITHUB_TOKEN`·`GITHUB_REPOSITORY`, 같은 채널의 열린 `초안` 이슈 3건 이상이면 `PACKAGE_BACKLOG`로 건너뜀, 종료 0) → 주제·생성·게이트 → 이슈 만들기. 연습 실행은 이슈 본문을 만들어 실행 요약에만 보이고 GitHub 호출 0회. 실패는 `PACKAGE_FAILED`(분류별 종료 코드: `auth_failed`·`too_long` 2, 나머지 1).
+- **어댑터**(`pipeline/publishers/issue_package.py`): `build_issue()`(순수 함수)와 `IssuePackagePublisher`(urllib, 의존성 추가 없음). 멱등(본문 첫 줄 숨은 표지 `draft-id`, 열림·닫힘 모두), 라벨 `초안`·`채널:<라벨>` 보장, 제목 `[초안][<채널>] <글 제목 60자>`, 본문 구역(복사용 제목·본문·해시태그·이미지 표·근거 출처·게이트 결과·체크리스트 8항목). 소독(G-L8): `@멘션`·`#숫자`·`GH-숫자`·`<!--` 뒤 영폭 공백, 펜스를 본문의 백틱 줄보다 길게, HTML 재정화, 네이버 마크다운 이스케이프, 고정 접두사·라벨, 이슈 한도 안에 못 들어가면 잘라 올리지 않고 `too_long`으로 실패. **이슈 만들기는 호출 안에서 자동 재시도하지 않는다**(응답만 잃은 경우 같은 글이 둘이 된다는 것을 시험이 잡았다 — D-74). 적체 점검은 라벨 `폐기`가 붙은 열린 이슈를 세지 않는다(초안 현황판과 같은 규칙: 폐기 = 라벨 `폐기` 또는 닫기).
+- **워크플로**(`tistory.yml`·`naver.yml`): `[티스토리] 초안 패키지 만들기`·`[네이버] 초안 패키지 만들기`. `blogger.yml`의 plan→generate 구조, 권한 `contents: write`(이력)·`issues: write`뿐, 시크릿은 Gemini 키와 기본 `GITHUB_TOKEN`뿐, 입력 `blog`·`topic`·`dry_run`(기본 켜짐), `PIPELINE_PAUSE`, cron 하루 1회(UTC 05:20·06:20 — Blogger 02:00·Chance :17/:47·감시 03:30/15:30·모음 :40과 겹치지 않음), 대상 0개면 초록 + `::notice::` + 요약.
+- **감시**(`pipeline/health.py`): `OK_STATUSES`·`REAL_POST_STATUSES`에 `package_issued`(새 상태가 STALE·NO_ACTIVITY를 오판하지 않게).
+- **시험**: 새 시험 216개 — `tests/package_helpers.py`(가짜 GitHub·임시 저장소·가짜 게시자)·`test_package_registry`(31)·`test_issue_package`(99)·`test_package_run`(55)·`test_package_workflows`(19)·`test_package_docs`(12). 기존 시험 갱신: `test_workflow_names`(이름 표 2개·run-name 8개·구분 5종·`PREVIOUS_NAMES`)·`test_draft_upload`(상한 상태 집합).
+- **문서**: `docs/ARCHITECTURE.md`(§2-1 표·§3·§4 Package 행·§4-1 코드표와 분류표·§5·§7-B/B-2 + 블로그 주소·주제를 받으면 해야 할 일 체크리스트·§9), `docs/ACTIONS_GUIDE.md`(3-17 읽고 직접 발행하는 법·6-12·6-13·표·용어), `HANDLER.md`, `docs/SECURITY_GUARDRAILS.md`(G-S7·G-L8·REG-1 행·승인 없이 하면 안 되는 행동), `docs/ENGINEERING_GUIDE.md`, `docs/CHARTER.md`, `docs/DEFECT_REGISTER.md`(D-73·D-74·관측 체크리스트 2행).
+
+### 알아 둘 것
+- **`docs/REQUEST_BRIEFING.md`는 총괄 소유라 이 PR에서 고치지 않았다.** 그 표를 읽는 시험 2개(`KoreanNamesTest.test_docs_tables_list_every_workflow_with_its_current_name`·`BriefingTest.test_real_briefing_covers_current_repository`)는 패치(`C_request_briefing_table.patch`, 제어 줄 1곳·소개 문장 1곳·이름 표 2행)를 얹기 전까지 실패하고 검증기 `BRIEF-1` 경고가 1건 더 난다. 패치를 얹으면 전부 통과한다.
+- **지금은 대상 0개다.** 블로그 주소·주제(사용자 입력)를 받으면 `docs/ARCHITECTURE.md` §7-B-2 체크리스트를 따른다 — 프로필·프롬프트·레지스트리 항목은 그때 만든다. 이미지·출처를 자동으로 고르는 단계는 파이프라인에 없어(어댑터에는 표와 자리만 있다) 이슈에는 "자동으로 고른 이미지가 없다"가 나온다.
+- 이 채널에서 쓰지 않는 `BLOGGER_PUBLISH`·`--publish`·`--auth-check`는 조용히 무시하지 않고 설정 오류(종료 2)로 거절한다(읽기만 하려던 요청이 이슈를 만들어 버리지 않게). 워크플로 입력에는 그 값이 없어 로컬 실행에서만 생긴다.
+- 환경변수 이름 `BLOGGER_TOPIC`을 그대로 재사용한다(이름이 Blogger식이다 — 정리는 후속 후보).
+- 이슈 본문의 `@이름`·`#숫자` 뒤에는 눈에 안 보이는 영폭 공백이 들어간다(알림·자동 링크가 안 가게 푼 것, 이메일·주소 안은 그대로). 복사한 글에도 따라가지만 보이지 않는다.
+- 감시 요약표(`scripts/watchdog.py` `_history_post_stats`)와 확인 필요 모음(`pipeline/inbox.py` `PUBLISH_STAGE`·초안 분류)은 `package_issued`를 아직 모른다 — package 블로그가 실제로 등록되기 전에 반영할 것(모음은 작업 B의 초안 현황판이 이슈 라벨로 센다).
+- 확인 필요 모음(`scripts/ops_inbox.py`)은 `.github/workflows` 폴더의 모든 파일을 읽어 파일마다 최근 실행을 확인하므로(코드로 확인, 실제 동작은 미확인) 새 워크플로 2개의 실패도 따로 고치지 않아도 모인다.
+- 요약 머리(`### <key>`)는 작업 B가 `### [<채널>] <블로그 이름>`(`summary_head()`)으로 바꾼다. 이 PR의 package 요약은 `_summary_head()` 한 곳에서 머리를 쓰므로 두 PR을 합칠 때 그 한 함수를 B의 `summary_head()`로 잇고 머리를 `### tistory_test` 꼴로 단언하는 시험 3곳(`tests/test_package_run.py`)을 새 머리에 맞춰 고친다.
+- main이 `f8724b7`(작업 A 병합 묶음)로 앞서 있어, 총괄이 `git rebase --onto origin/main 5c57a7c ai/claude/package-mode`로 옮기게 된다. 임시 브랜치에서 미리 해 보니 코드·시험·워크플로·문서 커밋은 충돌 없이 얹히고 `WORKLOG.md`만 맨 위 같은 자리(main의 새 항목 2개)라 한 곳 충돌했다 — 양쪽 항목을 모두 남기면 된다(이 항목을 맨 위에).
+
+### 검증 증거
+- **전체 시험**(`python -X utf8 -m unittest discover -s tests`): 1차 커밋 `9647e41` 작업 트리 패치 없이 **2424개 중 실패 2**(REQUEST_BRIEFING 표를 읽는 시험 둘, 904초) → `cbb97fd`+패치 2430개 OK(612초) → `10a8170`+패치 2431개 OK(543초) → **마지막 시험 커밋 `6acc2a3`+패치 2433개 OK**(367초, 작업 폴더의 worktree). base 2217개 대비 +216. 이 뒤 커밋은 `WORKLOG.md` 한 파일뿐이다.
+- **origin/main `f8724b7` 위로 임시 재베이스**(`git rebase --onto origin/main 5c57a7c`, 임시 브랜치): 세 커밋(`cbb97fd`까지) 기준 충돌 0건 + 패치 **전체 2435개 OK**(635초; main 자체 2222개 + 당시 새 시험 213개). 여섯 커밋 전부를 옮기면 앞의 다섯은 충돌 없이 얹히고 `WORKLOG.md`만 맨 위 같은 자리(main의 새 항목 2개)라 한 곳 충돌한다 — 양쪽 항목을 모두 남기면 되고, 푼 뒤 패치를 얹어 패키지 관련 시험 선택 532개 OK(265초). 이 브랜치 자체는 건드리지 않았다.
+- `python scripts/validate_repo.py --base origin/ai/claude/channel-names`: 오류 0, 경고 2(`BRIEF-1` 새 워크플로 2개가 브리핑 표에 없음 — 패치로 사라짐, `LIQUID-1` 기존).
+- `pyflakes pipeline scripts tests generator.py blogger_generator.py`: base와 같은 16건(줄 번호를 뺀 목록 동일, 새 경고 0). `vermin --target=3.10- pipeline scripts tests …`: 최소 3.10, 위반 0. 3.12 전용 f-string 문법 점검 13개 파일 0건. `actionlint 1.7.12 .github/workflows/*.yml`(12개): 0건. `git diff --check`: 0.
+- **Blogger 경로 불변**: 시나리오 385개 중 383개 바이트 동일(비교 476,995바이트·생성 파일 195개), 2개는 의도한 문구 차이(플랫폼 안내문·모드 허용 목록, 종료 코드 같음). CLI 명령 20개 20/20 동일. `pipeline/blogs.json` diff 0줄, `run.py` 기존 줄 변경 9줄.
+- **변이 시험** 118개(1차 83·2차 25·3차 5·4차 1·5차 4): 시험이 잡은 것 113개, 생존 5개(동등 변이 1·시험 구멍 4 — 구멍은 시험을 보강한 뒤 같은 변이를 다시 돌려 모두 잡았다).
+
+### 못 한 검증
+- 실제 Actions 실행(대상 0개 초록, 이름 정렬), 실제 GitHub 이슈 API 호출(권한·라벨 생성·응답 모양), 이슈의 복사 가능 여부·티스토리 HTML 모드·네이버 스마트에디터 붙여넣기 서식, 새 이슈 알림 도착, 저장소 Workflow permissions 설정이 `issues: write`를 막는지, Python 3.10·Linux에서의 전체 시험(로컬은 Windows·3.12 — `vermin`으로 3.10 호환만 확인). 푸시·병합 뒤 관측이 필요하다(DEFECT_REGISTER 관측 체크리스트 마지막 두 행).
+
+---
+
 ## [2026-10-27] Claude – 워크플로 이름 `[구분]` 접두사와 레지스트리 `channel`·`ads` 필드·검증 규칙 (작업요청서 5 PR-A, T2, 동작 변화 없음)
 
 **작업자**: Claude (구현 세션, 독립 검증은 별도 세션)
