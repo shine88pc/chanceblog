@@ -222,7 +222,7 @@
 
 ### 8-4. 사용자만 할 수 있는 일(AI가 대신할 수 없음)
 
-UN News에 이용 사실을 알리고 서면 확인 받기(운영자 메일로 unnews@un.org, 확인이 오면 알려 주기) · AI Studio(`aistudio.google.com/rate-limit`)에서 Gemini 모델별 한도 숫자 읽어 오기 · GitHub의 비밀값 유출 자동 탐지(Secret scanning·Push protection) 켜짐 확인 · Search Console·Bing 등록 확인 · 옛 이슈 #1~#3 확인 후 닫기 · Chance의 AdSense 계정과 macat0722의 구글 계정이 같은지 알려 주기 · (초안 업로드 병합 뒤) Blogger OAuth 동의 화면 "프로덕션" 전환과 Secrets 4종 등록 · 한글 Blogger(kcyoon)의 별도 구글 계정 인증과 `BLOGGER_KO_*` 시크릿 4종 등록(켜기 승인 뒤) · 티스토리·네이버 블로그 주소·주제 전달 · 열려 있는 PR #48~#52 닫기 · 텔레그램 "연결 확인" 수신 확인 · (선택) 중복 이미지 2건 교체 실행.
+UN News에 이용 사실을 알리고 서면 확인 받기(운영자 메일로 unnews@un.org, 확인이 오면 알려 주기) · AI Studio(`aistudio.google.com/rate-limit`)에서 Gemini 모델별 한도 숫자 읽어 오기 · GitHub의 비밀값 유출 자동 탐지(Secret scanning·Push protection) 켜짐 확인 · Search Console·Bing 등록 확인 · 옛 이슈 #1~#3 확인 후 닫기 · Chance의 AdSense 계정과 macat0722의 구글 계정이 같은지 알려 주기 · (초안 업로드 병합 뒤) Blogger OAuth 동의 화면 "프로덕션" 전환과 Secrets 4종 등록 · 한글 Blogger(kcyoon)의 별도 구글 계정 인증과 `BLOGGER_KO_*` 시크릿 4종 등록(켜기 승인 뒤) · 티스토리·네이버 블로그 주소·주제 전달 · 텔레그램 "연결 확인" 수신 확인 · (선택) 중복 이미지 2건 교체 실행.
 
 ### 8-5. 알려진 문제와 한계
 
