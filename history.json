@@ -81,5 +81,17 @@
     "lane": "culture",
     "source": "Pew Research Center",
     "source_url": "https://www.pewresearch.org/short-reads/2026/10/23/growing-share-of-americans-say-social-media-is-an-important-news-source-for-them/"
+  },
+  {
+    "date": "2026-10-27",
+    "topic": "CEF Energy 2026 call for PCI/PMI projects attracts strong interest with 67 applications requesting €2.88 billion",
+    "kr_title": "유럽 국경 간 에너지망 구축에 몰린 자금 수요: CEF 에너지 공모에 28.8억 유로 신청",
+    "en_title": "Demand Surges for Cross-Border Energy Grids: 67 Projects Seek €2.88 Billion in EU Co-Funding",
+    "kr_image": "https://images.unsplash.com/photo-1413882353314-73389f63b6fd?auto=format&fit=crop&w=1000&q=80",
+    "en_image": "https://images.unsplash.com/photo-1543489816-c87b0f5f7dd4?auto=format&fit=crop&w=1000&q=80",
+    "slot": 9,
+    "lane": "economy",
+    "source": "European Commission (DG Energy)",
+    "source_url": "https://cinea.ec.europa.eu/news-events/news/cef-energy-2026-call-pcipmi-projects-attracts-strong-interest-67-applications-requesting-eur288-2026-10-26_en"
   }
 ]

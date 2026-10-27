@@ -297,7 +297,8 @@ def topic_allowed(topic, profile):
 # 면제는 '문장'이 아니라 '절' 단위다. "마그네슘 보충제가 잠에 도움이 될 수 있지만 먼저 의사와 상담하세요"처럼 위험한 권유 뒤에 상담 구절을 붙인
 # 문장이 통째로 면제되면 안 되기 때문이다(D-64 ⑥ a). 문장을 문장부호(; : — -- 띄어 쓴 하이픈)와 프로필의 body_clause_split_patterns(영어 ', but'·', so'·
 # '지만' 같은 접속어)에서 절로 더 쪼개고, 상담 구절이 없는 절은 따로 검사한다. 또 body_safe_veto_patterns(용량 같은 것)에 맞는 절은 상담 구절이
-# 있어도 면제하지 않는다. 상담 구절이 접속어 없이 한 절 안에 들어 있는 경우("…를 챙기세요, 의사와 상담한 뒤에")는 여전히 면제된다 — 알려진 한계다.
+# 있어도 면제하지 않는다. 접속어는 쉼표가 없어도("…may lower your blood pressure so ask your doctor") 바로 뒤에 상담 구절이 올 때 가른다(D-64 ⑦ N-1). 접속어 없이 쉼표로만
+# 이은 경우("…를 챙기세요, 의사와 상담한 뒤에")는 여전히 면제된다 — 'If you are pregnant, talk to your doctor'와 구별할 수 없는 알려진 한계다.
 # ----------------------------------------------------------------------------
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?。！？])\s+|\n+")
 # 모든 언어에 공통인 절 경계: ; : — ― 줄표(--)와 양쪽에 공백이 있는 하이픈(엔 대시는 비교 전에 하이픈으로 바뀐다). 낱말 안의 하이픈(high-dose)은 가르지 않는다
@@ -305,17 +306,27 @@ _CLAUSE_PUNCTUATION = r"\s*[;:—―]\s*|\s*-{2,}\s*|\s+-\s+"
 
 
 def _clause_splitter(profile):
+    """절 경계 정규식 목록: 공통 문장부호 + 프로필의 body_clause_split_patterns. 패턴마다 따로 컴파일한다 — `(?:p1)|(?:p2)`로 합치면
+    `(?i)` 같은 전역 플래그는 앞 패턴 뒤에서 오류가 되고, 같은 이름의 묶음·역참조 번호는 다른 패턴과 얽힌다. 레지스트리는 패턴을 하나씩
+    컴파일해 검사하므로, 합치면 검증을 통과한 설정이 실행 중에 re.error 로 터질 수 있다(D-64 ⑦ N-4)."""
     parts = [_CLAUSE_PUNCTUATION] + [p for p in (profile.get("body_clause_split_patterns") or []) if isinstance(p, str)]
-    return re.compile("|".join(f"(?:{p})" for p in parts), re.IGNORECASE)
+    return [re.compile(p, re.IGNORECASE) for p in parts]
 
 
-def _split_clauses(sentence, splitter):
-    """문장을 절 경계에서 자른다. re.split 은 패턴 안의 묶음 괄호 내용까지 조각으로 돌려주므로 경계 위치만 써서 직접 자른다."""
+def _split_clauses(sentence, splitters):
+    """문장을 절 경계에서 자른다. 경계는 패턴마다 따로 찾고 겹치거나 맞닿은 것은 하나로 합친다. re.split 은 패턴 안의 묶음 괄호 내용까지
+    조각으로 돌려주므로 경계 위치만 써서 직접 자른다."""
+    spans = sorted((m.start(), m.end()) for rx in splitters for m in rx.finditer(sentence) if m.end() > m.start())  # 길이 0 경계는 무시(레지스트리가 막지만 방어한다)
+    merged = []
+    for begin, end in spans:
+        if merged and begin <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([begin, end])
     pieces, start = [], 0
-    for boundary in splitter.finditer(sentence):
-        if boundary.end() > boundary.start():  # 길이 0 경계는 무시(레지스트리가 빈 일치 패턴을 막지만 방어한다)
-            pieces.append(sentence[start:boundary.start()])
-            start = boundary.end()
+    for begin, end in merged:
+        pieces.append(sentence[start:begin])
+        start = end
     pieces.append(sentence[start:])
     return pieces
 

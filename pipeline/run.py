@@ -325,7 +325,8 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
     missing = [role for role in missing_secret_roles(blog, environ) if role != "llm_api_key"]
     names = ", ".join(blog["secrets"].get(role, role) for role in missing)
     upload_skipped = ""
-    if missing and (delivery == "publish" or (delivery == "draft" and len(missing) < len(PUBLISH_ROLES))):
+    secrets_incomplete = bool(missing) and (delivery == "publish" or (delivery == "draft" and len(missing) < len(PUBLISH_ROLES)))
+    if secrets_incomplete:
         if delivery == "publish":
             message = (f"게시용 시크릿이 등록되어 있지 않습니다: {names} "
                        "(저장소 Settings > Secrets and variables > Actions). "
@@ -339,17 +340,14 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
             _summarize(environ, blog, "SECRETS_MISSING", message)
             return EXIT_CONFIG
         out(f"::warning::[{blog['key']}] (DRY_RUN이라 계속합니다) {message}")
-    elif missing and delivery == "draft":
-        upload_skipped, delivery = names, "file"
-        out(skip_line("UPLOAD_SKIPPED", blog=blog["key"], reason="NO_SECRETS", missing=names.replace(" ", "")))
-        out(f"::notice::[{blog['key']}] Blogger 초안함에는 올리지 않고 저장소 파일에만 저장합니다(게시용 시크릿이 없음). "
-            "시크릿을 등록하면 다음 실행부터 초안함에 올라갑니다(.github/editorial/BLOGGER_API_SETUP.md).")
 
     # ---- 수동 주제 -------------------------------------------------------
     # 운영자가 직접 입력한 주제(--topic·BLOGGER_TOPIC)도 시드·LLM 확장 주제와 같은 금지 주제 목록을 통과해야 한다(주제 가드레일 (a), D-64 ⑥ c).
     # 예전에는 이 경로만 검사가 없어 제목·본문 가드레일이 뒤늦게 막았고, 그 사이 Gemini 호출과 하루 상한을 쓸 수 있었다.
     # 입력을 고쳐 다시 실행하면 되는 설정 오류라 INVALID_PUBLISH 처럼 종료 2(빨강)로 끝내고, 조용한 초록으로 넘기지 않도록 걸린 낱말을 로그·요약에 남긴다.
-    # 상태 파일(이력)을 읽기 전, Gemini 를 부르기 전에 멈춘다.
+    # 상태 파일(이력)을 읽기 전, Gemini 를 부르기 전에 멈춘다. 일시정지·mode off·잘못된 BLOGGER_PUBLISH·시크릿 누락 오류가 먼저 처리되는 순서는 그대로고,
+    # 시크릿이 하나도 없는 초안함 업로드의 안내(UPLOAD_SKIPPED, '저장소 파일에만 저장합니다')만 이 검사 뒤에 둔다 — 아무것도 저장하지 않고 멈추는 실행에
+    # '저장합니다'가 먼저 찍히면 안내가 모순이다(D-64 ⑦ N-7).
     override = clean_topic(args.topic or environ.get("BLOGGER_TOPIC", ""))
     if override and not gates.topic_allowed(override, profile):
         _, matched = gates.first_match(profile.get("banned_topic_patterns"), override)
@@ -361,6 +359,12 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
         _summarize(environ, blog, "TOPIC_BLOCKED",
                    f"입력한 주제가 금지 주제 낱말('{md_cell(matched, 40)}')에 걸려 Gemini 호출 없이 멈췄습니다. 주제를 바꿔 다시 실행하세요.")
         return EXIT_CONFIG
+
+    if missing and delivery == "draft" and not secrets_incomplete:
+        upload_skipped, delivery = names, "file"
+        out(skip_line("UPLOAD_SKIPPED", blog=blog["key"], reason="NO_SECRETS", missing=names.replace(" ", "")))
+        out(f"::notice::[{blog['key']}] Blogger 초안함에는 올리지 않고 저장소 파일에만 저장합니다(게시용 시크릿이 없음). "
+            "시크릿을 등록하면 다음 실행부터 초안함에 올라갑니다(.github/editorial/BLOGGER_API_SETUP.md).")
 
     # ---- 상태·상한 --------------------------------------------------------
     history_path = root / blog["state"]["history"]
