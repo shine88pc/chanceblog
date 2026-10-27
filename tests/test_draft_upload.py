@@ -486,8 +486,8 @@ class ScenarioTest(unittest.TestCase):
         self.assertEqual(health.evaluate({**blog, "mode": "auto"}, res.history, later), [])
 
     def test_statuses_and_the_daily_cap_agree_with_the_watchdog(self):
-        self.assertEqual(run_mod.COUNTED_STATUSES, {"posted", "draft", "draft_uploaded", "generated_unpublished"})
-        self.assertLessEqual(health.REAL_POST_STATUSES, run_mod.COUNTED_STATUSES)   # 독자에게 가는(또는 초안함에 올린) 글은 상한에 센다
+        self.assertEqual(run_mod.COUNTED_STATUSES, {"posted", "draft", "draft_uploaded", "generated_unpublished", "package_issued"})   # package_issued: 티스토리·네이버 초안 이슈
+        self.assertLessEqual(health.REAL_POST_STATUSES, run_mod.COUNTED_STATUSES)   # 독자에게 가는(또는 초안함·초안 이슈에 올린) 글은 상한에 센다
         self.assertEqual(run_mod.COUNTED_STATUSES - health.REAL_POST_STATUSES, {"draft", "generated_unpublished"})
         for status in ("publish_failed", "rejected", "llm_failed", "skipped_no_topic"):
             self.assertNotIn(status, run_mod.COUNTED_STATUSES)

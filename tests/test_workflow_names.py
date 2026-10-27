@@ -530,6 +530,9 @@ PREVIOUS_NAMES = {
     "이슈 양식 페이지 목록 갱신": "[공통] 이슈 양식 페이지 목록 갱신",
     "발행 중단 감시·알림": "[공통] 발행 중단 감시·알림",
     "확인 필요 모음": "[공통] 확인 필요 모음",
+    # 새로 만든 채널 워크플로(2026-10-27)는 접두사 없던 시절이 없다. 문서가 `[구분]` 을 빼고 인용하지 않게 접두사 없는 모양을 같은 표에 둔다
+    "티스토리 초안 패키지 만들기": "[티스토리] 초안 패키지 만들기",
+    "네이버 초안 패키지 만들기": "[네이버] 초안 패키지 만들기",
 }
 # 이전 이름 인용 검색(find_previous_name_quotes)에서 빼는 곳(이유를 적는다). 안내 문서·코드·워크플로는 지금 이름으로 인용해야 하고,
 # 아래는 날짜가 붙은 기록이거나 총괄이 따로 갱신하는 현황·브리핑 문서이거나 시험 자료다. '/' 로 끝나면 폴더 전체다.
@@ -581,6 +584,8 @@ class NamePrefixTest(unittest.TestCase):
         "sync-issue-form.yml": "[공통] 이슈 양식 페이지 목록 갱신",
         "watchdog.yml": "[공통] 발행 중단 감시·알림",
         "ops-inbox.yml": "[공통] 확인 필요 모음",
+        "tistory.yml": "[티스토리] 초안 패키지 만들기",
+        "naver.yml": "[네이버] 초안 패키지 만들기",
     }
 
     def test_every_workflow_has_its_approved_name(self):
@@ -599,7 +604,7 @@ class NamePrefixTest(unittest.TestCase):
                 continue
             seen += 1
             self.assertEqual(registry.name_label(run_name), registry.name_label(name), f"{file}: {run_name!r}")
-        self.assertEqual(seen, 6)  # chanceblog · chance-fix-images · issue-edit · blogger · watchdog · ops-inbox
+        self.assertEqual(seen, 8)  # chanceblog · chance-fix-images · issue-edit · blogger · watchdog · ops-inbox · tistory · naver
 
     def test_registered_blog_workflows_use_their_channel_label(self):
         """레지스트리 channel.label 과 그 블로그 워크플로 이름의 접두사는 같은 글자다(레지스트리 검증도 같은 것을 본다)."""
@@ -625,7 +630,7 @@ class NamePrefixTest(unittest.TestCase):
         labels = [registry.name_label(name) for name in sorted(current_names().values())]
         groups = [label for index, label in enumerate(labels) if index == 0 or label != labels[index - 1]]
         self.assertEqual(len(groups), len(set(groups)), f"같은 구분이 떨어져 있습니다: {groups}")
-        self.assertEqual(set(groups), {"Blogger", "Chance", "공통"})
+        self.assertEqual(set(groups), {"Blogger", "Chance", "공통", "티스토리", "네이버"})
 
     def test_operator_guide_lists_every_current_name(self):
         guide = (REAL / "docs" / "ACTIONS_GUIDE.md").read_text(encoding="utf-8")

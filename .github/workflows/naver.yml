@@ -1,0 +1,135 @@
+name: "[네이버] 초안 패키지 만들기"
+run-name: "[네이버] 초안 패키지 · ${{ github.event_name == 'workflow_dispatch' && (inputs.dry_run && '수동(연습: 이슈 안 만듦)' || '수동(초안 이슈 만들기)') || '정기' }}"
+
+# 레지스트리(pipeline/blogs.json)의 platform=naver 블로그를 모두 처리한다. 네이버 블로그에는 공식 자동 게시 수단이 없어(글쓰기 API 2020 종료,
+# 허락 없는 자동 게재는 약관상 금지) 글을 공개하지 않고 GitHub 이슈 1개(= 초안 1건)로 만들어 보여 줄 뿐이다. 운영자가 이슈의 '서식 있는 글'을
+# 선택·복사해 직접 발행하고 이슈를 닫는다. 글감은 Chance 글의 각색이 아니라 이 블로그 자체 주제다(원고 변형 복제 금지, 운영자 승인 2026-10-27 D7).
+# 로그인·세션·쿠키는 쓰지 않고 시크릿은 Gemini 키뿐이다(레지스트리 검증이 다른 시크릿을 막는다).
+# schedule.cron 은 레지스트리 값과 같아야 한다(scripts/validate_repo.py 가 확인). 지금은 레지스트리에 네이버 블로그가 없어 정기 실행이 "대상 0개"로 끝난다.
+
+on:
+  schedule:
+    # KST 15:20 = UTC 06:20 (Blogger 11:00·한글 Blogger·티스토리 14:20 과 겹치지 않게)
+    - cron: '20 6 * * *'
+  workflow_dispatch:
+    inputs:
+      blog:
+        description: '실행할 블로그 key (비우면 네이버 블로그 전체)'
+        required: false
+        type: string
+      topic:
+        description: '직접 정할 주제 (비우면 자동 선택)'
+        required: false
+        type: string
+      dry_run:
+        description: '연습 실행(기본 켜짐): 가짜 AI 응답을 쓰고 Gemini와 GitHub를 호출하지 않으며, 이슈를 만들지 않고 저장도 하지 않습니다. 이슈 본문 미리보기만 실행 요약에 남깁니다. 체크를 풀면 실제 Gemini로 글을 만들어 초안 이슈 1개를 만들고 그날 하루 상한을 씁니다'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: 대상 블로그 계획
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      count: ${{ steps.plan.outputs.count }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 실행 대상 계산 (레지스트리 검증 포함)
+        id: plan
+        env:
+          ONLY_BLOG: ${{ github.event.inputs.blog }}
+        run: |
+          set -euo pipefail
+          args=(--platform naver)
+          if [ -n "${ONLY_BLOG:-}" ]; then args+=(--only "$ONLY_BLOG"); fi
+          # echo "matrix=$(명령)" 처럼 명령 치환을 echo 안에 넣으면 plan 이 실패해도 echo 가 성공해 이 단계가
+          # 초록으로 지나가고 matrix 가 빈 값이 된다. 그래서 먼저 변수에 받아 set -e 가 실패를 잡게 한다.
+          matrix=$(python -m pipeline.plan "${args[@]}")
+          count=$(python -m pipeline.plan "${args[@]}" --count)
+          echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
+          echo "count=${count}" >> "$GITHUB_OUTPUT"
+          # 위 plan 은 --only 가 레지스트리에 없거나 naver 가 아닌 key 면 실패한다(이 단계가 빨강). 그래서 여기 오는
+          # 대상 0개는 대상(수동 실행이면 지정한 블로그, 아니면 platform=naver 전체)이 모두 mode=off 이거나 없을 때뿐이다.
+          if [ "$count" = "0" ]; then
+            echo "::notice::실행할 네이버 블로그가 없습니다(레지스트리에 platform=naver 블로그가 없거나 모두 mode=off). generate 잡은 건너뜁니다."
+            {
+              echo "### 네이버 초안 패키지 만들기"
+              echo "- 결과: **대상 0개** — pipeline/blogs.json 에서 대상(수동 실행이면 지정한 블로그, 아니면 platform=naver 블로그 전체)이 모두 mode=off(정지)이거나 없습니다. 초안 이슈는 만들지 않았습니다. 블로그 주소·주제를 정해 레지스트리에 등록하면 이 워크플로가 초안 패키지를 만듭니다(docs/ARCHITECTURE.md 7-B)."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  generate:
+    name: 초안 패키지 생성 (${{ matrix.key }})
+    needs: plan
+    if: needs.plan.outputs.count != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      issues: write
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    concurrency:
+      group: naver-${{ matrix.key }}
+      cancel-in-progress: false
+    env:
+      # 킬 스위치: 저장소 Settings > Variables 에 PIPELINE_PAUSE=true 를 넣으면 전부 멈춘다
+      PIPELINE_PAUSE: ${{ vars.PIPELINE_PAUSE }}
+      DRY_RUN: ${{ github.event.inputs.dry_run == 'true' && 'true' || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-pipeline.txt
+
+      - name: 생성 → 검증 → 초안 이슈 만들기
+        env:
+          BLOG_KEY: ${{ matrix.key }}
+          BLOGGER_TOPIC: ${{ github.event.inputs.topic }}
+          # 초안 이슈를 읽고 만드는 데 쓴다. 이 저장소의 이슈 권한(permissions: issues: write)만 있고 계정 정보가 아니다
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 이 채널의 시크릿은 Gemini 키뿐이다(값은 로그에 마스킹됨). 네이버 계정 정보는 저장·처리하지 않는다
+          PIPELINE_SECRET_LLM_API_KEY: ${{ secrets[matrix.secret_llm_api_key] }}
+        run: python -m pipeline.run --blog "$BLOG_KEY"
+
+      # 생성 단계가 실패해도(llm_failed/publish_failed) 기록과 초안 사본은 남긴다
+      - name: 변경 사항 커밋
+        if: ${{ !cancelled() }}
+        env:
+          BLOG_KEY: ${{ matrix.key }}
+          HISTORY_FILE: ${{ matrix.history }}
+          CONTENT_DIR: ${{ matrix.content_dir }}
+        run: |
+          set -euo pipefail
+          if [ "${DRY_RUN:-false}" = "true" ]; then echo "DRY_RUN — 커밋 생략"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for p in "$HISTORY_FILE" "$CONTENT_DIR"; do
+            if [ -e "$p" ]; then git add -- "$p"; fi
+          done
+          if git diff --cached --quiet; then echo "커밋할 변경 없음"; exit 0; fi
+          git commit -m "🤖 [${BLOG_KEY}] 초안 패키지 기록"
+          for i in 1 2 3; do
+            if git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}"; then exit 0; fi
+            sleep $((i * 5))
+          done
+          echo "push 실패" >&2
+          exit 1
