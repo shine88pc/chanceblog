@@ -392,7 +392,7 @@ def _package_dry_run(out, environ, blog, draft, post, accepted, ai_lines):
     _write_summary(environ, "\n".join([
         _summary_head(blog), f"- 결과: **DRY_RUN** — 게이트 통과, 이슈·저장 없이 종료(제목: {md_cell(post['title'], TITLE_SHOWN)})",
         "- GitHub API 호출: 0회(연습 실행은 이슈를 만들지 않고 적체도 점검하지 않습니다)",
-        f"- 이슈 제목: `{md_cell(spec.title, 120)}`", f"- 이슈 라벨: {', '.join(f'`{label}`' for label in spec.labels)}",
+        f"- 이슈 제목: {md_cell(spec.title, 120)}", f"- 이슈 라벨: {', '.join(f'`{label}`' for label in spec.labels)}",
         *[f"- {line}" for line in ai_lines()], "",
         "아래는 실제 실행에서 만들어질 이슈 본문의 미리보기입니다(맨 위 숨은 표지 `draft-id` 는 화면에 보이지 않습니다).", "", "---", "", spec.body, "---"]))
     return EXIT_OK

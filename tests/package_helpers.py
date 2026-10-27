@@ -3,7 +3,6 @@
 네트워크를 쓰지 않는다. 실제 `pipeline/blogs.json` 에는 티스토리·네이버 항목이 없으므로(대상 0개 — 주소·주제를 받기 전) 시험은 임시 저장소에
 항목을 더해 레지스트리 검증·러너·워크플로 경로를 증명한다. 프로필·프롬프트도 실제 파일이 없어 시험 안의 fixture(한국어 Blogger 프로필 사본)를 쓴다.
 """
-import copy
 import email.message
 import io
 import json
@@ -81,10 +80,6 @@ def with_entry(mutate_entry, platform="tistory"):
     def mutate(reg):
         mutate_entry(entry_of(reg, f"{platform}_test"))
     return mutate
-
-
-def deepcopy_registry(root):
-    return copy.deepcopy(registry_of(root))
 
 
 # ----------------------------------------------------------------------------
