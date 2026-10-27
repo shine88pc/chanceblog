@@ -718,7 +718,7 @@ EDITORIAL_LANES = {
 #   no_page_fetch  요약이 짧아도 기사 페이지를 따로 읽지 않는다(자동 수집을 막는 약관).
 #   notice         글 끝에 붙일 고지문(ko·en). 소스 약관이 요구하는 'AI 작성, 검토·승인 받지 않음' 안내.
 #   citation       글 끝에 붙일 인용 한 줄의 틀({title}·{date}·{url}). 소스 약관이 정한 인용 형식(Pew).
-#   prompt_rule    글 작성 지침에 한 줄 더하는 소스별 약관 조건.
+#   prompt_rule    글 작성 지침에 한 줄 더하는 소스별 약관 조건(요약에 없는 것을 채우지 않는 소스와 무관한 규칙은 GROUNDING_RULES 한 곳에 둔다).
 #   display_name   글에 보이는 출처 이름(생략하면 name). 한 게시자의 피드를 분야별로 나눠 읽을 때 name 은 달라야 해서 둔다.
 #   page_delay     기사 페이지를 연달아 읽을 때 사이에 기다릴 초(사이트의 Crawl-delay 를 지킨다).
 # 해외(미국 외) 소스의 공통 약관 조건(2026-10-26, 조사 보고서 R1·R2에서 약관·robots.txt·피드를 직접 읽어 확인).
@@ -736,7 +736,17 @@ _EC_NOTICE = {
           "The original is licensed under CC BY 4.0 (" + _CC_BY + "). The European Commission has not reviewed or endorsed this article."}
 # 건강·의료 주제의 안전 지침(Chance 의 일상·마음 분야와 건강 관련 정책·통계 글). 통계·정책 사실만 전하고 의학적 조언은 하지 않는다("의심스러우면 게시하지 않는다").
 HEALTH_RULE = "건강·의료 정보는 정책과 통계 사실만 전하고 진단·치료·복용·예방 효과를 조언하지 마세요."
-_EC_PROMPT_RULE = ("집행위원회의 제안·협의·계획과 이미 확정된 법·결정을 구분하세요. 요약에 없는 시행 시기·금액·법적 효력은 쓰지 마세요. "
+# 글 근거 보강(D-77): 검증된 출처가 있는 모든 글감의 작성 지침에 소스와 상관없이 붙는 공통 규칙(build_post_prompt 가 소스별 규칙 앞에 넣는다).
+# 소스별 `prompt_rule` 은 그 소스의 약관 조건(보증 암시 금지·링크 글자 등)과 고유한 구분만 담고, '요약에 없는 것을 채우지 않는다'는 규칙은 여기 한 곳에 둔다
+# (예전에는 집행위원회·GOV.UK·통계청 규칙이 같은 말을 따로 적었다). 2026-10-27 9시 슬롯 글(DG Energy)이 요약 한 문장(194자)만 받고 약 5,000자를 쓰면서 원문에 없는
+# 원화 환산과 평가 기준·절차 서술을 채웠다. 원문 발췌를 읽을지는 운영자 결정이라 수집 방식은 그대로 두고 지침으로만 막는다.
+GROUNDING_RULES = (
+    "독자를 위한 것이라도 통화·단위를 환산하거나 숫자를 반올림·추정하지 마세요(예: 유로를 원화로, 마일을 킬로미터로 바꾸지 마세요). 요약에 적힌 수치·단위·기준 시점을 그대로 쓰세요.",
+    "요약에 없는 평가 기준·심사 절차·일정·시행 시기·금액·예산 대비 배수·참여 국가 수·법적 효력은 쓰지 마세요. "
+    "배경 설명이 필요하면 '일반적으로 …'처럼 출처에 없는 일반론임을 드러내고, 구체적인 수치·고유명사는 지어내지 마세요.",
+    "출처에 없는 내용(원인·전망·절차 등)을 출처 기관이 말하거나 밝힌 것, 하기로 한 일처럼 쓰지 마세요.",
+)
+_EC_PROMPT_RULE = ("집행위원회의 제안·협의·계획과 이미 확정된 법·결정을 구분하세요. "
                    "원문의 의미를 왜곡하지 말고, 집행위원회가 이 글을 검토하거나 보증한 것처럼 쓰지 마세요. " + HEALTH_RULE)
 # 집행위원회 피드에서 뺄 기사 주소: Eurostat 소식(Eurostat 자체 고지가 따로 있음), Horizon 매거진 기사(2026-10-26 검증이 DG Environment 피드에 섞여 드는 것을 찾음),
 # Press Corner 보도자료(ec.europa.eu/commission/presscorner — 앱 바닥글에 법적 고지·라이선스 링크가 없어 재사용 조건을 확인하지 못했다. 불명확은 유예한다).
@@ -767,7 +777,7 @@ _STATCAN_CITATION = "Adapted from Statistics Canada, {title}, {date}. This does 
 _STATCAN_NOTICE = {
     "ko": "이 글은 AI 도구가 캐나다 통계청(Statistics Canada)이 발표한 자료를 바탕으로 재구성해 작성했습니다. 통계청은 이 글을 검토하거나 보증하지 않았으며, 수치와 기준 시점은 통계청의 발표를 따릅니다.",
     "en": "This article was written with an AI tool, adapting information published by Statistics Canada. Statistics Canada has not reviewed or endorsed it; figures and reference periods follow Statistics Canada's release."}
-_STATCAN_PROMPT_RULE = ("통계청 발표 요약의 수치·단위·기준 시점(월·분기·연도)을 그대로 쓰세요. 반올림·환산·추정을 하지 말고, 발표에 없는 원인이나 전망을 통계청의 말처럼 쓰지 마세요. "
+_STATCAN_PROMPT_RULE = ("통계청 발표 요약의 수치·단위·기준 시점(월·분기·연도)을 그대로 쓰세요. "
                         "통계청이 이 글을 보증하는 것처럼 쓰지 마세요. 원문 링크의 글자는 '통계청 발표'처럼 설명 문구로 쓰고 주소(statcan.gc.ca)를 글자로 보이게 쓰지 마세요. " + HEALTH_RULE)
 # 통계청 사이트 robots.txt 의 Crawl-delay: 2 를 지켜, 기사 페이지를 연달아 읽을 때 사이에 이만큼(초) 기다린다.
 _STATCAN_PAGE_DELAY = 2
@@ -812,7 +822,7 @@ _GOVUK_NOTICE = {
     "en": "This article was written with an AI tool by summarising and restructuring material published on GOV.UK; changes were made to the original. "
           "Contains public sector information licensed under the Open Government Licence v3.0. (" + _OGL_URL + ") "
           "The UK Government and the departments concerned have not reviewed or endorsed this article, and it is not an official government publication or position."}
-_GOVUK_PROMPT_RULE = ("영국 정부(부처)가 발표한 내용임을 분명히 하고, 정부의 계획·주장과 확인된 사실을 구분하세요. 요약에 없는 금액·시행 시기·법적 효력은 쓰지 마세요. "
+_GOVUK_PROMPT_RULE = ("영국 정부(부처)가 발표한 내용임을 분명히 하고, 정부의 계획·주장과 확인된 사실을 구분하세요. "
                       "정당·선거·장관 개인에 대한 평가는 쓰지 말고, 영국 정부나 해당 부처가 이 글을 검토·보증했거나 정부의 공식 입장·문서인 것처럼 쓰지 마세요. " + HEALTH_RULE)
 _GOVUK_FEED = "https://www.gov.uk/search/news-and-communications.atom?"
 _GOVUK_ENV_FEED = (_GOVUK_FEED + "organisations%5B%5D=department-for-energy-security-and-net-zero"
@@ -1353,12 +1363,14 @@ def build_post_prompt(item, recent_titles, category_hint="", allow_skip=False,
         topic_text = "검증된 출처가 제공되지 않았습니다. 반드시 skip을 반환하세요."
     skip_rule = ('- 이 주제가 [최근 다룬 주제/제목]과 같은 사건이나 소재라면 글을 쓰지 말고 '
                  '{"skip": true, "reason": "..."} 만 반환하세요.\n') if allow_skip else ""
-    source_rule = ("- 제공된 검증 게시자 원문만 사실 근거로 쓰세요. 원문에서 확인되지 않는 주장·수치·인용·날짜·인과관계는 쓰지 마세요.\n"
-                   "- 학술 연구는 동료심사 여부를 명시하고 표본·범위·한계를 설명하세요. arXiv 등의 프리프린트를 동료심사 연구처럼 표현하지 마세요.\n"
-                   "- 중요한 사실 문장에는 제공된 원문 URL을 Markdown 인라인 인용으로 붙이세요. 사실과 해석·전망을 명확히 구분하세요.\n"
-                   "- 제목·저자·학술지명·DOI·통계·인용문이나 출처를 추정해 만들지 마세요. 근거가 부족하면 skip을 반환하세요.\n"
-                   if item and item.get("link") and item.get("source") else
-                   "- 검증된 출처가 없으면 글을 만들지 말고 skip을 반환하세요.\n")
+    if item and item.get("link") and item.get("source"):
+        source_rule = ("- 제공된 검증 게시자 원문만 사실 근거로 쓰세요. 원문에서 확인되지 않는 주장·수치·인용·날짜·인과관계는 쓰지 마세요.\n"
+                       "- 학술 연구는 동료심사 여부를 명시하고 표본·범위·한계를 설명하세요. arXiv 등의 프리프린트를 동료심사 연구처럼 표현하지 마세요.\n"
+                       "- 중요한 사실 문장에는 제공된 원문 URL을 Markdown 인라인 인용으로 붙이세요. 사실과 해석·전망을 명확히 구분하세요.\n"
+                       "- 제목·저자·학술지명·DOI·통계·인용문이나 출처를 추정해 만들지 마세요. 근거가 부족하면 skip을 반환하세요.\n"
+                       + "".join(f"- {rule}\n" for rule in GROUNDING_RULES))   # 소스와 상관없이 모든 글감에 붙는 '요약에 없는 것을 채우지 않는' 규칙(D-77)
+    else:
+        source_rule = "- 검증된 출처가 없으면 글을 만들지 말고 skip을 반환하세요.\n"
     extra_rule = f"- {item['prompt_rule']}\n" if item and item.get("prompt_rule") else ""
     hint = f"[카테고리 힌트] {category_hint}\n" if category_hint else ""
     editorial_template = load_editorial_template()

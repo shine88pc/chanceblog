@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from pipeline import registry as reg_mod  # noqa: E402
-from pipeline.console import safe_output  # noqa: E402
+from pipeline.console import one_line, safe_output  # noqa: E402
 from pipeline.secret_patterns import SECRET_PATTERNS  # noqa: E402
 
 TEXT_EXT = {".md", ".py", ".yml", ".yaml", ".json", ".html", ".htm", ".js", ".css", ".txt", ".xml",
@@ -362,7 +362,8 @@ def check_workflow_names(root, files):
             continue
         name = data.get("name")
         if not _has_hangul(_without_label(name) if isinstance(name, str) else name):
-            problem = "에 name 이 없습니다" if name is None else f" name '{str(name)[:40]}' 에 한글이 없습니다"
+            # name 은 저장소 파일의 값이라 줄바꿈·`::`·`##[` 가 들어 있을 수 있다 — 로그에 찍기 전에 한 줄로 접어 워크플로 명령 줄이 되지 않게 한다(G-L2)
+            problem = "에 name 이 없습니다" if name is None else f" name '{one_line(str(name)[:40])}' 에 한글이 없습니다"
             if isinstance(name, str) and reg_mod.name_label(name) is not None:
                 problem += "(접두사 `[구분]` 뒤의 이름 부분에 한글이 있어야 합니다)"
             out.append(err("WF-11", f"워크플로{problem} — Actions 탭에서 이름만 보고 하는 일을 짐작할 수 있게 "
@@ -401,17 +402,17 @@ def check_workflow_prefixes(root, files):
             continue
         label = reg_mod.name_label(name)
         if label is None:
-            out.append(err("WF-12", f"워크플로 name '{name[:40]}' 이 `[구분] ` 접두사로 시작하지 않습니다 — Actions 목록에서 채널별로 묶이게 "
+            out.append(err("WF-12", f"워크플로 name '{one_line(name[:40])}' 이 `[구분] ` 접두사로 시작하지 않습니다 — Actions 목록에서 채널별로 묶이게 "
                                     f"허용 구분({allowed}) 중 하나를 맨 앞에 붙이세요. 대괄호로 시작하는 값은 YAML 에서 따옴표가 필요합니다"
                                     "(예: name: \"[공통] 사이트 자동 배포\")", rel))
             continue
         if label not in WORKFLOW_LABELS:
-            out.append(err("WF-12", f"워크플로 name 의 구분 '[{label}]' 은(는) 허용 목록에 없습니다 — 허용: {allowed}. "
+            out.append(err("WF-12", f"워크플로 name 의 구분 '[{one_line(label)}]' 은(는) 허용 목록에 없습니다 — 허용: {allowed}. "
                                     "새 채널이면 레지스트리 CHANNEL_LABELS(pipeline/registry.py)와 문서를 같이 고칩니다", rel))
             continue
         run_name = data.get("run-name")
         if run_name is not None and reg_mod.name_label(run_name) != label:
-            shown = run_name[:40] if isinstance(run_name, str) else repr(run_name)[:40]
+            shown = one_line(run_name[:40]) if isinstance(run_name, str) else repr(run_name)[:40]
             out.append(err("WF-12", f"run-name '{shown}' 이 name 과 같은 접두사 `[{label}] ` 로 시작하지 않습니다 — 실행 목록의 제목에서도 "
                                     "채널이 읽히게 같은 접두사를 붙이세요", rel))
     return out

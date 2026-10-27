@@ -16,6 +16,7 @@ from pathlib import Path
 import _bootstrap
 import ops_inbox_helpers as h
 import ops_inbox as oi
+from draft_helpers import REAL_PUBLISH_FLOW
 from notify_helpers import ENV as TELEGRAM_ENV, FakeNet, leaks
 from package_helpers import entry_of, make_package_root, registry_of
 from pipeline import drafts, inbox, notify, registry
@@ -24,6 +25,7 @@ from pipeline.publishers import issue_package
 from test_chance_draft_workflow import evaluate, steps_of
 from test_issue_package import make_draft as make_package_draft
 from test_notify_integration import patched_network
+from test_workflow_names import load as load_workflow
 
 REAL = _bootstrap.ROOT
 OPS_ENV = {"GITHUB_REPOSITORY": h.REPO, "GITHUB_TOKEN": "gh" + "s_" + "Q" * 36, "GITHUB_REPOSITORY_OWNER": "octo"}
@@ -197,11 +199,13 @@ class RegistryCombinationTest(unittest.TestCase):
         return registry.validate_registry(registry_of(root), root)
 
     def test_the_real_registry_is_unchanged_by_the_merge(self):
+        """표지판 시험: 실제 레지스트리의 키 목록·`mode` 와 Chance 의 발행 흐름. 발행 흐름 값은 `tests/draft_helpers.py` 의 REAL_PUBLISH_FLOW 한 곳에서 읽는다 —
+        승인 흐름을 켜는 두 줄(blogs.json·REAL_PUBLISH_FLOW)만 바꾸면 이 시험도 통과하고, 레지스트리만 바뀌면 빨강이다(키 목록은 블로그를 더하는 PR 이 함께 고친다)."""
         reg = registry.load_registry(REAL / "pipeline" / "blogs.json")
         blogs = [registry.merged_blog(reg, raw) for raw in reg["blogs"]]
         self.assertEqual([blog["key"] for blog in blogs], ["chance", "blogger_macat", "blogger_kcyoon"])       # 한글 Blogger(작업 D)가 정지 상태로 더해졌다
         self.assertEqual({blog["key"]: blog["mode"] for blog in blogs}, {"chance": "auto", "blogger_macat": "off", "blogger_kcyoon": "off"})
-        self.assertEqual(blogs[0]["publish_flow"], "direct")
+        self.assertEqual(blogs[0]["publish_flow"], REAL_PUBLISH_FLOW)
         self.assertFalse(any(blog["platform"] in registry.PACKAGE_PLATFORMS for blog in blogs))
 
     def test_the_approval_flow_and_the_package_blogs_live_in_one_registry(self):
@@ -269,11 +273,46 @@ class ChanceblogWorkflowTest(unittest.TestCase):
         self.assertIn("notify_draft_waiting", section.split("**켜기 전에 연결할 것**")[1])
         for name, source in (("pipeline/draft_flow.py", (REAL / "pipeline" / "draft_flow.py").read_text(encoding="utf-8")),
                              ("pipeline/publishers/issue_package.py", (REAL / "pipeline" / "publishers" / "issue_package.py").read_text(encoding="utf-8")),
-                             ("pipeline/run.py 의 초안 패키지 경로", inspect.getsource(run_mod._package_deliver))):
+                             ("pipeline/run.py 의 초안 패키지 경로", inspect.getsource(run_mod._package_deliver)),
+                             # 초안 브랜치 이름·이력 필드를 정하는 쪽과 Chance 엔진도 알림·모음 호출을 갖지 않는다(여기서 이어 버리는 길을 막는다)
+                             ("pipeline/drafts.py", (REAL / "pipeline" / "drafts.py").read_text(encoding="utf-8")),
+                             ("generator.py", (REAL / "generator.py").read_text(encoding="utf-8"))):
             with self.subTest(source=name):
                 self.assertNotIn("notify", source.replace("noqa", ""), f"{name} 이 텔레그램 알림을 부른다 — ARCHITECTURE §4-2-1 의 '켜기 전에 연결할 것'과 이 시험을 고친다")
                 self.assertNotIn("ops-inbox", source, f"{name} 이 ops-inbox 를 부른다 — ARCHITECTURE §4-2-1 의 '켜기 전에 연결할 것'과 이 시험을 고친다")
                 self.assertNotIn("workflow_dispatch", source)
+
+    def test_the_workflows_that_make_drafts_do_not_call_the_inbox_or_the_waiting_alert_either(self):
+        """코드 쪽만 막으면 워크플로가 먼저 이어져도 모른다(INT 검증 N3): tistory.yml·naver.yml 과 chanceblog.yml 의 올리기 단계도 모음 즉시 실행·발행 대기 알림을 부르지 않는다.
+        chanceblog.yml 은 마지막 단계 `텔레그램 알림(새 글)`(새 글 알림이라 시크릿과 pipeline.notify 가 있는 게 맞다)만 빼고 보고, `gh workflow run` 은 pages.yml 배포 요청뿐이어야 한다."""
+        forbidden = ("ops-inbox", "pipeline.notify", "notify_draft_waiting", "TELEGRAM_")
+        pieces = {name: json.dumps(load_workflow(name)["jobs"], ensure_ascii=False) for name in ("tistory.yml", "naver.yml")}
+        pieces["chanceblog.yml(새 글 알림 단계 제외)"] = json.dumps([step for step in steps_of() if step.get("name") != "텔레그램 알림(새 글)"], ensure_ascii=False)
+        for name, text in pieces.items():
+            for word in forbidden:
+                with self.subTest(workflow=name, word=word):
+                    self.assertNotIn(word, text, f"{name} 이 {word} 를 쓴다 — ARCHITECTURE §4-2-1 의 '켜기 전에 연결할 것'과 이 시험을 고친다")
+        for name in ("tistory.yml", "naver.yml", "chanceblog.yml"):
+            with self.subTest(workflow=name, check="gh workflow run"):
+                called = set(re.findall(r"gh workflow run (\S+)", (REAL / ".github" / "workflows" / name).read_text(encoding="utf-8")))
+                self.assertLessEqual(called, {"pages.yml"}, f"{name} 이 pages.yml 말고 다른 워크플로를 부른다(모음 즉시 실행을 이으려면 문서와 이 시험을 함께 고친다)")
+
+    def test_the_operator_docs_say_the_waiting_alert_is_not_connected_yet(self):
+        """기능(`notify_draft_waiting`)은 병합됐지만 E·C 의 초안 생성 직후 호출은 아직 연결하지 않았고 승인 흐름에서는 새 글 알림 단계가 돌지 않는다(ARCHITECTURE §4-2-1·§4-5).
+        운영자가 읽는 두 곳이 '병합 = 연결'로 읽히면 안 된다(INT 검증 N1): TELEGRAM_SETUP.md §1 표의 '발행 대기' 행과 ACTIONS_GUIDE 3-18 '무엇이 오나'."""
+        telegram = (REAL / ".github" / "editorial" / "TELEGRAM_SETUP.md").read_text(encoding="utf-8")
+        row = next(line for line in telegram.splitlines() if line.startswith("| 발행 대기 |"))
+        guide = (REAL / "docs" / "ACTIONS_GUIDE.md").read_text(encoding="utf-8")
+        start = guide.index("### 3-18.")
+        section = guide[start:guide.index("\n### ", start + 1)]
+        what_comes = next(line for line in section.splitlines() if line.startswith("- **무엇이 오나**"))
+        for where, text in (("TELEGRAM_SETUP.md §1 표 '발행 대기' 행", row), ("ACTIONS_GUIDE 3-18 '무엇이 오나'", what_comes)):
+            with self.subTest(doc=where):
+                self.assertIn("notify_draft_waiting", text)
+                self.assertIn("연결하지 않았", text)
+                self.assertIn("승인 흐름", text)            # 승인 흐름(pr)에서는 새 글 알림 단계도 돌지 않는다
+                self.assertNotIn("병합된 뒤", text)
+                self.assertNotIn("(**예정**)", text)
 
     def test_the_docs_number_the_four_features_without_reusing_a_number(self):
         """통합에서 겹친 번호를 옮겼다: ACTIONS_GUIDE 3-17(E)·3-18(TG)·3-19(C)·6-12·6-13(C)·6-14(TG), ARCHITECTURE §4-4(E)·§4-5(TG), 가드레일 G-L8(E)·G-L9(C)·G-C11(E)·G-C12(TG)."""
