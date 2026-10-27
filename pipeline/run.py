@@ -27,8 +27,9 @@
                      draft = Blogger 초안함에 업로드(게시용 시크릿 필요, 하나도 없으면 파일만 저장)
                      publish(on·1·true·yes) = 즉시 게시(게시용 시크릿 필요, 없으면 종료 2)
   BLOGGER_TOPIC      주제 지정(수동 실행용). 프로필의 금지 주제 낱말에 걸리면 Gemini 를 부르기 전에 종료 2(TOPIC_BLOCKED)
-  TELEGRAM_BOT_TOKEN·TELEGRAM_CHAT_ID  둘 다 있으면 초안함 업로드·즉시 게시에 성공한 직후 휴대폰(텔레그램)으로 알린다(pipeline/notify.py). 없으면 아무 일도 하지
-                     않고 출력도 그대로다. 알림이 실패해도 게시 결과·이력·요약·종료 코드는 바뀌지 않는다(연습 실행·실패에서는 보내지 않는다)
+  TELEGRAM_BOT_TOKEN·TELEGRAM_CHAT_ID  둘 다 있으면 초안함 업로드·즉시 게시에 성공했을 때 이력·초안 파일·실행 요약을 쓴 뒤 맨 마지막에 휴대폰(텔레그램)으로
+                     알린다(pipeline/notify.py). 없으면 아무 일도 하지 않고 출력도 그대로다. 알림이 실패해도 게시 결과·이력·요약·종료 코드는
+                     바뀌지 않는다(연습 실행·실패에서는 보내지 않는다)
   BLOGGER_AUTH_CHECK 1 이면 --auth-check 와 같다(워크플로의 '인증 점검만 실행' 입력). 정지(mode off) 중에도, 연습 실행이 켜져 있어도
                      실제로 점검한다(쓰기가 없다). 종료 코드: 0 통과 / 1 인증 만료·네트워크·API 오류 / 2 시크릿 없음·권한·주소 불일치
   GITHUB_TOKEN·GITHUB_REPOSITORY  (초안 패키지 전용) 초안 이슈를 읽고 만드는 데 쓴다. 워크플로가 넘기고, 오류 문구에서 가린다
@@ -826,8 +827,6 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
         # 어댑터가 모은 참고 사항(예: 중복 확인 실패)은 성공·실패와 상관없이 로그에 남긴다. 외부 문구라 한 줄로 접고 비밀을 가린다
         for note in getattr(publisher, "notes", None) or ():
             out(f"[참고] {one_line(redact(str(note), secret_values))}")
-        if status in ("draft_uploaded", "posted"):
-            _alert_result(environ, out, blog, status, post["title"], url)
     else:
         out("  Blogger 에는 올리지 않고 저장소 파일에만 초안을 저장합니다.")
 
@@ -878,6 +877,10 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
                      f"등록할 시크릿: {upload_skipped}")
     lines += [f"- {line}" for line in ai_lines()]  # Gemini 호출 기록(무료 한도 측정)
     _write_summary(environ, "\n".join(lines))
+    # 휴대폰(텔레그램) 알림은 맨 마지막에 보낸다: 이력·초안 파일·실행 요약을 모두 쓴 뒤라서, 알림이 오래 걸리거나 그 사이 프로세스가 끊겨도
+    # 이미 올라간 글·초안의 기록이 남는다(같은 날 재실행이 하루 상한·중복 방지를 볼 수 있다). 알림의 어떤 실패도 위의 결과·종료 코드를 바꾸지 않는다.
+    if status in ("draft_uploaded", "posted"):
+        _alert_result(environ, out, blog, status, post["title"], url)
     return exit_code
 
 

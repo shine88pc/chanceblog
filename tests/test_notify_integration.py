@@ -212,6 +212,52 @@ class BloggerRunnerAlertTest(RunBase):
         code, out, net = self.go_alert(extra=("--publish", "draft"))
         self.assertIn("Blogger: ", net.bodies()[0]["text"])
 
+    def relabel_the_channel(self, label):
+        """레지스트리의 blogger_macat 채널 라벨을 바꾼다(예: 두 번째 Blogger 채널 'Blogger 한글'). 레지스트리 검증이 워크플로 name 의 [라벨] 접두사를 읽으므로 스텁도 맞춘다."""
+        path = self.root / "pipeline" / "blogs.json"
+        reg = json.loads(path.read_text(encoding="utf-8"))
+        for blog in reg["blogs"]:
+            if blog["key"] == "blogger_macat":
+                blog["channel"] = {"key": "blogger_ko", "label": label}
+        path.write_text(json.dumps(reg, ensure_ascii=False), encoding="utf-8")
+        (self.root / ".github" / "workflows" / "blogger.yml").write_text(f'name: "[{label}] 글 자동 작성(초안함 업로드)"\n', encoding="utf-8")
+
+    def test_the_draft_message_uses_the_label_of_the_blogs_own_channel(self):
+        """독립 검증 H12: 한글 Blogger 처럼 두 번째 Blogger 채널이 켜지면 알림은 그 블로그의 채널 라벨을 쓴다(상수 'Blogger' 가 아니라)."""
+        self.relabel_the_channel("Blogger 한글")
+        code, out, net = self.go_alert(extra=("--publish", "draft"))
+        self.assertEqual((code, net.calls), (0, 1), out)
+        self.assertIn("<b>발행 대기</b> — Blogger 한글: ", net.bodies()[0]["text"])
+
+    def test_the_posted_message_uses_the_label_of_the_blogs_own_channel(self):
+        self.relabel_the_channel("Blogger 한글")
+        code, out, net = self.go_alert()
+        self.assertEqual((code, net.calls), (0, 1), out)
+        self.assertIn("<b>게시됨</b> — Blogger 한글: ", net.bodies()[0]["text"])
+
+    def test_the_alert_is_sent_last_after_the_history_the_draft_file_and_the_summary_are_written(self):
+        """독립 검증 N-1: 알림이 오래 걸리거나 그 사이 프로세스가 끊겨도, 이미 올라간 글·초안의 이력·초안 파일·실행 요약은 남아 있어야 한다 — 같은 날 재실행이
+        하루 상한·중복 방지를 볼 수 있게. 알림 요청이 나가는 순간의 파일 상태를 본다."""
+        summary = self.root / "summary.md"
+        test = self
+        for extra, status in ((("--publish", "draft"), "draft_uploaded"), ((), "posted")):
+            with self.subTest(status=status):
+                for leftover in self.drafts() + [self.root / "blogger_history.json", summary]:
+                    if leftover.exists():
+                        leftover.unlink()
+                seen = []
+
+                class Spy(FakeNet):
+                    def __call__(self, request, timeout=None):
+                        seen.append({"history": test.history(), "drafts": len(test.drafts()),
+                                     "summary": summary.read_text(encoding="utf-8") if summary.exists() else ""})
+                        return super().__call__(request, timeout=timeout)
+                code, out, net = self.go_alert(net=Spy(), env=dict(self.ENV_ON, GITHUB_STEP_SUMMARY=str(summary)), extra=extra)
+                self.assertEqual((code, net.calls, len(seen)), (0, 1, 1), out)
+                self.assertEqual([entry["status"] for entry in seen[0]["history"]], [status])
+                self.assertEqual(seen[0]["drafts"], 1)
+                self.assertIn(f"- 결과: **{status}**", seen[0]["summary"])
+
     def test_the_run_never_prints_the_values_even_when_telegram_answers_with_them(self):
         code, out, net = self.go_alert(net=FakeNet(http_error(401, f"Unauthorized: {TOKEN} {CHAT}")))
         self.assertEqual(leaks(out), [])
@@ -544,6 +590,33 @@ class DocsMatchCodeTest(unittest.TestCase):
         self.assertIn(f"{notify.RETRY_AFTER_MAX}초", guide)
         self.assertIn("3,800", guide)
         self.assertIn("1.1초", guide)
+
+    def test_the_docs_give_the_deploy_wait_and_the_cached_404_advice(self):
+        """독립 검증 N-2: 알림 문구·안내서·구조 문서가 같은 말(약 3분 뒤에 열기, 404 가 최대 약 18분 보관, 후속 후보)을 한다."""
+        for needle in ("약 3분", "404", "약 18분", "3분 뒤에 열어"):
+            self.assertIn(needle, notify.DEPLOY_WAIT_NOTE, needle)
+        guide = read(".github/editorial/TELEGRAM_SETUP.md")
+        for needle in ("약 3분", "404", "약 18분", "3분 뒤에 열어", "D-41", "후속", "pages.yml"):
+            self.assertIn(needle, guide, needle)
+        architecture = read("docs/ARCHITECTURE.md")
+        for needle in ("약 18분", "3분 뒤에 열어", "후속 후보", "pages.yml"):
+            self.assertIn(needle, architecture, needle)
+        self.assertNotIn("1~3분", guide + architecture + read("docs/ACTIONS_GUIDE.md"))
+
+    def test_the_known_limits_from_the_independent_review_are_written_down(self):
+        """독립 검증 N-4·N-8·N-10·N-11: 코드를 바꾸지 않고 문서에 한계로 적기로 한 것들."""
+        security = read("docs/SECURITY_GUARDRAILS.md")
+        for needle in ("toJSON(secrets)", "secrets: inherit", "외부 `uses:`", "재사용 워크플로"):
+            self.assertIn(needle, security, needle)
+        architecture = read("docs/ARCHITECTURE.md")
+        for needle in ("toJSON(secrets)", "작업 D", "jobs.<잡>.secrets", "Pages 배포 실행", "`main` 에서만"):
+            self.assertIn(needle, architecture, needle)
+        guide = read(".github/editorial/TELEGRAM_SETUP.md")
+        for needle in ("Pages 배포 실행", "Actions 실패 알림", "사칭", "마지막 선택지", "`main` 에서만"):
+            self.assertIn(needle, guide, needle)
+        actions = read("docs/ACTIONS_GUIDE.md")
+        for needle in ("Pages 배포 실행", "`main` 에서만", "`main` 이 아닌 브랜치"):
+            self.assertIn(needle, actions, needle)
 
     def test_the_architecture_documents_the_alert_layer(self):
         text = read("docs/ARCHITECTURE.md")

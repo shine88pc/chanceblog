@@ -22,6 +22,7 @@ from pipeline import notify
 
 BLOG_URL = "https://shine88pc.github.io/chanceblog/posts/2026/10/27/KR-093056/"
 EN_URL = "https://shine88pc.github.io/chanceblog/posts/2026/10/27/EN-093056/"
+FW_COLON = chr(0xFF1A)          # defang_urls 가 주소의 ':' 를 바꾸는 전각 콜론(소스에는 코드 포인트로 적는다)
 
 
 def posts(kr_url=BLOG_URL, en_url=EN_URL, kr_title="한글 제목", en_title="English Title"):
@@ -759,10 +760,55 @@ class EventMessageTest(unittest.TestCase):
         self.assertEqual(lines[2], f"{notify.FLAGS['en']} English Title")
         self.assertIn("분야: 경제·일 · Economy &amp; Work", lines)
         self.assertIn("출처: 유럽연합 CINEA", lines)
-        self.assertIn(f"{notify.WAIT_MARK} 사이트 배포까지 1~3분 걸립니다. 아래 주소는 배포가 끝나면 열립니다.", lines)
-        self.assertEqual(lines[lines.index(f"{notify.WAIT_MARK} 사이트 배포까지 1~3분 걸립니다. 아래 주소는 배포가 끝나면 열립니다.") + 1:][:2], [BLOG_URL, EN_URL])
+        wait_line = f"{notify.WAIT_MARK} {notify.DEPLOY_WAIT_NOTE}"
+        self.assertIn(wait_line, lines)
+        self.assertEqual(lines[lines.index(wait_line) + 1:][:2], [BLOG_URL, EN_URL])
         self.assertEqual(lines[-1], '실행 기록: <a href="https://github.com/shine88pc/chanceblog/actions/runs/42">열기</a>')
         self.assertEqual(body["reply_markup"], {"inline_keyboard": [[{"text": "한글 글", "url": BLOG_URL}, {"text": "English", "url": EN_URL}]]})
+
+    def test_chance_published_tells_the_reader_to_wait_three_minutes_because_of_the_cached_404(self):
+        """독립 검증 N-2(D-41): 알림은 배포를 요청한 직후에 와서, 일찍 열면 공개 CDN 이 그 404 를 최대 약 18분 보관할 수 있다 — 문구가 그 사실과 '3분 뒤'를 말한다."""
+        body = self.sent(lambda n: n.notify_chance_published(posts()))
+        lines = body["text"].split("\n")
+        wait = next(line for line in lines if line.startswith(notify.WAIT_MARK))
+        for needle in ("배포가 끝나기까지 약 3분", "일찍 열면 404 가 최대 약 18분 보관될 수 있으니", "3분 뒤에 열어 보세요"):
+            self.assertIn(needle, wait)
+        self.assertLess(lines.index(wait), lines.index(BLOG_URL))          # 주소보다 먼저 읽힌다
+        self.assertNotIn("1~3분", body["text"])
+
+    def test_chance_published_escapes_the_source_name_and_the_category(self):
+        """독립 검증 E08: 출처 이름·분야에 든 <·&·> 는 글자로 보내야 한다(이스케이프가 빠지면 텔레그램이 서식으로 읽어 400 이 난다)."""
+        two = posts()
+        two[0]["source_name"] = "A <b>x</b> & B"
+        two[0]["category"] = "C <i>y</i> & D"
+        text = self.sent(lambda n: n.notify_chance_published(two))["text"]
+        self.assertIn("출처: A &lt;b&gt;x&lt;/b&gt; &amp; B", text.split("\n"))
+        self.assertIn("분야: C &lt;i&gt;y&lt;/i&gt; &amp; D · Economy &amp; Work", text.split("\n"))
+        self.assertNotIn("<b>x</b>", text)
+        self.assertNotIn("<i>y</i>", text)
+
+    def test_chance_published_address_lines_are_html_escaped_but_the_buttons_keep_the_raw_address(self):
+        """독립 검증 U16: 허용된 주소에도 쿼리 구분자 & 가 있을 수 있다 — 글자로 보이는 주소 줄은 이스케이프하고 버튼 주소는 그대로 둔다."""
+        kr, en = BLOG_URL + "?a=1&b=2", EN_URL + "?c=3&d=4"
+        body = self.sent(lambda n: n.notify_chance_published(posts(kr_url=kr, en_url=en)))
+        lines = body["text"].split("\n")
+        self.assertIn(BLOG_URL + "?a=1&amp;b=2", lines)
+        self.assertIn(EN_URL + "?c=3&amp;d=4", lines)
+        self.assertNotIn("?a=1&b=2", body["text"])
+        self.assertEqual([button["url"] for button in body["reply_markup"]["inline_keyboard"][0]], [kr, en])
+
+    def test_chance_published_never_turns_text_in_a_title_or_source_into_a_link(self):
+        """독립 검증 N-7: 제목·분야·출처 속 https://…·tg://… 는 텔레그램이 링크로 바꾸지 못하게 글자로만 둔다(링크는 허용 목록의 주소를 코드가 건 것뿐)."""
+        hostile = posts(kr_title="클릭 https://evil.example/login 하세요", en_title="open tg://resolve?domain=evil now")
+        hostile[0]["source_name"] = "Src http://evil.example/x"
+        hostile[1]["category"] = "Cat ftp://evil.example"
+        text = self.sent(lambda n: n.notify_chance_published(hostile))["text"]
+        for raw in ("https://evil.example", "tg://resolve", "http://evil.example", "ftp://evil.example"):
+            self.assertNotIn(raw, text)
+        for shown in ("https" + FW_COLON + "//evil.example/login", "tg" + FW_COLON + "//resolve?domain=evil", "http" + FW_COLON + "//evil.example/x",
+                      "ftp" + FW_COLON + "//evil.example"):
+            self.assertIn(shown, text)
+        self.assertEqual(text.count("https://"), 2)                     # 남은 것은 코드가 건 예상 공개 주소 둘뿐
 
     def test_chance_published_puts_the_korean_post_first_whatever_the_input_order(self):
         body = self.sent(lambda n: n.notify_chance_published(list(reversed(posts()))))
@@ -846,6 +892,28 @@ class EventMessageTest(unittest.TestCase):
         self.assertIn("Blogger 한글: t", body["text"])
         body = self.sent(lambda n: n.notify_blogger_result("draft_uploaded", "t", blog_label=""))
         self.assertIn("Blogger: t", body["text"])
+        body = self.sent(lambda n: n.notify_blogger_result("posted", "t", blog_label="Blogger 한글"))        # 게시됨 쪽도 같은 라벨을 쓴다(독립 검증 H12)
+        self.assertEqual(body["text"], f"{notify.OK_MARK} <b>게시됨</b> — Blogger 한글: t")
+
+    def test_blogger_posted_escapes_the_title_and_the_label(self):
+        """독립 검증 E12: AI 가 만든 제목이 가장 바깥의 입력이다 — 게시됨 알림도 제목·라벨의 <·&·> 를 글자로 보낸다."""
+        body = self.sent(lambda n: n.notify_blogger_result("posted", "<i>x</i> & y", blog_label="<b>L</b> & M"))
+        self.assertEqual(body["text"], f"{notify.OK_MARK} <b>게시됨</b> — &lt;b&gt;L&lt;/b&gt; &amp; M: &lt;i&gt;x&lt;/i&gt; &amp; y")
+
+    def test_draft_waiting_never_turns_text_into_a_link(self):
+        """독립 검증 N-7: 채널 이름·제목·안내 문구 속 주소는 글자로만 둔다(버튼은 허용 목록의 주소만)."""
+        body = self.sent(lambda n: n.notify_draft_waiting("채널 https://c.example", "제목 https://evil.example/a", "여기 tg://resolve?domain=x 에서"))
+        self.assertNotIn("://", body["text"])
+        for shown in ("https" + FW_COLON + "//c.example", "https" + FW_COLON + "//evil.example/a", "tg" + FW_COLON + "//resolve?domain=x"):
+            self.assertIn(shown, body["text"])
+
+    def test_blogger_results_never_turn_the_title_or_the_label_into_a_link(self):
+        for code in ("posted", "draft_uploaded"):
+            with self.subTest(code=code):
+                body = self.sent(lambda n, c=code: n.notify_blogger_result(c, "제목 https://evil.example/a tg://x", blog_label="Blogger https://l.example"))
+                self.assertNotIn("://", body["text"])
+                self.assertIn("https" + FW_COLON + "//evil.example/a", body["text"])
+                self.assertIn("Blogger https" + FW_COLON + "//l.example", body["text"])
 
     def test_blogger_results_that_need_no_alert_send_nothing(self):
         notifier, net, _ = make_notifier()
@@ -1029,7 +1097,8 @@ class RobustnessTest(unittest.TestCase):
         notifier, _, _ = make_notifier(net=FakeNet(Endless()))
         result = notifier.send_message("안녕")
         self.assertEqual((result.sent, result.reason), (False, "bad_response"))
-        self.assertEqual(Endless.read_sizes, [notify.MAX_RESPONSE_BYTES])
+        self.assertEqual(Endless.read_sizes, [65536])                     # 상수를 그대로 비교하면 값이 바뀌어도 통과한다(독립 검증 C07) — 64KB 라는 값 자체를 고정한다
+        self.assertEqual(notify.MAX_RESPONSE_BYTES, 65536)
 
 
 class SourceSafetyTest(unittest.TestCase):

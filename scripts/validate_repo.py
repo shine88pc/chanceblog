@@ -234,7 +234,7 @@ def check_workflows(root, files):
 
 
 TELEGRAM_SECRETS = ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")
-_TELEGRAM_NAME = re.compile("|".join(TELEGRAM_SECRETS))
+_TELEGRAM_NAME = re.compile("|".join(TELEGRAM_SECRETS), re.IGNORECASE)   # GitHub 시크릿 이름은 대소문자를 가리지 않는다: secrets.telegram_bot_token 도 같은 값이다
 _TELEGRAM_ENV_VALUE = re.compile(r"\$\{\{\s*secrets\.(TELEGRAM_BOT_TOKEN|TELEGRAM_CHAT_ID)\s*\}\}")
 
 
@@ -256,7 +256,11 @@ def check_telegram_secrets(root, files):
 
     이 토큰은 요청 주소의 경로(https://api.telegram.org/bot<토큰>/…)에 들어가는 서비스의 열쇠라, 셸 명령 줄(echo·set -x·`::set-output`·GITHUB_ENV 에 쓰기)이나
     외부 액션의 입력(with)으로 흘러가면 공개 Actions 로그로 샐 수 있다. 값은 `env:` 로 파이썬 프로세스에 넘기고 pipeline/notify.py 가 환경변수에서만 읽는다
-    (G-C11). 문자열 안에 두 이름 중 하나라도 들어 있으면(`$TELEGRAM_BOT_TOKEN`·`${TELEGRAM_CHAT_ID}` 처럼 환경변수를 셸에서 펼치는 것 포함) 허용된 모양이 아닌 한 오류다."""
+    (G-C11). 문자열 안에 두 이름 중 하나라도 들어 있으면(`$TELEGRAM_BOT_TOKEN`·`${TELEGRAM_CHAT_ID}` 처럼 환경변수를 셸에서 펼치는 것 포함, 대소문자를 바꾼
+    `secrets.telegram_bot_token` 도 같은 시크릿이라 같게 본다) 허용된 모양이 아닌 한 오류다.
+
+    한계(문서에도 적었다): 이름이 **글자로** 나오는 곳만 본다 — `toJSON(secrets)`·`secrets[format(…)]`·`secrets: inherit` 처럼 이름 없이 시크릿을 넘기는 길과,
+    외부 `uses:` 단계의 env 는 못 잡는다. 호출 쪽 재사용 워크플로의 `secrets:` 매핑(`jobs.<잡>.secrets.TELEGRAM_*`)은 허용된 자리가 아니라 오류다."""
     if yaml is None:
         return []  # PyYAML 이 없다는 경고는 WF-0(check_workflows)이 이미 낸다
     out = []
@@ -268,7 +272,7 @@ def check_telegram_secrets(root, files):
         if not isinstance(data, dict):
             continue
         for path, value in _walk_strings(data):
-            names = sorted(set(_TELEGRAM_NAME.findall(value)))
+            names = sorted({found.upper() for found in _TELEGRAM_NAME.findall(value)})
             if not names:
                 continue
             in_step_env = len(path) == 6 and path[0] == "jobs" and path[2] == "steps" and path[4] == "env"

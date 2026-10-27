@@ -15,7 +15,8 @@
      비밀 모양 패턴(llm.mask)으로 한 번 더 가린 뒤에만 내보내며, (c) 토큰은 요청 주소 말고는 어디에도 쓰지 않는다(헤더·본문·명령 줄에 넣지 않는다).
   3. 길이·전송량 상한: 본문 3,800자(UTF-16 단위로 보수적으로 계산, 텔레그램 한도는 4,096), 한 실행(프로세스)에서 5통, 통 사이 1.1초.
   4. 외부·AI 유래 글(제목·출처 이름)은 소독해서 쓴다: 비밀 모양 가리기 → 보이지 않는 문자·제어 문자 제거 → 한 줄로 접기('::'·'##[' 풀어 씀) → 길이 제한 →
-     (HTML 알림이면) &·<·> 이스케이프. 주소는 허용 목록(allowed_url)만 링크·버튼으로 쓰고 나머지는 글자로만 둔다.
+     (HTML 알림이면) 글 속 https://…·tg://… 를 글자로만(defang_urls: ':' 를 전각 콜론으로) → &·<·> 이스케이프. 주소는 허용 목록(allowed_url)만
+     링크·버튼으로 쓰고 나머지는 글자로만 둔다.
   5. 재시도: 429 는 retry_after(최대 10초)만큼 기다려 한 번, 네트워크 오류·5xx 는 한 번. HTML 알림이 400(엔티티 해석 실패)이면 서식 없이 한 번 더,
      버튼이 거부되면(400 BUTTON…) 버튼 없이 한 번 더. 그 밖의 오류(400·401·403·404)는 다시 시도하지 않는다.
 
@@ -75,6 +76,9 @@ ERROR_LINE = "::error::텔레그램 알림 시험이 실패했습니다. 이유�
 # 알림 문구의 그림 문자(소스에는 코드 포인트로만 적는다 — 어떤 콘솔·편집기에서도 깨지지 않게)
 OK_MARK, PIN_MARK, MEMO_MARK, WAIT_MARK = (chr(0x2705), chr(0x1F4CC), chr(0x1F4DD), chr(0x23F3))
 FLAGS = {"ko": chr(0x1F1F0) + chr(0x1F1F7), "en": chr(0x1F1FA) + chr(0x1F1F8)}
+# 새 글 알림은 Pages 배포를 요청한 직후에 오고 주소 버튼이 같이 간다. 배포가 퍼지기 전에 열면 공개 CDN 이 그 404 를 최대 약 18분 보관해 독자에게도 한동안
+# 404 가 돌아올 수 있다(docs/DEFECT_REGISTER.md D-41) — 그래서 문구로 3분 뒤에 열어 보게 한다.
+DEPLOY_WAIT_NOTE = "사이트 배포가 끝나기까지 약 3분 걸립니다. 일찍 열면 404 가 최대 약 18분 보관될 수 있으니 3분 뒤에 열어 보세요."
 
 # ---- 결과 -------------------------------------------------------------------
 # ok: 문제가 없었다(보냈거나, 일부러 건너뜀) / sent: 실제로 전달됨 / status: HTTP 상태(없으면 None) / reason: 아래 분류 코드 / detail: 소독한 한 줄 설명
@@ -147,6 +151,12 @@ def escape_html(text):
 def defang_urls(text):
     """글 속 주소(http·https·ftp·tg)가 링크가 되지 않게 ':' 를 전각 콜론으로 바꾼다. 허용 목록 밖 주소를 글자로만 보여 줄 때 쓴다."""
     return _URL_SCHEME_RE.sub(lambda match: match.group(1) + _FULLWIDTH_COLON + "//", str(text))
+
+
+def safe_text(value, limit=TITLE_LIMIT):
+    """HTML 알림에 글자로 넣을 외부·AI 유래 글(제목·출처·라벨): clean_text → defang_urls(글 속 https://…·tg://… 를 텔레그램이 링크로 바꾸지 못하게) →
+    escape_html. 링크는 allowed_url 을 통과한 주소만 코드가 직접 건다."""
+    return escape_html(defang_urls(clean_text(value, limit)))
 
 
 def allowed_url(url, extra_prefixes=()):
@@ -493,8 +503,8 @@ class Notifier:
     def notify_draft_waiting(self, channel_label, title, where, url=None, extra_prefixes=()):
         """'발행 대기' 알림(티스토리·네이버 초안 패키지, Chance 승인 대기, Blogger 초안 공통): 어느 채널의 어떤 글을 어디서 무엇을 하면 되는지."""
         try:
-            text = (f"{MEMO_MARK} <b>발행 대기</b> — {escape_html(clean_text(channel_label, SHORT_LIMIT))}: {escape_html(clean_text(title))}\n"
-                    f"→ {escape_html(clean_text(where, WHERE_LIMIT))}")
+            text = (f"{MEMO_MARK} <b>발행 대기</b> — {safe_text(channel_label, SHORT_LIMIT)}: {safe_text(title)}\n"
+                    f"→ {safe_text(where, WHERE_LIMIT)}")
             buttons = [("열기", url)] if url else []
             return self.send_message(text, parse_mode="HTML", buttons=buttons, extra_prefixes=extra_prefixes)
         except Exception as exc:  # noqa: BLE001
@@ -504,12 +514,12 @@ class Notifier:
         """Blogger 러너의 결과를 알린다. draft_uploaded → '초안함에 올라옴, 확인·게시', posted(published) → '게시됨'.
         그 밖의 결과(실패·저장소 파일만 저장 등)는 보내지 않는다 — 실패는 확인 필요 모음과 Actions 실패 알림이 맡는다."""
         try:
-            label = clean_text(blog_label, SHORT_LIMIT) or "Blogger"
+            label = defang_urls(clean_text(blog_label, SHORT_LIMIT)) or "Blogger"
             if result_code == "draft_uploaded":
                 return self.notify_draft_waiting(label, title, "초안함에 올라왔습니다 — Blogger 대시보드 → 초안에서 확인하고 게시하세요",
                                                  url="https://www.blogger.com/")
             if result_code in ("posted", "published"):
-                text = f"{OK_MARK} <b>게시됨</b> — {escape_html(label)}: {escape_html(clean_text(title))}"
+                text = f"{OK_MARK} <b>게시됨</b> — {escape_html(label)}: {safe_text(title)}"
                 return self.send_message(text, parse_mode="HTML", buttons=[("글 보기", url)] if url else [], extra_prefixes=extra_prefixes)
             return Result(True, False, None, NOT_APPLICABLE, "")
         except Exception as exc:  # noqa: BLE001
@@ -551,11 +561,11 @@ def format_chance_published(posts, run_info):
     categories, source, links, buttons = [], "", [], []
     for post in posts:
         lang = "ko" if post.get("lang") == "ko" else "en"
-        lines.append(f"{FLAGS[lang]} {escape_html(clean_text(post.get('title')))}")
-        category = clean_text(post.get("category"), SHORT_LIMIT)
+        lines.append(f"{FLAGS[lang]} {safe_text(post.get('title'))}")
+        category = defang_urls(clean_text(post.get("category"), SHORT_LIMIT))
         if category and category not in categories:
             categories.append(category)
-        source = source or clean_text(post.get("source_name"), SHORT_LIMIT)
+        source = source or defang_urls(clean_text(post.get("source_name"), SHORT_LIMIT))
         url = allowed_url(post.get("url"))
         if url:
             links.append(escape_html(url))
@@ -567,7 +577,7 @@ def format_chance_published(posts, run_info):
         lines.append(f"분야: {escape_html(' · '.join(categories))}")
     if source:
         lines.append(f"출처: {escape_html(source)}")
-    lines.append(f"{WAIT_MARK} 사이트 배포까지 1~3분 걸립니다. 아래 주소는 배포가 끝나면 열립니다.")
+    lines.append(f"{WAIT_MARK} {DEPLOY_WAIT_NOTE}")
     lines.extend(links)
     run_url = allowed_url(run_info.get("run_url"))
     if run_url:
