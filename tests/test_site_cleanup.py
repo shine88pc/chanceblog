@@ -141,9 +141,10 @@ class ExcludeTest(unittest.TestCase):
 
 class HomeTest(unittest.TestCase):
     def grid_region(self):
+        """스와이프 글 목록(#post-grid)의 구간 — 목록은 추천 글 바로 아래에 있고(2026-10-28 운영자 승인 R-006 A), 끝은 그다음 소개 판이 시작하는 곳이다."""
         text = home()
         start = text.index('<div id="post-grid"')
-        end = text.index("</main>", start)
+        end = text.index('<section id="editorial-principles"', start)
         return text[start:end]
 
     def test_the_post_list_is_rendered_by_jekyll_so_links_exist_without_javascript(self):
@@ -175,6 +176,27 @@ class HomeTest(unittest.TestCase):
         self.assertIn("{% comment %}서버가 미리 그린 글 목록", region)
         self.assertIn("{% endcomment %}", region)
         self.assertNotIn("<!-- 서버가 미리 그린", region)
+
+    def test_the_swipe_list_sits_right_under_the_featured_post_and_the_panels_come_after_it(self):
+        """운영자 승인 R-006 선택 A(이슈 #63·#64): 글 목록이 소개 판 세 개 뒤 맨 아래에 있던 것을 추천 글 바로 아래로 올렸다."""
+        text = home()
+        order = ['id="featured-post"', 'id="results-summary"', 'id="reset-filters"', 'id="loading-indicator"', 'id="empty-state"',
+                 'id="post-carousel-controls"', 'id="post-grid"', '<section id="editorial-principles"', '<section id="daily-publishing-monitor"', "</main>"]
+        positions = [text.index(needle) for needle in order]
+        self.assertEqual(positions, sorted(positions), "블록 순서가 추천 글 → 글 수 줄 → 로딩·빈 목록 → 스와이프 목록 → 소개 판 → 발행 현황이어야 한다")
+        for needle in order:
+            self.assertEqual(text.count(needle), 1, needle)
+        between = text[text.index('id="reset-filters"'):text.index('id="post-carousel-controls"')]
+        self.assertNotIn("<section", between)                                       # 글 수 줄과 목록 사이에 다른 판이 끼지 않는다
+        self.assertNotIn('<article class="editorial-card', self.grid_region())      # 소개 판의 카드가 목록 구간으로 섞이지 않는다
+
+    def test_the_animal_interview_banner_is_gone_but_its_art_file_is_kept(self):
+        """'상상의 동물이 묻습니다' 배너(2026-10-20 콘셉트, 이어지는 글·영상 없음)는 운영자 결정으로 없앴다. 그림 파일은 되돌리기 쉽게 지우지 않는다."""
+        text = home()
+        for gone in ("동물이 묻", "shorts-panel", "shorts-art", "shorts-title", "shorts-float", "shorts-animal-interview", "가상 여우"):
+            with self.subTest(gone=gone):
+                self.assertNotIn(gone, text)
+        self.assertTrue((ROOT / "assets" / "shorts-animal-interview.svg").is_file())
 
     def test_the_summary_line_shows_the_server_side_count(self):
         self.assertIn("{{ site.posts.size }}개의 글을 만나보세요", home())
