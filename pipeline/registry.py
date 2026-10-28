@@ -21,7 +21,7 @@ import re
 import sys
 from pathlib import Path, PurePosixPath
 
-from pipeline.console import safe_output
+from pipeline.console import clean_secret, safe_output, secret_was_cleaned
 from pipeline.gates import SUPPORTED_LANGUAGES, first_match
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -139,16 +139,33 @@ def enabled_blogs(reg, platform=None):
 
 
 def resolve_secrets(blog, environ):
-    """역할 -> 값(앞뒤 공백 제거). 없으면 빈 문자열.
+    """역할 -> 값(앞뒤 공백과 보이지 않는 문자·제어 문자를 지운 값, console.clean_secret). 없으면 빈 문자열.
 
     우선순위: PIPELINE_SECRET_<ROLE> (워크플로 매트릭스가 블로그별 Secrets 를 역할 이름으로 넘길 때)
     > 레지스트리에 적힌 환경변수 이름 (로컬 수동 실행·단일 블로그).
+
+    채팅 앱·문서에서 복사해 붙여 넣은 값에는 폭 없는 공백(U+200B)·단어 결합자(U+2060)·BOM(U+FEFF) 같은 보이지 않는 문자가 섞이기 쉬운데 `str.strip()` 은 이를 못 지워
+    인증이 설명 없이 어긋났다(이슈 #58, 결함 D-79). 지우고 쓰되 값은 어디에도 출력하지 않는다 — 어느 시크릿이었는지는 cleaned_secret_names 가 이름만 알려 준다.
+    보이지 않는 문자가 없는 값은 예전과 똑같이 앞뒤 공백만 자른 값이다.
     """
     out = {}
     for role, name in blog.get("secrets", {}).items():
-        override = (environ.get("PIPELINE_SECRET_" + role.upper()) or "").strip()
-        out[role] = override or (environ.get(name) or "").strip()
+        override = clean_secret(environ.get("PIPELINE_SECRET_" + role.upper()))
+        out[role] = override or clean_secret(environ.get(name))
     return out
+
+
+def cleaned_secret_names(blog, environ):
+    """resolve_secrets 가 실제로 쓰는 값 중 보이지 않는 문자·제어 문자를 지운 것의 **환경변수 이름**(레지스트리 `secrets` 의 이름 = GitHub Secrets 이름) 목록.
+    운영자에게 '이 시크릿을 원본에서 다시 복사해 등록하라'고 알릴 때 쓴다 — 값·길이는 돌려주지 않는다. 쓰이지 않는 값(우선순위에서 밀린 쪽)은 보지 않는다."""
+    names = []
+    for role, name in blog.get("secrets", {}).items():
+        for source in ("PIPELINE_SECRET_" + role.upper(), name):
+            if clean_secret(environ.get(source)):
+                if secret_was_cleaned(environ.get(source)) and name not in names:
+                    names.append(name)
+                break
+    return names
 
 
 def missing_secret_roles(blog, environ):

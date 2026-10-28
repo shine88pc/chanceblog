@@ -1,0 +1,51 @@
+name: "[공통] AI 요청 텔레그램 알림"
+
+# AI 가 GitHub 화면을 쓸 수 없어 막힐 때(PR 병합·Actions 실행·설정·시크릿)나 결정이 필요할 때, 저장소의 요청 파일(`인수인계/요청함/R-001_짧은-영문-설명.md`)을
+# `ai/claude/**` 브랜치로 push 하면 그 제목·요약을 휴대폰 텔레그램으로 보낸다(운영자가 답하는 법: 인수인계/운영자_요청함_사용법.md, 구조: docs/ARCHITECTURE.md §4-6).
+# 이 워크플로는 저장소를 읽기만 하고 아무것도 쓰지 않는다. 이름이 비슷한 `[공통] 텔레그램 알림 시험` 은 시크릿이 맞는지 누르는 수동 시험이고 이 워크플로와 무관하다.
+#
+# 알아 둘 것(한계):
+#  - 트리거는 브랜치(`ai/claude/**`)뿐이다. 요청 파일 경로 필터(paths)는 일부러 쓰지 않았다 — 새 브랜치의 첫 push 에서 그 필터가 어떤 차이로 평가되는지 확인하지 못했다(미확인).
+#    그래서 이 브랜치의 모든 push 마다 짧은 실행이 하나 생기고, 새 요청 파일이 없으면 파이썬이 한 줄 남기고 곧바로 끝난다(전송 0, 종료 0).
+#  - 새 요청 파일 고르기는 파이썬(pipeline/operator_loop.py)이 git 으로 한다: 이번 push 가 새로 더했고 다른 브랜치·기본 브랜치에는 없던 `인수인계/요청함/R-번호_이름.md` 만.
+#    차이를 구하지 못하면(얕은 복제·사라진 커밋 등) 중복·도배를 막으려고 보내지 않고 `::warning::` 만 남긴다.
+#  - push 로 도는 워크플로는 push 한 커밋에 있는 이 파일 그대로 돈다. 이 파일이 없는 브랜치(옛 기준에서 만든 것)는 알림이 가지 않는다. 시크릿(TELEGRAM_*)은 모든 브랜치가 읽을 수 있다.
+#  - 같은 그룹에서 대기 중인 실행은 새 실행이 오면 취소된다(GitHub 규칙). 그러면 취소된 push 의 요청 파일은 아무도 알리지 못하므로 그룹을 push(커밋)마다 다르게 했다.
+# 시크릿은 단계의 env 로만 넘기고 명령 줄·로그·요약에 쓰지 않는다(검증기 WF-13·WF-14, docs/SECURITY_GUARDRAILS.md G-C12·G-C13). 값은 `run:` 에 끼우지 않고 env 로만 넘긴다.
+
+on:
+  push:
+    branches:
+      - 'ai/claude/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-request-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    name: 요청 알림 보내기
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # 새 요청 파일을 가려내려면 BEFORE 커밋과 다른 브랜치의 끝(origin/*)이 필요하다
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 새 요청 파일 알리기
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m pipeline.operator_loop requests

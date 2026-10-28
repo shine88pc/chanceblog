@@ -15,6 +15,13 @@ import unicodedata
 # 마크다운 문법 문자 → 무해한 표기(실행 요약은 마크다운으로 렌더링된다). 백틱은 코드 스팬을 여는 문자라 작은따옴표로 바꾼다.
 _MD_SAFE = (("|", "&#124;"), ("`", "'"), ("<", "&lt;"), (">", "&gt;"), ("[", "&#91;"), ("]", "&#93;"))
 
+# 글자 순서를 뒤집거나 보이지 않게 만드는 문자(소프트 하이픈·폭 없는 공백·방향 제어·단어 결합자·BOM). 알림 글 소독(pipeline/notify.py)과 시크릿 값 정리(clean_secret)가
+# 같은 목록을 쓰도록 한 곳에 둔다(순환 임포트를 피하려고 notify 가 아니라 여기). 소스에는 보이지 않는 문자를 넣지 않으려고 코드 포인트로 쓴다.
+INVISIBLE_CODEPOINTS = (0x00AD, *range(0x200B, 0x2010), *range(0x202A, 0x202F), *range(0x2060, 0x2065), *range(0x2066, 0x206A), 0xFEFF)
+INVISIBLE_RE = re.compile("[" + "".join(chr(code) for code in INVISIBLE_CODEPOINTS) + "]")
+_INVISIBLE_SET = frozenset(chr(code) for code in INVISIBLE_CODEPOINTS)
+_REMOVED_CATEGORIES = frozenset({"Cc", "Cf", "Cs"})      # 제어 문자·서식 문자(공유 목록의 문자도 모두 여기에 든다)·짝 없는 서로게이트
+
 
 def one_line(text, limit=300):
     """외부 유래 문자열을 로그에 넣을 한 줄로 접는다(길이는 limit 이하, 줄이면 끝에 '…').
@@ -38,6 +45,22 @@ def md_cell(text, limit=120):
     for char, safe in _MD_SAFE:
         folded = folded.replace(char, safe)
     return folded
+
+
+def clean_secret(value):
+    """시크릿 값을 쓸 수 있는 모양으로 정리한다: 보이지 않는 문자(INVISIBLE_CODEPOINTS)·제어 문자·서식 문자를 어디에 있든 지우고 앞뒤 공백을 자른다.
+
+    채팅 앱·문서에서 복사해 붙여 넣은 값에는 폭 없는 공백(U+200B)·단어 결합자(U+2060)·BOM(U+FEFF) 같은 문자가 섞이기 쉽다. 눈에 보이지 않고 `str.strip()` 도 못 지워
+    인증이 설명 없이 어긋난다(이슈 #58). 값 가운데의 보통 공백은 건드리지 않는다(시크릿에는 공백이 없어 그런 값은 원래도 인증이 실패해 드러난다).
+    보이지 않는 문자가 없는 값은 `value.strip()` 과 똑같이 돌려준다(예전 동작과 같다)."""
+    raw = "" if value is None else str(value)
+    return "".join(ch for ch in raw if ch not in _INVISIBLE_SET and unicodedata.category(ch) not in _REMOVED_CATEGORIES).strip()
+
+
+def secret_was_cleaned(value):
+    """clean_secret 이 앞뒤 공백 자르기(예전 동작) 말고 보이지 않는 문자·제어 문자를 더 지웠는가. 시크릿을 다시 등록하라고 알릴 때 쓴다(값은 출력하지 않는다)."""
+    raw = "" if value is None else str(value)
+    return clean_secret(raw) != raw.strip()
 
 
 def safe_output():

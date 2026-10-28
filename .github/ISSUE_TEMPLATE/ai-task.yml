@@ -1,0 +1,51 @@
+name: "AI 에게 새 일 맡기기(작업 요청)"
+description: "AI 가 이어서 해 주었으면 하는 새 일을 적습니다. 올리면 접수 확인(코멘트와 텔레그램)이 오고, AI 세션이 이 이슈를 읽고 진행합니다."
+title: "[요청] "
+labels: ["운영자요청"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **비밀번호·토큰·키 값은 절대 쓰지 마세요.** 이 이슈는 공개입니다(누구나 읽을 수 있습니다). 값이 필요한 일은 AI 가 안내하는 대로 GitHub 설정 화면에 직접 입력하세요.
+
+        이 양식은 **저장소 소유자 계정으로 올린 것만** 접수됩니다. 아래 '승인 범위'에서 '예'를 골라도 승인(T3)은 **이 글에 적은 항목에 한해서만** 유효하고, 적지 않은 일은 AI 가 따로 묻습니다.
+        고정 페이지 문구나 게시글 이미지를 바꾸는 일은 `고정 페이지 수정`·`기존 게시글 이미지 변경` 양식을 쓰세요(자동으로 PR 이 만들어집니다).
+
+  - type: textarea
+    id: what
+    attributes:
+      label: "해 주었으면 하는 일"
+      description: "무엇을 왜 하고 싶은지 쉬운 말로 적어 주세요. 길어도 됩니다."
+    validations:
+      required: true
+
+  - type: textarea
+    id: done
+    attributes:
+      label: "끝났다고 볼 기준"
+      description: "(선택) 어떻게 되면 끝났다고 보는지 적어 주세요. 비워 두면 AI 가 제안합니다."
+    validations:
+      required: false
+
+  - type: dropdown
+    id: urgency
+    attributes:
+      label: "긴급도"
+      options:
+        - "보통"
+        - "급함"
+        - "천천히"
+      default: 0
+    validations:
+      required: false
+
+  - type: dropdown
+    id: approval
+    attributes:
+      label: "승인 범위"
+      description: "'예'는 위 내용에 적은 항목에 한해서만 승인입니다(광고 표면·시크릿·계정·삭제·`mode` 변경 같은 T3 항목 포함). 모르겠으면 '아니요'를 고르세요."
+      options:
+        - "아니요 — 논의·준비까지만"
+        - "예 — 위 내용에 적은 항목에 한해 승인합니다(T3 포함)"
+    validations:
+      required: true

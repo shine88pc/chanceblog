@@ -28,6 +28,7 @@ except ImportError:  # pragma: no cover - 환경에 따라 다름
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from pipeline import operator_loop as loop_mod  # noqa: E402
 from pipeline import registry as reg_mod  # noqa: E402
 from pipeline.console import one_line, safe_output  # noqa: E402
 from pipeline.secret_patterns import SECRET_PATTERNS  # noqa: E402
@@ -596,6 +597,224 @@ def check_blogger_wrappers(root, files):
     return out
 
 
+# ----------------------------------------------------------------------------
+# 운영자 요청함(작업 H, 2026-10-28): AI 요청 알림·응답 접수 워크플로(WF-14), 요청 파일(REQ-1), 이슈 양식(FORM-1)
+# ----------------------------------------------------------------------------
+AI_REQUEST_WORKFLOW = ".github/workflows/ai-request.yml"
+OPERATOR_REPLY_WORKFLOW = ".github/workflows/operator-reply.yml"
+REPLY_FORM = ".github/ISSUE_TEMPLATE/ai-reply.yml"
+TASK_FORM = ".github/ISSUE_TEMPLATE/ai-task.yml"
+ISSUE_CONFIG = ".github/ISSUE_TEMPLATE/config.yml"
+_TELEGRAM_ENV = {"TELEGRAM_BOT_TOKEN": "${{ secrets.TELEGRAM_BOT_TOKEN }}", "TELEGRAM_CHAT_ID": "${{ secrets.TELEGRAM_CHAT_ID }}"}
+_AI_REQUEST_ENV = {"BEFORE_SHA": "${{ github.event.before }}", "AFTER_SHA": "${{ github.sha }}",
+                   "DEFAULT_BRANCH": "${{ github.event.repository.default_branch }}", **_TELEGRAM_ENV}
+_OPERATOR_REPLY_ENV = {"GITHUB_TOKEN": "${{ secrets.GITHUB_TOKEN }}", **_TELEGRAM_ENV}
+_REPLY_JOB_IF = "github.event.issue.user.login == github.repository_owner && github.event.issue.author_association == 'OWNER'"
+_JOB_KEYS = {"name", "runs-on", "timeout-minutes", "steps"}
+_STEP_KEYS = {"name", "uses", "with", "env", "run"}
+
+
+def _shown(value):
+    """저장소 파일에서 온 값을 오류 문구에 쓸 때: 한 줄로 접고(줄바꿈·`::`·`##[` 무력화) 40자로 줄인다(G-L2)."""
+    return one_line(str(value)[:40])
+
+
+def _operator_workflow_problems(data, kind):
+    """작업 H 의 두 워크플로(kind: request·reply)가 정해진 모양인지(WF-14). 문제 문구 목록을 돌려준다.
+
+    '허용 목록' 방식이다 — 트리거·권한·job·단계의 키와 값이 정확히 정해진 것이어야 하고, 그 밖의 것(다른 트리거·더 큰 권한·job/워크플로 env·시크릿 매핑·`if`·`continue-on-error`·
+    추가 단계·`run` 안의 GitHub 표현식 등)은 모두 문제다. 이 워크플로들은 누구나 쓸 수 있는 외부 입력(이슈 글·브랜치 이름)을 만지고 텔레그램 시크릿을 쓰므로 바뀔 때마다
+    규칙(docs/SECURITY_GUARDRAILS.md G-S9·G-C13)과 이 검사를 함께 고치게 한다."""
+    problems = []
+    reply = kind == "reply"
+    triggers, permissions = _triggers(data), data.get("permissions")
+    if reply:
+        if set(triggers) != {"issues"} or triggers.get("issues") != {"types": ["opened"]}:
+            problems.append(f"트리거는 `issues: types: [opened]` 하나뿐이어야 합니다(지금 {_shown(sorted(map(str, triggers)))}) — pull_request_target·issue_comment·workflow_run·수정·라벨 이벤트로 "
+                            "넓히면 낯선 사람이 시크릿에 닿거나 같은 이슈를 여러 번 처리하게 됩니다")
+        wanted_permissions = {"contents": "read", "issues": "write"}
+    else:
+        if set(triggers) != {"push"} or triggers.get("push") != {"branches": ["ai/claude/**"]}:
+            problems.append(f"트리거는 `push: branches: ['ai/claude/**']` 하나뿐이어야 합니다(지금 {_shown(sorted(map(str, triggers)))}) — paths·paths-ignore·tags·branches-ignore 같은 다른 필터도 쓰지 않습니다"
+                            "(새 브랜치의 첫 push 에서 paths 필터가 어떻게 평가되는지 확인하지 못했습니다)")
+        wanted_permissions = {"contents": "read"}
+    if permissions != wanted_permissions:
+        problems.append(f"최상위 permissions 는 정확히 {wanted_permissions} 이어야 합니다(지금 {_shown(permissions)})")
+    if "env" in data or "defaults" in data:
+        problems.append("워크플로 수준 env·defaults 를 두지 않습니다(값은 마지막 단계의 env 로만 넘깁니다)")
+    concurrency = data.get("concurrency")
+    group = concurrency.get("group") if isinstance(concurrency, dict) else None
+    needed = "github.event.issue.number" if reply else "github.sha"
+    if not (isinstance(group, str) and needed in group) or concurrency.get("cancel-in-progress") is not False:
+        problems.append(f"concurrency.group 에 `{needed}` 가 있고 cancel-in-progress 가 false 여야 합니다(지금 {_shown(concurrency)})"
+                        + ("" if reply else " — 같은 그룹에서 대기 중인 실행은 새 실행이 오면 취소돼 그 push 의 요청 파일을 아무도 알리지 못하므로 그룹을 push 마다 다르게 둡니다"))
+    jobs = data.get("jobs")
+    if not isinstance(jobs, dict) or len(jobs) != 1 or not isinstance(next(iter(jobs.values())), dict):
+        return problems + ["job 은 정확히 하나여야 합니다"]
+    job = next(iter(jobs.values()))
+    extra = sorted(str(key) for key in set(job) - _JOB_KEYS - ({"if"} if reply else set()))
+    if extra:
+        problems.append(f"job 에 허용되지 않은 키가 있습니다({_shown(', '.join(extra))}) — job 수준 permissions·env·secrets·uses·strategy·continue-on-error 등을 두지 않습니다")
+    if reply and " ".join(str(job.get("if")).split()) != _REPLY_JOB_IF:
+        problems.append(f"job 의 if 는 정확히 `{_REPLY_JOB_IF}` 여야 합니다(소유자가 연 이슈만, 이중 방어 — 지금 {_shown(job.get('if'))})")
+    if not reply and "if" in job:
+        problems.append("job 에 if 를 두지 않습니다")
+    timeout = job.get("timeout-minutes")
+    if job.get("runs-on") != "ubuntu-latest" or isinstance(timeout, bool) or not isinstance(timeout, int) or not 1 <= timeout <= 10:
+        problems.append("job 은 runs-on: ubuntu-latest 이고 timeout-minutes 가 1~10 이어야 합니다")
+    steps = job.get("steps")
+    if not isinstance(steps, list) or len(steps) != 3 or not all(isinstance(step, dict) for step in steps):
+        return problems + ["단계는 정확히 셋(checkout·setup-python·파이썬 실행)이어야 합니다"]
+    for step in steps:
+        extra = sorted(str(key) for key in set(step) - _STEP_KEYS)
+        if extra:
+            problems.append(f"단계에 허용되지 않은 키가 있습니다({_shown(', '.join(extra))}) — if·continue-on-error·shell·working-directory 등을 두지 않습니다")
+    checkout, python, run = steps
+    with_ = checkout.get("with") if isinstance(checkout.get("with"), dict) else {}
+    allowed_with = {"persist-credentials"} if reply else {"persist-credentials", "fetch-depth"}
+    if (not str(checkout.get("uses", "")).startswith("actions/checkout@") or with_.get("persist-credentials") is not False or set(with_) - allowed_with
+            or (not reply and with_.get("fetch-depth") != 0) or "env" in checkout or "run" in checkout):
+        problems.append("첫 단계는 actions/checkout 이어야 하고 with 는 persist-credentials: false"
+                        + ("" if reply else "·fetch-depth: 0") + " 뿐이어야 합니다"
+                        + (" — ref·repository·token 을 바꾸면 기본 브랜치가 아닌 코드(이슈 글에서 온 값)를 내려받을 수 있습니다" if reply else ""))
+    if not str(python.get("uses", "")).startswith("actions/setup-python@") or "run" in python or "env" in python:
+        problems.append("둘째 단계는 actions/setup-python 이어야 합니다")
+    wanted_run = f"python -m pipeline.operator_loop {'ack' if reply else 'requests'}"
+    wanted_env = _OPERATOR_REPLY_ENV if reply else _AI_REQUEST_ENV
+    env = run.get("env") if isinstance(run.get("env"), dict) else {}
+    if "uses" in run or str(run.get("run", "")).strip() != wanted_run:
+        problems.append(f"마지막 단계의 run 은 정확히 `{wanted_run}` 한 줄이어야 합니다(값은 run 에 끼우지 않고 env 로만 넘깁니다 — `${{{{ }}}}` 표현식 금지)")
+    if {str(key): str(value).strip() for key, value in env.items()} != wanted_env:
+        problems.append(f"마지막 단계의 env 는 정확히 {', '.join(wanted_env)} 여야 하고 각 값은 정해진 표현식 하나뿐이어야 합니다(텔레그램 시크릿은 같은 이름의 환경변수로만, WF-13)")
+    return problems
+
+
+def check_operator_workflows(root, files):
+    """WF-14: 운영자 요청함의 두 워크플로(`ai-request.yml`: ai/claude/** push 로 요청 파일을 텔레그램에 알림 / `operator-reply.yml`: 소유자가 연 응답 이슈를 접수 확인)가 정해진 모양인지.
+    트리거 집합·권한·job `if`·단계·env 가 허용 목록과 정확히 같아야 한다(docs/SECURITY_GUARDRAILS.md G-S9·G-C13). 시크릿 이름의 위치는 WF-13 이 따로 본다."""
+    if yaml is None:
+        return []  # PyYAML 이 없다는 경고는 WF-0(check_workflows)이 이미 낸다
+    out = []
+    for rel, kind in ((AI_REQUEST_WORKFLOW, "request"), (OPERATOR_REPLY_WORKFLOW, "reply")):
+        if rel not in files:
+            continue
+        try:
+            data = _load_yaml(read_text(root, rel) or "")
+        except yaml.YAMLError:
+            continue  # WF-0
+        if not isinstance(data, dict):
+            continue  # WF-0
+        out.extend(err("WF-14", message, rel) for message in _operator_workflow_problems(data, kind))
+    return out
+
+
+def check_request_files(root, files):
+    """REQ-1: `인수인계/요청함/` 의 요청 파일(`R-001_짧은-영문-설명.md`)이 정해진 모양인지 — 파일 이름·앞머리(id·kind·title·summary·urgency·pr·created)·id 와 이름의 일치·
+    제목 80자·요약 300자·중복 id 없음. 이 모양을 지킨 파일만 push 때 텔레그램으로 알려진다(pipeline/operator_loop.py). README.md 는 설명 문서라 건너뛴다."""
+    out, seen = [], {}
+    prefix = loop_mod.REQUEST_DIR + "/"
+    for rel in files:
+        if not rel.startswith(prefix):
+            continue
+        rest = rel[len(prefix):]
+        base = rest.rsplit("/", 1)[-1]
+        if "/" in rest:
+            if base.upper().startswith("R-"):
+                out.append(err("REQ-1", f"요청 파일은 `{loop_mod.REQUEST_DIR}/` 바로 아래에 둡니다(하위 폴더의 파일은 알림이 가지 않습니다)", rel))
+            continue
+        if rest == "README.md":
+            continue
+        if not base.upper().startswith("R-"):
+            out.append(warn("REQ-1", "요청 파일 이름이 `R-001_짧은-영문-설명.md` 모양이 아니라 push 해도 알림이 가지 않습니다(설명 문서는 README.md)", rel))
+            continue
+        text = read_text(root, rel)
+        if text is None:
+            out.append(err("REQ-1", "요청 파일을 읽을 수 없습니다(텍스트가 아니거나 너무 큽니다)", rel))
+            continue
+        try:
+            request = loop_mod.parse_request(base, text, strict=True)
+        except loop_mod.RequestError as exc:
+            out.append(err("REQ-1", one_line(loop_mod.problem_text(exc.code)), rel))
+            continue
+        if request.id in seen:
+            out.append(err("REQ-1", f"요청 번호 {request.id} 가 {seen[request.id]} 와 같습니다 — 요청 번호는 파일마다 달라야 합니다(답 이슈가 어느 요청인지 가려야 합니다)", rel))
+        seen.setdefault(request.id, rel)
+    return out
+
+
+def _form_problems(data, title, label, fields, required, types, options):
+    """이슈 양식 한 개(파싱한 data)가 loop_mod 의 정의와 같은지(FORM-1). 문제 문구 목록."""
+    if not isinstance(data, dict):
+        return ["양식이 객체가 아닙니다"]
+    problems = []
+    if data.get("title") != title:
+        problems.append(f"title 은 정확히 `{title}` 여야 합니다(지금 {_shown(data.get('title'))}) — 접수 워크플로가 제목 머리로 양식을 알아봅니다")
+    if data.get("labels") != [label]:
+        problems.append(f"labels 는 정확히 [`{label}`] 여야 합니다(지금 {_shown(data.get('labels'))}) — `blog-control` 이 있으면 `[Chance] 이슈 수정 요청 처리(수정안 PR 만들기)` 가 반응합니다")
+    body = data.get("body")
+    if not isinstance(body, list) or not body or not all(isinstance(item, dict) for item in body):
+        return problems + ["body 가 항목 목록이 아닙니다"]
+    notice = body[0]
+    if notice.get("type") != "markdown" or loop_mod.FORM_NOTICE not in str((notice.get("attributes") or {}).get("value", "")):
+        problems.append(f"맨 위 항목은 안내 글(markdown)이고 `{loop_mod.FORM_NOTICE}` 문장이 있어야 합니다(공개 이슈에 비밀 값이 적히는 것을 막는 안내)")
+    inputs = list(body[1:])
+    ids = [item.get("id") for item in inputs]
+    if len(ids) != len(set(map(str, ids))):
+        problems.append("항목 id 가 겹칩니다")
+    if sorted(map(str, ids)) != sorted(field_id for field_id, _ in fields):
+        problems.append(f"항목 id 가 정확히 {', '.join(field_id for field_id, _ in fields)} 여야 합니다(지금 {_shown(', '.join(map(str, ids)))})")
+    for item in inputs:
+        field_id = str(item.get("id"))
+        wanted = dict(fields).get(field_id)
+        if wanted is None:
+            continue
+        shown = (item.get("attributes") or {}).get("label")
+        if shown != wanted:
+            problems.append(f"{field_id} 의 label 은 정확히 `{wanted}` 여야 합니다(지금 {_shown(shown)}) — 접수 코드가 이슈 본문의 `### {wanted}` 제목으로 값을 읽습니다")
+        if item.get("type") != types[field_id]:
+            problems.append(f"{field_id} 의 type 은 {types[field_id]} 여야 합니다")
+        if bool((item.get("validations") or {}).get("required")) != (field_id in required):
+            problems.append(f"{field_id} 는 필수 여부(validations.required)가 {'참' if field_id in required else '거짓'} 이어야 합니다")
+        if field_id in options and (item.get("attributes") or {}).get("options") != options[field_id]:
+            problems.append(f"{field_id} 의 options 는 정확히 {_shown(options[field_id])} 이어야 합니다(접수 코드가 이 문구와 글자 그대로 견줍니다)")
+    return problems
+
+
+def check_operator_forms(root, files):
+    """FORM-1: 운영자 요청함의 이슈 양식 둘(`ai-reply.yml` `[답변]`, `ai-task.yml` `[요청]`)이 접수 코드(pipeline/operator_loop.py)와 같은 정의인지 —
+    제목 머리·라벨(`blog-control` 없음)·항목 id·항목 제목·종류·필수 여부·선택지 문구·맨 위 비밀 값 금지 안내 — 와 `config.yml`(빈 이슈 허용 유지·안내 링크 하나)."""
+    if yaml is None:
+        return []
+    out = []
+    specs = (
+        (REPLY_FORM, loop_mod.REPLY_TITLE_PREFIX, loop_mod.LABEL_REPLY, loop_mod.REPLY_FIELDS, loop_mod.REPLY_REQUIRED, loop_mod.REPLY_FIELD_TYPES,
+         {"answer": [full for _, full in loop_mod.ANSWER_OPTIONS]}),
+        (TASK_FORM, loop_mod.TASK_TITLE_PREFIX, loop_mod.LABEL_TASK, loop_mod.TASK_FIELDS, loop_mod.TASK_REQUIRED, loop_mod.TASK_FIELD_TYPES,
+         {"urgency": list(loop_mod.TASK_URGENCY_OPTIONS), "approval": [full for _, full in loop_mod.TASK_APPROVAL_OPTIONS]}),
+    )
+    for rel, title, label, fields, required, types, options in specs:
+        if rel not in files:
+            continue
+        try:
+            data = _load_yaml(read_text(root, rel) or "")
+        except yaml.YAMLError:
+            out.append(err("FORM-1", "YAML 문법 오류", rel))
+            continue
+        out.extend(err("FORM-1", message, rel) for message in _form_problems(data, title, label, fields, required, types, options))
+    if ISSUE_CONFIG in files:
+        try:
+            config = _load_yaml(read_text(root, ISSUE_CONFIG) or "")
+        except yaml.YAMLError:
+            return out + [err("FORM-1", "YAML 문법 오류", ISSUE_CONFIG)]
+        links = config.get("contact_links") if isinstance(config, dict) else None
+        if not isinstance(config, dict) or config.get("blank_issues_enabled") is not True:
+            out.append(err("FORM-1", "blank_issues_enabled 는 true 여야 합니다(빈 이슈를 막지 않습니다 — 운영자가 양식 밖으로도 글을 쓸 수 있어야 하고, 그런 글은 AI 가 읽되 승인으로 보지 않습니다)", ISSUE_CONFIG))
+        if not (isinstance(links, list) and len(links) == 1 and isinstance(links[0], dict)
+                and str(links[0].get("url", "")).startswith("https://github.com/shine88pc/chanceblog/") and links[0].get("name") and links[0].get("about")):
+            out.append(err("FORM-1", "contact_links 는 이 저장소의 사용법 문서를 가리키는 항목(name·url·about) 하나여야 합니다", ISSUE_CONFIG))
+    return out
+
+
 def check_issue_contract(root, files):
     """제어용 이슈 양식(blog-control 라벨)의 제목이 이슈 처리 워크플로의 제목 조건과 맞는지(D-01 재발 방지).
 
@@ -870,6 +1089,9 @@ def run_checks(root, base=None):
     findings += check_workflow_prefixes(root, files)
     findings += check_registry(root, files)
     findings += check_blogger_wrappers(root, files)
+    findings += check_operator_workflows(root, files)
+    findings += check_request_files(root, files)
+    findings += check_operator_forms(root, files)
     findings += check_issue_contract(root, files)
     findings += check_edit_system(root, files)
     findings += check_python(root, files)

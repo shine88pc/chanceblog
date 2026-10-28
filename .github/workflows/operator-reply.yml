@@ -1,0 +1,49 @@
+name: "[공통] 운영자 응답 접수"
+run-name: "[공통] 운영자 응답 접수 · 이슈 #${{ github.event.issue.number }}"
+
+# 운영자가 이슈 양식(Issues → New issue 의 `AI 요청에 답하기(결정·확인)` `[답변]`, `AI 에게 새 일 맡기기(작업 요청)` `[요청]`)으로 이슈를 열면
+# 접수했다는 코멘트를 달고(라벨 `운영자응답`·`운영자요청` 도 붙임) 휴대폰 텔레그램으로도 알린다. 이 이슈를 AI 세션이 감시해 이어서 진행한다.
+# 설명: 인수인계/운영자_요청함_사용법.md, 구조: docs/ARCHITECTURE.md §4-6, 신뢰 규칙: docs/SECURITY_GUARDRAILS.md G-S9.
+#
+# 보안(이슈 제목·본문은 누구나 쓸 수 있는 외부 입력이다):
+#  - 이슈를 연 사람이 저장소 소유자일 때만 접수한다. job 의 if 가 한 번 거르고(이중 방어), 진짜 판정은 파이썬이 이벤트 파일에서 읽은 작성자 login 과 author_association(OWNER)으로 한다.
+#    소유자가 아니면 코멘트·라벨·텔레그램 모두 없다.
+#  - 이슈의 글은 `run:`·명령 줄·환경변수·워크플로 명령에 들어가지 않는다. 파이썬이 GITHUB_EVENT_PATH 파일에서 읽고, 코멘트·텔레그램에는 검증된 값만 쓴다.
+#  - 코드는 기본 브랜치의 것이다(issues 이벤트는 기본 브랜치를 체크아웃한다). pull_request_target·issue_comment·workflow_run 은 쓰지 않는다.
+#  - 쓰는 것은 이 이슈의 라벨·코멘트뿐이다(issues: write). 이 양식 이슈에는 `blog-control` 라벨이 없어 `[Chance] 이슈 수정 요청 처리(수정안 PR 만들기)` 가 반응하지 않는다.
+# 시크릿은 단계의 env 로만 넘긴다(검증기 WF-13·WF-14). 실패는 `::warning::` 뿐이고 종료 코드는 0이다. 같은 이슈를 다시 실행해도 접수 코멘트는 한 번만 달린다.
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: operator-reply-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  ack:
+    name: 응답 이슈 접수
+    if: github.event.issue.user.login == github.repository_owner && github.event.issue.author_association == 'OWNER'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # 이벤트(이슈 제목·본문)는 파이썬이 GITHUB_EVENT_PATH 파일에서 읽는다. 여기에는 값이 한 줄도 들어가지 않는다.
+      - name: 접수 확인(코멘트·라벨·텔레그램)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m pipeline.operator_loop ack

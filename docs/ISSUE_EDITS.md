@@ -45,6 +45,7 @@ push(*.md, spec 등) ─► sync-issue-form.yml ─► pages.json · 양식 드�
 | 위협 | 통제 | 위치 |
 |------|------|------|
 | 이슈 본문에 의한 셸 인젝션 | 본문을 셸에 보간하지 않고 `gh api`로 파일에 받아 코드가 읽음 | `issue-edit.yml` |
+| 운영자 요청함의 이슈 양식 `[답변]`·`[요청]`(2026-10-28)이 이 시스템을 일으킴 | 두 양식에는 `blog-control` 라벨이 없고 제목이 `[페이지 수정]`·`[이미지 변경]` 이 아니라 `issue-edit.yml` 의 job `if` 가 거짓이다(시험이 식을 계산). 그 이슈의 승인 규칙은 별개다(`SECURITY_GUARDRAILS.md` G-S9) | `ai-reply.yml`·`ai-task.yml`, `tests/test_operator_loop_workflows.py` |
 | 텍스트 칸에 가짜 항목 제목을 심어 대상을 바꿈 | 양식에 정의된 라벨만 경계로 인정, **중복 제목은 거부** | `forms.parse_issue_body` |
 | 권한 없는 사용자의 요청 | job `if` + 코드에서 `author_association` 재확인 | 워크플로·`runner` |
 | AI가 임의 파일을 고름·삭제함 | AI는 파일 경로를 고르지 못함(대상은 코드가 결정), **절대 금지 경로**(`.github/`·`pipeline/`·`scripts/`·`_layouts/`·`_includes/`·`_config.yml`·`index.html`·`*.py`·`*.yml`·`*.json` 등)는 명세가 허용해도 수정 불가 | `spec.NEVER_ALLOW`, 검증기 SPEC-1 |
