@@ -718,6 +718,20 @@ class GateAndGuardTest(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         self.assertEqual(len(self.published_posts(written)), 2)
 
+    def test_a_code_fenced_header_candidate_is_rejected_and_the_next_one_is_published(self):
+        """```yaml 로 감싼 머리말 후보는 머리말 없는 응답으로 보아 코드 블록이 본문 앞에 남고, 그 안의 `layout:`·`title:` 줄이 본문 앞 세 줄에 있어 최종 검사가 거절한다 — 조용히 발행되지 않는다."""
+        fenced = '```yaml\n---\nlayout: post\ntitle: "t"\ncategory: "c"\n---\n```\n\n' + KR_BODY
+        value, report, out, written, calls = self.run_generation([
+            (fenced, GOOD_EN_RESPONSE, "한글 제목", GOOD_EN_TITLE),
+            (QUOTED_TITLE_RESPONSE, GOOD_EN_RESPONSE, QUOTED_TITLE, GOOD_EN_TITLE)])
+        self.assertIsNotNone(value)
+        self.assertEqual(report["outcome"], "PUBLISHED")
+        self.assertEqual(len(report["gate_rejects"]), 1)
+        self.assertIn("본문이 머리말 줄", report["gate_rejects"][0])
+        self.assertEqual(len(calls), 2)
+        for name, content in self.published_posts(written).items():
+            self.assertNotIn("```", content, name)
+
     def test_the_last_line_of_defence_writes_nothing_when_the_finished_post_is_broken(self):
         """자리표시 이미지로 한 후보 검사는 통과했지만 실제 이미지 주소가 머리말을 깨는 경우(따옴표가 든 주소): 파일도 이력도 쓰지 않고 멈춘다. 한글·영어 글 각각."""
         bad_url, good_url = 'https://images.unsplash.com/photo-1?x="y', "https://images.unsplash.com/photo-2?w=1"
@@ -1025,6 +1039,102 @@ class YamlLineBreakCharacterTest(unittest.TestCase):
                 finished = g.add_discovery_metadata(with_replaced("본문 첫 줄입니다.\n", FrontMatterProblemsSourceTest.LONG_BODY), source)
                 self.assertEqual(g.front_matter_problems(finished, source), [])
                 self.assertEqual(yaml.safe_load(finished.split("\n---\n", 1)[0][4:])["source_name"], "NASA" + char + "Lab")
+
+
+# ======================================================================================================================
+# 레이아웃은 post (N4)
+# ======================================================================================================================
+class LayoutRuleTest(unittest.TestCase):
+    """글의 레이아웃은 `post` 여야 한다(검증자 N4). 모델이 `layout: default` 같은 줄을 써도 옛 코드는 그대로 보존해 사이트가 글 모양으로 그리지 않았다. 이제 `layout` 줄이 있는데 값이 정확히
+    post 가 아니면 머리말을 믿지 않고 다시 쓴다. 값이 post 로 읽히는 세 표기(`post`·`"post"`·`'post'`)는 지금처럼 그대로 보존한다(좋은 입력의 출력은 바이트 동일). `layout` 줄이 없는 것은
+    지금처럼 엔진이 맨 앞에 `layout: post` 를 넣는다. `published`·`date`·`permalink`·`slug`·`redirect_from` 같은 다른 Jekyll 키는 건드리지 않는다(허용 키 목록은 두지 않는다 — 열린 문제 ②)."""
+
+    OTHER = ("default", "page", "Post", "POST", "posts", "post2", "post.html", '""', "''", '"default"', "'default'", "[post]", "null", "~")
+
+    def test_the_final_check_wants_layout_post(self):
+        for value in self.OTHER:
+            with self.subTest(value):
+                self.assertEqual(g.front_matter_problems(with_replaced("layout: post", f"layout: {value}")), ["`layout` 값이 post 가 아님"])
+        for value in ("post", '"post"', "'post'"):
+            with self.subTest(value):
+                self.assertEqual(g.front_matter_problems(with_replaced("layout: post", f"layout: {value}")), [])
+
+    def test_a_layout_given_as_a_block_list_is_refused(self):
+        self.assertIn("`layout` 값이 post 가 아님", g.front_matter_problems(with_replaced("layout: post", "layout:\n  - post")))
+
+    def test_a_missing_layout_is_still_only_a_missing_key(self):
+        self.assertEqual(g.front_matter_problems(with_replaced("layout: post\n", "")), ["필수 키 `layout` 줄이 없음"])
+
+    def test_a_model_header_with_another_layout_is_not_trusted(self):
+        for value in self.OTHER:
+            with self.subTest(value):
+                self.assertEqual(g._model_header_problems([f"layout: {value}", 'title: "t"']), ["`layout` 값이 post 가 아님"])
+        for value in ("post", '"post"', "'post'"):
+            with self.subTest(value):
+                self.assertEqual(g._model_header_problems([f"layout: {value}", 'title: "t"']), [])
+        self.assertEqual(g._model_header_problems(['title: "t"']), [])      # 줄이 없으면 엔진이 맨 앞에 `layout: post` 를 넣는다
+
+    def test_a_model_layout_other_than_post_gets_the_header_rewritten_with_layout_post(self):
+        for value in ("default", '"page"'):
+            with self.subTest(value):
+                notes = []
+                response = f'---\nlayout: {value}\ntitle: "제목"\ncategory: "c"\ntags: ["가"]\ndate: 2026-10-20 08:20:00 +0900\n---\n\n' + KR_BODY
+                text = validate(kr_only(response, kr_title="제목", kr_tags=("가", "나")), notes=notes)["kr_content"]
+                header, _ = split_post(text)
+                self.assertEqual(header, ["layout: post", 'title: "제목"', 'category: "과학·환경"', 'tags: ["가", "나"]', "lang: ko", f'image: "{KR_IMAGE}"'])
+                self.assertEqual(g.front_matter_problems(text), [])
+                self.assertEqual(len(notes), 1)
+                self.assertIn("`layout` 값이 post 가 아님", notes[0])
+
+    def test_layout_post_in_its_three_spellings_is_kept_byte_for_byte(self):
+        for layout in ("layout: post", 'layout: "post"', "layout: 'post'"):
+            with self.subTest(layout):
+                response = f'---\n{layout}\ntitle: "제목"\ncategory: "c"\ntags: []\n---\n\n' + KR_BODY
+                data = kr_only(response, kr_title="제목")
+                got = validate(copy.deepcopy(data))["kr_content"]
+                self.assertEqual(got, legacy_validate_post_data(copy.deepcopy(data), KR_IMAGE, EN_IMAGE, LINK)["kr_content"])
+                self.assertTrue(got.startswith(f"---\n{layout}\n"))
+
+    def test_other_jekyll_keys_in_a_good_header_are_not_touched(self):
+        extra = "published: false\ndate: 2026-10-20 08:20:00 +0900\npermalink: /posts/x/\nslug: x\nredirect_from:\n  - /old/\n"
+        response = f'---\nlayout: post\ntitle: "제목"\ncategory: "c"\ntags: []\n{extra}---\n\n' + KR_BODY
+        data = kr_only(response, kr_title="제목")
+        got = validate(copy.deepcopy(data))["kr_content"]
+        self.assertEqual(got, legacy_validate_post_data(copy.deepcopy(data), KR_IMAGE, EN_IMAGE, LINK)["kr_content"])
+        self.assertIn(extra, got)
+
+
+# ======================================================================================================================
+# 코드 블록으로 감싼 머리말(열린 문제 ③)
+# ======================================================================================================================
+class CodeFencedHeaderTest(unittest.TestCase):
+    """머리말을 코드 블록(```yaml 등)으로 감싼 응답은 머리말 없는 응답으로 본다 — 코드 블록이 본문 맨 앞에 남는다. 그렇다고 '검사하지 않는' 것은 아니다: 코드 블록 안의 `layout:`·`title:` 같은 줄이
+    본문의 앞 세 줄(빈 줄 제외)에 들어 있으면 최종 검사가 그 후보를 거절한다. 그보다 뒤에 있으면 검사하지 않는다(현재 한계)."""
+
+    def response(self, opening, *inner):
+        return opening + "\n" + "\n".join(inner) + "\n```\n\n" + KR_BODY
+
+    def test_a_fenced_header_is_not_taken_for_a_header(self):
+        for opening in ("```yaml", "```yml", "```markdown", "```"):
+            with self.subTest(opening):
+                kind, header, body = g._split_model_content(self.response(opening, "---", "layout: post", 'title: "t"', "---"))
+                self.assertEqual((kind, header), ("none", []))
+                self.assertTrue(body.startswith(opening))
+
+    def test_the_final_check_rejects_the_candidate_when_a_header_key_is_among_the_first_three_body_lines(self):
+        for opening in ("```yaml", "```markdown", "```"):
+            for inner in (("---", "layout: post", 'title: "t"', "---"), ("layout: post", 'title: "t"'), ("title: t",), ("# 머리말", "title: t")):
+                with self.subTest(opening=opening, inner=inner):
+                    data = validate(kr_only(self.response(opening, *inner)))
+                    with self.assertRaises(ValueError) as caught:
+                        g.check_final_front_matter(data, SOURCE)
+                    self.assertTrue(str(caught.exception).startswith("KR 글 머리말이 검사를 통과하지 못했습니다"), str(caught.exception))
+                    self.assertIn("본문이 머리말 줄", str(caught.exception))
+
+    def test_a_header_key_beyond_the_first_three_body_lines_is_not_checked(self):
+        """현재 한계를 고정한다: 코드 블록 안의 머리말 줄이 본문 앞 세 줄 밖에 있으면 최종 검사가 보지 못한다."""
+        data = validate(kr_only(self.response("```yaml", "# 가", "# 나", "# 다", "layout: post")))
+        g.check_final_front_matter(data, SOURCE)        # 거절하지 않는다
 
 
 # ======================================================================================================================

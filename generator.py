@@ -1588,6 +1588,15 @@ def _fm_header_problems(header):
     return problems, keys
 
 
+def _fm_layout_problem(keys):
+    """`layout` 줄이 있는데 값이 정확히 `post` 가 아니면 그 문제 문장을, 아니면 None. `post`·`"post"`·`'post'` 는 모두 post 로 읽혀 괜찮다. 줄이 없는 것은 여기서 보지 않는다(필수 키 검사와
+    엔진이 맨 앞에 넣는 `layout: post` 가 맡는다). `default` 같은 다른 값은 사이트가 글 모양으로 그리지 못한다(검증자 N4)."""
+    have = keys.get("layout")
+    if have is not None and _fm_scalar_text(have[0]) != "post":
+        return "`layout` 값이 post 가 아님"
+    return None
+
+
 def _source_front_fields(source):
     """add_discovery_metadata 가 머리말에 더하는 출처 세 줄의 값 (이름, 주소, 도메인). 더하지 않는 소스(주소가 http(s) 가 아니거나 이름·도메인이 없음)면 None."""
     if not source:
@@ -1602,7 +1611,7 @@ def _source_front_fields(source):
 def front_matter_problems(content, source=None):
     """완성된 글 한 편(머리말 + 본문)의 머리말과 본문 머리를 엄격히 검사해 문제 목록을 돌려준다(비어 있으면 정상).
     검사: 첫 줄이 정확히 `---`·닫는 `---` 줄·CR/BOM/제어 문자 없음·한 줄 한 키·키 중복 없음·값이 안전한 모양(`title` 은 한 줄 JSON 문자열)·필수 키(layout·title·
-    category·lang·image)·lang 은 ko·en·본문이 울타리 줄이나 머리말 줄로 시작하지 않음. source(add_discovery_metadata 에 넘기는 소스 항목)를 주면 엔진이 더하는
+    category·lang·image)·layout 은 post(줄이 있으면)·lang 은 ko·en·본문이 울타리 줄이나 머리말 줄로 시작하지 않음. source(add_discovery_metadata 에 넘기는 소스 항목)를 주면 엔진이 더하는
     설명(본문에서 뽑을 수 있을 때)과 출처 세 줄이 있고 소스와 같은지도 본다 — `_front_matter_set` 이 머리말을 못 찾아 조용히 지나친 경우가 여기서 드러난다.
     문제 문장에는 값이 들어가지 않는다."""
     text = str(content or "")
@@ -1626,6 +1635,9 @@ def front_matter_problems(content, source=None):
     found, keys = _fm_header_problems(header)
     problems += found
     problems += [f"필수 키 `{key}` 줄이 없음" for key in _FM_REQUIRED if key not in keys]
+    layout = _fm_layout_problem(keys)
+    if layout:
+        problems.append(layout)
     for key in ("category", "image"):
         have = keys.get(key)
         if have and have[0] and not (_fm_scalar_text(have[0]) or "").strip() and f"`{key}` 값이 비어 있음" not in problems:
@@ -1727,10 +1739,13 @@ def _split_model_content(content):
 
 def _model_header_problems(header):
     """모델이 쓴 머리말 줄을 그대로 보존해도 되는가: 안 되는 이유 목록(비어 있으면 보존한다). 한 줄 한 키 모양·키 중복 없음·값이 안전한 모양·`title` 이 한 줄 JSON 문자열이어야 하고,
-    엔진이 지웠다 다시 쓰는 `lang`·`image` 는 한 줄 값이어야 한다(값이 비면 지우는 정규식이 다음 줄까지 지운다)."""
+    엔진이 지웠다 다시 쓰는 `lang`·`image` 는 한 줄 값이어야 한다(값이 비면 지우는 정규식이 다음 줄까지 지운다). `layout` 줄이 있으면 값이 정확히 post 여야 한다(없으면 엔진이 넣는다)."""
     problems, keys = _fm_header_problems(header)
     if "title" not in keys:
         problems.append("제목(`title`) 줄이 없음")
+    layout = _fm_layout_problem(keys)
+    if layout:
+        problems.append(layout)
     problems += [f"`{key}` 는 한 줄 값이어야 함" for key in ("lang", "image") if key in keys and keys[key][1]]
     if _YAML_UNPRINTABLE.search("\n".join(header)):
         problems.append(_YAML_UNPRINTABLE_PROBLEM)

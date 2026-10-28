@@ -1531,7 +1531,7 @@ class LayoutGuaranteeTest(unittest.TestCase):
                 self.assertEqual(len(re.findall(r"(?m)^layout\s*:", out[key])), 1)
 
     def test_an_existing_layout_is_left_alone(self):
-        for layout in ("layout: post", "layout: default", 'layout: "post"'):
+        for layout in ("layout: post", 'layout: "post"'):      # post 로 읽히는 표기만 그대로 둔다 — 다른 레이아웃(`default` 등)은 머리말을 다시 쓴다(N4, test_generator_front_matter.LayoutRuleTest)
             with self.subTest(layout=layout):
                 out = self.validate(self.data_with_front(f'{layout}\ntitle: "t"\ncategory: "c"\ntags: []'))
                 self.assertTrue(out["kr_content"].startswith(f"---\n{layout}\ntitle: "), out["kr_content"][:60])
