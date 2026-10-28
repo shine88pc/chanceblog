@@ -190,6 +190,20 @@ class HomeTest(unittest.TestCase):
         self.assertNotIn("<section", between)                                       # 글 수 줄과 목록 사이에 다른 판이 끼지 않는다
         self.assertNotIn('<article class="editorial-card', self.grid_region())      # 소개 판의 카드가 목록 구간으로 섞이지 않는다
 
+    def test_every_id_the_script_looks_up_exists_in_the_markup(self):
+        """블록을 옮기는 변경이 가장 흔히 깨뜨리는 곳 — 스크립트가 id 로 찾는 요소가 마크업에서 사라지는 것(독립 검증 R1, 2026-10-28; 이전부터 있던 시험 구멍)."""
+        text = home()
+        looked_up = set(re.findall(r"getElementById\(['\"]([A-Za-z0-9_-]+)['\"]\)", text))
+        looked_up |= set(re.findall(r"querySelector\(['\"]#([A-Za-z0-9_-]+)['\"]\)", text))
+        self.assertGreaterEqual(len(looked_up), 25)                                 # 정규식이 아무것도 못 찾아 조용히 통과하는 일을 막는다(지금 34개)
+        for name in sorted(looked_up):
+            with self.subTest(id=name):
+                self.assertIn(f'id="{name}"', text)
+
+    def test_the_swipe_list_keeps_the_same_bottom_gap_as_the_panels(self):
+        """목록이 소개 판 위로 올라오면서 아래 간격(mb-9)을 받았다 — 판들과 같은 간격이라 아래 판이 목록에 붙지 않는다(독립 검증 R2)."""
+        self.assertRegex(self.grid_region(), r'\A<div id="post-grid" class="[^"]*\bmb-9\b')
+
     def test_the_animal_interview_banner_is_gone_but_its_art_file_is_kept(self):
         """'상상의 동물이 묻습니다' 배너(2026-10-20 콘셉트, 이어지는 글·영상 없음)는 운영자 결정으로 없앴다. 그림 파일은 되돌리기 쉽게 지우지 않는다."""
         text = home()
