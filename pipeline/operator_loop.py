@@ -407,13 +407,22 @@ def _label_problems(values, duplicates, fields, required):
     return problems
 
 
+def normalize_request_id(raw):
+    """운영자가 양식에 쓴 요청 번호를 `R-001` 꼴로 맞춘다 — 앞뒤 공백과 맨 앞 소문자 `r` 만 봐준다(2026-10-28 운영자의 첫 응답이 `r-002` 로 올라와 거절됐다).
+    그 밖의 모양(전각 `ｒ`·다른 하이픈·자리 수 틀림 등)은 그대로 두어 REQUEST_ID_RE 가 거절한다. 정규화는 신뢰 판정(작성자·권한) 뒤에만 일어나고 값은 비교·표시에만 쓴다."""
+    text = str(raw).strip()
+    if text[:2] == "r-":
+        return "R-" + text[2:]
+    return text
+
+
 def parse_reply(title, body, login, association, owner):
     """응답·요청 이슈 하나를 판정한다 → Submission(접수할 것) 또는 Refusal(사유 코드, 양식 문제 목록).
 
     신뢰 판정(먼저): 작성자 login 이 저장소 소유자와 같고(ASCII 영문 대소문자만 무시 — login 이 GitHub 계정 이름 모양(`_LOGIN_RE`)이 아니면 비교하기 전에 거절) author_association 이 정확히 `OWNER` 여야
     한다 — 둘 다 이벤트 JSON 의 값이고 이슈 본문·제목의 글은 보지 않는다. 유니코드 접기(`casefold`)는 쓰지 않는다: `ſhine88pc`(U+017F) 같은 글자가 `shine88pc` 로 접혀 통과하는 일이 없게(독립 검증 N-6).
     그다음 제목이 `[답변]`(요청에 답하기)·`[요청]`(새 일 맡기기)로 시작해야 하고, 본문의 항목 제목(양식이 만든 `### …`)으로 값을 읽어 **검증된 값만** 담는다:
-    요청 번호는 `R-` 와 숫자 세 자리, 답은 양식의 선택지 전체 문구와 글자 그대로 같아야 하고(짧은 말로 바꿔 담는다), 선택은 영문·숫자·한글 1~3자(아니면 표시하지 않음 표시), 메모는 글자 수만 담는다.
+    요청 번호는 `R-` 와 숫자 세 자리(소문자 `r-001` 은 `R-001` 로 읽는다), 답은 양식의 선택지 전체 문구와 글자 그대로 같아야 하고(짧은 말로 바꿔 담는다), 선택은 영문·숫자·한글 1~3자(아니면 표시하지 않음 표시), 메모는 글자 수만 담는다.
     `[요청]` 은 접수만 한다 — T3 승인이 아니다(독립 검증 B-1): 진행 범위(논의·준비까지 / 구현·시험까지)만 읽는다."""
     owner_name = str(owner or "")
     if not _LOGIN_RE.fullmatch(owner_name):
@@ -427,7 +436,7 @@ def parse_reply(title, body, login, association, owner):
         values, duplicates = parse_sections(body, [label for _, label in REPLY_FIELDS])
         label_of = dict(REPLY_FIELDS)
         problems = _label_problems(values, duplicates, REPLY_FIELDS, REPLY_REQUIRED)
-        request_id = values.get(label_of["request_id"], "")
+        request_id = normalize_request_id(values.get(label_of["request_id"], ""))
         if label_of["request_id"] in values and not notify.REQUEST_ID_RE.fullmatch(request_id):
             problems.append("`요청 번호` 값이 `R-001` 처럼 `R-` 와 숫자 세 자리가 아닙니다")
         word = next((short for short, full in ANSWER_OPTIONS if full == values.get(label_of["answer"], "")), "")
