@@ -17,7 +17,6 @@ import yaml
 import _bootstrap
 import operator_loop_helpers as oh
 from edits_helpers import make_edit_root
-from pipeline import notify
 from pipeline import operator_loop as ol
 from pipeline.edits import forms, pages, spec as spec_mod
 from test_ops_inbox_drafts import job_runs
