@@ -91,6 +91,8 @@ FLAGS = {"ko": chr(0x1F1F0) + chr(0x1F1F7), "en": chr(0x1F1FA) + chr(0x1F1F8)}
 # 새 글 알림은 Pages 배포를 요청한 직후에 오고 주소 버튼이 같이 간다. 배포가 퍼지기 전에 열면 공개 CDN 이 그 404 를 최대 약 18분 보관해 독자에게도 한동안
 # 404 가 돌아올 수 있다(docs/DEFECT_REGISTER.md D-41) — 그래서 문구로 3분 뒤에 열어 보게 한다.
 DEPLOY_WAIT_NOTE = "사이트 배포가 끝나기까지 약 3분 걸립니다. 일찍 열면 404 가 최대 약 18분 보관될 수 있으니 3분 뒤에 열어 보세요."
+# 글 머리말의 제목 줄을 읽지 못했을 때(따옴표가 깨진 제목 등, D-80) 빈 줄로 보내거나 파일 이름을 제목처럼 쓰지 않고 이 문구를 쓴다.
+UNREADABLE_TITLE = "(제목을 읽지 못했습니다 · 글 머리말 확인 필요)"
 
 # ---- 결과 -------------------------------------------------------------------
 # ok: 문제가 없었다(보냈거나, 일부러 건너뜀) / sent: 실제로 전달됨 / status: HTTP 상태(없으면 None) / reason: 아래 분류 코드 / detail: 소독한 한 줄 설명
@@ -598,7 +600,7 @@ def format_chance_published(posts, run_info):
     categories, source, links, buttons = [], "", [], []
     for post in posts:
         lang = "ko" if post.get("lang") == "ko" else "en"
-        lines.append(f"{FLAGS[lang]} {safe_text(post.get('title'))}")
+        lines.append(f"{FLAGS[lang]} {safe_text(post.get('title')) or UNREADABLE_TITLE}")
         category = defang_urls(clean_text(post.get("category"), SHORT_LIMIT))
         if category and category not in categories:
             categories.append(category)
