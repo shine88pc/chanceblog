@@ -1575,13 +1575,15 @@ class LayoutGuaranteeTest(unittest.TestCase):
         out = self.validate(data)
         self.assertTrue(out["kr_content"].startswith('---\nlayout: post\ntitle: "t"'), repr(out["kr_content"][:50]))
 
-    def test_an_empty_front_matter_gets_just_the_layout_line_without_a_blank_line(self):
+    def test_an_empty_front_matter_is_filled_from_the_structured_values_without_a_blank_line(self):
+        # 옛 동작은 제목 없는 머리말(`layout`·`lang`·`image` 뿐)을 만들었다 — 그런 글은 사이트에서 제목이 파일 이름으로 나온다(D-80). 이제 제목·분야·태그를 구조화된 값으로 채운다.
         data = g.stub_post_data("주제", self.LINK)
         for prefix in ("kr", "en"):
             body = data[f"{prefix}_content"].split("\n---\n", 1)[1]
             data[f"{prefix}_content"] = "---\n---\n" + body
         out = self.validate(data)
-        self.assertEqual(out["kr_content"].split("\n")[:3], ["---", "layout: post", "lang: ko"])
+        self.assertEqual(out["kr_content"].split("\n")[:4], ["---", "layout: post", 'title: "[스텁] 주제"', 'category: "KR - 스텁"'])
+        self.assertEqual(g.front_matter_problems(out["kr_content"]), [])
 
     def test_a_front_matter_with_windows_line_endings_still_gets_a_clean_layout_line(self):
         data = g.stub_post_data("주제", self.LINK)
