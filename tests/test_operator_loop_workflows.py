@@ -244,7 +244,7 @@ class AiRequestWorkflowTest(unittest.TestCase):
 
     def test_the_header_comment_states_the_limits(self):
         header = (WORKFLOWS / "ai-request.yml").read_text(encoding="utf-8").split("on:")[0]
-        for needle in ("한계", "paths", "두 점 비교", "대기 중인 실행", "얕은 복제", "중복·도배", "`[공통] 텔레그램 알림 시험`", "다른 브랜치에도 있어 알리지 않은 요청 파일", "영문·숫자"):
+        for needle in ("한계", "paths", "두 점 비교", "대기 중인 실행", "얕은 복제", "중복·도배", "`[공통] 텔레그램 알림 시험`", "다른 브랜치에도 있어 알리지 않은 요청 파일", "영문·숫자", "한꺼번에 push", "알림 실행이 끝난 뒤에 다음 것"):
             self.assertIn(needle, header, needle)
         self.assertNotIn("미확인", header)                                                           # 경로 필터를 안 쓰는 사유를 '확인하지 못했다'고 적지 않는다(독립 검증 N-9: 공식 문서로 확인된다)
 

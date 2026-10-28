@@ -29,6 +29,8 @@ APPROVAL_SENTENCE = ("이슈 작성자 login 이 저장소 소유자이고 **그
 # 이 문장이 그대로 들어 있어야 하는 지침·정책 파일(운영자용 사용법은 쉬운 말로 따로 쓴다 — 아래 별도 시험)
 APPROVAL_FILES = ("AGENTS.md", "CLAUDE.md", "GEMINI.md", "HANDLER.md", ".github/copilot-instructions.md", "docs/CHARTER.md", "docs/ACTIONS_GUIDE.md",
                   "docs/SECURITY_GUARDRAILS.md", "인수인계/작업요청/README.md", "인수인계/요청함/README.md")
+# 같은 규칙을 두 군데에서 말하는 파일(표의 한 줄과 본문 한 줄 등) — 두 군데 모두 글자 그대로 같아야 하므로 문장이 나오는 횟수까지 고정한다(나머지 파일은 1번)
+APPROVAL_COUNTS = {"HANDLER.md": 2, "docs/ACTIONS_GUIDE.md": 2, "인수인계/요청함/README.md": 2}
 
 
 def text_of(path):
@@ -173,6 +175,9 @@ class GuideMatchesFormsTest(unittest.TestCase):
             self.assertEqual(ol.valid_branch(name, "ai/claude/"), ok, name)
         for text in (self.guide, text_of(FOLDER_README), rel_text("docs/ACTIONS_GUIDE.md"), rel_text("docs/ARCHITECTURE.md"), rel_text(".github/workflows/ai-request.yml")):
             self.assertIn("영문·숫자·`.`·`_`·`-`", text)
+        for text in (self.guide, text_of(FOLDER_README)):                                     # 운영자·AI 가 읽는 두 안내는 `/` 로 이어도 된다는 것과 안 되는 글자의 예도 말한다(위 시험의 거짓 예와 같은 글자)
+            self.assertIn("`/` 로 이어도 ", text)
+            self.assertIn("한글·`+`·`@`·`#`", text)
 
     def test_the_acknowledgement_example_matches_what_the_code_writes(self):
         sub = ol.parse_reply(ol.REPLY_TITLE_PREFIX + "x", oh.reply_body(request_id="R-001", answer=oh.ANSWER["승인"]), oh.OWNER, "OWNER", oh.OWNER)
@@ -318,6 +323,7 @@ class FolderReadmeMatchesCodeTest(unittest.TestCase):
         self.assertIn("동시에 push 하지 말고", self.readme)
         self.assertIn("git push origin A B", self.readme)
         self.assertIn(ol.REQUESTS_SKIPPED_LINE.format(ids="R-001").split("AI 요청 알림: ", 1)[1], self.readme.replace("`", ""))
+        self.assertIn("main 을 합치거나 이미 알린 브랜치에서 새 브랜치를 만든 평범한 push 에도 남습니다", self.readme)          # 평범한 push 에도 같은 줄이 남는다고 미리 알려 놀라지 않게
         self.assertIn("다른 브랜치에도 있어 알리지 않은 요청 파일", rel_text("docs/ARCHITECTURE.md"))
 
 
@@ -395,7 +401,9 @@ class OtherDocsAgreeTest(unittest.TestCase):
         """승인 규칙(G-S9)의 한 문장이 모든 지침·정책 파일에 글자 그대로 같다 — 작성자 login 과 `author_association` 둘 다·요청 번호 일치·그 요청 파일에 적힌 항목에 한함·
         `[요청]`·양식 밖 이슈·코멘트·요청서 파일은 접수만(독립 검증 B-1·N-5: 파일마다 다른 요약이 `[요청]` 을 승인처럼 읽히게 했다)."""
         for rel in APPROVAL_FILES:
-            self.assertIn(APPROVAL_SENTENCE, rel_text(rel), rel)
+            text = rel_text(rel)
+            self.assertIn(APPROVAL_SENTENCE, text, rel)
+            self.assertEqual(text.count(APPROVAL_SENTENCE), APPROVAL_COUNTS.get(rel, 1), rel)      # 한 곳만 고쳐 모순되는 요약이 남는 것을 막는다
         for needle in ("**그리고**", "`author_association`", "`OWNER`", "`[답변]`", "요청 번호", "그 요청 파일에 적힌 항목에 한해서", "`[요청]`", "접수만 하고 승인이 아니다", "`decision`"):
             self.assertIn(needle, APPROVAL_SENTENCE, needle)
 

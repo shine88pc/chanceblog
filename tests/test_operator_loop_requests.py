@@ -234,6 +234,8 @@ class SelectionTest(unittest.TestCase):
         self.assertEqual(ol.skipped_line(["R-010_z.md", "R-002_b.md", "R-002_c.md"]), "AI 요청 알림: 다른 브랜치에도 있어 알리지 않은 요청 파일: R-002, R-010")
         line = ol.skipped_line([f"R-{index:03d}_x.md" for index in range(1, ol.MAX_SKIPPED_IDS + 4)])
         self.assertTrue(line.endswith(", ".join(f"R-{index:03d}" for index in range(1, ol.MAX_SKIPPED_IDS + 1)) + " 외 3건"), line)
+        twelve = ol.skipped_line([f"R-{index:03d}_x.md" for index in range(1, 13)])                      # 한도 값 자체도 글자 그대로 고정한다(번호 10개까지, 나머지는 '외 N건')
+        self.assertEqual(twelve, "AI 요청 알림: 다른 브랜치에도 있어 알리지 않은 요청 파일: R-001, R-002, R-003, R-004, R-005, R-006, R-007, R-008, R-009, R-010 외 2건")
         self.assertNotIn("::", line)
         self.assertEqual(len(line.splitlines()), 1)
 
@@ -463,6 +465,13 @@ class RealGitSelectionTest(unittest.TestCase):
 
     def test_merging_the_default_branch_in_does_not_announce_the_files_it_brought(self):
         self.assertEqual(self.found["merge_main_in"], [])
+
+    def test_the_skipped_list_also_names_files_that_ordinary_pushes_bring_from_other_branches(self):
+        """'다른 브랜치에도 있어 알리지 않은 요청 파일' 줄은 동시 push 만이 아니라 main 을 합치거나 이미 알린 브랜치에서 새 브랜치를 만든 평범한 push 에도 남는다(문서가 그렇게 말한다) — 알림은 잃지 않았다."""
+        self.assertEqual(self.skipped["merge_main_in"], ["R-005_z.md"])
+        self.assertEqual(self.skipped["cut_from_announced"], ["R-001_x.md"])
+        self.assertEqual(self.skipped["second_push_adds"], [])                                   # 이어 push 로 더한 새 파일은 걸러지지 않고 알린다
+        self.assertEqual(self.skipped["first_push_two_files"], [])
 
     def test_a_rebase_with_a_forced_push_does_not_announce_the_rebased_files_again(self):
         self.assertEqual(self.found["rebase_force_push"], [])
