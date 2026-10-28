@@ -431,7 +431,7 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 어느 채널의 것인지
 | 1 | 사용자 | Blogger 블로그 생성, 블로그 ID 확인, Google OAuth 클라이언트 준비(**동의 화면 "프로덕션"** — 테스트 상태는 7일 후 토큰 만료, D-11), refresh token 발급 |
 | 2 | 사용자 | GitHub Secrets 등록: 블로그 전용 이름 4종(예: 한글 Blogger 는 `BLOGGER_KO_BLOG_ID`, `BLOGGER_KO_CLIENT_ID`, `BLOGGER_KO_CLIENT_SECRET`, `BLOGGER_KO_REFRESH_TOKEN`). **구글 계정·Cloud 프로젝트·OAuth 클라이언트도 다른 블로그와 따로** 만든다. LLM 키는 `GEMINI_API_KEY` 공유 |
 | 3 | AI (T3 승인 후) | `blogs.json`에 항목 추가: **`mode`를 항목에 직접 적는다**(예: `"draft"`. 적지 않으면 검증기 `REG-1` 오류 — `defaults.mode`를 물려받은 새 블로그가 의도하지 않은 모드로, 예를 들어 기본값이 `auto`일 때 시크릿 등록만으로 바로 자동 게시되는 일을 막는다), 고유 `key`, **`channel`**(채널 라벨 — 그 블로그 워크플로 `name`의 `[라벨]` 접두사와 같은 글자, §3), `secrets` 이름, `state`(전용 history·content_dir), 프로필·프롬프트, **`ads`는 적지 않거나 `off`**(신규 채널은 품질 게이트를 통과하기 전까지 광고 없이 시작한다, §3 '광고 선언') |
-| 3-1 | AI (T3 승인 후) | **채널 래퍼 워크플로**를 더한다(위 설명). 새 채널 라벨은 `registry.CHANNEL_LABELS`에도 넣고, `schedule.cron`은 래퍼의 cron 과 같게 적는다(REG-2) |
+| 3-1 | AI (T3 승인 후) | **채널 래퍼 워크플로**를 더한다(위 설명). 새 채널 라벨은 `registry.CHANNEL_LABELS`에도 넣고, `schedule.cron`은 래퍼의 cron 과 같게 적는다(REG-2). 시험이 래퍼를 이름으로 알고 있으므로(`tests/blogger_workflow_helpers.py`의 `WRAPPERS`·`WRAPPER_LABELS`) 새 래퍼를 더하면 거기에도 한 줄을 더해야 이벤트·입력 조합 대조와 시크릿 분리 시험이 새 래퍼까지 본다 — REG-6 은 래퍼의 구조(블로그 key·시크릿 이름·권한·동시 실행 줄)만 보고 `with` 식의 의미는 보지 않는다 |
 | 4 | AI | `python -m pipeline.registry` · `python scripts/validate_repo.py` · `python -m unittest discover -s tests` · `actionlint` |
 | 5 | AI/사용자 | Actions → 그 블로그의 래퍼(예: `[Blogger 한글] 글 자동 작성`) → Run workflow(`인증 점검만 실행`으로 먼저 인증을 확인한 뒤, `연습 실행` 체크 해제, `publish=draft`)로 Blogger 초안함에서 글 확인(체크를 풀면 실제 Gemini로 초안을 만들어 저장소에 커밋한다. 시크릿을 등록하기 전이면 `publish=off`로 저장소 초안만) |
 | 6 | 워치독 | `draft` 상태로 3일 이상 운영하며 `rejected`·실패 이슈가 없는지 본다 (카나리) |

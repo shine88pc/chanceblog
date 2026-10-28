@@ -154,6 +154,14 @@ class WrapperTest(unittest.TestCase):
             self.assertEqual(wf.load(wrapper)["on"]["schedule"], [{"cron": blog["schedule"]["cron"]}], wrapper)
         self.assertEqual({blog["workflow"] for blog in (registry.get_blog(reg, key) for key in WRAPPERS)}, {f".github/workflows/{w}" for w in WRAPPERS.values()})
 
+    def test_every_blogger_blog_in_the_registry_has_its_wrapper_listed_in_the_test_helpers_so_the_other_tests_cover_it(self):
+        """독립 검증 N10: 새 Blogger 블로그를 레지스트리에 더하고 래퍼를 만들어도 이 도우미의 `WRAPPERS` 에 한 줄을 안 더하면 이벤트·입력 조합 대조·시크릿 분리 시험이 새 래퍼를 보지 못한다.
+        레지스트리의 Blogger 블로그와 도우미 목록이 어긋나면 여기서 알려 준다(REG-6 은 래퍼의 구조만 보고 `with` 식의 의미는 시험이 본다)."""
+        reg = registry.load_registry(REAL / "pipeline" / "blogs.json")
+        blogger_blogs = {blog["key"]: blog["workflow"].rsplit("/", 1)[-1] for blog in reg["blogs"] if blog["platform"] == "blogger"}
+        self.assertEqual(WRAPPERS, blogger_blogs)
+        self.assertEqual(sorted(wf.WRAPPER_LABELS), sorted(WRAPPERS.values()))
+
     def test_the_schedules_do_not_overlap_each_other_or_the_other_channels(self):
         crons = {name: wf.load(name)["on"]["schedule"][0]["cron"] for name in ("blogger-en.yml", "blogger-ko.yml", "tistory.yml", "naver.yml")}
         self.assertEqual(crons["blogger-en.yml"], "0 2 * * *")                      # 영문 정기 실행 시각은 그대로다
@@ -488,6 +496,12 @@ class SplitDocsAreCurrentTest(unittest.TestCase):
         self.assertIn("`[Blogger 영문]`·`[Blogger 한글]`", text)
         for label in ("Blogger 영문", "Blogger 한글"):
             self.assertIn(label, registry.CHANNEL_LABELS)                                       # 예시가 실제 허용 라벨이다
+
+    def test_the_add_a_blogger_blog_playbook_tells_the_new_wrapper_to_be_listed_in_the_test_helpers(self):
+        text = (REAL / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
+        row = next(line for line in text.splitlines() if line.startswith("| 3-1 | AI (T3 승인 후) | **채널 래퍼 워크플로**"))
+        for fragment in ("tests/blogger_workflow_helpers.py", "`WRAPPERS`·`WRAPPER_LABELS`", "REG-6 은 래퍼의 구조"):
+            self.assertIn(fragment, row)
 
     def test_the_plan_module_no_longer_promises_that_adding_any_blog_needs_no_workflow_change(self):
         first = plan.__doc__.splitlines()[0]
