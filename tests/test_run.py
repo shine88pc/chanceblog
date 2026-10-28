@@ -31,9 +31,10 @@ NO_PUBLISH = {"BLOGGER_PUBLISH": "0"}
 PUBLISH_SECRET_NAMES = ("BLOGGER_BLOG_ID", "BLOGGER_CLIENT_ID", "BLOGGER_CLIENT_SECRET", "BLOGGER_REFRESH_TOKEN")
 
 
-def make_root(tmp, mode="auto", lang="ko"):
+def make_root(tmp, mode="auto", lang="ko", korean_mode="off"):
     """임시 저장소. lang="ko"(기본)는 실제 레지스트리의 blogger_macat(영문 프로필)을 한국어 프로필·프롬프트로 바꿔 놓는다 —
-    이 파일의 실행 흐름 시험은 한국어 스텁·한국어 프로필로 돌린다. lang="en"은 실제 레지스트리 그대로(영문 프로필)다."""
+    이 파일의 실행 흐름 시험은 한국어 스텁·한국어 프로필로 돌린다. lang="en"은 실제 레지스트리 그대로(영문 프로필)다.
+    한글 Blogger(blogger_kcyoon)의 mode 는 기본으로 정지(off)에 맞춘다 — 실제 값(2026-10-29 부터 draft)과 무관하게 이 시험들이 보는 영문 흐름·정지 상태의 계획을 지킨다."""
     root = Path(tmp)
     (root / "pipeline" / "profiles").mkdir(parents=True)
     reg = json.loads((REAL / "pipeline" / "blogs.json").read_text(encoding="utf-8"))
@@ -42,6 +43,8 @@ def make_root(tmp, mode="auto", lang="ko"):
             blog["mode"] = mode
             if lang == "ko":
                 blog.update(languages=["ko"], profile="blogger_practical_ko", prompt=".github/editorial/BLOGGER_PROMPT.md")
+        elif blog["key"] == "blogger_kcyoon":
+            blog["mode"] = korean_mode
     (root / "pipeline" / "blogs.json").write_text(json.dumps(reg, ensure_ascii=False), encoding="utf-8")
     for name in ("blogger_practical_ko.json", "blogger_practical_en.json", "blogger_ai_tools_ko.json"):
         shutil.copy(REAL / "pipeline" / "profiles" / name, root / "pipeline" / "profiles")

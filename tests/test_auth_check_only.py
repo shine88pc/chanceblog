@@ -307,11 +307,15 @@ class EnumerationTest(unittest.TestCase):
 # ----------------------------------------------------------------------------
 # 3) plan 단계와 blogger.yml
 # ----------------------------------------------------------------------------
-def registry_with(mode):
+def registry_with(mode, korean_mode="off"):
+    """영문(blogger_macat)의 mode 를 정하고, 한글(blogger_kcyoon)은 기본으로 정지(off)에 맞춘다 — 이 시험들은 '정지 상태'의 계획을 보므로
+    실제 레지스트리의 한글 mode(2026-10-29 부터 draft)와 무관하게 만든다."""
     reg = registry.load_registry()
     for blog in reg["blogs"]:
         if blog["key"] == "blogger_macat":
             blog["mode"] = mode
+        elif blog["key"] == "blogger_kcyoon":
+            blog["mode"] = korean_mode
     return reg
 
 
@@ -321,7 +325,7 @@ class PlanIncludeOffTest(unittest.TestCase):
         self.assertEqual(plan.build_matrix(reg, "blogger")["include"], [])
         self.assertEqual(plan.build_matrix(reg, "blogger", include_off=False)["include"], [])
         items = plan.build_matrix(reg, "blogger", include_off=True)["include"]
-        self.assertEqual([(i["key"], i["mode"]) for i in items], [("blogger_macat", "off"), ("blogger_kcyoon", "off")])      # 한글 Blogger 도 정지 상태로 등록돼 있다
+        self.assertEqual([(i["key"], i["mode"]) for i in items], [("blogger_macat", "off"), ("blogger_kcyoon", "off")])      # 한글 Blogger 도 정지(이 시험이 맞춘 상태 — 실제 값은 2026-10-29 부터 draft)
         self.assertEqual(items[0]["secret_refresh_token"], "BLOGGER_REFRESH_TOKEN")      # 이름만 있고 값은 없다
         self.assertEqual(items[1]["secret_refresh_token"], "BLOGGER_KO_REFRESH_TOKEN")   # 한글은 영문과 다른 시크릿 이름이다
         self.assertEqual([i["key"] for i in plan.build_matrix(reg, "blogger", only="blogger_macat", include_off=True)["include"]],

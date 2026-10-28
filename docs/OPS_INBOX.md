@@ -71,7 +71,7 @@
 | | 성공한 실행의 주석(annotation) 중 **우리 스크립트가 남긴** warning 수준 문구 | check | 서로 다른 문구 3개까지 한 줄로 접어 나열(같은 문구는 실행마다 되풀이하지 않고 "성공 실행 N회 중 M회"로 합침). 파일마다 최근 성공 실행 3건의 주석만 읽습니다. `::warning::`으로 남긴 건너뜀 사유·시크릿·조회 실패 같은 것이 여기에 잡힙니다. 플랫폼 안내(아래 행)로 판정되지 않는 애매한 warning 은 check 로 둡니다 |
 | | GitHub 플랫폼이 붙이는 안내성 주석(warning·notice 수준) | info | 거의 모든 실행에 붙는 소음(2026-10-25 실제 실행 전부: warning "Node.js 20 is deprecated … forced to run on Node.js 24", notice "The ubuntu-latest label will migrate to Ubuntu 26 …")이라 check 가 아니라 **모든 워크플로를 통틀어 info 한 줄**로 합칩니다: "GitHub Actions 플랫폼 경고 N종 — 액션 버전 갱신 필요, 당장은 발행에 영향 없음" + 액션 이름(예: actions/checkout v4)·예시 문구 하나. **어느 워크플로·어느 실행에서 나왔는지는 싣지 않고** 링크는 저장소의 Actions 화면(고정 주소)입니다 — 싣는 순간 다른 워크플로가 돌 때마다 본문이 바뀌어 이슈를 계속 다시 쓰게 되기 때문입니다(같은 문구 집합이면 입력 순서와 상관없이 같은 글자). info 라서 새 알림 대상이 아닙니다. 판정 문구는 `pipeline/inbox.py`의 `PLATFORM_NOISE`(상수 한 곳)이고 `tests/test_ops_inbox.py`의 `PlatformNoticeTest`가 실제 문구 두 개로 고정합니다. `Node.js 20` 처럼 `Node.js`가 붙은 숫자만 소음으로 보며(우리 쪽 `Node 18` 같은 문구는 확인 항목으로 남음), 우리 스크립트의 실제 경고 문구 13개가 소음으로 잘못 분류되지 않는지도 같은 테스트가 확인합니다. 우리 쪽 notice 는 무시합니다 |
 | 일시정지 | 저장소 변수 `PIPELINE_PAUSE`가 `1`/`true`/`yes`/`on` | action | "자동 발행이 멈춰 있습니다 — 해제 방법". 일부러 멈춘 것이라면 그대로 둬도 됩니다. 정지 중에는 워치독이 새 알림을 만들지 않으므로 이 항목이 '아직 멈춰 있다'는 유일한 표시입니다 |
-| Blogger 게시 설정 | 블로그가 `auto`·`draft`인데, 이력의 **최신 게시 단계 항목**이 `generated_unpublished`이고 사유에 `[SECRETS]`가 있음 | action | 어떤 시크릿 **이름**이 비었는지만 표시(값은 절대 아님) + 저장소 시크릿 설정 페이지 링크. '게시 단계 항목'은 posted·draft·generated_unpublished·publish_failed·draft_uploaded 중 가장 나중 것(게시 단계에 가지 못한 `rejected` 등은 시크릿 상태를 알려 주지 않아 건너뜀). 2026-10-25 현재 레지스트리에서 `blogger_macat`은 `mode: off`라 이 규칙은 쉬고 아래 '정지 중' 참고 항목만 나옵니다 — 시크릿을 등록하고 mode 를 `draft`·`auto`로 켜면 동작합니다 |
+| Blogger 게시 설정 | 블로그가 `auto`·`draft`인데, 이력의 **최신 게시 단계 항목**이 `generated_unpublished`이고 사유에 `[SECRETS]`가 있음 | action | 어떤 시크릿 **이름**이 비었는지만 표시(값은 절대 아님) + 저장소 시크릿 설정 페이지 링크. '게시 단계 항목'은 posted·draft·generated_unpublished·publish_failed·draft_uploaded 중 가장 나중 것(게시 단계에 가지 못한 `rejected` 등은 시크릿 상태를 알려 주지 않아 건너뜀). 2026-10-29 부터 `blogger_macat`·`blogger_kcyoon` 이 `mode: draft` 라 이 규칙이 동작합니다(`mode: off` 인 블로그에는 이 규칙이 쉬고 아래 '정지 중' 참고 항목만 나옵니다) |
 | | 이력에 `draft_uploaded`(앞으로 생길 Blogger 초안함 업로드 상태)가 최근 7일 안에 있음 | action | "초안 N건 게시 대기", 링크는 Blogger 관리 화면. 이력으로는 게시했는지 알 수 없어 7일이 지나면 저절로 사라집니다. 새 초안이 올라오면 새 항목으로 다시 알립니다. 초안 현황 표의 Blogger 칸은 창이 다릅니다(14일 대략치, §3-1) |
 | | 블로그가 `mode: off` | info | "정지 중". 레지스트리의 `note`(또는 `_note`)가 있으면 이유로 표시 |
 | 현황 | 블로그별 마지막 글 시각(KST)·최근 24시간 글 수 | info | 이력 파일에서 읽음(없거나 모양이 달라도 죽지 않음). Chance는 날짜와 게시 슬롯 시각만 기록돼 있어 "09시 슬롯"처럼, 날짜만 있으면 "날짜만 기록됨"으로 표시하고 오늘(KST) 날짜면 24시간 안으로 셉니다. Blogger는 `posted`만 글로 세고 초안·미게시는 따로 셉니다 |
@@ -238,7 +238,7 @@ Chance 승인 흐름(레지스트리 `publish_flow: pr`, 지금 꺼짐 — [`ARC
 - [ ] 표 아래 "휴대폰에서 거르기" 링크가 GitHub 앱·웹에서 열리고 `초안` 이슈만 보인다. PR 링크(`/pulls?q=…`)도 열린다 — 라벨이 붙은 PR이 목록에 보이는지(`is:open label:…` 검색이 PR 목록에서도 먹는지)는 미확인
 - [ ] 초안 항목이 3일 넘으면 "확인하면 좋은 것"으로 옮겨 가고 알림이 오지 않는다
 - [ ] (Chance 승인 흐름을 켠 뒤, 작업 E) 초안 PR이 열리면: 같은 PR이 `검사 결과 없음`(check)이 아니라 `초안 대기 — …` 한 줄(PR 번호·PR 링크)로 보이고 @멘션 코멘트가 온다. 저장소 기본 토큰이 연 PR에 검사가 정말 안 도는지, 만드는 쪽이 이 워크플로를 불러 줬는지(안 불렀다면 다음 예약 때 반영)도 함께 본다. PR을 병합하면 표가 `0`으로 돌아간다. 이 줄은 아직 실제로 보지 못했다(미확인)
-- [ ] Blogger 실행 요약 첫 줄이 영문은 `### [Blogger 영문] Blogger (macat0722)`, 한글은 `### [Blogger 한글] Blogger (kcyoon)`(정지 중에는 "대상 0개" 요약이라 첫 실제 업로드 때)
+- [ ] Blogger 실행 요약 첫 줄이 영문은 `### [Blogger 영문] Blogger (macat0722)`, 한글은 `### [Blogger 한글] Blogger (kcyoon)`(영문·한글 모두 2026-10-29 부터 켜져 첫 실제 업로드 때 — 정지한 블로그는 "대상 0개" 요약)
 
 ## 9. 통합 담당 메모
 

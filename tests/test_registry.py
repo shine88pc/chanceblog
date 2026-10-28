@@ -41,7 +41,7 @@ class RealRegistryTest(unittest.TestCase):
     def test_defaults_mode_is_draft_so_a_blog_without_its_own_mode_never_publishes_by_itself(self):
         # 2026-10-25 20:26 에 auto 로 바뀌었던 것을 2026-10-26 운영자 답변으로 draft 로 되돌렸다. mode 없이 추가한 새 블로그가 곧바로 자동 게시되지 않게 한다.
         self.assertEqual(real_registry()["defaults"]["mode"], "draft")
-        self.assertEqual({b["key"]: b.get("mode") for b in real_registry()["blogs"]}, {"chance": "auto", "blogger_macat": "off", "blogger_kcyoon": "off"})
+        self.assertEqual({b["key"]: b.get("mode") for b in real_registry()["blogs"]}, {"chance": "auto", "blogger_macat": "draft", "blogger_kcyoon": "draft"})     # 영문·한글 모두 2026-10-28 운영자 승인으로 draft
 
     def test_model_chain_has_no_retired_model_and_matches_the_engine(self):
         import generator
@@ -58,7 +58,9 @@ class RealRegistryTest(unittest.TestCase):
         reg = real_registry()
         reg["blogs"][1]["mode"] = "off"
         keys = [b["key"] for b in registry.enabled_blogs(reg)]
-        self.assertEqual(keys, ["chance"])
+        self.assertEqual(keys, ["chance", "blogger_kcyoon"])     # 한글은 draft(2026-10-28 승인)라 켜져 있다
+        reg["blogs"][2]["mode"] = "off"
+        self.assertEqual([b["key"] for b in registry.enabled_blogs(reg)], ["chance"])
         reg = real_registry()
         for blog in reg["blogs"]:
             blog["mode"] = "auto"  # 운영 중 일시 정지(mode off)와 무관하게 platform 필터만 본다
@@ -129,7 +131,7 @@ class InvalidRegistryTest(unittest.TestCase):
 
     def test_the_three_current_blogs_write_their_mode_in_the_file(self):
         raw = registry.load_registry()["blogs"]
-        self.assertEqual({b["key"]: b["mode"] for b in raw}, {"chance": "auto", "blogger_macat": "off", "blogger_kcyoon": "off"})
+        self.assertEqual({b["key"]: b["mode"] for b in raw}, {"chance": "auto", "blogger_macat": "draft", "blogger_kcyoon": "draft"})
 
     def test_http_url(self):
         self.assertHas(self.errors(lambda r: r["blogs"][0].update(url="http://x.example")), "https://")

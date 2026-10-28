@@ -1,6 +1,6 @@
 """한글 Blogger(kcyoon, 레지스트리 키 blogger_kcyoon) 러너 시험 공용 도구(작업 D).
 
-임시 저장소는 실제 레지스트리의 사본이다(test_run.make_root): 영문 Blogger 는 실제 영문 프로필 그대로이고, 한글 Blogger 의 mode 만 시험이 정한다(실제 레지스트리에서는 off).
+임시 저장소는 실제 레지스트리의 사본이다(test_run.make_root): 영문 Blogger 는 실제 영문 프로필 그대로이고, 한글 Blogger 의 mode 만 시험이 정한다(실제 레지스트리에서는 2026-10-29 부터 draft).
 시크릿 값은 가짜다. 실제 Blogger·Gemini 호출은 없다(가짜 게시자·스텁 LLM).
 """
 import json
