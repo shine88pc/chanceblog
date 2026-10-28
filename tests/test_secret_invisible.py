@@ -283,7 +283,7 @@ class RunnerNoticeTest(unittest.TestCase):
         seen = []
 
         class Recorder:
-            def __init__(self, blog_id, client_id, client_secret, refresh_token):
+            def __init__(self, blog_id, client_id, client_secret, refresh_token, secret_names=None):    # secret_names: D-FIX(N3) 가 기본 게시자 생성에 더한 선택 인자
                 seen.append((blog_id, client_id, client_secret, refresh_token))
 
         env = self.dirty_env()
