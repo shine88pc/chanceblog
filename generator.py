@@ -1465,7 +1465,331 @@ def _validate_editorial_body(content, lang, verified_source_url):
         )
 
 
-def validate_post_data(data, kr_image, en_image, verified_source_url=None):
+# ============================================================
+# 글 머리말(front matter) 검사·복구 (D-80, 사용자 이슈 #59)
+# ============================================================
+# 모델이 쓴 머리말 줄은 믿지 않는다. 2026-10-27 18시 슬롯의 글 한 쌍은 모델이 `------` 로 시작하는 이중 머리말을, 2026-10-28 9시 슬롯의 한글 글은
+# 안쪽 따옴표를 이스케이프하지 않은 제목(`title: ""…": …"`)을 내보냈다. 옛 코드는 그 줄을 그대로 글 파일에 써서 공개 사이트의 글 제목이 파일 이름으로,
+# 분야가 General 로 나왔다. 그래서 ① 모델 응답에서 머리말과 본문을 견고하게 가르고(_split_model_content) ② 머리말이 엄격 검사를 통과할 때만 모델이 쓴
+# 줄을 보존하고 아니면 구조화된 값(제목·분야·태그)으로 처음부터 다시 쓰며(_front_matter_from_model) ③ 설명·출처 줄까지 더한 최종 글을 한 번 더 검사해
+# (front_matter_problems) 깨진 글은 발행하지 않고 그 후보를 거절한다. 운영 환경(requirements-pipeline.txt)에는 PyYAML 이 없으므로 검사는 정규식·JSON 으로만
+# 한다: 한 줄 `키: 값`(과 값이 빈 키에 이어지는 블록 목록 항목)만 받아들이고 그 밖의 모양은 모두 '믿지 않는 머리말'이다.
+_FM_FENCE = re.compile(r"-{3,}[ \t]*")      # 울타리처럼 보이는 줄(대시만 3개 이상). 정상은 정확히 `---`
+_FM_KEY = re.compile(r"([A-Za-z_][A-Za-z0-9_-]*):(?:[ \t]|\Z)")      # 줄 맨 앞의 `키:` — 콜론 뒤가 공백이나 줄 끝이어야 YAML 매핑이다
+_FM_ITEM = re.compile(r" *-[ \t]+(.*)")      # 값이 빈 앞 키에 이어지는 블록 목록 항목(`  - 값`)
+_FM_SHAPED = re.compile(r"(?:[A-Za-z_][A-Za-z0-9_-]*[ \t]*:|-[ \t]|[ \t#])")      # 머리말 줄처럼 생긴 줄(빈 줄은 따로 센다)
+_FM_KNOWN_KEY = re.compile(r"(?:layout|title|category|tags|lang|image|description)[ \t]*:")      # 글 머리말에만 있는 키
+_FM_RESIDUE = re.compile(r"(?:layout|title|category|tags|lang|image|description|published|date|permalink|slug|source_name|source_url|source_domain)[ \t]*:")      # 본문 앞 세 줄에 남아서는 안 되는 머리말 줄(소문자 키만)
+_FM_REQUIRED = ("layout", "title", "category", "lang", "image")
+_FM_MAX_LINE = 2000      # 머리말 한 줄의 상한(검사 정규식이 아주 긴 줄에서 오래 걸리지 않게)
+# 한 줄 목록의 항목: 큰따옴표(JSON 이 아는 이스케이프만)·작은따옴표·평문. 평문 항목은 공백으로 끝나지 못한다 — 꼬리와 뒤의 `[ \t]*` 가 같은 공백을 겹쳐 먹으면 되돌아가기가
+# 항목 수의 지수로 늘어(`tags: [a ,a ,… #]` 22개 1.3초, 하나 늘 때마다 두 배) 슬롯 실행이 멈춘다(검증자 N1). 또 평문 항목은 `?` 를 품지 못한다 — 한 줄 목록 안에서 `?` 는 평문을 끝내는 '키' 표지라
+# `[a?b]` 를 PyYAML 이 읽지 못한다(N2). 큰따옴표 항목의 이스케이프를 JSON 이 아는 것으로 좁힌 것도 같은 이유다(`\q` 는 YAML 이 읽지 못한다).
+_FM_FLOW_PLAIN = r"""[^\s,\[\]{}"'#&*!|>%@`:?-](?:[^,\[\]{}"'#:?\n]*[^\s,\[\]{}"'#:?\n])?"""
+_FM_FLOW_ITEM = r"""(?:"(?:[^"\\\n]|\\["\\/bfnrt]|\\u[0-9a-fA-F]{4})*"|'(?:[^'\n]|'')*'|""" + _FM_FLOW_PLAIN + ")"
+_FM_FLOW_LIST = re.compile(r"\[[ \t]*(?:" + _FM_FLOW_ITEM + r"(?:[ \t]*,[ \t]*" + _FM_FLOW_ITEM + r")*(?:[ \t]*,)?[ \t]*)?\]")
+_YAML_UNPRINTABLE = re.compile(r"[^\x09\x0a\x0d\x20-\x7e\xa0-\U00002027\U0000202a-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]")      # PyYAML 이 읽지 못하는 글자 + YAML 이 줄바꿈으로 읽는 U+0085·U+2028·U+2029
+# 머리말 한 줄 안의 날 U+0085·U+2028·U+2029 는 큰따옴표 값 안이면 NEL 이 공백으로 접혀 값이 바뀌고, 따옴표 없는 값 안이면 읽지 못하고, 키 줄 사이면 줄이 갈라져 다른 키가 끼어든다(검증자 N3).
+_YAML_UNPRINTABLE_PROBLEM = "머리말에 YAML 이 읽지 못하는 제어 문자나 줄바꿈으로 읽는 U+0085·U+2028·U+2029 가 있음"
+# 우리가 쓰는 JSON 한 줄에서는 그 세 글자를 `\uXXXX` 로 이스케이프한다: json.dumps(ensure_ascii=False) 는 날 글자로 두지만, JSON 과 YAML 이 같은 이스케이프를 읽어 값은 그대로 보존된다.
+_YAML_LINE_BREAK_ESCAPES = {code: "\\u%04x" % code for code in (0x85, 0x2028, 0x2029)}
+
+
+def _json_line(value):
+    """`json.dumps(value, ensure_ascii=False)` — 단, YAML 이 줄바꿈으로 읽는 U+0085·U+2028·U+2029 는 `\\uXXXX` 로 이스케이프한다(머리말의 title·category·tags 와 엔진이 더하는 줄에 쓴다)."""
+    return json.dumps(value, ensure_ascii=False).translate(_YAML_LINE_BREAK_ESCAPES)
+
+
+def _fm_json_string(value):
+    """한 줄 JSON 문자열(큰따옴표 안의 따옴표·역슬래시는 이스케이프)이면 그 글자를, 아니면 None 을 돌려준다."""
+    if len(value) < 2 or value[0] != '"' or value[-1] != '"':
+        return None
+    try:
+        parsed = json.loads(value)
+    except ValueError:
+        return None
+    return parsed if isinstance(parsed, str) else None
+
+
+def _fm_scalar_text(value):
+    """한 줄 스칼라 값을 글자로 푼다(JSON 문자열·작은따옴표 문자열·평문). 풀 수 없는 모양이면 None."""
+    if value.startswith('"'):
+        return _fm_json_string(value)
+    if value.startswith("'"):
+        return value[1:-1].replace("''", "'") if re.fullmatch(r"'(?:[^'\n]|'')*'", value) else None
+    return value if value and value[0] not in "[{" else None
+
+
+def _fm_plain_ok(value):
+    """따옴표 없는 값이 YAML 평문으로 안전한가: 표지 글자로 시작하지 않고 `: `·` #`·탭이 없다."""
+    if value[0] in "[]{},#&*!|>'\"%@`":
+        return False
+    if value[0] in "-?:" and (len(value) == 1 or value[1] in " \t"):
+        return False
+    return not re.search(r"[ \t]#|:[ \t]|:\Z|\t", value)
+
+
+def _fm_flow_list_ok(value):
+    """한 줄 목록(`["가", "나"]`·`[가, 나]`·`['가']`)인가. 항목은 글자·숫자뿐이다(안쪽 목록·매핑·`:` 가 든 평문 항목은 받지 않는다)."""
+    try:
+        parsed = json.loads(value)
+    except ValueError:
+        return bool(_FM_FLOW_LIST.fullmatch(value))
+    return isinstance(parsed, list) and all(item is None or isinstance(item, (str, int, float, bool)) for item in parsed)
+
+
+def _fm_value_problem(key, value):
+    """한 줄 값(앞뒤 공백을 뺀 비어 있지 않은 글)이 안전한 모양이 아닌 이유. 괜찮으면 None. 값의 뜻은 보지 않고 모양만 본다."""
+    if len(value) > _FM_MAX_LINE:
+        return "너무 김"
+    if key == "title":
+        text = _fm_json_string(value)
+        if text is None:
+            return "한 줄 JSON 문자열(큰따옴표 안의 따옴표·역슬래시는 이스케이프)이 아님"
+        return None if text.strip() else "비어 있음"
+    if key == "tags":      # 태그는 목록이어야 한다(`tags: "가, 나"` 같은 글자는 사이트가 목록으로 읽지 않는다). 값이 빈 블록 목록은 호출한 쪽이 따로 본다
+        return None if value[0] == "[" and _fm_flow_list_ok(value) else "한 줄 목록([…])이 아님"
+    if value[0] == '"':
+        return None if _fm_json_string(value) is not None else "큰따옴표 문자열이 한 줄 JSON 으로 읽히지 않음"
+    if value[0] == "'":
+        return None if _fm_scalar_text(value) is not None else "작은따옴표 문자열이 닫히지 않음"
+    if value[0] == "[":
+        return None if _fm_flow_list_ok(value) else "한 줄 목록으로 읽히지 않음"
+    return None if _fm_plain_ok(value) else "따옴표 없는 값으로 안전하지 않음(`: `·` #`·탭·YAML 표지 글자)"
+
+
+def _fm_header_problems(header):
+    """머리말 줄들의 모양 검사: (문제 목록, {키: [값, 이어진 목록 항목 수]}). 한 줄에 키 하나(`키: 값`)이고, 값이 빈 키에만 블록 목록 항목(`  - 값`)이 이어질 수 있다.
+    문제 문장에는 키 이름만 들어가고 값은 들어가지 않는다(모델이 쓴 글이 로그에 실리지 않게)."""
+    problems, keys, pending = [], {}, None
+    for line in header:
+        if not line.strip():
+            continue
+        found = _FM_KEY.match(line)
+        if found:
+            key, value = found.group(1), line[found.end():].strip()
+            if key in keys:
+                problems.append(f"`{key}` 키가 두 번 나옴")
+            keys[key] = [value, 0]
+            pending = None if value else keys[key]
+            why = _fm_value_problem(key, value) if value else None
+            if why:
+                problems.append(f"`{key}` 값이 {why}")
+            continue
+        item = _FM_ITEM.fullmatch(line)
+        if item and pending is not None:
+            pending[1] += 1
+            text = item.group(1).strip()
+            if not text or _fm_value_problem("item", text):
+                problems.append("블록 목록 항목이 안전한 모양이 아님")
+            continue
+        problems.append("`키: 값` 한 줄 모양이 아닌 줄이 있음")
+    problems += [f"`{key}` 값이 비어 있음" for key, (value, count) in keys.items() if not value and not count]
+    return problems, keys
+
+
+def _fm_layout_problem(keys):
+    """`layout` 줄이 있는데 값이 정확히 `post` 가 아니면 그 문제 문장을, 아니면 None. `post`·`"post"`·`'post'` 는 모두 post 로 읽혀 괜찮다. 줄이 없는 것은 여기서 보지 않는다(필수 키 검사와
+    엔진이 맨 앞에 넣는 `layout: post` 가 맡는다). `default` 같은 다른 값은 사이트가 글 모양으로 그리지 못한다(검증자 N4)."""
+    have = keys.get("layout")
+    if have is not None and _fm_scalar_text(have[0]) != "post":
+        return "`layout` 값이 post 가 아님"
+    return None
+
+
+def _source_front_fields(source):
+    """add_discovery_metadata 가 머리말에 더하는 출처 세 줄의 값 (이름, 주소, 도메인). 더하지 않는 소스(주소가 http(s) 가 아니거나 이름·도메인이 없음)면 None."""
+    if not source:
+        return None
+    source_url = str(source.get("link") or "").strip()
+    parsed = urllib.parse.urlparse(source_url)
+    if (parsed.scheme in {"http", "https"} and parsed.netloc and source.get("source") and source.get("publisher_domain")):
+        return str(source.get("source")), source_url, str(source["publisher_domain"])
+    return None
+
+
+def front_matter_problems(content, source=None):
+    """완성된 글 한 편(머리말 + 본문)의 머리말과 본문 머리를 엄격히 검사해 문제 목록을 돌려준다(비어 있으면 정상).
+    검사: 첫 줄이 정확히 `---`·닫는 `---` 줄·CR/BOM/제어 문자 없음·한 줄 한 키·키 중복 없음·값이 안전한 모양(`title` 은 한 줄 JSON 문자열)·필수 키(layout·title·
+    category·lang·image)·layout 은 post(줄이 있으면)·lang 은 ko·en·본문이 울타리 줄이나 머리말 줄로 시작하지 않음. source(add_discovery_metadata 에 넘기는 소스 항목)를 주면 엔진이 더하는
+    설명(본문에서 뽑을 수 있을 때)과 출처 세 줄이 있고 소스와 같은지도 본다 — `_front_matter_set` 이 머리말을 못 찾아 조용히 지나친 경우가 여기서 드러난다.
+    문제 문장에는 값이 들어가지 않는다."""
+    text = str(content or "")
+    if text.startswith("\ufeff"):
+        return ["글이 BOM 으로 시작함"]
+    lines = text.split("\n")
+    if lines[0] != "---":
+        return ["첫 줄이 정확히 `---` 가 아님"]
+    end = next((i for i in range(1, len(lines)) if _FM_FENCE.fullmatch(lines[i])), None)
+    if end is None:
+        return ["머리말을 닫는 `---` 줄이 없음"]
+    problems = []
+    if lines[end] != "---":
+        problems.append("머리말을 닫는 줄이 정확히 `---` 가 아님")
+    header, body = lines[1:end], lines[end + 1:]
+    joined = "\n".join(header)
+    if "\r" in joined:
+        problems.append("머리말에 CR 줄바꿈이 섞여 있음")
+    if _YAML_UNPRINTABLE.search(joined):
+        problems.append(_YAML_UNPRINTABLE_PROBLEM)
+    found, keys = _fm_header_problems(header)
+    problems += found
+    problems += [f"필수 키 `{key}` 줄이 없음" for key in _FM_REQUIRED if key not in keys]
+    layout = _fm_layout_problem(keys)
+    if layout:
+        problems.append(layout)
+    for key in ("category", "image"):
+        have = keys.get(key)
+        if have and have[0] and not (_fm_scalar_text(have[0]) or "").strip() and f"`{key}` 값이 비어 있음" not in problems:
+            problems.append(f"`{key}` 값이 비어 있음")
+    lang = keys.get("lang")
+    if lang and lang[0] and _fm_scalar_text(lang[0]) not in ("ko", "en"):
+        problems.append("`lang` 값이 ko·en 이 아님")
+    head = []       # 본문의 앞 세 줄(빈 줄 제외)
+    for line in body:
+        if line.strip():
+            head.append(line.rstrip("\r").lstrip("\ufeff"))
+            if len(head) == 3:
+                break
+    if head and _FM_FENCE.fullmatch(head[0]):
+        problems.append("본문이 `---` 울타리 줄로 시작함(이중 머리말 흔적)")
+    elif any(_FM_RESIDUE.match(line) for line in head):
+        problems.append("본문이 머리말 줄(`키: 값`)로 시작함")
+    expected = _source_front_fields(source)
+    if expected:
+        for key, want in zip(("source_name", "source_url", "source_domain"), expected):
+            have = keys.get(key)
+            if have is None or _fm_scalar_text(have[0]) != want:
+                problems.append(f"`{key}` 줄이 없거나 원문 정보와 다름")
+        if _description_from_markdown(text) and "description" not in keys:
+            problems.append("설명(`description`) 줄이 없음")
+    return problems
+
+
+def check_final_front_matter(data, source=None):
+    """validate_post_data 를 거친 data 의 두 글에 설명·출처 줄까지 더해(실제로 파일이 될 모양으로) 머리말을 검사한다. 문제가 있으면 ValueError —
+    깨진 글을 발행하느니 그 후보를 거절한다(본문 검증 실패와 같은 길)."""
+    for prefix in ("kr", "en"):
+        problems = front_matter_problems(add_discovery_metadata(data[f"{prefix}_content"], source), source)
+        if problems:
+            raise ValueError(f"{prefix.upper()} 글 머리말이 검사를 통과하지 못했습니다: " + " / ".join(problems[:3]))
+
+
+def _fm_is_header_block(block):
+    """울타리 둘 사이의 줄들이 '머리말 한 덩이'인가: 모든 줄이 머리말 모양(`키: 값`·목록 항목·들여쓴 줄·주석·빈 줄)이고 글 머리말의 키(layout·title·…)가 하나 이상 있다.
+    키 모양 줄만 있는 글(예: `Note: …` 한 문단)을 머리말로 보고 버리지 않으려고 알려진 키를 요구한다."""
+    return (all(not line.strip() or _FM_SHAPED.match(line) for line in block)
+            and any(_FM_KNOWN_KEY.match(line) for line in block))
+
+
+def _fm_extra_block(view, start):
+    """view[start] 가 울타리 줄일 때, 다음 울타리 줄까지가 머리말 한 덩이(_fm_is_header_block)면 그 닫는 줄의 번호, 아니면 None.
+    여는 울타리를 두 번 쓰거나 머리말을 두 번 쓴 응답을 알아보는 데 쓴다."""
+    end = next((i for i in range(start + 1, len(view)) if _FM_FENCE.fullmatch(view[i])), None)
+    if end is not None and _fm_is_header_block(view[start + 1:end]):
+        return end
+    return None
+
+
+def _fm_body(lines, view):
+    """머리말 뒤의 줄들에서 본문을 얻는다: 앞의 빈 줄, 구분선처럼 홀로 놓인 울타리 줄, 두 번째 머리말 한 덩이를 걷어낸다. (본문, 두 번째 머리말이 있었는가).
+    view 는 판단에 쓰는 줄(CR 을 뺀 것), lines 는 본문에 쓰는 원래 줄이다 — 본문 글자는 걷어낸 앞부분 말고는 바꾸지 않는다."""
+    i, doubled = 0, False
+    while i < len(view):
+        if not view[i].strip():
+            i += 1
+        elif _FM_FENCE.fullmatch(view[i]):
+            extra = _fm_extra_block(view, i)
+            if extra is None:
+                i += 1
+            else:
+                doubled, i = True, extra + 1
+        else:
+            break
+    return "\n".join(lines[i:]), doubled
+
+
+def _split_model_content(content):
+    """모델 응답 하나를 (종류, 머리말 줄 목록, 본문)으로 가른다.
+    종류 — "none": 머리말이 없다(맨 앞이 울타리가 아니거나, 울타리가 닫히지 않았거나 사이가 머리말이 아니라 글이라 구분선으로 본 경우) ·
+    "clean": 정확한 `---` 울타리 둘 사이의 머리말 하나 · "messy": 머리말은 있으나 울타리가 어긋나 있다(`------`·여는 울타리 두 번·머리말 두 번 …) — 이 줄들은 믿지 않는다.
+    본문은 어느 경우에도 울타리(대시) 줄로 시작하지 않는다. 맨 앞이 울타리가 아닌 응답(종류 "none")의 본문은 응답 그대로다."""
+    raw = str(content)
+    lines = raw.lstrip("\ufeff").lstrip().split("\n")
+    view = [line.rstrip("\r") for line in lines]
+    if not _FM_FENCE.fullmatch(view[0]):
+        return "none", [], raw
+    exact = view[0].rstrip() == "---"
+    end = next((i for i in range(1, len(view)) if _FM_FENCE.fullmatch(view[i])), None)
+    if end is None:
+        return "none", [], _fm_body(lines[1:], view[1:])[0]
+    block = view[1:end]
+    if not any(line.strip() for line in block):
+        header = []       # 빈 머리말(`---\n---`)이거나, 여는 울타리를 두 번 쓴 것(`---\n---\n머리말…\n---`)
+        extra = _fm_extra_block(view, end)
+        if extra is not None:
+            header, exact, end = view[end + 1:extra], False, extra
+    elif _fm_is_header_block(block):
+        header = block
+    else:       # 첫 울타리와 다음 울타리 사이가 머리말이 아니라 글이다(구분선으로 시작한 글) — 글 머리말의 키가 하나도 없는 덩이는 머리말로 보고 버리지 않는다
+        return "none", [], _fm_body(lines[1:], view[1:])[0]
+    body, doubled = _fm_body(lines[end + 1:], view[end + 1:])
+    return ("clean" if exact and view[end].rstrip() == "---" and not doubled else "messy"), header, body
+
+
+def _model_header_problems(header):
+    """모델이 쓴 머리말 줄을 그대로 보존해도 되는가: 안 되는 이유 목록(비어 있으면 보존한다). 한 줄 한 키 모양·키 중복 없음·값이 안전한 모양·`title` 이 한 줄 JSON 문자열이어야 하고,
+    엔진이 지웠다 다시 쓰는 `lang`·`image` 는 한 줄 값이어야 한다(값이 비면 지우는 정규식이 다음 줄까지 지운다). `layout` 줄이 있으면 값이 정확히 post 여야 한다(없으면 엔진이 넣는다)."""
+    problems, keys = _fm_header_problems(header)
+    if "title" not in keys:
+        problems.append("제목(`title`) 줄이 없음")
+    layout = _fm_layout_problem(keys)
+    if layout:
+        problems.append(layout)
+    problems += [f"`{key}` 는 한 줄 값이어야 함" for key in ("lang", "image") if key in keys and keys[key][1]]
+    if _YAML_UNPRINTABLE.search("\n".join(header)):
+        problems.append(_YAML_UNPRINTABLE_PROBLEM)
+    return problems
+
+
+def _fresh_front_matter(data, prefix, html_lang, image_url):
+    """모델이 쓴 머리말을 믿지 않을 때 쓰는, 구조화된 값(제목·분야·태그)과 시스템 값(언어·이미지)으로 처음부터 쓴 머리말(닫는 울타리와 빈 줄까지)."""
+    return (
+        "---\nlayout: post\n"
+        f"title: {_json_line(data[f'{prefix}_title'])}\n"
+        f"category: {_json_line(data[f'{prefix}_category'])}\n"
+        f"tags: {_json_line(data[f'{prefix}_tags'])}\n"
+        f"lang: {html_lang}\nimage: {json.dumps(image_url)}\n---\n\n"
+    )
+
+
+def _front_matter_from_model(data, prefix, html_lang, image_url):
+    """모델이 준 글 하나에 머리말을 붙여 (머리말이 붙은 글, 다시 쓴 이유)를 돌려준다. 이유는 모델이 쓴 머리말을 그대로 보존했거나 머리말이 아예 없었으면 None.
+    머리말이 엄격 검사를 통과하면 모델이 쓴 줄을 지금까지처럼 보존하고(layout 이 없으면 맨 앞에 `layout: post`, lang·image 는 지웠다가 맨 끝에 다시 씀),
+    통과하지 못하면 모델이 쓴 줄은 모두 버리고 구조화된 값으로 처음부터 다시 쓴다. 어느 쪽이든 본문은 걷어낸 앞부분(울타리 찌꺼기) 말고는 그대로다."""
+    kind, header, body = _split_model_content(data[f"{prefix}_content"])
+    reason = None
+    if kind == "clean":
+        problems = _model_header_problems(header)
+        if not problems:
+            front = "".join("\n" + line for line in header)   # 여는 울타리 줄 뒤의 줄들(맨 앞에 줄바꿈 하나)
+            front = re.sub(r"(?m)^image:\s*.*$", "", front)
+            front = re.sub(r"(?m)^lang:\s*.*$", "", front)
+            front = re.sub(r"\n{2,}", "\n", front).rstrip()
+            if not re.search(r"(?m)^layout\s*:", front):
+                # 모델이 front matter 에서 layout 을 빼먹어도 다른 글·시험·도구와 같게 post 로 보장한다(2026-10-26 18시 글이 그랬다)
+                rest = front.strip()
+                front = "\nlayout: post" + ("\n" + rest if rest else "")
+            front += f'\nlang: {html_lang}\nimage: "{image_url}"'
+            return f"---{front}\n---\n\n{body}", None
+        reason = problems[0]
+    elif kind == "messy":
+        reason = "머리말 울타리가 어긋남"
+    return _fresh_front_matter(data, prefix, html_lang, image_url) + body, reason
+
+
+def validate_post_data(data, kr_image, en_image, verified_source_url=None, notes=None):
+    """notes(목록)를 주면 모델이 쓴 머리말을 믿지 못해 다시 쓴 글마다 한 줄(이유 포함, 값은 없음)을 덧붙인다."""
     for key in ("kr_category", "kr_title", "kr_content",
                 "en_category", "en_title", "en_content"):
         if not isinstance(data.get(key), str) or not data[key].strip():
@@ -1477,30 +1801,9 @@ def validate_post_data(data, kr_image, en_image, verified_source_url=None):
 
     for prefix, image_url in (("kr", kr_image), ("en", en_image)):
         html_lang = "ko" if prefix == "kr" else "en"
-        content = data[f"{prefix}_content"]
-        if not content.lstrip().startswith("---"):
-            content = (
-                "---\nlayout: post\n"
-                f"title: {json.dumps(data[f'{prefix}_title'], ensure_ascii=False)}\n"
-                f"category: {json.dumps(data[f'{prefix}_category'], ensure_ascii=False)}\n"
-                f"tags: {json.dumps(data[f'{prefix}_tags'], ensure_ascii=False)}\n"
-                f"lang: {html_lang}\nimage: {json.dumps(image_url)}\n---\n\n" + content
-            )
-        else:
-            content = content.lstrip()  # 위 검사(lstrip().startswith)와 같게 — 앞의 빈 줄·공백이 있으면 아래 content[3:end] 가 어긋난다
-            end = content.find("\n---", 3)
-            if end != -1:
-                front = content[3:end]
-                body = content[end + 4:].lstrip("\n")
-                front = re.sub(r"(?m)^image:\s*.*$", "", front)
-                front = re.sub(r"(?m)^lang:\s*.*$", "", front)
-                front = re.sub(r"\n{2,}", "\n", front).rstrip()
-                if not re.search(r"(?m)^layout\s*:", front):
-                    # 모델이 front matter 에서 layout 을 빼먹어도 다른 글·시험·도구와 같게 post 로 보장한다(2026-10-26 18시 글이 그랬다)
-                    rest = front.strip()  # 여는 울타리 뒤 공백·탭·줄바꿈이 남아 빈 줄이나 탭만 있는 줄이 되지 않게
-                    front = "\nlayout: post" + ("\n" + rest if rest else "")
-                front += f'\nlang: {html_lang}\nimage: "{image_url}"'
-                content = f"---{front}\n---\n\n{body}"
+        content, reason = _front_matter_from_model(data, prefix, html_lang, image_url)
+        if reason and notes is not None:
+            notes.append(_one_line(f"{prefix.upper()} 머리말을 모델이 쓴 줄 대신 구조화된 값으로 다시 썼습니다({reason})"))     # 사유에는 키 이름만 있고 값은 없지만 로그에 찍는 글은 늘 접는다
 
         content = _front_matter_set(content, "category", data[f"{prefix}_category"])
         _validate_editorial_body(content, prefix, verified_source_url)
@@ -1516,13 +1819,15 @@ def validate_post_data(data, kr_image, en_image, verified_source_url=None):
 
 
 def _front_matter_set(content, key, value):
-    """Set one safely quoted scalar in an existing Markdown front matter block."""
+    """Set one safely quoted scalar in an existing Markdown front matter block.
+    머리말을 찾지 못하면 글을 그대로 돌려준다(예외를 던지지 않는다). 그래서 줄이 조용히 빠질 수 있다 — 최종 머리말 검사(front_matter_problems)가
+    첫 줄·필수 키·설명·출처 줄이 있는지 보고 문제로 드러낸다."""
     content = str(content or "").lstrip("\ufeff")
     match = re.match(r"\A---\s*\n(.*?)\n---\s*\n(.*)\Z", content, re.S)
     if not match:
         return content
     front, body = match.groups()
-    line = f"{key}: {json.dumps(str(value), ensure_ascii=False)}"
+    line = f"{key}: {_json_line(str(value))}"
     pattern = re.compile(rf"(?m)^{re.escape(key)}\s*:\s*.*$")
     if pattern.search(front):
         front = pattern.sub(lambda _: line, front, count=1)
@@ -1589,13 +1894,12 @@ def add_discovery_metadata(content, source=None):
     if description:
         content = _front_matter_set(content, "description", description)
     if source:
-        source_url = str(source.get("link") or "").strip()
-        parsed = urllib.parse.urlparse(source_url)
-        if (parsed.scheme in {"http", "https"} and parsed.netloc
-                and source.get("source") and source.get("publisher_domain")):
-            content = _front_matter_set(content, "source_name", source.get("source") or "원문")
+        fields = _source_front_fields(source)   # 최종 머리말 검사(front_matter_problems)가 같은 조건으로 이 세 줄이 있는지 본다
+        if fields:
+            source_name, source_url, source_domain = fields
+            content = _front_matter_set(content, "source_name", source_name)
             content = _front_matter_set(content, "source_url", source_url)
-            content = _front_matter_set(content, "source_domain", source["publisher_domain"])
+            content = _front_matter_set(content, "source_domain", source_domain)
             body_match = re.match(r"\A---\s*\n.*?\n---\s*\n(.*)\Z", content, re.S)
             body = body_match.group(1) if body_match else content
             if source_url not in body:
@@ -1779,9 +2083,11 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
         try:
             # 본문 검증(분량·원문 링크 인용)은 이미지를 고르기 전에 먼저 한다: 탈락한 후보에 Unsplash 호출을 쓰지 않고,
             # 첫 후보의 본문이 얇다는 이유로 실행 전체를 빨갛게 만들지 않고 다음 후보를 시도한다(검증 기준은 그대로).
-            validate_post_data(copy.deepcopy(candidate), "https://example.invalid/kr.jpg",
-                               "https://example.invalid/en.jpg",
-                               verified_source_url=(item or {}).get("link"))
+            # 설명·출처 줄까지 더한 최종 머리말도 여기서 미리 검사한다(D-80): 깨진 글을 발행하느니 이 후보를 거절하고 다음 후보를 시도한다.
+            checked = validate_post_data(copy.deepcopy(candidate), "https://example.invalid/kr.jpg",
+                                         "https://example.invalid/en.jpg",
+                                         verified_source_url=(item or {}).get("link"))
+            check_final_front_matter(checked, item)
         except ValueError as exc:
             reason = _one_line(exc, 200)
             print(f"  본문 검증 탈락: {reason}")
@@ -1807,16 +2113,25 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
         raise RuntimeError("사용 가능한 대표 이미지를 2개 확보하지 못했습니다. "
                            "글을 저장하지 않습니다.")
     kr_image, en_image = images
+    repairs = []
     data = validate_post_data(
         data, kr_image, en_image,
         verified_source_url=(selected_item or {}).get("link"),
+        notes=repairs,
     )
+    for repair in repairs:
+        print(f"[참고] {repair}")
 
     now = now_kst()
     date_str, time_str = now.strftime("%Y-%m-%d"), now.strftime("%H%M%S")
     selected_item["title"] = selected_item.get("title") or selected or "원문 기사"
     data["kr_content"] = add_discovery_metadata(data["kr_content"], selected_item)
     data["en_content"] = add_discovery_metadata(data["en_content"], selected_item)
+    for prefix in ("kr", "en"):
+        # 마지막 방어선: 위 후보 검사가 통과했어도(자리표시 이미지로 한 검사) 실제 이미지·출처로 완성한 글의 머리말이 깨졌으면 파일을 쓰지 않는다
+        problems = front_matter_problems(data[f"{prefix}_content"], selected_item)
+        if problems:
+            raise RuntimeError(f"{prefix.upper()} 글 머리말이 검사를 통과하지 못해 글을 저장하지 않습니다: " + " / ".join(problems[:3]))
     kr_path = safe_category_dir(data["kr_category"], "KR") / f"{date_str}-KR-{time_str}.md"
     en_path = safe_category_dir(data["en_category"], "EN") / f"{date_str}-EN-{time_str}.md"
 

@@ -37,12 +37,17 @@ def registry_all_auto():
 class PlanTest(unittest.TestCase):
     def test_matrix_for_blogger(self):
         matrix = plan.build_matrix(registry_all_auto(), "blogger")
-        self.assertEqual(len(matrix["include"]), 1)
-        item = matrix["include"][0]
-        self.assertEqual(item["key"], "blogger_macat")
+        self.assertEqual([i["key"] for i in matrix["include"]], ["blogger_macat", "blogger_kcyoon"])     # 영문·한글(둘 다 켠 사본에서)
+        item, korean = matrix["include"]
         self.assertEqual(item["secret_refresh_token"], "BLOGGER_REFRESH_TOKEN")
         self.assertEqual(item["history"], "blogger_history.json")
         self.assertNotIn("value", json.dumps(item))  # 이름만 있고 값은 없다
+        # 한글 Blogger 는 상태 파일과 시크릿 이름이 영문과 겹치지 않는다(계정·OAuth 클라이언트가 달라야 한다)
+        self.assertEqual((korean["history"], korean["content_dir"]), ("blogger_ko_history.json", "_blogger_ko_drafts"))
+        self.assertEqual(korean["secret_refresh_token"], "BLOGGER_KO_REFRESH_TOKEN")
+        english_names = {v for k, v in item.items() if k.startswith("secret_") and v != "GEMINI_API_KEY"}
+        korean_names = {v for k, v in korean.items() if k.startswith("secret_") and v != "GEMINI_API_KEY"}
+        self.assertEqual(english_names & korean_names, set())
 
     def test_only_filters_to_one_blog(self):
         reg = registry_all_auto()
@@ -52,8 +57,10 @@ class PlanTest(unittest.TestCase):
 
     def test_matrix_excludes_off_and_filters_platform(self):
         reg = registry_all_auto()
-        self.assertEqual([i["key"] for i in plan.build_matrix(reg)["include"]], ["chance", "blogger_macat"])
+        self.assertEqual([i["key"] for i in plan.build_matrix(reg)["include"]], ["chance", "blogger_macat", "blogger_kcyoon"])
         reg["blogs"][1]["mode"] = "off"
+        self.assertEqual([i["key"] for i in plan.build_matrix(reg, "blogger")["include"]], ["blogger_kcyoon"])    # 영문만 멈추면 한글은 그대로 돈다
+        reg["blogs"][2]["mode"] = "off"
         self.assertEqual(plan.build_matrix(reg, "blogger")["include"], [])
 
     def test_cli_outputs_compact_json_and_count(self):
@@ -66,7 +73,11 @@ class PlanTest(unittest.TestCase):
             buf = io.StringIO()
             with redirect_stdout(buf):
                 plan.main(["--platform", "blogger", "--count"])
-            self.assertEqual(buf.getvalue().strip(), "1")
+            self.assertEqual(buf.getvalue().strip(), "2")
+            buf = io.StringIO()
+            with redirect_stdout(buf):                                      # 채널 래퍼가 하는 것처럼 한 블로그만 지정하면 그 하나뿐이다
+                plan.main(["--platform", "blogger", "--only", "blogger_kcyoon"])
+            self.assertEqual([i["key"] for i in json.loads(buf.getvalue())["include"]], ["blogger_kcyoon"])
 
     def test_unknown_only_key_is_an_error_not_an_empty_matrix(self):
         """--only 에 오타를 내면 대상이 0개가 되어 generate 잡이 조용히 건너뛰어지던(초록) 문제."""
@@ -104,6 +115,7 @@ class PlanTest(unittest.TestCase):
         """mode=off 로 정지한 블로그는 오류가 아니라 대상 0개다(워크플로가 notice 를 남긴다)."""
         reg = registry_all_auto()
         reg["blogs"][1]["mode"] = "off"
+        reg["blogs"][2]["mode"] = "off"
         with mock.patch.object(plan, "load_registry", return_value=reg):
             buf = io.StringIO()
             with redirect_stdout(buf):
@@ -116,7 +128,7 @@ class PlanTest(unittest.TestCase):
 
 
 def plan_step_script():
-    """blogger.yml 의 plan 잡에서 id=plan 인 단계의 run 스크립트를 그대로 꺼낸다."""
+    """공용 워크플로 blogger.yml 의 plan 잡에서 id=plan 인 단계의 run 스크립트를 그대로 꺼낸다(채널별 래퍼가 부르는 공용 로직)."""
     workflow = yaml.safe_load((_bootstrap.ROOT / ".github" / "workflows" / "blogger.yml").read_text(encoding="utf-8"))
     return next(step["run"] for step in workflow["jobs"]["plan"]["steps"] if step.get("id") == "plan")
 
@@ -135,7 +147,7 @@ class WorkflowGenerateJobTest(unittest.TestCase):
 @unittest.skipUnless(yaml is not None and shutil.which("bash"),
                      "PyYAML(requirements-dev.txt)과 bash 가 필요합니다(CI 의 Linux 에서는 항상 실행됩니다)")
 class WorkflowPlanStepTest(unittest.TestCase):
-    """blogger.yml 의 plan 단계를 GitHub 처럼 `bash -e <스크립트>` 로 실제 실행한다.
+    """공용 워크플로 blogger.yml 의 plan 단계를 GitHub 처럼 `bash -e <스크립트>` 로 실제 실행한다.
     레지스트리·plan 코드는 임시 저장소에 복사해 쓴다(운영 중 mode 와 무관하게 시험한다)."""
 
     def setUp(self):
@@ -152,7 +164,8 @@ class WorkflowPlanStepTest(unittest.TestCase):
         shutil.copytree(_bootstrap.ROOT / "pipeline", root / "pipeline", dirs_exist_ok=True, ignore=ignore)
         return root
 
-    def run_step(self, root, only=""):
+    def run_step(self, root, only="blogger_macat"):
+        """only 기본값은 영문 래퍼가 넘기는 값이다(채널 래퍼는 항상 자기 블로그 key 를 `blog` 로 넘긴다)."""
         output, summary = root / "github_output", root / "github_step_summary"
         output.write_bytes(b"")
         summary.write_bytes(b"")
@@ -174,7 +187,7 @@ class WorkflowPlanStepTest(unittest.TestCase):
             self.assertNotIn("::notice::", proc.stdout)
             self.assertEqual(summary, "")
 
-        for label, only in (("blogger 블로그가 모두 정지", ""), ("지정한 블로그가 정지", "blogger_macat")):
+        for label, only in (("blogger 블로그가 모두 정지", ""), ("지정한 블로그가 정지", "blogger_macat"), ("한글 래퍼가 지정한 블로그가 정지", "blogger_kcyoon")):
             with self.subTest(label):
                 proc, output, summary = self.run_step(off, only)
                 self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -257,7 +270,7 @@ class CollectFindingsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             findings = watchdog.collect_findings(reg, tmp, datetime(2026, 10, 22, tzinfo=timezone.utc))
         self.assertEqual(sorted((f.blog, f.code) for f in findings),
-                         [("blogger_macat", "NO_ACTIVITY"), ("chance", "NO_ACTIVITY")])
+                         [("blogger_kcyoon", "NO_ACTIVITY"), ("blogger_macat", "NO_ACTIVITY"), ("chance", "NO_ACTIVITY")])
 
 
 if __name__ == "__main__":

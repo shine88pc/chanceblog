@@ -1,41 +1,62 @@
-name: "[Blogger] 글 자동 작성(초안함 업로드)"
-run-name: "[Blogger] 글 작성 · ${{ github.event_name == 'workflow_dispatch' && (inputs.auth_check && '수동(인증 점검만: 글 안 만듦)' || inputs.dry_run && '수동(연습: 저장·게시 안 함)' || (inputs.publish == 'publish' && '수동(즉시 게시)' || (inputs.publish == 'off' && '수동(저장소 파일만 저장)' || '수동(Blogger 초안함 업로드)'))) || '정기' }}"
+name: "[내부] Blogger 글 작성 공용(직접 실행하지 마세요)"
 
-# 레지스트리(pipeline/blogs.json)의 platform=blogger 블로그를 모두 처리한다.
-# 블로그를 추가하면 이 파일을 고치지 않고 레지스트리와 Secrets 만 추가하면 된다.
-# schedule.cron 은 레지스트리 값과 같아야 한다(scripts/validate_repo.py 가 확인).
+# 이 파일은 직접 실행하는 워크플로가 아니라 채널별 래퍼가 부르는 공용 로직이다(on: workflow_call 뿐이라 Run workflow 버튼이 없다).
+#   영문 Blogger(macat0722) = blogger-en.yml  ·  한글 Blogger(kcyoon) = blogger-ko.yml
+# 래퍼가 자기 예약(cron)·수동 입력·concurrency 와 시크릿을 갖고, 이 파일에는 한 블로그의 key(`blog`)와 입력 값을 `with:` 로 명시해 넘긴다.
+# 그래서 이 파일은 github.event_name·github.event.inputs 를 읽지 않는다(부르는 쪽 이벤트를 가정하지 않는다). 연습 실행 기본값·정기 실행 규칙은 래퍼의 식이 정한다.
+# 시크릿은 `secrets: inherit` 가 아니라 래퍼가 역할 이름(PIPELINE_SECRET_<역할>)으로 명시해 넘긴 것만 쓴다 — 한글 Blogger 는 영문과 계정·OAuth 클라이언트가 달라야 하므로
+# 래퍼마다 자기 블로그의 시크릿 이름만 넘기고(scripts/validate_repo.py REG-6 이 레지스트리와 같은지 확인), 텔레그램 시크릿 둘은 단계 env 로만 쓴다(WF-13).
+# 새 Blogger 블로그를 더하면 레지스트리 항목과 이 파일을 부르는 래퍼 하나를 추가한다(이 파일은 고치지 않는다).
 
 on:
-  schedule:
-    # KST 11:00 = UTC 02:00
-    - cron: '0 2 * * *'
-  workflow_dispatch:
+  workflow_call:
     inputs:
       blog:
-        description: '실행할 블로그 key (비우면 Blogger 블로그 전체)'
-        required: false
+        description: '실행할 블로그 key (pipeline/blogs.json 의 key, 래퍼가 정한다)'
+        required: true
         type: string
       topic:
         description: '직접 정할 주제 (비우면 자동 선택)'
         required: false
         type: string
+        default: ''
       dry_run:
-        description: '연습 실행(기본 켜짐): 가짜 AI 응답을 쓰고 Gemini를 호출하지 않으며, 파일 저장·게시·하루 상한 소진 없이 로그만 남깁니다. 체크를 풀면 실제 Gemini로 글을 만들어 초안을 저장소에 커밋하고 그날 하루 상한을 씁니다'
+        description: '연습 실행: 가짜 AI 응답을 쓰고 Gemini를 호출하지 않으며 파일 저장·게시·하루 상한 소진 없이 로그만 남긴다. 래퍼가 정기 실행에서는 끄고 수동 실행에서는 체크 값을 넘긴다'
+        required: false
         type: boolean
         default: true
       publish:
-        description: '글을 어디까지(연습 실행을 풀어야 적용): off=저장소 파일만 / draft=Blogger 초안함(기본) / publish=즉시 게시. 정기 실행은 mode를 따름. 자세히: BLOGGER_API_SETUP.md'
-        type: choice
-        default: 'draft'
-        options:
-          # 따옴표가 필요하다: 따옴표 없는 off 는 YAML 1.1 파서(PyYAML 등)가 문자열이 아니라 false 로 읽는다
-          - 'off'
-          - 'draft'
-          - 'publish'
+        description: '글을 어디까지: off=저장소 파일만 / draft=Blogger 초안함 / publish=즉시 게시. 비우면(정기 실행) 레지스트리 mode 를 따른다'
+        required: false
+        type: string
+        default: ''
       auth_check:
-        description: '인증 점검만 실행(기본 꺼짐): 글·Gemini 없이 토큰·블로그·주소만 확인(쓰기 없음). 자세히: BLOGGER_API_SETUP.md'
+        description: '인증 점검만 실행: 글·Gemini 없이 토큰·블로그·주소만 확인(쓰기 없음)'
+        required: false
         type: boolean
         default: false
+    secrets:
+      PIPELINE_SECRET_LLM_API_KEY:
+        description: 'Gemini 키(레지스트리 secrets.llm_api_key 의 값, 래퍼가 넘긴다)'
+        required: false
+      PIPELINE_SECRET_BLOG_ID:
+        description: 'Blogger 블로그 ID(레지스트리 secrets.blog_id)'
+        required: false
+      PIPELINE_SECRET_CLIENT_ID:
+        description: 'OAuth 클라이언트 ID(레지스트리 secrets.client_id)'
+        required: false
+      PIPELINE_SECRET_CLIENT_SECRET:
+        description: 'OAuth 클라이언트 시크릿(레지스트리 secrets.client_secret)'
+        required: false
+      PIPELINE_SECRET_REFRESH_TOKEN:
+        description: 'OAuth refresh token(레지스트리 secrets.refresh_token)'
+        required: false
+      TELEGRAM_BOT_TOKEN:
+        description: '휴대폰 알림용(선택). 없으면 알림 없이 그대로 동작한다'
+        required: false
+      TELEGRAM_CHAT_ID:
+        description: '휴대폰 알림용(선택). 없으면 알림 없이 그대로 동작한다'
+        required: false
 
 permissions:
   contents: read
@@ -58,8 +79,8 @@ jobs:
       - name: 실행 대상 계산 (레지스트리 검증 포함)
         id: plan
         env:
-          ONLY_BLOG: ${{ github.event.inputs.blog }}
-          AUTH_CHECK_ONLY: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.auth_check == 'true' && '1' || '' }}
+          ONLY_BLOG: ${{ inputs.blog }}
+          AUTH_CHECK_ONLY: ${{ inputs.auth_check && '1' || '' }}
         run: |
           set -euo pipefail
           args=(--platform blogger)
@@ -100,7 +121,7 @@ jobs:
     env:
       # 킬 스위치: 저장소 Settings > Variables 에 PIPELINE_PAUSE=true 를 넣으면 전부 멈춘다
       PIPELINE_PAUSE: ${{ vars.PIPELINE_PAUSE }}
-      DRY_RUN: ${{ github.event.inputs.dry_run == 'true' && 'true' || 'false' }}
+      DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -116,17 +137,17 @@ jobs:
       - name: 생성 → 검증 → 게시/초안
         env:
           BLOG_KEY: ${{ matrix.key }}
-          BLOGGER_TOPIC: ${{ github.event.inputs.topic }}
-          # 스케줄: 비움(레지스트리 mode 를 따름) / 수동: 고른 값 그대로(off=저장소 파일만, draft=Blogger 초안함 업로드, publish=즉시 게시)
-          BLOGGER_PUBLISH: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.publish || '' }}
-          # 수동 실행의 '인증 점검만 실행'(체크하면 1). 정기 실행은 항상 비어 글을 만든다
-          BLOGGER_AUTH_CHECK: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.auth_check == 'true' && '1' || '' }}
-          # 블로그마다 다른 Secrets 이름을 역할 이름으로 넘긴다(값은 로그에 마스킹됨)
-          PIPELINE_SECRET_LLM_API_KEY: ${{ secrets[matrix.secret_llm_api_key] }}
-          PIPELINE_SECRET_BLOG_ID: ${{ secrets[matrix.secret_blog_id] }}
-          PIPELINE_SECRET_CLIENT_ID: ${{ secrets[matrix.secret_client_id] }}
-          PIPELINE_SECRET_CLIENT_SECRET: ${{ secrets[matrix.secret_client_secret] }}
-          PIPELINE_SECRET_REFRESH_TOKEN: ${{ secrets[matrix.secret_refresh_token] }}
+          BLOGGER_TOPIC: ${{ inputs.topic }}
+          # 정기 실행: 비움(레지스트리 mode 를 따름) / 수동: 고른 값 그대로(off=저장소 파일만, draft=Blogger 초안함 업로드, publish=즉시 게시). 정기·수동 구분은 래퍼가 한다
+          BLOGGER_PUBLISH: ${{ inputs.publish }}
+          # 수동 실행의 '인증 점검만 실행'(체크하면 1). 정기 실행은 항상 비어 글을 만든다(래퍼가 정기 실행에서는 false 를 넘긴다)
+          BLOGGER_AUTH_CHECK: ${{ inputs.auth_check && '1' || '' }}
+          # 래퍼가 블로그마다 다른 Secrets 를 역할 이름으로 넘긴 것을 그대로 러너에 준다(값은 로그에 마스킹됨)
+          PIPELINE_SECRET_LLM_API_KEY: ${{ secrets.PIPELINE_SECRET_LLM_API_KEY }}
+          PIPELINE_SECRET_BLOG_ID: ${{ secrets.PIPELINE_SECRET_BLOG_ID }}
+          PIPELINE_SECRET_CLIENT_ID: ${{ secrets.PIPELINE_SECRET_CLIENT_ID }}
+          PIPELINE_SECRET_CLIENT_SECRET: ${{ secrets.PIPELINE_SECRET_CLIENT_SECRET }}
+          PIPELINE_SECRET_REFRESH_TOKEN: ${{ secrets.PIPELINE_SECRET_REFRESH_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python -m pipeline.run --blog "$BLOG_KEY"

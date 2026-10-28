@@ -12,12 +12,15 @@
   러너가 로그에 [참고] 줄로 찍는다.
 - googleapiclient 의 열거값(status·orderBy)은 대소문자를 구분한다: LIVE/DRAFT, PUBLISHED/UPDATED. 소문자로 부르면 요청을 만들기도
   전에 TypeError 가 나서 중복 확인이 늘 꺼진 채 재시도 중복 게시가 난다(V-01).
+- 오류 문구가 운영자에게 시크릿 이름을 말할 때(블로그 ID 형식 안내)는 secret_names(레지스트리 블로그 항목의 secrets: 역할 → 이름)에 있는 이름을 쓴다.
+  한글 Blogger 는 BLOGGER_KO_* 라서 영문 이름을 박아 두면 영문 값을 고치러 가게 된다(독립 검증 N3). 생략하면 영문 Blogger 의 이름이다.
 """
 import json
 import re
 import time
 from datetime import datetime, timedelta, timezone
 
+from pipeline.auth_check import secret_names_for
 from pipeline.publishers.base import PublishError, PublishResult, redact
 
 SCOPES = ["https://www.googleapis.com/auth/blogger"]
@@ -88,8 +91,9 @@ def _is_network_error(exc):
 class BloggerPublisher:
     def __init__(self, blog_id, client_id, client_secret, refresh_token,
                  service_factory=None, sleep=time.sleep, retries=2, now=None,
-                 credentials_factory=None, request_factory=None, service_builder=None):
+                 credentials_factory=None, request_factory=None, service_builder=None, secret_names=None):
         self.blog_id = blog_id
+        self._secret_names = secret_names_for(secret_names)  # 오류 문구에 쓰는 시크릿 '이름'(값이 아님). 기본은 영문 Blogger 의 이름
         self._client_id = client_id
         self._client_secret = client_secret
         self._refresh_token = refresh_token
@@ -168,7 +172,7 @@ class BloggerPublisher:
                 status = _status_of(exc)
                 if status == 400:  # blogs.get 의 400 은 보통 블로그 ID 형식 오류다. 다시 해도 같으니 재시도하지 않는다
                     raise PublishError("블로그 접근 확인 실패(status=400): 블로그 ID 형식이 올바르지 않은 것 같습니다 — "
-                                       f"BLOGGER_BLOG_ID 시크릿에 블로그 번호(숫자)만 넣었는지 확인하세요 | {self._scrub(exc)[:160]}",
+                                       f"{self._secret_names['blog_id']} 시크릿에 블로그 번호(숫자)만 넣었는지 확인하세요 | {self._scrub(exc)[:160]}",
                                        code="auth_failed") from exc
                 if _is_quota_error(exc):  # 권한 문제가 아니라 호출 한도다: 시크릿·설정을 고칠 일이 아니라 시간이 지나야 풀린다
                     raise PublishError("블로그 접근 확인 실패(status=403): 호출 한도(쿼터·속도 제한)에 걸린 것 같습니다 — "

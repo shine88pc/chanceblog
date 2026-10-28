@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: "운영자 요청함 사용법 — AI 요청에 답하는 법"
+    url: "https://github.com/shine88pc/chanceblog/blob/main/%EC%9D%B8%EC%88%98%EC%9D%B8%EA%B3%84/%EC%9A%B4%EC%98%81%EC%9E%90_%EC%9A%94%EC%B2%AD%ED%95%A8_%EC%82%AC%EC%9A%A9%EB%B2%95.md"
+    about: "텔레그램으로 받은 AI 요청의 읽는 법·답하는 법, AI 가 못 하는 일(PR 병합·Actions 실행·설정·시크릿)을 직접 하는 단계별 안내"

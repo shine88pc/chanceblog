@@ -21,12 +21,16 @@ class RealRegistryTest(unittest.TestCase):
         ads 를 pending_gate·on 으로 올리는 것은 T3(사용자 승인)다."""
         reg = real_registry()
         self.assertEqual({b["key"]: b["channel"] for b in reg["blogs"]},
-                         {"chance": {"key": "chance", "label": "Chance"}, "blogger_macat": {"key": "blogger", "label": "Blogger"}})
+                         {"chance": {"key": "chance", "label": "Chance"}, "blogger_macat": {"key": "blogger_en", "label": "Blogger 영문"},
+                          "blogger_kcyoon": {"key": "blogger_ko", "label": "Blogger 한글"}})
         self.assertEqual({b["key"]: registry.get_blog(reg, b["key"])["ads"] for b in reg["blogs"]},
-                         {"chance": "on", "blogger_macat": "off"})     # 지금 사실: Chance 홈에는 광고 스크립트가 있고 Blogger 에는 켜지 않았다
+                         {"chance": "on", "blogger_macat": "off", "blogger_kcyoon": "off"})     # 지금 사실: Chance 홈에는 광고 스크립트가 있고 Blogger 둘에는 켜지 않았다
+        self.assertEqual({b["key"]: registry.get_blog(reg, b["key"])["ad_surface"] for b in reg["blogs"]},
+                         {"chance": True, "blogger_macat": False, "blogger_kcyoon": False})      # 광고 표면(AdSense 심사 대상)은 Chance 만이다
         self.assertEqual(reg["defaults"]["ads"], "off")                # 새 채널은 광고 없이 시작한다
         self.assertEqual(registry.ADS_STATES, ("off", "pending_gate", "on"))
-        self.assertEqual(registry.CHANNEL_LABELS, ("Chance", "Blogger", "Blogger 영문", "Blogger 한글", "티스토리", "네이버"))
+        # 영문·한글로 나누기 전의 임시 라벨 `Blogger` 는 없앴다(채널 라벨 5종 + 워크플로 구분 공통·내부)
+        self.assertEqual(registry.CHANNEL_LABELS, ("Chance", "Blogger 영문", "Blogger 한글", "티스토리", "네이버"))
 
     def test_defaults_are_merged(self):
         blog = registry.get_blog(real_registry(), "blogger_macat")
@@ -37,7 +41,7 @@ class RealRegistryTest(unittest.TestCase):
     def test_defaults_mode_is_draft_so_a_blog_without_its_own_mode_never_publishes_by_itself(self):
         # 2026-10-25 20:26 에 auto 로 바뀌었던 것을 2026-10-26 운영자 답변으로 draft 로 되돌렸다. mode 없이 추가한 새 블로그가 곧바로 자동 게시되지 않게 한다.
         self.assertEqual(real_registry()["defaults"]["mode"], "draft")
-        self.assertEqual({b["key"]: b.get("mode") for b in real_registry()["blogs"]}, {"chance": "auto", "blogger_macat": "off"})
+        self.assertEqual({b["key"]: b.get("mode") for b in real_registry()["blogs"]}, {"chance": "auto", "blogger_macat": "off", "blogger_kcyoon": "off"})
 
     def test_model_chain_has_no_retired_model_and_matches_the_engine(self):
         import generator
@@ -58,7 +62,7 @@ class RealRegistryTest(unittest.TestCase):
         reg = real_registry()
         for blog in reg["blogs"]:
             blog["mode"] = "auto"  # 운영 중 일시 정지(mode off)와 무관하게 platform 필터만 본다
-        self.assertEqual([b["key"] for b in registry.enabled_blogs(reg, "blogger")], ["blogger_macat"])
+        self.assertEqual([b["key"] for b in registry.enabled_blogs(reg, "blogger")], ["blogger_macat", "blogger_kcyoon"])
 
     def test_missing_secret_roles(self):
         blog = registry.get_blog(real_registry(), "blogger_macat")
@@ -123,9 +127,9 @@ class InvalidRegistryTest(unittest.TestCase):
         errors = self.errors(lambda r: r["blogs"][1].pop("mode"))
         self.assertTrue(any("blogger_macat" in e and "직접" in e for e in errors), errors)
 
-    def test_the_two_current_blogs_write_their_mode_in_the_file(self):
+    def test_the_three_current_blogs_write_their_mode_in_the_file(self):
         raw = registry.load_registry()["blogs"]
-        self.assertEqual({b["key"]: b["mode"] for b in raw}, {"chance": "auto", "blogger_macat": "off"})
+        self.assertEqual({b["key"]: b["mode"] for b in raw}, {"chance": "auto", "blogger_macat": "off", "blogger_kcyoon": "off"})
 
     def test_http_url(self):
         self.assertHas(self.errors(lambda r: r["blogs"][0].update(url="http://x.example")), "https://")
@@ -190,7 +194,7 @@ class InvalidRegistryTest(unittest.TestCase):
         for key in (None, "", "A", "Bad-Key", "1abc", "x" * 40, 7, ["chance"]):
             self.assertHas(self.errors(lambda r, k=key: r["blogs"][0]["channel"].update(key=k)), "channel.key는")
         self.assertHas(self.errors(lambda r: r["blogs"][0]["channel"].pop("key")), "channel.key는")
-        for key in ("ab", "blogger_ko", "x" + "y" * 30):
+        for key in ("ab", "blogger_zz", "x" + "y" * 30):
             self.assertEqual(self.errors(lambda r, k=key: r["blogs"][0]["channel"].update(key=k)), [], key)
 
     def test_channel_label_must_be_one_of_the_allowed_labels(self):
@@ -212,8 +216,9 @@ class InvalidRegistryTest(unittest.TestCase):
         errors = self.errors(lambda r: r["blogs"][0]["channel"].update(label="Blogger 영문"))   # chanceblog.yml 의 name 은 [Chance] 로 시작한다
         self.assertHas(errors, "chanceblog.yml")
         self.assertHas(errors, '"[Blogger 영문] 이름"')
-        for label in ("티스토리", "네이버", "Blogger 한글"):
-            self.assertHas(self.errors(lambda r, l=label: r["blogs"][1]["channel"].update(label=l)), "blogger.yml")
+        for label in ("티스토리", "네이버", "Blogger 한글"):                     # 영문 블로그의 워크플로(blogger-en.yml)는 `[Blogger 영문]` 으로 시작하므로 다른 라벨은 모두 어긋난다
+            self.assertHas(self.errors(lambda r, l=label: r["blogs"][1]["channel"].update(label=l)), "blogger-en.yml")
+        self.assertHas(self.errors(lambda r: r["blogs"][2]["channel"].update(label="Blogger 영문")), "blogger-ko.yml")
 
     def test_a_missing_workflow_file_is_reported_once_without_a_name_complaint(self):
         errors = self.errors(lambda r: r["blogs"][0].update(workflow=".github/workflows/nope.yml"))
@@ -268,56 +273,66 @@ class WorkflowNameLineTest(unittest.TestCase):
         self.reg = registry.load_registry(self.root / "pipeline" / "blogs.json")
 
     def check(self, content, as_bytes=False):
-        path = self.root / ".github" / "workflows" / "blogger.yml"
+        path = self.root / ".github" / "workflows" / "blogger-en.yml"
         path.write_bytes(content if as_bytes else content.encode("utf-8"))
         return [e for e in registry.validate_registry(self.reg, self.root) if "blogger_macat" in e]
 
     def test_accepted_shapes(self):
-        for text in ('name: "[Blogger] 글 자동 작성"\non: push\n',
-                     "name: '[Blogger] 글 자동 작성'\non: push\n",
-                     'name: "[Blogger] 글" # 주석\n',
-                     'name:   "[Blogger] 글"   \n',
-                     'name :"[Blogger] 글"\n',
-                     '# 머리 주석\n# name: 가짜\n\nname: "[Blogger] 글"\non: push\n',
-                     'name: "[Blogger] 글"\r\non: push\r\n',
-                     "\ufeff" + 'name: "[Blogger] 글"\n',
-                     'on: push\nname: "[Blogger] 글"\n'):
+        for text in ('name: "[Blogger 영문] 글 자동 작성"\non: push\n',
+                     "name: '[Blogger 영문] 글 자동 작성'\non: push\n",
+                     'name: "[Blogger 영문] 글" # 주석\n',
+                     'name:   "[Blogger 영문] 글"   \n',
+                     'name :"[Blogger 영문] 글"\n',
+                     '# 머리 주석\n# name: 가짜\n\nname: "[Blogger 영문] 글"\non: push\n',
+                     'name: "[Blogger 영문] 글"\r\non: push\r\n',
+                     "\ufeff" + 'name: "[Blogger 영문] 글"\n',
+                     'on: push\nname: "[Blogger 영문] 글"\n'):
             self.assertEqual(self.check(text), [], text)
 
     def test_rejected_shapes(self):
-        for text, hint in (("name: [Blogger] 글 자동 작성\n", "[Blogger] 글 자동 작성"),    # 따옴표 없는 대괄호 값은 YAML 문법 오류다
+        for text, hint in (("name: [Blogger 영문] 글 자동 작성\n", "[Blogger 영문] 글 자동 작성"),    # 따옴표 없는 대괄호 값은 YAML 문법 오류다
                            ('name: "[Chance] 글"\n', "[Chance] 글"),
-                           ('name: "[blogger] 글"\n', "[blogger] 글"),
-                           ('name: "[Blogger]글"\n', "[Blogger]글"),
-                           ('name: "[Blogger] "\n', "[Blogger] "),
-                           ('name: "[Blogger]  글"\n', "[Blogger]  글"),                  # 공백이 둘이면 접두사 뒤 이름이 공백으로 시작한다
-                           ('name: "[Blogger]"\n', "[Blogger]"),
-                           ('name: " [Blogger] 글"\n', "[Blogger] 글"),
-                           ('name: "글 [Blogger]"\n', "글 [Blogger]"),
+                           ('name: "[blogger 영문] 글"\n', "[blogger 영문] 글"),
+                           ('name: "[Blogger 영문]글"\n', "[Blogger 영문]글"),
+                           ('name: "[Blogger 영문] "\n', "[Blogger 영문] "),
+                           ('name: "[Blogger 영문]  글"\n', "[Blogger 영문]  글"),                  # 공백이 둘이면 접두사 뒤 이름이 공백으로 시작한다
+                           ('name: "[Blogger 영문]"\n', "[Blogger 영문]"),
+                           ('name: " [Blogger 영문] 글"\n', "[Blogger 영문] 글"),
+                           ('name: "글 [Blogger 영문]"\n', "글 [Blogger 영문]"),
                            ("name: 글 자동 작성\n", "글 자동 작성"),
                            ("name:\n", "name:"),
-                           ('name: ["[Blogger] 글"]\n', "name:")):
+                           ('name: ["[Blogger 영문] 글"]\n', "name:")):
             errors = self.check(text)
             self.assertEqual(len(errors), 1, text)
-            self.assertIn("blogger.yml", errors[0], text)
-            self.assertIn('"[Blogger] 이름"', errors[0], text)
+            self.assertIn("blogger-en.yml", errors[0], text)
+            self.assertIn('"[Blogger 영문] 이름"', errors[0], text)
             self.assertIn(hint, errors[0], text)
 
     def test_only_the_top_level_name_counts(self):
-        for text in ('on: push\njobs:\n  j:\n    name: "[Blogger] 글"\n', '  name: "[Blogger] 글"\n', 'x:\n  name: "[Blogger] 글"\n'):
+        for text in ('on: push\njobs:\n  j:\n    name: "[Blogger 영문] 글"\n', '  name: "[Blogger 영문] 글"\n', 'x:\n  name: "[Blogger 영문] 글"\n'):
             errors = self.check(text)
             self.assertEqual(len(errors), 1, text)
             self.assertIn("찾지 못했습니다", errors[0], text)
         self.assertEqual(len(self.check("")), 1)
 
     def test_the_first_top_level_name_line_is_the_one_that_counts(self):
-        self.assertEqual(self.check('name: "[Blogger] 글"\nname: "다른 이름"\n'), [])
-        self.assertEqual(len(self.check('name: "다른 이름"\nname: "[Blogger] 글"\n')), 1)
+        self.assertEqual(self.check('name: "[Blogger 영문] 글"\nname: "다른 이름"\n'), [])
+        self.assertEqual(len(self.check('name: "다른 이름"\nname: "[Blogger 영문] 글"\n')), 1)
 
     def test_an_unreadable_file_is_an_error_not_a_crash(self):
-        errors = self.check(b'name: "[Blogger] \xff\xfe"\n', as_bytes=True)
+        errors = self.check('name: "[Blogger 영문] '.encode("utf-8") + b'\xff\xfe"\n', as_bytes=True)
         self.assertEqual(len(errors), 1)
         self.assertIn("읽을 수 없어", errors[0])
+
+    def test_the_korean_wrapper_name_line_is_read_the_same_way(self):
+        path = self.root / ".github" / "workflows" / "blogger-ko.yml"
+        for text, ok in (('name: "[Blogger 한글] 글 자동 작성"\non: push\n', True), ('name: "[Blogger 영문] 글 자동 작성"\n', False), ('name: "[Blogger] 글 자동 작성"\n', False)):
+            path.write_text(text, encoding="utf-8")
+            errors = [e for e in registry.validate_registry(self.reg, self.root) if "blogger_kcyoon" in e]
+            self.assertEqual(errors == [], ok, (text, errors))
+            if not ok:
+                self.assertIn("blogger-ko.yml", errors[0])
+                self.assertIn('"[Blogger 한글] 이름"', errors[0])
 
     def test_name_label_helper(self):
         for name, label in (("[Chance] 글", "Chance"), ("[Blogger 영문] 글", "Blogger 영문"), ("[공통] 사이트 자동 배포", "공통"), ("[내부] 공용 실행(직접 실행하지 마세요)", "내부")):

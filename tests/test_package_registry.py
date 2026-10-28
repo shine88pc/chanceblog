@@ -43,7 +43,7 @@ class NewValuesTest(PackageRegistryBase):
     def test_the_real_registry_has_no_package_blog_yet(self):
         """블로그 주소·주제(사용자 입력)를 받기 전이라 실제 레지스트리에는 티스토리·네이버가 없다 — 정기 실행은 '대상 0개'로 끝난다."""
         real = registry.load_registry()
-        self.assertEqual([blog["key"] for blog in real["blogs"]], ["chance", "blogger_macat"])
+        self.assertEqual([blog["key"] for blog in real["blogs"]], ["chance", "blogger_macat", "blogger_kcyoon"])        # 한글 Blogger(kcyoon, 정지)는 Blogger 라 패키지 채널이 아니다
         self.assertFalse({registry.merged_blog(real, blog)["platform"] for blog in real["blogs"]} & set(registry.PACKAGE_PLATFORMS))
         self.assertNotIn("package", {blog["mode"] for blog in real["blogs"]})
         self.assertEqual(registry.validate_registry(real), [])
@@ -62,8 +62,9 @@ class NewValuesTest(PackageRegistryBase):
         self.assertEqual(self.errors(), [])
         for mode in ("package", "off"):
             def mutate(reg, mode=mode):
-                for blog in reg["blogs"][2:]:
-                    blog["mode"] = mode
+                for blog in reg["blogs"]:
+                    if blog["platform"] in registry.PACKAGE_PLATFORMS:         # 티스토리·네이버 항목만(Blogger 는 package 모드를 쓸 수 없다)
+                        blog["mode"] = mode
             self.assertEqual(self.errors(mutate), [], mode)
 
     def test_the_other_blogs_are_unaffected_by_the_new_platforms(self):
@@ -112,7 +113,7 @@ class ModeRulesTest(PackageRegistryBase):
 
 class ChannelAndAdsTest(PackageRegistryBase):
     def test_the_channel_label_must_be_the_channels_own_label(self):
-        for platform, wrong in (("tistory", "네이버"), ("tistory", "Blogger"), ("tistory", "Chance"), ("naver", "티스토리"), ("naver", "Blogger 한글")):
+        for platform, wrong in (("tistory", "네이버"), ("tistory", "Blogger 영문"), ("tistory", "Chance"), ("naver", "티스토리"), ("naver", "Blogger 한글")):
             errors = self.errors(with_entry(lambda blog, w=wrong: blog["channel"].update(label=w), platform))
             self.assertHas(errors, f"channel.label은 {registry.PACKAGE_PLATFORMS[platform]!r} 이어야 합니다")
             self.assertHas(errors, "채널:<라벨>")

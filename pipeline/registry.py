@@ -5,8 +5,10 @@
 시크릿 '값'은 여기에 두지 않는다. 항목에는 환경변수(= GitHub Secrets) '이름'만 둔다.
 
 블로그마다 `channel`(채널 라벨 — 그 블로그 워크플로 name 맨 앞의 `[라벨] `과 같은 글자)과 `ads`(광고 선언: off·pending_gate·on)를
-적는다. 둘 다 이 파일이 검증한다(규칙: docs/ARCHITECTURE.md §3). 이 모듈은 표준 라이브러리만 쓴다 — blogger.yml 의 plan 잡이
+적는다. 둘 다 이 파일이 검증한다(규칙: docs/ARCHITECTURE.md §3). 이 모듈은 표준 라이브러리만 쓴다 — 공용 워크플로 blogger.yml 의 plan 잡이
 pip install 없이 `python -m pipeline.plan` 으로 이 검증을 실행하기 때문이다(워크플로 name 은 YAML 을 해석하지 않고 줄을 본다).
+블로그의 `workflow` 는 그 블로그를 실행하는 워크플로 파일이다 — Blogger 는 공용 워크플로(blogger.yml)가 아니라 그것을 부르는 채널별 래퍼
+(blogger-en.yml·blogger-ko.yml)다. 워치독·확인 필요 모음이 '마지막 실행'을 이 파일로 찾고, 재사용 워크플로를 부른 실행은 부른 쪽(래퍼) 파일 아래 기록되기 때문이다.
 
 초안 패키지 채널(platform tistory·naver, mode package): 공식 자동 게시 수단이 없어 글을 GitHub 이슈로 보여 주기만 한다. 이 채널은
 시크릿 역할이 LLM 키뿐이고(구조적 보장) 계정 정보 낱말이 든 시크릿 이름은 보조로 막는다(PACKAGE_PLATFORMS·_package_errors, docs/SECURITY_GUARDRAILS.md G-S7).
@@ -19,7 +21,7 @@ import re
 import sys
 from pathlib import Path, PurePosixPath
 
-from pipeline.console import safe_output
+from pipeline.console import clean_secret, safe_output, secret_was_cleaned
 from pipeline.gates import SUPPORTED_LANGUAGES, first_match
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -39,7 +41,9 @@ ADS_STATES = ("off", "pending_gate", "on")
 
 # 채널 라벨 = 그 블로그 워크플로 `name:` 맨 앞의 `[라벨] `(운영자가 Actions 목록에서 채널별로 묶어 본다). 블로그에 속하지 않는
 # 워크플로의 구분(`공통`·`내부`)은 레지스트리 밖이라 여기에 없다(scripts/validate_repo.py WF-12 가 합쳐서 쓴다).
-CHANNEL_LABELS = ("Chance", "Blogger", "Blogger 영문", "Blogger 한글", "티스토리", "네이버")
+# Blogger 는 영문(macat0722)·한글(kcyoon) 두 채널이라 라벨이 둘이다. 한글 Blogger 를 등록하기 전까지 영문 하나일 때 쓰던 임시 라벨 `Blogger` 는 없앴다
+# (blogger.yml 이 공용 워크플로 `[내부]` 가 되고 채널별 래퍼 blogger-en.yml·blogger-ko.yml 이 `[Blogger 영문]`·`[Blogger 한글]` 을 쓴다).
+CHANNEL_LABELS = ("Chance", "Blogger 영문", "Blogger 한글", "티스토리", "네이버")
 
 # 글을 만든 뒤 공개되는 방식(jekyll-git 전용). direct = 만들자마자 main 에 커밋해 공개(기본, 지금 동작), pr = 초안 브랜치와 PR 로 올리고
 # 운영자가 PR 을 병합하면 공개(사람 승인 흐름, pipeline/drafts.py). 항목에 적지 않으면 direct. pr 로 바꾸는 것은 T3(게시 방식)다.
@@ -135,16 +139,33 @@ def enabled_blogs(reg, platform=None):
 
 
 def resolve_secrets(blog, environ):
-    """역할 -> 값(앞뒤 공백 제거). 없으면 빈 문자열.
+    """역할 -> 값(앞뒤 공백과 보이지 않는 문자·제어 문자를 지운 값, console.clean_secret). 없으면 빈 문자열.
 
     우선순위: PIPELINE_SECRET_<ROLE> (워크플로 매트릭스가 블로그별 Secrets 를 역할 이름으로 넘길 때)
     > 레지스트리에 적힌 환경변수 이름 (로컬 수동 실행·단일 블로그).
+
+    채팅 앱·문서에서 복사해 붙여 넣은 값에는 폭 없는 공백(U+200B)·단어 결합자(U+2060)·BOM(U+FEFF) 같은 보이지 않는 문자가 섞이기 쉬운데 `str.strip()` 은 이를 못 지워
+    인증이 설명 없이 어긋났다(이슈 #58, 결함 D-79). 지우고 쓰되 값은 어디에도 출력하지 않는다 — 어느 시크릿이었는지는 cleaned_secret_names 가 이름만 알려 준다.
+    보이지 않는 문자가 없는 값은 예전과 똑같이 앞뒤 공백만 자른 값이다.
     """
     out = {}
     for role, name in blog.get("secrets", {}).items():
-        override = (environ.get("PIPELINE_SECRET_" + role.upper()) or "").strip()
-        out[role] = override or (environ.get(name) or "").strip()
+        override = clean_secret(environ.get("PIPELINE_SECRET_" + role.upper()))
+        out[role] = override or clean_secret(environ.get(name))
     return out
+
+
+def cleaned_secret_names(blog, environ):
+    """resolve_secrets 가 실제로 쓰는 값 중 보이지 않는 문자·제어 문자를 지운 것의 **환경변수 이름**(레지스트리 `secrets` 의 이름 = GitHub Secrets 이름) 목록.
+    운영자에게 '이 시크릿을 원본에서 다시 복사해 등록하라'고 알릴 때 쓴다 — 값·길이는 돌려주지 않는다. 쓰이지 않는 값(우선순위에서 밀린 쪽)은 보지 않는다."""
+    names = []
+    for role, name in blog.get("secrets", {}).items():
+        for source in ("PIPELINE_SECRET_" + role.upper(), name):
+            if clean_secret(environ.get(source)):
+                if secret_was_cleaned(environ.get(source)) and name not in names:
+                    names.append(name)
+                break
+    return names
 
 
 def missing_secret_roles(blog, environ):

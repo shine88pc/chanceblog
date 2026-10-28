@@ -1449,13 +1449,14 @@ class RunWithDraftsTest(unittest.TestCase):
 
     def test_the_real_registry_gives_chance_and_blogger_rows_with_nothing_pending(self):
         """표지판 시험: Chance 칸은 실제 레지스트리의 발행 흐름에서 온다 — 값은 `tests/draft_helpers.py` 의 REAL_PUBLISH_FLOW 한 곳에서 읽는다
-        (direct 면 '자동 공개', 승인 흐름 pr 을 켜면 열린 초안 PR 수 '0'). 줄 수(Chance·Blogger 둘)는 블로그를 더하는 PR 이 함께 고친다."""
+        (direct 면 '자동 공개', 승인 흐름 pr 을 켜면 열린 초안 PR 수 '0'). 줄 수(Chance·Blogger 영문·Blogger 한글 셋)는 블로그를 더하는 PR 이 함께 고친다."""
         fake, root = self.world(registry=(_bootstrap.ROOT / "pipeline" / "blogs.json").read_text(encoding="utf-8"))
         self.run_script(fake, root)
         rows = table_rows(self.body(fake))
         self.assertEqual(rows[0], ["Chance", "자동 공개" if REAL_PUBLISH_FLOW == "direct" else "0", "-", "-"])
-        self.assertEqual(rows[1], ["Blogger", "정지", "-", "-"])
-        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[1], ["Blogger 영문", "정지", "-", "-"])
+        self.assertEqual(rows[2], ["Blogger 한글", "정지", "-", "-"])
+        self.assertEqual(len(rows), 3)
         self.assertNotIn("Blogger 대시보드", self.body(fake))                          # 정지 중인 Blogger 의 대략치 안내는 붙이지 않는다
         self.assertEqual(self.body(fake).count("- 휴대폰에서 거르기:"), 1)
 
@@ -1928,7 +1929,8 @@ class DraftGuideMatchesCodeTest(unittest.TestCase):
 
     def test_the_blogger_summary_head_is_documented_where_the_runner_summary_is(self):
         self.assertIn("### [채널 라벨] 블로그 이름", self.arch)
-        self.assertIn("### [Blogger] Blogger (macat0722)", self.guide)
+        self.assertIn("### [Blogger 영문] Blogger (macat0722)", self.guide)
+        self.assertIn("### [Blogger 한글] Blogger (kcyoon)", self.guide)             # 한글 Blogger 의 머리도 같은 자리에 적혀 있다(작업 D)
         self.assertIn("summary_head", self.arch)
 
 

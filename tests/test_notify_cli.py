@@ -399,6 +399,91 @@ class FrontMatterTest(unittest.TestCase):
         self.assertFalse(notify.is_unpublished({"published": None}))
 
 
+class BrokenFrontMatterAlertTest(CliCase):
+    """공개된 글의 머리말이 깨졌을 때(결함 D-80, 이슈 #59)의 새 글 알림. 사이트는 제목 대신 파일 이름을 보여 줬지만 알림은 파일 이름을 제목으로 쓴 적이 없다 —
+    따옴표가 깨진 제목은 빈 줄로 나가던 것을 '(제목을 읽지 못했습니다 …)' 로 바꿨고, 여는 울타리가 깨진 글(`------`)은 지금도 알림이 가지 않는다(아래 시험이 현재 동작을 고정한다)."""
+    BROKEN_KR = ('---\nlayout: post\ntitle: ""너에게 무엇이 중요한지 결정하는 것": 우주 공학 현장에서 멘토링이 갖는 의미"\ncategory: "과학·환경"\ntags:\n  - 멘토링\n'
+                 'lang: ko\nsource_name: "NASA"\n---\n\n본문입니다.\n')
+    KR_PATH = "_posts/과학·환경/2026-10-28-KR-111851.md"
+    EN_PATH = "_posts/Science & Environment/2026-10-28-EN-111851.md"
+
+    def setUp(self):
+        super().setUp()
+        self.root = nh.make_root(self.tmp / "site")
+
+    def announce(self, files):
+        code, lines, net = self.run_cli("chance-published", "--commit", "HEAD", root=self.root, runner=FakeGit.adding(files))
+        return code, lines, net
+
+    def good_en(self):
+        return nh.post_text('"You Decide What’s Important": How Mentorship Shapes Aerospace Engineering Talent', "en", "Science & Environment", "NASA")
+
+    def test_a_json_escaped_title_with_quotes_is_read_whole(self):
+        front = notify.parse_front_matter(self.good_en())
+        self.assertEqual(front["title"], '"You Decide What’s Important": How Mentorship Shapes Aerospace Engineering Talent')
+        _, _, net = self.announce({self.EN_PATH: self.good_en()})
+        self.assertIn('"You Decide What’s Important": How Mentorship Shapes Aerospace Engineering Talent', net.bodies()[0]["text"])      # 알림은 HTML 이라도 따옴표는 이스케이프하지 않는다(escape_html quote=False)
+
+    def test_a_title_whose_inner_quotes_are_not_escaped_is_shown_as_unreadable_and_never_as_a_file_name(self):
+        self.assertEqual(notify.parse_front_matter(self.BROKEN_KR)["title"], "")      # 첫 따옴표 쌍만 읽혀 빈 글자가 된다
+        code, lines, net = self.announce({self.KR_PATH: self.BROKEN_KR, self.EN_PATH: self.good_en()})
+        self.assertEqual((code, net.calls), (0, 1))
+        text = net.bodies()[0]["text"]
+        self.assertIn(chr(0x1F1F0) + chr(0x1F1F7) + " " + notify.UNREADABLE_TITLE, text)
+        title_lines = [line for line in text.split("\n") if line[:1] in (chr(0x1F1F0), chr(0x1F1FA))]      # 국기로 시작하는 제목 줄(주소 줄에는 글 주소가 있어 슬러그가 보인다)
+        self.assertEqual(len(title_lines), 2)
+        for line in title_lines:
+            for forbidden in ("111851", "2026-10-28", ".md", "Kr "):
+                self.assertNotIn(forbidden, line)
+
+    def test_a_title_that_cannot_be_read_or_is_blank_gets_the_same_placeholder(self):
+        for title_line in ('title: "닫는 따옴표 없음', "title: [a, b]", 'title: ""', 'title: "   "', "title:"):
+            with self.subTest(title_line=title_line):
+                text = f'---\nlayout: post\n{title_line}\ncategory: "x"\nlang: ko\nsource_name: "NASA"\n---\n\n본문\n'
+                _, _, net = self.announce({self.KR_PATH: text})
+                self.assertIn(notify.UNREADABLE_TITLE, net.bodies()[0]["text"])
+
+    def test_a_readable_title_never_gets_the_placeholder(self):
+        _, _, net = self.announce(nh.pair_files())
+        self.assertNotIn(notify.UNREADABLE_TITLE, net.bodies()[0]["text"])
+        self.assertIn(chr(0x1F1F0) + chr(0x1F1F7) + " " + nh.KR_TITLE + "\n", net.bodies()[0]["text"])
+
+    def test_the_placeholder_is_a_fixed_text_that_is_safe_to_put_in_the_html_message_as_it_is(self):
+        """자리 문구는 `safe_text`(소독·이스케이프)를 거치지 않고 알림 본문에 그대로 들어간다 — 그래서 고정 문구여야 하고 HTML 특수 문자(`<` `>` `&`)가 없어야 텔레그램 HTML 모드가 깨지지 않는다
+        (검증자 N8). 문구를 바꾸려면 이 시험과 docs/DEFECT_REGISTER.md 의 D-80 을 함께 고친다."""
+        self.assertEqual(notify.UNREADABLE_TITLE, "(제목을 읽지 못했습니다 · 글 머리말 확인 필요)")
+        for char in "<>&":
+            self.assertNotIn(char, notify.UNREADABLE_TITLE)
+        self.assertEqual(notify.escape_html(notify.UNREADABLE_TITLE), notify.UNREADABLE_TITLE)
+        self.assertEqual(notify.safe_text(notify.UNREADABLE_TITLE), notify.UNREADABLE_TITLE)      # 소독을 거쳐도 그대로 — 비밀 모양·보이지 않는 문자·줄바꿈·주소가 없다
+        self.assertEqual(notify.UNREADABLE_TITLE.splitlines(), [notify.UNREADABLE_TITLE])
+        self.assertLessEqual(len(notify.UNREADABLE_TITLE), notify.TITLE_LIMIT)
+
+    def test_the_title_line_of_an_unreadable_title_is_exactly_the_flag_and_the_fixed_text(self):
+        for kr_title, en_title in ((None, ""), ("", None), ("   ", chr(0x200B)), (chr(0x200B) + chr(0xFEFF), "\n\t ")):      # 비거나 소독하면 비는 제목
+            with self.subTest(kr=repr(kr_title), en=repr(en_title)):
+                text, _ = notify.format_chance_published([{"lang": "ko", "title": kr_title}, {"lang": "en", "title": en_title}], {})
+                lines = text.split("\n")
+                self.assertEqual(lines[1], notify.FLAGS["ko"] + " " + notify.UNREADABLE_TITLE)
+                self.assertEqual(lines[2], notify.FLAGS["en"] + " " + notify.UNREADABLE_TITLE)
+                self.assertNotIn("<", lines[1] + lines[2])
+
+    def test_a_readable_title_is_escaped_and_never_replaced_by_the_placeholder(self):
+        for title, shown in (("<b>굵게</b>", "&lt;b&gt;굵게&lt;/b&gt;"), ("A & B", "A &amp; B"), ("(제목을 읽지 못했습니다)", "(제목을 읽지 못했습니다)")):
+            with self.subTest(title):
+                text, _ = notify.format_chance_published([{"lang": "ko", "title": title}], {})
+                self.assertEqual(text.split("\n")[1], notify.FLAGS["ko"] + " " + shown)
+                self.assertNotIn(notify.UNREADABLE_TITLE, text)
+
+    def test_a_post_whose_opening_fence_is_broken_is_not_announced_at_all(self):
+        """현재 한계를 고정한다: `------` 로 시작하는 글은 머리말을 읽을 수 없어(`{}`) 알림이 가지 않는다. 생성기가 그런 글을 더는 만들지 않게 막았다(D-80)."""
+        broken = self.BROKEN_KR.replace("---\nlayout", "------\nlayout", 1)
+        self.assertEqual(notify.parse_front_matter(broken), {})
+        code, lines, net = self.announce({self.KR_PATH: broken})
+        self.assertEqual((code, net.calls), (0, 0))
+        self.assertEqual(lines, ["텔레그램 알림: 이 커밋에 새로 공개되는 글이 없어 보내지 않았습니다"])
+
+
 class StatusCommandTest(CliCase):
     def run_status(self, environ, with_files=True):
         summary, output = self.tmp / f"summary{next(self.counter)}.md", self.tmp / f"output{next(self.counter)}.txt"

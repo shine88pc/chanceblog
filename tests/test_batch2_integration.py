@@ -203,8 +203,8 @@ class RegistryCombinationTest(unittest.TestCase):
         승인 흐름을 켜는 두 줄(blogs.json·REAL_PUBLISH_FLOW)만 바꾸면 이 시험도 통과하고, 레지스트리만 바뀌면 빨강이다(키 목록은 블로그를 더하는 PR 이 함께 고친다)."""
         reg = registry.load_registry(REAL / "pipeline" / "blogs.json")
         blogs = [registry.merged_blog(reg, raw) for raw in reg["blogs"]]
-        self.assertEqual([blog["key"] for blog in blogs], ["chance", "blogger_macat"])
-        self.assertEqual({blog["key"]: blog["mode"] for blog in blogs}, {"chance": "auto", "blogger_macat": "off"})
+        self.assertEqual([blog["key"] for blog in blogs], ["chance", "blogger_macat", "blogger_kcyoon"])       # 한글 Blogger(작업 D)가 정지 상태로 더해졌다
+        self.assertEqual({blog["key"]: blog["mode"] for blog in blogs}, {"chance": "auto", "blogger_macat": "off", "blogger_kcyoon": "off"})
         self.assertEqual(blogs[0]["publish_flow"], REAL_PUBLISH_FLOW)
         self.assertFalse(any(blog["platform"] in registry.PACKAGE_PLATFORMS for blog in blogs))
 

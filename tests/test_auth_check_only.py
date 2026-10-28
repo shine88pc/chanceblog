@@ -3,7 +3,7 @@
 구성
   1) 시나리오: 통과·시크릿 없음·분류별 실패, 쓰기 0(이력·초안·저장소 파일)·Gemini 호출 0·시크릿 값 출력 0, 연습 실행·정지·입력의 영향.
   2) 열거: 모드 3 × 시크릿 16가지 × 연습 2 × 켜는 방법 2(명령줄·환경변수), 인증 점검 결과 10가지 × 모드 3.
-  3) 계획(plan) 단계와 blogger.yml: 정지한 블로그도 점검 대상에 넣는 `--include-off`, 새 입력·환경변수, 예약(cron) 불변.
+  3) 계획(plan) 단계와 Blogger 워크플로(채널별 래퍼 + 공용 blogger.yml): 정지한 블로그도 점검 대상에 넣는 `--include-off`, 새 입력·환경변수, 예약(cron) 불변.
 
 실제 구글·Blogger·Gemini 호출은 없다(가짜 게시자). 인증 점검 로직과 분류표 자체는 test_auth_check.py·test_draft_upload.py 가 본다.
 """
@@ -19,6 +19,7 @@ from pathlib import Path
 from unittest import mock
 
 import _bootstrap
+import blogger_workflow_helpers as wf
 from pipeline import auth_check as ac
 from pipeline import plan, registry
 from pipeline import run as run_mod
@@ -68,7 +69,7 @@ class ScenarioTest(unittest.TestCase):
                 self.assertIn("인증 점검 통과", res.out)
                 # 실행 요약: 이름만, 값은 없다
                 self.assertEqual(len(res.summary_lines), 4, res.summary)
-                self.assertEqual(res.summary_lines[0], "### [Blogger] Blogger (macat0722)")
+                self.assertEqual(res.summary_lines[0], "### [Blogger 영문] Blogger (macat0722)")
                 self.assertIn("**AUTH_CHECK_OK**", res.summary_lines[1])
                 self.assertIn("쓰기 없음", res.summary_lines[1])
                 for name in SECRET_NAMES:
@@ -269,7 +270,7 @@ class EnumerationTest(unittest.TestCase):
                             mismatches.append(f"{label}: 실제 {got} / 기준 {want}")
                         if res.history or res.drafts or pub.published or res.llm_calls.calls:
                             mismatches.append(f"{label}: 쓰기 또는 Gemini 호출이 있음")
-                        if "### [Blogger] Blogger (macat0722)" not in res.summary or len(res.annotations) != 1:
+                        if "### [Blogger 영문] Blogger (macat0722)" not in res.summary or len(res.annotations) != 1:
                             mismatches.append(f"{label}: 요약·주석이 하나씩이 아님 {res.annotations}")
                         if complete and not res.annotations[0].startswith("::notice::"):
                             mismatches.append(f"{label}: 통과인데 notice 가 아님")
@@ -320,24 +321,27 @@ class PlanIncludeOffTest(unittest.TestCase):
         self.assertEqual(plan.build_matrix(reg, "blogger")["include"], [])
         self.assertEqual(plan.build_matrix(reg, "blogger", include_off=False)["include"], [])
         items = plan.build_matrix(reg, "blogger", include_off=True)["include"]
-        self.assertEqual([(i["key"], i["mode"]) for i in items], [("blogger_macat", "off")])
+        self.assertEqual([(i["key"], i["mode"]) for i in items], [("blogger_macat", "off"), ("blogger_kcyoon", "off")])      # 한글 Blogger 도 정지 상태로 등록돼 있다
         self.assertEqual(items[0]["secret_refresh_token"], "BLOGGER_REFRESH_TOKEN")      # 이름만 있고 값은 없다
+        self.assertEqual(items[1]["secret_refresh_token"], "BLOGGER_KO_REFRESH_TOKEN")   # 한글은 영문과 다른 시크릿 이름이다
         self.assertEqual([i["key"] for i in plan.build_matrix(reg, "blogger", only="blogger_macat", include_off=True)["include"]],
                          ["blogger_macat"])
+        self.assertEqual([i["key"] for i in plan.build_matrix(reg, "blogger", only="blogger_kcyoon", include_off=True)["include"]],
+                         ["blogger_kcyoon"])
         self.assertEqual(plan.build_matrix(reg, "blogger", only="chance", include_off=True)["include"], [])
 
     def test_the_platform_filter_and_running_blogs_are_unchanged(self):
         reg = registry_with("draft")
-        self.assertEqual([i["key"] for i in plan.build_matrix(reg, "blogger", include_off=True)["include"]], ["blogger_macat"])
-        self.assertEqual([i["key"] for i in plan.build_matrix(reg, "blogger")["include"]], ["blogger_macat"])
+        self.assertEqual([i["key"] for i in plan.build_matrix(reg, "blogger", include_off=True)["include"]], ["blogger_macat", "blogger_kcyoon"])
+        self.assertEqual([i["key"] for i in plan.build_matrix(reg, "blogger")["include"]], ["blogger_macat"])           # 한글은 정지라 일반 실행의 대상이 아니다
         everything = [i["key"] for i in plan.build_matrix(reg, include_off=True)["include"]]
-        self.assertEqual(everything, ["chance", "blogger_macat"])
+        self.assertEqual(everything, ["chance", "blogger_macat", "blogger_kcyoon"])
 
     def test_the_command_line_flag(self):
         import io
         from contextlib import redirect_stdout
         with mock.patch.object(plan, "load_registry", return_value=registry_with("off")):
-            for extra, expected in (([], "0"), (["--include-off"], "1")):
+            for extra, expected in (([], "0"), (["--include-off"], "2")):
                 buf = io.StringIO()
                 with redirect_stdout(buf):
                     self.assertEqual(plan.main(["--platform", "blogger", "--count", *extra]), 0)
@@ -367,7 +371,8 @@ class PlanStepIncludeOffTest(unittest.TestCase):
         shutil.copytree(REAL / "pipeline", root / "pipeline", dirs_exist_ok=True, ignore=ignore)
         return root
 
-    def run_step(self, root, only="", auth_check_only=""):
+    def run_step(self, root, only="blogger_macat", auth_check_only=""):
+        """only 기본값은 영문 래퍼가 넘기는 값이다(래퍼는 항상 자기 블로그 key 를 `blog` 로 넘기므로 실제 실행에서 ONLY_BLOG 가 비는 일은 없다)."""
         output, summary = root / "github_output", root / "github_step_summary"
         output.write_bytes(b"")
         summary.write_bytes(b"")
@@ -397,6 +402,17 @@ class PlanStepIncludeOffTest(unittest.TestCase):
             proc, output, _summary = self.run_step(off, only="blogger_macat", auth_check_only="1")
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertIn("count=1", output.splitlines())
+        with self.subTest("한글 래퍼가 넘기는 key: 한글 블로그만 점검 대상"):
+            proc, output, _summary = self.run_step(off, only="blogger_kcyoon", auth_check_only="1")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("count=1", output.splitlines())
+            self.assertIn('"key":"blogger_kcyoon"', output)
+            self.assertNotIn("blogger_macat", output)
+            self.assertIn("BLOGGER_KO_BLOG_ID", output)                            # 이름만(값 없음) — 한글 블로그의 시크릿 이름이다
+        with self.subTest("key 를 비우면(래퍼는 그러지 않는다) Blogger 블로그 전체: 정지한 둘이 모두 점검 대상"):
+            proc, output, _summary = self.run_step(off, only="", auth_check_only="1")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("count=2", output.splitlines())
         with self.subTest("켜진 블로그 + 점검만: 대상 1개"):
             proc, output, _summary = self.run_step(auto, auth_check_only="1")
             self.assertEqual((proc.returncode, "count=1" in output.splitlines()), (0, True))
@@ -408,32 +424,25 @@ class PlanStepIncludeOffTest(unittest.TestCase):
 
 @unittest.skipUnless(yaml is not None, "PyYAML(requirements-dev.txt)이 필요합니다(CI 에서는 항상 실행됩니다)")
 class WorkflowAuthCheckInputTest(unittest.TestCase):
+    """인증 점검만 실행 입력: 채널별 래퍼(blogger-en.yml·blogger-ko.yml)가 입력을 받아 `with:` 로 넘기고 공용 blogger.yml 이 환경변수로 러너·plan 단계에 준다."""
+    WRAPPERS = tuple(wf.WRAPPERS.values())
+
     @classmethod
     def setUpClass(cls):
-        cls.text = (REAL / ".github" / "workflows" / "blogger.yml").read_text(encoding="utf-8")
-        data = yaml.safe_load(cls.text)
-        if True in data and "on" not in data:  # YAML 1.1 은 키 on 을 True 로 읽는다
-            data["on"] = data.pop(True)
-        cls.data = data
-        cls.inputs = data["on"]["workflow_dispatch"]["inputs"]
-        cls.run_step = next(step for step in data["jobs"]["generate"]["steps"] if "pipeline.run" in str(step.get("run", "")))
-        cls.plan_step = next(step for step in data["jobs"]["plan"]["steps"] if step.get("id") == "plan")
+        cls.data = wf.load(wf.REUSABLE)
+        cls.plan_step, cls.generate, cls.run_step = wf.callee_steps()
 
-    @staticmethod
-    def render(template, event, auth_check):
-        import test_workflow_names as names
-        inputs = {} if auth_check is None else {"auth_check": auth_check}
-        ctx = {"github": {"event_name": event, "event": {"inputs": {k: ("true" if v is True else "false" if v is False else v)
-                                                                       for k, v in inputs.items()}}}, "inputs": inputs}
-        return names.render(template, ctx)
+    def inputs(self, wrapper):
+        return wf.load(wrapper)["on"]["workflow_dispatch"]["inputs"]
 
     def test_the_input_is_an_off_by_default_boolean_with_a_precise_korean_description(self):
-        spec = self.inputs["auth_check"]
-        self.assertEqual((spec["type"], spec["default"]), ("boolean", False))
-        for word in ("인증 점검", "기본 꺼짐", "Gemini", "쓰기 없음", "BLOGGER_API_SETUP.md"):     # 자세한 설명은 문서로(V-16)
-            self.assertIn(word, spec["description"])
-        self.assertRegex(spec["description"], r"[가-힣]")
-        self.assertLessEqual(len(spec["description"]), 120, "실행 대화상자에서 읽히도록 한 줄 요약 + 문서 링크로 둔다")
+        for wrapper in self.WRAPPERS:
+            spec = self.inputs(wrapper)["auth_check"]
+            self.assertEqual((spec["type"], spec["default"]), ("boolean", False), wrapper)
+            for word in ("인증 점검", "기본 꺼짐", "Gemini", "쓰기 없음", "BLOGGER_API_SETUP.md"):     # 자세한 설명은 문서로(V-16)
+                self.assertIn(word, spec["description"], wrapper)
+            self.assertRegex(spec["description"], r"[가-힣]")
+            self.assertLessEqual(len(spec["description"]), 120, "실행 대화상자에서 읽히도록 한 줄 요약 + 문서 링크로 둔다")
 
     def test_the_details_the_short_description_dropped_are_in_the_setup_guide(self):
         """입력 설명에서 뺀 동작(시크릿 없음·정지 중·연습 실행·입력 무시)은 BLOGGER_API_SETUP.md 에 있다."""
@@ -443,33 +452,39 @@ class WorkflowAuthCheckInputTest(unittest.TestCase):
             self.assertIn(word, bullet)
 
     def test_the_input_reaches_the_runner_and_the_plan_step_only_through_environment_variables(self):
-        for step in self.data["jobs"]["generate"]["steps"] + self.data["jobs"]["plan"]["steps"]:
+        for step in self.generate["steps"] + self.data["jobs"]["plan"]["steps"]:
             self.assertNotIn("inputs.auth_check", str(step.get("run", "")))
         self.assertEqual(self.run_step["run"], 'python -m pipeline.run --blog "$BLOG_KEY"')   # 명령줄 플래그가 아니라 환경변수로 켠다
         self.assertIn("--include-off", self.plan_step["run"])
         self.assertIn('AUTH_CHECK_ONLY:-', self.plan_step["run"])
 
     def test_scheduled_runs_never_turn_the_check_on_and_manual_runs_follow_the_checkbox(self):
-        for label, template in (("실행 단계", self.run_step["env"]["BLOGGER_AUTH_CHECK"]),
-                                ("plan 단계", self.plan_step["env"]["AUTH_CHECK_ONLY"])):
-            with self.subTest(label):
-                self.assertEqual(self.render(template, "workflow_dispatch", True), "1")
-                self.assertEqual(self.render(template, "workflow_dispatch", False), "")
-                self.assertEqual(self.render(template, "workflow_dispatch", None), "")
-                for value in (True, False, None):
-                    self.assertEqual(self.render(template, "schedule", value), "")        # 정기 실행은 항상 글을 만든다
+        for wrapper in self.WRAPPERS:
+            for label, name in (("실행 단계", "BLOGGER_AUTH_CHECK"), ("plan 단계", "AUTH_CHECK_ONLY")):
+                with self.subTest(wrapper=wrapper, step=label):
+                    self.assertEqual(wf.end_to_end_env(wrapper, "workflow_dispatch", {"auth_check": "true"})[name], "1")
+                    self.assertEqual(wf.end_to_end_env(wrapper, "workflow_dispatch", {"auth_check": "false"})[name], "")
+                    self.assertEqual(wf.end_to_end_env(wrapper, "workflow_dispatch", {})[name], "")
+                    self.assertEqual(wf.end_to_end_env(wrapper, "schedule")[name], "")        # 정기 실행은 항상 글을 만든다
+                    self.assertEqual(wf.end_to_end_env(wrapper, "schedule", {"auth_check": "true"})[name], "")
 
     def test_no_new_schedule_and_no_wider_permissions(self):
-        """새 예약 작업은 T3 다. 주 1회 점검은 후속에서 워치독에 붙인다(문서에만 남김)."""
-        self.assertEqual(self.data["on"]["schedule"], [{"cron": "0 2 * * *"}])
-        self.assertEqual(set(self.data["on"]), {"schedule", "workflow_dispatch"})
+        """새 예약 작업은 T3 다. 주 1회 점검은 후속에서 워치독에 붙인다(문서에만 남김). 래퍼의 예약은 레지스트리의 cron 그대로다."""
+        reg = registry.load_registry(REAL / "pipeline" / "blogs.json")
+        for key, wrapper in wf.WRAPPERS.items():
+            data = wf.load(wrapper)
+            self.assertEqual(data["on"]["schedule"], [{"cron": registry.get_blog(reg, key)["schedule"]["cron"]}], wrapper)
+            self.assertEqual(set(data["on"]), {"schedule", "workflow_dispatch"}, wrapper)
+            self.assertEqual(data["permissions"], {"contents": "read"}, wrapper)
+        self.assertEqual(wf.load("blogger-en.yml")["on"]["schedule"], [{"cron": "0 2 * * *"}])          # 영문 예약은 그대로
+        self.assertEqual(set(self.data["on"]), {"workflow_call"})                                         # 공용 워크플로는 직접 실행하는 트리거가 없다
         self.assertEqual(self.data["permissions"], {"contents": "read"})
-        self.assertEqual(self.data["jobs"]["generate"]["permissions"], {"contents": "write"})
-        self.assertEqual(self.data["jobs"]["generate"]["if"], "needs.plan.outputs.count != '0'")
+        self.assertEqual(self.generate["permissions"], {"contents": "write"})
+        self.assertEqual(self.generate["if"], "needs.plan.outputs.count != '0'")
 
     def test_secrets_are_still_passed_only_as_pipeline_secret_variables(self):
         roles = registry.get_blog(registry.load_registry(REAL / "pipeline" / "blogs.json"), "blogger_macat")["secrets"]
-        expected = {"PIPELINE_SECRET_" + role.upper(): "${{ secrets[matrix.secret_%s] }}" % role for role in roles}
+        expected = {"PIPELINE_SECRET_" + role.upper(): "${{ secrets.PIPELINE_SECRET_%s }}" % role.upper() for role in roles}
         env = self.run_step["env"]
         self.assertEqual({k: v for k, v in env.items() if k.startswith("PIPELINE_SECRET_")}, expected)
         self.assertEqual(set(env) - set(expected), {"BLOG_KEY", "BLOGGER_TOPIC", "BLOGGER_PUBLISH", "BLOGGER_AUTH_CHECK", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"})

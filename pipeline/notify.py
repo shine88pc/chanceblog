@@ -2,6 +2,7 @@
 
 운영자가 GitHub 화면을 열지 않아도 '새 글이 올라갔다', 'Blogger 초안이 올라와 게시를 기다린다', '확인할 일이 생겼다'를 휴대폰 알림으로 받게 하는 알림 계층이다.
 운영자용 설명서: .github/editorial/TELEGRAM_SETUP.md / 구조·실패 격리: docs/ARCHITECTURE.md §4-5 / 토큰 취급 규칙: docs/SECURITY_GUARDRAILS.md G-C12
+운영자 요청함(AI 의 요청 알림 notify_ai_request·응답 이슈 접수 확인 notify_reply_received·notify_task_received)의 호출 자리는 pipeline/operator_loop.py — docs/ARCHITECTURE.md §4-6
 
 설정: 환경변수 TELEGRAM_BOT_TOKEN·TELEGRAM_CHAT_ID(GitHub Secrets → 단계의 env). 둘 중 하나라도 비면 **비활성**이다 — 아무것도 보내지 않고 성공으로 끝난다.
 
@@ -41,7 +42,8 @@ from collections import namedtuple
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from pipeline.console import md_cell, one_line, safe_output
+from pipeline.console import (INVISIBLE_CODEPOINTS, INVISIBLE_RE, clean_secret, md_cell, one_line, safe_output,
+                              secret_was_cleaned)
 from pipeline.llm import mask
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -75,10 +77,22 @@ ERROR_LINE = "::error::텔레그램 알림 시험이 실패했습니다. 이유�
 
 # 알림 문구의 그림 문자(소스에는 코드 포인트로만 적는다 — 어떤 콘솔·편집기에서도 깨지지 않게)
 OK_MARK, PIN_MARK, MEMO_MARK, WAIT_MARK = (chr(0x2705), chr(0x1F4CC), chr(0x1F4DD), chr(0x23F3))
+BELL_MARK, SIREN_MARK = chr(0x1F514), chr(0x1F6A8)
+
+# 운영자 요청함(AI 의 요청·운영자의 응답, pipeline/operator_loop.py): 요청 종류와 한국어 라벨, 요청 번호 모양, 글자 수 상한. 사용자 지시 2026-10-28
+REQUEST_KIND_LABELS = {"merge": "병합 부탁", "run": "실행 부탁", "confirm": "확인 부탁", "decision": "결정 부탁", "info": "알림"}
+REQUEST_ANSWER_KINDS = ("confirm", "decision")     # 운영자가 양식으로 답해야 하는 종류('답하는 법' 한 줄을 붙인다)
+REQUEST_ID_RE = re.compile(r"R-[0-9]{3}")
+REQUEST_TITLE_LIMIT = 80
+REQUEST_SUMMARY_LIMIT = 300
+REPO_URL = "https://github.com/shine88pc/chanceblog"
+NEW_ISSUE_URL = REPO_URL + "/issues/new/choose"
 FLAGS = {"ko": chr(0x1F1F0) + chr(0x1F1F7), "en": chr(0x1F1FA) + chr(0x1F1F8)}
 # 새 글 알림은 Pages 배포를 요청한 직후에 오고 주소 버튼이 같이 간다. 배포가 퍼지기 전에 열면 공개 CDN 이 그 404 를 최대 약 18분 보관해 독자에게도 한동안
 # 404 가 돌아올 수 있다(docs/DEFECT_REGISTER.md D-41) — 그래서 문구로 3분 뒤에 열어 보게 한다.
 DEPLOY_WAIT_NOTE = "사이트 배포가 끝나기까지 약 3분 걸립니다. 일찍 열면 404 가 최대 약 18분 보관될 수 있으니 3분 뒤에 열어 보세요."
+# 글 머리말의 제목 줄을 읽지 못했을 때(따옴표가 깨진 제목 등, D-80) 빈 줄로 보내거나 파일 이름을 제목처럼 쓰지 않고 이 문구를 쓴다.
+UNREADABLE_TITLE = "(제목을 읽지 못했습니다 · 글 머리말 확인 필요)"
 
 # ---- 결과 -------------------------------------------------------------------
 # ok: 문제가 없었다(보냈거나, 일부러 건너뜀) / sent: 실제로 전달됨 / status: HTTP 상태(없으면 None) / reason: 아래 분류 코드 / detail: 소독한 한 줄 설명
@@ -118,13 +132,14 @@ REASON_TEXT = {
 # ---- 입력 소독 ---------------------------------------------------------------
 _TOKEN_RE = re.compile(r"[0-9]{3,20}:[A-Za-z0-9_\-]{20,100}")
 _CHAT_RE = re.compile(r"-?[0-9]{1,20}|@[A-Za-z][A-Za-z0-9_]{3,31}")
-# 글자 순서를 뒤집거나 보이지 않게 만드는 문자(소프트 하이픈·폭 없는 공백·방향 제어·단어 결합자·BOM). 소스에는 보이지 않는 문자를 넣지 않으려고 코드 포인트로 쓴다(pipeline/inbox.py 와 같다).
-_INVISIBLE_CODEPOINTS = (0x00AD, *range(0x200B, 0x2010), *range(0x202A, 0x202F), *range(0x2060, 0x2065), *range(0x2066, 0x206A), 0xFEFF)
-_INVISIBLE_RE = re.compile("[" + "".join(chr(code) for code in _INVISIBLE_CODEPOINTS) + "]")
+# 글자 순서를 뒤집거나 보이지 않게 만드는 문자(소프트 하이픈·폭 없는 공백·방향 제어·단어 결합자·BOM). 목록은 pipeline/console.py 한 곳에 있다 — 시크릿 값 정리(console.clean_secret)가 같은 목록을 쓴다.
+_INVISIBLE_CODEPOINTS = INVISIBLE_CODEPOINTS
+_INVISIBLE_RE = INVISIBLE_RE
 _SURROGATE_RE = re.compile("[" + chr(0xD800) + "-" + chr(0xDFFF) + "]")       # 짝 없는 서로게이트는 UTF-8 로 인코딩할 수 없다
 _URL_SCHEME_RE = re.compile(r"(?i)\b(https?|ftp|tg)://")
 _URL_CHARS_RE = re.compile(r"[A-Za-z0-9\-._~:/?#@!$&'()*+,;=%]+")
 _FULLWIDTH_COLON = chr(0xFF1A)
+_FULLWIDTH_AT = chr(0xFF20)
 
 # 링크·버튼으로 쓸 수 있는 주소(호스트, 경로 접두). 나머지는 글자로만 둔다 — 제목·출처 같은 외부 글이 알림에 낚시 링크를 끼우지 못하게 한다.
 ALLOWED_URLS = (
@@ -257,8 +272,9 @@ class Notifier:
 
     def __init__(self, environ=None, opener=None, sleep=None, clock=None, budget=None):
         environ = os.environ if environ is None else environ
-        self._token = str(environ.get(ENV_TOKEN) or "").strip()
-        self._chat = str(environ.get(ENV_CHAT) or "").strip()
+        # 값에 보이지 않는 문자(채팅 앱에서 복사할 때 섞이는 폭 없는 공백 등)가 있으면 지운다(console.clean_secret) — 보이지 않는 문자가 없는 값은 예전의 `.strip()` 과 같다
+        self._token = clean_secret(environ.get(ENV_TOKEN))
+        self._chat = clean_secret(environ.get(ENV_CHAT))
         self._opener, self._sleep, self._clock = opener, sleep, clock
         self.budget = budget if budget is not None else _DEFAULT_BUDGET
 
@@ -553,6 +569,29 @@ class Notifier:
         except Exception as exc:  # noqa: BLE001
             return self._result(False, False, None, INTERNAL_ERROR, type(exc).__name__)
 
+    def notify_ai_request(self, request_id, kind, title, summary, urgency="보통", pr=None, buttons=None, more=0):
+        """AI 가 운영자에게 보내는 요청(병합·실행·확인·결정·알림) 한 통(HTML). 제목·요약은 소독하고 버튼 주소는 허용 목록을 통과한 것만 쓴다(pipeline/operator_loop.py 가 부른다).
+        more: 이 푸시에서 이 통에 담지 못한 요청 수('… 외 N건' 한 줄)."""
+        try:
+            text = format_ai_request(request_id, kind, title, summary, urgency=urgency, pr=pr, more=more)
+            return self.send_message(text, parse_mode="HTML", buttons=buttons)
+        except Exception as exc:  # noqa: BLE001
+            return self._result(False, False, None, INTERNAL_ERROR, type(exc).__name__)
+
+    def notify_reply_received(self, request_id, answer, issue_number, choice="", buttons=None):
+        """운영자의 응답 이슈(양식 `[답변]`)를 접수했다는 확인 한 통(평문). 값은 코드가 검증한 것(요청 번호 모양·양식의 답 선택지·이슈 번호)만 받는다."""
+        try:
+            return self.send_message(format_reply_received(request_id, answer, issue_number, choice), buttons=buttons)
+        except Exception as exc:  # noqa: BLE001
+            return self._result(False, False, None, INTERNAL_ERROR, type(exc).__name__)
+
+    def notify_task_received(self, issue_number, urgency, approval_yes, buttons=None):
+        """운영자의 새 일 요청 이슈(양식 `[요청]`)를 접수했다는 확인 한 통(평문)."""
+        try:
+            return self.send_message(format_task_received(issue_number, urgency, approval_yes), buttons=buttons)
+        except Exception as exc:  # noqa: BLE001
+            return self._result(False, False, None, INTERNAL_ERROR, type(exc).__name__)
+
 
 # ---- 메시지 모양(순수 함수: 네트워크 없이 시험한다) ------------------------------------
 def format_chance_published(posts, run_info):
@@ -561,7 +600,7 @@ def format_chance_published(posts, run_info):
     categories, source, links, buttons = [], "", [], []
     for post in posts:
         lang = "ko" if post.get("lang") == "ko" else "en"
-        lines.append(f"{FLAGS[lang]} {safe_text(post.get('title'))}")
+        lines.append(f"{FLAGS[lang]} {safe_text(post.get('title')) or UNREADABLE_TITLE}")
         category = defang_urls(clean_text(post.get("category"), SHORT_LIMIT))
         if category and category not in categories:
             categories.append(category)
@@ -583,6 +622,50 @@ def format_chance_published(posts, run_info):
     if run_url:
         lines.append(f'실행 기록: <a href="{html.escape(run_url, quote=True)}">열기</a>')
     return "\n".join(lines), buttons
+
+
+def _positive_int(value, name):
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(name)
+    return value
+
+
+def format_ai_request(request_id, kind, title, summary, urgency="보통", pr=None, more=0):
+    """AI 요청 알림의 HTML 글. 머리 `🔔 AI 요청 R-001 · 병합 부탁`(급하면 `🚨 급함`), 제목, 요약, 관련 PR 번호, 답해야 하는 종류(확인·결정)에는 '답하는 법' 한 줄,
+    담지 못한 요청이 있으면 '… 외 N건'. 요청 번호(`R-` 세 자리)·종류(REQUEST_KIND_LABELS)·PR 번호(양의 정수)는 호출한 쪽이 이미 검증한 값이어야 하고 어긋나면 ValueError
+    (이 함수는 외부 글을 믿지 않는다 — 제목·요약은 safe_text 로 소독하고 HTML 이스케이프한다). 본문 상세는 싣지 않고 버튼으로 연다."""
+    if not REQUEST_ID_RE.fullmatch(str(request_id)):
+        raise ValueError("request_id")
+    if kind not in REQUEST_KIND_LABELS:
+        raise ValueError("kind")
+    head = f"{BELL_MARK} <b>AI 요청 {request_id} · {REQUEST_KIND_LABELS[kind]}</b>" + (f" {SIREN_MARK} 급함" if urgency == "급함" else "")
+    # 요청 글은 AI 가 쓴 글이다: 소독에 더해 `@이름` 이 텔레그램의 멘션 링크가 되지 않게 전각 `＠` 로 바꾼다
+    lines = [head, safe_text(title, REQUEST_TITLE_LIMIT).replace("@", _FULLWIDTH_AT), safe_text(summary, REQUEST_SUMMARY_LIMIT).replace("@", _FULLWIDTH_AT)]
+    if pr is not None:
+        lines.append(f"관련 PR: #{_positive_int(pr, 'pr')}")
+    if kind in REQUEST_ANSWER_KINDS:
+        lines.extend(["", f"답하는 법: 아래 [답하기] → 양식에서 {request_id} 선택"])
+    if more:
+        lines.extend(["", f"… 외 {_positive_int(more, 'more')}건 (저장소의 인수인계/요청함/ 폴더에서 확인하세요)"])
+    return "\n".join(lines)
+
+
+def format_reply_received(request_id, answer, issue_number, choice=""):
+    """응답 이슈 접수 확인의 평문: `✅ 답변 접수 R-001 → 승인(이슈 #12)`, 선택이 있으면 `→ 승인 · 선택 B(이슈 #12)`. 값은 한 줄로 소독한다."""
+    if not REQUEST_ID_RE.fullmatch(str(request_id)):
+        raise ValueError("request_id")
+    word = clean_text(answer, 20)
+    picked = clean_text(choice, 10)
+    if not word:
+        raise ValueError("answer")
+    return f"{OK_MARK} 답변 접수 {request_id} → {word}" + (f" · 선택 {picked}" if picked else "") + f"(이슈 #{_positive_int(issue_number, 'issue_number')})"
+
+
+def format_task_received(issue_number, urgency, approval_yes):
+    """새 일 요청 이슈 접수 확인의 평문: `✅ 새 일 요청 접수(이슈 #13) · 긴급도 급함 · 진행 범위 구현까지(T3 제외)`.
+    approval_yes 는 이름만 옛것이다 — 뜻은 '진행 범위가 구현·시험까지인가'이고 `[요청]` 은 T3 승인이 아니다(독립 검증 B-1)."""
+    return (f"{OK_MARK} 새 일 요청 접수(이슈 #{_positive_int(issue_number, 'issue_number')}) · 긴급도 {clean_text(urgency, 10)}"
+            + (" · 진행 범위 구현까지(T3 제외)" if approval_yes else " · 논의·준비까지만"))
 
 
 # ---- 모듈 수준 함수(작업 지시의 공개 이름) ------------------------------------------------
@@ -609,6 +692,18 @@ def notify_ops_alert(item_lines, inbox_url, count=None, notifier=None):
 
 def notify_test(notifier=None, now=None):
     return (notifier or Notifier()).notify_test(now=now)
+
+
+def notify_ai_request(request_id, kind, title, summary, urgency="보통", pr=None, buttons=None, more=0, notifier=None):
+    return (notifier or Notifier()).notify_ai_request(request_id, kind, title, summary, urgency=urgency, pr=pr, buttons=buttons, more=more)
+
+
+def notify_reply_received(request_id, answer, issue_number, choice="", buttons=None, notifier=None):
+    return (notifier or Notifier()).notify_reply_received(request_id, answer, issue_number, choice=choice, buttons=buttons)
+
+
+def notify_task_received(issue_number, urgency, approval_yes, buttons=None, notifier=None):
+    return (notifier or Notifier()).notify_task_received(issue_number, urgency, approval_yes, buttons=buttons)
 
 
 def describe(result):
@@ -709,6 +804,9 @@ def _git(root, *args, runner=subprocess.run):
     if done.returncode != 0:
         raise GitError("git 명령이 실패했습니다")
     return done.stdout
+
+
+run_git = _git      # 다른 모듈(pipeline/operator_loop.py)이 같은 호출 규칙(제한 시간·실패 문구에 외부 값 없음)을 쓴다
 
 
 def added_posts(root, commit, runner=subprocess.run):
@@ -827,6 +925,9 @@ def _write_summary(environ, text, out):
         out(f"[참고] 실행 요약 쓰기 실패({type(exc).__name__})")
 
 
+write_summary = _write_summary      # 다른 모듈(pipeline/operator_loop.py)이 같은 실행 요약 쓰기를 쓴다
+
+
 def _say(out, notifier, text):
     out(notifier.scrub(text))
 
@@ -858,17 +959,25 @@ def run_chance_published(commit, notifier, root, out, environ, runner=subprocess
     return 0
 
 
+CLEANED_HINT = ("값에 보이지 않는 문자(폭 없는 공백·제어 문자 등)가 섞여 있어 지우고 씁니다: {names} — 원본에서 바로 복사해 다시 등록하는 것을 권장합니다"
+                "(값은 이 화면에 나오지 않습니다)")
+
+
 def run_status(notifier, environ, out):
     names = (ENV_TOKEN, ENV_CHAT)
-    present = {name: bool(str(environ.get(name) or "").strip()) for name in names}
+    present = {name: bool(clean_secret(environ.get(name))) for name in names}
     rows = [f"| `{name}` | {'등록됨' if present[name] else '없음'} |" for name in names]
     for name in names:
         out(f"{name}: {'등록됨' if present[name] else '없음'}")
     ready = all(present.values())
+    cleaned = [name for name in names if secret_was_cleaned(environ.get(name))]
+    if cleaned:
+        out("[참고] " + CLEANED_HINT.format(names=", ".join(cleaned)))
     _write_summary(environ, "### 텔레그램 시크릿 등록 여부\n\n| 시크릿 이름 | 상태 |\n|---|---|\n" + "\n".join(rows) + "\n\n"
                    + ("두 시크릿이 모두 등록돼 있어 다음 단계에서 시험 메시지를 보냅니다(값은 이 화면에 나오지 않습니다)." if ready else
                       "**시크릿이 모두 등록돼 있지 않아 시험 메시지를 보내지 않습니다.** 저장소 Settings → Secrets and variables → Actions 에서 "
-                      "위 두 이름을 등록한 뒤 다시 실행하세요(`.github/editorial/TELEGRAM_SETUP.md`)."), out)
+                      "위 두 이름을 등록한 뒤 다시 실행하세요(`.github/editorial/TELEGRAM_SETUP.md`).")
+                   + (("\n\n" + CLEANED_HINT.format(names=", ".join(f"`{name}`" for name in cleaned)) + ".") if cleaned else ""), out)
     target = environ.get("GITHUB_OUTPUT")
     if target:
         try:

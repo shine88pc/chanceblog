@@ -29,7 +29,7 @@
 | R2 | **순수 로직과 I/O를 분리**한다 | ✅ `gates.py`·`health.py`는 입출력 없음 / I/O는 `run.py`·`watchdog.py`·`publishers/` |
 | R3 | 의존성은 **주입**한다 | `run(llm=…, publisher_factory=…, now=…, rng=…, out=…)` — 테스트가 가짜를 끼운다 |
 | R4 | 표준 라이브러리를 우선한다 | 새 패키지는 T2. 버전 범위를 고정하고 `requirements-*.txt`에 둔다 |
-| R5 | **LLM 출력은 검증 후에만** 쓴다 | 형식 파싱 → 정화 → 게이트. 파일 경로·명령·URL을 LLM이 정하게 하지 않는다 |
+| R5 | **LLM 출력은 검증 후에만** 쓴다 | 형식 파싱 → 정화 → 게이트. 파일 경로·명령·URL을 LLM이 정하게 하지 않는다. 생성 글의 머리말(front matter)도 모델이 쓴 줄을 믿지 않는다 — 엄격 검사(`generator.front_matter_problems` 와 같은 규칙)를 통과한 줄만 쓰고 아니면 구조화된 값(제목·분야·태그)으로 다시 쓰며, 완성된 글을 한 번 더 검사해 깨졌으면 그 후보를 거절한다. 검사용 정규식은 되돌아가기가 입력 길이의 지수로 늘지 않게(양쪽이 같은 글자를 먹는 반복을 두지 않는다) 짜고 최악 모양의 시간을 시험으로 잰다. 좋은 입력(머리말이 없거나 엄격 검사를 통과하는 LF 응답)의 출력은 옛 동작과 바이트 동일하고 그 밖은 일부러 다시 쓴다(D-80) |
 | R6 | 오류를 **분류**한다 | 설정 오류 2 / 인프라 실패 1 / 정상 건너뜀 0. 예외를 삼키지 말고, 삼켜야 하면 이유를 주석과 이력에 남긴다 |
 | R7 | **멱등·재시도 안전** | 쓰기 전 존재 확인, 재시도 전 중복 확인, 파일은 임시 파일→교체(`state.write_json_atomic`) |
 | R8 | 시간은 **UTC aware**, 날짜 경계만 KST | naive `datetime` 금지. 테스트에서는 `now`를 주입한다 |
@@ -55,6 +55,7 @@
 | W8 | 시크릿은 `secrets[...]` → `env`로만. `echo` 금지. 텔레그램 시크릿(`TELEGRAM_BOT_TOKEN`·`TELEGRAM_CHAT_ID`)은 **단계의 `env`에 같은 이름으로**만 두고 `run`·`with`·`if`·job/워크플로 `env`에는 쓰지 않는다 | **WF-9**·**REG-3**·**WF-13** |
 | W9 | 변경 후 `actionlint`가 0건이어야 한다 | CI |
 | W10 | 워크플로·job 이름(`name`)은 **한글**로, 이름만 보고 자동인지 수동인지·무엇을 하는지 짐작할 수 있게 짓는다(예: `[공통] 사이트 자동 배포`, `[Chance] 기존 글 이미지 교체(수동)`). 이름 하나로 설명되지 않는 서로 다른 기능이 한 워크플로에 묶이면 나눈다(예: 글 작성과 이미지 교체). `run-name`에는 정기/수동·번호·불리언만 쓰고 이슈·PR 제목 같은 외부 문자열은 넣지 않는다. 외부 워크플로 템플릿을 복사해 넣을 때는 영문 `name`을 한글로 바꾼다. **워크플로 `name`·`run-name` 맨 앞에는 `[구분] `을 붙인다** — 블로그 채널 라벨(`Chance`·`Blogger`·`Blogger 영문`·`Blogger 한글`·`티스토리`·`네이버`)이거나, 블로그에 속하지 않으면 `공통`(배포·검사·감시·점검), 다른 워크플로가 부르는 공용 실행이면 `내부`. 대괄호로 시작하는 값은 YAML에서 따옴표가 필요하다(`name: "[공통] 사이트 자동 배포"`). job·단계 이름에는 붙이지 않는다(job 이름은 PR 검사 화면의 이름이다). 블로그 워크플로의 구분은 레지스트리 `channel.label`과 같은 글자여야 한다. 이름 표는 [`ARCHITECTURE.md`](./ARCHITECTURE.md) §2-1. **어디서 강제하나**: 검증기 WF-12는 모든 워크플로의 `name`이 허용된 `[구분] `으로 시작하고 `run-name`이 있으면 같은 접두사인지(오류) 보고, 레지스트리 검증(REG-1)은 블로그 워크플로의 `name` 접두사가 `channel.label`과 같은지 본다. 검증기 WF-11은 워크플로 `name`(오류, 접두사 뒤의 이름 부분에 한글이 있어야 한다)과 job `name`(경고)만 본다. 그러나 job `name`은 단위 테스트 `test_real_repository_workflow_and_job_names_are_korean`이 경고도 실패로 취급하므로 새 job에도 한글 이름이 사실상 필요하다. 입력 `description`·단계 `name`·`run-name`의 한글과 run-name이 쓸 수 있는 값은 검증기가 아니라 단위 테스트(`tests/test_workflow_names.py`)가 요구한다 | **WF-11**(워크플로 name 은 오류, job name 은 경고)·**WF-12**(`[구분] ` 접두사, 오류) + 단위 테스트 |
+| W11 | **외부 입력(이슈 글·브랜치 이름)을 만지고 텔레그램 시크릿을 쓰는 푸시·이슈 이벤트 워크플로**(운영자 요청함의 `ai-request.yml`·`operator-reply.yml`)는 트리거·권한·job `if`·단계·env 가 허용 목록과 정확히 같아야 하고 `run:` 에 GitHub 표현식을 쓰지 않는다. 이슈 글은 파이썬이 이벤트 파일에서 읽는다. 바꿀 때는 규칙(G-S9·G-C13)·검증기·시험을 함께 고친다 | **WF-14**·**REQ-1**·**FORM-1** |
 
 ## 4. 프롬프트·프로필 규칙
 
@@ -69,7 +70,7 @@
 3. **보안 회귀 테스트**: 우회 페이로드(`<scr<script>ipt>`, 이벤트 핸들러, `javascript:` 링크 등)를 케이스로 남긴다. 새 우회가 발견되면 먼저 실패하는 테스트를 추가하고 고친다.
 4. **실제 비밀처럼 보이는 리터럴을 소스에 쓰지 않는다.** 테스트에서는 런타임에 문자열을 조합한다(검증기 SEC-2 회피용 `allow` 표시에 기대지 않는다).
 5. **테스트가 실제로 실패하는지 확인**한다. 고친 코드를 잠시 되돌렸을 때 테스트가 깨지지 않으면 그 테스트는 쓸모가 없다.
-6. 임시 저장소는 `tests/test_run.py`의 `make_root()`를 쓴다(레지스트리·프로필·프롬프트를 복사하고, 워크플로 두 개(`chanceblog.yml`·`blogger.yml`)는 `name` 한 줄짜리 스텁 — 레지스트리 검증이 채널 접두사를 읽는다 — 나머지는 빈 파일).
+6. 임시 저장소는 `tests/test_run.py`의 `make_root()`를 쓴다(레지스트리·프로필·프롬프트를 복사하고, 레지스트리의 각 블로그 `workflow` 파일(`chanceblog.yml`·`blogger-en.yml`·`blogger-ko.yml`)은 그 블로그의 채널 라벨로 만든 `name` 한 줄짜리 스텁 — 레지스트리 검증이 채널 접두사를 읽는다 — 나머지는 빈 파일). 한글 Blogger(`blogger_kcyoon`)까지 함께 돌리는 시험은 `tests/blogger_ko_helpers.py`의 `make_pair_root()`·`KoreanRunBase`를 쓰고(영문·한글 이력이 따로 만들어진다), 워크플로 표현식을 이벤트·입력별로 평가하는 도구는 `tests/blogger_workflow_helpers.py`(`wrapper_with`·`end_to_end_env`·`old_env`)다.
 
 ### 자주 하는 확장 작업
 
@@ -92,7 +93,7 @@
 | **L0 정적** | 문법·보안 규칙·설정 일관성 | `python scripts/validate_repo.py` · `actionlint` · `python -m pipeline.registry` | 오류 0건 |
 | **L1 단위** | 로직(성공+실패 경로) | `python -m unittest discover -s tests` | 전부 통과, 네트워크 없음 |
 | **L2 드라이런** | 전체 흐름(스텁 LLM, 파일·게시 없음) | `python -m pipeline.run --blog <key> --dry-run` 또는 Actions `dry_run` 체크 | 종료 코드 0, 변경 파일 없음. 예외: Chance 드라이런은 모든 분야에 검증된 기사가 없거나 소스에 접속하지 못하면 종료 1이다(이상 신호, `docs/ARCHITECTURE.md` §4-1) — 실행 요약의 탈락 사유를 확인하고 기사가 있을 때 다시 실행한다 |
-| **L3 초안** | 실제 LLM·게이트, Blogger **초안함** 업로드 또는 저장소 초안 저장(공개 게시 없음) | Actions → `[Blogger] 글 자동 작성(초안함 업로드)` → Run workflow(`연습 실행` 체크를 풀고 `publish`=`draft`. 시크릿 등록 전이면 `off`) | `draft_uploaded`(`mode: draft` + 게시용 시크릿 4종: 초안함에 올라감) 또는 `draft`(`off`이거나 시크릿이 하나도 없을 때: 저장소 파일만), 초안 내용 확인. 시크릿이 일부만 있으면 종료 2 |
+| **L3 초안** | 실제 LLM·게이트, Blogger **초안함** 업로드 또는 저장소 초안 저장(공개 게시 없음) | Actions → `[Blogger 영문] 글 자동 작성`(한글은 `[Blogger 한글] 글 자동 작성`) → Run workflow(`연습 실행` 체크를 풀고 `publish`=`draft`. 시크릿 등록 전이면 `off`) | `draft_uploaded`(`mode: draft` + 게시용 시크릿 4종: 초안함에 올라감) 또는 `draft`(`off`이거나 시크릿이 하나도 없을 때: 저장소 파일만), 초안 내용 확인. 시크릿이 일부만 있으면 종료 2 |
 | **L4 카나리** | 실제 게시 소량 관찰 | `mode: auto`, 상한 1건/일, 3일 이상 | `posted` 연속, 워치독 이슈 0, 게시글 확인 |
 | **L5 운영** | 지속 감시 | 워치독 일 2회, Actions 실패 메일 | 이슈 0건 |
 

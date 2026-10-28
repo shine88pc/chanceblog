@@ -19,7 +19,7 @@ REAL = _bootstrap.ROOT
 NOW = datetime(2026, 10, 21, 2, 0, tzinfo=timezone.utc)  # KST 2026-10-21 11:00
 FULL_ENV = {"GEMINI_API_KEY": "k", "BLOGGER_BLOG_ID": "123", "BLOGGER_CLIENT_ID": "cid",
             "BLOGGER_CLIENT_SECRET": "cs", "BLOGGER_REFRESH_TOKEN": "rt"}
-# 실제 워크플로(.github/workflows/blogger.yml)가 넘기는 이름. 레지스트리의 역할 이름(llm_api_key·blog_id·client_id·
+# 실제 공용 워크플로(.github/workflows/blogger.yml)가 러너에 넘기는 이름. 레지스트리의 역할 이름(llm_api_key·blog_id·client_id·
 # client_secret·refresh_token)에 PIPELINE_SECRET_ 을 붙인 것이고, 값은 FULL_ENV 와 같다. BLOGGER_*·GEMINI_* 는 없다.
 WORKFLOW_ENV = {"PIPELINE_SECRET_LLM_API_KEY": FULL_ENV["GEMINI_API_KEY"],
                 "PIPELINE_SECRET_BLOG_ID": FULL_ENV["BLOGGER_BLOG_ID"],
@@ -43,16 +43,15 @@ def make_root(tmp, mode="auto", lang="ko"):
             if lang == "ko":
                 blog.update(languages=["ko"], profile="blogger_practical_ko", prompt=".github/editorial/BLOGGER_PROMPT.md")
     (root / "pipeline" / "blogs.json").write_text(json.dumps(reg, ensure_ascii=False), encoding="utf-8")
-    for name in ("blogger_practical_ko.json", "blogger_practical_en.json"):
+    for name in ("blogger_practical_ko.json", "blogger_practical_en.json", "blogger_ai_tools_ko.json"):
         shutil.copy(REAL / "pipeline" / "profiles" / name, root / "pipeline" / "profiles")
     (root / ".github" / "editorial").mkdir(parents=True)
-    for name in ("BLOGGER_PROMPT.md", "BLOGGER_PROMPT_EN.md"):
+    for name in ("BLOGGER_PROMPT.md", "BLOGGER_PROMPT_EN.md", "BLOGGER_PROMPT_KO_AI.md"):
         shutil.copy(REAL / ".github" / "editorial" / name, root / ".github" / "editorial")
-    # 워크플로 파일은 name 한 줄만 있는 스텁이다: 레지스트리 검증이 블로그의 channel.label 과 워크플로 name 의 `[라벨] ` 접두사가 같은지 읽는다
-    stubs = {".github/workflows/chanceblog.yml": 'name: "[Chance] 글 자동 작성·게시"\n',
-             ".github/workflows/blogger.yml": 'name: "[Blogger] 글 자동 작성(초안함 업로드)"\n'}
-    for rel in (".github/workflows/chanceblog.yml", ".github/workflows/blogger.yml", "generator.py",
-                "blogger_generator.py", ".github/editorial/CHANCE_BLOG_TEMPLATE.md"):
+    # 워크플로 파일은 name 한 줄만 있는 스텁이다: 레지스트리 검증이 블로그의 channel.label 과 워크플로 name 의 `[라벨] ` 접두사가 같은지 읽는다.
+    # 블로그마다 자기 workflow 파일(Blogger 는 채널별 래퍼 blogger-en.yml·blogger-ko.yml)의 스텁을 레지스트리의 채널 라벨로 만든다
+    stubs = {blog["workflow"]: f'name: "[{blog["channel"]["label"]}] 글 자동 작성"\n' for blog in reg["blogs"]}
+    for rel in (*stubs, "generator.py", "blogger_generator.py", ".github/editorial/CHANCE_BLOG_TEMPLATE.md"):
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(stubs.get(rel, ""), encoding="utf-8")
@@ -141,9 +140,10 @@ class FlowTest(RunBase):
         seen, created = {}, []
 
         class SpyPublisher(FakePublisher):
-            def __init__(self, blog_id, client_id, client_secret, refresh_token):
+            def __init__(self, blog_id, client_id, client_secret, refresh_token, secret_names=None):
                 super().__init__()
                 seen["publisher"] = (blog_id, client_id, client_secret, refresh_token)
+                seen["secret_names"] = secret_names
                 created.append(self)
 
         def spy_llm_factory(api_key, models, max_retries=2):
@@ -155,6 +155,7 @@ class FlowTest(RunBase):
         self.assertEqual(code, 0, out)
         self.assertEqual(seen["llm_key"], FULL_ENV["GEMINI_API_KEY"])
         self.assertEqual(seen["publisher"], tuple(FULL_ENV[name] for name in PUBLISH_SECRET_NAMES))
+        self.assertEqual(seen["secret_names"], roles)    # 오류 문구가 말할 시크릿 이름은 이 블로그 항목의 secrets 다(한글 Blogger 는 BLOGGER_KO_*, 값이 아니라 이름)
         self.assertEqual(len(created[0].published), 1)
         self.assertEqual(self.history()[-1]["status"], "posted")
 
@@ -635,7 +636,7 @@ class VisibilityTest(RunBase):
         self.assertIn("위조된 제목 줄", pub.published[0]["title"])        # 전제: 위조 문구가 제목에 실제로 들어갔다
         lines = self.summary().splitlines()
         self.assertEqual(len(lines), 3, lines)                           # '### [채널] 이름', '- 결과', '- URL' 세 줄뿐
-        self.assertEqual([line for line in lines if line.startswith("#")], ["### [Blogger] Blogger (macat0722)"])
+        self.assertEqual([line for line in lines if line.startswith("#")], ["### [Blogger 영문] Blogger (macat0722)"])
         for char in "|<>`":
             self.assertNotIn(char, lines[1])
         self.assertNotIn("](", self.summary())
@@ -903,7 +904,7 @@ class ManualTopicGuardTest(RunBase):
 class SummaryHeadTest(RunBase):
     """실행 요약의 첫 줄은 `### [채널 라벨] 블로그 이름`이다(작업요청서 5 PR-B). 어느 경로의 요약이든 같고, 값은 레지스트리(channel.label·name)에서 읽는다.
     요약의 나머지 줄은 예전과 같다 — 그것은 기준 브랜치와 바이트 단위로 비교해 확인했다(시나리오 2155개, WORKLOG)."""
-    HEAD = "### [Blogger] Blogger (macat0722)"
+    HEAD = "### [Blogger 영문] Blogger (macat0722)"
 
     def setUp(self):
         super().setUp()
@@ -922,8 +923,14 @@ class SummaryHeadTest(RunBase):
 
     def test_the_real_registry_gives_channel_label_and_blog_name(self):
         blog = registry.get_blog(registry.load_registry(REAL / "pipeline" / "blogs.json"), "blogger_macat")
-        self.assertEqual((blog["channel"]["label"], blog["name"]), ("Blogger", "Blogger (macat0722)"))
+        self.assertEqual((blog["channel"]["label"], blog["name"]), ("Blogger 영문", "Blogger (macat0722)"))
         self.assertEqual(run_mod.summary_head(blog), self.HEAD)
+
+    def test_the_korean_blogger_has_its_own_channel_label_in_the_head(self):
+        """한글 Blogger(kcyoon)의 요약 머리는 영문과 다른 채널 라벨을 쓴다 — 같은 러너 코드가 레지스트리 값만 바꿔 읽는다(작업 D)."""
+        blog = registry.get_blog(registry.load_registry(REAL / "pipeline" / "blogs.json"), "blogger_kcyoon")
+        self.assertEqual((blog["channel"]["label"], blog["name"]), ("Blogger 한글", "Blogger (kcyoon)"))
+        self.assertEqual(run_mod.summary_head(blog), "### [Blogger 한글] Blogger (kcyoon)")
 
     def test_every_kind_of_run_starts_its_summary_with_the_head_and_has_no_other_heading(self):
         dry = {**FULL_ENV, "DRY_RUN": "1"}
@@ -982,12 +989,12 @@ class SummaryHeadTest(RunBase):
         for blog in reg["blogs"]:
             if blog["key"] == "blogger_macat":
                 blog["name"] = "다른 이름의 블로그"
-                blog["channel"] = {"key": "blogger_en", "label": "Blogger 영문"}
+                blog["channel"] = {"key": "naver_x", "label": "네이버"}              # 쓰이지 않는 허용 라벨로 바꿔 라벨도 레지스트리를 따르는지 본다
         path.write_text(json.dumps(reg, ensure_ascii=False), encoding="utf-8")
-        (root / ".github" / "workflows" / "blogger.yml").write_text('name: "[Blogger 영문] 글 자동 작성(초안함 업로드)"\n', encoding="utf-8")
+        (root / ".github" / "workflows" / "blogger-en.yml").write_text('name: "[네이버] 글 자동 작성"\n', encoding="utf-8")
         code, out = self.go(env=self.env(**FULL_ENV), root=root)
         self.assertEqual(code, 0, out)
-        self.assertEqual(self.lines()[0], "### [Blogger 영문] 다른 이름의 블로그")
+        self.assertEqual(self.lines()[0], "### [네이버] 다른 이름의 블로그")
 
     def test_the_helper_makes_one_safe_line_from_hostile_registry_text(self):
         blog = {"key": "k", "name": "이름 [링크](https://e.io)|<b>굵게</b>`코드`\r\n::error::위조 " + "가" * 100,

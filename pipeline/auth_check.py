@@ -3,11 +3,14 @@
 글을 올리기 전에(Gemini 를 부르기 전에) 한 번 부른다. 하나라도 실패하면 게시·업로드를 하지 않고 실패 분류를 돌려준다.
 
   1. refresh token 으로 access token 을 갱신한다(만료·폐기·클라이언트 값 오류·네트워크 오류를 가른다).
-  2. blogs.get 으로 BLOGGER_BLOG_ID 의 블로그를 조회한다(권한·존재 여부).
+  2. blogs.get 으로 블로그 ID 시크릿(영문 BLOGGER_BLOG_ID, 한글 BLOGGER_KO_BLOG_ID)의 블로그를 조회한다(권한·존재 여부).
   3. 돌려준 블로그 주소가 레지스트리(pipeline/blogs.json)의 url 과 같은지 본다. 같은 구글 계정의 다른 블로그 ID 를
      넣어도 1·2번은 통과하므로, 이 비교가 엉뚱한 블로그에 쓰는 사고를 막는 마지막 문이다.
 
 이 모듈은 순수 로직이다(입출력 없음). 로그·요약·종료 코드 처리는 pipeline/run.py 가 한다.
+
+안내 문장에 나오는 시크릿 이름은 그 블로그(레지스트리 항목)의 이름이다: 한글 Blogger 는 영문과 다른 계정·시크릿(BLOGGER_KO_*)을 쓰므로 영문 이름만 말하면
+운영자가 한글 실행의 실패를 보고 영문 값을 갱신하러 갈 수 있다(독립 검증 N3). 레지스트리 항목의 secrets 를 못 받으면 영문 Blogger 의 이름을 쓴다.
 
 종료 코드 기준(docs/ENGINEERING_GUIDE.md R6: 설정 오류 2 / 인프라 실패 1):
   2 설정 — 사람이 설정(블로그 ID·계정 권한·클라이언트 ID/시크릿)을 고쳐야 한다. 다시 실행해도 같은 결과다.
@@ -19,17 +22,18 @@ from urllib.parse import urlsplit
 
 from pipeline.publishers.base import PublishError
 
-# PublishError.code → (사전 점검 실패 때 종료 코드, 이름, 운영자에게 보이는 고정 안내 문장).
-# 안내 문장은 ::error:: 주석에도 그대로 쓰므로 외부·AI 유래 문자열을 넣지 않는다(고정 문장만).
+# PublishError.code → (사전 점검 실패 때 종료 코드, 이름, 운영자에게 보이는 고정 안내 문장의 틀).
+# 안내 문장은 ::error:: 주석에도 그대로 쓰므로 외부·AI 유래 문자열을 넣지 않는다(고정 문장만). 문장 속 `{blog_id}`·`{client_id}`·`{client_secret}`·`{refresh_token}` 은
+# 그 블로그의 시크릿 이름이 들어갈 자리다 — 틀을 직접 읽지 말고 항상 sentence_for(code, secrets)로 읽는다(자리를 채우지 않은 글자가 운영자에게 보이면 안 된다).
 FAILURES = {
     "auth_expired": (1, "인증 만료",
                      "Blogger 인증(refresh token)이 만료되었거나 폐기되었습니다. OAuth 동의 화면이 '프로덕션' 상태인지 확인하고 "
-                     "토큰을 새로 발급해 BLOGGER_REFRESH_TOKEN 시크릿을 갱신하세요(.github/editorial/BLOGGER_API_SETUP.md)."),
+                     "토큰을 새로 발급해 {refresh_token} 시크릿을 갱신하세요(.github/editorial/BLOGGER_API_SETUP.md)."),
     "auth_failed": (2, "권한·접근 불가",
-                    "Blogger 인증 또는 블로그 접근 권한 확인에 실패했습니다. BLOGGER_BLOG_ID·BLOGGER_CLIENT_ID·"
-                    "BLOGGER_CLIENT_SECRET 시크릿, Blogger API 사용 설정, 로그인한 계정의 블로그 권한을 확인하세요."),
+                    "Blogger 인증 또는 블로그 접근 권한 확인에 실패했습니다. {blog_id}·{client_id}·"
+                    "{client_secret} 시크릿, Blogger API 사용 설정, 로그인한 계정의 블로그 권한을 확인하세요."),
     "blog_mismatch": (2, "블로그 주소 불일치",
-                      "인증은 통과했지만 BLOGGER_BLOG_ID 가 가리키는 블로그의 주소가 레지스트리(pipeline/blogs.json)의 url 과 다릅니다. "
+                      "인증은 통과했지만 {blog_id} 가 가리키는 블로그의 주소가 레지스트리(pipeline/blogs.json)의 url 과 다릅니다. "
                       "엉뚱한 블로그에 쓰지 않도록 멈췄습니다. 블로그 ID 시크릿을 확인하세요."),
     "network": (1, "네트워크 오류",
                 "Blogger 서버에 연결하지 못했습니다(연결 실패·시간 초과). 잠시 뒤 다시 실행하세요."),
@@ -41,9 +45,28 @@ FAILURES = {
                    "인증 점검 중 예기치 않은 오류가 났습니다. 이 단계의 로그를 확인하세요."),
 }
 KNOWN_CODES = frozenset(FAILURES)
+# 안내 문장에 들어가는 게시용 시크릿 이름의 기본값 = 영문 Blogger(blogger_macat)의 이름. 레지스트리의 그 블로그 secrets(역할 → 이름)를 못 받으면 이 이름을 쓴다.
+DEFAULT_SECRET_NAMES = {"blog_id": "BLOGGER_BLOG_ID", "client_id": "BLOGGER_CLIENT_ID",
+                        "client_secret": "BLOGGER_CLIENT_SECRET", "refresh_token": "BLOGGER_REFRESH_TOKEN"}
+# 시크릿 이름의 모양(pipeline/registry.py 의 _ENV_RE 와 같다: 대문자·숫자·밑줄). 이름은 ::error:: 주석에 그대로 들어가므로 이 모양이 아닌 값은 쓰지 않는다
+# (레지스트리 검증을 통과한 이름은 모두 이 모양이라 평소에는 걸리지 않는다. 직접 부른 호출이 이상한 값을 넘겨도 주석이 여러 줄이 되거나 명령 표기가 끼지 않게 하는 방어다).
+_SECRET_NAME_RX = re.compile(r"[A-Z][A-Z0-9_]{2,63}")
 # Blogger 호스트: <이름>.blogspot.com 또는 국가별 도메인(blogspot.kr · blogspot.co.uk · blogspot.com.au). 끝이 이 모양이어야 해서
 # 'x.blogspot.com.evil.example' 같은 다른 도메인은 Blogger 주소로 읽지 않는다.
 _BLOGSPOT_RX = re.compile(r"^([a-z0-9-]+)\.blogspot\.(?:com|[a-z]{2}|com?\.[a-z]{2})$")
+
+
+def secret_names_for(secrets=None):
+    """안내 문장에 쓸 게시용 시크릿 이름 넷(blog_id·client_id·client_secret·refresh_token → 이름).
+
+    secrets 는 레지스트리 블로그 항목의 secrets(역할 → 환경변수 이름)다. 없거나 그 역할이 없거나 올바른 이름 모양(대문자·숫자·밑줄)이 아니면 그 역할만
+    영문 Blogger 의 기본 이름을 쓴다. 값(시크릿 내용)은 다루지 않는다 — 이름만이다."""
+    given = secrets if isinstance(secrets, dict) else {}
+    names = {}
+    for role, default in DEFAULT_SECRET_NAMES.items():
+        name = given.get(role)
+        names[role] = name if isinstance(name, str) and _SECRET_NAME_RX.fullmatch(name) else default
+    return names
 
 
 def safe_code(code):
@@ -59,8 +82,12 @@ def label_for(code):
     return FAILURES[safe_code(code)][1]
 
 
-def sentence_for(code):
-    return FAILURES[safe_code(code)][2]
+def sentence_for(code, secrets=None):
+    """운영자에게 보이는 고정 안내 문장. 문장 속 시크릿 이름은 그 블로그의 이름이다(secrets = 레지스트리 블로그 항목의 secrets, 생략하면 영문 Blogger 의 이름)."""
+    sentence = FAILURES[safe_code(code)][2]
+    for role, name in secret_names_for(secrets).items():
+        sentence = sentence.replace("{" + role + "}", name)
+    return sentence
 
 
 def normalize_blog_url(url):
@@ -94,11 +121,12 @@ def urls_match(returned_url, expected_url):
     return bool(returned) and returned == expected
 
 
-def auth_check(publisher, expected_url):
+def auth_check(publisher, expected_url, secrets=None):
     """쓰기 없는 사전 점검. 통과하면 blogs.get 의 {'name', 'url'} 을 돌려주고(출력하지 말 것: 같은 계정의 다른 블로그일 수 있다),
     실패하면 PublishError(code)를 일으킨다. code 는 FAILURES 의 키다(분류·종료 코드는 위 표).
 
-    publisher 는 healthcheck() -> {'name': ..., 'url': ...} 를 가진 어댑터다(토큰 갱신과 blogs.get 은 그 안에서 한다)."""
+    publisher 는 healthcheck() -> {'name': ..., 'url': ...} 를 가진 어댑터다(토큰 갱신과 blogs.get 은 그 안에서 한다).
+    secrets 는 레지스트리 블로그 항목의 secrets 다: 오류 문구가 가리키는 블로그 ID 시크릿의 이름에만 쓴다(생략하면 영문 Blogger 의 BLOGGER_BLOG_ID)."""
     info = publisher.healthcheck()
     returned = info.get("url") if isinstance(info, dict) else None
     if not isinstance(returned, str) or not returned.strip():
@@ -106,6 +134,6 @@ def auth_check(publisher, expected_url):
     if not urls_match(returned, expected_url):
         # 응답의 주소는 문구에 넣지 않는다: 잘못 넣은 ID 가 같은 계정의 다른(비공개일 수 있는) 블로그를 가리키면
         # 그 주소가 공개 저장소의 Actions 로그·이력에 남는다.
-        raise PublishError("BLOGGER_BLOG_ID 가 가리키는 블로그의 주소가 레지스트리의 url 과 다릅니다"
+        raise PublishError(f"{secret_names_for(secrets)['blog_id']} 가 가리키는 블로그의 주소가 레지스트리의 url 과 다릅니다"
                            "(응답 주소는 다른 블로그일 수 있어 출력하지 않습니다)", code="blog_mismatch")
     return info

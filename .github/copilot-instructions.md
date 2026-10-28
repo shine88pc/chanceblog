@@ -23,6 +23,10 @@
 
 광고 표면(`index.html`, `privacy.md`, `about.md`, `contact.md`, `_includes/`, `_layouts/`, `_config.yml`, `robots.txt`, `ads.txt`), `.github/workflows/`, `pipeline/`, `scripts/`, 비밀 파일. 광고 코드(`adsbygoogle`, `ca-pub-`)는 어떤 경우에도 추가·삭제하지 않는다.
 
+## 운영자 요청함 이슈는 수정 요청이 아니다
+
+이슈 제목이 `[답변] `·`[요청] ` 로 시작하면 운영자 요청함의 응답·새 일 요청이다(`blog-control` 라벨이 없고 위 수정 양식과 무관). 승인은 이슈 작성자 login 이 저장소 소유자이고 **그리고** `author_association` 이 `OWNER` 이며, 양식 `[답변]` 의 요청 번호가 AI 가 보낸 요청의 번호와 같을 때만 그 요청 파일에 적힌 항목에 한해서 승인으로 본다. 양식 `[요청]`·양식 밖의 빈 이슈·이슈 코멘트·요청서 파일은 접수만 하고 승인이 아니다(T3 가 필요하면 AI 가 번호 있는 `decision` 요청으로 다시 묻는다).(AGENTS.md 8번) 이 이슈로 파일을 고치는 PR 을 스스로 만들지 않는다.
+
 ## 읽을 문서
 
 [`HANDLER.md`](../HANDLER.md) · [`docs/SECURITY_GUARDRAILS.md`](../docs/SECURITY_GUARDRAILS.md) · 코드 작업이면 [`docs/ENGINEERING_GUIDE.md`](../docs/ENGINEERING_GUIDE.md)

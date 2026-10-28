@@ -122,7 +122,7 @@ class RealRegistryEnglishTest(unittest.TestCase):
         self.assertEqual(blog["secrets"], {"llm_api_key": "GEMINI_API_KEY", "blog_id": "BLOGGER_BLOG_ID", "client_id": "BLOGGER_CLIENT_ID",
                                             "client_secret": "BLOGGER_CLIENT_SECRET", "refresh_token": "BLOGGER_REFRESH_TOKEN"})
         self.assertEqual((blog["platform"], blog["url"], blog["workflow"], blog["entrypoint"]),
-                         ("blogger", "https://macat0722.blogspot.com/", ".github/workflows/blogger.yml", "blogger_generator.py"))
+                         ("blogger", "https://macat0722.blogspot.com/", ".github/workflows/blogger-en.yml", "blogger_generator.py"))     # 영문 채널 래퍼(공용 로직은 blogger.yml)
         self.assertEqual((blog["schedule"], blog["limits"], blog["state"]),
                          ({"cron": "0 2 * * *"}, {"max_posts_per_day": 1},
                           {"history": "blogger_history.json", "content_dir": "_blogger_drafts"}))

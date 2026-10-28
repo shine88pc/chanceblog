@@ -28,6 +28,7 @@ except ImportError:  # pragma: no cover - 환경에 따라 다름
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from pipeline import operator_loop as loop_mod  # noqa: E402
 from pipeline import registry as reg_mod  # noqa: E402
 from pipeline.console import one_line, safe_output  # noqa: E402
 from pipeline.secret_patterns import SECRET_PATTERNS  # noqa: E402
@@ -250,6 +251,15 @@ def _walk_strings(node, path=()):
             yield from _walk_strings(value, path + (index,))
 
 
+_LOCAL_REUSABLE_USES = re.compile(r"\./\.github/workflows/[A-Za-z0-9._\-]+\.ya?ml")
+
+
+def _is_local_reusable_call(job):
+    """이 저장소 안의 재사용 워크플로를 부르는 잡인가(`uses: ./.github/workflows/<파일>.yml`). 다른 저장소의 `owner/repo/.github/workflows/x.yml@ref` 는 아니다."""
+    uses = job.get("uses") if isinstance(job, dict) else None
+    return isinstance(uses, str) and _LOCAL_REUSABLE_USES.fullmatch(uses.strip()) is not None
+
+
 def check_telegram_secrets(root, files):
     """WF-13: 텔레그램 시크릿(TELEGRAM_BOT_TOKEN·TELEGRAM_CHAT_ID)은 워크플로의 **단계 env 값**으로만 나타난다 — 같은 이름의 환경변수에
     `${{ secrets.그 이름 }}` 그대로. run 본문·with·if·job/워크플로 env·outputs·이름 등 어디에도 나타나면 오류다.
@@ -259,8 +269,15 @@ def check_telegram_secrets(root, files):
     (G-C12). 문자열 안에 두 이름 중 하나라도 들어 있으면(`$TELEGRAM_BOT_TOKEN`·`${TELEGRAM_CHAT_ID}` 처럼 환경변수를 셸에서 펼치는 것 포함, 대소문자를 바꾼
     `secrets.telegram_bot_token` 도 같은 시크릿이라 같게 본다) 허용된 모양이 아닌 한 오류다.
 
-    한계(문서에도 적었다): 이름이 **글자로** 나오는 곳만 본다 — `toJSON(secrets)`·`secrets[format(…)]`·`secrets: inherit` 처럼 이름 없이 시크릿을 넘기는 길과,
-    외부 `uses:` 단계의 env 는 못 잡는다. 호출 쪽 재사용 워크플로의 `secrets:` 매핑(`jobs.<잡>.secrets.TELEGRAM_*`)은 허용된 자리가 아니라 오류다."""
+    재사용 워크플로(`on: workflow_call`)를 쓸 때 시크릿이 지나가는 길이 둘 더 있어 그 자리만 정확히 허용한다(작업 D, 독립 검증 N-4):
+      ① 부르는 쪽 `jobs.<잡>.secrets.<이름>: ${{ secrets.<같은 이름> }}` — 이 저장소 안의 재사용 워크플로(`uses: ./.github/workflows/…`)를 부르는 잡이어야 한다.
+         다른 저장소의 워크플로로 텔레그램 시크릿을 넘기는 것은 오류다.
+      ② 부르는 대상 `on.workflow_call.secrets.<이름>` 의 정의 — 이름은 정확히 대문자, 항목은 `required`·`description` 뿐, 선택(`required: true` 가 아님)이어야 한다
+         (필수로 정의하면 시크릿을 등록하지 않은 저장소에서 호출이 통째로 실패한다. 알림은 보조다). 부르는 대상에서 시크릿을 쓰는 자리는 여전히 단계 env 뿐이다.
+    `jobs.<잡>.secrets: inherit` 는 시크릿을 이름 없이 모두 넘기므로(텔레그램 시크릿 포함) 오류다 — 필요한 것만 이름으로 적는다.
+
+    한계(문서에도 적었다): 이름이 **글자로** 나오는 곳만 본다 — `toJSON(secrets)`·`secrets[format(…)]` 처럼 이름 없이 시크릿을 쓰는 길과,
+    외부 `uses:` 단계의 env 는 못 잡는다."""
     if yaml is None:
         return []  # PyYAML 이 없다는 경고는 WF-0(check_workflows)이 이미 낸다
     out = []
@@ -271,17 +288,48 @@ def check_telegram_secrets(root, files):
             continue
         if not isinstance(data, dict):
             continue
+        jobs = data.get("jobs") if isinstance(data.get("jobs"), dict) else {}
         for path, value in _walk_strings(data):
             names = sorted({found.upper() for found in _TELEGRAM_NAME.findall(value)})
             if not names:
                 continue
             in_step_env = len(path) == 6 and path[0] == "jobs" and path[2] == "steps" and path[4] == "env"
-            match = _TELEGRAM_ENV_VALUE.fullmatch(value.strip()) if in_step_env else None
-            if match is None or match.group(1) != path[5]:       # 단계 env 의 같은 이름 환경변수에 `${{ secrets.이름 }}` 그대로일 때만 허용
+            in_call_secrets = len(path) == 4 and path[0] == "jobs" and path[2] == "secrets" and _is_local_reusable_call(jobs.get(path[1]))
+            allowed_name = path[5] if in_step_env else path[3] if in_call_secrets else None
+            match = _TELEGRAM_ENV_VALUE.fullmatch(value.strip()) if allowed_name is not None else None
+            # 단계 env 의 같은 이름 환경변수, 또는 재사용 워크플로를 부르는 잡의 secrets 의 같은 이름 항목에 `${{ secrets.이름 }}` 그대로일 때만 허용
+            if match is None or match.group(1) != allowed_name:
                 where = ".".join(str(part) for part in path)
                 out.append(err("WF-13", f"텔레그램 시크릿 이름({', '.join(names)})이 허용되지 않은 자리({where})에 있습니다 — 단계의 env 에서 같은 이름의 환경변수로만 "
-                                        "`${{ secrets.이름 }}` 그대로 넘기세요(run·with·if·job/워크플로 env 에는 쓰지 않습니다). "
-                                        "토큰이 셸 명령 줄이나 로그로 새는 길을 막는 규칙입니다 (G-C12)", rel))
+                                        "`${{ secrets.이름 }}` 그대로 넘기세요(run·with·if·job/워크플로 env 에는 쓰지 않습니다. 이 저장소의 재사용 워크플로를 부르는 잡은 "
+                                        "`secrets:` 에 같은 이름으로만 넘길 수 있습니다). 토큰이 셸 명령 줄이나 로그로 새는 길을 막는 규칙입니다 (G-C12)", rel))
+        for job_id, job in jobs.items():
+            secrets = job.get("secrets") if isinstance(job, dict) else None
+            if isinstance(secrets, str) and secrets.strip().lower() == "inherit":
+                out.append(err("WF-13", f"jobs.{job_id}.secrets 가 inherit 입니다 — 텔레그램 시크릿을 포함해 모든 시크릿이 이름 없이 넘어갑니다. "
+                                        "부르는 쪽 잡의 secrets 에 필요한 시크릿만 이름으로 적으세요(`secrets: inherit` 는 쓰지 않습니다) (G-C12)", rel))
+            elif isinstance(secrets, dict):
+                for key, value in secrets.items():
+                    # 값에 텔레그램 이름이 있으면 위 문자열 검사가 이미 알렸다. 키만 텔레그램 이름이고 값이 다른 것(다른 시크릿을 그 이름으로 넘기는 것)을 잡는다
+                    if isinstance(key, str) and _TELEGRAM_NAME.fullmatch(key) and not (isinstance(value, str) and _TELEGRAM_NAME.search(value)):
+                        out.append(err("WF-13", f"jobs.{job_id}.secrets.{key} 는 텔레그램 시크릿 이름인데 값이 같은 이름의 `${{{{ secrets.{key.upper()} }}}}` 가 아닙니다 — "
+                                                "다른 값을 그 이름으로 넘기지 마세요 (G-C12)", rel))
+        workflow_call = _triggers(data).get("workflow_call")
+        declared = workflow_call.get("secrets") if isinstance(workflow_call, dict) else None
+        for key, spec in (declared.items() if isinstance(declared, dict) else []):
+            if not (isinstance(key, str) and _TELEGRAM_NAME.fullmatch(key)):
+                continue
+            where = f"on.workflow_call.secrets.{key}"
+            if key != key.upper():
+                out.append(err("WF-13", f"{where}: 텔레그램 시크릿의 정의 이름은 정확히 대문자({key.upper()})여야 합니다 — 이름이 다르면 부르는 쪽·단계 env 의 이름과 어긋납니다 (G-C12)", rel))
+            if spec is not None and not isinstance(spec, dict):
+                out.append(err("WF-13", f"{where}: 정의는 required·description 만 가진 항목이어야 합니다 (G-C12)", rel))
+            elif isinstance(spec, dict):
+                extra = sorted(str(item) for item in set(spec) - {"required", "description"})
+                if extra:
+                    out.append(err("WF-13", f"{where}: 정의에 허용되지 않은 항목이 있습니다({', '.join(extra)}) — required·description 만 쓸 수 있습니다 (G-C12)", rel))
+                if spec.get("required") is True:
+                    out.append(err("WF-13", f"{where}: required: true 로 정의하면 시크릿을 등록하지 않은 저장소에서 호출이 통째로 실패합니다 — 알림은 보조라 선택(required: false)으로 둡니다 (G-C12)", rel))
     return out
 
 
@@ -452,6 +500,330 @@ def check_registry(root, files):
         if code_models and code_models != reg_models:
             out.append(warn("REG-4", f"generator.py MODEL_CANDIDATES {code_models} 가 레지스트리 {reg_models} 와 다릅니다 "
                                      "(모델 목록은 한 곳에서 관리)", "generator.py"))
+    return out
+
+
+# Blogger 채널 래퍼(blogger-en.yml·blogger-ko.yml)가 부르는 공용 워크플로와 그 입력. 공용 워크플로 쪽 정의는 actionlint 가 래퍼의 호출과 대조한다.
+BLOGGER_REUSABLE = "./.github/workflows/blogger.yml"
+BLOGGER_CALL_INPUTS = ("blog", "topic", "dry_run", "publish", "auth_check")
+_CALL_SECRET_VALUE = re.compile(r"\$\{\{\s*secrets\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
+
+
+def _blogger_wrapper_errors(rel, data, blog, all_keys):
+    """래퍼 한 개(워크플로 파일 rel, 파싱한 data)가 레지스트리 블로그 blog 와 맞는지: (오류 문구 목록, 최상위 concurrency 줄 이름 또는 None)."""
+    key = blog["key"]
+    problems = []
+    jobs = data.get("jobs") if isinstance(data.get("jobs"), dict) else {}
+    calls = {job_id: job for job_id, job in jobs.items() if isinstance(job, dict) and str(job.get("uses", "")).strip() == BLOGGER_REUSABLE}
+    if len(calls) != 1:
+        return [f"블로그 '{key}' 의 워크플로 {rel} 는 공용 워크플로({BLOGGER_REUSABLE[2:]})를 부르는 잡이 정확히 하나여야 합니다(지금 {len(calls)}개) — "
+                "Blogger 블로그의 워크플로는 공용 로직을 직접 갖지 않고 채널별 래퍼로 부릅니다(docs/ARCHITECTURE.md §2-1)"], None
+    job_id, job = next(iter(calls.items()))
+    given = job.get("with") if isinstance(job.get("with"), dict) else {}
+    if given.get("blog") != key:
+        problems.append(f"{rel} 의 jobs.{job_id}.with.blog 가 {given.get('blog')!r} 입니다 — 이 래퍼의 블로그(레지스트리 key)인 {key!r} 이어야 합니다"
+                        "(식이 아니라 글자 그대로. 다른 블로그의 key 를 넘기면 그 블로그가 이 채널 이름으로 돕니다)")
+    missing, extra = sorted(set(BLOGGER_CALL_INPUTS) - set(given)), sorted(str(name) for name in set(given) - set(BLOGGER_CALL_INPUTS))
+    if missing or extra:
+        problems.append(f"{rel} 의 jobs.{job_id}.with 는 {', '.join(BLOGGER_CALL_INPUTS)} 를 모두 명시해야 합니다(빠진 것: {', '.join(missing) or '없음'} / 모르는 것: "
+                        f"{', '.join(extra) or '없음'}) — 정기·수동 판단은 래퍼가 하고 공용 워크플로는 부르는 쪽 이벤트를 가정하지 않습니다")
+    wanted = {"PIPELINE_SECRET_" + role.upper(): name for role, name in blog["secrets"].items()}
+    passed = job.get("secrets") if isinstance(job.get("secrets"), dict) else {}
+    for secret, name in sorted(wanted.items()):
+        match = _CALL_SECRET_VALUE.fullmatch(str(passed.get(secret, "")).strip())
+        if match is None or match.group(1) != name:
+            problems.append(f"{rel} 의 jobs.{job_id}.secrets.{secret} 는 `${{{{ secrets.{name} }}}}` 여야 합니다(레지스트리 블로그 '{key}' 의 시크릿 이름) — "
+                            f"지금 {passed.get(secret)!r}. 한글 Blogger 는 영문과 다른 계정·OAuth 클라이언트를 쓰므로 다른 블로그의 시크릿 이름을 넘기면 안 됩니다")
+    unknown = sorted(str(name) for name in passed if name not in wanted and not (isinstance(name, str) and _TELEGRAM_NAME.fullmatch(name)))
+    if unknown:
+        problems.append(f"{rel} 의 jobs.{job_id}.secrets 에 이 블로그의 것이 아닌 시크릿이 있습니다({', '.join(unknown)}) — 역할 이름(PIPELINE_SECRET_<역할>)과 "
+                        "텔레그램 알림용 두 개만 넘길 수 있습니다")
+    permissions = job.get("permissions")
+    if not (isinstance(permissions, dict) and permissions.get("contents") == "write"):
+        problems.append(f"{rel} 의 jobs.{job_id} 에 permissions: contents: write 가 없습니다 — 재사용 워크플로의 권한은 부르는 쪽이 정한 범위를 넘을 수 없어, "
+                        "없으면 공용 워크플로가 이력·초안을 커밋하지 못합니다")
+    elif permissions != {"contents": "write"}:
+        extra = ", ".join(sorted(str(name) for name in permissions if name != "contents"))     # contents 가 write 인데 다르다면 다른 키가 더 있다는 뜻이다
+        problems.append(f"{rel} 의 jobs.{job_id}.permissions 에 contents: write 외의 권한이 있습니다({extra}) — 호출 잡의 권한은 정확히 "
+                        "`contents: write` 하나여야 합니다. 공용 워크플로가 이력·초안을 커밋하는 데 필요한 것은 그것뿐이고, 호출 잡 권한은 공용 워크플로가 쓸 수 있는 상한이라 "
+                        "id-token·issues 같은 추가 권한을 여기서 열면 안 됩니다")
+    group = (data.get("concurrency") or {}).get("group") if isinstance(data.get("concurrency"), dict) else None
+    if not isinstance(group, str) or not group.strip():
+        problems.append(f"{rel} 에 최상위 concurrency.group 이 없습니다 — 같은 채널의 실행이 겹치지 않게 줄을 세웁니다")
+    elif group.strip().lower() in {f"blogger-{other}".lower() for other in all_keys}:
+        problems.append(f"{rel} 의 concurrency.group({group.strip()!r}) 이 공용 워크플로 안의 블로그별 줄(`blogger-<블로그 key>`)과 같습니다(GitHub 은 줄 이름의 "
+                        "대소문자를 구분하지 않습니다) — 이름이 같으면 부르는 쪽과 불린 잡이 서로를 기다려 멈춥니다. 다른 이름을 쓰세요")
+    return problems, (group.strip() if isinstance(group, str) else None)
+
+
+def check_blogger_wrappers(root, files):
+    """REG-6: Blogger 블로그의 워크플로(채널별 래퍼)가 레지스트리와 맞는지. blogger.yml 이 재사용 워크플로가 되면서 '어느 블로그를 어느 시크릿으로 돌리는지'가
+    레지스트리가 아니라 래퍼의 글자로 정해지므로, 둘이 어긋나는 것을 PR 단계에서 잡는다: ① 래퍼가 부르는 `with.blog` 가 그 래퍼를 `workflow` 로 가진 블로그의 key 와
+    같다 ② `with` 가 다섯 입력을 모두 명시한다 ③ 넘기는 시크릿(역할 이름)이 레지스트리의 그 블로그 시크릿 이름과 정확히 같고 다른 블로그의 것이 없다(영문·한글이 계정과
+    OAuth 클라이언트를 공유하지 않는 보장) ④ 부르는 잡의 permissions 가 정확히 `{contents: write}` 하나다(id-token·issues 같은 추가 권한은 오류) ⑤ 래퍼의 concurrency
+    줄 이름이 채널마다 다르고 공용 워크플로 안의 줄과 같지 않다(GitHub 처럼 대소문자는 구분하지 않고 비교한다).
+    정기·수동 입력의 식(연습 실행 기본값 등)은 tests/test_blogger_split.py 가 모든 이벤트·입력 조합으로 대조한다. 레지스트리 오류는 REG-1 이 알린다."""
+    if yaml is None:
+        return []  # PyYAML 이 없다는 경고는 WF-0(check_workflows)이 이미 낸다
+    path = Path(root) / "pipeline" / "blogs.json"
+    try:
+        reg = reg_mod.load_registry(path)
+    except reg_mod.RegistryError:
+        return []  # REG-0
+    if reg_mod.validate_registry(reg, root):
+        return []  # REG-1
+    blogs = [reg_mod.merged_blog(reg, raw) for raw in reg["blogs"]]
+    all_keys = [blog["key"] for blog in blogs]
+    out, seen_groups = [], {}
+    for blog in blogs:
+        if blog.get("platform") != "blogger":
+            continue
+        rel = blog["workflow"]
+        try:
+            data = _load_yaml(read_text(root, rel) or "")
+        except yaml.YAMLError:
+            continue  # WF-0
+        if not isinstance(data, dict):
+            continue
+        problems, group = _blogger_wrapper_errors(rel, data, blog, all_keys)
+        out.extend(err("REG-6", message, rel) for message in problems)
+        if group:
+            folded = group.lower()      # GitHub 은 concurrency 그룹 이름의 대소문자를 구분하지 않는다('Blogger-EN' 과 'blogger-en' 은 같은 줄이다)
+            if folded in seen_groups:
+                other_rel, other_group = seen_groups[folded]
+                out.append(err("REG-6", f"{rel} 의 concurrency.group({group!r}) 이 {other_rel} 의 {other_group!r} 와 같습니다(대소문자는 구분하지 않습니다) — "
+                                        "채널마다 다른 줄을 써야 영문·한글 실행이 서로를 막지 않습니다", rel))
+            seen_groups[folded] = (rel, group)
+    return out
+
+
+# ----------------------------------------------------------------------------
+# 운영자 요청함(작업 H, 2026-10-28): AI 요청 알림·응답 접수 워크플로(WF-14), 요청 파일(REQ-1), 이슈 양식(FORM-1)
+# ----------------------------------------------------------------------------
+AI_REQUEST_WORKFLOW = ".github/workflows/ai-request.yml"
+OPERATOR_REPLY_WORKFLOW = ".github/workflows/operator-reply.yml"
+REPLY_FORM = ".github/ISSUE_TEMPLATE/ai-reply.yml"
+TASK_FORM = ".github/ISSUE_TEMPLATE/ai-task.yml"
+ISSUE_CONFIG = ".github/ISSUE_TEMPLATE/config.yml"
+_TELEGRAM_ENV = {"TELEGRAM_BOT_TOKEN": "${{ secrets.TELEGRAM_BOT_TOKEN }}", "TELEGRAM_CHAT_ID": "${{ secrets.TELEGRAM_CHAT_ID }}"}
+_AI_REQUEST_ENV = {"BEFORE_SHA": "${{ github.event.before }}", "AFTER_SHA": "${{ github.sha }}",
+                   "DEFAULT_BRANCH": "${{ github.event.repository.default_branch }}", **_TELEGRAM_ENV}
+_OPERATOR_REPLY_ENV = {"GITHUB_TOKEN": "${{ secrets.GITHUB_TOKEN }}", **_TELEGRAM_ENV}
+_REPLY_JOB_IF = "github.event.issue.user.login == github.repository_owner && github.event.issue.author_association == 'OWNER'"
+_JOB_KEYS = {"name", "runs-on", "timeout-minutes", "steps"}
+_STEP_KEYS = {"name", "uses", "with", "env", "run"}
+
+
+def _shown(value):
+    """저장소 파일에서 온 값을 오류 문구에 쓸 때: 한 줄로 접고(줄바꿈·`::`·`##[` 무력화) 40자로 줄인다(G-L2)."""
+    return one_line(str(value)[:40])
+
+
+def _operator_workflow_problems(data, kind):
+    """작업 H 의 두 워크플로(kind: request·reply)가 정해진 모양인지(WF-14). 문제 문구 목록을 돌려준다.
+
+    '허용 목록' 방식이다 — 트리거·권한·job·단계의 키와 값이 정확히 정해진 것이어야 하고, 그 밖의 것(다른 트리거·더 큰 권한·job/워크플로 env·시크릿 매핑·`if`·`continue-on-error`·
+    추가 단계·`run` 안의 GitHub 표현식 등)은 모두 문제다. 이 워크플로들은 누구나 쓸 수 있는 외부 입력(이슈 글·브랜치 이름)을 만지고 텔레그램 시크릿을 쓰므로 바뀔 때마다
+    규칙(docs/SECURITY_GUARDRAILS.md G-S9·G-C13)과 이 검사를 함께 고치게 한다."""
+    problems = []
+    reply = kind == "reply"
+    triggers, permissions = _triggers(data), data.get("permissions")
+    if reply:
+        if set(triggers) != {"issues"} or triggers.get("issues") != {"types": ["opened"]}:
+            problems.append(f"트리거는 `issues: types: [opened]` 하나뿐이어야 합니다(지금 {_shown(sorted(map(str, triggers)))}) — pull_request_target·issue_comment·workflow_run·수정·라벨 이벤트로 "
+                            "넓히면 낯선 사람이 시크릿에 닿거나 같은 이슈를 여러 번 처리하게 됩니다")
+        wanted_permissions = {"contents": "read", "issues": "write"}
+    else:
+        if set(triggers) != {"push"} or triggers.get("push") != {"branches": ["ai/claude/**"]}:
+            problems.append(f"트리거는 `push: branches: ['ai/claude/**']` 하나뿐이어야 합니다(지금 {_shown(sorted(map(str, triggers)))}) — paths·paths-ignore·tags·branches-ignore 같은 다른 필터도 쓰지 않습니다"
+                            "(새 브랜치의 첫 push 에서 paths 필터가 어떻게 평가되는지 확인하지 못했습니다)")
+        wanted_permissions = {"contents": "read"}
+    if permissions != wanted_permissions:
+        problems.append(f"최상위 permissions 는 정확히 {wanted_permissions} 이어야 합니다(지금 {_shown(permissions)})")
+    if "env" in data or "defaults" in data:
+        problems.append("워크플로 수준 env·defaults 를 두지 않습니다(값은 마지막 단계의 env 로만 넘깁니다)")
+    concurrency = data.get("concurrency")
+    group = concurrency.get("group") if isinstance(concurrency, dict) else None
+    needed = "github.event.issue.number" if reply else "github.sha"
+    if not (isinstance(group, str) and needed in group) or concurrency.get("cancel-in-progress") is not False:
+        problems.append(f"concurrency.group 에 `{needed}` 가 있고 cancel-in-progress 가 false 여야 합니다(지금 {_shown(concurrency)})"
+                        + ("" if reply else " — 같은 그룹에서 대기 중인 실행은 새 실행이 오면 취소돼 그 push 의 요청 파일을 아무도 알리지 못하므로 그룹을 push 마다 다르게 둡니다"))
+    jobs = data.get("jobs")
+    if not isinstance(jobs, dict) or len(jobs) != 1 or not isinstance(next(iter(jobs.values())), dict):
+        return problems + ["job 은 정확히 하나여야 합니다"]
+    job = next(iter(jobs.values()))
+    extra = sorted(str(key) for key in set(job) - _JOB_KEYS - ({"if"} if reply else set()))
+    if extra:
+        problems.append(f"job 에 허용되지 않은 키가 있습니다({_shown(', '.join(extra))}) — job 수준 permissions·env·secrets·uses·strategy·continue-on-error 등을 두지 않습니다")
+    if reply and " ".join(str(job.get("if")).split()) != _REPLY_JOB_IF:
+        problems.append(f"job 의 if 는 정확히 `{_REPLY_JOB_IF}` 여야 합니다(소유자가 연 이슈만, 이중 방어 — 지금 {_shown(job.get('if'))})")
+    if not reply and "if" in job:
+        problems.append("job 에 if 를 두지 않습니다")
+    timeout = job.get("timeout-minutes")
+    if job.get("runs-on") != "ubuntu-latest" or isinstance(timeout, bool) or not isinstance(timeout, int) or not 1 <= timeout <= 10:
+        problems.append("job 은 runs-on: ubuntu-latest 이고 timeout-minutes 가 1~10 이어야 합니다")
+    steps = job.get("steps")
+    if not isinstance(steps, list) or len(steps) != 3 or not all(isinstance(step, dict) for step in steps):
+        return problems + ["단계는 정확히 셋(checkout·setup-python·파이썬 실행)이어야 합니다"]
+    for step in steps:
+        extra = sorted(str(key) for key in set(step) - _STEP_KEYS)
+        if extra:
+            problems.append(f"단계에 허용되지 않은 키가 있습니다({_shown(', '.join(extra))}) — if·continue-on-error·shell·working-directory 등을 두지 않습니다")
+    checkout, python, run = steps
+    with_ = checkout.get("with") if isinstance(checkout.get("with"), dict) else {}
+    allowed_with = {"persist-credentials"} if reply else {"persist-credentials", "fetch-depth"}
+    if (not str(checkout.get("uses", "")).startswith("actions/checkout@") or with_.get("persist-credentials") is not False or set(with_) - allowed_with
+            or (not reply and with_.get("fetch-depth") != 0) or "env" in checkout or "run" in checkout):
+        problems.append("첫 단계는 actions/checkout 이어야 하고 with 는 persist-credentials: false"
+                        + ("" if reply else "·fetch-depth: 0") + " 뿐이어야 합니다"
+                        + (" — ref·repository·token 을 바꾸면 기본 브랜치가 아닌 코드(이슈 글에서 온 값)를 내려받을 수 있습니다" if reply else ""))
+    if not str(python.get("uses", "")).startswith("actions/setup-python@") or "run" in python or "env" in python:
+        problems.append("둘째 단계는 actions/setup-python 이어야 합니다")
+    wanted_run = f"python -m pipeline.operator_loop {'ack' if reply else 'requests'}"
+    wanted_env = _OPERATOR_REPLY_ENV if reply else _AI_REQUEST_ENV
+    env = run.get("env") if isinstance(run.get("env"), dict) else {}
+    if "uses" in run or str(run.get("run", "")).strip() != wanted_run:
+        problems.append(f"마지막 단계의 run 은 정확히 `{wanted_run}` 한 줄이어야 합니다(값은 run 에 끼우지 않고 env 로만 넘깁니다 — `${{{{ }}}}` 표현식 금지)")
+    if {str(key): str(value).strip() for key, value in env.items()} != wanted_env:
+        problems.append(f"마지막 단계의 env 는 정확히 {', '.join(wanted_env)} 여야 하고 각 값은 정해진 표현식 하나뿐이어야 합니다(텔레그램 시크릿은 같은 이름의 환경변수로만, WF-13)")
+    return problems
+
+
+def check_operator_workflows(root, files):
+    """WF-14: 운영자 요청함의 두 워크플로(`ai-request.yml`: ai/claude/** push 로 요청 파일을 텔레그램에 알림 / `operator-reply.yml`: 소유자가 연 응답 이슈를 접수 확인)가 정해진 모양인지.
+    트리거 집합·권한·job `if`·단계·env 가 허용 목록과 정확히 같아야 한다(docs/SECURITY_GUARDRAILS.md G-S9·G-C13). 시크릿 이름의 위치는 WF-13 이 따로 본다."""
+    if yaml is None:
+        return []  # PyYAML 이 없다는 경고는 WF-0(check_workflows)이 이미 낸다
+    out = []
+    for rel, kind in ((AI_REQUEST_WORKFLOW, "request"), (OPERATOR_REPLY_WORKFLOW, "reply")):
+        if rel not in files:
+            continue
+        try:
+            data = _load_yaml(read_text(root, rel) or "")
+        except yaml.YAMLError:
+            continue  # WF-0
+        if not isinstance(data, dict):
+            continue  # WF-0
+        out.extend(err("WF-14", message, rel) for message in _operator_workflow_problems(data, kind))
+    return out
+
+
+def check_request_files(root, files):
+    """REQ-1: `인수인계/요청함/` 의 요청 파일(`R-001_짧은-영문-설명.md`)이 정해진 모양인지 — 파일 이름·앞머리(id·kind·title·summary·urgency·pr·created)·id 와 이름의 일치·
+    제목 80자·요약 300자·중복 id 없음. 이 모양을 지킨 파일만 push 때 텔레그램으로 알려진다(pipeline/operator_loop.py). README.md 는 설명 문서라 건너뛴다."""
+    out, seen = [], {}
+    prefix = loop_mod.REQUEST_DIR + "/"
+    for rel in files:
+        if not rel.startswith(prefix):
+            continue
+        rest = rel[len(prefix):]
+        base = rest.rsplit("/", 1)[-1]
+        if "/" in rest:
+            if base.upper().startswith("R-"):
+                out.append(err("REQ-1", f"요청 파일은 `{loop_mod.REQUEST_DIR}/` 바로 아래에 둡니다(하위 폴더의 파일은 알림이 가지 않습니다)", rel))
+            continue
+        if rest == "README.md":
+            continue
+        if not base.upper().startswith("R-"):
+            out.append(warn("REQ-1", "요청 파일 이름이 `R-001_짧은-영문-설명.md` 모양이 아니라 push 해도 알림이 가지 않습니다(설명 문서는 README.md)", rel))
+            continue
+        text = read_text(root, rel)
+        if text is None:
+            out.append(err("REQ-1", "요청 파일을 읽을 수 없습니다(텍스트가 아니거나 너무 큽니다)", rel))
+            continue
+        try:
+            request = loop_mod.parse_request(base, text, strict=True)
+        except loop_mod.RequestError as exc:
+            out.append(err("REQ-1", one_line(loop_mod.problem_text(exc.code)), rel))
+            continue
+        if request.id in seen:
+            out.append(err("REQ-1", f"요청 번호 {request.id} 가 {seen[request.id]} 와 같습니다 — 요청 번호는 파일마다 달라야 합니다(답 이슈가 어느 요청인지 가려야 합니다)", rel))
+        seen.setdefault(request.id, rel)
+    return out
+
+
+def _form_problems(data, title, label, fields, required, types, options, notice_phrases=(), defaults=None):
+    """이슈 양식 한 개(파싱한 data)가 loop_mod 의 정의와 같은지(FORM-1). 문제 문구 목록.
+    notice_phrases: 맨 위 안내 글에 더 있어야 하는 문장들(`[요청]` 양식의 'T3 승인이 아닙니다' 등). defaults: {드롭다운 id: 미리 선택돼야 하는 선택지 번호} — 안전한 선택지가
+    미리 골라져 있게(독립 검증 N-3: 요청 번호만 쓰고 올려도 `승인` 이 되지 않게)."""
+    if not isinstance(data, dict):
+        return ["양식이 객체가 아닙니다"]
+    problems = []
+    if data.get("title") != title:
+        problems.append(f"title 은 정확히 `{title}` 여야 합니다(지금 {_shown(data.get('title'))}) — 접수 워크플로가 제목 머리로 양식을 알아봅니다")
+    if data.get("labels") != [label]:
+        problems.append(f"labels 는 정확히 [`{label}`] 여야 합니다(지금 {_shown(data.get('labels'))}) — `blog-control` 이 있으면 `[Chance] 이슈 수정 요청 처리(수정안 PR 만들기)` 가 반응합니다")
+    body = data.get("body")
+    if not isinstance(body, list) or not body or not all(isinstance(item, dict) for item in body):
+        return problems + ["body 가 항목 목록이 아닙니다"]
+    notice = body[0]
+    if notice.get("type") != "markdown" or loop_mod.FORM_NOTICE not in str((notice.get("attributes") or {}).get("value", "")):
+        problems.append(f"맨 위 항목은 안내 글(markdown)이고 `{loop_mod.FORM_NOTICE}` 문장이 있어야 합니다(공개 이슈에 비밀 값이 적히는 것을 막는 안내)")
+    notice_text = str((notice.get("attributes") or {}).get("value", "")) if notice.get("type") == "markdown" else ""
+    for phrase in notice_phrases:
+        if phrase not in notice_text:
+            problems.append(f"맨 위 안내 글에 `{phrase}` 문장이 있어야 합니다")
+    inputs = list(body[1:])
+    ids = [item.get("id") for item in inputs]
+    if len(ids) != len(set(map(str, ids))):
+        problems.append("항목 id 가 겹칩니다")
+    if sorted(map(str, ids)) != sorted(field_id for field_id, _ in fields):
+        problems.append(f"항목 id 가 정확히 {', '.join(field_id for field_id, _ in fields)} 여야 합니다(지금 {_shown(', '.join(map(str, ids)))})")
+    for item in inputs:
+        field_id = str(item.get("id"))
+        wanted = dict(fields).get(field_id)
+        if wanted is None:
+            continue
+        shown = (item.get("attributes") or {}).get("label")
+        if shown != wanted:
+            problems.append(f"{field_id} 의 label 은 정확히 `{wanted}` 여야 합니다(지금 {_shown(shown)}) — 접수 코드가 이슈 본문의 `### {wanted}` 제목으로 값을 읽습니다")
+        if item.get("type") != types[field_id]:
+            problems.append(f"{field_id} 의 type 은 {types[field_id]} 여야 합니다")
+        if bool((item.get("validations") or {}).get("required")) != (field_id in required):
+            problems.append(f"{field_id} 는 필수 여부(validations.required)가 {'참' if field_id in required else '거짓'} 이어야 합니다")
+        if field_id in options and (item.get("attributes") or {}).get("options") != options[field_id]:
+            problems.append(f"{field_id} 의 options 는 정확히 {_shown(options[field_id])} 이어야 합니다(접수 코드가 이 문구와 글자 그대로 견줍니다)")
+        if field_id in (defaults or {}):
+            default = (item.get("attributes") or {}).get("default")
+            if isinstance(default, bool) or default != defaults[field_id]:
+                problems.append(f"{field_id} 의 default 는 {defaults[field_id]}(첫 선택지, 안전한 쪽이 미리 선택됨)여야 합니다(지금 {_shown(default)})")
+    return problems
+
+
+def check_operator_forms(root, files):
+    """FORM-1: 운영자 요청함의 이슈 양식 둘(`ai-reply.yml` `[답변]`, `ai-task.yml` `[요청]`)이 접수 코드(pipeline/operator_loop.py)와 같은 정의인지 —
+    제목 머리·라벨(`blog-control` 없음)·항목 id·항목 제목·종류·필수 여부·선택지 문구·맨 위 비밀 값 금지 안내(`[요청]` 은 'T3 승인이 아닙니다' 문장도, `[답변]` 은 '직접 고르세요' 문장도)·
+    드롭다운의 미리 선택(`default`) — 와 `config.yml`(빈 이슈 허용 유지·안내 링크 하나)."""
+    if yaml is None:
+        return []
+    out = []
+    specs = (
+        (REPLY_FORM, loop_mod.REPLY_TITLE_PREFIX, loop_mod.LABEL_REPLY, loop_mod.REPLY_FIELDS, loop_mod.REPLY_REQUIRED, loop_mod.REPLY_FIELD_TYPES,
+         {"answer": [full for _, full in loop_mod.ANSWER_OPTIONS]}, (loop_mod.ANSWER_DIRECT_NOTICE,), {"answer": loop_mod.ANSWER_DEFAULT_INDEX}),
+        (TASK_FORM, loop_mod.TASK_TITLE_PREFIX, loop_mod.LABEL_TASK, loop_mod.TASK_FIELDS, loop_mod.TASK_REQUIRED, loop_mod.TASK_FIELD_TYPES,
+         {"urgency": list(loop_mod.TASK_URGENCY_OPTIONS), "approval": [full for _, full in loop_mod.TASK_APPROVAL_OPTIONS]}, (loop_mod.TASK_FORM_NOT_T3,),
+         {"urgency": loop_mod.TASK_DEFAULT_INDEX, "approval": loop_mod.TASK_DEFAULT_INDEX}),
+    )
+    for rel, title, label, fields, required, types, options, notice_phrases, defaults in specs:
+        if rel not in files:
+            continue
+        try:
+            data = _load_yaml(read_text(root, rel) or "")
+        except yaml.YAMLError:
+            out.append(err("FORM-1", "YAML 문법 오류", rel))
+            continue
+        out.extend(err("FORM-1", message, rel) for message in _form_problems(data, title, label, fields, required, types, options, notice_phrases, defaults))
+    if ISSUE_CONFIG in files:
+        try:
+            config = _load_yaml(read_text(root, ISSUE_CONFIG) or "")
+        except yaml.YAMLError:
+            return out + [err("FORM-1", "YAML 문법 오류", ISSUE_CONFIG)]
+        links = config.get("contact_links") if isinstance(config, dict) else None
+        if not isinstance(config, dict) or config.get("blank_issues_enabled") is not True:
+            out.append(err("FORM-1", "blank_issues_enabled 는 true 여야 합니다(빈 이슈를 막지 않습니다 — 운영자가 양식 밖으로도 글을 쓸 수 있어야 하고, 그런 글은 AI 가 읽되 승인으로 보지 않습니다)", ISSUE_CONFIG))
+        if not (isinstance(links, list) and len(links) == 1 and isinstance(links[0], dict)
+                and str(links[0].get("url", "")).startswith("https://github.com/shine88pc/chanceblog/") and links[0].get("name") and links[0].get("about")):
+            out.append(err("FORM-1", "contact_links 는 이 저장소의 사용법 문서를 가리키는 항목(name·url·about) 하나여야 합니다", ISSUE_CONFIG))
     return out
 
 
@@ -728,6 +1100,10 @@ def run_checks(root, base=None):
     findings += check_workflow_names(root, files)
     findings += check_workflow_prefixes(root, files)
     findings += check_registry(root, files)
+    findings += check_blogger_wrappers(root, files)
+    findings += check_operator_workflows(root, files)
+    findings += check_request_files(root, files)
+    findings += check_operator_forms(root, files)
     findings += check_issue_contract(root, files)
     findings += check_edit_system(root, files)
     findings += check_python(root, files)
