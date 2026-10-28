@@ -317,6 +317,13 @@ class AuthFailureNamesTest(KoreanRunBase):
             self.assertIn("BLOGGER_BLOG_ID 시크릿에 블로그 번호(숫자)만 넣었는지 확인하세요", out)    # 영문은 예전 문구 그대로
             self.assertNotIn("BLOGGER_KO_", out)
 
+    def test_the_guides_tell_the_operator_that_the_names_on_the_screen_are_the_blogs_own(self):
+        def read(*parts):
+            return REAL.joinpath(*parts).read_text(encoding="utf-8")
+        self.assertIn("안내 문장·원인 줄에 나오는 시크릿 이름도 한글 것(`BLOGGER_KO_*`)", read(".github", "editorial", "BLOGGER_API_SETUP.md"))
+        self.assertIn("**누른 워크플로의 블로그 것**", read("docs", "ACTIONS_GUIDE.md"))
+        self.assertIn("**고정 문장·원인 줄·실행 요약 속 시크릿 이름은 그 블로그 항목(`blog[\"secrets\"]`)의 이름이다**", read("docs", "ARCHITECTURE.md"))
+
     def test_the_english_blog_gets_the_sentences_it_got_before_in_the_same_runs(self):
         with tempfile.TemporaryDirectory() as tmp:
             root, env = self.english_root_and_env(tmp)
