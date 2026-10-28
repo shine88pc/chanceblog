@@ -692,7 +692,7 @@ class GateAndGuardTest(unittest.TestCase):
             self.assertTrue(loaded["description"], name)
             self.assertNotEqual(first_body_line(body), "---", name)
 
-    def test_a_candidate_whose_final_header_would_be_broken_is_rejected_and_the_next_one_is_published(self):
+    def test_candidates_whose_final_header_would_be_broken_are_all_rejected_and_nothing_is_written(self):
         """`_front_matter_set` 이 조용히 아무것도 못 더하는 경우(옛 동작)를 흉내 내면 설명·출처 줄이 빠진다 — 첫 후보는 거절되고 다음 후보도 같은 이유로 거절된다."""
         with mock.patch.object(g, "_front_matter_set", lambda content, key, value: content):
             value, report, out, written, calls = self.run_generation(
@@ -705,7 +705,7 @@ class GateAndGuardTest(unittest.TestCase):
         self.assertIn("본문 검증 탈락", out)
 
     def test_one_bad_candidate_does_not_stop_the_run(self):
-        """첫 후보의 영어 글은 본문이 울타리뿐이라 머리말을 읽을 수 없고(본문 분량 미달), 둘째 후보가 발행된다."""
+        """첫 후보의 한글 응답은 머리말을 닫지 않아 머리말 줄이 본문 앞에 남고(최종 검사가 거절), 둘째 후보가 발행된다."""
         broken = ("---\nlayout: post\ntitle: \"t\"\n\n본문 첫 줄이 머리말 뒤에 닫는 울타리 없이 이어집니다.\n" + KR_BODY)
         value, report, out, written, calls = self.run_generation([
             (broken, GOOD_EN_RESPONSE, "한글 제목", GOOD_EN_TITLE),
