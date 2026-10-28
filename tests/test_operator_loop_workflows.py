@@ -244,8 +244,9 @@ class AiRequestWorkflowTest(unittest.TestCase):
 
     def test_the_header_comment_states_the_limits(self):
         header = (WORKFLOWS / "ai-request.yml").read_text(encoding="utf-8").split("on:")[0]
-        for needle in ("한계", "paths", "미확인", "대기 중인 실행", "얕은 복제", "중복·도배", "`[공통] 텔레그램 알림 시험`"):
+        for needle in ("한계", "paths", "두 점 비교", "대기 중인 실행", "얕은 복제", "중복·도배", "`[공통] 텔레그램 알림 시험`", "다른 브랜치에도 있어 알리지 않은 요청 파일", "영문·숫자"):
             self.assertIn(needle, header, needle)
+        self.assertNotIn("미확인", header)                                                           # 경로 필터를 안 쓰는 사유를 '확인하지 못했다'고 적지 않는다(독립 검증 N-9: 공식 문서로 확인된다)
 
 
 class OperatorReplyWorkflowTest(unittest.TestCase):
@@ -464,6 +465,18 @@ class IssueFormTest(unittest.TestCase):
         self.assertEqual(fields["answer"]["attributes"]["options"], [full for _, full in ol.ANSWER_OPTIONS])
         self.assertEqual(list(fields), ["request_id", "answer", "choice", "memo"])
 
+    def test_the_answer_form_preselects_the_safe_choice_and_it_is_not_an_approval(self):
+        """필수 드롭다운이 첫 선택지를 미리 보여 주더라도(공식 문서가 적지 않는다) 요청 번호만 쓰고 올린 이슈가 `승인` 이 되지 않는다(독립 검증 N-3)."""
+        answer = {item["id"]: item for item in form("ai-reply.yml")["body"][1:]}["answer"]["attributes"]
+        self.assertEqual(answer["default"], ol.ANSWER_DEFAULT_INDEX)
+        self.assertEqual(ol.ANSWER_DEFAULT_INDEX, 0)
+        preselected = answer["options"][answer["default"]]
+        self.assertEqual(preselected, "보류 — 나중에 다시 물어 주세요")
+        self.assertEqual(ol.ANSWER_OPTIONS[ol.ANSWER_DEFAULT_INDEX][0], "보류")
+        self.assertEqual(answer["options"][0], preselected)                                          # default 가 없어도 첫 선택지가 안전하다
+        self.assertEqual([short for short, _ in ol.ANSWER_OPTIONS].index("승인"), 2)                 # 승인은 첫째도 미리 선택되는 것도 아니다
+        self.assertIn("반드시 직접 고르세요", answer["description"])
+
     def test_the_task_form_is_what_the_code_reads(self):
         data = form("ai-task.yml")
         self.assertEqual((data["name"], data["title"], data["labels"]), ("AI 에게 새 일 맡기기(작업 요청)", ol.TASK_TITLE_PREFIX, [ol.LABEL_TASK]))
@@ -473,7 +486,21 @@ class IssueFormTest(unittest.TestCase):
         self.assertEqual({field_id for field_id, item in fields.items() if (item.get("validations") or {}).get("required")}, set(ol.TASK_REQUIRED))
         self.assertEqual(fields["urgency"]["attributes"]["options"], list(ol.TASK_URGENCY_OPTIONS))
         self.assertEqual(fields["approval"]["attributes"]["options"], [full for _, full in ol.TASK_APPROVAL_OPTIONS])
-        self.assertEqual(fields["urgency"]["attributes"]["default"], 0)                       # 기본은 '보통'
+        self.assertEqual(fields["urgency"]["attributes"]["default"], ol.TASK_DEFAULT_INDEX)    # 기본은 '보통'
+        self.assertEqual(fields["approval"]["attributes"]["default"], ol.TASK_DEFAULT_INDEX)   # 기본은 '논의·준비까지만'(안전한 쪽)
+        self.assertEqual(fields["approval"]["attributes"]["label"], "진행 범위")
+        self.assertEqual(fields["approval"]["attributes"]["options"], ["논의·준비까지만", "구현·시험까지 진행(T1·T2) — T3 는 따로 번호 있는 요청으로 묻습니다"])
+
+    def test_the_task_form_is_not_a_t3_approval_and_says_so_without_any_old_wording(self):
+        """`[요청]` 은 번호 없는 새 일 요청이라 T3 승인이 아니다(독립 검증 B-1) — 안내 글이 그렇게 말하고, T3 를 승인하는 듯한 옛 선택지·안내가 어디에도 없다."""
+        raw = (TEMPLATES / "ai-task.yml").read_text(encoding="utf-8")
+        notice = form("ai-task.yml")["body"][0]["attributes"]["value"]
+        self.assertIn(ol.TASK_FORM_NOT_T3, notice)
+        self.assertIn("번호 있는 `결정 부탁`(R-번호)으로 따로 묻고", notice)
+        for old_phrase in ("T3 포함", "승인 범위", "승인합니다", "'예'를 골라도", "아니요 —", "예 —"):
+            self.assertNotIn(old_phrase, raw, old_phrase)
+        description = {item["id"]: item for item in form("ai-task.yml")["body"][1:]}["approval"]["attributes"]["description"]
+        self.assertIn("T3(광고 표면·시크릿·계정·삭제·`mode` 변경·새 플랫폼 등)는 포함하지 않습니다", description)
 
     def test_neither_form_carries_the_blog_control_label_or_an_edit_title(self):
         for name in ("ai-reply.yml", "ai-task.yml"):
@@ -489,6 +516,7 @@ class IssueFormTest(unittest.TestCase):
             value = notice["attributes"]["value"]
             for needle in (ol.FORM_NOTICE, "공개", "저장소 소유자 계정", "T3"):
                 self.assertIn(needle, value, (name, needle))
+        self.assertIn(ol.ANSWER_DIRECT_NOTICE, form("ai-reply.yml")["body"][0]["attributes"]["value"])
 
     def test_the_rendered_body_of_every_option_is_read_back_by_the_parser(self):
         """양식 파일의 라벨·선택지로 GitHub 가 만드는 본문(`### 라벨` 아래에 값)을 그대로 지어 파서에 넣으면 값이 되돌아온다."""
@@ -768,16 +796,28 @@ class FormRuleTest(unittest.TestCase):
         "항목 하나 없음": (REPLY_FORM, "  - type: input\n    id: choice\n    attributes:\n      label: \"선택\"\n", "  - type: input\n    id: choice_x\n    attributes:\n      label: \"선택\"\n"),
         "선택지 문구 바꿈": (REPLY_FORM, '- "승인 — 제안한 대로 진행해 주세요"', '- "승인 - 제안한 대로 진행해 주세요"'),
         "선택지 추가": (REPLY_FORM, '        - "문제 — 아래 메모를 보세요"\n', '        - "문제 — 아래 메모를 보세요"\n        - "그냥 통과"\n'),
-        "선택지 순서": (REPLY_FORM, '        - "거절 — 하지 마세요"\n        - "보류 — 나중에 다시 물어 주세요"\n', '        - "보류 — 나중에 다시 물어 주세요"\n        - "거절 — 하지 마세요"\n'),
+        "선택지 순서(첫째가 거절)": (REPLY_FORM, '        - "보류 — 나중에 다시 물어 주세요"\n        - "거절 — 하지 마세요"\n', '        - "거절 — 하지 마세요"\n        - "보류 — 나중에 다시 물어 주세요"\n'),
+        "답변 미리 선택이 없음": (REPLY_FORM, "      default: 0\n", ""),
+        "답변 미리 선택이 승인": (REPLY_FORM, "      default: 0\n", "      default: 2\n"),
+        "답변 미리 선택이 거짓값(False == 0 이라 걸러야 한다)": (REPLY_FORM, "      default: 0\n", "      default: false\n"),
+        "답변 직접 고르라는 안내 뺌": (REPLY_FORM, "올리기 전에 반드시 직접 고르세요", "올려 주세요"),
+        "승인을 첫째로": (REPLY_FORM, '        - "보류 — 나중에 다시 물어 주세요"\n        - "거절 — 하지 마세요"\n        - "승인 — 제안한 대로 진행해 주세요"\n',
+                     '        - "승인 — 제안한 대로 진행해 주세요"\n        - "보류 — 나중에 다시 물어 주세요"\n        - "거절 — 하지 마세요"\n'),
         "안내 글 문장 뺌": (REPLY_FORM, "**비밀번호·토큰·키 값은 절대 쓰지 마세요.**", "**비밀 값에 주의하세요.**"),
         "안내 글 없음": (REPLY_FORM, "  - type: markdown\n    attributes:\n      value: |\n", "  - type: markdown\n    attributes:\n      x: |\n"),
         "요청 양식 제목": (TASK_FORM, 'title: "[요청] "', 'title: "[페이지 수정] "'),
         "요청 양식 라벨": (TASK_FORM, 'labels: ["운영자요청"]', 'labels: ["blog-control"]'),
-        "승인 범위 필수 아님": (TASK_FORM, "승인합니다(T3 포함)\"\n    validations:\n      required: true\n", "승인합니다(T3 포함)\"\n    validations:\n      required: false\n"),
+        "진행 범위 필수 아님": (TASK_FORM, "      default: 0\n    validations:\n      required: true\n", "      default: 0\n    validations:\n      required: false\n"),
+        "진행 범위 미리 선택이 없음": (TASK_FORM, "      default: 0\n    validations:\n      required: true\n", "    validations:\n      required: true\n"),
+        "진행 범위 미리 선택이 구현까지": (TASK_FORM, "      default: 0\n    validations:\n      required: true\n", "      default: 1\n    validations:\n      required: true\n"),
+        "긴급도 미리 선택이 없음": (TASK_FORM, "      default: 0\n    validations:\n      required: false\n", "    validations:\n      required: false\n"),
+        "진행 범위 이름을 옛것으로": (TASK_FORM, 'label: "진행 범위"', 'label: "승인 범위"'),
+        "옛 T3 포함 선택지": (TASK_FORM, '- "구현·시험까지 진행(T1·T2) — T3 는 따로 번호 있는 요청으로 묻습니다"', '- "예 — 위 내용에 적은 항목에 한해 승인합니다(T3 포함)"'),
+        "요청 양식이 T3 승인이 아니라는 문장을 뺌": (TASK_FORM, "**이 양식은 T3 승인이 아닙니다**", "**이 양식은 접수만 합니다**"),
         "작업 내용 필수 아님": (TASK_FORM, "      description: \"무엇을 왜 하고 싶은지 쉬운 말로 적어 주세요. 길어도 됩니다.\"\n    validations:\n      required: true\n",
                          "      description: \"무엇을 왜 하고 싶은지 쉬운 말로 적어 주세요. 길어도 됩니다.\"\n    validations:\n      required: false\n"),
         "긴급도 선택지": (TASK_FORM, '        - "천천히"\n', '        - "아주 천천히"\n'),
-        "승인 범위 문구": (TASK_FORM, '- "아니요 — 논의·준비까지만"', '- "아니요"'),
+        "진행 범위 문구": (TASK_FORM, '- "논의·준비까지만"', '- "논의까지만"'),
         "요청 양식 안내": (TASK_FORM, "비밀번호·토큰·키 값은 절대 쓰지 마세요", "주의하세요"),
         "빈 이슈 막음": (CONFIG, "blank_issues_enabled: true", "blank_issues_enabled: false"),
         "빈 이슈 항목 없음": (CONFIG, "blank_issues_enabled: true\n", ""),

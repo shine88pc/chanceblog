@@ -660,9 +660,10 @@ def format_reply_received(request_id, answer, issue_number, choice=""):
 
 
 def format_task_received(issue_number, urgency, approval_yes):
-    """새 일 요청 이슈 접수 확인의 평문: `✅ 새 일 요청 접수(이슈 #13) · 긴급도 급함 · 승인 범위 있음(T3 포함)`."""
+    """새 일 요청 이슈 접수 확인의 평문: `✅ 새 일 요청 접수(이슈 #13) · 긴급도 급함 · 진행 범위 구현까지(T3 제외)`.
+    approval_yes 는 이름만 옛것이다 — 뜻은 '진행 범위가 구현·시험까지인가'이고 `[요청]` 은 T3 승인이 아니다(독립 검증 B-1)."""
     return (f"{OK_MARK} 새 일 요청 접수(이슈 #{_positive_int(issue_number, 'issue_number')}) · 긴급도 {clean_text(urgency, 10)}"
-            + (" · 승인 범위 있음(T3 포함)" if approval_yes else " · 논의·준비까지만"))
+            + (" · 진행 범위 구현까지(T3 제외)" if approval_yes else " · 논의·준비까지만"))
 
 
 # ---- 모듈 수준 함수(작업 지시의 공개 이름) ------------------------------------------------

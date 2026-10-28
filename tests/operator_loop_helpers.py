@@ -23,6 +23,7 @@ SHA_A, SHA_B, SHA_C = "a" * 40, "b" * 40, "c" * 40
 ZERO = "0" * 40
 DIR = ol.REQUEST_DIR + "/"
 ANSWER = dict(ol.ANSWER_OPTIONS)                      # 짧은 말 → 양식의 전체 문구
+TASK_SCOPE = dict(ol.TASK_APPROVAL_OPTIONS)           # no(논의·준비까지만)·yes(구현·시험까지) → 양식의 전체 문구
 
 
 # ---- 요청 파일 ----------------------------------------------------------------------------------
@@ -157,8 +158,8 @@ def reply_body(request_id="R-001", answer="승인", choice="", memo="", crlf=Tru
     return body.replace("\n", "\r\n") if crlf else body
 
 
-def task_body(what="PR 을 정리해 주세요", done="", urgency="보통", approval="아니요 — 논의·준비까지만", crlf=True):
-    body = f"### 해 주었으면 하는 일\n\n{what}\n\n### 끝났다고 볼 기준\n\n{done or '_No response_'}\n\n### 긴급도\n\n{urgency}\n\n### 승인 범위\n\n{approval}"
+def task_body(what="PR 을 정리해 주세요", done="", urgency="보통", approval="논의·준비까지만", crlf=True):
+    body = f"### 해 주었으면 하는 일\n\n{what}\n\n### 끝났다고 볼 기준\n\n{done or '_No response_'}\n\n### 긴급도\n\n{urgency}\n\n### 진행 범위\n\n{approval}"
     return body.replace("\n", "\r\n") if crlf else body
 
 

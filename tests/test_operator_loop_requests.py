@@ -217,6 +217,26 @@ class SelectionTest(unittest.TestCase):
         self.assertEqual(self.names(RequestGit(tree=oh.paths("R-001_a.md"), log=[])), [])            # main·다른 브랜치가 가져온 파일(트리 차이에만 있음)
         self.assertEqual(self.names(RequestGit(tree=[], log=oh.paths("R-001_a.md"))), [])            # 리베이스로 복사된 파일(BEFORE 트리에 이미 있음)
 
+    def test_the_selection_also_tells_which_files_other_branches_already_had(self):
+        """트리 차이에는 있지만 커밋 차이로 걸러진 파일 = '다른 브랜치에도 있어 알리지 않는' 파일 — 로그에 남기려고 따로 돌려준다(독립 검증 N-1)."""
+        def select(tree, log):
+            return ol.request_name_selection("ROOT", SHA_B, SHA_A, "main", "ai/claude/work", runner=RequestGit(tree=tree, log=log))
+        self.assertEqual(select(oh.paths("R-001_a.md", "R-002_b.md", "README.md"), oh.paths("R-002_b.md")), (["R-002_b.md"], ["R-001_a.md"]))
+        self.assertEqual(select(oh.paths("R-001_a.md"), []), ([], ["R-001_a.md"]))
+        self.assertEqual(select([], oh.paths("R-001_a.md")), ([], []))                                  # 리베이스: 걸러진 것이 아니라 BEFORE 트리에 이미 있던 것
+        self.assertEqual(select(oh.paths("R-001_a.md", "R-002_b.md"), oh.paths("R-001_a.md", "R-002_b.md")), (["R-001_a.md", "R-002_b.md"], []))
+        self.assertEqual(self.names(RequestGit(tree=oh.paths("R-001_a.md", "R-002_b.md"), log=oh.paths("R-002_b.md"))), ["R-002_b.md"])      # 새 파일 목록은 예전과 같다
+        many = oh.paths(*[f"R-{index:03d}_x.md" for index in range(1, ol.MAX_CANDIDATES + 15)])
+        self.assertEqual(len(select(many, [])[1]), ol.MAX_CANDIDATES)
+
+    def test_the_skipped_log_line_names_only_request_numbers_sorted_and_capped(self):
+        self.assertEqual(ol.skipped_line(["R-001_a.md"]), "AI 요청 알림: 다른 브랜치에도 있어 알리지 않은 요청 파일: R-001")
+        self.assertEqual(ol.skipped_line(["R-010_z.md", "R-002_b.md", "R-002_c.md"]), "AI 요청 알림: 다른 브랜치에도 있어 알리지 않은 요청 파일: R-002, R-010")
+        line = ol.skipped_line([f"R-{index:03d}_x.md" for index in range(1, ol.MAX_SKIPPED_IDS + 4)])
+        self.assertTrue(line.endswith(", ".join(f"R-{index:03d}" for index in range(1, ol.MAX_SKIPPED_IDS + 1)) + " 외 3건"), line)
+        self.assertNotIn("::", line)
+        self.assertEqual(len(line.splitlines()), 1)
+
     def test_only_exact_request_file_paths_in_the_folder_are_kept_and_the_result_is_sorted(self):
         listed = oh.paths("R-010_z.md", "R-002_b.md", "README.md", "R-003_Bad.md", "r-004_x.md", "sub/R-005_x.md", "R-006_x.txt") + [
             "R-007_x.md", "인수인계/R-008_x.md", "인수인계/요청함/R-009_x.md/extra", "other/인수인계/요청함/R-011_x.md", "", "인수인계/요청함"]
@@ -292,7 +312,7 @@ class RealGitSelectionTest(unittest.TestCase):
         cls._tmp = tempfile.mkdtemp(prefix="oltest_")
         cls.root = Path(cls._tmp) / "repo"
         cls.root.mkdir()
-        cls.refs, cls.found = {}, {}
+        cls.refs, cls.found, cls.skipped, cls.cli_runs = {}, {}, {}, {}
         git = cls.git
         git("init", "-q", "-b", "main")
         cls.commit({"README.md": "x\n"}, "base")
@@ -348,6 +368,28 @@ class RealGitSelectionTest(unittest.TestCase):
                                      oh.DIR + "r-025_i.md": "x\n"}, "d2")
         cls.push("ai/claude/d")
         cls.search("odd_names", "d1", "d2", "ai/claude/d")
+        # 요청 파일을 가진 커밋이 든 두 브랜치를 한꺼번에 push 한 경우(독립 검증 N-1): 둘 다 '다른 브랜치에도 있다'고 보고 아무도 알리지 않는다 — 대신 로그에 이유가 남는다
+        git("switch", "-q", "main")
+        git("switch", "-q", "-c", "ai/claude/p")
+        cls.refs["p1"] = cls.commit({oh.DIR + "R-050_p.md": request_text(id="R-050")}, "p1")
+        git("switch", "-q", "-c", "ai/claude/q")
+        cls.refs["q1"] = cls.commit({"q.txt": "q\n"}, "q1")
+        cls.push("ai/claude/p")
+        cls.push("ai/claude/q")                                                                     # git push origin p q 와 같다
+        cls.search("together_p", ZERO, "p1", "ai/claude/p")
+        cls.run_cli_now("together_p", ZERO, "p1", "ai/claude/p")
+        cls.search("together_q", ZERO, "q1", "ai/claude/q")
+        # 시간 차를 두고 push 하면(r 을 먼저 올려 알림 실행이 끝난 뒤 s) 첫 브랜치는 알려지고 둘째는 다시 알리지 않는다
+        git("switch", "-q", "main")
+        git("switch", "-q", "-c", "ai/claude/r")
+        cls.refs["r1"] = cls.commit({oh.DIR + "R-051_r.md": request_text(id="R-051")}, "r1")
+        cls.push("ai/claude/r")
+        cls.search("alone_r", ZERO, "r1", "ai/claude/r")
+        git("switch", "-q", "-c", "ai/claude/s")
+        cls.refs["s1"] = cls.commit({"s.txt": "s\n"}, "s1")
+        cls.push("ai/claude/s")
+        cls.search("later_s", ZERO, "s1", "ai/claude/s")
+        git("switch", "-q", "ai/claude/d")                                                         # 뒤의 시험이 기대는 작업 트리(R-001 파일이 있는 브랜치)로 돌아간다
 
     @classmethod
     def tearDownClass(cls):
@@ -379,9 +421,30 @@ class RealGitSelectionTest(unittest.TestCase):
     def search(cls, key, before, after, ref):
         """push 직후에 찾기를 돌려 결과(이름 목록 또는 예외)를 모아 둔다. before·after 는 refs 의 키이거나 ZERO."""
         try:
-            cls.found[key] = ol.new_request_names(cls.root, ZERO if before == ZERO else cls.refs[before], cls.refs[after], "main", ref)
+            cls.found[key], cls.skipped[key] = ol.request_name_selection(cls.root, ZERO if before == ZERO else cls.refs[before], cls.refs[after], "main", ref)
         except notify.GitError as exc:
-            cls.found[key] = exc
+            cls.found[key] = cls.skipped[key] = exc
+
+    @classmethod
+    def run_cli_now(cls, key, before, after, ref):
+        """같은 시점에 `python -m pipeline.operator_loop requests` 를 진짜 git·가짜 텔레그램으로 돌려 (종료 코드, 로그 줄, 보낸 통 수)를 모아 둔다."""
+        env = requests_env(before=ZERO if before == ZERO else cls.refs[before], after=cls.refs[after], ref_name=ref)
+        code, lines, net, _ = oh.run_cli("requests", environ=env, root=cls.root)
+        cls.cli_runs[key] = (code, lines, net.calls)
+
+    def test_two_branches_pushed_together_with_the_same_new_request_commit_announce_nothing_but_the_log_says_why(self):
+        self.assertEqual((self.found["together_p"], self.skipped["together_p"]), ([], ["R-050_p.md"]))
+        self.assertEqual((self.found["together_q"], self.skipped["together_q"]), ([], ["R-050_p.md"]))
+        self.assertEqual(self.cli_runs["together_p"], (0, [ol.skipped_line(["R-050_p.md"]), ol.REQUESTS_NONE_LINE], 0))
+
+    def test_pushed_one_after_the_other_the_first_branch_announces_and_the_second_is_not_announced_again(self):
+        self.assertEqual((self.found["alone_r"], self.skipped["alone_r"]), (["R-051_r.md"], []))
+        self.assertEqual((self.found["later_s"], self.skipped["later_s"]), ([], ["R-051_r.md"]))
+
+    def test_the_names_function_and_the_selection_function_agree_on_the_new_files(self):
+        for key, before, after, ref in (("second_push_adds", "a1", "a2", "ai/claude/a"), ("first_push_two_files", ZERO, "f2", "ai/claude/first")):
+            names = ol.new_request_names(self.root, ZERO if before == ZERO else self.refs[before], self.refs[after], "main", ref)
+            self.assertEqual(names, ol.request_name_selection(self.root, ZERO if before == ZERO else self.refs[before], self.refs[after], "main", ref)[0], key)
 
     def test_a_first_push_with_only_the_folder_readme_finds_nothing(self):
         self.assertEqual(self.found["readme_first_push"], [])
@@ -575,7 +638,9 @@ class ReceivedMessageTest(unittest.TestCase):
         self.assertEqual(notify.format_reply_received("R-001", "승인", 12, choice="B"), f"{notify.OK_MARK} 답변 접수 R-001 → 승인 · 선택 B(이슈 #12)")
 
     def test_the_task_confirmation_has_the_promised_shape(self):
-        self.assertEqual(notify.format_task_received(13, "급함", True), f"{notify.OK_MARK} 새 일 요청 접수(이슈 #13) · 긴급도 급함 · 승인 범위 있음(T3 포함)")
+        self.assertEqual(notify.format_task_received(13, "급함", True), f"{notify.OK_MARK} 새 일 요청 접수(이슈 #13) · 긴급도 급함 · 진행 범위 구현까지(T3 제외)")
+        for old_phrase in ("T3 포함", "승인 범위", "있음("):                                                          # `[요청]` 이 T3 를 승인한 것처럼 읽히는 옛 문구가 없다(독립 검증 B-1)
+            self.assertNotIn(old_phrase, notify.format_task_received(13, "급함", True), old_phrase)
         self.assertEqual(notify.format_task_received(13, "보통", False), f"{notify.OK_MARK} 새 일 요청 접수(이슈 #13) · 긴급도 보통 · 논의·준비까지만")
 
     def test_unvalidated_words_are_folded_into_one_line_cut_and_never_a_workflow_command(self):
@@ -670,6 +735,24 @@ class RequestsCliTest(unittest.TestCase):
         self.assertEqual((code, lines, net.calls), (0, [ol.REQUESTS_NONE_LINE], 0))
         self.assertFalse(any(line.startswith("::") for line in lines))
         self.assertFalse(self.summary.exists())
+
+    def test_files_that_another_branch_already_has_are_named_in_one_plain_log_line(self):
+        code, lines, net, _ = self.run_requests(RequestGit(tree=oh.paths("R-001_a.md"), log=[]))
+        self.assertEqual((code, net.calls), (0, 0))
+        self.assertEqual(lines, [ol.skipped_line(["R-001_a.md"]), ol.REQUESTS_NONE_LINE])
+        self.assertFalse(any(line.startswith("::") for line in lines))                              # 경고가 아니라 알림 한 줄(main 을 합친 정상 push 에서도 나온다)
+        self.assertFalse(self.summary.exists())
+
+    def test_the_skipped_line_comes_first_and_a_skipped_file_is_neither_read_nor_sent(self):
+        git = RequestGit(tree=oh.paths("R-001_a.md", "R-002_b.md"), log=oh.paths("R-002_b.md"), files={"R-002_b.md": request_text(id="R-002")})
+        code, lines, net, _ = self.run_requests(git)
+        self.assertEqual(lines, [ol.skipped_line(["R-001_a.md"]), "AI 요청 알림: R-002 을 알렸습니다"])
+        self.assertEqual(net.calls, 1)
+        self.assertEqual([args[3].split(":", 1)[1].rsplit("/", 1)[-1] for args in git.names("cat-file")], ["R-002_b.md"])
+
+    def test_nothing_is_logged_about_skipped_files_when_there_are_none(self):
+        code, lines, net, _ = self.run_requests(RequestGit.with_requests({GOOD_NAME: request_text()}))
+        self.assertEqual(lines, ["AI 요청 알림: R-001 을 알렸습니다"])
 
     def test_one_new_request_is_sent_as_one_message_and_logged(self):
         git = RequestGit.with_requests({GOOD_NAME: request_text(kind="decision", title="고를 것", summary="A 와 B", pr="57")})

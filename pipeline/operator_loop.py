@@ -195,15 +195,17 @@ def _paths_from(raw, directory=REQUEST_DIR):
     return found
 
 
-def new_request_names(root, before, after, default_branch, ref_name, runner=subprocess.run):
-    """이번 push 가 **새로 더한** 요청 파일 이름 목록(정렬, 최대 MAX_CANDIDATES). 구할 수 없으면 notify.GitError — 호출한 쪽은 보내지 않고 경고한다(중복·도배 방지).
+def request_name_sets(root, before, after, default_branch, ref_name, runner=subprocess.run):
+    """(트리 차이로 본 더해진 요청 파일 이름 집합, 커밋 차이로 본 집합) 둘. 구할 수 없으면 notify.GitError — 호출한 쪽은 보내지 않고 경고한다(중복·도배 방지).
 
-    두 가지를 모두 만족하는 파일만 새 파일로 본다:
+    새 파일은 두 가지를 모두 만족하는 것(둘의 교집합 — new_request_names)이다:
       ① 트리 차이: `git diff --diff-filter=A <기준> <AFTER>` 에서 '더해진' 것(수정만 된 파일·이름만 바뀐 파일은 빠진다). 기준은 BEFORE 이고, 새 브랜치 첫 push 처럼 BEFORE 가
          전부 0 이면 `merge-base(origin/<기본 브랜치>, AFTER)` 다(얕은 복제면 기준을 믿을 수 없어 GitError).
       ② 커밋 차이: AFTER 에서 도달할 수 있지만 BEFORE·**이 브랜치 말고 다른 모든 원격 브랜치**(기본 브랜치 포함)에서는 도달할 수 없는 커밋이 더한 것. main 을 이 브랜치에
          합치거나(merge) 이미 알린 다른 브랜치를 합치거나 그런 브랜치에서 새 브랜치를 만들어도 그 브랜치들이 가져온 요청 파일을 다시 알리지 않는다. 같은 내용의 리베이스·강제 push 는
          ①이 거른다(BEFORE 트리에 이미 있는 파일).
+    트리 차이에만 있고 커밋 차이로 걸러진 파일은 '다른 브랜치에도 있어 알리지 않은' 파일이다(request_name_selection 이 따로 돌려주고 run_requests 가 로그에 남긴다 — 요청 파일을 가진
+    커밋이 든 두 브랜치를 한꺼번에 push 하면 둘 다 서로가 가졌다고 보고 아무도 알리지 않는 경우를 눈에 띄게 하려는 것, 독립 검증 N-1).
     BEFORE·AFTER·기본 브랜치·이 브랜치 이름은 호출한 쪽이 모양을 검증했어야 하고(여기서도 한 번 더 본다) git 인자의 맨 앞이 `-` 가 될 수 없다."""
     if not (isinstance(after, str) and _SHA_RE.fullmatch(after)) or _ZERO_RE.fullmatch(after):
         raise notify.GitError("AFTER_SHA 가 올바른 커밋 번호가 아닙니다")
@@ -225,16 +227,37 @@ def new_request_names(root, before, after, default_branch, ref_name, runner=subp
     by_tree = _paths_from(notify.run_git(root, "diff", "--name-only", "--diff-filter=A", "-M", "-z", start, after, "--", pathspec, runner=runner))
     by_commit = _paths_from(notify.run_git(root, "log", "--diff-filter=A", "--name-only", "-M", "-z", "--format=", after, *already,
                                            "--not", f"--exclude=origin/{ref_name}", "--remotes=origin", "--", pathspec, runner=runner))
+    return by_tree, by_commit
+
+
+def new_request_names(root, before, after, default_branch, ref_name, runner=subprocess.run):
+    """이번 push 가 **새로 더한** 요청 파일 이름 목록(정렬, 최대 MAX_CANDIDATES) — request_name_sets 의 두 집합의 교집합. 구할 수 없으면 notify.GitError."""
+    by_tree, by_commit = request_name_sets(root, before, after, default_branch, ref_name, runner=runner)
     return sorted(by_tree & by_commit)[:MAX_CANDIDATES]
+
+
+def request_name_selection(root, before, after, default_branch, ref_name, runner=subprocess.run):
+    """(새 요청 파일 이름 목록, 트리 차이에는 있지만 커밋 차이로 걸러진 — 다른 브랜치에도 있어 알리지 않는 — 이름 목록). 각각 정렬·최대 MAX_CANDIDATES."""
+    by_tree, by_commit = request_name_sets(root, before, after, default_branch, ref_name, runner=runner)
+    return sorted(by_tree & by_commit)[:MAX_CANDIDATES], sorted(by_tree - by_commit)[:MAX_CANDIDATES]
 
 
 # ---- 알림 보내기(requests) ---------------------------------------------------------------------------
 REQUESTS_SKIP_LINE = "AI 요청 알림: 건너뜀(시크릿 없음)"
 REQUESTS_NONE_LINE = "AI 요청 알림: 이 푸시에 새 요청 파일이 없어 보내지 않았습니다"
+REQUESTS_SKIPPED_LINE = "AI 요청 알림: 다른 브랜치에도 있어 알리지 않은 요청 파일: {ids}"
+MAX_SKIPPED_IDS = 10            # 위 줄에 싣는 요청 번호 수(넘으면 '외 N건')
 REQUEST_WARNING_LINE = ("::warning::텔레그램 알림을 보내지 못했습니다. 이유는 바로 앞 로그 줄에 있고, Actions 의 '[공통] 텔레그램 알림 시험' 으로 연결을 점검할 수 있습니다"
                         "(푸시·병합에는 영향이 없습니다).")
 REQUEST_PROBLEM_WARNING = "::warning::요청 파일을 읽지 못해 알리지 않은 것이 있습니다. 이유는 바로 앞 로그 줄에 있습니다(파일은 그대로이니 고쳐서 다시 push 하세요)."
 GIT_WARNING = "::warning::새 요청 파일을 가려내지 못해 알림을 보내지 않았습니다(중복·도배를 막으려는 것입니다). 이유는 바로 앞 로그 줄에 있습니다."
+
+
+def skipped_line(names):
+    """'다른 브랜치에도 있어 알리지 않은 요청 파일' 로그 한 줄. 이름은 이미 정규식을 통과한 값이라 앞의 요청 번호(R-001)만 싣는다(최대 MAX_SKIPPED_IDS 개, 넘으면 '외 N건')."""
+    ids = sorted({name.split("_", 1)[0] for name in names})
+    shown = ", ".join(ids[:MAX_SKIPPED_IDS]) + (f" 외 {len(ids) - MAX_SKIPPED_IDS}건" if len(ids) > MAX_SKIPPED_IDS else "")
+    return REQUESTS_SKIPPED_LINE.format(ids=shown)
 
 
 def blob_url(ref, path):
@@ -261,11 +284,13 @@ def run_requests(environ, notifier, root, out, runner=subprocess.run):
     default_branch = str(environ.get("DEFAULT_BRANCH") or "").strip() or "main"
     ref_name = str(environ.get("GITHUB_REF_NAME") or "").strip()
     try:
-        names = new_request_names(root, before, after, default_branch, ref_name, runner=runner)
+        names, skipped = request_name_selection(root, before, after, default_branch, ref_name, runner=runner)
     except notify.GitError as exc:
         out(notifier.scrub(f"AI 요청 알림: 새 요청 파일을 찾지 못해 보내지 않았습니다 — {exc}"))
         out(GIT_WARNING)
         return 0
+    if skipped:
+        out(skipped_line(skipped))                       # 요청 파일을 가진 커밋이 든 두 브랜치를 한꺼번에 push 하면 아무도 알리지 못할 수 있다 — 그 일이 로그에 보이게
     if not names:
         out(REQUESTS_NONE_LINE)
         return 0
@@ -318,14 +343,21 @@ REPLY_FIELDS = (("request_id", "요청 번호"), ("answer", "답변"), ("choice"
 REPLY_REQUIRED = ("request_id", "answer")
 REPLY_FIELD_TYPES = {"request_id": "input", "answer": "dropdown", "choice": "input", "memo": "textarea"}
 FORM_NOTICE = "비밀번호·토큰·키 값은 절대 쓰지 마세요"       # 두 양식 맨 위 안내 글에 있어야 하는 문장(검증기 FORM-1)
-# 답 선택지: (짧은 말, 양식 드롭다운에 보이는 전체 문구)
-ANSWER_OPTIONS = (("승인", "승인 — 제안한 대로 진행해 주세요"), ("거절", "거절 — 하지 마세요"), ("보류", "보류 — 나중에 다시 물어 주세요"),
+# 답 선택지: (짧은 말, 양식 드롭다운에 보이는 전체 문구). 첫째는 가장 안전한 `보류` 이고 양식이 그것을 미리 선택해 둔다(`default: 0`) — 필수 드롭다운이 첫 선택지를 미리 보여 주더라도
+# 요청 번호만 쓰고 올린 이슈가 `승인` 이 되지 않게(독립 검증 N-3). 승인 규칙의 문장은 docs/SECURITY_GUARDRAILS.md G-S9.
+ANSWER_OPTIONS = (("보류", "보류 — 나중에 다시 물어 주세요"), ("거절", "거절 — 하지 마세요"), ("승인", "승인 — 제안한 대로 진행해 주세요"),
                   ("했어요", "했어요 — 제가 직접 처리했습니다"), ("문제", "문제 — 아래 메모를 보세요"))
-TASK_FIELDS = (("what", "해 주었으면 하는 일"), ("done", "끝났다고 볼 기준"), ("urgency", "긴급도"), ("approval", "승인 범위"))
+ANSWER_DEFAULT_INDEX = 0
+ANSWER_DIRECT_NOTICE = "올리기 전에 반드시 직접 고르세요"   # `[답변]` 양식 맨 위 안내 글에 있어야 하는 문장(검증기 FORM-1)
+# `[요청]` 양식(새 일 맡기기)은 T3 승인이 아니다(독립 검증 B-1): 번호 없는 새 일 요청이라 논의·준비·T1·T2 범위의 진행만 정한다. T3 가 필요하면 AI 가 번호 있는 `decision` 요청(R-번호)으로 다시 묻는다.
+# 필드 id(`approval`)와 Submission.approval_yes 는 그대로 두고 뜻만 '진행 범위'다: no = 논의·준비까지만, yes = 구현·시험까지(T1·T2).
+TASK_FIELDS = (("what", "해 주었으면 하는 일"), ("done", "끝났다고 볼 기준"), ("urgency", "긴급도"), ("approval", "진행 범위"))
 TASK_REQUIRED = ("what", "approval")
 TASK_FIELD_TYPES = {"what": "textarea", "done": "textarea", "urgency": "dropdown", "approval": "dropdown"}
 TASK_URGENCY_OPTIONS = ("보통", "급함", "천천히")
-TASK_APPROVAL_OPTIONS = (("no", "아니요 — 논의·준비까지만"), ("yes", "예 — 위 내용에 적은 항목에 한해 승인합니다(T3 포함)"))
+TASK_APPROVAL_OPTIONS = (("no", "논의·준비까지만"), ("yes", "구현·시험까지 진행(T1·T2) — T3 는 따로 번호 있는 요청으로 묻습니다"))
+TASK_DEFAULT_INDEX = 0                                   # `urgency`·`approval` 모두 첫 선택지(보통·논의·준비까지만)가 미리 선택된다
+TASK_FORM_NOT_T3 = "이 양식은 T3 승인이 아닙니다"          # `[요청]` 양식 맨 위 안내 글에 있어야 하는 문장(검증기 FORM-1)
 CHOICE_RE = re.compile(r"[A-Za-z0-9가-힣]{1,3}")
 _NO_RESPONSE = ("_no response_", "no response")
 MAX_EVENT_BYTES = 2_000_000
@@ -378,13 +410,15 @@ def _label_problems(values, duplicates, fields, required):
 def parse_reply(title, body, login, association, owner):
     """응답·요청 이슈 하나를 판정한다 → Submission(접수할 것) 또는 Refusal(사유 코드, 양식 문제 목록).
 
-    신뢰 판정(먼저): 작성자 login 이 저장소 소유자와 같고(대소문자만 무시) author_association 이 정확히 `OWNER` 여야 한다 — 둘 다 이벤트 JSON 의 값이고 이슈 본문·제목의 글은 보지 않는다.
+    신뢰 판정(먼저): 작성자 login 이 저장소 소유자와 같고(ASCII 영문 대소문자만 무시 — login 이 GitHub 계정 이름 모양(`_LOGIN_RE`)이 아니면 비교하기 전에 거절) author_association 이 정확히 `OWNER` 여야
+    한다 — 둘 다 이벤트 JSON 의 값이고 이슈 본문·제목의 글은 보지 않는다. 유니코드 접기(`casefold`)는 쓰지 않는다: `ſhine88pc`(U+017F) 같은 글자가 `shine88pc` 로 접혀 통과하는 일이 없게(독립 검증 N-6).
     그다음 제목이 `[답변]`(요청에 답하기)·`[요청]`(새 일 맡기기)로 시작해야 하고, 본문의 항목 제목(양식이 만든 `### …`)으로 값을 읽어 **검증된 값만** 담는다:
-    요청 번호는 `R-` 와 숫자 세 자리, 답은 양식의 선택지 전체 문구와 글자 그대로 같아야 하고(짧은 말로 바꿔 담는다), 선택은 영문·숫자·한글 1~3자(아니면 표시하지 않음 표시), 메모는 글자 수만 담는다."""
+    요청 번호는 `R-` 와 숫자 세 자리, 답은 양식의 선택지 전체 문구와 글자 그대로 같아야 하고(짧은 말로 바꿔 담는다), 선택은 영문·숫자·한글 1~3자(아니면 표시하지 않음 표시), 메모는 글자 수만 담는다.
+    `[요청]` 은 접수만 한다 — T3 승인이 아니다(독립 검증 B-1): 진행 범위(논의·준비까지 / 구현·시험까지)만 읽는다."""
     owner_name = str(owner or "")
     if not _LOGIN_RE.fullmatch(owner_name):
         return Refusal("no_owner", ())
-    if not isinstance(login, str) or login.casefold() != owner_name.casefold():
+    if not (isinstance(login, str) and _LOGIN_RE.fullmatch(login)) or login.lower() != owner_name.lower():
         return Refusal("not_owner", ())
     if association != "OWNER":
         return Refusal("not_owner_association", ())
@@ -413,7 +447,7 @@ def parse_reply(title, body, login, association, owner):
             problems.append("`해 주었으면 하는 일` 이 비어 있습니다")
         approval = next((key for key, full in TASK_APPROVAL_OPTIONS if full == values.get(label_of["approval"], "")), "")
         if label_of["approval"] in values and not approval:
-            problems.append("`승인 범위` 값이 양식의 선택지가 아닙니다")
+            problems.append("`진행 범위` 값이 양식의 선택지가 아닙니다")
         urgency = values.get(label_of["urgency"], "") or TASK_URGENCY_OPTIONS[0]
         if urgency not in TASK_URGENCY_OPTIONS:
             problems.append("`긴급도` 값이 양식의 선택지가 아닙니다")
@@ -435,7 +469,8 @@ def _compose(head, notes):
 
 def reply_comment(sub, known_request):
     """`[답변]` 접수 코멘트(마크다운). 값은 모두 검증을 통과한 것이다 — 요청 번호 모양·양식의 답 선택지·선택 글자(영문·숫자·한글 1~3자)·메모 글자 수.
-    known_request 가 거짓이면 '알 수 없는 요청 번호' 안내를 더한다(없어도 접수는 한다: 요청 파일이 아직 병합 전 브랜치에만 있을 수 있다)."""
+    known_request 가 거짓이면 중립 사실 진술 한 줄을 더한다 — 요청 파일은 병합 전 작업 브랜치에 있는 것이 보통이라 이 저장소 기본 브랜치에서 안 보이는 것이 정상일 수 있고,
+    그래서 '번호를 다시 확인하세요' 같은 불안을 주는 말은 쓰지 않는다(독립 검증 N-2). 접수는 늘 한다."""
     head = f"접수했습니다 — 요청 **{sub.request_id}** · 답: **{sub.answer}**" + (f" · 선택: **{sub.choice}**" if sub.choice else "") + "."
     notes = []
     if sub.memo_chars:
@@ -443,16 +478,17 @@ def reply_comment(sub, known_request):
     if sub.choice_invalid:
         notes.append("- 선택 칸의 값이 형식(영문·숫자·한글 1~3자)에 맞지 않아 표시하지 않았습니다. AI 가 이슈 본문에서 읽습니다.")
     if not known_request:
-        notes.append(f"- 알 수 없는 요청 번호: 저장소의 `{REQUEST_DIR}/` 에서 {sub.request_id} 파일을 찾지 못했습니다(요청 파일이 아직 병합 전 브랜치에만 있을 수 있습니다). "
-                     "번호가 맞는지 텔레그램 메시지를 다시 확인하세요. 접수는 했습니다.")
+        notes.append(f"- 요청 번호 {sub.request_id} 은 AI 가 자기가 보낸 요청과 대조해 처리합니다"
+                     "(요청 파일이 병합 전 브랜치에만 있으면 이 저장소 기본 브랜치에서는 보이지 않으며 정상일 수 있습니다).")
     return _compose(head, notes)
 
 
 def task_comment(sub):
-    """`[요청]` 접수 코멘트. 이슈 본문의 글은 되풀이하지 않는다(긴급도·승인 범위는 양식의 선택지 값)."""
-    head = (f"접수했습니다 — 새 일 요청 · 긴급도: **{sub.urgency}** · 승인 범위: "
-            + ("**있음(T3 포함)**" if sub.approval_yes else "**논의·준비까지만**") + ".")
-    notes = ["- 승인은 이슈 본문에 적은 항목에만 유효합니다. 적지 않은 일(광고·시크릿·계정·삭제 등)은 따로 묻습니다."] if sub.approval_yes else []
+    """`[요청]` 접수 코멘트. 이슈 본문의 글은 되풀이하지 않는다(긴급도·진행 범위는 양식의 선택지 값). `[요청]` 은 T3 승인이 아니라고 분명히 적는다(독립 검증 B-1)."""
+    head = (f"접수했습니다 — 새 일 요청 · 긴급도: **{sub.urgency}** · 진행 범위: "
+            + ("**구현까지(T3 제외)**" if sub.approval_yes else "**논의·준비까지만**") + ".")
+    notes = ["- 이 양식은 T3 승인이 아닙니다. T3(광고 표면·시크릿·계정·삭제·`mode` 변경·새 플랫폼 등)가 필요하면 AI 가 번호 있는 `결정 부탁`(R-번호)으로 따로 묻고, "
+             "그때 `[답변]` 양식으로 답해 주세요."] if sub.approval_yes else []
     return _compose(head, notes)
 
 
