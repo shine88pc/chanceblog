@@ -117,5 +117,17 @@
     "lane": "science",
     "source": "NASA",
     "source_url": "https://www.nasa.gov/general/how-a-johnson-mentor-shapes-the-next-generation-of-nasa-talent/"
+  },
+  {
+    "date": "2026-10-28",
+    "topic": "Reinforcing Frontex for stronger protection of the EU’s external borders",
+    "kr_title": "유럽연합 집행위의 프론텍스 강화 제안: 외부 국경 관리와 솅겐 체제의 균형",
+    "en_title": "Reinforcing Frontex: The European Commission’s Proposal and the Governance of External Borders",
+    "kr_image": "https://images.unsplash.com/photo-1621310547536-9f03189e36f1?auto=format&fit=crop&w=1000&q=80",
+    "en_image": "https://images.unsplash.com/photo-1768718851076-1a99ef24b94d?auto=format&fit=crop&w=1000&q=80",
+    "slot": 18,
+    "lane": "society",
+    "source": "European Commission",
+    "source_url": "https://commission.europa.eu/news-and-media/news/reinforcing-frontex-stronger-protection-eus-external-borders-2026-10-27_en"
   }
 ]
