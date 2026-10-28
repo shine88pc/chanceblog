@@ -91,6 +91,16 @@ class ReusableWorkflowTest(unittest.TestCase):
         for job in jobs.values():
             self.assertEqual(job["steps"][1]["with"], {"python-version": "3.12"})
 
+    def test_both_jobs_run_on_ubuntu_latest_because_their_scripts_are_bash(self):
+        """독립 검증 N7(변이 X03): plan 잡의 runs-on 은 위 시험이 고정했지만 generate 잡의 것은 아무 시험·검증기·actionlint 도 보지 않았다. 두 잡의 `run:` 은 bash
+        스크립트(`set -euo pipefail`·배열·`$GITHUB_OUTPUT`)라 윈도 러너로 바뀌면 첫 정기 실행에서 깨진다."""
+        jobs = self.data["jobs"]
+        self.assertEqual({name: job["runs-on"] for name, job in jobs.items()}, {"plan": "ubuntu-latest", "generate": "ubuntu-latest"})
+        for name, job in jobs.items():
+            self.assertNotIn("shell", job.get("defaults", {}).get("run", {}), name)               # 기본 셸을 바꾸지도 않는다(바꾸면 bash 가정이 깨진다)
+            for step in job["steps"]:
+                self.assertNotIn("shell", step, (name, step.get("name")))
+
     def test_the_plan_script_and_the_commit_script_keep_their_behavior_lines(self):
         plan_step, generate, run_step = wf.callee_steps()
         script = plan_step["run"]
@@ -143,6 +153,14 @@ class WrapperTest(unittest.TestCase):
             self.assertEqual(wf.call_job(wrapper)[1]["with"]["blog"], key, wrapper)
             self.assertEqual(wf.load(wrapper)["on"]["schedule"], [{"cron": blog["schedule"]["cron"]}], wrapper)
         self.assertEqual({blog["workflow"] for blog in (registry.get_blog(reg, key) for key in WRAPPERS)}, {f".github/workflows/{w}" for w in WRAPPERS.values()})
+
+    def test_every_blogger_blog_in_the_registry_has_its_wrapper_listed_in_the_test_helpers_so_the_other_tests_cover_it(self):
+        """독립 검증 N10: 새 Blogger 블로그를 레지스트리에 더하고 래퍼를 만들어도 이 도우미의 `WRAPPERS` 에 한 줄을 안 더하면 이벤트·입력 조합 대조·시크릿 분리 시험이 새 래퍼를 보지 못한다.
+        레지스트리의 Blogger 블로그와 도우미 목록이 어긋나면 여기서 알려 준다(REG-6 은 래퍼의 구조만 보고 `with` 식의 의미는 시험이 본다)."""
+        reg = registry.load_registry(REAL / "pipeline" / "blogs.json")
+        blogger_blogs = {blog["key"]: blog["workflow"].rsplit("/", 1)[-1] for blog in reg["blogs"] if blog["platform"] == "blogger"}
+        self.assertEqual(WRAPPERS, blogger_blogs)
+        self.assertEqual(sorted(wf.WRAPPER_LABELS), sorted(WRAPPERS.values()))
 
     def test_the_schedules_do_not_overlap_each_other_or_the_other_channels(self):
         crons = {name: wf.load(name)["on"]["schedule"][0]["cron"] for name in ("blogger-en.yml", "blogger-ko.yml", "tistory.yml", "naver.yml")}
@@ -245,6 +263,29 @@ class ExpressionEquivalenceTest(unittest.TestCase):
             for event, combo in (("schedule", {}), ("workflow_dispatch", {"dry_run": "false"}), ("workflow_dispatch", {})):
                 self.assertEqual(wf.end_to_end_env(wrapper, event, combo)["ONLY_BLOG"], key)
             self.assertEqual(wf.old_env("schedule")["AUTH_CHECK_ONLY"], "")
+
+    def test_a_string_input_is_never_handed_over_as_null_for_any_event_or_input_combination(self):
+        """독립 검증 N9: 정기 실행(과 API 로 입력을 생략한 수동 실행)에는 github.event.inputs.topic 이 없어 식이 null 이 된다. 문자열 입력에 null 을 넘길 때의 동작은 GitHub 문서에
+        없으므로(엄격하게 거부하는 구현이면 첫 정기 실행이 실패한다) 래퍼가 `|| ''` 로 빈 문자열을 직접 넘긴다 — 모든 조합에서 문자열이고, 불린 입력은 불린이다."""
+        checked = 0
+        for wrapper in WRAPPERS.values():
+            for event, combos in (("schedule", [{}, {"dry_run": "true", "publish": "publish", "auth_check": "true", "topic": "x"}]),
+                                  ("workflow_dispatch", list(wf.dispatch_combinations()))):
+                for combo in combos:
+                    given = wf.wrapper_with(wrapper, event, combo)
+                    for name in ("blog", "topic", "publish"):
+                        self.assertIsInstance(given[name], str, (wrapper, event, combo, name))
+                    for name in wf.BOOLEAN_INPUTS:
+                        self.assertIsInstance(given[name], bool, (wrapper, event, combo, name))
+                    checked += 1
+        self.assertEqual(checked, 2 * (2 + 108))
+
+    def test_the_topic_expression_falls_back_to_an_empty_string_in_both_wrappers(self):
+        for wrapper in WRAPPERS.values():
+            self.assertEqual(wf.call_job(wrapper)[1]["with"]["topic"], "${{ github.event.inputs.topic || '' }}", wrapper)
+            self.assertEqual(wf.wrapper_with(wrapper, "schedule")["topic"], "", wrapper)                           # 정기 실행: 입력이 없다 → 빈 문자열
+            self.assertEqual(wf.wrapper_with(wrapper, "workflow_dispatch", {"dry_run": "true"})["topic"], "", wrapper)    # 수동인데 주제를 안 준 경우
+            self.assertEqual(wf.wrapper_with(wrapper, "workflow_dispatch", {"topic": "직접 정한 주제"})["topic"], "직접 정한 주제", wrapper)
 
     def test_typed_inputs_have_the_types_the_called_workflow_declares(self):
         for wrapper in WRAPPERS.values():
@@ -438,6 +479,39 @@ class MonitoringContinuityTest(unittest.TestCase):
         calls = len([f for f in files if f != inbox.OWN_WORKFLOW])
         self.assertLessEqual(calls + 12, oi.MAX_CALLS_WITH_TOKEN, (calls, oi.MAX_CALLS_WITH_TOKEN))   # 워크플로 파일마다 한 번 + 이슈·PR·검사 읽기: 한도(150) 안이다
         self.assertEqual(len(files), 15)                                                                  # 열두 개였다가 공용 하나·래퍼 둘이 더해져 열다섯
+
+
+class SplitDocsAreCurrentTest(unittest.TestCase):
+    """독립 검증 N8: 영문/한글 분리 뒤에도 옛 문장이 남은 곳 — 요약 머리 예시(`### [Blogger] …`)·워크플로 접두사 예시(`[Blogger]`)·`pipeline/plan.py` 첫 줄('워크플로 수정 없이 잡이 늘어난다')."""
+
+    def test_the_summary_head_example_in_the_architecture_doc_uses_the_two_current_channel_labels(self):
+        text = (REAL / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
+        self.assertNotIn("### [Blogger] ", text)
+        self.assertIn("### [Blogger 영문] Blogger (macat0722)", text)
+        self.assertIn("### [Blogger 한글] Blogger (kcyoon)", text)
+
+    def test_the_workflow_editing_rules_name_the_two_blogger_prefixes_not_the_old_single_one(self):
+        text = (REAL / ".github" / "instructions" / "workflows.instructions.md").read_text(encoding="utf-8")
+        self.assertNotIn("`[Blogger]`", text)
+        self.assertIn("`[Blogger 영문]`·`[Blogger 한글]`", text)
+        for label in ("Blogger 영문", "Blogger 한글"):
+            self.assertIn(label, registry.CHANNEL_LABELS)                                       # 예시가 실제 허용 라벨이다
+
+    def test_the_add_a_blogger_blog_playbook_tells_the_new_wrapper_to_be_listed_in_the_test_helpers(self):
+        text = (REAL / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
+        row = next(line for line in text.splitlines() if line.startswith("| 3-1 | AI (T3 승인 후) | **채널 래퍼 워크플로**"))
+        for fragment in ("tests/blogger_workflow_helpers.py", "`WRAPPERS`·`WRAPPER_LABELS`", "REG-6 은 래퍼의 구조"):
+            self.assertIn(fragment, row)
+
+    def test_the_plan_module_no_longer_promises_that_adding_any_blog_needs_no_workflow_change(self):
+        first = plan.__doc__.splitlines()[0]
+        self.assertNotIn("블로그를 추가하면 워크플로 수정 없이 잡이 늘어난다", first)
+        self.assertIn("Blogger 는 블로그마다 채널 래퍼 워크플로 하나를 더해야 한다", first)
+        # 말이 맞는지: 티스토리·네이버 워크플로는 plan 의 매트릭스만 읽고, Blogger 는 래퍼가 `with.blog` 로 key 를 박는다
+        for name in ("tistory.yml", "naver.yml"):
+            self.assertIn("--platform " + name.split(".")[0], code_text(name))
+        for wrapper in WRAPPERS.values():
+            self.assertIn("blog:", code_text(wrapper))
 
 
 class PlanCliTest(unittest.TestCase):

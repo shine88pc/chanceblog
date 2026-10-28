@@ -1,4 +1,4 @@
-"""레지스트리에서 GitHub Actions 매트릭스를 만든다(블로그를 추가하면 워크플로 수정 없이 잡이 늘어난다).
+"""레지스트리에서 GitHub Actions 매트릭스를 만든다(티스토리·네이버는 블로그를 추가하면 워크플로 수정 없이 잡이 늘고, Blogger 는 블로그마다 채널 래퍼 워크플로 하나를 더해야 한다).
 
   python -m pipeline.plan --platform blogger           # {"include":[...]} 한 줄 JSON
   python -m pipeline.plan --platform blogger --count   # 대상 블로그 수

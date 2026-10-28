@@ -11,26 +11,36 @@
   4) 게이트: 한글 프로필의 금지 표현이 러너에서 글을 막는다(올리지도 저장하지도 않는다).
   5) 교차 중복: 영문→한글, 한글→영문 양쪽에서 다른 블로그 이력의 주제를 피한다.
   6) 영문 불간섭: 한글 실행이 영문 이력·초안·시크릿 이름을 건드리지 않고, 그 반대도 같다.
+  7) 이력 파일 공개 순서: `_config.yml` exclude 를 mode 보다 먼저 더하게 막되, 켠 뒤(봇이 이력 파일을 커밋한 뒤)에는 CI 가 빨개지지 않는다(독립 검증 N1).
 """
+import functools
 import json
+import random
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import yaml
 
 import _bootstrap
 from blogger_ko_helpers import (EN, EN_ENV, EN_NAMES, EN_VALUES, GEMINI, KO, KO_ENV, KO_NAMES, KO_URL, KO_VALUES, KO_WORKFLOW_ENV, KoreanRunBase,
                                 ko_publisher, make_pair_root)
+from pipeline import auth_check as ac
 from pipeline import registry
+from pipeline import run as run_mod
 from pipeline.publishers.base import PublishError
+from pipeline.publishers.blogger import BloggerPublisher
 from pipeline.stubs import stub_llm
-from test_run import FakePublisher
+from test_auth_check import ENGLISH_SENTENCES_BEFORE_THE_CHANGE
+from test_publisher_blogger import FakeService, HttpErr
+from test_run import NOW, FakePublisher
 
 REAL = _bootstrap.ROOT
 PROFILE = json.loads((REAL / "pipeline" / "profiles" / "blogger_ai_tools_ko.json").read_text(encoding="utf-8"))
 SEEDS = PROFILE["seed_topics"]
 ALL_ROLES = ("llm_api_key", "blog_id", "client_id", "client_secret", "refresh_token")
+HISTORY_FILE = "blogger_ko_history.json"
 
 
 def llm_with(sentence):
@@ -50,6 +60,24 @@ class CountingLLM:
     def __call__(self, prompt):
         self.calls += 1
         return self.inner(prompt)
+
+
+def history_exposure_problems(root, key=KO):
+    """블로그 `key` 의 이력 파일이 공개 사이트로 새는 상태의 문제 문장 목록(비어 있으면 안전). root 는 `pipeline/blogs.json`·`_config.yml` 이 있는 저장소 모양의 폴더다.
+    Jekyll 은 밑줄로 시작하지 않는 루트 파일을 사이트에 그대로 내므로 이력 파일은 `_config.yml` 의 exclude 에 이름이 있어야 한다. 두 가지를 본다.
+      ① mode 가 off 밖이면 exclude 에 이름이 있어야 한다 — 켠 뒤 첫 실행이 이력을 루트에 커밋하면 그 순간 공개 주소가 된다(그래서 exclude 를 mode 보다 먼저 더한다).
+      ② 이력 파일이 이미 루트에 있으면 exclude 에 이름이 있어야 한다. exclude 가 있으면 파일이 있어도 공개되지 않으니 정상이다 — 켠 뒤 봇이 첫 이력을 커밋한 다음 PR 의
+         CI 가, 켰다가 다시 끈(mode off) 저장소의 CI 가 이 시험 때문에 빨개지면 안 된다(독립 검증 N1: 예전에는 mode 와 무관하게 '파일이 없어야 한다'고 단언해 시한폭탄이었다)."""
+    root = Path(root)
+    blog = registry.get_blog(registry.load_registry(root / "pipeline" / "blogs.json"), key)
+    history, mode = blog["state"]["history"], blog["mode"]
+    excluded = yaml.safe_load((root / "_config.yml").read_text(encoding="utf-8")).get("exclude") or []
+    problems = []
+    if history not in excluded and mode != "off":
+        problems.append(f"{history} 가 `_config.yml` exclude 에 없는데 {key} 의 mode 가 {mode} 입니다 — exclude 를 먼저 더하세요(T3)")
+    if history not in excluded and (root / history).exists():
+        problems.append(f"{history} 가 저장소 루트에 있는데 `_config.yml` exclude 에 없습니다 — 공개 사이트에 그대로 나옵니다(T3)")
+    return problems
 
 
 class DraftFlowTest(KoreanRunBase):
@@ -211,6 +239,106 @@ class SecretTest(KoreanRunBase):
         self.assertEqual(code, 2, out)
         self.assertIn("GEMINI_API_KEY", out)                                                     # LLM 키는 영문·한글이 같은 Gemini 키를 쓴다(작업요청서)
         self.assertEqual(self.history(), [])
+
+
+class AuthFailureNamesTest(KoreanRunBase):
+    """독립 검증 N3: 인증 실패 안내(::error::·실행 요약·원인 줄·이력)가 한글 실행에서도 영문 시크릿 이름(BLOGGER_BLOG_ID 등)만 말해, 운영자가 영문 값을 갱신하러 갈 수 있었다.
+    실제 러너(run.py)를 끝까지 돌려 한글은 BLOGGER_KO_* 이름만, 영문은 바뀌기 전 문장 그대로 나오는지 본다."""
+    MODE = "draft"
+    CODES = ("auth_expired", "auth_failed", "blog_mismatch", "network", "bad_response", "api_error", "unexpected")
+    KOREAN_FRAGMENTS = {"auth_expired": "토큰을 새로 발급해 BLOGGER_KO_REFRESH_TOKEN 시크릿을 갱신하세요",
+                        "auth_failed": "BLOGGER_KO_BLOG_ID·BLOGGER_KO_CLIENT_ID·BLOGGER_KO_CLIENT_SECRET 시크릿",
+                        "blog_mismatch": "인증은 통과했지만 BLOGGER_KO_BLOG_ID 가 가리키는 블로그의 주소가"}
+
+    def run_failure(self, publisher, extra=(), blog=KO, root=None, env=None):
+        """인증 점검이 실패하는 실행 한 번 → (종료 코드, 출력, 실행 요약 글)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            summary = Path(tmp) / "summary.md"
+            code, out = self.go(env={**(KO_WORKFLOW_ENV if env is None else env), "GITHUB_STEP_SUMMARY": str(summary)}, publisher=publisher, extra=extra, blog=blog, root=root)
+            return code, out, summary.read_text(encoding="utf-8")
+
+    def english_root_and_env(self, tmp):
+        env = {"PIPELINE_SECRET_LLM_API_KEY": GEMINI, **{f"PIPELINE_SECRET_{role.upper()}": EN_VALUES[name] for role, name in zip(ALL_ROLES[1:], EN_NAMES)}}
+        return make_pair_root(tmp, ko_mode="off", en_mode="draft"), env
+
+    def test_every_failure_code_names_only_the_korean_secrets_in_the_annotation_the_summary_and_the_log(self):
+        ko_secrets = registry.get_blog(registry.load_registry(REAL / "pipeline" / "blogs.json"), KO)["secrets"]
+        for extra in ((), ("--auth-check",)):                                                     # 글 생성 전 사전 점검과 `인증 점검만 실행` 두 경로
+            for code in self.CODES:
+                with self.subTest(extra=extra, code=code):
+                    exit_code, out, summary = self.run_failure(ko_publisher(check=PublishError("실패", code=code)), extra=extra)
+                    sentence = ac.sentence_for(code, ko_secrets)
+                    self.assertEqual(exit_code, ac.exit_code_for(code), out)
+                    self.assertIn(f"::error::[{KO}] {sentence}", out.splitlines())
+                    self.assertIn(f"{ac.label_for(code)}({code}) — {sentence}", summary)
+                    if code in self.KOREAN_FRAGMENTS:
+                        self.assertIn(self.KOREAN_FRAGMENTS[code], out)
+                        self.assertIn(self.KOREAN_FRAGMENTS[code], summary)
+                    for name in EN_NAMES:                                                          # 영문 이름은 로그에도 요약에도 없다
+                        self.assertNotIn(name, out)
+                        self.assertNotIn(name, summary)
+
+    def test_a_real_blog_mismatch_names_the_korean_blog_id_in_the_cause_line_and_the_history_too(self):
+        for extra in ((), ("--auth-check",)):                                                     # 글 생성 전 사전 점검(이력 기록 있음)과 `인증 점검만 실행`(쓰기 없음)
+            with self.subTest(extra=extra):
+                publisher = ko_publisher(blog_url="https://macat0722.blogspot.com/")             # 영문 계정의 블로그 주소가 돌아온다
+                exit_code, out, summary = self.run_failure(publisher, extra=extra)
+                self.assertEqual(exit_code, 2, out)
+                cause = [line for line in out.splitlines() if line.startswith("[설정 오류] 인증 점검 실패(blog_mismatch):")]
+                self.assertEqual(len(cause), 1, out)
+                self.assertIn("BLOGGER_KO_BLOG_ID 가 가리키는 블로그의 주소가 레지스트리의 url 과 다릅니다", cause[0])
+                reasons = self.history()[-1]["reasons"] if not extra else []                      # 단독 점검은 이력을 남기지 않는다
+                if not extra:
+                    self.assertTrue(len(reasons) == 1 and reasons[0].startswith("[blog_mismatch] BLOGGER_KO_BLOG_ID 가 가리키는"), reasons)
+                else:
+                    self.assertEqual(len(self.history()), 1)                                      # 앞의 사전 점검이 남긴 한 줄뿐이다
+                for name in EN_NAMES:
+                    self.assertNotIn(name, out + summary + "".join(reasons))
+                self.assertNotIn("macat0722", out + summary)                                      # 다른 블로그 주소는 여전히 쓰지 않는다
+
+    def test_the_real_adapter_the_runner_builds_names_the_korean_blog_id_secret_in_its_400_message(self):
+        """러너의 기본 게시자 만들기(default_publisher_factory)가 그 블로그의 시크릿 이름을 어댑터에 넘기는지 — 가짜 구글 서비스(blogs.get 400)를 단 진짜 어댑터로 끝까지 돌린다."""
+        def run(blog, root, env):
+            svc = FakeService(get_error=HttpErr(400, "Invalid value for: blogId", reason="invalid"))
+            real = functools.partial(BloggerPublisher, service_factory=lambda: svc, sleep=lambda seconds: None)
+            out = []
+            with mock.patch("pipeline.publishers.blogger.BloggerPublisher", real):
+                code = run_mod.run(["--blog", blog, "--root", str(root)], environ=env, now=NOW, llm=stub_llm, publisher_factory=None, rng=random.Random(1), out=out.append)
+            return code, "\n".join(out)
+        code, out = run(KO, self.root, KO_WORKFLOW_ENV)
+        self.assertEqual(code, 2, out)
+        self.assertIn("BLOGGER_KO_BLOG_ID 시크릿에 블로그 번호(숫자)만 넣었는지 확인하세요", out)
+        for name in EN_NAMES:
+            self.assertNotIn(name, out)
+        with tempfile.TemporaryDirectory() as tmp:
+            root, env = self.english_root_and_env(tmp)
+            code, out = run(EN, root, env)
+            self.assertEqual(code, 2, out)
+            self.assertIn("BLOGGER_BLOG_ID 시크릿에 블로그 번호(숫자)만 넣었는지 확인하세요", out)    # 영문은 예전 문구 그대로
+            self.assertNotIn("BLOGGER_KO_", out)
+
+    def test_the_guides_tell_the_operator_that_the_names_on_the_screen_are_the_blogs_own(self):
+        def read(*parts):
+            return REAL.joinpath(*parts).read_text(encoding="utf-8")
+        self.assertIn("안내 문장·원인 줄에 나오는 시크릿 이름도 한글 것(`BLOGGER_KO_*`)", read(".github", "editorial", "BLOGGER_API_SETUP.md"))
+        self.assertIn("**누른 워크플로의 블로그 것**", read("docs", "ACTIONS_GUIDE.md"))
+        self.assertIn("**고정 문장·원인 줄·실행 요약 속 시크릿 이름은 그 블로그 항목(`blog[\"secrets\"]`)의 이름이다**", read("docs", "ARCHITECTURE.md"))
+
+    def test_the_english_blog_gets_the_sentences_it_got_before_in_the_same_runs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, env = self.english_root_and_env(tmp)
+            for extra in ((), ("--auth-check",)):
+                for code in self.CODES:
+                    with self.subTest(extra=extra, code=code):
+                        before = ENGLISH_SENTENCES_BEFORE_THE_CHANGE[code]
+                        exit_code, out, summary = self.run_failure(FakePublisher(check=PublishError("실패", code=code)), extra=extra, blog=EN, root=root, env=env)
+                        self.assertEqual(exit_code, ac.exit_code_for(code), out)
+                        self.assertIn(f"::error::[{EN}] {before}", out.splitlines())
+                        self.assertIn(f"{ac.label_for(code)}({code}) — {before}", summary)
+                        self.assertNotIn("BLOGGER_KO_", out + summary)
+            exit_code, out, _summary = self.run_failure(FakePublisher(blog_url=KO_URL), blog=EN, root=root, env=env)       # 영문 실행에 한글 계정 주소가 돌아온 경우
+            self.assertEqual(exit_code, 2, out)
+            self.assertIn("[설정 오류] 인증 점검 실패(blog_mismatch): BLOGGER_BLOG_ID 가 가리키는 블로그의 주소가 레지스트리의 url 과 다릅니다", out)
 
 
 class AutoModeTest(KoreanRunBase):
@@ -442,19 +570,96 @@ class RegistryContractTest(unittest.TestCase):
     def test_the_korean_history_file_must_be_kept_off_the_public_site_before_the_blog_is_turned_on(self):
         """Jekyll 은 밑줄로 시작하지 않는 루트 파일을 사이트에 그대로 낸다 — `blogger_ko_history.json` 은 `_config.yml` 의 exclude 에 이름이 적혀야 한다
         (영문 `blogger_history.json` 이 거기 있는 이유와 같다). `_config.yml` 은 광고 표면이라 T3 승인이 필요해 한글 Blogger 를 등록하는 이 작업은 건드리지 않았다.
-        그래서 정지(off)인 동안만 비어 있어도 되게 하고, exclude 를 더하기 전에 `mode` 를 켜는 실수를 시험이 막는다(첫 실행이 이력을 루트에 커밋하면 공개 주소가 된다)."""
+        그래서 정지(off)인 동안만 비어 있어도 되게 하고, exclude 를 더하기 전에 `mode` 를 켜는 실수를 시험이 막는다(첫 실행이 이력을 루트에 커밋하면 공개 주소가 된다).
+        판정은 `history_exposure_problems` 가 한다 — 켠 뒤(exclude 가 있고 봇이 이력 파일을 커밋한 뒤)에도 이 시험이 빨개지지 않는 것은 아래 HistoryExposureGuardTest 가 본다."""
         excluded = yaml.safe_load((REAL / "_config.yml").read_text(encoding="utf-8")).get("exclude") or []
-        history = self.blog["state"]["history"]
-        self.assertTrue(history in excluded or self.blog["mode"] == "off",
-                        f"{history} 가 `_config.yml` exclude 에 없는데 {KO} 의 mode 가 {self.blog['mode']} 입니다 — exclude 를 먼저 더하세요(T3)")
+        self.assertEqual(history_exposure_problems(REAL), [])
         self.assertIn("blogger_history.json", excluded)                              # 영문 이력은 이미 빠져 있다(같은 이유)
         self.assertTrue(self.blog["state"]["content_dir"].startswith("_"))           # 밑줄로 시작하는 초안 폴더는 Jekyll 이 처음부터 무시한다
-        self.assertEqual((REAL / history).exists(), False)                           # 정지 중에는 이력 파일이 아예 만들어지지 않았다
+
+    def test_the_watch_thresholds_are_the_english_blogs_and_the_role_names_the_seventy_thirty_split(self):
+        """독립 검증 N7(변이 X28·X29): 워치독 기준(공백 50시간·연속 실패 3회·미게시 3일)은 영문과 같은 기준이고, `role` 문구는 70:30(보조 30% 이내)을 말한다."""
+        english = registry.get_blog(self.reg, EN)
+        self.assertEqual(self.blog["health"], {"max_gap_hours": 50, "max_failure_streak": 3, "max_unpublished_days": 3})
+        self.assertEqual(self.blog["health"], english["health"])
+        self.assertEqual(self.blog["role"], "일상 속 AI·디지털 도구 활용기(주력) + 집·살림 실사용 기록(보조 30% 이내) (KO)")
+        self.assertTrue(english["role"].endswith("(EN)") and self.blog["role"].endswith("(KO)"))     # 영문과 같은 모양: `<설명> (<언어>)`
 
     def test_the_default_plan_has_no_korean_target_until_it_is_turned_on(self):
         from pipeline import plan
         self.assertEqual([item["key"] for item in plan.build_matrix(self.reg, "blogger", include_off=True)["include"]], [EN, KO])
         self.assertEqual(plan.build_matrix(self.reg, "blogger")["include"], [])
+
+
+class HistoryExposureGuardTest(unittest.TestCase):
+    """RegistryContractTest 의 순서 지킴이(exclude 를 먼저 더하고 mode 를 켠다)가 켠 뒤에도 올바르게 판정하는지 — 실제 저장소의 사본에서 exclude·mode·이력 파일을
+    바꿔 `history_exposure_problems` 에 먹여 본다(독립 검증 N1: 켠 뒤 봇이 첫 이력 파일을 커밋하면 다음 PR 의 CI 가 무조건 빨개지던 시한폭탄)."""
+
+    def make_copy(self, tmp, mode, excluded, history_exists, exclude_as=HISTORY_FILE):
+        """실제 레지스트리·`_config.yml` 의 사본. 한글 블로그의 mode 를 정하고, exclude 에 이력 파일 이름을 더하거나(excluded) 빼고, 이력 파일을 만든다."""
+        root = Path(tmp)
+        (root / "pipeline").mkdir()
+        reg = json.loads((REAL / "pipeline" / "blogs.json").read_text(encoding="utf-8"))
+        for blog in reg["blogs"]:
+            if blog["key"] == KO:
+                blog["mode"] = mode
+        (root / "pipeline" / "blogs.json").write_text(json.dumps(reg, ensure_ascii=False), encoding="utf-8")
+        config = yaml.safe_load((REAL / "_config.yml").read_text(encoding="utf-8"))
+        config["exclude"] = [name for name in config.get("exclude") or [] if name != HISTORY_FILE] + ([exclude_as] if excluded else [])
+        (root / "_config.yml").write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+        if history_exists:
+            (root / HISTORY_FILE).write_text("[]\n", encoding="utf-8")
+        return root
+
+    def problems(self, mode, excluded, history_exists, **kwargs):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.make_copy(tmp, mode, excluded, history_exists, **kwargs)
+            self.assertEqual((root / HISTORY_FILE).exists(), history_exists)       # 전제: 사본이 시험이 말하는 모양이다
+            return history_exposure_problems(root)
+
+    def test_the_real_repository_is_the_stopped_state_without_the_file_and_passes(self):
+        self.assertEqual(history_exposure_problems(REAL), [])
+        self.assertEqual(self.problems("off", excluded=False, history_exists=False), [])        # 사본 도우미가 실제 저장소와 같은 모양을 만든다
+
+    def test_after_the_blog_is_turned_on_with_the_exclude_entry_the_first_bot_history_commit_does_not_turn_the_check_red(self):
+        """N1 재현: exclude 를 더하고 mode 를 켠 PR 이 병합되고, 봇이 첫 이력 파일을 커밋한 상태. 예전 마지막 단언(`이력 파일이 없어야 한다`)은 여기서 실패했다."""
+        for mode in ("draft", "auto"):
+            for history_exists in (False, True):
+                with self.subTest(mode=mode, history_exists=history_exists):
+                    self.assertEqual(self.problems(mode, excluded=True, history_exists=history_exists), [])
+
+    def test_a_blog_that_was_turned_on_and_stopped_again_keeps_its_excluded_history_file_without_a_red_check(self):
+        """켰다가 다시 끈(mode off) 저장소: 이력 파일이 있어도 exclude 에 있으면 공개되지 않는다 — 정지하는 PR 의 CI 가 이 시험 때문에 막히면 안 된다."""
+        self.assertEqual(self.problems("off", excluded=True, history_exists=True), [])
+
+    def test_turning_the_blog_on_before_adding_the_exclude_entry_is_still_caught(self):
+        """순서 지킴이의 본래 일: exclude 가 없는데 mode 가 off 밖이면, 파일이 아직 없어도 막는다."""
+        for mode in ("draft", "auto"):
+            for history_exists in (False, True):
+                with self.subTest(mode=mode, history_exists=history_exists):
+                    found = self.problems(mode, excluded=False, history_exists=history_exists)
+                    self.assertTrue(any("exclude" in line and f"mode 가 {mode} 입니다" in line for line in found), found)
+
+    def test_a_history_file_that_is_already_public_is_caught_even_while_stopped(self):
+        found = self.problems("off", excluded=False, history_exists=True)
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("공개 사이트에 그대로 나옵니다", found[0])
+
+    def test_a_misspelled_exclude_entry_does_not_count(self):
+        for exclude_as in ("blogger_ko_histroy.json", "blogger_ko_history.json ", "BLOGGER_KO_HISTORY.JSON", "blogger_history.json"):
+            with self.subTest(exclude_as=exclude_as):
+                self.assertTrue(self.problems("draft", excluded=True, history_exists=False, exclude_as=exclude_as))
+
+    def test_the_helper_reads_the_history_name_from_the_registry_entry_not_from_a_constant(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.make_copy(tmp, "draft", excluded=True, history_exists=True)
+            reg = json.loads((root / "pipeline" / "blogs.json").read_text(encoding="utf-8"))
+            for blog in reg["blogs"]:
+                if blog["key"] == KO:
+                    blog["state"]["history"] = "renamed_ko_history.json"             # 레지스트리가 이름을 바꾸면 새 이름이 exclude 에 있어야 한다
+            (root / "pipeline" / "blogs.json").write_text(json.dumps(reg, ensure_ascii=False), encoding="utf-8")
+            found = history_exposure_problems(root)
+            self.assertTrue(found and all("renamed_ko_history.json" in line for line in found), found)
 
 
 if __name__ == "__main__":

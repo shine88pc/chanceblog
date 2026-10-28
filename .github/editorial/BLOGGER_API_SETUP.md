@@ -179,7 +179,7 @@ python -m pipeline.run --blog blogger_macat --auth-check
 
    - 4종을 한꺼번에 등록하거나 하나도 등록하지 않습니다. 일부만 있으면 설정 오류(빨강, 종료 2)로 멈추고 **한글 이름만** 안내합니다.
    - 영문 `BLOGGER_*` 4종은 건드리지 않습니다. `GEMINI_API_KEY`는 이미 있는 것을 같이 씁니다.
-6. Actions → `[Blogger 한글] 글 자동 작성` → Run workflow → `인증 점검만 실행`을 체크하고 실행합니다. 정지 중에도 점검하고, 통과하면 요약에 `AUTH_CHECK_OK`가 나옵니다. 실패하면 §5·`docs/ACTIONS_GUIDE.md` 6-3의 분류를 봅니다(`blog_mismatch`면 `BLOGGER_KO_BLOG_ID`가 kcyoon 블로그의 ID인지, 영문 계정 값이 섞이지 않았는지 확인).
+6. Actions → `[Blogger 한글] 글 자동 작성` → Run workflow → `인증 점검만 실행`을 체크하고 실행합니다. 정지 중에도 점검하고, 통과하면 요약에 `AUTH_CHECK_OK`가 나옵니다. 실패하면 §5·`docs/ACTIONS_GUIDE.md` 6-3의 분류를 봅니다(`blog_mismatch`면 `BLOGGER_KO_BLOG_ID`가 kcyoon 블로그의 ID인지, 영문 계정 값이 섞이지 않았는지 확인). 실행 화면의 안내 문장·원인 줄에 나오는 시크릿 이름도 한글 것(`BLOGGER_KO_*`)입니다 — 영문 `BLOGGER_*`는 고치지 않습니다.
 7. AI에게 채팅으로 `blogger_kcyoon`의 `mode`를 `draft`로 켜 달라고 승인합니다(T3). **같은 PR에서 AI가 `_config.yml`의 `exclude`에 `blogger_ko_history.json`을 먼저 더합니다** — 안 넣으면 첫 실행이 커밋한 이력 파일이 공개 사이트 주소가 됩니다(영문 `blogger_history.json`이 거기 있는 이유와 같습니다). `_config.yml`은 광고 표면 파일이라 별도 승인(T3)과 커밋 표시 `Ad-Surface-Approved: <사유>`가 필요해 이번 등록에서는 건드리지 않았고, 순서를 잊지 않도록 `tests/test_blogger_ko.py`가 'exclude가 없으면 `mode`를 `off` 밖으로 못 바꾼다'를 시험합니다. 이후 동작은 §4의 표와 같고, 최소 8일은 `draft`(초안함)로 운영해 인증 실패가 없는지 봅니다. `auto`는 한 번 더 승인입니다.
 8. **광고는 켜지 않습니다.** 신규 채널은 품질 게이트를 통과하기 전까지 광고 없이 시작합니다(레지스트리 `ads: off`, Blogger 화면에서도 켜지 않음. `docs/SECURITY_GUARDRAILS.md` G-C10).
 

@@ -48,13 +48,11 @@ def typed(template, ctx):
 
 
 def wrapper_with(wrapper, event, event_inputs=None):
-    """래퍼가 공용 워크플로에 넘기는 입력 값(`with:` 를 이벤트·입력으로 평가). 문자열 입력의 null 은 빈 문자열이 된다(GitHub 도 그렇게 넘긴다)."""
+    """래퍼가 공용 워크플로에 넘기는 입력 값(`with:` 를 이벤트·입력으로 평가). 값을 고치지 않는다: 문자열 입력에 null 이 가면 null 그대로 보인다.
+    GitHub 문서에는 문자열 입력에 null 을 넘길 때의 동작이 없으므로 래퍼가 `|| ''` 로 빈 문자열을 직접 넘겨야 하고, 그 보장은 test_blogger_split 이
+    모든 이벤트·입력 조합에서 이 값이 문자열인지로 확인한다(독립 검증 N9 — 예전에는 여기서 null 을 빈 문자열로 바꿔 그 가정을 가렸다)."""
     ctx = event_context(event, event_inputs)
-    given = {}
-    for name, template in call_job(wrapper)[1]["with"].items():
-        value = typed(template, ctx) if isinstance(template, str) else template
-        given[name] = ("" if value is None else value) if name not in BOOLEAN_INPUTS else value
-    return given
+    return {name: (typed(template, ctx) if isinstance(template, str) else template) for name, template in call_job(wrapper)[1]["with"].items()}
 
 
 def _only(items, predicate):

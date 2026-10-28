@@ -462,6 +462,37 @@ class CodeownersTest(unittest.TestCase):
             with self.subTest(doc=rel):
                 self.assertTrue((ROOT / rel).is_file(), f"CODEOWNERS 주석이 존재하지 않는 문서를 가리킵니다: {rel}")
 
+    @staticmethod
+    def workflows_that_push_to_main():
+        """`GITHUB_TOKEN` 으로 main 에 직접 push 하는 워크플로 파일. 단계의 `git push` 가 현재 브랜치(`GITHUB_REF_NAME`)나 대상 없이(기본 push) 올리는 것이고, 별도 브랜치로 올리는
+        것(이슈 수정의 `git push origin "$branch"`)은 아니다. 재사용 워크플로(`on: workflow_call`)는 그것을 `uses:` 로 부르는 파일로 센다 — 부른 쪽 실행이 main 에 커밋한다."""
+        folder = ROOT / ".github" / "workflows"
+        texts = {path.name: "\n".join(line for line in path.read_text(encoding="utf-8").splitlines() if not line.lstrip().startswith("#")) for path in sorted(folder.glob("*.yml"))}
+        pushing = {name for name, text in texts.items()
+                   if any(re.search(r"\bgit push\b", line) and ("GITHUB_REF_NAME" in line or re.search(r"\bgit push\s*$", line)) for line in text.splitlines())}
+        callers = {name for name, text in texts.items() for callee in pushing if f"uses: ./.github/workflows/{callee}" in text}
+        reusable = {name for name in pushing if re.search(r"^\s*workflow_call:", texts[name], re.M)}
+        return (pushing - reusable) | callers
+
+    def test_the_comment_lists_every_workflow_that_pushes_to_main_with_the_right_count(self):
+        """독립 검증 N8: 주석의 '5종' 목록에 tistory.yml·naver.yml 이 빠져 있었다(작업 D 이전부터). 목록은 워크플로 파일에서 읽은 실제 push 목록과 같아야 하고, 개수도 맞아야 한다."""
+        pushing = self.workflows_that_push_to_main()
+        self.assertGreaterEqual(len(pushing), 7, pushing)                                                  # 도우미가 헛돌지 않는다(지금은 7개)
+        comment = "\n".join(line for line in self.PATH.read_text(encoding="utf-8").splitlines() if line.startswith("#"))
+        for name in sorted(pushing):
+            with self.subTest(workflow=name):
+                self.assertRegex(comment, rf"(?<![\w.-]){re.escape(name)}")
+        self.assertEqual(int(re.search(r"워크플로 (\d+)종", comment).group(1)), len(pushing))
+        not_pushing = {path.name for path in (ROOT / ".github" / "workflows").glob("*.yml")} - pushing - {"blogger.yml"}
+        for name in sorted(not_pushing):
+            with self.subTest(not_pushing=name):
+                self.assertNotRegex(comment, rf"(?<![\w.-]){re.escape(name)}")
+        self.assertIn(f"자동 발행 {len(pushing)}종(", (ROOT / "docs" / "ACTIONS_GUIDE.md").read_text(encoding="utf-8"))   # 같은 목록을 말하는 운영 가이드의 경고도 같은 개수다
+
+    def test_the_helper_that_finds_the_pushing_workflows_sees_the_known_ones(self):
+        self.assertEqual(self.workflows_that_push_to_main(),
+                         {"chanceblog.yml", "chance-fix-images.yml", "blogger-en.yml", "blogger-ko.yml", "tistory.yml", "naver.yml", "sync-issue-form.yml"})
+
     def test_header_comment_states_the_conditions_for_enforcement(self):
         """주석이 사실과 어긋나지 않게: 봇 우회 조건과 '미검증' 표시가 있고, 단정('켜는 순간 멈춘다')이 없으며,
         1인 소유 저장소에서 본인 PR을 본인이 승인할 수 없다는 한계를 적는다."""

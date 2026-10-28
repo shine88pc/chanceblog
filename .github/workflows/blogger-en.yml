@@ -52,7 +52,8 @@ jobs:
     uses: ./.github/workflows/blogger.yml
     with:
       blog: blogger_macat
-      topic: ${{ github.event.inputs.topic }}
+      # 정기 실행(schedule)에는 github.event.inputs 가 없어 값이 null 이 된다. 문자열 입력에 null 을 넘길 때의 동작은 GitHub 문서에 없으므로 `|| ''` 로 빈 문자열을 직접 넘긴다
+      topic: ${{ github.event.inputs.topic || '' }}
       dry_run: ${{ github.event.inputs.dry_run == 'true' }}
       publish: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.publish || '' }}
       auth_check: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.auth_check == 'true' }}

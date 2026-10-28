@@ -537,15 +537,21 @@ def _blogger_wrapper_errors(rel, data, blog, all_keys):
     if unknown:
         problems.append(f"{rel} 의 jobs.{job_id}.secrets 에 이 블로그의 것이 아닌 시크릿이 있습니다({', '.join(unknown)}) — 역할 이름(PIPELINE_SECRET_<역할>)과 "
                         "텔레그램 알림용 두 개만 넘길 수 있습니다")
-    if not (isinstance(job.get("permissions"), dict) and job["permissions"].get("contents") == "write"):
+    permissions = job.get("permissions")
+    if not (isinstance(permissions, dict) and permissions.get("contents") == "write"):
         problems.append(f"{rel} 의 jobs.{job_id} 에 permissions: contents: write 가 없습니다 — 재사용 워크플로의 권한은 부르는 쪽이 정한 범위를 넘을 수 없어, "
                         "없으면 공용 워크플로가 이력·초안을 커밋하지 못합니다")
+    elif permissions != {"contents": "write"}:
+        extra = ", ".join(sorted(str(name) for name in permissions if name != "contents"))     # contents 가 write 인데 다르다면 다른 키가 더 있다는 뜻이다
+        problems.append(f"{rel} 의 jobs.{job_id}.permissions 에 contents: write 외의 권한이 있습니다({extra}) — 호출 잡의 권한은 정확히 "
+                        "`contents: write` 하나여야 합니다. 공용 워크플로가 이력·초안을 커밋하는 데 필요한 것은 그것뿐이고, 호출 잡 권한은 공용 워크플로가 쓸 수 있는 상한이라 "
+                        "id-token·issues 같은 추가 권한을 여기서 열면 안 됩니다")
     group = (data.get("concurrency") or {}).get("group") if isinstance(data.get("concurrency"), dict) else None
     if not isinstance(group, str) or not group.strip():
         problems.append(f"{rel} 에 최상위 concurrency.group 이 없습니다 — 같은 채널의 실행이 겹치지 않게 줄을 세웁니다")
-    elif group.strip() in {f"blogger-{other}" for other in all_keys}:
-        problems.append(f"{rel} 의 concurrency.group({group.strip()!r}) 이 공용 워크플로 안의 블로그별 줄(`blogger-<블로그 key>`)과 같습니다 — 이름이 같으면 "
-                        "부르는 쪽과 불린 잡이 서로를 기다려 멈춥니다. 다른 이름을 쓰세요")
+    elif group.strip().lower() in {f"blogger-{other}".lower() for other in all_keys}:
+        problems.append(f"{rel} 의 concurrency.group({group.strip()!r}) 이 공용 워크플로 안의 블로그별 줄(`blogger-<블로그 key>`)과 같습니다(GitHub 은 줄 이름의 "
+                        "대소문자를 구분하지 않습니다) — 이름이 같으면 부르는 쪽과 불린 잡이 서로를 기다려 멈춥니다. 다른 이름을 쓰세요")
     return problems, (group.strip() if isinstance(group, str) else None)
 
 
@@ -553,7 +559,8 @@ def check_blogger_wrappers(root, files):
     """REG-6: Blogger 블로그의 워크플로(채널별 래퍼)가 레지스트리와 맞는지. blogger.yml 이 재사용 워크플로가 되면서 '어느 블로그를 어느 시크릿으로 돌리는지'가
     레지스트리가 아니라 래퍼의 글자로 정해지므로, 둘이 어긋나는 것을 PR 단계에서 잡는다: ① 래퍼가 부르는 `with.blog` 가 그 래퍼를 `workflow` 로 가진 블로그의 key 와
     같다 ② `with` 가 다섯 입력을 모두 명시한다 ③ 넘기는 시크릿(역할 이름)이 레지스트리의 그 블로그 시크릿 이름과 정확히 같고 다른 블로그의 것이 없다(영문·한글이 계정과
-    OAuth 클라이언트를 공유하지 않는 보장) ④ 부르는 잡에 contents: write 가 있다 ⑤ 래퍼의 concurrency 줄 이름이 채널마다 다르고 공용 워크플로 안의 줄과 같지 않다.
+    OAuth 클라이언트를 공유하지 않는 보장) ④ 부르는 잡의 permissions 가 정확히 `{contents: write}` 하나다(id-token·issues 같은 추가 권한은 오류) ⑤ 래퍼의 concurrency
+    줄 이름이 채널마다 다르고 공용 워크플로 안의 줄과 같지 않다(GitHub 처럼 대소문자는 구분하지 않고 비교한다).
     정기·수동 입력의 식(연습 실행 기본값 등)은 tests/test_blogger_split.py 가 모든 이벤트·입력 조합으로 대조한다. 레지스트리 오류는 REG-1 이 알린다."""
     if yaml is None:
         return []  # PyYAML 이 없다는 경고는 WF-0(check_workflows)이 이미 낸다
@@ -580,9 +587,12 @@ def check_blogger_wrappers(root, files):
         problems, group = _blogger_wrapper_errors(rel, data, blog, all_keys)
         out.extend(err("REG-6", message, rel) for message in problems)
         if group:
-            if group in seen_groups:
-                out.append(err("REG-6", f"{rel} 의 concurrency.group({group!r}) 이 {seen_groups[group]} 와 같습니다 — 채널마다 다른 줄을 써야 영문·한글 실행이 서로를 막지 않습니다", rel))
-            seen_groups[group] = rel
+            folded = group.lower()      # GitHub 은 concurrency 그룹 이름의 대소문자를 구분하지 않는다('Blogger-EN' 과 'blogger-en' 은 같은 줄이다)
+            if folded in seen_groups:
+                other_rel, other_group = seen_groups[folded]
+                out.append(err("REG-6", f"{rel} 의 concurrency.group({group!r}) 이 {other_rel} 의 {other_group!r} 와 같습니다(대소문자는 구분하지 않습니다) — "
+                                        "채널마다 다른 줄을 써야 영문·한글 실행이 서로를 막지 않습니다", rel))
+            seen_groups[folded] = (rel, group)
     return out
 
 

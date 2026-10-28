@@ -140,9 +140,10 @@ class FlowTest(RunBase):
         seen, created = {}, []
 
         class SpyPublisher(FakePublisher):
-            def __init__(self, blog_id, client_id, client_secret, refresh_token):
+            def __init__(self, blog_id, client_id, client_secret, refresh_token, secret_names=None):
                 super().__init__()
                 seen["publisher"] = (blog_id, client_id, client_secret, refresh_token)
+                seen["secret_names"] = secret_names
                 created.append(self)
 
         def spy_llm_factory(api_key, models, max_retries=2):
@@ -154,6 +155,7 @@ class FlowTest(RunBase):
         self.assertEqual(code, 0, out)
         self.assertEqual(seen["llm_key"], FULL_ENV["GEMINI_API_KEY"])
         self.assertEqual(seen["publisher"], tuple(FULL_ENV[name] for name in PUBLISH_SECRET_NAMES))
+        self.assertEqual(seen["secret_names"], roles)    # 오류 문구가 말할 시크릿 이름은 이 블로그 항목의 secrets 다(한글 Blogger 는 BLOGGER_KO_*, 값이 아니라 이름)
         self.assertEqual(len(created[0].published), 1)
         self.assertEqual(self.history()[-1]["status"], "posted")
 

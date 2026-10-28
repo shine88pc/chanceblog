@@ -232,15 +232,17 @@ def _counts_toward_cap(entry):
 
 def _auth_check_failed(out, environ, blog, record, code, detail):
     """인증 점검 실패를 한곳에서 알린다: [SKIP] 줄·원인 한 줄·고정 문장 ::error::·이력(publish_failed)·실행 요약. 종료 코드를 돌려준다.
-    code 는 어댑터가 낸 분류이고(auth_check.FAILURES 에 없으면 api_error 로 접는다), detail 은 이미 비밀을 가린 원인 문구다."""
+    code 는 어댑터가 낸 분류이고(auth_check.FAILURES 에 없으면 api_error 로 접는다), detail 은 이미 비밀을 가린 원인 문구다.
+    고정 문장 속 시크릿 이름은 이 블로그의 것이다(한글 Blogger 는 BLOGGER_KO_*): blog["secrets"] 로 채운다."""
     code = safe_code(code)
     exit_code = exit_code_for(code)
+    sentence = sentence_for(code, blog.get("secrets"))
     out(skip_line("AUTH_CHECK_FAILED", blog=blog["key"], reason=code, exit=exit_code))
     out(f"[{'설정' if exit_code == EXIT_CONFIG else '인프라'} 오류] 인증 점검 실패({code}): {one_line(detail)}")
-    out(f"::error::[{blog['key']}] {sentence_for(code)}")
+    out(f"::error::[{blog['key']}] {sentence}")
     if record is not None:  # 단독 점검(--auth-check)은 쓰기가 없으므로 이력을 남기지 않는다
         record({"status": "publish_failed", "topic": "", "reasons": [f"[{code}] {one_line(detail, 300)}"]})
-    _summarize(environ, blog, "AUTH_CHECK_FAILED", f"{label_for(code)}({code}) — {sentence_for(code)}")
+    _summarize(environ, blog, "AUTH_CHECK_FAILED", f"{label_for(code)}({code}) — {sentence}")
     return exit_code
 
 
@@ -271,7 +273,7 @@ def run_auth_check_only(out, environ, blog, publisher_factory, secret_values, dr
         out(f"[{blog['key']}] mode=off(정지 중)이지만 인증 점검은 쓰기가 없어 실행합니다.")
     try:
         publisher = (publisher_factory or default_publisher_factory)(blog, environ)
-        auth_check(publisher, blog["url"])
+        auth_check(publisher, blog["url"], blog.get("secrets"))
     except PublishError as exc:
         return _auth_check_failed(out, environ, blog, None, exc.code, redact(exc, secret_values))
     except Exception as exc:  # noqa: BLE001 - 어댑터 밖의 예외(설치 누락 등)도 기록하고 멈춘다
@@ -290,8 +292,9 @@ def default_publisher_factory(blog, environ):
     secrets = resolve_secrets(blog, environ)
     if blog["platform"] == "blogger":
         from pipeline.publishers.blogger import BloggerPublisher
+        # secret_names: 오류 문구가 가리키는 시크릿 이름(이 블로그의 것 — 한글 Blogger 는 BLOGGER_KO_*)이다. 값이 아니라 이름이다.
         return BloggerPublisher(secrets["blog_id"], secrets["client_id"],
-                                secrets["client_secret"], secrets["refresh_token"])
+                                secrets["client_secret"], secrets["refresh_token"], secret_names=blog.get("secrets"))
     if blog["platform"] in PACKAGE_PLATFORMS:   # 초안 패키지: GitHub 이슈. 계정 정보 없이 워크플로가 넘기는 토큰으로만 쓴다
         return issue_package.IssuePackagePublisher(environ.get("GITHUB_REPOSITORY"), environ.get("GITHUB_TOKEN"))
     raise RegistryError(f"이 러너가 지원하지 않는 platform: {blog['platform']}")
@@ -683,7 +686,7 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
     if delivery in ("publish", "draft") and not dry:
         try:
             publisher = (publisher_factory or default_publisher_factory)(blog, environ)
-            auth_check(publisher, blog["url"])
+            auth_check(publisher, blog["url"], blog.get("secrets"))
         except PublishError as exc:
             return _auth_check_failed(out, environ, blog, record, exc.code, redact(exc, secret_values))
         except Exception as exc:  # noqa: BLE001 - 어댑터 밖의 예외(설치 누락 등)도 기록하고 멈춘다

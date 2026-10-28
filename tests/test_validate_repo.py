@@ -351,7 +351,7 @@ def blogger_wrapper(label, cron, key, group, names, wired=True):
             uses: ./.github/workflows/blogger.yml
             with:
               blog: {key}
-              topic: ${{{{ github.event.inputs.topic }}}}
+              topic: ${{{{ github.event.inputs.topic || '' }}}}
               dry_run: ${{{{ github.event.inputs.dry_run == 'true' }}}}
               publish: ${{{{ github.event_name == 'workflow_dispatch' && github.event.inputs.publish || '' }}}}
               auth_check: ${{{{ github.event_name == 'workflow_dispatch' && github.event.inputs.auth_check == 'true' }}}}
@@ -1326,6 +1326,63 @@ class BloggerWrapperRuleTest(TmpCase):
         messages = self.messages()
         self.assertEqual(len(messages), 1, messages)
         self.assertIn("영문·한글 실행이 서로를 막지 않습니다", messages[0])
+
+    def test_the_group_names_are_compared_without_regard_to_case_like_github_does(self):
+        """독립 검증 N10: GitHub 은 concurrency 그룹 이름의 대소문자를 구분하지 않는다 — 'Blogger-EN' 과 'blogger-en' 은 같은 줄이다. 철자만 대소문자로 바꿔 검사를 피할 수 없다."""
+        for variant in ("Blogger-EN", "BLOGGER-EN", "blogger-En"):
+            with self.subTest(variant=variant):
+                self.edit("blogger-ko.yml", "  group: blogger-ko\n", f"  group: {variant}\n")
+                messages = self.messages()
+                self.assertEqual(len(messages), 1, messages)
+                self.assertIn("대소문자는 구분하지 않습니다", messages[0])
+                self.assertIn(variant, messages[0])
+                self.assertIn("blogger-en", messages[0])
+                self.edit("blogger-ko.yml", f"  group: {variant}\n", "  group: blogger-ko\n")
+        self.assertEqual(self.check(), [])
+
+    def test_a_group_that_differs_only_in_case_from_the_reusable_workflows_own_group_is_an_error(self):
+        for variant in ("Blogger-Blogger_Macat", "BLOGGER-BLOGGER_KCYOON"):
+            with self.subTest(variant=variant):
+                self.edit("blogger-en.yml", "  group: blogger-en\n", f"  group: {variant}\n")
+                messages = self.messages()
+                self.assertEqual(len(messages), 1, messages)
+                self.assertIn("서로를 기다려", messages[0])
+                self.assertIn("대소문자를 구분하지 않습니다", messages[0])
+                self.edit("blogger-en.yml", f"  group: {variant}\n", "  group: blogger-en\n")
+
+    def test_distinct_names_are_not_confused_by_the_case_folding(self):
+        self.edit("blogger-ko.yml", "  group: blogger-ko\n", "  group: Blogger-Korean-Channel\n")
+        self.assertEqual(self.check(), [])
+
+    def test_the_call_job_permissions_are_exactly_contents_write_so_extra_permissions_are_errors(self):
+        """독립 검증 N10: 호출 잡의 권한은 공용 워크플로가 쓸 수 있는 상한이다. contents: write 에 id-token·issues 같은 권한을 더하면 오류다."""
+        for extra in ("id-token: write", "issues: write", "actions: write", "pull-requests: write", "packages: none", "contents2: write"):
+            with self.subTest(extra=extra):
+                self.edit("blogger-en.yml", "    permissions:\n      contents: write\n", f"    permissions:\n      contents: write\n      {extra}\n")
+                messages = self.messages()
+                self.assertEqual(len(messages), 1, messages)
+                self.assertIn("contents: write 외의 권한이 있습니다", messages[0])
+                self.assertIn(extra.split(":")[0], messages[0])
+                self.edit("blogger-en.yml", f"    permissions:\n      contents: write\n      {extra}\n", "    permissions:\n      contents: write\n")
+        self.assertEqual(self.check(), [])
+
+    def test_two_extra_permissions_are_listed_together_and_each_wrapper_is_judged_on_its_own(self):
+        self.edit("blogger-ko.yml", "    permissions:\n      contents: write\n", "    permissions:\n      contents: write\n      issues: write\n      id-token: write\n")
+        messages = self.messages()
+        self.assertEqual(len(messages), 1, messages)
+        self.assertIn("(id-token, issues)", messages[0])
+        self.edit("blogger-en.yml", "    permissions:\n      contents: write\n", "    permissions:\n      contents: write\n      actions: read\n")
+        self.assertEqual(len(self.messages()), 2)
+
+    def test_the_same_permissions_written_another_way_still_pass_and_a_string_form_is_not_contents_write(self):
+        self.edit("blogger-en.yml", "    permissions:\n      contents: write\n", "    permissions: {contents: write}\n")
+        self.assertEqual(self.check(), [])                                   # 같은 뜻의 다른 표기
+        self.edit("blogger-en.yml", "    permissions: {contents: write}\n", '    permissions:\n      contents: "write"\n')
+        self.assertEqual(self.check(), [])
+        self.edit("blogger-en.yml", '    permissions:\n      contents: "write"\n', "    permissions: write-all\n")
+        messages = self.messages()
+        self.assertEqual(len(messages), 1, messages)
+        self.assertIn("permissions: contents: write 가 없습니다", messages[0])      # write-all 은 contents: write 가 아니다
 
     def test_a_workflow_that_does_not_call_the_reusable_one_is_an_error(self):
         write(self.reg_root, ".github/workflows/blogger-ko.yml", blogger_wrapper("Blogger 한글", "30 3 * * *", "blogger_kcyoon", "blogger-ko", {}, wired=False).replace(

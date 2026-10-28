@@ -7,6 +7,49 @@
 
 ---
 
+## [2026-10-28] Claude – 작업 D 독립 검증 권고 반영(D-FIX): 켠 뒤 CI 시한폭탄 제거·인증 실패 안내의 시크릿 이름·번역 한계 정정·시험 구멍 막기·낡은 문장·`topic` 방어·REG-6 보강 (T2)
+
+**작업자**: Claude (구현 세션, 독립 검증은 별도 세션)
+**대상**: Blogger(코드·시험·래퍼 워크플로)·공통(검증기·문서)
+**등급**: T2 — 인증 실패 안내 문장 속 시크릿 이름(`pipeline/auth_check.py`·`pipeline/run.py`·Blogger 어댑터)·래퍼 워크플로 `topic` 식·검증기 REG-6·시험. 문서 정정은 T1. `mode`(Chance `auto`·영문 Blogger `off`·한글 Blogger `off`)·시크릿 값·광고 표면(`index.html`·`_config.yml`)·`인수인계/작업내용.md`·`docs/SESSION_START.md`·`docs/REQUEST_BRIEFING.md` 는 건드리지 않았다. **영문 Blogger 의 출력은 바이트 단위로 같다**(아래 증거).
+**승인 근거**: 작업 D 독립 검증(판정 "병합 가능")의 권고 중 같은 PR 에서 고치면 비용이 가장 작은 것(N1·N2·N3·N7·N8·N9·N10)을 총괄이 지시했다. 운영자 승인 D5·D6(등록·광고 금지)은 그대로고 한글 Blogger 를 켜는 것은 별도 T3 다. 톤·정책·`mode` 를 바꾸는 일이 없어 새 승인이 필요한 항목은 없다.
+**목적**: 병합 전에 검증자가 찾은 낮은 위험 7건을 같은 PR 에서 정리한다. 켜는 날 CI 가 터질 시한폭탄(N1)과 한글 실행의 실패 안내가 영문 시크릿을 고치게 하는 문제(N3)를 먼저 없애고, 시험이 못 보던 구멍(N7)과 낡은 문장(N8)을 막는다.
+**브랜치**: `ai/claude/batch3-fixes`(기준 `ai/claude/batch3-integ` `6dca5d7`). 로컬 커밋만 했다 — push·PR·Actions 실행·`api.github.com` 호출 없음.
+
+### 한 일(검증 보고 §12 번호)
+- **N1(중간, 시한폭탄)** `tests/test_blogger_ko.py` 의 마지막 단언 '`blogger_ko_history.json` 이 없어야 한다'는 `mode` 와 무관해, 켠 뒤 봇이 첫 이력을 커밋하면 그다음 PR 의 CI 가 무조건 빨강이 됐다. 판정을 `history_exposure_problems()` 로 뽑아 ① `mode` 가 off 밖이면 `_config.yml` exclude 에 이름이 있어야 하고 ② 이력 파일이 이미 있으면 exclude 에 이름이 있어야 한다로 바꿨다(exclude 가 있으면 파일이 있어도 공개되지 않아 통과 — 켰다가 다시 끈 저장소에서 둘째 시한폭탄이 되지 않게 '정지일 때만 없어야 한다'보다 한 걸음 더 나갔다). 켠 뒤 상태(exclude 추가 + `mode: draft` + 이력 파일 생성)를 실제 레지스트리·`_config.yml` 사본으로 만들어 통과를, exclude 없이 켜면·철자 틀린 exclude 면 실패를 보는 시험 7개를 더했다.
+- **N2(중간)** 번역·복제 금지가 코드로 보장되는 것처럼 읽히던 문장을 정정했다. 제목 교차 중복(`DUP_OTHER`)은 글자 유사도라 같은 언어 안에서만 걸리고 영·한 번역 제목은 대체로 0.2 이하(검증 측정 0.12~0.18, 탈락 기준 0.6)라 못 잡는다. `BLOGGER_PROMPT_KO_AI.md` §3(보장 어투)·§7(게이트가 막는다)·머리말을 고치고 §6 '켜기 전에 읽을 것'에 7번(영문 글의 번역·복제를 켜기 전·첫 초안들에서 눈으로 확인)을 더했다. 같은 한계를 `docs/ARCHITECTURE.md`(§5 교차 중복·§7-1 한글 프로필 새 문단·영문 프로필 '알려진 한계')·`docs/SECURITY_GUARDRAILS.md` G-C5·`docs/ACTIONS_GUIDE.md` 3-12 한글 켜기 6번·`HANDLER.md` 한글 Blogger 행에 적었다. 문구와 실제 유사도(영·한 쌍 6개 < 0.25, 같은 언어의 거의 같은 제목은 탈락)를 시험이 고정한다.
+- **N3(낮음~중간)** 인증 실패 안내가 한글 실행에서도 영문 시크릿 이름(`BLOGGER_REFRESH_TOKEN`·`BLOGGER_BLOG_ID` 등)만 말했다. `pipeline/auth_check.py` 의 세 문장(`auth_expired`·`auth_failed`·`blog_mismatch`)을 `{blog_id}`·`{client_id}`·`{client_secret}`·`{refresh_token}` 자리표시자가 든 틀로 바꾸고 `sentence_for(code, secrets=None)` 가 그 블로그 레지스트리 항목의 `secrets` 이름으로 채운다(이름이 없거나 환경변수 이름 모양이 아니면 그 역할만 영문 기본 이름 — 이름이 `::error::` 주석에 그대로 들어가므로). `auth_check(publisher, url, secrets=None)` 의 `blog_mismatch` 원인 문구도 같은 이름을 쓰고, 어댑터는 선택 인자 `secret_names`(기본 영문)로 블로그 ID 형식 안내(`blogs.get` 400)를 채운다. `pipeline/run.py` 는 `_auth_check_failed`·두 `auth_check` 호출·`default_publisher_factory` 에서 `blog["secrets"]` 를 넘긴다. `EXPIRED_HINT` 는 시크릿 이름을 말하지 않아 그대로이고 시험이 이를 고정한다. 영문 문장 7개는 바뀌기 전 글자 그대로를 시험에 고정했다(`ENGLISH_SENTENCES_BEFORE_THE_CHANGE`).
+- **N7(낮음~중간, 시험 구멍)** 검증자의 생존 변이를 시험 한 묶음씩으로 막았다: 한글 md 프롬프트 본문(번호 규칙 12개가 각각 말해야 하는 것·머리·글 길이·제목 길이·본론 단계 수·점검 목록·라벨 수가 프로필 게이트 범위 안인지·**출력 형식 머리표가 러너 파서(`gates._MARKER_SETS`)가 읽는 머리표와 같은지, 그 머리표대로 쓴 답이 실제로 파싱되는지**(영문 프롬프트도 같은 대조)), 공용 `blogger.yml` 두 잡의 `runs-on: ubuntu-latest`, `topic_expand_prompt` 의 `구성:`(70:30) 줄, `blogger_kcyoon` 의 `health`·`role`. 검증 보고 §10 의 생존 변이 17개(P19·X03·X22·X24~X29·X31·Y01~Y07)를 복사본으로 다시 만들어 모두 잡힘을 확인했다.
+- **N8(낮음)** 낡은 문장 정정: `docs/ARCHITECTURE.md` 요약 머리 예시(`### [Blogger] …` → 영문·한글 둘), `.github/instructions/workflows.instructions.md` 접두사 예시, `pipeline/plan.py` 첫 줄('워크플로 수정 없이 잡이 늘어난다'는 티스토리·네이버만 맞다), `.github/CODEOWNERS` 의 '봇이 main 에 직접 push 하는 워크플로 5종' 목록(`tistory.yml`·`naver.yml` 누락 → 7종, 같은 목록을 말하는 `docs/ACTIONS_GUIDE.md` 5절 경고 포함), `docs/ARCHITECTURE.md` §7-1 '새 한글 Blogger 는 계획'. CODEOWNERS 목록은 워크플로 파일의 `git push` 에서 읽은 실제 목록(재사용 워크플로는 부르는 래퍼로 셈)과 개수까지 같은지 시험이 대조한다.
+- **N9(낮음)** 래퍼 둘의 `with.topic` 식에 `|| ''` 를 더했다(`github.event.inputs.topic` → `github.event.inputs.topic || ''`. 정기 실행에서 null 이 문자열 입력으로 가는 동작이 GitHub 문서에 없다). 시험 도우미 `wrapper_with` 가 null 을 빈 문자열로 가려 이 가정을 숨기던 것을 그만두고, 래퍼 둘 × (정기 2 + 수동 108) = 220조합에서 문자열 입력이 null 이 아니고 불린 입력이 불린인지·식의 모양을 확인한다. 분리 전 값과의 220조합 대조는 그대로 통과한다.
+- **N10(낮음)** `scripts/validate_repo.py` REG-6: 호출 잡의 `permissions` 는 정확히 `{contents: write}` 만 허용(`id-token`·`issues` 등 추가 권한은 오류), 동시 실행 줄(`concurrency.group`) 비교는 대소문자 무시(래퍼끼리·공용 워크플로 안의 `blogger-<key>` 줄 모두; GitHub 문서 "The concurrency group name is case insensitive" 를 2026-10-28 에 직접 읽어 확인). 시험 6개와 `docs/ARCHITECTURE.md` §7-A·`docs/SECURITY_GUARDRAILS.md` REG-6 행 갱신. 검증자의 둘째 권고(새 래퍼를 만들 때 시험 도우미 `WRAPPERS` 갱신을 문서에 명시)도 §7-A 3-1 행에 적고, 레지스트리의 Blogger 블로그와 `WRAPPERS` 가 어긋나면 실패하는 시험을 더했다(REG-6 은 래퍼의 구조만 보고 `with` 식의 의미는 시험이 `WRAPPERS` 에 있는 래퍼만 본다). `docs/DEFECT_REGISTER.md` D-75·D-76 행에 보강 한 문장씩.
+
+### 후속으로 미룬 것(이번 PR 에서 고치지 않음)
+- **N4·N5·N6**(프로필 정책·톤 — 운영자 승인 몫): 일상 낱말 `증상`·`진단`·`N만 원`·`저작권`·`연체` 의 본문 오탐 가능성(켜기 전 첫 초안들로 확인, 필요하면 의료 맥락으로 좁힘)·`5천 원` 같은 요금 변형 미탐·한글 글에 `macat0722`·'영문 블로그'·`Chance_Blog` 이름 언급을 막지 않음.
+- **N11**(PR 본문의 파일 수 40→41 오기)은 우리 PR 본문이 아니라 총괄이 PR 을 만들 때 숫자를 새로 쓰면 된다. **N12**(main 과 충돌 7곳)는 총괄이 통합본(묶음 3)에서 이미 처리했다.
+- **N13**(만 자 넘는 숫자·영숫자 덩어리에서 정규식 이차 시간 — 현실 위험 낮음)은 후속 후보로만 기록한다(제안: 응답·한 단어 길이 상한 한 줄, 이메일 패턴 앞 `(?<![A-Za-z0-9._%+\-])`).
+
+### 검증 증거
+- **전체 시험**: 새 clone 에서 `python -X utf8 -m unittest discover -s tests` — `6b6fc9d`(WORKLOG 항목만 더하기 전 마지막 코드·시험·문서 커밋)에서 **3512개 모두 통과**(OK, 503.409초). 앞선 커밋 `9216d20`(3512개, 464.6초)·`486d1b0`(3510개, 434.7초)의 새 clone 에서도 모두 통과했다. 기준(`6dca5d7`) 3456개 → 3512개(+56: `test_auth_check` +12·`test_blogger_ko` +13·`test_profile_ko_ai` +14·`test_blogger_split` +8·`test_validate_repo` +6·`test_security_settings` +2·`test_publisher_blogger` +1), 없어진 시험 0. 기존 시험을 고친 곳은 넷뿐이다: `tests/test_run.py` 가짜 게시자 시그니처(어댑터 인자 때문, 단언 하나 추가)·`tests/test_blogger_ko.py` 순서 지킴이(N1)·`tests/blogger_workflow_helpers.py` `wrapper_with`(null 을 가리지 않게, N9)·`tests/test_validate_repo.py` 래퍼 틀의 식(N9).
+- **검증기·도구**(최종 head, 이 항목을 더한 작업 트리): `validate_repo.py --base 750c147` 오류 0·경고 2(`인수인계/` 문서 둘의 LIQUID-1 — main 과 같음), `actionlint` 1.7.12 워크플로 15개 0건, `pyflakes pipeline scripts tests generator.py blogger_generator.py` 16건 = 기준과 같은 집합(새 경고 0), `vermin --target=3.10-` 최소 3.10, 3.12 전용 f-string 검사 107개 파일 0건, `git diff --check` 0. 이 PC 에는 Python 3.12 뿐이라 3.10 직접 실행은 못 했다.
+- **영문 Blogger 동작 불변(러너 시나리오 2460개)**: 기준 트리(`6dca5d7`)와 이 브랜치의 최종 head(코드는 `486d1b0` 이후 같다 — 거기서도 같은 결과)를 같은 가짜 LLM·가짜 게시자(또는 가짜 구글 서비스를 단 진짜 어댑터)로 `pipeline.run.run()` 을 돌려 종료 코드·출력 줄·실행 요약·생성/변경 파일·게시자 호출을 비교했다. 시나리오: 블로그(영문·한글) × `mode`(off·draft·auto) × 연습 여부 × 실행 모양(글 생성·`--auth-check`·`BLOGGER_AUTH_CHECK=1`) × 점검 결과(통과·주소 불일치·실패 코드 7종·모르는 코드·예외) × 시크릿(전부·없음·일부), 게시 정책 5값, 게시 단계 실패(코드 7종·모르는 코드·예외), 진짜 어댑터의 `blogs.get` 오류 9종. 결과 영문 1230개는 전부 바이트 단위로 같고(설명 안 되는 차이 0), 한글 1230개는 1130개가 바이트 단위로 같고 100개가 시크릿 이름만 다르다(달라진 줄은 열 가지 — 한글 인증 실패 안내 `::error::`·실행 요약 두 줄씩 세 문장, 원인 줄 둘, 이력 `reasons` 둘). 종료 코드 분포(0 1076·1 396·2 988)·비교한 출력 줄 7878개·생성/변경 파일 800개(약 1.4MB)도 기준과 같다. 비교 도구가 둔하지 않음은 영문 `network` 문장의 낱말 하나를 바꾼 사본으로 확인했다(56개가 차이로 잡힘).
+- **정기·수동 입력 → 러너 환경변수(N9)**: 래퍼 둘 × (정기 2 + 수동 108) = 220조합의 값을 기준 트리와 이 브랜치에서 각각 계산해 비교했다 — 차이 0(정기 실행의 `BLOGGER_TOPIC` 은 두 래퍼 모두 빈 문자열). 새 시험은 모든 조합에서 `with:` 의 문자열 입력이 null 이 아님을 확인한다.
+- **N1 재현**: '켠 뒤'(exclude 추가 + 한글 `mode: draft` + 봇이 커밋한 `blogger_ko_history.json`) 사본에서 기준 트리의 옛 시험은 `AssertionError: True != False` 로 실패하고 고친 시험은 통과하며, exclude 를 다시 빼면 고친 시험도 실패한다.
+- **변이 시험(직접, 복사본에서 한 번에 한 곳)**: 79개(검증 보고 §10 의 생존 변이 17개 P19·X03·X22·X24~X29·X31·Y01~Y07 포함. 묶음: N1 5·N3 20·N9 4·N10 6·N7 19·N2 7·N8 7·시험 도우미·대조 시험용 보강 11)를 새 시험이 모두 잡았다 — 생존 0, 문법·임포트 오류로만 잡힌 것 0. 새 시험 56개가 모두 변이를 하나 이상 잡는다(안 잡는 시험 0 — 처음에는 대조·부정 시험 10개가 어떤 변이도 못 잡아 그 시험을 겨냥한 변이 11개를 더해 살아 있음을 확인했다). 한 번에 한 곳만 바꾸고 새 시험 묶음으로만 판정했다
+
+### 알아 둘 것
+- 새 번호(가드레일·결함·검증기 규칙)는 만들지 않았다: 기존 `REG-6`·`D-75`·`D-76`·`G-C5` 행을 고쳤다. 같은 기준에서 따로 일하는 작업 H 와 겹칠 수 있는 파일은 `WORKLOG.md`(맨 위 항목)·`docs/ACTIONS_GUIDE.md`·`docs/ARCHITECTURE.md`·`docs/SECURITY_GUARDRAILS.md`·`docs/DEFECT_REGISTER.md`·`HANDLER.md`·`scripts/validate_repo.py`·`tests/test_run.py`·`tests/test_validate_repo.py` 이고, 모두 서로 다른 줄을 고쳤다.
+- 이 PR 이 병합돼도 한글 Blogger 는 켜지지 않는다. 켜는 PR 은 `_config.yml` exclude → `mode: draft` 순서(N1 이 고친 시험이 순서를 지키되 켠 뒤에는 빨개지지 않는다)와 `BLOGGER_PROMPT_KO_AI.md` §6 의 7번(영문 글 번역·복제 눈으로 확인)을 따른다.
+- 작업 D 항목의 '다음 AI 주의 ②' 중 `with:` 의 null→빈 문자열 관측은 N9 로 필요 없어졌다(래퍼가 빈 문자열을 직접 넘긴다). 나머지 관측(`secrets:` 명시 전달·`contents: write` 위임·접혀 보이는 실행 이름)은 병합 뒤 첫 정기 실행에서 그대로 확인한다.
+- 검증용 도구(러너 시나리오 비교·변이·N1 재현·표본 계산)는 저장소에 넣지 않고 저장소 밖 스크래치에 두었다. 변이는 복사본(작업 트리)에서만 만들었고 매번 되돌렸다.
+- 실제 GitHub Actions 실행·구글·Gemini·텔레그램 호출은 하지 않았다(가짜 게시자·스텁 LLM·가짜 서비스). Python 3.10·Linux 실행은 못 했다(`vermin`·f-string 검사로 대신).
+- 남은 불완전한 문장(거짓은 아님, 이번에는 고치지 않음): `AGENTS.md`('블로그는 `pipeline/blogs.json` 항목으로 추가한다')·`pipeline/registry.py` 머리 독스트링('코드를 고치지 않고 항목을 추가한다')은 Blogger 가 채널 래퍼 워크플로를 더 필요로 한다는 말이 없다(`docs/ARCHITECTURE.md` §7-A 가 그 절차다). 작업 H 도 `AGENTS.md`·`registry.py` 를 고치므로 총괄이 병합할 때 한 줄을 더해도 된다.
+
+---
+
+---
+
 ## [2026-10-27] Claude – 묶음 3: 작업 D(한글 Blogger 등록·Blogger 워크플로 분리)를 main(750c147)과 합치고 현황 문서 갱신 (총괄, 문서·표지판 시험 충돌 정리만)
 
 **작업자**: Claude (총괄 세션, 독립 검증은 별도 세션)
