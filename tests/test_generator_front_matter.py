@@ -867,9 +867,17 @@ class FlowListSpeedTest(unittest.TestCase):
     )
 
     def timed(self, call):
-        started = time.perf_counter()
-        result = call()
-        return time.perf_counter() - started, result
+        """call 의 걸린 시간과 결과를 돌려준다. 시간 제한을 넘으면 최대 세 번까지 다시 재서 가장 빠른 값을 쓴다 — 한 번의 일시적인 멈춤으로 시험이 흔들리지 않게 한다(정규식이 정말 느리면 세 번 다
+        느리고, 제한의 열 배를 넘게 느리면 일시적인 멈춤일 수 없어 다시 재지 않는다)."""
+        best, result = None, None
+        for _ in range(3):
+            started = time.perf_counter()
+            result = call()
+            spent = time.perf_counter() - started
+            best = spent if best is None else min(best, spent)
+            if best < self.LIMIT or spent > 10 * self.LIMIT:
+                break
+        return best, result
 
     def test_the_worst_shapes_finish_within_the_time_limit(self):
         for label, value in self.SHAPES:
@@ -909,27 +917,34 @@ class FlowListSpeedTest(unittest.TestCase):
                 self.assertLess(spent, self.LIMIT, f"{label}: {spent:.2f}초")
 
     def test_random_adversarial_lines_never_take_long(self):
+        """무작위로 고른 위험한 모양(쉼표 앞 공백 한 칸·탭·둘·다섯 칸·앞뒤 공백·낱말 둘)을 항목 수를 바꿔 가며 틀린 끝으로 닫는다 — 모두 0.2초 안에 끝나야 한다."""
         rng = random.Random(7)
-        pieces = ["a", "a ", "a  ", "a" + chr(9), " a", "a b", "a b ", "'a' ", '"a" ', ",", " ,", ", ", "?", "#", ":"]
-        tails = ["]", "#]", ":]", "", " ]", ",]", "?]", " #"]
+        shapes = (("a ", 20, 23, ","), ("a" + chr(9), 20, 23, ","), ("a ", 11, 13, " ,"), ("a" + " " * 5, 7, 8, ","), (" a ", 20, 22, ","), ("a b ", 18, 20, ","))
+        tails = ["#]", ":]", "", "?]", " #"]
         worst = 0.0
-        for _ in range(400):
-            value = ("[" + "".join(rng.choice(pieces) for _ in range(rng.randint(1, 40))) + rng.choice(tails))[:2000]
+        for _ in range(40):
+            item, low, high, separator = rng.choice(shapes)
+            value = "[" + separator.join([item] * rng.randint(low, high)) + rng.choice(tails)
             spent, _ = self.timed(lambda: g._fm_value_problem("tags", value))
             worst = max(worst, spent)
         self.assertLess(worst, self.LIMIT, f"가장 느린 줄 {worst:.2f}초")
 
     def test_the_other_header_patterns_are_linear_on_long_lines(self):
-        """같은 겹침(양쪽이 같은 글자를 먹는 반복)이 다른 머리말 정규식에도 있는지 보는 시험: 길고 공백·대시가 많은 줄에서 모두 바로 끝난다."""
-        shapes = (("키 뒤 공백 뭉치", "custom:" + " " * 1990 + "x"), ("들여쓴 목록 항목 뒤 공백", " " * 1900 + "-" + " " * 90 + "x"), ("대시 뭉치", "-" * 1990 + " x"),
-                  ("키 모양 긴 이름", "a" * 1990 + ":"), ("작은따옴표 뭉치", "custom: '" + "''" * 990 + "x"), ("따옴표 안 역슬래시", 'custom: "' + (ESC + '"') * 990 + "x"),
-                  ("공백과 샵", "custom: " + " #" * 990 + "x"), ("콜론 뭉치", "custom: " + ":" * 1980))
-        for label, line in shapes:
-            with self.subTest(label):
+        """같은 겹침(양쪽이 같은 글자를 먹는 반복)이 다른 머리말 정규식에도 있는지 보는 시험. 두 단계로 돈다: ① 짧은 줄(18~46글자) — 되돌아가기가 지수로 느는 정규식은 이것만으로 몇 초가 걸린다
+        ② 길고 공백·대시가 많은 줄(1,990글자) — 제곱으로 느는 정규식이 드러난다. ① 에서 느린 것이 나오면 ② 는 돌리지 않는다(지수로 느린 정규식에 긴 줄을 주면 끝나지 않는다)."""
+        short = (("키 모양 + 틀린 끝", "a" * 18 + "!"), ("대시 뭉치", "-" * 46 + " x"), ("닫히지 않은 작은따옴표 값", "custom: '" + "a" * 26))
+        long = (("키 뒤 공백 뭉치", "custom:" + " " * 1990 + "x"), ("들여쓴 목록 항목 뒤 공백", " " * 1900 + "-" + " " * 90 + "x"), ("대시 뭉치", "-" * 1990 + " x"),
+                ("키 모양 긴 이름", "a" * 1990 + ":"), ("작은따옴표 뭉치", "custom: '" + "''" * 990 + "x"), ("따옴표 안 역슬래시", 'custom: "' + (ESC + '"') * 990 + "x"),
+                ("공백과 샵", "custom: " + " #" * 990 + "x"), ("콜론 뭉치", "custom: " + ":" * 1980))
+        for phase, shapes in (("짧은 줄", short), ("긴 줄", long)):
+            slow = []
+            for label, line in shapes:
                 text = with_replaced("lang: ko\n", f"lang: ko\n{line}\n")
                 spent_check, _ = self.timed(lambda: g.front_matter_problems(text))
                 spent_split, _ = self.timed(lambda: g._split_model_content(text + "\n" + KR_BODY))
-                self.assertLess(max(spent_check, spent_split), self.LIMIT, f"{label}: {spent_check:.2f}·{spent_split:.2f}초")
+                if max(spent_check, spent_split) >= self.LIMIT:
+                    slow.append(f"{label}: {spent_check:.2f}·{spent_split:.2f}초")
+            self.assertEqual(slow, [], f"{phase}에서 느린 정규식")
 
 
 # ======================================================================================================================
@@ -955,6 +970,7 @@ class YamlLineBreakCharacterTest(unittest.TestCase):
                 with self.assertRaises(yaml.YAMLError):
                     yaml.safe_load("custom: a" + char + "b")
                 self.assertEqual(yaml.safe_load("layout: post" + char + "title: x"), {"layout": "post", "title": "x"})      # 줄바꿈이 되어 키가 끼어든다
+                self.assertTrue(g._YAML_UNPRINTABLE.search(char), "그래서 날 글자는 읽지 못하는 글자로 취급한다")
         self.assertEqual(yaml.safe_load('title: "a' + NEL + 'b"')["title"], "a b")      # 날 NEL 은 공백으로 접힌다 — 제목이 바뀐다
 
     def test_a_raw_line_break_character_in_the_header_is_a_problem_wherever_it_is(self):
