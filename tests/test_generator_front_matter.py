@@ -186,7 +186,7 @@ class FrontMatterProblemsTest(unittest.TestCase):
     def test_characters_yaml_cannot_read_are_refused(self):
         self.only(with_replaced("분야", "분\x7f야"), "제어 문자")
         problems = g.front_matter_problems(with_replaced("분야", "분\x00야"))         # JSON 은 문자열 안의 날 제어 문자를 받지 않으므로 값 모양 문제도 함께 나온다
-        self.assertIn("머리말에 YAML 이 읽지 못하는 제어 문자가 있음", problems)
+        self.assertIn(UNREADABLE, problems)
         self.assertEqual(g.front_matter_problems(with_replaced("분야", "분야이모지😀")), [])         # 이모지(astral 글자)는 읽힌다
         self.assertEqual(g.front_matter_problems(with_replaced("분야", "분\\t야")), [])           # JSON 이스케이프 \\t 는 읽힌다(엔진의 json.dumps 가 쓰는 모양)
         self.assertTrue(g.front_matter_problems(with_replaced("분야", "분\t야")))                 # 날 탭은 JSON 이 받지 않는다 — 보수적으로 믿지 않는다
@@ -491,7 +491,7 @@ class ModelHeaderTrustTest(unittest.TestCase):
         self.assertTrue(self.problems('title: "t"', "custom: [a"))
 
     def test_characters_yaml_cannot_read_make_the_header_untrusted(self):
-        self.assertEqual(self.problems('title: "t\x7f"'), ["머리말에 YAML 이 읽지 못하는 제어 문자가 있음"])
+        self.assertEqual(self.problems('title: "t\x7f"'), [UNREADABLE])
 
     def test_a_plain_category_and_extra_keys_are_trusted_because_the_engine_rewrites_or_keeps_them_as_before(self):
         self.assertEqual(self.problems('title: "t"', "category: 분야", "published: true", "date: 2026-10-20 08:20:00 +0900"), [])
@@ -916,6 +916,115 @@ class FlowListSpeedTest(unittest.TestCase):
                 spent_check, _ = self.timed(lambda: g.front_matter_problems(text))
                 spent_split, _ = self.timed(lambda: g._split_model_content(text + "\n" + KR_BODY))
                 self.assertLess(max(spent_check, spent_split), self.LIMIT, f"{label}: {spent_check:.2f}·{spent_split:.2f}초")
+
+
+# ======================================================================================================================
+# YAML 이 줄바꿈으로 읽는 글자 U+0085·U+2028·U+2029 (N3)
+# ======================================================================================================================
+NEL, LS, PS = chr(0x85), chr(0x2028), chr(0x2029)      # 소스에 날 글자를 넣지 않으려고 코드 포인트로 만든다
+LINE_BREAKS = (("U+0085", NEL), ("U+2028", LS), ("U+2029", PS))
+UNREADABLE = "머리말에 YAML 이 읽지 못하는 제어 문자나 줄바꿈으로 읽는 U+0085·U+2028·U+2029 가 있음"
+
+
+class YamlLineBreakCharacterTest(unittest.TestCase):
+    """U+0085(NEL)·U+2028(줄 구분)·U+2029(문단 구분)는 YAML 이 줄바꿈으로 읽는 글자다(검증자 N3). `json.dumps(ensure_ascii=False)` 는 이 글자를 날 글자로 두는데, 머리말 한 줄 안에 날 글자로 있으면
+    큰따옴표 제목 안의 NEL 은 공백으로 접혀 제목이 조용히 바뀌고, 따옴표 없는 값 안에서는 읽지 못하며, 키 줄 사이에서는 줄이 갈라져 다른 키가 끼어든다. 그래서 모델이 쓴 머리말에 날 글자가 있으면
+    믿지 않고 다시 쓰며, 우리가 쓰는 JSON 한 줄에서는 `\\uXXXX` 로 이스케이프해 글자(제목·분야·태그)를 그대로 보존한다."""
+
+    def kr(self, response, notes=None, **fields):
+        return validate(kr_only(response, **fields), **({} if notes is None else {"notes": notes}))["kr_content"]
+
+    def test_the_premise_json_dumps_leaves_them_raw_and_pyyaml_misreads_them(self):
+        for name, char in LINE_BREAKS:
+            with self.subTest(name):
+                self.assertIn(char, json.dumps("a" + char + "b", ensure_ascii=False))
+                with self.assertRaises(yaml.YAMLError):
+                    yaml.safe_load("custom: a" + char + "b")
+                self.assertEqual(yaml.safe_load("layout: post" + char + "title: x"), {"layout": "post", "title": "x"})      # 줄바꿈이 되어 키가 끼어든다
+        self.assertEqual(yaml.safe_load('title: "a' + NEL + 'b"')["title"], "a b")      # 날 NEL 은 공백으로 접힌다 — 제목이 바뀐다
+
+    def test_a_raw_line_break_character_in_the_header_is_a_problem_wherever_it_is(self):
+        for name, char in LINE_BREAKS:
+            for label, text in (("큰따옴표 제목", with_replaced("제목", "제" + char + "목")), ("분야", with_replaced("분야", "분" + char + "야")),
+                                ("태그 목록", with_replaced('["a", "b"]', '["a' + char + '", "b"]')),
+                                ("따옴표 없는 값", with_replaced("lang: ko\n", "lang: ko\ncustom: a" + char + "b\n")),
+                                ("키 줄 사이", with_replaced("lang: ko", "lang: ko" + char + "published: false"))):
+                with self.subTest(f"{name} {label}"):
+                    self.assertIn(UNREADABLE, g.front_matter_problems(text))
+
+    def test_the_other_unreadable_characters_are_still_a_problem_and_the_body_is_not_checked(self):
+        for char in (chr(0x7f), chr(0x84), chr(0x86), chr(0x9f), chr(0x0b), chr(0x00), chr(0xd800), chr(0xfffe)):
+            with self.subTest(hex(ord(char))):
+                self.assertIn(UNREADABLE, g.front_matter_problems(with_replaced("분야", "분" + char + "야")))
+        for char in (chr(0xa0), chr(0x2027), chr(0x202a), chr(0x3000), chr(0xfeff), chr(0x1F600)):      # 읽히는 글자(바로 옆 코드 포인트)는 그대로 받는다
+            with self.subTest(hex(ord(char))):
+                self.assertNotIn(UNREADABLE, g.front_matter_problems(with_replaced("분야", "분" + char + "야")))
+        for name, char in LINE_BREAKS:
+            self.assertEqual(g.front_matter_problems(with_replaced("본문 첫 줄입니다.", "본문" + char + "첫 줄입니다.")), [], name)
+
+    def test_a_model_header_with_a_raw_line_break_character_is_not_trusted(self):
+        for name, char in LINE_BREAKS:
+            with self.subTest(name):
+                self.assertEqual(g._model_header_problems(['title: "앞' + char + '뒤"']), [UNREADABLE])
+                self.assertEqual(g._model_header_problems(['title: "t"', "tags: [a" + char + "b]"]), [UNREADABLE])
+                self.assertEqual(g._model_header_problems(['title: "t"', "category: 분" + char + "야"]), [UNREADABLE])
+
+    def test_json_line_is_json_dumps_except_for_the_three_characters(self):
+        for value in ("한글", 'quote"d', ESC + "slash", "tab" + chr(9) + "here", "emoji" + chr(0x1F600), "del" + chr(0x7f), "", ["a", "b"], ["가", '나"다'], "a" * 50):
+            with self.subTest(repr(value)[:20]):
+                self.assertEqual(g._json_line(value), json.dumps(value, ensure_ascii=False))
+        for name, char in LINE_BREAKS:
+            with self.subTest(name):
+                for value in ("a" + char + "b", ["x", "a" + char + "b"]):
+                    line = g._json_line(value)
+                    self.assertNotIn(char, line)
+                    self.assertEqual(json.loads(line), value)
+                    self.assertEqual(yaml.safe_load("k: " + line)["k"], value)
+                self.assertIn(ESC + "u%04x" % ord(char), g._json_line("a" + char + "b"))
+
+    def test_a_title_category_and_tags_with_the_characters_are_written_escaped_and_read_back_exactly(self):
+        for name, char in LINE_BREAKS:
+            with self.subTest(name):
+                title, category, tags = "앞" + char + "뒤", "분" + char + "야", ["가" + char + "다", "나"]
+                text = self.kr(KR_BODY, kr_title=title, kr_category=category, kr_tags=tags)
+                header, _ = split_post(text)
+                self.assertNotIn(char, "\n".join(header))
+                loaded = yaml.safe_load("\n".join(header))
+                self.assertEqual((loaded["title"], loaded["category"], loaded["tags"]), (title, category, tags))
+                self.assertEqual(g.front_matter_problems(text), [])
+
+    def test_the_fresh_header_escapes_each_structured_value_on_its_own(self):
+        """`validate_post_data` 가 분야 줄을 다시 쓰므로 위 시험으로는 `_fresh_front_matter` 의 분야 줄이 가려진다 — 함수를 직접 부른다."""
+        for name, char in LINE_BREAKS:
+            with self.subTest(name):
+                data = {"kr_title": "앞" + char + "뒤", "kr_category": "분" + char + "야", "kr_tags": ["가" + char + "다"]}
+                header = g._fresh_front_matter(data, "kr", "ko", KR_IMAGE)
+                self.assertNotIn(char, header)
+                loaded = yaml.safe_load(header.split("\n---\n", 1)[0][4:])
+                self.assertEqual((loaded["title"], loaded["category"], loaded["tags"]), (data["kr_title"], data["kr_category"], data["kr_tags"]))
+
+    def test_a_model_header_with_a_raw_character_is_rewritten_and_the_title_survives_exactly(self):
+        for name, char in LINE_BREAKS:
+            with self.subTest(name):
+                notes, title = [], "앞" + char + "뒤"
+                text = self.kr('---\nlayout: post\ntitle: "' + title + '"\ncategory: "c"\ntags: []\n---\n\n' + KR_BODY, notes, kr_title=title)
+                header, _ = split_post(text)
+                self.assertNotIn(char, "\n".join(header))
+                self.assertEqual(yaml.safe_load("\n".join(header))["title"], title)
+                self.assertEqual(g.front_matter_problems(text), [])
+                self.assertEqual(len(notes), 1)
+                self.assertIn("제어 문자", notes[0])
+
+    def test_the_lines_the_engine_adds_later_escape_them_too(self):
+        for name, char in LINE_BREAKS:
+            with self.subTest(name):
+                text = g._front_matter_set(GOOD, "category", "분" + char + "야")
+                self.assertEqual(g.front_matter_problems(text), [])
+                self.assertEqual(yaml.safe_load(text.split("\n---\n", 1)[0][4:])["category"], "분" + char + "야")
+                source = dict(SOURCE, source="NASA" + char + "Lab")
+                finished = g.add_discovery_metadata(with_replaced("본문 첫 줄입니다.\n", FrontMatterProblemsSourceTest.LONG_BODY), source)
+                self.assertEqual(g.front_matter_problems(finished, source), [])
+                self.assertEqual(yaml.safe_load(finished.split("\n---\n", 1)[0][4:])["source_name"], "NASA" + char + "Lab")
 
 
 # ======================================================================================================================

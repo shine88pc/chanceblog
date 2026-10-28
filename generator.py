@@ -1488,7 +1488,16 @@ _FM_MAX_LINE = 2000      # 머리말 한 줄의 상한(검사 정규식이 아�
 _FM_FLOW_PLAIN = r"""[^\s,\[\]{}"'#&*!|>%@`:?-](?:[^,\[\]{}"'#:?\n]*[^\s,\[\]{}"'#:?\n])?"""
 _FM_FLOW_ITEM = r"""(?:"(?:[^"\\\n]|\\["\\/bfnrt]|\\u[0-9a-fA-F]{4})*"|'(?:[^'\n]|'')*'|""" + _FM_FLOW_PLAIN + ")"
 _FM_FLOW_LIST = re.compile(r"\[[ \t]*(?:" + _FM_FLOW_ITEM + r"(?:[ \t]*,[ \t]*" + _FM_FLOW_ITEM + r")*(?:[ \t]*,)?[ \t]*)?\]")
-_YAML_UNPRINTABLE = re.compile(r"[^\x09\x0a\x0d\x20-\x7e\x85\xa0-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]")      # PyYAML 이 읽지 못하는 글자
+_YAML_UNPRINTABLE = re.compile(r"[^\x09\x0a\x0d\x20-\x7e\xa0-\U00002027\U0000202a-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]")      # PyYAML 이 읽지 못하는 글자 + YAML 이 줄바꿈으로 읽는 U+0085·U+2028·U+2029
+# 머리말 한 줄 안의 날 U+0085·U+2028·U+2029 는 큰따옴표 값 안이면 NEL 이 공백으로 접혀 값이 바뀌고, 따옴표 없는 값 안이면 읽지 못하고, 키 줄 사이면 줄이 갈라져 다른 키가 끼어든다(검증자 N3).
+_YAML_UNPRINTABLE_PROBLEM ="머리말에 YAML 이 읽지 못하는 제어 문자나 줄바꿈으로 읽는 U+0085·U+2028·U+2029 가 있음"
+# 우리가 쓰는 JSON 한 줄에서는 그 세 글자를 `\uXXXX` 로 이스케이프한다: json.dumps(ensure_ascii=False) 는 날 글자로 두지만, JSON 과 YAML 이 같은 이스케이프를 읽어 값은 그대로 보존된다.
+_YAML_LINE_BREAK_ESCAPES = {code: "\\u%04x" % code for code in (0x85, 0x2028, 0x2029)}
+
+
+def _json_line(value):
+    """`json.dumps(value, ensure_ascii=False)` — 단, YAML 이 줄바꿈으로 읽는 U+0085·U+2028·U+2029 는 `\\uXXXX` 로 이스케이프한다(머리말의 title·category·tags 와 엔진이 더하는 줄에 쓴다)."""
+    return json.dumps(value, ensure_ascii=False).translate(_YAML_LINE_BREAK_ESCAPES)
 
 
 def _fm_json_string(value):
@@ -1613,7 +1622,7 @@ def front_matter_problems(content, source=None):
     if "\r" in joined:
         problems.append("머리말에 CR 줄바꿈이 섞여 있음")
     if _YAML_UNPRINTABLE.search(joined):
-        problems.append("머리말에 YAML 이 읽지 못하는 제어 문자가 있음")
+        problems.append(_YAML_UNPRINTABLE_PROBLEM)
     found, keys = _fm_header_problems(header)
     problems += found
     problems += [f"필수 키 `{key}` 줄이 없음" for key in _FM_REQUIRED if key not in keys]
@@ -1724,7 +1733,7 @@ def _model_header_problems(header):
         problems.append("제목(`title`) 줄이 없음")
     problems += [f"`{key}` 는 한 줄 값이어야 함" for key in ("lang", "image") if key in keys and keys[key][1]]
     if _YAML_UNPRINTABLE.search("\n".join(header)):
-        problems.append("머리말에 YAML 이 읽지 못하는 제어 문자가 있음")
+        problems.append(_YAML_UNPRINTABLE_PROBLEM)
     return problems
 
 
@@ -1732,9 +1741,9 @@ def _fresh_front_matter(data, prefix, html_lang, image_url):
     """모델이 쓴 머리말을 믿지 않을 때 쓰는, 구조화된 값(제목·분야·태그)과 시스템 값(언어·이미지)으로 처음부터 쓴 머리말(닫는 울타리와 빈 줄까지)."""
     return (
         "---\nlayout: post\n"
-        f"title: {json.dumps(data[f'{prefix}_title'], ensure_ascii=False)}\n"
-        f"category: {json.dumps(data[f'{prefix}_category'], ensure_ascii=False)}\n"
-        f"tags: {json.dumps(data[f'{prefix}_tags'], ensure_ascii=False)}\n"
+        f"title: {_json_line(data[f'{prefix}_title'])}\n"
+        f"category: {_json_line(data[f'{prefix}_category'])}\n"
+        f"tags: {_json_line(data[f'{prefix}_tags'])}\n"
         f"lang: {html_lang}\nimage: {json.dumps(image_url)}\n---\n\n"
     )
 
@@ -1803,7 +1812,7 @@ def _front_matter_set(content, key, value):
     if not match:
         return content
     front, body = match.groups()
-    line = f"{key}: {json.dumps(str(value), ensure_ascii=False)}"
+    line = f"{key}: {_json_line(str(value))}"
     pattern = re.compile(rf"(?m)^{re.escape(key)}\s*:\s*.*$")
     if pattern.search(front):
         front = pattern.sub(lambda _: line, front, count=1)
