@@ -448,6 +448,33 @@ class BrokenFrontMatterAlertTest(CliCase):
         self.assertNotIn(notify.UNREADABLE_TITLE, net.bodies()[0]["text"])
         self.assertIn(chr(0x1F1F0) + chr(0x1F1F7) + " " + nh.KR_TITLE + "\n", net.bodies()[0]["text"])
 
+    def test_the_placeholder_is_a_fixed_text_that_is_safe_to_put_in_the_html_message_as_it_is(self):
+        """자리 문구는 `safe_text`(소독·이스케이프)를 거치지 않고 알림 본문에 그대로 들어간다 — 그래서 고정 문구여야 하고 HTML 특수 문자(`<` `>` `&`)가 없어야 텔레그램 HTML 모드가 깨지지 않는다
+        (검증자 N8). 문구를 바꾸려면 이 시험과 docs/DEFECT_REGISTER.md 의 D-80 을 함께 고친다."""
+        self.assertEqual(notify.UNREADABLE_TITLE, "(제목을 읽지 못했습니다 · 글 머리말 확인 필요)")
+        for char in "<>&":
+            self.assertNotIn(char, notify.UNREADABLE_TITLE)
+        self.assertEqual(notify.escape_html(notify.UNREADABLE_TITLE), notify.UNREADABLE_TITLE)
+        self.assertEqual(notify.safe_text(notify.UNREADABLE_TITLE), notify.UNREADABLE_TITLE)      # 소독을 거쳐도 그대로 — 비밀 모양·보이지 않는 문자·줄바꿈·주소가 없다
+        self.assertEqual(notify.UNREADABLE_TITLE.splitlines(), [notify.UNREADABLE_TITLE])
+        self.assertLessEqual(len(notify.UNREADABLE_TITLE), notify.TITLE_LIMIT)
+
+    def test_the_title_line_of_an_unreadable_title_is_exactly_the_flag_and_the_fixed_text(self):
+        for kr_title, en_title in ((None, ""), ("", None), ("   ", chr(0x200B)), (chr(0x200B) + chr(0xFEFF), "\n\t ")):      # 비거나 소독하면 비는 제목
+            with self.subTest(kr=repr(kr_title), en=repr(en_title)):
+                text, _ = notify.format_chance_published([{"lang": "ko", "title": kr_title}, {"lang": "en", "title": en_title}], {})
+                lines = text.split("\n")
+                self.assertEqual(lines[1], notify.FLAGS["ko"] + " " + notify.UNREADABLE_TITLE)
+                self.assertEqual(lines[2], notify.FLAGS["en"] + " " + notify.UNREADABLE_TITLE)
+                self.assertNotIn("<", lines[1] + lines[2])
+
+    def test_a_readable_title_is_escaped_and_never_replaced_by_the_placeholder(self):
+        for title, shown in (("<b>굵게</b>", "&lt;b&gt;굵게&lt;/b&gt;"), ("A & B", "A &amp; B"), ("(제목을 읽지 못했습니다)", "(제목을 읽지 못했습니다)")):
+            with self.subTest(title):
+                text, _ = notify.format_chance_published([{"lang": "ko", "title": title}], {})
+                self.assertEqual(text.split("\n")[1], notify.FLAGS["ko"] + " " + shown)
+                self.assertNotIn(notify.UNREADABLE_TITLE, text)
+
     def test_a_post_whose_opening_fence_is_broken_is_not_announced_at_all(self):
         """현재 한계를 고정한다: `------` 로 시작하는 글은 머리말을 읽을 수 없어(`{}`) 알림이 가지 않는다. 생성기가 그런 글을 더는 만들지 않게 막았다(D-80)."""
         broken = self.BROKEN_KR.replace("---\nlayout", "------\nlayout", 1)
