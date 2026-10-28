@@ -36,8 +36,8 @@
 | 작업요청서 | 저장소를 볼 수 없는 AI(모바일 Claude 등)에게 `docs/REQUEST_BRIEFING.md`를 통째로 붙여 넣으면 이 프로그램에 맞는 요청서를 만든다. 요청서는 `인수인계/작업요청/`에 올리거나 채팅에 붙여 넣는다. 처리 규칙은 그 폴더의 README |
 | 통합 성과 대시보드 | **제안 단계 — 사용자 결정 대기.** 블로그별 방문자·인기 글·AdSense 사이트별 수익을 한곳에서 보는 방안(Looker Studio 먼저). 검토 결과·결정 항목은 `docs/ANALYTICS_PLAN.md` §7. 결정 전에는 사이트에 GA 등을 설치하지 않는다(T3) |
 | 알려진 결함 | D-03 봇 글이 슬롯 대부분에서 안 나옴(원인: 비기술 분야 후보 0건 + 대체 분야 시도 없음 → 폴백으로 완화, 비기술 분야 후보 부족은 열림) · D-11 OAuth 7일 · D-08 내부 문서·코드의 사이트 공개(해결: 사이트에서 뺌, 2026-10-26) · D-15/D-16 Copilot PR 승인·PR 생성 설정(사용자 조치) — 상세는 `docs/DEFECT_REGISTER.md` (D-01 이슈 이미지 흐름은 `issue-edit`로 대체, 관측 대기) |
-| Blogger 워크플로(Actions 이름 `[Blogger 영문] 글 자동 작성`·`[Blogger 한글] 글 자동 작성`, 둘이 공용 `blogger.yml`을 부름) | `blogger_macat`(영문)은 **정지(mode off)** — 영문 블로그인데 프로필이 한글이라 멈췄고(운영자 결정 2026-10-25), **영문 프로필·영어 프롬프트·주제 가드레일(제목·라벨·본문)은 병합됨**(PR #40 362ba8f·보강 PR #43 0da8221·2차 보강 PR #46 009eecc·3차 보강 PR #47 f8724b7 — 둘 다 독립 검증 "병합 가능"; 레지스트리는 영문 프로필을 가리키지만 `mode`는 off 그대로, 켜는 것은 운영자 승인(T3)이고 남은 후속은 3차 검증의 낮음 권고(V-2·V-4·V-5) — 한글 Blogger 의 프로필 점검은 아래 행, `docs/DEFECT_REGISTER.md` D-64 ⑦·⑧, 설계 `docs/ARCHITECTURE.md` §7-1). 정지 중에도 매일 02:00 UTC(영문)·03:30 UTC(한글) 실행은 돌고 대상 0개로 초록 + `::notice::`로 끝난다. 켜면 `mode: draft`는 게시 Secrets 4종이 모두 있을 때 Blogger **초안함**에 업로드(공개되지 않음, 운영자가 Blogger 화면에서 확인한 뒤 직접 게시)하고, 하나도 없으면 저장소 파일에만 저장하며, 일부만 있거나 `mode: auto`(즉시 게시)인데 없으면 글을 만들기 전에 종료 2(빨강). 올리기 전에 인증 점검(토큰 갱신·블로그 조회·주소 일치)을 먼저 한다. 재개 절차는 §3 P1 |
-| 한글 Blogger `blogger_kcyoon`(kcyoon.blogspot.com) | **정지(mode off)** — 2026-10-27 레지스트리에 **등록만** 했다(작업 D, 운영자 승인 D5·D6, 켜는 것은 별도 T3). 일상 속 AI·디지털 도구 활용법(약 70%)과 집·살림(약 30%), 프로필 `blogger_ai_tools_ko`·프롬프트 `BLOGGER_PROMPT_KO_AI.md`(설계 `docs/ARCHITECTURE.md` §7-1). 시크릿은 영문과 **다른 계정·OAuth 클라이언트의 `BLOGGER_KO_*` 4종**(미등록, 등록 금지), 이력 `blogger_ko_history.json`·초안 `_blogger_ko_drafts/`, 광고 `off`. 켜기 전 읽을 것: 프롬프트 파일 §6(영문 글을 번역·복제하지 않았는지는 코드가 못 잡아 첫 초안들에서 눈으로 확인하는 항목 포함), 절차: `.github/editorial/BLOGGER_API_SETUP.md` §7(켜는 PR에서 `_config.yml` exclude 에 `blogger_ko_history.json` 추가가 먼저 — T3·광고 표면). ⏳ 실제 GitHub·구글·Gemini 호출은 한 번도 없다 |
+| Blogger 워크플로(Actions 이름 `[Blogger 영문] 글 자동 작성`·`[Blogger 한글] 글 자동 작성`, 둘이 공용 `blogger.yml`을 부름) | `blogger_macat`(영문)은 **`mode: draft`(2026-10-29 운영자 승인 R-015 선택 A·이슈 #71, 병합 뒤 적용)** — 2026-10-25 에는 영문 블로그인데 프로필이 한글이라 멈췄었고(운영자 결정), **영문 프로필·영어 프롬프트·주제 가드레일(제목·라벨·본문)은 병합됨**(PR #40 362ba8f·보강 PR #43 0da8221·2차 보강 PR #46 009eecc·3차 보강 PR #47 f8724b7 — 둘 다 독립 검증 "병합 가능"; 인증 점검 통과 2026-10-28, 남은 후속은 3차 검증의 낮음 권고(V-2·V-4·V-5) — 한글 Blogger 의 프로필 점검은 아래 행, `docs/DEFECT_REGISTER.md` D-64 ⑦·⑧, 설계 `docs/ARCHITECTURE.md` §7-1). 매일 02:00 UTC(영문)·03:30 UTC(한글) 실행은 각자 글 1편을 만들어 Blogger 초안함에 올린다(정지한 블로그가 있으면 그 실행은 대상 0개로 초록 + `::notice::`로 끝난다). 켜면 `mode: draft`는 게시 Secrets 4종이 모두 있을 때 Blogger **초안함**에 업로드(공개되지 않음, 운영자가 Blogger 화면에서 확인한 뒤 직접 게시)하고, 하나도 없으면 저장소 파일에만 저장하며, 일부만 있거나 `mode: auto`(즉시 게시)인데 없으면 글을 만들기 전에 종료 2(빨강). 올리기 전에 인증 점검(토큰 갱신·블로그 조회·주소 일치)을 먼저 한다. 재개 절차는 §3 P1 |
+| 한글 Blogger `blogger_kcyoon`(kcyoon.blogspot.com) | **`mode: draft`(2026-10-28 운영자 승인 R-011 선택 A·이슈 #70, 병합 뒤 적용)** — 2026-10-27 레지스트리에 등록했고(작업 D, 운영자 승인 D5·D6) 인증 점검 통과(2026-10-28 22:01) 뒤 켰다: 매일 12:30 KST 글 1편을 Blogger 초안함에만 올리고 공개는 운영자가 직접 한다. 일상 속 AI·디지털 도구 활용법(약 70%)과 집·살림(약 30%), 프로필 `blogger_ai_tools_ko`·프롬프트 `BLOGGER_PROMPT_KO_AI.md`(설계 `docs/ARCHITECTURE.md` §7-1). 시크릿은 영문과 **다른 계정·OAuth 클라이언트의 `BLOGGER_KO_*` 4종**(운영자가 직접 등록·갱신 — AI 는 값을 보지 않는다), 이력 `blogger_ko_history.json`·초안 `_blogger_ko_drafts/`, 광고 `off`. 켜기 전 읽은 것(운영자 승인됨): 프롬프트 파일 §6(영문 글을 번역·복제하지 않았는지는 코드가 못 잡아 첫 초안들에서 눈으로 확인하는 항목 포함), 절차: `.github/editorial/BLOGGER_API_SETUP.md` §7(켜는 PR에서 `_config.yml` exclude 에 `blogger_ko_history.json` 추가 — T3·광고 표면, 같은 PR 에 포함). ⏳ 인증 점검만 실제로 통과했고 글 생성은 실제 모델로 아직 한 번도 시험하지 못했다 |
 | 초안 패키지(티스토리·네이버, 2026-10-27, T3 승인 D4·D7) | 두 채널은 공식 자동 게시 수단이 없어(티스토리 오픈 API 2024-02 종료, 네이버 글쓰기 API 2020 종료) 글을 **GitHub 이슈 1개(라벨 `초안`)로 만들어 보여 주기만** 하고 운영자가 복사해 직접 발행한 뒤 이슈를 닫는다. 레지스트리 `mode: package`·`platform: tistory`·`naver`, 러너 `pipeline/run.py`의 package 경로, 어댑터 `pipeline/publishers/issue_package.py`, 워크플로 `[티스토리] 초안 패키지 만들기`(`tistory.yml`)·`[네이버] 초안 패키지 만들기`(`naver.yml`). **코드·시험은 끝났지만 레지스트리에 두 블로그가 없다**(블로그 주소·주제는 사용자 입력 대기) — 정기 실행은 "대상 0개"로 초록. 시크릿은 Gemini 키뿐이고 **티스토리·네이버 계정 정보는 저장·처리하지 않는다**(G-S7). AI 출력은 이슈가 되기 전에 소독한다(G-L9). 읽고 발행하는 법 `docs/ACTIONS_GUIDE.md` 3-19, 구조·받은 뒤 할 일 체크리스트 `docs/ARCHITECTURE.md` §7-B-2. 첫 실제 이슈의 복사 가능 여부는 관측 대기 |
 | 비밀 파일 | `client_secret.json`은 저장소에 없음 (`.gitignore`로 차단) |
 | 자동 push 스크립트 | `auto_sync.bat` 제거됨. 같은 동작 재도입 금지 |
@@ -53,7 +53,7 @@
 | 루트 랜딩 저장소 | `shine88pc/shine88pc.github.io` → https://shine88pc.github.io/ — `index.html`·`README.md`·`robots.txt`뿐인 별도 저장소. 같은 호스트의 chanceblog에서 최신 글 목록을 읽어 온다. Google Ads 스크립트가 들어 있으므로 AdSense 관련 변경 금지 |
 | Chance_Blog | https://shine88pc.github.io/chanceblog/ — 교양·분석형 |
 | Blogger 영문 | https://macat0722.blogspot.com/ — 생활 습관 실용형(영문). 질병·치료·약·보충제·진단·임신·영유아·체중 감량 주제는 게이트가 막는다(`docs/ARCHITECTURE.md` §7-1) |
-| Blogger 한글 | https://kcyoon.blogspot.com/ — 일상 속 AI·디지털 도구 활용법 + 집·살림(한글, 지금 정지). 건강·의료에 더해 법률·세금·대출·투자·보험 조언도 게이트가 막는다(`docs/ARCHITECTURE.md` §7-1) |
+| Blogger 한글 | https://kcyoon.blogspot.com/ — 일상 속 AI·디지털 도구 활용법 + 집·살림(한글, 2026-10-29 부터 초안함 업로드). 건강·의료에 더해 법률·세금·대출·투자·보험 조언도 게이트가 막는다(`docs/ARCHITECTURE.md` §7-1) |
 | 전략 | C 방향 + **균형 성장** (한쪽만 우선 금지) |
 | 콘텐츠 원칙 | **동일 글 양쪽에 올리지 않음**. 같은 주제라도 관점·형식·깊이 다르게 |
 
@@ -91,7 +91,7 @@
 - **코드는 완료**, **Secrets 등록은 사용자 진행 중**
 - `client_secret.json`은 작업 PC에만 있고 **저장소에는 없다** (공개 저장소 — `.gitignore`로 차단). 다른 PC에서는 Google Cloud에서 다시 받는다 (§10)
 - refresh token **미발급** — `scripts/get_blogger_token.py` 실행 필요 (브라우저 Google 동의가 필요해 사용자가 직접)
-- `blogger-en.yml`(영문, 매일 02:00 UTC)·`blogger-ko.yml`(한글, 매일 03:30 UTC)은 공용 `blogger.yml`을 불러 돌지만 지금은 `blogger_macat`·`blogger_kcyoon`이 `mode: off`라 대상 0개로 초록 + `::notice::`로 끝난다(2026-10-25 운영자 결정, §3 P1 재개 절차). 게시 대상(mode auto 또는 publish 켬)인데 Secrets가 없으면 글을 만들기 전에 종료 2(빨강)로 멈추므로 초안만 쌓인 채 초록으로 끝나지 않는다
+- `blogger-en.yml`(영문, 매일 02:00 UTC)·`blogger-ko.yml`(한글, 매일 03:30 UTC)은 공용 `blogger.yml`을 불러 돌지만 지금은 `blogger_macat`(영문, 11:00 KST)·`blogger_kcyoon`(한글, 12:30 KST) 둘 다 2026-10-29 부터 `mode: draft` 라 각자 글 1편을 만들어 Blogger 초안함에 올린다(2026-10-25 에는 영문이 `mode: off` 로 멈춰 있었다 — 운영자 결정, §3 P1 재개 절차). 게시 대상(mode auto 또는 publish 켬)인데 Secrets가 없으면 글을 만들기 전에 종료 2(빨강)로 멈추므로 초안만 쌓인 채 초록으로 끝나지 않는다
 - 결제/Cloud 체험이 부담이면 → 초안 수동 게시 또는 이메일 게시 유지 가능
 
 ---
@@ -140,7 +140,7 @@ Secrets (API 선택 시):
 - (기존) `GEMINI_API_KEY`
 
 **현재 상태**: 결정(운영자 2026-10-25) — **초안은 Blogger 초안함에 자동으로 올리고 운영자가 직접 게시**(표의 B를 Blogger API 초안함 업로드로 구현: `mode: draft`)로 시작하고, 글 품질과 인증이 안정된 뒤 A(풀오토 API 게시, `mode: auto`)로 올린다(`auto` 전환은 T3). refresh token 미발급. 순서: ① OAuth 동의 화면 "프로덕션" 전환(미전환 시 7일 만료, D-11) → ② token 발급 → ③ Secrets 등록 → ④ 인증 점검 → ⑤ 첫 수동 실행 확인. 자세한 절차는 §10 5번.
-`blogger_macat`은 지금 `mode: off`(운영자 결정 2026-10-25: 영문 블로그인데 프로필·프롬프트가 한글이라 정지 — 영문 프로필·가드레일은 병합됨(PR #40·#43), 2차·3차 보강도 병합됨(PR #46·#47), 켜는 것은 운영자 승인(T3))라 매일 02:00 UTC 실행이 대상 0개로 초록 + `::notice::`로 끝난다. 한글 `blogger_kcyoon`도 `mode: off`로 등록만 돼 있어 매일 03:30 UTC 실행이 같은 모양으로 끝난다(켜는 절차는 `.github/editorial/BLOGGER_API_SETUP.md` §7). 게시 대상인데 게시 Secrets가 없으면 글을 만들기 전에 종료 2로 멈춘다(예전처럼 초안만 쌓이지 않는다).
+`blogger_macat`(영문)은 2026-10-25 에 영문 블로그인데 프로필·프롬프트가 한글이라 `mode: off` 로 멈췄었고(운영자 결정), 영문 프로필·가드레일(PR #40·#43)과 2차·3차 보강(PR #46·#47)이 병합된 뒤 2026-10-29 운영자 승인(R-015 선택 A)으로 `mode: draft` 가 됐다 — 매일 02:00 UTC 실행이 글 1편을 만들어 초안함에 올린다. 한글 `blogger_kcyoon` 도 2026-10-29 부터 `mode: draft`(매일 03:30 UTC, 켠 절차는 `.github/editorial/BLOGGER_API_SETUP.md` §7)다. 게시 대상인데 게시 Secrets가 없으면 글을 만들기 전에 종료 2로 멈춘다(예전처럼 초안만 쌓이지 않는다).
 
 **재개 절차(Blogger)**: ① 영문 프로필·프롬프트·가드레일(병합됨 PR #40·#43, 2차 보강 #46·3차 보강 #47 — 프로필·언어·톤 변경은 운영자 채팅 승인이었고 보강은 독립 검증 "병합 가능"을 받았다. 남은 후속(낮음): 3차 검증 V-2·V-4·V-5) ② `mode: draft`로 켠다(T3: 게시 모드 변경은 채팅 승인). 정지 중에는 `--dry-run`도 막히므로 시험은 mode를 켠 상태(또는 mode를 바꾼 사본)에서 한다 ③ L2 연습 실행(`연습 실행` 체크) ④ 시크릿 4종 등록(§10 5번) → `인증 점검만 실행`(쓰기 없는 점검 입력. ⑤의 첫 수동 실행도 글을 만들기 전에 같은 점검을 먼저 한다) ⑤ T3로 `mode: draft` 전환 → 수동 실행을 `연습 실행` 체크를 푼 채 `publish=draft`로 해서 Blogger 초안함에 올라간 글을 확인(수동 실행은 `연습 실행`이 기본 켜짐이라 체크를 풀어야 실제로 올라간다) ⑥ `auto` 전환은 T3. `publish=publish`는 `mode: draft`에서도 즉시 게시하니 처음에는 고르지 않는다. 재개 직후 마지막 활동이 오래돼 워치독 STALE(50시간)이 바로 걸릴 수 있다. `BLOGGER_PUBLISH=off`로 수동 실행해 만든 초안도 같은 날 하루 상한을 쓴다(KST 11시 정기 게시 전에 하면 정기 실행이 `DAILY_CAP`으로 건너뜀) — 시험은 정기 실행 뒤에 하거나 `topic`을 입력한다. 정지된 상태에서 워치독 이슈 #10(UNPUBLISHED)이 닫혀도 문제(시크릿 미등록, 영문 프로필)가 풀린 것은 아니다. 미게시 감시는 `UNPUBLISHED` 대신 빨간 실행(`RUN_FAIL_STREAK`)과 `STALE`에 의존한다.
 
@@ -149,7 +149,7 @@ Secrets (API 선택 시):
 - 주제 충돌 방지 (Chance_Blog history ↔ Blogger history)
 - 초안 품질 점검 / 샘플 테스트
 - AdSense 승인 모니터링 (Chance_Blog 최우선 유지)
-- `[Blogger 영문] 글 자동 작성` 첫 실행 결과 확인 (Actions 탭 → Run workflow, 처음에는 `dry_run`(연습 실행) 체크. 분리 직후의 첫 정기 실행이 대상 0개 초록인지도 본다) — 지금은 mode off라 위 재개 절차가 먼저
+- `[Blogger 영문] 글 자동 작성` 첫 실행 결과 확인 (Actions 탭 → Run workflow, 처음에는 `dry_run`(연습 실행) 체크. 분리 직후의 첫 정기 실행이 대상 0개 초록인지도 본다) — 영문은 2026-10-29 부터 draft 라 첫 정기 실행(11:00 KST)이 초안함에 올리는지 본다
 - `feature/image-fix-20261019-0000`·`backup/issue-template-$TS` 브랜치를 지울지 결정 (사용자) — §11
 - 풀오토 로드맵(Phase 1~4)과 완료 기준: `docs/ARCHITECTURE.md` §8
 - 결함 D-03(봇 글이 안 나온 원인과 완화)·D-08(내부 문서·코드의 사이트 공개 — 해결): `docs/DEFECT_REGISTER.md`

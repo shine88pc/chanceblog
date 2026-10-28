@@ -202,7 +202,7 @@ class PlanAndEnabledTest(PackageRegistryBase):
             "key": "tistory_test", "platform": "tistory", "mode": "package", "history": "tistory_test_history.json", "content_dir": "_tistory_test_drafts",
             "secret_llm_api_key": "GEMINI_API_KEY", "secret_blog_id": "", "secret_client_id": "", "secret_client_secret": "", "secret_refresh_token": ""}]})
         self.assertEqual([i["key"] for i in plan.build_matrix(self.reg, "naver")["include"]], ["naver_test"])
-        self.assertEqual(plan.build_matrix(self.reg, "blogger")["include"], [])                     # macat 은 off
+        self.assertEqual(plan.build_matrix(self.reg, "blogger")["include"], [])                     # macat 은 off(임시 저장소는 한글도 정지로 맞춘다 — test_run.make_root)
         self.assertEqual([i["key"] for i in plan.build_matrix(self.reg, "tistory", only="tistory_test")["include"]], ["tistory_test"])
         self.assertEqual(plan.build_matrix(self.reg, "tistory", only="naver_test")["include"], [])
 

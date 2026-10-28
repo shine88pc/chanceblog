@@ -1,7 +1,7 @@
 """한글 Blogger(kcyoon, 레지스트리 키 blogger_kcyoon) 러너 흐름 시험(작업 D).
 
 영문 Blogger 와 같은 러너(pipeline.run)가 레지스트리 값만 바꿔 읽어 한글 블로그를 돌린다는 것을 임시 저장소에서 끝까지 돌려 확인한다.
-실제 레지스트리의 한글 블로그는 mode: off 라 운영자가 켜기 전에는 아무 일도 일어나지 않는다 — 이 시험이 mode 를 draft·auto 로 바꾸는 것은 임시 저장소 사본에서뿐이다.
+실제 레지스트리의 한글 블로그는 2026-10-29 부터 mode: draft 다(운영자 승인 R-011 선택 A, 이슈 #70) — 이 시험이 mode 를 off·auto 로 바꾸는 것은 임시 저장소 사본에서뿐이다.
 시크릿 값은 가짜이고, Blogger·Gemini 는 가짜 게시자·스텁 LLM 으로 대신한다(실제 호출 없음).
 
 구성
@@ -543,8 +543,8 @@ class RegistryContractTest(unittest.TestCase):
         self.reg = registry.load_registry(REAL / "pipeline" / "blogs.json")
         self.blog = registry.get_blog(self.reg, KO)
 
-    def test_the_real_registry_keeps_the_korean_blog_stopped_and_ad_free(self):
-        self.assertEqual((self.blog["mode"], self.blog["ads"], self.blog["ad_surface"]), ("off", "off", False))   # 켜는 것은 운영자 승인 뒤 PR 한 줄
+    def test_the_real_registry_runs_the_korean_blog_as_draft_and_ad_free(self):
+        self.assertEqual((self.blog["mode"], self.blog["ads"], self.blog["ad_surface"]), ("draft", "off", False))   # 2026-10-28 운영자 승인(R-011 선택 A, 이슈 #70)으로 켰다 — auto·광고는 별도 승인
         self.assertEqual(registry.validate_registry(self.reg, REAL), [])
 
     def test_identity_and_files_do_not_overlap_with_the_english_blog(self):
@@ -575,6 +575,8 @@ class RegistryContractTest(unittest.TestCase):
         excluded = yaml.safe_load((REAL / "_config.yml").read_text(encoding="utf-8")).get("exclude") or []
         self.assertEqual(history_exposure_problems(REAL), [])
         self.assertIn("blogger_history.json", excluded)                              # 영문 이력은 이미 빠져 있다(같은 이유)
+        self.assertIn(HISTORY_FILE, excluded)                                        # 켠 지금(2026-10-28, R-011 선택 A)은 한글 이력도 빠져 있어야 한다 — 승인 범위의 한 줄
+        self.assertTrue((REAL / HISTORY_FILE).exists())                              # exclude 항목이 실제 파일을 가리킨다(site_cleanup 시험이 오타를 잡는 방식) — 첫 실행 전에는 빈 목록 `[]`
         self.assertTrue(self.blog["state"]["content_dir"].startswith("_"))           # 밑줄로 시작하는 초안 폴더는 Jekyll 이 처음부터 무시한다
 
     def test_the_watch_thresholds_are_the_english_blogs_and_the_role_names_the_seventy_thirty_split(self):
@@ -585,10 +587,15 @@ class RegistryContractTest(unittest.TestCase):
         self.assertEqual(self.blog["role"], "일상 속 AI·디지털 도구 활용기(주력) + 집·살림 실사용 기록(보조 30% 이내) (KO)")
         self.assertTrue(english["role"].endswith("(EN)") and self.blog["role"].endswith("(KO)"))     # 영문과 같은 모양: `<설명> (<언어>)`
 
-    def test_the_default_plan_has_no_korean_target_until_it_is_turned_on(self):
+    def test_the_default_plan_targets_the_korean_blog_only_while_it_is_not_stopped(self):
         from pipeline import plan
         self.assertEqual([item["key"] for item in plan.build_matrix(self.reg, "blogger", include_off=True)["include"]], [EN, KO])
-        self.assertEqual(plan.build_matrix(self.reg, "blogger")["include"], [])
+        self.assertEqual([(item["key"], item["mode"]) for item in plan.build_matrix(self.reg, "blogger")["include"]], [(EN, "draft"), (KO, "draft")])   # 영문(R-015)·한글(R-011) 모두 2026-10-29 부터 draft
+        stopped = registry.load_registry(REAL / "pipeline" / "blogs.json")
+        for blog in stopped["blogs"]:
+            if blog["key"] == KO:
+                blog["mode"] = "off"
+        self.assertEqual([item["key"] for item in plan.build_matrix(stopped, "blogger")["include"]], [EN])                              # 한글을 정지하면 기본 대상에서 빠진다(영문만 남는다)
 
 
 class HistoryExposureGuardTest(unittest.TestCase):
@@ -617,7 +624,7 @@ class HistoryExposureGuardTest(unittest.TestCase):
             self.assertEqual((root / HISTORY_FILE).exists(), history_exists)       # 전제: 사본이 시험이 말하는 모양이다
             return history_exposure_problems(root)
 
-    def test_the_real_repository_is_the_stopped_state_without_the_file_and_passes(self):
+    def test_the_real_repository_passes_and_so_does_the_stopped_copy_without_the_exclude_entry_or_the_file(self):
         self.assertEqual(history_exposure_problems(REAL), [])
         self.assertEqual(self.problems("off", excluded=False, history_exists=False), [])        # 사본 도우미가 실제 저장소와 같은 모양을 만든다
 

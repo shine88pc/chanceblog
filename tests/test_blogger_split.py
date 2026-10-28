@@ -300,6 +300,9 @@ class ExpressionEquivalenceTest(unittest.TestCase):
     def test_the_plan_matrix_of_one_blog_is_what_the_single_blogger_workflow_gave_for_that_blog(self):
         """영문: `--platform blogger --only blogger_macat` 의 매트릭스 항목 = 한글 항목이 없던 레지스트리에서 `--platform blogger` 가 주던 그 항목."""
         reg = registry.load_registry(REAL / "pipeline" / "blogs.json")
+        for blog in reg["blogs"]:
+            if blog["key"] == "blogger_kcyoon":
+                blog["mode"] = "off"     # 한글이 꺼져 있던 때의 계획과 견준다 — 실제 값(2026-10-29 부터 draft)과 무관하게
         before = dict(reg, blogs=[blog for blog in reg["blogs"] if blog["key"] != "blogger_kcyoon"])    # 한글 블로그가 없던 레지스트리(블로그 객체는 reg 와 같은 것이다)
         for mode in ("draft", "auto", "off"):
             for blog in reg["blogs"]:
@@ -515,7 +518,8 @@ class SplitDocsAreCurrentTest(unittest.TestCase):
 
 
 class PlanCliTest(unittest.TestCase):
-    """`python -m pipeline.plan` 출력(래퍼가 부르는 plan 단계가 읽는 것): 한글 블로그는 정지라 기본 대상 0개, `--include-off` 에서만 포함."""
+    """`python -m pipeline.plan` 출력(래퍼가 부르는 plan 단계가 읽는 것): 실제 레지스트리에서 영문(R-015)·한글(R-011) 모두 2026-10-29 부터 draft 라 기본 대상이다.
+    정지한 블로그가 `--include-off` 에서만 대상이 되는 쪽은 test_auth_check_only 가 정지 사본으로 본다."""
 
     def run_plan(self, *args):
         out = io.StringIO()
@@ -523,14 +527,16 @@ class PlanCliTest(unittest.TestCase):
             code = plan.main(list(args))
         return code, out.getvalue().strip()
 
-    def test_the_real_registry_gives_zero_default_targets_and_the_korean_blog_only_with_include_off(self):
-        self.assertEqual(self.run_plan("--platform", "blogger", "--count"), (0, "0"))
-        self.assertEqual(self.run_plan("--platform", "blogger"), (0, '{"include":[]}'))
+    def test_the_real_registry_gives_both_blogger_blogs_as_default_targets(self):
+        self.assertEqual(self.run_plan("--platform", "blogger", "--count"), (0, "2"))           # 영문 draft(R-015)·한글 draft(R-011)
+        code, text = self.run_plan("--platform", "blogger")
+        self.assertEqual(code, 0)
+        self.assertEqual([item["key"] for item in __import__("json").loads(text)["include"]], ["blogger_macat", "blogger_kcyoon"])
         code, text = self.run_plan("--platform", "blogger", "--include-off")
         self.assertEqual(code, 0)
         self.assertEqual([item["key"] for item in __import__("json").loads(text)["include"]], ["blogger_macat", "blogger_kcyoon"])
-        for key in WRAPPERS:
-            self.assertEqual(self.run_plan("--platform", "blogger", "--only", key, "--count"), (0, "0"), key)
+        for key in ("blogger_macat", "blogger_kcyoon"):
+            self.assertEqual(self.run_plan("--platform", "blogger", "--only", key, "--count"), (0, "1"), key)
             self.assertEqual(self.run_plan("--platform", "blogger", "--only", key, "--include-off", "--count"), (0, "1"), key)
 
     def test_each_wrapper_can_name_only_a_blogger_blog(self):

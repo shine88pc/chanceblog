@@ -1,7 +1,7 @@
 """영문 Blogger 프로필(blogger_practical_en)·영어 프롬프트·레지스트리 전환 시험.
 
-`blogger_macat`(macat0722)은 영문 블로그다. 레지스트리가 영문 프로필·영어 프롬프트를 가리키고, `mode`는 off 그대로다(켜는 것은
-운영자 승인 T3). 실제 레지스트리는 건드리지 않고, 임시 저장소(make_root(lang="en"))에서 가짜 LLM으로 한 편을 끝까지 돌려
+`blogger_macat`(macat0722)은 영문 블로그다. 레지스트리가 영문 프로필·영어 프롬프트를 가리키고, `mode`는 2026-10-29 운영자 승인(R-015 선택 A, 이슈 #71)으로
+draft 다(켜는 것은 T3). 실제 레지스트리는 건드리지 않고, 임시 저장소(make_root(lang="en"))에서 가짜 LLM으로 한 편을 끝까지 돌려
 통과·탈락 경로를 확인한다. 네트워크를 쓰지 않는다.
 """
 import json
@@ -116,9 +116,9 @@ class RealRegistryEnglishTest(unittest.TestCase):
         self.assertEqual(blog["role"], "생활 습관 실용형 (EN)")
         self.assertEqual(registry.load_profile(blog["profile"])["language"], "en")
 
-    def test_mode_is_still_off_and_nothing_else_about_publishing_changed(self):
+    def test_mode_is_draft_and_nothing_else_about_publishing_changed(self):
         blog = self.blog()
-        self.assertEqual(blog["mode"], "off")  # 켜는 것은 T3(운영자 채팅 승인)와 시크릿 등록(운영자)이 끝난 뒤의 별도 변경이다
+        self.assertEqual(blog["mode"], "draft")  # 2026-10-29 운영자 승인(R-015 선택 A, 이슈 #71)으로 켰다 — 시크릿은 운영자가 등록·인증 점검 통과, auto·광고는 별도 승인
         self.assertEqual(blog["secrets"], {"llm_api_key": "GEMINI_API_KEY", "blog_id": "BLOGGER_BLOG_ID", "client_id": "BLOGGER_CLIENT_ID",
                                             "client_secret": "BLOGGER_CLIENT_SECRET", "refresh_token": "BLOGGER_REFRESH_TOKEN"})
         self.assertEqual((blog["platform"], blog["url"], blog["workflow"], blog["entrypoint"]),
@@ -136,6 +136,9 @@ class RealRegistryEnglishTest(unittest.TestCase):
 
     def test_plan_skips_the_blog_while_off_and_keeps_the_same_matrix_shape_when_enabled(self):
         reg = registry.load_registry()
+        for blog in reg["blogs"]:
+            if blog["key"] in ("blogger_macat", "blogger_kcyoon"):
+                blog["mode"] = "off"     # 정지 상태에서 시작해 영문 한 블로그의 켜짐만 본다 — 실제 값(2026-10-29 부터 영문·한글 모두 draft)과 무관하게
         self.assertEqual(plan.build_matrix(reg, "blogger"), {"include": []})
         reg["blogs"][1]["mode"] = "draft"
         item = plan.build_matrix(reg, "blogger")["include"][0]
@@ -157,19 +160,30 @@ class RealRegistryEnglishTest(unittest.TestCase):
         reg["blogs"][1]["languages"] = ["ko", "en"]                  # 여러 언어 블로그는 그중 하나면 된다
         self.assertEqual(registry.validate_registry(reg), [])
 
-    def test_the_real_dry_run_is_skipped_because_the_mode_is_off(self):
-        out = []
-        code = run_mod.run(["--blog", "blogger_macat", "--dry-run"], environ={}, now=NOW, out=out.append)
+    def test_a_stopped_english_blog_is_skipped_in_a_dry_run(self):
+        """영문을 정지(off)로 맞춘 임시 저장소에서: 정지한 블로그는 연습 실행도 건너뛴다(실제 레지스트리는 2026-10-29 부터 draft 라 사본을 쓴다)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            stopped = make_root(tmp, mode="off", lang="en")
+            out = []
+            code = run_mod.run(["--blog", "blogger_macat", "--dry-run", "--root", str(stopped)], environ={}, now=NOW, out=out.append)
         self.assertEqual(code, 0)
         self.assertIn("[SKIP] code=MODE_OFF blog=blogger_macat", "\n".join(out))
 
-    def test_the_command_line_entry_point_agrees(self):
+    def test_the_real_english_blog_is_no_longer_skipped_as_stopped(self):
+        out = []
+        code = run_mod.run(["--blog", "blogger_macat", "--dry-run"], environ={}, now=NOW, out=out.append)
+        self.assertEqual(code, 0)
+        self.assertNotIn("MODE_OFF", "\n".join(out))                # 실제 레지스트리: draft(2026-10-29 R-015) — 시크릿이 없는 연습 실행은 업로드 단계에서 건너뛴다
+
+    def test_the_command_line_entry_point_agrees_for_a_stopped_blog(self):
         # 환경은 그대로 두되 러너의 동작을 바꾸는 변수(일시정지·연습·시크릿)만 뺀다. 이 환경에서는 PATH·라이브러리 경로가 필요하다
         env = {k: v for k, v in os.environ.items() if not k.startswith(("PIPELINE_", "BLOGGER_", "GEMINI", "UNSPLASH", "GITHUB_"))
                and k != "DRY_RUN"}
         env["PYTHONUTF8"] = "1"
-        proc = subprocess.run([sys.executable, "-m", "pipeline.run", "--blog", "blogger_macat", "--dry-run"], cwd=str(REAL),
-                              capture_output=True, text=True, encoding="utf-8", timeout=120, env=env)
+        with tempfile.TemporaryDirectory() as tmp:
+            stopped = make_root(tmp, mode="off", lang="en")        # 실제 레지스트리는 2026-10-29 부터 draft 라 영문을 정지로 맞춘 임시 저장소를 가리킨다
+            proc = subprocess.run([sys.executable, "-m", "pipeline.run", "--blog", "blogger_macat", "--dry-run", "--root", str(stopped)], cwd=str(REAL),
+                                  capture_output=True, text=True, encoding="utf-8", timeout=120, env=env)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("[SKIP] code=MODE_OFF", proc.stdout)
         self.assertNotIn("DRY_RUN", proc.stdout)

@@ -1454,10 +1454,10 @@ class RunWithDraftsTest(unittest.TestCase):
         self.run_script(fake, root)
         rows = table_rows(self.body(fake))
         self.assertEqual(rows[0], ["Chance", "자동 공개" if REAL_PUBLISH_FLOW == "direct" else "0", "-", "-"])
-        self.assertEqual(rows[1], ["Blogger 영문", "정지", "-", "-"])
-        self.assertEqual(rows[2], ["Blogger 한글", "정지", "-", "-"])
+        self.assertEqual(rows[1], ["Blogger 영문", "0", "-", "-"])                       # 영문도 2026-10-29 부터 draft(R-015) — 최근 14일 초안함 업로드 0건
+        self.assertEqual(rows[2], ["Blogger 한글", "0", "-", "-"])                       # 한글은 2026-10-29 부터 draft — 최근 14일 초안함 업로드 0건
         self.assertEqual(len(rows), 3)
-        self.assertNotIn("Blogger 대시보드", self.body(fake))                          # 정지 중인 Blogger 의 대략치 안내는 붙이지 않는다
+        self.assertIn("Blogger 대시보드 → 글 → 초안", self.body(fake))                 # 영문·한글이 draft(2026-10-28)라 대략치 안내가 붙는다 — 정지 중인 Blogger 에는 붙지 않는 쪽은 위 합성 시험(blogger_mode)이 본다
         self.assertEqual(self.body(fake).count("- 휴대폰에서 거르기:"), 1)
 
     # --- 라벨
