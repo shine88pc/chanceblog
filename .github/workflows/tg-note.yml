@@ -33,4 +33,4 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python tg_note/send.py tg_note/58_auth_result.txt
+        run: python tg_note/send.py tg_note/59_findings.txt
