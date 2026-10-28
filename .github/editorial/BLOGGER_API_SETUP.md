@@ -52,6 +52,20 @@ BLOGGER_REFRESH_TOKEN=...
 - 다른 방법: API 탐색기에서 `blogs.getByUrl`(`https://www.googleapis.com/blogger/v3/blogs/byurl?url=<블로그 주소>`)로 조회한 `id`
 - 같은 계정에 블로그가 여러 개이면 ID를 잘못 넣기 쉽습니다. 그래서 실행할 때 Blogger가 돌려준 블로그 주소가 `pipeline/blogs.json`의 `url`과 다르면 **글을 올리지 않고 멈춥니다**(`blog_mismatch`, 아래 §4).
 
+### 2-B. 브라우저만으로 받기 — OAuth 2.0 Playground (저장소 사본·파이썬이 없을 때)
+
+> 이 절의 화면 이름·버튼 위치는 구글이 바꿀 수 있습니다. 공식 문서로 확인하지 못한 부분은 '추정'으로 적었습니다. 값(클라이언트 ID·시크릿·토큰)은 채팅·이슈·저장소에 쓰지 말고 이 화면과 GitHub Secrets 화면 사이에서만 복사해 붙여 넣습니다.
+
+위 `get_blogger_token.py` 는 저장소 사본·파이썬·데스크톱 앱용 `client_secret.json` 이 있어야 합니다. 회사 PC 처럼 그것이 어려우면 구글의 OAuth Playground(웹 화면)로도 받을 수 있습니다.
+
+1. **웹 애플리케이션 유형의 OAuth 클라이언트를 새로 만듭니다**: 구글 클라우드 → API 및 서비스 → 사용자 인증 정보 → 사용자 인증 정보 만들기 → OAuth 클라이언트 ID → 애플리케이션 유형 **웹 애플리케이션** → **승인된 리디렉션 URI** 에 `https://developers.google.com/oauthplayground` 를 더하고 만듭니다. 나온 클라이언트 ID·보안 비밀번호가 이후의 `BLOGGER_CLIENT_ID`·`BLOGGER_CLIENT_SECRET` 입니다. (추정: §1 의 '데스크톱 앱' 클라이언트는 Playground 의 리디렉션 주소를 받지 않아 여기서 쓸 수 없습니다.)
+2. 동의 화면이 `In production` 인지 다시 확인합니다(§1-4). `Testing` 이면 이 방법으로 받은 토큰도 7일 만에 만료됩니다.
+3. 브라우저에서 `https://developers.google.com/oauthplayground` 를 엽니다. 오른쪽 위 톱니(설정)를 눌러 **Use your own OAuth credentials** 를 체크하고 1번의 클라이언트 ID·보안 비밀번호를 넣습니다(추정: 액세스 유형은 `Offline` 이어야 refresh token 이 나옵니다 — 기본값입니다). **이 체크를 하지 않으면 Playground 자체 클라이언트로 토큰이 발급돼 우리 클라이언트 ID·시크릿과 맞지 않아 `invalid_grant`(인증 만료)가 나옵니다.**
+4. 왼쪽 **Step 1** 의 범위 입력칸(`Input your own scopes`)에 `https://www.googleapis.com/auth/blogger` 를 직접 넣고 **Authorize APIs** 를 눌러, Blogger 블로그를 가진 구글 계정으로 허용합니다. '확인되지 않은 앱' 경고가 나오면 고급 → 이동으로 진행합니다(§1-4 와 같은 이유).
+5. **Step 2** 의 **Exchange authorization code for tokens** 를 누르면 `Refresh token` 값이 나옵니다. 그 값을 복사합니다.
+6. §3 의 표대로 GitHub Secrets 에 **`BLOGGER_CLIENT_ID`·`BLOGGER_CLIENT_SECRET`(1번의 새 클라이언트 값)·`BLOGGER_REFRESH_TOKEN`** 세 개를 **함께** 등록(덮어쓰기)합니다. 셋은 한 벌이라 하나만 바꾸면 맞지 않습니다. 값 끝에 공백·줄바꿈이 들어가지 않게 복사한 그대로 한 번만 붙여 넣고, 끝에서 Enter 를 누르지 않습니다.
+7. Actions 에서 `인증 점검만 실행`(§6)을 돌려 `AUTH_CHECK_OK` 를 확인합니다.
+
 ---
 
 ## 3. GitHub Secrets 등록
