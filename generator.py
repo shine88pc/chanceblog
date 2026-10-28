@@ -1490,7 +1490,7 @@ _FM_FLOW_ITEM = r"""(?:"(?:[^"\\\n]|\\["\\/bfnrt]|\\u[0-9a-fA-F]{4})*"|'(?:[^'\n
 _FM_FLOW_LIST = re.compile(r"\[[ \t]*(?:" + _FM_FLOW_ITEM + r"(?:[ \t]*,[ \t]*" + _FM_FLOW_ITEM + r")*(?:[ \t]*,)?[ \t]*)?\]")
 _YAML_UNPRINTABLE = re.compile(r"[^\x09\x0a\x0d\x20-\x7e\xa0-\U00002027\U0000202a-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]")      # PyYAML 이 읽지 못하는 글자 + YAML 이 줄바꿈으로 읽는 U+0085·U+2028·U+2029
 # 머리말 한 줄 안의 날 U+0085·U+2028·U+2029 는 큰따옴표 값 안이면 NEL 이 공백으로 접혀 값이 바뀌고, 따옴표 없는 값 안이면 읽지 못하고, 키 줄 사이면 줄이 갈라져 다른 키가 끼어든다(검증자 N3).
-_YAML_UNPRINTABLE_PROBLEM ="머리말에 YAML 이 읽지 못하는 제어 문자나 줄바꿈으로 읽는 U+0085·U+2028·U+2029 가 있음"
+_YAML_UNPRINTABLE_PROBLEM = "머리말에 YAML 이 읽지 못하는 제어 문자나 줄바꿈으로 읽는 U+0085·U+2028·U+2029 가 있음"
 # 우리가 쓰는 JSON 한 줄에서는 그 세 글자를 `\uXXXX` 로 이스케이프한다: json.dumps(ensure_ascii=False) 는 날 글자로 두지만, JSON 과 YAML 이 같은 이스케이프를 읽어 값은 그대로 보존된다.
 _YAML_LINE_BREAK_ESCAPES = {code: "\\u%04x" % code for code in (0x85, 0x2028, 0x2029)}
 
