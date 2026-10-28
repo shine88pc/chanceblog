@@ -157,7 +157,7 @@ class ParseReplyTest(unittest.TestCase):
         for good, want in (("r-002", "R-002"), ("R-002", "R-002"), (" r-002 ", "R-002"), ("r-000", "R-000"), ("r-999", "R-999")):
             result = reply(body=reply_body(request_id=good, crlf=False))
             self.assertEqual((result.kind, result.request_id), ("reply", want), repr(good))
-        for bad in ("rr-001", "r_001", "r-1", "r-0001", "r-001 extra", "r--001", "r−001", "r\u2011001", "\uff52-001", "\u017f-001", "x-001", "r-00a", "-001", "r-", "r"):
+        for bad in ("r- 001", "r -001", "rr-001", "r_001", "r-1", "r-0001", "r-001 extra", "r--001", "r−001", "r\u2011001", "\uff52-001", "\u017f-001", "x-001", "r-00a", "-001", "r-", "r"):
             result = reply(body=reply_body(request_id=bad, crlf=False))
             self.assertEqual(result.code, "bad_shape", repr(bad))
         self.assertEqual(reply(login="someone", body=reply_body(request_id="r-002")), ol.Refusal("not_owner", ()))                    # 정규화는 신뢰 판정 뒤다 — 소유자가 아니면 소문자여도 거절
