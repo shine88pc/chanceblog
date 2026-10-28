@@ -1482,8 +1482,12 @@ _FM_KNOWN_KEY = re.compile(r"(?:layout|title|category|tags|lang|image|descriptio
 _FM_RESIDUE = re.compile(r"(?:layout|title|category|tags|lang|image|description|published|date|permalink|slug|source_name|source_url|source_domain)[ \t]*:")      # 본문 앞 세 줄에 남아서는 안 되는 머리말 줄(소문자 키만)
 _FM_REQUIRED = ("layout", "title", "category", "lang", "image")
 _FM_MAX_LINE = 2000      # 머리말 한 줄의 상한(검사 정규식이 아주 긴 줄에서 오래 걸리지 않게)
-_FM_FLOW_ITEM = r"""(?:"(?:[^"\\\n]|\\.)*"|'(?:[^'\n]|'')*'|[^\s,\[\]{}"'#&*!|>%@`:?-][^,\[\]{}"'#:\n]*)"""
-_FM_FLOW_LIST = re.compile(r"\[[ \t]*(?:" + _FM_FLOW_ITEM + r"[ \t]*(?:,[ \t]*" + _FM_FLOW_ITEM + r"[ \t]*)*,?[ \t]*)?\]")
+# 한 줄 목록의 항목: 큰따옴표(JSON 이 아는 이스케이프만)·작은따옴표·평문. 평문 항목은 공백으로 끝나지 못한다 — 꼬리와 뒤의 `[ \t]*` 가 같은 공백을 겹쳐 먹으면 되돌아가기가
+# 항목 수의 지수로 늘어(`tags: [a ,a ,… #]` 22개 1.3초, 하나 늘 때마다 두 배) 슬롯 실행이 멈춘다(검증자 N1). 또 평문 항목은 `?` 를 품지 못한다 — 한 줄 목록 안에서 `?` 는 평문을 끝내는 '키' 표지라
+# `[a?b]` 를 PyYAML 이 읽지 못한다(N2). 큰따옴표 항목의 이스케이프를 JSON 이 아는 것으로 좁힌 것도 같은 이유다(`\q` 는 YAML 이 읽지 못한다).
+_FM_FLOW_PLAIN = r"""[^\s,\[\]{}"'#&*!|>%@`:?-](?:[^,\[\]{}"'#:?\n]*[^\s,\[\]{}"'#:?\n])?"""
+_FM_FLOW_ITEM = r"""(?:"(?:[^"\\\n]|\\["\\/bfnrt]|\\u[0-9a-fA-F]{4})*"|'(?:[^'\n]|'')*'|""" + _FM_FLOW_PLAIN + ")"
+_FM_FLOW_LIST = re.compile(r"\[[ \t]*(?:" + _FM_FLOW_ITEM + r"(?:[ \t]*,[ \t]*" + _FM_FLOW_ITEM + r")*(?:[ \t]*,)?[ \t]*)?\]")
 _YAML_UNPRINTABLE = re.compile(r"[^\x09\x0a\x0d\x20-\x7e\x85\xa0-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]")      # PyYAML 이 읽지 못하는 글자
 
 

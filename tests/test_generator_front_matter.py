@@ -11,6 +11,7 @@ import json
 import random
 import re
 import tempfile
+import time
 import unittest
 import urllib.parse
 from pathlib import Path
@@ -746,6 +747,175 @@ class GateAndGuardTest(unittest.TestCase):
         self.assertTrue(message.startswith("KR 글 머리말이 검사를 통과하지 못했습니다: "), message)
         self.assertEqual(message.count(" / "), 2)         # 문제는 앞의 세 개만
         self.assertNotIn("\n", message)
+
+
+# ======================================================================================================================
+# 한 줄 목록(`tags: [a, b]`) 검사 — 정규식 폭주(N1)와 `?`·잘못된 이스케이프(N2)
+# ======================================================================================================================
+ESC = chr(92)      # 역슬래시 — 소스에 이스케이프를 쓰지 않으려고 코드 포인트로 만든다(편집 도구가 이스케이프를 실제 글자로 바꿔 쓰는 일이 있다)
+
+
+class FlowListShapeTest(unittest.TestCase):
+    """JSON 으로 읽히지 않는 한 줄 목록(따옴표 없는 항목·작은따옴표 항목이 섞인 것)은 정규식(`_FM_FLOW_LIST`)이 가른다 — 무엇을 받고 무엇을 거절하는지."""
+
+    def test_lists_with_ordinary_spacing_are_accepted_and_pyyaml_reads_them_as_lists(self):
+        for value in ("[a, b]", "[a ,b]", "[a , b]", "[a,b]", "[ a ]", "[ a , b ]", "[a b, c d]", "[a  b]", "[a, b, ]", "[a,]", "[a ,]", "[a , ]", "[]", "[ ]",
+                      "['a', b]", "['it''s', b]", "['a'  ,  'b' ]", '["a", b]', "[가나 다, 라]", "[a-b, c.d, e_f, 1, 2.5]", "[a!b, c&d, e*f, g|h, i>j, k%l, m@n, o`p]",
+                      '["a' + ESC + 'nb", c]', '["a' + ESC + 'u00e9", b]', '["a' + ESC + '"b", c]', '["a' + ESC + ESC + 'b", c]'):
+            with self.subTest(value):
+                self.assertTrue(g._fm_flow_list_ok(value))
+                self.assertIsInstance(yaml.safe_load("tags: " + value)["tags"], list)
+
+    def test_malformed_lists_are_refused(self):
+        for value in ("[a, b", "a, b]", "[a b] c", "[a,, b]", "[,a]", "[a, #]", "[a #b]", "[a: b]", "[a:b]", "[[a]]", "[{a}]", "[a, {b}]", '["a" "b"]', "['a' 'b']",
+                      '["a"b]', "[a, b]]", "[[a, b]"):
+            with self.subTest(value):
+                self.assertFalse(g._fm_flow_list_ok(value))
+
+    def test_a_question_mark_in_a_plain_item_is_refused_because_yaml_cannot_read_it(self):
+        """한 줄 목록 안에서 `?` 는 평문 항목을 끝내는 '키' 표지다 — `[a?b]` 는 PyYAML 이 ParserError 로 읽지 못한다(검증자 N2). 따옴표 안의 `?` 는 괜찮다."""
+        for value in ("[a?b]", "[a, b?]", "[what? yes]", "[a ? b]", "[a, b ?]"):
+            with self.subTest(value):
+                with self.assertRaises(yaml.YAMLError):
+                    yaml.safe_load("tags: " + value)            # 정말 읽지 못하는 모양이다
+                self.assertFalse(g._fm_flow_list_ok(value))
+        for value in ("[?]", "[a, ?b]", "[? a]"):               # 읽히기는 해도(한 쌍짜리 사전) 태그 목록이 아니다
+            with self.subTest(value):
+                self.assertFalse(g._fm_flow_list_ok(value))
+        for value in ('["a?b"]', '["what? yes", "b?"]', "['a?b']", "['what?', \"why?\"]", "[x, 'a?b']", "['a', \"b?\" , c]"):
+            with self.subTest(value):
+                self.assertTrue(g._fm_flow_list_ok(value))
+                self.assertIsInstance(yaml.safe_load("tags: " + value)["tags"], list)
+
+    def test_a_double_quoted_item_may_only_use_escapes_yaml_knows(self):
+        """JSON 으로 읽히지 않는 목록(작은따옴표·평문 항목이 섞인 것)의 큰따옴표 항목에 `\\q` 같은 이스케이프가 있으면 PyYAML·libyaml 이 읽지 못한다(소리 없이 받아들이던 구멍 —
+        N2 를 찾으려고 만든 무작위 대조가 드러냈다)."""
+        for value in ('[x, "a' + ESC + 'qb"]', '[x, "' + ESC + ']"]', "['x', \"a" + ESC + "+b\"]", '[x, "a' + ESC + 'u12g4"]', '[x, "a' + ESC + 'u12"]'):
+            with self.subTest(value):
+                with self.assertRaises(yaml.YAMLError):
+                    yaml.safe_load("tags: " + value)
+                self.assertFalse(g._fm_flow_list_ok(value))
+
+    def test_the_header_level_checks_use_the_same_rule(self):
+        for value in ("[a, b?]", "[a?b]", '[x, "a' + ESC + 'qb"]'):
+            with self.subTest(value):
+                self.only_problem(with_replaced('tags: ["a", "b"]', f"tags: {value}"))
+                self.assertEqual(g._model_header_problems(['title: "t"', f"tags: {value}"]), ["`tags` 값이 한 줄 목록([…])이 아님"])
+
+    def only_problem(self, text):
+        problems = g.front_matter_problems(text)
+        self.assertEqual(problems, ["`tags` 값이 한 줄 목록([…])이 아님"])
+
+    def test_question_marks_stay_accepted_where_yaml_allows_them(self):
+        for line in ("tags:\n  - what? yes\n  - a?b", 'tags: ["what?", "b"]'):
+            with self.subTest(line):
+                text = with_replaced('tags: ["a", "b"]', line)
+                self.assertEqual(g.front_matter_problems(text), [])
+                self.assertIsInstance(yaml.safe_load(text.split("\n---\n", 1)[0][4:])["tags"], list)
+        self.assertEqual(g.front_matter_problems(with_replaced("lang: ko\n", "lang: ko\ncustom: https://a.test/x?y=1\n")), [])
+
+    def test_every_list_the_check_accepts_is_a_flat_list_for_pyyaml(self):
+        """무작위로 만든 한 줄 목록 1만 개: 검사가 받아들인 것은 PyYAML 이 모두 안쪽 목록·사전 없는 목록으로 읽는다. 받아들이고도 읽지 못하는 것이 하나라도 있으면 실패한다
+        (`?` 와 `\\q` 가 이렇게 드러났다). 알파벳에 탭·제어 문자·`=` 는 없다 — 제어 문자는 머리말 전체 검사(_YAML_UNPRINTABLE)가 따로 막고, 탭과 `=` 는 PyYAML 만 못 읽는다
+        (Jekyll 이 쓰는 libyaml 은 읽는다)."""
+        rng = random.Random(20261029)
+        alphabet = list("ab가 ,,,?:#-[]\"'!&*|>%@`{}1") + [ESC, "''", " , ", ESC + '"', ESC + "n", ESC + "q"]
+        accepted = 0
+        for _ in range(10000):
+            value = "[" + "".join(rng.choice(alphabet) for _ in range(rng.randint(0, 11))) + "]"
+            if not g._fm_flow_list_ok(value):
+                continue
+            accepted += 1
+            try:
+                loaded = yaml.safe_load("tags: " + value)["tags"]
+            except yaml.YAMLError as exc:
+                self.fail(f"받아들였지만 PyYAML 이 읽지 못함: {value!r} ({type(exc).__name__})")
+            self.assertIsInstance(loaded, list, value)
+            self.assertFalse(any(isinstance(item, (list, dict)) for item in loaded), value)
+        self.assertGreater(accepted, 800)      # 받아들이는 쪽도 충분히 돌았다(속 빈 시험이 아니다)
+
+
+class FlowListSpeedTest(unittest.TestCase):
+    """한 줄 목록 검사는 입력 길이에 비례해 끝난다. 검증자 N1: 평문 항목의 꼬리가 공백까지 먹고 뒤의 `[ \\t]*` 가 또 먹어서 되돌아가기(backtracking)가 항목 수의 지수로 늘었다 —
+    `tags: [a ,a ,… #]` 처럼 끝이 틀린 줄에서 항목 22개 1.3초, 하나 늘 때마다 두 배(25개 10.5초, 26개 20.8초 — 30개는 5분 남짓, 35개는 몇 시간)라 슬롯 실행이 멈춘다.
+    시간 제한 0.2초는 넉넉한 값이다(고친 코드는 1000분의 몇 초).
+    아래 입력은 옛 정규식에서도 몇 초면 끝나는 크기로 골랐다(시험이 영영 멈추지 않고 실패한다)."""
+    LIMIT = 0.2
+    SHAPES = (
+        ("쉼표 앞 공백 한 칸 + 끝 #", "[" + ",".join(["a "] * 22) + "#]"),
+        ("쉼표 앞 탭 + 끝 #", "[" + ",".join(["a" + chr(9)] * 22) + "#]"),
+        ("쉼표 앞 공백 5칸 + 끝 #", "[" + ",".join(["a" + " " * 5] * 8) + "#]"),
+        ("쉼표 앞 공백 한 칸 + 끝 :", "[" + ",".join(["a "] * 22) + ":]"),
+        ("닫는 괄호 없음", "[" + ",".join(["a "] * 22)),
+        ("앞뒤 공백 + 끝 #", "[" + ",".join([" a "] * 22) + "#]"),
+        ("쉼표 앞 공백 둘 + 끝 #", "[" + " , ".join(["a "] * 14) + "#]"),
+        ("여러 낱말 + 끝 #", "[" + ",".join(["a b "] * 20) + "#]"),
+    )
+
+    def timed(self, call):
+        started = time.perf_counter()
+        result = call()
+        return time.perf_counter() - started, result
+
+    def test_the_worst_shapes_finish_within_the_time_limit(self):
+        for label, value in self.SHAPES:
+            with self.subTest(label):
+                spent, problem = self.timed(lambda: g._fm_value_problem("tags", value))
+                self.assertIsNotNone(problem)             # 모두 잘못된 목록이다
+                self.assertLess(spent, self.LIMIT, f"{label}: {spent:.2f}초")
+
+    def test_every_check_that_reads_the_line_is_fast_too(self):
+        bad = "[" + ",".join(["a "] * 22) + "#]"
+        response = f'---\nlayout: post\ntitle: "제목"\ncategory: "c"\ntags: {bad}\n---\n\n' + KR_BODY
+        for label, call in (("최종 검사", lambda: g.front_matter_problems(with_replaced('tags: ["a", "b"]', f"tags: {bad}"))),
+                            ("모델 머리말 신뢰 검사", lambda: g._model_header_problems(['title: "t"', f"tags: {bad}"])),
+                            ("블록 목록 항목 검사", lambda: g._fm_value_problem("item", bad)),
+                            ("validate_post_data 전체", lambda: validate(kr_only(response, kr_title="제목", kr_tags=("가", "나")))["kr_content"])):
+            with self.subTest(label):
+                spent, result = self.timed(call)
+                self.assertTrue(result, label)
+                self.assertLess(spent, self.LIMIT, f"{label}: {spent:.2f}초")
+
+    def test_a_response_with_such_a_tags_line_gets_a_clean_rewritten_header(self):
+        bad = "[" + ",".join(["a "] * 22) + "#]"
+        notes = []
+        text = validate(kr_only(f'---\nlayout: post\ntitle: "제목"\ncategory: "c"\ntags: {bad}\n---\n\n' + KR_BODY, kr_title="제목", kr_tags=("가", "나")), notes=notes)["kr_content"]
+        self.assertIn('tags: ["가", "나"]\n', text)
+        self.assertEqual(g.front_matter_problems(text), [])
+        self.assertEqual(len(notes), 1)
+        self.assertIn("`tags` 값이 한 줄 목록", notes[0])
+
+    def test_long_valid_lists_are_accepted_quickly(self):
+        for label, value in (("1자 항목 600개", "[" + ",".join(["a"] * 600) + "]"), ("낱말 둘짜리 150개", "[" + ", ".join(["alpha beta"] * 150) + "]"),
+                             ("쉼표 앞 공백 600개", "[" + " ,".join(["a"] * 600) + " ]"), ("작은따옴표 항목 250개", "[" + ", ".join(["'a b'"] * 250) + "]")):
+            with self.subTest(label):
+                self.assertLessEqual(len(value), 2000)
+                spent, problem = self.timed(lambda: g._fm_value_problem("tags", value))
+                self.assertIsNone(problem)
+                self.assertLess(spent, self.LIMIT, f"{label}: {spent:.2f}초")
+
+    def test_random_adversarial_lines_never_take_long(self):
+        rng = random.Random(7)
+        pieces = ["a", "a ", "a  ", "a" + chr(9), " a", "a b", "a b ", "'a' ", '"a" ', ",", " ,", ", ", "?", "#", ":"]
+        tails = ["]", "#]", ":]", "", " ]", ",]", "?]", " #"]
+        worst = 0.0
+        for _ in range(400):
+            value = ("[" + "".join(rng.choice(pieces) for _ in range(rng.randint(1, 40))) + rng.choice(tails))[:2000]
+            spent, _ = self.timed(lambda: g._fm_value_problem("tags", value))
+            worst = max(worst, spent)
+        self.assertLess(worst, self.LIMIT, f"가장 느린 줄 {worst:.2f}초")
+
+    def test_the_other_header_patterns_are_linear_on_long_lines(self):
+        """같은 겹침(양쪽이 같은 글자를 먹는 반복)이 다른 머리말 정규식에도 있는지 보는 시험: 길고 공백·대시가 많은 줄에서 모두 바로 끝난다."""
+        shapes = (("키 뒤 공백 뭉치", "custom:" + " " * 1990 + "x"), ("들여쓴 목록 항목 뒤 공백", " " * 1900 + "-" + " " * 90 + "x"), ("대시 뭉치", "-" * 1990 + " x"),
+                  ("키 모양 긴 이름", "a" * 1990 + ":"), ("작은따옴표 뭉치", "custom: '" + "''" * 990 + "x"), ("따옴표 안 역슬래시", 'custom: "' + (ESC + '"') * 990 + "x"),
+                  ("공백과 샵", "custom: " + " #" * 990 + "x"), ("콜론 뭉치", "custom: " + ":" * 1980))
+        for label, line in shapes:
+            with self.subTest(label):
+                text = with_replaced("lang: ko\n", f"lang: ko\n{line}\n")
+                spent_check, _ = self.timed(lambda: g.front_matter_problems(text))
+                spent_split, _ = self.timed(lambda: g._split_model_content(text + "\n" + KR_BODY))
+                self.assertLess(max(spent_check, spent_split), self.LIMIT, f"{label}: {spent_check:.2f}·{spent_split:.2f}초")
 
 
 # ======================================================================================================================
