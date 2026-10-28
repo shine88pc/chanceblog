@@ -204,6 +204,13 @@ class ParseReplyTest(unittest.TestCase):
         for urgency in ol.TASK_URGENCY_OPTIONS:
             self.assertEqual(reply(title="[요청] ", body=task_body(urgency=urgency)).urgency, urgency)
 
+    def test_a_task_request_without_an_urgency_value_counts_as_the_first_choice_not_as_urgent(self):
+        """긴급도 칸이 비었거나(`_No response_`) 항목 자체가 없으면 양식의 첫 선택지(보통)로 읽는다 — 급함으로 올려 읽지 않는다."""
+        no_section = "### 해 주었으면 하는 일\n\n일\n\n### 승인 범위\n\n아니요 — 논의·준비까지만"
+        for body in (no_section, task_body(urgency="_No response_"), task_body(urgency="")):
+            result = reply(title="[요청] ", body=body)
+            self.assertEqual((result.kind, result.urgency, result.approval_yes), ("task", "보통", False), body)
+
     def test_a_task_request_with_a_missing_empty_or_foreign_value_is_a_shape_problem(self):
         title = "[요청] "
         self.assertEqual(reply(title=title, body=task_body(what="")), ol.Refusal("bad_shape", ("`해 주었으면 하는 일` 이 비어 있습니다",)))
@@ -315,6 +322,14 @@ class GitHubClientTest(unittest.TestCase):
         self.assertNotIn("##[", shown)
         self.assertEqual(len(shown.splitlines()), 1)
         self.assertTrue(shown.startswith("HTTP 400: bad ***"))
+
+    def test_a_token_is_replaced_even_in_a_shape_no_secret_pattern_knows(self):
+        odd = "plain-" + "opaque-credential-" + "0001"          # 비밀 모양 리터럴을 소스에 두지 않으려고 이어 붙인다 — 패턴 마스크가 모르는 모양
+        api, _, _ = self.client(oh.http_error(400, f"echo {odd} done"), token=odd)
+        with self.assertRaises(ol.GitHubError) as caught:
+            api.request("GET", "/x")
+        self.assertNotIn(odd, str(caught.exception))
+        self.assertEqual(str(caught.exception), "HTTP 400: echo *** done")
 
     def test_a_long_error_message_is_cut(self):
         api, _, _ = self.client(oh.http_error(422, "가" * 1000))

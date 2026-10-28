@@ -237,7 +237,8 @@ class SelectionTest(unittest.TestCase):
             self.assertEqual(git.calls, [], (before, after))
         for default, ref in (("--upload-pack=x", "ai/claude/a"), ("main", "main"), ("main", "feature/x"), ("main", "ai/claude/../x"), ("main", "ai/claude/a b"),
                              ("main", "ai/claude/.hidden"), ("main", "ai/claude/x.lock"), ("m*", "ai/claude/a"), ("main", "ai/claude/a*"), ("", "ai/claude/a"), ("main", "ai/claude/" + "x" * 120),
-                             ("main", "ai/claude/a;rm"), ("main", "ai/claude/$HOME")):
+                             ("main", "ai/claude/a;rm"), ("main", "ai/claude/$HOME"), ("main", "ai/claude/a..b"), ("a..b", "ai/claude/a"), ("main", "ai/claude/a/"),
+                             ("main", "ai/claude//a")):
             git = RequestGit(tree=oh.paths("R-001_a.md"))
             with self.assertRaises(notify.GitError, msg=(default, ref)):
                 self.names(git, default=default, ref=ref)
@@ -247,6 +248,11 @@ class SelectionTest(unittest.TestCase):
         for name in ("main", "ai/claude/a", "ai/claude/operator-loop", "ai/claude/x.y_z-1", "release/1.2"):
             self.assertTrue(ol.valid_branch(name), name)
         self.assertFalse(ol.valid_branch("-main"))
+        self.assertFalse(ol.valid_branch("a..b"))                       # 점 둘은 git 이름 규칙 위반 — 점으로 시작하는 조각 검사로는 못 잡는다
+        self.assertFalse(ol.valid_branch("a/b.lock"))
+        self.assertFalse(ol.valid_branch("a/.b"))
+        self.assertFalse(ol.valid_branch("x" * 121))
+        self.assertTrue(ol.valid_branch("x" * 120))
         self.assertFalse(ol.valid_branch("main", "ai/claude/"))
         self.assertFalse(ol.valid_branch(5))
         self.assertTrue(ol.valid_branch("ai/claude/a", "ai/claude/"))
@@ -490,12 +496,15 @@ class MessageTest(unittest.TestCase):
         self.assertIn("&lt;b&gt;굵게&lt;/b&gt; &amp; &lt;i&gt;x&lt;/i&gt;", body)
 
     def test_urls_in_the_text_are_defanged_and_mentions_do_not_become_links(self):
-        text = self.fmt(summary="https://evil.example/x tg://resolve?domain=bot ftp://a.example @everyone @owner")
-        body = text.split("\n", 1)[1]
-        for needle in ("https://", "tg://", "ftp://", "@"):
-            self.assertNotIn(needle, body, needle)
-        self.assertIn("https" + chr(0xFF1A) + "//evil.example/x", body)
-        self.assertIn(chr(0xFF20) + "owner", body)
+        text = self.fmt(title="@owner 확인 https://evil.example/t", summary="https://evil.example/x tg://resolve?domain=bot ftp://a.example @everyone @owner")
+        title_line, summary_line = text.split("\n")[1:3]
+        for part in (title_line, summary_line):                          # 제목과 요약 둘 다(AI 가 쓴 글 둘)
+            for needle in ("https://", "tg://", "ftp://", "@"):
+                self.assertNotIn(needle, part, needle)
+        self.assertIn("https" + chr(0xFF1A) + "//evil.example/x", summary_line)
+        self.assertIn(chr(0xFF20) + "owner", summary_line)
+        self.assertTrue(title_line.startswith(chr(0xFF20) + "owner 확인"), title_line)
+        self.assertIn("https" + chr(0xFF1A) + "//evil.example/t", title_line)
 
     def test_secret_shaped_text_is_masked_and_invisible_or_control_characters_are_removed(self):
         text = self.fmt(title="키 " + nh.TOKEN + " 끝", summary="AIza" + "B" * 35 + " " + chr(0x200B) + "a" + chr(0x202E) + "b" + chr(0xFEFF) + "c\x00d\x07e")
@@ -556,6 +565,39 @@ class ButtonsTest(unittest.TestCase):
     def test_every_button_passes_the_alert_address_allow_list(self):
         for label, url in self.buttons():
             self.assertEqual(notify.allowed_url(url), url, label)
+
+
+class ReceivedMessageTest(unittest.TestCase):
+    """접수 확인 문구(평문 두 가지)의 모양과 방어. 값은 접수 코드가 이미 검증하지만 이 함수들도 외부 글을 믿지 않는다."""
+
+    def test_the_reply_confirmation_has_the_promised_shape(self):
+        self.assertEqual(notify.format_reply_received("R-001", "승인", 12), f"{notify.OK_MARK} 답변 접수 R-001 → 승인(이슈 #12)")
+        self.assertEqual(notify.format_reply_received("R-001", "승인", 12, choice="B"), f"{notify.OK_MARK} 답변 접수 R-001 → 승인 · 선택 B(이슈 #12)")
+
+    def test_the_task_confirmation_has_the_promised_shape(self):
+        self.assertEqual(notify.format_task_received(13, "급함", True), f"{notify.OK_MARK} 새 일 요청 접수(이슈 #13) · 긴급도 급함 · 승인 범위 있음(T3 포함)")
+        self.assertEqual(notify.format_task_received(13, "보통", False), f"{notify.OK_MARK} 새 일 요청 접수(이슈 #13) · 긴급도 보통 · 논의·준비까지만")
+
+    def test_unvalidated_words_are_folded_into_one_line_cut_and_never_a_workflow_command(self):
+        hostile = "승인\n::set-output name=x::y @everyone " + chr(0x202E)
+        for text in (notify.format_reply_received("R-001", hostile, 3, choice="B\n@x"), notify.format_task_received(5, hostile, True)):
+            self.assertEqual(len(text.splitlines()), 1, text)
+            self.assertNotIn("::", text)
+            self.assertNotIn(chr(0x202E), text)
+        self.assertLessEqual(len(notify.format_reply_received("R-001", "승" * 500, 3)), 80)
+        self.assertLessEqual(len(notify.format_task_received(5, "급" * 500, False)), 80)
+
+    def test_numbers_must_be_positive_integers_and_the_request_number_and_answer_must_be_real(self):
+        for bad in (0, -1, True, "3", None, 2.5):
+            with self.assertRaises(ValueError, msg=bad):
+                notify.format_reply_received("R-001", "승인", bad)
+            with self.assertRaises(ValueError, msg=bad):
+                notify.format_task_received(bad, "보통", False)
+        for bad_id in ("R-1", "r-001", "R-0001", None, ""):
+            with self.assertRaises(ValueError, msg=bad_id):
+                notify.format_reply_received(bad_id, "승인", 3)
+        with self.assertRaises(ValueError):
+            notify.format_reply_received("R-001", chr(0x200B), 3)                       # 지우고 나면 빈 답
 
 
 class NotifierRequestTest(unittest.TestCase):
