@@ -55,11 +55,8 @@ layout: null
     .chance-hero-art { filter: drop-shadow(0 28px 60px rgba(15, 23, 42, .55)); }
     .chance-kicker { background: linear-gradient(120deg, rgba(59,130,246,.16), rgba(139,92,246,.12)); }
     .editorial-label { letter-spacing: .16em; }
-    .shorts-panel { background: radial-gradient(ellipse at 82% 12%, rgba(106,91,230,.17), transparent 42%), linear-gradient(125deg, #0d172d, #10162b 58%, #19152f); }
-    .shorts-art { filter: drop-shadow(0 18px 38px rgba(5, 8, 20, .48)); }
     .editorial-panel { background: radial-gradient(ellipse at 8% 0%, rgba(49,91,206,.13), transparent 45%), linear-gradient(145deg, #0d1529, #10182d 62%, #11152b); }
     .editorial-card { background: linear-gradient(145deg, rgba(30,43,70,.72), rgba(14,22,41,.88)); }
-    @media (prefers-reduced-motion: no-preference) { .shorts-art { animation: shorts-float 7s ease-in-out infinite; } @keyframes shorts-float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } } }
     .prose img { border-radius: 0.75rem; margin: 1.5rem auto; max-height: 480px; object-fit: cover; }
     .prose h1 { font-size: 1.875rem; font-weight: 800; margin-top: 1.75rem; margin-bottom: 1rem; line-height: 1.3; }
     .prose h2 { font-size: 1.5rem; font-weight: 700; margin-top: 1.5rem; margin-bottom: 0.75rem; line-height: 1.35; }
@@ -190,27 +187,50 @@ layout: null
       <p id="results-summary" class="text-slate-400" aria-live="polite">{% if site.posts.size > 0 %}{{ site.posts.size }}개의 글을 만나보세요{% else %}글 목록을 준비하고 있습니다...{% endif %}</p>
       <button id="reset-filters" type="button" class="hidden shrink-0 text-blue-400 hover:text-blue-300">필터 초기화</button>
     </div>
-    <section class="shorts-panel mb-9 overflow-hidden rounded-3xl border border-indigo-300/15 shadow-2xl shadow-indigo-950/20" aria-labelledby="shorts-title">
-      <div class="grid items-center md:grid-cols-[1.03fr_.97fr]">
-        <div class="order-2 p-6 md:order-1 md:p-9 lg:p-11">
-          <div class="editorial-label mb-4 inline-flex items-center gap-2 rounded-full border border-cyan-200/20 bg-cyan-200/5 px-3 py-1.5 text-[10px] font-bold uppercase text-cyan-200"><span class="h-1.5 w-1.5 rounded-full bg-cyan-300 shadow-[0_0_12px_#67e8f9]"></span>AI SHORTS · SERIES CONCEPT</div>
-          <h2 id="shorts-title" class="mb-3 text-2xl font-black leading-tight text-white md:text-3xl">사람 대신, 상상의 동물이 묻습니다.</h2>
-          <p class="mb-5 max-w-xl text-sm leading-7 text-slate-300">가상 여우 기자가 AI 결정체를 인터뷰하는 짧은 탐사. 기술뿐 아니라 일·돈·문화·삶의 변화를, 현실인 척하지 않는 AI의 비주얼과 확인 가능한 근거로 풀어냅니다.</p>
-          <div class="mb-6 grid gap-2 text-xs sm:grid-cols-3">
-            <div class="rounded-xl border border-white/5 bg-white/[.035] p-3"><span class="mb-1 block text-cyan-200">01 · 질문</span><span class="text-slate-400">AI는 답을 어떻게 찾을까?</span></div>
-            <div class="rounded-xl border border-white/5 bg-white/[.035] p-3"><span class="mb-1 block text-violet-200">02 · 비유</span><span class="text-slate-400">30초 안에 쉽게 풀기</span></div>
-            <div class="rounded-xl border border-white/5 bg-white/[.035] p-3"><span class="mb-1 block text-amber-200">03 · 근거</span><span class="text-slate-400">원문과 출처로 이어 읽기</span></div>
-          </div>
-          <div class="flex flex-wrap items-center gap-3">
-            <a href="#post-grid" class="inline-flex items-center gap-2 rounded-xl border border-indigo-300/30 bg-indigo-300/10 px-4 py-2.5 text-sm font-bold text-indigo-100 transition hover:bg-indigo-300/20">기술 노트 둘러보기 <i class="fa-solid fa-arrow-right text-xs"></i></a>
-            <span class="text-[11px] text-slate-500">가상 캐릭터 · AI 생성 콘셉트 아트</span>
-          </div>
-        </div>
-        <div class="order-1 p-3 pb-0 md:order-2 md:p-5 md:pl-0">
-          <img src="{{ '/assets/shorts-animal-interview.svg' | relative_url }}" alt="네온 숲에서 가상 여우 기자가 빛나는 AI 결정체를 인터뷰하는 콘셉트 아트" class="shorts-art block w-full rounded-2xl" width="880" height="560" loading="lazy">
-        </div>
+    <!-- Loading Indicator -->
+    <div id="loading-indicator" class="hidden py-24 flex flex-col items-center justify-center space-y-4">
+      <div class="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
+      <p class="text-sm text-slate-400 font-medium">포스트를 불러오는 중입니다...</p>
+    </div>
+
+    <!-- Empty State -->
+    <div id="empty-state" class="hidden py-24 text-center space-y-3">
+      <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-slate-900 border border-slate-800 text-slate-500 text-2xl">
+        <i class="fa-regular fa-folder-open"></i>
       </div>
-    </section>
+      <h3 class="text-lg font-bold text-slate-300">검색 결과 또는 등록된 포스트가 없습니다.</h3>
+      <p class="text-sm text-slate-500 max-w-sm mx-auto">다른 키워드로 검색하거나 카테고리 필터를 변경해 보세요.</p>
+    </div>
+
+    <div id="post-carousel-controls" class="mb-3 flex items-center justify-between gap-3" aria-label="게시글 가로 목록 탐색">
+      <p id="post-carousel-hint" class="text-xs text-slate-500">좌우로 넘겨 더 많은 글을 살펴보세요</p>
+      <div class="flex items-center gap-2">
+        <button id="post-carousel-prev" type="button" class="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-700 bg-slate-900 text-slate-200 transition hover:border-blue-400/50 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40" aria-label="이전 게시글 보기" disabled><i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button>
+        <button id="post-carousel-next" type="button" class="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-700 bg-slate-900 text-slate-200 transition hover:border-blue-400/50 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40" aria-label="다음 게시글 보기" disabled><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button>
+      </div>
+    </div>
+    <!-- Horizontal Posts Carousel -->
+    <div id="post-grid" class="flex snap-x snap-mandatory gap-5 overflow-x-auto scroll-smooth pb-5 mb-9" tabindex="0" aria-label="게시글 목록. 좌우로 스크롤할 수 있습니다.">
+      {% comment %}서버가 미리 그린 글 목록(2026-10-26 운영자 승인, SIT-02): JS 없이도 글 링크가 보이게 한다. JS가 켜져 posts.json 을 받으면 같은 글을 다시 그려 이 카드를 바꾼다.{% endcomment %}
+      {% for post in site.posts limit: 24 %}
+      {% assign card_category = post.category | default: post.categories.first | default: 'General' %}
+      <article class="group min-w-[84%] max-w-[84%] shrink-0 snap-start bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden flex flex-col justify-between sm:min-w-[48%] sm:max-w-[48%] xl:min-w-[32%] xl:max-w-[32%]">
+        <div>
+          <a href="{{ post.url | relative_url }}" class="relative aspect-video w-full overflow-hidden bg-slate-800 block" aria-label="{{ post.title | escape }} 글 읽기">
+            {% if post.image %}<img src="{{ post.image | escape }}" alt="{{ post.title | escape }}" class="w-full h-full object-cover" loading="lazy">{% endif %}
+            <div class="absolute top-3 left-3 flex gap-1.5">
+              <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-900/80 backdrop-blur-md text-blue-400 border border-blue-500/30">{{ card_category | escape }}</span>
+            </div>
+          </a>
+          <div class="p-5">
+            <div class="text-xs text-slate-500 font-mono mb-2">{{ post.date | date: "%Y-%m-%d" }}</div>
+            <h2 class="text-lg font-bold text-slate-100 line-clamp-2 leading-snug mb-2"><a href="{{ post.url | relative_url }}" class="hover:text-blue-400">{{ post.title | escape }}</a></h2>
+            <p class="text-sm text-slate-400 line-clamp-3 leading-relaxed mb-4">{{ post.excerpt | strip_html | normalize_whitespace | truncate: 180 }}</p>
+          </div>
+        </div>
+      </article>
+      {% endfor %}
+    </div>
     <section id="editorial-principles" class="editorial-panel mb-9 overflow-hidden rounded-3xl border border-blue-300/10 px-5 py-7 shadow-xl shadow-blue-950/10 md:px-8 md:py-9" aria-labelledby="editorial-principles-title">
       <div class="mx-auto max-w-5xl">
         <div class="mb-6 text-center">
@@ -269,50 +289,6 @@ layout: null
       </div>
       <p id="daily-publishing-status" class="px-4 py-2.5 text-[11px] text-slate-500 md:px-6">게시글 목록 기준으로 집계합니다.</p>
     </section>
-    <!-- Loading Indicator -->
-    <div id="loading-indicator" class="hidden py-24 flex flex-col items-center justify-center space-y-4">
-      <div class="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
-      <p class="text-sm text-slate-400 font-medium">포스트를 불러오는 중입니다...</p>
-    </div>
-
-    <!-- Empty State -->
-    <div id="empty-state" class="hidden py-24 text-center space-y-3">
-      <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-slate-900 border border-slate-800 text-slate-500 text-2xl">
-        <i class="fa-regular fa-folder-open"></i>
-      </div>
-      <h3 class="text-lg font-bold text-slate-300">검색 결과 또는 등록된 포스트가 없습니다.</h3>
-      <p class="text-sm text-slate-500 max-w-sm mx-auto">다른 키워드로 검색하거나 카테고리 필터를 변경해 보세요.</p>
-    </div>
-
-    <div id="post-carousel-controls" class="mb-3 flex items-center justify-between gap-3" aria-label="게시글 가로 목록 탐색">
-      <p id="post-carousel-hint" class="text-xs text-slate-500">좌우로 넘겨 더 많은 글을 살펴보세요</p>
-      <div class="flex items-center gap-2">
-        <button id="post-carousel-prev" type="button" class="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-700 bg-slate-900 text-slate-200 transition hover:border-blue-400/50 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40" aria-label="이전 게시글 보기" disabled><i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button>
-        <button id="post-carousel-next" type="button" class="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-700 bg-slate-900 text-slate-200 transition hover:border-blue-400/50 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40" aria-label="다음 게시글 보기" disabled><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button>
-      </div>
-    </div>
-    <!-- Horizontal Posts Carousel -->
-    <div id="post-grid" class="flex snap-x snap-mandatory gap-5 overflow-x-auto scroll-smooth pb-5" tabindex="0" aria-label="게시글 목록. 좌우로 스크롤할 수 있습니다.">
-      {% comment %}서버가 미리 그린 글 목록(2026-10-26 운영자 승인, SIT-02): JS 없이도 글 링크가 보이게 한다. JS가 켜져 posts.json 을 받으면 같은 글을 다시 그려 이 카드를 바꾼다.{% endcomment %}
-      {% for post in site.posts limit: 24 %}
-      {% assign card_category = post.category | default: post.categories.first | default: 'General' %}
-      <article class="group min-w-[84%] max-w-[84%] shrink-0 snap-start bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden flex flex-col justify-between sm:min-w-[48%] sm:max-w-[48%] xl:min-w-[32%] xl:max-w-[32%]">
-        <div>
-          <a href="{{ post.url | relative_url }}" class="relative aspect-video w-full overflow-hidden bg-slate-800 block" aria-label="{{ post.title | escape }} 글 읽기">
-            {% if post.image %}<img src="{{ post.image | escape }}" alt="{{ post.title | escape }}" class="w-full h-full object-cover" loading="lazy">{% endif %}
-            <div class="absolute top-3 left-3 flex gap-1.5">
-              <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-900/80 backdrop-blur-md text-blue-400 border border-blue-500/30">{{ card_category | escape }}</span>
-            </div>
-          </a>
-          <div class="p-5">
-            <div class="text-xs text-slate-500 font-mono mb-2">{{ post.date | date: "%Y-%m-%d" }}</div>
-            <h2 class="text-lg font-bold text-slate-100 line-clamp-2 leading-snug mb-2"><a href="{{ post.url | relative_url }}" class="hover:text-blue-400">{{ post.title | escape }}</a></h2>
-            <p class="text-sm text-slate-400 line-clamp-3 leading-relaxed mb-4">{{ post.excerpt | strip_html | normalize_whitespace | truncate: 180 }}</p>
-          </div>
-        </div>
-      </article>
-      {% endfor %}
-    </div>
   </main>
 
   <!-- Post Reader Modal -->
