@@ -408,6 +408,17 @@ class OtherDocsAgreeTest(unittest.TestCase):
         for login, association in ((oh.OWNER, "MEMBER"), ("stranger", "OWNER"), ("stranger", "NONE")):
             self.assertIsInstance(ol.parse_reply("[답변] ", oh.reply_body(), login, association, oh.OWNER), ol.Refusal, (login, association))
 
+    def test_the_task_requests_readme_rule_for_the_request_form_names_the_scope_choices_and_says_it_is_not_an_approval(self):
+        """작업요청 README 규칙 7(양식 `[요청]` 이슈를 어떻게 다루나)은 규칙 3 의 문장과 따로 한 번 더 `[요청]` 은 승인이 아니라고 적고, 진행 범위의 두 선택지(코드의 값)를 말한다."""
+        rule = next(line for line in rel_text("인수인계/작업요청/README.md").splitlines() if line.startswith("7. 운영자가 양식"))
+        labels = dict(ol.TASK_FIELDS)
+        self.assertIn(f"`{labels['approval']}`", rule)
+        self.assertIn(f"`{oh.TASK_SCOPE['no']}`", rule)
+        self.assertIn(f"`{oh.TASK_SCOPE['yes'].split(' — ')[0]}`", rule)                 # 긴 선택지 글의 앞부분(구현·시험까지 진행(T1·T2))
+        for needle in ("**`[요청]` 은 승인이 아니다**", "T3 는 포함하지 않는다", "`decision` 요청(R-번호)으로 다시 묻고", "`[답변]` 으로 승인한다"):
+            self.assertIn(needle, rule, needle)
+        self.assertNotIn("승인으로 본다", rule)
+
     def test_no_wording_that_made_the_request_form_look_like_a_t3_approval_remains(self):
         """독립 검증 B-1: `[요청]`·`승인 범위(T3 포함)` 를 승인으로 읽히게 하던 옛 문구가 이 작업이 소유한 파일 어디에도 없다(WORKLOG 의 역사는 제외)."""
         owned = (*APPROVAL_FILES, "docs/ARCHITECTURE.md", "docs/DEFECT_REGISTER.md", "docs/OPS_INBOX.md", "docs/ISSUE_EDITS.md", ".github/editorial/TELEGRAM_SETUP.md",
