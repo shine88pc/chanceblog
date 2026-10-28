@@ -93,5 +93,29 @@
     "lane": "economy",
     "source": "European Commission (DG Energy)",
     "source_url": "https://cinea.ec.europa.eu/news-events/news/cef-energy-2026-call-pcipmi-projects-attracts-strong-interest-67-applications-requesting-eur288-2026-10-26_en"
+  },
+  {
+    "date": "2026-10-27",
+    "topic": "Protecting Europe with stronger climate-resilience",
+    "kr_title": "기후변화 대응의 축 이동: 선제적·시스템적 위험 관리가 공동체와 경제에 의미하는 것",
+    "en_title": "Shifting the Climate Defense: What Proactive Risk Management Means for European Communities",
+    "kr_image": "https://images.unsplash.com/photo-1678659857839-11517026d4b6?auto=format&fit=crop&w=1000&q=80",
+    "en_image": "https://images.unsplash.com/photo-1723271901087-d7f11d9e8bfc?auto=format&fit=crop&w=1000&q=80",
+    "slot": 18,
+    "lane": "society",
+    "source": "European Commission",
+    "source_url": "https://commission.europa.eu/news-and-media/news/protecting-europe-stronger-climate-resilience-2026-10-27_en"
+  },
+  {
+    "date": "2026-10-28",
+    "topic": "How a Johnson Mentor Shapes the Next Generation of NASA Talent",
+    "kr_title": "\"너에게 무엇이 중요한지 결정하는 것\": 우주 공학 현장에서 멘토링이 갖는 의미",
+    "en_title": "\"You Decide What’s Important\": How Mentorship Shapes Aerospace Engineering Talent",
+    "kr_image": "https://images.unsplash.com/photo-1775031478823-e415206e4d58?auto=format&fit=crop&w=1000&q=80",
+    "en_image": "https://images.unsplash.com/photo-1782338937828-d6c1dab06387?auto=format&fit=crop&w=1000&q=80",
+    "slot": 9,
+    "lane": "science",
+    "source": "NASA",
+    "source_url": "https://www.nasa.gov/general/how-a-johnson-mentor-shapes-the-next-generation-of-nasa-talent/"
   }
 ]
