@@ -147,10 +147,28 @@ class ParseReplyTest(unittest.TestCase):
     def test_the_request_number_must_be_r_and_three_digits(self):
         for good in ("R-001", "R-999", "R-000"):
             self.assertEqual(reply(body=reply_body(request_id=good)).request_id, good)
-        for bad in ("R-1", "R-0001", "r-001", "R_001", "R-001 extra", "R-001\nR-002", "001", "R-00a", "#R-001", "R-001.", "R−001"):
+        for bad in ("R-1", "R-0001", "R_001", "R-001 extra", "R-001\nR-002", "001", "R-00a", "#R-001", "R-001.", "R−001"):
             result = reply(body=reply_body(request_id=bad, crlf=False))
             self.assertEqual(result.code, "bad_shape", repr(bad))
             self.assertEqual(result.problems, ("`요청 번호` 값이 `R-001` 처럼 `R-` 와 숫자 세 자리가 아닙니다",), repr(bad))
+
+    def test_a_lowercase_r_is_read_as_the_same_request_number(self):
+        """운영자가 `r-002` 로 쓴 첫 응답(이슈 #61)이 거절됐다 — 맨 앞 소문자 r 과 앞뒤 공백만 봐주고 번호는 `R-002` 로 맞춘다. 나머지 틀린 모양은 그대로 거절한다."""
+        for good, want in (("r-002", "R-002"), ("R-002", "R-002"), (" r-002 ", "R-002"), ("r-000", "R-000"), ("r-999", "R-999")):
+            result = reply(body=reply_body(request_id=good, crlf=False))
+            self.assertEqual((result.kind, result.request_id), ("reply", want), repr(good))
+        for bad in ("rr-001", "r_001", "r-1", "r-0001", "r-001 extra", "r--001", "r−001", "r\u2011001", "\uff52-001", "\u017f-001", "x-001", "r-00a", "-001", "r-", "r"):
+            result = reply(body=reply_body(request_id=bad, crlf=False))
+            self.assertEqual(result.code, "bad_shape", repr(bad))
+        self.assertEqual(reply(login="someone", body=reply_body(request_id="r-002")), ol.Refusal("not_owner", ()))                    # 정규화는 신뢰 판정 뒤다 — 소유자가 아니면 소문자여도 거절
+        self.assertEqual(reply(association="CONTRIBUTOR", body=reply_body(request_id="r-002")), ol.Refusal("not_owner_association", ()))
+
+    def test_normalize_request_id_changes_only_a_leading_lowercase_r_and_the_edges(self):
+        """정규화 함수만 따로: 맨 앞 소문자 `r-` 와 앞뒤 공백만 바꾼다. 대문자화(`upper`)로 풀어 쓰면 `ı`·`ſ`·전각 같은 다른 글자가 ASCII 로 접혀 들어오므로 그대로 둔다."""
+        cases = (("r-002", "R-002"), (" r-002 ", "R-002"), ("\tr-002\n", "R-002"), ("R-002", "R-002"), ("r-ab", "R-ab"), ("rr-002", "rr-002"),
+                 ("r_002", "r_002"), ("\u0131-002", "\u0131-002"), ("\u017f-002", "\u017f-002"), ("\uff52-002", "\uff52-002"), ("", ""))
+        for raw, want in cases:
+            self.assertEqual(ol.normalize_request_id(raw), want, repr(raw))
 
     def test_an_answer_outside_the_forms_choices_is_a_shape_problem(self):
         for bad in ("승인", "승인 — 제안한 대로 진행해 주세요!", "승인 - 제안한 대로 진행해 주세요", "APPROVE", "승인 — 제안한 대로 진행해 주세요\n거절 — 하지 마세요", "<script>", "",
@@ -582,6 +600,16 @@ class AckCliTest(unittest.TestCase):
         self.assertNotIn(GH_TOKEN, everything)
         self.assertEqual(leaks(everything, chat=False), [])                                       # 요청 본문에는 채팅 ID(수신자)가 있어야 한다. 토큰은 어디에도 없다
         self.assertEqual(leaks("\n".join(lines), json.dumps(github.comments, ensure_ascii=False), self.summary.read_text(encoding="utf-8")), [])
+
+    def test_a_lowercase_request_number_is_acknowledged_with_the_capital_number(self):
+        """이슈 #61 의 `r-002` 사례 — 접수 코멘트와 폰 메시지에는 `R-001` 꼴만 나가고, 저장소 요청함에 그 파일이 있으면 '대조' 안내도 붙지 않는다."""
+        code, lines, net, github = self.ack(issue_event(body=reply_body(request_id="r-001", answer="문제", memo="버튼이 안 눌립니다")))
+        self.assertEqual(code, 0)
+        comment = github.posted(12)[0]
+        self.assertTrue(comment.startswith(ol.ACK_MARK + "\n접수했습니다 — 요청 **R-001** · 답: **문제**."), comment[:80])
+        self.assertNotIn("r-001", comment)
+        self.assertNotIn("대조해 처리합니다", comment)
+        self.assertEqual(net.bodies()[0]["text"], f"{notify.OK_MARK} 답변 접수 R-001 → 문제(이슈 #12)")
 
     def test_a_request_answer_without_a_choice_has_a_short_phone_message(self):
         code, lines, net, github = self.ack(issue_event(body=reply_body(answer="거절")))
