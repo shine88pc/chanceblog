@@ -1,32 +1,34 @@
 ---
 id: R-002
 kind: run
-title: Blogger 시크릿 3종 등록 뒤 인증 점검을 다시 실행해 주세요 (이슈 #58)
-summary: 08:52 인증 점검에서 BLOGGER_BLOG_ID·BLOGGER_CLIENT_ID·BLOGGER_REFRESH_TOKEN 이 비어 있다고 나왔습니다. Settings → Secrets and variables → Actions 의 Secrets 탭에 3종을 등록한 뒤 같은 점검을 다시 실행해 주세요. 결과는 AI 가 자동으로 읽습니다.
+title: Blogger refresh token 을 새로 받아 덮어쓴 뒤 인증 점검을 다시 실행해 주세요 (이슈 #58)
+summary: 시크릿 4종은 모두 등록됐지만 구글이 refresh token 을 거부했습니다(만료·폐기·다른 클라이언트 발급·붙여넣기 오류). 동의 화면이 '프로덕션'인지 확인하고 같은 클라이언트로 토큰을 새로 받아 BLOGGER_REFRESH_TOKEN 을 덮어쓴 뒤 '인증 점검만 실행'을 다시 돌려 주세요. 결과는 AI 가 자동으로 읽습니다.
 urgency: 보통
 created: 2026-10-28
 ---
 
-# R-002 · Blogger 시크릿 3종 등록 뒤 인증 점검 다시 실행
+# R-002 · Blogger refresh token 새로 받기 → 인증 점검 다시 실행
 
 ## 지금까지
-- 2026-10-28 08:52 에 실행하신 `인증 점검만 실행`이 **"게시용 시크릿이 일부만 등록(없는 것: `BLOGGER_BLOG_ID`·`BLOGGER_CLIENT_ID`·`BLOGGER_REFRESH_TOKEN`)"** 으로 멈췄습니다(글·게시 없음, 쓰기 없음). 지금 Actions 시크릿에는 `BLOGGER_CLIENT_SECRET` 만 보입니다.
-- 코드의 연동 이름은 맞습니다(이슈 #58 리뷰). 비어 있는 것은 **값 등록**입니다.
+- 08:52 점검은 시크릿 3종이 비어 멈췄습니다(이슈 #58). 그 뒤 운영자께서 시크릿을 등록하셨고, 오늘 다시 실행하신 점검(Actions 실행 #40628449117)에서는 **시크릿 4종이 모두 인식**됐습니다.
+- 이번 점검은 **"인증 만료(auth_expired): refresh token 이 만료되었거나 폐기되었습니다"** 로 멈췄습니다. 글·게시·저장소 변경은 없었습니다(쓰기 없는 점검). 영문 Blogger 는 정지(`mode: off`) 상태라 글이 올라가지 않습니다.
+- 구글이 클라이언트 ID·시크릿 자체를 틀렸다고 하면 보통 다른 문구("권한·접근 불가")가 나옵니다(추정). 그래서 값 전체보다 **토큰** 쪽이 문제일 가능성이 큽니다.
 
-## 1단계 — 시크릿 3종 등록 (휴대폰 가능)
-저장소 **Settings**(휴대폰은 More ⋯ 안) → **Secrets and variables** → **Actions** → **Secrets** 탭 → **New repository secret**.
-| 이름(글자 그대로) | 값 |
-|---|---|
-| `BLOGGER_BLOG_ID` | 블로그 관리 화면 주소의 숫자 |
-| `BLOGGER_CLIENT_ID` | OAuth 클라이언트 ID |
-| `BLOGGER_REFRESH_TOKEN` | 발급받은 refresh token |
+## 먼저 확인 (확인하기 쉬운 순서이며 가능성 순서는 아닙니다)
+1. **토큰이 오래된 것은 아닌가**: 예전에 받아 둔 토큰을 다시 등록하셨다면, 그때 OAuth 동의 화면이 `Testing`(테스트) 상태였을 때 7일 만에 만료됐을 수 있습니다. 구글 클라우드 → Google Auth Platform(OAuth 동의 화면) → 대상(Audience) 의 게시 상태가 `In production`(프로덕션)이어야 하고, 바꾼 **뒤에** 토큰을 새로 받습니다(가이드 §1-4).
+2. **같은 클라이언트인가**: refresh token 은 발급받은 OAuth 클라이언트의 ID·시크릿과 짝으로만 쓸 수 있습니다. 토큰을 받을 때 쓴 클라이언트 ID·시크릿이 `BLOGGER_CLIENT_ID`·`BLOGGER_CLIENT_SECRET` 과 같아야 합니다(`scripts/get_blogger_token.py` 가 세 값을 한 번에 출력합니다).
+3. **값 끝에 공백·줄바꿈이 없는가**: 붙여 넣을 때 같이 들어가면 구글이 토큰을 알아보지 못합니다. 묶음 PR #57 병합 뒤에는 코드가 눈에 안 보이는 글자와 끝 공백을 지우고 쓰지만, 지금의 main 은 지우지 못합니다. 새 값은 원본에서 복사해 한 번만 붙여 넣고, 끝에서 Enter 를 누르지 마세요.
 
-- **Variables 탭이 아니라 Secrets 탭**에 있어야 합니다(Variables 에 넣으면 시크릿으로 읽히지 않습니다). 이미 Variables 에 넣으셨다면 Secrets 에 새로 등록하세요.
-- 값은 **원본에서 바로 복사해 붙여넣기**. 채팅 앱에서 복사하면 눈에 안 보이는 글자가 섞일 수 있습니다(섞이면 이제 코드가 지우고 쓰며 요약에 이름만 알립니다).
-- `BLOGGER_REFRESH_TOKEN` 은 `BLOGGER_CLIENT_ID`·`BLOGGER_CLIENT_SECRET` 과 **같은 OAuth 클라이언트로 한 번에 발급**한 값이어야 합니다(`scripts/get_blogger_token.py` 가 세 줄을 같이 출력). ID·시크릿을 새로 만드셨다면 토큰도 새로 발급해 **셋을 함께** 등록하세요.
-- 값을 이슈·채팅에 쓰지 마세요.
+## 1단계 — 토큰 새로 받기
+- 저장소 가이드 `.github/editorial/BLOGGER_API_SETUP.md` §2 의 `python scripts/get_blogger_token.py`(데스크톱 앱 OAuth 클라이언트 JSON 필요)로 받습니다. 브라우저에서 Blogger 권한이 있는 구글 계정으로 허용하면 `BLOGGER_REFRESH_TOKEN=…` 이 나옵니다.
+- 이 PC 에 저장소 사본·파이썬이 없거나 파일을 꺼낼 수 없어 막히면 **채팅으로 알려 주세요**. 브라우저만으로 받는 방법을 가이드에 추가하겠습니다(값은 어디에도 쓰지 마세요).
 
-## 2단계 — 인증 점검 다시 실행
+## 2단계 — 시크릿 덮어쓰기
+저장소 **Settings**(휴대폰은 More ⋯ 안) → **Secrets and variables** → **Actions** → **Secrets** 탭 → `BLOGGER_REFRESH_TOKEN` 의 연필(Update) → 새 값 붙여 넣기 → **Update secret**.
+- 클라이언트를 바꿨다면 `BLOGGER_CLIENT_ID`·`BLOGGER_CLIENT_SECRET` 도 **같은 클라이언트의 값**으로 함께 덮어씁니다(셋은 한 벌입니다).
+- Variables 탭이 아니라 **Secrets 탭**입니다. 값은 이슈·채팅에 쓰지 마세요.
+
+## 3단계 — 인증 점검 다시 실행
 Actions → 워크플로 선택(묶음 병합 **전** `[Blogger] 글 자동 작성(초안함 업로드)`, **후** `[Blogger 영문] 글 자동 작성`) → **Run workflow** → **"인증 점검만 실행"만 체크**(나머지 그대로) → 초록 **Run workflow** → 1~2분 뒤 실행의 **Summary**.
 
 ## 결과 읽는 법
@@ -34,8 +36,8 @@ Actions → 워크플로 선택(묶음 병합 **전** `[Blogger] 글 자동 작�
 |---|---|---|
 | `AUTH_CHECK_OK` | 정상 | 없음 — AI 가 자동으로 확인합니다 |
 | 시크릿 일부 없음(없는 것: 이름) | 아직 빠진 것이 있음 | 그 이름을 Secrets 에 등록 |
-| 인증 만료(auth_expired) | refresh token 만료·폐기 | OAuth 동의 화면 '프로덕션' 확인 후 토큰 새로 발급·등록 |
-| 권한·접근 불가(auth_failed) | ID·시크릿·토큰 불일치 또는 블로그 권한 | 세 값을 **같은 클라이언트의 같은 발급**으로 다시 등록 |
+| 인증 만료(auth_expired) | 구글이 refresh token 을 거부 | 위 "먼저 확인"을 다시 보고 토큰을 새로 받아 덮어쓰기 |
+| 권한·접근 불가(auth_failed) | ID·시크릿 불일치 또는 블로그 권한 | 세 값을 **같은 클라이언트의 같은 발급**으로 다시 등록 |
 | 블로그 주소 불일치(blog_mismatch) | `BLOGGER_BLOG_ID` 가 다른 블로그 | 블로그 ID 확인 |
 | 네트워크·API 오류 | 일시적 | 잠시 뒤 다시 실행 |
 
