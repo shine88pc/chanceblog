@@ -80,6 +80,7 @@ DRAFT_TITLE_MAX = 80           # 항목 제목 안의 글 제목 길이
 TITLE_MAX, DETAIL_MAX, HINT_MAX, MESSAGE_MAX = 110, 420, 260, 150
 
 PUBLISH_STAGE = ("posted", "draft", "generated_unpublished", "publish_failed", "draft_uploaded")
+PACKAGE_STATUS = "package_issued"      # 티스토리·네이버 초안 패키지(GitHub 이슈 1개)를 만든 이력 상태(pipeline/run.py). 공개된 글이 아니라 운영자가 복사해 발행할 초안이다
 IGNORED_CONCLUSIONS = ("cancelled", "skipped", "neutral", "stale", "action_required")     # 최근 완료 실행을 고를 때 건너뛴다(승인 대기는 성공도 실패도 아니다)
 PULL_EVENTS = ("pull_request", "pull_request_target")     # 이 이벤트의 실행은 head 저장소가 이 저장소일 때만 센다(포크 PR 의 head 브랜치가 main 이어도 섞이지 않게)
 FAILED_CONCLUSIONS = ("failure", "timed_out", "startup_failure")
@@ -710,20 +711,25 @@ def blog_items(blogs, histories, now, repo_url):
 
 
 def _post_kind(entry):
-    """'post' 게시된 글 / 'draft' 초안·미게시 / None 해당 없음. Chance 처럼 status 가 없는 dict 는 글 한 건(KR+EN 한 쌍)이다."""
+    """'post' 게시된 글 / 'draft' 초안·미게시 / 'package' 초안 패키지 이슈를 만듦(티스토리·네이버) / None 해당 없음.
+    Chance 처럼 status 가 없는 dict 는 글 한 건(KR+EN 한 쌍)이다."""
     if not isinstance(entry, dict):
         return None
     status = entry.get("status")
     if status is None or status == "posted":
         return "post"
+    if status == PACKAGE_STATUS:
+        return "package"
     return "draft" if status in ("draft", "generated_unpublished", "draft_uploaded") else None
 
 
 def blog_stats(history, now):
-    """이력 → {last: (시각, 정밀도) | None, posts_24h, drafts_24h}. 날짜만 기록된 항목은 오늘(KST) 날짜면 24시간 안으로 센다."""
+    """이력 → {last: (시각, 정밀도) | None, posts_24h, drafts_24h, last_package: (시각, 정밀도) | None}. 날짜만 기록된 항목은 오늘(KST) 날짜면 24시간 안으로 센다.
+    초안 패키지(package_issued)는 글이 아니라 초안·미게시라 drafts_24h 에 세고, 마지막 시각은 last 가 아니라 last_package 에 따로 둔다
+    (그래서 글이 있는 블로그의 '마지막 글'은 그대로고, 초안 패키지만 있는 블로그는 stats_items 가 last_package 를 보여 준다. D-86)."""
     today = now.astimezone(KST).date()
     posts, last = 0, None
-    drafts = 0
+    drafts, last_package = 0, None
     for entry in history:
         kind = _post_kind(entry)
         moment = entry_moment(entry) if kind else None
@@ -735,9 +741,11 @@ def blog_stats(history, now):
             posts += 1 if inside else 0
             if last is None or when > last[0]:
                 last = moment
-        elif inside:
-            drafts += 1
-    return {"last": last, "posts_24h": posts, "drafts_24h": drafts}
+        else:
+            drafts += 1 if inside else 0
+            if kind == "package" and (last_package is None or when > last_package[0]):
+                last_package = moment
+    return {"last": last, "posts_24h": posts, "drafts_24h": drafts, "last_package": last_package}
 
 
 def _last_text(last):
@@ -751,7 +759,8 @@ def _last_text(last):
 
 
 def stats_items(blogs, histories, now):
-    """블로그별 현황(참고): 마지막 글 시각(KST)·최근 24시간 글 수. 이력이 없거나 형식이 달라도 죽지 않는다. mode=off 는 제외."""
+    """블로그별 현황(참고): 마지막 글 시각(KST)·최근 24시간 글 수. 이력이 없거나 형식이 달라도 죽지 않는다. mode=off 는 제외.
+    초안 패키지(package_issued)만 있고 공개된 글이 없는 블로그(티스토리·네이버)는 '마지막 글 없음' 대신 '마지막 초안' 시각을 보여 준다(D-86)."""
     items = []
     for blog in blogs:
         key = blog.get("key") if isinstance(blog, dict) else None
@@ -762,8 +771,11 @@ def stats_items(blogs, histories, now):
         detail = f"최근 24시간 글 {stats['posts_24h']}건"
         if stats["drafts_24h"]:
             detail += f" · 초안·미게시 {stats['drafts_24h']}건"
-        items.append(Item(id=f"stat:{key}", level=LEVEL_INFO, title=f"{ext(blog.get('name') or key, 50)}: 마지막 글 {_last_text(stats['last'])}",
-                          detail=detail))
+        if stats["last"] is None and stats["last_package"] is not None:
+            last_text = f"마지막 초안 {_last_text(stats['last_package'])}"       # 초안 패키지(티스토리·네이버)만 있는 블로그: '마지막 글 없음'이 아니라 마지막 초안 이슈의 시각
+        else:
+            last_text = f"마지막 글 {_last_text(stats['last'])}"
+        items.append(Item(id=f"stat:{key}", level=LEVEL_INFO, title=f"{ext(blog.get('name') or key, 50)}: {last_text}", detail=detail))
     return items
 
 

@@ -20,6 +20,12 @@ OK_STATUSES = {"posted", "draft", "draft_uploaded", "generated_unpublished", "pa
 # package_issued 도 같은 부류다(운영자에게 초안 이슈가 갔다). 이슈를 열어 둔 채 방치하는 것도 이 감시는 모른다(초안 현황판 몫).
 REAL_POST_STATUSES = {"posted", "draft_uploaded", "package_issued"}
 FAIL_STATUSES = {"publish_failed", "llm_failed"}
+# 초안 패키지 채널(mode package, 티스토리·네이버): 같은 채널에 열린 `초안` 이슈가 3건 이상이면 러너가 새 초안을 만들지 않고 이력·커밋·초안 사본을 하나도 남기지 않은 채
+# 건너뛴다(pipeline/run.py PACKAGE_BACKLOG, 종료 0). 그래서 운영자가 초안을 발행·정리하지 않으면 마지막 package_issued 로부터 max_gap_hours 뒤에 STALE(심각)이 울린다 —
+# 파이프라인이 멈춘 것이 아니라 운영자 손을 기다리는 상태일 수 있으므로 STALE 문구에 원인 후보와 푸는 법을 덧붙인다(D-86). 분류·심각도는 바꾸지 않았다(알림 정책은 운영자 몫).
+# 개수 3 은 pipeline/publishers/issue_package.py 의 OPEN_DRAFT_LIMIT 과 같아야 한다(이 모듈은 순수 함수라 어댑터를 가져오지 않고, tests/test_package_stats.py 가 둘이 같은지 지킨다).
+PACKAGE_STALE_HINT = (" 열린 `초안` 이슈가 3건 이상 쌓이면 새 초안을 만들지 않고 기록 없이 건너뛰므로 이 경고가 먼저 울릴 수 있습니다 — "
+                      "초안을 발행해 이슈를 닫거나 `폐기` 라벨을 붙이면 풀립니다. 3건 미만인데도 새 초안이 없으면 워크플로 실행을 확인하세요.")
 REJECT_STREAK = 5
 PAGES_GRACE_MINUTES = 30
 # 글 커밋 시각은 러너 시계, Pages 실행 생성 시각은 GitHub 서버 시계다. 정상 배포는 커밋 2~3초 뒤에 시작하므로 두 시계가
@@ -136,9 +142,10 @@ def evaluate(blog, history, now, last_content_commit=None, recent_runs=(), post_
         last = max(candidates)
         hours = (now - last).total_seconds() / 3600
         if hours > gap_hours:
+            hint = PACKAGE_STALE_HINT if blog.get("mode") == "package" else ""
             findings.append(Finding(key, "STALE", "critical",
                                     f"마지막 활동({last.astimezone(KST):%Y-%m-%d %H:%M} KST) 이후 {hours:.0f}시간 경과 "
-                                    f"(허용 {gap_hours}시간)."))
+                                    f"(허용 {gap_hours}시간)." + hint))
 
     # 2) 연속 실패 / 연속 게이트 탈락 / 시크릿 미등록
     statuses = [e.get("status") for e in entries if e.get("status")]
