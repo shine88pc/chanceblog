@@ -7,6 +7,38 @@
 
 ---
 
+## [2026-10-29] Claude – PR #72(Blogger 한글·영문 켜기) 병합 확인과 첫 글 2편(수동 실행) 결과
+
+**작업자**: Claude
+**대상**: Blogger 영문(`blogger_macat`)·한글(`blogger_kcyoon`) — 운영 관측(코드·설정 변경 없음, 문서만)
+**병합**: 운영자가 이슈 #73(`[요청]` "블로거 첫글 발행 먼저 확인 해볼수 있도록 진행해주고 두번째 글부터는 기존 발행 예정 시간대로", 진행 범위 '논의·준비까지만')보다 먼저, R-014 의 안내대로 저장소 첫 화면 배너로 PR #72 를 만들어 **27초 만에** squash 병합했다(2026-10-29 08:21:40 KST, main c26d0ea, 제목 `feat: Blogger 초안함 켜기 Ad-Surface-Approved: 이슈 #70·#71 [대상: Blogger] (#72)`). 병합 직후 main 푸시의 `[공통] 저장소 규칙·테스트 자동 검사`·`[공통] 사이트 자동 배포`·`[공통] 이슈 양식 페이지 목록 갱신`이 모두 초록이었다 — **승인 표시가 squash 제목에 남아 AD-1 이 통과**했다(D-82 대책이 실제로 통했다). `mode` 는 두 Blogger 모두 `draft`, 한글 이력 파일 `blogger_ko_history.json` 등은 사이트에서 404 였다.
+**운영자 요청 #73 에 대한 답**: AI 는 Actions 의 Run workflow 버튼을 누를 수 없어 R-016(`run`)으로 수동 실행 순서(연습 실행 체크 해제·글을 어디까지=`draft` 그대로·주제 비움)를 보냈고, 운영자가 두 워크플로를 실행했다. 하루 1편 상한(`DAILY_CAP`)이 오늘 정기 실행을 건너뛰게 하고 내일부터 평소 시각(영문 11:00·한글 12:30 KST)에 두 번째 글이 올라간다.
+**첫 글 결과**: 영문 — 실행 #40793530408(수동, 09:21 KST, 성공): 이력 `draft_uploaded`, 제목 `How to Build a Grocery List Without Overthinking`(주제 시드 'How to build a simple grocery list without overthinking'), 라벨 3개, 소제목 4개·목록 1개·질문으로 끝맺음·AI 고지문 붙음. 한글 — 실행 #40793750433(수동, 09:23 KST, 성공): 이력 `draft_uploaded`, 모델 gemini-3.8-flash, 제목 `캘린더 알림을 정리해 일정이 겹치지 않게 돕는 설정 순서 4가지`, 소제목 4개·'오늘 해 볼 것' 목록·질문 하나·AI 고지문 붙음. 두 본문을 AI 가 읽었다: 의료·치료 주장·지어낸 개인 경험·수치·후기·링크·이미지 없음, 정책 위반 없음(한글은 가격·메뉴 위치 단정 없이 '앱마다 다를 수 있으니 도움말 확인' 안내). 공개 여부는 운영자가 Blogger 초안함에서 읽고 정한다(AI 는 공개하지 않는다).
+**관측한 것**: 두 글 모두 사진이 없다 — 이것이 운영자의 채팅 요청("게시글 메인에 사진도 첨부하고 싶은데")으로 이어졌고 아래 항목의 대표 사진 기능으로 구현했다. 이미 올라간 첫 글 2편에는 사진이 붙지 않는다(운영자가 Blogger 편집기에서 직접 넣거나 그대로 둔다).
+**다음 AI 주의**: ① 내일 첫 정기 실행(영문 02:00 UTC·한글 03:30 UTC)에서 두 번째 글이 올라오는지 읽는다(성공 시 이력 항목 2개, `DAILY_CAP` 건너뜀이 아님). ② 12:30 점검(워치독)에서 알림이 없어야 정상이다 — 첫 글로 이력이 갱신됐다. ③ 운영자가 공개한 글이 생기면 Blogger 쪽 노출(AdSense 미연동·광고 `off`)은 그대로임을 기억한다.
+
+---
+
+## [2026-10-29] Claude – Blogger 글 맨 위 대표 사진(Unsplash) 자동 첨부 — 초안함 업로드·즉시 게시 경로만 (운영자 요청 "게시글 메인에 사진도 첨부", T2 + 워크플로 시크릿 전달 추가)
+
+**작업자**: Claude (구현 세션, 독립 검증은 별도 세션)
+**대상**: Blogger 영문(`blogger_macat`)·한글(`blogger_kcyoon`) — 새 모듈 `pipeline/main_image.py`, `pipeline/run.py`, 레지스트리, 워크플로 3개
+**등급**: T2 로 시작했으나 독립 검증이 짚은 대로 `docs/CHARTER.md` 의 T3 정의(시크릿 경로·비용 증가 — 워크플로 시크릿 전달 추가, 글당 Gemini 호출 +1회)에 걸릴 수 있어 **T3 에 준해 처리한다**: 소유자의 채팅 요청이 기능 승인이고, 아래 '구현 측 결정'을 병합 부탁 R-017 에 적어 병합(=확인)을 받는다. 새 기능(코드·시험·문서). 광고 표면·`_config.yml`·프로필 규칙·프롬프트 본문·글 게이트는 바꾸지 않았다. 다만 **워크플로 시크릿 전달이 추가**됐다(`blogger.yml`에 선택 시크릿 정의 + 러너 단계 env 한 줄, 래퍼 둘의 `secrets:` 한 줄씩). 새 시크릿은 없다 — Chance가 이미 쓰는 `UNSPLASH_ACCESS_KEY`를 같이 쓰므로 운영자가 새로 등록할 것은 없지만, 워크플로·시크릿 경로가 바뀌므로 독립 검증이 WF-13·REG-6을 눈으로 확인한다.
+**근거**: 운영자의 채팅 요청 "게시글 메인에 사진도 첨부하고 싶은데 적용가능하도록 수정해줘". 구현 측 결정(소유자 요청에는 '사진을 달아 달라'뿐이라 아래는 AI 가 정한 것이고 R-017 로 알린다): 출처는 Unsplash 검색 API, 영어 검색어 3개를 같은 LLM에게 받음, 같은 블로그의 최근 30개 항목에서 사진 중복 금지, 쓰기로 한 사진의 `download_location` 한 번 호출, 출처 표기(utm), 어떤 실패도 사진 없이 올림, 고정 풀(`IMAGE_POOL`)로 대신하지 않음, 연습 실행·초안 패키지는 Unsplash를 부르지 않음.
+**브랜치**: `ai/claude/blogger-main-photo`(기준 main 2575ff7), 커밋 한 개
+
+### 한 일
+- `pipeline/main_image.py`(신규, 표준 라이브러리 + `pipeline` 모듈만 — `generator.py`는 가져오지 않는다): LLM 검색어 요청(`{"image_queries": [...]}`, 코드 펜스 허용, 영어 글자만·60자 이하만 받음, 실패하면 영문 제목·라벨로 대체)·`/search/photos` 호출(가로·`content_filter=high`·10건, 머리글 `Authorization: Client-ID`·`Accept-Version: v1`, 키는 리다이렉트를 따라가지 않는 머리글로)·결과 검사(사진 주소는 https·호스트 정확히 `images.unsplash.com`·`/photo-<id>`, 작가 링크는 정확히 `unsplash.com/@사용자`, 아니면 그 사진을 버림, 이름·설명은 보이지 않는 문자 제거·80·150자 제한)·`download_location`(호스트가 정확히 `api.unsplash.com`일 때만) 한 번 호출·HTML 블록 만들기(전부 `html.escape`). 주입 가능한 opener로 시험은 네트워크 없이 돈다. 실패는 고정 코드 15개(`REASONS`)로만 알리고 예외를 올리지 않는다.
+- `pipeline/run.py`: 게이트 통과 직후·`gates.append_disclosure` 앞에서 `final_html = 사진 블록 + "\n" + (모델 글 + 면책 문구)`(`platform: blogger`·전달 `draft`·`publish`·연습 실행 아님·레지스트리 `secrets`에 `unsplash_key` 역할 있음일 때만). 이력 항목에 `image`(사진을 붙인 실행에만), 로그 `[<key>] 대표 사진: <ID> (Photo by <작가>)`·`[IMAGE] 건너뜀: <코드>`, 실행 요약 `대표 사진: 있음/없음(<코드>)`·`Unsplash 남은 호출: N회(시간당 한도 M회)`, 연습 실행은 `[DRY_RUN] 대표 사진 단계는 건너뜁니다(외부 호출 없음)` 한 줄. `run()`에 시험용 `image_opener` 인자. 저장소 파일에만 저장·초안 패키지는 출력까지 예전과 같다(시험이 바이트로 대조).
+- 레지스트리: `PLATFORMS["blogger"]["optional_secrets"] = ["unsplash_key"]`, `blogs.json`의 `shared_secrets`에 `UNSPLASH_ACCESS_KEY`, 두 Blogger 블로그 `secrets.unsplash_key`. 선택 역할이라 게시용 시크릿 점검·`missing_secret_roles`에 걸리지 않고 `_secret_values`(redact 대상)에는 들어간다. `plan.py` 매트릭스는 그대로.
+- 워크플로: `blogger.yml`에 선택 시크릿 `PIPELINE_SECRET_UNSPLASH_KEY` 정의와 러너 단계 env, `blogger-en.yml`·`blogger-ko.yml`의 `secrets:`에 `PIPELINE_SECRET_UNSPLASH_KEY` 항목(`secrets.UNSPLASH_ACCESS_KEY` 표현식, `secrets: inherit` 아님). 검증기 REG-6은 레지스트리의 역할을 래퍼와 대조하므로 코드 변경 없이 새 역할을 요구한다(래퍼가 빠뜨리거나 다른 이름을 넘기면 오류).
+- 시험: `tests/test_main_image.py`(단위 76개: 검색어·주소 검사·블록·HTTP·download·이력·진입점)·`tests/test_main_image_run.py`(러너 통합: 영문·한글·즉시 게시·키 없음·연습·파일만·역할 없음·초안 패키지 바이트 대조·실패 동등성·이력 중복·키 비노출·호출 기록·문서)·`tests/main_image_helpers.py`. 옛 시크릿 목록을 못박은 시험(`test_blogger_split`·`test_run`·`test_validate_repo`·`test_draft_upload`·`test_profile_en`·`test_blogger_ko` 등)은 새 역할을 반영하도록 고쳤다(단언을 약하게 만들지 않았다).
+- 문서: `docs/ARCHITECTURE.md` §4-7(새 절)·§4 Publish 행·§5 이력 스키마·§6·§2-1 표, `docs/ACTIONS_GUIDE.md` 6-3(사진 설명·고정 코드표)·7-1 한 행, `docs/SECURITY_GUARDRAILS.md` G-C7, `HANDLER.md` 한 행, 프롬프트 문서 3개·프로필 `_doc` 3개에 '모델은 여전히 이미지·링크를 쓰지 않고 파이프라인이 게이트 뒤에 붙인다'는 안내만(모델에게 가는 글·규칙은 그대로 — 시험이 확인), `인수인계/작업내용.md` §1·§2 한 줄씩.
+**증거**: 4131개 통과(Python 3.12, 474초 — 기준 main 의 4011개에 대표 사진 시험 120개가 더해진 값: 단위 77·러너 통합 39·REG-6 4 등), `validate_repo.py --base origin/main` 오류 0·경고 2(LIQUID-1 둘 — main 과 같음), `actionlint` 워크플로 17개 출력 0줄, `pyflakes` 16건 = main 과 같은 집합(새 경고 0), `vermin --target=3.10-` 최소 3.10, 3.12 전용 f-string 검사 0건. 구현 에이전트가 새 코드에 변이 33건(전부 포착)을, 독립 검증이 58건(53 포착·구멍 3건은 F3 로 메움)을 시도했다 · **조건부 병합 가능**(별도 세션, 막는 결함 0 — 키 유출·HTML/URL 주입·종료 코드 변화를 모두 시도했지만 실패, 적대 응답 20,000건 fuzz 에서 예외 0·키 노출 0, 러너 13개 시나리오는 사진 줄 외 base 와 차이 없음, 새 시험 변이 58건 중 53건 포착. 권고 F1(짝 없는 서로게이트가 업로드 뒤 크래시)·F3(시험 구멍 3)·F4(AI 가 사유를 읽을 길 — `::notice::` 주석)·F2(T3 해당·구현 측 결정 기록 — R-017 에 7가지를 알림)·F9(문서 정정)는 같은 커밋에서 반영했고, F6(사진 단계에 총 시간 상한 없음)은 위험이 낮아 한계로 문서에 적었다. 확인하지 못한 것: 실제 Unsplash 응답·Blogger 초안 렌더링·Python 3.10 실행)
+**다음 AI 주의**: ① 실제 Unsplash·Blogger를 한 번도 호출하지 못했다 — 병합 뒤 첫 정기 실행(영문 11:00·한글 12:30 KST)에서 실행의 Annotations(`::notice::` 한 줄 — 단계 로그는 로그인이 없어 못 읽으니 공개 check-runs 주석 API 로 읽는다. 키가 없을 때 `NO_KEY` 는 주석이 없다: 사진도 `대표 사진` 주석도 없으면 키 없음)와 저장소 초안 사본(`_blogger_drafts/`·`_blogger_ko_drafts/` 최신 `.md` 맨 위에 `images.unsplash.com` 이 있는지)·이력의 `image` 칸을 읽는다. Blogger 초안함의 모양은 운영자가 본다. 응답 모양이 가정과 다르면 사진 없이 올라가고 코드(`UNSAFE_URL`·`BAD_RESPONSE`)만 남는다. ② 사진 쪽 실패는 실행을 빨갛게 하지 않아 워치독이 보지 않는다 — 계속 안 붙으면 로그를 읽는다. ③ Gemini 호출이 글당 1회 늘었다(첫 주에는 요약의 `Gemini 호출`·`용도별 호출`을 본다). ④ Unsplash 호출 한도(앱이 데모 상태면 시간당 50회)는 Chance와 나눠 쓴다(앱 상태는 운영자가 확인 — 미확인). ⑤ 사진 주소의 추적 매개변수(`ixid`·`ixlib`)는 Chance의 `build_image_url`처럼 버린다 — Unsplash 지침에 맞는지 원문을 읽어 확인하지 못했다(미확인). ⑥ 끄려면 그 블로그 `secrets`의 `unsplash_key`와 래퍼의 `PIPELINE_SECRET_UNSPLASH_KEY` 줄을 함께 뺀다(ARCHITECTURE §4-7). ⑦ 사진 단계 전체에는 시간 상한이 없다: HTTP 는 호출마다 시간 제한만 있고(천천히 흘려 보내는 응답은 총 시간을 못 막는다), 새로 늘어난 LLM 호출에도 클라이언트 시간 제한이 없다(D-66 의 283초 멈춤 전례) — 마지막 방어는 job 15분 제한이다(독립 검증 F6, 위험이 낮아 이번에는 고치지 않았다). ⑧ 요약의 '대표 사진: 있음'은 사진을 골랐다는 뜻이고 업로드가 실패해도 찍힌다(상태는 이력의 `status` 로 본다).
+
+---
+
 ## [2026-10-29] Claude – Blogger 한글·영문 켜기: `mode: off` → `draft` + `_config.yml` exclude 한 줄 (운영자 승인 R-011 선택 A·R-015 선택 A, 이슈 #70·#71, T3)
 
 **작업자**: Claude (구현 세션, 독립 검증은 별도 세션)

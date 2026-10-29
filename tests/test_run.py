@@ -139,7 +139,7 @@ class FlowTest(RunBase):
         passed = set(re.findall(r"^\s+(PIPELINE_SECRET_[A-Z_]+):", workflow, re.M))
         roles = registry.get_blog(registry.load_registry(REAL / "pipeline" / "blogs.json"), "blogger_macat")["secrets"]
         self.assertEqual(passed, {"PIPELINE_SECRET_" + role.upper() for role in roles})  # 워크플로가 넘기는 이름 = 러너가 읽는 이름
-        self.assertEqual(passed, set(WORKFLOW_ENV))
+        self.assertEqual(passed, set(WORKFLOW_ENV) | {"PIPELINE_SECRET_UNSPLASH_KEY"})   # 선택 역할(대표 사진용 Unsplash 키)은 이 실행처럼 없어도 게시된다 — 아래에서 값 없이 돌린다
         seen, created = {}, []
 
         class SpyPublisher(FakePublisher):
@@ -638,7 +638,8 @@ class VisibilityTest(RunBase):
         self.assertEqual(code, 0)
         self.assertIn("위조된 제목 줄", pub.published[0]["title"])        # 전제: 위조 문구가 제목에 실제로 들어갔다
         lines = self.summary().splitlines()
-        self.assertEqual(len(lines), 3, lines)                           # '### [채널] 이름', '- 결과', '- URL' 세 줄뿐
+        self.assertEqual(len(lines), 4, lines)                           # '### [채널] 이름', '- 결과', '- URL', 그리고 키가 없을 때의 고정 한 줄 '- 대표 사진: 없음(NO_KEY)'뿐
+        self.assertEqual(lines[3], "- 대표 사진: 없음(NO_KEY)")
         self.assertEqual([line for line in lines if line.startswith("#")], ["### [Blogger 영문] Blogger (macat0722)"])
         for char in "|<>`":
             self.assertNotIn(char, lines[1])

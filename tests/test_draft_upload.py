@@ -169,11 +169,12 @@ class ScenarioTest(unittest.TestCase):
         self.assertIn("status: draft_uploaded", text)
         self.assertIn('url: "https://macat.example/p1"', text)
         self.assertNotIn(SECRET_VALUES["BLOGGER_BLOG_ID"], res.everything())    # 블로그 ID 는 어디에도 기록하지 않는다
-        self.assertEqual(len(res.summary_lines), 4, res.summary)
+        self.assertEqual(len(res.summary_lines), 5, res.summary)
         self.assertEqual(res.summary_lines[0], "### [Blogger 영문] Blogger (macat0722)")
         self.assertIn("**draft_uploaded**", res.summary_lines[1])
         self.assertIn("https://macat.example/p1", res.summary_lines[2])
         self.assertIn("Blogger 초안함에 올렸습니다", res.summary_lines[3])
+        self.assertEqual(res.summary_lines[4], "- 대표 사진: 없음(NO_KEY)")                 # Unsplash 키가 없으면 사진 없이 올리고 이유를 한 줄 남긴다(pipeline/main_image.py)
         self.assertIn("직접 게시", res.summary_lines[3])                          # 운영자가 할 일을 알려 준다
 
     def test_draft_mode_without_any_publish_secret_keeps_the_file_draft_and_says_so(self):
@@ -215,7 +216,8 @@ class ScenarioTest(unittest.TestCase):
         self.assertEqual(res.code, 0, res.out)
         self.assertEqual([p["draft"] for p in pub.published], [False])
         self.assertEqual((pub.health_calls, res.last["status"]), (1, "posted"))
-        self.assertEqual(len(res.summary_lines), 3, res.summary)                  # '### [채널] 이름', '- 결과', '- URL'
+        self.assertEqual(len(res.summary_lines), 4, res.summary)                  # '### [채널] 이름', '- 결과', '- URL', '- 대표 사진: 없음(NO_KEY)'
+        self.assertEqual(res.summary_lines[3], "- 대표 사진: 없음(NO_KEY)")
 
     def test_manual_choice_decides_where_the_post_goes_whatever_the_mode(self):
         # (레지스트리 mode, BLOGGER_PUBLISH 값) → (publish 호출의 draft 플래그, 이력 상태)

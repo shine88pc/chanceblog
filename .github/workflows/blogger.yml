@@ -51,6 +51,9 @@ on:
       PIPELINE_SECRET_REFRESH_TOKEN:
         description: 'OAuth refresh token(레지스트리 secrets.refresh_token)'
         required: false
+      PIPELINE_SECRET_UNSPLASH_KEY:
+        description: 'Unsplash 사진 검색 키(레지스트리 secrets.unsplash_key, 선택). 글 맨 위 대표 사진에 쓰고, 없으면 사진 없이 올린다'
+        required: false
       TELEGRAM_BOT_TOKEN:
         description: '휴대폰 알림용(선택). 없으면 알림 없이 그대로 동작한다'
         required: false
@@ -148,6 +151,7 @@ jobs:
           PIPELINE_SECRET_CLIENT_ID: ${{ secrets.PIPELINE_SECRET_CLIENT_ID }}
           PIPELINE_SECRET_CLIENT_SECRET: ${{ secrets.PIPELINE_SECRET_CLIENT_SECRET }}
           PIPELINE_SECRET_REFRESH_TOKEN: ${{ secrets.PIPELINE_SECRET_REFRESH_TOKEN }}
+          PIPELINE_SECRET_UNSPLASH_KEY: ${{ secrets.PIPELINE_SECRET_UNSPLASH_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python -m pipeline.run --blog "$BLOG_KEY"

@@ -11,6 +11,9 @@
   운영자가 이슈의 복사 상자로 직접 발행한다(pipeline/publishers/issue_package.py). Blogger 인증·시크릿 점검은 하지 않고(Gemini 키와
   GITHUB_TOKEN 뿐), BLOGGER_PUBLISH 는 쓰지 않는다. 같은 채널에 열린 초안 이슈가 3건 이상이면 새로 만들지 않는다(PACKAGE_BACKLOG).
   연습 실행은 이슈 본문을 만들어 실행 요약에만 보이고 GitHub API 를 부르지 않는다.
+  대표 사진(Blogger 초안함 업로드·즉시 게시 경로만): 글이 게이트를 통과한 뒤 AI 면책 문구를 붙이기 전에 Unsplash 사진 한 장을 글 맨 위에 붙인다(pipeline/main_image.py).
+  레지스트리 secrets 에 unsplash_key 역할이 있는 블로그만 쓴다. 연습 실행·저장소 파일에만 저장·초안 패키지(티스토리·네이버)에서는 Unsplash 를 부르지 않는다. 키가 없거나 검색·주소 검사가
+  실패해도 글은 사진 없이 올라가고 종료 코드·상태는 사진이 없는 실행과 같다(로그 `[IMAGE] 건너뜀: <코드>`, 실행 요약 `대표 사진: 있음/없음(<코드>)`).
 
 종료 코드
   0 정상 종료(일일 상한·정지·게이트 탈락·주제 없음 등 '건너뜀' 포함). 건너뛴 사유는
@@ -33,6 +36,7 @@
   BLOGGER_AUTH_CHECK 1 이면 --auth-check 와 같다(워크플로의 '인증 점검만 실행' 입력). 정지(mode off) 중에도, 연습 실행이 켜져 있어도
                      실제로 점검한다(쓰기가 없다). 종료 코드: 0 통과 / 1 인증 만료·네트워크·API 오류 / 2 시크릿 없음·권한·주소 불일치
   GITHUB_TOKEN·GITHUB_REPOSITORY  (초안 패키지 전용) 초안 이슈를 읽고 만드는 데 쓴다. 워크플로가 넘기고, 오류 문구에서 가린다
+  PIPELINE_SECRET_UNSPLASH_KEY·UNSPLASH_ACCESS_KEY  (선택, Blogger 전용) 글 맨 위 대표 사진을 찾는 Unsplash 키. 워크플로는 앞의 이름으로 넘기고 로컬 실행은 뒤의 이름을 읽는다. 없으면 사진 없이 올린다
 """
 import argparse
 import json
@@ -43,7 +47,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from pipeline import gates, notify
+from pipeline import gates, main_image, notify
 from pipeline.auth_check import auth_check, exit_code_for, label_for, safe_code, sentence_for
 from pipeline.console import md_cell, one_line, safe_output
 from pipeline.llm import LLMError, call_log_of, make_gemini_llm, purpose
@@ -508,7 +512,38 @@ def _package_deliver(out, environ, blog, root, local_now, draft, post, topic, so
     return exit_code
 
 
-def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng=None, out=print):
+IMAGE_ROLE = "unsplash_key"   # 레지스트리 secrets 의 역할 이름. 이 역할이 있는 Blogger 블로그만 대표 사진 단계를 쓴다(없으면 기능이 꺼진 것이라 로그·요약에 아무 줄도 없다)
+
+
+def _attach_main_image(out, environ, blog, history, accepted, llm, secret_values, opener):
+    """Blogger 글 맨 위에 붙일 대표 사진을 찾아 (HTML 블록, 사진 ID, 실행 요약에 붙일 줄 목록)을 돌려준다. 사진이 없으면 블록·ID 가 빈 문자열이다.
+
+    어떤 문제가 있어도(키 없음·검색 실패·호출 한도·주소 검사 탈락 …) 예외를 올리지 않고 사진 없이 돌려준다 — 글은 사진 없이 올라가고 종료 코드·상태는 바뀌지 않는다.
+    이유는 고정 코드 한 줄(`[IMAGE] 건너뜀: <코드>`)로만 알린다. 사진을 붙였으면 `[<블로그 key>] 대표 사진: <사진 ID> (Photo by <작가>)` 한 줄이다. 외부 유래 문자열(사진 ID·작가 이름)은
+    비밀을 가리고 한 줄로 접어서만 쓰고, Unsplash 키는 어디에도 쓰지 않는다. 같은 사진을 다시 쓰지 않도록 이력의 최근 항목에 적힌 사진 ID 는 건너뛴다."""
+    key = resolve_secrets(blog, environ).get(IMAGE_ROLE, "")
+    result = main_image.find_main_image(key, accepted["title"], accepted["labels"], llm, main_image.used_ids(history), opener)
+    lines = []
+    if result.ok:
+        photo_id, author = one_line(redact(result.photo_id, secret_values), 60), one_line(redact(result.author, secret_values), 80)
+        out(f"[{blog['key']}] 대표 사진: {photo_id} (Photo by {author})")
+        out(f"::notice::[{blog['key']}] 대표 사진을 붙였습니다({photo_id})")     # 공개 주석 API 로 AI 가 읽는다: 사진 ID(검사를 통과한 글자)만 싣는다
+        note = "" if result.from_llm else " — 검색어는 AI 응답이 아니라 제목·라벨로 만들었습니다"
+        lines.append(f"대표 사진: 있음 — {md_cell(photo_id, 60)} (Photo by {md_cell(author, 80)}){note}")
+    else:
+        code = result.reason if result.reason in main_image.REASONS else "UNEXPECTED"
+        detail = f"({result.detail})" if code == "UNEXPECTED" and result.detail else ""
+        out(f"[IMAGE] 건너뜀: {code}{detail}")
+        if code != "NO_KEY":      # 키가 없는 상태는 매 실행 같은 줄이 남는 설정 상태라 주석을 만들지 않는다 — 사진도 주석도 없으면 NO_KEY 로 읽는다
+            out(f"::notice::[{blog['key']}] 대표 사진 없이 올립니다({code}{detail})")     # 고정 코드만 — 주석은 경고·오류가 아니라 실행은 초록 그대로다
+        lines.append(f"대표 사진: 없음({code}{detail})")
+    remaining, limit = result.rate.get("remaining"), result.rate.get("limit")
+    if remaining is not None:       # Chance 요약(generator._unsplash_line)과 같은 문구: 시간당 한도를 얼마나 썼는지 본다
+        lines.append(f"Unsplash 남은 호출: {remaining}회" + (f"(시간당 한도 {limit}회)" if limit is not None else ""))
+    return (result.block, result.photo_id, lines) if result.ok else ("", "", lines)
+
+
+def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng=None, out=print, image_opener=None):
     args = parse_args(argv)
     environ = os.environ if environ is None else environ
     root = Path(args.root).resolve() if args.root else ROOT
@@ -789,7 +824,24 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
         _summarize(environ, blog, "GATE_REJECTED", md_cell('; '.join(reasons), REASONS_SHOWN), ai_lines())
         return EXIT_OK
 
+    # ---- 대표 사진(Blogger 초안함 업로드·즉시 게시 경로만) ---------------------------------
+    # 게이트를 통과한 글 맨 위에 Unsplash 사진 한 장(출처 표기 포함)을 붙인다. 모델이 이미지·링크를 못 쓰는 규칙(프로필 allow_links=false, 게이트·프롬프트)은 그대로이고, 사진 블록은
+    # 면책 문구처럼 게이트 뒤에 파이프라인이 붙인다. 연습 실행·저장소 파일에만 저장·초안 패키지(티스토리·네이버)는 Unsplash 를 부르지 않는다. 어떤 실패도 글을 막지 않는다(_attach_main_image).
+    image_block, image_id, image_lines = "", "", []
+    if blog["platform"] == "blogger" and delivery in ("draft", "publish") and IMAGE_ROLE in (blog.get("secrets") or {}):
+        if dry:
+            out("[DRY_RUN] 대표 사진 단계는 건너뜁니다(외부 호출 없음)")
+        else:
+            try:
+                image_block, image_id, image_lines = _attach_main_image(out, environ, blog, history, accepted, llm, secret_values, image_opener)
+            except Exception as exc:  # noqa: BLE001 - 사진 단계의 어떤 예외도 글을 막지 못한다(main_image 는 이미 예외를 올리지 않지만 러너 쪽 조립에서 난 것까지 막는다). 클래스 이름만 남긴다
+                name = re.sub(r"[^A-Za-z0-9_]", "", type(exc).__name__)[:40]
+                out(f"[IMAGE] 건너뜀: UNEXPECTED({name})")
+                out(f"::notice::[{blog['key']}] 대표 사진 없이 올립니다(UNEXPECTED({name}))")
+                image_block, image_id, image_lines = "", "", [f"대표 사진: 없음(UNEXPECTED({name}))"]
     final_html = gates.append_disclosure(accepted["content"], profile)
+    if image_block:
+        final_html = image_block + "\n" + final_html
     post = {"title": accepted["title"], "labels": accepted["labels"], "content_html": final_html}
 
     # ---- 게시 / 초안 ------------------------------------------------------
@@ -857,7 +909,7 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
     try:
         record({"status": status, "topic": topic, "topic_source": source, "title": post["title"],
                 "labels": post["labels"], "url": url, "post_id": post_id, "model": model,
-                "attempts": attempts, "reasons": extra})
+                "attempts": attempts, "reasons": extra, **({"image": image_id} if image_id else {})})
     except OSError:
         history_ok, exit_code = False, EXIT_INFRA
         out(skip_line("HISTORY_WRITE_FAILED", blog=blog["key"], status=status))
@@ -894,6 +946,7 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
     if upload_skipped:
         lines.append("- Blogger 초안함에는 올리지 않음(게시용 시크릿 없음): 저장소 파일에만 저장했습니다. "
                      f"등록할 시크릿: {upload_skipped}")
+    lines += [f"- {line}" for line in image_lines]  # 대표 사진: 있음/없음(사유) — 사진 단계를 쓰지 않은 실행에는 줄이 없다
     lines += [f"- {line}" for line in ai_lines()]  # Gemini 호출 기록(무료 한도 측정)
     _write_summary(environ, "\n".join(lines))
     # 휴대폰(텔레그램) 알림은 맨 마지막에 보낸다: 이력·초안 파일·실행 요약을 모두 쓴 뒤라서, 알림이 오래 걸리거나 그 사이 프로세스가 끊겨도

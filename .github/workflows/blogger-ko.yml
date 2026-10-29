@@ -59,12 +59,13 @@ jobs:
       dry_run: ${{ github.event.inputs.dry_run == 'true' }}
       publish: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.publish || '' }}
       auth_check: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.auth_check == 'true' }}
-    # `secrets: inherit` 가 아니라 이 블로그의 시크릿 이름만 역할 이름으로 명시해 넘긴다(한글: BLOGGER_KO_*, Gemini 키는 영문과 공용)
+    # `secrets: inherit` 가 아니라 이 블로그의 시크릿 이름만 역할 이름으로 명시해 넘긴다(한글: BLOGGER_KO_*, Gemini 키·Unsplash 키(글 맨 위 대표 사진용, 선택)는 영문과 공용)
     secrets:
       PIPELINE_SECRET_LLM_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       PIPELINE_SECRET_BLOG_ID: ${{ secrets.BLOGGER_KO_BLOG_ID }}
       PIPELINE_SECRET_CLIENT_ID: ${{ secrets.BLOGGER_KO_CLIENT_ID }}
       PIPELINE_SECRET_CLIENT_SECRET: ${{ secrets.BLOGGER_KO_CLIENT_SECRET }}
       PIPELINE_SECRET_REFRESH_TOKEN: ${{ secrets.BLOGGER_KO_REFRESH_TOKEN }}
+      PIPELINE_SECRET_UNSPLASH_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}

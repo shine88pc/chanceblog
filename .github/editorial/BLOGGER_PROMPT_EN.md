@@ -3,6 +3,8 @@
 > **대상: Blogger (영어 블로그)**  
 > Chance_Blog와 동일한 내용을 사용하지 말 것. 한국어 프롬프트 [`BLOGGER_PROMPT.md`](./BLOGGER_PROMPT.md)와 **같은 구조·같은 안전 규칙**의 영어판이다.  
 > `pipeline/run.py`는 레지스트리(`pipeline/blogs.json`)의 `prompt` 필드로 이 파일을 읽고, 아래 `text` 코드 블록 안만 모델에 보낸다(`{topic}` 자리표시자 필수). 프로필 `pipeline/profiles/blogger_practical_en.json`의 `prompt_extra`가 `[추가 규칙]`으로 뒤에 붙는다. 코드 블록 밖의 문장은 사람용 설명이다.
+>
+> **대표 사진**: 글 맨 위의 대표 사진(Unsplash)과 출처 표기는 모델이 쓰지 않는다. 모델 글에는 여전히 이미지·링크를 넣지 않고(프로필 `allow_links: false`), 파이프라인이 게이트를 통과한 글 맨 위에 사진 블록을 붙인다(`pipeline/main_image.py`, 면책 문구와 같은 방식 — docs/ARCHITECTURE.md §4-7). 이 영어 프롬프트에도 사진·링크 지시는 없다.
 
 ---
 

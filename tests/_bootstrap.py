@@ -16,3 +16,7 @@ for _name in ("GITHUB_STEP_SUMMARY", "GITHUB_OUTPUT", "GITHUB_ENV", "GITHUB_PATH
 # 알림 시험은 값을 직접 주는 가짜 환경(dict)과 가짜 HTTP 로만 돈다.
 for _name in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"):
     os.environ.pop(_name, None)
+# Unsplash 키도 같다: 시험 PC 의 환경에 값이 있어도 러너(pipeline/run.py)의 대표 사진 단계가 진짜 Unsplash 를 부르지 못하게 지운다.
+# 시험은 가짜 opener(`image_opener`)와 값을 직접 준 가짜 환경(dict)으로만 돈다.
+for _name in ("UNSPLASH_ACCESS_KEY", "PIPELINE_SECRET_UNSPLASH_KEY"):
+    os.environ.pop(_name, None)
