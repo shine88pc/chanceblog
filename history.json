@@ -141,5 +141,17 @@
     "lane": "economy",
     "source": "European Commission (DG Energy)",
     "source_url": "https://energy.ec.europa.eu/news/commission-launches-high-level-dialogue-european-oil-refining-sector-2026-10-28_en"
+  },
+  {
+    "date": "2026-10-29",
+    "topic": "EU launches Friends of Credits for Nature and Biodiversity",
+    "kr_title": "EU의 '자연 크레딧 우호국' 출범: 생물다양성 금융은 시장의 해법이 될 수 있을까",
+    "en_title": "EU Launches 'Friends of Credits for Nature and Biodiversity': Can Markets Finance Ecosystem Recovery?",
+    "kr_image": "https://images.unsplash.com/photo-1761943841002-a0b5aae49af4?auto=format&fit=crop&w=1000&q=80",
+    "en_image": "https://images.unsplash.com/photo-1760548452970-5e4f0f525032?auto=format&fit=crop&w=1000&q=80",
+    "slot": 18,
+    "lane": "science",
+    "source": "European Commission (DG Environment)",
+    "source_url": "https://environment.ec.europa.eu/news/eu-launches-friends-credits-nature-and-biodiversity-2026-10-28_en"
   }
 ]
