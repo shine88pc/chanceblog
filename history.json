@@ -129,5 +129,17 @@
     "lane": "society",
     "source": "European Commission",
     "source_url": "https://commission.europa.eu/news-and-media/news/reinforcing-frontex-stronger-protection-eus-external-borders-2026-10-27_en"
+  },
+  {
+    "date": "2026-10-29",
+    "topic": "Commission launches High-Level Dialogue with the European oil refining sector",
+    "kr_title": "에너지 안보와 방위 준비태세: 유럽 정유업계와 집행위의 고위급 대화가 던진 질문",
+    "en_title": "Energy Security and Defence Readiness: Inside the EU's High-Level Dialogue with Refining",
+    "kr_image": "https://images.unsplash.com/photo-1516937941344-00b4e0337589?auto=format&fit=crop&w=1000&q=80",
+    "en_image": "https://images.unsplash.com/photo-1588011930968-eadac80e6a5a?auto=format&fit=crop&w=1000&q=80",
+    "slot": 9,
+    "lane": "economy",
+    "source": "European Commission (DG Energy)",
+    "source_url": "https://energy.ec.europa.eu/news/commission-launches-high-level-dialogue-european-oil-refining-sector-2026-10-28_en"
   }
 ]
