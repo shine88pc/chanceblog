@@ -8,10 +8,15 @@
 로그 한 줄(`[GEMINI] ...`)로 남긴다. 실행 요약은 이 기록을 접어 쓴다. 장부 파일·커밋은 만들지 않는다(후속 작업).
 기록은 호출의 동작(재시도·폴백·반환값·예외)을 바꾸지 않는다 — 측정 전용이다. 기록하다 어떤 Exception 이 나도(응답·오류 객체의 깨진 속성,
 막힌 로그 출력) 호출 결과는 그대로이고 기록만 줄어든다(KeyboardInterrupt·SystemExit 는 그대로 지나간다).
+
+호출 시간 상한(D-83, 2026-10-29): 서버가 응답 없이 연결을 붙잡으면 SDK 는 끊길 때까지 기다린다(2026-10-26 283초, 2026-10-29 한글 Blogger 실행은 job 15분 제한으로 취소).
+그래서 호출 하나마다 CALL_TIMEOUT_SECONDS 의 상한을 둔다. 넘으면 CallTimeout 이고, 멈춘 서버에 같은 모델로 다시 부르지 않고 바로 다음 모델로 넘어가며(일시 오류
+재시도는 그대로), 멈춘 모델은 이 호출 객체의 다음 호출에서 맨 뒤로 보낸다(같은 실행의 두 번째 호출이 또 같은 모델에서 멈추지 않게).
 """
 import contextlib
 import enum
 import re
+import threading
 import time
 from collections import Counter
 from dataclasses import dataclass
@@ -23,6 +28,39 @@ from pipeline.secret_patterns import SECRET_PATTERNS
 
 class LLMError(RuntimeError):
     """모든 모델/재시도가 실패했을 때."""
+
+
+# 호출 하나의 시간 상한(초). 길게 쓰는 글 생성이 30~90초(D-66 관측)이고 Blogger 의 짧은 글은 정상 실행 전체가 21초라 그보다 넉넉히 잡되, 멈춘 서버를 몇 분씩 기다리지 않을 만큼 짧게 둔다.
+# 멈춤(시간 상한 초과)만 있을 때는 멈춘 모델을 한 번씩만 기다리므로(아래 dead) 한 호출이 최악에도 모델 수 × 이 값을 넘지 않는다. 일시 오류(429·5xx)가 매번 상한 직전에 돌아오는 경우는
+# 재시도(max_retries) 때문에 더 길어질 수 있다(그런 경우는 드물어 호출 전체 예산은 두지 않았다).
+CALL_TIMEOUT_SECONDS = 120
+
+
+class CallTimeout(TimeoutError):
+    """호출이 CALL_TIMEOUT_SECONDS 안에 끝나지 않았다(서버가 응답 없이 연결을 붙잡음)."""
+
+
+def _run_with_timeout(fn, seconds):
+    """fn() 을 데몬 스레드에서 돌리고 seconds 안에 안 끝나면 CallTimeout. 스레드는 버린다(죽일 수 없다 — 서버가 끊으면 저절로 끝나고 데몬이라 프로세스 종료를 막지
+    않는다). fn 이 낸 예외는 그대로 다시 올린다. seconds 가 없으면(None·0) 시간 제한 없이 그 자리에서 부른다."""
+    if not seconds:
+        return fn()
+    box = {}
+
+    def worker():
+        try:
+            box["value"] = fn()
+        except BaseException as exc:  # noqa: BLE001 - 예외 종류를 가리지 않고 호출한 쪽으로 넘긴다(호출한 쪽이 분류한다)
+            box["error"] = exc
+
+    thread = threading.Thread(target=worker, name="gemini-call", daemon=True)
+    thread.start()
+    thread.join(seconds)
+    if thread.is_alive():
+        raise CallTimeout(f"Gemini 호출이 {seconds}초 안에 끝나지 않았습니다")
+    if "error" in box:
+        raise box["error"]
+    return box.get("value")
 
 
 _SECRET_RX = re.compile(r"(AIza[0-9A-Za-z_\-]{20,}|ya29\.[0-9A-Za-z_\-]{20,}|1//[0-9A-Za-z_\-]{20,}|"
@@ -393,9 +431,10 @@ def purpose(llm, name):
     return log.purposed(name) if log is not None else contextlib.nullcontext()
 
 
-def make_gemini_llm(api_key, models, max_retries=2, sleep=time.sleep, client_factory=None, clock=time.monotonic, log=None):
+def make_gemini_llm(api_key, models, max_retries=2, sleep=time.sleep, client_factory=None, clock=time.monotonic, log=None, call_timeout=CALL_TIMEOUT_SECONDS):
     """(prompt) -> (text, model) 을 돌려주는 호출 객체를 만든다. 요청별 기록은 호출 객체의 call_log(CallLog)에 쌓인다."""
     holder = {}
+    dead = []     # 이 호출 객체에서 시간 상한을 넘긴 모델: 다음 호출에서는 맨 뒤로 보낸다(D-83)
     log = CallLog() if log is None else log
     log.add_secret(api_key)   # 이 키는 로그 줄·요약 어디에도 글자 그대로 나가지 않는다(패턴에 안 걸리는 모양이어도)
 
@@ -410,12 +449,12 @@ def make_gemini_llm(api_key, models, max_retries=2, sleep=time.sleep, client_fac
 
     def call(prompt):
         errors = []
-        for model in models:
+        for model in [m for m in models if m not in dead] + [m for m in models if m in dead]:
             for attempt in range(max_retries + 1):
                 started = clock()
                 response, failure, text = None, None, ""
                 try:
-                    response = client().models.generate_content(model=model, contents=prompt)
+                    response = _run_with_timeout(lambda model=model: client().models.generate_content(model=model, contents=prompt), call_timeout)
                     text = (getattr(response, "text", None) or "").strip()
                 except Exception as exc:  # noqa: BLE001 - 라이브러리별 예외를 한곳에서 분류한다
                     failure = exc
@@ -429,6 +468,10 @@ def make_gemini_llm(api_key, models, max_retries=2, sleep=time.sleep, client_fac
                     break
                 log.failure(model, elapsed, failure)
                 errors.append(f"{model}: {type(failure).__name__}: {mask(failure)[:200]}")
+                if isinstance(failure, CallTimeout):
+                    if model not in dead:
+                        dead.append(model)
+                    break     # 멈춘 서버에 같은 모델로 다시 부르지 않는다: 다음 모델로 넘어간다
                 if attempt < max_retries and _is_transient(failure):
                     sleep(2 ** attempt * 2)
                     continue
