@@ -316,6 +316,7 @@ BLOGGER_REUSABLE_TEXT = """
           PIPELINE_SECRET_CLIENT_ID: {required: false}
           PIPELINE_SECRET_CLIENT_SECRET: {required: false}
           PIPELINE_SECRET_REFRESH_TOKEN: {required: false}
+          PIPELINE_SECRET_UNSPLASH_KEY: {required: false}
           TELEGRAM_BOT_TOKEN: {required: false}
           TELEGRAM_CHAT_ID: {required: false}
     permissions:
@@ -1290,6 +1291,44 @@ class BloggerWrapperRuleTest(TmpCase):
         self.edit("blogger-en.yml", "    secrets:\n", "    secrets:\n      PIPELINE_SECRET_EXTRA: ${{ secrets.BLOGGER_KO_BLOG_ID }}\n")
         self.assertTrue(any("이 블로그의 것이 아닌 시크릿이 있습니다(PIPELINE_SECRET_EXTRA)" in m for m in self.messages()))
 
+    def test_a_wrapper_that_forgets_the_optional_unsplash_key_is_an_error_because_the_registry_declares_it(self):
+        """레지스트리가 블로그의 `unsplash_key` 역할을 선언하면 래퍼도 넘겨야 한다 — 선택 시크릿이어도 '무엇을 넘기는지'는 레지스트리와 래퍼가 같아야 한다(REG-6)."""
+        for wrapper in ("blogger-en.yml", "blogger-ko.yml"):
+            self.edit(wrapper, "      PIPELINE_SECRET_UNSPLASH_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}\n", "")
+            found = self.check()
+            self.assertEqual([(f.check, f.level, f.path) for f in found], [("REG-6", "ERROR", f".github/workflows/{wrapper}")], wrapper)
+            self.assertIn("PIPELINE_SECRET_UNSPLASH_KEY", found[0].message)
+            self.assertIn("UNSPLASH_ACCESS_KEY", found[0].message)
+            self.edit(wrapper, "    secrets:\n", "    secrets:\n      PIPELINE_SECRET_UNSPLASH_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}\n")
+        self.assertEqual(self.check(), [])
+
+    def test_a_wrapper_that_hands_over_another_secret_as_the_unsplash_key_is_an_error(self):
+        """다른 블로그의 시크릿 이름(한글 블로그 ID)이나 다른 용도의 키(Gemini)를 Unsplash 키 자리에 넘기면 오류다."""
+        for other in ("BLOGGER_KO_BLOG_ID", "BLOGGER_BLOG_ID", "GEMINI_API_KEY", "UNSPLASH_ACCESS_KEY_OLD"):
+            self.edit("blogger-en.yml", "PIPELINE_SECRET_UNSPLASH_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}", "PIPELINE_SECRET_UNSPLASH_KEY: ${{ secrets.%s }}" % other)
+            messages = self.messages()
+            self.assertEqual(len(messages), 1, (other, messages))
+            self.assertIn("PIPELINE_SECRET_UNSPLASH_KEY", messages[0])
+            self.edit("blogger-en.yml", "PIPELINE_SECRET_UNSPLASH_KEY: ${{ secrets.%s }}" % other, "PIPELINE_SECRET_UNSPLASH_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}")
+        self.assertEqual(self.check(), [])
+
+    def test_both_wrappers_hand_over_the_same_shared_unsplash_secret_name(self):
+        text = {name: (self.reg_root / ".github" / "workflows" / name).read_text(encoding="utf-8") for name in ("blogger-en.yml", "blogger-ko.yml")}
+        for name, content in text.items():
+            self.assertEqual(content.count("PIPELINE_SECRET_UNSPLASH_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}"), 1, name)
+
+    def test_a_blog_whose_registry_entry_has_no_unsplash_role_must_not_hand_it_over(self):
+        """끄는 법(docs/ARCHITECTURE.md §4-7): 레지스트리에서 역할을 빼면 래퍼의 한 줄도 함께 빼야 한다 — 하나만 빼면 REG-6 이 막는다."""
+        path = self.reg_root / "pipeline" / "blogs.json"
+        reg = json.loads(path.read_text(encoding="utf-8"))
+        next(blog for blog in reg["blogs"] if blog["key"] == "blogger_macat")["secrets"].pop("unsplash_key")
+        path.write_text(json.dumps(reg, ensure_ascii=False), encoding="utf-8")
+        messages = self.messages()
+        self.assertEqual(len(messages), 1, messages)                                    # 레지스트리에는 없는데 래퍼가 넘긴다
+        self.assertIn("이 블로그의 것이 아닌 시크릿이 있습니다(PIPELINE_SECRET_UNSPLASH_KEY)", messages[0])
+        self.edit("blogger-en.yml", "      PIPELINE_SECRET_UNSPLASH_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}\n", "")
+        self.assertEqual(self.check(), [])                                              # 둘 다 빼면 통과한다(한글 블로그는 그대로 넘기고 있다)
+
     def test_the_telegram_names_are_the_only_other_secrets_a_wrapper_may_hand_over(self):
         self.edit("blogger-en.yml", "    secrets:\n", f"    secrets:\n      TELEGRAM_BOT_TOKEN: {TG_TOKEN}\n      TELEGRAM_CHAT_ID: {TG_CHAT}\n")
         self.assertEqual(self.check(), [])                                    # 모양 자체는 WF-13 이 따로 본다
@@ -1299,7 +1338,7 @@ class BloggerWrapperRuleTest(TmpCase):
         text = path.read_text(encoding="utf-8")
         head = text[:text.index("    secrets:\n")]
         path.write_text(head + "    secrets: inherit\n", encoding="utf-8")
-        self.assertEqual(len(self.messages()), 4 + 1, self.messages())         # 역할 5개(llm_api_key 포함) 모두 빠짐
+        self.assertEqual(len(self.messages()), 5 + 1, self.messages())         # 역할 6개(llm_api_key·선택 unsplash_key 포함) 모두 빠짐
         self.assertIn(("WF-13", "ERROR"), [(f.check, f.level) for f in vr.run_checks(self.reg_root)])
 
     def test_the_call_job_needs_contents_write_because_a_called_workflow_cannot_raise_permissions(self):

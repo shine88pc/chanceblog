@@ -31,8 +31,9 @@ import watchdog  # noqa: E402
 REAL = _bootstrap.ROOT
 WORKFLOWS = REAL / ".github" / "workflows"
 WRAPPERS = wf.WRAPPERS
-SEVEN_SECRETS = ("PIPELINE_SECRET_LLM_API_KEY", "PIPELINE_SECRET_BLOG_ID", "PIPELINE_SECRET_CLIENT_ID", "PIPELINE_SECRET_CLIENT_SECRET",
-                 "PIPELINE_SECRET_REFRESH_TOKEN", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")
+# 공용 워크플로가 받는 시크릿 8개: 역할 이름 6(Gemini 키·게시용 4·선택 Unsplash 키) + 텔레그램 2. 1~4번째(게시용 4종)의 위치는 아래 시험이 슬라이스로 쓴다
+EIGHT_SECRETS = ("PIPELINE_SECRET_LLM_API_KEY", "PIPELINE_SECRET_BLOG_ID", "PIPELINE_SECRET_CLIENT_ID", "PIPELINE_SECRET_CLIENT_SECRET",
+                 "PIPELINE_SECRET_REFRESH_TOKEN", "PIPELINE_SECRET_UNSPLASH_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")
 
 
 def code_text(name):
@@ -62,7 +63,7 @@ class ReusableWorkflowTest(unittest.TestCase):
 
     def test_the_secrets_are_declared_by_role_name_and_all_optional(self):
         declared = self.data["on"]["workflow_call"]["secrets"]
-        self.assertEqual(tuple(declared), SEVEN_SECRETS)
+        self.assertEqual(tuple(declared), EIGHT_SECRETS)
         for name, spec in declared.items():
             self.assertIs(spec["required"], False, name)                            # 시크릿이 아직 없는 블로그(정지 중인 한글)의 호출이 시작 단계에서 실패하지 않는다
             self.assertRegex(spec["description"], "[가-힣]", name)
@@ -118,8 +119,8 @@ class ReusableWorkflowTest(unittest.TestCase):
 
     def test_the_runner_step_receives_exactly_the_environment_the_runner_reads(self):
         _plan, _generate, run_step = wf.callee_steps()
-        self.assertEqual(set(run_step["env"]), {"BLOG_KEY", "BLOGGER_TOPIC", "BLOGGER_PUBLISH", "BLOGGER_AUTH_CHECK", *SEVEN_SECRETS})
-        for name in SEVEN_SECRETS:
+        self.assertEqual(set(run_step["env"]), {"BLOG_KEY", "BLOGGER_TOPIC", "BLOGGER_PUBLISH", "BLOGGER_AUTH_CHECK", *EIGHT_SECRETS})
+        for name in EIGHT_SECRETS:
             self.assertEqual(run_step["env"][name], "${{ secrets.%s }}" % name, name)
         self.assertEqual(run_step["env"]["BLOG_KEY"], "${{ matrix.key }}")
 
@@ -318,7 +319,7 @@ class ExpressionEquivalenceTest(unittest.TestCase):
 
 class SecretIsolationTest(unittest.TestCase):
     """영문과 한글은 계정·Cloud 프로젝트·OAuth 클라이언트가 달라야 한다(작업요청서 §3-4): 한 블로그의 시크릿이 다른 블로그의 실행에 닿는 길이 없다."""
-    SECRETS = {**{name: f"ENV-{name}" for name in EN_NAMES}, **{name: f"KOR-{name}" for name in KO_NAMES}, "GEMINI_API_KEY": "GEM", "TELEGRAM_BOT_TOKEN": "TOK", "TELEGRAM_CHAT_ID": "CHAT"}
+    SECRETS = {**{name: f"ENV-{name}" for name in EN_NAMES}, **{name: f"KOR-{name}" for name in KO_NAMES}, "GEMINI_API_KEY": "GEM", "UNSPLASH_ACCESS_KEY": "UNS", "TELEGRAM_BOT_TOKEN": "TOK", "TELEGRAM_CHAT_ID": "CHAT"}
 
     def passed_by(self, wrapper, available=None):
         """래퍼의 `secrets:` 매핑을 주어진 저장소 시크릿으로 평가한 값(없는 시크릿은 빈 문자열 — GitHub 가 그렇게 넘긴다)."""
@@ -333,21 +334,22 @@ class SecretIsolationTest(unittest.TestCase):
         english, korean = self.passed_by("blogger-en.yml"), self.passed_by("blogger-ko.yml")
         self.assertEqual(english, {"PIPELINE_SECRET_LLM_API_KEY": "GEM", "PIPELINE_SECRET_BLOG_ID": "ENV-BLOGGER_BLOG_ID", "PIPELINE_SECRET_CLIENT_ID": "ENV-BLOGGER_CLIENT_ID",
                                    "PIPELINE_SECRET_CLIENT_SECRET": "ENV-BLOGGER_CLIENT_SECRET", "PIPELINE_SECRET_REFRESH_TOKEN": "ENV-BLOGGER_REFRESH_TOKEN",
-                                   "TELEGRAM_BOT_TOKEN": "TOK", "TELEGRAM_CHAT_ID": "CHAT"})
+                                   "PIPELINE_SECRET_UNSPLASH_KEY": "UNS", "TELEGRAM_BOT_TOKEN": "TOK", "TELEGRAM_CHAT_ID": "CHAT"})
         self.assertEqual(korean, {"PIPELINE_SECRET_LLM_API_KEY": "GEM", "PIPELINE_SECRET_BLOG_ID": "KOR-BLOGGER_KO_BLOG_ID", "PIPELINE_SECRET_CLIENT_ID": "KOR-BLOGGER_KO_CLIENT_ID",
                                   "PIPELINE_SECRET_CLIENT_SECRET": "KOR-BLOGGER_KO_CLIENT_SECRET", "PIPELINE_SECRET_REFRESH_TOKEN": "KOR-BLOGGER_KO_REFRESH_TOKEN",
-                                  "TELEGRAM_BOT_TOKEN": "TOK", "TELEGRAM_CHAT_ID": "CHAT"})
-        self.assertEqual(set(english), set(SEVEN_SECRETS))
+                                  "PIPELINE_SECRET_UNSPLASH_KEY": "UNS", "TELEGRAM_BOT_TOKEN": "TOK", "TELEGRAM_CHAT_ID": "CHAT"})
+        self.assertEqual(set(english), set(EIGHT_SECRETS))
         self.assertFalse(any(value.startswith("KOR-") for value in english.values()))
         self.assertFalse(any(value.startswith("ENV-") for value in korean.values()))
 
     def test_with_only_the_other_blogs_secrets_registered_a_wrapper_hands_over_nothing_of_it(self):
         only_english = {name: value for name, value in self.SECRETS.items() if name not in KO_NAMES}
         korean = self.passed_by("blogger-ko.yml", only_english)
-        self.assertEqual([korean[name] for name in SEVEN_SECRETS[1:5]], ["", "", "", ""])          # 한글 시크릿이 없으면 빈 값이지 영문 값이 아니다
+        self.assertEqual([korean[name] for name in EIGHT_SECRETS[1:5]], ["", "", "", ""])          # 한글 시크릿이 없으면 빈 값이지 영문 값이 아니다
+        self.assertEqual(korean["PIPELINE_SECRET_UNSPLASH_KEY"], "UNS")                              # 영문 계정의 시크릿만 등록해도 Unsplash 키는 한글에 간다 — Gemini 키처럼 두 블로그가 함께 쓰는 값이다
         only_korean = {name: value for name, value in self.SECRETS.items() if name not in EN_NAMES}
         english = self.passed_by("blogger-en.yml", only_korean)
-        self.assertEqual([english[name] for name in SEVEN_SECRETS[1:5]], ["", "", "", ""])
+        self.assertEqual([english[name] for name in EIGHT_SECRETS[1:5]], ["", "", "", ""])
 
     def test_the_registry_names_the_runner_resolves_are_the_ones_the_wrapper_maps(self):
         reg = registry.load_registry(REAL / "pipeline" / "blogs.json")
@@ -362,9 +364,11 @@ class SecretIsolationTest(unittest.TestCase):
     def test_the_runner_has_no_fallback_from_the_korean_blog_to_the_english_names(self):
         blog = registry.get_blog(registry.load_registry(REAL / "pipeline" / "blogs.json"), "blogger_kcyoon")
         english_only_env = {"GEMINI_API_KEY": GEMINI, **EN_VALUES}
-        self.assertEqual(registry.resolve_secrets(blog, english_only_env), {"llm_api_key": GEMINI, "blog_id": "", "client_id": "", "client_secret": "", "refresh_token": ""})
+        self.assertEqual(registry.resolve_secrets(blog, english_only_env), {"llm_api_key": GEMINI, "blog_id": "", "client_id": "", "client_secret": "", "refresh_token": "", "unsplash_key": ""})
         self.assertEqual(registry.missing_secret_roles(blog, english_only_env), ["blog_id", "client_id", "client_secret", "refresh_token"])
         self.assertEqual(set(blog["secrets"].values()) & set(EN_NAMES), set())
+        self.assertEqual(set(blog["secrets"].values()) & set(registry.get_blog(registry.load_registry(REAL / "pipeline" / "blogs.json"), "blogger_macat")["secrets"].values()),
+                         {"GEMINI_API_KEY", "UNSPLASH_ACCESS_KEY"})                                       # 두 블로그가 함께 쓰는 이름은 Gemini 키와 선택 Unsplash 키뿐이다(shared_secrets)
         self.assertEqual(set(registry.get_blog(registry.load_registry(REAL / "pipeline" / "blogs.json"), "blogger_macat")["secrets"].values()) & set(KO_NAMES), set())
 
     def test_the_auth_check_is_the_second_line_of_defense_if_the_english_secrets_were_ever_handed_to_the_korean_run(self):

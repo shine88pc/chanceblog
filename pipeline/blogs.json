@@ -1,7 +1,7 @@
 {
   "_doc": "블로그 레지스트리 v1. 새 블로그는 blogs[]에 항목을 추가한다(docs/ARCHITECTURE.md '블로그 추가 플레이북'). 시크릿 '값'은 절대 쓰지 말고 환경변수/Secrets '이름'만 적는다. 블로그마다 channel(그 블로그 워크플로 name 의 [접두사]와 같은 라벨)을 직접 적고, 새 블로그의 ads 는 off 로 시작한다(품질 게이트를 통과하기 전에는 광고를 켜지 않는다).",
   "schema_version": 1,
-  "shared_secrets": ["GEMINI_API_KEY"],
+  "shared_secrets": ["GEMINI_API_KEY", "UNSPLASH_ACCESS_KEY"],
   "defaults": {
     "mode": "draft",
     "timezone": "Asia/Seoul",
@@ -64,7 +64,8 @@
         "blog_id": "BLOGGER_BLOG_ID",
         "client_id": "BLOGGER_CLIENT_ID",
         "client_secret": "BLOGGER_CLIENT_SECRET",
-        "refresh_token": "BLOGGER_REFRESH_TOKEN"
+        "refresh_token": "BLOGGER_REFRESH_TOKEN",
+        "unsplash_key": "UNSPLASH_ACCESS_KEY"
       },
       "ads": "off",
       "health": {"max_gap_hours": 50, "max_failure_streak": 3, "max_unpublished_days": 3}
@@ -90,7 +91,8 @@
         "blog_id": "BLOGGER_KO_BLOG_ID",
         "client_id": "BLOGGER_KO_CLIENT_ID",
         "client_secret": "BLOGGER_KO_CLIENT_SECRET",
-        "refresh_token": "BLOGGER_KO_REFRESH_TOKEN"
+        "refresh_token": "BLOGGER_KO_REFRESH_TOKEN",
+        "unsplash_key": "UNSPLASH_ACCESS_KEY"
       },
       "ad_surface": false,
       "ads": "off",

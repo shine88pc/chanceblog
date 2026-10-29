@@ -120,7 +120,7 @@ class RealRegistryEnglishTest(unittest.TestCase):
         blog = self.blog()
         self.assertEqual(blog["mode"], "draft")  # 2026-10-29 운영자 승인(R-015 선택 A, 이슈 #71)으로 켰다 — 시크릿은 운영자가 등록·인증 점검 통과, auto·광고는 별도 승인
         self.assertEqual(blog["secrets"], {"llm_api_key": "GEMINI_API_KEY", "blog_id": "BLOGGER_BLOG_ID", "client_id": "BLOGGER_CLIENT_ID",
-                                            "client_secret": "BLOGGER_CLIENT_SECRET", "refresh_token": "BLOGGER_REFRESH_TOKEN"})
+                                            "client_secret": "BLOGGER_CLIENT_SECRET", "refresh_token": "BLOGGER_REFRESH_TOKEN", "unsplash_key": "UNSPLASH_ACCESS_KEY"})
         self.assertEqual((blog["platform"], blog["url"], blog["workflow"], blog["entrypoint"]),
                          ("blogger", "https://macat0722.blogspot.com/", ".github/workflows/blogger-en.yml", "blogger_generator.py"))     # 영문 채널 래퍼(공용 로직은 blogger.yml)
         self.assertEqual((blog["schedule"], blog["limits"], blog["state"]),

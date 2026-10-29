@@ -3,6 +3,8 @@
 > **대상: Blogger**  
 > Chance_Blog와 동일한 내용을 사용하지 말 것.  
 > 이 프롬프트는 `blogger_generator.py` 및 수동 생성 시 공통으로 사용한다.
+>
+> **대표 사진**: 글 맨 위의 대표 사진(Unsplash)과 출처 표기는 모델이 쓰지 않는다. 모델 글에는 여전히 이미지·링크를 넣지 않고(프로필 `allow_links: false`), 파이프라인이 게이트를 통과한 글 맨 위에 사진 블록을 붙인다(`pipeline/main_image.py`, 면책 문구와 같은 방식 — docs/ARCHITECTURE.md §4-7). 이 안내는 코드 블록 밖의 설명이라 모델에 가지 않는다.
 
 ---
 

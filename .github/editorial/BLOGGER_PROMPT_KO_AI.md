@@ -7,6 +7,8 @@
 > **지금은 레지스트리에서 `mode: off`(정지)라 이 프롬프트로 글이 만들어지지 않는다.** 켜는 것은 T3(운영자 승인) 사항이고, 켜기 전에 시드 전체 목록·이 프롬프트·가드레일을 운영자가 읽는다(§6).
 >
 > `pipeline/run.py`는 레지스트리(`pipeline/blogs.json`)의 `prompt` 필드로 이 파일을 읽고, 아래 `text` 코드 블록 안만 모델에 보낸다(`{topic}` 자리표시자 필수). 프로필 `pipeline/profiles/blogger_ai_tools_ko.json`의 `prompt_extra`가 `[추가 규칙]`으로 뒤에 붙는다. 코드 블록 밖의 문장은 사람용 설명이다.
+>
+> **대표 사진**: 글 맨 위의 대표 사진(Unsplash)과 출처 표기는 모델이 쓰지 않는다. 모델 글에는 여전히 이미지·링크를 넣지 않고(프로필 `allow_links: false`), 파이프라인이 게이트를 통과한 글 맨 위에 사진 블록을 붙인다(`pipeline/main_image.py`, 면책 문구와 같은 방식 — docs/ARCHITECTURE.md §4-7). 이 한글 프롬프트에도 사진·링크 지시는 없다.
 
 ---
 

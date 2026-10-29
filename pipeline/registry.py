@@ -56,9 +56,11 @@ PLATFORMS = {
         "required_secrets": ["llm_api_key"],
         "optional_secrets": ["unsplash_key"],
     },
+    # unsplash_key(선택): 글 맨 위 대표 사진(pipeline/main_image.py)용 Unsplash 키. 이 역할이 있는 블로그만 사진 단계를 쓰고, 값이 없어도 글은 사진 없이 올라간다 —
+    # 그래서 필수 점검(missing_secret_roles)·게시용 시크릿 점검(run.PUBLISH_ROLES)에는 들지 않는다. 끄려면 그 블로그의 secrets 에서 이 역할을 뺀다.
     "blogger": {
         "required_secrets": ["llm_api_key", "blog_id", "client_id", "client_secret", "refresh_token"],
-        "optional_secrets": [],
+        "optional_secrets": ["unsplash_key"],
     },
     # 초안 패키지 채널(아래 PACKAGE_PLATFORMS): 시크릿은 LLM 키뿐이다. 다른 역할과 계정 정보 모양의 이름은 검증이 막는다.
     "tistory": {"required_secrets": ["llm_api_key"], "optional_secrets": []},

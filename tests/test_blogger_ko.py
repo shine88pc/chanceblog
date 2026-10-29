@@ -560,12 +560,13 @@ class RegistryContractTest(unittest.TestCase):
         self.assertEqual(set(self.blog["state"].values()) & set(english["state"].values()), set())    # 이력·초안 폴더가 겹치지 않는다
         self.assertEqual(self.blog["limits"], english["limits"])                                       # 하루 한 건
 
-    def test_secrets_are_its_own_four_names_plus_the_shared_gemini_key(self):
+    def test_secrets_are_its_own_four_names_plus_the_shared_gemini_and_unsplash_keys(self):
         english = registry.get_blog(self.reg, EN)
         self.assertEqual(self.blog["secrets"], {"llm_api_key": "GEMINI_API_KEY", "blog_id": "BLOGGER_KO_BLOG_ID", "client_id": "BLOGGER_KO_CLIENT_ID",
-                                                "client_secret": "BLOGGER_KO_CLIENT_SECRET", "refresh_token": "BLOGGER_KO_REFRESH_TOKEN"})
+                                                "client_secret": "BLOGGER_KO_CLIENT_SECRET", "refresh_token": "BLOGGER_KO_REFRESH_TOKEN", "unsplash_key": "UNSPLASH_ACCESS_KEY"})
         self.assertEqual(self.blog["secrets"]["llm_api_key"], english["secrets"]["llm_api_key"])
-        self.assertEqual(set(self.blog["secrets"].values()) & set(english["secrets"].values()), {"GEMINI_API_KEY"})
+        self.assertEqual(self.blog["secrets"]["unsplash_key"], english["secrets"]["unsplash_key"])     # 대표 사진용 선택 키는 Gemini 키처럼 공용이다(계정 정보가 아니다)
+        self.assertEqual(set(self.blog["secrets"].values()) & set(english["secrets"].values()), {"GEMINI_API_KEY", "UNSPLASH_ACCESS_KEY"})
 
     def test_the_korean_history_file_must_be_kept_off_the_public_site_before_the_blog_is_turned_on(self):
         """Jekyll 은 밑줄로 시작하지 않는 루트 파일을 사이트에 그대로 낸다 — `blogger_ko_history.json` 은 `_config.yml` 의 exclude 에 이름이 적혀야 한다

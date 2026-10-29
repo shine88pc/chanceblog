@@ -1,5 +1,5 @@
 {
-  "_doc": "콘텐츠 프로필: 한 블로그의 생성물 검증 기준. 같은 성격의 블로그를 추가하면 이 프로필을 재사용한다. 정규식은 Python re, 대소문자 무시. 주제 가드레일(docs/SECURITY_GUARDRAILS.md G-C4): banned_topic_patterns는 주제 후보·생성된 제목·라벨에 예외 없이, body_banned_patterns는 생성된 본문에 건다(body_safe_patterns에 맞는 전문가 상담·면책 문장은 건너뜀).",
+  "_doc": "콘텐츠 프로필: 한 블로그의 생성물 검증 기준. 같은 성격의 블로그를 추가하면 이 프로필을 재사용한다. 정규식은 Python re, 대소문자 무시. 주제 가드레일(docs/SECURITY_GUARDRAILS.md G-C4): banned_topic_patterns는 주제 후보·생성된 제목·라벨에 예외 없이, body_banned_patterns는 생성된 본문에 건다(body_safe_patterns에 맞는 전문가 상담·면책 문장은 건너뜀). 대표 사진(Unsplash)과 출처 표기는 모델이 쓰지 않는다: 모델 글에는 이미지·링크를 넣지 않고(allow_links=false) 파이프라인이 게이트를 통과한 글 맨 위에 사진 블록을 붙인다(pipeline/main_image.py, 면책 문구와 같은 방식).",
   "name": "blogger_practical_ko",
   "language": "ko",
   "min_hangul_ratio": 0.5,
