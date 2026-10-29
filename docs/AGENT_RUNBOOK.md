@@ -138,7 +138,7 @@ $o = foreach ($b in @('origin/main') + @(git for-each-ref --format='%(refname:sh
 
 1. 최근 실행: `python scripts/github_status.py runs --workflow <파일> --limit 5`.
 2. 이상한 실행의 내부: `python scripts/github_status.py jobs <실행 번호>` — **단계별 걸린 시간**과 **주석(annotations)** 이 로그인 없이 읽힙니다(단계 로그 원문은 로그인이 필요합니다).
-3. 결과물: 이력 파일의 마지막 항목 — Blogger(`blogger_history.json`·`blogger_ko_history.json`)는 `status`·`model`·`image`·`generated_at`(**실행 시작 시각**), Chance(`history.json`)는 `date`·`slot`·`lane`·`source`·`kr_title`·`en_title`·`kr_image`·`en_image`(모델·상태 칸은 없고 날짜·슬롯으로 글이 나왔는지 봅니다). 초안 사본은 `_blogger_drafts/`·`_blogger_ko_drafts/`. 로컬 파일은 `git fetch` 만으로는 바뀌지 않으니 최신 내용은 `git show origin/main:<파일>` 로 읽습니다.
+3. 결과물: 이력 파일의 마지막 항목 — Blogger(`blogger_history.json`·`blogger_ko_history.json`)는 `status`·`model`·`image`·`generated_at`(**실행 시작 시각**), Chance(`history.json`)는 `date`·`slot`·`lane`·`source`·`kr_title`·`en_title`·`kr_image`·`en_image`(모델·상태 칸은 없고 날짜·슬롯으로 글이 나왔는지 봅니다). 초안 사본은 `_blogger_drafts/`·`_blogger_ko_drafts/`. 티스토리·네이버(초안 패키지)는 `status: package_issued`(`url` 은 초안 이슈 주소)이고 공개된 글이 아닙니다 — 워치독 표에는 시각 옆에 `(초안 이슈)` 가 붙고, 새 초안이 없어 `STALE` 이면 먼저 열린 `초안` 이슈가 3건 이상인지 봅니다(그러면 러너가 이력 없이 건너뜁니다, D-86). 로컬 파일은 `git fetch` 만으로는 바뀌지 않으니 최신 내용은 `git show origin/main:<파일>` 로 읽습니다.
 4. 판정(Blogger 글 한 편 기준; 정상 실행은 '생성 → 검증 → 게시/초안' 단계가 약 20초):
 
 | 관측 | 정상 | 주의 | 이상 |

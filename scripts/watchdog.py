@@ -28,7 +28,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pipeline.console import safe_output  # noqa: E402
-from pipeline.health import Finding, entry_time, evaluate  # noqa: E402
+from pipeline.health import REAL_POST_STATUSES, Finding, entry_time, evaluate  # noqa: E402
 from pipeline.registry import ROOT, enabled_blogs, load_registry, validate_registry  # noqa: E402
 from pipeline.state import KST, StateError, read_json_list  # noqa: E402
 
@@ -264,8 +264,10 @@ def commit_times(root, path, added_only=False, limit=None, since="30 days ago"):
 
 
 def _history_post_stats(history, now):
-    """이력 파일 기반 (최근 7일 글 수, 마지막 글 시각). 실제 글이 나온 항목(posted·draft_uploaded, 상태 없는 옛 항목 포함)만 센다."""
-    real = [h for h in history if isinstance(h, dict) and h.get("status", "posted") in ("posted", "draft_uploaded")]
+    """이력 파일 기반 (최근 7일 글 수, 마지막 글 시각). 글이 나온 항목(health.REAL_POST_STATUSES: posted·draft_uploaded·package_issued, 상태 없는 옛 항목 포함)만 센다.
+    package_issued 는 공개된 글이 아니라 티스토리·네이버 초안 패키지 이슈를 만든 것이다. 감시 판정(health.py)이 이미 '글이 나온 날'로 세므로 이 현황도 같은 집합을 쓴다 —
+    예전에는 여기만 ("posted", "draft_uploaded") 를 따로 적어 초안 패키지만 있는 블로그가 '마지막 글 없음'으로 보였다(D-86)."""
+    real = [h for h in history if isinstance(h, dict) and h.get("status", "posted") in REAL_POST_STATUSES]
     times = [e for e in (entry_time(h) for h in real) if e]
     return sum(1 for t in times if now - t <= timedelta(days=7)), (max(times) if times else None)
 
@@ -342,7 +344,12 @@ def render_summary(stats, findings, created, closed, renotified, open_issues=())
     lines += ["", "| 블로그 | 모드 | 마지막 글(KST) | 최근 7일 글 수 | 이번 점검 결과 |", "|---|---|---|---|---|"]
     for s in stats:
         last = s["last_post"].astimezone(KST).strftime("%Y-%m-%d %H:%M") if s["last_post"] else "없음"
-        lines.append(f"| {s['key']} | {s['mode']} | {last} | {s['posts_7d']} | {', '.join(s['codes']) or '정상'} |")
+        count = str(s["posts_7d"])
+        if s.get("mode") == "package":
+            # 초안 패키지 채널(티스토리·네이버): 시각·건수는 공개된 글이 아니라 GitHub 초안 이슈(운영자가 복사해 직접 발행)를 만든 것이다. 표의 머리글은 그대로 두고 칸에 밝힌다.
+            last = f"{last} (초안 이슈)" if s["last_post"] else last
+            count = f"{count} (초안 이슈)"
+        lines.append(f"| {s['key']} | {s['mode']} | {last} | {count} | {', '.join(s['codes']) or '정상'} |")
     if created or closed or renotified:
         lines.append("")
         lines += [f"- 이슈 생성: {title}" for title in created]
