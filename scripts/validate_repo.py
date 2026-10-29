@@ -1065,6 +1065,44 @@ def _git(root, *args):
     return subprocess.run(["git", *args], cwd=root, capture_output=True, check=True, timeout=60).stdout.decode("utf-8", "replace")
 
 
+_AD_MARKER = "Ad-Surface-Approved:"
+# 에이전트 계정: 작성자나 커미터의 이름·이메일에 'Copilot' 낱말(앞뒤가 영문·숫자가 아닌 것)이 든 커밋. `copilot-swe-agent[bot]` 도 첫 낱말이 걸린다.
+# 예: `Copilot <198982749+Copilot@users.noreply.github.com>`
+_AGENT_IDENTITY_RX = re.compile(r"(?<![a-z0-9])copilot(?![a-z0-9])", re.I)
+_LOG_FIELDS = 5     # 작성자 이름·이메일, 커미터 이름·이메일, 메시지
+
+
+def _commit_records(log_output):
+    """`git log --format=%an%x00%ae%x00%cn%x00%ce%x00%B%x00` 출력을 (작성자 이름, 작성자 이메일, 커미터 이름, 커미터 이메일, 메시지) 목록으로 푼다.
+
+    필드 구분이 NUL 이다: git 은 커밋 메시지·이름에 NUL 을 넣지 못하게 막으므로 메시지 안의 글자로 가짜 레코드(가짜 사람 작성자)를 만들 수 없다
+    (옛 구분자 \\x1e·\\x1f 는 독립 검증이 실제로 위조해 AD-1·AD-2 를 통과했다). 필드 수가 5의 배수가 아니면 ValueError — 읽은 결과를 믿지 않는다."""
+    parts = log_output.split("\x00")
+    if parts and not parts[-1].strip():
+        parts.pop()
+    if len(parts) % _LOG_FIELDS:
+        raise ValueError("커밋 기록의 필드 수가 맞지 않음")
+    records = []
+    for index in range(0, len(parts), _LOG_FIELDS):
+        name, email, committer, committer_email, body = parts[index:index + _LOG_FIELDS]
+        records.append((name.strip(), email.strip(), committer.strip(), committer_email.strip(), body.strip("\n")))
+    return records
+
+
+def _is_agent_commit(record):
+    return bool(_AGENT_IDENTITY_RX.search(" ".join(record[:4])))
+
+
+def _protected_paths(reg):
+    paths = []
+    for raw in (reg.get("blogs") or []) if isinstance(reg, dict) else []:
+        if isinstance(raw, dict):
+            blog = reg_mod.merged_blog(reg, raw)
+            if blog.get("ad_surface"):
+                paths.extend(blog.get("protected_paths") or [])
+    return paths
+
+
 def check_ad_surface(root, base):
     if not base or re.fullmatch(r"0+", base):
         return []
@@ -1072,19 +1110,44 @@ def check_ad_surface(root, base):
     try:
         reg = reg_mod.load_registry(path)
         changed = [p for p in _git(root, "diff", "--name-only", f"{base}..HEAD").splitlines() if p]
-        messages = _git(root, "log", "--format=%B", f"{base}..HEAD")
-    except (reg_mod.RegistryError, OSError, subprocess.SubprocessError):
+        raw_log = _git(root, "log", "--format=%an%x00%ae%x00%cn%x00%ce%x00%B%x00", f"{base}..HEAD")
+        commit_count = int(_git(root, "rev-list", "--count", f"{base}..HEAD").strip() or 0)
+    except (reg_mod.RegistryError, OSError, subprocess.SubprocessError, ValueError):
         return [warn("AD-0", f"base({base[:8]})를 해석할 수 없어 광고 표면 검사를 건너뜁니다")]
-    protected = []
-    for raw in reg["blogs"]:
-        blog = reg_mod.merged_blog(reg, raw)
-        if blog.get("ad_surface"):
-            protected.extend(blog.get("protected_paths", []))
+    try:
+        records = _commit_records(raw_log)
+    except ValueError:
+        records = None
+    if records is None or len(records) != commit_count:
+        return [err("AD-2", "커밋 작성자·승인 표시를 읽지 못했습니다(기록 형식·개수 불일치) — 읽은 결과를 믿을 수 없어 이 검사를 통과시키지 않습니다")]
+    # 보호 경로는 이 변경이 가진 레지스트리와 기준의 레지스트리를 합쳐 쓴다: 같은 변경에서 목록에서 빼고 그 파일을 고치는 길을 막는다.
+    # 기준은 base 와 HEAD 의 공통 조상(merge-base) 시점이다 — 낡은 가지에서 main 이 그 뒤에 보호 경로를 더했을 때 '뺀 경로'로 오탐하지 않게(CI 의 병합 커밋 검사에서는 둘이 같다).
+    try:
+        point = _git(root, "merge-base", base, "HEAD").strip() or base
+    except (OSError, subprocess.SubprocessError):
+        point = base
+    try:
+        base_reg = json.loads(_git(root, "show", f"{point}:pipeline/blogs.json"))
+        base_paths = set(_protected_paths(base_reg)) if base_reg else set()
+    except (OSError, subprocess.SubprocessError, ValueError, TypeError, AttributeError):    # 기준에 레지스트리가 없거나 깨졌거나 모양이 틀리면 이 변경의 것만 쓴다
+        base_paths = set()
+    head_paths = set(_protected_paths(reg))
+    protected = sorted(head_paths | base_paths)
     hits = sorted({p for p in changed for pp in protected if p == pp or (pp.endswith("/") and p.startswith(pp))})
-    if hits and "Ad-Surface-Approved:" not in messages:
-        return [err("AD-1", "광고 표면(AdSense 심사 대상) 파일이 승인 표시 없이 변경됐습니다: " + ", ".join(hits) +
-                    ". 사용자 승인 후 커밋 메시지에 'Ad-Surface-Approved: <사유>' 를 넣으세요 (G-C6)")]
-    return []
+    dropped = sorted(base_paths - head_paths)
+    if dropped:     # 보호 목록에서 경로를 빼는 것 자체가 광고 표면의 보호를 푸는 일이다
+        hits.append("pipeline/blogs.json(보호 목록에서 뺀 경로: " + ", ".join(dropped) + ")")
+    # 승인은 사람만 한다: Copilot 이 쓴 커밋 안의 승인 표시는 있어도 없는 것으로 본다(에이전트가 스스로 써 넣어 AD-1 을 통과하는 길을 닫는다)
+    agent_text = "\n".join(record[4] for record in records if _is_agent_commit(record))
+    human_text = "\n".join(record[4] for record in records if not _is_agent_commit(record))
+    out = []
+    if _AD_MARKER in agent_text:
+        out.append(err("AD-2", "Copilot 이 쓴 커밋에 'Ad-Surface-Approved:' 표시가 있습니다 — 승인은 사용자만 하므로 이 표시는 승인으로 인정하지 않습니다. "
+                               "광고 표면 변경은 사용자 승인 뒤 사람 또는 세션형 AI 가 만듭니다 (G-C6, docs/AGENT_DELEGATION.md §6)"))
+    if hits and _AD_MARKER not in human_text:
+        out.append(err("AD-1", "광고 표면(AdSense 심사 대상) 파일이 승인 표시 없이 변경됐습니다: " + ", ".join(hits) +
+                       ". 사용자 승인 후 커밋 메시지에 'Ad-Surface-Approved: <사유>' 를 넣으세요 (G-C6)"))
+    return out
 
 
 # ----------------------------------------------------------------------------

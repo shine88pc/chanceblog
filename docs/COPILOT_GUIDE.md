@@ -47,6 +47,7 @@
    - ⚠️ 확인 필요 → 범위 안이지만 AI가 쓴 문장이라 직접 읽어 보세요.
    - ❌ 요청 범위 밖 → 병합하지 말고 PR에 이렇게 답글을 다세요: **"요청한 부분만 바꾸고 나머지는 되돌려 주세요."**
 4. 병합은 항상 사람이 합니다(에이전트는 자기 브랜치로만 push하고 승인·병합을 하지 못합니다).
+5. **광고 심사 대상 페이지**(`about.md`·`contact.md`·`privacy.md`·`index.html` 등)를 Copilot 이 고치면 검증기가 '승인 표시 없음'(AD-1)으로 빨갛게 됩니다 — 승인 표시(`Ad-Surface-Approved:`)는 Copilot 이 쓸 수 없고(AD-2) Copilot PR 을 병합할 때 제목에 붙여도 커밋 작성자가 Copilot 이라 인정되지 않습니다. 그런 페이지 수정은 위 양식의 **자동 처리**(AI 없이 그대로 교체)나 Claude 같은 세션형 AI 에게 맡기세요. 개발·운영 일을 Copilot 에게 맡기는 방법은 [`AGENT_DELEGATION.md`](./AGENT_DELEGATION.md) 입니다.
 
 ## 4. Copilot Chat이나 다른 AI에 직접 말할 때 쓰는 문장 틀
 
