@@ -106,5 +106,25 @@
     "model": "gemini-3.8-flash",
     "attempts": 1,
     "reasons": []
+  },
+  {
+    "v": 1,
+    "blog": "blogger_macat",
+    "date": "2026-10-29",
+    "generated_at": "2026-10-29T09:21:59.389001+09:00",
+    "status": "draft_uploaded",
+    "topic": "How to build a simple grocery list without overthinking",
+    "topic_source": "seed",
+    "title": "How to Build a Grocery List Without Overthinking",
+    "labels": [
+      "meal planning",
+      "grocery shopping",
+      "simple habits"
+    ],
+    "url": "https://macat0722.blogspot.com/",
+    "post_id": "4083806990162343742",
+    "model": "gemini-3.8-flash",
+    "attempts": 1,
+    "reasons": []
   }
 ]
