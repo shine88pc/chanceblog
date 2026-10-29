@@ -491,5 +491,73 @@ class ErrorKindsTest(unittest.TestCase):
                 self.assertNotIn(needle, line, needle)
 
 
+class RequestCountTest(unittest.TestCase):
+    """명령별 REST 호출 수. 절차서 §7 과 도구 설명이 이 숫자를 알리고, 시간당 60회 한도를 아끼려는 사람이 믿고 쓰므로 실제와 같아야 한다."""
+
+    SHA = "69a77aafaad7f338993ff0cc0890dc60895f8a90"
+
+    def routes(self):
+        pr = {"number": 75, "state": "closed", "merged": True, "merged_at": "2026-10-29T04:48:18Z", "merged_by": {"login": "shine88pc"}, "title": "t",
+              "user": {"login": "shine88pc"}, "commits": 1, "changed_files": 1, "head": {"sha": self.SHA}, "mergeable_state": "clean"}
+        issue = {"number": 73, "state": "open", "title": "t", "user": {"login": "shine88pc"}, "author_association": "OWNER",
+                 "created_at": "2026-10-29T00:00:00Z", "labels": [], "body": "b"}
+        job = {"conclusion": "success", "started_at": "2026-10-29T03:00:00Z", "completed_at": "2026-10-29T03:00:20Z", "steps": []}
+        commit = {"sha": self.SHA, "commit": {"message": "m", "committer": {"date": "2026-10-29T04:48:18Z"}}}
+        return {
+            f"{P}/commits/main": commit,
+            f"{P}/actions/runs?head_sha={self.SHA}&per_page=20": {"workflow_runs": [run(1)]},
+            f"{P}/actions/runs?per_page=8": {"workflow_runs": [run(2)]},
+            f"{P}/actions/runs?per_page=10": {"workflow_runs": [run(3)]},
+            f"{P}/pulls?state=open&per_page=10": [],
+            f"{P}/pulls/75": pr,
+            f"{P}/issues?state=open&per_page=30": [],
+            f"{P}/issues/73": issue,
+            f"{P}/issues/73/comments?per_page=50": [],
+            f"{P}/actions/runs/5/jobs?per_page=50": {"jobs": [dict(job, id=1, name="a"), dict(job, id=2, name="b"), dict(job, id=3, name="c")]},
+            f"{P}/check-runs/1/annotations?per_page=50": [],
+            f"{P}/check-runs/2/annotations?per_page=50": [],
+            f"{P}/check-runs/3/annotations?per_page=50": [],
+            f"{P}/actions/workflows/blogger-en.yml/runs?per_page=1": {"workflow_runs": [run(4)]},
+            f"{P}/issues?state=open&per_page=30&creator=github-actions%5Bbot%5D": [],
+        }
+
+    def test_each_command_makes_the_documented_number_of_requests(self):
+        cases = ((["status"], 4), (["main"], 2), (["pr", "75"], 2), (["issue", "73"], 2), (["issues"], 1), (["runs"], 1),
+                 (["jobs", "5", "--no-annotations"], 1), (["jobs", "5"], 1 + 3))        # jobs 는 1회 + job 수(여기서는 3개)
+        for argv, expected in cases:
+            with self.subTest(argv=argv):
+                code, _, opener = run_cli(argv, self.routes())
+                self.assertEqual(code, 0)
+                self.assertEqual(len(opener.calls), expected)
+
+    def test_limit_is_one_request_to_the_endpoint_that_github_does_not_count(self):
+        code, _, opener = run_cli(["limit"], {"/rate_limit": {"resources": {"core": {"limit": 60, "remaining": 14, "reset": 1798000000}}}})
+        self.assertEqual((code, opener.paths), (0, ["/rate_limit"]))
+
+    def test_option_forms_used_in_the_runbook_make_the_documented_number_of_requests(self):
+        for argv in (["runs", "--workflow", "blogger-en.yml", "--limit", "1"], ["issues", "--creator", "github-actions[bot]"]):
+            with self.subTest(argv=argv):
+                code, _, opener = run_cli(argv, self.routes())
+                self.assertEqual((code, len(opener.calls)), (0, 1))
+
+    def test_every_docstring_line_carries_its_own_number(self):
+        expected = {"status": "[REST 호출 4회]", "runs": "[호출 1회]", "jobs": "[호출 1회 + job 수, --no-annotations 면 1회]", "pr": "[호출 2회]",
+                    "main": "[호출 2회]", "issues": "[호출 1회]", "issue": "[호출 2회]", "limit": "[한도에 0회]"}
+        lines = {}
+        for line in gs.__doc__.splitlines():
+            words = line.split()
+            if line.startswith("  ") and words and words[0] in expected:
+                lines[words[0]] = line.rstrip()
+        self.assertEqual(sorted(lines), sorted(expected))
+        for command, fragment in expected.items():
+            self.assertTrue(lines[command].endswith(fragment), (command, lines[command][-40:]))
+
+    def test_the_runbook_states_the_same_numbers(self):
+        runbook = (_bootstrap.ROOT / "docs" / "AGENT_RUNBOOK.md").read_text(encoding="utf-8")
+        for fragment in ("`status` 4 · `main`·`pr`·`issue` 2 · `runs`·`issues` 1 · `jobs` 1+job 수(`--no-annotations` 면 1) · `limit` 0",
+                         "`status` 한 번이 4회입니다", "`status`(4회)", "호출 1회인 `runs --workflow <파일> --limit 1`"):
+            self.assertIn(fragment, runbook)
+
+
 if __name__ == "__main__":
     unittest.main()
