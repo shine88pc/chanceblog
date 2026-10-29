@@ -126,5 +126,26 @@
     "model": "gemini-3.8-flash",
     "attempts": 1,
     "reasons": []
+  },
+  {
+    "v": 1,
+    "blog": "blogger_macat",
+    "date": "2026-10-29",
+    "generated_at": "2026-10-29T12:04:41.140119+09:00",
+    "status": "draft_uploaded",
+    "topic": "A gentle morning routine for people who hate waking up",
+    "topic_source": "override",
+    "title": "A Gentle Morning Routine for Non-Morning People",
+    "labels": [
+      "morning routine",
+      "simple habits",
+      "sleep"
+    ],
+    "url": "https://macat0722.blogspot.com/",
+    "post_id": "2480285108542104321",
+    "model": "gemini-3.6-flash",
+    "attempts": 1,
+    "reasons": [],
+    "image": "lOssrZstDhQ"
   }
 ]
