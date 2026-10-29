@@ -75,6 +75,11 @@ def fake_finder(**found):
     return lambda name, which=None: found.get(name)
 
 
+def fake_fstring_step(root, files, version=None):
+    """step_fstrings 대신 쓴다. 진짜 단계는 3.12 미만 파이썬에서 '건너뜀'이라, 그대로 두면 표·종료 코드 시험이 파이썬 버전에 따라 달라진다(CI 3.10 에서 실패했다)."""
+    return fc.Step("3.12 전용 f-string", fc.PASS, "시험용 고정 결과")
+
+
 def ladder(root, runner, base="origin/main", pattern=None, actionlint="/bin/actionlint", vermin="/bin/vermin", modules=("pyflakes",)):
     with mock.patch.object(fc, "find_executable", fake_finder(actionlint=actionlint, vermin=vermin)):
         return fc.run_ladder(root, base, pattern, runner=runner, which=lambda name: None, module_ok=lambda name: name in modules)
@@ -95,6 +100,14 @@ class LadderTest(unittest.TestCase):
         # 바뀐 .py 만: 지운 파일(tests/gone.py)·.py 가 아닌 파일(docs/a.md)은 빠지고 새 파일(scripts/final_checks.py)은 들어온다
         self.assertEqual(files, ["pipeline/x.py", "scripts/final_checks.py"])
         self.assertIn("origin/main 대비", note)
+
+    def test_below_python_3_12_the_last_step_is_skipped_so_the_ladder_is_incomplete(self):
+        """3.10 에서 돈 사다리는 f-string 검사를 못 하므로 다른 단계가 모두 통과여도 '통과'가 아니다(어느 파이썬에서 시험해도 같은 결과가 나오도록 버전을 지정해 부른다)."""
+        real = fc.step_fstrings
+        with mock.patch.object(fc, "step_fstrings", lambda root, files, version=None: real(root, files, version=(3, 10, 12))):
+            steps, _, _ = ladder(self.root, FakeRunner(base_rules()))
+        self.assertEqual([s.status for s in steps], [fc.PASS] * 5 + [fc.SKIP])
+        self.assertEqual(fc.verdict_of(steps), ("불완전", 3))
 
     def test_unittest_and_validate_are_run_from_the_root_with_the_base(self):
         runner = FakeRunner(base_rules())
@@ -314,7 +327,7 @@ class MainAndRenderTest(unittest.TestCase):
     def run_main(self, argv, runner, **kwargs):
         lines = []
         found = fake_finder(actionlint="/bin/actionlint", vermin="/bin/vermin") if kwargs.get("tools", True) else fake_finder()
-        with mock.patch.object(fc, "find_executable", found):
+        with mock.patch.object(fc, "find_executable", found), mock.patch.object(fc, "step_fstrings", fake_fstring_step):
             code = fc.main(["--root", str(self.root)] + argv, runner=runner, which=lambda name: None, module_ok=kwargs.get("module_ok", lambda name: True), out=lines.append)
         return code, lines
 
