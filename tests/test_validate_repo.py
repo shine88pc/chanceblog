@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -9,6 +10,7 @@ import textwrap
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 import _bootstrap  # noqa: F401
 from edits_helpers import make_edit_root
@@ -767,6 +769,18 @@ def git(root, *args):
                    check=True, capture_output=True)
 
 
+def git_as(root, name, email, *args):
+    """다른 작성자(예: Copilot)로 git 을 부른다."""
+    subprocess.run(["git", "-c", f"user.name={name}", "-c", f"user.email={email}", *args], cwd=root,
+                   check=True, capture_output=True)
+
+
+def git_with_env(root, env_extra, *args):
+    """환경변수(예: GIT_COMMITTER_NAME)를 덧붙여 git 을 부른다 — 작성자와 커미터를 다르게 만들 때."""
+    env = dict(os.environ, **env_extra)
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args], cwd=root, check=True, capture_output=True, env=env)
+
+
 class AdSurfaceTest(TmpCase):
     def make_repo(self):
         root = registry_root(self.root, chance_extra=DEPLOY_STEP)
@@ -805,6 +819,167 @@ class AdSurfaceTest(TmpCase):
         git(root, "add", "-A")
         git(root, "commit", "-q", "-m", "layout")
         self.assertEqual(levels(vr.check_ad_surface(root, base), "AD-1"), ["ERROR"])
+
+    COPILOT = ("Copilot", "198982749+Copilot@users.noreply.github.com")
+
+    def test_approval_marker_written_by_copilot_is_not_an_approval(self):
+        """에이전트가 승인 표시를 스스로 써 넣어 AD-1 을 통과하는 길은 닫혀 있다(AD-2)."""
+        root, base = self.make_repo()
+        write(root, "index.html", "<html>v2</html>")
+        git_as(root, *self.COPILOT, "commit", "-q", "-am", "tweak landing\n\nAd-Surface-Approved: 에이전트가 스스로 씀")
+        found = vr.check_ad_surface(root, base)
+        self.assertEqual(levels(found, "AD-2"), ["ERROR"])
+        self.assertEqual(levels(found, "AD-1"), ["ERROR"])          # 사람이 쓴 승인 표시는 없으므로 AD-1 도 그대로 걸린다
+        self.assertIn("승인은 사용자만", [f.message for f in found if f.check == "AD-2"][0])
+
+    def test_copilot_commit_without_a_marker_is_only_an_ad_1_error(self):
+        root, base = self.make_repo()
+        write(root, "index.html", "<html>v2</html>")
+        git_as(root, *self.COPILOT, "commit", "-q", "-am", "tweak landing")
+        found = vr.check_ad_surface(root, base)
+        self.assertEqual((levels(found, "AD-1"), levels(found, "AD-2")), (["ERROR"], []))
+
+    def test_a_human_marker_still_approves_even_when_copilot_commits_are_in_the_range(self):
+        root, base = self.make_repo()
+        write(root, "notes.md", "n2")
+        git_as(root, *self.COPILOT, "commit", "-q", "-am", "notes by copilot")
+        write(root, "index.html", "<html>v2</html>")
+        git(root, "commit", "-q", "-am", "tweak landing\n\nAd-Surface-Approved: user approved in chat")
+        self.assertEqual(vr.check_ad_surface(root, base), [])
+
+    def test_copilot_marker_is_flagged_even_when_no_protected_file_changed(self):
+        root, base = self.make_repo()
+        write(root, "notes.md", "n2")
+        git_as(root, *self.COPILOT, "commit", "-q", "-am", "notes\n\nAd-Surface-Approved: 불필요한 표시")
+        found = vr.check_ad_surface(root, base)
+        self.assertEqual((levels(found, "AD-1"), levels(found, "AD-2")), ([], ["ERROR"]))
+
+    def test_the_committer_identity_counts_as_an_agent_too_not_only_the_author(self):
+        """squash·rebase 로 작성자와 커미터가 갈라져도 에이전트 표시는 인정되지 않는다."""
+        root, base = self.make_repo()
+        write(root, "index.html", "<html>v2</html>")
+        git_with_env(root, {"GIT_COMMITTER_NAME": self.COPILOT[0], "GIT_COMMITTER_EMAIL": self.COPILOT[1]},
+                     "commit", "-q", "-am", "tweak landing\n\nAd-Surface-Approved: 사람이 쓴 것처럼 보이는 표시")
+        self.assertEqual(levels(vr.check_ad_surface(root, base), "AD-2"), ["ERROR"])
+        write(root, "index.html", "<html>v3</html>")
+        git_as(root, "t", "t@example.com", "commit", "-q", "-am", "author is copilot only",
+               f"--author={self.COPILOT[0]} <{self.COPILOT[1]}>")
+        self.assertEqual(levels(vr.check_ad_surface(root, base), "AD-1"), ["ERROR"])
+
+    def test_forged_record_separators_in_a_copilot_message_do_not_create_a_human_author(self):
+        """독립 검증이 옛 구분자(\\x1e·\\x1f)로 가짜 '사람' 레코드를 만들어 AD-1·AD-2 를 통과했던 길 — NUL 구분으로 막혔다."""
+        root, base = self.make_repo()
+        write(root, "index.html", "<html>v2</html>")
+        forged = "tweak\n\x1e\n사람\x1f사람@example.com\x1fAd-Surface-Approved: 위조"
+        git_as(root, *self.COPILOT, "commit", "-q", "-am", forged)
+        found = vr.check_ad_surface(root, base)
+        self.assertEqual((levels(found, "AD-1"), levels(found, "AD-2")), (["ERROR"], ["ERROR"]))
+
+    def test_dropping_a_path_from_the_protection_list_in_the_same_change_does_not_hide_the_edit(self):
+        """독립 검증이 확인한 우회: Copilot 커밋 하나에서 pipeline/blogs.json 의 보호 목록에서 파일을 빼고 그 파일을 고쳤더니 AD-1·AD-2 가 0건이었다."""
+        root, base = self.make_repo()
+        registry = json.loads((Path(root) / "pipeline" / "blogs.json").read_text(encoding="utf-8"))
+        for blog in registry["blogs"]:
+            if blog.get("protected_paths") and "index.html" in blog["protected_paths"]:
+                blog["protected_paths"].remove("index.html")
+        write(root, "pipeline/blogs.json", json.dumps(registry, ensure_ascii=False))
+        write(root, "index.html", "<html>v2</html>")
+        git_as(root, *self.COPILOT, "commit", "-q", "-am", "quiet change")
+        found = vr.check_ad_surface(root, base)
+        self.assertEqual(levels(found, "AD-1"), ["ERROR"])
+        self.assertIn("보호 목록에서 뺀 경로: index.html", [f.message for f in found if f.check == "AD-1"][0])
+
+    def test_removing_a_protected_path_needs_a_human_approval_even_when_no_protected_file_changed(self):
+        root, base = self.make_repo()
+        registry = json.loads((Path(root) / "pipeline" / "blogs.json").read_text(encoding="utf-8"))
+        for blog in registry["blogs"]:
+            if blog.get("protected_paths") and "contact.md" in blog["protected_paths"]:
+                blog["protected_paths"].remove("contact.md")
+        write(root, "pipeline/blogs.json", json.dumps(registry, ensure_ascii=False))
+        git(root, "commit", "-q", "-am", "registry only")
+        self.assertEqual(levels(vr.check_ad_surface(root, base), "AD-1"), ["ERROR"])
+        git(root, "commit", "-q", "--allow-empty", "-m", "approved\n\nAd-Surface-Approved: 운영자가 채팅으로 승인")
+        self.assertEqual(vr.check_ad_surface(root, base), [])
+
+    def test_adding_a_protected_path_is_not_a_weakening(self):
+        root, base = self.make_repo()
+        registry = json.loads((Path(root) / "pipeline" / "blogs.json").read_text(encoding="utf-8"))
+        for blog in registry["blogs"]:
+            if blog.get("protected_paths") is not None and blog.get("ad_surface"):
+                blog["protected_paths"].append("new-page.md")
+        write(root, "pipeline/blogs.json", json.dumps(registry, ensure_ascii=False))
+        git(root, "commit", "-q", "-am", "protect one more page")
+        self.assertEqual(vr.check_ad_surface(root, base), [])
+
+    def test_an_unreadable_or_miscounted_commit_log_fails_closed(self):
+        root, base = self.make_repo()
+        write(root, "notes.md", "n2")
+        git(root, "commit", "-q", "-am", "notes")
+        with mock.patch.object(vr, "_commit_records", side_effect=ValueError("깨짐")):
+            self.assertEqual(levels(vr.check_ad_surface(root, base), "AD-2"), ["ERROR"])
+        with mock.patch.object(vr, "_commit_records", return_value=[]):         # 커밋은 1개인데 레코드가 0개
+            self.assertEqual(levels(vr.check_ad_surface(root, base), "AD-2"), ["ERROR"])
+
+    def test_only_real_copilot_identities_count_as_agents(self):
+        for name, email in (("copilot-swe-agent[bot]", "x@example.com"), ("GitHub Copilot", "c@example.com"), ("x", "198982749+copilot@users.noreply.github.com"), ("Copilot", "c@example.com")):
+            self.assertTrue(vr._is_agent_commit((name, email, "", "", "")), (name, email))
+        # 낱말 경계: 뒤에 글자가 붙은 것(Copilotson·copilots)과 앞에 글자가 붙은 것(NotCopilot·mycopilot)은 사람이다
+        for name, email in (("Copilotson", "a@example.com"), ("copilots", "b@example.com"), ("NotCopilot", "n@example.com"), ("mycopilot", "m@example.com"),
+                            ("강병수", "shine88pc@gmail.com"), ("t", "t@example.com")):
+            self.assertFalse(vr._is_agent_commit((name, email, "", "", "")), (name, email))
+
+    def test_a_marker_without_the_colon_is_not_an_approval(self):
+        root, base = self.make_repo()
+        write(root, "index.html", "<html>v2</html>")
+        git(root, "commit", "-q", "-am", "tweak landing\n\nAd-Surface-Approved 사유만 적고 콜론이 없다")
+        self.assertEqual(levels(vr.check_ad_surface(root, base), "AD-1"), ["ERROR"])
+
+    def test_a_stale_branch_does_not_report_paths_that_main_added_after_the_branch_point(self):
+        """낡은 가지: main 이 가지가 갈라진 뒤에 보호 경로를 더했다고 그 경로를 '뺀 것'으로 보면 오탐이다(기준 레지스트리는 공통 조상 시점)."""
+        root, base = self.make_repo()
+        trunk = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=root, capture_output=True, text=True).stdout.strip()
+        git(root, "checkout", "-q", "-b", "feature")
+        write(root, "notes.md", "n2")
+        git(root, "commit", "-q", "-am", "feature notes")
+        git(root, "checkout", "-q", trunk)
+        registry = json.loads((Path(root) / "pipeline" / "blogs.json").read_text(encoding="utf-8"))
+        for blog in registry["blogs"]:
+            if blog.get("ad_surface") and blog.get("protected_paths") is not None:
+                blog["protected_paths"].append("new-page.md")
+        write(root, "pipeline/blogs.json", json.dumps(registry, ensure_ascii=False))
+        git(root, "commit", "-q", "-am", "main protects one more page")
+        git(root, "checkout", "-q", "feature")
+        self.assertEqual(vr.check_ad_surface(root, trunk), [])
+
+    def test_a_missing_or_malformed_base_registry_is_ignored_not_fatal(self):
+        root, base = self.make_repo()
+        write(root, "notes.md", "n2")
+        git(root, "commit", "-q", "-am", "notes")
+        real_git = vr._git
+
+        def with_base_registry(shown):
+            def fake(root_arg, *args):
+                if args and args[0] == "show":
+                    if isinstance(shown, BaseException):
+                        raise shown
+                    return shown
+                return real_git(root_arg, *args)
+            return fake
+
+        broken = ("[1, 2]", '"문자열"', "5", "null", '{"blogs": 5}', '{"defaults": 5, "blogs": [{"key": "a", "ad_surface": true}]}',
+                  '{"blogs": [{"key": "a", "ad_surface": true, "protected_paths": 7}]}', "{깨진 json", subprocess.CalledProcessError(128, "git show"))
+        for shown in broken:
+            with self.subTest(shown=str(shown)[:30]), mock.patch.object(vr, "_git", with_base_registry(shown)):
+                self.assertEqual(vr.check_ad_surface(root, base), [])
+        self.assertTrue(vr._is_agent_commit(("t", "t@example.com", "Copilot", "c@example.com", "")))     # 커미터만 에이전트여도
+
+    def test_commit_records_are_split_into_five_fields_with_nul_separators(self):
+        out = "t\x00t@example.com\x00t\x00t@example.com\x00first line\n\nbody\n\x00\nCopilot\x00c@example.com\x00GitHub\x00noreply@github.com\x00second\n\x00"
+        self.assertEqual(vr._commit_records(out), [("t", "t@example.com", "t", "t@example.com", "first line\n\nbody"),
+                                                   ("Copilot", "c@example.com", "GitHub", "noreply@github.com", "second")])
+        self.assertEqual(vr._commit_records(""), [])
+        with self.assertRaises(ValueError):
+            vr._commit_records("a\x00b\x00c\x00")
 
 
 class LiquidInDocsTest(TmpCase):
