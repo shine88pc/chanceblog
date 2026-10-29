@@ -1,1 +1,22 @@
-[]
+[
+  {
+    "v": 1,
+    "blog": "blogger_kcyoon",
+    "date": "2026-10-29",
+    "generated_at": "2026-10-29T09:23:57.548977+09:00",
+    "status": "draft_uploaded",
+    "topic": "캘린더 알림을 정리해 일정이 겹치지 않게 관리하는 설정 순서와 요령",
+    "topic_source": "seed",
+    "title": "캘린더 알림을 정리해 일정이 겹치지 않게 돕는 설정 순서 4가지",
+    "labels": [
+      "디지털 정리",
+      "캘린더 관리",
+      "시간 관리"
+    ],
+    "url": "https://kcyoon.blogspot.com/",
+    "post_id": "6324376636606257982",
+    "model": "gemini-3.8-flash",
+    "attempts": 1,
+    "reasons": []
+  }
+]
