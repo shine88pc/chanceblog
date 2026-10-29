@@ -998,7 +998,7 @@ class LiquidInDocsTest(TmpCase):
 
 
 class BriefingTest(TmpCase):
-    FULL = "`chance` `blogger_macat` `blogger_kcyoon` `alpha.yml` `beta.yaml` `text_change` `link_change`\n"
+    FULL = "`chance` `blogger_macat` `blogger_kcyoon` `tistory_it_tips` `naver_life_tips` `alpha.yml` `beta.yaml` `text_change` `link_change`\n"
 
     def build(self, briefing):
         (self.root / "pipeline").mkdir()

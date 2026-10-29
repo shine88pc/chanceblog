@@ -1447,16 +1447,19 @@ class RunWithDraftsTest(unittest.TestCase):
         self.assertNotIn("초안 현황", self.body(fake))
         self.assertNotIn("초안 현황", self.summary.read_text(encoding="utf-8"))
 
-    def test_the_real_registry_gives_chance_and_blogger_rows_with_nothing_pending(self):
+    def test_the_real_registry_gives_chance_blogger_and_package_rows_with_nothing_pending(self):
         """표지판 시험: Chance 칸은 실제 레지스트리의 발행 흐름에서 온다 — 값은 `tests/draft_helpers.py` 의 REAL_PUBLISH_FLOW 한 곳에서 읽는다
-        (direct 면 '자동 공개', 승인 흐름 pr 을 켜면 열린 초안 PR 수 '0'). 줄 수(Chance·Blogger 영문·Blogger 한글 셋)는 블로그를 더하는 PR 이 함께 고친다."""
+        (direct 면 '자동 공개', 승인 흐름 pr 을 켜면 열린 초안 PR 수 '0'). 줄 수(Chance·Blogger 영문·Blogger 한글·티스토리·네이버 다섯)는 블로그를 더하는 PR 이 함께 고친다.
+        티스토리·네이버(초안 패키지, mode package)는 정지가 아니고 열린 `초안` 이슈도 없으니 대기 0 이다."""
         fake, root = self.world(registry=(_bootstrap.ROOT / "pipeline" / "blogs.json").read_text(encoding="utf-8"))
         self.run_script(fake, root)
         rows = table_rows(self.body(fake))
         self.assertEqual(rows[0], ["Chance", "자동 공개" if REAL_PUBLISH_FLOW == "direct" else "0", "-", "-"])
         self.assertEqual(rows[1], ["Blogger 영문", "0", "-", "-"])                       # 영문도 2026-10-29 부터 draft(R-015) — 최근 14일 초안함 업로드 0건
         self.assertEqual(rows[2], ["Blogger 한글", "0", "-", "-"])                       # 한글은 2026-10-29 부터 draft — 최근 14일 초안함 업로드 0건
-        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[3], ["티스토리", "0", "-", "-"])                           # 초안 패키지 채널: 열린 초안 이슈 0건('정지' 가 아니라 켜져 있다), 가장 오래된·최신 초안 없음
+        self.assertEqual(rows[4], ["네이버", "0", "-", "-"])                             # 위와 같다 — 칸이 비어 있어도 줄은 레지스트리 순서대로 유지된다
+        self.assertEqual(len(rows), 5)
         self.assertIn("Blogger 대시보드 → 글 → 초안", self.body(fake))                 # 영문·한글이 draft(2026-10-28)라 대략치 안내가 붙는다 — 정지 중인 Blogger 에는 붙지 않는 쪽은 위 합성 시험(blogger_mode)이 본다
         self.assertEqual(self.body(fake).count("- 휴대폰에서 거르기:"), 1)
 

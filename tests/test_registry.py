@@ -22,11 +22,12 @@ class RealRegistryTest(unittest.TestCase):
         reg = real_registry()
         self.assertEqual({b["key"]: b["channel"] for b in reg["blogs"]},
                          {"chance": {"key": "chance", "label": "Chance"}, "blogger_macat": {"key": "blogger_en", "label": "Blogger 영문"},
-                          "blogger_kcyoon": {"key": "blogger_ko", "label": "Blogger 한글"}})
+                          "blogger_kcyoon": {"key": "blogger_ko", "label": "Blogger 한글"},
+                          "tistory_it_tips": {"key": "tistory", "label": "티스토리"}, "naver_life_tips": {"key": "naver", "label": "네이버"}})   # 초안 패키지 채널은 platform 마다 자기 라벨 하나
         self.assertEqual({b["key"]: registry.get_blog(reg, b["key"])["ads"] for b in reg["blogs"]},
-                         {"chance": "on", "blogger_macat": "off", "blogger_kcyoon": "off"})     # 지금 사실: Chance 홈에는 광고 스크립트가 있고 Blogger 둘에는 켜지 않았다
+                         {"chance": "on", "blogger_macat": "off", "blogger_kcyoon": "off", "tistory_it_tips": "off", "naver_life_tips": "off"})     # 지금 사실: Chance 홈에는 광고 스크립트가 있고 Blogger 둘·티스토리·네이버에는 켜지 않았다(새 채널은 광고 없이 시작)
         self.assertEqual({b["key"]: registry.get_blog(reg, b["key"])["ad_surface"] for b in reg["blogs"]},
-                         {"chance": True, "blogger_macat": False, "blogger_kcyoon": False})      # 광고 표면(AdSense 심사 대상)은 Chance 만이다
+                         {"chance": True, "blogger_macat": False, "blogger_kcyoon": False, "tistory_it_tips": False, "naver_life_tips": False})      # 광고 표면(AdSense 심사 대상)은 Chance 만이다
         self.assertEqual(reg["defaults"]["ads"], "off")                # 새 채널은 광고 없이 시작한다
         self.assertEqual(registry.ADS_STATES, ("off", "pending_gate", "on"))
         # 영문·한글로 나누기 전의 임시 라벨 `Blogger` 는 없앴다(채널 라벨 5종 + 워크플로 구분 공통·내부)
@@ -41,7 +42,9 @@ class RealRegistryTest(unittest.TestCase):
     def test_defaults_mode_is_draft_so_a_blog_without_its_own_mode_never_publishes_by_itself(self):
         # 2026-10-25 20:26 에 auto 로 바뀌었던 것을 2026-10-26 운영자 답변으로 draft 로 되돌렸다. mode 없이 추가한 새 블로그가 곧바로 자동 게시되지 않게 한다.
         self.assertEqual(real_registry()["defaults"]["mode"], "draft")
-        self.assertEqual({b["key"]: b.get("mode") for b in real_registry()["blogs"]}, {"chance": "auto", "blogger_macat": "draft", "blogger_kcyoon": "draft"})     # 영문·한글 모두 2026-10-28 운영자 승인으로 draft
+        self.assertEqual({b["key"]: b.get("mode") for b in real_registry()["blogs"]},
+                         {"chance": "auto", "blogger_macat": "draft", "blogger_kcyoon": "draft",         # 영문·한글 모두 2026-10-28 운영자 승인으로 draft
+                          "tistory_it_tips": "package", "naver_life_tips": "package"})                   # 초안 패키지(GitHub 이슈로 보여 주기만 한다 — 공개되지 않는 mode)
 
     def test_model_chain_has_no_retired_model_and_matches_the_engine(self):
         import generator
@@ -58,8 +61,11 @@ class RealRegistryTest(unittest.TestCase):
         reg = real_registry()
         reg["blogs"][1]["mode"] = "off"
         keys = [b["key"] for b in registry.enabled_blogs(reg)]
-        self.assertEqual(keys, ["chance", "blogger_kcyoon"])     # 한글은 draft(2026-10-28 승인)라 켜져 있다
+        self.assertEqual(keys, ["chance", "blogger_kcyoon", "tistory_it_tips", "naver_life_tips"])     # 한글은 draft(2026-10-28 승인)라 켜져 있고, 초안 패키지 채널(package)도 off 가 아니라 켜져 있다
         reg["blogs"][2]["mode"] = "off"
+        self.assertEqual([b["key"] for b in registry.enabled_blogs(reg)], ["chance", "tistory_it_tips", "naver_life_tips"])
+        for blog in reg["blogs"][3:]:
+            blog["mode"] = "off"                                  # 티스토리·네이버도 off 로 정지할 수 있다(package ↔ off)
         self.assertEqual([b["key"] for b in registry.enabled_blogs(reg)], ["chance"])
         reg = real_registry()
         for blog in reg["blogs"]:
@@ -129,9 +135,11 @@ class InvalidRegistryTest(unittest.TestCase):
         errors = self.errors(lambda r: r["blogs"][1].pop("mode"))
         self.assertTrue(any("blogger_macat" in e and "직접" in e for e in errors), errors)
 
-    def test_the_three_current_blogs_write_their_mode_in_the_file(self):
+    def test_every_current_blog_writes_its_mode_in_the_file(self):
+        """실제 파일의 모든 항목(Chance·Blogger 둘·티스토리·네이버)이 mode 를 직접 적고 있고, 그 값이 지금 사실과 같다."""
         raw = registry.load_registry()["blogs"]
-        self.assertEqual({b["key"]: b["mode"] for b in raw}, {"chance": "auto", "blogger_macat": "draft", "blogger_kcyoon": "draft"})
+        self.assertEqual({b["key"]: b["mode"] for b in raw},
+                         {"chance": "auto", "blogger_macat": "draft", "blogger_kcyoon": "draft", "tistory_it_tips": "package", "naver_life_tips": "package"})
 
     def test_http_url(self):
         self.assertHas(self.errors(lambda r: r["blogs"][0].update(url="http://x.example")), "https://")

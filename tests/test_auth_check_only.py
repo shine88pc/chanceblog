@@ -339,7 +339,7 @@ class PlanIncludeOffTest(unittest.TestCase):
         self.assertEqual([i["key"] for i in plan.build_matrix(reg, "blogger", include_off=True)["include"]], ["blogger_macat", "blogger_kcyoon"])
         self.assertEqual([i["key"] for i in plan.build_matrix(reg, "blogger")["include"]], ["blogger_macat"])           # 한글은 정지라 일반 실행의 대상이 아니다
         everything = [i["key"] for i in plan.build_matrix(reg, include_off=True)["include"]]
-        self.assertEqual(everything, ["chance", "blogger_macat", "blogger_kcyoon"])
+        self.assertEqual(everything, ["chance", "blogger_macat", "blogger_kcyoon", "tistory_it_tips", "naver_life_tips"])      # 플랫폼을 안 주면 레지스트리 전부(초안 패키지 채널 포함) — 위 blogger 필터가 이 둘을 빼는 것은 그대로다
 
     def test_the_command_line_flag(self):
         import io

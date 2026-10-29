@@ -135,11 +135,11 @@ class LimitsAndPolicyDocsTest(unittest.TestCase):
         for needle in ("프로필", "프롬프트", "`channel`", "`entrypoint: pipeline/run.py`", "연습 실행", "비공개 시험 글", "`ads: \"off\"`"):
             self.assertIn(needle, arch, needle)
         # N9: 첫 실제 항목을 넣을 때 함께 고칠 시험, 새 이력 파일의 공개 방지
-        for needle in ("test_the_real_registry_has_no_package_blog_yet", "tests/test_registry.py", "`_config.yml`", "`exclude`", "T3",
+        for needle in ("test_the_real_registry_has_exactly_the_two_package_blogs", "tests/test_registry.py", "`_config.yml`", "`exclude`", "T3",
                        "새 블로그의 이력 파일(`state.history`, 루트의 `*.json`)을 `_config.yml`의 `exclude`에 더한다"):         # 지시 문장 자체를 못 박는다(변이 EXT527)
             self.assertIn(needle, arch, needle)
         real = (REAL / "tests" / "test_package_registry.py").read_text(encoding="utf-8")
-        self.assertIn("def test_the_real_registry_has_no_package_blog_yet", real)         # 문서가 가리키는 시험이 실제로 있다
+        self.assertIn("def test_the_real_registry_has_exactly_the_two_package_blogs", real)         # 문서가 가리키는 시험이 실제로 있다
         # N11: 공개 저장소의 이슈는 공개 페이지, 주소는 소독하지 않는다
         for needle in ("공개 저장소", "검색 색인", "주소(URL)는 소독하지 않는다"):
             self.assertIn(needle, arch, needle)

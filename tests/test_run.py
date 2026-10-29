@@ -38,6 +38,7 @@ def make_root(tmp, mode="auto", lang="ko", korean_mode="off"):
     root = Path(tmp)
     (root / "pipeline" / "profiles").mkdir(parents=True)
     reg = json.loads((REAL / "pipeline" / "blogs.json").read_text(encoding="utf-8"))
+    reg["blogs"] = [blog for blog in reg["blogs"] if blog["platform"] not in registry.PACKAGE_PLATFORMS]   # 초안 패키지 채널(티스토리·네이버)은 이 파일이 보는 Blogger 흐름과 무관하다 — 파일을 안 옮긴 임시 저장소에서 검증이 깨지지 않게 뺀다
     for blog in reg["blogs"]:
         if blog["key"] == "blogger_macat":
             blog["mode"] = mode
