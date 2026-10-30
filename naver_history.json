@@ -1,1 +1,22 @@
-[]
+[
+  {
+    "v": 1,
+    "blog": "naver_life_tips",
+    "date": "2026-10-30",
+    "generated_at": "2026-10-30T22:10:58.539457+09:00",
+    "status": "package_issued",
+    "topic": "봄맞이 대청소를 방별로 나눠 며칠에 걸쳐 끝내는 계획표 만드는 방법",
+    "topic_source": "seed",
+    "title": "봄맞이 대청소를 방별로 나눠 끝내는 분할 계획표 만들기",
+    "labels": [
+      "봄맞이 대청소",
+      "살림 관리",
+      "공간 정리"
+    ],
+    "url": "https://github.com/shine88pc/chanceblog/issues/88",
+    "post_id": "88",
+    "model": "gemini-3.8-flash",
+    "attempts": 1,
+    "reasons": []
+  }
+]
