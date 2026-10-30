@@ -234,6 +234,29 @@ class PinnedRulesTest(unittest.TestCase):
         for needle in ("squash 병합하면 커밋 작성자가 Copilot", "종료 코드는 0 모두 통과 · 1 실패 · 3 **불완전**", "S 가 먼저 diff 를 읽습니다"):
             self.assertIn(needle, RUNBOOK, needle)
 
+    def test_the_push_preflight_check_is_documented_where_a_new_ai_starts_and_in_the_check_table(self):
+        """다른 AI 가 일을 시작할 때 push 가 되는지 아무것도 쓰지 않고 미리 보는 점검(2026-10-30 확인표). 자격 증명이 없는 AI 가 끝까지 구현한 뒤에야 push 가 안 되는 것을 아는 일을 막는다."""
+        command = "GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=false git push --dry-run --porcelain origin HEAD:refs/heads/ai/<이름>/preflight"
+        self.assertIn(command, RUNBOOK)
+        self.assertIn(command, DELEGATION)
+        for name, doc in (("절차서", RUNBOOK), ("위임 설계", DELEGATION)):          # 두 문서가 각각 실패 신호(자격 증명 없음)를 알려 줘야 한다
+            for needle in ("could not read Username", "종료 128"):
+                self.assertIn(needle, doc, f"{name}: {needle}")
+        self.assertIn("자격 증명은 AI 가 만들지 않습니다", RUNBOOK)                    # 자격 증명을 만드는 것은 T3 — 어느 AI 도 하지 않는다
+        self.assertIn("**AI 가 만들 수 없습니다**", DELEGATION)
+        self.assertIn("### 10-2. 다른 AI 확인표", DELEGATION)
+        self.assertIn("§10-2", RUNBOOK)
+        prompt = DELEGATION.split("```text")[1].split("```")[0]                      # §5(나)의 붙여 넣기 문구 — 다른 AI 가 이것만 받아도 두 규칙을 알아야 한다
+        for needle in ("git push --dry-run", "ai/claude/<네 이름>-<주제>", "AGENTS.md → docs/AGENT_RUNBOOK.md → 인수인계/작업내용.md"):
+            self.assertIn(needle, prompt, needle)
+
+    def test_the_defect_number_lookup_scans_main_and_every_two_level_ai_branch(self):
+        """결함 번호 겹침(D-86)을 막는 확인 명령은 요청 번호 명령(J3)과 같은 이유로 `refs/remotes/origin/ai`(접두사)여야 한다 — 끝에 `/*` 를 붙이면 두 단계 이름을 못 찾는다."""
+        line = next(row for row in RUNBOOK.splitlines() if row.startswith("2. [`DEFECT_REGISTER.md`]"))
+        for needle in ("origin/main", "refs/remotes/origin/ai)", "git show \"$b:docs/DEFECT_REGISTER.md\"", "sort -t- -k2,2n -u"):
+            self.assertIn(needle, line, needle)
+        self.assertNotIn("refs/remotes/origin/ai/*", line)
+
 
 if __name__ == "__main__":
     unittest.main()

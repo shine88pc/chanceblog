@@ -24,7 +24,7 @@
 ### 2-1. 작업 환경 만들기 (Windows 회사 PC 기준)
 
 - clone: `git clone https://github.com/shine88pc/chanceblog.git chanceblog` (공개 저장소라 읽기는 로그인이 필요 없습니다).
-- 작성자 설정은 **clone 안에서만**(저장소 로컬 설정), 기존 커밋의 작성자와 같게 둡니다(`git log -1 --format="%an <%ae>"`로 확인). 전역 git 설정은 건드리지 않습니다.
+- 작성자 설정은 **clone 안에서만**(저장소 로컬 설정), **사람이 만든** 기존 커밋의 작성자와 같게 둡니다 — 최신 커밋이 봇(`🤖 자동 포스팅…`)일 수 있으니 `git log -8 --format="%an <%ae> %s"` 로 사람 커밋을 찾습니다(최근 AI 요청·문서 커밋은 `강병수 <shine88pc@gmail.com>`). 전역 git 설정은 건드리지 않습니다.
 - 시스템 `core.autocrlf=true`는 **끄지 않습니다.** 작업 사본이 CRLF로 보이는 것은 정상이고, 끄면 모든 파일이 수정된 것으로 보입니다.
 - 한글 커밋 메시지는 UTF-8 파일에 써서 `git commit -F 파일`로 넘깁니다(셸 인자로 넘기면 인코딩이 깨질 수 있습니다).
 - 파이썬은 `PYTHONUTF8=1`을 붙여 실행합니다(한국어 Windows 콘솔 cp949 문제). 코드는 Python 3.10에서 돌아야 하며 3.12 전용 문법은 금지입니다.
