@@ -27,10 +27,11 @@ import watchdog  # noqa: E402
 
 
 def registry_all_auto():
-    """실제 레지스트리의 모든 블로그를 켜 둔 사본. 운영 중 일시 정지(mode off)와 무관하게 로직을 시험한다."""
+    """실제 레지스트리의 모든 블로그를 켜 둔 사본. 운영 중 일시 정지(mode off)와 무관하게 로직을 시험한다.
+    초안 패키지 채널(티스토리·네이버)은 mode 가 off·package 만 허용돼(auto 는 레지스트리 검증이 막는다) 켠 상태가 package 다."""
     reg = registry.load_registry()
     for blog in reg["blogs"]:
-        blog["mode"] = "auto"
+        blog["mode"] = "package" if blog["platform"] in registry.PACKAGE_PLATFORMS else "auto"   # 패키지 채널을 auto 로 켜면 plan 의 레지스트리 검증이 먼저 실패한다
     return reg
 
 
@@ -57,7 +58,8 @@ class PlanTest(unittest.TestCase):
 
     def test_matrix_excludes_off_and_filters_platform(self):
         reg = registry_all_auto()
-        self.assertEqual([i["key"] for i in plan.build_matrix(reg)["include"]], ["chance", "blogger_macat", "blogger_kcyoon"])
+        self.assertEqual([i["key"] for i in plan.build_matrix(reg)["include"]],
+                         ["chance", "blogger_macat", "blogger_kcyoon", "naver_life_tips"])     # 플랫폼을 안 주면 켜진 블로그 전부(패키지 채널 포함) — 아래 blogger 필터가 이 하나를 빼는 것도 이 시험이 지킨다
         reg["blogs"][1]["mode"] = "off"
         self.assertEqual([i["key"] for i in plan.build_matrix(reg, "blogger")["include"]], ["blogger_kcyoon"])    # 영문만 멈추면 한글은 그대로 돈다
         reg["blogs"][2]["mode"] = "off"
@@ -270,7 +272,8 @@ class CollectFindingsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             findings = watchdog.collect_findings(reg, tmp, datetime(2026, 10, 22, tzinfo=timezone.utc))
         self.assertEqual(sorted((f.blog, f.code) for f in findings),
-                         [("blogger_kcyoon", "NO_ACTIVITY"), ("blogger_macat", "NO_ACTIVITY"), ("chance", "NO_ACTIVITY")])
+                         [("blogger_kcyoon", "NO_ACTIVITY"), ("blogger_macat", "NO_ACTIVITY"), ("chance", "NO_ACTIVITY"),
+                          ("naver_life_tips", "NO_ACTIVITY")])     # 켜진 초안 패키지 채널(네이버)도 같은 감시 대상이다
 
 
 if __name__ == "__main__":

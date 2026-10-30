@@ -47,13 +47,14 @@ class RunbookCoversTheRepoTest(unittest.TestCase):
 
     def test_scheduled_workflows_show_their_real_cron_times(self):
         """표의 시각(UTC)이 실제 cron 과 같은지: 매일 한 번 도는 예약만 비교한다."""
-        for name, expect in (("blogger-en.yml", "02:00"), ("blogger-ko.yml", "03:30"), ("tistory.yml", "05:20"), ("naver.yml", "06:20")):
+        for name, expect, kst in (("blogger-en.yml", "02:00", "11:00"), ("blogger-ko.yml", "03:30", "12:30"), ("tistory.yml", "05:20", "14:20"), ("naver.yml", "06:20", "15:20")):
             text = (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
             cron = re.search(r"cron:\s*'(\d+) (\d+) \* \* \*'", text)
             self.assertIsNotNone(cron, name)
             self.assertEqual(f"{int(cron.group(2)):02d}:{int(cron.group(1)):02d}", expect, name)
             row = next(line for line in RUNBOOK.splitlines() if line.startswith(f"| `{name}` |"))
             self.assertIn(expect, row, name)
+            self.assertIn(f"{expect}(한국 {kst})", row, f"{name}: UTC {expect} 는 한국 시각 {kst} 이다")
 
 
 class JobNumbersAreConsistentTest(unittest.TestCase):

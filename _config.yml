@@ -35,6 +35,7 @@ exclude:
   - history.json
   - blogger_history.json
   - blogger_ko_history.json
+  - naver_history.json
   - pages.json
   - requirements-dev.txt
   - requirements-edits.txt
