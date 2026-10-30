@@ -147,5 +147,26 @@
     "attempts": 1,
     "reasons": [],
     "image": "lOssrZstDhQ"
+  },
+  {
+    "v": 1,
+    "blog": "blogger_macat",
+    "date": "2026-10-30",
+    "generated_at": "2026-10-30T17:21:29.615003+09:00",
+    "status": "draft_uploaded",
+    "topic": "Habit stacking: attach new routines to old ones",
+    "topic_source": "seed",
+    "title": "How to Build New Habits by Stacking Everyday Routines",
+    "labels": [
+      "habits",
+      "daily routine",
+      "habit stacking"
+    ],
+    "url": "https://macat0722.blogspot.com/",
+    "post_id": "3589268332908477760",
+    "model": "gemini-3.6-flash",
+    "attempts": 1,
+    "reasons": [],
+    "image": "bTMTggEt5s4"
   }
 ]
