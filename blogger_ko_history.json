@@ -18,5 +18,26 @@
     "model": "gemini-3.8-flash",
     "attempts": 1,
     "reasons": []
+  },
+  {
+    "v": 1,
+    "blog": "blogger_kcyoon",
+    "date": "2026-10-30",
+    "generated_at": "2026-10-30T19:18:21.345633+09:00",
+    "status": "draft_uploaded",
+    "topic": "장보기 목록을 미리 만들어 두고 충동구매를 줄이는 계획 습관과 요령",
+    "topic_source": "seed",
+    "title": "장보기 전 메모 앱으로 목록을 만들어 충동구매 줄이는 요령",
+    "labels": [
+      "장보기 습관",
+      "메모 앱 활용",
+      "집 안 정리"
+    ],
+    "url": "https://kcyoon.blogspot.com/",
+    "post_id": "5012963524637964129",
+    "model": "gemini-3.6-flash",
+    "attempts": 1,
+    "reasons": [],
+    "image": "JlNzxCWPUBQ"
   }
 ]
