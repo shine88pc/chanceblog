@@ -203,10 +203,13 @@ class RegistryCombinationTest(unittest.TestCase):
         승인 흐름을 켜는 두 줄(blogs.json·REAL_PUBLISH_FLOW)만 바꾸면 이 시험도 통과하고, 레지스트리만 바뀌면 빨강이다(키 목록은 블로그를 더하는 PR 이 함께 고친다)."""
         reg = registry.load_registry(REAL / "pipeline" / "blogs.json")
         blogs = [registry.merged_blog(reg, raw) for raw in reg["blogs"]]
-        self.assertEqual([blog["key"] for blog in blogs], ["chance", "blogger_macat", "blogger_kcyoon"])       # 한글 Blogger(작업 D)가 더해졌다
-        self.assertEqual({blog["key"]: blog["mode"] for blog in blogs}, {"chance": "auto", "blogger_macat": "draft", "blogger_kcyoon": "draft"})     # 운영자 승인으로 영문(R-015 선택 A, 이슈 #71, 2026-10-29)·한글(R-011 선택 A, 이슈 #70, 2026-10-28) 모두 draft
+        self.assertEqual([blog["key"] for blog in blogs], ["chance", "blogger_macat", "blogger_kcyoon", "naver_life_tips"])       # 한글 Blogger(작업 D)에 이어 초안 패키지 채널(네이버)이 더해졌다
+        self.assertEqual({blog["key"]: blog["mode"] for blog in blogs},
+                         {"chance": "auto", "blogger_macat": "draft", "blogger_kcyoon": "draft",     # 운영자 승인으로 영문(R-015 선택 A, 이슈 #71, 2026-10-29)·한글(R-011 선택 A, 이슈 #70, 2026-10-28) 모두 draft
+                          "naver_life_tips": "package"})               # 초안 패키지는 공개되지 않는 mode(GitHub 이슈로 보여 주기만 한다)
         self.assertEqual(blogs[0]["publish_flow"], REAL_PUBLISH_FLOW)
-        self.assertFalse(any(blog["platform"] in registry.PACKAGE_PLATFORMS for blog in blogs))
+        self.assertEqual({blog["key"]: blog["platform"] for blog in blogs if blog["platform"] in registry.PACKAGE_PLATFORMS},
+                         {"naver_life_tips": "naver"})                  # 패키지 플랫폼(티스토리·네이버)의 블로그는 네이버 하나뿐이다(티스토리는 제외·격리)
 
     def test_the_approval_flow_and_the_package_blogs_live_in_one_registry(self):
         self.assertEqual(self.errors(lambda reg: entry_of(reg, "chance").update(publish_flow="pr")), [])

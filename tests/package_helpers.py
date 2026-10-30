@@ -1,7 +1,7 @@
 """초안 패키지(티스토리·네이버) 시험 공용 보조: 임시 저장소, 가짜 GitHub REST, 가짜 게시자.
 
-네트워크를 쓰지 않는다. 실제 `pipeline/blogs.json` 에는 티스토리·네이버 항목이 없으므로(대상 0개 — 주소·주제를 받기 전) 시험은 임시 저장소에
-항목을 더해 레지스트리 검증·러너·워크플로 경로를 증명한다. 프로필·프롬프트도 실제 파일이 없어 시험 안의 fixture(한국어 Blogger 프로필 사본)를 쓴다.
+네트워크를 쓰지 않는다. 실제 `pipeline/blogs.json` 의 네이버 항목(승인 2026-10-29)은 `tests/test_package_registry.py`·`tests/test_profiles_naver.py` 가 따로 보고, 이 시험들은 임시 저장소에
+시험용 항목(`tistory_test`·`naver_test`)을 더해 레지스트리 검증·러너·워크플로 경로를 증명한다. 프로필·프롬프트는 시험 안의 fixture(한국어 Blogger 프로필 사본)를 쓴다 — 임시 저장소는 `make_root` 가 실제 package 블로그를 뺀 사본이라 이름이 겹치지 않는다.
 """
 import email.message
 import io
@@ -50,7 +50,7 @@ def package_entry(platform, mode="package", **overrides):
 
 
 def make_package_root(tmp, mode="package", platforms=("tistory", "naver"), mutate=None):
-    """임시 저장소: 실제 레지스트리(chance·blogger_macat)에 시험용 티스토리·네이버 항목을 더하고, 실제 워크플로 파일 2개와 fixture 프로필을 복사한다."""
+    """임시 저장소: 실제 레지스트리에서 패키지 블로그를 뺀 사본(chance·blogger_macat·blogger_kcyoon)에 시험용 티스토리·네이버 항목을 더하고, 실제 워크플로 파일 2개와 fixture 프로필을 복사한다."""
     root = make_root(tmp, mode="off")
     reg_path = root / "pipeline" / "blogs.json"
     reg = json.loads(reg_path.read_text(encoding="utf-8"))

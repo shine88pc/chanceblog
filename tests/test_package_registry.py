@@ -1,7 +1,9 @@
 """초안 패키지 채널(mode package, platform tistory·naver)의 레지스트리 규칙 시험.
 
-실제 `pipeline/blogs.json` 에는 티스토리·네이버 항목이 없다(블로그 주소·주제를 받기 전 — 대상 0개). 그래서 임시 레지스트리에 시험용 항목을 더해
-검증 경로(새 모드·플랫폼·금지 시크릿 역할·허용 조합)와 매트릭스·검증기가 이 항목을 올바르게 다루는지 증명한다.
+실제 `pipeline/blogs.json` 에는 네이버(`naver_life_tips`) 항목이 하나 있다(NewValuesTest·PlanAndEnabledTest 가 값을 못 박는다). 티스토리는 2026-10-30 운영자 결정(제외·격리)으로
+실제 레지스트리에 없다(구현은 보관 브랜치 `ai/claude/tistory-naver` 에만 있다). 나머지 시험은 임시 레지스트리에 시험용 항목(`tistory_test`·`naver_test`)을 더해
+검증 경로(새 모드·플랫폼·금지 시크릿 역할·허용 조합)와 매트릭스·검증기가 이 항목을 올바르게 다루는지 증명한다 — 실제 파일을 건드리지 않고 항목을 마음대로 고칠 수 있어서이고,
+쓰지 않는 티스토리 플랫폼 코드도 이 경로로 계속 시험한다. '패키지 블로그가 없는' 경우는 실제 레지스트리에서 네이버 항목을 뺀 사본(`real_registry_without_package_blogs`)으로 만든다.
 """
 import copy
 import io
@@ -10,6 +12,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from unittest import mock
 
 import _bootstrap  # noqa: F401
 from package_helpers import REAL, entry_of, make_package_root, registry_of, with_entry
@@ -17,6 +20,24 @@ from pipeline import plan, registry
 
 sys.path.insert(0, str(_bootstrap.ROOT / "scripts"))
 import validate_repo as vr  # noqa: E402
+
+# 실제 레지스트리의 초안 패키지 채널 항목(키 → 병합본에서 이 값이어야 하는 필드). 시험이 지금 값을 못 박아 두므로 바꾸려면(채널·모드·파일 이름·시각 변경)
+# 이 표와 해당 워크플로·프로필·문서를 함께 고친다. 시크릿은 Gemini 키 '이름' 하나뿐이고(계정 정보 없음) 광고는 꺼져 있다.
+REAL_PACKAGE_BLOGS = {
+    "naver_life_tips": {
+        "platform": "naver", "mode": "package", "url": "https://blog.naver.com/shine5652", "channel": {"key": "naver", "label": "네이버"},
+        "workflow": ".github/workflows/naver.yml", "entrypoint": "pipeline/run.py", "prompt": ".github/editorial/NAVER_PROMPT.md", "profile": "naver_life_tips_ko",
+        "state": {"history": "naver_history.json", "content_dir": "_naver_drafts"},
+        "schedule": {"cron": "20 6 * * *"}, "secrets": {"llm_api_key": "GEMINI_API_KEY"}, "ads": "off", "ad_surface": False,
+    },
+}
+
+
+def real_registry_without_package_blogs():
+    """실제 레지스트리에서 초안 패키지 채널(네이버) 항목만 뺀 사본 = '패키지 블로그가 하나도 없는' 저장소. test_run.make_root 가 임시 저장소에 하는 거름과 같다."""
+    reg = registry.load_registry()
+    reg["blogs"] = [blog for blog in reg["blogs"] if blog["platform"] not in registry.PACKAGE_PLATFORMS]
+    return reg
 
 
 class PackageRegistryBase(unittest.TestCase):
@@ -40,12 +61,21 @@ class PackageRegistryBase(unittest.TestCase):
 
 
 class NewValuesTest(PackageRegistryBase):
-    def test_the_real_registry_has_no_package_blog_yet(self):
-        """블로그 주소·주제(사용자 입력)를 받기 전이라 실제 레지스트리에는 티스토리·네이버가 없다 — 정기 실행은 '대상 0개'로 끝난다."""
+    def test_the_real_registry_has_exactly_the_naver_package_blog(self):
+        """실제 레지스트리의 초안 패키지 채널은 정확히 하나다 — 네이버(`naver_life_tips`). mode `package`(공개되지 않는 쪽)이고 시크릿은 Gemini 키 이름뿐이며 광고는 꺼져 있다.
+        티스토리는 2026-10-30 운영자 결정(제외·격리)으로 실제 레지스트리에 없다(플랫폼 코드는 쓰지 않는 채로 남아 있다). 정기 실행은 네이버만 '대상 1개'다(PlanAndEnabledTest).
+        시험 이름은 블로그 주소·주제를 받기 전의 옛 모습('아직 없다') 그대로였다 — docs/ARCHITECTURE.md §7-B-2 3-1 행과 tests/test_package_docs.py 가
+        이 이름을 가리키므로 이름은 그 둘과 함께 바꾼다."""
         real = registry.load_registry()
-        self.assertEqual([blog["key"] for blog in real["blogs"]], ["chance", "blogger_macat", "blogger_kcyoon"])        # 한글 Blogger(kcyoon, 정지)는 Blogger 라 패키지 채널이 아니다
-        self.assertFalse({registry.merged_blog(real, blog)["platform"] for blog in real["blogs"]} & set(registry.PACKAGE_PLATFORMS))
-        self.assertNotIn("package", {blog["mode"] for blog in real["blogs"]})
+        self.assertEqual([blog["key"] for blog in real["blogs"]], ["chance", "blogger_macat", "blogger_kcyoon", "naver_life_tips"])   # 한글 Blogger(kcyoon)는 Blogger 라 패키지 채널이 아니다
+        blogs = {blog["key"]: registry.merged_blog(real, blog) for blog in real["blogs"]}
+        package = {key: blog for key, blog in blogs.items() if blog["platform"] in registry.PACKAGE_PLATFORMS}
+        self.assertEqual(list(package), list(REAL_PACKAGE_BLOGS))                       # 네이버 하나뿐이다
+        self.assertFalse([key for key, blog in blogs.items() if blog["platform"] == "tistory"])      # 티스토리는 제외·격리(2026-10-30 운영자 결정) — 실제 레지스트리에 없다
+        for key, blog in package.items():
+            self.assertIn(blog["mode"], registry.PACKAGE_MODES, key)                     # off·package 뿐이다 — 올릴 곳이 없는 draft·auto 는 못 쓴다
+            for field, expected in REAL_PACKAGE_BLOGS[key].items():
+                self.assertEqual(blog[field], expected, (key, field))
         self.assertEqual(registry.validate_registry(real), [])
 
     def test_modes_platforms_and_the_package_table(self):
@@ -207,13 +237,35 @@ class PlanAndEnabledTest(PackageRegistryBase):
         self.assertEqual(plan.build_matrix(self.reg, "tistory", only="naver_test")["include"], [])
 
     def test_with_no_package_blog_the_matrix_is_empty_and_that_is_green_not_an_error(self):
-        real = registry.load_registry()
+        """패키지 블로그가 하나도 없는 저장소: 정기 실행의 대상은 0개이고 끝은 초록(종료 코드 0)이다. 실제 레지스트리에는 이제 네이버가 있으므로
+        그 경우는 그 항목을 뺀 사본으로 만든다(실제 레지스트리의 '네이버 1개'는 바로 아래 시험이 본다)."""
+        without = real_registry_without_package_blogs()
+        self.assertFalse([blog["key"] for blog in without["blogs"] if blog["platform"] in registry.PACKAGE_PLATFORMS])      # 사본에는 패키지 블로그가 없다
         for platform in ("tistory", "naver"):
-            self.assertEqual(plan.build_matrix(real, platform), {"include": []})
+            self.assertEqual(plan.build_matrix(without, platform), {"include": []})
             buffer = io.StringIO()
-            with redirect_stdout(buffer):
+            with mock.patch.object(plan, "load_registry", return_value=without), redirect_stdout(buffer):                    # 명령줄은 이 사본을 읽는다(검증은 실제 저장소 파일 기준)
                 self.assertEqual(plan.main(["--platform", platform, "--count"]), 0)
             self.assertEqual(buffer.getvalue().strip(), "0")
+
+    def test_the_real_registry_gives_each_package_platform_exactly_one_matrix_entry(self):
+        """실제 레지스트리: 네이버가 대상 1개이고 티스토리는 0개다(정기 실행이 네이버 초안 하나를 만든다). 매트릭스에는 시크릿 '이름'과 LLM 키 역할만 든다."""
+        real = registry.load_registry()
+        for key, spec in REAL_PACKAGE_BLOGS.items():
+            platform = spec["platform"]
+            self.assertEqual(plan.build_matrix(real, platform), {"include": [{
+                "key": key, "platform": platform, "mode": "package", "history": spec["state"]["history"], "content_dir": spec["state"]["content_dir"],
+                "secret_llm_api_key": "GEMINI_API_KEY", "secret_blog_id": "", "secret_client_id": "", "secret_client_secret": "", "secret_refresh_token": ""}]})
+            self.assertEqual([i["key"] for i in plan.build_matrix(real, platform, only=key)["include"]], [key])
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                self.assertEqual(plan.main(["--platform", platform, "--count"]), 0)                  # 실제 레지스트리·실제 저장소 파일로 검증까지 통과한다
+            self.assertEqual(buffer.getvalue().strip(), "1")
+        self.assertEqual(plan.build_matrix(real, "tistory"), {"include": []})                       # 티스토리 정기 실행(남아 있는 워크플로)은 아무것도 하지 않는다
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            self.assertEqual(plan.main(["--platform", "tistory", "--count"]), 0)
+        self.assertEqual(buffer.getvalue().strip(), "0")
 
     def test_the_plan_cli_rejects_a_key_of_another_platform(self):
         err = io.StringIO()

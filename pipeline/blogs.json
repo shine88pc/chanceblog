@@ -97,6 +97,27 @@
       "ad_surface": false,
       "ads": "off",
       "health": {"max_gap_hours": 50, "max_failure_streak": 3, "max_unpublished_days": 3}
+    },
+    {
+      "key": "naver_life_tips",
+      "name": "네이버 (계절·생활 팁)",
+      "channel": {"key": "naver", "label": "네이버"},
+      "platform": "naver",
+      "url": "https://blog.naver.com/shine5652",
+      "role": "계절·명절·여행 준비와 생활 습관·살림 관리(초안 패키지 — 운영자가 복사해 발행) (KO)",
+      "languages": ["ko"],
+      "mode": "package",
+      "workflow": ".github/workflows/naver.yml",
+      "entrypoint": "pipeline/run.py",
+      "prompt": ".github/editorial/NAVER_PROMPT.md",
+      "profile": "naver_life_tips_ko",
+      "state": {"history": "naver_history.json", "content_dir": "_naver_drafts"},
+      "schedule": {"cron": "20 6 * * *"},
+      "limits": {"max_posts_per_day": 1},
+      "secrets": {"llm_api_key": "GEMINI_API_KEY"},
+      "ad_surface": false,
+      "ads": "off",
+      "health": {"max_gap_hours": 50, "max_failure_streak": 3, "max_unpublished_days": 3}
     }
   ]
 }
