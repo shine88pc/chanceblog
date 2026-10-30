@@ -165,5 +165,17 @@
     "lane": "society",
     "source": "Statistics Canada",
     "source_url": "https://www.statcan.gc.ca/daily-quotidien/261028/dq261028b-eng.htm"
+  },
+  {
+    "date": "2026-10-30",
+    "topic": "On Facebook and Instagram, Political Ads Are Increasingly Critical of Data Centers",
+    "kr_title": "소셜 미디어 정치 광고 속 데이터센터: 반대 57% 대 찬성 3%가 뜻하는 것",
+    "en_title": "Data Centers in Social Media Political Ads: 57% Opposed vs. 3% Supportive",
+    "kr_image": "https://images.unsplash.com/photo-1680992046626-418f7e910589?auto=format&fit=crop&w=1000&q=80",
+    "en_image": "https://images.unsplash.com/photo-1565273601018-d1da7cfed4f7?auto=format&fit=crop&w=1000&q=80",
+    "slot": 18,
+    "lane": "culture",
+    "source": "Pew Research Center",
+    "source_url": "https://www.pewresearch.org/short-reads/2026/10/29/on-facebook-and-instagram-political-ads-are-increasingly-critical-of-data-centers/"
   }
 ]
