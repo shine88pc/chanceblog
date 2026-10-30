@@ -153,5 +153,17 @@
     "lane": "science",
     "source": "European Commission (DG Environment)",
     "source_url": "https://environment.ec.europa.eu/news/eu-launches-friends-credits-nature-and-biodiversity-2026-10-28_en"
+  },
+  {
+    "date": "2026-10-30",
+    "topic": "Study: How are young Canadian university graduates faring in the recent labour market?",
+    "kr_title": "캐나다 청년 대졸자의 상용직 전일제 고용률 69%: 노동시장 긴장 완화가 남긴 과제",
+    "en_title": "Permanent Full-Time Employment at 69%: What Shifting Labour Market Dynamics Mean for Young Canadian Graduates",
+    "kr_image": "https://images.unsplash.com/photo-1499750310107-5fef28a66643?auto=format&fit=crop&w=1000&q=80",
+    "en_image": "https://images.unsplash.com/photo-1631557777232-a2632ae3c67d?auto=format&fit=crop&w=1000&q=80",
+    "slot": 9,
+    "lane": "society",
+    "source": "Statistics Canada",
+    "source_url": "https://www.statcan.gc.ca/daily-quotidien/261028/dq261028b-eng.htm"
   }
 ]
