@@ -201,5 +201,17 @@
     "lane": "technology",
     "source": "European Commission (Digital Strategy)",
     "source_url": "https://digital-strategy.ec.europa.eu/en/events/local-digital-twins-citiverse-edic-joins-smart-city-expo-world-congress-2026"
+  },
+  {
+    "date": "2026-11-02",
+    "topic": "NASA Explores Potential Commercial Servicing for Hubble Telescope",
+    "kr_title": "허블 우주망원경과 민간 우주 궤도 서비스: 정보요청서가 던진 과학 자산의 지속성 질문",
+    "en_title": "Commercial In-Space Servicing for Hubble: What an RFI Reveals About Science Infrastructure",
+    "kr_image": "https://images.unsplash.com/photo-1446776811953-b23d57bd21aa?auto=format&fit=crop&w=1000&q=80",
+    "en_image": "https://images.unsplash.com/photo-1446776877081-d282a0f896e2?auto=format&fit=crop&w=1000&q=80",
+    "slot": null,
+    "lane": "science",
+    "source": "NASA",
+    "source_url": "https://science.nasa.gov/missions/hubble/nasa-explores-potential-commercial-servicing-for-hubble-telescope/"
   }
 ]
