@@ -189,5 +189,17 @@
     "lane": "science",
     "source": "European Commission, Joint Research Centre",
     "source_url": "https://joint-research-centre.ec.europa.eu/jrc-news-and-updates/jrc-makes-climate-risk-data-europes-regions-available-through-single-dashboard-2026-10-30_en"
+  },
+  {
+    "date": "2026-11-01",
+    "topic": "Local Digital Twins CiTiVERSE EDIC joins Smart City Expo World Congress 2026",
+    "kr_title": "바르셀로나로 향하는 LDT CiTiVERSE EDIC: 인간 중심 AI와 도시 디지털 트윈의 행방",
+    "en_title": "LDT CiTiVERSE EDIC at Smart City Expo 2026: Human-Centric AI and the Urban Digital Twin",
+    "kr_image": "https://images.unsplash.com/photo-1760553120312-2821bf54e767?auto=format&fit=crop&w=1000&q=80",
+    "en_image": "https://images.unsplash.com/photo-1604528935023-74e0a7b2d23f?auto=format&fit=crop&w=1000&q=80",
+    "slot": 9,
+    "lane": "technology",
+    "source": "European Commission (Digital Strategy)",
+    "source_url": "https://digital-strategy.ec.europa.eu/en/events/local-digital-twins-citiverse-edic-joins-smart-city-expo-world-congress-2026"
   }
 ]
