@@ -18,5 +18,25 @@
     "model": "gemini-3.8-flash",
     "attempts": 1,
     "reasons": []
+  },
+  {
+    "v": 1,
+    "blog": "naver_life_tips",
+    "date": "2026-11-03",
+    "generated_at": "2026-11-03T01:15:36.706902+09:00",
+    "status": "package_issued",
+    "topic": "여행 전에 집을 비울 때 가스와 전원과 쓰레기를 정리하는 점검 목록",
+    "topic_source": "seed",
+    "title": "가을 여행 전 집을 비울 때 확인하는 가전과 가스 쓰레기 정돈법",
+    "labels": [
+      "가을 여행",
+      "여행 준비",
+      "집 정리"
+    ],
+    "url": "https://github.com/shine88pc/chanceblog/issues/103",
+    "post_id": "103",
+    "model": "gemini-3.6-flash",
+    "attempts": 1,
+    "reasons": []
   }
 ]
