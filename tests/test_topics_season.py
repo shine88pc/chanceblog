@@ -89,6 +89,33 @@ class MentionedSeasonsTest(unittest.TestCase):
         self.assertEqual(topics.mentioned_seasons("Summertime snacks and a heat wave plan", "en"), {"summer"})
         self.assertEqual(topics.mentioned_seasons("Wintertime routines", "en"), {"winter"})
 
+    def test_everyday_words_that_only_start_like_a_season_word_are_not_seasons(self):
+        """독립 재검증이 짚은 오탐: 중복(重複)은 복날의 중복(中伏)이 아니고, 모기지·구정물·동지애는 계절이 아니다."""
+        for text in ("중복 사진과 중복 파일을 한 번에 찾아 정리하는 방법과 순서", "모기지 상환 계획 세우기", "모기업 소식 확인하는 방법", "구정물이 고인 배수구 청소",
+                     "동지애를 키우는 팀 문화", "동지역 주변 맛집 정리"):
+            self.assertEqual(topics.mentioned_seasons(text, "ko"), set(), text)
+        self.assertEqual(topics.mentioned_seasons("초복 중복 말복 보양식", "ko"), {"summer"})                   # 복날 이름은 초복·말복으로 잡는다
+        self.assertEqual(topics.mentioned_seasons("모기 쫓는 방법", "ko"), {"summer"})
+        self.assertEqual(topics.mentioned_seasons("구정 연휴 준비", "ko"), {"winter"})
+        self.assertEqual(topics.mentioned_seasons("동지 팥죽 만들기", "ko"), {"winter"})
+
+    def test_every_season_word_in_the_table_is_pinned(self):
+        """낱말 하나를 목록에서 빼면 이 시험이 잡는다(독립 검증의 변이 점검에서 시험이 고정하지 않던 낱말 17개)."""
+        words = {"spring": ["봄", "초봄", "늦봄", "올봄", "꽃구경", "벚꽃", "꽃샘", "개나리", "황사", "입춘", "식목일", "어린이날", "어버이날", "새 학기", "새학기"],
+                 "summer": ["여름", "한여름", "초여름", "늦여름", "올여름", "장마", "폭염", "무더위", "찜통더위", "더위", "열대야", "피서", "휴가철", "물놀이", "모기", "삼복", "복날",
+                            "초복", "말복", "단오", "해수욕"],
+                 "autumn": ["가을", "초가을", "늦가을", "올가을", "단풍", "김장", "추석", "한가위", "낙엽", "추수", "수능"],
+                 "winter": ["겨울", "한겨울", "초겨울", "늦겨울", "올겨울", "한파", "폭설", "보일러", "난방", "설날", "설 연휴", "설연휴", "설 명절", "구정", "정월", "대보름", "크리스마스",
+                            "성탄", "연말", "동지"]}
+        for season, listed in words.items():
+            for word in listed:
+                self.assertEqual(topics.mentioned_seasons(f"{word} 준비하는 방법", "ko"), {season}, word)
+        english = {"spring": ["spring", "springtime"], "summer": ["summer", "summertime", "heat wave", "heatwave"], "autumn": ["autumn", "halloween", "thanksgiving"],
+                   "winter": ["winter", "wintertime", "christmas"]}
+        for season, listed in english.items():
+            for word in listed:
+                self.assertEqual(topics.mentioned_seasons(f"Easy {word} routines", "en"), {season}, word)
+
     def test_an_unknown_language_or_odd_input_means_no_seasons(self):
         self.assertEqual(topics.mentioned_seasons("봄맞이", "fr"), set())
         self.assertEqual(topics.mentioned_seasons("봄맞이", None), set())
