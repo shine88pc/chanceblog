@@ -19,19 +19,20 @@ SEASONS = ("spring", "summer", "autumn", "winter")      # 한 해의 흐름 순�
 SEASON_MONTHS = {"spring": (3, 4, 5), "summer": (6, 7, 8), "autumn": (9, 10, 11), "winter": (12, 1, 2)}
 SEASON_LABELS = {"ko": {"spring": "봄", "summer": "여름", "autumn": "가을", "winter": "겨울"},
                  "en": {"spring": "spring", "summer": "summer", "autumn": "autumn", "winter": "winter"}}
-# 주제에 이 낱말이 있으면 그 계절 이야기다. 한국어는 낱말 첫머리에서만 맞춘다('돌봄'의 '봄'은 계절이 아니다). 영어 'fall' 은 'fall asleep' 처럼 계절이 아닌 쓰임이 많아 뺐다.
+# 주제에 이 낱말이 있으면 그 계절 이야기다. 한국어는 낱말 첫머리에서만 맞춘다('돌봄'의 '봄'은 계절이 아니다). 계절 이름 앞의 초·늦·올·지난·이른·한(한여름·한겨울)은 같은 계절로 본다.
+# 영어 'fall' 은 'fall asleep' 처럼 계절이 아닌 쓰임이 많아 뺐다. 모든 계절 낱말을 담을 수는 없다 — 여기 없는 계절 이야기는 주제 확장 지시문의 시기 안내가 막는 데까지만 막힌다(docs/ARCHITECTURE.md 한계).
 _SEASON_WORDS = {
     "ko": {
-        "spring": re.compile(r"(?<![가-힣])(?:(?:초|늦)?봄|꽃구경|벚꽃|꽃샘추위|개나리)"),
-        "summer": re.compile(r"(?<![가-힣])(?:(?:초|늦|한)?여름|장마|폭염|무더위|열대야|피서)"),
-        "autumn": re.compile(r"(?<![가-힣])(?:(?:초|늦)?가을|단풍|김장|추석|낙엽)"),
-        "winter": re.compile(r"(?<![가-힣])(?:(?:초|늦|한)?겨울|한파|폭설|보일러|난방|설날|크리스마스|성탄)"),
+        "spring": re.compile(r"(?<![가-힣])(?:(?:초|늦|올|지난|이른)?봄|꽃구경|벚꽃|꽃샘|개나리|황사|입춘|식목일|어린이날|어버이날|새 ?학기)"),
+        "summer": re.compile(r"(?<![가-힣])(?:(?:초|늦|올|지난|이른|한)?여름|장마|폭염|무더위|찜통더위|더위|열대야|피서|휴가철|물놀이|모기|삼복|복날|초복|중복|말복|단오|해수욕)"),
+        "autumn": re.compile(r"(?<![가-힣])(?:(?:초|늦|올|지난|이른)?가을|단풍|김장|추석|한가위|낙엽|추수|수능)"),
+        "winter": re.compile(r"(?<![가-힣])(?:(?:초|늦|올|지난|이른|한)?겨울|한파|폭설|보일러|난방|설날|설 ?연휴|설 ?명절|구정|정월|대보름|크리스마스|성탄|연말|동지)"),
     },
     "en": {
-        "spring": re.compile(r"\bspring\b", re.IGNORECASE),
-        "summer": re.compile(r"\bsummer\b", re.IGNORECASE),
+        "spring": re.compile(r"\b(?:spring|springtime)\b", re.IGNORECASE),
+        "summer": re.compile(r"\b(?:summer|summertime|heat ?wave)\b", re.IGNORECASE),
         "autumn": re.compile(r"\b(?:autumn|halloween|thanksgiving)\b", re.IGNORECASE),
-        "winter": re.compile(r"\b(?:winter|christmas)\b", re.IGNORECASE),
+        "winter": re.compile(r"\b(?:winter|wintertime|christmas)\b", re.IGNORECASE),
     },
 }
 
@@ -89,9 +90,9 @@ def season_hint(profile, today):
     english = profile.get("language") == "en"
     label = SEASON_LABELS["en" if english else "ko"][season_of(today)]
     if english:
-        return (f"Today is {today.isoformat()} ({label} in the Northern Hemisphere). Only suggest ideas that fit this time of year; skip seasonal "
-                "events, weather or preparations that do not match it (for example spring cleaning in autumn).")
-    return (f"오늘은 {today.isoformat()}이고 한국은 {label}이다. 지금 시기에 맞는 주제만 제안한다. 지금 계절에 맞지 않는 계절 행사·날씨·준비는 제외한다"
+        return (f"Today is {today.isoformat()} ({label} in the Northern Hemisphere). Only suggest ideas that fit the current season or the one coming next; "
+                "skip seasonal events, weather or preparations from other seasons (for example spring cleaning in autumn).")
+    return (f"오늘은 {today.isoformat()}이고 한국은 {label}이다. 지금 계절이나 곧 올 계절에 맞는 주제만 제안한다. 지난 계절이나 먼 계절의 행사·날씨·준비는 제외한다"
             "(예: 가을에 봄맞이 대청소).")
 
 

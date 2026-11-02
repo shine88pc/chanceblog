@@ -9,10 +9,12 @@ import copy
 import json
 import random
 import unittest
-from datetime import date
+from datetime import date, datetime, timezone
 
 import _bootstrap
 from pipeline import registry, run as run_mod, topics
+from pipeline.stubs import stub_llm
+from test_run import NO_PUBLISH, RunBase
 
 NOV = date(2026, 11, 2)          # 가을
 APR = date(2026, 4, 10)          # 봄
@@ -66,6 +68,26 @@ class MentionedSeasonsTest(unittest.TestCase):
         self.assertEqual(topics.mentioned_seasons("Spring cleaning in ten minutes", "en"), {"spring"})
         self.assertEqual(topics.mentioned_seasons("A cozy WINTER evening routine and a calm Autumn walk", "en"), {"winter", "autumn"})
         self.assertEqual(topics.mentioned_seasons("Easy Christmas gift wrapping", "en"), {"winter"})
+
+    def test_prefixes_before_a_season_name_count_as_that_season(self):
+        for prefix in ("초", "늦", "올", "지난", "이른"):
+            for season, word in (("spring", "봄"), ("summer", "여름"), ("autumn", "가을"), ("winter", "겨울")):
+                self.assertEqual(topics.mentioned_seasons(f"{prefix}{word} 옷차림", "ko"), {season}, prefix + word)
+        self.assertEqual(topics.mentioned_seasons("한여름 더위", "ko"), {"summer"})
+        self.assertEqual(topics.mentioned_seasons("한겨울 추위", "ko"), {"winter"})
+
+    def test_holiday_and_weather_words_the_review_found_are_caught(self):
+        cases = {"한가위 연휴 준비": "autumn", "설 연휴 앞두고 정리": "winter", "설 명절 선물 포장": "winter", "입춘 지나고 정리": "spring",
+                 "정월 대보름 음식": "winter", "복날 건강 챙기기": "summer", "올여름 더위 대비": "summer", "더위를 식히는 방법": "summer", "황사 대비 청소": "spring",
+                 "새 학기 준비물": "spring", "휴가철 짐 싸기": "summer", "물놀이 준비물": "summer", "모기 막는 방법": "summer", "삼복더위 이겨내기": "summer",
+                 "단오 풍습 알아보기": "summer", "어버이날 선물 준비": "spring", "연말 대청소 계획": "winter", "수능 앞두고 정리": "autumn"}
+        for text, season in cases.items():
+            self.assertEqual(topics.mentioned_seasons(text, "ko"), {season}, text)
+        for text in ("설거지를 미루지 않는 방법", "모양을 잡는 법", "동생 돌봄 시간 정하기"):
+            self.assertEqual(topics.mentioned_seasons(text, "ko"), set(), text)
+        self.assertEqual(topics.mentioned_seasons("Springtime picnic ideas", "en"), {"spring"})
+        self.assertEqual(topics.mentioned_seasons("Summertime snacks and a heat wave plan", "en"), {"summer"})
+        self.assertEqual(topics.mentioned_seasons("Wintertime routines", "en"), {"winter"})
 
     def test_an_unknown_language_or_odd_input_means_no_seasons(self):
         self.assertEqual(topics.mentioned_seasons("봄맞이", "fr"), set())
@@ -157,15 +179,20 @@ class PickTopicSeasonTest(unittest.TestCase):
 class PromptNoteTest(unittest.TestCase):
     TEMPLATE = "주제 {topic} 로 글을 쓴다."
 
-    def test_the_note_is_added_after_the_extra_rules_and_before_the_feedback(self):
-        p = {"language": "ko", "prompt_extra": ["규칙 하나"]}
+    def test_the_note_comes_before_the_extra_rules_so_the_format_rules_stay_last(self):
+        p = {"language": "ko", "prompt_extra": ["규칙 하나"], "seed_months": {"겨울 준비 글감 하나입니다": [11]}}
         prompt = run_mod.build_prompt(self.TEMPLATE, "겨울 준비", p, feedback=["제목이 길다"], today=NOV)
-        self.assertLess(prompt.index("[추가 규칙]"), prompt.index("[작성 시점]"))
-        self.assertLess(prompt.index("[작성 시점]"), prompt.index("[이전 시도에서 고쳐야 할 점]"))
+        self.assertLess(prompt.index("[작성 시점]"), prompt.index("[추가 규칙]"))
+        self.assertLess(prompt.index("[추가 규칙]"), prompt.index("[이전 시도에서 고쳐야 할 점]"))
         self.assertIn("오늘은 2026-11-02이고 한국은 가을이다", prompt)
 
+    def test_a_profile_without_seed_months_never_gets_the_note(self):
+        """시기를 타는 글감(seed_months)이 없는 프로필(사철 글감)은 날짜를 줘도 프롬프트가 예전과 글자 하나 다르지 않다 — 영어 습관 블로그에 계절 이야기가 끼지 않게."""
+        for p in ({"language": "ko", "prompt_extra": ["규칙"]}, {"language": "en"}, {"language": "ko", "seed_months": {}}, {"language": "ko", "seed_months": None}):
+            self.assertEqual(run_mod.build_prompt(self.TEMPLATE, "겨울 준비", p, today=NOV), run_mod.build_prompt(self.TEMPLATE, "겨울 준비", p), p)
+
     def test_without_a_date_the_prompt_is_unchanged(self):
-        p = {"language": "ko", "prompt_extra": ["규칙 하나"]}
+        p = {"language": "ko", "prompt_extra": ["규칙 하나"], "seed_months": {"겨울 준비 글감 하나입니다": [11]}}
         self.assertNotIn("[작성 시점]", run_mod.build_prompt(self.TEMPLATE, "겨울 준비", p))
         self.assertEqual(run_mod.build_prompt(self.TEMPLATE, "겨울 준비", p),
                          run_mod.build_prompt(self.TEMPLATE, "겨울 준비", p, None, None))
@@ -175,11 +202,6 @@ class PromptNoteTest(unittest.TestCase):
         self.assertTrue(note.startswith("[Timing]"))
         self.assertFalse([ch for ch in note if "가" <= ch <= "힣"])
         self.assertNotIn("Topic:", note)                  # 스텁 LLM 은 'Topic:' 줄로 영어 프롬프트를 알아본다 — 안내가 그 표식을 만들면 안 된다
-
-    def test_the_run_passes_today_into_the_prompt(self):
-        source = (_bootstrap.ROOT / "pipeline" / "run.py").read_text(encoding="utf-8")
-        self.assertIn("llm(build_prompt(template, topic, profile, feedback, today))", source)
-        self.assertIn("pick_topic(profile, history, today,", source)
 
 
 class SeedMonthsValidationTest(unittest.TestCase):
@@ -192,6 +214,15 @@ class SeedMonthsValidationTest(unittest.TestCase):
         seed = registry.load_profile("blogger_practical_ko")["seed_topics"][0]
         self.assertEqual(self.errors(seed_months={seed: [3, 4, 5]}), [])
         self.assertEqual(self.errors(), [])
+
+    def test_unhashable_values_are_reported_as_errors_and_never_raised(self):
+        seed = registry.load_profile("blogger_practical_ko")["seed_topics"][0]
+        for bad in ([[1]], [{"a": 1}], [None], [[]], [1, [2]]):
+            self.assertTrue(self.errors(seed_months={seed: bad}), bad)
+        broken = copy.deepcopy(registry.load_profile("blogger_practical_ko"))
+        broken["seed_topics"] = broken["seed_topics"] + [["x"]]
+        broken["seed_months"] = {"x": [1]}
+        self.assertTrue(registry.validate_profile(broken))            # 예외 없이 오류 목록
 
     def test_unknown_seeds_bad_months_and_wrong_shapes_are_errors(self):
         seed = registry.load_profile("blogger_practical_ko")["seed_topics"][0]
@@ -253,6 +284,61 @@ class DocumentationTest(unittest.TestCase):
         doc = (_bootstrap.ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
         for phrase in ("`seed_months`", "[작성 시점]", "season_fits"):
             self.assertIn(phrase, doc, phrase)
+
+
+class RunnerSeasonTest(RunBase):
+    """실제 러너(pipeline.run.run)가 오늘 날짜를 글감 고르기와 프롬프트에 넘기는지 — 소스 글자가 아니라 동작으로 확인한다."""
+    NOV_NOW = datetime(2026, 11, 2, 1, 0, tzinfo=timezone.utc)        # KST 2026-11-02 10:00
+    SPRING = "봄맞이 대청소를 방별로 나눠 며칠에 걸쳐 끝내는 계획표 만드는 방법"
+
+    def tag(self, months_for):
+        """임시 저장소의 한글 프로필에 seed_months 를 단다: months_for(시드 목록) → {시드: [달…]}. 시드 목록을 돌려준다."""
+        profile_path = self.root / "pipeline" / "profiles" / "blogger_practical_ko.json"
+        data = json.loads(profile_path.read_text(encoding="utf-8"))
+        if months_for is not None:
+            data["seed_months"] = months_for(data["seed_topics"])
+        profile_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        return data["seed_topics"]
+
+    def run_and_capture(self, **kwargs):
+        prompts = []
+
+        def llm(prompt):
+            prompts.append(prompt)
+            return stub_llm(prompt)
+        code, text = self.go(env=dict(NO_PUBLISH), llm=llm, now=self.NOV_NOW, **kwargs)
+        return code, text, prompts
+
+    def test_a_seasonal_profile_gets_the_note_with_the_runner_date(self):
+        self.tag(lambda seeds: {seeds[0]: [11]})
+        code, text, prompts = self.run_and_capture()
+        self.assertEqual(code, 0, text)
+        self.assertTrue(prompts)
+        self.assertIn("[작성 시점]", prompts[0])
+        self.assertIn("오늘은 2026-11-02이고 한국은 가을이다", prompts[0])
+        self.assertLess(prompts[0].index("[작성 시점]"), prompts[0].index("[추가 규칙]"))
+
+    def test_a_profile_without_seed_months_gets_no_note(self):
+        code, text, prompts = self.run_and_capture()
+        self.assertEqual(code, 0, text)
+        self.assertTrue(prompts)
+        self.assertFalse([p for p in prompts if "[작성 시점]" in p])
+
+    def test_the_runner_never_picks_a_seed_that_is_out_of_season(self):
+        seeds = self.tag(lambda seeds: {seed: [5] for seed in seeds[:-1]} | {seeds[-1]: [11]})        # 마지막 시드만 11월에 맞는다
+        code, text, _prompts = self.run_and_capture()
+        self.assertEqual(code, 0, text)
+        self.assertEqual(self.history()[-1]["topic"], seeds[-1])
+        self.assertEqual(self.history()[-1]["topic_source"], "seed")
+
+    def test_a_manual_topic_is_not_filtered_and_gets_no_note(self):
+        self.tag(lambda seeds: {seeds[0]: [5]})
+        code, text, prompts = self.run_and_capture(extra=("--topic", self.SPRING))
+        self.assertEqual(code, 0, text)
+        self.assertEqual(self.history()[-1]["topic"], self.SPRING)
+        self.assertEqual(self.history()[-1]["topic_source"], "override")
+        self.assertTrue(prompts)
+        self.assertFalse([p for p in prompts if "[작성 시점]" in p])
 
 
 if __name__ == "__main__":
