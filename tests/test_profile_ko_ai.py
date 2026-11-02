@@ -309,7 +309,7 @@ class StructureTest(unittest.TestCase):
     def test_the_guardrail_structure_is_the_korean_practical_profile_s(self):
         """banned_*·body_*·leak_*·상담 구절 면제 구조를 그대로 가져왔다: 같은 필드를 갖고 길이·구조·라벨·유사도·쿨다운이 같다. 다른 것은 의도한 것뿐이다."""
         self.assertLessEqual(set(BASE), set(PROFILE))
-        self.assertEqual(set(PROFILE) - set(BASE), {"_seed_mix", "topic_expand_prompt"})
+        self.assertEqual(set(PROFILE) - set(BASE), {"_seed_mix", "topic_expand_prompt", "seed_months"})
         for key in ("max_attempts", "length", "title", "structure", "labels", "allow_links", "similarity", "topic_cooldown_days", "body_safe_veto_patterns"):
             self.assertEqual(PROFILE[key], BASE[key], key)
         self.assertIs(PROFILE["allow_links"], False)

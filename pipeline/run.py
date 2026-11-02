@@ -57,7 +57,7 @@ from pipeline.registry import (PACKAGE_PLATFORMS, PLATFORMS, ROOT, RegistryError
                                load_registry, merged_blog, missing_secret_roles, resolve_secrets, validate_registry)
 from pipeline.state import KST, StateError, entry_titles, other_blog_titles, read_json_list, write_json_atomic
 from pipeline.stubs import stub_llm
-from pipeline.topics import clean_topic, pick_topic
+from pipeline.topics import clean_topic, pick_topic, season_note
 
 EXIT_OK, EXIT_INFRA, EXIT_CONFIG = 0, 1, 2
 HISTORY_KEEP = 200
@@ -120,11 +120,13 @@ def load_prompt_template(root, blog):
     return match.group(1).strip()
 
 
-def build_prompt(template, topic, profile, feedback=None):
+def build_prompt(template, topic, profile, feedback=None, today=None):
     prompt = template.replace("{topic}", topic)
     extra = profile.get("prompt_extra") or []
     if extra:
         prompt += "\n\n[추가 규칙]\n" + "\n".join(f"- {line}" for line in extra)
+    if today is not None:     # 지금 시기(계절·명절)에 맞지 않는 이야기를 쓰지 않게(이슈 #92). 날짜를 주지 않으면 예전과 글자 하나 다르지 않다
+        prompt += "\n\n" + season_note(profile, today)
     if feedback:
         prompt += ("\n\n[이전 시도에서 고쳐야 할 점]\n" + "\n".join(f"- {r}" for r in feedback)
                    + "\n위 문제를 모두 고쳐 처음부터 다시 작성한다.")
@@ -787,7 +789,7 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
     for attempt in range(1, int(profile.get("max_attempts", 3)) + 1):
         attempts = attempt
         try:
-            raw, model = llm(build_prompt(template, topic, profile, feedback))
+            raw, model = llm(build_prompt(template, topic, profile, feedback, today))
         except LLMError as exc:
             out(skip_line("LLM_FAILED", blog=blog["key"], attempt=attempt))
             out(f"[인프라 오류] LLM 호출 실패: {one_line(redact(exc, secret_values))}")

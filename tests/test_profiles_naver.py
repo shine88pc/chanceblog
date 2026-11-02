@@ -85,7 +85,7 @@ GUARDRAIL_KEYS = ("banned_patterns", "banned_topic_patterns", "body_banned_patte
 # 채널마다 시드가 닿는 위험 영역의 안전 문장(프롬프트 파일 규칙 8 과 프로필 prompt_extra 가 같은 문장을 가진다) — 게이트는 이런 안내의 빠짐을 못 잡으므로 문장 자체를 못박는다
 NAVER_SAFETY = ("청소 도구·수납함·가전", "제품 설명서를 먼저 확인하라고", "해마다 조금씩 다를 수 있다고", "세제를 섞어 쓰지 말고 제품 설명서의 사용법과 환기 안내를 따르라고",
                 "보관 기간이나 온도를 숫자로 단정하지 않고 포장에 적힌 표시와 제조사 안내를 확인하라고", "여권 유효기간·입국 조건·전압처럼 나라마다 다른 사실은 단정하지 않고 공식 안내에서 확인하라고")
-CHANGED_KEYS = {"_doc", "_seed_mix", "name", "topic_expand_prompt", "prompt_extra", "disclosure_html", "seed_topics"}
+CHANGED_KEYS = {"_doc", "_seed_mix", "name", "topic_expand_prompt", "prompt_extra", "disclosure_html", "seed_topics", "seed_months"}
 
 
 def profile_of(name):
@@ -218,14 +218,20 @@ class SeedTest(unittest.TestCase):
                 self.assertTrue(topics._acceptable(seed, profile_of(name), [], datetime.date(2026, 10, 30), existing + others), seed)
 
     def test_the_picker_chooses_only_from_these_seeds_and_covers_all_of_them(self):
+        """고르는 날(2026-10-30)에 시기가 맞는 시드는 모두 나온다. 시기를 타는 시드(seed_months·계절 낱말, 이슈 #92)는 그 철에만 나오므로
+        열두 달을 통틀어서는 모든 시드가 어느 달엔가 나온다."""
         for name in CHANNELS:
             profile = profile_of(name)
+            day = datetime.date(2026, 10, 30)
             seen = set()
             for number in range(400):
-                topic, source = topics.pick_topic(profile, [], datetime.date(2026, 10, 30), [], random.Random(number))
+                topic, source = topics.pick_topic(profile, [], day, [], random.Random(number))
                 self.assertEqual(source, "seed")
                 seen.add(topic)
-            self.assertEqual(seen, set(profile["seed_topics"]), name)
+            self.assertEqual(seen, {seed for seed in profile["seed_topics"] if topics.season_fits(seed, profile, day)}, name)
+            reachable = {seed for month in range(1, 13) for seed in profile["seed_topics"]
+                         if topics.season_fits(seed, profile, datetime.date(2026, month, 15))}
+            self.assertEqual(reachable, set(profile["seed_topics"]), name)
 
     def test_the_seeds_differ_from_the_korean_blogs_seeds_by_angle_not_only_by_wording(self):
         """네이버는 '계절·여행·절약 습관' 각도다 — 한글 Blogger 의 집 정리 낱말 묶음과 겹치는 시드가 거의 없다."""
