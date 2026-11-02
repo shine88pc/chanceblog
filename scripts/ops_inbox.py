@@ -19,6 +19,8 @@
                             없으면 아무 일도 하지 않고 출력도 그대로다. 알림이 실패해도 코멘트·이슈·종료 코드는 바뀌지 않는다
 토큰이 없으면(로컬) 읽기 전용으로 마크다운만 출력한다(인증 없는 공개 API 는 시간당 60회 제한). 열린 이슈 목록(워치독 알림용)은 읽지만 모음 이슈는 읽지도 쓰지도 않는다.
 
+Blogger 초안 게시 확인: 최근 초안함에 올린 기록이 있는 Blogger 블로그는 블로그 공개 피드(<블로그 주소>feeds/posts/summary?alt=json)를 읽어, 운영자가 이미 게시한 글을
+'게시 대기'에서 뺀다(로그인·시크릿 없이 공개 주소만 읽는다). 피드를 읽지 못하면 그 블로그의 '게시 대기'는 새로 알리지 않고 '조회 실패' 항목으로 남긴다.
 한 소스(이슈·PR·실행 기록·주석·이력 파일)를 읽지 못해도 멈추지 않고 '조회 실패' 항목으로 남긴 뒤 계속한다.
 스크립트 자체의 버그(예상 밖 예외)는 그대로 올려 실행을 빨갛게 한다.
 종료 코드: 0 정상(조회 일부 실패 포함) / 1 이슈·코멘트 쓰기 실패 / 2 설정 오류
@@ -61,6 +63,11 @@ MAX_LABEL_CREATES = 10   # 초안 모델 라벨을 한 번의 점검에서 새�
 MAX_JOBS_PER_RUN = 6
 MAX_READ_SECONDS = 300    # 읽기에 쓰는 시간 상한(잡 제한 10분 안에 쓰기까지 끝내려고). 호출 하나는 20초에서 끊긴다
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+FEED_TIMEOUT_SECONDS = 15      # Blogger 공개 피드 한 번을 읽는 데 기다리는 최대 시간
+FEED_MAX_RESULTS = 500         # 피드가 한 번에 주는 최대 글 수(최신순 — 최근 초안은 이 안에 있다)
+FEED_MAX_BYTES = 4000000       # 피드 응답은 이 크기까지만 읽는다
+_BLOGSPOT_URL_RE = re.compile(r"^https://[a-z0-9][a-z0-9-]{0,62}\.blogspot\.com/?$")     # 레지스트리의 블로그 주소가 이 모양일 때만 피드를 읽는다
+_FEED_POST_ID_RE = re.compile(r"\.post-(\d+)$")                                       # tag:blogger.com,1999:blog-<블로그 번호>.post-<글 번호>
 
 
 class ApiError(Exception):
@@ -196,6 +203,64 @@ def read_histories(root, blogs, failures):
             bad.append(f"{rel}: {_read_error(exc)}")
     if bad:
         failures.append(("history", "; ".join(bad)))
+    return out
+
+
+def parse_feed_post_ids(text):
+    """Blogger 공개 피드(alt=json)에 있는 글 번호 집합. 피드 모양이 아니면 ValueError(부른 쪽이 '읽지 못함'으로 처리한다). 공개 글이 하나도 없으면 빈 집합."""
+    data = json.loads(text)
+    feed = data.get("feed") if isinstance(data, dict) else None
+    if not isinstance(feed, dict):
+        raise ValueError("Blogger 피드 모양이 아닙니다")
+    entries = feed.get("entry")
+    if entries is None:
+        return frozenset()
+    if not isinstance(entries, list):
+        raise ValueError("피드의 entry 가 목록이 아닙니다")
+    ids = set()
+    for entry in entries:
+        raw = (entry.get("id") or {}).get("$t") if isinstance(entry, dict) and isinstance(entry.get("id"), dict) else None
+        match = _FEED_POST_ID_RE.search(str(raw or ""))
+        if match:
+            ids.add(match.group(1))
+    return frozenset(ids)
+
+
+def fetch_feed_post_ids(blog_url, opener=urllib.request.urlopen):
+    """블로그 공개 주소의 피드를 읽어 게시된 글 번호 집합을 돌려준다(로그인·시크릿 없음). 실패는 예외로 올린다."""
+    base = blog_url if blog_url.endswith("/") else blog_url + "/"
+    request = urllib.request.Request(f"{base}feeds/posts/summary?alt=json&max-results={FEED_MAX_RESULTS}",
+                                     headers={"User-Agent": "chanceblog-ops-inbox", "Accept": "application/json"})
+    with opener(request, timeout=FEED_TIMEOUT_SECONDS) as response:
+        raw = response.read(FEED_MAX_BYTES + 1)
+    if len(raw) > FEED_MAX_BYTES:
+        raise ValueError("피드 응답이 너무 큽니다")
+    return parse_feed_post_ids(raw.decode("utf-8", errors="replace"))
+
+
+def fetch_published(blogs, histories, now, failures, fetch=fetch_feed_post_ids):
+    """정지가 아닌 Blogger 블로그 중 최근 초안함 업로드 기록이 있는 곳의 공개 피드를 읽어 게시된 글 번호를 모은다.
+    돌려주는 값: {블로그 key: 글 번호 집합 | None(읽지 못함)}. 확인할 초안이 없는 블로그는 읽지 않는다(키 없음).
+    읽지 못한 블로그는 한 줄로 모아 failures 에 ('published', 사유)로 남긴다 — 점검은 멈추지 않는다."""
+    out, bad = {}, []
+    for blog in blogs:
+        key = blog.get("key") if isinstance(blog, dict) else None
+        if not isinstance(key, str) or str(blog.get("platform") or "") != "blogger" or str(blog.get("mode") or "draft") == "off":
+            continue
+        if not inbox.history_drafts(histories.get(key) if isinstance(histories, dict) else None, now):
+            continue
+        url = str(blog.get("url") or "")
+        if not _BLOGSPOT_URL_RE.fullmatch(url):
+            out[key] = None
+            bad.append(f"{key}: 레지스트리의 블로그 주소가 https://<이름>.blogspot.com 모양이 아닙니다")
+            continue
+        try:
+            out[key] = fetch(url)
+        except Exception as exc:  # noqa: BLE001 - 네트워크·형식 문제는 어떤 것이든 '읽지 못함'으로 남기고 점검은 계속한다
+            out[key] = None
+            bad.append(f"{key}: {type(exc).__name__} {inbox.fold(exc, 80)}".strip())
+    if bad:
+        failures.append(("published", "; ".join(bad)))
     return out
 
 
@@ -634,7 +699,7 @@ def _write_summary(environ, text, out):
         out(f"[참고] 실행 요약 쓰기 실패(점검 결과에는 영향 없음): {inbox.fold(exc, 150)}")
 
 
-def run(environ=None, client=None, now=None, root=ROOT, out=print, sleep=time.sleep):
+def run(environ=None, client=None, now=None, root=ROOT, out=print, sleep=time.sleep, feed_fetcher=None):
     environ = os.environ if environ is None else environ
     repo = (environ.get("GITHUB_REPOSITORY") or "").strip()
     if not inbox.is_valid_repo(repo):
@@ -658,6 +723,8 @@ def run(environ=None, client=None, now=None, root=ROOT, out=print, sleep=time.sl
     failures, notes = [], []
     blogs = read_blogs(root, failures)
     histories = read_histories(root, blogs, failures)
+    # 게시 확인(블로그 공개 피드). feed_fetcher 가 없으면(시험·옛 호출) 확인하지 않고 이력만 센 대략치로 둔다 — main() 이 진짜 읽기 함수를 넘긴다
+    published = fetch_published(blogs, histories, now, failures, feed_fetcher) if feed_fetcher is not None else None
     issues = fetch_issues(client, failures)
     pulls = fetch_pulls(client, failures, notes, sleep)
     drafts = fetch_drafts(client, failures, notes)
@@ -669,7 +736,7 @@ def run(environ=None, client=None, now=None, root=ROOT, out=print, sleep=time.sl
     snapshot = inbox.Snapshot(
         now=now, repo=repo, issues=issues, pulls=pulls, runs=runs, approvals=approvals, annotations=annotations,
         paused=inbox.is_truthy(environ.get("PIPELINE_PAUSE")), blogs=blogs, histories=histories, failures=failures, notes=notes,
-        workflow_names=names, drafts=drafts)
+        workflow_names=names, drafts=drafts, published=published)
     items = inbox.build_items(snapshot)
     try:
         board = inbox.draft_board(snapshot)
@@ -710,7 +777,7 @@ def run(environ=None, client=None, now=None, root=ROOT, out=print, sleep=time.sl
 
 def main():
     safe_output()
-    return run()
+    return run(feed_fetcher=fetch_feed_post_ids)
 
 
 if __name__ == "__main__":
