@@ -12,7 +12,8 @@ GitHub 읽기·쓰기와 이슈 관리는 scripts/ops_inbox.py 가 맡는다. �
 초안 현황(2026-10-27, 작업요청서 5 PR-B): 채널별로 발행을 기다리는 초안을 한 표로 보여 준다. 초안 모델 — 초안 1건 = 이슈 1개 또는 PR 1개,
 라벨 `초안` + `채널:<채널 라벨>`(채널 라벨은 레지스트리 channel.label), 쓰지 않을 초안은 라벨 `폐기` 또는 닫기. 열린 초안(이슈·PR)이 새로 생기면
 action(코멘트 알림), 3일 넘게 열려 있으면 check. 초안 PR 은 열린 PR 규칙이 이미 action 으로 올린 것(병합하면 됩니다·충돌·검사 실패)이면 그 줄 하나로,
-아니면(검사가 안 돈 PR 등) 초안 항목 하나로만 보인다(같은 PR 이 두 줄이 되지 않게). Blogger 는 이력의 draft_uploaded 를 센 대략치다(공개 여부는 Blogger 쪽 사실).
+아니면(검사가 안 돈 PR 등) 초안 항목 하나로만 보인다(같은 PR 이 두 줄이 되지 않게). Blogger 는 이력의 draft_uploaded 를 센 값이다 — Snapshot.published(scripts/ops_inbox.py 가
+블로그 공개 피드로 확인한 게시된 글 번호)가 있으면 이미 게시한 글은 빼고(이슈 #89), 없으면 공개 여부를 몰라 대략치다.
 표는 항목(Item)이 아니라 render() 의 board 인자로 본문 위쪽에 들어간다.
 
 보안: 외부에서 온 텍스트(PR 제목·주석 문구·이슈 제목·이력 사유)는 ext() 로 한 줄로 접고, 비밀 값 모양을 가리고, '@'·'<'·'&' 를
@@ -52,7 +53,7 @@ RUN_WINDOW_HOURS = 48          # 워크플로 실행은 최근 48시간만 본�
 RUNS_PER_FILE = 10             # 워크플로 파일마다 최근 10건
 ANNOTATION_RUNS_PER_FILE = 3   # 경고(주석)는 파일마다 최근 성공 실행 3건까지만 읽는다(API 호출 절약)
 PR_STALE_DAYS = 3              # 이보다 오래 열린 PR 은 수준을 check 이상으로 올린다
-DRAFT_WAIT_DAYS = 7            # Blogger 초안함에 올라간 글은 7일 안의 것만 '게시 대기'로 센다
+DRAFT_WAIT_DAYS = 7            # Blogger 초안함에 올라간 글은 7일 안의 것만 '게시 대기'로 센다(공개 피드로 이미 게시한 글을 빼고, 올린 직후 DRAFT_REMIND_AFTER_HOURS 안의 것도 뺀다)
 APPROVAL_ITEMS_MAX = 5
 WARNING_MESSAGES_MAX = 3       # 워크플로 하나의 경고 문구는 서로 다른 것 3개까지만 나열한다
 BODY_LIMIT = 58000             # 보이는 본문은 이 길이까지만. 뒤에 붙는 표식(알린 id 80개 × 80자 + 구분자 ≈ 6,530자)을 더해도 GitHub 이슈 본문 한도(65,536자) 안이다
@@ -72,7 +73,8 @@ DRAFT_LABEL_SPECS = (       # (라벨 이름, 색, 설명)
 )
 LABEL_NAME_MAX = 50            # GitHub 라벨 이름 길이 한도
 DRAFT_STALE_DAYS = 3           # 이보다 오래 열려 있는 초안은 action 에서 check 로 내린다(PR_STALE_DAYS 와 같은 값)
-DRAFT_WINDOW_DAYS = 14         # 초안 현황의 Blogger 칸은 초안함 업로드 기록 중 이 기간 안의 것만 센다(게시 여부는 Blogger 쪽 사실이라 모른다)
+DRAFT_WINDOW_DAYS = 14         # 초안 현황의 Blogger 칸은 초안함 업로드 기록 중 이 기간 안의 것만 센다(게시 여부는 scripts/ops_inbox.py 가 블로그 공개 피드로 확인해 넘긴다 — 못 읽으면 대략치)
+DRAFT_REMIND_AFTER_HOURS = 6   # 게시 확인을 마친 Blogger 초안은 올린 지 이 시간이 지나도 공개 글에 안 보일 때만 '게시 대기' action 으로 센다 — 올린 직후에는 러너가 이미 텔레그램으로 '발행 대기'를 알렸다
 BOARD_ROWS_MAX = 12            # 초안 현황 표의 최대 줄 수(레지스트리 채널 + 레지스트리에 없는 채널의 초안)
 BOARD_TITLE_MAX = 24           # 표 안의 글 제목 길이
 DRAFT_TITLE_MAX = 80           # 항목 제목 안의 글 제목 길이
@@ -92,10 +94,11 @@ SOURCE_LABELS = {
     "issues": "열린 이슈 목록", "pulls": "열린 PR 목록", "pull_details": "PR 검사·병합 상태",
     "runs": "워크플로 실행 기록", "approvals": "승인 대기 실행", "annotations": "실행 경고(주석)",
     "history": "블로그 이력 파일", "registry": "블로그 레지스트리", "drafts": "열린 초안(이슈·PR) 목록",
+    "published": "Blogger 게시 확인(블로그 공개 피드)",
 }
 SOURCE_PREFIXES = {
     "issues": ("watchdog:",), "pulls": ("pr:",), "pull_details": ("pr:",), "runs": ("run:",),
-    "approvals": ("approve:",), "history": ("blogger:",), "registry": ("blogger:",), "drafts": ("draft:",),
+    "approvals": ("approve:",), "history": ("blogger:",), "registry": ("blogger:",), "drafts": ("draft:",), "published": ("blogger:",),
 }
 
 # 플랫폼(GitHub)이 거의 모든 실행에 붙이는 안내성 주석 — 우리 스크립트가 남긴 것이 아니라서 check 로 올리지 않고 '참고' 한 줄로 합친다.
@@ -259,6 +262,7 @@ class Snapshot:
     notes: list = field(default_factory=list)               # [(id, 문구)] 참고 안내(예: 일부만 확인함)
     workflow_names: dict = field(default_factory=dict)      # 워크플로 파일 이름 → 그 파일의 최상위 name(체크아웃한 파일에서 읽음). 실행(run)의 name 은 run-name 이라 쓰지 않는다
     drafts: list = field(default_factory=list)              # normalize_draft() 가 만든 열린 `초안` 이슈·PR(라벨 초안이 붙은 것). 읽지 못했으면 failures 에 ('drafts', 사유)
+    published: Optional[dict] = None                        # Blogger 블로그 key → 공개 피드에서 읽은 게시된 글 번호 집합(None 이면 읽지 못함). dict 가 아니면 이번 점검은 게시 확인을 하지 않은 것(이력만 센 대략치)
 
 
 # ----------------------------------------------------------------------------
@@ -668,25 +672,68 @@ def _secrets_item(blog, key, name, history, repo_url):
         hint="위 이름으로 저장소 시크릿을 등록하세요(값은 채팅·이슈에 적지 마세요). 발급 절차는 HANDLER.md §10.")
 
 
-def _drafts_item(key, name, history, now):
-    waiting = []
-    for entry in history:
+def _published_state(published, key):
+    """('unchecked'|'ok'|'failed', 게시된 글 번호 집합). scripts/ops_inbox.py 가 블로그 공개 피드로 게시 여부를 확인해 넘긴 값(Snapshot.published)을 읽는다.
+    published 가 dict 가 아니면 이번 점검은 확인하지 않은 것이다('unchecked' — 이력만 센 대략치). dict 에 키가 없으면 확인할 초안이 없어 읽지 않은 것이라
+    'ok'(빈 집합), 값이 None 이거나 읽을 수 없는 모양이면 피드를 읽지 못한 것이다('failed')."""
+    if not isinstance(published, dict):
+        return "unchecked", frozenset()
+    if key not in published:
+        return "ok", frozenset()
+    ids = published[key]
+    if ids is None or isinstance(ids, (str, bytes)):
+        return "failed", frozenset()
+    try:
+        return "ok", frozenset(str(i).strip() for i in ids if isinstance(i, (str, int)) and not isinstance(i, bool))
+    except TypeError:
+        return "failed", frozenset()
+
+
+def _waiting_entries(history, now, days, published_ids=frozenset()):
+    """Blogger 이력의 draft_uploaded 중 days 일 안의 것 → [(시각, 정밀도)]. 블로그 공개 피드에서 이미 보이는 글(post_id 가 published_ids 에 있음)은 뺀다.
+    글 번호가 없는 항목은 게시 여부를 알 수 없어 센다. 시각을 읽을 수 없는 항목은 세지 않는다."""
+    out = []
+    for entry in history if isinstance(history, list) else []:
         moment = entry_moment(entry) if isinstance(entry, dict) and entry.get("status") == "draft_uploaded" else None
-        if moment and now - moment[0] <= timedelta(days=DRAFT_WAIT_DAYS):
-            waiting.append(moment[0])
+        if not moment or now - moment[0] > timedelta(days=days):
+            continue
+        post_id = str(entry.get("post_id") or "").strip()
+        if post_id and post_id in published_ids:
+            continue
+        out.append(moment)
+    return out
+
+
+def _drafts_item(key, name, history, now, published=None):
+    state, published_ids = _published_state(published, key)
+    if state == "failed":
+        # 공개 피드를 읽지 못했다 — 게시했는지 모르는 채로 '게시 대기'를 새로 알리면 이미 게시한 글을 또 알릴 수 있다.
+        # 조회 실패 항목이 대신 알리고, plan_notice 가 이전 blogger: id 를 이어 가서 복구 뒤에도 같은 항목이 새 알림이 되지 않는다.
+        return None
+    waiting = [moment[0] for moment in _waiting_entries(history, now, DRAFT_WAIT_DAYS, published_ids)]
+    if state == "ok":
+        # 올린 직후에는 러너가 이미 텔레그램으로 '발행 대기'를 알렸다. 확인을 마친 값은 그 알림을 되풀이하지 않도록
+        # DRAFT_REMIND_AFTER_HOURS 가 지나도 아직 공개 글에 안 보이는 것만 센다(운영자가 그 사이에 게시했으면 한 번도 되풀이하지 않는다).
+        waiting = [moment for moment in waiting if now - moment >= timedelta(hours=DRAFT_REMIND_AFTER_HOURS)]
     if not waiting:
         return None
+    if state == "ok":
+        detail = (f"Blogger 초안함에 올린 지 {DRAFT_REMIND_AFTER_HOURS}시간이 넘었는데 블로그 공개 주소(피드)에서 아직 보이지 않는 글이 최근 "
+                  f"{DRAFT_WAIT_DAYS}일 안에 {len(waiting)}건 있습니다. 이미 게시했다면 공개 주소에 나타나는 대로 이 항목은 저절로 사라집니다.")
+    else:
+        detail = (f"Blogger 초안함에 올라간 글이 최근 {DRAFT_WAIT_DAYS}일 안에 {len(waiting)}건 있습니다. 이력으로는 게시했는지 알 수 없어 "
+                  f"{DRAFT_WAIT_DAYS}일이 지나면 이 항목은 저절로 사라집니다.")
     return Item(
         id=f"blogger:{key}:drafts:{max(waiting).astimezone(KST).strftime('%Y%m%d%H%M')}", level=LEVEL_ACTION,
         title=f"{name}: 초안 {len(waiting)}건 게시 대기", since=min(waiting), url="https://www.blogger.com/",
-        detail=(f"Blogger 초안함에 올라간 글이 최근 {DRAFT_WAIT_DAYS}일 안에 {len(waiting)}건 있습니다. 이력으로는 게시했는지 알 수 없어 "
-                f"{DRAFT_WAIT_DAYS}일이 지나면 이 항목은 저절로 사라집니다."),
+        detail=detail,
         hint="Blogger 관리 화면의 '글'에서 초안을 확인하고 게시하세요.")
 
 
-def blog_items(blogs, histories, now, repo_url):
+def blog_items(blogs, histories, now, repo_url, published=None):
     """mode=off 는 참고(정지 이유 포함). auto·draft 블로그는 ① 최신 게시 단계 이력이 generated_unpublished 이고 사유에 [SECRETS] 가 있으면
-    시크릿 등록 action, ② Blogger 초안함 업로드(draft_uploaded) 가 최근 7일 안에 있으면 게시 대기 action.
+    시크릿 등록 action, ② Blogger 초안함 업로드(draft_uploaded) 가 최근 7일 안에 있고 아직 게시되지 않았으면 게시 대기 action(published 로 게시 여부를 확인한 점검에서는
+    이미 게시한 글과 올린 지 DRAFT_REMIND_AFTER_HOURS 가 안 된 글을 빼고, 공개 피드를 못 읽은 블로그는 새로 만들지 않는다).
     '최신 게시 단계 이력'은 posted·draft·generated_unpublished·publish_failed·draft_uploaded 중 가장 나중 항목이다
     (rejected·skipped 같은 게시 단계에 가지 못한 실행은 시크릿 상태를 알려 주지 않으므로 건너뛴다)."""
     items = []
@@ -704,7 +751,7 @@ def blog_items(blogs, histories, now, repo_url):
             continue
         history = histories.get(key)
         history = history if isinstance(history, list) else []
-        for item in (_secrets_item(blog, key, name, history, repo_url), _drafts_item(key, name, history, now)):
+        for item in (_secrets_item(blog, key, name, history, repo_url), _drafts_item(key, name, history, now, published)):
             if item is not None:
                 items.append(item)
     return items
@@ -911,15 +958,10 @@ def draft_filter_url(repo_url, label=None, pulls=False):
     return f"{repo_url}/{'pulls' if pulls else 'issues'}?q={urllib.parse.quote_plus(query)}"
 
 
-def history_drafts(history, now):
+def history_drafts(history, now, published_ids=frozenset()):
     """Blogger 이력의 draft_uploaded 중 DRAFT_WINDOW_DAYS 일 안의 것 → [(시각, 정밀도)]. 시각을 읽을 수 없는 항목은 세지 않는다.
-    이력만으로는 사람이 이미 게시했는지 알 수 없다 — 대략치다."""
-    out = []
-    for entry in history if isinstance(history, list) else []:
-        moment = entry_moment(entry) if isinstance(entry, dict) and entry.get("status") == "draft_uploaded" else None
-        if moment and now - moment[0] <= timedelta(days=DRAFT_WINDOW_DAYS):
-            out.append(moment)
-    return out
+    이력만으로는 사람이 이미 게시했는지 알 수 없다 — published_ids(블로그 공개 피드에서 읽은 글 번호)가 없으면 대략치다. 있으면 그 글은 뺀다."""
+    return _waiting_entries(history, now, DRAFT_WINDOW_DAYS, published_ids)
 
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
@@ -932,6 +974,8 @@ DRAFTS_CAP_NOTE_ID = "drafts_cap"     # scripts/ops_inbox.py 가 열린 초안�
 BOARD_NOTE_CAP = "열린 초안이 읽는 상한을 넘을 수 있어 `+` 가 붙은 칸은 그 이상일 수 있고, '가장 오래된'도 읽은 범위 안의 값입니다."
 BOARD_NOTE_BLOGGER = (f"Blogger 는 초안함에 올린 기록(최근 {DRAFT_WINDOW_DAYS}일)을 센 대략치입니다 — 이미 게시했는지는 Blogger 쪽 사실이라 여기서는 알 수 없습니다. "
                       "확인·게시: Blogger 대시보드 → 글 → 초안(블로그 ID 가 시크릿이라 링크는 싣지 않습니다).")
+BOARD_NOTE_BLOGGER_CHECKED = (f"Blogger 칸은 초안함에 올린 기록(최근 {DRAFT_WINDOW_DAYS}일) 가운데 블로그 공개 주소(피드)에서 아직 보이지 않는 글만 셉니다 — 이미 게시한 글은 뺍니다. "
+                              "피드를 읽지 못한 채널은 '조회 실패'로 표시합니다. 확인·게시: Blogger 대시보드 → 글 → 초안(블로그 ID 가 시크릿이라 링크는 싣지 않습니다).")
 
 
 def _cell(text):
@@ -1024,10 +1068,12 @@ def board_rows(snap, now=None):
         if str(blog.get("platform") or "") == "blogger" and str(blog.get("mode") or "draft") != "off":
             blogger = True           # 대략치가 나올 수 있는(정지가 아닌) Blogger 채널이 있을 때만 표 아래에 Blogger 안내 줄을 붙인다
             history = snap.histories.get(blog.get("key")) if isinstance(snap.histories, dict) else None
-            if isinstance(history, list):
-                candidates += [(moment[0], 0, _last_text(moment), True) for moment in history_drafts(history, now)]
+            state, published_ids = _published_state(snap.published, blog.get("key"))
+            if not isinstance(history, list) or state == "failed":
+                failed = True        # 이력을 읽지 못했거나 공개 피드로 게시 여부를 확인하지 못했다 — 모르는 값을 0 으로 보이지 않게 '조회 실패'
             else:
-                failed = True
+                approximate = state == "unchecked"      # 게시 확인을 마친 값은 대략치가 아니다
+                candidates += [(moment[0], 0, _last_text(moment), approximate) for moment in history_drafts(history, now, published_ids)]
         rows.append(_row_cells(_cell(ext(label, 30)), blog, candidates, now, failed, capped and (github or bool(mine))))
         if github or mine:
             links += _filter_links(label, repo_url, blog.get("publish_flow") == "pr" or any(draft["kind"] == "pull" for draft in mine))
@@ -1064,7 +1110,7 @@ def draft_board(snap):
     if _drafts_capped(snap):
         lines.append(f"- {BOARD_NOTE_CAP}")
     if blogger:
-        lines.append(f"- {BOARD_NOTE_BLOGGER}")
+        lines.append(f"- {BOARD_NOTE_BLOGGER_CHECKED if isinstance(snap.published, dict) else BOARD_NOTE_BLOGGER}")
     shortcut = [("대기 초안 전체(이슈)", draft_filter_url(repo_url)), ("대기 초안 전체(PR)", draft_filter_url(repo_url, pulls=True))] + links
     parts = [f"[{text}]({url})" for text, url in shortcut if safe_url(url)]
     lines.append("- 휴대폰에서 거르기: " + " · ".join(parts))
@@ -1115,7 +1161,7 @@ def build_items(snap):
     items = (watchdog_items(snap.issues, repo_url) + pulls
              + run_items(snap.runs, snap.annotations, now, repo_url, names=snap.workflow_names)
              + approval_items(snap.approvals, repo_url, names=snap.workflow_names)
-             + pause_items(snap.paused, repo_url) + blog_items(snap.blogs, snap.histories, now, repo_url)
+             + pause_items(snap.paused, repo_url) + blog_items(snap.blogs, snap.histories, now, repo_url, snap.published)
              + stats_items(snap.blogs, snap.histories, now) + draft_items(snap.drafts, now, repo_url, acting_pulls)
              + failure_items(snap.failures, repo_url) + note_items(snap.notes))
     unique, seen = [], set()

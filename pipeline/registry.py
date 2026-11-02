@@ -358,6 +358,19 @@ def validate_profile(profile):
             raw, word = first_match(profile.get("banned_topic_patterns"), seed)
             if raw is not None:
                 errors.append(f"프로필 seed_topics의 {seed!r}가 banned_topic_patterns에 걸립니다('{word}').")
+    months = profile.get("seed_months")
+    if months is not None:        # 선택: 시기를 타는 시드의 달 목록(없는 시드는 사철 주제). 키는 seed_topics 에 있는 글 그대로여야 한다
+        if not isinstance(months, dict):
+            errors.append("프로필 seed_months는 {시드 주제: [달, …]} 객체여야 합니다.")
+        else:
+            known = {seed for seed in seeds if isinstance(seed, str)} if isinstance(seeds, list) else set()
+            for seed, listed in months.items():
+                if seed not in known:
+                    errors.append(f"프로필 seed_months의 {seed!r}가 seed_topics에 없습니다(글이 한 글자라도 다르면 시드에 적용되지 않습니다).")
+                if not (isinstance(listed, list) and listed
+                        and all(isinstance(month, int) and not isinstance(month, bool) and 1 <= month <= 12 for month in listed)
+                        and len(set(listed)) == len(listed)):
+                    errors.append(f"프로필 seed_months[{seed!r}]는 1~12 사이 정수가 겹치지 않게 든 비어 있지 않은 배열이어야 합니다.")
     if not isinstance(profile.get("topic_cooldown_days"), int) or profile["topic_cooldown_days"] < 0:
         errors.append("프로필 topic_cooldown_days는 0 이상 정수여야 합니다.")
     return errors
