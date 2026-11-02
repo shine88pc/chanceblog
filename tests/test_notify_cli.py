@@ -628,10 +628,10 @@ class ParserTest(unittest.TestCase):
     def test_no_option_accepts_external_values(self):
         parser = notify.build_parser()
         subparsers = [action for action in parser._actions if action.dest == "event"][0].choices
-        self.assertEqual(sorted(subparsers), ["chance-published", "status", "test"])
+        self.assertEqual(sorted(subparsers), ["chance-published", "main-check-failed", "status", "test"])
         options = {name: sorted(opt for action in sub._actions for opt in action.option_strings if opt not in ("-h", "--help"))
                    for name, sub in subparsers.items()}
-        self.assertEqual(options, {"chance-published": ["--commit"], "status": [], "test": []})
+        self.assertEqual(options, {"chance-published": ["--commit"], "main-check-failed": [], "status": [], "test": []})
 
     def test_usage_errors_exit_two(self):
         for argv in ([], ["nope"], ["test", "--commit", "HEAD"], ["status", "--token", "x"], ["chance-published", "--title", "x"]):

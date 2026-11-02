@@ -135,7 +135,7 @@ class SecurityTest(unittest.TestCase):
         for platform in BOTH:
             workflow = load(f"{platform}.yml")
             uses = {step["uses"] for job in workflow["jobs"].values() for step in job.get("steps", []) if "uses" in step}
-            self.assertEqual(uses, {"actions/checkout@v4", "actions/setup-python@v5"}, platform)
+            self.assertEqual(uses, {"actions/checkout@v6", "actions/setup-python@v6"}, platform)
 
     def test_the_kill_switch_and_practice_flag_are_wired_like_the_blogger_workflow(self):
         """킬 스위치는 Blogger 공용 워크플로(blogger.yml)와 같은 글자이고, 연습 실행 값은 Blogger 채널 래퍼를 거친 값과 모든 이벤트·입력에서 같다

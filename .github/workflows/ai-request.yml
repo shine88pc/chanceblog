@@ -34,12 +34,12 @@ jobs:
     timeout-minutes: 5
     steps:
       # 새 요청 파일을 가려내려면 BEFORE 커밋과 다른 브랜치의 끝(origin/*)이 필요하다
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 

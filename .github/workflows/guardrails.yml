@@ -26,11 +26,11 @@ jobs:
       matrix:
         python-version: ['3.10', '3.12']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -56,3 +56,28 @@ jobs:
       - name: 워크플로 정적 분석 (actionlint)
         if: matrix.python-version == '3.12'
         run: actionlint
+
+  # main 에 올라간 변경(직접 push·PR 병합)이 검사에 떨어지면 곧바로 휴대폰(텔레그램)으로 알린다(이슈 #90: 2026-10-31 main 에 직접 올라간 변경이 발행 프로그램을
+  # 망가뜨렸는데 검사 실패는 GitHub 알림으로만 갔다). PR 검사 실패는 병합 전이라 알리지 않는다. 알림은 보조라 이 잡이 실패해도 검사 결과는 그대로다.
+  alert:
+    name: 실패 알림(main 에 올라간 변경만)
+    needs: validate
+    if: ${{ always() && github.event_name == 'push' && needs.validate.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false      # 올라온 커밋의 코드가 텔레그램 시크릿과 함께 도는 잡이라 저장소 토큰을 남기지 않는다
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: 텔레그램 알림(main 검사 실패)
+        continue-on-error: true
+        timeout-minutes: 2
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m pipeline.notify main-check-failed

@@ -22,7 +22,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: GitHub Pages 설정
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
 
       - name: Jekyll 사이트 빌드
         uses: actions/jekyll-build-pages@v1
@@ -31,7 +31,7 @@ jobs:
           destination: ./_site
 
       - name: Pages 산출물 업로드
-        uses: actions/upload-pages-artifact@v4
+        uses: actions/upload-pages-artifact@v5
         with:
           path: ./_site
 
@@ -51,7 +51,7 @@ jobs:
     steps:
       - name: GitHub Pages에 배포
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
 
   # 배포 성공 != 공개 반영. 저장소의 가장 새 글(공개될 것: published: false·미래 날짜 제외)의 공개 주소가 HTTP 200으로
   # 열리는지 확인한다. 공개 CDN은 404도 보관하고(최대 약 18분, 1회 측정) 쿼리 문자열·no-cache 헤더로는 피하지 못하므로,

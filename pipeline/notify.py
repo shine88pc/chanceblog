@@ -21,9 +21,9 @@
   5. 재시도: 429 는 retry_after(최대 10초)만큼 기다려 한 번, 네트워크 오류·5xx 는 한 번. HTML 알림이 400(엔티티 해석 실패)이면 서식 없이 한 번 더,
      버튼이 거부되면(400 BUTTON…) 버튼 없이 한 번 더. 그 밖의 오류(400·401·403·404)는 다시 시도하지 않는다.
 
-명령 줄: python -m pipeline.notify <chance-published [--commit HEAD] | test | status>
-  외부 값(제목·토큰)을 명령 줄 인자로 받지 않는다 — 글은 git 커밋의 파일에서, 토큰은 환경변수에서만 읽는다.
-  종료 코드: 0 정상(건너뜀 포함, chance-published 는 전송이 실패해도 0 — 실패는 ::warning:: 로 드러난다) / 1 test 가 실패 / 2 사용법 오류
+명령 줄: python -m pipeline.notify <chance-published [--commit HEAD] | main-check-failed | test | status>
+  외부 값(제목·토큰)을 명령 줄 인자로 받지 않는다 — 글은 git 커밋의 파일에서, 토큰·커밋·올린 사람·실행 번호는 환경변수에서만 읽는다(main-check-failed 는 Actions 가 주는 값만).
+  종료 코드: 0 정상(건너뜀 포함, chance-published·main-check-failed 는 전송이 실패해도 0 — 실패는 ::warning:: 로 드러난다) / 1 test 가 실패 / 2 사용법 오류
 """
 import argparse
 import html
@@ -77,6 +77,7 @@ ERROR_LINE = "::error::텔레그램 알림 시험이 실패했습니다. 이유�
 
 # 알림 문구의 그림 문자(소스에는 코드 포인트로만 적는다 — 어떤 콘솔·편집기에서도 깨지지 않게)
 OK_MARK, PIN_MARK, MEMO_MARK, WAIT_MARK = (chr(0x2705), chr(0x1F4CC), chr(0x1F4DD), chr(0x23F3))
+ALERT_MARK = chr(0x1F6A8)       # 🚨
 BELL_MARK, SIREN_MARK = chr(0x1F514), chr(0x1F6A8)
 
 # 운영자 요청함(AI 의 요청·운영자의 응답, pipeline/operator_loop.py): 요청 종류와 한국어 라벨, 요청 번호 모양, 글자 수 상한. 사용자 지시 2026-10-28
@@ -559,6 +560,16 @@ class Notifier:
         except Exception as exc:  # noqa: BLE001
             return self._result(False, False, None, INTERNAL_ERROR, type(exc).__name__)
 
+    def notify_main_check_failed(self, sha, actor, run_url=None):
+        """main 에 올라간 변경(직접 push·PR 병합)이 저장소 규칙·시험 검사(guardrails)에 떨어졌다는 즉시 알림 한 통(평문, 이슈 #90).
+        sha·actor 는 Actions 가 주는 값이지만 모양을 확인한 것만 글에 넣고, 버튼은 허용 목록을 통과한 실행 화면 주소만 단다."""
+        try:
+            url = allowed_url(run_url)
+            buttons = ([("실행 열기", url)] if url else []) + [("AI 에게 요청하기", NEW_ISSUE_URL)]      # 요청 양식을 바로 여는 버튼(운영자는 텔레그램에서 한 번에 이어 간다)
+            return self.send_message(format_main_check_failed(sha, actor), buttons=buttons)
+        except Exception as exc:  # noqa: BLE001
+            return self._result(False, False, None, INTERNAL_ERROR, type(exc).__name__)
+
     def notify_test(self, now=None):
         """연결 확인 한 통(평문)."""
         try:
@@ -622,6 +633,18 @@ def format_chance_published(posts, run_info):
     if run_url:
         lines.append(f'실행 기록: <a href="{html.escape(run_url, quote=True)}">열기</a>')
     return "\n".join(lines), buttons
+
+
+_SHA_TEXT_RE = re.compile(r"[0-9a-fA-F]{7,40}")
+_ACTOR_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?(?:\[bot\])?")      # GitHub 로그인(영숫자·하이픈 39자 이하) + 봇 꼬리표
+
+
+def format_main_check_failed(sha, actor):
+    """main 검사 실패 알림 글(평문). 어느 변경(커밋 앞 7자리)을 누가 올렸는지와 무엇을 하면 되는지."""
+    shown_sha = str(sha)[:7] if _SHA_TEXT_RE.fullmatch(str(sha or "")) else "알 수 없음"
+    shown_actor = str(actor) if _ACTOR_RE.fullmatch(str(actor or "")) else "알 수 없음"
+    return (f"{ALERT_MARK} main 검사 실패 — 방금 main 에 올라간 변경({shown_sha}, 올린 사람 {shown_actor})이 저장소 규칙·시험을 통과하지 못했습니다.\n"
+            "Blogger·네이버 발행이 멈췄을 수 있습니다. GitHub 에서 직접 고치지 마시고, AI 에게 [요청]으로 '확인해 달라'고 맡겨 주세요.")
 
 
 def _positive_int(value, name):
@@ -688,6 +711,10 @@ def notify_blogger_result(result_code, title, url=None, blog_label="Blogger", ex
 
 def notify_ops_alert(item_lines, inbox_url, count=None, notifier=None):
     return (notifier or Notifier()).notify_ops_alert(item_lines, inbox_url, count=count)
+
+
+def notify_main_check_failed(sha, actor, run_url=None, notifier=None):
+    return (notifier or Notifier()).notify_main_check_failed(sha, actor, run_url)
 
 
 def notify_test(notifier=None, now=None):
@@ -1009,7 +1036,22 @@ def run_test(notifier, environ, out, now=None):
     return 1
 
 
-USAGE_ERROR_LINE = "사용법 오류: 이 명령은 chance-published [--commit HEAD|커밋 해시]·test·status 만 받습니다(제목·토큰 같은 값은 명령 줄이 아니라 git·환경변수에서만 읽습니다)"
+def run_main_check_failed(notifier, environ, out):
+    """guardrails 의 alert 잡이 부른다. 값은 명령 줄이 아니라 Actions 가 주는 환경변수(GITHUB_SHA·GITHUB_ACTOR·GITHUB_REPOSITORY·GITHUB_RUN_ID)에서만 읽는다.
+    알림은 보조라 보내지 못해도 종료 코드는 0 이다(검사 실패 자체는 앞 단계가 이미 빨갛게 보인다)."""
+    if not notifier.enabled:
+        out(SKIP_LINE)
+        return 0
+    result = notifier.notify_main_check_failed(environ.get("GITHUB_SHA"), environ.get("GITHUB_ACTOR"), _run_info(environ).get("run_url"))
+    if result.sent:
+        out("텔레그램 알림: main 검사 실패를 알렸습니다")
+    else:
+        _say(out, notifier, f"텔레그램 알림: main 검사 실패 알림을 보내지 못했습니다 — {describe(result)}")
+        out(WARNING_LINE)
+    return 0
+
+
+USAGE_ERROR_LINE = "사용법 오류: 이 명령은 chance-published [--commit HEAD|커밋 해시]·main-check-failed·test·status 만 받습니다(제목·토큰 같은 값은 명령 줄이 아니라 git·환경변수에서만 읽습니다)"
 
 
 class _Parser(argparse.ArgumentParser):
@@ -1025,6 +1067,7 @@ def build_parser():
     sub = parser.add_subparsers(dest="event", required=True)
     published = sub.add_parser("chance-published", help="방금 push 한 커밋이 올린 Chance 새 글(한·영 한 쌍)을 알린다")
     published.add_argument("--commit", default="HEAD", help="HEAD 또는 커밋 해시(7~40자리 16진수). 제목 같은 외부 값은 받지 않는다")
+    sub.add_parser("main-check-failed", help="main 에 올라간 변경이 규칙·시험 검사에 떨어졌다고 알린다(값은 Actions 환경변수에서만 읽는다)")
     sub.add_parser("test", help="연결 확인 메시지 한 통을 보낸다")
     sub.add_parser("status", help="시크릿 두 개가 등록돼 있는지(이름별 등록됨/없음)만 알린다")
     return parser
@@ -1041,6 +1084,8 @@ def main(argv=None, environ=None, out=print, root=None, runner=subprocess.run, o
             return run_status(notifier, environ, out)
         if args.event == "test":
             return run_test(notifier, environ, out, now=now)
+        if args.event == "main-check-failed":
+            return run_main_check_failed(notifier, environ, out)
         if not _COMMIT_RE.fullmatch(args.commit):
             out("[사용법 오류] --commit 은 HEAD 또는 7~40자리 16진수 커밋 해시여야 합니다")
             return 2

@@ -54,7 +54,7 @@ class FlowStepTest(unittest.TestCase):
         ids = [s.get("id") for s in steps_of()]
         self.assertEqual(ids[names.index("발행 흐름 확인 (레지스트리 publish_flow)")], "flow")
         flow_index = ids.index("flow")
-        self.assertEqual(steps_of()[flow_index - 1]["uses"], "actions/setup-python@v5")
+        self.assertEqual(steps_of()[flow_index - 1]["uses"], "actions/setup-python@v6")
         generator_index = steps_of().index(generator_step())
         self.assertLess(flow_index, generator_index)
         self.assertLess(generator_index, ids.index("commit"))
