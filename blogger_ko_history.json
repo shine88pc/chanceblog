@@ -39,5 +39,26 @@
     "attempts": 1,
     "reasons": [],
     "image": "JlNzxCWPUBQ"
+  },
+  {
+    "v": 1,
+    "blog": "blogger_kcyoon",
+    "date": "2026-11-02",
+    "generated_at": "2026-11-02T20:30:49.405739+09:00",
+    "status": "draft_uploaded",
+    "topic": "스마트폰 앱 권한을 한 번에 점검하고 불필요한 권한을 끄는 방법",
+    "topic_source": "seed",
+    "title": "스마트폰 앱 권한 한 번에 점검하고 불필요한 설정 정리하는 방법",
+    "labels": [
+      "디지털 정리",
+      "스마트폰 활용",
+      "일상 습관"
+    ],
+    "url": "https://kcyoon.blogspot.com/",
+    "post_id": "4936765052124806734",
+    "model": "gemini-3.6-flash",
+    "attempts": 1,
+    "reasons": [],
+    "image": "9e9PD9blAto"
   }
 ]
