@@ -56,13 +56,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           # PR 이벤트에서는 PR 쪽 코드가 아니라 기본 브랜치의 코드로 점검한다(pr-scope-check.yml 과 같은 원칙). 다른 이벤트는 그 이벤트의 커밋(= 기본 동작)이다.
           ref: ${{ github.event_name == 'pull_request' && github.event.repository.default_branch || github.sha }}
           persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 

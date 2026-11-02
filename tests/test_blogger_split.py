@@ -86,9 +86,9 @@ class ReusableWorkflowTest(unittest.TestCase):
         self.assertEqual(generate["strategy"], {"fail-fast": False, "max-parallel": 1, "matrix": "${{ fromJSON(needs.plan.outputs.matrix) }}"})
         self.assertEqual(generate["concurrency"], {"group": "blogger-${{ matrix.key }}", "cancel-in-progress": False})   # 블로그별 줄은 그대로(영문 그룹 이름 불변)
         self.assertEqual(generate["env"], {"PIPELINE_PAUSE": "${{ vars.PIPELINE_PAUSE }}", "DRY_RUN": "${{ inputs.dry_run && 'true' || 'false' }}"})
-        self.assertEqual([step.get("name") or step["uses"] for step in plan_job["steps"]], ["actions/checkout@v4", "actions/setup-python@v5", "실행 대상 계산 (레지스트리 검증 포함)"])
+        self.assertEqual([step.get("name") or step["uses"] for step in plan_job["steps"]], ["actions/checkout@v6", "actions/setup-python@v6", "실행 대상 계산 (레지스트리 검증 포함)"])
         self.assertEqual([step.get("name") or step["uses"] for step in generate["steps"]],
-                         ["actions/checkout@v4", "actions/setup-python@v5", "의존성 설치", "생성 → 검증 → 게시/초안", "변경 사항 커밋"])
+                         ["actions/checkout@v6", "actions/setup-python@v6", "의존성 설치", "생성 → 검증 → 게시/초안", "변경 사항 커밋"])
         for job in jobs.values():
             self.assertEqual(job["steps"][1]["with"], {"python-version": "3.12"})
 

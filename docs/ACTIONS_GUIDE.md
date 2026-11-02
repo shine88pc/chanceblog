@@ -913,8 +913,8 @@ PR → **Files changed**와 하단 **Checks**에서 봅니다. 병합을 막아 
 | Chance 승인 흐름 | 지금 꺼져 있고(`publish_flow: direct`), 코드와 시험만 있습니다. PR 열기·라벨·병합 뒤 배포는 실제 GitHub 에서 한 번도 돌려 보지 않았습니다(켠 뒤 처음 관측, 3-17). 봇이 연 PR 에는 검사가 돌지 않아 병합 전에 글을 읽는 것이 유일한 검증이고, 확인 필요 모음은 이 PR 을 '초안 대기'(지금 해야 할 일)로 보여 줍니다. 이력은 초안을 만들 때 main 에 올라가므로 닫아서 폐기한 초안의 슬롯·주제도 다시 쓰지 않습니다 |
 | 이슈 수정의 권한 | 한 job이 쓰기 권한 4종을 함께 가집니다. 3-job 분리가 **예정**입니다([`ISSUE_EDITS.md`](./ISSUE_EDITS.md) §7) |
 | 이슈 수정의 이미지 주소 | `https://images.unsplash.com/photo-…` 형식만 받아, 첫 후보가 다른 형식이면 재시도 없이 거부됩니다 |
-| Node 20·ubuntu-latest 주석 | 거의 모든 실행에 "Node.js 20 is deprecated"·"ubuntu-latest label will migrate" 같은 GitHub 공지 주석이 붙습니다. 해롭지 않아 조치할 필요가 없습니다. 액션 버전 갱신은 별도 작업(**예정**) |
-| 권한 최소화·Dependabot | 워크플로 권한 최소화, Dependabot, 액션 버전 갱신은 **예정**입니다. 반영되면 6장의 권한 서술과 Actions 목록이 바뀔 수 있습니다 |
+| Node 20·ubuntu-latest 주석 | 거의 모든 실행에 "Node.js 20 is deprecated"·"ubuntu-latest label will migrate" 같은 GitHub 공지 주석이 붙습니다. 해롭지 않아 조치할 필요가 없습니다. 액션 버전은 2026-11-02(이슈 #91)에 Node 24 판으로 올렸고(checkout v6·setup-python v6·Pages 3종 v5·v6), 그 뒤에는 "Node.js 20" 주석이 사라지고 "ubuntu-latest" 안내만 남습니다 |
+| 권한 최소화·Dependabot | 워크플로 권한 최소화와 Dependabot 은 **예정**입니다(액션 버전 갱신은 2026-11-02 끝남). 반영되면 6장의 권한 서술과 Actions 목록이 바뀔 수 있습니다 |
 | 무료 Gemini 한도 | 숫자를 아직 모릅니다(3-13). 운영자가 AI Studio에서 확인해야 합니다 |
 | Blogger 대표 사진(Unsplash) | 실제 Unsplash·Blogger는 한 번도 호출해 보지 못했습니다(시험은 가짜 응답). 첫 실제 실행에서 응답 모양과 Blogger 초안함의 사진·출처 줄을 눈으로 확인합니다(6-3). Unsplash 호출 한도(앱이 데모 상태면 시간당 50회)를 Chance와 나눠 쓰고 한 실행은 검색 최대 3회 + download 1회, Gemini 호출이 글당 1회 늘어납니다. 사진 쪽 실패는 글을 막지 않아 초록으로 지나가므로(자동 알림 없음) 사진이 계속 안 붙는지는 로그의 `[IMAGE]` 줄·Summary로 직접 봅니다 |
 | 초안 패키지(네이버, 티스토리는 제외·격리) | 네이버 1개가 켜져 있어 정기 실행이 하루 1편 이슈를 만들지만 첫 실제 이슈는 관측 대기입니다. 복사 붙여넣기 결과(네이버 서식 보존·태그 입력·대표 이미지 업로드)는 첫 실제 이슈로만 확인할 수 있습니다. 이미지·출처를 자동으로 고르는 단계는 아직 없습니다. 초안 현황판(확인 필요 모음)은 별도 작업입니다 |

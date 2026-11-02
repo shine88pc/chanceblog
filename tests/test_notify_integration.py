@@ -486,9 +486,9 @@ TELEGRAM_ENV = {"TELEGRAM_BOT_TOKEN": "${{ secrets.TELEGRAM_BOT_TOKEN }}", "TELE
 
 class WorkflowStructureTest(unittest.TestCase):
     def test_the_secret_names_appear_only_in_the_expected_workflows(self):
-        """텔레그램 시크릿 이름은 알림을 보내는 워크플로(chanceblog·ops-inbox·telegram-test·운영자 요청함의 ai-request·operator-reply), Blogger 공용 워크플로(정의와 러너 단계 env), 그것을 부르는 두 래퍼(`secrets:` 매핑)에만 있다."""
+        """텔레그램 시크릿 이름은 알림을 보내는 워크플로(chanceblog·ops-inbox·telegram-test·guardrails 의 main 검사 실패 알림(이슈 #90)·운영자 요청함의 ai-request·operator-reply), Blogger 공용 워크플로(정의와 러너 단계 env), 그것을 부르는 두 래퍼(`secrets:` 매핑)에만 있다."""
         found = sorted(p.name for p in WORKFLOWS.iterdir() if "TELEGRAM_" in p.read_text(encoding="utf-8"))
-        self.assertEqual(found, ["ai-request.yml", "blogger-en.yml", "blogger-ko.yml", "blogger.yml", "chanceblog.yml", "operator-reply.yml", "ops-inbox.yml", "telegram-test.yml"])
+        self.assertEqual(found, ["ai-request.yml", "blogger-en.yml", "blogger-ko.yml", "blogger.yml", "chanceblog.yml", "guardrails.yml", "operator-reply.yml", "ops-inbox.yml", "telegram-test.yml"])
 
     def test_the_blogger_wrappers_hand_the_two_secrets_over_only_by_name_in_the_secrets_mapping(self):
         for wrapper in ("blogger-en.yml", "blogger-ko.yml"):
@@ -537,7 +537,7 @@ class WorkflowStructureTest(unittest.TestCase):
     def test_the_other_chanceblog_steps_did_not_change(self):
         names = [s.get("name") or s.get("uses") for s in steps_of("chanceblog.yml", "build")]
         # 알림 말고 단계 목록은 승인 흐름(Chance 승인 PR)이 더한 두 단계('발행 흐름 확인'·'초안 올리기')를 포함한다
-        self.assertEqual(names, ["actions/checkout@v4", "actions/setup-python@v5", "발행 흐름 확인 (레지스트리 publish_flow)", "의존성 설치",
+        self.assertEqual(names, ["actions/checkout@v6", "actions/setup-python@v6", "발행 흐름 확인 (레지스트리 publish_flow)", "의존성 설치",
                                  "AI 블로그 제너레이터 실행", "변경 사항 커밋", "Pages 배포 실행 (새 커밋이 있을 때만)",
                                  "초안 올리기와 승인 PR 열기 (승인 흐름일 때만)", "텔레그램 알림(새 글)"])
         wf = load("chanceblog.yml")
@@ -584,7 +584,7 @@ class WorkflowStructureTest(unittest.TestCase):
         self.assertEqual((job["name"], job["timeout-minutes"]), ("알림 연결 시험", 5))
         self.assertNotIn("permissions", job)
         steps = job["steps"]
-        self.assertEqual(steps[0]["uses"], "actions/checkout@v4")
+        self.assertEqual(steps[0]["uses"], "actions/checkout@v6")
         self.assertIs(steps[0]["with"]["persist-credentials"], False)
         self.assertTrue(steps[1]["uses"].startswith("actions/setup-python@"))
         status, send = steps[2], steps[3]
