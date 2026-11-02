@@ -226,8 +226,10 @@ def parse_feed_post_ids(text):
     return frozenset(ids)
 
 
-def fetch_feed_post_ids(blog_url, opener=urllib.request.urlopen):
-    """블로그 공개 주소의 피드를 읽어 게시된 글 번호 집합을 돌려준다(로그인·시크릿 없음). 실패는 예외로 올린다."""
+def fetch_feed_post_ids(blog_url, opener=None):
+    """블로그 공개 주소의 피드를 읽어 게시된 글 번호 집합을 돌려준다(로그인·시크릿 없음). 실패는 예외로 올린다.
+    opener 를 주지 않으면 호출할 때의 urllib.request.urlopen 을 쓴다(함수가 만들어질 때 묶지 않아서 시험이 urlopen 을 바꿔 끼울 수 있다)."""
+    opener = opener or urllib.request.urlopen
     base = blog_url if blog_url.endswith("/") else blog_url + "/"
     request = urllib.request.Request(f"{base}feeds/posts/summary?alt=json&max-results={FEED_MAX_RESULTS}",
                                      headers={"User-Agent": "chanceblog-ops-inbox", "Accept": "application/json"})
@@ -243,6 +245,7 @@ def fetch_published(blogs, histories, now, failures, fetch=fetch_feed_post_ids):
     돌려주는 값: {블로그 key: 글 번호 집합 | None(읽지 못함)}. 확인할 초안이 없는 블로그는 읽지 않는다(키 없음).
     읽지 못한 블로그는 한 줄로 모아 failures 에 ('published', 사유)로 남긴다 — 점검은 멈추지 않는다."""
     out, bad = {}, []
+    now = inbox._aware(now)
     for blog in blogs:
         key = blog.get("key") if isinstance(blog, dict) else None
         if not isinstance(key, str) or str(blog.get("platform") or "") != "blogger" or str(blog.get("mode") or "draft") == "off":
@@ -256,6 +259,11 @@ def fetch_published(blogs, histories, now, failures, fetch=fetch_feed_post_ids):
             continue
         try:
             out[key] = fetch(url)
+            if not out[key]:
+                # 200 인데 공개 글이 하나도 없는 피드 — 피드를 끈 블로그이거나 비어 있는 응답일 수 있다. 이 블로그에는 이미 공개 글이 있으니 '아무것도 게시 안 함'으로
+                # 믿지 않고 읽지 못한 것으로 둔다(믿으면 게시한 초안이 6시간 뒤 '게시 대기'로 다시 알려진다)
+                out[key] = None
+                bad.append(f"{key}: 공개 글이 하나도 없는 피드입니다(피드가 꺼져 있거나 비어 있는 응답일 수 있어 확인하지 못한 것으로 봅니다)")
         except Exception as exc:  # noqa: BLE001 - 네트워크·형식 문제는 어떤 것이든 '읽지 못함'으로 남기고 점검은 계속한다
             out[key] = None
             bad.append(f"{key}: {type(exc).__name__} {inbox.fold(exc, 80)}".strip())

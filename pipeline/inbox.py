@@ -12,7 +12,8 @@ GitHub 읽기·쓰기와 이슈 관리는 scripts/ops_inbox.py 가 맡는다. �
 초안 현황(2026-10-27, 작업요청서 5 PR-B): 채널별로 발행을 기다리는 초안을 한 표로 보여 준다. 초안 모델 — 초안 1건 = 이슈 1개 또는 PR 1개,
 라벨 `초안` + `채널:<채널 라벨>`(채널 라벨은 레지스트리 channel.label), 쓰지 않을 초안은 라벨 `폐기` 또는 닫기. 열린 초안(이슈·PR)이 새로 생기면
 action(코멘트 알림), 3일 넘게 열려 있으면 check. 초안 PR 은 열린 PR 규칙이 이미 action 으로 올린 것(병합하면 됩니다·충돌·검사 실패)이면 그 줄 하나로,
-아니면(검사가 안 돈 PR 등) 초안 항목 하나로만 보인다(같은 PR 이 두 줄이 되지 않게). Blogger 는 이력의 draft_uploaded 를 센 대략치다(공개 여부는 Blogger 쪽 사실).
+아니면(검사가 안 돈 PR 등) 초안 항목 하나로만 보인다(같은 PR 이 두 줄이 되지 않게). Blogger 는 이력의 draft_uploaded 를 센 값이다 — Snapshot.published(scripts/ops_inbox.py 가
+블로그 공개 피드로 확인한 게시된 글 번호)가 있으면 이미 게시한 글은 빼고(이슈 #89), 없으면 공개 여부를 몰라 대략치다.
 표는 항목(Item)이 아니라 render() 의 board 인자로 본문 위쪽에 들어간다.
 
 보안: 외부에서 온 텍스트(PR 제목·주석 문구·이슈 제목·이력 사유)는 ext() 로 한 줄로 접고, 비밀 값 모양을 가리고, '@'·'<'·'&' 를
@@ -52,7 +53,7 @@ RUN_WINDOW_HOURS = 48          # 워크플로 실행은 최근 48시간만 본�
 RUNS_PER_FILE = 10             # 워크플로 파일마다 최근 10건
 ANNOTATION_RUNS_PER_FILE = 3   # 경고(주석)는 파일마다 최근 성공 실행 3건까지만 읽는다(API 호출 절약)
 PR_STALE_DAYS = 3              # 이보다 오래 열린 PR 은 수준을 check 이상으로 올린다
-DRAFT_WAIT_DAYS = 7            # Blogger 초안함에 올라간 글은 7일 안의 것만 '게시 대기'로 센다
+DRAFT_WAIT_DAYS = 7            # Blogger 초안함에 올라간 글은 7일 안의 것만 '게시 대기'로 센다(공개 피드로 이미 게시한 글을 빼고, 올린 직후 DRAFT_REMIND_AFTER_HOURS 안의 것도 뺀다)
 APPROVAL_ITEMS_MAX = 5
 WARNING_MESSAGES_MAX = 3       # 워크플로 하나의 경고 문구는 서로 다른 것 3개까지만 나열한다
 BODY_LIMIT = 58000             # 보이는 본문은 이 길이까지만. 뒤에 붙는 표식(알린 id 80개 × 80자 + 구분자 ≈ 6,530자)을 더해도 GitHub 이슈 본문 한도(65,536자) 안이다
@@ -731,7 +732,8 @@ def _drafts_item(key, name, history, now, published=None):
 
 def blog_items(blogs, histories, now, repo_url, published=None):
     """mode=off 는 참고(정지 이유 포함). auto·draft 블로그는 ① 최신 게시 단계 이력이 generated_unpublished 이고 사유에 [SECRETS] 가 있으면
-    시크릿 등록 action, ② Blogger 초안함 업로드(draft_uploaded) 가 최근 7일 안에 있으면 게시 대기 action.
+    시크릿 등록 action, ② Blogger 초안함 업로드(draft_uploaded) 가 최근 7일 안에 있고 아직 게시되지 않았으면 게시 대기 action(published 로 게시 여부를 확인한 점검에서는
+    이미 게시한 글과 올린 지 DRAFT_REMIND_AFTER_HOURS 가 안 된 글을 빼고, 공개 피드를 못 읽은 블로그는 새로 만들지 않는다).
     '최신 게시 단계 이력'은 posted·draft·generated_unpublished·publish_failed·draft_uploaded 중 가장 나중 항목이다
     (rejected·skipped 같은 게시 단계에 가지 못한 실행은 시크릿 상태를 알려 주지 않으므로 건너뛴다)."""
     items = []

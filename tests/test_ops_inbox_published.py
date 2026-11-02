@@ -146,7 +146,7 @@ class ConfirmedDraftItemTest(unittest.TestCase):
         newer = items_for([draft(40, "1"), draft(20, "2")], {"blogger_macat": frozenset()})[0].id
         gone = items_for([draft(40, "1"), draft(20, "2")], {"blogger_macat": frozenset({"2"})})[0].id
         self.assertNotEqual(base, newer)
-        self.assertEqual(base, gone)                         # 새 초안을 게시하면 id 가 이전 것으로 돌아가 새 알림이 아니다
+        self.assertEqual(base, gone)                         # 새 초안을 게시하면 id 가 이전 초안(아직 미게시)의 것으로 돌아간다 — 그 초안은 실제로 게시 전이라 다시 알려도 오보가 아니다
         self.assertTrue(base.startswith("blogger:blogger_macat:drafts:"))
 
     def test_mode_off_still_makes_no_draft_item(self):
@@ -281,6 +281,16 @@ class FetchFeedTest(unittest.TestCase):
         with self.assertRaises(urllib.error.URLError):
             oi.fetch_feed_post_ids(BLOG_URL, FakeOpener(urllib.error.URLError("연결 안 됨")))
 
+    def test_the_default_reader_uses_the_urlopen_that_exists_at_call_time(self):
+        """함수가 만들어질 때 urlopen 을 묶어 두면 시험이 네트워크를 바꿔 끼우지 못해 진짜 블로그로 나간다(검증이 잡은 일)."""
+        fake = FakeOpener(feed_json("7"))
+        with mock.patch("urllib.request.urlopen", fake):
+            self.assertEqual(oi.fetch_feed_post_ids(BLOG_URL), frozenset({"7"}))
+        self.assertEqual(len(fake.requests), 1)
+        with mock.patch("urllib.request.urlopen", FakeOpener(urllib.error.URLError("연결 안 됨"))):
+            with self.assertRaises(urllib.error.URLError):
+                oi.fetch_feed_post_ids(BLOG_URL)
+
 
 class FetchPublishedTest(unittest.TestCase):
     def blogs(self):
@@ -335,6 +345,23 @@ class FetchPublishedTest(unittest.TestCase):
             self.assertEqual(calls, [], url)
             self.assertEqual(result, {"blogger_macat": None}, url)
             self.assertEqual(failures[0][0], "published", url)
+
+    def test_a_feed_without_any_public_post_is_treated_as_unreadable_not_as_nothing_published(self):
+        failures = []
+        calls = []
+        result = oi.fetch_published(self.blogs()[1:2], self.histories(), NOW, failures, lambda url: calls.append(url) or frozenset())
+        self.assertEqual(calls, ["https://macat0722.blogspot.com/"])
+        self.assertEqual(result, {"blogger_macat": None})
+        [(source, reason)] = failures
+        self.assertEqual(source, "published")
+        self.assertIn("공개 글이 하나도 없는 피드", reason)
+        snap = inbox.Snapshot(now=NOW, repo=h.REPO, blogs=self.blogs()[1:2], histories=self.histories(), failures=failures, published=result)
+        self.assertFalse([i for i in inbox.build_items(snap) if ":drafts:" in i.id])               # 게시한 초안이 6시간 뒤 다시 알려지지 않는다
+
+    def test_a_naive_clock_does_not_break_the_check(self):
+        naive = NOW.replace(tzinfo=None)
+        result = oi.fetch_published(self.blogs()[1:2], self.histories(), naive, [], lambda url: frozenset({"9"}))
+        self.assertEqual(result, {"blogger_macat": frozenset({"9"})})
 
     def test_malformed_blogs_and_histories_are_skipped_quietly(self):
         result = oi.fetch_published([None, "x", {"key": 5}, {"mode": "draft"}], {}, NOW, [], lambda url: frozenset())
@@ -396,7 +423,7 @@ class DocumentationTest(unittest.TestCase):
     def test_the_guide_describes_the_published_check_and_the_grace_hours(self):
         doc = (_bootstrap.ROOT / "docs" / "OPS_INBOX.md").read_text(encoding="utf-8")
         for phrase in ("게시 확인(2026-11-02, 이슈 #89)", "`DRAFT_REMIND_AFTER_HOURS`(6시간)", "공개 피드", "Blogger 게시 확인(블로그 공개 피드)",
-                       "feeds/posts/summary?alt=json"):
+                       "feeds/posts/summary?alt=json", "공개 글이 하나도 없는 피드", "예약 게시(SCHEDULED)"):
             self.assertIn(phrase, doc, phrase)
         self.assertEqual(inbox.DRAFT_REMIND_AFTER_HOURS, 6)
 
