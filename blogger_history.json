@@ -168,5 +168,26 @@
     "attempts": 1,
     "reasons": [],
     "image": "bTMTggEt5s4"
+  },
+  {
+    "v": 1,
+    "blog": "blogger_macat",
+    "date": "2026-11-02",
+    "generated_at": "2026-11-02T18:07:04.176571+09:00",
+    "status": "draft_uploaded",
+    "topic": "Simple habits to order less takeout",
+    "topic_source": "seed",
+    "title": "Simple Kitchen Habits to Order Less Takeout",
+    "labels": [
+      "meal planning",
+      "habits",
+      "kitchen"
+    ],
+    "url": "https://macat0722.blogspot.com/",
+    "post_id": "8904314094141914492",
+    "model": "gemini-3.6-flash",
+    "attempts": 1,
+    "reasons": [],
+    "image": "lMcRyBx4G50"
   }
 ]
