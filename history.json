@@ -213,5 +213,17 @@
     "lane": "science",
     "source": "NASA",
     "source_url": "https://science.nasa.gov/missions/hubble/nasa-explores-potential-commercial-servicing-for-hubble-telescope/"
+  },
+  {
+    "date": "2026-11-02",
+    "topic": "November’s Night Sky Notes: Light-Day Away",
+    "kr_title": "175년 만의 궤도와 보이저의 항해: 밤하늘 관측이 일깨우는 행성 탐사의 유산",
+    "en_title": "A 175-Year Planetary Alignment and Voyager’s Path: What Deep-Space Milestones Mean for Everyday Observers",
+    "kr_image": "https://images.unsplash.com/photo-1505579962197-df174377e13f?auto=format&fit=crop&w=1000&q=80",
+    "en_image": "https://images.unsplash.com/photo-1548124771-9f2040b66df8?auto=format&fit=crop&w=1000&q=80",
+    "slot": 9,
+    "lane": "science",
+    "source": "NASA",
+    "source_url": "https://science.nasa.gov/solar-system/skywatching/night-sky-network/novembers-night-sky-notes-light-day-away/"
   }
 ]
