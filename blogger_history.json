@@ -189,5 +189,26 @@
     "attempts": 1,
     "reasons": [],
     "image": "lMcRyBx4G50"
+  },
+  {
+    "v": 1,
+    "blog": "blogger_macat",
+    "date": "2026-11-03",
+    "generated_at": "2026-11-03T18:13:48.610326+09:00",
+    "status": "draft_uploaded",
+    "topic": "A 25-minute timer routine for when focus slips",
+    "topic_source": "seed",
+    "title": "A Gentle 25-Minute Timer Routine for Focus",
+    "labels": [
+      "focus",
+      "habits",
+      "daily routine"
+    ],
+    "url": "https://macat0722.blogspot.com/",
+    "post_id": "7375768539399946932",
+    "model": "gemini-3.6-flash",
+    "attempts": 1,
+    "reasons": [],
+    "image": "Z5GKgb7NCXQ"
   }
 ]
