@@ -32,6 +32,7 @@
 | **[`AGENTS.md`](./AGENTS.md)** | Standing rules for every AI (guardrails, verification) |
 | [`docs/CHARTER.md`](./docs/CHARTER.md) | Goal, roles, change tiers (T0–T3), multi-AI protocol |
 | [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) | Full-auto pipeline, blog registry, how to add a blog |
+| [`docs/GLOSSARY.md`](./docs/GLOSSARY.md) | Glossary: terms, relations, and the words that mean different things in different places (key, number, request, draft, mode …) |
 | [`docs/ENGINEERING_GUIDE.md`](./docs/ENGINEERING_GUIDE.md) | How to write code and verify it |
 | [`docs/SECURITY_GUARDRAILS.md`](./docs/SECURITY_GUARDRAILS.md) | Security and policy guardrails, incident playbooks |
 | [`docs/DEFECT_REGISTER.md`](./docs/DEFECT_REGISTER.md) | Verified known defects and their status |

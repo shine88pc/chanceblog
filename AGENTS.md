@@ -10,6 +10,7 @@
 2. 코드·워크플로·프롬프트를 건드릴 거면 [`docs/ENGINEERING_GUIDE.md`](./docs/ENGINEERING_GUIDE.md)와 [`docs/SECURITY_GUARDRAILS.md`](./docs/SECURITY_GUARDRAILS.md)
 3. `git pull --rebase origin main` — 봇이 main에 직접 커밋한다. **낡은 사본에서 작업·push 하지 않는다.**
 4. 새 세션이면 [`docs/SESSION_START.md`](./docs/SESSION_START.md) §2(첫 30분)·§5(현재 상태와 다음 작업 순서)·§6(사용자 몫)을 읽고, 하루를 마칠 때는 §4(마감 체크리스트)를 따른다.
+5. 낱말·번호의 뜻이 헷갈리면(키·번호·요청·초안·모드처럼 같은 낱말이 곳마다 다르다) [`docs/GLOSSARY.md`](./docs/GLOSSARY.md)에서 먼저 찾는다. 운영자에게 쓰는 글에서는 그 표의 낱말에 종류를 붙인다(예: '요청' 대신 '요청 파일 R-089').
 
 ## 2. 절대 규칙 (어기면 사고)
 
