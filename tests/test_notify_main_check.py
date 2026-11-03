@@ -6,10 +6,10 @@
 """
 import contextlib
 import io
+import re
 import sys
 import unittest
 import urllib.error
-from pathlib import Path
 
 import yaml
 
@@ -23,6 +23,22 @@ RUN_ENV = dict(ENV, GITHUB_SHA=SHA, GITHUB_ACTOR="shine88pc", GITHUB_REPOSITORY=
 RUN_URL = "https://github.com/shine88pc/chanceblog/actions/runs/41401574943"
 SENT_LINE = "텔레그램 알림: main 검사 실패를 알렸습니다"
 WORKFLOW = _bootstrap.ROOT / ".github" / "workflows" / "guardrails.yml"
+
+
+def evaluate_condition(expression, context):
+    """GitHub 식 `${{ a && b && … }}` 중 이 워크플로가 쓰는 모양(`always()` 와 `맥락 == '문자열'` 을 &&로 이은 것)만 계산한다. 다른 모양(`||`·`!=`·괄호 등)이 나오면
+    실패한다 — 조건이 바뀌면 이 시험도 함께 고치게 한다. GitHub 의 `==` 는 문자열의 대소문자를 가리지 않는다."""
+    match = re.fullmatch(r"\$\{\{\s*(.+?)\s*\}\}", expression.strip())
+    assert match, expression
+    for clause in match.group(1).split(" && "):
+        clause = clause.strip()
+        if clause == "always()":
+            continue
+        compared = re.fullmatch(r"([a-z_.]+) == '([^']*)'", clause)
+        assert compared, f"이 시험이 모르는 조건 모양: {clause}"
+        if str(context[compared.group(1)]).lower() != compared.group(2).lower():
+            return False
+    return True
 
 
 def run_cli(*argv, environ=None, net=None):
@@ -136,14 +152,36 @@ class WorkflowTest(unittest.TestCase):
     def test_the_alert_job_runs_once_only_for_a_failed_push_to_main(self):
         self.assertEqual(self.job["needs"], "validate")
         condition = self.job["if"]
-        self.assertEqual(condition, "${{ always() && github.event_name == 'push' && needs.validate.result == 'failure' }}")      # 조건 전체를 고정한다(|| true 같은 덧붙임을 잡는다)
+        self.assertEqual(condition, "${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.validate.result == 'failure' }}")      # 조건 전체를 고정한다(|| true 같은 덧붙임·main 조건 삭제를 잡는다)
         self.assertNotIn("matrix", self.job.get("strategy", {}))                    # 3.10·3.12 두 칸이 둘 다 떨어져도 알림은 한 번
         self.assertIn("push", self.data[True])                                       # PyYAML 은 on 을 True 로 읽는다
-        self.assertEqual(self.data[True]["push"]["branches"], ["main"])
+        self.assertEqual(self.data[True]["push"]["branches"], ["main", "ai/claude/**"])      # AI 브랜치 사전 검사(운영자 요청 2026-11-03)가 더해졌다 — 알림은 위 조건 때문에 main 에서만 간다
 
     def test_pull_request_failures_do_not_send_a_phone_alert(self):
         self.assertIn("github.event_name == 'push'", self.job["if"])
         self.assertNotIn("pull_request", self.job["if"])
+
+    def test_a_failed_check_on_an_ai_branch_never_sends_a_phone_alert(self):
+        """AI 브랜치(ai/claude/**) push 의 사전 검사 실패는 AI 가 먼저 고칠 일이라 운영자 텔레그램으로 가지 않는다. 이 잡은 push 한 커밋의 코드가 텔레그램 시크릿과 함께 도는 잡이라
+        main 에서만 돌아야 한다 — 알림 잡의 조건 표현식을 이벤트·브랜치·검사 결과의 모든 조합으로 직접 계산한다."""
+        def sends(event, ref, result):
+            return evaluate_condition(self.job["if"], {"github.event_name": event, "github.ref": ref, "needs.validate.result": result})
+
+        self.assertTrue(sends("push", "refs/heads/main", "failure"))                  # main 에 올라간 변경의 실패 — 지금까지와 같다
+        for ref in ("refs/heads/ai/claude/blog-ci-precheck", "refs/heads/ai/claude/a/b", "refs/heads/ai/claude/main", "refs/heads/main-2", "refs/heads/xmain",
+                    "refs/heads/ai/draft/2026-11-03-s1", "refs/tags/main"):
+            self.assertFalse(sends("push", ref, "failure"), ref)                      # AI 브랜치(이름에 main 이 들어 있어도)·다른 브랜치·태그
+        for event, ref in (("pull_request", "refs/pull/7/merge"), ("workflow_dispatch", "refs/heads/main"), ("workflow_dispatch", "refs/heads/ai/claude/x")):
+            self.assertFalse(sends(event, ref, "failure"), (event, ref))              # PR·수동 실행은 알리지 않는다
+        for result in ("success", "cancelled", "skipped"):
+            self.assertFalse(sends("push", "refs/heads/main", result), result)        # 실패가 아닌 결과(취소 포함)도 알리지 않는다
+
+    def test_the_condition_evaluator_of_this_test_is_strict_about_unknown_shapes(self):
+        for text in ("${{ always() && github.ref == 'refs/heads/main' || true }}", "${{ always() && github.ref != 'refs/heads/main' }}",
+                     "${{ always() && startsWith(github.ref, 'refs/heads/ai/') }}"):
+            with self.assertRaises(AssertionError, msg=text):
+                evaluate_condition(text, {"github.ref": "refs/heads/main"})
+        self.assertTrue(evaluate_condition("${{ always() && github.ref == 'REFS/HEADS/MAIN' }}", {"github.ref": "refs/heads/main"}))     # GitHub 처럼 대소문자를 가리지 않는다
 
     def test_the_secrets_are_only_in_the_step_env_and_the_step_cannot_fail_the_run(self):
         notify_steps = [step for step in self.job["steps"] if "run" in step]
@@ -180,7 +218,8 @@ class WorkflowTest(unittest.TestCase):
 class DocumentationTest(unittest.TestCase):
     def test_the_architecture_doc_lists_the_event(self):
         doc = (_bootstrap.ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
-        for phrase in ("notify_main_check_failed", "main-check-failed", "guardrails.yml", "alert", "secret_patterns}.py", "다섯 파일", "`AI 에게 요청하기`"):
+        for phrase in ("notify_main_check_failed", "main-check-failed", "guardrails.yml", "alert", "secret_patterns}.py", "다섯 파일", "`AI 에게 요청하기`",
+                       "`github.ref` 가 `refs/heads/main` 인 것", "AI 브랜치(`ai/claude/**`) push 의 사전 검사 실패도 보내지 않는다"):
             self.assertIn(phrase, doc, phrase)
         setup = (_bootstrap.ROOT / ".github" / "editorial" / "TELEGRAM_SETUP.md").read_text(encoding="utf-8")
         for phrase in ("main 검사 실패", "실행 열기 · AI 에게 요청하기"):

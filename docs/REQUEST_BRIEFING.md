@@ -93,7 +93,7 @@
 | (신규) | `[Blogger 한글] 글 자동 작성` | `blogger-ko.yml` | 한글 Blogger(kcyoon) 글 생성·검증 후 초안 저장 또는 게시(2026-10-29 부터 `mode: draft` — 초안함 업로드) | 자동(매일 03:30 UTC) + 수동 |
 | (신규) | `[내부] Blogger 글 작성 공용(직접 실행하지 마세요)` | `blogger.yml` | 위 두 워크플로가 부르는 공용 부품(재사용 워크플로). Run workflow 버튼도 정기 실행도 없다 | 직접 실행하지 않음 |
 | Deploy GitHub Pages | `[공통] 사이트 자동 배포` | `pages.yml` | Chance 사이트(GitHub Pages) 배포 | 자동(main에 push될 때) + 수동 |
-| Guardrails | `[공통] 저장소 규칙·테스트 자동 검사` | `guardrails.yml` | 저장소가 규칙을 어기지 않았는지 자동 검사(비밀·워크플로 규칙·광고 표면·단위 테스트) | 자동(push·PR) + 수동 |
+| Guardrails | `[공통] 저장소 규칙·테스트 자동 검사` | `guardrails.yml` | 저장소가 규칙을 어기지 않았는지 자동 검사(비밀·워크플로 규칙·광고 표면·단위 테스트) | 자동(main push·`ai/claude/**` 브랜치 push·PR) + 수동 |
 | Watchdog | `[공통] 발행 중단 감시·알림` | `watchdog.yml` | 게시가 멈췄는지·사이트 배포가 됐는지 하루 2회 점검, 문제 때만 이슈로 알림 | 자동(하루 2회, 시각은 `watchdog.yml`의 cron) + 수동 |
 | Issue Edit | `[Chance] 이슈 수정 요청 처리(수정안 PR 만들기)` | `issue-edit.yml` | 이슈 양식으로 접수된 수정 요청을 PR로 만듦 | 자동(제어 이슈가 열릴 때) + 수동 |
 | Sync Issue Form | `[공통] 이슈 양식 페이지 목록 갱신` | `sync-issue-form.yml` | 이슈 양식의 페이지 목록을 자동 갱신 | 자동(관련 파일 push) + 수동 |

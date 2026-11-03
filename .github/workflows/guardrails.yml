@@ -2,10 +2,14 @@ name: "[공통] 저장소 규칙·테스트 자동 검사"
 
 # 모든 변경(사람·AI 공통)에 대한 자동 점검: 비밀 유출, 워크플로 보안 규칙, 문서·설정 드리프트,
 # 광고 표면 무단 변경, 단위 테스트, 워크플로 정적 분석. 설명: docs/ENGINEERING_GUIDE.md
+#
+# 언제 도나: main push · PR · 수동 · AI 브랜치(`ai/claude/**`) push(사전 검사, 운영자 요청 2026-11-03). AI 가 병합 부탁을 보내기 전에 같은 검사의 결과(초록·빨강)를 먼저 보고,
+# 빨강이면 AI 가 먼저 고쳐 운영자에게 넘기지 않는다. PR 검사(`pull_request`)는 그대로 둔다 — 봇이 main 에 글 커밋을 계속 올려 '병합 결과 트리'는 push 한 브랜치와 다를 수 있다.
+# push 로 도는 워크플로는 push 한 커밋에 있는 이 파일 그대로 돈다(이 파일이 없는 옛 브랜치는 사전 검사가 돌지 않는다).
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'ai/claude/**']
   pull_request:
   workflow_dispatch:
 
@@ -43,7 +47,18 @@ jobs:
           PR_BASE: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          base="${PR_BASE:-${PUSH_BASE:-}}"
+          if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            # AI 브랜치 push(사전 검사): PR 검사와 같은 범위 — main 과 갈라진 지점(merge-base)부터 이 커밋까지. main 끝(tip)이 아니다:
+            # main 이 앞서 간 만큼(봇 글 커밋·다른 병합)이 '이 브랜치가 바꾼 파일'로 보여 광고 표면 검사가 오탐한다. 첫 push(이전 커밋 0)도 같다.
+            # 못 구하면 광고 표면 검사를 건너뛴 초록이 되지 않게 이 단계를 실패시킨다(AI 가 그 초록을 믿고 병합 부탁을 보내면 안 된다).
+            if ! base="$(git merge-base origin/main HEAD)" || [ -z "$base" ]; then
+              echo "::error::origin/main 과 갈라진 지점(merge-base)을 구하지 못해 광고 표면 검사를 할 수 없습니다 - 건너뛴 초록으로 두지 않고 실패시킵니다"
+              exit 1
+            fi
+            echo "::notice title=광고 표면 검사 기준::main 과 갈라진 지점 $base"
+          else
+            base="${PR_BASE:-${PUSH_BASE:-}}"
+          fi
           if [ -n "$base" ]; then
             python scripts/validate_repo.py --base "$base"
           else
@@ -59,10 +74,12 @@ jobs:
 
   # main 에 올라간 변경(직접 push·PR 병합)이 검사에 떨어지면 곧바로 휴대폰(텔레그램)으로 알린다(이슈 #90: 2026-10-31 main 에 직접 올라간 변경이 발행 프로그램을
   # 망가뜨렸는데 검사 실패는 GitHub 알림으로만 갔다). PR 검사 실패는 병합 전이라 알리지 않는다. 알림은 보조라 이 잡이 실패해도 검사 결과는 그대로다.
+  # AI 브랜치(`ai/claude/**`) push 의 사전 검사 실패도 알리지 않는다: AI 가 먼저 고칠 일이고 운영자에게 넘기지 않는다. 이 잡은 push 한 커밋의 코드가 텔레그램 시크릿과
+  # 함께 도는 잡이라 `github.ref` 가 main 일 때만 돌게 조건에 건다(조건을 풀면 브랜치 push 가 시크릿을 쓰는 길이 열린다).
   alert:
     name: 실패 알림(main 에 올라간 변경만)
     needs: validate
-    if: ${{ always() && github.event_name == 'push' && needs.validate.result == 'failure' }}
+    if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.validate.result == 'failure' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
