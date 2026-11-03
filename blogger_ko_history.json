@@ -60,5 +60,26 @@
     "attempts": 1,
     "reasons": [],
     "image": "9e9PD9blAto"
+  },
+  {
+    "v": 1,
+    "blog": "blogger_kcyoon",
+    "date": "2026-11-03",
+    "generated_at": "2026-11-03T20:10:15.065611+09:00",
+    "status": "draft_uploaded",
+    "topic": "메모 앱 폴더와 태그를 단순하게 정리해 나중에 찾기 쉽게 만드는 방법",
+    "topic_source": "seed",
+    "title": "메모 앱 폴더와 태그를 단순하게 정리하여 필요한 글을 바로 찾는 방법",
+    "labels": [
+      "디지털 정리",
+      "메모 앱 사용법",
+      "살림 습관"
+    ],
+    "url": "https://kcyoon.blogspot.com/",
+    "post_id": "1224222174855813027",
+    "model": "gemini-3.6-flash",
+    "attempts": 1,
+    "reasons": [],
+    "image": "mN5-yjVGBAI"
   }
 ]
