@@ -225,5 +225,17 @@
     "lane": "science",
     "source": "NASA",
     "source_url": "https://science.nasa.gov/solar-system/skywatching/night-sky-network/novembers-night-sky-notes-light-day-away/"
+  },
+  {
+    "date": "2026-11-03",
+    "topic": "Americans’ Trust in Information From News Organizations Has Risen in the Past Year",
+    "kr_title": "미국인의 저널리즘 신뢰 반등: 전국·지역 뉴스 신뢰는 상승, 소셜 미디어는 제자리",
+    "en_title": "Trust in News Organizations Rises Among Americans, While Social Media Trust Stagnates",
+    "kr_image": "https://images.unsplash.com/photo-1582079768266-e65af1ad8d3a?auto=format&fit=crop&w=1000&q=80",
+    "en_image": "https://images.unsplash.com/photo-1611915792063-2bddd2ad5568?auto=format&fit=crop&w=1000&q=80",
+    "slot": 9,
+    "lane": "culture",
+    "source": "Pew Research Center",
+    "source_url": "https://www.pewresearch.org/short-reads/2026/11/02/americans-trust-in-information-from-news-organizations-has-risen-in-the-past-year/"
   }
 ]
