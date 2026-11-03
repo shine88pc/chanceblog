@@ -3,6 +3,7 @@
 GitHub Actions 를 실행할 수 없는 환경에서도 이름·run-name·트리거·권한·시크릿·동시성·연습 실행 기본값·계획 단계가 의도대로인지 YAML 로 확인한다.
 (문법·표현식은 CI 의 actionlint 가 따로 본다.)
 """
+import copy
 import json
 import re
 import tempfile
@@ -19,9 +20,10 @@ from test_workflow_names import context, load, render, workflow_paths
 REAL = _bootstrap.ROOT
 WORKFLOWS = REAL / ".github" / "workflows"
 SPEC = {
-    "tistory": {"name": "[티스토리] 초안 패키지 만들기", "cron": "20 5 * * *", "label": "티스토리"},
-    "naver": {"name": "[네이버] 초안 패키지 만들기", "cron": "20 6 * * *", "label": "네이버"},
+    "tistory": {"name": "[티스토리] 초안 패키지 만들기", "cron": None, "label": "티스토리"},         # cron None: 2026-11-03 운영자 결정(접근성 문제)으로 최종 중단 — 정기 실행 없음, 수동 실행만
+    "naver": {"name": "[네이버] 초안 패키지 만들기", "cron": "20 6 * * *", "label": "네이버"},      # 잠정 중단(레지스트리 mode off)이어도 정기 실행 줄은 그대로다
 }
+FIXTURE_CRON = {"tistory": "20 5 * * *", "naver": "20 6 * * *"}          # 임시 저장소 fixture(package_entry)의 cron — 티스토리 플랫폼 코드를 계속 시험하려고 옛 값을 쓴다
 BOTH = tuple(SPEC)
 
 
@@ -61,6 +63,9 @@ class NamesAndTriggersTest(unittest.TestCase):
     def test_only_a_daily_schedule_and_the_manual_trigger(self):
         for platform in BOTH:
             workflow, spec = load(f"{platform}.yml"), SPEC[platform]
+            if spec["cron"] is None:                                                          # 티스토리: 최종 중단 — 수동 실행만
+                self.assertEqual(set(workflow["on"]), {"workflow_dispatch"}, platform)
+                continue
             self.assertEqual(set(workflow["on"]), {"schedule", "workflow_dispatch"}, platform)
             self.assertEqual(workflow["on"]["schedule"], [{"cron": spec["cron"]}], platform)
             minute, hour, day, month, weekday = spec["cron"].split()
@@ -71,14 +76,18 @@ class NamesAndTriggersTest(unittest.TestCase):
         for path in workflow_paths():
             for item in load(path.name)["on"].get("schedule") or []:
                 crons.setdefault(item["cron"], []).append(path.name)
+        self.assertNotIn("tistory.yml", [name for names in crons.values() for name in names])      # 티스토리: 최종 중단 — 정기 실행이 없다
         for platform, spec in SPEC.items():
+            if spec["cron"] is None:
+                continue
             self.assertEqual(crons[spec["cron"]], [f"{platform}.yml"], spec["cron"])          # 같은 시각에 도는 다른 워크플로가 없다
             self.assertNotEqual(tuple(spec["cron"].split()[:2]), ("0", "2"))                  # Blogger(KST 11시)와도 겹치지 않는다
-        self.assertNotEqual(SPEC["tistory"]["cron"], SPEC["naver"]["cron"])
+        self.assertNotEqual(FIXTURE_CRON["tistory"], FIXTURE_CRON["naver"])
 
     def test_the_cron_matches_the_registry_fixture_the_operator_will_copy(self):
-        for platform, spec in SPEC.items():
-            self.assertEqual(package_entry(platform)["schedule"]["cron"], spec["cron"])
+        for platform in SPEC:
+            self.assertEqual(package_entry(platform)["schedule"]["cron"], FIXTURE_CRON[platform])      # fixture 는 정기 실행이 있는 플랫폼의 모양을 계속 시험한다
+        self.assertEqual(SPEC["naver"]["cron"], FIXTURE_CRON["naver"])                                  # 네이버는 실제 워크플로와 fixture 가 같다
 
     def test_inputs_have_the_blogger_style_names_and_practice_is_on_by_default(self):
         for platform in BOTH:
@@ -226,8 +235,10 @@ class PlanAndRunTest(unittest.TestCase):
 
     def test_the_two_workflows_differ_only_in_the_channel(self):
         def normalize(platform):
-            text = json.dumps(load(f"{platform}.yml"), ensure_ascii=False, sort_keys=True)
-            text = text.replace(SPEC[platform]["cron"], "CRON").replace(SPEC[platform]["label"], "LABEL").replace(platform, "PLATFORM")
+            data = copy.deepcopy(load(f"{platform}.yml"))
+            data["on"].pop("schedule", None)                                                  # 정기 실행 줄은 빼고 비교한다(티스토리는 2026-11-03 최종 중단으로 없다)
+            text = json.dumps(data, ensure_ascii=False, sort_keys=True)
+            text = text.replace(SPEC[platform]["label"], "LABEL").replace(platform, "PLATFORM")
             return re.sub(r"네이버 블로그|티스토리 블로그", "LABEL 블로그", text)
         self.assertEqual(normalize("tistory"), normalize("naver"))
 

@@ -44,7 +44,7 @@ class RealRegistryTest(unittest.TestCase):
         self.assertEqual(real_registry()["defaults"]["mode"], "draft")
         self.assertEqual({b["key"]: b.get("mode") for b in real_registry()["blogs"]},
                          {"chance": "auto", "blogger_macat": "draft", "blogger_kcyoon": "draft",         # 영문·한글 모두 2026-10-28 운영자 승인으로 draft
-                          "naver_life_tips": "package"})                   # 초안 패키지(GitHub 이슈로 보여 주기만 한다 — 공개되지 않는 mode)
+                          "naver_life_tips": "off"})                       # 초안 패키지 채널 — 2026-11-03 운영자 결정으로 데스크톱 이관을 마칠 때까지 잠정 중단(되돌리면 package: GitHub 이슈로 보여 주기만 하는 mode)
 
     def test_model_chain_has_no_retired_model_and_matches_the_engine(self):
         import generator
@@ -61,7 +61,9 @@ class RealRegistryTest(unittest.TestCase):
         reg = real_registry()
         reg["blogs"][1]["mode"] = "off"
         keys = [b["key"] for b in registry.enabled_blogs(reg)]
-        self.assertEqual(keys, ["chance", "blogger_kcyoon", "naver_life_tips"])     # 한글은 draft(2026-10-28 승인)라 켜져 있고, 초안 패키지 채널(네이버, package)도 off 가 아니라 켜져 있다
+        self.assertEqual(keys, ["chance", "blogger_kcyoon"])                       # 한글은 draft(2026-10-28 승인)라 켜져 있고, 초안 패키지 채널(네이버)은 2026-11-03 운영자 결정으로 off(잠정 중단)라 빠진다
+        reg["blogs"][3]["mode"] = "package"                                        # 되돌리면(package) 다시 켜진다 — 공개되지 않는 초안 패키지 mode
+        self.assertEqual([b["key"] for b in registry.enabled_blogs(reg)], ["chance", "blogger_kcyoon", "naver_life_tips"])
         reg["blogs"][2]["mode"] = "off"
         self.assertEqual([b["key"] for b in registry.enabled_blogs(reg)], ["chance", "naver_life_tips"])
         for blog in reg["blogs"][3:]:
@@ -139,7 +141,7 @@ class InvalidRegistryTest(unittest.TestCase):
         """실제 파일의 모든 항목(Chance·Blogger 둘·네이버)이 mode 를 직접 적고 있고, 그 값이 지금 사실과 같다."""
         raw = registry.load_registry()["blogs"]
         self.assertEqual({b["key"]: b["mode"] for b in raw},
-                         {"chance": "auto", "blogger_macat": "draft", "blogger_kcyoon": "draft", "naver_life_tips": "package"})
+                         {"chance": "auto", "blogger_macat": "draft", "blogger_kcyoon": "draft", "naver_life_tips": "off"})      # 네이버: 2026-11-03 잠정 중단
 
     def test_http_url(self):
         self.assertHas(self.errors(lambda r: r["blogs"][0].update(url="http://x.example")), "https://")

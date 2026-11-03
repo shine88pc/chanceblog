@@ -48,7 +48,10 @@ class RunbookCoversTheRepoTest(unittest.TestCase):
 
     def test_scheduled_workflows_show_their_real_cron_times(self):
         """표의 시각(UTC)이 실제 cron 과 같은지: 매일 한 번 도는 예약만 비교한다."""
-        for name, expect, kst in (("blogger-en.yml", "02:00", "11:00"), ("blogger-ko.yml", "03:30", "12:30"), ("tistory.yml", "05:20", "14:20"), ("naver.yml", "06:20", "15:20")):
+        stopped = (ROOT / ".github" / "workflows" / "tistory.yml").read_text(encoding="utf-8")
+        self.assertIsNone(re.search(r"(?m)^\s*schedule:", stopped), "tistory.yml: 2026-11-03 운영자 결정으로 최종 중단 — 정기 실행이 없어야 한다")
+        self.assertIn("정기 실행 없음", next(line for line in RUNBOOK.splitlines() if line.startswith("| `tistory.yml` |")))
+        for name, expect, kst in (("blogger-en.yml", "02:00", "11:00"), ("blogger-ko.yml", "03:30", "12:30"), ("naver.yml", "06:20", "15:20")):      # 네이버는 잠정 중단(mode off)이라 정기 실행 줄은 그대로다
             text = (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
             cron = re.search(r"cron:\s*'(\d+) (\d+) \* \* \*'", text)
             self.assertIsNotNone(cron, name)

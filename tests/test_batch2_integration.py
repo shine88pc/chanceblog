@@ -206,7 +206,7 @@ class RegistryCombinationTest(unittest.TestCase):
         self.assertEqual([blog["key"] for blog in blogs], ["chance", "blogger_macat", "blogger_kcyoon", "naver_life_tips"])       # 한글 Blogger(작업 D)에 이어 초안 패키지 채널(네이버)이 더해졌다
         self.assertEqual({blog["key"]: blog["mode"] for blog in blogs},
                          {"chance": "auto", "blogger_macat": "draft", "blogger_kcyoon": "draft",     # 운영자 승인으로 영문(R-015 선택 A, 이슈 #71, 2026-10-29)·한글(R-011 선택 A, 이슈 #70, 2026-10-28) 모두 draft
-                          "naver_life_tips": "package"})               # 초안 패키지는 공개되지 않는 mode(GitHub 이슈로 보여 주기만 한다)
+                          "naver_life_tips": "off"})                   # 초안 패키지 채널 — 2026-11-03 운영자 결정으로 데스크톱 이관을 마칠 때까지 잠정 중단(되돌리면 package)
         self.assertEqual(blogs[0]["publish_flow"], REAL_PUBLISH_FLOW)
         self.assertEqual({blog["key"]: blog["platform"] for blog in blogs if blog["platform"] in registry.PACKAGE_PLATFORMS},
                          {"naver_life_tips": "naver"})                  # 패키지 플랫폼(티스토리·네이버)의 블로그는 네이버 하나뿐이다(티스토리는 제외·격리)
