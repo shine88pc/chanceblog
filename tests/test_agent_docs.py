@@ -14,6 +14,7 @@ RUNBOOK = (ROOT / "docs" / "AGENT_RUNBOOK.md").read_text(encoding="utf-8")
 DELEGATION = (ROOT / "docs" / "AGENT_DELEGATION.md").read_text(encoding="utf-8")
 COPILOT = (ROOT / ".github" / "copilot-instructions.md").read_text(encoding="utf-8")
 AGENTS = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+REQUESTS_README = (ROOT / "인수인계" / "요청함" / "README.md").read_text(encoding="utf-8")
 CODE_REVIEW_LIMIT = 4000     # Copilot 코드 리뷰는 지침 파일마다 앞 4,000자만 읽는다(GitHub 문서)
 JOBS = {f"J{n}" for n in range(1, 13)}
 
@@ -129,7 +130,7 @@ class PinnedRulesTest(unittest.TestCase):
 
     WORKFLOW_ROWS = {      # 워크플로 파일: 절차서 표의 그 행에 있어야 하는 글자(트리거·시각)
         "chanceblog.yml": ("17분", "47분"), "watchdog.yml": ("03:30", "15:30"), "ops-inbox.yml": ("2시간", "텔레그램"),
-        "ai-request.yml": ("ai/claude/**",), "guardrails.yml": ("main push", "PR"), "pages.yml": ("main push",),
+        "ai-request.yml": ("ai/claude/**",), "guardrails.yml": ("main push", "PR", "ai/claude/**"), "pages.yml": ("main push",),
         "sync-issue-form.yml": ("main push", "*.md"), "issue-edit.yml": ("이슈",), "pr-scope-check.yml": ("PR",),
         "operator-reply.yml": ("이슈가 열릴 때",), "telegram-test.yml": ("수동",), "chance-fix-images.yml": ("수동",), "blogger.yml": ("호출",),
     }
@@ -249,6 +250,23 @@ class PinnedRulesTest(unittest.TestCase):
         prompt = DELEGATION.split("```text")[1].split("```")[0]                      # §5(나)의 붙여 넣기 문구 — 다른 AI 가 이것만 받아도 두 규칙을 알아야 한다
         for needle in ("git push --dry-run", "ai/claude/<네 이름>-<주제>", "AGENTS.md → docs/AGENT_RUNBOOK.md → 인수인계/작업내용.md"):
             self.assertIn(needle, prompt, needle)
+
+    def test_the_merge_request_waits_for_the_green_precheck_of_the_pushed_branch(self):
+        """운영자 요청 2026-11-03: 운영자는 검사를 지켜보지 않고 병합만 한다 — AI 는 병합 브랜치의 검사가 초록인 것을 확인한 뒤에만 병합 부탁을 보낸다(알림은 요청 파일을 push 하는 순간 가므로 요청 파일은 따로)."""
+        rule = "병합 부탁은 병합 브랜치를 push 한 뒤 그 커밋의 검사가 끝나 초록인 것을 확인한 뒤에만 보냅니다"
+        self.assertEqual(RUNBOOK.count(rule), 2)                                    # J3 5(병합 부탁 쓰는 법)와 J4 8(push → 검사 확인 → 병합 부탁)
+        j4 = next(line for line in RUNBOOK.splitlines() if line.startswith("8. **push → 검사 확인 → 병합 부탁**"))
+        for needle in ("--workflow guardrails.yml", "chanceblog-desktop runs --workflow ci.yml", "`cancelled`·`failure` 는 초록이 아닙니다",       # 취소를 초록으로 읽으면 취소된 실행을 믿고 부탁을 보낸다
+                       "블로그는 1~2분, 데스크톱은 3~5분 간격", "python scripts/github_status.py limit", "1~2분 안에 `push` 줄이 안 나타나면", "새 `guardrails.yml` 이 없는 것입니다",
+                       "최신 main 에서 새 브랜치로 다시 올립니다", "`주석[notice] main 과 갈라진 지점 <해시>`", "**빨강이면**", "커밋 한 개로 새 브랜치 이름(예: `-2`)",
+                       "force push 금지", "Re-run 은 누르지 않습니다", "운영자에게 넘기지 않습니다", "PR 검사(약 2분)가 한 번 더"):
+            self.assertIn(needle, j4, needle)
+        j3 = next(line for line in RUNBOOK.splitlines() if line.startswith("5. **병합 부탁(`merge`)**"))
+        for needle in ("요청 전용 브랜치", "같은 커밋에 넣으면 검사 결과를 보기 전에 알림이 갑니다", "ci.yml` 네 칸 약 14분"):
+            self.assertIn(needle, j3, needle)
+        self.assertNotIn("같은 커밋**에 넣습니다", RUNBOOK)                          # 옛 안내(요청 파일을 병합 브랜치의 같은 커밋에)는 사전 검사와 부딪친다
+        for needle in ("검사는 부탁을 보내기 전에 끝나 있습니다", "초록인 것을 확인한 뒤에만", "PR 만들기 → 초록 확인 → Merge → Confirm", "PR 검사(약 2분)가 한 번 더 돕니다"):
+            self.assertIn(needle, REQUESTS_README, needle)
 
     def test_the_defect_number_lookup_scans_main_and_every_two_level_ai_branch(self):
         """결함 번호 겹침(D-86)을 막는 확인 명령은 요청 번호 명령(J3)과 같은 이유로 `refs/remotes/origin/ai`(접두사)여야 한다 — 끝에 `/*` 를 붙이면 두 단계 이름을 못 찾는다."""
