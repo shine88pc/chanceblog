@@ -14,6 +14,7 @@ import json
 import re
 from pathlib import Path
 
+from pipeline import unsplash_credit
 from pipeline.edits import checks, frontmatter, safety
 from pipeline.llm import purpose
 
@@ -312,10 +313,11 @@ def image_queries(request, title, tags, llm=None):
     return (queries[:3] + fallback) if queries else fallback
 
 
-def apply_image(text, old_url, new_url):
-    """old_url 이 있는 모든 곳(front matter image·본문)을 new_url 로. 없으면 front matter image 만 설정."""
+def apply_image(text, old_url, new_url, credit=""):
+    """old_url 이 있는 모든 곳(front matter image·본문)을 new_url 로. 없으면 front matter image 만 설정. 새 사진의 출처 줄(credit — unsplash_credit.credit_markdown 이 만든 한 줄,
+    없으면 빈 문자열)은 옛 출처 줄(우리 모양)을 모두 지우고 새 이미지 줄 바로 다음에 넣는다."""
     if old_url and old_url in text:
-        return text.replace(old_url, new_url)
+        return unsplash_credit.place_credit(text.replace(old_url, new_url), new_url, credit)
     fm_text, body = frontmatter.split_front_matter(text)
     if fm_text is None:
         raise EditError("front matter 가 없는 글이라 대표 이미지를 지정할 수 없습니다.")
@@ -323,7 +325,7 @@ def apply_image(text, old_url, new_url):
         fm_text = re.sub(r"(?m)^image:.*$", lambda _m: f'image: "{new_url}"', fm_text)
     else:
         fm_text = fm_text.rstrip() + f'\nimage: "{new_url}"'
-    return f"---\n{fm_text}\n---\n{body}"
+    return unsplash_credit.place_credit(f"---\n{fm_text}\n---\n{body}", new_url, credit)
 
 
 def op_image(text, fields, post, root, llm=None, picker=None):
@@ -343,4 +345,9 @@ def op_image(text, fields, post, root, llm=None, picker=None):
     new_url = picker(queries, used)
     if not new_url or not checks.is_safe_image_url(str(new_url)):   # 접두사만이 아니라 전체 형식·허용 호스트를 확인한다(D-38)
         raise EditError("조건에 맞는 새 이미지를 찾지 못했습니다. 설명을 더 구체적으로 적어 새 이슈로 올려 주세요.")
-    return apply_image(text, old_url, new_url), f"대표 이미지 교체 ({'; '.join(queries[:2])})"
+    # 선택기가 사진의 작가 출처 줄을 함께 주면(Credited) 새 이미지 줄 바로 다음에 넣고 옛 줄은 지운다. 모양이 맞지 않는 줄은 쓰지 않는다. 일반 문자열 선택기는 줄 없이 주소만 바꾼다(옛 줄은 지운다).
+    credit = getattr(new_url, "credit", "") if isinstance(new_url, unsplash_credit.Credited) else ""
+    credit = credit if unsplash_credit.is_credit_line(credit) else ""
+    new_url = str(new_url)
+    new_text = apply_image(text, old_url, new_url, credit) if credit else apply_image(text, old_url, new_url)
+    return new_text, f"대표 이미지 교체 ({'; '.join(queries[:2])})"

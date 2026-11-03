@@ -25,7 +25,8 @@ from pipeline import main_image as mi
 from pipeline.llm import CallLog, LLMError
 
 GOOD_RAW = "https://images.unsplash.com/photo-1507146426996-ef05306b995a?ixid=M3wxfDB8&ixlib=rb-4.0.3"
-GOOD_SRC = "https://images.unsplash.com/photo-1507146426996-ef05306b995a?w=1080&q=80&fm=jpg&fit=max&auto=format"
+GOOD_SRC_PLAIN = "https://images.unsplash.com/photo-1507146426996-ef05306b995a?w=1080&q=80&fm=jpg&fit=max&auto=format"      # 질의가 없는 주소(ixid 없음)
+GOOD_SRC = "https://images.unsplash.com/photo-1507146426996-ef05306b995a?ixid=M3wxfDB8&w=1080&q=80&fm=jpg&fit=max&auto=format"      # GOOD_RAW 의 ixid 를 남긴 주소
 GOOD_DOWNLOAD = "https://api.unsplash.com/photos/Abc123XyZ_k/download?ixid=M3wxfDB8"
 UTM = "utm_source=chanceblog&utm_medium=referral"
 
@@ -146,9 +147,9 @@ class AskQueriesTest(unittest.TestCase):
 class UrlSafetyTest(unittest.TestCase):
     def test_the_raw_url_is_normalised_to_the_resize_parameters(self):
         self.assertEqual(mi.normalize_image_url(GOOD_RAW), GOOD_SRC)
-        self.assertEqual(mi.normalize_image_url("https://images.unsplash.com/photo-1507146426996-ef05306b995a"), GOOD_SRC)
+        self.assertEqual(mi.normalize_image_url("https://images.unsplash.com/photo-1507146426996-ef05306b995a"), GOOD_SRC_PLAIN)
         self.assertEqual(mi.normalize_image_url("  " + GOOD_RAW + "\n"), GOOD_SRC)                       # 앞뒤 공백은 접는다
-        self.assertEqual(mi.normalize_image_url("https://images.unsplash.com/photo-1507146426996-ef05306b995a#x"), GOOD_SRC)   # 조각은 버린다
+        self.assertEqual(mi.normalize_image_url("https://images.unsplash.com/photo-1507146426996-ef05306b995a#x"), GOOD_SRC_PLAIN)   # 조각은 버린다
 
     def test_foreign_or_odd_image_urls_are_rejected(self):
         bad = ("http://images.unsplash.com/photo-1", "https://images.unsplash.com.evil.example/photo-1", "https://evil.example/photo-1",
@@ -182,12 +183,57 @@ class UrlSafetyTest(unittest.TestCase):
             self.assertEqual(mi.safe_download_url(bad), "", repr(bad))
 
 
+class IxidKeptTest(unittest.TestCase):
+    """Unsplash API 지침(2026-11-03 원문 확인): 사진 주소의 `ixid`(앱의 사진 조회 보고용 추적 값)는 크기를 바꿔도 남긴다. 올바른 값이 하나뿐일 때만 남기고, 아니면 옛 동작(빼고 계속)이다 —
+    사진을 못 쓰게 만들지는 않는다. 값의 모양 검사는 공용 모듈(pipeline/unsplash_credit.py)이 하고 Chance·이슈 수정과 같은 규칙이다."""
+    BASE = "https://images.unsplash.com/photo-1507146426996-ef05306b995a"
+    TAIL = "w=1080&q=80&fm=jpg&fit=max&auto=format"
+
+    def test_a_valid_ixid_is_kept_in_front_and_the_other_tracking_parameters_are_dropped(self):
+        for query in ("ixid=M3wxfDB8&ixlib=rb-4.0.3", "ixlib=rb-4.0.3&ixid=M3wxfDB8", "ixid=M3wxfDB8", "x=1&ixid=M3wxfDB8&y=2#frag"):
+            with self.subTest(query):
+                self.assertEqual(mi.normalize_image_url(f"{self.BASE}?{query}"), f"{self.BASE}?ixid=M3wxfDB8&{self.TAIL}")
+
+    def test_the_allowed_characters_and_the_length_limit(self):
+        for value in ("aZ09_-=", "M3w", "A" * 200, "MXwxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHw="):
+            self.assertEqual(mi.normalize_image_url(f"{self.BASE}?ixid={value}"), f"{self.BASE}?ixid={value}&{self.TAIL}", value)
+        self.assertEqual(mi.normalize_image_url(f"{self.BASE}?ixid=MXwxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHw%3D"),
+                         f"{self.BASE}?ixid=MXwxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHw=&{self.TAIL}")      # 실제 응답에 있는 %3D 는 풀어서 한 모양으로 남긴다
+
+    def test_a_wrong_ixid_is_dropped_and_the_photo_is_still_usable(self):
+        plain = f"{self.BASE}?{self.TAIL}"
+        for query in ("ixid=", "ixid=" + "A" * 201, "ixid=a%20b", "ixid=a+b", "ixid=a/b", "ixid=a:b", "ixid=a%26b", "ixid=%3Cscript%3E", "ixid=%E3%81%82", "ixid=a%0Ab", "ixid=a%00b",
+                      "ixid=a&ixid=b", "ixid=M3w&ixid=M3w", "IXID=M3w", "ixid", "xixid=M3w", "ixid%3D=M3w", "ixid=a%5Cb", "ixlib=rb-4.0.3"):
+            with self.subTest(query):
+                self.assertEqual(mi.normalize_image_url(f"{self.BASE}?{query}"), plain)
+
+    def test_the_host_and_path_rules_do_not_change_when_an_ixid_is_present(self):
+        for url in ("https://evil.example/photo-1?ixid=M3w", "http://images.unsplash.com/photo-1?ixid=M3w", "https://images.unsplash.com/uploads/1?ixid=M3w",
+                    "https://images.unsplash.com/photo-1?ixid=M3w\nx", "https://images.unsplash.com/photo-1?ixid=M3w\"x", "https://images.unsplash.com.evil.example/photo-1?ixid=M3w"):
+            self.assertEqual(mi.normalize_image_url(url), "", repr(url))
+
+    def test_the_photo_and_the_block_carry_the_ixid(self):
+        photo = mi.photo_from(photo_item(raw=f"{self.BASE}?ixid=M3wxfDB8&ixlib=rb-4.0.3"))
+        self.assertEqual(photo.src, f"{self.BASE}?ixid=M3wxfDB8&{self.TAIL}")
+        self.assertIn(f'<img src="{self.BASE}?ixid=M3wxfDB8&amp;w=1080&amp;q=80', mi.build_block(photo))
+        plain = mi.photo_from(photo_item(raw=f"{self.BASE}?ixid=bad value"))
+        self.assertIsNone(plain)                                     # 주소에 공백이 든 응답은 옛 규칙대로 통째로 버린다
+        dropped = mi.photo_from(photo_item(raw=f"{self.BASE}?ixid=a%20b"))
+        self.assertEqual(dropped.src, f"{self.BASE}?{self.TAIL}")    # 모양이 틀린 ixid 만 빼고 사진은 쓴다
+
+    def test_the_search_to_block_flow_keeps_the_ixid_of_the_chosen_photo(self):
+        fake = FakeUnsplash(results(photo_item("Aaa111bbb22", raw=f"{self.BASE}?ixid=M3wxfDB8&ixlib=rb-4.0.3")))
+        result = mi.find_main_image(KEY, "Morning Coffee", ["coffee"], QueryLLM(), opener=fake)
+        self.assertTrue(result.ok, result.reason)
+        self.assertIn(f"{self.BASE}?ixid=M3wxfDB8&amp;w=1080", result.block)
+
+
 class PhotoFromTest(unittest.TestCase):
     def test_a_complete_result_becomes_a_photo(self):
         photo = mi.photo_from(photo_item(), "Some title")
         self.assertEqual((photo.id, photo.alt, photo.author, photo.author_url),
                          ("Abc123XyZ_k", "a cup of coffee on a wooden table", "Jane Doe", "https://unsplash.com/@janedoe"))
-        self.assertEqual(photo.src, "https://images.unsplash.com/photo-1500000000000-abc123xyz_k?w=1080&q=80&fm=jpg&fit=max&auto=format")
+        self.assertEqual(photo.src, "https://images.unsplash.com/photo-1500000000000-abc123xyz_k?ixid=M3wxfDB8&w=1080&q=80&fm=jpg&fit=max&auto=format")
         self.assertEqual(photo.download_location, "https://api.unsplash.com/photos/Abc123XyZ_k/download?ixid=M3wxfDB8")
 
     def test_the_post_title_is_the_alt_text_when_unsplash_has_no_description(self):
@@ -246,7 +292,7 @@ class BuildBlockTest(unittest.TestCase):
         self.assertEqual(
             mi.build_block(photo),
             '<div style="text-align:center;margin:0 0 1.5em;">'
-            '<img src="https://images.unsplash.com/photo-1500000000000-abc123xyz_k?w=1080&amp;q=80&amp;fm=jpg&amp;fit=max&amp;auto=format" '
+            '<img src="https://images.unsplash.com/photo-1500000000000-abc123xyz_k?ixid=M3wxfDB8&amp;w=1080&amp;q=80&amp;fm=jpg&amp;fit=max&amp;auto=format" '
             'alt="a cup of coffee on a wooden table" style="max-width:100%;height:auto;">'
             '<br><small>Photo by <a href="https://unsplash.com/@janedoe?utm_source=chanceblog&amp;utm_medium=referral" rel="noopener nofollow" target="_blank">Jane Doe</a> on '
             '<a href="https://unsplash.com/?utm_source=chanceblog&amp;utm_medium=referral" rel="noopener nofollow" target="_blank">Unsplash</a></small></div>')

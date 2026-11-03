@@ -1337,7 +1337,7 @@ class UnsplashRateTest(ChanceBase):
         urls, out = self.search(error=OSError("연결 실패"))
         self.assertEqual(urls, [])
         self.assertEqual(g.UNSPLASH_RATE, {"remaining": 5, "limit": 50})
-        body = {"results": [{"urls": {"raw": "https://images.unsplash.com/photo-1"}, "links": {"download_location": "https://api.unsplash.com/d"}}]}
+        body = {"results": [{"urls": {"raw": "https://images.unsplash.com/photo-1"}, "links": {"download_location": "https://api.unsplash.com/photos/abc12345/download"}}]}
         urls, _ = self.search(FakeUnsplashResponse({"X-Ratelimit-Remaining": "4"}, body))
         self.assertEqual(len(urls), 1)
         self.assertTrue(urls[0].startswith("https://images.unsplash.com/photo-1"))

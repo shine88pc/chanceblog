@@ -11,6 +11,7 @@ import difflib
 import html
 import re
 
+from pipeline import unsplash_credit
 from pipeline.edits import frontmatter, safety, spec as spec_mod
 from pipeline.secret_patterns import find_secrets
 
@@ -139,6 +140,8 @@ def verify_image_change(before, after):
     생성 직후 검증(runner)과 PR 범위 검사(scope_check)가 같은 함수를 쓴다. 통과 조건:
     1. 새 front matter image 가 허용 형식·허용 호스트의 주소다(값은 사유에 되풀이하지 않는다)
     2. 이전 주소가 있었다면, 그것을 새 주소로 바꾼 것 말고는 본문·다른 줄이 한 글자도 다르지 않다(주소를 자리표시자로 바꿔 비교)
+       — 단 하나의 예외: 우리가 만든 작가 출처 줄(`unsplash_credit` 의 모양, 이름은 이스케이프되고 링크는 unsplash.com 뿐)은 비교에서 빼고, 새 글에 그런 줄이 있다면
+       하나뿐이고 새 이미지 줄 바로 다음이어야 한다(옛 사진의 출처 줄을 지우고 새 사진의 줄을 넣는 교체를 허용하되 다른 글을 끼워 넣을 수는 없게)
     3. 이미지가 없던 글에 이미지가 추가된 경우에는 front matter 의 image 줄만 늘어난 것이다
     """
     old_url, old_fm = front_matter_image(before)
@@ -153,15 +156,17 @@ def verify_image_change(before, after):
     reasons = []
     if sum(1 for ln in frontmatter.split_front_matter(after)[0].split("\n") if _IMAGE_LINE.match(ln)) > 1:
         reasons.append("front matter 에 image 줄이 둘 이상입니다.")
+    core_before, core_after = unsplash_credit.strip_credit_lines(before), unsplash_credit.strip_credit_lines(after)   # 우리 출처 줄은 비교에서 뺀다(아래에서 따로 본다)
     if old_url:
         marker = "\0IMAGE-URL\0"
-        while marker in before or marker in after:   # 본문에 자리표시자와 같은 문자열이 있어도 속지 않는다
+        while marker in core_before or marker in core_after:   # 본문에 자리표시자와 같은 문자열이 있어도 속지 않는다
             marker += "\0"
-        same = before.replace(old_url, marker) == after.replace(new_url, marker)
+        same = core_before.replace(old_url, marker) == core_after.replace(new_url, marker)
     else:
-        same = _without_image_line(before) == _without_image_line(after)
+        same = _without_image_line(core_before) == _without_image_line(core_after)
     if not same:
         reasons.append("대표 이미지 주소 외의 내용(본문·다른 front matter)이 바뀌었습니다. 이미지 변경은 주소만 바꿀 수 있습니다.")
+    reasons += unsplash_credit.credit_problems(after, new_url)
     return reasons
 
 

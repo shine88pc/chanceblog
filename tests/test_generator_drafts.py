@@ -13,6 +13,7 @@ from unittest import mock
 
 import _bootstrap
 import generator as g
+from chance_credit_helpers import fake_pool_photo
 from draft_helpers import REAL_PUBLISH_FLOW, HermeticGit
 from pipeline import draft_flow, drafts
 from test_generator_slots import at, candidate, long_post, run_captured
@@ -61,6 +62,7 @@ def run_tick(clone, now, flow="pr", event="schedule", dry=False, feed=None, gemi
                mock.patch.object(g, "SLOT_HOURS", [9, 18]), mock.patch.object(g, "now_kst", return_value=now),
                mock.patch.object(g, "fetch_news_items", fake_fetch), mock.patch.object(g, "call_gemini_with_fallback", fake_gemini),
                mock.patch.object(g, "url_ok", lambda url, timeout=10: True), mock.patch.object(g, "trigger_download", lambda url: None),
+               mock.patch.object(g, "fetch_pool_photo", fake_pool_photo),     # 키 없는 실제 실행은 고정 목록 사진의 출처를 조회할 수 없다 → 조회에 성공한 것으로 가정(시험은 이미지가 아니라 흐름을 본다)
                mock.patch.object(g, "get_client", side_effect=AssertionError("가짜 Gemini 만 쓴다")),
                mock.patch.object(drafts, "chance_flow", return_value=flow)]
     if remote_exists != "real":

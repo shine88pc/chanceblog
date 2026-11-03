@@ -31,6 +31,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from pipeline import registry as registry_mod
+from pipeline import unsplash_credit
 from pipeline.console import md_cell, safe_output
 from pipeline.edits import checks, forms, frontmatter, ops, pages, safety, spec as spec_mod, targets
 from pipeline.llm import CallLog, call_line
@@ -342,7 +343,11 @@ def default_image_picker(notes=None):
         finally:
             if notes is not None:
                 notes.extend(image_search_notes(captured.getvalue()))
-        return picked[0] if picked else None
+        if not picked:
+            return None
+        chosen = unsplash_credit.Credited(picked[0])      # 주소(ixid 포함)와 함께 그 사진의 작가 출처 줄을 돌려준다 — 이미지 교체가 새 이미지 줄 아래에 넣는다
+        chosen.credit = generator.credit_line_for(picked[0])
+        return chosen
     return pick
 
 

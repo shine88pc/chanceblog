@@ -4,7 +4,7 @@
 개발 지식이 없어도 알아볼 수 있게 하는 것이다.
 
   ✅ 통과        요청한 교체와 정확히 일치하는 변경만 있다(문자 그대로 교체·링크·SEO 메타처럼 기대값을 계산할 수 있는 경우)
-  ⚠️ 확인 필요   범위 안이지만 내용이 요청과 맞는지 자동으로 증명할 수 없다(AI 가 문장을 쓴 경우 등)
+  ⚠️ 확인 필요   범위 안이지만 내용이 요청과 맞는지 자동으로 증명할 수 없다(AI 가 문장을 쓴 경우, 이미지 교체에 작가 출처 줄이 함께 바뀐 경우 등)
   ❌ 범위 밖     허용되지 않은 파일·광고 코드·front matter 변경, 요청과 다른 교체 등
 
 PR 이 고치려는 코드(pipeline/ 등)를 실행하지 않도록, 이 도구는 항상 base 커밋의 체크아웃에서 실행하고
@@ -23,6 +23,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from pipeline import unsplash_credit
 from pipeline.console import safe_output
 from pipeline.edits import checks, frontmatter, ops, runner, safety, spec as spec_mod
 
@@ -99,6 +100,15 @@ def expected_after(req, before_text):
     return None
 
 
+def credit_diff(before, after, path):
+    """이전·이후 글의 우리 모양 작가 출처 줄(unsplash_credit.credit_lines)이 달라졌는가(바뀜·새로 생김·사라짐). 달라졌으면 이전 → 이후 차이(코드 블록에 넣을 글), 같거나 둘 다 없으면 None.
+    작가 이름은 Unsplash 응답에서 온 외부 글이라 이스케이프·길이 제한을 거쳐도 '이름이 진짜'라는 증명이 아니다(평문이면 무엇이든 우리 줄 모양이다) — 그래서 출처 줄이 달라진 PR 은 통과(✅)로 증명하지 않는다."""
+    old, new = unsplash_credit.credit_lines(before), unsplash_credit.credit_lines(after)
+    if old == new:
+        return None
+    return checks.unified_diff("\n".join(old), "\n".join(new), f"{path} (작가 출처 줄: 이전 → 이후)")
+
+
 def check_pull(issue, root, base, head, changes=None, show=None):
     """이슈 요청과 PR(base..head)의 변경을 비교한 Report."""
     show = show or (lambda sha, path: git_show(root, sha, path))
@@ -163,12 +173,23 @@ def check_pull(issue, root, base, head, changes=None, show=None):
         if image_reasons:
             fail = True
             items += [("❌", r) for r in image_reasons]
-        elif not checks.front_matter_image(before)[0]:
-            items.append(("✅", "이미지가 없던 글에 대표 이미지(front matter image)만 추가되었고 나머지는 그대로입니다."))
-            proven = True
         else:
-            items.append(("✅", "대표 이미지 URL 만 새 이미지로 바뀌었고 나머지는 그대로입니다."))
-            proven = True
+            added = not checks.front_matter_image(before)[0]
+            changed_credit = credit_diff(before, after, path)
+            if changed_credit is not None:
+                # 우리 모양의 작가 출처 줄이 이전 글과 달라졌다 — 이름 칸 평문은 검사로 증명할 수 없어 ✅ 로 표시하지 않고 사람이 보게 한다(⚠️ 확인 필요)
+                items.append(("ℹ️", ("이미지가 없던 글에 대표 이미지(front matter image)가 추가되었고" if added else "대표 이미지 URL 이 새 이미지로 바뀌었고") + ", 작가 출처 줄 외의 내용은 그대로입니다."))
+                items.append(("⚠️", "작가 출처 줄이 함께 바뀌었습니다 — 작가 이름은 Unsplash 응답에서 온 외부 글이라 자동으로 증명할 수 없습니다. 아래 줄을 직접 확인하세요."))
+                details.append(changed_credit)
+            elif added:
+                items.append(("✅", "이미지가 없던 글에 대표 이미지(front matter image)만 추가되었고 나머지는 그대로입니다."))
+                proven = True
+            else:
+                items.append(("✅", "대표 이미지 URL 만 새 이미지로 바뀌었고 나머지는 그대로입니다."))
+                proven = True
+            if changed_credit is None and unsplash_credit.credit_lines(after):
+                # 줄이 이전 글 그대로다(통과) — 주소를 바꿨다면 그 줄이 새 사진의 작가인지는 검사로 알 수 없다고 덧붙인다
+                items.append(("ℹ️", "작가 출처 줄은 그대로입니다 — 사진을 바꿨다면 그 줄이 새 사진의 작가인지는 검사가 알 수 없으니 직접 확인하세요."))
     else:
         if want is not None:
             if after == want and eol_problem:
