@@ -164,10 +164,11 @@ class WrapperTest(unittest.TestCase):
         self.assertEqual(sorted(wf.WRAPPER_LABELS), sorted(WRAPPERS.values()))
 
     def test_the_schedules_do_not_overlap_each_other_or_the_other_channels(self):
-        crons = {name: wf.load(name)["on"]["schedule"][0]["cron"] for name in ("blogger-en.yml", "blogger-ko.yml", "tistory.yml", "naver.yml")}
+        self.assertNotIn("schedule", wf.load("tistory.yml")["on"])                  # 티스토리는 2026-11-03 운영자 결정(접근성 문제)으로 최종 중단 — 정기 실행이 없다
+        crons = {name: wf.load(name)["on"]["schedule"][0]["cron"] for name in ("blogger-en.yml", "blogger-ko.yml", "naver.yml")}      # 네이버는 잠정 중단(mode off)이라 정기 실행 줄은 그대로다
         self.assertEqual(crons["blogger-en.yml"], "0 2 * * *")                      # 영문 정기 실행 시각은 그대로다
         self.assertEqual(crons["blogger-ko.yml"], "30 3 * * *")
-        self.assertEqual(len(set(crons.values())), 4, crons)
+        self.assertEqual(len(set(crons.values())), 3, crons)
 
     def test_the_triggers_and_inputs_are_the_old_workflows_inputs_without_the_blog_picker(self):
         english, korean = wf.load("blogger-en.yml"), wf.load("blogger-ko.yml")

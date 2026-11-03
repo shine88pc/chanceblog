@@ -25,7 +25,7 @@ import validate_repo as vr  # noqa: E402
 # 이 표와 해당 워크플로·프로필·문서를 함께 고친다. 시크릿은 Gemini 키 '이름' 하나뿐이고(계정 정보 없음) 광고는 꺼져 있다.
 REAL_PACKAGE_BLOGS = {
     "naver_life_tips": {
-        "platform": "naver", "mode": "package", "url": "https://blog.naver.com/shine5652", "channel": {"key": "naver", "label": "네이버"},
+        "platform": "naver", "mode": "off", "url": "https://blog.naver.com/shine5652", "channel": {"key": "naver", "label": "네이버"},      # off: 2026-11-03 운영자 결정(데스크톱 이관을 마칠 때까지 잠정 중단 — 되돌리면 package)
         "workflow": ".github/workflows/naver.yml", "entrypoint": "pipeline/run.py", "prompt": ".github/editorial/NAVER_PROMPT.md", "profile": "naver_life_tips_ko",
         "state": {"history": "naver_history.json", "content_dir": "_naver_drafts"},
         "schedule": {"cron": "20 6 * * *"}, "secrets": {"llm_api_key": "GEMINI_API_KEY"}, "ads": "off", "ad_surface": False,
@@ -62,8 +62,9 @@ class PackageRegistryBase(unittest.TestCase):
 
 class NewValuesTest(PackageRegistryBase):
     def test_the_real_registry_has_exactly_the_naver_package_blog(self):
-        """실제 레지스트리의 초안 패키지 채널은 정확히 하나다 — 네이버(`naver_life_tips`). mode `package`(공개되지 않는 쪽)이고 시크릿은 Gemini 키 이름뿐이며 광고는 꺼져 있다.
-        티스토리는 2026-10-30 운영자 결정(제외·격리)으로 실제 레지스트리에 없다(플랫폼 코드는 쓰지 않는 채로 남아 있다). 정기 실행은 네이버만 '대상 1개'다(PlanAndEnabledTest).
+        """실제 레지스트리의 초안 패키지 채널은 정확히 하나다 — 네이버(`naver_life_tips`). mode 는 지금 `off`(2026-11-03 운영자 결정: 데스크톱 이관을 마칠 때까지 잠정 중단, 되돌리면 `package` — 공개되지 않는 쪽)이고
+        시크릿은 Gemini 키 이름뿐이며 광고는 꺼져 있다. 티스토리는 2026-10-30 운영자 결정(제외·격리)으로 실제 레지스트리에 없고 2026-11-03 에 최종 중단했다(플랫폼 코드는 쓰지 않는 채로 남아 있다).
+        정기 실행은 지금 '대상 0개'다(PlanAndEnabledTest).
         시험 이름은 블로그 주소·주제를 받기 전의 옛 모습('아직 없다') 그대로였다 — docs/ARCHITECTURE.md §7-B-2 3-1 행과 tests/test_package_docs.py 가
         이 이름을 가리키므로 이름은 그 둘과 함께 바꾼다."""
         real = registry.load_registry()
@@ -249,18 +250,23 @@ class PlanAndEnabledTest(PackageRegistryBase):
             self.assertEqual(buffer.getvalue().strip(), "0")
 
     def test_the_real_registry_gives_each_package_platform_exactly_one_matrix_entry(self):
-        """실제 레지스트리: 네이버가 대상 1개이고 티스토리는 0개다(정기 실행이 네이버 초안 하나를 만든다). 매트릭스에는 시크릿 '이름'과 LLM 키 역할만 든다."""
+        """실제 레지스트리: 네이버는 지금 off(2026-11-03 운영자 결정, 데스크톱 이관을 마칠 때까지 잠정 중단)라 대상 0개이고 티스토리도 0개다(정기 실행은 아무것도 만들지 않는다).
+        되돌려(package) 켜면 예전처럼 네이버 하나만 대상 1개가 된다 — 사본으로 확인한다. 매트릭스에는 시크릿 '이름'과 LLM 키 역할만 든다."""
         real = registry.load_registry()
         for key, spec in REAL_PACKAGE_BLOGS.items():
             platform = spec["platform"]
-            self.assertEqual(plan.build_matrix(real, platform), {"include": [{
-                "key": key, "platform": platform, "mode": "package", "history": spec["state"]["history"], "content_dir": spec["state"]["content_dir"],
-                "secret_llm_api_key": "GEMINI_API_KEY", "secret_blog_id": "", "secret_client_id": "", "secret_client_secret": "", "secret_refresh_token": ""}]})
-            self.assertEqual([i["key"] for i in plan.build_matrix(real, platform, only=key)["include"]], [key])
+            self.assertEqual(plan.build_matrix(real, platform), {"include": []})                     # 잠정 중단(off)
+            self.assertEqual(plan.build_matrix(real, platform, only=key)["include"], [])
             buffer = io.StringIO()
             with redirect_stdout(buffer):
                 self.assertEqual(plan.main(["--platform", platform, "--count"]), 0)                  # 실제 레지스트리·실제 저장소 파일로 검증까지 통과한다
-            self.assertEqual(buffer.getvalue().strip(), "1")
+            self.assertEqual(buffer.getvalue().strip(), "0")
+            resumed = copy.deepcopy(real)
+            entry_of(resumed, key)["mode"] = "package"                                               # 되돌리기: mode 한 줄
+            self.assertEqual(plan.build_matrix(resumed, platform), {"include": [{
+                "key": key, "platform": platform, "mode": "package", "history": spec["state"]["history"], "content_dir": spec["state"]["content_dir"],
+                "secret_llm_api_key": "GEMINI_API_KEY", "secret_blog_id": "", "secret_client_id": "", "secret_client_secret": "", "secret_refresh_token": ""}]})
+            self.assertEqual([i["key"] for i in plan.build_matrix(resumed, platform, only=key)["include"]], [key])
         self.assertEqual(plan.build_matrix(real, "tistory"), {"include": []})                       # 티스토리 정기 실행(남아 있는 워크플로)은 아무것도 하지 않는다
         buffer = io.StringIO()
         with redirect_stdout(buffer):
@@ -315,6 +321,16 @@ class ValidatorTest(PackageRegistryBase):
         files = vr.list_files(REAL)
         for name in ("tistory.yml", "naver.yml"):
             self.assertIn(f".github/workflows/{name}", files)
+
+    def test_tistory_is_stopped_for_good_and_naver_keeps_its_schedule_while_paused(self):
+        """2026-11-03 운영자 결정: 티스토리는 최종 중단 — 실제 tistory.yml 에 정기 실행(schedule)이 없고 수동 실행만 남는다. 네이버는 잠정 중단이라 정기 실행 줄은 그대로이고
+        레지스트리 mode 만 off 다(되돌리려면 mode 한 줄). 티스토리를 다시 쓰려면 운영자의 새 결정과 함께 이 시험을 바꿔야 한다."""
+        self.assertEqual(vr._workflow_crons(REAL, ".github/workflows/tistory.yml"), [])
+        self.assertEqual(vr._workflow_crons(REAL, ".github/workflows/naver.yml"), ["20 6 * * *"])
+        self.assertEqual([blog["key"] for blog in registry.load_registry()["blogs"] if blog["platform"] == "tistory"], [])
+        text = (REAL / ".github" / "workflows" / "tistory.yml").read_text(encoding="utf-8")
+        self.assertIn("workflow_dispatch:", text)
+        self.assertIn("최종 중단", text)
 
 
 if __name__ == "__main__":

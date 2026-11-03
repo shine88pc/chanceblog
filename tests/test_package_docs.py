@@ -21,8 +21,10 @@ def section(text, start, end):
 
 
 def cron_of(name):
+    """워크플로의 정기 실행(cron). 정기 실행이 없으면 None(티스토리는 2026-11-03 운영자 결정으로 최종 중단 — 수동 실행만 남았다)."""
     data = yaml.safe_load(read(f".github/workflows/{name}.yml"))
-    return (data.get("on") or data.get(True))["schedule"][0]["cron"]
+    schedule = (data.get("on") or data.get(True)).get("schedule") or []
+    return schedule[0]["cron"] if schedule else None
 
 
 class ResultCodeDocsTest(unittest.TestCase):
@@ -103,12 +105,12 @@ class LimitsAndPolicyDocsTest(unittest.TestCase):
     def test_the_documented_crons_are_the_workflows_crons(self):
         arch = section(read("docs/ARCHITECTURE.md"), "### B-2.", "### C. 또 하나의 Jekyll")
         guide = read("docs/ACTIONS_GUIDE.md")
-        self.assertEqual((cron_of("tistory"), cron_of("naver")), ("20 5 * * *", "20 6 * * *"))
-        for cron in (cron_of("tistory"), cron_of("naver")):
-            self.assertIn(f"`{cron}`", arch)
-        for name, hour, kst in (("tistory", "05:20", "14:20"), ("naver", "06:20", "15:20")):
-            self.assertRegex(guide, rf"\| \[{registry.PACKAGE_PLATFORMS[name]}\] 초안 패키지 만들기 \| 매일 {hour} \| {kst} \|")     # UTC → 한국 시각(+9)
-        self.assertIn("cron `20 5 * * *`(UTC)", guide)
+        # 2026-11-03 운영자 결정: 티스토리 최종 중단(정기 실행 없음 — None), 네이버 잠정 중단(정기 실행 줄은 그대로, 레지스트리 mode off)
+        self.assertEqual((cron_of("tistory"), cron_of("naver")), (None, "20 6 * * *"))
+        self.assertIn(f"`{cron_of('naver')}`", arch)
+        self.assertRegex(guide, rf"\| \[{registry.PACKAGE_PLATFORMS['naver']}\] 초안 패키지 만들기 \| 매일 06:20 \| 15:20 \|")     # UTC → 한국 시각(+9)
+        self.assertRegex(guide, rf"\| \[{registry.PACKAGE_PLATFORMS['tistory']}\] 초안 패키지 만들기 \| 정기 실행 없음 \| - \|")      # 티스토리: 최종 중단
+        self.assertIn("최종 중단", arch)
         self.assertIn("cron `20 6 * * *`(UTC)", guide)
         self.assertIn("네이버 15:20 KST", read("HANDLER.md"))
 

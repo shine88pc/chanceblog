@@ -49,6 +49,18 @@ def package_entry(platform, mode="package", **overrides):
     return entry
 
 
+def restore_schedule_if_stopped(root, platform, cron):
+    """2026-11-03 운영자 결정으로 실제 `tistory.yml` 의 정기 실행(schedule)을 껐다(최종 중단). 시험은 쓰지 않는 티스토리 플랫폼 코드도 계속 증명해야 하므로
+    (정기 실행이 있는 플랫폼의 경로) **임시 사본에만** 옛 일정을 되살린다 — 실제 저장소 파일은 건드리지 않는다."""
+    path = Path(root) / ".github" / "workflows" / f"{platform}.yml"
+    text = path.read_text(encoding="utf-8")
+    if re.search(r"(?m)^  schedule:", text):
+        return
+    text, count = re.subn(r"(?m)^on:\n(?=  workflow_dispatch:)", f"on:\n  schedule:\n    - cron: '{cron}'\n", text, count=1)
+    assert count == 1, f"{platform}.yml 의 on: 모양이 바뀌었다 — 이 보조 함수를 함께 고친다"
+    path.write_text(text, encoding="utf-8")
+
+
 def make_package_root(tmp, mode="package", platforms=("tistory", "naver"), mutate=None):
     """임시 저장소: 실제 레지스트리에서 패키지 블로그를 뺀 사본(chance·blogger_macat·blogger_kcyoon)에 시험용 티스토리·네이버 항목을 더하고, 실제 워크플로 파일 2개와 fixture 프로필을 복사한다."""
     root = make_root(tmp, mode="off")
@@ -63,6 +75,7 @@ def make_package_root(tmp, mode="package", platforms=("tistory", "naver"), mutat
     (root / "pipeline" / "profiles" / "package_test_ko.json").write_text(json.dumps(profile, ensure_ascii=False), encoding="utf-8")
     for platform in ("tistory", "naver"):
         shutil.copy(REAL / ".github" / "workflows" / f"{platform}.yml", root / ".github" / "workflows" / f"{platform}.yml")
+    restore_schedule_if_stopped(root, "tistory", "20 5 * * *")                    # 임시 사본에서만 — 실제 tistory.yml 은 정기 실행이 꺼져 있다
     (root / "pipeline" / "run.py").write_text("", encoding="utf-8")
     return root
 
