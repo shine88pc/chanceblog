@@ -22,6 +22,7 @@ import yaml
 
 import _bootstrap
 import generator as g
+from chance_credit_helpers import fake_pool_photo
 from test_generator_slots import at, candidate, run_captured
 
 ROOT = _bootstrap.ROOT
@@ -624,7 +625,7 @@ class GateAndGuardTest(unittest.TestCase):
             patcher = mock.patch.object(g, name, return_value=value)
             patcher.start()
             self.addCleanup(patcher.stop)
-        for name, value in (("url_ok", lambda url, timeout=10: True), ("trigger_download", lambda url: None)):
+        for name, value in (("url_ok", lambda url, timeout=10: True), ("trigger_download", lambda url: None), ("fetch_pool_photo", fake_pool_photo)):
             patcher = mock.patch.object(g, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)

@@ -26,6 +26,7 @@ from datetime import timezone, timedelta
 from pathlib import Path
 
 from pipeline import drafts  # 승인 흐름(레지스트리 publish_flow: pr)의 이름·판정 규칙. direct(기본)에서는 흐름을 읽는 것 말고 아무것도 하지 않는다
+from pipeline import unsplash_credit  # Unsplash 사진의 ixid 유지·작가 출처 줄(순수 함수 — Chance·이슈 수정·Blogger 가 같은 규칙을 쓴다)
 from pipeline.llm import CallLog, scrub  # Gemini 요청 기록·시크릿 가리기는 Blogger·이슈 수정과 같은 코드를 쓴다(D-52)
 
 # ============================================================
@@ -103,6 +104,12 @@ TECH_EN = re.compile(
 
 _client = None
 _download_locations = {}
+# 사진(image_key = 호스트+경로)별 작가 출처 (이름, 프로필 주소) — search_unsplash·fetch_pool_photo 가 검사·정리를 통과한 것만 적는다. 여기에 없는 사진은 새 글·이미지 교체에 쓰지 않는다.
+_credits = {}
+STUB_CREDIT = ("Stub Photographer", "https://unsplash.com/@stub_photographer")   # 연습 실행(키 없음)의 가짜 사진에 붙이는 가짜 출처 — 연습 실행은 아무것도 저장하지 않는다
+POOL_LOOKUP_MAX_BODY = 1_000_000   # 사진 조회 응답을 이 바이트까지만 읽는다
+POOL_LOOKUP_MAX_FAILS = 3   # 고정 목록 사진 조회가 연달아 이만큼 실패하면 더 부르지 않는다(키가 막혔을 때 한도만 쓰지 않게)
+POOL_LOOKUP_MAX_TOTAL = 6   # 한 번의 pick_images 호출에서 고정 목록 사진 조회(fetch_pool_photo)를 부르는 총 횟수 상한 — 성공·실패·주소 확인 실패·이미 쓴 사진을 가리지 않고 '조회를 부른 횟수'를 센다(시간당 한도를 지킨다)
 
 
 # ============================================================
@@ -242,8 +249,10 @@ def image_key(url):
 
 
 def build_image_url(raw):
+    """urls.raw → 쓸 사진 주소: 호스트·경로에 크기·형식 매개변수(IMG_PARAMS)를 붙인다. Unsplash 가 준 `ixid`(앱의 사진 조회 보고용 추적 값 — Unsplash API 지침은 크기를 바꿔도 남기라고 한다)는
+    올바른 모양이면 `?ixid=<값>&auto=format…` 으로 남기고, 없거나 모양이 틀리면 옛 동작(매개변수만)이다 — 글 발행은 막지 않는다. 중복 판정 키(image_key)는 호스트+경로라 그대로다."""
     p = urllib.parse.urlsplit(raw)
-    return f"{p.scheme}://{p.netloc}{p.path}{IMG_PARAMS}"
+    return unsplash_credit.with_ixid(f"{p.scheme}://{p.netloc}{p.path}", p.query, IMG_PARAMS)
 
 
 def url_ok(url, timeout=10):
@@ -274,24 +283,95 @@ def _note_unsplash_rate(headers):
             UNSPLASH_RATE[key] = int(value.strip())
 
 
+def _api_request(url):
+    """Unsplash API 요청 한 건(검색·고정 목록 조회·사용 알림이 모두 이것으로 만든다). 키(Authorization)는 '리다이렉트 때 따라가지 않는' 머리글로만 싣는다 —
+    응답이 다른 호스트로 보내도 키가 새 요청에 복사되지 않는다(req.headers 에 없고 unredirected_hdrs 에만 있다). 키는 주소·로그·예외 글에 들어가지 않는다."""
+    req = urllib.request.Request(url, headers={"Accept-Version": "v1", "User-Agent": UA})
+    req.add_unredirected_header("Authorization", f"Client-ID {UNSPLASH_KEY}")
+    return req
+
+
+def _forget_photo(key):
+    """이 사진의 기록(작가 출처·사용 알림 주소)을 모두 지운다 — 앞선 응답의 낡은 값이 남아 쓰이지 않게."""
+    _credits.pop(key, None)
+    _download_locations.pop(key, None)
+
+
+def _note_skipped(skipped):
+    """검사에 걸려 버린 사진을 고정 문구로 묶어 한 번씩 알린다(응답의 값은 로그에 싣지 않는다)."""
+    if skipped.get("url"):
+        print(f"[참고] 사진 주소가 허용된 형식이 아니어서 쓰지 않은 사진: {skipped['url']}장")
+    if skipped.get("ping"):
+        print("[참고] 사용 알림 주소가 올바르지 않은 사진은 쓰지 않습니다")
+
+
+def _record_photo(item, skipped=None):
+    """검색·조회 응답의 사진 한 건을 읽어 쓸 주소(ixid 가 든 build_image_url)를 돌려주고, 사용 알림 주소(_download_locations)와 작가 출처(_credits)를 기록한다.
+
+    검사 순서(모두 통과한 뒤에만 기록한다): 주소 만들기 → 주소 검사(photo_url_ok: https·호스트가 정확히 images.unsplash.com·경로 `/photo-<번호>`) →
+    사용 알림 주소 검사(safe_download_url: 호스트가 정확히 api.unsplash.com 인 `/photos/<id>/download` — 키가 그 주소로 가므로) → 작가 읽기 → 기록.
+    주소 검사나 사용 알림 주소 검사에 걸린 사진은 쓰지 않는다(None, 그 사진의 낡은 기록도 지운다). 사용 알림 주소가 아예 없으면(None·빈 문자열) 사진은 쓰되 알림 호출만 없다.
+    출처를 검사·정리하지 못한 사진은 기록부에서 지운다. 주소가 없으면 None. skipped(딕셔너리)를 주면 버린 사진 수를 'url'·'ping' 칸에 더하고 로그 줄은 부르는 쪽이 묶어서 한 번 낸다(search_unsplash·fetch_pool_photo).
+    주지 않고 직접 부르면 걸린 그 자리에서 같은 고정 문구를 한 줄 낸다."""
+    own = skipped is None
+    skipped = skipped if skipped is not None else {}
+    if not isinstance(item, dict):
+        return None
+    urls = item.get("urls")
+    raw = urls.get("raw") if isinstance(urls, dict) else None
+    if not raw or not isinstance(raw, str):
+        return None
+    try:
+        url = build_image_url(raw)
+        key = image_key(url)
+    except ValueError:      # 주소를 읽을 수 없는 항목은 건너뛴다(예전에는 검색 전체가 예외로 멈췄다)
+        return None
+    if not unsplash_credit.photo_url_ok(url):
+        _forget_photo(key)
+        skipped["url"] = skipped.get("url", 0) + 1
+        if own:
+            _note_skipped(skipped)
+        return None
+    links = item.get("links")
+    loc = links.get("download_location") if isinstance(links, dict) else None
+    ping = ""
+    if loc not in (None, ""):
+        ping = unsplash_credit.safe_download_url(loc)
+        if not ping:
+            _forget_photo(key)
+            skipped["ping"] = skipped.get("ping", 0) + 1
+            if own:
+                _note_skipped(skipped)
+            return None
+    if ping:
+        _download_locations[key] = ping
+    else:
+        _download_locations.pop(key, None)
+    author = unsplash_credit.author_of(item)
+    if author:
+        _credits[key] = author
+    else:
+        _credits.pop(key, None)
+    return url
+
+
 def search_unsplash(query, per_page=15):
     if STUB_UNSPLASH:
         if DRY_RUN:
             crc = zlib.crc32(query.encode("utf-8")) % 100000
             print(f"[DRY_RUN] Unsplash 스텁 검색: {query!r}")
-            return [f"https://images.unsplash.com/photo-dry{crc}{i}{IMG_PARAMS}"
+            urls = [f"https://images.unsplash.com/photo-dry{crc}{i}{IMG_PARAMS}"
                     for i in range(3)]
+            for url in urls:
+                _credits[image_key(url)] = STUB_CREDIT
+            return urls
         print("UNSPLASH_ACCESS_KEY 없음: 검색 생략")
         return []
     params = urllib.parse.urlencode({
         "query": query, "per_page": per_page,
         "orientation": "landscape", "content_filter": "high",
     })
-    req = urllib.request.Request(
-        "https://api.unsplash.com/search/photos?" + params,
-        headers={"Authorization": f"Client-ID {UNSPLASH_KEY}",
-                 "Accept-Version": "v1", "User-Agent": UA},
-    )
+    req = _api_request("https://api.unsplash.com/search/photos?" + params)
     headers = None
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
@@ -307,36 +387,73 @@ def search_unsplash(query, per_page=15):
         return []
     _note_unsplash_rate(headers)
 
-    urls = []
+    urls, skipped = [], {}
     for item in data.get("results", []):
-        raw = (item.get("urls") or {}).get("raw")
-        if not raw:
-            continue
-        url = build_image_url(raw)
-        urls.append(url)
-        loc = (item.get("links") or {}).get("download_location")
-        if loc:
-            _download_locations[image_key(url)] = loc
+        url = _record_photo(item, skipped)
+        if url:
+            urls.append(url)
+    _note_skipped(skipped)
+    missing = sum(1 for url in urls if "?ixid=" not in url)
+    if missing:
+        print(f"[IXID] 사진 {missing}장은 주소에 올바른 ixid 가 없어 ixid 없이 씁니다(글은 그대로 올라갑니다)")
     return urls
 
 
 def trigger_download(url):
-    """Unsplash API 가이드라인: 사진 사용 시 download 엔드포인트 호출 (실패해도 무시)."""
-    loc = _download_locations.get(image_key(url))
+    """Unsplash API 가이드라인: 사진 사용 시 download 엔드포인트 호출 (실패해도 무시).
+    기록된 주소를 부르기 직전에 한 번 더 검사한다(safe_download_url — 호스트가 정확히 api.unsplash.com 인 `/photos/<id>/download` 만, 키가 그 호스트로만 가게). 검사에 걸리면 어떤 요청도 보내지 않는다."""
+    loc = unsplash_credit.safe_download_url(_download_locations.get(image_key(url)))
     if not loc or DRY_RUN or STUB_UNSPLASH:
         return
     try:
-        req = urllib.request.Request(
-            loc, headers={"Authorization": f"Client-ID {UNSPLASH_KEY}", "User-Agent": UA})
-        urllib.request.urlopen(req, timeout=10).read()
+        urllib.request.urlopen(_api_request(loc), timeout=10).read()
     except Exception:
         pass
+
+
+def credit_line_for(url):
+    """사진의 작가 출처 줄(마크다운 한 줄). 출처를 모르는 사진은 빈 문자열."""
+    author = _credits.get(image_key(url))
+    return unsplash_credit.credit_markdown(*author) if author else ""
+
+
+def fetch_pool_photo(pool_url):
+    """고정 목록(IMAGE_POOL) 사진 하나를 Unsplash API(GET /photos/photo-<번호>, 같은 키·머리글)로 한 번 조회해 ixid 가 든 주소를 얻고, 작가 출처·사용 알림 주소를 기록한다.
+    고정 주소에는 ixid·작가·사용 알림 정보가 없어 조회가 되어야만 쓴다. 키가 없거나(스텁) 조회·검사가 어긋나면 None — 출처를 알 수 없는 사진은 새 글에 쓰지 않는다."""
+    match = re.fullmatch(r"/photo-(.+)", urllib.parse.urlsplit(str(pool_url)).path)
+    lookup = unsplash_credit.photo_lookup_id(match.group(1)) if match else ""
+    if STUB_UNSPLASH or not lookup:
+        return None
+    req = _api_request(f"https://api.unsplash.com/photos/{lookup}")      # 키는 리다이렉트를 따라가지 않는 머리글로만 간다
+    headers = None
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            headers = getattr(resp, "headers", None)
+            body = resp.read(POOL_LOOKUP_MAX_BODY + 1)      # 사진 한 장의 응답은 수십 KB — 상한을 두어 엉뚱하게 큰 응답을 읽지 않는다
+        if not isinstance(body, (bytes, bytearray)) or len(body) > POOL_LOOKUP_MAX_BODY:
+            return None
+        data = json.loads(bytes(body).decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        _note_unsplash_rate(getattr(exc, "headers", None))
+        print(f"Unsplash API 오류 {exc.code} (사진 조회) - 403/429면 시간당 호출 한도 초과일 수 있습니다.")
+        return None
+    except Exception as exc:
+        print(f"Unsplash 호출 실패 (사진 조회): {_one_line(exc, 200)}")
+        return None
+    _note_unsplash_rate(headers)
+    skipped = {}
+    url = _record_photo(data, skipped)      # 주소 모양·사용 알림 주소 검사는 _record_photo 가 한다(검색 경로와 같은 검사) — 통과한 주소만 돌려준다
+    _note_skipped(skipped)
+    if not url or image_key(url) not in _credits:      # 작가 출처를 알 수 없는 사진은 쓰지 않는다
+        return None
+    return url
 
 
 def pick_images(queries, used, count=1, allow_pool=False):
     """미사용 + 접근 가능한 이미지를 count개 선택. used 집합에 키를 추가한다."""
     picked = []
     seen_queries = set()
+    uncredited = 0
     for q in queries:
         q = (q or "").strip()
         if not q or q.lower() in seen_queries:
@@ -344,6 +461,9 @@ def pick_images(queries, used, count=1, allow_pool=False):
         seen_queries.add(q.lower())
         for url in search_unsplash(q):
             key = image_key(url)
+            if key not in _credits:      # 작가 출처를 알 수 없는 사진은 쓰지 않는다(Unsplash API 지침: 작가·Unsplash 표기)
+                uncredited += 1
+                continue
             if key in used or not url_ok(url):
                 continue
             used.add(key)
@@ -351,12 +471,29 @@ def pick_images(queries, used, count=1, allow_pool=False):
             print(f"  이미지 선택 (query={q!r}): {url}")
             if len(picked) >= count:
                 return picked
+    if uncredited:
+        print(f"  [참고] 작가 출처 정보가 없어 쓰지 않은 사진: {uncredited}장")
     if allow_pool:
-        for url in IMAGE_POOL:
+        failed = looked = 0
+        for pool_url in IMAGE_POOL:
+            if image_key(pool_url) in used:
+                continue
+            if looked >= POOL_LOOKUP_MAX_TOTAL:     # 연속 실패가 아니어도(주소 확인 실패·이미 쓴 사진이 이어져도) 한 번에 부르는 조회 총 횟수에 상한을 둔다
+                print("  [경고] 고정 목록 사진 조회가 한 번에 허용한 횟수에 닿아 더 시도하지 않습니다")
+                break
+            looked += 1
+            url = fetch_pool_photo(pool_url)     # 조회로 ixid·작가 출처·사용 알림 주소를 받아야 쓴다 — 조회가 안 되면 출처 없는 사진을 몰래 쓰지 않는다
+            if not url:
+                failed += 1
+                if failed >= POOL_LOOKUP_MAX_FAILS:
+                    print("  [경고] 고정 목록 사진 조회가 연달아 실패해 더 시도하지 않습니다(키·한도·네트워크를 확인하세요)")
+                    break
+                continue
+            failed = 0
             key = image_key(url)
             if key in used or not url_ok(url):
                 continue
-            used.add(key)
+            used.update((key, image_key(pool_url)))
             picked.append(url)
             print(f"  [경고] 검색 결과 없음, 폴백 풀 이미지 사용: {url}")
             if len(picked) >= count:
@@ -443,8 +580,10 @@ def load_posts():
 
 
 def apply_image(text, old_url, new_url):
+    """글의 대표 이미지를 new_url 로 바꾼다. 새 사진의 작가 출처 줄은 옛 줄(우리 모양)을 지우고 새 이미지 줄 바로 다음에 넣는다(출처를 모르면 옛 줄만 지운다)."""
+    credit = credit_line_for(new_url)
     if old_url and old_url in text:
-        return text.replace(old_url, new_url)
+        return unsplash_credit.place_credit(text.replace(old_url, new_url), new_url, credit)
     fm, body = split_front_matter(text)
     if fm is None:
         return text
@@ -452,7 +591,7 @@ def apply_image(text, old_url, new_url):
         fm = re.sub(r"(?m)^image:.*$", f'image: "{new_url}"', fm)
     else:
         fm = fm.rstrip() + f'\nimage: "{new_url}"'
-    return f"---\n{fm}\n---\n{body}"
+    return unsplash_credit.place_credit(f"---\n{fm}\n---\n{body}", new_url, credit)
 
 
 def used_keys_from_posts(posts, exclude_path=None):
@@ -1814,6 +1953,8 @@ def validate_post_data(data, kr_image, en_image, verified_source_url=None, notes
             content = re.sub(
                 r"(?m)^!\[[^\]]*\]\(https://images\.unsplash\.com/[^)]+\)",
                 f"![Thumbnail]({image_url})", content, count=1)
+        # 작가 출처 줄을 이미지 줄 바로 다음에 넣는다. 모델이 쓴 본문에 우리 모양의 출처 줄이 먼저 있어도 모두 지우고 우리가 만든 한 줄로 덮어쓴다(모델 출력은 데이터 — 위조 방지).
+        content = unsplash_credit.place_credit(content, image_url, credit_line_for(image_url))
         data[f"{prefix}_content"] = content.rstrip() + "\n"
     return data
 
@@ -1838,6 +1979,7 @@ def _front_matter_set(content, key, value):
 
 def _description_from_markdown(content, max_chars=155):
     text = re.sub(r"\A---\s*\n.*?\n---\s*\n", "", str(content or ""), count=1, flags=re.S)
+    text = unsplash_credit.strip_credit_lines(text)      # 이미지 아래 출처 줄(Photo by …)이 글의 설명이 되지 않게
     for paragraph in re.split(r"\n\s*\n", text):
         paragraph = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", paragraph)
         paragraph = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", paragraph)
@@ -2132,6 +2274,10 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
         problems = front_matter_problems(data[f"{prefix}_content"], selected_item)
         if problems:
             raise RuntimeError(f"{prefix.upper()} 글 머리말이 검사를 통과하지 못해 글을 저장하지 않습니다: " + " / ".join(problems[:3]))
+    for prefix, image_url in (("kr", kr_image), ("en", en_image)):
+        # 마지막 방어선(출처): 사진 고르기를 통과했어도 작가 출처를 알 수 없는 사진이면 글을 저장하지 않는다(Unsplash 지침 — 출처 없는 사진을 새 글에 쓰지 않는다)
+        if not credit_line_for(image_url):
+            raise RuntimeError(f"{prefix.upper()} 대표 이미지의 작가 출처를 알 수 없어 글을 저장하지 않습니다.")
     kr_path = safe_category_dir(data["kr_category"], "KR") / f"{date_str}-KR-{time_str}.md"
     en_path = safe_category_dir(data["en_category"], "EN") / f"{date_str}-EN-{time_str}.md"
 

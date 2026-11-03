@@ -27,6 +27,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 
+from pipeline import unsplash_credit   # ixid 를 남기는 규칙은 Chance·이슈 수정과 같은 공용 모듈에서 정한다
 from pipeline.console import INVISIBLE_RE, one_line
 from pipeline.llm import purpose
 from pipeline.publishers.issue_package import UNSPLASH_UTM   # 출처 표기 링크의 utm 값은 한 곳(초안 패키지와 같은 것)에서 정한다
@@ -39,7 +40,7 @@ RECENT_ENTRIES = 30            # 이력의 마지막 이만큼 항목에 적힌 
 SEARCH_TIMEOUT, PING_TIMEOUT = 15, 10
 MAX_BODY = 1_000_000           # 검색 응답을 이 바이트까지만 읽는다(10건 응답은 수십 KB)
 QUERY_MAX, NAME_MAX, ALT_MAX = 60, 80, 150
-IMG_PARAMS = "?w=1080&q=80&fm=jpg&fit=max&auto=format"   # Chance 의 build_image_url 과 같은 방식: 경로만 두고 크기·형식 매개변수를 붙인다
+IMG_PARAMS = "?w=1080&q=80&fm=jpg&fit=max&auto=format"   # Chance 의 build_image_url 과 같은 방식: 경로에 크기·형식 매개변수를 붙이고, 올바른 ixid 는 남긴다(맨 앞)
 USER_AGENT = "Mozilla/5.0 (compatible; ChanceBlogBot/2.0)"
 
 # 사진을 못 붙였을 때의 고정 코드 → 뜻. 로그(`[IMAGE] 건너뜀: <코드>`)와 실행 요약(`대표 사진: 없음(<코드>)`)에는 이 코드만 쓴다.
@@ -224,11 +225,13 @@ def _parts(raw, host):
 
 
 def normalize_image_url(raw):
-    """urls.raw → 쓸 사진 주소. 호스트가 정확히 images.unsplash.com 이고 경로가 `/photo-<id>` 인 것만 받고, 질의·조각은 버리고 크기·형식 매개변수를 붙인다. 아니면 빈 문자열."""
+    """urls.raw → 쓸 사진 주소. 호스트가 정확히 images.unsplash.com 이고 경로가 `/photo-<id>` 인 것만 받고, 조각과 나머지 질의는 버리고 크기·형식 매개변수를 붙인다. 질의의 `ixid`(Unsplash 가
+    앱의 사진 조회를 알도록 붙인 추적 값 — API 지침은 크기를 바꿔도 남기라고 한다)는 올바른 모양(영숫자·`_`·`-`·`=` 1~200자, 하나뿐)이면 `?ixid=<값>&w=…` 로 남기고, 없거나 모양이 틀리면 옛 동작이다.
+    아니면 빈 문자열."""
     parts = _parts(raw, IMAGE_HOST)
     if parts is None or not _IMAGE_PATH_RX.fullmatch(parts.path):
         return ""
-    return f"https://{IMAGE_HOST}{parts.path}{IMG_PARAMS}"
+    return unsplash_credit.with_ixid(f"https://{IMAGE_HOST}{parts.path}", parts.query, IMG_PARAMS)
 
 
 def safe_author_url(raw):

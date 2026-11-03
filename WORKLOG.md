@@ -7,6 +7,70 @@
 
 ---
 
+## [2026-11-04] Claude – U3 수정 라운드: 1차 독립 검증 지적 반영 (T2 — 코드·시험·문서)
+
+**작업자**: Claude (U3-fix 구현자). 수정분 재검증 전(다른 새 검증자가 이 수정분만 다시 확인한다).
+**대상**: 공통 — `generator.py`·`pipeline/edits/scope_check.py`·시험·문서. `pipeline/unsplash_credit.py`·`checks.verify_image_change`(거절 기준)는 바꾸지 않았다. 광고 표면(`index.html`·`_layouts/`·`_includes/`·`_config.yml`·`privacy.md`·`about.md`·`contact.md`·`robots.txt`)·워크플로·`pipeline/blogs.json`·`_posts/` 기존 글·`history.json` 구조·`pipeline/publishers/issue_package.py`·데스크톱 저장소도 그대로이고 어디에도 push 하지 않았다(로컬 커밋).
+**등급**: T2 — 외부 응답을 글에 넣는 생성 엔진 수정(독립 검증 필요). 기준 b2a1ebe 와 e4dd829 를 비교한 1차 독립 검증이 '조건부 병합 가능'(높음 0·중간 5·낮음 8)으로 돌려준 지적을 고쳤다. 병합 승인은 병합 부탁 때 따로 받는다.
+**목적**: 중간 ①~④ 는 코드로 고치고 ⑤ 는 문서에만 정직하게 적고, 변이로 드러난 시험 공백 15곳을 시험으로 막는다.
+
+### 변경 사항
+- ① `scope_check.check_pull` 이미지 갈래: `verify_image_change` 가 거절하지 않아도 우리 출처 줄(`credit_lines`)이 이전 글과 달라졌으면(바뀜·생김·사라짐) ✅ 대신 **⚠️ 확인 필요(WARN)** — 한 문장과 이전 → 이후 줄(`checks.unified_diff`, 코멘트의 틸드 펜스 코드 블록)을 싣는다. 줄이 그대로이거나 둘 다 없으면 PASS(줄이 그대로 있으면 ℹ️ 로 '그 줄이 새 사진의 작가인지는 검사가 모른다'를 덧붙인다). `verify_image_change` 는 그대로다(거절 기준을 좁히지 않았다).
+- ② `generator.py`: 검색·고정 목록 조회·사용 알림이 모두 `_api_request` 로 요청을 만들고 키는 `add_unredirected_header` 로만 싣는다(전에는 검색과 사용 알림이 일반 머리글이라 리다이렉트를 따라갔다). `_record_photo` 는 `links.download_location` 을 `safe_download_url` 로 검사해 값이 있는데 어긋나면 그 사진을 쓰지 않고(기록·낡은 값 모두 지움, 고정 문구 한 줄) 값이 없으면 사진은 쓰되 알림 호출만 없다. `trigger_download` 는 부르기 직전 한 번 더 검사한다. 걸린 사진 수는 반복문이 모아 로그 한 줄로 묶어 내고, `_record_photo` 를 집계 없이 직접 부르면 걸린 자리에서 같은 줄을 낸다. 새 코드의 변수·칸 이름은 `ping` 이다(`test_batch2_integration` 이 생성기에 'notify' 낱말이 없는지 본다).
+- ③ `_record_photo`: 다시 만든 사진 주소를 `photo_url_ok` 로 검사한다(어긋나면 쓰지 않고 개수만 로그 한 줄). 검사 차례는 주소 만들기 → 주소 → 알림 주소 → 작가 → 기록. `fetch_pool_photo` 의 같은 검사는 `_record_photo` 하나로 합쳤다(동작 같음).
+- ④ `POOL_LOOKUP_MAX_TOTAL = 6`: 한 `pick_images` 호출에서 고정 목록 조회를 부른 총 횟수(성공·실패·이미지 확인 실패·이미 쓴 사진 포함, 이미 쓴 고정 주소를 조회 없이 건너뛴 것은 제외)에 상한. 닿으면 경고 한 줄. 연속 실패 3회 규칙은 그대로. 검증자 재현 H6 은 32번 → 6번.
+- ⑤ 문서만: 키가 막히면 새 글이 멈추고 그 슬롯이 열려 있는 동안 매시 17·47분 정기 실행마다 뉴스 수집·Gemini 호출 뒤 사진에서 멈추는 일이 되풀이된다(하루 최대 약 30번 헛호출, 요약에는 사진 문제라는 말이 없음). 코드·워크플로·요약은 바꾸지 않았다(T3) — '사진 실패 때 재시도 간격을 늘릴지'는 운영자가 정할 일.
+- 시험: 새 파일 `tests/test_unsplash_credit_fix.py`(15)·`tests/test_chance_credit_fix.py`(53)·`tests/test_edits_credit_fix.py`(26 — 실제 git·명령줄 시나리오 3개 포함), `tests/test_chance_credit.py` 에 처음부터 끝까지 흐름 2개. 기존 시험은 기대값·준비 단계만 고쳤다(약하게 만든 단정 없음): `test_edits_credit` 의 PR 범위 검사 시험은 '정상 교체 → PASS' 를 'WARN + 이전·이후 줄이 코멘트에 보인다'로 바꿨고(독립 검증 ① 그대로의 기대값 변경), `test_edits_logging`·`test_gemini_call_log` 의 가짜 Unsplash 응답은 사용 알림 주소를 실제 모양(`/photos/<id>/download` 의 id 5자 이상)으로 고쳤으며(전의 `photos/x/download`·`/d` 는 새 검사에 걸려 그 사진을 못 쓴다 — 뒤의 것은 전체 시험을 돌려 보고서야 알았다), 도우미 `chance_credit_helpers.FakeApi` 는 요청 객체와 기록 순서(단정이 터지기 전에 기록)를 더했다.
+- 문서: `docs/ARCHITECTURE.md` §4-8(검사 차례·키가 가는 길·조회 총 상한·이름 칸 평문·틱마다 재시도·남은 한계)·`docs/SECURITY_GUARDRAILS.md` G-C7·`docs/ISSUE_EDITS.md`·`docs/ACTIONS_GUIDE.md`·`HANDLER.md`·`인수인계/작업내용.md`·이 항목. 문서 시험(`DocsFixTest`)이 새 문장을 지킨다.
+
+### 검증 증거
+- 검증자가 남긴 재현 스크립트를 같은 방법으로 다시 돌렸다: `inj_integ.py` H3(urls.raw 악성 18건: 'HEAD 가 무엇이나 통과' 가정에서도 오염 0 — 16건 막힘·2건은 깨끗한 정규형으로 통과)·H4(download_location 악성 6건 모두 막힘)·H6(조회 32 → 6), `redirect_old_paths.py`(검색·사용 알림·조회 세 곳 모두 낯선 호스트로 키가 안 따라감), `verify_table.py` V05·V06·V07·V09·V31 은 모두 WARN(V08 은 다른 검사가 FAIL)이고 ✅ 는 0.
+- 변이 점검(최종 코드 a436a2a): 고친 코드(생성기 51·PR 범위 검사 18·공용 모듈 20·이슈 수정 5)의 94곳 모두 시험이 깨졌고, 동등한 대조 3곳은 살아남아 하니스가 '모두 잡힘'으로 오판하지 않음을 확인했다(변이는 새 검사 한 줄 삭제·상수 완화·차례 바꿈·키를 주소나 로그에 싣기 등). 검증자가 찾은 시험 공백 15곳(M006·M008·M019·M020·M025·M072·M083·M107·M112·M116·M119·M126·M128·M129·M130)은 같은 변이로 모두 시험이 깨진다. 변이 도구는 작업 폴더를 복사한 폴더에서만 돌렸고 핵심 시험 10개 모듈로 판정했다.
+- 새 시험이 옛 코드를 잡는다: 새 3개 파일 94개 가운데 41개는 e4dd829 의 생성기·PR 검사 코드에서 실패하고(지적 ①~④·키 길), 나머지 53개는 옛 코드도 맞았던 곳(시험 공백 15곳·공용 모듈 경계)을 지킨다.
+- coverage(파이썬 3.12, branch): e4dd829 대비 바뀐 실행문(생성기 51·PR 범위 검사 19)이 모두 실행됐고 안 가 본 가지는 0.
+- 시험·검증기 결과: 바뀐 모듈 시험 15개 파일 3.10 `Ran 1018 tests … OK`·3.12 `Ran 1018 tests … OK`. 전체 시험(3.10 가상환경, 모듈 81개 4그룹, 커밋 a436a2a): 1090+1177+1132+1352 = 4751개 전부 통과(skip 5) — Bash 도구로 돌려 bash 가 있어 `test_manual_run_defaults` 5개도 통과했다(bash 가 없는 환경에서는 그 5개가 실패한다). 처음 전체 시험(0419665)은 바뀐 모듈 시험에 없던 실패 둘을 잡아 고쳤다(생성기에 'notify' 낱말이 들어가면 안 되는 `test_batch2_integration`, 가짜 알림 주소 모양의 `test_gemini_call_log`). 환경 변주(해시 씨드 2종·`PYTHONIOENCODING=ascii`·`-X utf8` 없음·`-W error`, 3.10·3.12)에서 새 시험이 통과한다. `python scripts/validate_repo.py --root . --base origin/main` 오류 0건·경고 2건(기존 문서의 이중 중괄호). 이 줄을 채우느라 바뀐 것은 이 항목뿐이다.
+
+### 다음 AI에게 남기는 주의사항
+- 작가 이름 칸은 외부 글이다. 이스케이프·길이 제한은 링크·코드 주입을 막을 뿐 '이름이 진짜'라는 증명이 아니므로, 출처 줄이 달라진 이미지 PR 은 사람이 읽는다(⚠️). 이 검사를 ✅ 로 되돌리지 않는다.
+- 키(`UNSPLASH_ACCESS_KEY`)가 가는 Unsplash 요청을 새로 만들 때는 `generator._api_request` 를 쓰고(리다이렉트가 키를 복사하지 않는다), 응답이 알려 준 주소는 호스트·경로 검사를 통과한 것만 부른다.
+- 주소만 바꾸고 옛 출처 줄을 그대로 둔 PR 은 ✅ 이다(줄이 새 사진의 것인지는 검사가 모른다 — ℹ️ 한 줄만 붙는다).
+
+### 남은 이슈 / 확인할 점
+- 키가 막혔을 때 새 글의 재시도 간격을 늘릴지(운영자 결정, 위 ⑤).
+- 검증자가 '낮음'으로 적은 것은 코드를 바꾸지 않고 `docs/ARCHITECTURE.md` §4-8 '남은 한계'에 적었다: 코드 펜스 안 이미지 줄 뒤의 출처 줄·정확히 같지 않은 흉내 줄·`ixid` 허용 문자 밖의 값·작가 이름의 `$$` 수식·파이썬 3.10/3.12 유니코드 표 차이·조회 응답 리다이렉트와 느린 응답.
+- 실제 Unsplash·실제 Jekyll 빌드·GitHub Actions 는 여전히 한 번도 돌려 보지 못했다(위 U3 항목의 '실행하지 못한 것' 그대로).
+
+## [2026-11-04] Claude – Unsplash 사진 주소의 ixid 유지와 Chance 글의 작가·Unsplash 출처 줄 (U3, T2 — 코드·시험·문서)
+
+**작업자**: Claude (U3 구현자). 이 항목을 쓴 시점은 독립 검증 전이고, 1차 검증과 수정 라운드는 바로 위 항목이다.
+**대상**: 공통 — `generator.py`·`pipeline/unsplash_credit.py`(새)·`pipeline/main_image.py`·`pipeline/edits/{ops,checks,runner}.py`·시험·문서. 광고 표면(`index.html`·`_layouts/`·`_includes/`·`_config.yml`·`privacy.md`·`about.md`·`contact.md`·`robots.txt`)·워크플로·`pipeline/blogs.json`·시크릿·`_posts/` 기존 글·`history.json` 구조·`pipeline/publishers/issue_package.py` 는 바꾸지 않았다.
+**등급**: T2 — 외부 응답을 글에 넣는 생성 엔진 수정(독립 검증 필요). 운영자가 2026-11-03 R-085 에서 U3 '수정안을 만든다'를 승인했다(병합 승인은 병합 부탁 때 따로).
+**목적**: Unsplash API 지침(2026-11-03 원문 확인)의 ① 사진 주소의 `ixid` 유지 ② 작가·Unsplash 출처 표시(utm 링크)를 Chance 에 적용하고 Blogger 의 `ixid` 도 고친다.
+
+### 변경 사항
+- `pipeline/unsplash_credit.py`(새, 표준 라이브러리만·입출력 없음): `ixid` 검사(영숫자·`_-=` 1~200자·정확히 하나 — 틀리면 빼고 계속)·`with_ixid`, 작가 이름 정리(보이지 않는 문자·제어 문자·Liquid 중괄호 제거, 80자)·프로필 주소 검사(https·정확히 `unsplash.com`·`/@사용자`)·출처 줄(`credit_markdown`, 마크다운 특수문자 이스케이프)·우리 줄 알아보기·지우기·넣기(`is_credit_line` 은 이름 칸을 풀어 `credit_markdown` 으로 다시 쓴 줄과 글자까지 같은 줄만 '우리 줄'로 본다 — 틀만 닮고 이름에 이스케이프되지 않은 마크다운·HTML·보이지 않는 문자가 든 줄은 우리 줄이 아니라 사후 검증도 통과하지 못한다. `CREDIT_MARKER` 꼬리, 멱등, 모델이 흉내 낸 우리 줄은 지움)·`Credited`(주소+출처 줄을 함께 돌려주는 문자열).
+- `generator.py`: `build_image_url` 이 `ixid` 를 남기고, `search_unsplash` 가 작가 출처를 기록부 `_credits` 에 적으며(`_record_photo`), `pick_images` 는 출처를 모르는 사진을 쓰지 않는다. 고정 목록(`IMAGE_POOL`) 대체는 `fetch_pool_photo`(사진 조회 `GET /photos/photo-<번호>`, 연달아 3번 실패하면 중단)로 `ixid`·작가·사용 알림 주소를 받아야 쓴다. `validate_post_data` 가 이미지 줄 바로 다음 줄에 출처 줄을 넣고, `apply_image`(이미지 교체)가 옛 줄을 새 줄로 바꾸며, `_description_from_markdown` 이 출처 줄을 설명에서 뺀다.
+- `pipeline/edits`: `ops.apply_image(…, credit)`·`op_image`(선택기가 돌려준 `Credited` 의 출처 줄 사용)·`runner.default_image_picker`(주소와 함께 출처 줄)·`checks.verify_image_change`(**허용 범위를 넓힘**: 우리 모양의 출처 줄 교체만 비교에서 빼고, 새 글에 그런 줄이 있다면 하나뿐이고 새 이미지 줄 바로 다음이어야 한다). 허용 주소 형식(`checks.image_url_problem`)은 고치지 않았다 — 실제 `ixid` 값(`?ixid=…&auto=format…`·`%3D`)을 받는 것을 시험으로 확인.
+- `pipeline/main_image.py`: `normalize_image_url` 이 같은 규칙으로 `ixid` 를 남긴다(`build_block`·출처 줄·`download_location` 호출은 그대로).
+- 시험: 새 파일 `tests/test_unsplash_credit.py`·`test_chance_credit.py`·`test_edits_credit.py`·`chance_credit_helpers.py`. 기존 시험은 기대값만 맞췄다(Blogger `ixid` 기대값 3건, 이슈 수정 로그 시험의 가짜 응답에 작가 칸 추가, 키 없는 실제 실행 시험 2곳(`test_generator_drafts.run_tick`·`test_generator_front_matter.GateAndGuardTest`)의 준비 단계에 가짜 고정 목록 조회 추가) — 단정은 약하게 하지 않았다.
+- 문서: `docs/ARCHITECTURE.md`(§4-7 `ixid` 유지·§4-8 새 절)·`docs/SECURITY_GUARDRAILS.md` G-C7 행·`docs/ACTIONS_GUIDE.md`(키가 막힐 때 달라진 점 등 4곳)·`HANDLER.md` 한 행·`인수인계/작업내용.md` §2 행·§5 항목.
+
+### 검증 증거
+- 바뀐 모듈의 시험 10개 파일(새 3개 + 기존 7개): 3.10 `Ran 685 tests … OK`, 3.12 `Ran 685 tests … OK`(새 3개 파일만 178개). `python scripts/validate_repo.py --root . --base origin/main` 오류 0건(경고 2건은 기존 문서의 이중 중괄호).
+- 전체 시험(3.10 가상환경, 78개 모듈 4그룹, 코드·시험이 확정된 커밋 2109214 에서): 합계 4655개 중 실패 5 — 모두 `test_manual_run_defaults.WorkflowStepScriptTest`(이 PC 에 bash 가 없어 기준 main b2a1ebe 에서도 같은 5개가 실패한다, CI 에선 통과). 그룹별 1294·1344·984·1033개. 이 증거 줄을 적느라 바뀐 것은 이 항목뿐이다.
+- 변이 점검 96곳(새 모듈 62·생성기 26·이슈 수정 7·Blogger 1) 중 94곳을 잡았고, 생존 2곳은 모두 동등하다(이중 방어: 우리 줄 꼬리 사전 필터·이슈 수정 선택기 출처 줄 모양 이중 확인). 첫 점검에서 시험 공백 1곳(키 없음일 때 조회 안 함)이 드러나 시험을 보강했고, 자체 재검토에서 우리 줄 판별이 틀만 보던 구멍(이름에 이스케이프되지 않은 HTML 이 든 줄을 사후 검증이 '출처 줄 교체'로 통과시킬 수 있었다)을 찾아 엄격하게 고쳤다(시험 6개 추가).
+- `python scripts/validate_repo.py --root . --base origin/main`: 오류 0건.
+- 실행하지 못한 것: 실제 Unsplash 호출(고정 목록 조회 `GET /photos/photo-<번호>` 가 되는지 포함)·실제 Jekyll 빌드(출처 줄이 이미지 아래 한 줄로 보이는지)·GitHub Actions.
+
+### 다음 AI에게 남기는 주의사항
+- 출처 줄의 '우리 모양'은 `unsplash_credit.is_credit_line` 하나가 정한다. 모양을 바꾸면 `verify_image_change`(PR 범위 검사)와 이미 올라간 글의 옛 줄 지우기가 함께 어긋나므로 모양을 바꾸는 변경은 두 곳과 시험을 같이 고친다.
+- Chance 는 이제 작가 출처를 아는 사진만 쓴다. `UNSPLASH_ACCESS_KEY` 가 막히거나 한도를 넘으면 새 글이 멈추고(빨강) 예비 사진으로 대체되지 않는다(`docs/ACTIONS_GUIDE.md` 4-2 표).
+- 기존 글 52편(`_posts/`, 2026-11-04 기준)은 머리말 `image:` 에 `ixid` 가 없고 출처 줄도 없다 — 되돌려 채우는 일은 작가 조회 API 호출이 필요해 운영자 결정 항목이다.
+
+### 남은 이슈 / 확인할 점
+- 홈페이지 `index.html` 의 기본 썸네일 4장(595~598행)·글 카드·모달의 대표 이미지에는 출처 표시가 없다(광고 표면 — 이번에 손대지 않음). 운영자 결정: 기본 썸네일을 Unsplash 가 아닌 단색 틀로 바꾸기 / 출처 문구 달기 / 그대로 두기.
+- 첫 실제 실행에서 확인: 응답의 `ixid` 모양·고정 목록 조회 응답·글 화면의 출처 줄.
+
 ## [2026-10-30] Claude – 다른 AI 확인표(전송·수정)와 위임 시험 보완, 데스크톱 프로그램 요구서 정합·무료 AI 감시·설치/자동 업데이트 분석 문서 (T0~T1 문서)
 
 **작업자**: Claude (구현 세션). 위임 시험은 새 AI 세션 둘(문서만 읽고 시작)이 직접 했다. 이 항목은 문서와 문서 시험만 바꾸고 코드·워크플로·광고 표면·시크릿은 바꾸지 않았다.

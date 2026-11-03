@@ -693,7 +693,8 @@ class ImagePickerLogTest(RunnerBase):
             if "api.unsplash.com/search/photos" in url:
                 if behaviour == "forbidden":
                     raise urllib.error.HTTPError(url, 403, "Forbidden", {}, None)
-                body = {"results": [{"urls": {"raw": self.PHOTO}, "links": {"download_location": "https://api.unsplash.com/photos/x/download"}}]}
+                body = {"results": [{"urls": {"raw": self.PHOTO}, "links": {"download_location": "https://api.unsplash.com/photos/abc12345/download"},
+                                    "user": {"name": "Jane Doe", "links": {"html": "https://unsplash.com/@janedoe"}}}]}      # 작가 출처가 있는 실제 모양(없으면 쓰지 않는다)
                 return FakeResponse(json.dumps(body).encode("utf-8"))
             return FakeResponse(b"")                                            # HEAD 확인·download 알림
         return calls, fake_urlopen
