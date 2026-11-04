@@ -7,6 +7,29 @@
 
 ---
 
+## [2026-11-04] Claude – wf: 블로그 PR 화면에 '이미 끝난 초록'만 보이게 — 가드레일 검사를 push 때 시험 병합으로 돌리고 PR 의 새 실행·건너뜀 줄을 없앤다 (T3 — 워크플로 변경, 독립 검증 대상)
+
+**작업자**: Claude (wf 구현자). 로컬 WIP 커밋만(push·병합 가지·PR 없음) — 병합은 운영자가, 독립 검증 뒤.
+**대상**: 공통 — `.github/workflows/guardrails.yml`·`pr-scope-check.yml`·`ops-inbox.yml`, 시험(`test_guardrails_precheck` 전면 재작성·`test_notify_main_check`·`test_ops_inbox_drafts`·`test_agent_docs` 수정, `test_pr_ready_workflows`·`workflow_expr_helpers` 새로), 문서. `ai-request.yml`·`operator-reply.yml`·`pages.yml`·`chanceblog.yml`·`scripts/validate_repo.py`·생성기·`pipeline/`·`_posts/` 는 그대로다.
+**등급**: T3 — 워크플로(검사 설정) 변경. 검사 강도는 낮추지 않았다(같은 검증·단위 테스트·actionlint 를 같은 병합 결과 트리에서 돈다).
+**목적**: 운영자(2026-11-04 15:17)가 'CI 테스트가 일부 진행 누락되는 경우가 있어 병합만 바로 할 수 있게 점검해 달라'고 했다. 점검(공개 REST): 빠진 검사는 없었고(최근 PR 10건 모두 끝까지 성공, 건너뜀은 의도된 것) PR 을 만들 때 같은 커밋에 새 실행 셋(가드레일 PR 실행 110~145초·범위 검사 17초·확인 필요 모음 건너뜀)이 시작돼 '도는 중'·'건너뜀'으로 보인 것이 '일부 검사가 안 돈다'로 읽힌 것이었다(운영자는 PR 을 만들고 병합까지 4~13분, 데스크톱 저장소는 `ci.yml` 이 push 전용이라 10초).
+
+### 변경 사항
+- `guardrails.yml`: 트리거를 `push`(**브랜치 필터 없음** — 어느 브랜치든)·`workflow_dispatch` 로 하고 `pull_request` 를 뺐다. main 이 아닌 브랜치 push 는 검증 전에 이 실행 안에서 `git fetch` → 임시 신원(`git config user.name/email`, 이 폴더의 로컬 설정만) → `git merge --no-edit origin/main` 으로 **시험 병합**(러너 안에서만, 올리지 않는다)하고 합쳐진 트리에서 같은 검증·시험·actionlint 를 돈다. 충돌·이어지지 않음은 `::error::` 와 함께 실패, 가져오기 실패·기준을 못 구함·병합 결과가 main 끝을 담지 않음도 실패(건너뛴 초록 없음). 광고 표면 `--base` 는 시험 병합 직전의 `origin/main` 끝(sha) — merge-base 를 쓰던 것을 이 뜻으로 바꿨고 주석에 근거(main 이 앞서 간 만큼 오탐되지 않음)를 적었다. notice 주석 문구는 `시험 병합 직전의 main 끝 <해시>`. main push·수동·`alert`·`concurrency`·행렬·`actionlint`·권한은 그대로(옛 `PR_BASE` 환경변수만 뺐다).
+- `pr-scope-check.yml`: job `if` 에 `!startsWith(github.head_ref, 'ai/claude/')` 를 더해 AI 브랜치 PR 은 건너뛴다(수동 실행·포크 확인은 그대로, 건너뜀 한 줄은 남지만 곧바로 끝난다).
+- `ops-inbox.yml`: `pull_request` 의 `types` 에서 `opened`·`reopened` 를 뺐다(`closed`·`labeled`·`unlabeled` 만, `issues` 는 그대로). 주석에 이유를 적었다.
+- 시험: `test_guardrails_precheck.py` 를 진짜 git 의 임시 '원격'(bare)과 그 작업 사본에서 단계의 셸을 bash 로 그대로 돌리는 시나리오 시험으로 다시 썼다(앞서 간 main 과 합쳐짐·같은 파일을 둘 다 고쳐 충돌하면 실패·이미 최신이면 그대로·봇 글 커밋이 쌓인 main·가져오기 실패/원격에 main 없음·기준 해시를 못 읽음·병합이 아무것도 안 함·이름이 이상한 브랜치·main push/수동은 가져오기·병합 없이 옛 그대로 + 병합 결과 트리에 진짜 `check_ad_surface` 를 건 시험). 한 파일이 이 PC 에서 10분을 넘어 시나리오를 클래스에서 한 번만 돌려 읽는 방식으로 줄였다(약 280초). `test_pr_ready_workflows.py`(모든 워크플로의 `on`·job `if` 를 이벤트별로 계산해 'AI 브랜치 PR 을 열거나 갱신해도 도는 job 0개·시작하는 워크플로는 pr-scope-check 하나·ops-inbox 는 닫힘·라벨만'을 고정, 범위 검사 `if` 의 진리표, 문서에서 옛 문장 부재), `workflow_expr_helpers.py`(`test_ops_inbox_drafts` 의 식 해석기를 옮기고 `startsWith`·`endsWith` 추가) 새로. `test_notify_main_check`·`test_ops_inbox_drafts`·`test_agent_docs` 는 새 트리거 모양·문구에 맞췄다.
+- 문서(옛 'PR 을 만들면 검사가 한 번 더 돈다'·'초록이 될 때까지 기다린다'를 새 동작으로): `ACTIONS_GUIDE`(표·6-7·6-9·6-10)·`AGENT_RUNBOOK`(J4 8·표 둘)·`ARCHITECTURE`·`SECURITY_GUARDRAILS`(새 G-A11·G-O8)·`ENGINEERING_GUIDE`(새 W12)·`OPS_INBOX`·`REQUEST_BRIEFING`·`HANDLER`·`COPILOT_GUIDE`·`ISSUE_EDITS`·`TELEGRAM_SETUP`·운영자용 `PR_병합_방법`·`운영자_요청함_사용법`·`요청함/README`·`DEFECT_REGISTER`(D-87 + 관측 체크리스트 한 줄).
+
+### 증거
+- 〔시험〕 3.12·3.10.11 의 시험 줄과 변이 결과는 이 브랜치의 보고(총괄에게 준 최종 응답)에 있다. 저장소 검증기 오류 0, actionlint 1.7.12 지적 0.
+- 〔첫 실제 실행〕 아직 없다 — 이 변경을 실은 브랜치를 push 하면 새 `guardrails.yml` 이 처음 실제 러너에서 `git fetch`·`git merge` 를 돈다(DEFECT_REGISTER 관측 체크리스트 D-87 행).
+
+### 다음 AI 주의
+- 이 변경을 push 하는 순간 새 워크플로가 도는 첫 실행이므로 병합 브랜치 push 뒤 검사 결과를 먼저 본다(충돌이면 새 main 위에서 브랜치를 다시 만든다).
+- PR 화면의 건너뜀 줄 둘(`실패 알림`·`이슈 요청 범위 확인`)은 남는다(job `if` 라 줄이 생긴다 — 없애려면 새 워크플로가 필요해 하지 않았다). 포크 PR 은 push 가 없어 검사가 돌지 않는다. Copilot PR(D-15)에서 push 로 도는 검사도 승인이 필요한지는 관측 전이다.
+- `인수인계/작업내용.md` 는 이 브랜치에서 건드리지 않았다(총괄이 병합 때 갱신).
+
 ## [2026-11-04] Claude – Chance 생성기 막힘 해소 묶음(gfix: F 탈락 사유 공개 주석 + A 분야 이어가기·시드 시각 구간 + B 얇은 근거 뒤로 + C 요약 상한 + E 응답 형식·호출 시간 상한) (T2 — 코드·시험·문서)
 
 **작업자**: Claude (gfix 구현자). 독립 검증 완료(조건부 병합 가능, 2026-11-04 — 지적 반영 후 병합). 로컬 커밋 하나까지만 만들었고 push·병합 가지·PR 은 만들지 않았다(총괄이 한다).

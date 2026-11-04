@@ -155,7 +155,7 @@ class WorkflowTest(unittest.TestCase):
         self.assertEqual(condition, "${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.validate.result == 'failure' }}")      # 조건 전체를 고정한다(|| true 같은 덧붙임·main 조건 삭제를 잡는다)
         self.assertNotIn("matrix", self.job.get("strategy", {}))                    # 3.10·3.12 두 칸이 둘 다 떨어져도 알림은 한 번
         self.assertIn("push", self.data[True])                                       # PyYAML 은 on 을 True 로 읽는다
-        self.assertEqual(self.data[True]["push"]["branches"], ["main", "ai/claude/**"])      # AI 브랜치 사전 검사(운영자 요청 2026-11-03)가 더해졌다 — 알림은 위 조건 때문에 main 에서만 간다
+        self.assertIsNone(self.data[True]["push"])                                   # 브랜치 필터가 없다: 어느 브랜치 push 든 사전 검사(운영자 요청 2026-11-03·11-04, PR 로는 돌리지 않는다) — 알림은 위 조건 때문에 main 에서만 간다
 
     def test_pull_request_failures_do_not_send_a_phone_alert(self):
         self.assertIn("github.event_name == 'push'", self.job["if"])
@@ -219,7 +219,7 @@ class DocumentationTest(unittest.TestCase):
     def test_the_architecture_doc_lists_the_event(self):
         doc = (_bootstrap.ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
         for phrase in ("notify_main_check_failed", "main-check-failed", "guardrails.yml", "alert", "secret_patterns}.py", "다섯 파일", "`AI 에게 요청하기`",
-                       "`github.ref` 가 `refs/heads/main` 인 것", "AI 브랜치(`ai/claude/**`) push 의 사전 검사 실패도 보내지 않는다"):
+                       "`github.ref` 가 `refs/heads/main` 인 것", "AI 브랜치(`ai/claude/**`) push 의 사전 검사 실패도 보내지 않는다", "PR 은 이 검사로 돌지 않으므로"):
             self.assertIn(phrase, doc, phrase)
         setup = (_bootstrap.ROOT / ".github" / "editorial" / "TELEGRAM_SETUP.md").read_text(encoding="utf-8")
         for phrase in ("main 검사 실패", "실행 열기 · AI 에게 요청하기"):

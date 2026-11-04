@@ -14,7 +14,7 @@
                          │            ─ 통과 ─► 브랜치 issue-edit/<번호>-<대상> 커밋 → PR(Fixes #번호) → 이슈 코멘트 + 표식 라벨 issue-edit-done
                          │            ─ 이미 처리함 ─► 새 브랜치·PR 없이 "이미 처리한 이슈입니다" 코멘트만(dry-run 은 예외)
                          │            ─ 실패 ─► 파일 변경 없이 이슈에 사유 코멘트(필수 누락·대상 모호·범위 위반 등)
-pull_request ─► pr-scope-check.yml ─► 이슈 요청 ↔ PR 실제 변경 비교 → ✅/⚠️/❌ 코멘트   (Copilot·사람이 만든 PR. issue-edit 이 만든 PR 은 GITHUB_TOKEN 으로 만들어져 이 워크플로를 일으키지 않는다 — 그 PR 은 러너의 사후 검증과 --verify-staged 를 이미 통과했다)
+pull_request ─► pr-scope-check.yml ─► 이슈 요청 ↔ PR 실제 변경 비교 → ✅/⚠️/❌ 코멘트   (Copilot·사람이 만든 PR. AI 브랜치 `ai/claude/` 의 PR 은 job 이 건너뜀. issue-edit 이 만든 PR 은 GITHUB_TOKEN 으로 만들어져 이 워크플로를 일으키지 않는다 — 그 PR 은 러너의 사후 검증과 --verify-staged 를 이미 통과했다)
 push(*.md, spec 등) ─► sync-issue-form.yml ─► pages.json · 양식 드롭다운 자동 갱신(두 파일만 커밋)
 ```
 

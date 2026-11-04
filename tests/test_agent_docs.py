@@ -133,7 +133,7 @@ class PinnedRulesTest(unittest.TestCase):
 
     WORKFLOW_ROWS = {      # 워크플로 파일: 절차서 표의 그 행에 있어야 하는 글자(트리거·시각)
         "chanceblog.yml": ("17분", "47분"), "watchdog.yml": ("03:30", "15:30"), "ops-inbox.yml": ("2시간", "텔레그램"),
-        "ai-request.yml": ("ai/claude/**",), "guardrails.yml": ("main push", "PR", "ai/claude/**"), "pages.yml": ("main push",),
+        "ai-request.yml": ("ai/claude/**",), "guardrails.yml": ("push", "어느 브랜치든", "PR 로는 돌지 않음", "수동"), "pages.yml": ("main push",),
         "sync-issue-form.yml": ("main push", "*.md"), "issue-edit.yml": ("이슈",), "pr-scope-check.yml": ("PR",),
         "operator-reply.yml": ("이슈가 열릴 때",), "telegram-test.yml": ("수동",), "chance-fix-images.yml": ("수동",), "blogger.yml": ("호출",),
     }
@@ -261,14 +261,14 @@ class PinnedRulesTest(unittest.TestCase):
         j4 = next(line for line in RUNBOOK.splitlines() if line.startswith("8. **push → 검사 확인 → 병합 부탁**"))
         for needle in ("--workflow guardrails.yml", "chanceblog-desktop runs --workflow ci.yml", "`cancelled`·`failure` 는 초록이 아닙니다",       # 취소를 초록으로 읽으면 취소된 실행을 믿고 부탁을 보낸다
                        "블로그는 1~2분, 데스크톱은 3~5분 간격", "python scripts/github_status.py limit", "1~2분 안에 `push` 줄이 안 나타나면", "새 `guardrails.yml` 이 없는 것입니다",
-                       "최신 main 에서 새 브랜치로 다시 올립니다", "`주석[notice] main 과 갈라진 지점 <해시>`", "**빨강이면**", "커밋 한 개로 새 브랜치 이름(예: `-2`)",
-                       "force push 금지", "Re-run 은 누르지 않습니다", "운영자에게 넘기지 않습니다", "PR 검사(약 2분)가 한 번 더"):
+                       "최신 main 에서 새 브랜치로 다시 올립니다", "`주석[notice] 시험 병합 직전의 main 끝 <해시>`", "시험 병합", "최신 main 에서 새 브랜치를 다시 만들어", "**빨강이면**", "커밋 한 개로 새 브랜치 이름(예: `-2`)",
+                       "force push 금지", "Re-run 은 누르지 않습니다", "운영자에게 넘기지 않습니다", "검사가 새로 돌지 않습니다"):
             self.assertIn(needle, j4, needle)
         j3 = next(line for line in RUNBOOK.splitlines() if line.startswith("5. **병합 부탁(`merge`)**"))
         for needle in ("요청 전용 브랜치", "같은 커밋에 넣으면 검사 결과를 보기 전에 알림이 갑니다", "ci.yml` 네 칸 약 14분"):
             self.assertIn(needle, j3, needle)
         self.assertNotIn("같은 커밋**에 넣습니다", RUNBOOK)                          # 옛 안내(요청 파일을 병합 브랜치의 같은 커밋에)는 사전 검사와 부딪친다
-        for needle in ("검사는 부탁을 보내기 전에 끝나 있습니다", "초록인 것을 확인한 뒤에만", "PR 만들기 → 초록 확인 → Merge → Confirm", "PR 검사(약 2분)가 한 번 더 돕니다"):
+        for needle in ("검사는 부탁을 보내기 전에 끝나 있습니다", "초록인 것을 확인한 뒤에만", "PR 만들기 → 초록 확인 → Merge → Confirm", "PR 을 만들 때 새로 도는 검사가 없습니다"):
             self.assertIn(needle, REQUESTS_README, needle)
 
     def test_the_defect_number_lookup_scans_main_and_every_two_level_ai_branch(self):
