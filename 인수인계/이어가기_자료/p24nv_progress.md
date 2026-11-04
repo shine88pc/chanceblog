@@ -1,5 +1,25 @@
 # p24nv 진행 기록 (N1 NAVER API HUB 안전 틀)
 
+## ▶ 3차(문서) 결과 (21:20 — 코디네이터 요청 21:13, 마감 21:35, 문서만·src/·시험 변경 없음)
+- 브랜치 `ai/claude/naver-hub-safety-1`, 새 WIP 커밋 **`2cc6b5a`**(전체 `2cc6b5a85983fa570243af3dc6e545fa4da55903`), 부모 `9bcb1c7`(그대로), 작성자 강병수. push·병합 가지·PR 없음. 변경 5개 문서 파일(8줄 바뀜 — 긴 줄 하나가 한 줄), origin/main 은 여전히 `3b1294b`(기준 그대로).
+
+| 고친 곳 | 내용 |
+|---|---|
+| `docs/DECISIONS.md` D-35 ⑦ | **구현 쪽 기본값(운영자가 따로 정하지 않은 것)** 으로 명시: 하루 100회 창에서도 우선순위 몫 보호(일반 제공자의 일괄 30%·새 후보 20%·선택 후보 10%)를 쓰지 않는다 — 운영자 문서가 정한 것은 월 70·80·90% 단계뿐. 결과(자동 새로고침이 하루를 다 쓰면 그날 직접 고른 후보도 거절 — 일반 제공자는 일괄 70·새 후보 80·선택 90회에서 멈추고 필수만 100회), 되돌리는 길 둘(일 창엔 기존 몫 규칙 `QuotaGuard._check` 한 곳 / N2 에서 자동 새로고침 하루 상한 낮춤), 결정 거리(기본값: 예약 없음 유지) |
+| `docs/DECISIONS.md` D-35 ⑧ | '다른 제공자의 파일은 그대로' 의 예외 한 갈래: NAVER 항목이 연결 설정에 있을 때 다른 용도가 깨진 상태 파일을 고치면 그 호출이 거절돼도 절반 가정 계수·빈 묶음·NAVER hold 표시를 바로 저장(예전 동작은 거절되면 저장 안 해 파일이 빔 — 더 보수적이라 위험 낮음) |
+| `docs/SECURITY.md` | 단계 문단에 '하루 100회 창에도 쓰지 않는다 — 구현 쪽 기본값' 괄호, 알려 둔 한계에 몫 보호 없음 한 줄(되돌리는 길·기본값 포함) |
+| `docs/ARCHITECTURE.md` | 몫 규칙 문장에 같은 괄호, 알려 둔 한계 ⑮ 추가, 상태 파일 문단에 D-35 ⑧ 예외 한 문장 |
+| `README.md` | NAVER 항목 단계 설명 뒤에 '하루 100회 안에서는 우선순위별 몫이 없다(구현 쪽 기본값, D-35)' 한 문장 |
+| `CHANGELOG.md` | 문서 보강 문장 + 변이 개수(구현자 113곳 = 첫 90 + 1차 23, 112곳 잡고 1곳 동등) + 시험 개수 192개(75 + 117) |
+
+- 수치 점검: README·CHANGELOG·SECURITY·ARCHITECTURE·DECISIONS 어디에도 `[시험수]`·`175개` 남지 않음(grep 0건). 새 시험 개수는 CHANGELOG 한 곳에만 있고 192개(registry 75 + hub_quota 117)로 코드와 같음. 변이 개수 문구는 CHANGELOG 한 곳(113곳·112 잡음·1 동등)이고 앞의 90곳(89+1)·1차 23곳과 합이 맞음.
+- 시험이 읽는 문서 줄 확인: `grep` 으로 tests 를 훑어 문서를 읽는 모듈은 test_repo_layout(링크·D-nn 정의·키 모양·개인 이메일)·test_errors_catalog(TROUBLESHOOTING↔catalog)·test_service_connections(TROUBLESHOOTING 한 줄)뿐 — 이번에 TROUBLESHOOTING 은 안 바꿈.
+- 시험(한 번에 하나, 3.12 / 진짜 3.10.11 모두 `OK`): test_security_shape 43 · test_repo_layout 26 · test_errors_catalog 37 · test_service_naver_hub_registry 75 · test_service_naver_hub_quota 117 · test_service_safety 16.
+- 보이지 않는 글자 스캔 0건(바뀐 5개 파일, CRLF 유지) · `git diff --check` 통과.
+- 막힌 곳: 없음. 정할 것: 일 창 우선순위 몫 보호를 둘지(기본값: 예약 없음 유지 — 운영자 결정 거리, D-35 ⑦).
+
+---
+
 ## ▶ 수정 1차 결과 (20:54 — 코디네이터 수정 요청 20:30, 마감 21:10)
 - 브랜치 `ai/claude/naver-hub-safety-1`, 새 WIP 커밋 **`9bcb1c7`**(전체 `9bcb1c7147460c376430714775cd7e0dbd1702d4`), 부모 `728fedc`(그대로), 작성자 강병수. push·병합 가지·PR 없음.
 - 변경 7개 파일, +282/−14: `service/quota.py` +25(`_legacy_denial`·`_exhaust_until` 월 창 갈래·`_confirms_auth`·`_report` 의 성공 갱신), `service/connections.py` +14(`mark_call_ok`), `tests/test_service_naver_hub_quota.py` +237(기존 1곳 기대 수정·새 시험 17개), `docs/SECURITY.md`·`ARCHITECTURE.md`·`DECISIONS.md`(D-35)·`CHANGELOG.md`.

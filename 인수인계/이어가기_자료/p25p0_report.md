@@ -1,6 +1,75 @@
 # P0 보고서 — 5채널 주제 선정 전략 1단계: 기존 동작을 시험으로 먼저 보호 + 계획 문서·결정
 
-작업 폴더 `W\cd_wt_p0`(가지 `ai/claude/p0-topic-protect-1`, 기준 `origin/main` = `3b1294b` — 끝까지 움직이지 않았다). 시작 19:27, 1차 끝 20:10경, **보완 1차(독립 검증 지적 3건) 끝 20:42경**(마감 20:57). **로컬 WIP 커밋 둘** — 1차 `1f2297b`(그대로 둠)·보완 `4c746d6`(전체 `4c746d62dfb9f685a584abf734799bbecbd03f59`), 작성자 `강병수 <shine88pc@gmail.com>`. push·병합 가지·PR 은 만들지 않았다. 운영자 R-131 답(A~H=1 + 조건 7개, 19:40)은 19:41 에 받아 반영했다.
+작업 폴더 `W\cd_wt_p0`(가지 `ai/claude/p0-topic-protect-1`, 기준 `origin/main` = `3b1294b` — 끝까지 움직이지 않았다). 시작 19:27, 1차 끝 20:10경, 보완 1차 끝 20:42경, **보완 2차(독립 검증 최종 보고서 반영) 끝 21:30경**(마감 21:45). **로컬 WIP 커밋 셋** — 1차 `1f2297b`·보완 1차 `4c746d6`(둘 다 그대로 둠)·**보완 2차 `23ca08e`**(전체 `23ca08ebf1550b373300a424cdea96d95eea8c7e`), 작성자 `강병수 <shine88pc@gmail.com>`. push·병합 가지·PR 은 만들지 않았다. 운영자 R-131 답(A~H=1 + 조건 7개, 19:40)은 19:41 에 받아 반영했다.
+
+## 000. 2차 수정(21:30) — 독립 검증 최종 보고서 `ver_p0_report.md`(판정 '조건부 병합 가능': 높음 0·중간 2·낮음 12) 반영 (새 WIP 커밋 `23ca08e`, `src/` 0줄·기존 시험 0줄)
+※ 이 절 아래의 00절(보완 1차)·0절(6항목)·1~10절은 그 시점의 값이다 — **2차 이후 최신 값은 이 절을 따른다**: 시험 **76개**(ui 31·suggest 26·candidates 19), 변이 점검 **67곳**, 결정 **D-36~D-41**, 계획 문서 396줄. 새 커밋 `23ca08e` 의 부모는 `4c746d6` 이고 `git diff --stat origin/main HEAD -- src` 는 비어 있다(기준 대비 6파일 +1,435·삭제 0).
+
+### 반영한 것
+| 지적 | 한 일 | 확인 |
+|---|---|---|
+| **M1 (중간·필수)** 계획 7절 ③·⑥ 의 `connections.py` 인용이 N1 병합 뒤에는 틀려짐 | ③ 의 공급자 문장을 **'`3b1294b` 기준'**(`:138` `naver_openapi`·`:142` `naver_searchad`)과 **'N1 병합 뒤'**(`r134-naver-hub-safety-2` 머리 `3b0194f`: `naver_openapi` 는 이름이 '옛 항목 — 네이버 오픈 API(검색·데이터랩)' 가 되어 읽기만 하고 새 항목은 더하지 못함 `:198`, 새 `naver_apihub` `:176` 이 데이터랩 '검색어 트렌드' 로 **관심도 변화**를 조회하는 용도(안전 장치만 있고 호출 코드 없음), `naver_searchad` `:181` 그대로)로 나눠 적었다. ⑥ 에는 '(`3b1294b` 기준)' 과 'N1 뒤에는 이 근거가 약해진다 — 남는 것은 이미 든 값이 무엇이었는지 알 수 없다는 쪽뿐, 결론(Legacy 유지·자동 이전 없음)은 어느 쪽이든 같다' 를 더했다. 7절 머리에는 '인용한 줄은 `3b1294b` 의 줄이다' 를 적었다 | N1 머리(`3b0194f`)에서 계획의 `파일:줄` 인용을 전수 대조: **밀리는 것은 `connections.py`(138→198·142→181, 새 용도 176)뿐**이고 `cli.py:502·627`·`format.py:236` 은 같은 줄이다. 새 시험 76개는 N1 머리 위에서도 OK(아래) |
+| **M2 (중간)** Qt 소스 글자 훑기 시험이 주석으로 남긴 옛 줄(V85)에 속고 동작이 같은 정리(V86·V87)에 깨짐 | `test_the_qt_shell_source_picks_home_or_the_placeholder_and_shows_the_drawer_on_home_only` 를 정규식에서 **`ast` 기반**으로 바꿨다 — `shell.py` 의 `render`·`_sync_overlays` 에서 `home_screen`·`placeholder_screen`·`drawer_view` 호출이 '`…page == "home"` 조건의 참/거짓 가지' 안에 있는지, `screens.py` 에서 `vm["section"]["all"]` 글의 단추 눌림이 `shell.go("topics")` 로 이어지는지 본다. 조건을 지역 변수에 담은 것도 같은 조건으로 읽는다 | 변이 M53~M60 (아래 표): 깨뜨리는 4곳(홈↔자리표시 맞바꿈·서랍을 설정 화면 말고 모두·'전체 보기'→기록·**옛 줄을 주석으로 남기고 서랍을 모두 보임(V85)**) **모두 잡힘**, 동작이 같은 4곳(조건을 변수로 뺌(V86)·줄 바꿈(V87)·주석만 덧붙임·단추 변수 이름 바꿈) **모두 통과** |
+| 낮음 1 — 아무 시험도 못 잡던 변이 3곳 | **V11** 추세 낱말 표(보합→`flat`)·`TREND_ICON`·화면 글(상승·보통·하락·데이터 없음) `test_the_three_trend_words_become_up_flat_and_down_and_no_trend_stays_empty` / **V30** 새로 불러오면 칩이 '전체' 로 돌아가고 첫 행이 선택됨 `test_loading_new_data_puts_the_chip_back_to_all_and_selects_the_first_live_row` / **V34** `SeasonGenericWordTest` — '준비'·'마무리'·'행사' 만 든 글은 시기 이름의 일부여도('종합소득세 준비'·'여름 마무리'·'쇼핑 행사') 시기와 이어지지 않고, 흔한 말을 뺀 나머지 낱말은 이어지며(70) 이름 전체는 일치(100) | 변이 M61(V11)·M62(V30)·M63~M65(V34 의 '준비'·'마무리'·'행사' 각각) **모두 잡힘** |
+| 낮음 2 — 새 시험이 놓치고 기존 시험이 잡는 변이 7곳 | 계획 9.1 에 **'새 시험은 기존 시험과 합쳐서 보호한다'** 한 문장(제안 점수 구간 경계·태그 씨앗 강도·경쟁·관심도 보합·위험 판정의 금지 문구·프로필 없는 네이버 B 안내는 기존 시험 몫) | 문장만 — 겹치는 시험은 더하지 않음(원칙) |
+| 낮음 3 — 결정 B·H 행 없음 | **D-40**(채널 이름 대응) · **D-41**(실시간 이슈) 두 행을 표 끝에 더했다. 계획 5.2 제목·10절 B·H 행의 '이어지는 곳' 에 연결 | `test_repo_layout` OK(부르는 번호 ⊆ 정의된 번호) |
+| 낮음 4 — 결정 A '제안 상태 시작 목록' 위치 | 계획 10절 A 행과 D-39 ④ 에 **'전략 문서에서 뽑은 시작 목록도 실제 Seed 라서 사용자 데이터(`seeds.json`)에만 두고 저장소에는 시험용 가짜 예시만'** | 둘이 같은 말 |
+| 낮음 5 — P4 행 '화면 문구 3곳' | 구체화: 의식적으로 바뀌는 기존 시험 = 서랍 항목 목록 시험·'주제 후보' 가 자리표시가 아니게 되는 곳(메뉴 시험의 자리표시 단추 단언·`test_ui_qt` 자리표시 시험). R-131 의 '3곳' 은 재라벨을 전제로 센 것이라 지금은 세지 않음(11절 열린 항목 3), 구체 목록은 P4 구현자가 보고 | — |
+| 낮음 6 — 새 문구 없음 시험의 오경보 | `T` 훑기를 **'상대값' 낱말만** 보게 좁히고 주석에 '새 Trend 문구는 새 키로 더한다' 를 적었다. 서랍 시험의 `최근 관심도` 검사도 `상대값` 으로 좁혔다 | 변이 M66(새 키로 `최근 관심도(상대값)` 를 더함 — 의도대로 깨짐)·**M67(기존 `d_trend` 를 '최근 관심도 변화' 로 바꿈 — 깨지지 않음, 오경보 없음)** |
+| 낮음 7 — Legacy KNOWN_DEFECT 3개는 뒤집는 단계가 없음 | 시험 3개에 '뒤집는 단계가 없다 — Legacy 는 그대로 두고 새 Trend 칸이 대신한다(D-37 ③)' 주석, 계획 9.2 `KNOWN_DEFECT` 행에 같은 문장 | — |
+| 낮음 8 — 실제 시계 | 화면 시험의 `AppState` 에 `today=TODAY`(2026-11-03)를 넘긴다(전엔 `date.today()` 를 읽었다). `make_ctx` 의 `Clock` 은 고정 가짜 시계 | **`date.today()`·`datetime.now()` 를 부르면 터지게 바꿔 놓고 76개를 돌려 통과** — 시험이 실제 시계를 읽지 않는다 |
+| 낮음 9 — P1 지시와 계획 3.2 충돌 | 계획 3.2 의 의존 방향·3.1 `model.py` 행·D-36 ① 을 **'`errors`·`check.claims`·`content` 의 순수 부품(작업 상태 상수 같은 것)만 가져오고 `content.store`·`service`·`ui` 는 가져오지 않는다'** 로 정확하게 고쳤다(`content.candidates` 는 `errors`·`content.status`·`content.model`·`content.profiles` 만 가져옴을 확인) | P1 지시('작업 축 값은 `content.candidates` 상수 재사용')와 일치 |
+| 낮음 11 — 비공개 이름 의존 | `sg._RISKY`·`ServiceHomeProvider()._names` 를 읽는 곳에 '비공개 이름 — 바뀌면 이 시험을 고친다' 주석 | — |
+
+### 반영하지 않은 것과 이유
+| 지적 | 이유 |
+|---|---|
+| 낮음 10 — 시험 예시 프로필 A·B 를 중립 낱말로 | B 의 '그래픽카드' 는 운영자 요청의 오탐 예시 자체이고, A·B 의 첫 셋 제안이 손으로 옮긴 값(스냅샷)이라 바꾸려면 값을 다시 구해 못박아야 한다. 낱말은 일반 낱말이고 계획·결정 행에는 전략 문서의 채널 분야를 옮기지 않았다 — 코디네이터가 원하면 P1 이후에 중립 예시로 바꾼다 |
+| 낮음 12 — 계획 문서의 `README` 링크 | 이번 라운드는 'src·기존 시험·기존 문서 줄은 바꾸지 않는다' 이고 README 는 요청 범위 밖이다(시험도 요구하지 않음). 병합 때 링크할지는 코디네이터 판단 |
+| 낮음 2 의 '새 시험 더하기' | 기존 시험이 이미 잡는 것(7곳)이라 겹치는 시험을 더하지 않았다(문장으로만 반영) |
+| 기존 줄을 바꿔야 하는 지적 | 없었다 — 이번 지적은 모두 새 시험·새 문서 줄·내 앞 커밋의 줄 안에서 처리했다(`src/`·기존 시험 파일은 0줄) |
+
+### 시험 결과 (3.12.10 / 3.10.11, 한 번에 한 모듈씩 — 전체 실행은 하지 않음)
+```text
+                                3.12.10                          3.10.11
+test_topic_protect_ui           Ran 31 tests in 0.784s  OK      Ran 31 tests in 0.804s  OK
+test_topic_protect_suggest      Ran 26 tests in 3.575s  OK      Ran 26 tests in 3.620s  OK
+test_topic_protect_candidates   Ran 19 tests in 0.091s  OK      Ran 19 tests in 0.098s  OK      (합 76)
+test_repo_layout                Ran 26 tests in 1.759s  OK      Ran 26 tests in 1.562s  OK
+test_content_model              Ran 34 tests in 0.019s  OK      Ran 34 tests in 0.017s  OK
+test_ui_core                    Ran 94 tests in 3.163s  OK      Ran 94 tests in 3.400s  OK
+test_service_candidates_cli     Ran 60 tests in 10.983s OK      Ran 60 tests in 11.537s OK
+N1 병합 가지 머리 3b0194f 위에서 새 3모듈:
+test_topic_protect_ui           Ran 31 tests in 0.732s  OK      Ran 31 tests in 0.732s  OK
+test_topic_protect_suggest      Ran 26 tests in 3.394s  OK      Ran 26 tests in 3.595s  OK
+test_topic_protect_candidates   Ran 19 tests in 0.086s  OK      Ran 19 tests in 0.069s  OK
+```
+`ruff check --select F,E9,B,UP --target-version py310` 새 시험 3개 **0건** · `git diff --check` 0건 · 새·바뀐 6파일의 BOM·보이지 않는 글자·줄 끝 공백·탭 **0건** · 계획 문서 **396줄**(한도 400) · 모든 시험(76/76) 위 표준 주석 있음 · 계획·시험에 `D-35` 글자 0건 · 임시 N1 작업 폴더·변이 사본은 작업 폴더 밖이고 끝에 지웠다(변이 사본은 작업 폴더와 바이트까지 같음 확인).
+
+### 변이 점검 (임시 사본에서 한 곳씩 깨뜨리고 되돌림)
+전체 **67곳**(1차 M01~M42·보완 1차 M43~M52·2차 M53~M67)을 **2차의 최종 시험으로 처음부터 다시** 돌렸다: **62곳 잡힘**(동작을 깨뜨리는 것은 전부), **5곳은 통과가 맞다**(M57~M60 = 동작이 같은 정리, M67 = 오경보 방지) — 기대와 다른 결과 0. 새로 더한 M53~M67 은 아래 표(앞 52곳 표는 2절).
+
+| 번호 | 변이 | 기대 | 결과 |
+|---|---|---|---|
+| M53 | (Qt 소스) 홈 화면과 자리표시 화면을 맞바꿈 · `ui/qt/shell.py` | 잡혀야 함 | 잡힘 — the_qt_shell_source_picks_home_or_the_placeholder_and_shows_… |
+| M54 | (Qt 소스) 서랍이 설정 화면 말고는 모두 보임 · `ui/qt/shell.py` | 잡혀야 함 | 잡힘 — the_qt_shell_source_picks_home_or_the_placeholder_and_shows_… |
+| M55 | (Qt 소스) '전체 보기' 가 기록 화면으로 · `ui/qt/screens.py` | 잡혀야 함 | 잡힘 — the_qt_shell_source_picks_home_or_the_placeholder_and_shows_… |
+| M56 | (Qt 소스) 서랍을 모든 화면에 보이되 옛 줄을 주석으로 남김 — 옛 글자 훑기 시험은 속았다(V85) · `ui/qt/shell.py` | 잡혀야 함 | 잡힘 — the_qt_shell_source_picks_home_or_the_placeholder_and_shows_… |
+| M57 | (Qt 소스) 동작은 같고 조건을 변수 하나로 뺀 정리 — 통과해야 한다(V86) · `ui/qt/shell.py` | 통과해야 함(동작이 같음) | 통과(맞음) |
+| M58 | (Qt 소스) 동작은 같고 줄만 바꾼 정리 — 통과해야 한다(V87) · `ui/qt/shell.py` | 통과해야 함(동작이 같음) | 통과(맞음) |
+| M59 | (Qt 소스) 동작은 같고 주석만 덧붙임 — 통과해야 한다 · `ui/qt/shell.py` | 통과해야 함(동작이 같음) | 통과(맞음) |
+| M60 | (Qt 소스) 동작은 같고 단추 변수 이름만 바꾼 정리 — 통과해야 한다 · `ui/qt/screens.py` | 통과해야 함(동작이 같음) | 통과(맞음) |
+| M61 | 추세 표에서 보합을 up 으로(V11 — 아무 시험도 못 잡던 것) · `ui/adapters.py` | 잡혀야 함 | 잡힘 — the_three_trend_words_become_up_flat_and_down_and_no_trend_s… |
+| M62 | 새로 불러와도 칩 거르기를 '전체' 로 되돌리지 않음(V30 — 아무 시험도 못 잡던 것) · `ui/core/app_state.py` | 잡혀야 함 | 잡힘 — loading_new_data_puts_the_chip_back_to_all_and_selects_the_f… |
+| M63 | 흔한 말 목록에서 '준비' 빼기(V34 — 아무 시험도 못 잡던 것) · `content/suggest_score.py` | 잡혀야 함 | 잡힘 — a_text_with_only_a_generic_word_does_not_connect_to_a_season… |
+| M64 | 흔한 말 목록에서 '마무리' 빼기 · `content/suggest_score.py` | 잡혀야 함 | 잡힘 — a_text_with_only_a_generic_word_does_not_connect_to_a_season… |
+| M65 | 흔한 말 목록에서 '행사' 빼기 · `content/suggest_score.py` | 잡혀야 함 | 잡힘 — a_text_with_only_a_generic_word_does_not_connect_to_a_season… |
+| M66 | 새 Trend 문구를 새 키로 더함(P4 가 할 일) — '아직 없음' 시험이 의식적으로 깨져야 한다 · `ui/core/text.py` | 깨져야 함(의도) | 잡힘 — the_screen_text_has_no_relative_interest_label_yet_so_p4_add… |
+| M67 | 기존 추세 서랍 이름을 '최근 관심도 변화' 로 바꿈 — 좁힌 시험은 깨지지 않아야 한다(오경보 방지) · `ui/core/text.py` | 통과해야 함(오경보 방지) | 통과(맞음) |
+
+### 내가 결정할 것(2차 이후)
+- 낮음 10(중립 예시 프로필)·낮음 12(README 링크)를 할지.
+- N1 → P0 순서로 병합하면 `DECISIONS.md`·`CHANGELOG.md` 끝 충돌만 풀면 된다(N1 은 D-35 한 행뿐 — `git diff` 로 확인, P0 의 D-36~D-41 과 겹치지 않음).
 
 ## 00. 보완 1차(20:42) — 독립 검증 `ver_p0_report_partial.md` 지적 3건 (새 WIP 커밋 `4c746d6`, `src/` 0줄·기존 시험 변경 0)
 | # | 지적 | 한 일 |
@@ -14,21 +83,21 @@
 ## 0. 운영자 단계 보고 6항목 (조건 7 — 이 순서)
 
 ### ① 변경 파일
-`git diff --stat origin/main HEAD` = 6개 파일, +1,333줄, 삭제 0줄(커밋 둘 합산 — 보완 커밋만 보면 +123·−31).
+`git diff --stat origin/main HEAD` = 6개 파일, +1,435줄, 삭제 0줄(커밋 셋 합산 — 보완 2차만 보면 +139·−37, 모두 내 앞 커밋의 줄).
 
 | 파일 | 상태 | 줄 | 내용 |
 |---|---|---:|---|
-| `tests/test_topic_protect_ui.py` | 새 | 365 | 특성 시험 29개 — G1 어댑터·뷰모델, G4 화면 쪽, G5 `주제 후보` 자리, **Legacy 절대 횟수 칸의 화면 이름·단위(보완)** |
-| `tests/test_topic_protect_suggest.py` | 새 | 325 | 특성 시험 25개 — G2 제안 엔진(다섯 카드 예시 포함), G4 제안 서비스 쪽, **보관함 후보 우선도의 같은 계절 오탐(보완)** |
-| `tests/test_topic_protect_candidates.py` | 새 | 242 | 특성 시험 19개 — G3 후보 모양·CSV·설정 엄격성, G4 채널 열거, **명령줄의 Legacy 횟수 이름·단위(보완)** |
+| `tests/test_topic_protect_ui.py` | 새 | 449 | 특성 시험 31개 — G1 어댑터·뷰모델, G4 화면 쪽, G5 `주제 후보` 자리, **Legacy 절대 횟수 칸의 화면 이름·단위(보완)** |
+| `tests/test_topic_protect_suggest.py` | 새 | 338 | 특성 시험 26개 — G2 제안 엔진(다섯 카드 예시 포함), G4 제안 서비스 쪽, **보관함 후보 우선도의 같은 계절 오탐(보완)** |
+| `tests/test_topic_protect_candidates.py` | 새 | 245 | 특성 시험 19개 — G3 후보 모양·CSV·설정 엄격성, G4 채널 열거, **명령줄의 Legacy 횟수 이름·단위(보완)** |
 | `docs/TOPIC_ENGINE_PLAN.md` | 새 | 396 | 계획 문서(400줄 이내) — 7절이 기존 `search_demand` 의미 조사 |
-| `docs/DECISIONS.md` | +4행 | 41~44행 | D-36~D-39(표 끝, 보완에서 운영자 말과 이 계획의 해석을 나눠 다시 씀). 기존 D-01~D-34 는 한 글자도 안 바뀜(CRLF 유지) |
+| `docs/DECISIONS.md` | +6행 | 41~46행 | D-36~D-41(표 끝, 보완에서 운영자 말과 이 계획의 해석을 나눠 다시 씀). 기존 D-01~D-34 는 한 글자도 안 바뀜(CRLF 유지) |
 | `CHANGELOG.md` | +1줄 | 39행 | 맨 끝 한 줄 |
 
 **바꾸지 않은 곳**: `src/` 전부(0줄 — 오타·주석 포함), 기존 시험 전부(고치거나 약화한 것 0), `README.md`·`docs/ARCHITECTURE.md`·`ci.yml`·`vendor/`.
 
 ### ② 추가·변경된 시험
-- **추가 73개**(모듈별: ui 29 · suggest 25 · candidates 19 — 1차 65개 + 보완 8개). **변경한 기존 시험 0개.** 모든 시험 위에 한국어 주석 한 줄('특성 시험(P0): 현재 동작을 못박는다. 바꾸려면 새 결정(D-nn)을 쓰고 이 시험을 의식적으로 고친다.')이 있고 73/73 을 스크립트로 확인했다. PySide6·네트워크·`subprocess`·실제 시계 없음.
+- **추가 76개**(모듈별: ui 31 · suggest 26 · candidates 19 — 1차 65개 + 보완 1차 8개 + 2차 3개). **변경한 기존 시험 0개.** 모든 시험 위에 한국어 주석 한 줄('특성 시험(P0): 현재 동작을 못박는다. 바꾸려면 새 결정(D-nn)을 쓰고 이 시험을 의식적으로 고친다.')이 있고 76/76 을 스크립트로 확인했다. PySide6·네트워크·`subprocess`·실제 시계 없음.
 - **`KNOWN_DEFECT` 11개**(이름·주석에 표시 — 뒤 단계가 의도적으로 뒤집는다):
   1. `test_topic_protect_suggest.SeasonFitCardTest.test_KNOWN_DEFECT_graphics_card_and_cadmium_match_the_year_end_tax_season_only_because_they_contain_card` — **다섯 카드 예시** 중 오탐 둘(그래픽카드·카드뮴)
   2. `…GraphicsCardTopSuggestionTest.test_KNOWN_DEFECT_profile_b_in_november_ranks_a_year_end_tax_title_for_graphics_cards_first` — 프로필 B 11월 1위 '연말정산 준비 시기에 챙겨 볼 그래픽카드 정리' **100.0 높음**(직접 돌려 확인한 값)
@@ -53,11 +122,11 @@
 **전체(`discover`)는 지시에 따라 돌리지 않았다**(PC 메모리 2GB 안팎 — 코디네이터가 CI 네 칸으로 본다). 대신 요청서의 모듈을 **한 번에 하나씩** 3.12.10 과 진짜 3.10.11 로 돌렸다(PySide6 없음 — Qt 시험은 건너뜀). 실제 줄:
 
 ```text
-새 시험 (보완 1차 뒤 최종 실행)                         3.12.10                    3.10.11
-test_topic_protect_ui          Ran 29 tests in 1.598s  OK        Ran 29 tests in 1.752s  OK
-test_topic_protect_suggest     Ran 25 tests in 3.710s  OK        Ran 25 tests in 4.269s  OK
-test_topic_protect_candidates  Ran 19 tests in 0.150s  OK        Ran 19 tests in 0.118s  OK
-test_repo_layout               Ran 26 tests in 3.201s  OK        Ran 26 tests in 2.717s  OK
+새 시험 (보완 2차 뒤 최종 실행)                         3.12.10                    3.10.11
+test_topic_protect_ui          Ran 31 tests in 0.784s  OK        Ran 31 tests in 0.804s  OK
+test_topic_protect_suggest     Ran 26 tests in 3.575s  OK        Ran 26 tests in 3.620s  OK
+test_topic_protect_candidates  Ran 19 tests in 0.091s  OK        Ran 19 tests in 0.098s  OK
+test_repo_layout               Ran 26 tests in 1.759s  OK        Ran 26 tests in 1.562s  OK
 
 요청서의 기존 시험 모듈(1차 때 실행한 값 — 보완은 소스·기존 시험을 안 바꿨으므로 그대로)
 test_ui_adapters               Ran 25 tests in 3.120s  OK        Ran 25 tests in 3.187s  OK
@@ -81,7 +150,7 @@ test_service_draft_token       Ran 13 tests in 3.411s  OK        Ran 13 tests in
 - **병합 순서 확인**: 공개 가지 `origin/ai/claude/r134-naver-hub-safety-1`(N1, 머리 `b2096ce`) 머리를 임시 detached 작업 폴더로 받아 내 새 시험 3개를 복사해 돌렸다 → 1차(65개)는 3.12 에서 25·22·18 OK·3.10 에서 65 OK, **보완 뒤 73개도 3.12·3.10 모두 `Ran 73 tests … OK`**. 임시 폴더는 지웠다. N1 과 내 가지를 `git merge-tree` 로 합쳐 보면 **`CHANGELOG.md`·`docs/DECISIONS.md` 두 파일만 충돌**(둘 다 맨 끝에 줄을 더해서)이고 나머지는 자동으로 합쳐진다 — 둘 다 남기고 D-35 를 D-36 앞에 두면 된다.
 
 ### ④ 기존 기능 영향
-**없다.** 근거: ① `src/` 변경 0줄(`git diff --stat origin/main..HEAD` 의 파일 6개가 모두 `tests/`·`docs/`·`CHANGELOG.md`) ② 기존 시험 파일 변경 0 ③ 위 기존 모듈 14개(요청서 9개 + 문서를 읽는 5개)가 3.12·3.10 모두 그대로 통과 ④ 새 시험은 현재 동작을 못박았을 뿐 기능을 더하지 않았다. 새 시험 73개가 일부러 깨뜨린 소스를 **52곳 모두** 잡았다(아래 2절).
+**없다.** 근거: ① `src/` 변경 0줄(`git diff --stat origin/main..HEAD` 의 파일 6개가 모두 `tests/`·`docs/`·`CHANGELOG.md`) ② 기존 시험 파일 변경 0 ③ 위 기존 모듈 14개(요청서 9개 + 문서를 읽는 5개)가 3.12·3.10 모두 그대로 통과 ④ 새 시험은 현재 동작을 못박았을 뿐 기능을 더하지 않았다. 새 시험 76개가 일부러 깨뜨린 소스를 **67곳 중 동작을 깨뜨리는 62곳 모두** 잡았다(나머지 5곳은 동작이 같은 정리·오경보 방지라 통과가 맞다 — 위 000절).
 
 ### ⑤ 다음 단계에서 발생할 동작 변화
 | 단계 | 동작 변화 | 이때 의식적으로 고쳐야 하는 이 시험들 |
@@ -99,9 +168,9 @@ test_service_draft_token       Ran 13 tests in 3.411s  OK        Ran 13 tests in
 ---
 
 ## 1. 가장 중요한 5가지
-1. **기존 동작을 먼저 못박았다.** 새 특성 시험 73개(3모듈)가 3.12·3.10 에서 통과하고 `src/` 와 기존 시험은 한 글자도 안 바뀌었다 — WIP 커밋 `1f2297b`(1차)·`4c746d6`(보완 1차), 로컬·push 안 함.
+1. **기존 동작을 먼저 못박았다.** 새 특성 시험 76개(3모듈)가 3.12·3.10 에서 통과하고 `src/` 와 기존 시험은 한 글자도 안 바뀌었다 — WIP 커밋 `1f2297b`(1차)·`4c746d6`(보완 1차)·`23ca08e`(보완 2차), 로컬·push 안 함.
 2. **알려진 결함 11개를 '현재 그대로' 못박았다.** 다섯 카드 예시는 모두 `(70, '연말정산 준비')`(그래픽카드·카드뮴이 오탐), 프로필 B 11월 1위는 '연말정산 준비 시기에 챙겨 볼 그래픽카드 정리' 100점, 상대지수 87 은 '월간 검색 수요 87'로 저장되어 기회도 38.89점이 된다.
-3. **변이 점검 52곳을 모두 잡았다**(2곳은 처음에 살아남아 시험을 보강한 뒤). 'season_fit 부분 일치 → 정확 일치' 변이는 하위 시험까지 24건이 잡는다.
+3. **변이 점검 67곳**: 동작을 깨뜨리는 62곳을 모두 잡고, 동작이 같은 정리 4곳과 오경보 방지 1곳은 통과한다(2곳은 처음에 살아남아 시험을 보강한 뒤). 'season_fit 부분 일치 → 정확 일치' 변이는 하위 시험까지 24건이 잡는다.
 4. **`search_demand` 조사 결론(이 조사의 결론 — 운영자 말이 아니다): 'Legacy 유지·자동 이전 없음'이 맞다** — 운영자 지시(조건 1: 의미가 불명확하면 Legacy 유지)를 이 값에 적용한 것이다. 값의 뜻은 '월간 검색 수(회)'로 일관되지만 공급자·기간 칸도 수집 코드도 없다. 요청서의 결론 후보(코디네이터 가설)와 달랐던 두 가지: 공급자는 검색광고 한 곳이 아니고 오픈 API(데이터랩)도 같은 칸을 채우는 용도로 적혀 있음 · 'PC+모바일 합'은 코드·문서에 없음.
 5. **계획 문서·D-36~D-39 를 운영자 승인으로 확정했다**(별도 `topic_engine.db`, 마이그레이션 없음). 번호 연속을 요구하는 시험이 없어 D-35 를 비운 채 D-36 부터 만들었고, N1 가지와는 `DECISIONS.md`·`CHANGELOG.md` 끝에서만 충돌한다.
 
