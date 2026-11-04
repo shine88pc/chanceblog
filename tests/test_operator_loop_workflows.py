@@ -496,7 +496,8 @@ class IssueFormTest(unittest.TestCase):
         raw = (TEMPLATES / "ai-task.yml").read_text(encoding="utf-8")
         notice = form("ai-task.yml")["body"][0]["attributes"]["value"]
         self.assertIn(ol.TASK_FORM_NOT_T3, notice)
-        self.assertIn("번호 있는 `결정 부탁`(R-번호)으로 따로 묻고", notice)
+        self.assertIn("번호 있는 `결정 부탁`(`r001` 같은 번호)으로 따로 묻고", notice)
+        self.assertIn(ol.TASK_FORM_NUMBERED_ASK, notice)
         for old_phrase in ("T3 포함", "승인 범위", "승인합니다", "'예'를 골라도", "아니요 —", "예 —"):
             self.assertNotIn(old_phrase, raw, old_phrase)
         description = {item["id"]: item for item in form("ai-task.yml")["body"][1:]}["approval"]["attributes"]["description"]
@@ -786,7 +787,11 @@ class FormRuleTest(unittest.TestCase):
         "답 양식 라벨": (REPLY_FORM, 'labels: ["운영자응답"]', 'labels: ["운영자응답", "blog-control"]'),
         "답 양식에 편집 라벨": (REPLY_FORM, 'labels: ["운영자응답"]', 'labels: ["blog-control", "edit:page"]'),
         "답 양식 라벨 없음": (REPLY_FORM, 'labels: ["운영자응답"]\n', ""),
-        "요청 번호 필수 아님": (REPLY_FORM, "      placeholder: \"R-001\"\n    validations:\n      required: true\n", "      placeholder: \"R-001\"\n    validations:\n      required: false\n"),
+        "요청 번호 필수 아님": (REPLY_FORM, "      placeholder: \"r001\"\n    validations:\n      required: true\n", "      placeholder: \"r001\"\n    validations:\n      required: false\n"),
+        "요청 번호 칸의 예시가 옛 R-001 로 되돌아감": (REPLY_FORM, 'placeholder: "r001"', 'placeholder: "R-001"'),
+        "요청 번호 칸 설명에서 r001 예시를 뺌": (REPLY_FORM, "(예: r001 — R-001·r-001 로 써도 됩니다)", "(예: 번호)"),
+        "답 양식 안내 글에서 r001 꼴 안내를 뺌": (REPLY_FORM, "텔레그램 메시지 맨 위의 `r001` 같은 번호", "텔레그램 메시지 맨 위의 번호"),
+        "요청 양식 안내가 (R-번호) 로 되돌아감": (TASK_FORM, "(`r001` 같은 번호)", "(R-번호)"),
         "메모를 필수로": (REPLY_FORM, "      description: \"AI 에게 전할 말(선택). 화면에 보인 문구는 적어도 되지만 비밀번호·토큰·키 값은 쓰지 마세요.\"\n    validations:\n      required: false\n",
                     "      description: \"AI 에게 전할 말(선택). 화면에 보인 문구는 적어도 되지만 비밀번호·토큰·키 값은 쓰지 마세요.\"\n    validations:\n      required: true\n"),
         "항목 제목 바꿈": (REPLY_FORM, 'label: "요청 번호"', 'label: "번호"'),

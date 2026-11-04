@@ -742,10 +742,11 @@ def check_request_files(root, files):
     return out
 
 
-def _form_problems(data, title, label, fields, required, types, options, notice_phrases=(), defaults=None):
+def _form_problems(data, title, label, fields, required, types, options, notice_phrases=(), defaults=None, examples=None):
     """이슈 양식 한 개(파싱한 data)가 loop_mod 의 정의와 같은지(FORM-1). 문제 문구 목록.
     notice_phrases: 맨 위 안내 글에 더 있어야 하는 문장들(`[요청]` 양식의 'T3 승인이 아닙니다' 등). defaults: {드롭다운 id: 미리 선택돼야 하는 선택지 번호} — 안전한 선택지가
-    미리 골라져 있게(독립 검증 N-3: 요청 번호만 쓰고 올려도 `승인` 이 되지 않게)."""
+    미리 골라져 있게(독립 검증 N-3: 요청 번호만 쓰고 올려도 `승인` 이 되지 않게). examples: {입력 항목 id: 예시} — 그 항목의 placeholder 가 정확히 예시이고 description 에도 예시가 있어야 한다
+    (요청 번호 칸의 예시가 운영자에게 보이는 꼴 `r001` 임을 지킨다 — 옛 `R-001` 로 되돌아가지 않게)."""
     if not isinstance(data, dict):
         return ["양식이 객체가 아닙니다"]
     problems = []
@@ -787,24 +788,31 @@ def _form_problems(data, title, label, fields, required, types, options, notice_
             default = (item.get("attributes") or {}).get("default")
             if isinstance(default, bool) or default != defaults[field_id]:
                 problems.append(f"{field_id} 의 default 는 {defaults[field_id]}(첫 선택지, 안전한 쪽이 미리 선택됨)여야 합니다(지금 {_shown(default)})")
+        if field_id in (examples or {}):
+            attributes = item.get("attributes") or {}
+            if attributes.get("placeholder") != examples[field_id]:
+                problems.append(f"{field_id} 의 placeholder 는 정확히 `{examples[field_id]}`(운영자에게 보이는 요청 번호 꼴) 여야 합니다(지금 {_shown(attributes.get('placeholder'))})")
+            if examples[field_id] not in str(attributes.get("description", "")):
+                problems.append(f"{field_id} 의 description 에 예시 `{examples[field_id]}` 가 있어야 합니다")
     return problems
 
 
 def check_operator_forms(root, files):
     """FORM-1: 운영자 요청함의 이슈 양식 둘(`ai-reply.yml` `[답변]`, `ai-task.yml` `[요청]`)이 접수 코드(pipeline/operator_loop.py)와 같은 정의인지 —
     제목 머리·라벨(`blog-control` 없음)·항목 id·항목 제목·종류·필수 여부·선택지 문구·맨 위 비밀 값 금지 안내(`[요청]` 은 'T3 승인이 아닙니다' 문장도, `[답변]` 은 '직접 고르세요' 문장도)·
-    드롭다운의 미리 선택(`default`) — 와 `config.yml`(빈 이슈 허용 유지·안내 링크 하나)."""
+    드롭다운의 미리 선택(`default`)·`[답변]` 양식의 요청 번호 칸 예시(placeholder·설명·안내 글이 운영자에게 보이는 꼴 `r001`, 2026-11-04) — 와 `config.yml`(빈 이슈 허용 유지·안내 링크 하나)."""
     if yaml is None:
         return []
     out = []
     specs = (
         (REPLY_FORM, loop_mod.REPLY_TITLE_PREFIX, loop_mod.LABEL_REPLY, loop_mod.REPLY_FIELDS, loop_mod.REPLY_REQUIRED, loop_mod.REPLY_FIELD_TYPES,
-         {"answer": [full for _, full in loop_mod.ANSWER_OPTIONS]}, (loop_mod.ANSWER_DIRECT_NOTICE,), {"answer": loop_mod.ANSWER_DEFAULT_INDEX}),
+         {"answer": [full for _, full in loop_mod.ANSWER_OPTIONS]}, (loop_mod.ANSWER_DIRECT_NOTICE, loop_mod.REQUEST_ID_NOTICE), {"answer": loop_mod.ANSWER_DEFAULT_INDEX},
+         {"request_id": loop_mod.REQUEST_ID_EXAMPLE}),
         (TASK_FORM, loop_mod.TASK_TITLE_PREFIX, loop_mod.LABEL_TASK, loop_mod.TASK_FIELDS, loop_mod.TASK_REQUIRED, loop_mod.TASK_FIELD_TYPES,
-         {"urgency": list(loop_mod.TASK_URGENCY_OPTIONS), "approval": [full for _, full in loop_mod.TASK_APPROVAL_OPTIONS]}, (loop_mod.TASK_FORM_NOT_T3,),
-         {"urgency": loop_mod.TASK_DEFAULT_INDEX, "approval": loop_mod.TASK_DEFAULT_INDEX}),
+         {"urgency": list(loop_mod.TASK_URGENCY_OPTIONS), "approval": [full for _, full in loop_mod.TASK_APPROVAL_OPTIONS]},
+         (loop_mod.TASK_FORM_NOT_T3, loop_mod.TASK_FORM_NUMBERED_ASK), {"urgency": loop_mod.TASK_DEFAULT_INDEX, "approval": loop_mod.TASK_DEFAULT_INDEX}, None),
     )
-    for rel, title, label, fields, required, types, options, notice_phrases, defaults in specs:
+    for rel, title, label, fields, required, types, options, notice_phrases, defaults, examples in specs:
         if rel not in files:
             continue
         try:
@@ -812,7 +820,7 @@ def check_operator_forms(root, files):
         except yaml.YAMLError:
             out.append(err("FORM-1", "YAML 문법 오류", rel))
             continue
-        out.extend(err("FORM-1", message, rel) for message in _form_problems(data, title, label, fields, required, types, options, notice_phrases, defaults))
+        out.extend(err("FORM-1", message, rel) for message in _form_problems(data, title, label, fields, required, types, options, notice_phrases, defaults, examples))
     if ISSUE_CONFIG in files:
         try:
             config = _load_yaml(read_text(root, ISSUE_CONFIG) or "")

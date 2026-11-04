@@ -150,7 +150,7 @@ class ParseReplyTest(unittest.TestCase):
         for bad in ("R-1", "R-0001", "R_001", "R-001 extra", "R-001\nR-002", "001", "R-00a", "#R-001", "R-001.", "R−001"):
             result = reply(body=reply_body(request_id=bad, crlf=False))
             self.assertEqual(result.code, "bad_shape", repr(bad))
-            self.assertEqual(result.problems, ("`요청 번호` 값이 `R-001` 처럼 `R-` 와 숫자 세 자리가 아닙니다",), repr(bad))
+            self.assertEqual(result.problems, ("`요청 번호` 값이 `r001` 처럼 `r` 와 숫자 세 자리가 아닙니다",), repr(bad))
 
     def test_a_lowercase_r_is_read_as_the_same_request_number(self):
         """운영자가 `r-002` 로 쓴 첫 응답(이슈 #61)이 거절됐다 — 맨 앞 소문자 r 과 앞뒤 공백만 봐주고 번호는 `R-002` 로 맞춘다. 나머지 틀린 모양은 그대로 거절한다."""
@@ -183,7 +183,7 @@ class ParseReplyTest(unittest.TestCase):
         no_id = reply_body().replace("### 요청 번호", "### 번호")
         self.assertEqual(reply(body=no_id), ol.Refusal("bad_shape", ("`요청 번호` 항목이 없습니다",)))
         no_answer = reply_body().replace("### 답변", "### 대답")                                       # 모르는 제목 아래의 글은 앞 항목의 값으로 들어간다
-        self.assertEqual(reply(body=no_answer), ol.Refusal("bad_shape", ("`답변` 항목이 없습니다", "`요청 번호` 값이 `R-001` 처럼 `R-` 와 숫자 세 자리가 아닙니다")))
+        self.assertEqual(reply(body=no_answer), ol.Refusal("bad_shape", ("`답변` 항목이 없습니다", "`요청 번호` 값이 `r001` 처럼 `r` 와 숫자 세 자리가 아닙니다")))
         only_answer = "### 요청 번호\n\nR-001\n"
         self.assertEqual(reply(body=only_answer), ol.Refusal("bad_shape", ("`답변` 항목이 없습니다",)))
         both = reply(body="아무 글만 있는 본문")
@@ -260,7 +260,7 @@ class ParseReplyTest(unittest.TestCase):
 
     def test_shape_problems_are_fixed_sentences_that_never_echo_the_issue_text(self):
         closed = {"`요청 번호` 항목이 없습니다", "`답변` 항목이 없습니다", "`요청 번호` 항목이 두 번 나옵니다", "`답변` 항목이 두 번 나옵니다", "`선택` 항목이 두 번 나옵니다",
-                  "`메모` 항목이 두 번 나옵니다", "`요청 번호` 값이 `R-001` 처럼 `R-` 와 숫자 세 자리가 아닙니다", "`답변` 값이 양식의 선택지가 아닙니다"}
+                  "`메모` 항목이 두 번 나옵니다", "`요청 번호` 값이 `r001` 처럼 `r` 와 숫자 세 자리가 아닙니다", "`답변` 값이 양식의 선택지가 아닙니다"}
         for hostile in HOSTILE:
             body = f"### 요청 번호\n\n{hostile}\n\n### 답변\n\n{hostile}\n\n### 선택\n\n{hostile}\n\n### 메모\n\n### 요청 번호\n\n{hostile}"
             result = reply(body=body)
@@ -282,8 +282,8 @@ class CommentTest(unittest.TestCase):
 
     def test_the_reply_comment_names_the_request_the_answer_and_the_choice(self):
         text = ol.reply_comment(self.SUB._replace(choice="B"), True)
-        self.assertEqual(text.splitlines()[1], "접수했습니다 — 요청 **R-001** · 답: **승인** · 선택: **B**.")
-        self.assertEqual(ol.reply_comment(self.SUB, True).splitlines()[1], "접수했습니다 — 요청 **R-001** · 답: **승인**.")
+        self.assertEqual(text.splitlines()[1], "접수했습니다 — 요청 **r001** · 답: **승인** · 선택: **B**.")
+        self.assertEqual(ol.reply_comment(self.SUB, True).splitlines()[1], "접수했습니다 — 요청 **r001** · 답: **승인**.")
 
     def test_notes_appear_only_when_they_apply(self):
         plain = ol.reply_comment(self.SUB, True)
@@ -292,7 +292,7 @@ class CommentTest(unittest.TestCase):
         self.assertIn("- 메모: 있음(120자) — AI 가 이슈 본문에서 읽습니다(여기에는 되풀이하지 않습니다).", ol.reply_comment(self.SUB._replace(memo_chars=120), True))
         self.assertIn("- 선택 칸의 값이 형식(영문·숫자·한글 1~3자)에 맞지 않아 표시하지 않았습니다.", ol.reply_comment(self.SUB._replace(choice_invalid=True), True))
         unknown = ol.reply_comment(self.SUB, False)
-        self.assertIn("- 요청 번호 R-001 은 AI 가 자기가 보낸 요청과 대조해 처리합니다"
+        self.assertIn("- 요청 번호 r001 은 AI 가 자기가 보낸 요청과 대조해 처리합니다"
                       "(요청 파일이 병합 전 브랜치에만 있으면 이 저장소 기본 브랜치에서는 보이지 않으며 정상일 수 있습니다).", unknown)
         for alarming in ("알 수 없는", "다시 확인하세요", "찾지 못했습니다", "접수는 했습니다"):                                    # 불안을 주는 말은 쓰지 않는다(독립 검증 N-2)
             self.assertNotIn(alarming, unknown, alarming)
@@ -300,7 +300,7 @@ class CommentTest(unittest.TestCase):
     def test_the_task_comment_shows_urgency_and_the_progress_scope_and_says_it_is_not_a_t3_approval(self):
         text = ol.task_comment(ol.Submission("task", "", "", "", False, 5, "급함", True))
         self.assertEqual(text.splitlines()[1], "접수했습니다 — 새 일 요청 · 긴급도: **급함** · 진행 범위: **구현까지(T3 제외)**.")
-        self.assertIn("- 이 양식은 T3 승인이 아닙니다. T3(광고 표면·시크릿·계정·삭제·`mode` 변경·새 플랫폼 등)가 필요하면 AI 가 번호 있는 `결정 부탁`(R-번호)으로 따로 묻고, "
+        self.assertIn("- 이 양식은 T3 승인이 아닙니다. T3(광고 표면·시크릿·계정·삭제·`mode` 변경·새 플랫폼 등)가 필요하면 AI 가 번호 있는 `결정 부탁`(`r001` 같은 번호)으로 따로 묻고, "
                       "그때 `[답변]` 양식으로 답해 주세요.", text)
         for old_phrase in ("T3 포함", "승인 범위", "승인은 이슈 본문에 적은 항목에만", "있음("):                                          # 옛 문구가 남아 있으면 `[요청]` 이 T3 를 승인한 것처럼 읽힌다(독립 검증 B-1)
             self.assertNotIn(old_phrase, text, old_phrase)
@@ -581,11 +581,11 @@ class AckCliTest(unittest.TestCase):
         self.assertEqual(self.sequence(github), [("POST", "/labels"), ("POST", "/issues/12/labels"), ("GET", "/issues/12/comments"), ("POST", "/issues/12/comments")])
         self.assertEqual(github.issue_labels, {12: ["운영자응답"]})
         comment = github.posted(12)[0]
-        self.assertTrue(comment.startswith(ol.ACK_MARK + "\n접수했습니다 — 요청 **R-001** · 답: **승인** · 선택: **B**."))
+        self.assertTrue(comment.startswith(ol.ACK_MARK + "\n접수했습니다 — 요청 **r001** · 답: **승인** · 선택: **B**."))
         self.assertNotIn("대조해 처리합니다", comment)                                              # 저장소 요청함에 R-001 파일이 있다
         self.assertEqual(net.calls, 1)
         body = net.bodies()[0]
-        self.assertEqual(body["text"], f"{notify.OK_MARK} 답변 접수 R-001 → 승인 · 선택 B(이슈 #12)")
+        self.assertEqual(body["text"], f"{notify.OK_MARK} 답변 접수 r001 → 승인 · 선택 B(이슈 #12)")
         self.assertNotIn("parse_mode", body)
         self.assertEqual(body["reply_markup"]["inline_keyboard"], [[{"text": "이슈 열기", "url": "https://github.com/shine88pc/chanceblog/issues/12"}]])
         self.assertEqual(lines, ["운영자 응답 접수: 이슈 #12 에 라벨 운영자응답 을 붙였습니다", "운영자 응답 접수: 이슈 #12 에 접수 코멘트를 달았습니다",
@@ -601,19 +601,19 @@ class AckCliTest(unittest.TestCase):
         self.assertEqual(leaks(everything, chat=False), [])                                       # 요청 본문에는 채팅 ID(수신자)가 있어야 한다. 토큰은 어디에도 없다
         self.assertEqual(leaks("\n".join(lines), json.dumps(github.comments, ensure_ascii=False), self.summary.read_text(encoding="utf-8")), [])
 
-    def test_a_lowercase_request_number_is_acknowledged_with_the_capital_number(self):
-        """이슈 #61 의 `r-002` 사례 — 접수 코멘트와 폰 메시지에는 `R-001` 꼴만 나가고, 저장소 요청함에 그 파일이 있으면 '대조' 안내도 붙지 않는다."""
+    def test_a_lowercase_request_number_is_read_as_the_same_request_and_acknowledged_with_the_displayed_number(self):
+        """이슈 #61 의 `r-002` 사례 — 접수 코멘트와 폰 메시지에는 운영자에게 보이는 `r001` 꼴만 나가고(안쪽 정본은 `R-001`), 저장소 요청함에 그 파일이 있으면 '대조' 안내도 붙지 않는다."""
         code, lines, net, github = self.ack(issue_event(body=reply_body(request_id="r-001", answer="문제", memo="버튼이 안 눌립니다")))
         self.assertEqual(code, 0)
         comment = github.posted(12)[0]
-        self.assertTrue(comment.startswith(ol.ACK_MARK + "\n접수했습니다 — 요청 **R-001** · 답: **문제**."), comment[:80])
+        self.assertTrue(comment.startswith(ol.ACK_MARK + "\n접수했습니다 — 요청 **r001** · 답: **문제**."), comment[:80])
         self.assertNotIn("r-001", comment)
         self.assertNotIn("대조해 처리합니다", comment)
-        self.assertEqual(net.bodies()[0]["text"], f"{notify.OK_MARK} 답변 접수 R-001 → 문제(이슈 #12)")
+        self.assertEqual(net.bodies()[0]["text"], f"{notify.OK_MARK} 답변 접수 r001 → 문제(이슈 #12)")
 
     def test_a_request_answer_without_a_choice_has_a_short_phone_message(self):
         code, lines, net, github = self.ack(issue_event(body=reply_body(answer="거절")))
-        self.assertEqual(net.bodies()[0]["text"], f"{notify.OK_MARK} 답변 접수 R-001 → 거절(이슈 #12)")
+        self.assertEqual(net.bodies()[0]["text"], f"{notify.OK_MARK} 답변 접수 r001 → 거절(이슈 #12)")
 
     def test_a_repeated_run_does_not_post_or_send_a_second_time(self):
         github = FakeGitHub()
@@ -639,15 +639,15 @@ class AckCliTest(unittest.TestCase):
 
     def test_an_unknown_request_number_is_a_warning_in_the_comment_but_still_accepted(self):
         code, lines, net, github = self.ack(issue_event(body=reply_body(request_id="R-777")))
-        self.assertIn("요청 번호 R-777 은 AI 가 자기가 보낸 요청과 대조해 처리합니다", github.posted(12)[0])
+        self.assertIn("요청 번호 r777 은 AI 가 자기가 보낸 요청과 대조해 처리합니다", github.posted(12)[0])
         self.assertEqual(net.calls, 1)
-        self.assertIn("R-777", net.bodies()[0]["text"])
+        self.assertEqual(net.bodies()[0]["text"], f"{notify.OK_MARK} 답변 접수 r777 → 승인(이슈 #12)")
 
     def test_a_missing_request_folder_also_just_warns(self):
         (self.repo_root / ol.REQUEST_DIR / "R-001_merge-pr57.md").unlink()
         (self.repo_root / ol.REQUEST_DIR).rmdir()
         code, lines, net, github = self.ack()
-        self.assertIn("요청 번호 R-001 은 AI 가 자기가 보낸 요청과 대조해 처리합니다", github.posted(12)[0])
+        self.assertIn("요청 번호 r001 은 AI 가 자기가 보낸 요청과 대조해 처리합니다", github.posted(12)[0])
         self.assertEqual(net.calls, 1)
 
     def test_a_new_task_request_gets_its_own_label_comment_and_phone_message(self):
@@ -826,18 +826,18 @@ class OperatorLoopFlowTest(unittest.TestCase):
             code, lines, net, _ = oh.run_cli("requests", environ=requests_env(), runner=oh.RequestGit.with_requests({name: text}), root=repo_root)
             self.assertEqual((code, net.calls), (0, 1))
             message = net.bodies()[0]
-            self.assertIn("AI 요청 R-007 · 결정 부탁", message["text"])
-            self.assertIn("답하는 법: 아래 [답하기] → 양식에서 R-007 선택", message["text"])
+            self.assertIn("AI 요청 r007 · 결정 부탁", message["text"])
+            self.assertIn("답하는 법: 아래 [답하기] → 양식에서 r007 선택", message["text"])
             self.assertEqual([button["text"] for button in message["reply_markup"]["inline_keyboard"][0]], ["요청 열기", "PR 열기", "답하기", "사용법"])
             # 2) 운영자는 메시지 맨 위의 번호를 보고 양식에 쓴다(여기서는 메시지에서 번호를 읽어 그대로 쓴다)
-            request_id = re.search(r"AI 요청 (R-[0-9]{3})", message["text"]).group(1)
+            request_id = re.search(r"AI 요청 (r[0-9]{3})", message["text"]).group(1)
             event = issue_event(number=21, body=reply_body(request_id=request_id, answer="승인", choice="B", memo="B 로 가요"))
             # 3) 이슈가 열리면 접수 확인이 코멘트와 텔레그램으로 간다
             code, lines, net2, github = oh.run_cli("ack", environ=ack_env(tmp, event), root=repo_root)
             self.assertEqual((code, net2.calls), (0, 1))
-            self.assertIn("접수했습니다 — 요청 **R-007** · 답: **승인** · 선택: **B**.", github.posted(21)[0])
+            self.assertIn("접수했습니다 — 요청 **r007** · 답: **승인** · 선택: **B**.", github.posted(21)[0])
             self.assertNotIn("대조해 처리합니다", github.posted(21)[0])
-            self.assertEqual(net2.bodies()[0]["text"], f"{notify.OK_MARK} 답변 접수 R-007 → 승인 · 선택 B(이슈 #21)")
+            self.assertEqual(net2.bodies()[0]["text"], f"{notify.OK_MARK} 답변 접수 r007 → 승인 · 선택 B(이슈 #21)")
             # 4) AI 세션은 그 이슈를 읽어 요청 번호로 어느 요청에 대한 답인지 되찾는다
             issue = event["issue"]
             found = ol.parse_reply(issue["title"], issue["body"], issue["user"]["login"], issue["author_association"], OWNER)
@@ -851,7 +851,7 @@ class OperatorLoopFlowTest(unittest.TestCase):
             event = issue_event(number=22, body=reply_body(request_id="R-404"))
             code, lines, net, github = oh.run_cli("ack", environ=ack_env(tmp, event), root=tmp)
             self.assertEqual((code, net.calls, len(github.posted(22))), (0, 1, 1))
-            self.assertIn("요청 번호 R-404 은 AI 가 자기가 보낸 요청과 대조해 처리합니다", github.posted(22)[0])
+            self.assertIn("요청 번호 r404 은 AI 가 자기가 보낸 요청과 대조해 처리합니다", github.posted(22)[0])
 
 
 if __name__ == "__main__":

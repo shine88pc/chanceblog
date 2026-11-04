@@ -523,7 +523,7 @@ class MessageTest(unittest.TestCase):
         self.assertEqual(notify.REQUEST_KIND_LABELS, labels)
         for kind, label in labels.items():
             first = self.fmt(kind=kind).splitlines()[0]
-            self.assertEqual(first, f"{notify.BELL_MARK} <b>AI 요청 R-001 · {label}</b>", kind)
+            self.assertEqual(first, f"{notify.BELL_MARK} <b>AI 요청 r001 · {label}</b>", kind)
 
     def test_the_body_is_title_then_summary(self):
         self.assertEqual(self.fmt().splitlines()[1:3], ["PR 병합 부탁", "아래 PR 을 병합해 주세요."])
@@ -542,10 +542,10 @@ class MessageTest(unittest.TestCase):
 
     def test_the_how_to_answer_line_is_only_for_kinds_that_need_an_answer(self):
         for kind in ("confirm", "decision"):
-            self.assertIn("답하는 법: 아래 [답하기] → 양식에서 R-001 선택", self.fmt(kind=kind).splitlines(), kind)
+            self.assertIn("답하는 법: 아래 [답하기] → 양식에서 r001 선택", self.fmt(kind=kind).splitlines(), kind)
         for kind in ("merge", "run", "info"):
             self.assertNotIn("답하는 법", self.fmt(kind=kind), kind)
-        self.assertIn("양식에서 R-042 선택", self.fmt(kind="decision", request_id="R-042"))
+        self.assertIn("양식에서 r042 선택", self.fmt(kind="decision", request_id="R-042"))
 
     def test_the_overflow_line_counts_the_requests_that_did_not_fit(self):
         self.assertIn("… 외 2건 (저장소의 인수인계/요청함/ 폴더에서 확인하세요)", self.fmt(more=2).splitlines())
@@ -643,8 +643,8 @@ class ReceivedMessageTest(unittest.TestCase):
     """접수 확인 문구(평문 두 가지)의 모양과 방어. 값은 접수 코드가 이미 검증하지만 이 함수들도 외부 글을 믿지 않는다."""
 
     def test_the_reply_confirmation_has_the_promised_shape(self):
-        self.assertEqual(notify.format_reply_received("R-001", "승인", 12), f"{notify.OK_MARK} 답변 접수 R-001 → 승인(이슈 #12)")
-        self.assertEqual(notify.format_reply_received("R-001", "승인", 12, choice="B"), f"{notify.OK_MARK} 답변 접수 R-001 → 승인 · 선택 B(이슈 #12)")
+        self.assertEqual(notify.format_reply_received("R-001", "승인", 12), f"{notify.OK_MARK} 답변 접수 r001 → 승인(이슈 #12)")
+        self.assertEqual(notify.format_reply_received("R-001", "승인", 12, choice="B"), f"{notify.OK_MARK} 답변 접수 r001 → 승인 · 선택 B(이슈 #12)")
 
     def test_the_task_confirmation_has_the_promised_shape(self):
         self.assertEqual(notify.format_task_received(13, "급함", True), f"{notify.OK_MARK} 새 일 요청 접수(이슈 #13) · 긴급도 급함 · 진행 범위 구현까지(T3 제외)")
@@ -683,7 +683,7 @@ class NotifierRequestTest(unittest.TestCase):
         body = net.bodies()[0]
         self.assertEqual(body["parse_mode"], "HTML")
         self.assertEqual(body["chat_id"], int(CHAT))
-        self.assertTrue(body["text"].startswith(f"{notify.BELL_MARK} <b>AI 요청 R-001 · 결정 부탁</b>\n결정할 것\nA 와 B 중 하나\n관련 PR: #57\n\n답하는 법"))
+        self.assertTrue(body["text"].startswith(f"{notify.BELL_MARK} <b>AI 요청 r001 · 결정 부탁</b>\n결정할 것\nA 와 B 중 하나\n관련 PR: #57\n\n답하는 법"))
         row = body["reply_markup"]["inline_keyboard"][0]
         self.assertEqual([button["text"] for button in row], ["요청 열기", "PR 열기", "답하기", "사용법"])
         self.assertEqual(body["link_preview_options"], {"is_disabled": True})
@@ -769,7 +769,7 @@ class RequestsCliTest(unittest.TestCase):
         self.assertEqual((code, net.calls), (0, 1))
         self.assertEqual(lines, ["AI 요청 알림: R-001 을 알렸습니다"])
         body = net.bodies()[0]
-        self.assertIn("AI 요청 R-001 · 결정 부탁", body["text"])
+        self.assertIn("AI 요청 r001 · 결정 부탁", body["text"])
         self.assertEqual([b["text"] for b in body["reply_markup"]["inline_keyboard"][0]], ["요청 열기", "PR 열기", "답하기", "사용법"])
         self.assertIn(f"{BLOB}ai/claude/operator-loop/{FOLDER}/{GOOD_NAME}", body["reply_markup"]["inline_keyboard"][0][0]["url"])
         self.assertEqual(self.summary.read_text(encoding="utf-8").strip(), "### AI 요청 텔레그램 알림\n\n- R-001: 알렸습니다")
@@ -786,7 +786,7 @@ class RequestsCliTest(unittest.TestCase):
         code, lines, net, _ = self.run_requests(RequestGit.with_requests(files))
         self.assertEqual((code, net.calls), (0, 3))
         texts = [body["text"] for body in net.bodies()]
-        self.assertEqual([("AI 요청 R-00%d" % n) in text for n, text in zip((1, 2, 3), texts)], [True, True, True])
+        self.assertEqual([("AI 요청 r00%d" % n) in text for n, text in zip((1, 2, 3), texts)], [True, True, True])
         self.assertNotIn("… 외", texts[0] + texts[1])
         self.assertIn("… 외 2건", texts[2])
         self.assertIn("한 푸시에 3통까지만 보내 2건은", "\n".join(lines))
