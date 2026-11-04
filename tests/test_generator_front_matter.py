@@ -23,6 +23,7 @@ import yaml
 import _bootstrap
 import generator as g
 from chance_credit_helpers import fake_pool_photo
+from pipeline import unsplash_credit
 from test_generator_slots import at, candidate, run_captured
 
 ROOT = _bootstrap.ROOT
@@ -1408,7 +1409,10 @@ class LegacyIdentityTest(unittest.TestCase):
     def test_every_real_post_fed_back_as_a_model_response_is_identical_when_the_old_output_was_good(self):
         compared = 0
         for path in sorted((ROOT / "_posts").rglob("*.md")):
-            text = path.read_text(encoding="utf-8")
+            # 사진 출처 줄(`*Photo by …*`, R-094)은 글이 만들어진 뒤 이미지 단계가 붙이는 줄이라 모델 응답에는 없다 — 새 코드는 그런 줄을 지우거나 다시 넣고
+            # (그 규칙은 test_unsplash_credit 시험이 지킨다) 옛 코드는 본문으로 둔다. 출처 줄이 처음 든 실제 글(2026-11-04-EN-203644)이 생기면서 이 시험이
+            # 빨강이 됐으므로, 출처 줄을 뺀 글로 견줘 본문·머리말이 같은지만 본다.
+            text = unsplash_credit.strip_credit_lines(path.read_text(encoding="utf-8"))
             front = yaml.safe_load(text.split("\n---\n", 1)[0][4:]) if text.startswith("---\n") else None
             if not isinstance(front, dict) or not front.get("title"):
                 continue

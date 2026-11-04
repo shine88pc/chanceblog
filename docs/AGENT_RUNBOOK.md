@@ -222,6 +222,7 @@ $o = foreach ($b in @('origin/main') + @(git for-each-ref --format='%(refname:sh
 2. **같은 파일 동시 편집 금지**(`CHARTER` §6.4). 이미 진행 중인 일과 파일이 겹치면 순서를 정하고, 먼저 하던 쪽이 끝낸 뒤 시작합니다.
 3. **넘길 때 남길 것**: 브랜치·PR 번호, 요청 번호(R-n), 마지막으로 통과한 검증 결과, 남은 단계, 알려진 문제. 이 정보가 저장소(작업내용.md·WORKLOG)에 있으면 어느 주체가 와도 이어받습니다. **세션 기억·채팅 요약은 기준이 아닙니다.**
 4. **구현자≠검증자**: T2 이상은 넘겨받은 쪽이 검증자가 되는 것이 자연스럽습니다(J4 의 5).
+5. **PC·세션이 통째로 바뀔 때**(2026-11-04): 새 일꾼은 [`인수인계/작업내용.md`](../인수인계/작업내용.md) §0 → [`SESSION_START.md`](./SESSION_START.md) §2-4 → [`인수인계/도구/README.md`](../인수인계/도구/README.md) 순서로 이어받습니다(도구·지시서·기억 사본이 저장소에 있습니다). 옛 일꾼의 크론·감시·백그라운드 에이전트는 멈췄다고 보고 다시 켭니다.
 
 ## 7. 도구
 
@@ -233,5 +234,6 @@ $o = foreach ($b in @('origin/main') + @(git for-each-ref --format='%(refname:sh
 | [`scripts/watchdog.py`](../scripts/watchdog.py)·[`scripts/ops_inbox.py`](../scripts/ops_inbox.py)·[`scripts/verify_pages_deploy.py`](../scripts/verify_pages_deploy.py) | 워치독·확인 필요 모음·배포 반영 확인(워크플로가 부름) |
 | [`scripts/sync_issue_form.py`](../scripts/sync_issue_form.py)·[`scripts/build_pages_registry.py`](../scripts/build_pages_registry.py) | 이슈 양식의 페이지 목록·`pages.json` 자동 생성(`--check` 로 최신 여부만 검사, 손으로 고치지 않음) |
 | [`scripts/get_blogger_token.py`](../scripts/get_blogger_token.py) | Blogger API refresh token 1회 발급(운영자 PC 에서만 — 나온 값은 GitHub 시크릿으로만 등록하고 채팅·문서에 붙이지 않음) |
+| [`인수인계/도구/`](../인수인계/도구/README.md) | AI 가 쓰는 반복 작업 스크립트 모음(요청 파일 만들기·한 커밋 병합 가지·커밋 작성자 고정·안전 설치·검사 읽기·감시·작업 폴더를 만드는 `setup_workspace.py`)과 정기 현황 알림 크론 프롬프트·지시서·병합 부탁 초안 — 표준 라이브러리만, 비밀·개인 경로 없음 |
 
 도구가 없는 환경(예: Copilot 의 방화벽 안)에서는 같은 정보를 GitHub 화면·API 도구로 읽고, 읽은 것과 **읽지 못한 것**을 구분해 적습니다.
