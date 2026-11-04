@@ -7,6 +7,34 @@
 
 ---
 
+## [2026-11-04] Claude – Chance 생성기 막힘 해소 묶음(gfix: F 탈락 사유 공개 주석 + A 분야 이어가기·시드 시각 구간 + B 얇은 근거 뒤로 + C 요약 상한 + E 응답 형식·호출 시간 상한) (T2 — 코드·시험·문서)
+
+**작업자**: Claude (gfix 구현자). 독립 검증 완료(조건부 병합 가능, 2026-11-04 — 지적 반영 후 병합). 로컬 커밋 하나까지만 만들었고 push·병합 가지·PR 은 만들지 않았다(총괄이 한다).
+**대상**: Chance_Blog — `generator.py`·`tests/test_generator_unblock.py`(새)·`tests/test_generator_slots.py`(시험 1개를 한 줄 감쌈)·`docs/ARCHITECTURE.md`·`docs/ACTIONS_GUIDE.md`·`docs/DEFECT_REGISTER.md`·이 항목. `.github/workflows/`(cron 포함)·시크릿·광고 표면·`_posts`·`pipeline/blogs.json`·`pipeline/operator_loop.py`·`pipeline/notify.py`·`pipeline/llm.py` 는 그대로다.
+**등급**: T2 — `generator.py` 로직(독립 검증 필요). 병합 승인은 병합 부탁 때 따로 받는다.
+**목적**: 2026-11-04 원인 조사(후보가 있는데 글이 안 나온다)가 짚은 막힘을 푼다 — 첫 후보 분야에서 멈춤·같은 슬롯의 되풀이·탈락 사유 비공개·모델 입력 근거 300자·호출 시간 상한 없음. 글 품질 검사(분량 한글 1,000자·영어 1,500자·원문 링크 인용·제목 유사도 0.7·머리말)는 낮추지 않았다. 프롬프트 최소 분량(D)·기사 나이 상한(J)·소스 변경(K)·자동 재실행(M)·슬롯 규칙(N)은 하지 않았다(운영자 결정 대기).
+
+### 변경 사항
+- **F 탈락 사유 공개 주석**: 후보가 탈락할 때마다 기록(`report["rejects"]` — 분야·제목 앞 40자·종류·사유 앞 80자; 종류는 모델 skip·응답 형식 오류·제목 유사(유사도 값)·본문 검증 탈락(글자 수 문구))을 남기고, 모두 탈락(`ALL_REJECTED`)이면 `::warning::후보 N건이 모두 탈락했습니다(분야·후보·Gemini 호출 수·종류별 개수) — [분야] 제목 → 종류: 사유 …` 한 줄을, 탈락 뒤에 글을 만들었으면 같은 모양의 `::notice::` 한 줄을 낸다(수동 실행은 이어서 예외). 실행 요약에 '후보별 탈락 사유' 목록(예외로 끝나는 실행은 그 블록만 따로). 소독은 기존 `_one_line`·`_scrub`·`_md_cell` 을 그대로 쓰고(새 소독 함수 없음, URL 의 `?`·`#` 뒤를 떼는 정규식 하나만 더함) 가린 뒤에 자르며 한 줄은 3,500자 안이다.
+- **A(a) 분야 이어가기**: `iter_candidate_lanes`(제너레이터)가 후보가 나온 분야를 하나씩 내보내고 `generate_blog_posts` 가 그 분야 후보를 다 쓴 뒤에야 다음 분야를 읽는다. 후보 시도는 **분야를 합쳐 `MAX_ATTEMPTS`(3)건**, 상한에 닿으면 다음 분야를 읽지도 않고 `LANE_SEARCH_BUDGET_SECONDS`(480초)는 수집 시작부터 센다(모델 호출 시간 포함). `collect_candidates` 는 그 첫 항목을 돌려주는 껍데기로 남겨 기존 시험·호출이 그대로다. 안내 `::notice::'기술·미래' 분야의 후보가 모두 탈락해 '과학·환경' 분야를 이어서 시도합니다.` 새로 더했고 '후보가 없어 대체' 안내는 그대로. 정기·수동·승인 흐름이 같은 반복을 쓰고 끝맺음(정기는 `None`+경고, 수동은 `RuntimeError`)·주제 지정 실행은 그대로다.
+- **A(b) 같은 슬롯 창의 재시도**: `editorial_lane_order(slot, history, now=None)` 시드에 실행 시각 구간(`LANE_ORDER_BUCKET_MINUTES`=10분, 0 이면 옛 시드)을 더했다. 분야 가중치(직전 ×0.25·그 전 ×0.6·최근 12편 횟수)는 이력만 보므로 균형은 그대로다(시험이 864번 뽑아 비율을 고정).
+- **B 얇은 근거는 뒤로**: `pick_topic_candidates` 가 `evidence_chars`(요약에서 사이트 틀 문구 'Anonymous (not verified) 날짜'·'Main link 주소'·'Related topics …' 꼬리와 주소를 뺀 글자 수)가 `THIN_EVIDENCE_CHARS`(150) 미만인 후보를 안정 정렬로 뒤로 보낸다(탈락 아님, 요약 자체 불변, `SHORT_SUMMARY` 와 겹치지 않음). 진단 표본 'Web Summit 2026'(원래 403자)은 틀 문구를 빼면 118자.
+- **C 요약 상한**: `SUMMARY_MAX_CHARS`=1,800(예전 300), `parse_feed(data, summary_limit=None)`, 소스별 `summary_max_chars`(지금 쓰는 소스 없음). 약관은 `NEWS_SOURCES` 의 `terms` 기록 기준으로 점검했고(사이트 원문은 다시 읽지 않음) 읽는 소스 모두 입력 분량 제한이 기록에 없어 소스별 고정을 두지 않았다. 프롬프트는 호출당 최대 +1,500자(실측 11,984 → 13,484자).
+- **E 응답 형식·호출 시간 상한**: `_generate` 가 `config={"response_mime_type": "application/json"}`(SDK 가 `config` 를 받을 때만, 모델이 형식 지정을 거절하는 400 이면 지정 없이 한 번 더 — 호출 수·기록에 센다)와 `pipeline/llm.py` 의 `_run_with_timeout`(120초, `GEMINI_CALL_TIMEOUT_SECONDS`)을 건다. 넘으면 그 모델 실패 → 다음 모델 → 모두 실패면 `RuntimeError`. 기존 시험의 가짜 SDK(`generate_content(model, contents)`)가 많아 시그니처로 확인해 `config` 를 받는 SDK 에만 건다.
+- 문서: `docs/DEFECT_REGISTER.md` D-34(낮음→높음·해결)·D-36·D-66(열림→해결)·D-83 갱신, `docs/ARCHITECTURE.md`(§4-1 표 한 칸·분야 폴백 뒤 새 문단 6개: 분야 이어가기와 시도 상한·같은 슬롯 창의 재시도·얇은 근거 뒤로·근거 늘리기(프롬프트 길이 계산 포함)·탈락 사유 공개 주석·응답 형식과 호출 시간 상한), `docs/ACTIONS_GUIDE.md`(6-1 표·읽는 법 2줄).
+
+### 검증 증거
+- 새 시험 `tests/test_generator_unblock.py` 89개: 파이썬 3.12 와 진짜 3.10.11 모두 `Ran 89 tests … OK`(약 2초). 기존 시험은 `tests/test_generator_slots.py` 의 `test_first_lane_is_unchanged_from_the_old_draw` 한 개만 시드의 시각 구간을 끈(0) 상태로 돌리게 감쌌고 기대값(옛 추첨과 같은 첫 분야)은 그대로다 — 시각 구간이 켜지면 첫 분야가 달라지는 것이 이 변경의 목적이라 옛 계산과의 일치를 켠 상태로 요구할 수 없다. 나머지 기존 시험은 고치지 않았다.
+- 관련 시험(생성기·호출 기록·문서·결함 표를 읽는 43개 모듈) 3.12: `Ran 2584 tests in 733.994s … OK`. 진짜 3.10.11: `Ran 2584 tests in 1026.349s … OK`(같은 43개 모듈, 새 시험 89개 포함). 전체 시험은 이 PC 에서 너무 느려 돌리지 않았다(푸시한 브랜치의 가드레일 검사가 돌린다). `scripts/validate_repo.py --root .` 오류 0건(경고 2건은 기존). pyflakes 새 경고 0건, vermin 최소 3.7(옛 코드와 같음), 바뀐 파일 6개에서 보이지 않는 문자·방향 제어 문자·단독 CR 새로 0개.
+- 변이 점검 80곳(분야 이어가기 조건·시도 상한 둘·예산 검사·시드 시각 항목 넷·가중치·증거량 비교 방향과 경계·틀 문구 처리·`SUMMARY_MAX_CHARS` 경계·소스별 상한·주입 소독 셋·URL 질의·글자 수 상한·JSON 형식 설정·시간 상한 장치·형식 거절 안전망 여섯 …): 새 시험이 78곳을 잡았고 기존 시험만 잡은 것이 2곳(`collect_candidates` 껍데기가 첫 분야를 돌려주는 것·`fallback=False` 처리 — 기존 `CollectCandidatesTest` 가 잡음), 살아남은 것은 0곳이다. 처음 돌렸을 때 살아남은 2곳(URL 의 `#` 조각, 설정을 못 받은 SDK 의 불필요한 재시도)과 새 시험이 못 잡던 1곳(직전 분야 가중치)은 시험을 보강했다. 변이는 작업 폴더를 복사한 곳에서만 돌렸다.
+- 실제 SDK 확인: 격리 venv(3.12)에 `google-genai` 2.34.0 을 설치해 `generate_content(model, contents, config)` 시그니처와 `GenerateContentConfig.response_mime_type` 을 확인하고, 127.0.0.1 의 가짜 서버로 `_generate` 가 보낸 요청 본문에 `generationConfig.responseMimeType: application/json` 이 실리는 것을 확인했다(진짜 Gemini 는 부르지 않음). 운영 워크플로(`chanceblog.yml`)는 Python 3.10 이라 2.x 중 3.10 호환 판이 깔리는데 3.10 venv 는 회사 PC 의 인증서 오류로 설치하지 못해 거기서는 확인하지 못했다(`config` 인자는 2.x 전체에 있다고 문서가 말한다 — 시험이 `requirements*.txt` 의 `google-genai>=2,<3` 범위를 고정해 넓어지면 알려 준다).
+- 드라이런(오프라인, 진단 표본): 기술·미래 소스에 'Web Summit 2026' 한 건(요약은 진단 주석의 앞 300자), 과학·환경(NASA)에 후보 3건을 두고 `generate_blog_posts` 를 끝까지 돌렸다 — Web Summit 은 모델 skip, 같은 실행에서 과학·환경 첫 후보로 이어 글을 만들었고(`PUBLISHED`, 후보 시도 2건) `::notice::'기술·미래' 분야의 후보가 모두 탈락해 '과학·환경' 분야를 이어서 시도합니다.` 와 `::notice::앞선 후보 1건이 탈락한 뒤 2번째 후보로 글을 만들었습니다(…)` 가 남았다. 이 드라이런에서 '분야 N곳' 문구가 글이 나온 분야를 빼먹는 결함을 찾아 고쳤다.
+
+### 남은 이슈 / 다음 AI 주의
+- 실제 Gemini·Actions·피드는 한 번도 부르지 않았다(시험은 가짜). 병합 뒤 첫 슬롯들에서 확인: ① `Annotations` 의 `후보 N건이 모두 탈락했습니다(…)` 줄로 skip·분량 미달·형식 오류 중 주된 탈락 이유가 가려지는지 ② JSON 응답 형식이 실제 모델에서 400 없이 통하는지(거절돼도 안전망이 한 번 더 부른다) ③ 120초 상한이 정상 응답을 자르지 않는지(공개 job 기록의 '생성' 단계 길이) ④ 요약 1,800자로 늘린 뒤 글이 원문 문장을 길게 옮기지 않는지(글과 원문의 겹침을 재는 검사는 아직 없다 — 품질 개선안 5단계 후보. 품질 개선안 문서는 입력 보강을 T3 로 분류했으므로 병합 부탁에 이 점을 적어 운영자 확인을 받을 것).
+- 호출 수: 상한은 실행당 후보 3건 그대로. 첫 분야 후보가 적어 일찍 막히던 실행이 다음 분야 후보까지 쓰므로 막히던 슬롯에서 +1~2회(어림). 후보 풀 자체가 마르면(경제·일·일상·마음 0건) 막힘만 풀리고 글감은 늘지 않는다(K·M·N 은 운영자 결정 대기).
+- 틀 문구 목록(`_FRAME_HEAD`·`_FRAME_TAIL`)은 EU Digital Strategy 한 표본에서 읽은 모양이다. 다른 소스의 틀 문구는 모른다. 얇음 기준 150자와 시각 구간 10분은 근거(표본 1건·정기 실행 간격 15분 이상)로 정한 값이라 관측 뒤 조정할 수 있다.
+
 ## [2026-11-04] Claude – U3 수정 라운드: 1차 독립 검증 지적 반영 (T2 — 코드·시험·문서)
 
 **작업자**: Claude (U3-fix 구현자). 수정분 재검증 전(다른 새 검증자가 이 수정분만 다시 확인한다).

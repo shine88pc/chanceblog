@@ -16,6 +16,7 @@ import html
 import random
 import time
 import difflib
+import inspect
 import datetime
 from email.utils import parsedate_to_datetime
 import urllib.parse
@@ -27,7 +28,7 @@ from pathlib import Path
 
 from pipeline import drafts  # 승인 흐름(레지스트리 publish_flow: pr)의 이름·판정 규칙. direct(기본)에서는 흐름을 읽는 것 말고 아무것도 하지 않는다
 from pipeline import unsplash_credit  # Unsplash 사진의 ixid 유지·작가 출처 줄(순수 함수 — Chance·이슈 수정·Blogger 가 같은 규칙을 쓴다)
-from pipeline.llm import CallLog, scrub  # Gemini 요청 기록·시크릿 가리기는 Blogger·이슈 수정과 같은 코드를 쓴다(D-52)
+from pipeline.llm import CALL_TIMEOUT_SECONDS, CallLog, _run_with_timeout, failure_code, failure_status, scrub  # Gemini 요청 기록·시크릿 가리기·호출 시간 상한은 Blogger·이슈 수정과 같은 코드를 쓴다(D-52·D-83)
 
 # ============================================================
 # 환경 설정
@@ -53,6 +54,8 @@ HISTORY_FILE = Path("history.json")
 EDITORIAL_TEMPLATE_FILE = Path(__file__).resolve().parent / ".github/editorial/CHANCE_BLOG_TEMPLATE.md"
 UA = "Mozilla/5.0 (compatible; ChanceBlogBot/2.0)"
 MAX_ATTEMPTS = 3
+# MAX_ATTEMPTS 는 '한 번의 실행에서 모델에 보내 보는 후보의 총 수'다. 첫 분야의 후보가 모두 탈락해 다음 분야를 이어서 시도해도 분야를 합쳐 이 수를 넘지 않는다(2026-11-04 gfix, A) —
+# 무료 한도를 쓰는 모델 호출 수의 상한이다(모델 폴백으로 후보 하나에 SDK 호출이 최대 모델 수만큼 나갈 수 있다는 점은 그대로).
 # Minimum body length before source lists and thumbnails. This is a floor against
 # thin drafts, not a target or a substitute for editorial review.
 MIN_BODY_CHARS = {"kr": 1000, "en": 1500}
@@ -66,6 +69,15 @@ MODEL_CANDIDATES = [
     "gemini-3.6-flash",
     "gemini-3.5-flash-lite",
 ]
+# 모델 호출 하나의 시간 상한(초): Blogger·이슈 수정이 쓰는 pipeline/llm.py 의 장치(_run_with_timeout·CALL_TIMEOUT_SECONDS)를 그대로 쓴다(D-66·D-83).
+# 서버가 응답 없이 연결을 붙잡으면 SDK 는 끊길 때까지 기다린다 — 2026-10-26 18시 슬롯의 호출은 283초 뒤 'Server disconnected', 2026-11-01 18:44 실행은 20분 제한에 걸려 취소되어 그 슬롯이 사라졌다.
+# 길이는 llm.py 의 값(120초)을 따른다: 이 엔진의 호출은 한국어·영어 글 한 쌍을 한 번에 쓰는 긴 응답이지만 정상 소요가 30~90초(D-66 관측, 2026-11-04 진단 33·56초)라 120초는 정상 응답을 자르지 않는 선이고
+# 멈춘 서버를 20분 제한까지 기다리지 않는다. 넘으면 그 모델은 실패(CallTimeout)로 세어 다음 모델로 넘어가고, 모두 실패하면 지금처럼 RuntimeError 다(모델 폴백 흐름 그대로).
+GEMINI_CALL_TIMEOUT_SECONDS = CALL_TIMEOUT_SECONDS
+# 모델에 JSON 응답을 요청하는 호출 설정: google-genai 의 GenerateContentConfig.response_mime_type(SDK 문서의 JSON 출력 예시가 쓰는 필드, config 는 딕셔너리로도 받는다).
+# 프롬프트의 'JSON 객체만 반환' 문장만으로는 줄바꿈·따옴표를 어긴 응답이 후보를 탈락시켰다(extract_json_object 의 ValueError). 프롬프트·본문 검증 기준은 그대로다.
+# SDK 의 generate_content 가 config 를 받지 않으면 걸지 않고, 모델이 형식 지정 자체를 거절하면 같은 모델을 지정 없이 한 번 더 부른다(_generate).
+JSON_RESPONSE_CONFIG = {"response_mime_type": "application/json"}
 
 # 검색 결과가 전혀 없을 때만 쓰는 최후 폴백 (글 생성 시에만 사용)
 POOL_IDS = [
@@ -205,6 +217,48 @@ def _scrub(text):
     return scrub(text, (API_KEY,))
 
 
+def _accepts_config(generate):
+    """SDK 의 generate_content 가 config 인자를 받는가. 받지 않는 낡은 SDK·단순한 대역에는 형식 지정을 걸지 않는다(지원이 불확실하면 적용하지 않는다)."""
+    try:
+        params = inspect.signature(generate).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(p.name == "config" or p.kind is inspect.Parameter.VAR_KEYWORD for p in params)
+
+
+def _format_rejected(exc):
+    """모델이 JSON 형식 지정(response_mime_type) 자체를 거절한 오류인가: HTTP 400(INVALID_ARGUMENT)이고 문구가 mime 형식·JSON·응답 형식·생성 설정 중 하나를 말한다(문구가 낯설어도 이 낱말 중 하나는 든다 — 독립 검증 지적 2026-11-04). 그 밖의 400(키·요청 오류)은 해당하지 않는다."""
+    if failure_code(exc) != 400 and failure_status(exc).upper() != "INVALID_ARGUMENT":
+        return False
+    return bool(re.search(r"mime|json|response.?format|response.?schema|generation.?config", str(exc), re.I))
+
+
+def _generate(model_name, prompt, started):
+    """SDK 호출 한 번: JSON 응답 형식을 지정하고(SDK 가 config 를 받을 때) 시간 상한(GEMINI_CALL_TIMEOUT_SECONDS)을 건다.
+    모델이 형식 지정 자체를 거절하면(_format_rejected) 같은 모델을 지정 없이 한 번 더 부른다 — 형식 지정은 최선 노력이고 글을 못 만드는 쪽으로 번지지 않게 한다.
+    거절당한 첫 호출도 한 번의 요청이라 호출 수(GEMINI_CALLS)와 요청 기록(CALL_LOG)에 센다. started 는 첫 호출을 시작한 시각(time.monotonic)이다."""
+    sent = {}
+
+    def call(with_config):
+        generate = get_client().models.generate_content
+        kwargs = {"model": model_name, "contents": prompt}
+        if with_config and _accepts_config(generate):
+            kwargs["config"] = dict(JSON_RESPONSE_CONFIG)
+            sent["config"] = True
+        return generate(**kwargs)
+
+    try:
+        return _run_with_timeout(lambda: call(True), GEMINI_CALL_TIMEOUT_SECONDS)
+    except Exception as exc:
+        if not (sent.get("config") and _format_rejected(exc)):
+            raise
+        print(f"Gemini 모델이 JSON 형식 지정을 거절해 지정 없이 다시 호출합니다: {model_name} - {_one_line(_scrub(exc))}")
+        GEMINI_CALLS["failed"] += 1
+        CALL_LOG.failure(model_name, time.monotonic() - started, exc)
+        GEMINI_CALLS["attempts"] += 1
+        return _run_with_timeout(lambda: call(False), GEMINI_CALL_TIMEOUT_SECONDS)
+
+
 def call_gemini_with_fallback(prompt):
     errors = []
     for model_name in MODEL_CANDIDATES:
@@ -213,8 +267,7 @@ def call_gemini_with_fallback(prompt):
         try:
             print(f"Gemini 모델 호출 시도: {model_name}")
             GEMINI_CALLS["attempts"] += 1
-            response = get_client().models.generate_content(
-                model=model_name, contents=prompt)
+            response = _generate(model_name, prompt, started)
             text = getattr(response, "text", None)
             usable = bool(text and text.strip())
         except Exception as exc:
@@ -734,6 +787,18 @@ def _int_env(name, default):
 # 시도하지 않는다. 이미 시작한 소스 하나는 끝까지 기다리므로(소스당 최악 약 2분) 수집은 상한 + 약 2분 안에 끝난다.
 LANE_SEARCH_BUDGET_SECONDS = _int_env("LANE_SEARCH_BUDGET_SECONDS", 480)
 
+# 분야 추첨 순서의 시드에 더하는 '실행 시각 구간'의 길이(분). 시드가 날짜·슬롯·이력 길이·마지막 이력뿐이면 같은 날 같은 슬롯의 모든 실행이 같은 분야 순서·같은 후보로 같은 실패를 되풀이했다
+# (D-34, 2026-11-04 진단: 11-04 9시 슬롯의 10:24·12:19 실행이 같은 후보 한 건에서 막힘). 구간이 다르면 순서가 달라진다. 분야별 가중치(최근 발행 편중)는 이력만 보므로 같은 분야가 연속되지 않게 하는
+# 균형은 그대로다. 정기 실행은 매시 17·47분이고 GitHub 지연으로 간격이 15분~7.6시간이라(진단) 10분 구간이면 서로 다른 실행이 같은 구간에 들 일이 거의 없다. 0 이면 시각 항목을 쓰지 않는다(옛 시드).
+LANE_ORDER_BUCKET_MINUTES = 10
+
+
+def _lane_order_bucket(now):
+    """시드 뒤에 붙는 실행 시각 구간 표지('|<하루 안의 구간 번호>'). LANE_ORDER_BUCKET_MINUTES 가 0 이하이면 빈 문자열(옛 시드)."""
+    if LANE_ORDER_BUCKET_MINUTES <= 0:
+        return ""
+    return f"|{(now.hour * 60 + now.minute) // LANE_ORDER_BUCKET_MINUTES}"
+
 # 기사 탈락 사유 코드. 소스별 줄·[SKIP] 줄·실행 요약에 같은 코드로 남는다(docs/ARCHITECTURE.md).
 DROP_LABELS = {
     "NO_TITLE": "제목 없음",
@@ -775,6 +840,15 @@ def _md_cell(text, limit=120):
     for ch, entity in (("|", "&#124;"), ("`", "'"), ("<", "&lt;"), (">", "&gt;"), ("[", "&#91;"), ("]", "&#93;")):
         folded = folded.replace(ch, entity)
     return folded
+
+
+_URL_QUERY = re.compile(r"(https?://[^\s?#]*)[?#]\S*")
+
+
+def _public_text(text, limit):
+    """공개 주석·실행 요약에 싣는 모델·피드 유래 글(F): ① 비밀 모양(키·토큰)과 이 실행의 키를 먼저 가리고(_scrub) ② URL 의 질의·조각(?…·#…)을 떼고 ③ 한 줄로 접은(_one_line: 개행 제거,
+    '::'·'##[' 무력화) 뒤 ④ 앞 limit 자만 남긴다. 가린 뒤에 자른다 — 자르고 가리면 잘린 키 조각이 비밀 패턴에 걸리지 않아 그대로 남는다."""
+    return _one_line(_URL_QUERY.sub(r"\1", _scrub(text)), limit)
 
 
 def _pause_on():
@@ -860,6 +934,7 @@ EDITORIAL_LANES = {
 #   prompt_rule    글 작성 지침에 한 줄 더하는 소스별 약관 조건(요약에 없는 것을 채우지 않는 소스와 무관한 규칙은 GROUNDING_RULES 한 곳에 둔다).
 #   display_name   글에 보이는 출처 이름(생략하면 name). 한 게시자의 피드를 분야별로 나눠 읽을 때 name 은 달라야 해서 둔다.
 #   page_delay     기사 페이지를 연달아 읽을 때 사이에 기다릴 초(사이트의 Crawl-delay 를 지킨다).
+#   summary_max_chars  이 소스의 피드 요약을 모델에 넘기는 최대 글자 수(생략하면 SUMMARY_MAX_CHARS). 소스의 약관이 더 짧은 발췌만 허락하면 그 값을 적는다(지금 쓰는 소스는 없다).
 # 해외(미국 외) 소스의 공통 약관 조건(2026-10-26, 조사 보고서 R1·R2에서 약관·robots.txt·피드를 직접 읽어 확인).
 #
 # 유럽연합 집행위원회 계열: 법적 고지(https://commission.europa.eu/legal-notice_en)는 "달리 표시하지 않은 한 CC BY 4.0이며 적절한 출처 표시와
@@ -1152,6 +1227,31 @@ TERMS_BLOCKED_DOMAINS = ("bbc.com", "bbc.co.uk", "bbci.co.uk", "theguardian.com"
                          "arstechnica.com", "ieee.org", "etnews.com")
 
 
+# 모델에 넘기는 피드 요약의 최대 글자 수(parse_feed 가 자른다). 예전에는 300자였다 — 2026-11-04 진단: EU Digital Strategy 요약은 항목당 403~3,052자(중앙 1,668자)라 모델이 중앙 기준 약 18%만 봤고,
+# NASA(374~405자)·통계청(최대 796자)도 잘렸다. 소스에 `summary_max_chars` 를 적으면 그 소스만 이 값 대신 쓴다(소스의 약관이 더 짧은 발췌만 허락하면 그 값으로 낮춘다).
+# 약관 점검(2026-11-04, NEWS_SOURCES 의 terms 기록 기준 — 사이트 약관 원문은 다시 읽지 않았다): 읽는 소스(terms.status == "allowed") 모두 이 값으로 늘려도 되는 것으로 읽었다. 조건은 출처 표시·변경 표시·
+# 보증 암시 금지·AI 이용 안내(NASA)이고, 피드가 이미 주는 글을 모델에 넘기는 분량의 제한은 기록에 없다. 새 요청은 0건이다(같은 피드 응답을 덜 자르기만 한다). 보류 소스(UN News)는 읽지 않는다.
+# 프롬프트 길이 영향은 docs/ARCHITECTURE.md '모델에 넘기는 근거 늘리기'에 계산했다(호출당 최대 +1,500자). 원문을 그대로 옮기지 않게 하는 장치(프롬프트의 '문장을 그대로 옮기지 마세요'·GROUNDING_RULES)는 그대로다.
+SUMMARY_MAX_CHARS = 1800
+
+# 증거가 한 문장 수준인 후보는 모델 호출 순서에서 뒤로 미룬다(B). 증거량(evidence_chars) = 요약에서 사이트 틀 문구와 주소를 뺀 글자 수.
+# 근거(2026-11-04 진단): 11-04 9시 슬롯이 두 번 모두 막힌 후보 'Web Summit 2026'(EU Digital Strategy 행사 안내)의 요약은 원래 403자였지만 사실 정보는 'DG Connect 가 11월 10~12일 리스본 Web Summit 에 참가한다'는
+# 한 문장뿐이고 나머지는 사이트 틀 문구였다(제목 반복, 'Anonymous (not verified) Tue, 11/03/2026 - 11:13', 'Main link https://…', 'Related topics …'). 틀 문구를 빼면 약 118자다.
+# 영문 뉴스 한 문장은 보통 100~150자이므로 150자 미만을 '한 문장 수준'으로 본다. 뒤로 미룰 뿐 탈락시키지 않는다 — 얇은 후보만 있는 분야는 그대로 시도하고(마지막 후보로),
+# 150자 이상인 정상 후보의 순서는 그대로다. 요약 자체(모델에 넘기는 글)는 바꾸지 않는다. 요약이 100자 미만이면 기존대로 SHORT_SUMMARY(기사 페이지 설명을 읽어 보고도 100자 미만이면 후보에서 빠진다)이고,
+# 이 상수는 그 위의 100~149자와 틀 문구를 빼면 150자 미만이 되는 요약을 '얇음'으로 본다 — 두 장치는 겹치지 않는다.
+THIN_EVIDENCE_CHARS = 150
+_FRAME_HEAD = re.compile(r"Anonymous \(not verified\)\s+(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+)?\d{1,2}/\d{1,2}/\d{4}\s*-\s*\d{1,2}:\d{2}")
+_FRAME_TAIL = re.compile(r"\b(?:Main link|Related topics)\b.*", re.S)
+_BARE_URL = re.compile(r"https?://\S+")
+
+
+def evidence_chars(summary):
+    """모델에 넘기는 요약에서 사이트 틀 문구(앞의 'Anonymous (not verified) 날짜', 뒤의 'Main link 주소·Related topics …' 꼬리)와 주소를 뺀 글자 수."""
+    text = _BARE_URL.sub(" ", _FRAME_HEAD.sub(" ", _FRAME_TAIL.sub(" ", summary or "")))
+    return len(" ".join(text.split()))
+
+
 def _clean_text(s, limit=300):
     s = html.unescape(re.sub(r"<[^>]+>", " ", s or ""))
     return re.sub(r"\s+", " ", s).strip()[:limit]
@@ -1226,8 +1326,8 @@ def _fetch_source_excerpt(url):
     return ""
 
 
-def parse_feed(data):
-    """RSS 2.0(item)와 Atom(entry)을 모두 처리."""
+def parse_feed(data, summary_limit=None):
+    """RSS 2.0(item)와 Atom(entry)을 모두 처리. 요약은 summary_limit 자(생략하면 SUMMARY_MAX_CHARS)까지 남긴다."""
     root = ET.fromstring(data)
     items = []
     for node in root.iter():
@@ -1264,7 +1364,8 @@ def parse_feed(data):
         items.append({
             "title": _clean_text(text_of("title"), 300),
             "published": _parse_date(text_of("pubDate", "published", "updated", "date")),
-            "summary": _clean_text(text_of("description", "summary", "content", "encoded")),
+            "summary": _clean_text(text_of("description", "summary", "content", "encoded"),
+                                   SUMMARY_MAX_CHARS if summary_limit is None else summary_limit),
             "link": link,
             "publisher_name": publisher_name,
             "publisher_url": publisher_url,
@@ -1303,7 +1404,7 @@ def fetch_news_items(editorial_lane=None, stats=None, deadline=None, clock=time.
         try:
             req = urllib.request.Request(src["url"], headers={"User-Agent": UA})
             with urllib.request.urlopen(req, timeout=15) as resp:
-                parsed = parse_feed(resp.read())
+                parsed = parse_feed(resp.read(), summary_limit=src.get("summary_max_chars"))
             ok_count += 1
         except Exception as exc:
             print(f"  소스 {src['name']}: 수집 실패 ({type(exc).__name__}: {_one_line(exc, 200)})")
@@ -1414,10 +1515,17 @@ def fetch_news_items(editorial_lane=None, stats=None, deadline=None, clock=time.
 def pick_topic_candidates(titles, allow_auto_topic=True, editorial_lane=None, stats=None, deadline=None,
                           clock=time.monotonic):
     """신뢰 출처 검증과 중복 검사를 통과한 기사 후보만 반환합니다.
-    stats(dict)를 넘기면 소스별 개수와 함께 중복으로 탈락한 수·최종 후보 수를 채웁니다."""
+    증거가 한 문장 수준(evidence_chars < THIN_EVIDENCE_CHARS)인 후보는 증거가 두꺼운 후보 뒤로 보냅니다(순서만 바꾸고 탈락시키지 않으며, 각 묶음 안의 순서는 그대로).
+    stats(dict)를 넘기면 소스별 개수와 함께 중복으로 탈락한 수·최종 후보 수·후보 가운데 증거가 얇은 수(thin)를 채웁니다."""
     picked = []
     duplicates = 0
-    for it in fetch_news_items(editorial_lane, stats=stats, deadline=deadline, clock=clock):
+    items = fetch_news_items(editorial_lane, stats=stats, deadline=deadline, clock=clock)
+    scored = [(evidence_chars(it.get("summary")) < THIN_EVIDENCE_CHARS, it) for it in items]
+    ordered = [it for is_thin, it in scored if not is_thin] + [it for is_thin, it in scored if is_thin]
+    thin_ids = {id(it) for is_thin, it in scored if is_thin}
+    if any(a is not b for a, b in zip(ordered, items)):
+        print(f"  근거가 얇은 후보 {len(thin_ids)}건(증거 {THIN_EVIDENCE_CHARS}자 미만)은 시도 순서를 뒤로 미룸")
+    for it in ordered:
         if is_similar_to_any(it["title"], titles, 0.6):
             duplicates += 1
             continue
@@ -1427,13 +1535,16 @@ def pick_topic_candidates(titles, allow_auto_topic=True, editorial_lane=None, st
     if stats is not None:
         stats["duplicates"] = duplicates
         stats["candidates"] = len(picked)
+        stats["thin"] = sum(1 for it in picked if id(it) in thin_ids)
     # 출처 검증을 통과한 기사가 없으면 AI가 근거 없이 주제를 고르지 않습니다.
     return picked
 
 
-def editorial_lane_order(slot, history):
-    """최근 발행 편중을 줄이면서 슬롯별로 재현 가능한 확률 추첨 순서로 모든 분야를 반환합니다.
-    첫 번째가 choose_editorial_lane 의 선택과 같고, 뒤쪽은 그 분야에 후보가 없을 때 시도할 대체 순서입니다."""
+def editorial_lane_order(slot, history, now=None):
+    """최근 발행 편중을 줄이면서 날짜·슬롯·이력·실행 시각 구간별로 재현 가능한 확률 추첨 순서로 모든 분야를 반환합니다.
+    첫 번째가 choose_editorial_lane 의 선택과 같고, 뒤쪽은 그 분야에 후보가 없거나 후보가 모두 탈락했을 때 시도할 대체 순서입니다.
+    now 는 시계 주입용(생략하면 지금, now_kst)입니다. 같은 슬롯 창 안에서도 실행 시각 구간(LANE_ORDER_BUCKET_MINUTES)이 다르면 순서가 달라져 같은 실패를 되풀이하지 않습니다(D-34).
+    분야별 가중치(최근 발행 편중)는 이력만 보므로 구간이 달라져도 같은 분야가 연속되지 않게 하는 균형은 그대로입니다."""
     lanes = list(EDITORIAL_LANES)
     recent = [item.get("lane") for item in history[-12:]
               if isinstance(item, dict) and item.get("lane") in EDITORIAL_LANES]
@@ -1447,10 +1558,10 @@ def editorial_lane_order(slot, history):
         elif len(recent) > 1 and recent[-2] == lane:
             weights[lane] *= 0.6
 
-    now = now_kst()
+    now = now_kst() if now is None else now
     latest = history[-1] if history else None
     latest_key = (latest.get("date", ""), latest.get("topic", "")) if isinstance(latest, dict) else str(latest or "")
-    seed = f"{now:%Y-%m-%d}|{slot}|{len(history)}|{latest_key}"
+    seed = f"{now:%Y-%m-%d}|{slot}|{len(history)}|{latest_key}{_lane_order_bucket(now)}"
     rng = random.Random(seed)
     remaining, order = list(lanes), []
     while remaining:
@@ -2106,16 +2217,19 @@ def _lane_report(lane, stats, found):
     }
 
 
-def collect_candidates(titles, allow_auto_topic, lane_order, report, fallback=True,
-                       clock=time.monotonic):
-    """분야를 추첨 순서대로 시도해 처음으로 후보가 나온 분야와 그 후보를 반환한다.
-    모든 분야가 비면 ([], 첫 분야). 이 단계는 Gemini 를 부르지 않아 비용은 수집 시간뿐이다.
-    LANE_SEARCH_BUDGET_SECONDS 를 넘으면 새 분야도, 분야 안의 남은 소스도 시도하지 않는다(소스 하나가 끝나는 시간만큼은 더 걸린다).
-    report 에 budget_exceeded(시간 상한으로 건너뜀)와 sources_unreachable(시도한 소스가 전부 수집 실패)을 남긴다."""
+def iter_candidate_lanes(titles, allow_auto_topic, lane_order, report, fallback=True,
+                         clock=time.monotonic):
+    """분야를 추첨 순서대로 시도해 후보가 나온 분야마다 (분야, 후보 목록)을 하나씩 내보내는 제너레이터(A).
+    받는 쪽이 그 분야의 후보를 모두 탈락시키고 다음을 요청하면 그제서야 다음 분야를 읽는다 — 앞 분야의 후보가 모두 탈락해도 후보가 있는 다음 분야로 이어진다.
+    이 단계는 Gemini 를 부르지 않아 비용은 수집 시간뿐이다. LANE_SEARCH_BUDGET_SECONDS 는 이 제너레이터를 시작한 때부터 센다 — 받는 쪽이 모델을 부르며 쓴 시간도 들어간다.
+    넘으면 새 분야도, 분야 안의 남은 소스도 시도하지 않는다(소스 하나가 끝나는 시간만큼은 더 걸린다).
+    끝까지 소비되면 report 에 budget_exceeded(시간 상한으로 건너뜀)와 sources_unreachable(시도한 소스가 전부 수집 실패)을 남긴다.
+    후보를 하나도 못 냈으면 아무것도 내보내지 않고 끝난다."""
     started = clock()
     deadline = started + LANE_SEARCH_BUDGET_SECONDS
     tried = lane_order if fallback else lane_order[:1]
     attempted = failed = 0
+    previous = None     # 앞서 후보를 냈던 분야(그 후보가 모두 탈락해 이어 읽는 중인지 가린다)
     for index, lane in enumerate(tried):
         if index and clock() > deadline:
             report["budget_exceeded"] = True
@@ -2134,21 +2248,103 @@ def collect_candidates(titles, allow_auto_topic, lane_order, report, fallback=Tr
         if stats.get("time_skipped"):
             report["budget_exceeded"] = True
         if found:
-            if index:
+            if previous is not None:
+                print(f"::notice::'{EDITORIAL_LANES[previous]['label']}' 분야의 후보가 모두 탈락해 "
+                      f"'{lane_report['label']}' 분야를 이어서 시도합니다.")
+            elif index:
                 print(f"::notice::'{EDITORIAL_LANES[lane_order[0]]['label']}' 분야에 후보가 없어 "
                       f"'{lane_report['label']}' 분야로 대체했습니다.")
-            return found, lane
+            previous = lane
+            yield lane, found
+            continue
         print(skip_line("LANE_EMPTY", lane=lane, sources=lane_report["sources"],
                         failed=lane_report["failed_sources"], fetched=lane_report["fetched"],
                         passed=lane_report["passed"], reasons=lane_report["drops"]))
     report["sources_unreachable"] = attempted > 0 and failed == attempted
+
+
+def collect_candidates(titles, allow_auto_topic, lane_order, report, fallback=True,
+                       clock=time.monotonic):
+    """분야를 추첨 순서대로 시도해 처음으로 후보가 나온 분야와 그 후보를 반환한다(iter_candidate_lanes 의 첫 항목).
+    모든 분야가 비면 ([], 첫 분야). 글 만들기(generate_blog_posts)는 앞 분야의 후보가 모두 탈락해도 이어 가려고 iter_candidate_lanes 를 직접 쓴다."""
+    for lane, found in iter_candidate_lanes(titles, allow_auto_topic, lane_order, report, fallback, clock):
+        return found, lane
     return [], lane_order[0]
+
+
+# 후보 탈락 종류(후보별 탈락 기록 report["rejects"] 의 kind). 공개 주석 한 줄과 실행 요약에 같은 이름으로 남는다(2026-11-04 gfix, F).
+REJECT_LABELS = {
+    "SKIP": "모델이 건너뜀(skip)",
+    "FORMAT": "응답 형식 오류",
+    "SIMILAR": "제목이 기존 글과 비슷",
+    "BODY": "본문 검증 탈락",
+}
+REJECT_TITLE_CHARS = 40     # 공개 주석·요약에 싣는 후보 제목의 앞 글자 수
+REJECT_REASON_CHARS = 80    # 사유(모델이 쓴 skip 사유·응답 형식 오류 종류·검증 문구)의 앞 글자 수
+REJECT_LINE_MAX = 3500      # 공개 주석 한 줄의 상한
+
+
+def _format_error_kind(exc):
+    """응답 형식 오류의 종류: 예외 이름과, 모델이 쓴 글 조각이 붙기 전의 앞 문구(`문구: <모델 글 앞부분>` 에서 콜론 앞까지)."""
+    return f"{type(exc).__name__}: {str(exc).split(':', 1)[0]}"
+
+
+def _reject_record(lane, title, kind, detail=""):
+    """후보 하나의 탈락 기록: 분야 이름·제목 앞 글자·종류 코드·사유 앞 글자. 공개 주석·실행 요약에 쓰이므로 만들 때 이미 가려 둔다(_public_text)."""
+    return {"lane": EDITORIAL_LANES[lane]["label"], "title": _public_text(title or "(자동 선정)", REJECT_TITLE_CHARS),
+            "kind": kind, "detail": _public_text(detail, REJECT_REASON_CHARS)}
+
+
+def _tried_lane_labels(report):
+    """후보를 모델에 보내 본 분야의 이름(순서대로, 중복 없음): 탈락한 후보의 분야들에, 글이 만들어졌다면 그 글이 나온 분야를 더한다."""
+    labels = [r["lane"] for r in report.get("rejects") or []]
+    if report.get("outcome") != "ALL_REJECTED" and report.get("lane_label"):
+        labels.append(report["lane_label"])
+    return list(dict.fromkeys(labels))
+
+
+def reject_summary_line(report):
+    """후보별 탈락 사유를 공개 주석 한 줄 글로(앞에 `::warning::`·`::notice::` 를 붙여 쓴다). 탈락 기록이 없으면 빈 문자열.
+    들어가는 것: 종류별 개수(0 포함) · 시도한 분야와 후보 수 · 모델 호출 수 · 후보마다 분야·제목 앞 40자·종류·사유 앞 80자.
+    모델·피드가 만든 글이므로 기록을 만들 때(_reject_record)와 한 줄로 합칠 때 모두 소독한다(비밀·URL 질의 가림, 개행·'::'·'##[' 무력화). 전체는 REJECT_LINE_MAX 자 안이다."""
+    rejects = report.get("rejects") or []
+    if not rejects:
+        return ""
+    tried = report.get("attempts") or len(rejects)
+    lanes = _tried_lane_labels(report)
+    counts = {}
+    for r in rejects:
+        _count(counts, r["kind"])
+    kinds = " · ".join(f"{label} {counts.get(kind, 0)}" for kind, label in REJECT_LABELS.items())
+    calls = report.get("gemini_calls") or GEMINI_CALLS
+    head = (f"후보 {len(rejects)}건이 모두 탈락했습니다" if report.get("outcome") == "ALL_REJECTED"
+            else f"앞선 후보 {len(rejects)}건이 탈락한 뒤 {tried}번째 후보로 글을 만들었습니다")
+    scope = (f"분야 {len(lanes)}곳({', '.join(lanes)}) · 후보 {tried}건 시도 · "
+             f"Gemini 호출 {calls.get('attempts', 0)}회(실패 {calls.get('failed', 0)}회) · {kinds}")
+    parts = [f"[{r['lane']}] {r['title']} → {REJECT_LABELS.get(r['kind'], r['kind'])}" + (f": {r['detail']}" if r.get("detail") else "")
+             for r in rejects]
+    return _one_line(f"{head}({scope}) — " + " | ".join(parts), REJECT_LINE_MAX)
+
+
+def reject_detail_lines(report):
+    """실행 요약(마크다운)에 넣는 후보별 탈락 사유 줄 목록. 기록이 없으면 빈 목록. 칸마다 _md_cell 로 표·링크 문법을 막는다."""
+    rejects = report.get("rejects") or []
+    if not rejects:
+        return []
+    lanes = _tried_lane_labels(report)
+    lines = [f"- 후보별 탈락 사유(분야 {len(lanes)}곳 · 후보 {report.get('attempts') or len(rejects)}건 시도):"]
+    for r in rejects:
+        detail = f": {_md_cell(r['detail'], REJECT_REASON_CHARS + 20)}" if r.get("detail") else ""
+        lines.append(f"  - {_md_cell(r['lane'], 30)} · {_md_cell(r['title'], REJECT_TITLE_CHARS + 20)} → "
+                     f"{_md_cell(REJECT_LABELS.get(r['kind'], r['kind']), 40)}{detail}")
+    return lines
 
 
 def generate_blog_posts(topic_override=None, category_hint="", slot=None,
                         allow_auto_topic=True, report=None, draft_flow=False):
     """KR/EN 글 한 쌍을 만든다. 만들면 (kr_path, en_path), 만들 수 없으면 None.
-    report(dict)를 넘기면 분야별 수집 결과와 최종 결과 코드(outcome)를 채워 준다.
+    report(dict)를 넘기면 분야별 수집 결과와 최종 결과 코드(outcome)를 채워 준다. 후보는 분야를 합쳐 MAX_ATTEMPTS 건까지 시도하고 앞 분야의 후보가 모두 탈락하면 다음 분야로 이어지며(A),
+    후보별 탈락 기록(rejects)과 시도한 후보 수(attempts)도 채운다(공개 주석 한 줄과 실행 요약에 쓰인다, F).
     draft_flow=True 는 승인 흐름(publish_flow: pr)이다: 글을 만드는 방법은 같고, 이력 항목에 flow·branch·paths 를 더하며 결과 코드는
     PUBLISHED 대신 DRAFT_CREATED 다(공개는 PR 병합이라 '발행했다'고 쓰지 않는다). 파일 올리기는 pipeline/draft_flow.py 가 맡는다."""
     report = report if report is not None else {}
@@ -2176,27 +2372,31 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
             print("요청 주제와 직접 연결되고 출처 검증을 통과한 기사가 없습니다. 발행을 중단합니다.")
             report["outcome"] = "NO_MATCH"
             return None
-        candidates = [dict(matched, title=topic_override)]
+        batches = iter([(editorial_lane, [dict(matched, title=topic_override)])])
     else:
-        candidates, editorial_lane = collect_candidates(
-            titles, allow_auto_topic, lane_order, report)
+        # 분야별 후보 묶음을 앞에서부터 하나씩 받는다. 앞 분야의 후보가 모두 탈락하면 다음 분야를 이어서 읽는다(분야 합산 MAX_ATTEMPTS 건까지, 시간 상한 안에서 — A).
+        batches = iter_candidate_lanes(titles, allow_auto_topic, lane_order, report)
     report["lane"] = editorial_lane
     report["lane_label"] = EDITORIAL_LANES[editorial_lane]["label"]
-    if not candidates:
-        print("쓸 만한 새 기사가 없습니다. 글을 만들지 않습니다.")
-        # 이상 신호(빨강)는 '소스에 접속하지 못함'과 '모든 분야에 검증된 기사가 한 건도 없음'이다.
-        # 검증된 기사는 있었지만 전부 기존 글과 비슷하면 뉴스가 뜸한 것이라 경고 수준이고, 시간 상한으로 일부만 시도했을 때도 경고다.
-        if report.get("sources_unreachable"):
-            report["outcome"] = "SOURCES_UNREACHABLE"
-        elif report.get("budget_exceeded"):
-            report["outcome"] = "NO_CANDIDATES"
-        elif any(lane["passed"] > 0 for lane in report.get("lanes", [])):
-            report["outcome"] = "ALL_DUPLICATES"
-        else:
-            report["outcome"] = "ALL_LANES_EMPTY"
-        return None
     gate_rejects = report["gate_rejects"] = []
-    for item in candidates:
+    rejects = report["rejects"] = []    # 후보별 탈락 기록(분야·제목 앞 글자·종류·사유) — 공개 주석 한 줄과 실행 요약에 쓴다(F)
+    attempts = report["attempts"] = 0   # 이번 실행에서 모델에 보내 본 후보 수(분야 합산)
+
+    def attempt_stream():
+        """(분야, 후보)를 하나씩 내보낸다. 이 분야의 후보를 다 썼는데도 글이 없으면 그때서야 다음 분야를 읽는다 — 수집은 느리므로 시도 상한에 닿았으면 읽지 않는다."""
+        for lane, found in batches:
+            for entry in found:
+                if attempts >= MAX_ATTEMPTS:
+                    return
+                yield lane, entry
+            if attempts >= MAX_ATTEMPTS:
+                return
+
+    for editorial_lane, item in attempt_stream():
+        attempts += 1
+        report["attempts"] = attempts
+        report["lane"] = editorial_lane                 # 글의 분야·프롬프트·이력에는 후보가 실제로 나온 분야가 쓰인다
+        report["lane_label"] = EDITORIAL_LANES[editorial_lane]["label"]
         topic = item["title"] if item else None
         src_label = f" [{_one_line(item['source'], 60)}]" if item and item.get("source") else ""
         print(f"주제 시도: {_one_line(topic or '(자동 선정)', 200)}{src_label}")
@@ -2213,14 +2413,18 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
             reason = _one_line(exc, 200)
             print(f"  Gemini 응답을 읽지 못해 이 후보는 건너뜀: {reason}")
             gate_rejects.append(reason)
+            rejects.append(_reject_record(editorial_lane, topic, "FORMAT", _format_error_kind(exc)))
             continue
         if candidate.get("skip") is True:
             print(f"  Gemini가 중복 주제로 판단해 건너뜀: {_one_line(candidate.get('reason', ''))}")
+            rejects.append(_reject_record(editorial_lane, topic, "SKIP", candidate.get("reason", "")))
             continue
         kr_t, en_t = str(candidate.get("kr_title", "")), str(candidate.get("en_title", ""))
         if not topic_override and (is_similar_to_any(kr_t, titles, 0.7)
                                    or is_similar_to_any(en_t, titles, 0.7)):
             print(f"  생성된 제목이 기존 글과 비슷해 폐기: {_one_line(kr_t, 150)} / {_one_line(en_t, 150)}")
+            best = max(max((similarity(t, e) for e in titles), default=0.0) for t in (kr_t, en_t))
+            rejects.append(_reject_record(editorial_lane, topic, "SIMILAR", f"유사도 {best:.2f}(기준 0.70)"))
             continue
         try:
             # 본문 검증(분량·원문 링크 인용)은 이미지를 고르기 전에 먼저 한다: 탈락한 후보에 Unsplash 호출을 쓰지 않고,
@@ -2234,14 +2438,33 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
             reason = _one_line(exc, 200)
             print(f"  본문 검증 탈락: {reason}")
             gate_rejects.append(reason)
+            rejects.append(_reject_record(editorial_lane, topic, "BODY", reason))
             continue
         data, selected, selected_item = candidate, topic, item
         break
+    if not attempts:
+        print("쓸 만한 새 기사가 없습니다. 글을 만들지 않습니다.")
+        # 이상 신호(빨강)는 '소스에 접속하지 못함'과 '모든 분야에 검증된 기사가 한 건도 없음'이다.
+        # 검증된 기사는 있었지만 전부 기존 글과 비슷하면 뉴스가 뜸한 것이라 경고 수준이고, 시간 상한으로 일부만 시도했을 때도 경고다.
+        if report.get("sources_unreachable"):
+            report["outcome"] = "SOURCES_UNREACHABLE"
+        elif report.get("budget_exceeded"):
+            report["outcome"] = "NO_CANDIDATES"
+        elif any(lane["passed"] > 0 for lane in report.get("lanes", [])):
+            report["outcome"] = "ALL_DUPLICATES"
+        else:
+            report["outcome"] = "ALL_LANES_EMPTY"
+        return None
     if data is None:
         report["outcome"] = "ALL_REJECTED"
+        line = reject_summary_line(report)
+        if line:
+            print(f"::warning::{line}")   # 후보마다 왜 탈락했는지 공개 주석 한 줄로 남긴다(로그인 없이 공개 REST 로 읽힌다)
         if not topic_override and not allow_auto_topic:
             print("통과한 후보가 없습니다(중복·Gemini 건너뜀·본문 검증 탈락). 글을 만들지 않습니다.")
             return None
+        # 예외로 끝나는 실행(수동·주제 지정)은 finish_run 의 요약을 쓰지 못하고 run_cli 가 '실패' 요약만 남기므로, 후보별 탈락 사유 블록을 따로 남긴다.
+        write_step_summary("\n".join(["### Chance_Blog 후보 탈락 사유"] + reject_detail_lines(report)))
         raise RuntimeError("후보가 모두 탈락해 글을 만들지 못했습니다(중복·Gemini 건너뜀·본문 검증 탈락).")
 
     if not selected_item or not selected_item.get("link") or not selected_item.get("publisher_domain"):
@@ -2307,6 +2530,9 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
     report.update(outcome="DRAFT_CREATED" if draft_flow else "PUBLISHED", title=data["kr_title"], en_title=data["en_title"],
                   source=(selected_item or {}).get("source", ""),
                   paths=[str(kr_path), str(en_path)])
+    notice = reject_summary_line(report)   # 앞선 후보가 탈락한 뒤에 만든 글이면 그 사유를 공개 주석 한 줄로(첫 후보로 만들었으면 아무것도 하지 않는다)
+    if notice:
+        print(f"::notice::{notice}")
     print("블로그 글 생성 완료" + (" (DRY_RUN: 파일·기록은 저장되지 않았습니다):" if DRY_RUN else ":"))
     print(f"- KR: {kr_path}\n- EN: {en_path}\n- 편집 축: {EDITORIAL_LANES[editorial_lane]['label']}\n- 주제: {_one_line(selected or '(자동 선정)', 200)}")
     print(f"- 이미지: {kr_image}\n         {en_image}")
@@ -2399,6 +2625,7 @@ def render_run_summary(event, now, slot, report):
     rejects = report.get("gate_rejects", [])
     if rejects:
         lines.append(f"- 후보 탈락 {len(rejects)}건(본문 검증·응답 형식): " + " / ".join(_md_cell(r, 100) for r in rejects[:3]))
+    lines += reject_detail_lines(report)
     lanes = report.get("lanes", [])
     if lanes:
         lines += ["", "| 분야 | 소스 | 받은 기사 | 검증 통과 | 후보 | 탈락 사유(개수) |",
@@ -2409,7 +2636,7 @@ def render_run_summary(event, now, slot, report):
             lines.append(f"| {lane['label']} | {lane['sources']}{failed} | {lane['fetched']} | "
                          f"{lane['passed']} | {lane['candidates']} | {drops} |")
         if len(lanes) > 1:
-            lines.append(f"\n분야 {len(lanes)}개를 차례로 시도했습니다(처음 추첨된 분야에 후보가 없으면 다음 분야).")
+            lines.append(f"\n분야 {len(lanes)}개를 차례로 시도했습니다(처음 추첨된 분야에 후보가 없거나 그 후보가 모두 탈락하면 다음 분야).")
         codes = sorted({code for lane in lanes for code in lane["drops"]})
         if codes:
             lines.append("\n탈락 사유 코드: " + " · ".join(f"{c}={DROP_LABELS.get(c, c)}" for c in codes))
