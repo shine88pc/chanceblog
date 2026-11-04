@@ -335,7 +335,7 @@ class NewWorkflowsInTheRepositoryTest(unittest.TestCase):
 
     def test_workflow_count_and_the_other_workflows_are_untouched_by_name(self):
         names = sorted(path.name for path in WORKFLOWS.glob("*.yml"))
-        self.assertEqual(len(names), 17)
+        self.assertEqual(len(names), 18)                      # 텔레그램 수신(telegram-inbox.yml, 2026-11-04)이 열여덟째다
         self.assertIn("ai-request.yml", names)
         self.assertIn("operator-reply.yml", names)
 
@@ -372,7 +372,7 @@ class NothingExistingReactsTest(unittest.TestCase):
         self.assertFalse(Gh(condition, issue_context(title="[페이지 수정] 소개", association="NONE")).parse())
 
     def test_the_inbox_job_does_not_run_for_the_new_forms(self):
-        for labels in ([ol.LABEL_REPLY], [ol.LABEL_TASK], []):
+        for labels in ([ol.LABEL_REPLY], [ol.LABEL_TASK], ["텔레그램수신"], []):
             self.assertFalse(job_runs("issues", issue_labels=labels), labels)
 
     def test_the_new_labels_are_not_used_by_any_other_workflow(self):

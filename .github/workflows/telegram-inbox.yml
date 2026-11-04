@@ -1,0 +1,55 @@
+name: "[공통] 텔레그램 수신 가져오기"
+run-name: "[공통] 텔레그램 수신 가져오기 · ${{ github.event_name == 'schedule' && '정기' || (github.event_name == 'push' && '요청 푸시 뒤' || '수동') }}"
+
+# 운영자가 텔레그램 봇에게 보낸 글을 정해진 때마다 읽어 저장소 이슈(라벨 `텔레그램수신`)로 옮긴다('예약 읽기'). 웹훅·상시 서버 없이 이 저장소의 자동 실행만 쓴다.
+# 운영자가 읽는 설명: docs/TELEGRAM_INBOX.md, 구조: docs/ARCHITECTURE.md §4-6-1, 규칙: docs/SECURITY_GUARDRAILS.md G-S10(검증기 WF-15)·G-S9·G-C12.
+#
+# 알아 둘 것(한계·끄는 법):
+#  - 접수일 뿐 승인이 아니다. 받은 글은 공개 이슈가 되므로 비밀·키·개인정보는 보내지 말라고 봇이 안내한다. 승인이 필요한 일은 소유자 계정의 `[답변]` 양식으로만 한다(G-S9, 바뀌지 않았다).
+#  - 지연: 예약 실행(cron)은 GitHub 사정으로 보통 10분보다 늦게, 길면 수 시간 늦게 돈다. 내가(AI) `ai/claude/**` 브랜치를 push 할 때마다(요청 알림과 같은 트리거) 한 번 더 읽는다.
+#  - 처음 켤 때: 첫 실제 실행은 병합이 아니라 이 파일이 든 `ai/claude/**` 가지를 push 하는 순간이다(push 로 도는 실행은 push 한 커밋의 파일을 쓴다) — 최종 가지를 push 하기 전에 운영자에게 알리고 시험·임시 가지는 push 하지 않는다.
+#    텔레그램은 확인하지 않은 글을 최대 24시간 보관해, 그동안 봇에 보낸 글(운영자 본인의 것만 옮긴다)을 한꺼번에 읽을 수 있다. 한 번에 최대 5통씩 옮기고 나머지는 다음 실행이 옮긴다.
+#  - 봇에 웹훅이 설정돼 있으면 getUpdates 로 읽을 수 없다(409, 실행이 빨갛게 되고 원인이 실행 요약에 한 줄 남는다). 이 워크플로는 웹훅을 만들지도 지우지도 않는다.
+#  - 끄는 법: 이 파일을 지운다(또는 `on:` 에서 `schedule`·`push` 를 지우고 `workflow_dispatch` 만 남긴다 — 검증기 WF-15 도 함께 바꿔야 하므로 AI 에게 맡긴다).
+#    저장소 Actions 탭에서 이 워크플로의 '…' 메뉴 → Disable workflow 로 잠시 끌 수도 있다(파일은 그대로).
+#  - 같은 그룹에서 대기 중인 실행은 새 실행이 오면 취소되지만(GitHub 규칙) 어느 실행이든 쌓인 글을 모두 읽으므로 잃는 글은 없다. 동시에 둘이 읽으면 같은 글이 중복되므로 그룹은 하나다.
+# 시크릿은 단계의 env 로만 넘기고 명령 줄·로그·요약에 쓰지 않는다(검증기 WF-13·WF-15, G-C12). 이슈를 쓰는 권한(issues: write)은 `GITHUB_TOKEN` 에만 있다.
+# 외부 입력(텔레그램 글)은 `run:`·명령 줄에 들어가지 않는다 — 파이썬이 읽어 소독한 뒤 이슈 본문에만 쓴다(G-A2).
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+  push:
+    branches:
+      - 'ai/claude/**'
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: telegram-inbox
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    name: 새 글 가져오기
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      # 값은 한 줄도 `run:` 에 끼우지 않는다. 시크릿이 없으면 파이썬이 '건너뜀' 한 줄을 남기고 종료 코드 0 으로 끝난다.
+      - name: 새 글을 이슈로 옮기기
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m pipeline.telegram_inbox
