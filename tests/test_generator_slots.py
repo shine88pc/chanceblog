@@ -220,6 +220,12 @@ class LaneOrderTest(unittest.TestCase):
         self.assertEqual(len(order), len(set(order)))
 
     def test_first_lane_is_unchanged_from_the_old_draw(self):
+        # 시드에 실행 시각 구간을 더한 뒤(2026-11-04 gfix, D-34)에도 그 항목을 끄면(0) 첫 분야는 옛 추첨과 같다 — 가중치·시드 식이 그대로임을 같은 기대값으로 고정한다.
+        # 시각 구간이 켜진 동작(구간이 다르면 순서가 달라짐)은 tests/test_generator_unblock.py 가 본다.
+        with mock.patch.object(g, "LANE_ORDER_BUCKET_MINUTES", 0):
+            self.check_first_lane_is_unchanged_from_the_old_draw()
+
+    def check_first_lane_is_unchanged_from_the_old_draw(self):
         for slot in (None, 9, 18):
             for history in ([], self.HISTORY):
                 for day in (23, 24, 25):
