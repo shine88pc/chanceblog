@@ -104,16 +104,16 @@ class GuideMatchesFormsTest(unittest.TestCase):
 
     def test_the_telegram_messages_quoted_in_the_guide_are_what_the_code_sends(self):
         head = re.sub(r"</?b>", "", notify.format_ai_request("R-001", "merge", "제목", "요약")).splitlines()[0]
-        self.assertEqual(head, f"{notify.BELL_MARK} AI 요청 R-001 · 병합 부탁")
+        self.assertEqual(head, f"{notify.BELL_MARK} AI 요청 r001 · 병합 부탁")
         self.assertIn(head, self.guide)
         urgent = re.sub(r"</?b>", "", notify.format_ai_request("R-001", "merge", "제목", "요약", urgency="급함")).splitlines()[0]
         self.assertTrue(urgent.endswith(f"{notify.SIREN_MARK} 급함"))
         self.assertIn(f"`{notify.SIREN_MARK} 급함`", self.guide)
         asking = notify.format_ai_request("R-001", "decision", "제목", "요약")
-        self.assertIn("답하는 법: 아래 [답하기] → 양식에서 R-001 선택", asking)
-        self.assertIn("`답하는 법: 아래 [답하기] → 양식에서 R-001 선택`", self.guide)
+        self.assertIn("답하는 법: 아래 [답하기] → 양식에서 r001 선택", asking)
+        self.assertIn("`답하는 법: 아래 [답하기] → 양식에서 r001 선택`", self.guide)
         received = notify.format_reply_received("R-001", "승인", 12)
-        self.assertEqual(received, f"{notify.OK_MARK} 답변 접수 R-001 → 승인(이슈 #12)")
+        self.assertEqual(received, f"{notify.OK_MARK} 답변 접수 r001 → 승인(이슈 #12)")
         self.assertIn(received.replace("#12", "#N"), self.guide)
         task = notify.format_task_received(13, "급함", True)
         self.assertTrue(task.startswith(f"{notify.OK_MARK} 새 일 요청 접수(이슈 #13)"))
@@ -133,7 +133,7 @@ class GuideMatchesFormsTest(unittest.TestCase):
         source = text_of(ROOT / "pipeline" / "operator_loop.py")
         for phrase in ("접수했습니다 — 요청", "접수했습니다 — 새 일 요청", "양식 모양이 달라 처리하지 못했습니다", "은 AI 가 자기가 보낸 요청과 대조해 처리합니다", "AI 요청 알림: {request.id} 을 알렸습니다"):
             self.assertIn(phrase, source, phrase)
-        for phrase in ("접수했습니다 — 새 일 요청", "양식 모양이 달라 처리하지 못했습니다", "요청 번호 R-007 은 AI 가 자기가 보낸 요청과 대조해 처리합니다", "AI 요청 알림: R-… 을 알렸습니다",
+        for phrase in ("접수했습니다 — 새 일 요청", "양식 모양이 달라 처리하지 못했습니다", "요청 번호 r007 은 AI 가 자기가 보낸 요청과 대조해 처리합니다", "AI 요청 알림: R-… 을 알렸습니다",
                        "다른 브랜치에도 있어 알리지 않은 요청 파일"):
             self.assertIn(phrase, self.guide, phrase)
         self.assertIn("다른 브랜치에도 있어 알리지 않은 요청 파일", ol.REQUESTS_SKIPPED_LINE)
@@ -142,7 +142,7 @@ class GuideMatchesFormsTest(unittest.TestCase):
         """'알 수 없는 요청 번호 … 다시 확인하세요' 대신 중립 사실 진술(독립 검증 N-2)."""
         sub = ol.Submission("reply", "R-007", "승인", "", False, 0, "", False)
         comment = ol.reply_comment(sub, False)
-        sentence = "요청 번호 R-007 은 AI 가 자기가 보낸 요청과 대조해 처리합니다"
+        sentence = "요청 번호 r007 은 AI 가 자기가 보낸 요청과 대조해 처리합니다"
         self.assertIn(sentence + "(요청 파일이 병합 전 브랜치에만 있으면 이 저장소 기본 브랜치에서는 보이지 않으며 정상일 수 있습니다).", comment)
         for text in (self.guide, rel_text("docs/ACTIONS_GUIDE.md"), rel_text("docs/ARCHITECTURE.md")):
             self.assertIn(sentence, text)
@@ -158,7 +158,7 @@ class GuideMatchesFormsTest(unittest.TestCase):
         self.assertEqual(ol.ANSWER_OPTIONS[ol.ANSWER_DEFAULT_INDEX][0], "보류")
 
     def test_the_guide_says_the_task_form_is_not_a_t3_approval_and_t3_goes_through_a_numbered_request(self):
-        for needle in ("**T3 승인이 아닙니다**", "번호 있는 `결정 부탁`(R-번호)으로 따로 묻고", "**진행 범위**(필수)", "`[요청]`"):
+        for needle in ("**T3 승인이 아닙니다**", "번호 있는 `결정 부탁`(`r001` 같은 번호)으로 따로 묻고", ol.TASK_FORM_NUMBERED_ASK, "**진행 범위**(필수)", "`[요청]`"):
             self.assertIn(needle, self.guide, needle)
         self.assertNotIn("T3 포함", self.guide)
         self.assertIn(ol.TASK_FORM_NOT_T3.replace("이 양식은 ", ""), self.guide)
@@ -182,8 +182,8 @@ class GuideMatchesFormsTest(unittest.TestCase):
     def test_the_acknowledgement_example_matches_what_the_code_writes(self):
         sub = ol.parse_reply(ol.REPLY_TITLE_PREFIX + "x", oh.reply_body(request_id="R-001", answer=oh.ANSWER["승인"]), oh.OWNER, "OWNER", oh.OWNER)
         comment = ol.reply_comment(sub, True)
-        self.assertIn("접수했습니다 — 요청 **R-001** · 답: **승인**", comment)
-        self.assertIn("`접수했습니다 — 요청 R-001 · 답: 승인`", self.guide)
+        self.assertIn("접수했습니다 — 요청 **r001** · 답: **승인**", comment)
+        self.assertIn("`접수했습니다 — 요청 r001 · 답: 승인`", self.guide)
 
     def test_the_labels_and_title_prefixes_the_guide_mentions_are_the_codes(self):
         for token in (ol.LABEL_REPLY, ol.LABEL_TASK, ol.REPLY_TITLE_PREFIX.strip(), ol.TASK_TITLE_PREFIX.strip()):
@@ -291,7 +291,7 @@ class FolderReadmeMatchesCodeTest(unittest.TestCase):
             path.write_text(example, encoding="utf-8", newline="\n")
             self.assertEqual(vr.check_request_files(Path(tmp), [ol.REQUEST_DIR + "/R-001_merge-pr57.md"]), [])
         message = notify.format_ai_request(request.id, request.kind, request.title, request.summary, request.urgency, request.pr)
-        self.assertIn("AI 요청 R-001 · 병합 부탁", message)
+        self.assertIn("AI 요청 r001 · 병합 부탁", message)
 
     def test_the_readme_itself_is_not_a_request_file_so_it_never_triggers_an_alert(self):
         self.assertIsNone(ol.REQUEST_NAME_RE.fullmatch("README.md"))
@@ -480,8 +480,8 @@ class OtherDocsAgreeTest(unittest.TestCase):
 
     def test_the_telegram_setup_doc_lists_the_two_new_messages(self):
         text = rel_text(".github/editorial/TELEGRAM_SETUP.md")
-        self.assertIn(f"`{notify.BELL_MARK} AI 요청 R-001 · 병합 부탁`", text)
-        self.assertIn(f"`{notify.OK_MARK} 답변 접수 R-001 → 승인(이슈 #12)`", text)
+        self.assertIn(f"`{notify.BELL_MARK} AI 요청 r001 · 병합 부탁`", text)
+        self.assertIn(f"`{notify.OK_MARK} 답변 접수 r001 → 승인(이슈 #12)`", text)
         self.assertIn(notify.format_reply_received("R-001", "승인", 12), text)
 
     def test_the_merge_howto_points_to_the_guide_and_says_to_report_back(self):

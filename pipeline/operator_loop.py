@@ -15,6 +15,8 @@
   3. 텔레그램은 pipeline/notify.py 의 규칙을 그대로 쓴다(소독·허용 주소·토큰 비노출·통 수 상한·실패 격리). 새 HTTP 코드를 따로 만들지 않는다. GitHub REST 는 urllib 만, 토큰은
      Authorization 헤더에만 쓰고 오류 문구에 요청 객체·토큰을 싣지 않으며(클래스 이름·HTTP 상태·짧은 설명뿐), 응답 크기·시간에 상한이 있고 재시도는 한 번이다.
   4. 알림·접수는 보조다. 실패는 `::warning::` 한 줄뿐이고 종료 코드는 0(사용법 오류만 2) — 푸시·병합·이슈를 막지 않는다.
+  5. 요청 번호는 안쪽 기록과 보이는 글의 꼴이 다르다(2026-11-04 운영자 요청): 파일 이름·앞머리 id·로그·실행 요약은 정본 `R-001`, 운영자가 읽는 글(텔레그램·접수 코멘트·양식·사용법)은 `r001`(notify.display_id).
+     운영자가 양식에 쓰는 번호는 `r001`·`R001`·`r-001`·`R-001`·`r 001` 어느 꼴이든 normalize_request_id 가 정본으로 맞춘다(정본 모양은 여전히 notify.REQUEST_ID_RE 가 지킨다).
 
 명령 줄: python -m pipeline.operator_loop <requests | ack>   (외부 값을 인자로 받지 않는다 — 값은 환경변수·git·이벤트 JSON 파일에서만 읽는다)
   requests  환경변수 BEFORE_SHA·AFTER_SHA·DEFAULT_BRANCH(워크플로가 env 로 넘김)·GITHUB_REF_NAME(러너)·TELEGRAM_BOT_TOKEN·TELEGRAM_CHAT_ID
@@ -358,6 +360,10 @@ TASK_URGENCY_OPTIONS = ("보통", "급함", "천천히")
 TASK_APPROVAL_OPTIONS = (("no", "논의·준비까지만"), ("yes", "구현·시험까지 진행(T1·T2) — T3 는 따로 번호 있는 요청으로 묻습니다"))
 TASK_DEFAULT_INDEX = 0                                   # `urgency`·`approval` 모두 첫 선택지(보통·논의·준비까지만)가 미리 선택된다
 TASK_FORM_NOT_T3 = "이 양식은 T3 승인이 아닙니다"          # `[요청]` 양식 맨 위 안내 글에 있어야 하는 문장(검증기 FORM-1)
+# 요청 번호 표기(2026-11-04 운영자 요청, 이슈 #110 메모): 보이는 글에는 `r001`(소문자 r + 숫자 세 자리, 하이픈 없음)로 적는다. 안쪽 기록(파일 이름·앞머리 id·로그)은 정본 `R-001` 그대로.
+REQUEST_ID_EXAMPLE = notify.display_id("R-001")                                       # 양식·안내의 예시 번호 `r001`(검증기 FORM-1 이 양식의 placeholder·안내와 대조한다)
+REQUEST_ID_NOTICE = f"텔레그램 메시지 맨 위의 `{REQUEST_ID_EXAMPLE}` 같은 번호"        # `[답변]` 양식 맨 위 안내 글에 있어야 하는 문구(검증기 FORM-1)
+TASK_FORM_NUMBERED_ASK = f"번호 있는 `결정 부탁`(`{REQUEST_ID_EXAMPLE}` 같은 번호)으로 따로 묻고"      # `[요청]` 양식 안내 글·접수 코멘트·사용법이 같은 문구로 말한다(검증기 FORM-1·문서 시험)
 CHOICE_RE = re.compile(r"[A-Za-z0-9가-힣]{1,3}")
 _NO_RESPONSE = ("_no response_", "no response")
 MAX_EVENT_BYTES = 2_000_000
@@ -407,10 +413,16 @@ def _label_problems(values, duplicates, fields, required):
     return problems
 
 
+REQUEST_INPUT_RE = re.compile(r"[rR][ -]?([0-9]{3})")       # 운영자가 쓸 수 있는 꼴: r090·R090·r-090·R-090·r 090(공백 한 칸) — 숫자는 ASCII 세 자리뿐
+
+
 def normalize_request_id(raw):
-    """운영자가 양식에 쓴 요청 번호를 `R-001` 꼴로 맞춘다 — 앞뒤 공백과 맨 앞 소문자 `r` 만 봐준다(2026-10-28 운영자의 첫 응답이 `r-002` 로 올라와 거절됐다).
-    그 밖의 모양(전각 `ｒ`·다른 하이픈·자리 수 틀림 등)은 그대로 두어 REQUEST_ID_RE 가 거절한다. 정규화는 신뢰 판정(작성자·권한) 뒤에만 일어나고 값은 비교·표시에만 쓴다."""
+    """운영자가 양식에 쓴 요청 번호를 정본 `R-001` 꼴로 맞춘다 — 앞뒤 공백을 떼고, `r001`·`R001`·`r-001`·`R-001`·`r 001`(공백 한 칸) 꼴 전체가 맞을 때만 바꾼다(2026-11-04 운영자 요청, 이슈 #110 메모 '요청번호 작성 방법 수정 / r090 형태로 변경 - 삭제' / 2026-10-28 운영자의 첫 응답이 `r-002` 로 올라와 거절된 일이 있었다). 그 밖의 모양(전각 `ｒ`·다른 하이픈·자리 수 틀림·그 밖의 안쪽 공백·탭·줄 바꿈·보이지 않는 문자·`r-001 메모` 등)은
+    그대로 두어 REQUEST_ID_RE 가 거절한다(옛 동작 유지: `r-` 로 시작하는 나머지 꼴은 앞의 `r` 만 대문자로 바꿔 둔다 — 어차피 거절된다). 정규화는 신뢰 판정(작성자·권한) 뒤에만 일어나고 값은 비교·표시에만 쓴다."""
     text = str(raw).strip()
+    found = REQUEST_INPUT_RE.fullmatch(text)
+    if found:
+        return "R-" + found.group(1)
     if text[:2] == "r-":
         return "R-" + text[2:]
     return text
@@ -422,7 +434,7 @@ def parse_reply(title, body, login, association, owner):
     신뢰 판정(먼저): 작성자 login 이 저장소 소유자와 같고(ASCII 영문 대소문자만 무시 — login 이 GitHub 계정 이름 모양(`_LOGIN_RE`)이 아니면 비교하기 전에 거절) author_association 이 정확히 `OWNER` 여야
     한다 — 둘 다 이벤트 JSON 의 값이고 이슈 본문·제목의 글은 보지 않는다. 유니코드 접기(`casefold`)는 쓰지 않는다: `ſhine88pc`(U+017F) 같은 글자가 `shine88pc` 로 접혀 통과하는 일이 없게(독립 검증 N-6).
     그다음 제목이 `[답변]`(요청에 답하기)·`[요청]`(새 일 맡기기)로 시작해야 하고, 본문의 항목 제목(양식이 만든 `### …`)으로 값을 읽어 **검증된 값만** 담는다:
-    요청 번호는 `R-` 와 숫자 세 자리(소문자 `r-001` 은 `R-001` 로 읽는다), 답은 양식의 선택지 전체 문구와 글자 그대로 같아야 하고(짧은 말로 바꿔 담는다), 선택은 영문·숫자·한글 1~3자(아니면 표시하지 않음 표시), 메모는 글자 수만 담는다.
+    요청 번호는 정본 `R-` 와 숫자 세 자리이고 `r001`·`R001`·`r-001`·`r 001` 같은 운영자 표기도 정본으로 읽는다(normalize_request_id), 답은 양식의 선택지 전체 문구와 글자 그대로 같아야 하고(짧은 말로 바꿔 담는다), 선택은 영문·숫자·한글 1~3자(아니면 표시하지 않음 표시), 메모는 글자 수만 담는다.
     `[요청]` 은 접수만 한다 — T3 승인이 아니다(독립 검증 B-1): 진행 범위(논의·준비까지 / 구현·시험까지)만 읽는다."""
     owner_name = str(owner or "")
     if not _LOGIN_RE.fullmatch(owner_name):
@@ -438,7 +450,7 @@ def parse_reply(title, body, login, association, owner):
         problems = _label_problems(values, duplicates, REPLY_FIELDS, REPLY_REQUIRED)
         request_id = normalize_request_id(values.get(label_of["request_id"], ""))
         if label_of["request_id"] in values and not notify.REQUEST_ID_RE.fullmatch(request_id):
-            problems.append("`요청 번호` 값이 `R-001` 처럼 `R-` 와 숫자 세 자리가 아닙니다")
+            problems.append("`요청 번호` 값이 `r001` 처럼 `r` 와 숫자 세 자리가 아닙니다")
         word = next((short for short, full in ANSWER_OPTIONS if full == values.get(label_of["answer"], "")), "")
         if label_of["answer"] in values and not word:
             problems.append("`답변` 값이 양식의 선택지가 아닙니다")
@@ -480,14 +492,15 @@ def reply_comment(sub, known_request):
     """`[답변]` 접수 코멘트(마크다운). 값은 모두 검증을 통과한 것이다 — 요청 번호 모양·양식의 답 선택지·선택 글자(영문·숫자·한글 1~3자)·메모 글자 수.
     known_request 가 거짓이면 중립 사실 진술 한 줄을 더한다 — 요청 파일은 병합 전 작업 브랜치에 있는 것이 보통이라 이 저장소 기본 브랜치에서 안 보이는 것이 정상일 수 있고,
     그래서 '번호를 다시 확인하세요' 같은 불안을 주는 말은 쓰지 않는다(독립 검증 N-2). 접수는 늘 한다."""
-    head = f"접수했습니다 — 요청 **{sub.request_id}** · 답: **{sub.answer}**" + (f" · 선택: **{sub.choice}**" if sub.choice else "") + "."
+    shown = notify.display_id(sub.request_id)                       # 운영자에게는 `r001` 꼴(안쪽 기록은 정본 R-001)
+    head = f"접수했습니다 — 요청 **{shown}** · 답: **{sub.answer}**" + (f" · 선택: **{sub.choice}**" if sub.choice else "") + "."
     notes = []
     if sub.memo_chars:
         notes.append(f"- 메모: 있음({sub.memo_chars}자) — AI 가 이슈 본문에서 읽습니다(여기에는 되풀이하지 않습니다).")
     if sub.choice_invalid:
         notes.append("- 선택 칸의 값이 형식(영문·숫자·한글 1~3자)에 맞지 않아 표시하지 않았습니다. AI 가 이슈 본문에서 읽습니다.")
     if not known_request:
-        notes.append(f"- 요청 번호 {sub.request_id} 은 AI 가 자기가 보낸 요청과 대조해 처리합니다"
+        notes.append(f"- 요청 번호 {shown} 은 AI 가 자기가 보낸 요청과 대조해 처리합니다"
                      "(요청 파일이 병합 전 브랜치에만 있으면 이 저장소 기본 브랜치에서는 보이지 않으며 정상일 수 있습니다).")
     return _compose(head, notes)
 
@@ -496,7 +509,7 @@ def task_comment(sub):
     """`[요청]` 접수 코멘트. 이슈 본문의 글은 되풀이하지 않는다(긴급도·진행 범위는 양식의 선택지 값). `[요청]` 은 T3 승인이 아니라고 분명히 적는다(독립 검증 B-1)."""
     head = (f"접수했습니다 — 새 일 요청 · 긴급도: **{sub.urgency}** · 진행 범위: "
             + ("**구현까지(T3 제외)**" if sub.approval_yes else "**논의·준비까지만**") + ".")
-    notes = ["- 이 양식은 T3 승인이 아닙니다. T3(광고 표면·시크릿·계정·삭제·`mode` 변경·새 플랫폼 등)가 필요하면 AI 가 번호 있는 `결정 부탁`(R-번호)으로 따로 묻고, "
+    notes = [f"- 이 양식은 T3 승인이 아닙니다. T3(광고 표면·시크릿·계정·삭제·`mode` 변경·새 플랫폼 등)가 필요하면 AI 가 {TASK_FORM_NUMBERED_ASK}, "
              "그때 `[답변]` 양식으로 답해 주세요."] if sub.approval_yes else []
     return _compose(head, notes)
 

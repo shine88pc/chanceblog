@@ -83,7 +83,7 @@ BELL_MARK, SIREN_MARK = chr(0x1F514), chr(0x1F6A8)
 # 운영자 요청함(AI 의 요청·운영자의 응답, pipeline/operator_loop.py): 요청 종류와 한국어 라벨, 요청 번호 모양, 글자 수 상한. 사용자 지시 2026-10-28
 REQUEST_KIND_LABELS = {"merge": "병합 부탁", "run": "실행 부탁", "confirm": "확인 부탁", "decision": "결정 부탁", "info": "알림"}
 REQUEST_ANSWER_KINDS = ("confirm", "decision")     # 운영자가 양식으로 답해야 하는 종류('답하는 법' 한 줄을 붙인다)
-REQUEST_ID_RE = re.compile(r"R-[0-9]{3}")
+REQUEST_ID_RE = re.compile(r"R-[0-9]{3}")       # 정본 — 요청 파일 이름·앞머리 id·로그·기록은 이 꼴 그대로. 운영자가 읽는 글은 display_id 로 `r090` 꼴(2026-11-04 운영자 요청)
 REQUEST_TITLE_LIMIT = 80
 REQUEST_SUMMARY_LIMIT = 300
 REPO_URL = "https://github.com/shine88pc/chanceblog"
@@ -653,35 +653,63 @@ def _positive_int(value, name):
     return value
 
 
-def format_ai_request(request_id, kind, title, summary, urgency="보통", pr=None, more=0):
-    """AI 요청 알림의 HTML 글. 머리 `🔔 AI 요청 R-001 · 병합 부탁`(급하면 `🚨 급함`), 제목, 요약, 관련 PR 번호, 답해야 하는 종류(확인·결정)에는 '답하는 법' 한 줄,
-    담지 못한 요청이 있으면 '… 외 N건'. 요청 번호(`R-` 세 자리)·종류(REQUEST_KIND_LABELS)·PR 번호(양의 정수)는 호출한 쪽이 이미 검증한 값이어야 하고 어긋나면 ValueError
-    (이 함수는 외부 글을 믿지 않는다 — 제목·요약은 safe_text 로 소독하고 HTML 이스케이프한다). 본문 상세는 싣지 않고 버튼으로 연다."""
-    if not REQUEST_ID_RE.fullmatch(str(request_id)):
+def display_id(request_id):
+    """운영자에게 보이는 요청 번호 꼴: 정본 `R-090` → `r090`(소문자 r + 숫자 세 자리, 하이픈 없음). 운영자 요청(2026-11-04 이슈 #110, 메모 '요청번호 작성 방법 수정 / r090 형태로 변경 - 삭제')에 따른 표기다.
+    안쪽 기록(요청 파일 이름·앞머리 `id`·브랜치·로그·실행 요약)은 정본 `R-090` 그대로이고, 이 함수는 운영자가 읽는 글(텔레그램·접수 코멘트·양식·사용법)을 만들 때만 쓴다.
+    입력은 정본(REQUEST_ID_RE 와 글자 그대로 같은 것)이어야 하고 아니면 ValueError('request_id') — 반대 방향(운영자가 쓴 꼴 → 정본)은 operator_loop.normalize_request_id 가 맡는다."""
+    text = str(request_id)
+    if not REQUEST_ID_RE.fullmatch(text):
         raise ValueError("request_id")
+    return "r" + text[2:]
+
+
+# display_text 가 바꾸는 번호: 인용·코드 조각 밖의 맨 `R-090` 만. 앞뒤가 영숫자·`_`·`-` 이거나(`PR-123`·`R-0901`·`R-090_x.md`), `[R-090]`(PR·커밋 제목 꼴)이거나, `R-090.md` 같은 파일 이름 꼴이면 그대로 둔다.
+_DISPLAY_ID_RE = re.compile(r"(?P<quoted>「[^」]*」|『[^』]*』|`[^`]*`)|(?<![A-Za-z0-9_\-\[])R-(?P<digits>[0-9]{3})(?![A-Za-z0-9_\-\]]|\.[A-Za-z0-9])")
+_LEAD_TAG_RE = re.compile(r"\[R-([0-9]{3})\](?=\s|$)")
+
+
+def display_text(text, lead_tag=False):
+    """AI 가 쓴 제목·요약 속 요청 번호도 운영자가 읽는 글에서는 `r090` 꼴로(머리의 번호와 같게). 글자 그대로 두는 곳: 「…」·『…』·백틱(`) 안 — 운영자가 GitHub 에서 **글자까지 같은 PR 제목**을 찾아 병합하므로
+    요청은 PR 제목을 「」 로 인용한다(인수인계/PR_병합_방법.md) — 와 `[R-090]`(PR·커밋 제목 꼴)·파일 이름 꼴. lead_tag=True(요청 제목)이면 맨 앞 `[R-090]` 꼬리표(요청 자신의 꼬리표, 예: 진행 현황 알림 제목)만 `[r090]` 으로 바꾼다.
+    이미 소독된 짧은 글(제목 80자·요약 300자)을 받는 것이 전제다 — 예외를 던지지 않고 번호 꼴 말고는 글자 하나도 바꾸지 않는다."""
+    text = str(text)
+    head = ""
+    if lead_tag:
+        found = _LEAD_TAG_RE.match(text)
+        if found:
+            head, text = f"[r{found.group(1)}]", text[found.end():]
+    return head + _DISPLAY_ID_RE.sub(lambda match: match.group("quoted") or "r" + match.group("digits"), text)
+
+
+def format_ai_request(request_id, kind, title, summary, urgency="보통", pr=None, more=0):
+    """AI 요청 알림의 HTML 글. 머리 `🔔 AI 요청 r001 · 병합 부탁`(급하면 `🚨 급함`, 번호는 운영자에게 보이는 꼴 display_id), 제목, 요약, 관련 PR 번호, 답해야 하는 종류(확인·결정)에는 '답하는 법' 한 줄,
+    담지 못한 요청이 있으면 '… 외 N건'. 요청 번호(`R-` 세 자리)·종류(REQUEST_KIND_LABELS)·PR 번호(양의 정수)는 호출한 쪽이 이미 검증한 값이어야 하고 어긋나면 ValueError
+    (이 함수는 외부 글을 믿지 않는다 — 제목·요약은 safe_text 로 소독하고 HTML 이스케이프한다). 제목·요약 속 `R-001` 도 보이는 글에서는 `r001` 로 바꾼다(display_text — 인용·`[R-001]` 제목 꼴은 그대로).
+    본문 상세는 싣지 않고 버튼으로 연다."""
+    shown = display_id(request_id)                  # 정본이 아니면 ValueError("request_id") — 운영자에게는 `r001` 꼴로 보인다
     if kind not in REQUEST_KIND_LABELS:
         raise ValueError("kind")
-    head = f"{BELL_MARK} <b>AI 요청 {request_id} · {REQUEST_KIND_LABELS[kind]}</b>" + (f" {SIREN_MARK} 급함" if urgency == "급함" else "")
+    head = f"{BELL_MARK} <b>AI 요청 {shown} · {REQUEST_KIND_LABELS[kind]}</b>" + (f" {SIREN_MARK} 급함" if urgency == "급함" else "")
     # 요청 글은 AI 가 쓴 글이다: 소독에 더해 `@이름` 이 텔레그램의 멘션 링크가 되지 않게 전각 `＠` 로 바꾼다
-    lines = [head, safe_text(title, REQUEST_TITLE_LIMIT).replace("@", _FULLWIDTH_AT), safe_text(summary, REQUEST_SUMMARY_LIMIT).replace("@", _FULLWIDTH_AT)]
+    lines = [head, display_text(safe_text(title, REQUEST_TITLE_LIMIT), lead_tag=True).replace("@", _FULLWIDTH_AT),
+             display_text(safe_text(summary, REQUEST_SUMMARY_LIMIT)).replace("@", _FULLWIDTH_AT)]
     if pr is not None:
         lines.append(f"관련 PR: #{_positive_int(pr, 'pr')}")
     if kind in REQUEST_ANSWER_KINDS:
-        lines.extend(["", f"답하는 법: 아래 [답하기] → 양식에서 {request_id} 선택"])
+        lines.extend(["", f"답하는 법: 아래 [답하기] → 양식에서 {shown} 선택"])
     if more:
         lines.extend(["", f"… 외 {_positive_int(more, 'more')}건 (저장소의 인수인계/요청함/ 폴더에서 확인하세요)"])
     return "\n".join(lines)
 
 
 def format_reply_received(request_id, answer, issue_number, choice=""):
-    """응답 이슈 접수 확인의 평문: `✅ 답변 접수 R-001 → 승인(이슈 #12)`, 선택이 있으면 `→ 승인 · 선택 B(이슈 #12)`. 값은 한 줄로 소독한다."""
-    if not REQUEST_ID_RE.fullmatch(str(request_id)):
-        raise ValueError("request_id")
+    """응답 이슈 접수 확인의 평문: `✅ 답변 접수 r001 → 승인(이슈 #12)`, 선택이 있으면 `→ 승인 · 선택 B(이슈 #12)`(번호는 운영자에게 보이는 꼴 display_id). 값은 한 줄로 소독한다."""
+    shown = display_id(request_id)                  # 정본이 아니면 ValueError("request_id")
     word = clean_text(answer, 20)
     picked = clean_text(choice, 10)
     if not word:
         raise ValueError("answer")
-    return f"{OK_MARK} 답변 접수 {request_id} → {word}" + (f" · 선택 {picked}" if picked else "") + f"(이슈 #{_positive_int(issue_number, 'issue_number')})"
+    return f"{OK_MARK} 답변 접수 {shown} → {word}" + (f" · 선택 {picked}" if picked else "") + f"(이슈 #{_positive_int(issue_number, 'issue_number')})"
 
 
 def format_task_received(issue_number, urgency, approval_yes):
