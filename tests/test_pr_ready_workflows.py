@@ -254,7 +254,7 @@ class DocumentedBehaviorTest(unittest.TestCase):
         self.assertIn("tests/test_pr_ready_workflows.py", w12)
         defects = doc("docs/DEFECT_REGISTER.md")
         d87 = next(line for line in defects.splitlines() if line.startswith("| **D-87** |"))
-        for needle in ("`guardrails.yml`", "`pr-scope-check.yml`", "`ops-inbox.yml`", "첫 실제 실행 관측 필요", "건너뜀 줄 둘"):
+        for needle in ("`guardrails.yml`", "`pr-scope-check.yml`", "`ops-inbox.yml`", "첫 실제 실행 관측 완료", "건너뜀 줄 둘"):
             self.assertIn(needle, d87, needle)
         self.assertLess(defects.index("| **D-86** |"), defects.index("| **D-87** |"))
         self.assertTrue(any(line.startswith("| 가드레일 시험 병합(D-87) 병합 뒤") for line in defects.splitlines()))          # 관측 체크리스트에도 첫 실제 실행에서 볼 것이 적혀 있다

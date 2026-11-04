@@ -33,7 +33,7 @@
    - 빨간 ✗ 가 하나라도 있으면 **병합하지 말고** 화면을 캡처해 알려 주세요.
    - "This branch has conflicts that must be resolved" 가 보여도 병합하지 말고 알려 주세요.
 4. **"Squash and merge" (초록 버튼)** 을 누르고, 제목·본문 칸은 **그대로 둔 채** "Confirm squash and merge" 를 누릅니다. (광고 표면을 바꾸는 PR 은 제목 앞쪽에 `Ad-Surface-Approved: …` 가 들어 있습니다 — 승인 기록이라 **지우지 마세요**.)
-5. "Pull request successfully merged and closed" 가 뜨면 병합 완료입니다. **"Delete branch" 버튼은 누르지 마세요**(병합한 브랜치를 지우지 않는 규칙입니다).
+5. "Pull request successfully merged and closed" 가 뜨면 병합 완료입니다. **"Delete branch" 버튼은 누르지 마세요**(병합한 브랜치를 지우지 않는 규칙입니다). 브랜치 선택 칸에 PR 번호 같은 글자를 쳐 넣고 **"Create branch"** 를 누르면 그 이름의 빈 브랜치가 생기고 검사가 한 번 돕니다 — 해는 없지만 필요 없는 일이니 누르지 않습니다(실수로 생기면 AI 가 알려 드리고 지웁니다).
 6. 병합 5~10분 뒤 **Actions** 탭에서 `[공통] 사이트 자동 배포`가 초록인지 확인합니다. 빨강이면 알려 주세요(AI 도 병합 직후 확인합니다).
 
 ## 휴대폰에서 할 때

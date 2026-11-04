@@ -142,7 +142,7 @@ class ClassificationTest(unittest.TestCase):
         self.assertEqual(documented, set(ac.KNOWN_CODES))
 
     def test_sentences_are_fixed_korean_text_safe_for_an_annotation(self):
-        """::error:: 주석에는 고정 문장만 쓴다: 한 줄이고, 워크플로 명령 표기가 없고, 외부 값이 들어갈 자리가 없다."""
+        """오류 주석(error 명령)에는 고정 문장만 쓴다: 한 줄이고, 워크플로 명령 표기가 없고, 외부 값이 들어갈 자리가 없다."""
         for code in ac.KNOWN_CODES:
             sentence = ac.sentence_for(code)
             with self.subTest(code):
