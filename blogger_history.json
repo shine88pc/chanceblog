@@ -210,5 +210,26 @@
     "attempts": 1,
     "reasons": [],
     "image": "Z5GKgb7NCXQ"
+  },
+  {
+    "v": 1,
+    "blog": "blogger_macat",
+    "date": "2026-11-04",
+    "generated_at": "2026-11-04T17:49:50.243587+09:00",
+    "status": "draft_uploaded",
+    "topic": "Light and easy dinner ideas for busy evenings",
+    "topic_source": "seed",
+    "title": "Simple and Light Dinner Ideas for Busy Evenings",
+    "labels": [
+      "dinner ideas",
+      "meal planning",
+      "evening routine"
+    ],
+    "url": "https://macat0722.blogspot.com/",
+    "post_id": "5884529646694708050",
+    "model": "gemini-3.6-flash",
+    "attempts": 1,
+    "reasons": [],
+    "image": "AiHJiRCwB3w"
   }
 ]
