@@ -52,6 +52,7 @@
 | G-A8 | 모든 job에 `timeout-minutes`, 스케줄 워크플로에는 `concurrency` | 자동(경고): **WF-7**·**WF-8** |
 | G-A9 | 워크플로 문법·표현식 오류는 `actionlint`로 푸시 전에 잡는다 | 자동: CI `guardrails.yml` |
 | G-A10 | 승인 흐름(Chance `publish_flow: pr`)의 권한은 필요한 만큼만 쓴다: `chanceblog.yml`만 `pull-requests: write`(초안 PR 열기·라벨 붙이기, 직접 게시에서는 쓰지 않는다), `watchdog.yml`은 `pull-requests: read`(열린 초안 PR 세기). 초안 브랜치는 `ai/draft/<날짜>-s<슬롯>`·`-m<HHMMSS>` 형식에서만 만들고 지우며(다른 이름은 건드리지 않는다) 열린 PR 이 있는 브랜치는 지우지 않는다. 자동 삭제(병합·닫은 지 7일 뒤)는 봇이 만든 임시 브랜치에 한정되고 §3의 '브랜치 삭제'에 닿으므로 승인 흐름을 켜는 T3 승인에 포함된다. `GITHUB_TOKEN`은 환경변수로만 받고 로그·오류·요약에 쓰지 않으며, `::error::`·`::warning::`에는 외부 문자열이 없는 고정 문장만 쓴다. `GITHUB_TOKEN`이 연 PR 에는 검사 워크플로가 돌지 않는다(G-A6과 같은 GitHub 규칙) — 병합 전에 사람이 글을 읽는 것이 유일한 검증이다 | 자동: `tests/test_chance_draft_workflow.py`(권한·단계 조건 고정)·`tests/test_draft_flow.py`·`tests/test_drafts.py`, **WF-1** / 코드 |
+| G-A11 | **가드레일 검사(`guardrails.yml`)는 PR(`pull_request`)로 돌지 않고 어느 브랜치든 push 로 돈다**(운영자 요청 2026-11-04 — PR 화면에 새로 도는 검사·건너뜀 줄이 없게). main 이 아닌 브랜치 push 는 검증 전에 `origin/main` 을 가져와 **러너 안에서만** 시험 병합한다: `git fetch`·`git merge` 만 쓰고 `git push`·원격 변경·`--global`/`--system` 설정·`pull_request_target`·`workflow_run`·새 시크릿·외부 호출은 없으며, 브랜치 이름 같은 이벤트 값은 어떤 명령에도 끼우지 않는다(임시 신원은 이 저장소 폴더의 로컬 설정). 충돌·가져오기 실패·기준을 못 구함·병합 결과가 main 끝을 담지 않음은 모두 건너뛴 초록이 아니라 단계 실패다. 광고 표면 검사(G-C6)의 기준은 시험 병합 직전의 `origin/main` 끝이다(merge-base 가 아니다 — main 이 앞서 간 만큼 이 브랜치의 변경으로 오탐하지 않게). `alert`(main 실패 텔레그램)의 `github.ref` 조건·`contents: read`·액션 버전 고정은 그대로다. 포크에서 온 PR 은 push 가 없어 이 검사가 돌지 않는다 | 자동: `tests/test_guardrails_precheck.py`(트리거 모양·단계를 한 줄씩 고정·진짜 git 으로 시험 병합 시나리오·진짜 검증기), `tests/test_pr_ready_workflows.py` / 정책 |
 
 ### 2.3 AI·LLM (G-L)
 
@@ -99,7 +100,7 @@
 | G-O5 | AI 에이전트는 §3의 행동을 사용자 승인 없이 하지 않는다 | 정책 |
 | G-O6 | 환경 위생: 자동 commit/push 스크립트 금지, 낡은 로컬 사본 폐기, 파일 통째 덮어쓰기 금지 | 자동(부분): **AD-1**, CI / 정책 |
 | G-O7 | **수익·방문 통계는 공개 채널에 올리지 않는다.** 이 저장소와 Pages 사이트는 공개다(비공개 Pages는 Enterprise Cloud 전용). 성과 수치는 커밋·이슈·PR·Actions 로그/요약·Pages 산출물에 넣지 않고 비공개 채널(Looker Studio 비공개 공유, 비공개 저장소, 메일)로만 다룬다. 성과 데이터를 가져오는 OAuth는 읽기 전용 스코프만 쓴다 | 정책. 통합 대시보드를 구현하면 자동 검사를 추가한다([`ANALYTICS_PLAN.md`](./ANALYTICS_PLAN.md)) |
-| G-O8 | **이슈·PR 이벤트로 도는 워크플로(`ops-inbox.yml`의 초안 현황 갱신)는 이벤트 값을 job `if`에서 라벨·저장소 이름을 견주는 데만 쓰고 셸 명령·환경변수로 넘기지 않는다(G-A2). PR 이벤트는 이 저장소의 브랜치에서 온 것만(G-A3) 기본 브랜치의 코드로 돌리고 `pull_request_target`은 쓰지 않는다.** 초안 이슈·PR의 제목·채널 라벨(AI·사람이 쓴 글)은 공개 이슈에 인용하기 전에 무력화하고(멘션·HTML·링크 문법·`::`·`##[`·비밀 값 모양), 모바일 필터 링크의 주소에는 평범한 채널 라벨만 싣는다. 낯선 사람이 연 이슈는 라벨이 있어도 세지 않는다 | 자동: **WF-3**·**WF-4**, `tests/test_ops_inbox_drafts.py`(job `if` 계산·셸 보간 금지·무력화·링크 조건) / 정책 |
+| G-O8 | **이슈·PR 이벤트로 도는 워크플로(`ops-inbox.yml`의 초안 현황 갱신)는 이벤트 값을 job `if`에서 라벨·저장소 이름을 견주는 데만 쓰고 셸 명령·환경변수로 넘기지 않는다(G-A2). PR 이벤트는 이 저장소의 브랜치에서 온 것만(G-A3) 기본 브랜치의 코드로 돌리고 `pull_request_target`은 쓰지 않는다.** PR 이벤트의 종류는 닫힘·라벨 변경(`closed`·`labeled`·`unlabeled`)뿐이다 — `opened`·`reopened` 를 받으면 초안이 아닌 모든 PR 을 열 때마다 '건너뜀' 줄이 PR 화면에 생긴다(운영자 요청 2026-11-04). 초안 이슈·PR의 제목·채널 라벨(AI·사람이 쓴 글)은 공개 이슈에 인용하기 전에 무력화하고(멘션·HTML·링크 문법·`::`·`##[`·비밀 값 모양), 모바일 필터 링크의 주소에는 평범한 채널 라벨만 싣는다. 낯선 사람이 연 이슈는 라벨이 있어도 세지 않는다 | 자동: **WF-3**·**WF-4**, `tests/test_ops_inbox_drafts.py`(job `if` 계산·셸 보간 금지·무력화·링크 조건) / 정책 |
 
 ## 3. AI 에이전트가 사용자 승인 없이 하면 안 되는 행동
 

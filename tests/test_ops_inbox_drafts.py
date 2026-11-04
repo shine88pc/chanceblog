@@ -23,6 +23,7 @@ import ops_inbox_helpers as h
 import ops_inbox as oi
 from draft_helpers import REAL_PUBLISH_FLOW
 from pipeline import inbox
+from workflow_expr_helpers import Expr as _Expr
 
 NOW, URL, ago = h.NOW, h.REPO_URL, h.ago
 TOKEN = "gh" + "s_" + "Q" * 36          # 런타임에 조합한 가짜 토큰(소스에 비밀 모양 리터럴을 두지 않는다)
@@ -1548,111 +1549,6 @@ class RunWithDraftsTest(unittest.TestCase):
 # ----------------------------------------------------------------------------
 # 워크플로 구조
 # ----------------------------------------------------------------------------
-class _Expr:
-    """워크플로 job `if` 식(`||`·`&&`·`==`·`!=`·괄호·문자열·`contains()`·`a.b.*.c` 참조)을 GitHub 규칙대로 계산하는 작은 해석기."""
-    TOKEN = re.compile(r"\s*(?:(?P<op>\|\||&&|==|!=|[(),!])|'(?P<str>(?:[^']|'')*)'|(?P<id>[A-Za-z_][A-Za-z0-9_.*\-]*))")
-
-    def __init__(self, source, context):
-        self.tokens, pos, src = [], 0, source.strip()
-        while pos < len(src):
-            match = self.TOKEN.match(src, pos)
-            if not match:
-                raise ValueError(f"읽을 수 없는 식: {src[pos:pos + 30]!r}")
-            pos = match.end()
-            if match.group("op"):
-                self.tokens.append(("op", match.group("op")))
-            elif match.group("str") is not None:
-                self.tokens.append(("val", match.group("str").replace("''", "'")))
-            else:
-                self.tokens.append(("id", match.group("id")))
-        self.i, self.context = 0, context
-
-    def peek(self):
-        return self.tokens[self.i] if self.i < len(self.tokens) else (None, None)
-
-    def take(self):
-        token = self.peek()
-        self.i += 1
-        return token
-
-    @staticmethod
-    def truthy(value):
-        return not (value is None or value is False or value == 0 or value == "" or value == [])
-
-    def parse(self):
-        value = self.or_()
-        if self.i != len(self.tokens):
-            raise ValueError("식 끝에 남은 토큰이 있습니다")
-        return value
-
-    def or_(self):
-        value = self.and_()
-        while self.peek() == ("op", "||"):
-            self.take()
-            right = self.and_()
-            value = value if self.truthy(value) else right
-        return value
-
-    def and_(self):
-        value = self.eq()
-        while self.peek() == ("op", "&&"):
-            self.take()
-            right = self.eq()
-            value = right if self.truthy(value) else value
-        return value
-
-    def eq(self):
-        value = self.unary()
-        while self.peek() in (("op", "=="), ("op", "!=")):
-            op = self.take()[1]
-            right = self.unary()
-            same = value.casefold() == right.casefold() if isinstance(value, str) and isinstance(right, str) else value == right
-            value = same if op == "==" else not same
-        return value
-
-    def unary(self):
-        if self.peek() == ("op", "!"):
-            self.take()
-            return not self.truthy(self.unary())
-        return self.primary()
-
-    def primary(self):
-        kind, text = self.take()
-        if (kind, text) == ("op", "("):
-            value = self.or_()
-            assert self.take() == ("op", ")")
-            return value
-        if kind == "val":
-            return text
-        if kind == "id" and self.peek() == ("op", "("):
-            self.take()
-            args = [self.or_()]
-            while self.peek() == ("op", ","):
-                self.take()
-                args.append(self.or_())
-            assert self.take() == ("op", ")")
-            assert text == "contains", text
-            haystack, needle = args
-            if isinstance(haystack, list):
-                return any(isinstance(item, str) and isinstance(needle, str) and item.casefold() == needle.casefold() for item in haystack)
-            return isinstance(haystack, str) and isinstance(needle, str) and needle.casefold() in haystack.casefold()
-        if kind == "id":
-            return {"true": True, "false": False, "null": None}[text] if text in ("true", "false", "null") else self.lookup(text)
-        raise ValueError(f"예상하지 못한 토큰 {kind} {text}")
-
-    def lookup(self, path):
-        nodes = [self.context]
-        for part in path.split("."):
-            nxt = []
-            for node in nodes:
-                if part == "*":
-                    nxt += node if isinstance(node, list) else []
-                elif isinstance(node, dict):
-                    nxt.append(node.get(part))
-                else:
-                    nxt.append(None)
-            nodes = nxt
-        return nodes if ".*." in path else (nodes[0] if nodes else None)
 
 
 def load_workflow():
@@ -1682,11 +1578,15 @@ class DraftWorkflowTest(unittest.TestCase):
         self.job = self.wf["jobs"]["inbox"]
         self.text = WORKFLOW.read_text(encoding="utf-8")
 
-    def test_the_event_triggers_are_exactly_the_five_draft_event_types_and_nothing_else(self):
+    def test_the_event_triggers_are_exactly_the_draft_event_types_and_nothing_else(self):
         on = self.wf["on"]
         self.assertEqual(set(on), {"schedule", "workflow_dispatch", "issues", "pull_request"})
         self.assertEqual(on["issues"], {"types": ["opened", "closed", "reopened", "labeled", "unlabeled"]})
-        self.assertEqual(on["pull_request"], {"types": ["opened", "closed", "reopened", "labeled", "unlabeled"]})
+        # PR 은 닫힘·라벨 변경뿐이다(운영자 요청 2026-11-04): `opened`·`reopened` 를 받으면 초안이 아닌 모든 PR 을 열 때마다 job 이 '건너뜀'으로 한 줄 생겨 PR 화면에 '일부 검사가 안 돈다'로 보인다.
+        # 초안 PR 은 자동화가 기본 토큰으로 만들어 그 이벤트가 오지 않으므로 잃는 것이 없다. 목록을 정확히 같게 고정한다(되살리면 이 시험이 실패한다).
+        self.assertEqual(on["pull_request"], {"types": ["closed", "labeled", "unlabeled"]})
+        for event_type in ("opened", "reopened", "synchronize", "edited", "ready_for_review", "converted_to_draft"):
+            self.assertNotIn(event_type, on["pull_request"]["types"], event_type)
         self.assertNotIn("pull_request_target", on)
         self.assertNotIn("workflow_run", on)
         self.assertNotIn("issue_comment", on)
