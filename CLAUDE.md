@@ -2,6 +2,8 @@
 
 이 저장소의 규칙 정본은 [`AGENTS.md`](./AGENTS.md)다. 작업 전에 읽는다.
 
+**PC 를 바꾸었거나 로컬 파일 없이 이어서 일하는 새 세션이면** 먼저 [`인수인계/작업내용.md`](./인수인계/작업내용.md) §0 '이어가기' → [`docs/SESSION_START.md`](./docs/SESSION_START.md) §2-4 → [`인수인계/도구/README.md`](./인수인계/도구/README.md) → [`인수인계/AI_기억/README.md`](./인수인계/AI_기억/README.md)(운영자 상시 지시·정책의 기억 사본) 순서로 읽는다(2026-11-04 PC 이전 준비).
+
 1. [`HANDLER.md`](./HANDLER.md) → [`AI_COLLAB.md`](./AI_COLLAB.md) → [`WORKLOG.md`](./WORKLOG.md) 최신 3~5개
 2. 코드·워크플로 작업이면 [`docs/ENGINEERING_GUIDE.md`](./docs/ENGINEERING_GUIDE.md), [`docs/SECURITY_GUARDRAILS.md`](./docs/SECURITY_GUARDRAILS.md)
 
