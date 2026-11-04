@@ -10,7 +10,13 @@
 | [`01_diagnosis.md`](01_diagnosis.md) | 전체 게시글 진단표 — 이야기 20개·파일 52개의 분류·문제·권장 조치 |
 | [`02_topic_classification.md`](02_topic_classification.md) | 주제별 분류 — 핵심 독자 질문·검색 의도·주/보조 분야·적용할 가이드 |
 | [`03_internal_links.md`](03_internal_links.md) | 내부 링크 후보 목록 — 글마다 관련 글·링크 자리·실제 주소 |
+| [`04_hubble_standard_post.md`](04_hubble_standard_post.md) | 허블 우주망원경 글 표준 사례(제안 본문 — 사이트 글에 반영할지는 별도 PR 로 정함) |
+| [`05_hubble_sources.md`](05_hubble_sources.md) | 허블 글 근거 표·고친 곳·이미지 판단 |
 | [`06_post_template.md`](06_post_template.md) | 표준 게시글 작성 템플릿(공통 기준 + 분야별 선택) |
+| [`07_sample_pew.md`](07_sample_pew.md) | 표본 A(정책·경제·산업) — Pew 데이터센터 광고 글 개선 전후·근거 |
+| [`08_sample_pew_after.md`](08_sample_pew_after.md) | 표본 A 개선 후 글 전체(제안) |
+| [`09_sample_food.md`](09_sample_food.md) | 표본 B(생활정보) — 유통기한·소비기한 글 개선 전후·근거 |
+| [`10_sample_food_after.md`](10_sample_food_after.md) | 표본 B 개선 후 글 전체(제안) |
 | [`11_generator_improvement_plan.md`](11_generator_improvement_plan.md) | 자동 생성 시스템 개선안(영향 분석·단계적 도입·승인 경로) |
 | [`12_quality_checklist.md`](12_quality_checklist.md) | 품질 검증 체크리스트 |
 | [`13_adsense_prereview_checklist.md`](13_adsense_prereview_checklist.md) | 애드센스 재심사 전 최종 점검표 |
