@@ -237,5 +237,17 @@
     "lane": "culture",
     "source": "Pew Research Center",
     "source_url": "https://www.pewresearch.org/short-reads/2026/11/02/americans-trust-in-information-from-news-organizations-has-risen-in-the-past-year/"
+  },
+  {
+    "date": "2026-11-04",
+    "topic": "Census of Environment: Harvesting benefits from nature",
+    "kr_title": "자연이 제공하는 물질 자원: 캐나다 통계청 '환경 센서스'가 본 생태계 공급 서비스",
+    "en_title": "Measuring Nature's Yield: How Ecosystem Provisioning Services Support Society and Economy",
+    "kr_image": "https://images.unsplash.com/photo-1566744883356-fb704591844e?ixid=M3wxMTA2NzEwfDB8MXxzZWFyY2h8MXx8aGFydmVzdCUyMHRpbWJlciUyMGFncmljdWx0dXJlfGVufDF8MHx8fDE3OTM3OTIyMDR8MA&auto=format&fit=crop&w=1000&q=80",
+    "en_image": "https://images.unsplash.com/photo-1425153183311-601003867b82?ixid=M3wxMTA2NzEwfDB8MXxzZWFyY2h8Mnx8aGFydmVzdCUyMHRpbWJlciUyMGFncmljdWx0dXJlfGVufDF8MHx8fDE3OTM3OTIyMDR8MA&auto=format&fit=crop&w=1000&q=80",
+    "slot": 18,
+    "lane": "society",
+    "source": "Statistics Canada",
+    "source_url": "https://www.statcan.gc.ca/daily-quotidien/261102/dq261102a-eng.htm"
   }
 ]
