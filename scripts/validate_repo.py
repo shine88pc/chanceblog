@@ -708,6 +708,92 @@ def check_operator_workflows(root, files):
     return out
 
 
+# ----------------------------------------------------------------------------
+# 텔레그램 수신(예약 읽기, 2026-11-04): 운영자가 봇에게 보낸 글을 저장소 이슈로 옮기는 워크플로(WF-15)
+# ----------------------------------------------------------------------------
+TELEGRAM_INBOX_WORKFLOW = ".github/workflows/telegram-inbox.yml"
+_INBOX_ENV = {"GITHUB_TOKEN": "${{ secrets.GITHUB_TOKEN }}", **_TELEGRAM_ENV}
+_INBOX_RUN_NAME = "[공통] 텔레그램 수신 가져오기 · ${{ github.event_name == 'schedule' && '정기' || (github.event_name == 'push' && '요청 푸시 뒤' || '수동') }}"
+_INBOX_CRON = "*/10 * * * *"
+_INBOX_RUN = "python -m pipeline.telegram_inbox"
+_INBOX_TIMEOUT_MAX = 5
+_INBOX_MODULE = "telegram_inbox"
+
+
+def _telegram_inbox_problems(data):
+    """텔레그램 수신 워크플로(`telegram-inbox.yml`)가 정해진 모양인지(WF-15). 문제 문구 목록을 돌려준다.
+
+    WF-14 와 같은 '허용 목록' 방식이다 — 트리거 집합(schedule 하나·workflow_dispatch 입력 없음·push `ai/claude/**` 하나)·최상위 permissions(contents 읽기 + issues 쓰기)·
+    job 하나(키·runs-on·timeout 5 이하·`if` 없음)·단계 셋(checkout·setup-python·실행 한 줄)·단계 키·`run` 이 정확히 `python -m pipeline.telegram_inbox`·env 키와 값(정해진 표현식 하나씩)·
+    checkout 옵션(`persist-credentials: false` 뿐)·동시 실행 그룹(하나, 취소 안 함)·`run-name` 이 있으면 정해진 식이어야 하고, 그 밖의 것(다른 트리거·더 큰 권한·job/워크플로 env·시크릿 매핑·
+    `if`·`continue-on-error`·추가 단계·`run` 안의 GitHub 표현식 등)은 모두 문제다. 이 워크플로는 텔레그램에서 온 외부 글을 만지고 텔레그램 시크릿과 이슈 쓰기 권한을 함께 쓰므로
+    바뀔 때마다 규칙(docs/SECURITY_GUARDRAILS.md G-S10)과 이 검사를 함께 고치게 한다."""
+    problems = []
+    triggers, permissions = _triggers(data), data.get("permissions")
+    if (set(triggers) != {"schedule", "workflow_dispatch", "push"} or triggers.get("schedule") != [{"cron": _INBOX_CRON}]
+            or triggers.get("workflow_dispatch") not in (None, {}) or triggers.get("push") != {"branches": ["ai/claude/**"]}):
+        problems.append(f"트리거는 `schedule`(cron `{_INBOX_CRON}` 하나)·`workflow_dispatch`(입력 없음)·`push: branches: ['ai/claude/**']` 셋뿐이어야 합니다(지금 {_shown(sorted(map(str, triggers)))}) — "
+                        "pull_request_target·issue_comment·issues·workflow_run 같은 낯선 사람이 닿는 이벤트나 더 잦은 예약·입력을 더하면 시크릿이 닿거나 글이 중복됩니다")
+    if permissions != {"contents": "read", "issues": "write"}:
+        problems.append(f"최상위 permissions 는 정확히 {{'contents': 'read', 'issues': 'write'}} 이어야 합니다(지금 {_shown(permissions)})")
+    if "env" in data or "defaults" in data:
+        problems.append("워크플로 수준 env·defaults 를 두지 않습니다(값은 마지막 단계의 env 로만 넘깁니다)")
+    if data.get("concurrency") != {"group": "telegram-inbox", "cancel-in-progress": False}:
+        problems.append(f"concurrency 는 정확히 group `telegram-inbox`·cancel-in-progress false 여야 합니다(동시에 둘이 읽으면 같은 글이 중복됩니다 — 지금 {_shown(data.get('concurrency'))})")
+    if "run-name" in data and data.get("run-name") != _INBOX_RUN_NAME:
+        problems.append("run-name 은 정해진 식(`github.event_name` 만 쓰는 이름)이어야 합니다 — 텔레그램 글·이슈·브랜치 이름 같은 외부 값을 넣지 않습니다")
+    jobs = data.get("jobs")
+    if not isinstance(jobs, dict) or len(jobs) != 1 or not isinstance(next(iter(jobs.values())), dict):
+        return problems + ["job 은 정확히 하나여야 합니다"]
+    job = next(iter(jobs.values()))
+    extra = sorted(str(key) for key in set(job) - _JOB_KEYS)
+    if extra:
+        problems.append(f"job 에 허용되지 않은 키가 있습니다({_shown(', '.join(extra))}) — job 수준 if·permissions·env·secrets·uses·strategy·continue-on-error 등을 두지 않습니다")
+    timeout = job.get("timeout-minutes")
+    if job.get("runs-on") != "ubuntu-latest" or isinstance(timeout, bool) or not isinstance(timeout, int) or not 1 <= timeout <= _INBOX_TIMEOUT_MAX:
+        problems.append(f"job 은 runs-on: ubuntu-latest 이고 timeout-minutes 가 1~{_INBOX_TIMEOUT_MAX} 이어야 합니다")
+    steps = job.get("steps")
+    if not isinstance(steps, list) or len(steps) != 3 or not all(isinstance(step, dict) for step in steps):
+        return problems + ["단계는 정확히 셋(checkout·setup-python·파이썬 실행)이어야 합니다"]
+    for step in steps:
+        extra = sorted(str(key) for key in set(step) - _STEP_KEYS)
+        if extra:
+            problems.append(f"단계에 허용되지 않은 키가 있습니다({_shown(', '.join(extra))}) — if·continue-on-error·shell·working-directory 등을 두지 않습니다")
+    checkout, python, run = steps
+    if (not str(checkout.get("uses", "")).startswith("actions/checkout@") or checkout.get("with") != {"persist-credentials": False}
+            or "env" in checkout or "run" in checkout):
+        problems.append("첫 단계는 actions/checkout 이어야 하고 with 는 persist-credentials: false 뿐이어야 합니다 — 토큰을 .git 에 남기지 않고 다른 브랜치·저장소를 내려받지 않습니다")
+    if (not str(python.get("uses", "")).startswith("actions/setup-python@") or "run" in python or "env" in python
+            or set(python.get("with") if isinstance(python.get("with"), dict) else {}) - {"python-version"}):
+        problems.append("둘째 단계는 actions/setup-python 이어야 하고 with 는 python-version 뿐이어야 합니다")
+    env = run.get("env") if isinstance(run.get("env"), dict) else {}
+    if "uses" in run or "with" in run or str(run.get("run", "")).strip() != _INBOX_RUN:
+        problems.append(f"마지막 단계의 run 은 정확히 `{_INBOX_RUN}` 한 줄이어야 합니다(값은 run 에 끼우지 않고 env 로만 넘깁니다 — `${{{{ }}}}` 표현식 금지)")
+    if {str(key): str(value).strip() for key, value in env.items()} != _INBOX_ENV:
+        problems.append(f"마지막 단계의 env 는 정확히 {', '.join(_INBOX_ENV)} 여야 하고 각 값은 정해진 표현식 하나뿐이어야 합니다(텔레그램 시크릿은 같은 이름의 환경변수로만, WF-13)")
+    return problems
+
+
+def check_telegram_inbox_workflow(root, files):
+    """WF-15: 텔레그램 수신 워크플로(`telegram-inbox.yml`: 봇에게 온 운영자의 글을 정해진 때마다 읽어 이슈로 옮김)가 정해진 모양인지, 그리고 `pipeline.telegram_inbox` 를 다른 워크플로가
+    부르지 않는지(권한·트리거가 다른 곳에서 같은 코드를 돌리지 못하게). 파일이 없으면 꺼진 것이라 아무 문제도 아니다(끄는 법: 파일 삭제). docs/SECURITY_GUARDRAILS.md G-S10."""
+    if yaml is None:
+        return []  # PyYAML 이 없다는 경고는 WF-0(check_workflows)이 이미 낸다
+    out = []
+    for rel in _workflow_files(files):
+        try:
+            data = _load_yaml(read_text(root, rel) or "")
+        except yaml.YAMLError:
+            continue  # WF-0
+        if not isinstance(data, dict):
+            continue  # WF-0
+        if rel == TELEGRAM_INBOX_WORKFLOW:
+            out.extend(err("WF-15", message, rel) for message in _telegram_inbox_problems(data))
+        elif any(_INBOX_MODULE in value for _path, value in _walk_strings(data)):
+            out.append(err("WF-15", f"`pipeline.{_INBOX_MODULE}` 는 `{TELEGRAM_INBOX_WORKFLOW}` 에서만 부릅니다 — 다른 워크플로의 트리거·권한으로 텔레그램 글을 이슈로 옮기지 않습니다 (G-S10)", rel))
+    return out
+
+
 def check_request_files(root, files):
     """REQ-1: `인수인계/요청함/` 의 요청 파일(`R-001_짧은-영문-설명.md`)이 정해진 모양인지 — 파일 이름·앞머리(id·kind·title·summary·urgency·pr·created)·id 와 이름의 일치·
     제목 80자·요약 300자·중복 id 없음. 이 모양을 지킨 파일만 push 때 텔레그램으로 알려진다(pipeline/operator_loop.py). README.md 는 설명 문서라 건너뛴다."""
@@ -1173,6 +1259,7 @@ def run_checks(root, base=None):
     findings += check_registry(root, files)
     findings += check_blogger_wrappers(root, files)
     findings += check_operator_workflows(root, files)
+    findings += check_telegram_inbox_workflow(root, files)
     findings += check_request_files(root, files)
     findings += check_operator_forms(root, files)
     findings += check_issue_contract(root, files)

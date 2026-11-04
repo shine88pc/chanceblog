@@ -160,7 +160,8 @@ class TriggerShapeTest(unittest.TestCase):
         self.assertEqual(self.data["jobs"]["validate"]["timeout-minutes"], 10)
 
     def test_only_the_request_notification_and_this_check_react_to_a_push_on_an_ai_branch(self):
-        """AI 브랜치 push 에 반응하는 워크플로가 이 검사와 요청 알림뿐이고(감시·확인 필요 모음·PR 범위 검사 등과 겹치지 않는다), 서로 같은 동시 실행 그룹을 쓰지 않는다."""
+        """AI 브랜치 push 에 반응하는 워크플로가 이 검사·요청 알림·텔레그램 수신(예약 읽기, 2026-11-04 — 요청을 올릴 때마다 한 번 더 읽는다)뿐이고(감시·확인 필요 모음·PR 범위 검사 등과 겹치지 않는다),
+        서로 같은 동시 실행 그룹을 쓰지 않는다."""
         reacting = {}
         for path in sorted(WORKFLOWS.glob("*.yml")):
             _, data = load_workflow(path)
@@ -172,10 +173,12 @@ class TriggerShapeTest(unittest.TestCase):
             patterns = config.get("branches")
             if patterns is None or any(branch_pattern_matches(pattern, BRANCH) for pattern in patterns):
                 reacting[path.name] = data                                                          # 브랜치 필터가 없으면 모든 브랜치 push 에 돈다
-        self.assertEqual(sorted(reacting), ["ai-request.yml", "guardrails.yml"])
+        self.assertEqual(sorted(reacting), ["ai-request.yml", "guardrails.yml", "telegram-inbox.yml"])
         groups = {name: data["concurrency"]["group"] for name, data in reacting.items()}
-        self.assertEqual(groups, {"ai-request.yml": "ai-request-${{ github.sha }}", "guardrails.yml": "guardrails-${{ github.ref }}"})
+        self.assertEqual(groups, {"ai-request.yml": "ai-request-${{ github.sha }}", "guardrails.yml": "guardrails-${{ github.ref }}", "telegram-inbox.yml": "telegram-inbox"})
+        self.assertEqual(len(set(groups.values())), 3)                                          # 세 그룹이 모두 달라 서로를 취소하거나 기다리게 하지 않는다
         self.assertIs(reacting["ai-request.yml"]["concurrency"]["cancel-in-progress"], False)   # 검사 쪽 취소가 요청 알림을 취소하는 길이 없다
+        self.assertIs(reacting["telegram-inbox.yml"]["concurrency"]["cancel-in-progress"], False)  # 검사·요청 알림이 텔레그램 수신을 취소하는 길도 없다
 
 
 def branch_pattern_matches(pattern, branch):

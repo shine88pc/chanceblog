@@ -390,6 +390,12 @@ class RunNameTest(unittest.TestCase):
         self.assertEqual(self.title("ops-inbox.yml", "issues", issue=12), "[공통] 확인 필요 모음 갱신 · 이슈 변경(초안만 점검)")
         self.assertEqual(self.title("ops-inbox.yml", "pull_request"), "[공통] 확인 필요 모음 갱신 · PR 변경(초안만 점검)")
 
+    def test_telegram_inbox_titles(self):
+        """텔레그램 수신(예약 읽기)의 이름은 실행이 정기인지 수동인지 내가 push 한 뒤의 것인지만 말한다 — 텔레그램 글·브랜치 이름 같은 외부 값은 넣지 않는다."""
+        self.assertEqual(self.title("telegram-inbox.yml", "schedule"), "[공통] 텔레그램 수신 가져오기 · 정기")
+        self.assertEqual(self.title("telegram-inbox.yml", "workflow_dispatch"), "[공통] 텔레그램 수신 가져오기 · 수동")
+        self.assertEqual(self.title("telegram-inbox.yml", "push"), "[공통] 텔레그램 수신 가져오기 · 요청 푸시 뒤")
+
     def test_issue_edit_titles_show_the_issue_number(self):
         self.assertEqual(self.title("issue-edit.yml", "issues", issue=12), "[Chance] 이슈 #12 수정 요청 처리 · 자동(이슈 등록 시)")
         self.assertEqual(self.title("issue-edit.yml", "workflow_dispatch", {"issue_number": "7", "dry_run": True}),
@@ -548,6 +554,8 @@ PREVIOUS_NAMES = {
     # 운영자 요청함(2026-10-28)의 두 워크플로도 처음부터 접두사와 함께 만들었다
     "AI 요청 텔레그램 알림": "[공통] AI 요청 텔레그램 알림",
     "운영자 응답 접수": "[공통] 운영자 응답 접수",
+    # 텔레그램 수신(2026-11-04, 예약 읽기)도 처음부터 접두사와 함께 만들었다
+    "텔레그램 수신 가져오기": "[공통] 텔레그램 수신 가져오기",
     # 영문·한글로 나눈 Blogger 워크플로(2026-10-27): 한글 래퍼와 공용 워크플로도 접두사 뗀 모양을 둔다(영문의 옛 이름은 위 `Blogger 글 자동 작성`)
     "Blogger 한글 글 자동 작성": "[Blogger 한글] 글 자동 작성",
     "Blogger 글 작성 공용(직접 실행하지 마세요)": "[내부] Blogger 글 작성 공용(직접 실행하지 마세요)",
@@ -609,6 +617,7 @@ class NamePrefixTest(unittest.TestCase):
         "telegram-test.yml": "[공통] 텔레그램 알림 시험",
         "ai-request.yml": "[공통] AI 요청 텔레그램 알림",
         "operator-reply.yml": "[공통] 운영자 응답 접수",
+        "telegram-inbox.yml": "[공통] 텔레그램 수신 가져오기",
     }
 
     def test_every_workflow_has_its_approved_name(self):
@@ -627,7 +636,7 @@ class NamePrefixTest(unittest.TestCase):
                 continue
             seen += 1
             self.assertEqual(registry.name_label(run_name), registry.name_label(name), f"{file}: {run_name!r}")
-        self.assertEqual(seen, 10)  # chanceblog · chance-fix-images · issue-edit · blogger-en · blogger-ko · watchdog · ops-inbox · tistory · naver · operator-reply(공용 blogger.yml 과 ai-request 는 run-name 이 없다)
+        self.assertEqual(seen, 11)  # chanceblog · chance-fix-images · issue-edit · blogger-en · blogger-ko · watchdog · ops-inbox · tistory · naver · operator-reply · telegram-inbox(공용 blogger.yml 과 ai-request 는 run-name 이 없다)
 
     def test_registered_blog_workflows_use_their_channel_label(self):
         """레지스트리 channel.label 과 그 블로그 워크플로 이름의 접두사는 같은 글자다(레지스트리 검증도 같은 것을 본다)."""
