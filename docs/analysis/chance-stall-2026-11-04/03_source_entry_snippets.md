@@ -1,5 +1,7 @@
 # 붙여 쓸 `NEWS_SOURCES` 뼈대 초안 (k) — 2026-11-04
 
+> **2026-11-05 갱신 — 이 초안 가운데 6곳(§1 FTC 보도자료·§3 FEDS Notes·§5 집행위 R&I·EMPL·§6 영국 CMA·§7 NSF)은 R-119 A(기본값 — 답이 없으면 기본값으로 진행하고 병합이 곧 승인)에 따라 구현했다**(현재 `generator.py` 구조에 맞춰 옮겨 쓰고 일부 규칙은 실제 피드 표본을 보고 고쳤다 — `docs/DEFECT_REGISTER.md` D-88, `generator.py` 의 `_FTC_*`·`_FEDS_*`·`_NSF_*`·`_CMA_*`). 나머지 항목은 아래 설명 그대로 적용 전 초안이다.
+>
 > **저장소에 적용하지 않은 초안입니다.** 운영자가 번호 요청으로 승인하면 구현합니다(새 소스·정책 = T3, `generator.py` 로직 = T2 — `docs/CHARTER.md` §5). 근거와 수치는 `S\k_sources_report.md` 에 있습니다(`S` = 작업 폴더). 약관 문구는 의역했고, 원문에서 가져온 것은 기관이 정한 출처 표시 형식 몇 단어뿐입니다. `checked` 는 2026-11-04 입니다.
 >
 > 구조 메모: 아래 코드 블록은 각각 **독립 실행되는 파이썬**이라 `generator.py` 의 `_EC_*`·`_GOVUK_*`·`HEALTH_RULE`·`_CC_BY` 정의 뒤, `NEWS_SOURCES = [` 앞에 상수를 두고 `NEW_SOURCES_*` 리스트의 항목을 `NEWS_SOURCES` 에 옮겨 붙이면 됩니다. 시험(`tests/test_generator_slots.py::SourceListTest`)은 ① 소스 이름·분야·피드 주소 사전이 고정돼 있어 항목을 더할 때 그 사전을 같이 고쳐야 하고 ② 모든 `allowed`·`pending` 소스에 `checked`(날짜)·`terms.url`(https)·`notice`(ko·en)를 요구하며 ③ 피드 호스트가 그 분야의 신뢰 목록에 있어야 하고 ④ 정규식이 컴파일돼야 하고 ⑤ 인용 틀이 `{title}`·`{date}`·`{url}` 만 쓰고 채워지는지 봅니다. 아래는 이 조건을 맞춘 형태입니다.

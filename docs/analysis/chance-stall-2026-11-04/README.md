@@ -6,7 +6,7 @@
 |---|---|---|
 | `01_generator_stall_diagnosis.md` | 원인 조사 보고 — 후보·탈락 경로, 원인 순위, 같은 슬롯 되풀이, 개선 선택지, 줄 번호 부록 | 2026-11-04 15시 최종(기준 코드 main `835ed22`) |
 | `02_source_candidates_research.md` | 글감 소스 후보 조사 — 약관·`robots.txt` 를 먼저 읽고 허용되는 곳의 공개 피드만 한 번씩 읽은 통계, 추천 6곳, 막힌 곳 목록, 부록 A 방법·기록, 부록 B 한국 국가데이터처 공공누리 유형 확인 | 2026-11-04 15~16시 한 시점의 표본 |
-| `03_source_entry_snippets.md` | `generator.py` 의 `NEWS_SOURCES` 에 붙여 쓸 항목 초안 22개 | **적용 전 — 운영자 결정(R-119) 뒤에만 구현** |
+| `03_source_entry_snippets.md` | `generator.py` 의 `NEWS_SOURCES` 에 붙여 쓸 항목 초안 22개 | **일부 적용(2026-11-05, R-119 A 기본값에 따라): FTC 보도자료·FEDS Notes·집행위 R&I·EMPL·NSF·영국 CMA 6곳만 구현**(현재 `generator.py` 구조에 맞춰 옮겨 썼고 일부 규칙은 표본을 보고 고쳤다 — `docs/DEFECT_REGISTER.md` D-88). 나머지는 적용 전 — 운영자 결정(R-119 의 B·C·D·E·보충)이 있어야 구현 |
 | `04_diagnostic_annotations_1.txt`·`05_diagnostic_annotations_2.txt` | 임시 브랜치의 읽기 전용 진단 실행(2026-11-04 14:38·14:49 KST)이 남긴 공개 주석 원문 | 그 브랜치는 지웠음 |
 
 ## 읽을 때 알아 둘 것

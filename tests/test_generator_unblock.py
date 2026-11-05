@@ -794,12 +794,20 @@ class SummaryLimitTest(unittest.TestCase):
         items = self.fetch_with(sources)
         self.assertEqual(sorted(len(it["summary"]) for it in items), [300, 1500])
 
+    # R-119 A(2026-11-05): 미 FTC 보도자료는 약관 때문이 아니라 요약이 보도자료 전문 수준(중앙 3,520자)이라 원문 문장을 베끼지 않게 1,500자로 고정한다. 다른 소스는 그대로 기본값이다.
+    PINNED_SUMMARY_CAPS = {"FTC · press (consumer protection)": 1500}
+
     def test_every_allowed_source_follows_the_default_after_the_terms_review(self):
-        """2026-11-04 약관 점검(terms 기록 기준): 읽는 소스(allowed) 모두 입력 분량 제한 조항이 없어 소스별 고정이 없다. 약관이 더 짧은 발췌만 허락하면 그 소스에 summary_max_chars 를 적고 이 시험을 고친다."""
+        """2026-11-04 약관 점검(terms 기록 기준): 읽는 소스(allowed) 모두 입력 분량 제한 조항이 없어 소스별 고정이 없다. 약관이 더 짧은 발췌만 허락하면 그 소스에 summary_max_chars 를 적고 이 시험을 고친다.
+        예외는 PINNED_SUMMARY_CAPS 에 적은 소스뿐이고(값까지 못박는다) 나머지는 고정이 없어야 한다."""
         for src in g.NEWS_SOURCES:
             with self.subTest(source=src["name"]):
                 self.assertIn(src["terms"]["status"], {"allowed", "pending"})
-                self.assertNotIn("summary_max_chars", src)
+                if src["name"] in self.PINNED_SUMMARY_CAPS:
+                    self.assertEqual(src["summary_max_chars"], self.PINNED_SUMMARY_CAPS[src["name"]])
+                else:
+                    self.assertNotIn("summary_max_chars", src)
+        self.assertEqual({s["name"] for s in g.NEWS_SOURCES if "summary_max_chars" in s}, set(self.PINNED_SUMMARY_CAPS))
 
     def test_the_prompt_grows_by_exactly_the_extra_summary_and_keeps_the_copy_guards(self):
         def prompt(size):
