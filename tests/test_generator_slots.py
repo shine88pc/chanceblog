@@ -758,8 +758,9 @@ class FetchNewsStatsTest(unittest.TestCase):
         self.assertEqual(merged, [])
         self.assertIn("소스 UN News: 보류", out)
         self.assertEqual([u for u in requested if "un.org" in u], [])
-        # 사회·정책 분야는 집행위원회 소식과 통계청(사회)을 읽고, 보류한 UN News 는 소스 수에 세지 않는다
-        self.assertEqual([s["name"] for s in stats["sources"]], ["European Commission", "Statistics Canada · society"])
+        # 사회·정책 분야는 집행위원회 소식·통계청(사회)·집행위 고용·사회(2026-11-05 R-119 A)를 읽고, 보류한 UN News 는 소스 수에 세지 않는다
+        self.assertEqual([s["name"] for s in stats["sources"]],
+                         ["European Commission", "Statistics Canada · society", "European Commission · Employment & Social Affairs"])
 
     def test_failed_source_is_recorded_not_hidden(self):
         sources = [{"name": "죽은 소스", "lane": "economy", "url": "https://dead.test/feed"}]
@@ -1974,12 +1975,19 @@ class SourceRuleSamplesTest(unittest.TestCase):
         self.assertEqual(lanes_of, {"ec.europa.eu": {"science", "economy", "society", "technology"},
                                     "commission.europa.eu": {"society"},
                                     "statcan.gc.ca": {"economy", "society", "daily_life"},
-                                    "www.gov.uk": {"science", "technology"}})
+                                    "www.gov.uk": {"science", "technology", "economy"}})   # economy: R-119 A(2026-11-05) 영국 CMA 한 곳을 위해서만
         # GOV.UK 는 www.gov.uk 호스트만 신뢰한다 — 다른 정부 부처 사이트(*.gov.uk)나 비슷한 이름은 아니다
         for host in ("ons.gov.uk", "assets.publishing.service.gov.uk", "gov.uk", "evilgov.uk", "www.gov.uk.evil.example", "nhs.uk"):
-            for lane in ("science", "technology"):
+            for lane in ("science", "technology", "economy"):
                 self.assertFalse(g._trusted_domain(host, lane), (host, lane))
-        self.assertFalse(g._trusted_domain("www.gov.uk", "economy"))   # 경제 분야 피드(재무부·DWP·DBT)는 정치 발표가 대부분이라 쓰지 않는다
+        # 경제 분야 피드(재무부·DWP·DBT)는 정치 발표가 대부분이라 쓰지 않는다(2026-10-26 결정) — 경제 분야의 www.gov.uk 신뢰는 R-119 A(2026-11-05)로 영국 CMA 한 곳을 위해 들어왔고,
+        # 경제 분야에서 GOV.UK 를 읽는 소스는 CMA 하나뿐이다.
+        self.assertTrue(g._trusted_domain("www.gov.uk", "economy"))
+        economy_govuk = [s for s in g.NEWS_SOURCES if s["lane"] == "economy" and g._host(s["url"]) == "www.gov.uk"]
+        self.assertEqual([s["name"] for s in economy_govuk], ["UK CMA · Competition & Markets"])
+        self.assertEqual(economy_govuk[0]["url"], g._GOVUK_FEED + "organisations%5B%5D=competition-and-markets-authority")
+        for lane in ("society", "culture", "daily_life"):
+            self.assertFalse(g._trusted_domain("www.gov.uk", lane), lane)
 
     def test_the_commission_and_statcan_prompt_rules_forbid_medical_advice(self):
         by_name = {s["name"]: s for s in g.NEWS_SOURCES}
@@ -2286,6 +2294,13 @@ class SourceListTest(unittest.TestCase):
                                                          "&organisations%5B%5D=department-for-environment-food-rural-affairs"),
             "GOV.UK · Science & Technology": ("technology", "https://www.gov.uk/search/news-and-communications.atom?organisations%5B%5D=ai-security-institute"
                                                             "&organisations%5B%5D=department-for-science-innovation-and-technology"),
+            # R-119 A(2026-11-05): 글감 소스 1차 6곳(이 여섯의 이름·약관·고지문·상한·제외 규칙은 tests/test_generator_sources_r119a.py 가 따로 고정한다)
+            "FTC · press (consumer protection)": ("economy", "https://www.ftc.gov/feeds/press-release-consumer-protection.xml"),
+            "Federal Reserve · FEDS Notes": ("economy", "https://www.federalreserve.gov/feeds/feds_notes.xml"),
+            "UK CMA · Competition & Markets": ("economy", "https://www.gov.uk/search/news-and-communications.atom?organisations%5B%5D=competition-and-markets-authority"),
+            "European Commission · R&I": ("technology", "https://research-and-innovation.ec.europa.eu/node/2/rss_en"),
+            "European Commission · Employment & Social Affairs": ("society", "https://employment-social-affairs.ec.europa.eu/node/2/rss_en"),
+            "U.S. NSF · news": ("technology", "https://www.nsf.gov/rss/rss_www_news.xml"),
         })
         # 읽는 소스 전부(승인 상태와 상관없이)의 피드 호스트가 자기 분야에서 신뢰된다
         for src in g.NEWS_SOURCES:

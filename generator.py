@@ -934,7 +934,8 @@ EDITORIAL_LANES = {
 #   prompt_rule    글 작성 지침에 한 줄 더하는 소스별 약관 조건(요약에 없는 것을 채우지 않는 소스와 무관한 규칙은 GROUNDING_RULES 한 곳에 둔다).
 #   display_name   글에 보이는 출처 이름(생략하면 name). 한 게시자의 피드를 분야별로 나눠 읽을 때 name 은 달라야 해서 둔다.
 #   page_delay     기사 페이지를 연달아 읽을 때 사이에 기다릴 초(사이트의 Crawl-delay 를 지킨다).
-#   summary_max_chars  이 소스의 피드 요약을 모델에 넘기는 최대 글자 수(생략하면 SUMMARY_MAX_CHARS). 소스의 약관이 더 짧은 발췌만 허락하면 그 값을 적는다(지금 쓰는 소스는 없다).
+#   summary_max_chars  이 소스의 피드 요약을 모델에 넘기는 최대 글자 수(생략하면 SUMMARY_MAX_CHARS). 소스의 약관이 더 짧은 발췌만 허락하거나, 요약이 보도자료 전문이라 원문 문장을 베끼지 않게 줄이고 싶을 때 그 값을 적는다
+#                      (지금 쓰는 소스는 미 FTC 보도자료 하나다 — 약관 때문이 아니라 전문 수준의 요약을 베끼지 않게).
 # 해외(미국 외) 소스의 공통 약관 조건(2026-10-26, 조사 보고서 R1·R2에서 약관·robots.txt·피드를 직접 읽어 확인).
 #
 # 유럽연합 집행위원회 계열: 법적 고지(https://commission.europa.eu/legal-notice_en)는 "달리 표시하지 않은 한 CC BY 4.0이며 적절한 출처 표시와
@@ -1056,6 +1057,70 @@ _GOVUK_EXCLUDE_TITLE = (
     r"|\bsuicid|\bself-harm|\bsexual (?:abuse|exploitation|assault|violence)\b|\bchild (?:sexual|abuse)\b|\bdomestic abuse\b|\bviolence against women\b"
     r"|\bextremis|\bradicali[sz]|\bterror")
 
+# R-119 A(2026-11-05, 결정 요청 R-119 의 기본값 A=1 — 답이 없으면 기본값으로 진행하고 병합이 곧 승인: Chance 글감 소스 1차 6곳). 2026-11-04 조사(docs/analysis/chance-stall-2026-11-04/)에서 공식 기관 피드가 느리고 얇아 후보 풀이 말랐던
+# 분야(경제·일·기술·미래·사회·정책)에 미 FTC 보도자료·연준 FEDS Notes·집행위 R&I·집행위 EMPL·미 NSF 뉴스·영국 CMA 를 더한다. 아래 약관 풀이는 2026-11-04 에 사이트 약관·robots.txt 를 읽은 기록이다
+# (키워드가 든 문장을 추려 읽은 것이라 법률 판단이 아니다. 이번 구현에서는 다시 읽지 않고 피드만 한 번씩 읽어 모양을 확인했다). 6곳 모두 목록 끝에 붙여 기존 소스의 순서·동작은 그대로이고,
+# 기사 페이지를 읽지 않으며(no_page_fetch) 한 번의 수집에서 소스당 요청은 피드 한 번뿐이다. 소스를 이 6곳 밖으로 넓히려면 따로 운영자 승인을 받는다.
+#
+# 미 FTC 보도자료(소비자 보호) — 약관 https://www.ftc.gov/policy-notices/website-policy: 사이트 자료 대부분이 연방 정부 저작물이라 공공영역(저작권 제한 없음)이고 가능하면 출처를 밝히라고 한다
+# (형식 예: "Source: United States Federal Trade Commission, www.ftc.gov"). 기만적 사용은 금지, FTC 의 보증·제휴를 암시하면 안 되며 제3자 저작물(사진·공개 의견)은 따로 허락이 필요하다(글만 쓰고 이미지는 쓰지 않는다).
+# robots.txt 는 Crawl-delay 5초만 두고 AI 크롤러 제한이 없다. 보도자료 요약이 전문 수준(중앙 3,520자)이라 summary_max_chars 로 모델에 넘기는 양을 줄이고 문장을 옮기지 말라는 지침을 더한다.
+# 소송·조치는 확정 판결이 아니라 FTC 의 '주장'일 수 있어 구분하게 한다.
+_FTC_TERMS = {"status": "allowed", "checked": "2026-11-04", "url": "https://www.ftc.gov/policy-notices/website-policy"}
+_FTC_CITATION = "“{title}.” Source: United States Federal Trade Commission, www.ftc.gov, {date} <{url}>"
+_FTC_NOTICE = {
+    "ko": "이 글은 AI 도구가 미국 연방거래위원회(FTC)가 공개한 자료를 요약·재구성해 작성했습니다. FTC는 이 글을 검토하거나 보증하지 않았으며, 이 글은 FTC의 공식 입장이나 공식 문서가 아닙니다.",
+    "en": "This article was written with an AI tool by summarising and restructuring material published by the U.S. Federal Trade Commission. The FTC has not reviewed or endorsed it, and it is not an official FTC publication or position."}
+_FTC_PROMPT_RULE = ("FTC가 제기한 소송·조치와 업체의 해명·합의를 구분하세요. 법원이 확정하기 전의 내용은 'FTC는 …라고 주장했다'(영어 글은 'the FTC alleges')처럼 주장으로 쓰고, "
+                    "특정 업체나 사람을 단정적으로 비난하지 마세요. 독자에게 법률·금융 조언을 하지 말고, FTC가 이 글을 검토·보증했거나 FTC의 공식 입장인 것처럼 쓰지 마세요. "
+                    "보도자료 문장을 그대로 옮기지 말고 사건의 핵심을 자기 말로 정리하며, 위원·직원이 한 말을 따옴표로 옮겨 쓰지 마세요. "
+                    "요약 앞머리의 'By BCP Staff'는 글쓴이 표기이니 글에 쓰지 마세요. " + HEALTH_RULE)
+# 독자 글감이 못 되는 공지: 의견 모집·기한 연장·정책 철회·위원 성명·최종 명령 승인·연도별 수수료 안내
+_FTC_EXCLUDE_TITLE = (r"\b(?:extends?|seeks?) (?:the )?(?:public )?comments?\b|\bwithdraws?\b|\bcommissioner\b|\bchairman\b"
+                      r"|\bstatement (?:from|by|of|on)\b|\bapproves? final\b|\bannounces? 20\d\d\b.*\bfees\b")
+_FTC_SUMMARY_MAX_CHARS = 1500
+
+# 연준 FEDS Notes — 연준 이사회 연구진이 쓰는 짧은 분석 글. 약관은 기존 Federal Reserve 소스와 같은 이사회 사이트 고지(https://www.federalreserve.gov/disclaimer.htm: 달리 표시하지 않은 이사회 사이트 정보는
+# 공공영역이라 허락 없이 복사·배포할 수 있고, 인장·로고·제3자 저작물은 제외)다. robots.txt 는 없다(404). 노트의 분석과 결론은 저자의 것이고 연준·이사회의 입장이 아니라는 점을 고지문과 지침에 분명히 한다.
+_FEDS_TERMS = {"status": "allowed", "checked": "2026-11-04", "url": "https://www.federalreserve.gov/disclaimer.htm"}
+_FEDS_CITATION = "“{title}.” FEDS Notes, Board of Governors of the Federal Reserve System, {date} <{url}>"
+_FEDS_NOTICE = {
+    "ko": "이 글은 AI 도구가 미국 연방준비제도 이사회 연구진이 공개한 FEDS Notes를 참고해 작성했습니다. 노트의 분석과 결론은 저자의 것이며 연준이나 이사회의 공식 입장이 아니고, 이사회는 이 글을 검토하거나 승인하지 않았습니다.",
+    "en": "This article was written with an AI tool using FEDS Notes published by staff of the Federal Reserve Board. The analysis and conclusions are the authors' own and do not represent the Board or the Federal Reserve; the Board has not reviewed or approved this article."}
+_FEDS_PROMPT_RULE = ("FEDS Notes는 연준 연구진의 분석 글이라 연준이나 이사회의 입장·결정·전망으로 쓰지 마세요('저자들은 …라고 분석했다'처럼 저자의 분석임을 밝히세요). "
+                     "피드 요약은 앞머리에 노트 저자들의 이름이 붙어 있으니(예: 'Jane Doe and John Roe Earlier this year, …') 저자로 밝힐 수는 있지만 직함·소속을 덧붙이지 마세요. "
+                     "금융 전문 용어는 처음 나올 때 쉬운 말로 풀어 쓰세요. 분석에 쓴 자료·가정·한계와 분석 결과를 구분하고, 독자에게 투자·재테크 조언을 하지 마세요.")
+
+# 미 NSF 뉴스 — 약관 https://www.nsf.gov/policies/digital: NSF 가 만든 글은 정부 직원 저작물이라 자유롭게 복사할 수 있고 출처 크레딧은 선택이다. 이미지·그래픽은 허가가 필요해 쓰지 않는다(글만 쓴다).
+# robots.txt 는 통과(AI 크롤러 제한 없음). 2026-11-05 표본 15건 중 8건이 'Podcast: …' 회차 소개(한두 문장)이고 1건은 공동 성명이라, 글감이 못 되는 이 둘은 제목으로 뺀다 —
+# 한 번의 실행이 모델에 보내 보는 후보는 분야를 합쳐 3건이라(MAX_ATTEMPTS) 근거가 없는 후보가 시도를 차지하면 다른 분야의 쓸 만한 후보가 밀린다.
+_NSF_EXCLUDE_TITLE = r"^podcast\b|\bstatement\b"
+_NSF_TERMS = {"status": "allowed", "checked": "2026-11-04", "url": "https://www.nsf.gov/policies/digital"}
+_NSF_CITATION = "“{title}.” Source: U.S. National Science Foundation, {date} <{url}>"
+_NSF_NOTICE = {
+    "ko": "이 글은 AI 도구가 미국 국립과학재단(NSF)이 공개한 자료를 요약·재구성해 작성했습니다. NSF는 이 글을 검토하거나 보증하지 않았으며, 이 글은 NSF의 공식 입장이 아닙니다. 사진·그래픽은 사용하지 않았습니다.",
+    "en": "This article was written with an AI tool by summarising and restructuring material published by the U.S. National Science Foundation. NSF has not reviewed or endorsed it, and it is not an official NSF position. No NSF images or graphics are used."}
+_NSF_PROMPT_RULE = ("NSF가 지원한 연구라고 해서 NSF가 결과를 보증하거나 이 글을 검토한 것처럼 쓰지 마세요. 연구자의 주장과 확인된 결과를 구분하고, "
+                    "소개 글에 나오지 않은 연구자의 발언이나 수치를 지어내지 마세요. " + HEALTH_RULE)
+
+# 집행위 R&I(기술·미래)·EMPL(사회·정책) — 기존 집행위 소스와 같은 약관(`_EC_*`: 법적 고지 CC BY 4.0, 출처·변경 표시)·고지문·지침·제외 규칙을 그대로 쓴다. 두 사이트 바닥글 고지 링크와 robots.txt 는 2026-11-04 조사에서 확인했다
+# (`/node/2/rss_en` 허용, AI 크롤러 제한 없음). R&I 는 연구 정책·국제 협력 글이 많아(2026-11-05 표본 30건 중 13건만 기술 주제) 기술·미래 분야 주제어로 거른다 — 조사 초안의 주제어에는 'innovation' 이 있었지만
+# 이 피드의 분류 태그에 모든 항목이 'Directorate-General for Research and Innovation' 로 붙어 있어 글자 하나도 거르지 못해서 뺐다. 요약이 얇아(중앙 200자 안팎) 100자 미만은 SHORT_SUMMARY 로 떨어진다.
+# EMPL 피드에는 Cedefop(별도 EU 기관) 이 쓴 글이 섞여 든다(표본 30건 중 7건, 분류 태그 'Cedefop'). Cedefop 법적 고지는 요약·번역 같은 가공 허용을 적지 않아 R-119 에서 보류한 곳이라 태그로 뺀다.
+# 위원 성명(태그 'Statement')과 행사 안내(태그 'Events')도 글감이 못 되어 같은 태그 규칙으로 뺀다.
+_RTD_TOPIC = (r"artificial intelligence|\bAI\b|quantum|fusion|supercomput|semiconductor|\bchips?\b|robot|space|satellite|earth observation|digital|\bdata\b|cyber|cloud|biotech|bioeconomy"
+              r"|battery|hydrogen|photonic|open science|research infrastructure")
+_EC_EXCLUDE_DG_TITLE = (_EC_EXCLUDE_STATEMENTS + "|" + _EC_EXCLUDE_VISITS + "|" + _EC_EXCLUDE_APPLY
+                        + r"|\bcall for (?:applications|tenders|proposals|experts|feedback|evidence)\b|\bwebinar\b|\bpodcast\b")
+_EC_EXCLUDE_DG_TAGS = r"^cedefop$|^statements?$|^events?$"
+
+# 영국 경쟁시장청(CMA) — 위 GOV.UK 약관·고지문·제외 규칙(`_GOVUK_*`)을 그대로 쓴다. 이름을 'GOV.UK' 로 시작하지 않는 것은 시험이 GOV.UK 소스를 이름 앞머리로 세기 때문이다.
+# 경제·일 분야에 재무부·DWP·DBT 피드(정치 발표가 대부분)를 쓰지 않기로 한 결정(2026-10-26)은 그대로이고, `www.gov.uk` 는 이 CMA 한 곳을 위해서만 경제 분야 신뢰 목록에 들어갔다.
+# CMA 는 기업을 조사하는 규제 기관이라 조사 착수·잠정 판단을 확정된 결정과 구분하게 한다.
+_CMA_FEED = _GOVUK_FEED + "organisations%5B%5D=competition-and-markets-authority"
+_CMA_PROMPT_RULE = (_GOVUK_PROMPT_RULE + " 영국 경쟁시장청(CMA)의 조사 착수·잠정 판단·의견 수렴은 확정된 결정이 아님을 구분하고(영어 글은 'the CMA has provisionally found'처럼), "
+                    "특정 기업의 위법을 단정하지 마세요.")
+
 NEWS_SOURCES = [
     # 약관을 확인한 직접 RSS(2026-10-26). 분야마다 약관상 쓸 수 있는 소스만 둔다.
     {"name": "NASA", "lane": "science", "url": "https://www.nasa.gov/feed/",
@@ -1171,6 +1236,31 @@ NEWS_SOURCES = [
     {"name": "GOV.UK · Science & Technology", "display_name": "GOV.UK", "lane": "technology", "url": _GOVUK_TECH_FEED,
      "terms": _GOVUK_TERMS, "exclude_title": _GOVUK_EXCLUDE_TITLE, "exclude_link": _GOVUK_EXCLUDE_LINK, "no_page_fetch": True,
      "citation": _GOVUK_CITATION, "notice": _GOVUK_NOTICE, "prompt_rule": _GOVUK_PROMPT_RULE},
+    # R-119 A(2026-11-05): 글감 소스 1차 6곳. 약관 근거는 위 `_FTC_*`·`_FEDS_*`·`_NSF_*`·`_CMA_*` 와 집행위(`_EC_*`)·GOV.UK(`_GOVUK_*`) 상수의 주석에 있다. 목록 끝에 붙여 위 소스의 순서는 그대로다.
+    {"name": "FTC · press (consumer protection)", "display_name": "Federal Trade Commission", "lane": "economy",
+     "url": "https://www.ftc.gov/feeds/press-release-consumer-protection.xml",
+     "terms": _FTC_TERMS, "exclude_title": _FTC_EXCLUDE_TITLE, "no_page_fetch": True, "summary_max_chars": _FTC_SUMMARY_MAX_CHARS,
+     "citation": _FTC_CITATION, "notice": _FTC_NOTICE, "prompt_rule": _FTC_PROMPT_RULE},
+    {"name": "Federal Reserve · FEDS Notes", "display_name": "Federal Reserve Board (FEDS Notes)", "lane": "economy",
+     "url": "https://www.federalreserve.gov/feeds/feds_notes.xml",
+     "terms": _FEDS_TERMS, "no_page_fetch": True,
+     "citation": _FEDS_CITATION, "notice": _FEDS_NOTICE, "prompt_rule": _FEDS_PROMPT_RULE},
+    {"name": "UK CMA · Competition & Markets", "display_name": "GOV.UK (Competition and Markets Authority)", "lane": "economy", "url": _CMA_FEED,
+     "terms": _GOVUK_TERMS, "exclude_title": _GOVUK_EXCLUDE_TITLE, "exclude_link": _GOVUK_EXCLUDE_LINK, "no_page_fetch": True,
+     "citation": _GOVUK_CITATION, "notice": _GOVUK_NOTICE, "prompt_rule": _CMA_PROMPT_RULE},
+    {"name": "European Commission · R&I", "display_name": "European Commission (DG Research and Innovation)", "lane": "technology",
+     "url": "https://research-and-innovation.ec.europa.eu/node/2/rss_en",
+     "terms": _EC_TERMS, "exclude_title": _EC_EXCLUDE_DG_TITLE, "exclude_link": _EC_EXCLUDE_LINK, "exclude_tags": _EC_EXCLUDE_DG_TAGS,
+     "topic_regex": _RTD_TOPIC, "no_page_fetch": True,
+     "citation": _ec_citation("European Commission, DG Research and Innovation"), "notice": _EC_NOTICE, "prompt_rule": _EC_PROMPT_RULE},
+    {"name": "European Commission · Employment & Social Affairs", "display_name": "European Commission (DG Employment, Social Affairs and Inclusion)",
+     "lane": "society", "url": "https://employment-social-affairs.ec.europa.eu/node/2/rss_en",
+     "terms": _EC_TERMS, "exclude_title": _EC_EXCLUDE_DG_TITLE, "exclude_link": _EC_EXCLUDE_LINK, "exclude_tags": _EC_EXCLUDE_DG_TAGS, "no_page_fetch": True,
+     "citation": _ec_citation("European Commission, DG Employment, Social Affairs and Inclusion"), "notice": _EC_NOTICE, "prompt_rule": _EC_PROMPT_RULE},
+    {"name": "U.S. NSF · news", "display_name": "U.S. National Science Foundation", "lane": "technology",
+     "url": "https://www.nsf.gov/rss/rss_www_news.xml",
+     "terms": _NSF_TERMS, "exclude_title": _NSF_EXCLUDE_TITLE, "no_page_fetch": True,
+     "citation": _NSF_CITATION, "notice": _NSF_NOTICE, "prompt_rule": _NSF_PROMPT_RULE},
     # 전자신문(rss.etnews.com)은 2026-10-26에 뺐다: 콘텐츠 이용 안내(info.etnews.com)가 영리·비영리 정보서비스에 사전 협의·정식 계약을 요구하고 무단 사용에는 사용료의
     # 30배 배상을 안내한다. 운영자 결정(2026-10-26 "계약·사용료는 '무료 자동화 기반' 취지에 맞지 않음")으로 TERMS_BLOCKED_DOMAINS 에 올렸다(D-61).
     # 블로터(https://www.bloter.net/feed)는 HTTP 404라 2026-10-25에 뺐다(실행 로그 '수집 실패', 로컬에서도 404/403).
@@ -1192,6 +1282,8 @@ TRUSTED_SOURCE_DOMAINS = {
     "economy": ("oecd.org", "imf.org", "worldbank.org", "federalreserve.gov",
                 "bls.gov", "bok.or.kr", "kostat.go.kr", "kdi.re.kr",
                 "ec.europa.eu", "statcan.gc.ca",
+                "ftc.gov",       # R-119 A: 미 FTC 보도자료
+                "www.gov.uk",    # R-119 A: 영국 CMA 한 곳을 위해서만(재무부·DWP·DBT 같은 정치 발표 피드는 쓰지 않는다 — 2026-10-26 결정)
                 "reuters.com", "apnews.com", "ft.com", "bloomberg.com"),
     "society": ("oecd.org", "un.org", "unesco.org", "unicef.org", "korea.kr",
                 "kostat.go.kr", "kdi.re.kr",
@@ -1200,6 +1292,7 @@ TRUSTED_SOURCE_DOMAINS = {
     "technology": ("nist.gov", "acm.org", "arxiv.org",
                    "science.org",
                    "ec.europa.eu", "www.gov.uk",
+                   "nsf.gov",       # R-119 A: 미 NSF 뉴스
                    "reuters.com", "apnews.com"),
     "culture": ("unesco.org", "pewresearch.org", "reuters.com", "apnews.com",
                 "variety.com", "nytimes.com"),
