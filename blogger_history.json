@@ -231,5 +231,26 @@
     "attempts": 1,
     "reasons": [],
     "image": "AiHJiRCwB3w"
+  },
+  {
+    "v": 1,
+    "blog": "blogger_macat",
+    "date": "2026-11-05",
+    "generated_at": "2026-11-05T18:13:31.974909+09:00",
+    "status": "draft_uploaded",
+    "topic": "Small ways to use a 10-minute commute well",
+    "topic_source": "seed",
+    "title": "Simple Ways to Use a 10-Minute Commute Well",
+    "labels": [
+      "habits",
+      "commute",
+      "daily routine"
+    ],
+    "url": "https://macat0722.blogspot.com/",
+    "post_id": "2216404888457751093",
+    "model": "gemini-3.6-flash",
+    "attempts": 1,
+    "reasons": [],
+    "image": "9HykCSoVx5g"
   }
 ]
