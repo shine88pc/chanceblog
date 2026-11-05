@@ -102,5 +102,26 @@
     "attempts": 1,
     "reasons": [],
     "image": "K5ogQTtLb7s"
+  },
+  {
+    "v": 1,
+    "blog": "blogger_kcyoon",
+    "date": "2026-11-05",
+    "generated_at": "2026-11-05T20:18:00.477282+09:00",
+    "status": "draft_uploaded",
+    "topic": "스프레드시트 수식을 AI에게 설명받고 결과를 직접 검증해 보는 방법",
+    "topic_source": "seed",
+    "title": "AI 챗봇으로 스프레드시트 수식을 풀어보고 직접 검증하는 방법",
+    "labels": [
+      "AI 활용",
+      "디지털 정리",
+      "스프레드시트"
+    ],
+    "url": "https://kcyoon.blogspot.com/",
+    "post_id": "388763226647106855",
+    "model": "gemini-3.6-flash",
+    "attempts": 1,
+    "reasons": [],
+    "image": "hpjSkU2UYSU"
   }
 ]
