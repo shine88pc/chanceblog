@@ -16,7 +16,7 @@
 |---|---|
 | [user-profile.md](./user-profile.md) | 운영자 프로필 — 비개발자, 한국어, 회사 PC |
 | [blog-project-principles.md](./blog-project-principles.md) | 프로젝트 원칙 — 풀오토·저장소가 진실·여러 AI 하나의 목표·보안/광고 표면 보호 |
-| [quiet-mode-defaults.md](./quiet-mode-defaults.md) | 조용히 일하기·기본값으로 결정·현황 알림(업무 알람은 메세지로) 규칙 |
+| [quiet-mode-defaults.md](./quiet-mode-defaults.md) | 조용히 일하기·기본값으로 결정·현황 알림(업무 알람은 메세지로) 규칙 — **사본의 '07~23시·밤에는 안 보냄'은 옛 값이다(2026-11-05 야간 전송 제한 삭제, 정본 문서가 우선)** |
 | [operator-telegram-requests-only.md](./operator-telegram-requests-only.md) | 운영자는 텔레그램 요청(R-번호)만 처리 — GitHub 알림·배너는 무시 |
 | [approval-scope-and-site-checks.md](./approval-scope-and-site-checks.md) | T3 승인은 목록 항목에만 유효, 사이트 변경은 병합 전 실제 Jekyll 빌드 비교 |
 | [prohibited-sources-policy.md](./prohibited-sources-policy.md) | 약관·표기·robots.txt 가 막는 소스는 접근하지 않는다 |
