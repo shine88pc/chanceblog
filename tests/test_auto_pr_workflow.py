@@ -954,7 +954,7 @@ class DocumentedBehaviorTest(unittest.TestCase):
                        "docs/CHARTER.md §5 표에서는 T2",                                  # 워크플로는 표의 T2 인데 이 변경은 보안 영역이라 T3 로 다룬다(인용을 표와 맞게)
                        "그대로 공개된다", "`@이름` 멘션", "처음 push 때의 커밋 제목·본문", "포크에서 올라오는 PR 에서는 돌지 않는다", "사라질 것으로 본다", "일시 오류에 다시 시도하지 않고"):
             self.assertIn(needle, header, needle)
-        self.assertNotIn("병합하면 그 실행은 끝난다", header)                             # 관측은 봇 PR #13 이 닫힐 때의 failure 뿐이라 단정하지 않는다
+        self.assertNotIn("병합하면 그 실행은 끝난다", header)                             # 승인 없이 병합했을 때의 결과는 아직 미관측(2026-11-07 첫 관측은 병합 직전에 운영자가 그 실행을 다시 돌린 경우 — 아래 새 시험)이라 단정하지 않는다. 워크플로 머리 주석은 이 묶음에서 안 고쳤다(T3 파일)
 
     def test_the_rule_table_and_the_name_tables_carry_the_new_workflow(self):
         security = doc("docs/SECURITY_GUARDRAILS.md")
@@ -980,7 +980,7 @@ class DocumentedBehaviorTest(unittest.TestCase):
                        "승인 대기", "승인 단추를 누르지 말고",           # 봇이 만든 PR 은 `pull_request` 워크플로를 승인 대기로 만든다(공식 문서·봇 PR #13 기록) — 운영자가 누르지 않게 안내한다
                        "사라질 것으로 봅니다", "그대로 공개", "`@이름`", "첫 번째 커밋의 제목"):
             self.assertIn(needle, merge, needle)
-        self.assertNotIn("병합하면 그 승인 대기는 끝납니다", merge)                      # 관측은 봇 PR #13 이 닫힐 때의 failure 뿐 — 단정하지 않는다
+        self.assertNotIn("병합하면 그 승인 대기는 끝납니다", merge)                      # 승인 없이 병합했을 때의 결과는 아직 미관측(2026-11-07 첫 관측은 병합 직전에 운영자가 그 실행을 다시 돌린 경우) — 단정하지 않는다
         guide = doc("인수인계/운영자_요청함_사용법.md")
         for needle in ("이미 만들어져 있으면", "Pull requests", "노란", "승인 대기", "승인하지 않아도 됩니다", "사라질 것으로 봅니다", "그대로 공개", "`@이름`"):
             self.assertIn(needle, guide, needle)
@@ -988,6 +988,40 @@ class DocumentedBehaviorTest(unittest.TestCase):
         runbook = doc("docs/AGENT_RUNBOOK.md")
         self.assertIn("병합 가지를 올리면", runbook)
         self.assertIn("`[공통] 병합 부탁 PR 자동 만들기`", runbook)
+
+    def test_the_first_real_run_of_2026_11_07_is_recorded_as_observed_facts_where_the_documents_waited_for_it(self):
+        """2026-11-07 첫 실제 실행(블로그 PR #148) 뒤, '첫 관측으로 확인한다' 던 문장들을 관측한 사실로 고쳤다(변경 이유). 위 시험이 못박은 '사라질 것으로 본다/봅니다' 는 **그대로** 남는다 —
+        승인 없이 병합했을 때의 기대이고 그 경우는 아직 미관측이기 때문이다(PR #148 은 병합 12초 전에 운영자가 그 실행을 다시 돌려 건너뜀으로 끝났다). 그래서 여기서는
+        ① 관측한 사실(날짜·PR 번호·설정이 이미 켜져 있었음·병합 커밋 작성자·미관측으로 남은 것)이 적혀 있고 ② 옛 '관측 대기' 문장이 되살아나지 않았는지를 본다.
+        워크플로 머리 주석(`.github/workflows/auto-pr.yml`)은 워크플로 파일이라(T3) 이 묶음에서 고치지 않았고, 그래서 위 머리 주석 시험은 그대로다."""
+        architecture = doc("docs/ARCHITECTURE.md")
+        section = architecture[architecture.index("## 4-6-3."):]
+        section = section[:section.index("\n## ", 5)] if "\n## " in section[5:] else section
+        for needle in ("첫 관측(2026-11-07, 블로그 PR #148)", "승인 없이 병합했을 때 이 실행이 사라지는지·남는지는 미관측", "블로그 저장소는 첫 관측에서 이미 켜져 있었다", "데스크톱 저장소는 첫 관측 대기",
+                       "작성자는 PR 작성자인 `github-actions[bot]`, 커미터는 GitHub", "첫 실행(2026-11-07 01:26", "실제 403 문구는", "러너(ubuntu)의 실제 로캘은"):
+            self.assertIn(needle, section, needle)
+        for stale in ("첫 관측으로 확인한다", "봇으로 찍힐 수 있다(미관측)", "가짜 `gh` 와 actionlint 로만 확인했고 첫 실행에서 관측한다"):
+            self.assertNotIn(stale, section, stale)
+        merge = doc("인수인계/PR_병합_방법.md")
+        for needle in ("블로그 저장소는 **이미 켜져 있었습니다**", "첫 관측 2026-11-07", "승인하지 않고 병합했을 때 그 줄이 어떻게 되는지는 아직 못 봤습니다"):
+            self.assertIn(needle, merge, needle)
+        for stale in ("이미 켜져 있을 수 있습니다", "(첫 관측으로 확인합니다)"):
+            self.assertNotIn(stale, merge, stale)
+        guide = doc("인수인계/운영자_요청함_사용법.md")
+        for needle in ("블로그 저장소는 이미 켜져 있었습니다", "첫 관측 2026-11-07", "승인하지 않고 병합했을 때는 아직 못 봤습니다"):
+            self.assertIn(needle, guide, needle)
+        self.assertNotIn("첫 관측으로 확인합니다", guide)
+        self.assertIn("블로그 저장소는 2026-11-07 첫 관측에서 이미 켜져 있었다", doc("docs/AGENT_RUNBOOK.md"))
+        actions = doc("docs/ACTIONS_GUIDE.md")
+        chapter = actions[actions.index("### 6-18."):]
+        chapter = chapter[:chapter.index("\n### ", 5)] if "\n### " in chapter[5:] else chapter
+        for needle in ("첫 관측 2026-11-07, 블로그 PR #148", "블로그 저장소는 첫 관측에서 이미 켜져 있었습니다"):
+            self.assertIn(needle, chapter, needle)
+        self.assertNotIn("(첫 관측으로 확인합니다)", chapter)
+        register = doc("docs/DEFECT_REGISTER.md")
+        row = next(line for line in register.splitlines() if line.startswith("| 병합 부탁 PR 자동 만들기(G-A12) 병합 뒤 첫 병합 가지 push |"))
+        for needle in ("**→ 관측 결과(2026-11-07, 서버에서 직접", "PR #148", "이미 켜져 있었다", "`action_required`", "승인 없이 병합했을 때 그 실행이 사라지는지·남는지는 미관측", "실제 403 문구"):
+            self.assertIn(needle, row, needle)
 
 
 if __name__ == "__main__":

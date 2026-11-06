@@ -41,7 +41,7 @@ python -X utf8 인수인계/도구/setup_workspace.py <작업 폴더 W>
 |---|---|---|
 | `runs_by_sha.py` | `python -X utf8 runs_by_sha.py <소유자/저장소> <sha7> […]` | 한 번의 읽기로 여러 커밋의 실행 상태를 보인다 |
 | `wait_ci_multi.py` | `python -X utf8 -u wait_ci_multi.py <소유자/저장소> <최대 분> <간격 초> <커밋 SHA 전체> […]` | 여러 브랜치 머리의 검사가 끝나길 기다린다(공개 REST 한 건씩, 시간당 60회 한도를 아낀다) |
-| `wait_ci.py` | (`make_request.py` 가 불러 쓴다) | 병합 브랜치의 검사가 초록인지 공개 웹 목록으로 확인 |
+| `wait_ci.py` | (`make_request.py` 가 불러 쓴다) | 병합 브랜치의 검사가 초록인지 공개 웹 목록으로 확인(내장 JSON 이 없으면 목록 HTML → 공개 REST 순으로 읽는다). **관문(`make_request.py`)과 `wait_ci.py` 는 봇이 만든 PR 의 알려진 '승인 대기' 실행 — `[공통] PR 변경 범위 검사` 의 `action_required` — 를 초록으로 센다**(`run_ok`; 자동 PR 첫 관측 2026-11-07 — 봇이 만든 PR 에는 이 실행이 job 없이 승인 대기로 생긴다). 다른 이름의 `action_required`·실패·취소는 초록이 아니고, 시험은 `tests/test_wait_ci_gate.py` |
 | `ci_web.py` | `python -X utf8 ci_web.py <소유자/저장소> [개수] [페이지 경로]` | **REST 한도(시간당 60회)를 다 썼을 때** 쓰는 읽기 도구 — 공개 Actions 웹 페이지에 실린 JSON 만 읽어 최근 실행 N 개(번호·상태·브랜치·걸린 시간·제목)를 한 줄씩 보인다(로그인·API 없음) |
 | `run_steps_times.py`·`run_annotations.py` | `python -X utf8 run_steps_times.py <소유자/저장소> <run id> [주석 1/0]` | 한 실행의 job·단계 결과와 **단계별 소요 시간**·주석을 읽는다(실패 원인은 주석에 있다) |
 | `watch_light.py`·`watch_desktop.py` | `cd W/scratch && WATCH_SINCE=$(date +%s) python -X utf8 -u watch_light.py` | 블로그/데스크톱 저장소를 **API 한도 없이**(git ls-remote + 공개 웹) 지켜보며 새 PR·병합(main 이동)·새 실패 실행·소유자 이슈·`텔레그램수신` 이슈를 한 줄씩 알린다. **한 번 켜면 29분 뒤 끝나므로 끝났다는 알림이 오면 다시 켠다**(Claude 의 Monitor 도구로 돌린다) |

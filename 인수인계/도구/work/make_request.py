@@ -47,7 +47,7 @@ def default_gate(gate_target, workspace):
     runs = wait_ci.runs_for(gate_repo, gate_branch, head[:12])
     if not runs:
         sys.exit(f"머리 커밋 {head[:8]} 의 자동 검사 실행이 목록에 없다 — 아직 시작 전이거나 검사가 안 도는 브랜치다. 검사가 끝나 초록인 것을 확인한 뒤에 다시 실행한다")
-    bad = [r for r in runs if r["status"] != "completed" or r["conclusion"] not in wait_ci.OK_CONCLUSIONS]
+    bad = [r for r in runs if r["status"] != "completed" or not wait_ci.run_ok(r)]      # 봇 PR 의 알려진 '승인 대기' 실행(action_required)은 초록으로 센다(wait_ci.run_ok)
     if bad:
         sys.exit("검사가 아직 끝나지 않았거나 초록이 아니다: " + ", ".join(f"{r['id']}({r['status']}/{r['conclusion'] or '-'})" for r in bad))
     print(f"검사 관문 통과: {gate_target} @ {head[:8]} — 실행 {len(runs)}건 모두 끝나 초록(" + ", ".join(r["timing"] for r in runs) + ")")
