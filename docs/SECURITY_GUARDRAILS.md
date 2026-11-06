@@ -53,6 +53,7 @@
 | G-A9 | 워크플로 문법·표현식 오류는 `actionlint`로 푸시 전에 잡는다 | 자동: CI `guardrails.yml` |
 | G-A10 | 승인 흐름(Chance `publish_flow: pr`)의 권한은 필요한 만큼만 쓴다: `chanceblog.yml`만 `pull-requests: write`(초안 PR 열기·라벨 붙이기, 직접 게시에서는 쓰지 않는다), `watchdog.yml`은 `pull-requests: read`(열린 초안 PR 세기). 초안 브랜치는 `ai/draft/<날짜>-s<슬롯>`·`-m<HHMMSS>` 형식에서만 만들고 지우며(다른 이름은 건드리지 않는다) 열린 PR 이 있는 브랜치는 지우지 않는다. 자동 삭제(병합·닫은 지 7일 뒤)는 봇이 만든 임시 브랜치에 한정되고 §3의 '브랜치 삭제'에 닿으므로 승인 흐름을 켜는 T3 승인에 포함된다. `GITHUB_TOKEN`은 환경변수로만 받고 로그·오류·요약에 쓰지 않으며, `::error::`·`::warning::`에는 외부 문자열이 없는 고정 문장만 쓴다. `GITHUB_TOKEN`이 연 PR 에는 검사 워크플로가 돌지 않는다(G-A6과 같은 GitHub 규칙) — 병합 전에 사람이 글을 읽는 것이 유일한 검증이다 | 자동: `tests/test_chance_draft_workflow.py`(권한·단계 조건 고정)·`tests/test_draft_flow.py`·`tests/test_drafts.py`, **WF-1** / 코드 |
 | G-A11 | **가드레일 검사(`guardrails.yml`)는 PR(`pull_request`)로 돌지 않고 어느 브랜치든 push 로 돈다**(운영자 요청 2026-11-04 — PR 화면에 새로 도는 검사·건너뜀 줄이 없게). main 이 아닌 브랜치 push 는 검증 전에 `origin/main` 을 가져와 **러너 안에서만** 시험 병합한다: `git fetch`·`git merge` 만 쓰고 `git push`·원격 변경·`--global`/`--system` 설정·`pull_request_target`·`workflow_run`·새 시크릿·외부 호출은 없으며, 브랜치 이름 같은 이벤트 값은 어떤 명령에도 끼우지 않는다(임시 신원은 이 저장소 폴더의 로컬 설정). 충돌·가져오기 실패·기준을 못 구함·병합 결과가 main 끝을 담지 않음은 모두 건너뛴 초록이 아니라 단계 실패다. 광고 표면 검사(G-C6)의 기준은 시험 병합 직전의 `origin/main` 끝이다(merge-base 가 아니다 — main 이 앞서 간 만큼 이 브랜치의 변경으로 오탐하지 않게). `alert`(main 실패 텔레그램)의 `github.ref` 조건·`contents: read`·액션 버전 고정은 그대로다. 포크에서 온 PR 은 push 가 없어 이 검사가 돌지 않는다 | 자동: `tests/test_guardrails_precheck.py`(트리거 모양·단계를 한 줄씩 고정·진짜 git 으로 시험 병합 시나리오·진짜 검증기), `tests/test_pr_ready_workflows.py` / 정책 |
+| G-A12 | **병합 부탁 PR 자동 만들기(`auto-pr.yml`)는 PR 만 만들고 병합하지 않는다**(운영자 확인 003 의 ②, 2026-11-06). 트리거는 `push` 하나·가지 `ai/claude/M###-*`·`ai/claude/M####-*` 뿐이고(`pull_request_target`·`workflow_run`·`issue_comment`·`schedule` 금지), 권한은 `contents: read`·`pull-requests: write`·`actions: read` 셋뿐이다(병합에 필요한 contents 쓰기가 없다). `uses:`·시크릿·체크아웃이 없고 러너의 `gh` 로 정해진 API 여섯 가지만 부른다(병합·승인·라벨·코멘트·가지 삭제·설정 변경·다른 워크플로 실행 호출 금지). 가지 이름·커밋 제목·본문은 AI 가 쓴 글이라 값은 env 로만 넘기고 `run:` 에 GitHub 표현식(달러 기호와 이중 중괄호)을 끼우지 않으며 쓰기 전에 모양을 정규식으로 거르고 로그·요약에는 고정 문장과 PR 번호만 쓴다. PR 을 만들지 않는 모든 경우(검사 실패·취소·가지 끝 변경·이미 PR 있음·권한 오류·시간 초과)는 실패가 아니라 경고와 함께 성공으로 끝난다(운영자가 빨간 표시를 검사 실패로 오해하지 않게). 저장소 설정 'Allow GitHub Actions to create and approve pull requests' 는 운영자만 켠다(이 설정은 워크플로의 PR '승인'도 허용하므로 승인 호출을 넣는 변경은 받지 않는다). push 로 도는 워크플로는 push 한 커밋의 파일 그대로 돌므로(`ai-request.yml` 과 같은 신뢰 경계) 이 파일을 바꾸는 변경은 T3 로 다룬다(워크플로는 CHARTER §5 표에서는 T2 인데 PR 만들기 권한과 저장소 설정 한 줄에 닿는 보안 영역이라 운영자 승인 병합으로 올린다). 커밋 제목·본문은 PR 로 그대로 공개되므로 비밀·키·`@이름` 멘션을 쓰지 않는다 | 자동: `tests/test_auto_pr_workflow.py`(모양 고정 + 일부러 망가뜨린 사본 19개 + 가짜 `gh` 로 bash 를 돌리는 동작 시험), **WF-1**·**WF-3**·**WF-4**·**WF-5** / 정책 |
 
 ### 2.3 AI·LLM (G-L)
 
@@ -111,6 +112,7 @@
 - 텔레그램 알림의 수신 채팅 추가·변경(수신자는 운영자 본인 한 명), 알림 코드에 외부 라이브러리·외부 액션 도입, 알림에 공개되지 않는 정보 싣기(G-C12)
 - 운영자 응답 이슈의 효력을 그 요청에 적힌 항목 밖으로 넓히기(요청에 없는 T3 를 `승인` 답으로 진행), 양식 밖의 이슈·코멘트·`[요청]` 양식이나 소유자가 아닌 계정의 이슈를 승인으로 보기, 접수·알림 워크플로의 트리거·권한·시크릿 위치 넓히기(G-S9·G-C13)
 - 텔레그램 수신 글(라벨 `텔레그램수신` 이슈)을 승인으로 처리하기, 텔레그램 수신 워크플로의 트리거·권한·허용 계정 조건·시크릿 위치 넓히기, 웹훅(`setWebhook`) 만들기, 수신 글을 명령으로 실행하기(G-S10)
+- 병합 부탁 PR 자동 만들기 워크플로(`auto-pr.yml`)의 트리거·가지 필터·권한(contents 쓰기·승인·코멘트·라벨)을 넓히거나 병합·승인·삭제 호출을 넣기, 저장소 설정 'Allow GitHub Actions to create and approve pull requests' 를 AI 가 바꾸기(G-A12)
 - 분석·추적 코드(GA 등)나 외부 스크립트를 사이트에 삽입 (`<head>` 변경이며 개인정보처리방침에 영향)
 - 글·파일·브랜치 삭제, force push, 히스토리 재작성, 다른 저장소 수정
 - 자동 commit/push 스크립트·예약 작업·Webhook 생성
@@ -151,6 +153,7 @@
 | main 브랜치 룰셋: **삭제 차단과 force push 차단만** 켜기(권장). PR 필수·코드 오너 승인 필수·상태 검사 필수·서명 필수는 **켜지 않는다** | 자동 발행은 봇(`github-actions`)이 main에 직접 push하므로 그 규칙을 켜면 발행이 멈춘다(운영자 결정 2026-10-25). 켜려면 봇을 우회 대상에 넣을 수 있는지 먼저 확인해야 한다(미검증). 1인 저장소에서 '코드 오너 검토 필수'는 본인이 연 PR을 본인이 승인할 수 없다. 낡은 사본 덮어쓰기 같은 사고는 CI가 사후 탐지한다 |
 | GitHub·Google 계정 2단계 인증 | 계정 탈취 방지 |
 | (선택) 텔레그램 알림: 시크릿 `TELEGRAM_BOT_TOKEN`·`TELEGRAM_CHAT_ID` 등록과 `[공통] 텔레그램 알림 시험` 1회 실행 | 값은 운영자만 GitHub 화면에 입력할 수 있다(G-C12). 등록하지 않으면 알림은 조용히 꺼져 있다. 순서: [`TELEGRAM_SETUP.md`](../.github/editorial/TELEGRAM_SETUP.md) |
+| (선택) 병합 부탁 PR 자동 만들기: Settings → Actions → General → Workflow permissions → `Allow GitHub Actions to create and approve pull requests` 체크 | 꺼져 있으면 `[공통] 병합 부탁 PR 자동 만들기` 가 PR 을 못 만들고 경고만 남긴다(노란 배너로 만들면 된다, G-A12). `[Chance] 이슈 수정 요청 처리(수정안 PR 만들기)` 도 같은 설정을 쓴다. 이 설정은 워크플로의 PR '승인'도 허용하지만 이 저장소는 승인 필수 규칙을 켜지 않고(위 main 룰셋 행) 자동 만들기에는 승인 호출이 없다 — 켜는 것은 설정 변경이라 운영자만 한다 |
 
 ## 6. 자동 검증 매핑
 
@@ -177,6 +180,7 @@
 | DOC-1, AGENT-1 | 깨진 문서 링크, AI 지침 파일 | CHARTER P10 |
 | DEP-1 | 버전 범위 없는 설치 | G-A5 |
 | EXPOSE-1 | 내부 문서가 사이트에 공개됨(2026-10-26 `exclude`로 해결, 경고 사라짐) | D-08 |
+| (시험) `tests/test_auto_pr_workflow.py` | 병합 부탁 PR 자동 만들기(`auto-pr.yml`)의 트리거(push 하나·가지 필터 둘)·권한 셋·`uses:`·시크릿·`run:` 안 GitHub 표현식 없음·병합 호출 없음·`gh` 호출 여섯 가지만·일부러 망가뜨린 사본 19개가 모두 걸림·가짜 `gh` 로 bash 를 돌려 검사 실패·취소·가지 끝 변경·권한 오류·제목 속 셸 문자까지 — 검증기(WF-*)가 아니라 이 시험이 모양을 지킨다 | G-A12 |
 | PY-1, JSON-1 | 문법 오류 | — |
 
 런타임 게이트 코드: `TITLE_LEN`·`TITLE_BANNED`·`TITLE_TOPIC`·`LEN_SHORT`·`LEN_LONG`·`LANG`·`STRUCT_H3`·`STRUCT_LIST`·`BANNED`·`LEAK`·`BODY_TOPIC`·`LABELS`·`DUP_SAME`·`DUP_OTHER`·`PARSE`. `TITLE_TOPIC`(제목)·`LABELS`(라벨)·`BODY_TOPIC`(본문)이 G-C4의 세 지점이고, `tests/test_gates.py`가 게이트가 내는 코드가 이 줄에서 빠지지 않았는지 대조한다.

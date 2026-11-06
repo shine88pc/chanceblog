@@ -556,6 +556,8 @@ PREVIOUS_NAMES = {
     "운영자 응답 접수": "[공통] 운영자 응답 접수",
     # 텔레그램 수신(2026-11-04, 예약 읽기)도 처음부터 접두사와 함께 만들었다
     "텔레그램 수신 가져오기": "[공통] 텔레그램 수신 가져오기",
+    # 병합 부탁 PR 자동 만들기(2026-11-06)도 처음부터 접두사와 함께 만들었다
+    "병합 부탁 PR 자동 만들기": "[공통] 병합 부탁 PR 자동 만들기",
     # 영문·한글로 나눈 Blogger 워크플로(2026-10-27): 한글 래퍼와 공용 워크플로도 접두사 뗀 모양을 둔다(영문의 옛 이름은 위 `Blogger 글 자동 작성`)
     "Blogger 한글 글 자동 작성": "[Blogger 한글] 글 자동 작성",
     "Blogger 글 작성 공용(직접 실행하지 마세요)": "[내부] Blogger 글 작성 공용(직접 실행하지 마세요)",
@@ -618,6 +620,7 @@ class NamePrefixTest(unittest.TestCase):
         "ai-request.yml": "[공통] AI 요청 텔레그램 알림",
         "operator-reply.yml": "[공통] 운영자 응답 접수",
         "telegram-inbox.yml": "[공통] 텔레그램 수신 가져오기",
+        "auto-pr.yml": "[공통] 병합 부탁 PR 자동 만들기",           # 병합 부탁 PR 자동 만들기(운영자 확인 003 의 ②, 2026-11-06) — run-name 은 두지 않는다(실행 제목은 push 한 커밋 제목)
     }
 
     def test_every_workflow_has_its_approved_name(self):
