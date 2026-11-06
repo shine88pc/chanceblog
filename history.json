@@ -261,5 +261,17 @@
     "lane": "culture",
     "source": "Pew Research Center",
     "source_url": "https://www.pewresearch.org/short-reads/2026/11/05/lgbtq-americans-stand-out-for-being-part-of-online-communities-finding-value-in-them/"
+  },
+  {
+    "date": "2026-11-06",
+    "topic": "Tourism generates more than one in every 10 euros of value added in the EU",
+    "kr_title": "EU 부가가치의 10유로 중 1유로 이상은 관광에서: 경제적 파급효과와 지속 가능한 전환",
+    "en_title": "Tourism Generates Over 1 in Every 10 Euros of EU Value Added: Economic Multipliers and Sustainable Tourism",
+    "kr_image": "https://images.unsplash.com/photo-1507840771025-26e8ececa04c?ixid=M3wxMTA2NzEwfDB8MXxzZWFyY2h8MXx8c3VzdGFpbmFibGUlMjB0b3VyaXNtJTIwZXVyb3BlfGVufDF8MHx8fDE3OTM5NjI3MTV8MA&auto=format&fit=crop&w=1000&q=80",
+    "en_image": "https://images.unsplash.com/photo-1570161766218-f8488ebb8078?ixid=M3wxMTA2NzEwfDB8MXxzZWFyY2h8Mnx8c3VzdGFpbmFibGUlMjB0b3VyaXNtJTIwZXVyb3BlfGVufDF8MHx8fDE3OTM5NjI3MTV8MA&auto=format&fit=crop&w=1000&q=80",
+    "slot": 18,
+    "lane": "science",
+    "source": "European Commission, Joint Research Centre",
+    "source_url": "https://joint-research-centre.ec.europa.eu/jrc-news-and-updates/tourism-generates-more-one-every-10-euros-value-added-eu-2026-11-04_en"
   }
 ]
