@@ -7,6 +7,36 @@
 
 ---
 
+## [2026-11-06] Claude – 병합 부탁 PR 자동 만들기 워크플로(`auto-pr.yml`) 준비 (T3 — 병합 전·독립 검증 전, 켜는 것은 병합 부탁으로 따로)
+
+**작업자**: Claude (구현자). 병합은 운영자가. 독립 검증은 구현자와 다른 주체가 새 clone 에서 따로 한다(워크플로·보안 영역이라 필수).
+**대상**: 공통 — `.github/workflows/auto-pr.yml`(새)·`tests/test_auto_pr_workflow.py`(새)·`tests/test_workflow_names.py`(이름 표)·`tests/test_operator_loop_workflows.py`(워크플로 개수 18→19)·`tests/test_blogger_split.py`(확인 필요 모음이 실행을 읽는 워크플로 파일 개수 18→19)·문서(`docs/ARCHITECTURE.md` 표·§4-6-3·§9, `docs/AGENT_RUNBOOK.md` §5·J3 5, `docs/SECURITY_GUARDRAILS.md` G-A12·§3·§5·§6, `docs/ACTIONS_GUIDE.md` 6-18, `docs/REQUEST_BRIEFING.md`, `docs/DEFECT_REGISTER.md` 관측 한 줄, `인수인계/PR_병합_방법.md`, `인수인계/운영자_요청함_사용법.md`). 데스크톱 저장소에도 같은 기능의 워크플로를 따로 준비했다(그쪽 기록은 데스크톱 `docs/DECISIONS.md`).
+**등급**: T3 취급(워크플로는 `docs/CHARTER.md` §5 표에서는 T2 인데 PR 만들기 권한과 저장소 설정 한 줄에 닿는 보안 영역이라 운영자 승인 병합 + 독립 검증 — 2026-11-07 독립 검증의 지적으로 인용을 표와 맞게 고침).
+**목적**: 운영자의 병합 절차(폰 → GitHub PC 버전 → 노란 배너 → Create pull request → 병합)에서 'PR 만들기' 단계를 없애 병합 한 번만 누르게 한다(운영자 확인 003 에서 ② 'PR 만들기만 자동화'를 고름, 2026-11-06 20:18). **병합은 하지 않는다.**
+
+### 변경 사항
+- `auto-pr.yml`(`[공통] 병합 부탁 PR 자동 만들기`): 트리거는 `push` 하나·가지 `ai/claude/M###-*`·`ai/claude/M####-*` 뿐(요청 가지 `NO-MERGE-…` 에는 안 돎). 권한 `contents: read`·`pull-requests: write`·`actions: read`. `uses:`·시크릿·체크아웃 없이 러너의 `gh` 로 API 여섯 가지만 부른다(커밋 메시지·기존 PR 목록·가지 끝·검사 실행·main 과의 거리·PR 만들기 한 번). 가지 이름·커밋 제목이 같은 번호이고 가지의 PR 이 없고 가지 끝이 아직 이 커밋이고 `guardrails.yml` 이 성공이고 main 위 한 커밋(`ahead_by` 1)일 때만, 30초 간격·최대 40분 기다린 뒤 PR 을 만든다. PR 을 만들지 않는 모든 경우(검사 실패·취소·가지 끝 변경·이미 PR 있음·시간 초과·GitHub 응답 연속 5회 못 읽음·저장소 설정 꺼짐 403)는 **실패가 아니라 경고와 함께 성공**으로 끝난다 — 운영자가 PR 화면의 빨간 표시를 검사 실패로 오해하지 않게. 값은 모두 `env:` 로만 넘기고 `run:` 에 표현식이 없으며 쓰기 전에 정규식으로 거른다. 로그·요약에는 고정 문장과 PR 번호만 쓴다.
+- 시험 `tests/test_auto_pr_workflow.py`: ① 모양(트리거·권한·`uses:`·시크릿·병합 호출·`gh` 주소 순서까지) + **일부러 망가뜨린 사본 19개가 모두 걸리는지** ② 가지 필터(글로브)와 스크립트 정규식이 같은 가지를 가리는 표 23줄 ③ 진짜 bash 로 `run:` 을 돌리는 동작 시험 25개(가짜 `gh` 는 셸 함수 — 정상·제목 번호 불일치·길이 경계 200/201·제어 문자·가지 이름 규칙 밖·이미 PR 있음·검사 실패/취소/시간 초과·가지 끝 변경·ahead 2→1·검사 진행 중→성공·기다림 시간 초과·연속 5회 읽기 실패·기다리는 사이 직접 만든 PR·권한 오류·제목·본문의 셸 문자·CRLF) ④ 문서 문구.
+- 기존 시험 세 곳을 의도적으로 갱신: `test_workflow_names.py` 의 이름 표 2곳(새 워크플로의 이름과 접두사 없던 시절의 이름), `test_operator_loop_workflows.py` 의 워크플로 개수 18→19, `test_blogger_split.py` 의 '확인 필요 모음이 실행을 읽는 워크플로 파일 개수' 18→19(첫 전체 실행에서 이 한 줄만 빨갰다 — 모음은 main 의 실행만 읽고 이 워크플로는 main 에서 돌지 않아 항목이 생기지 않으며 호출만 한 번 는다, 한도 150 안).
+
+### 증거
+- **전체 시험**: `python -X utf8 -m unittest discover -s tests` — **5,491개 통과**(이 PC 24분, 워크플로·시험·문서를 확정한 뒤의 두 번째 전체 실행). 첫 전체 실행(5,490개)에서는 `test_blogger_split` 의 워크플로 파일 개수 한 줄만 빨갛게 나와 위 '기존 시험 세 곳' 으로 고쳤다. 그 뒤 워크플로 머리 주석·문서 문장·이 증거 줄만 바뀌어 문서를 읽는 시험 모듈과 새 시험의 정적·문서 부분은 다시 돌려 통과했다. 새 시험 `test_auto_pr_workflow` 40개(모양 8·변이 1(사본 19개)·가지 표 3·동작 25·문서 3)는 3.12 와 3.10 에서 모두 통과한다. 검증기 `python scripts/validate_repo.py --root .` 오류 0건·경고 2건(기존 LIQUID-1). 스크립트 논리를 한 곳씩 일부러 틀리게 고친 사본 18개(ahead 비교·가지 끝 비교·제목 검사·길이 한도·제어 문자·연속 실패 횟수·403 분류·본문 전달·기존 PR 수·`--state all`·기다림 한도·두 번째 PR 확인·따옴표·검사 상태 식·compare 기준 등) 중 17개를 동작 시험이 잡았다 — 못 잡은 1개(CR 제거 `tr -d '\r'`)는 이 PC 의 Git Bash 가 명령 치환·awk 에서 CR 을 스스로 지우기 때문이며 리눅스에서는 잡힐 것으로 본다(미관측).
+- 이 PC 에서 actionlint 1.7.12(`-shellcheck=` 로 셸 연동을 끈 채)와 shellcheck 0.11.0(actionlint 와 같은 제외 목록·`--shell=bash`, 꺼낸 스크립트에 직접)을 따로 돌려 둘 다 지적 0건 — **actionlint 가 shellcheck 연동으로 4096바이트가 넘는 스크립트를 파이프로 넘기면 이 PC(윈도)에서 멈춘다**(스크립트 내용과 무관, 크기 4097바이트에서 재현; 리눅스 CI 에서는 해당 없는 것으로 본다 — 미관측). 두 도구는 `C:\ccgui\tools` 에 공식 배포본(actionlint 는 게시된 체크섬 대조)으로 격리 설치했다.
+- 읽기 호출 세 가지의 실제 응답 모양은 공개 REST 로 읽어 확인했다(2026-11-06, 인증 없이: `git/ref/heads/<`/` 가 든 가지>` 200·`.object.sha`, `…/guardrails.yml/runs?head_sha=…&event=push&per_page=5` 200·실행 1개 `completed`·`success`, `compare/main...<sha>` 200·`ahead_by` 정수). 쓰기(`POST …/pulls`)·`gh pr list`(GraphQL)·`[0-9]` 가지 필터는 관측하지 못했다(가짜 `gh`·actionlint 로만). 첫 실제 병합 가지 push 에서 볼 것은 `docs/DEFECT_REGISTER.md` 관측 체크리스트의 맨 끝 줄에 있다.
+
+### 다음 AI 주의
+- 병합 가지의 **커밋 제목은 `[M번호] `(가지 이름의 번호와 같게)로 시작**해야 PR 이 만들어진다. 앞선 병합 전의 커밋을 품은 가지(쌓은 가지)는 `ahead_by` 가 1 이 되지 않아 PR 을 안 만든다.
+- **자동으로 만든 PR 은 `pull_request` 워크플로를 '승인 대기'로 만든다**(GitHub 공식 문서 'When GITHUB_TOKEN triggers workflow runs' + 이 저장소 봇 PR #13 의 기록: PR 을 만든 3초 뒤 `PR Scope Check`·`Guardrails` 실행이 만들어졌고 job 이 0개였으며 PR 을 닫자 failure 로 끝났다). 그래서 이 저장소 문서 곳곳의 '`GITHUB_TOKEN` 으로 연 PR 은 `pull_request` 워크플로를 시작시키지 않는다(예상)'(`docs/ARCHITECTURE.md` §4-4 의 초안 PR 표·`docs/OPS_INBOX.md`·`docs/ACTIONS_GUIDE.md` 의 봇 PR 설명·`docs/SECURITY_GUARDRAILS.md` G-A10)는 틀렸다 — 이 변경에서는 고치지 않고 새 절 §4-6-3 에만 바로잡아 적었다. 자동 만들기의 PR 은 병합 상자에 `[공통] PR 변경 범위 검사` 승인 대기가 보이고 확인 필요 모음이 '승인 대기'로 올릴 수 있다(승인은 필요 없다). 모음이 `ai/claude/M…` 의 승인 대기를 무시하게 고칠지는 따로 정한다.
+- 켜려면 저장소 설정 'Allow GitHub Actions to create and approve pull requests'(Settings → Actions → General → Workflow permissions)가 필요하다 — 이슈 수정 워크플로가 같은 설정을 쓰고 2026-10-25 에 그 설정으로 봇 PR #13 이 만들어졌으므로 그때는 켜져 있었다(지금도 켜져 있는지는 확인하지 못했다). 데스크톱 저장소는 봇이 만든 PR 이 하나도 없어(PR 29개 모두 운영자 작성) 꺼져 있을 가능성이 크다. 꺼져 있어도 경고만 남고 노란 배너로 진행한다. 이 설정은 워크플로의 PR '승인'도 허용하므로 워크플로에 승인 호출을 넣는 변경은 받지 않는다(시험이 막는다).
+- push 로 도는 워크플로는 push 한 커밋의 파일 그대로 돈다(`ai-request.yml` 과 같은 신뢰 경계). 이 파일을 바꾸는 변경은 T3 로 다루고, 시험의 `static_problems`·변이 19개를 함께 고친다.
+
+### 수정 1 (2026-11-07, 독립 검증 두 렌즈 반영 — 같은 가지 위의 새 WIP 커밋)
+- **로캘**: 제목 길이 검사 `${#title}` 가 로캘에 따라 글자·바이트로 달라 129자·293바이트 한국어 제목이 기본 로캘에서 '200자 초과'로 거절됐다 → 스크립트 첫머리에 `export LC_ALL=C.UTF-8`. 시험은 비윈도에서 `LC_ALL=C.UTF-8` 을 직접 줘 이 가정을 가렸으므로 일부러 `LC_ALL=C`(`POSIX`·로캘 변수 없음 포함)로 돌리고 129자 제목·한국어 200/201자 경계를 시험한다.
+- **시험 틈 메움**: 검사 결론 `skipped`·`neutral`·`action_required`·`stale`·`startup_failure`·결론 없음·실행 0개를 거절·기다림으로 시험, 쉬는 줄 `sleep "$poll"`·기본값(30초·2400초)을 가짜 sleep(시계를 앞으로 돌림)으로 시험, 가지·SHA 정규식 앵커·`ahead_by` 숫자 확인·본문 6만 바이트 한도(경계 60000/60001·바이트 기준)·CR 제거 줄·엄격 모드(`set -euo pipefail` 첫 줄)·deny-list(`perl`·`set +e`·`|| true`·`trap`)를 못박고 추가 변이 22개가 모두 걸리는지 시험한다.
+- **문서**: 커밋 제목·본문이 PR 로 그대로 공개된다는 문장·포크 PR 에서 안 도는 이유·PR 제목은 첫 push 때의 커밋 제목으로 고정된다는 문장·'병합하면 사라집니다' → '사라질 것으로 봅니다(첫 관측으로 확인)'·'T3' 의 근거를 CHARTER 표(워크플로는 T2)와 맞게·옛 가정이 남은 두 곳(`ops-inbox.yml` 주석·`pipeline/inbox.py` 주석)·알려진 한계 한 줄씩을 §4-6-3 에 적었다. 확인 필요 모음의 '승인 대기' 안내문(눌러서 시작)이 운영자 안내(누르지 말 것)와 반대인 것은 후속 T2 묶음 `DEFERRED`(코드는 이번에 바꾸지 않음).
+
+---
+
 ## [2026-11-06] Claude – TG-STD 텔레그램 알림 표준화: 알림 번호 P001·M001·001, 표준 메시지 3종, 새 답변 양식(대상번호) (T3 — 운영자 승인 계획 R-165, 병합 전·독립 검증 전)
 
 **작업자**: Claude (구현자). 병합은 운영자가. 독립 검증은 구현자와 다른 AI 가 따로 한다(`pipeline/` 코어·검증기·승인 채널이라 T2 필수).
