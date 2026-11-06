@@ -249,5 +249,17 @@
     "lane": "society",
     "source": "Statistics Canada",
     "source_url": "https://www.statcan.gc.ca/daily-quotidien/261102/dq261102a-eng.htm"
+  },
+  {
+    "date": "2026-11-06",
+    "topic": "LGBTQ Americans Stand Out for Being Part of Online Communities, Finding Value in Them",
+    "kr_title": "온라인 커뮤니티 속 LGBTQ 미국인들: 소속감과 가치 발견, 그리고 이탈의 그늘",
+    "en_title": "LGBTQ Americans and Online Communities: Finding Value, Facing Harassment, and Leaving",
+    "kr_image": "https://images.unsplash.com/photo-1727434032773-af3cd98375ba?ixid=M3wxMTA2NzEwfDB8MXxzZWFyY2h8Mnx8ZGlnaXRhbCUyMGNvbW11bml0eSUyMG5ldHdvcmslMjBhYnN0cmFjdHxlbnwxfDB8fHwxNzkzOTMyNDE4fDA&auto=format&fit=crop&w=1000&q=80",
+    "en_image": "https://images.unsplash.com/photo-1639322537228-f710d846310a?ixid=M3wxMTA2NzEwfDB8MXxzZWFyY2h8M3x8ZGlnaXRhbCUyMGNvbW11bml0eSUyMG5ldHdvcmslMjBhYnN0cmFjdHxlbnwxfDB8fHwxNzkzOTMyNDE4fDA&auto=format&fit=crop&w=1000&q=80",
+    "slot": 9,
+    "lane": "culture",
+    "source": "Pew Research Center",
+    "source_url": "https://www.pewresearch.org/short-reads/2026/11/05/lgbtq-americans-stand-out-for-being-part-of-online-communities-finding-value-in-them/"
   }
 ]
