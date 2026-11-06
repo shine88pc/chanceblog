@@ -252,5 +252,26 @@
     "attempts": 1,
     "reasons": [],
     "image": "9HykCSoVx5g"
+  },
+  {
+    "v": 1,
+    "blog": "blogger_macat",
+    "date": "2026-11-06",
+    "generated_at": "2026-11-06T18:05:11.282103+09:00",
+    "status": "draft_uploaded",
+    "topic": "A 5-minute night reset for an easier morning",
+    "topic_source": "seed",
+    "title": "A 5-Minute Night Reset for a Calmer Morning",
+    "labels": [
+      "evening routine",
+      "everyday habits",
+      "morning prep"
+    ],
+    "url": "https://macat0722.blogspot.com/",
+    "post_id": "3250975050207275929",
+    "model": "gemini-3.6-flash",
+    "attempts": 1,
+    "reasons": [],
+    "image": "ur4desGm6vY"
   }
 ]
