@@ -23,9 +23,7 @@ import validate_repo as vr  # noqa: E402
 GUIDE = ROOT / ol.GUIDE_PATH
 FOLDER_README = ROOT / ol.REQUEST_DIR / "README.md"
 TEMPLATES = ROOT / ".github" / "ISSUE_TEMPLATE"
-APPROVAL_SENTENCE = ("이슈 작성자 login 이 저장소 소유자이고 **그리고** `author_association` 이 `OWNER` 이며, 양식 `[답변]` 의 요청 번호가 AI 가 보낸 요청의 번호와 같을 때만 "
-                     "그 요청 파일에 적힌 항목에 한해서 승인으로 본다. 양식 `[요청]`·양식 밖의 빈 이슈·이슈 코멘트·요청서 파일은 접수만 하고 승인이 아니다"
-                     "(T3 가 필요하면 AI 가 번호 있는 `decision` 요청으로 다시 묻는다).")
+APPROVAL_SENTENCE = ("이슈 작성자 login 이 저장소 소유자이고 **그리고** `author_association` 이 `OWNER` 이며, 양식 `[답변]` 의 요청 번호(새 양식은 대상번호)가 AI 가 보낸 요청의 번호와 같고 새 양식에서는 선택이 그 요청 파일의 `approve` 보기와 같을 때만(옛 양식은 답변 `승인`) 그 요청 파일에 적힌 항목에 한해서 승인으로 본다. 대상번호만 올린 답(확인함)·양식 `[요청]`·양식 밖의 빈 이슈·이슈 코멘트·요청서 파일·텔레그램으로 받은 글은 접수만 하고 승인이 아니다(T3 가 필요하면 AI 가 번호 있는 `decision` 요청으로 다시 묻는다).")
 # 이 문장이 그대로 들어 있어야 하는 지침·정책 파일(운영자용 사용법은 쉬운 말로 따로 쓴다 — 아래 별도 시험)
 APPROVAL_FILES = ("AGENTS.md", "CLAUDE.md", "GEMINI.md", "HANDLER.md", ".github/copilot-instructions.md", "docs/CHARTER.md", "docs/ACTIONS_GUIDE.md",
                   "docs/SECURITY_GUARDRAILS.md", "인수인계/작업요청/README.md", "인수인계/요청함/README.md")
@@ -404,7 +402,8 @@ class OtherDocsAgreeTest(unittest.TestCase):
             text = rel_text(rel)
             self.assertIn(APPROVAL_SENTENCE, text, rel)
             self.assertEqual(text.count(APPROVAL_SENTENCE), APPROVAL_COUNTS.get(rel, 1), rel)      # 한 곳만 고쳐 모순되는 요약이 남는 것을 막는다
-        for needle in ("**그리고**", "`author_association`", "`OWNER`", "`[답변]`", "요청 번호", "그 요청 파일에 적힌 항목에 한해서", "`[요청]`", "접수만 하고 승인이 아니다", "`decision`"):
+        for needle in ("**그리고**", "`author_association`", "`OWNER`", "`[답변]`", "요청 번호", "그 요청 파일에 적힌 항목에 한해서", "`[요청]`", "접수만 하고 승인이 아니다", "`decision`",
+                       "대상번호", "`approve`", "대상번호만 올린 답(확인함)", "텔레그램으로 받은 글"):          # TG-STD: 새 양식의 승인 조건과 '확인함·텔레그램 글은 승인 아님'
             self.assertIn(needle, APPROVAL_SENTENCE, needle)
 
     def test_the_approval_sentence_is_what_the_code_does_with_each_form(self):

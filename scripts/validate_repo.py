@@ -603,6 +603,7 @@ def check_blogger_wrappers(root, files):
 AI_REQUEST_WORKFLOW = ".github/workflows/ai-request.yml"
 OPERATOR_REPLY_WORKFLOW = ".github/workflows/operator-reply.yml"
 REPLY_FORM = ".github/ISSUE_TEMPLATE/ai-reply.yml"
+ANSWER_FORM = ".github/ISSUE_TEMPLATE/ai-answer.yml"        # 새 `[답변]` 양식(대상번호·선택·내용, TG-STD)
 TASK_FORM = ".github/ISSUE_TEMPLATE/ai-task.yml"
 ISSUE_CONFIG = ".github/ISSUE_TEMPLATE/config.yml"
 _TELEGRAM_ENV = {"TELEGRAM_BOT_TOKEN": "${{ secrets.TELEGRAM_BOT_TOKEN }}", "TELEGRAM_CHAT_ID": "${{ secrets.TELEGRAM_CHAT_ID }}"}
@@ -796,8 +797,10 @@ def check_telegram_inbox_workflow(root, files):
 
 def check_request_files(root, files):
     """REQ-1: `인수인계/요청함/` 의 요청 파일(`R-001_짧은-영문-설명.md`)이 정해진 모양인지 — 파일 이름·앞머리(id·kind·title·summary·urgency·pr·created)·id 와 이름의 일치·
-    제목 80자·요약 300자·중복 id 없음. 이 모양을 지킨 파일만 push 때 텔레그램으로 알려진다(pipeline/operator_loop.py). README.md 는 설명 문서라 건너뛴다."""
-    out, seen = [], {}
+    제목 80자·요약 300자·중복 id 없음. 이 모양을 지킨 파일만 push 때 텔레그램으로 알려진다(pipeline/operator_loop.py). README.md 는 설명 문서라 건너뛴다.
+    알림 번호(TG-STD): `no` 가 있는 파일은 번호 모양·kind 와의 유형 일치(info=P·merge=M·그 밖=숫자)·유형별 칸·글자 수 상한·PR 제목 안전을 보고, **같은 알림 번호를 가진 파일이
+    둘이면 오류**(유형마다 번호가 따로 늘어 P012·M012·012 는 서로 다른 번호다). 번호가 NOTICE_NO_REQUIRED_FROM_R 이상인 파일은 `no` 가 필요하다 — 그보다 앞선 옛 파일은 옛 모양 그대로 통과한다."""
+    out, seen, seen_no = [], {}, {}
     prefix = loop_mod.REQUEST_DIR + "/"
     for rel in files:
         if not rel.startswith(prefix):
@@ -825,17 +828,24 @@ def check_request_files(root, files):
         if request.id in seen:
             out.append(err("REQ-1", f"요청 번호 {request.id} 가 {seen[request.id]} 와 같습니다 — 요청 번호는 파일마다 달라야 합니다(답 이슈가 어느 요청인지 가려야 합니다)", rel))
         seen.setdefault(request.id, rel)
+        if request.no:
+            if request.no in seen_no:
+                out.append(err("REQ-1", f"알림 번호 {request.no} 가 {seen_no[request.no]} 와 같습니다 — 알림 번호는 유형별로 파일마다 달라야 합니다"
+                                        "(`인수인계/도구/work/next_notice_no.py` 로 다음 번호를 구합니다)", rel))
+            seen_no.setdefault(request.no, rel)
     return out
 
 
-def _form_problems(data, title, label, fields, required, types, options, notice_phrases=(), defaults=None, examples=None):
+def _form_problems(data, title, label, fields, required, types, options, notice_phrases=(), defaults=None, examples=None, name=None):
     """이슈 양식 한 개(파싱한 data)가 loop_mod 의 정의와 같은지(FORM-1). 문제 문구 목록.
     notice_phrases: 맨 위 안내 글에 더 있어야 하는 문장들(`[요청]` 양식의 'T3 승인이 아닙니다' 등). defaults: {드롭다운 id: 미리 선택돼야 하는 선택지 번호} — 안전한 선택지가
     미리 골라져 있게(독립 검증 N-3: 요청 번호만 쓰고 올려도 `승인` 이 되지 않게). examples: {입력 항목 id: 예시} — 그 항목의 placeholder 가 정확히 예시이고 description 에도 예시가 있어야 한다
-    (요청 번호 칸의 예시가 운영자에게 보이는 꼴 `r001` 임을 지킨다 — 옛 `R-001` 로 되돌아가지 않게)."""
+    (요청 번호 칸의 예시가 운영자에게 보이는 꼴 `r001` 임을 지킨다 — 옛 `R-001` 로 되돌아가지 않게). name: 주면 양식 메뉴 이름이 정확히 그것이어야 한다(TG-STD: 옛 양식은 `(이전 R 번호용)` 표시, 새 양식은 `AI 확인 요청에 답하기(대상번호)`)."""
     if not isinstance(data, dict):
         return ["양식이 객체가 아닙니다"]
     problems = []
+    if name is not None and data.get("name") != name:
+        problems.append(f"name 은 정확히 `{name}` 여야 합니다(지금 {_shown(data.get('name'))}) — 새 알림이 안내하는 양식과 옛 R 번호 양식을 메뉴에서 가르는 이름이고 안내 문서가 그대로 인용합니다")
     if data.get("title") != title:
         problems.append(f"title 은 정확히 `{title}` 여야 합니다(지금 {_shown(data.get('title'))}) — 접수 워크플로가 제목 머리로 양식을 알아봅니다")
     if data.get("labels") != [label]:
@@ -884,7 +894,7 @@ def _form_problems(data, title, label, fields, required, types, options, notice_
 
 
 def check_operator_forms(root, files):
-    """FORM-1: 운영자 요청함의 이슈 양식 둘(`ai-reply.yml` `[답변]`, `ai-task.yml` `[요청]`)이 접수 코드(pipeline/operator_loop.py)와 같은 정의인지 —
+    """FORM-1: 운영자 요청함의 이슈 양식 셋(`ai-reply.yml` 옛 `[답변]`(이전 R 번호용), `ai-answer.yml` 새 `[답변]`(대상번호), `ai-task.yml` `[요청]`)이 접수 코드(pipeline/operator_loop.py)와 같은 정의인지 —
     제목 머리·라벨(`blog-control` 없음)·항목 id·항목 제목·종류·필수 여부·선택지 문구·맨 위 비밀 값 금지 안내(`[요청]` 은 'T3 승인이 아닙니다' 문장도, `[답변]` 은 '직접 고르세요' 문장도)·
     드롭다운의 미리 선택(`default`)·`[답변]` 양식의 요청 번호 칸 예시(placeholder·설명·안내 글이 운영자에게 보이는 꼴 `r001`, 2026-11-04) — 와 `config.yml`(빈 이슈 허용 유지·안내 링크 하나)."""
     if yaml is None:
@@ -893,12 +903,16 @@ def check_operator_forms(root, files):
     specs = (
         (REPLY_FORM, loop_mod.REPLY_TITLE_PREFIX, loop_mod.LABEL_REPLY, loop_mod.REPLY_FIELDS, loop_mod.REPLY_REQUIRED, loop_mod.REPLY_FIELD_TYPES,
          {"answer": [full for _, full in loop_mod.ANSWER_OPTIONS]}, (loop_mod.ANSWER_DIRECT_NOTICE, loop_mod.REQUEST_ID_NOTICE), {"answer": loop_mod.ANSWER_DEFAULT_INDEX},
-         {"request_id": loop_mod.REQUEST_ID_EXAMPLE}),
+         {"request_id": loop_mod.REQUEST_ID_EXAMPLE}, loop_mod.REPLY_FORM_NAME),
+        # 새 양식(TG-STD): 대상번호만 필수, 선택은 `선택 안 함` 이 미리 선택됨(안전값 — 대상번호만 올린 답은 승인이 아니다), 안내 글이 그렇게 말한다
+        (ANSWER_FORM, loop_mod.REPLY_TITLE_PREFIX, loop_mod.LABEL_REPLY, loop_mod.ANSWER_FIELDS, loop_mod.ANSWER_REQUIRED, loop_mod.ANSWER_FIELD_TYPES,
+         {"choice": list(loop_mod.CHOICE_OPTIONS)}, (loop_mod.TARGET_NOTICE, loop_mod.ANSWER_NOT_APPROVAL_NOTICE), {"choice": loop_mod.CHOICE_DEFAULT_INDEX},
+         {"target": loop_mod.TARGET_EXAMPLE}, loop_mod.ANSWER_FORM_NAME),
         (TASK_FORM, loop_mod.TASK_TITLE_PREFIX, loop_mod.LABEL_TASK, loop_mod.TASK_FIELDS, loop_mod.TASK_REQUIRED, loop_mod.TASK_FIELD_TYPES,
          {"urgency": list(loop_mod.TASK_URGENCY_OPTIONS), "approval": [full for _, full in loop_mod.TASK_APPROVAL_OPTIONS]},
-         (loop_mod.TASK_FORM_NOT_T3, loop_mod.TASK_FORM_NUMBERED_ASK), {"urgency": loop_mod.TASK_DEFAULT_INDEX, "approval": loop_mod.TASK_DEFAULT_INDEX}, None),
+         (loop_mod.TASK_FORM_NOT_T3, loop_mod.TASK_FORM_NUMBERED_ASK), {"urgency": loop_mod.TASK_DEFAULT_INDEX, "approval": loop_mod.TASK_DEFAULT_INDEX}, None, None),
     )
-    for rel, title, label, fields, required, types, options, notice_phrases, defaults, examples in specs:
+    for rel, title, label, fields, required, types, options, notice_phrases, defaults, examples, name in specs:
         if rel not in files:
             continue
         try:
@@ -906,7 +920,7 @@ def check_operator_forms(root, files):
         except yaml.YAMLError:
             out.append(err("FORM-1", "YAML 문법 오류", rel))
             continue
-        out.extend(err("FORM-1", message, rel) for message in _form_problems(data, title, label, fields, required, types, options, notice_phrases, defaults, examples))
+        out.extend(err("FORM-1", message, rel) for message in _form_problems(data, title, label, fields, required, types, options, notice_phrases, defaults, examples, name))
     if ISSUE_CONFIG in files:
         try:
             config = _load_yaml(read_text(root, ISSUE_CONFIG) or "")

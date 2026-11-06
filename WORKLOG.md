@@ -7,6 +7,38 @@
 
 ---
 
+## [2026-11-06] Claude – TG-STD 텔레그램 알림 표준화: 알림 번호 P001·M001·001, 표준 메시지 3종, 새 답변 양식(대상번호) (T3 — 운영자 승인 계획 R-165, 병합 전·독립 검증 전)
+
+**작업자**: Claude (구현자). 병합은 운영자가. 독립 검증은 구현자와 다른 AI 가 따로 한다(`pipeline/` 코어·검증기·승인 채널이라 T2 필수).
+**대상**: 공통 — `pipeline/notify.py`·`pipeline/operator_loop.py`·`pipeline/telegram_inbox.py`·`scripts/validate_repo.py`(REQ-1·FORM-1)·`.github/ISSUE_TEMPLATE/ai-answer.yml`(새)·`ai-reply.yml`(이름)·`ai-task.yml`(안내 한 문장)·`인수인계/도구/`(`next_notice_no.py`·`notice_tools.py`·`make_request.py`)·문서·시험. **워크플로·허용 주소·시크릿·수신 채팅·자동 알림은 바꾸지 않았다**(S0).
+**등급**: T3(운영자 답 접수의 양식·해석·승인 효력 문구 — 운영자 승인 범위 S1~S5) + `pipeline/` 코어·검증기 T2.
+**목적**: 운영자가 정한 알림 표준(2026-11-06 07:40, 이슈 #139)을 구현한다 — 번호는 유형별(진행 현황 `P001`·병합 요청 `M001`·확인 요청 숫자만 `001`, 요청 번호 `R-nnn` 은 작업 식별자로 그대로), 메시지 3종(진행 현황 5항목·병합 요청 5항목에 **PR 제목 글자 그대로**·확인 요청), 모바일 3칸 답변 양식(대상번호만 필수·대상번호만 올리면 '확인함'이고 **승인 아님**).
+
+### 변경 사항
+- `notify.py`: `NOTICE_NO_RE`·`notice_type`·`notice_no_text`·`pr_title_problem`·`format_progress`/`format_merge_request`/`format_ask`/`format_notice`·`format_answer_received`/`format_answer_error`·`Notifier.notify_notice`(PR 제목에 비밀 모양·보이지 않는 글자가 있으면 보내지 않음 — `REFUSED`).
+- `operator_loop.py`: `REQUEST_KEYS` 에 알림 번호 칸 17개, `notice_problem`(유형·kind 일치·필수 칸·상한·`default`≠`approve`), `Request` 확장(옛 파일은 기본값), 런타임은 새 칸이 틀려도 옛 모양으로 보내고 로그·경고, `request_buttons`(확인 요청은 새 양식 직접 열기·다른 저장소 PR 버튼 없음), 새 양식 읽기(`answer_form_kind`·`parse_target`·`parse_choice`·`answer_comment`·`earlier_answer` '대체')·새 양식 오류도 폰으로 회신.
+- `validate_repo.py`: REQ-1(알림 번호 중복·유형·PR 제목 안전, 요청 번호가 상수 `NOTICE_NO_REQUIRED_FROM_R` 이상이면 `no` 필요)·FORM-1(양식 셋·새 양식 `선택 안 함` 미리 선택·메뉴 이름). `telegram_inbox.py`: 세 줄 글을 '답변 후보(참고용)' 한 줄로만 인식(승인 아님).
+- 이슈 양식: `ai-answer.yml`(새)·`ai-reply.yml` 이름 `(이전 R 번호용)`. 도구: `next_notice_no.py`(유형별 최댓값+1, 모든 원격 가지)·`notice_tools.py`·`make_request.py`(`@NO@`·`@PR_TITLE@` 자리표시자). 문서: G-S9 한 문장(10개 파일)·G-S10·REQ-1·FORM-1·요청함 README·사용법 2~3장·ARCHITECTURE §4-6-2(설계 결정 TS-1~25)·AGENT_RUNBOOK J2·J3·J4·GLOSSARY·PR 병합 방법·작업내용 §0-5·크론 프롬프트 사본·본보기.
+
+### 증거
+- 새 시험 4모듈(3.12·3.10 통과): `test_notice_numbers` 48·`test_notice_requests` 54(요청 전용 가지의 옛 파일 전부 REQ-1 통과 포함)·`test_answer_form` 73·`test_notice_tools` 81. 옛 시험은 의도적 갱신 7곳(양식 이름·템플릿 목록·G-S9 문장·해시 둘·G-S10 낱말·사유 집합) 외 한 줄도 약화·삭제하지 않았고 영향 모듈(`test_operator_loop_*`·`test_notify*`·`test_telegram_inbox*`·`test_validate_repo`·문서 시험 등)이 통과.
+- 변이 점검(임시 사본에서 소스를 한 군데씩 망가뜨려 시험이 실패하는지 봄) 155곳 중 154곳을 시험이 잡았고 살아남은 변이는 동등 변이 하나(보고서 11장). 옛 요청 파일 143개(검증 시점의 요청 전용 가지 옛 모양 전부)를 변경 전·후 코드에 넣은 결과 차이 0건, 옛 코드가 새 모양 파일을 읽어도 제목·요약이 전달됨. S0 함수 81개 AST 변경 0.
+- 독립 검증 V1(승인 채널·메시지 무결성)은 '병합 가능'·V2(호환·번호·문서·S0·이행)는 '조건부 통과'(높음 0)였고 아래 '수정 1차' 로 중간 지적을 고쳤다. 실제 폰 확인은 아직 없다(폰 확인은 첫 확인 요청 `001` 로).
+
+### 수정 1차(독립 검증 V1·V2 반영 — 새 커밋 하나, 설계 결정 TS-21~TS-25)
+- **번호는 표준 표기만(TS-21)**: `P0012`·`0003` 처럼 앞에 0 을 더 붙인 네 자리는 번호가 아니다(`NOTICE_NO_RE`·`notice_type`·`parse_target`·REQ-1·`parse_request` 가 같은 함수). 접수 `parse_target('0003')` 는 쉬운 '번호 모양' 안내. 도구 `parse_no` 는 읽을 때만 넓게 세고 만들 때는 늘 표준 표기.
+- **도구의 PR 제목 점검(TS-22)**: `notice_tools.pr_title_problem` 이 런타임·검증기와 같은 비밀 모양 판정(`llm.mask` 사본 — 시험이 원본과 비교)과 비어 보이는 글자 8개(U+034F·115F·1160·17B4·17B5·2800·3164·FFA0, PR 제목에서만)를 거절. 비밀 모양 제목은 화면에도 되풀이하지 않는다.
+- **`make_request.py`(TS-24)**: 손으로 쓴 `no`·`pr_title` 을 만들기 전에 검사, `pr_title` 자동 채움은 커밋 메시지 첫 줄만.
+- **문서**: 옛 현황 알림 규칙('50분·매시간')을 새 규칙(230분·같은 내용 건너뜀·12시간 '변화 없음' 한 줄)으로 대체 표시(작업내용 §0-2·AGENT_RUNBOOK §2·AI_기억 사본), 옛 양식 이름만 안내한 지침·문서 8곳에 새 양식 안내, 상수 `NOTICE_NO_REQUIRED_FROM_R` 숫자는 코드 한 곳에만(TS-23), 요청 파일이 든 가지는 강제 푸시·되돌림도 하지 않는다(TS-25), 요청함 README 의 앞머리 닫는 줄 설명을 41번째 줄까지로 정정, FORM-1 의 '양식 파일이 없으면 건너뜀' 명시.
+- **시험**: `test_notice_numbers`(1..9999×3유형 표기 하나·앞 0 거절)·`test_answer_form`·`test_notice_tools`(도구·런타임·검증기 판정 일치 6천 표본·손으로 쓴 값)·`test_notice_requests`(옛 가지 시험은 가지가 없거나 적으면 건너뜀·문서에 낡은 숫자 없음).
+
+### 다음 AI 주의
+- **병합 직후에도 폰 모양은 그대로다.** 요청 전용 가지가 낡은 코드를 쓰므로 병합 뒤 main 에서 새로 만들고(옛 가지 보존) 상수 `NOTICE_NO_REQUIRED_FROM_R`(`pipeline/operator_loop.py` 한 줄 — 문서는 숫자를 적지 않는다)를 '모든 원격 가지의 옛 모양 최대 요청 번호 + 1' 이상으로 맞춘 뒤 크론 프롬프트(사본: 230분·5항목)를 갱신한다.
+- 알림 번호는 `인수인계/도구/work/next_notice_no.py` 로 정하고 `작업내용.md` §0-5 에 적는다. 확인 번호는 재사용 금지. 새 양식의 옛 R 번호(`r149`)는 접수만(승인은 옛 양식).
+- G-S9 한 문장·`G_S9_ROW_SHA256`·`AGENTS_RULE_8_SHA256` 이 개정됐다(시험이 고정) — 다시 바꾸려면 새 승인이 필요하다.
+
+---
+
 ## [2026-11-04] Claude – PC 이전 준비 'handoff': 도구 모음·AI 기억 사본·이어가기 절 (T0 — 문서·보조 스크립트만)
 
 **작업자**: Claude (총괄). 병합은 운영자가.
