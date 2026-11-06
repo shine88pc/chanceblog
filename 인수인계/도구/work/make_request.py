@@ -23,7 +23,16 @@ import next_notice_no as nn
 import notice_tools as nt
 
 HERE = Path(__file__).resolve().parent
-GATE_TARGET_MESSAGE = "병합 부탁에는 마지막 인자로 소유자/저장소:브랜치 가 필요하다(그 브랜치의 자동 검사가 끝나 초록인지 확인한다)"
+MERGE_LABEL_FROM = 176          # 이 요청 번호(R-176)부터 병합 PR 제목 `[M###] …`·가지 이름 `ai/claude/M###-…` 를 강제한다(운영자 지시 2026-11-06)
+
+
+def number_of(request_number):
+    """`R-176` → 176 (모양이 다르면 0 — 강제하지 않는다)."""
+    found = re.fullmatch(r"R-([0-9]+)", request_number)
+    return int(found.group(1)) if found else 0
+
+
+GATE_TARGET_MESSAGE ="병합 부탁에는 마지막 인자로 소유자/저장소:브랜치 가 필요하다(그 브랜치의 자동 검사가 끝나 초록인지 확인한다)"
 
 
 def default_gate(gate_target, workspace):
@@ -115,6 +124,17 @@ def main(argv=None, *, workspace=None, gate=None):
             shown = "(비밀로 보이는 글이라 화면에 적지 않는다)" if nt.looks_secret(pr_title) else pr_title      # 비밀 모양 제목을 터미널·로그에 되풀이하지 않는다
             sys.exit(f"병합 PR 제목을 그대로 쓸 수 없어 요청 파일을 만들지 않는다 — {problem}: {shown}")
         print(f"PR 제목(글자 그대로): {pr_title}  ← {source.name} 의 {title_ref} 머리 커밋 {title_sha[:8]}")
+        # 운영자 지시 2026-11-06: 병합 화면(GitHub)에서 '병합해도 되는 것'을 M 번호로 알아보게 한다 — PR 제목은 `[M002] …`, 가지 이름은 `ai/claude/M002-…`.
+        # 요청 번호 R-nnn 은 작업 ID 일 뿐이라 병합 화면에 나오지 않는다. R-176 부터 이 규칙을 강제한다(앞선 R-175 의 `[R-175]` 제목은 그대로 둔다).
+        notice_no = no_text or str(front.get("no", "")).strip().strip("\"'")
+        if number_of(number) >= MERGE_LABEL_FROM:
+            if not notice_no or not re.fullmatch(r"M[0-9]{3,4}", notice_no):
+                sys.exit(f"병합 부탁의 알림 번호를 읽지 못했다({notice_no!r}) — 초안 앞머리에 `no: @NO@` 를 둔다")
+            if not pr_title.startswith(f"[{notice_no}] "):
+                sys.exit(f"병합 PR 제목이 `[{notice_no}] ` 로 시작하지 않는다(운영자 지시 2026-11-06 — 병합 화면에서 M 번호로 알아보게): {pr_title[:60]}\n"
+                         f"  → 병합 가지의 한 커밋 제목을 `[{notice_no}] …` 로 다시 만든다(mk_merge_branch.py, 새 가지 이름 `ai/claude/{notice_no}-…`)")
+            if not gate_branch.startswith(f"ai/claude/{notice_no}-"):
+                sys.exit(f"병합 가지 이름이 `ai/claude/{notice_no}-…` 꼴이 아니다(운영자 지시 2026-11-06): {gate_branch}")
 
     auto_verify = kind == "merge" and verify == ""        # 검증 문구가 비었으면 검사 관문을 통과한 뒤 `검사 N칸 초록` 으로 채운다
     values = {"TESTS": tests, "PREVIOUS": previous}

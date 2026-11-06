@@ -841,6 +841,9 @@ class MakeRequestTest(unittest.TestCase):
         self.work = Path(self._tmp.name) / "W"
         self.folder = self.work / "wt_r30" / "인수인계" / "요청함"
         self.folder.mkdir(parents=True)
+        patcher = mock.patch.object(make_request, "MERGE_LABEL_FROM", 10 ** 9)        # 병합 PR 제목·가지 이름 표기 규칙(R-176~)은 아래 '병합 표기' 시험이 따로 본다 — 다른 시험의 가짜 제목·가지 이름은 옛 꼴 그대로 쓴다
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def draft(self, text, name="draft.md"):
         (self.work / name).write_text(text, encoding="utf-8", newline="\n")
@@ -955,6 +958,39 @@ class MakeRequestTest(unittest.TestCase):
         with mock.patch.object(nt, "head_subject", return_value=(subject, sha, "ai/claude/r170-x")) as read:
             code, out = self.run_it("R-196", "merge-tool", self.draft(draft), "시험 통과", target=TARGET, gate=gate)
         return code, out, gate, read
+
+    # -- 병합 표기: PR 제목은 `[M###] …`, 가지 이름은 `ai/claude/M###-…`(운영자 지시 2026-11-06, 요청 번호 R-176 부터 도구가 강제)
+    def merge_labelled(self, subject, branch="ai/claude/M007-x", number="R-196", threshold=176, draft=MERGE_DRAFT):
+        """새 표기 규칙을 켜고(threshold) 가짜 머리 커밋 제목·가지로 병합 부탁을 만든다. 초안의 `no: M007` 은 손으로 쓴 알림 번호다."""
+        with mock.patch.object(make_request, "MERGE_LABEL_FROM", threshold), mock.patch.object(nt, "head_subject", return_value=(subject, "a" * 40, branch)):
+            return self.run_it(number, "merge-tool", self.draft(draft), "시험 통과", target=f"shine88pc/chanceblog:{branch}", gate=Gate())
+
+    def test_from_r176_a_merge_title_that_starts_with_the_notice_number_and_a_branch_that_carries_it_are_accepted(self):
+        code, out = self.merge_labelled("[M007] 병합 표기 규칙 [대상: 공통]")
+        self.assertIsNone(code)
+        self.assertIn("\npr_title: [M007] 병합 표기 규칙 [대상: 공통]\n", self.written("R-196_merge-tool.md"))
+
+    def test_from_r176_the_old_request_number_title_a_wrong_notice_number_or_no_tag_are_refused_before_any_file_is_written(self):
+        for subject in ("[R-196] 옛 꼴 제목", "[M008] 다른 번호", "[M007]번호 뒤에 공백 없음", "번호 없는 제목", "[m007] 소문자"):
+            with self.subTest(subject=subject):
+                code, _out = self.merge_labelled(subject)
+                self.assertStops(code, "`[M007] ` 로 시작하지 않는다", "mk_merge_branch.py")
+
+    def test_from_r176_a_branch_name_without_the_notice_number_is_refused(self):
+        for branch in ("ai/claude/r170-x", "ai/claude/M008-x", "ai/claude/M007", "ai/claude/m007-x", "M007-x"):
+            with self.subTest(branch=branch):
+                code, _out = self.merge_labelled("[M007] 제목", branch=branch)
+                self.assertStops(code, "병합 가지 이름이 `ai/claude/M007-…` 꼴이 아니다")
+
+    def test_before_r176_the_old_request_number_style_still_works(self):
+        code, _out = self.merge_labelled("[R-175] 옛 병합 부탁", branch="ai/claude/r175-x", number="R-175", draft=MERGE_DRAFT.replace("id: R-196", "id: R-175"))
+        self.assertIsNone(code)
+        self.assertIn("\npr_title: [R-175] 옛 병합 부탁\n", self.written("R-175_merge-tool.md"))
+
+    def test_the_rule_needs_a_standard_merge_notice_number_in_the_draft(self):
+        code, _out = self.merge_labelled("[M007] 제목", draft=MERGE_DRAFT.replace("no: M007", "no: P007"))
+        self.assertIsInstance(code, str)            # 병합 부탁의 번호 유형이 아니라 번호 검사에서 먼저 멈춘다(어느 쪽이든 파일은 없다)
+        self.assertEqual(list(self.folder.iterdir()), [])
 
     def test_the_pr_title_goes_into_the_file_verbatim_and_without_quotes(self):
         for subject in (PR_TITLE, "[R-196] 따옴표 \"두\" '작은' 역슬래시 \\ 와 \\1 — 한글 😀 [대상: 공통]", "[R-196] 끝에 점. 콜론: 있음 # 샵 @ 골뱅이", "x" * 200):
@@ -1221,7 +1257,8 @@ class RealGitTest(unittest.TestCase):
     def test_make_request_fills_the_pr_title_from_the_real_branch_head_and_the_check_count(self):
         (self.work / "merge.md").write_text(MERGE_DRAFT, encoding="utf-8", newline="\n")
         gate = Gate(head=self.title_sha, runs=3)
-        code, out = run_main(["R-196", "merge-tool", "merge.md", "단위 시험 전부 통과", "", "", "shine88pc/chanceblog:ai/claude/r170-x"], self.work, gate)
+        with mock.patch.object(make_request, "MERGE_LABEL_FROM", 10 ** 9):                      # 옛 꼴 제목 `[R-170] …` 로 진짜 git 흐름을 보는 시험 — 새 표기 규칙(R-176~)은 `MakeRequestTest` 의 '병합 표기' 시험이 따로 본다
+            code, out = run_main(["R-196", "merge-tool", "merge.md", "단위 시험 전부 통과", "", "", "shine88pc/chanceblog:ai/claude/r170-x"], self.work, gate)
         self.assertIsNone(code, code)
         text = (self.folder / "R-196_merge-tool.md").read_text(encoding="utf-8")
         request = ol.parse_request("R-196_merge-tool.md", text, strict=True)
