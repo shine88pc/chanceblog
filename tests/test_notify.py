@@ -989,7 +989,8 @@ class DescribeTest(unittest.TestCase):
     def test_every_reason_has_a_korean_explanation(self):
         expected = {"sent", "disabled", "not_applicable", "invalid_token", "invalid_chat_id", "empty_text", "unauthorized", "forbidden", "not_found",
                     "chat_not_found", "bad_request", "parse_error", "button_error", "rate_limited", "server_error", "network", "timeout",
-                    "bad_response", "limit", "internal_error"}
+                    "bad_response", "limit", "internal_error",
+                    "refused"}                      # TG-STD(2026-11-06): 병합 요청의 PR 제목을 글자 그대로 보낼 수 없어(비밀 모양·보이지 않는 글자) 보내지 않은 경우
         self.assertEqual(set(notify.REASON_TEXT), expected)
         for reason in expected:
             self.assertRegex(notify.REASON_TEXT[reason], "[가-힣]", reason)

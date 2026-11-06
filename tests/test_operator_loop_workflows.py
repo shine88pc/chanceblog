@@ -29,7 +29,7 @@ import validate_repo as vr  # noqa: E402
 WORKFLOWS = ROOT / ".github" / "workflows"
 TEMPLATES = ROOT / ".github" / "ISSUE_TEMPLATE"
 AI_REQUEST, OPERATOR_REPLY = vr.AI_REQUEST_WORKFLOW, vr.OPERATOR_REPLY_WORKFLOW
-REPLY_FORM, TASK_FORM, CONFIG = vr.REPLY_FORM, vr.TASK_FORM, vr.ISSUE_CONFIG
+REPLY_FORM, ANSWER_FORM, TASK_FORM, CONFIG = vr.REPLY_FORM, vr.ANSWER_FORM, vr.TASK_FORM, vr.ISSUE_CONFIG
 TELEGRAM_ENV = {"TELEGRAM_BOT_TOKEN": "${{ secrets.TELEGRAM_BOT_TOKEN }}", "TELEGRAM_CHAT_ID": "${{ secrets.TELEGRAM_CHAT_ID }}"}
 OWNER = oh.OWNER
 
@@ -392,9 +392,9 @@ class NothingExistingReactsTest(unittest.TestCase):
     def test_the_sync_script_and_the_form_loader_do_not_touch_or_confuse_the_new_forms(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = make_edit_root(tmp)
-            for name in ("ai-reply.yml", "ai-task.yml", "config.yml"):
+            for name in ("ai-reply.yml", "ai-answer.yml", "ai-task.yml", "config.yml"):
                 shutil.copy(TEMPLATES / name, root / ".github" / "ISSUE_TEMPLATE" / name)
-            before = {name: (root / ".github" / "ISSUE_TEMPLATE" / name).read_bytes() for name in ("ai-reply.yml", "ai-task.yml", "config.yml")}
+            before = {name: (root / ".github" / "ISSUE_TEMPLATE" / name).read_bytes() for name in ("ai-reply.yml", "ai-answer.yml", "ai-task.yml", "config.yml")}
             spec = spec_mod.load_spec(root)
             forms.sync_page_form(root, spec, pages.load_registry(root), write=True)
             after = {name: (root / ".github" / "ISSUE_TEMPLATE" / name).read_bytes() for name in before}
@@ -402,6 +402,7 @@ class NothingExistingReactsTest(unittest.TestCase):
             templates = forms.load_templates(root)
             by_file = {template["file"]: template for template in templates}
             self.assertEqual(by_file["ai-reply.yml"]["labels"], [ol.LABEL_REPLY])
+            self.assertEqual(by_file["ai-answer.yml"]["labels"], [ol.LABEL_REPLY])
             self.assertEqual(by_file["ai-task.yml"]["labels"], [ol.LABEL_TASK])
             self.assertNotIn("config.yml", by_file)                                       # 본문이 없는 설정 파일은 양식이 아니다
             self.assertEqual(sorted(template["file"] for template in forms.control_templates(templates)), ["blog_control.yml", "page-edit.yml"])
@@ -417,7 +418,7 @@ class NothingExistingReactsTest(unittest.TestCase):
     def test_the_existing_forms_and_workflows_keep_their_triggers(self):
         self.assertEqual(load("issue-edit.yml")["on"]["issues"], {"types": ["opened"]})
         self.assertEqual(load("sync-issue-form.yml")["on"]["push"]["branches"], ["main"])
-        self.assertEqual(sorted(path.name for path in TEMPLATES.iterdir()), ["ai-reply.yml", "ai-task.yml", "blog_control.yml", "config.yml", "page-edit.yml"])
+        self.assertEqual(sorted(path.name for path in TEMPLATES.iterdir()), ["ai-answer.yml", "ai-reply.yml", "ai-task.yml", "blog_control.yml", "config.yml", "page-edit.yml"])
 
 
 # ----------------------------------------------------------------------------
@@ -452,12 +453,12 @@ class IssueFormTest(unittest.TestCase):
         self.assertTrue(all(isinstance(label, str) and label for label in data.get("labels", [])))
 
     def test_both_forms_follow_the_issue_form_schema(self):
-        for name in ("ai-reply.yml", "ai-task.yml"):
+        for name in ("ai-reply.yml", "ai-answer.yml", "ai-task.yml"):
             self.check_schema(form(name))
 
     def test_the_answer_form_is_what_the_code_reads(self):
         data = form("ai-reply.yml")
-        self.assertEqual((data["name"], data["title"], data["labels"]), ("AI 요청에 답하기(결정·확인)", ol.REPLY_TITLE_PREFIX, [ol.LABEL_REPLY]))
+        self.assertEqual((data["name"], data["title"], data["labels"]), (ol.REPLY_FORM_NAME, ol.REPLY_TITLE_PREFIX, [ol.LABEL_REPLY]))
         fields = {item["id"]: item for item in data["body"][1:]}
         self.assertEqual({field_id: item["attributes"]["label"] for field_id, item in fields.items()}, dict(ol.REPLY_FIELDS))
         self.assertEqual({field_id: item["type"] for field_id, item in fields.items()}, ol.REPLY_FIELD_TYPES)
@@ -504,7 +505,7 @@ class IssueFormTest(unittest.TestCase):
         self.assertIn("T3(광고 표면·시크릿·계정·삭제·`mode` 변경·새 플랫폼 등)는 포함하지 않습니다", description)
 
     def test_neither_form_carries_the_blog_control_label_or_an_edit_title(self):
-        for name in ("ai-reply.yml", "ai-task.yml"):
+        for name in ("ai-reply.yml", "ai-answer.yml", "ai-task.yml"):
             data = form(name)
             self.assertNotIn("blog-control", data["labels"])
             self.assertFalse(any(label.startswith("edit:") for label in data["labels"]))
@@ -561,7 +562,7 @@ class IssueFormTest(unittest.TestCase):
 def rule_root(tmp, mutate=None):
     """실제 운영자 요청함 파일(워크플로·양식·config)을 임시 폴더에 복사한다. mutate({상대 경로: 글})로 글을 바꿔 쓴다."""
     root = Path(tmp)
-    texts = {rel: (ROOT / rel).read_text(encoding="utf-8") for rel in (AI_REQUEST, OPERATOR_REPLY, REPLY_FORM, TASK_FORM, CONFIG)}
+    texts = {rel: (ROOT / rel).read_text(encoding="utf-8") for rel in (AI_REQUEST, OPERATOR_REPLY, REPLY_FORM, ANSWER_FORM, TASK_FORM, CONFIG)}
     if mutate:
         mutate(texts)
     for rel, text in texts.items():
@@ -836,6 +837,46 @@ class FormRuleTest(unittest.TestCase):
                 found = self.errors(lambda texts: swap(texts, rel, old, new))
                 self.assertTrue(found, f"FORM-1 이 잡지 못했다: {label}")
                 self.assertTrue(all(f.check == "FORM-1" and f.level == "ERROR" and f.path == rel for f in found), [f.line() for f in found])
+
+    # 새 답변 양식(TG-STD)과 옛 양식 이름 표시의 변이 — 하나씩 망가뜨리면 FORM-1 이 잡아야 한다
+    ANSWER_MUTATIONS = {
+        "옛 양식 이름에서 (이전 R 번호용) 표시를 뺌": (REPLY_FORM, 'name: "AI 요청에 답하기(결정·확인) (이전 R 번호용)"', 'name: "AI 요청에 답하기(결정·확인)"'),
+        "새 양식 이름": (ANSWER_FORM, 'name: "AI 확인 요청에 답하기(대상번호)"', 'name: "AI 요청에 답하기"'),
+        "새 양식 제목": (ANSWER_FORM, 'title: "[답변] "', 'title: "[질문] "'),
+        "새 양식 라벨에 blog-control": (ANSWER_FORM, 'labels: ["운영자응답"]', 'labels: ["운영자응답", "blog-control"]'),
+        "새 양식 라벨 없음": (ANSWER_FORM, 'labels: ["운영자응답"]\n', ""),
+        "대상번호 필수 아님": (ANSWER_FORM, '      placeholder: "001"\n    validations:\n      required: true\n', '      placeholder: "001"\n    validations:\n      required: false\n'),
+        "대상번호 예시가 바뀜": (ANSWER_FORM, 'placeholder: "001"', 'placeholder: "003"'),
+        "대상번호 설명에서 예시를 뺌": (ANSWER_FORM, "(예: 001)", "(예: 번호)"),
+        "대상번호 칸 제목 바꿈": (ANSWER_FORM, 'label: "대상번호"', 'label: "번호"'),
+        "항목 id 바꿈": (ANSWER_FORM, "id: target", "id: tgt"),
+        "선택이 필수": (ANSWER_FORM, "      default: 0\n    validations:\n      required: false\n", "      default: 0\n    validations:\n      required: true\n"),
+        "선택 미리 선택이 없음": (ANSWER_FORM, "      default: 0\n", ""),
+        "선택 미리 선택이 ②": (ANSWER_FORM, "      default: 0\n", "      default: 2\n"),
+        "선택 미리 선택이 거짓값(False == 0 이라 걸러야 한다)": (ANSWER_FORM, "      default: 0\n", "      default: false\n"),
+        "선택지 순서(첫째가 ①)": (ANSWER_FORM, '        - "선택 안 함"\n        - "①"\n', '        - "①"\n        - "선택 안 함"\n'),
+        "선택지 하나 없음": (ANSWER_FORM, '        - "⑤"\n', ""),
+        "선택지 추가": (ANSWER_FORM, '        - "⑤"\n', '        - "⑤"\n        - "⑥"\n'),
+        "내용을 필수로": (ANSWER_FORM, '쓰지 마세요."\n    validations:\n      required: false\n', '쓰지 마세요."\n    validations:\n      required: true\n'),
+        "항목 종류 바꿈": (ANSWER_FORM, "  - type: textarea\n    id: memo\n", "  - type: input\n    id: memo\n"),
+        "안내 글에서 비밀 문장을 뺌": (ANSWER_FORM, "**비밀번호·토큰·키 값은 절대 쓰지 마세요.**", "**비밀 값에 주의하세요.**"),
+        "안내 글에서 승인이 아니라는 문장을 뺌": (ANSWER_FORM, "**`선택 안 함` 이나 대상번호만 올린 답은 승인이 아닙니다**", "**선택 안 함 도 괜찮습니다**"),
+        "안내 글에서 번호 안내를 뺌": (ANSWER_FORM, "텔레그램 확인 요청 맨 위의 `001` 같은 숫자입니다", "확인 요청의 번호입니다"),
+    }
+
+    def test_every_new_form_mutation_is_caught(self):
+        for label, (rel, old, new) in self.ANSWER_MUTATIONS.items():
+            with self.subTest(label):
+                found = self.errors(lambda texts, rel=rel, old=old, new=new: swap(texts, rel, old, new))
+                self.assertTrue(found, f"FORM-1 이 잡지 못했다: {label}")
+                self.assertTrue(all(f.check == "FORM-1" and f.level == "ERROR" and f.path == rel for f in found), [f.line() for f in found])
+
+    def test_the_real_new_form_is_checked_and_a_missing_one_is_skipped_like_the_others(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, files = rule_root(tmp)
+            self.assertIn(ANSWER_FORM, files)
+            self.assertEqual(vr.check_operator_forms(root, files), [])
+            self.assertEqual(vr.check_operator_forms(root, [name for name in files if name != ANSWER_FORM]), [])
 
     def test_a_yaml_error_is_reported_and_missing_files_are_skipped(self):
         found = self.errors(lambda texts: texts.update({REPLY_FORM: "name: [\n"}))

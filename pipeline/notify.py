@@ -35,6 +35,7 @@ import socket
 import subprocess
 import sys
 import time
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -88,6 +89,7 @@ REQUEST_TITLE_LIMIT = 80
 REQUEST_SUMMARY_LIMIT = 300
 REPO_URL = "https://github.com/shine88pc/chanceblog"
 NEW_ISSUE_URL = REPO_URL + "/issues/new/choose"
+NEW_ANSWER_URL = REPO_URL + "/issues/new?template=ai-answer.yml"       # 새 답변 양식(대상번호)을 바로 여는 주소 — 허용 주소 규칙 안(블로그 저장소 경로). 확인 요청의 `답하기` 버튼
 FLAGS = {"ko": chr(0x1F1F0) + chr(0x1F1F7), "en": chr(0x1F1FA) + chr(0x1F1F8)}
 # 새 글 알림은 Pages 배포를 요청한 직후에 오고 주소 버튼이 같이 간다. 배포가 퍼지기 전에 열면 공개 CDN 이 그 404 를 최대 약 18분 보관해 독자에게도 한동안
 # 404 가 돌아올 수 있다(docs/DEFECT_REGISTER.md D-41) — 그래서 문구로 3분 뒤에 열어 보게 한다.
@@ -105,6 +107,7 @@ UNAUTHORIZED, FORBIDDEN, NOT_FOUND = "unauthorized", "forbidden", "not_found"
 CHAT_NOT_FOUND, BAD_REQUEST, PARSE_ERROR, BUTTON_ERROR = "chat_not_found", "bad_request", "parse_error", "button_error"
 RATE_LIMITED, SERVER_ERROR, NETWORK, TIMEOUT = "rate_limited", "server_error", "network", "timeout"
 BAD_RESPONSE, LIMIT, INTERNAL_ERROR = "bad_response", "limit", "internal_error"
+REFUSED = "refused"             # 병합 요청의 PR 제목을 글자 그대로 보낼 수 없어(비밀 모양·보이지 않는 글자) 보내지 않았다(TG-STD)
 
 # 운영자에게 보여 주는 원인 설명(실행 요약·로그). 값(토큰·채팅 ID)은 어디에도 없다
 REASON_TEXT = {
@@ -128,6 +131,7 @@ REASON_TEXT = {
     BAD_RESPONSE: "텔레그램의 응답을 읽을 수 없습니다",
     LIMIT: f"한 실행에서 보내는 통 수 상한({MAX_MESSAGES}통)에 도달했습니다",
     INTERNAL_ERROR: "알림 모듈 안에서 예기치 않은 오류가 났습니다",
+    REFUSED: "PR 제목에 비밀 모양이나 보이지 않는 글자가 있어 글자 그대로 보낼 수 없어 보내지 않았습니다(PR 제목은 고치거나 줄이지 않고 그대로만 보냅니다)",
 }
 
 # ---- 입력 소독 ---------------------------------------------------------------
@@ -603,6 +607,31 @@ class Notifier:
         except Exception as exc:  # noqa: BLE001
             return self._result(False, False, None, INTERNAL_ERROR, type(exc).__name__)
 
+    def notify_notice(self, no, fields, urgency="보통", work="", pr=None, buttons=None, more=0):
+        """번호 있는 표준 알림 한 통(HTML) — 진행 현황 `P001`·병합 요청 `M001`·확인 요청 `001`(TG-STD). no·fields 는 operator_loop.parse_request 가 검증한 값이다.
+        병합 요청의 PR 제목에 비밀 모양·보이지 않는 글자가 있으면 **고치거나 자르지 않고 보내지 않는다**(Result.reason = REFUSED)."""
+        try:
+            text = format_notice(no, fields, urgency=urgency, work=work, pr=pr, more=more)
+            return self.send_message(text, parse_mode="HTML", buttons=buttons)
+        except NoticeRefused:
+            return Result(False, False, None, REFUSED, "")
+        except Exception as exc:  # noqa: BLE001
+            return self._result(False, False, None, INTERNAL_ERROR, type(exc).__name__)
+
+    def notify_answer_received(self, target, choice_no, issue_number, replaced=None, buttons=None):
+        """새 양식(`대상번호`)의 답을 접수했다는 확인 한 통(평문). 값은 코드가 검증한 것(번호 모양·선택 기호·이슈 번호)만 받는다."""
+        try:
+            return self.send_message(format_answer_received(target, choice_no, issue_number, replaced), buttons=buttons)
+        except Exception as exc:  # noqa: BLE001
+            return self._result(False, False, None, INTERNAL_ERROR, type(exc).__name__)
+
+    def notify_answer_error(self, issue_number, reason, buttons=None):
+        """소유자의 답 이슈를 접수하지 못했다는 회신 한 통(평문, TG-STD). reason 은 코드가 정한 고정 문장이다."""
+        try:
+            return self.send_message(format_answer_error(issue_number, reason), buttons=buttons)
+        except Exception as exc:  # noqa: BLE001
+            return self._result(False, False, None, INTERNAL_ERROR, type(exc).__name__)
+
 
 # ---- 메시지 모양(순수 함수: 네트워크 없이 시험한다) ------------------------------------
 def format_chance_published(posts, run_info):
@@ -719,6 +748,231 @@ def format_task_received(issue_number, urgency, approval_yes):
             + (" · 진행 범위 구현까지(T3 제외)" if approval_yes else " · 논의·준비까지만"))
 
 
+# ---- 알림 번호와 표준 메시지 3종(TG-STD — 운영자 승인 2026-11-06, 계획 R-165) ----------------------------------------------
+# 번호: 진행 현황 `P001`·병합 요청 `M001`·확인 요청은 숫자만 `001`(세 자리 0 채움, 999 다음은 네 자리, 000 은 없다). 유형마다 번호가 따로 늘고 요청 번호(R-nnn)는 작업 식별자로 그대로 남는다.
+# 접두어·번호만 영어이고 라벨·문장은 한글 고정 문자열이다. 요청 파일 앞머리 `no` 가 있는 파일만 이 모양으로 가고(operator_loop.parse_request) 없는 옛 파일은 format_ai_request 그대로다.
+NOTICE_PROGRESS, NOTICE_MERGE, NOTICE_ASK = "progress", "merge", "ask"
+NOTICE_LABELS = {NOTICE_PROGRESS: "진행 현황", NOTICE_MERGE: "병합 요청", NOTICE_ASK: "확인 요청"}
+NOTICE_KIND_TYPES = {"info": NOTICE_PROGRESS, "merge": NOTICE_MERGE, "decision": NOTICE_ASK, "confirm": NOTICE_ASK, "run": NOTICE_ASK}     # 요청 종류(kind) → 번호 유형
+# 표준 표기만 번호다: 1~999 는 세 자리 0 채움(`001`~`999`), 1000~9999 는 네 자리(`1000`~`9999`) — 앞에 0 을 더 붙인 네 자리(`P0012`·`0003`)는 번호가 아니다(같은 번호가 두 글자로 적혀
+# '유형별 중복 금지'를 피하지 못하게). ASCII 숫자만(`[0-9]`) — 전각·원문자·다른 나라 숫자도 번호가 아니다. 쓸 때는 fullmatch(줄 바꿈 꼬리표 금지)
+NOTICE_NO_RE = re.compile(r"[PM]?(?:(?!000)[0-9]{3}|[1-9][0-9]{3})")
+NOTICE_NO_MAX = 9999
+PROGRESS_ITEMS = (("now", "현재 진행", 200), ("changed", "직전 보고 이후", 200), ("next", "다음 계획", 200), ("eta", "예상 완료", 100), ("waiting", "확인·승인 대기", 200))
+CHECK_LIMIT, TARGET_LIMIT, VERIFY_LIMIT, STATE_LIMIT, OPTION_LIMIT = 60, 100, 120, 40, 60
+PR_TITLE_LIMIT = 200            # 검증기(REQ-1)의 상한 — 폰 글은 PR 제목을 줄이지 않는다(런타임은 더 길어도 글자 그대로 싣는다)
+OPTIONS_MAX = 5                 # 확인 요청의 보기 수 상한(①~⑤)
+OPTION_SEPARATOR = " / "
+STATE_DEFAULT = "승인 대기"
+PROGRESS_MARK, MERGE_MARK, WARN_MARK = chr(0x1F4CA), chr(0x1F500), chr(0x26A0) + chr(0xFE0F)       # 📊 🔀 ⚠️
+NOTICE_MARKS = {NOTICE_PROGRESS: PROGRESS_MARK, NOTICE_MERGE: MERGE_MARK, NOTICE_ASK: BELL_MARK}   # 머리 그림 문자: 진행 현황 📊 · 병합 요청 🔀 · 확인 요청 🔔
+CIRCLED_DIGITS = tuple(chr(0x2460 + index) for index in range(OPTIONS_MAX))                         # ①②③④⑤
+_AT_RE = re.compile(r"([0-9]{4})-([0-9]{2})-([0-9]{2}) ([0-9]{2}):([0-9]{2})")
+_PR_TITLE_BAD_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})          # 제어·서식·짝 없는 서로게이트·줄·문단 구분 문자
+# 글자처럼 보이지만 화면에서는 비어 보이는 문자(결합 그래핌 조이너 U+034F·한글 채움 U+115F·U+1160·U+3164·U+FFA0·크메르 고유 모음 U+17B4·U+17B5·점자 빈칸 U+2800) — 운영자가 제목을 눈으로
+# 대조할 때 헷갈리므로 PR 제목에서만 거절한다(`pipeline.console` 의 소독 목록은 건드리지 않는다 — 다른 알림의 동작이 달라지지 않게).
+PR_TITLE_EXTRA_INVISIBLE_CODEPOINTS = (0x034F, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x2800, 0x3164, 0xFFA0)
+_PR_TITLE_EXTRA_INVISIBLE = frozenset(chr(code) for code in PR_TITLE_EXTRA_INVISIBLE_CODEPOINTS)
+
+
+class NoticeRefused(ValueError):
+    """병합 요청의 PR 제목을 글자 그대로 보낼 수 없을 때(빈 제목·제어·보이지 않는 글자·비밀 모양). code 는 pr_title_problem 의 값. 제목을 고치거나 자르지 않고 보내지 않는다."""
+
+    def __init__(self, code):
+        super().__init__("pr_title")
+        self.code = code
+
+
+def notice_type(no):
+    """알림 번호의 유형 — `P` + 표준 숫자 = 진행 현황(progress), `M` + 표준 숫자 = 병합 요청(merge), 숫자만 = 확인 요청(ask). 표준 숫자는 `001`~`999`(세 자리)·`1000`~`9999`(네 자리, 앞 0 없음).
+    번호 꼴이 아니거나 숫자가 0(`P000`·`000`)이거나 앞에 0 이 더 붙었으면(`P0012`·`0003`) 빈 문자열. 번호 전체가 맞아야 한다(앞뒤 공백·줄 바꿈·전각 숫자·원문자·소문자 `p` 는 번호가 아니다)."""
+    text = no if isinstance(no, str) else ""
+    if NOTICE_NO_RE.fullmatch(text) is None:
+        return ""
+    return {"P": NOTICE_PROGRESS, "M": NOTICE_MERGE}.get(text[0], NOTICE_ASK)
+
+
+def notice_number(no):
+    """알림 번호의 순번(정수). 번호 꼴이 아니면 0."""
+    return int(no.lstrip("PM")) if notice_type(no) else 0
+
+
+def notice_no_text(kind, number):
+    """유형·순번 → 번호 글자(세 자리 0 채움, 1000 부터 네 자리). 유형을 모르거나 순번이 1~9999 밖이면 ValueError."""
+    if kind not in NOTICE_LABELS or isinstance(number, bool) or not isinstance(number, int) or not 1 <= number <= NOTICE_NO_MAX:
+        raise ValueError("number")
+    return {NOTICE_PROGRESS: "P", NOTICE_MERGE: "M"}.get(kind, "") + f"{number:03d}"
+
+
+def pr_title_problem(value, limit=None):
+    """PR 제목을 폰 글에 글자 그대로 싣을 수 있는가 — 빈 문자열이면 가능, 아니면 이유 코드: empty(비었음)·too_long(limit 초과, limit 을 준 검증기만)·
+    control(제어·서식·보이지 않거나 비어 보이는 글자·줄 바꿈 — 눈으로 같은지 볼 수 없다)·secret(비밀 모양). 줄이거나 바꿔서 통과시키지 않는다.
+    secret 은 `mask`(로그·이력에 쓰기 전에 비밀을 가리는 함수)가 글을 바꾸는지로 가린다 — `key=`·`token=`·`secret=` 꼴은 낱말 경계가 없어 `monkey=banana` 도 걸린다(안전한 쪽)."""
+    text = value if isinstance(value, str) else ""
+    if not text.strip():
+        return "empty"
+    if limit is not None and len(text) > limit:
+        return "too_long"
+    if INVISIBLE_RE.search(text) or any(unicodedata.category(char) in _PR_TITLE_BAD_CATEGORIES or char in _PR_TITLE_EXTRA_INVISIBLE for char in text):
+        return "control"
+    if mask(text) != text:
+        return "secret"
+    return ""
+
+
+def split_options(raw):
+    """앞머리 `options` 값(` / ` 로 이은 보기 글) → 보기 글 목록(각각 앞뒤 공백 제거). 비었으면 빈 목록. 개수·길이 검증은 호출한 쪽이 한다."""
+    text = "" if raw is None else str(raw)
+    return [part.strip() for part in text.split(OPTION_SEPARATOR)] if text.strip() else []
+
+
+def _shown(value, limit):
+    """AI 가 쓴 한 줄 값을 폰 글에 넣는다: 소독(safe_text) → 맨 `R-090` 은 `r090` → `@` 는 전각(멘션 방지). 줄이 비면 빈 문자열."""
+    return display_text(safe_text(value, limit)).replace("@", _FULLWIDTH_AT)
+
+
+def _notice_value(fields, key, limit, required=True):
+    value = _shown(fields.get(key), limit)
+    if required and not value:
+        raise ValueError(key)
+    return value
+
+
+def notice_stamp(raw):
+    """`2026-11-06 12:07`(KST) → `11-06 12:07`. 모양이 틀리거나 없는 날짜·시각이면 ValueError("at")."""
+    found = _AT_RE.fullmatch(raw if isinstance(raw, str) else "")
+    if found is None:
+        raise ValueError("at")
+    year, month, day, hour, minute = (int(part) for part in found.groups())
+    try:
+        datetime(year, month, day, hour, minute)
+    except ValueError:
+        raise ValueError("at") from None
+    return f"{found.group(2)}-{found.group(3)} {found.group(4)}:{found.group(5)}"
+
+
+def _notice_head(no, kind, urgency, work, tail=""):
+    head = f"{NOTICE_MARKS[kind]} <b>{no} · {NOTICE_LABELS[kind]}</b>{tail}"
+    if work:
+        head += f" · 작업 {display_id(work)}"
+    return head + (f" {SIREN_MARK} 급함" if urgency == "급함" else "")
+
+
+def format_progress(no, fields, urgency="보통", work=""):
+    """진행 현황(P) 알림의 HTML 글 — 머리 `📊 P012 · 진행 현황 · 11-06 12:07 기준 · 점검 이상 없음` 과 5항목(현재 진행·직전 보고 이후·다음 계획·예상 완료·확인·승인 대기).
+    fields: 앞머리 값(at·now·changed·next·eta·waiting 필수, check 선택). 빠졌거나 모양이 틀리면 ValueError(키 이름). 값은 한 줄로 소독한다(`R-090` → `r090`, `@` → 전각)."""
+    if notice_type(no) != NOTICE_PROGRESS:
+        raise ValueError("no")
+    tail = f" · {notice_stamp(fields.get('at'))} 기준"
+    check = _notice_value(fields, "check", CHECK_LIMIT, required=False)
+    if check:
+        tail += f" · 점검 {check}"
+    lines = [_notice_head(no, NOTICE_PROGRESS, urgency, work, tail)]
+    lines.extend(f"{label}: {_notice_value(fields, key, limit)}" for key, label, limit in PROGRESS_ITEMS)
+    return "\n".join(lines)
+
+
+def format_merge_request(no, fields, urgency="보통", work=""):
+    """병합 요청(M) 알림의 HTML 글 — 머리 `🔀 M007 · 병합 요청` 과 5항목(병합 대상·저장소·PR 제목·검증 결과·상태).
+    **PR 제목은 글자 그대로**다: `<code>` 안에 HTML 이스케이프(`&`·`<`·`>`)만 거치고 safe_text·display_text·`@` 전각·길이 줄이기를 거치지 않는다(운영자가 GitHub 에서 글자까지 같은 제목을 찾아 병합한다).
+    비밀 모양·보이지 않는 글자가 있으면 NoticeRefused(고치거나 자르지 않고 보내지 않는다). fields: repo·target·pr_title·verify 필수, state 선택(기본 `승인 대기`)."""
+    if notice_type(no) != NOTICE_MERGE:
+        raise ValueError("no")
+    title = fields.get("pr_title")
+    problem = pr_title_problem(title)
+    if problem:
+        raise NoticeRefused(problem)
+    lines = [_notice_head(no, NOTICE_MERGE, urgency, work),
+             f"병합 대상: {_notice_value(fields, 'target', TARGET_LIMIT)}",
+             f"저장소: {_notice_value(fields, 'repo', TARGET_LIMIT)}",
+             f"PR 제목: <code>{escape_html(title)}</code>",
+             f"검증 결과: {_notice_value(fields, 'verify', VERIFY_LIMIT)}",
+             f"상태: {_notice_value(fields, 'state', STATE_LIMIT, required=False) or STATE_DEFAULT}"]
+    return "\n".join(lines)
+
+
+def _option_number(fields, key, count):
+    """`default`·`approve` 값(보기 번호 1~count). 비었으면 0. 모양이 틀리면 ValueError(키)."""
+    raw = fields.get(key)
+    if raw is None or str(raw) == "":
+        return 0
+    text = str(raw)
+    if re.fullmatch(r"[1-5]", text) is None or int(text) > count:
+        raise ValueError(key)
+    return int(text)
+
+
+def format_ask(no, fields, urgency="보통", work=""):
+    """확인 요청(숫자만) 알림의 HTML 글 — 머리 `🔔 003 · 확인 요청`, 확인이 필요한 내용(summary), 보기(`① … ② …`, 최대 5개), 기본값(없으면 '없음 — 답이 필요합니다'),
+    `approve` 가 있으면 승인 보기, 답하는 법(`[답하기] → 대상번호 003`). 보기가 없으면 보기·기본값 줄 없이 '내용 칸에 답을 적어 주세요' 로 안내한다. 승인 보기와 기본값은 같은 보기일 수 없다."""
+    if notice_type(no) != NOTICE_ASK:
+        raise ValueError("no")
+    options = split_options(fields.get("options"))
+    if len(options) > OPTIONS_MAX or any(not option for option in options) or (options and len(options) < 2):
+        raise ValueError("options")
+    default, approve = _option_number(fields, "default", len(options)), _option_number(fields, "approve", len(options))      # 보기가 없으면 어떤 번호도 ValueError
+    if default and default == approve:
+        raise ValueError("approve")                      # 답이 없을 때 진행하는 보기가 곧 승인 보기일 수는 없다(침묵으로 승인이 되지 않게)
+    lines = [_notice_head(no, NOTICE_ASK, urgency, work), f"확인이 필요한 내용: {_notice_value(fields, 'summary', REQUEST_SUMMARY_LIMIT)}"]
+    if options:
+        lines.append("보기: " + "  ".join(f"{CIRCLED_DIGITS[index]} {_shown(option, OPTION_LIMIT)}" for index, option in enumerate(options)))
+        lines.append(f"기본값: {CIRCLED_DIGITS[default - 1]} — 답이 없으면 이대로 진행합니다" if default else "기본값: 없음 — 답이 필요합니다")
+        if approve:
+            lines.append(f"승인 보기: {CIRCLED_DIGITS[approve - 1]} (이 요청에 적힌 항목에 한해 승인으로 읽습니다)")
+        lines.append(f"답하는 법: [답하기] → 대상번호 {no} (선택은 비워도 됩니다)")
+    else:
+        lines.append(f"답하는 법: [답하기] → 대상번호 {no} (내용 칸에 답을 적어 주세요)")
+    return "\n".join(lines)
+
+
+def format_notice(no, fields, urgency="보통", work="", pr=None, more=0):
+    """번호 있는 표준 알림의 HTML 글(유형은 번호로 정한다). pr 이 있으면 머리 바로 아래 `관련 PR: #n`, more 가 있으면 끝에 '… 외 N건'(한 푸시에 담지 못한 요청 수).
+    번호 모양·유형별 필수 값이 어긋나면 ValueError(키 이름)·병합 요청의 PR 제목을 그대로 보낼 수 없으면 NoticeRefused."""
+    kind, fields = notice_type(no), (fields if isinstance(fields, dict) else {})
+    builder = {NOTICE_PROGRESS: format_progress, NOTICE_MERGE: format_merge_request, NOTICE_ASK: format_ask}.get(kind)
+    if builder is None:
+        raise ValueError("no")
+    lines = builder(no, fields, urgency=urgency, work=work).split("\n")
+    if pr is not None:
+        lines.insert(1, f"관련 PR: #{_positive_int(pr, 'pr')}")
+    if more:
+        lines.extend(["", f"… 외 {_positive_int(more, 'more')}건 (저장소의 인수인계/요청함/ 폴더에서 확인하세요)"])
+    return "\n".join(lines)
+
+
+def format_answer_received(target, choice_no, issue_number, replaced=None):
+    """새 양식(`대상번호`) 답 접수 확인의 평문: `✅ 답변 접수 003 → 선택 ②(이슈 #145)`, 선택이 없으면 `→ 확인함 — 승인 아님(이슈 #145) · 번호가 요청과 맞는지는 AI 가 대조합니다`
+    (접수 워크플로는 요청 파일이 없는 기본 가지만 봐서 번호가 실제 요청인지 모른다 — 오탈자도 접수로 보이므로 AI 가 대조한다고 말한다), 앞서 같은 번호에 답한 이슈가 있으면
+    ` · 이전 답(이슈 #144)을 대체합니다`(가장 나중 답이 이긴다). target 이 옛 요청 번호(`R-149`)면 `r149` 로 보이고 새 양식으로는 승인되지 않는다는 말을 붙인다.
+    값은 코드가 검증한 것이다 — 번호 모양·선택 기호(0=없음, 1~5)·이슈 번호. 어긋나면 ValueError."""
+    text = target if isinstance(target, str) else ""
+    if notice_type(text) == NOTICE_ASK:
+        shown, old = text, False
+    elif REQUEST_ID_RE.fullmatch(text):
+        shown, old = display_id(text), True
+    else:
+        raise ValueError("target")
+    if isinstance(choice_no, bool) or not isinstance(choice_no, int) or not 0 <= choice_no <= OPTIONS_MAX:
+        raise ValueError("choice")
+    line = f"{OK_MARK} 답변 접수 {shown} → " + (f"선택 {CIRCLED_DIGITS[choice_no - 1]}" if choice_no else "확인함 — 승인 아님") + f"(이슈 #{_positive_int(issue_number, 'issue_number')})"
+    if replaced is not None:
+        line += f" · 이전 답(이슈 #{_positive_int(replaced, 'replaced')})을 대체합니다"
+    if old:
+        line += " · 옛 R 번호 요청은 새 양식으로 승인되지 않습니다(승인은 이전 R 번호용 양식으로)"
+    if not choice_no:
+        line += " · 번호가 요청과 맞는지는 AI 가 대조합니다"
+    return line
+
+
+def format_answer_error(issue_number, reason):
+    """소유자의 답 이슈를 접수하지 못했다는 폰 회신의 평문: `⚠️ 답변을 접수하지 못했습니다(이슈 #145) — 대상번호가 필요합니다(숫자 3자리, 예: 001). 새 이슈로 다시 올려 주세요.`
+    reason 은 코드가 정한 고정 문장이다(이슈 글을 되풀이하지 않는다) — 여기서도 한 줄로 소독하고 백틱은 뺀다."""
+    word = clean_text(reason, 120).replace("`", "")
+    if not word:
+        raise ValueError("reason")
+    return f"{WARN_MARK} 답변을 접수하지 못했습니다(이슈 #{_positive_int(issue_number, 'issue_number')}) — {word}. 새 이슈로 다시 올려 주세요."
+
+
 # ---- 모듈 수준 함수(작업 지시의 공개 이름) ------------------------------------------------
 def send_message(text, parse_mode=None, buttons=None, silent=False, notifier=None):
     return (notifier or Notifier()).send_message(text, parse_mode=parse_mode, buttons=buttons, silent=silent)
@@ -759,6 +1013,18 @@ def notify_reply_received(request_id, answer, issue_number, choice="", buttons=N
 
 def notify_task_received(issue_number, urgency, approval_yes, buttons=None, notifier=None):
     return (notifier or Notifier()).notify_task_received(issue_number, urgency, approval_yes, buttons=buttons)
+
+
+def notify_notice(no, fields, urgency="보통", work="", pr=None, buttons=None, more=0, notifier=None):
+    return (notifier or Notifier()).notify_notice(no, fields, urgency=urgency, work=work, pr=pr, buttons=buttons, more=more)
+
+
+def notify_answer_received(target, choice_no, issue_number, replaced=None, buttons=None, notifier=None):
+    return (notifier or Notifier()).notify_answer_received(target, choice_no, issue_number, replaced=replaced, buttons=buttons)
+
+
+def notify_answer_error(issue_number, reason, buttons=None, notifier=None):
+    return (notifier or Notifier()).notify_answer_error(issue_number, reason, buttons=buttons)
 
 
 def describe(result):

@@ -7,7 +7,7 @@
 
 원칙
   1. **접수일 뿐 승인이 아니다.** 이 채널은 글을 이슈로 옮기기만 한다. 승인이 필요한 일(광고·사이트·자동 발행 설정·비밀)은 이 글만으로 진행하지 않는다 — 승인은 소유자 계정이
-     `[답변]` 양식으로 올린 것만 인정한다(G-S9, 바뀌지 않았다). 글이 `r103 승인 1` 처럼 요청 번호로 시작하면 본문에 '답변 후보' 한 줄을 덧붙이지만 참고용이다.
+     `[답변]` 양식으로 올린 것만 인정한다(G-S9, 바뀌지 않았다). 글이 `r103 승인 1` 처럼 요청 번호로 시작하거나 세 줄 글(`대상번호: 001` / `선택: ②` / `내용: …`)이면 본문에 '답변 후보' 한 줄을 덧붙이지만 참고용이다(TG-STD — 읽은 번호·선택 기호·내용 글자 수만 싣는다).
   2. **허용 조건은 하나다**: `message.chat.type == "private"` 이고 `message.chat.id` 와 `message.from.id` 가 둘 다 `TELEGRAM_CHAT_ID` 와 같을 때만(`from.is_bot` 이 참이면 제외). 다른 사람·그룹·채널 글,
      `edited_message`·콜백, 글이 아닌 것은 이슈를 만들지 않고 남에게는 아무 답도 하지 않는다(스팸 반사 금지).
   3. **받은 글은 데이터다.** 공개 이슈의 인용 블록에 넣기 전에 소독한다(보이지 않는 문자·제어 문자 제거, `@`·`<`·`>`·엔티티 모양의 `&` 무력화, 비밀 모양·토큰·채팅 ID 가리기,
@@ -75,12 +75,13 @@ _KST = timezone(timedelta(hours=9))
 
 # ---- 안내 문구(텔레그램·이슈 본문에 쓰는 고정 문장 — 외부 글은 하나도 섞이지 않는다) ------------------------------------------
 USAGE_TEXT = ("이 봇은 챈스블로그의 알림 봇입니다. 여기로 보낸 글은 저장소의 공개 이슈([텔레그램] 제목)로 옮겨져 AI 가 읽습니다 — 비밀번호·키·개인정보는 보내지 마세요. "
-              "옮겨 오는 일은 정해진 때에 하므로 수십 분에서 몇 시간 늦을 수 있습니다. 접수는 승인이 아닙니다: 승인이 필요한 일은 알림에 적힌 번호(r001 같은 번호)의 "
-              "[답하기] 양식으로 답해 주세요. `r103 승인 1` 처럼 번호로 시작하는 글도 접수만 합니다.")
+              "옮겨 오는 일은 정해진 때에 하므로 수십 분에서 몇 시간 늦을 수 있습니다. 접수는 승인이 아닙니다: 승인이 필요한 일은 알림에 적힌 번호(001 같은 숫자, 옛 요청은 r001 같은 번호)의 "
+              "[답하기] 양식으로 답해 주세요. `대상번호: 001` 세 줄 글이나 `r103 승인 1` 처럼 번호로 시작하는 글도 접수만 합니다.")
 NON_TEXT_TEXT = "글만 받을 수 있어요 — 사진·음성·파일은 가져오지 않습니다."
 ISSUE_NOTICE = ("**텔레그램으로 받은 글입니다** — 허용된 운영자 계정(비공개 대화)에서 온 것을 확인했습니다. **접수일 뿐 승인이 아닙니다.**\n"
                 "이 이슈는 공개입니다 — 비밀번호·키·개인정보는 보내지 마세요(이미 보냈다면 바로 폐기·재발급하세요).")
-CANDIDATE_NOTE = ("※ 위 답변 후보는 참고용이고 승인이 아닙니다. 승인은 소유자 계정이 `[답변]` 양식(알림의 `[답하기]`)으로 올리고 요청 번호가 맞을 때만 인정됩니다(G-S9).")
+CANDIDATE_NOTE = ("※ 위 답변 후보는 참고용이고 승인이 아닙니다. 승인은 소유자 계정이 `[답변]` 양식(알림의 `[답하기]`)으로 올리고 대상번호(옛 요청은 요청 번호)가 맞고 "
+                  "선택이 그 요청에 적힌 승인 보기와 같을 때만 인정됩니다(G-S9).")
 SECRET_NOTE = "※ 비밀 값처럼 보이는 글자는 `***` 로 가렸습니다."
 FORWARDED_NOTE = "※ 이 글은 다른 곳에서 전달된 글(또는 봇을 거친 글)입니다 — 운영자가 쓴 글이 아닙니다. 운영자 계정이 보냈다는 것만 확인했습니다."
 
@@ -114,6 +115,8 @@ Poll = namedtuple("Poll", "ok updates reason status wait")          # reason: ok
 Incoming = namedtuple("Incoming", "update_id kind text sent forwarded", defaults=(False,))        # kind: skip(허용 밖) | other(운영자 본인이 보낸 글 아닌 형식) | text, forwarded: 전달·봇 경유 글
 FORWARD_KEYS = ("forward_origin", "forward_from", "forward_from_chat", "forward_from_message_id", "forward_signature", "forward_sender_name", "forward_date", "is_automatic_forward", "via_bot")
 Candidate = namedtuple("Candidate", "request_id answer choice memo_chars")
+# 세 줄 글(`대상번호: 001` / `선택: ②` / `내용: …`)의 후보(TG-STD): target_kind 는 ask(확인 요청 번호)·request(옛 요청 번호)·빈 글(읽지 못함), problem 은 loop.TARGET_PROBLEMS 의 키 또는 빈 글
+ThreeLineCandidate = namedtuple("ThreeLineCandidate", "target_kind target choice_no choice_invalid memo_chars problem")
 
 
 # ---- 텔레그램 getUpdates ------------------------------------------------------------------------------------------
@@ -302,11 +305,43 @@ _CHOICE_RE = re.compile(_CHOICE_ITEM + r"(?:," + _CHOICE_ITEM + r"){0,4}")
 _ANSWER_WORDS = tuple(short for short, _full in loop.ANSWER_OPTIONS)
 
 
+_THREE_LINE_TARGET_RE = re.compile(r"대상번호[ \t]*[:：][ \t]*(.*)")        # 소독한 글에서 찾는다(전각 콜론도 받는다)
+_THREE_LINE_FIELD_RE = re.compile(r"(선택|내용)[ \t]*[:：][ \t]*(.*)")
+
+
+def three_line_candidate(text):
+    """글이 `대상번호: 001` 로 시작하는 세 줄 글이면 ThreeLineCandidate(번호 종류·번호·선택 기호·선택이 틀렸나·내용 글자 수·문제 코드)를, 아니면 None. `선택:` 은 첫 줄 뒤의 줄, `내용:` 은 그 줄부터 끝까지.
+    번호·선택 읽기는 운영자 요청함과 한곳이다(loop.parse_target·loop.parse_choice) — `001`·`r149` 만 번호로 읽고 `P012`·전각·`001 메모` 같은 모양은 문제 코드로만 남는다. 참고용이고 승인이 아니다."""
+    lines = text.split("\n")
+    found = _THREE_LINE_TARGET_RE.fullmatch(lines[0])
+    if found is None:
+        return None
+    choice_raw, memo, in_memo, seen_choice = "", [], False, False
+    for line in lines[1:]:
+        if in_memo:
+            memo.append(line)
+            continue
+        field = _THREE_LINE_FIELD_RE.fullmatch(line)
+        if field is None:
+            continue
+        if field.group(1) == "선택" and not seen_choice:
+            choice_raw, seen_choice = field.group(2), True
+        elif field.group(1) == "내용":
+            in_memo = True
+            memo.append(field.group(2))
+    target_kind, target, problem = loop.parse_target(found.group(1))
+    choice_no, choice_problem = loop.parse_choice(choice_raw)
+    return ThreeLineCandidate(target_kind, target, choice_no, bool(choice_problem), len("\n".join(memo).strip()), problem)
+
+
 def answer_candidate(clean):
-    """글이 요청 번호로 시작하면 Candidate(정본 번호, 답 낱말 또는 '', 선택 또는 '', 메모 글자 수)를, 아니면 None.
+    """글이 세 줄 글(`대상번호: 001` …)이면 ThreeLineCandidate(three_line_candidate), 요청 번호로 시작하면 Candidate(정본 번호, 답 낱말 또는 '', 선택 또는 '', 메모 글자 수)를, 아니면 None.
     번호 읽기는 운영자 요청함과 한곳이다 — `r103`·`R103`·`r-103`·`R-103`·`r 103` 꼴(loop.REQUEST_INPUT_RE·normalize_request_id), 답 낱말은 양식의 선택지(loop.ANSWER_OPTIONS)의 짧은 말.
     번호 바로 뒤가 글자·숫자·밑줄이면(`r1034`·`r103x`) 번호가 아니다. 참고용이고 승인이 아니다 — 읽은 값(검증된 번호·낱말·선택)과 메모 글자 수만 본문에 싣는다."""
     text = clean.lstrip()
+    three = three_line_candidate(text)
+    if three is not None:
+        return three
     found = loop.REQUEST_INPUT_RE.match(text)
     if found is None:
         return None
@@ -330,7 +365,15 @@ def answer_candidate(clean):
 
 
 def candidate_line(candidate):
-    """본문에 싣는 '답변 후보' 한 줄(값은 코드가 검증한 것뿐). 번호는 운영자에게 보이는 꼴 `r103`."""
+    """본문에 싣는 '답변 후보' 한 줄(값은 코드가 검증한 것뿐). 번호는 운영자에게 보이는 꼴 — 확인 요청은 `001`, 옛 요청은 `r103`. 세 줄 글은 읽은 번호·선택 기호·내용 글자 수만 싣는다(원문을 되풀이하지 않는다)."""
+    if isinstance(candidate, ThreeLineCandidate):
+        if candidate.problem:
+            return f"답변 후보(참고용): 대상번호를 읽지 못했습니다 — {loop.TARGET_PROBLEMS[candidate.problem]}"
+        old = candidate.target_kind == "request"
+        picked = f"선택 **{notify.CIRCLED_DIGITS[candidate.choice_no - 1]}**" if candidate.choice_no else ("선택은 읽지 못했습니다" if candidate.choice_invalid else "확인함")
+        memo = f"메모 있음({candidate.memo_chars}자)" if candidate.memo_chars else "메모 없음"
+        subject = f"요청 **{notify.display_id(candidate.target)}**(이전 R 번호)" if old else f"확인 요청 **{candidate.target}**"
+        return f"답변 후보(참고용): {subject} · {picked} · {memo}"
     shown = notify.display_id(candidate.request_id)
     if not candidate.answer:
         return (f"요청 번호 후보(참고용): **{shown}** — 답변 낱말({'·'.join(_ANSWER_WORDS)})이 바로 뒤에 없어 답으로 읽지 않았습니다.")

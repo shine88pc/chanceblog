@@ -19,8 +19,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import validate_repo as vr  # noqa: E402
 
 # 병합 기준 main(835ed22, R-106 의 요청 번호 표기가 반영된 판)의 G-S9 행·AGENTS.md 규칙 8의 sha256 — 텔레그램 수신은 승인 규칙을 바꾸지 않는다(G-S10). 이 값이 달라지면 승인 규칙 문구를 건드린 것이므로 의도한 변경인지(T3) 확인한다.
-G_S9_ROW_SHA256 = "1161e244bc6b955dca489359d94e92c7042e3dd14405cfcf40b2b8fe93d2fd9d"
-AGENTS_RULE_8_SHA256 = "bffb9ab51f39c30496e5fa85db3094506e4befaae096d8e2fb389286195239f0"
+G_S9_ROW_SHA256 = "3598b1089116d5bc2c72aa8a7b36df65de7dcfe43f6d7528682ca586664affc7"      # 2026-11-06 TG-STD(운영자 승인 R-165)로 G-S9 문구를 의도적으로 개정했다(새 양식 대상번호·선택·확인함). 이전 값 1161e244… — 이 값이 또 바뀌려면 새 승인이 필요하다
+AGENTS_RULE_8_SHA256 = "c2004fb876915771961d67c2329871696e129777dac2c2eb8ea1bf90a9e9b95b"      # 2026-11-06 TG-STD(운영자 승인 R-165): 8번 규칙 줄에 든 G-S9 한 문장을 새 양식에 맞게 개정했다. 이전 값 bffb9ab5…
 
 
 def read(rel):
@@ -224,13 +224,13 @@ class RulesTest(unittest.TestCase):
         self.security = read("docs/SECURITY_GUARDRAILS.md")
 
     def test_the_g_s9_row_and_agents_rule_8_are_byte_for_byte_what_they_were(self):
-        """텔레그램 수신은 접수일 뿐 — 승인 규칙의 문구는 바뀌지 않았다(지시서: G-S9 문구는 그대로)."""
+        """텔레그램 수신은 접수일 뿐 — 승인 규칙(G-S9)의 문구는 TG-STD 개정(2026-11-06) 이후의 값으로 고정돼 있고 텔레그램 수신이 그것을 바꾸지 않는다."""
         self.assertEqual(sha(line_starting(self.security, "| G-S9 |")), G_S9_ROW_SHA256)
         self.assertEqual(sha(line_starting(read("AGENTS.md"), "8. **승인은 사용자의 채팅 메시지로만 유효하다.**")), AGENTS_RULE_8_SHA256)
 
     def test_g_s10_states_the_seven_points(self):
         row = line_starting(self.security, "| G-S10 |")
-        for needle in ("접수일 뿐 승인이 아니다", "`private`", "`chat.id`·`from.id`", "`TELEGRAM_CHAT_ID`", "G-S9 의 문구는 바뀌지 않았고", "공개 이슈", "원문은 데이터다", "`@`·`<`·`>`",
+        for needle in ("접수일 뿐 승인이 아니다", "`private`", "`chat.id`·`from.id`", "`TELEGRAM_CHAT_ID`", "텔레그램 글은 승인이 아니라는 점은 G-S9 가 새 양식으로 개정", "공개 이슈", "원문은 데이터다", "`@`·`<`·`>`",
                        "토큰은 요청 주소에 들어간다", "G-C12", "`requests` 를 쓰지 않고", "`update_id`", "`offset`", "최대 5통", "자동 재시도하지 않는다", "`contents: read`·`issues: write`",
                        "`schedule`", "`workflow_dispatch`", "`push` `ai/claude/**`", "`setWebhook`", "`github-actions[bot]`", "`텔레그램수신`", "`telegram-inbox:v1`", "WF-15", "WF-13",
                        "tests/test_telegram_inbox.py", "tests/test_telegram_inbox_workflow.py", "tests/test_telegram_inbox_docs.py", "스팸 반사 금지", "`decision`"):

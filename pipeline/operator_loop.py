@@ -17,6 +17,10 @@
   4. 알림·접수는 보조다. 실패는 `::warning::` 한 줄뿐이고 종료 코드는 0(사용법 오류만 2) — 푸시·병합·이슈를 막지 않는다.
   5. 요청 번호는 안쪽 기록과 보이는 글의 꼴이 다르다(2026-11-04 운영자 요청): 파일 이름·앞머리 id·로그·실행 요약은 정본 `R-001`, 운영자가 읽는 글(텔레그램·접수 코멘트·양식·사용법)은 `r001`(notify.display_id).
      운영자가 양식에 쓰는 번호는 `r001`·`R001`·`r-001`·`R-001`·`r 001` 어느 꼴이든 normalize_request_id 가 정본으로 맞춘다(정본 모양은 여전히 notify.REQUEST_ID_RE 가 지킨다).
+  6. **알림 번호(TG-STD, 운영자 승인 2026-11-06 계획 R-165)**: 요청 파일 앞머리 `no`(진행 현황 `P001`·병합 요청 `M001`·확인 요청은 숫자만 `001`, 유형마다 따로 늘어남)가 있는 파일은 유형별 칸으로
+     표준 메시지(notify.format_notice)가 가고, 없는 옛 파일(요청 번호가 아래 상수 NOTICE_NO_REQUIRED_FROM_R 보다 작은 것)은 옛 모양 그대로다. 요청 번호 `R-nnn`·파일 이름·`id` 는 작업 식별자로 그대로다. 운영자의 답은 새 양식(`ai-answer.yml`:
+     대상번호·선택·내용)도 읽는다 — **대상번호만 올린 답은 '확인함'이고 승인이 아니다**(승인은 선택이 그 확인 요청의 `approve` 보기와 같을 때만, 그 요청 파일에 적힌 항목에 한해 — G-S9).
+     새 양식의 모양 오류는 폰으로도 회신한다(소유자 판정을 통과한 이슈에만). 옛 `[답변]` 양식(요청 번호)은 옛 R 번호 요청을 위해 함께 둔다.
 
 명령 줄: python -m pipeline.operator_loop <requests | ack>   (외부 값을 인자로 받지 않는다 — 값은 환경변수·git·이벤트 JSON 파일에서만 읽는다)
   requests  환경변수 BEFORE_SHA·AFTER_SHA·DEFAULT_BRANCH(워크플로가 env 로 넘김)·GITHUB_REF_NAME(러너)·TELEGRAM_BOT_TOKEN·TELEGRAM_CHAT_ID
@@ -48,7 +52,18 @@ REQUEST_DIR = "인수인계/요청함"
 GUIDE_PATH = "인수인계/운영자_요청함_사용법.md"
 REQUEST_NAME_RE = re.compile(r"R-([0-9]{3})_([a-z0-9]+(?:-[a-z0-9]+)*)\.md")      # 요청 번호 + 영문 소문자·숫자·하이픈 슬러그
 SLUG_MAX = 60
-REQUEST_KEYS = ("id", "kind", "title", "summary", "urgency", "pr", "created")       # 앞머리에서 읽는 키(그 밖의 키는 런타임에서 무시, 검증기에서는 오류)
+BASE_KEYS = ("id", "kind", "title", "summary", "urgency", "pr", "created")          # 옛 파일(R-001~)의 앞머리 키 — 이것만 있는 파일은 옛 모양 그대로 읽힌다
+# 알림 번호 칸(TG-STD, 운영자 승인 2026-11-06 R-165): `no` 가 있는 파일만 새 규칙·새 메시지 모양을 쓴다. 유형별 칸은 번호 유형(진행 현황 P·병합 요청 M·확인 요청 숫자)마다 정해져 있다.
+NOTICE_KEYS = ("no", "work")                                                          # no 알림 번호(P012·M007·003) · work 이 알림이 속한 작업 번호(R-160)
+PROGRESS_KEYS = ("at", "now", "changed", "next", "eta", "waiting", "check")           # 진행 현황: 기준 시각(KST)·현재 진행·직전 보고 이후·다음 계획·예상 완료·확인/승인 대기·(선택) 점검 한 줄
+MERGE_KEYS = ("repo", "target", "pr_title", "verify", "state")                        # 병합 요청: 저장소·병합 대상·실제 PR 제목(글자 그대로)·검증 결과·(선택) 상태
+ASK_KEYS = ("options", "default", "approve")                                          # 확인 요청: (선택) 보기 · 기본 보기 번호 · 승인으로 읽는 보기 번호
+REQUEST_KEYS = (*BASE_KEYS, *NOTICE_KEYS, *PROGRESS_KEYS, *MERGE_KEYS, *ASK_KEYS)   # 앞머리에서 읽는 키(그 밖의 키는 런타임에서 무시, 검증기에서는 오류)
+NOTICE_ALLOWED = {notify.NOTICE_PROGRESS: PROGRESS_KEYS, notify.NOTICE_MERGE: MERGE_KEYS, notify.NOTICE_ASK: ASK_KEYS}
+NOTICE_REQUIRED = {notify.NOTICE_PROGRESS: ("at", "now", "changed", "next", "eta", "waiting"), notify.NOTICE_MERGE: ("repo", "target", "pr_title", "verify"), notify.NOTICE_ASK: ()}
+NOTICE_LIMITS = {**{key: limit for key, _label, limit in notify.PROGRESS_ITEMS}, "check": notify.CHECK_LIMIT, "target": notify.TARGET_LIMIT, "verify": notify.VERIFY_LIMIT,
+                 "state": notify.STATE_LIMIT}                                         # 글자 수 상한(검증기만 강제 — 런타임은 받고 보낼 때 줄인다). PR 제목(notify.PR_TITLE_LIMIT)은 줄이지 않는다
+NOTICE_NO_REQUIRED_FROM_R = 173          # 이 번호 이상의 요청 파일에는 `no` 가 필요하다(검증기 REQ-1). 그보다 작은 번호의 옛 모양 파일은 옛 모양 그대로 통과한다. 병합 직전에 '새 체계의 첫 요청 번호'(모든 원격 가지의 옛 모양 파일 최대 번호 + 1 이상)로 **여기 한 곳만** 고친다 — 문서는 이 상수를 이름으로만 가리키고 숫자를 적지 않는다(tests/test_notice_requests.py 가 확인)
 URGENCIES = ("보통", "급함")
 TITLE_MAX = notify.REQUEST_TITLE_LIMIT
 SUMMARY_MAX = notify.REQUEST_SUMMARY_LIMIT
@@ -61,7 +76,9 @@ _DATE_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 _PR_RE = re.compile(r"[1-9][0-9]{0,6}")
 _BOM = chr(0xFEFF)
 
-Request = namedtuple("Request", "id kind title summary urgency pr created name")
+# no·work·fields·notice_error 는 새 칸이다(옛 파일은 기본값: 빈 글·빈 목록). fields: 번호 유형에 맞는 검증된 앞머리 값의 (키, 값) 쌍들(+ 확인 요청이면 summary) — notify.format_notice 가 읽는다.
+# notice_error: 런타임이 새 칸의 문제를 만나 옛 모양(제목·요약)으로 보내기로 한 이유 코드(PROBLEMS 의 키). 문제가 없으면 빈 글.
+Request = namedtuple("Request", "id kind title summary urgency pr created name no work fields notice_error", defaults=("", "", (), ""))
 
 # 요청 파일 문제 분류 → 설명(검증기·로그가 쓴다. 외부 값은 없다)
 PROBLEMS = {
@@ -85,7 +102,27 @@ PROBLEMS = {
     "long_title": f"title 이 {TITLE_MAX}자를 넘습니다",
     "long_summary": f"summary 가 {SUMMARY_MAX}자를 넘습니다",
     "unreadable": "git 에서 파일 내용을 읽지 못했습니다",
+    # 알림 번호 칸(TG-STD) — 문구에 외부 값은 없다
+    "bad_no": "no 는 알림 번호 모양이 아닙니다(진행 현황 `P001`·병합 요청 `M001`·확인 요청은 숫자만 `001` — 숫자는 `001`~`999` 세 자리 또는 `1000`~`9999` 네 자리이고, 앞에 0 을 더 붙인 `P0012`·`0003` 이나 000 은 없습니다)",
+    "no_kind_mismatch": "no 의 유형이 kind 와 맞지 않습니다(info 는 `P`, merge 는 `M`, decision·confirm·run 은 숫자만)",
+    "no_required": f"R-{NOTICE_NO_REQUIRED_FROM_R} 부터의 요청 파일에는 알림 번호 `no` 가 필요합니다(`인수인계/도구/work/next_notice_no.py` 로 다음 번호를 구합니다)",
+    "notice_keys_without_no": "알림 칸(work·at·now·…·repo·target·pr_title·…·options 등)은 `no` 와 함께만 쓸 수 있습니다",
+    "foreign_key": "이 알림 유형에 쓰지 않는 칸이 있습니다(진행 현황: at·now·changed·next·eta·waiting·check / 병합 요청: repo·target·pr_title·verify·state / 확인 요청: options·default·approve)",
+    "bad_work": "work 는 작업 번호 `R-160` 모양이어야 합니다",
+    "bad_at": "at 는 `2026-11-06 12:07`(KST, 존재하는 날짜·시각) 모양이어야 합니다",
+    "bad_repo": "repo 는 `소유자/저장소` 모양이어야 합니다",
+    "bad_options": f"options 는 ` / ` 로 이은 보기 2~{notify.OPTIONS_MAX}개(각 보기는 비지 않고 {notify.OPTION_LIMIT}자 이하)여야 합니다",
+    "bad_default": "default 는 보기 번호(1~보기 수)여야 하고 options 가 있어야 합니다",
+    "bad_approve": "approve 는 보기 번호(1~보기 수)여야 하고 options 가 있어야 합니다",
+    "approve_is_default": "approve(승인으로 읽는 보기)는 default(답이 없을 때 진행하는 보기)와 같을 수 없습니다 — 침묵이 승인이 되지 않게",
+    "pr_title_control": "pr_title 에 제어 문자·보이지 않는 글자·줄 바꿈이 있습니다(글자 그대로 눈으로 같은지 볼 수 없습니다)",
+    "pr_title_secret": "pr_title 에 비밀 값처럼 보이는 글자가 있습니다(PR 제목은 고치지 않고 그대로만 보내므로 보낼 수 없습니다)",
+    "long_pr_title": f"pr_title 이 {notify.PR_TITLE_LIMIT}자를 넘습니다(PR 제목은 줄이지 않고 그대로 보냅니다 — PR 제목을 줄이세요)",
 }
+for _key in ("at", "now", "changed", "next", "eta", "waiting", "repo", "target", "pr_title", "verify"):
+    PROBLEMS["missing_" + _key] = f"`{_key}` 칸이 없거나 비어 있습니다(이 알림 유형에는 필요합니다)"
+for _key, _limit in NOTICE_LIMITS.items():
+    PROBLEMS["long_" + _key] = f"`{_key}` 가 {_limit}자를 넘습니다"
 
 
 class RequestError(ValueError):
@@ -138,7 +175,7 @@ def parse_request(name, text, strict=False):
             continue
         if key in values:
             raise RequestError("duplicate_key")
-        values[key] = _unquote(found.group(2).strip())
+        values[key] = found.group(2).strip() if key == "pr_title" else _unquote(found.group(2).strip())       # PR 제목은 따옴표까지 제목의 글자다 — 벗기지 않는다
     for key in ("id", "kind", "title", "summary"):
         if key not in values:
             raise RequestError("missing_" + key)
@@ -170,7 +207,81 @@ def parse_request(name, text, strict=False):
             date.fromisoformat(created)
         except ValueError:
             raise RequestError("bad_created") from None
-    return Request(request_id, values["kind"], values["title"], values["summary"], urgency, int(pr) if pr else None, created, str(name))
+    no, work, fields, notice_error = "", "", (), ""
+    problem = notice_problem(values, values["kind"], int(match.group(1)), strict)
+    if problem and strict:
+        raise RequestError(problem)
+    if problem:
+        notice_error = problem                  # 런타임: 새 칸이 맞지 않으면 알림을 잃지 않으려고 옛 모양(제목·요약)으로 보낸다 — 이유는 run_requests 가 로그에 남긴다
+    elif "no" in values:
+        no, work = values["no"], values.get("work", "")
+        wanted = (*NOTICE_ALLOWED[notify.notice_type(no)], *(["summary"] if notify.notice_type(no) == notify.NOTICE_ASK else []))
+        fields = tuple((key, values[key]) for key in (*wanted,) if key in values)
+    return Request(request_id, values["kind"], values["title"], values["summary"], urgency, int(pr) if pr else None, created, str(name), no, work, fields, notice_error)
+
+
+def notice_problem(values, kind, number, strict):
+    """앞머리의 알림 칸(`no`·`work`·유형별 칸)이 맞는지 — 문제 코드(PROBLEMS 의 키)를 돌려주고 없으면 빈 글. values 는 앞머리 값(글), kind 는 이미 검증한 요청 종류, number 는 파일 이름의 요청 번호(정수).
+
+    `no` 가 없는 파일은 옛 모양이다(새 칸이 하나라도 있으면 문제, strict 이고 번호가 NOTICE_NO_REQUIRED_FROM_R 이상이면 `no` 가 필요). `no` 가 있으면 번호 모양·kind 와의 유형 일치(info=P·merge=M·그 밖=숫자)·유형별 필수 칸·다른 유형의 칸 금지·값 모양을 본다.
+    strict=True(검증기)는 글자 수 상한과 PR 제목의 안전(제어·보이지 않는 글자·비밀 모양·200자)까지 본다 — 런타임은 받고 보낼 때 줄이되 PR 제목은 줄이지 않고 notify 가 보낼 수 없으면 보내지 않는다."""
+    present = [key for key in values if key in (*NOTICE_KEYS, *PROGRESS_KEYS, *MERGE_KEYS, *ASK_KEYS)]
+    if "no" not in values:
+        if present:
+            return "notice_keys_without_no"
+        return "no_required" if strict and number >= NOTICE_NO_REQUIRED_FROM_R else ""
+    no = values["no"]
+    kind_type = notify.notice_type(no)
+    if not kind_type:
+        return "bad_no"
+    if kind_type != notify.NOTICE_KIND_TYPES[kind]:
+        return "no_kind_mismatch"
+    if any(key != "work" and key != "no" and key not in NOTICE_ALLOWED[kind_type] for key in present):
+        return "foreign_key"
+    for key in NOTICE_REQUIRED[kind_type]:
+        value = values.get(key, "")
+        if not (value.strip() if key == "pr_title" else notify.clean_text(value, 10 ** 6)):
+            return "missing_" + key
+    if "work" in values and not notify.REQUEST_ID_RE.fullmatch(values["work"]):
+        return "bad_work"
+    if kind_type == notify.NOTICE_PROGRESS:
+        try:
+            notify.notice_stamp(values["at"])
+        except ValueError:
+            return "bad_at"
+    elif kind_type == notify.NOTICE_MERGE:
+        if _REPO_RE.fullmatch(values["repo"]) is None:
+            return "bad_repo"
+        if strict:
+            title_problem = notify.pr_title_problem(values["pr_title"], limit=notify.PR_TITLE_LIMIT)
+            if title_problem:
+                return {"too_long": "long_pr_title", "control": "pr_title_control", "secret": "pr_title_secret"}.get(title_problem, "missing_pr_title")
+    else:
+        problem = _ask_problem(values, strict)
+        if problem:
+            return problem
+    if strict:
+        for key, limit in NOTICE_LIMITS.items():
+            if len(values.get(key, "")) > limit:
+                return "long_" + key
+    return ""
+
+
+def _ask_problem(values, strict):
+    """확인 요청의 보기 칸(options·default·approve)의 문제 코드. options 는 있으면 2~5개이고 비지 않아야 한다. default·approve 는 보기 번호이고 서로 달라야 한다."""
+    options = notify.split_options(values.get("options"))
+    if "options" in values and (not 2 <= len(options) <= notify.OPTIONS_MAX or any(not option for option in options)
+                                or (strict and any(len(option) > notify.OPTION_LIMIT for option in options))):
+        return "bad_options"
+    numbers = {}
+    for key in ("default", "approve"):
+        if key in values:
+            if re.fullmatch(r"[1-5]", values[key]) is None or int(values[key]) > len(options):
+                return "bad_" + key
+            numbers[key] = int(values[key])
+    if "default" in numbers and numbers["default"] == numbers.get("approve"):
+        return "approve_is_default"
+    return ""
 
 
 # ---- 새 요청 파일 고르기 --------------------------------------------------------------------------
@@ -253,6 +364,8 @@ REQUEST_WARNING_LINE = ("::warning::텔레그램 알림을 보내지 못했습�
                         "(푸시·병합에는 영향이 없습니다).")
 REQUEST_PROBLEM_WARNING = "::warning::요청 파일을 읽지 못해 알리지 않은 것이 있습니다. 이유는 바로 앞 로그 줄에 있습니다(파일은 그대로이니 고쳐서 다시 push 하세요)."
 GIT_WARNING = "::warning::새 요청 파일을 가려내지 못해 알림을 보내지 않았습니다(중복·도배를 막으려는 것입니다). 이유는 바로 앞 로그 줄에 있습니다."
+NOTICE_FALLBACK_WARNING = ("::warning::요청 파일의 알림 칸(no·at·now 등)이 맞지 않아 번호 없는 옛 모양으로 보낸 알림이 있습니다. 이유는 바로 앞 로그 줄에 있습니다"
+                           "(파일을 고쳐 새 번호로 다시 보내세요).")
 
 
 def skipped_line(names):
@@ -267,14 +380,53 @@ def blob_url(ref, path):
     return f"{notify.REPO_URL}/blob/{urllib.parse.quote(ref, safe='/')}/{urllib.parse.quote(path, safe='/')}"
 
 
+BLOG_REPO = notify.REPO_URL.split("github.com/", 1)[1]          # `shine88pc/chanceblog` — 허용 주소가 가리키는 저장소(다른 저장소의 PR 은 이 주소로 열 수 없다)
+
+
 def request_buttons(request, ref_name, default_branch):
-    """요청 알림의 버튼(최대 4): ① 요청 열기(그 파일, 이 브랜치) ② PR 열기(pr 이 있을 때) ③ 답하기(새 이슈 양식 고르기) ④ 사용법(기본 브랜치). 주소는 코드가 만든다."""
-    buttons = [("요청 열기", blob_url(ref_name, f"{REQUEST_DIR}/{request.name}"))]
-    if request.pr:
+    """요청 알림의 버튼(최대 4). 옛 파일(`no` 없음): ① 요청 열기(그 파일, 이 브랜치) ② PR 열기(pr 이 있을 때) ③ 답하기(새 이슈 양식 고르기) ④ 사용법(기본 브랜치).
+    번호 있는 파일(TG-STD): 확인 요청은 ① 답하기(새 답변 양식 `ai-answer.yml` 바로 열기)로 시작하고, 진행 현황·병합 요청은 답할 일이 없어 답하기가 없다.
+    병합 요청의 저장소가 이 블로그 저장소가 아니면(예: 데스크톱) PR 열기를 달지 않는다 — 주소가 블로그 저장소의 같은 번호 PR 을 가리켜 틀리고 허용 주소도 아니다. 주소는 코드가 만든다."""
+    kind = notify.notice_type(request.no) if request.no else ""
+    fields = dict(request.fields)
+    buttons = [("답하기", notify.NEW_ANSWER_URL)] if kind == notify.NOTICE_ASK else []
+    buttons.append(("요청 열기", blob_url(ref_name, f"{REQUEST_DIR}/{request.name}")))
+    if request.pr and not (kind == notify.NOTICE_MERGE and fields.get("repo") != BLOG_REPO):
         buttons.append(("PR 열기", f"{notify.REPO_URL}/pull/{request.pr}"))
-    buttons.append(("답하기", notify.NEW_ISSUE_URL))
+    if not kind:
+        buttons.append(("답하기", notify.NEW_ISSUE_URL))
     buttons.append(("사용법", blob_url(default_branch, GUIDE_PATH)))
     return buttons
+
+
+NOTICE_DUPLICATE_LINE = ("AI 요청 알림: 알림 번호 {no} 를 다른 요청 파일({names})도 원격 가지에서 쓰고 있습니다 — 번호가 겹쳤습니다(알림은 그대로 보냈습니다). "
+                         "`인수인계/도구/work/next_notice_no.py` 로 번호를 다시 정해 새 요청 번호의 새 파일로 알리세요")
+NOTICE_DUPLICATE_WARNING = "::warning::알림 번호가 다른 요청 파일과 겹쳤습니다(알림은 보냈습니다). 이유는 바로 앞 로그 줄에 있습니다."
+MAX_GREP_REFS = 40              # git grep 한 번에 주는 원격 가지 수(명령 줄 길이)
+MAX_DUPLICATE_NAMES = 5         # 겹친 파일 이름을 로그에 싣는 수
+
+
+def other_files_with_notice_no(root, no, name, runner=subprocess.run):
+    """이 알림 번호(`no`)를 **이름이 다른** 요청 파일이 원격 가지(`refs/remotes/origin`)에서 쓰고 있는지 — 겹친 파일 이름 목록(정렬, 최대 MAX_DUPLICATE_NAMES). 로그 경고용이라
+    알아내지 못하면(git 실패·읽을 수 없는 출력) 빈 목록이고 어떤 경우에도 알림을 막지 않는다. 같은 파일이 다른 가지에도 있는 것(이 가지에서 만든 가지)은 겹침이 아니다.
+    앞머리 `no: P012`·`no: "003"`·`no: '003'` 줄만 찾는다(정규식으로 값 전체가 같을 때만 — `P0123` 은 `P012` 와 다르다)."""
+    try:
+        listing = notify.run_git(root, "for-each-ref", "--format=%(refname)", "refs/remotes/origin", runner=runner).decode("utf-8", "replace").split()
+        refs = [ref for ref in listing if ref != "refs/remotes/origin/HEAD" and _BRANCH_RE.fullmatch(ref.replace("refs/remotes/", "", 1))]
+        pattern = "^no: *[\"']?" + re.escape(no) + "[\"']? *$"
+        found = set()
+        for start in range(0, len(refs), MAX_GREP_REFS):
+            done = runner(["git", "grep", "-l", "-z", "-E", "-e", pattern, *refs[start:start + MAX_GREP_REFS], "--", REQUEST_DIR], cwd=str(root), capture_output=True,
+                          timeout=notify.GIT_TIMEOUT, check=False)
+            if done.returncode != 0:                      # 1 = 찾은 것 없음, 그 밖은 읽지 못함 — 둘 다 겹침을 알릴 근거가 없다
+                continue
+            for token in done.stdout.decode("utf-8", "replace").split("\0"):
+                base = token.rpartition("/")[2]
+                if base != name and REQUEST_NAME_RE.fullmatch(base):
+                    found.add(base)
+        return sorted(found)[:MAX_DUPLICATE_NAMES]
+    except Exception:  # noqa: BLE001 - 경고용 조회라 어떤 오류도 알림을 막지 않는다(예외 문구는 쓰지 않는다)
+        return []
 
 
 def run_requests(environ, notifier, root, out, runner=subprocess.run):
@@ -310,22 +462,38 @@ def run_requests(environ, notifier, root, out, runner=subprocess.run):
         out(REQUEST_PROBLEM_WARNING)
     sending = sorted(requests, key=lambda request: request.name)
     shown, hidden = sending[:MAX_REQUEST_MESSAGES], len(sending) - MAX_REQUEST_MESSAGES
-    failed, lines = 0, []
+    failed, lines, fallbacks, duplicates = 0, [], 0, 0
     for index, request in enumerate(shown):
         more = hidden if index == len(shown) - 1 and hidden > 0 else 0
-        result = notifier.notify_ai_request(request.id, request.kind, request.title, request.summary, urgency=request.urgency, pr=request.pr,
-                                            buttons=request_buttons(request, ref_name, default_branch), more=more)
+        buttons = request_buttons(request, ref_name, default_branch)
+        if request.notice_error:                         # 새 칸이 맞지 않아도 알림을 잃지 않는다 — 옛 모양(제목·요약)으로 보내고 이유를 남긴다
+            fallbacks += 1
+            out(f"AI 요청 알림: {request.name} 의 알림 칸이 맞지 않아 옛 모양(제목·요약)으로 보냅니다 — {problem_text(request.notice_error)}")
+        if request.no:
+            result = notifier.notify_notice(request.no, dict(request.fields), urgency=request.urgency, work=request.work, pr=request.pr, buttons=buttons, more=more)
+        else:
+            result = notifier.notify_ai_request(request.id, request.kind, request.title, request.summary, urgency=request.urgency, pr=request.pr, buttons=buttons, more=more)
         if result.sent:
-            out(f"AI 요청 알림: {request.id} 을 알렸습니다")
-            lines.append(f"- {request.id}: 알렸습니다")
+            numbered = f" (알림 번호 {request.no})" if request.no else ""
+            out(f"AI 요청 알림: {request.id} 을 알렸습니다{numbered}")
+            lines.append(f"- {request.id}: 알렸습니다{numbered}")
         else:
             failed += 1
             out(notifier.scrub(f"AI 요청 알림: {request.id} 을 보내지 못했습니다 — {notify.describe(result)}"))
             lines.append(f"- {request.id}: 보내지 못했습니다({result.reason})")
+        if request.no:                                   # 알림 번호가 다른 가지의 다른 요청 파일과 겹쳤는지(로그 경고만 — 알림은 이미 보냈고 이 확인은 알림을 막지 않는다)
+            twins = other_files_with_notice_no(root, request.no, request.name, runner=runner)
+            if twins:
+                duplicates += 1
+                out(NOTICE_DUPLICATE_LINE.format(no=request.no, names=", ".join(twins)))
     if hidden > 0:
         out(f"AI 요청 알림: 한 푸시에 {MAX_REQUEST_MESSAGES}통까지만 보내 {hidden}건은 마지막 통의 '… 외 {hidden}건' 한 줄로 알렸습니다")
     if failed:
         out(REQUEST_WARNING_LINE)
+    if fallbacks:
+        out(NOTICE_FALLBACK_WARNING)
+    if duplicates:
+        out(NOTICE_DUPLICATE_WARNING)
     if lines:
         notify.write_summary(environ, "### AI 요청 텔레그램 알림\n\n" + "\n".join(lines), out)
     return 0
@@ -351,6 +519,32 @@ ANSWER_OPTIONS = (("보류", "보류 — 나중에 다시 물어 주세요"), ("
                   ("했어요", "했어요 — 제가 직접 처리했습니다"), ("문제", "문제 — 아래 메모를 보세요"))
 ANSWER_DEFAULT_INDEX = 0
 ANSWER_DIRECT_NOTICE = "올리기 전에 반드시 직접 고르세요"   # `[답변]` 양식 맨 위 안내 글에 있어야 하는 문장(검증기 FORM-1)
+REPLY_FORM_NAME = "AI 요청에 답하기(결정·확인) (이전 R 번호용)"      # 옛 `[답변]` 양식의 메뉴 이름 — 새 알림은 새 양식만 안내한다(TG-STD). 옛 R 번호 요청을 위해 한동안 함께 둔다
+# 새 `[답변]` 양식 `ai-answer.yml`(TG-STD, 운영자 승인 2026-11-06 R-165) — 휴대폰에서 3칸으로 답한다: `대상번호: 001` / `선택: ②` / `내용: …`. 같은 제목 머리 `[답변] `·같은 라벨 `운영자응답` 이라 AI 의 읽기 절차가 그대로 동작한다.
+# 대상번호만 필수다. 대상번호만 올린 답은 '확인함'이고 **승인이 아니다** — 선택 칸은 `선택 안 함` 이 미리 선택돼 있고(안전값), 승인은 소유자 계정이 이 양식으로 올리고 대상번호가 AI 가 보낸
+# 확인 요청 번호와 같고 선택이 그 요청 파일의 `approve` 보기와 같을 때만 그 요청 파일에 적힌 항목에 한해 인정된다(docs/SECURITY_GUARDRAILS.md G-S9).
+ANSWER_FORM_NAME = "AI 확인 요청에 답하기(대상번호)"
+ANSWER_FIELDS = (("target", "대상번호"), ("choice", "선택"), ("memo", "내용"))
+ANSWER_REQUIRED = ("target",)
+ANSWER_FIELD_TYPES = {"target": "input", "choice": "dropdown", "memo": "textarea"}
+CHOICE_NONE = "선택 안 함"
+CHOICE_OPTIONS = (CHOICE_NONE, *notify.CIRCLED_DIGITS)             # 선택 드롭다운의 선택지(양식과 글자 그대로 같아야 한다) — 첫째(`선택 안 함`)가 미리 선택된다
+CHOICE_DEFAULT_INDEX = 0
+TARGET_EXAMPLE = "001"                                            # 양식 `대상번호` 칸의 예시(placeholder)·설명의 번호(검증기 FORM-1)
+TARGET_NOTICE = f"텔레그램 확인 요청 맨 위의 `{TARGET_EXAMPLE}` 같은 숫자"      # 새 양식 맨 위 안내 글에 있어야 하는 문구(검증기 FORM-1)
+ANSWER_NOT_APPROVAL_NOTICE = "`선택 안 함` 이나 대상번호만 올린 답은 승인이 아닙니다"   # 새 양식 맨 위 안내 글에 있어야 하는 문장(검증기 FORM-1)
+_CHOICE_SYMBOLS = {**{symbol: index + 1 for index, symbol in enumerate(notify.CIRCLED_DIGITS)},
+                   **{chr(0x2776 + index): index + 1 for index in range(notify.OPTIONS_MAX)}}     # ①~⑤ 와 ❶~❺ — 원문자는 같은 숫자로 읽는다
+# 대상번호·선택을 읽다 틀렸을 때 폰·코멘트에 쓰는 고정 문장(이슈 글을 되풀이하지 않는다)
+TARGET_PROBLEMS = {
+    "empty": "`대상번호`가 필요합니다(텔레그램 확인 요청 맨 위의 숫자 3자리, 예: 001)",
+    "short": "`대상번호`는 숫자 3자리로 써 주세요(예: 001)",
+    "two": "`대상번호`에는 번호를 하나만 쓸 수 있습니다(번호 하나당 이슈 하나)",
+    "type": "`대상번호`에는 숫자만인 확인 요청 번호를 써 주세요(P·M 으로 시작하는 번호는 답하는 번호가 아닙니다)",
+    "format": "`대상번호` 모양이 맞지 않습니다(알림에 적힌 번호 그대로 숫자만 — 세 자리 예: 001, 1000번부터는 네 자리. 앞에 0 을 더 붙이지 마세요)",
+}
+FOREIGN_LABELS_PROBLEM = "새 양식에 없는 항목({labels})이 있습니다"
+MIXED_FORMS_PROBLEM = "두 양식의 항목(`요청 번호`와 `대상번호`)이 섞여 있습니다"
 # `[요청]` 양식(새 일 맡기기)은 T3 승인이 아니다(독립 검증 B-1): 번호 없는 새 일 요청이라 논의·준비·T1·T2 범위의 진행만 정한다. T3 가 필요하면 AI 가 번호 있는 `decision` 요청(R-번호)으로 다시 묻는다.
 # 필드 id(`approval`)와 Submission.approval_yes 는 그대로 두고 뜻만 '진행 범위'다: no = 논의·준비까지만, yes = 구현·시험까지(T1·T2).
 TASK_FIELDS = (("what", "해 주었으면 하는 일"), ("done", "끝났다고 볼 기준"), ("urgency", "긴급도"), ("approval", "진행 범위"))
@@ -368,7 +562,8 @@ CHOICE_RE = re.compile(r"[A-Za-z0-9가-힣]{1,3}")
 _NO_RESPONSE = ("_no response_", "no response")
 MAX_EVENT_BYTES = 2_000_000
 
-Submission = namedtuple("Submission", "kind request_id answer choice choice_invalid memo_chars urgency approval_yes")    # kind: reply | task
+# kind: reply(옛 `[답변]`) | task(`[요청]`) | answer(새 `[답변]` 양식 — target 은 확인 요청 번호 `003` 또는 옛 요청 번호 `R-149`, choice_no 는 선택 기호 1~5·없으면 0, answer·choice 는 비어 있다 — 새 양식은 승인 낱말이 없다)
+Submission = namedtuple("Submission", "kind request_id answer choice choice_invalid memo_chars urgency approval_yes target choice_no", defaults=("", 0))
 Refusal = namedtuple("Refusal", "code problems")
 # 거절 사유: no_owner 저장소 소유자를 모름 / not_owner 작성자가 소유자가 아님 / not_owner_association 작성자 권한이 OWNER 가 아님 / not_form 제목이 양식 이슈가 아님 / bad_shape 양식 모양이 다름
 REFUSAL_LINES = {
@@ -428,6 +623,80 @@ def normalize_request_id(raw):
     return text
 
 
+_TYPED_NO_RE = re.compile(r"[PpMm][ -]?[0-9]{3,4}")                  # 진행 현황·병합 요청 번호 — 답하는 번호가 아니다
+_NUMBERISH_RE = re.compile(r"(?:[PpMmRr][ -]?)?[0-9]{1,4}")
+_TARGET_SPLIT_RE = re.compile(r"[\s,/·]+")
+
+
+def parse_target(raw):
+    """새 양식 `대상번호` 칸의 값을 읽는다 → (종류, 값, 문제 코드). 종류는 `ask`(확인 요청 번호 `001`, 표준 ASCII 숫자 `001`~`999`·`1000`~`9999` — `0003` 처럼 앞에 0 을 더 붙인 글자는 번호가 아니다) 또는 `request`(옛 요청 번호 — `r149`·`R-149` 등
+    normalize_request_id 와 같은 꼴, 값은 정본 `R-149`), 문제가 있으면 종류·값은 빈 글이고 코드는 TARGET_PROBLEMS 의 키다: empty(비었음)·short(1~2자리)·two(번호 둘 이상)·
+    type(`P012`·`M007` — 답하는 번호가 아님)·format(그 밖의 모든 모양: 전각·원문자·`#001`·`001.`·`001 메모`·자리 수 초과·`000`·앞 0 이 더 붙은 `0003`). 앞뒤 공백만 봐주고 번호는 ASCII 만 읽는다 —
+    잘못 읽어 엉뚱한 요청에 답이 붙는 것을 막는 옛 원칙(`r90`·전각 `ｒ` 거절)과 같다. 신뢰 판정(작성자·권한) 뒤에만 쓴다."""
+    text = str(raw or "").strip()
+    if not text:
+        return "", "", "empty"
+    if notify.notice_type(text) == notify.NOTICE_ASK:
+        return "ask", text, ""
+    if _TYPED_NO_RE.fullmatch(text):
+        return "", "", "type"
+    found = REQUEST_INPUT_RE.fullmatch(text)
+    if found:
+        return "request", "R-" + found.group(1), ""
+    if re.fullmatch(r"[0-9]{1,2}", text):
+        return "", "", "short"
+    parts = [part for part in _TARGET_SPLIT_RE.split(text) if part]
+    if len(parts) >= 2 and all(_NUMBERISH_RE.fullmatch(part) for part in parts):
+        return "", "", "two"
+    return "", "", "format"
+
+
+def parse_choice(raw):
+    """새 양식 `선택` 칸의 값을 읽는다 → (선택 기호 번호, 문제 코드). `선택 안 함`·빈칸 = (0, ''), `①`~`⑤`·`❶`~`❺`·`1`~`5`·`2.`·`2)`·`2번` = 같은 번호, 그 밖(전각 숫자·`A`·`두번째`·`6`)은
+    (0, 'invalid') — 선택은 버리고 접수는 한다(AI 가 본문을 읽는다). 틀린 선택이 승인 보기와 같아지는 일은 없다."""
+    text = str(raw or "").strip()
+    if text in ("", CHOICE_NONE):
+        return 0, ""
+    if text in _CHOICE_SYMBOLS:
+        return _CHOICE_SYMBOLS[text], ""
+    found = re.fullmatch(r"([1-5])(?:[.)]|번)?", text)
+    if found:
+        return int(found.group(1)), ""
+    return 0, "invalid"
+
+
+_ANSWER_LABELS = [label for _, label in ANSWER_FIELDS]
+_ALL_ANSWER_LABELS = list(dict.fromkeys([*_ANSWER_LABELS, *(label for _, label in REPLY_FIELDS)]))        # 두 양식의 항목 제목 전부(어느 양식인지 가릴 때)
+
+
+def answer_form_kind(body):
+    """`[답변]` 이슈 본문이 어느 양식의 모양인지: `new`(항목 `### 대상번호` 가 있고 `### 요청 번호` 는 없음) · `old`(`### 요청 번호` 만 있음) · `mixed`(둘 다 있음 — 메모 칸에 가짜 제목을 심은 글 포함) ·
+    `none`(둘 다 없음). 항목 제목은 양식이 만든 `### 제목` 한 줄만 인정한다(parse_sections)."""
+    values, duplicates = parse_sections(body, _ALL_ANSWER_LABELS)
+    found = set(values) | set(duplicates)
+    has_new, has_old = dict(ANSWER_FIELDS)["target"] in found, dict(REPLY_FIELDS)["request_id"] in found
+    return "mixed" if has_new and has_old else "new" if has_new else "old" if has_old else "none"
+
+
+def _parse_answer(body):
+    """새 양식 본문 → Submission(kind `answer`) 또는 Refusal(bad_shape, 고정 문장 목록). 대상번호만 필수. 새 양식에 없는 항목(`답변`·`메모`)이나 두 번 나온 항목은 모양 오류다 —
+    내용 칸에 가짜 `### 대상번호`·`### 선택` 같은 줄을 심어 값을 바꾸려는 시도를 거절한다."""
+    values, duplicates = parse_sections(body, _ALL_ANSWER_LABELS)
+    label_of = dict(ANSWER_FIELDS)
+    problems = [f"`{label}` 항목이 두 번 나옵니다" for label in duplicates]
+    foreign = [label for label in _ALL_ANSWER_LABELS if label in values and label not in _ANSWER_LABELS]
+    if foreign:
+        problems.append(FOREIGN_LABELS_PROBLEM.format(labels=", ".join(f"`{label}`" for label in foreign)))
+    target_kind, target, target_problem = parse_target(values.get(label_of["target"], ""))
+    if target_problem:
+        problems.append(TARGET_PROBLEMS[target_problem])
+    if problems:
+        return Refusal("bad_shape", tuple(problems))
+    raw_choice = values.get(label_of["choice"], "")
+    choice_no, choice_problem = parse_choice(raw_choice)
+    return Submission("answer", target if target_kind == "request" else "", "", "", bool(choice_problem), len(values.get(label_of["memo"], "")), "", False, target, choice_no)
+
+
 def parse_reply(title, body, login, association, owner):
     """응답·요청 이슈 하나를 판정한다 → Submission(접수할 것) 또는 Refusal(사유 코드, 양식 문제 목록).
 
@@ -435,7 +704,9 @@ def parse_reply(title, body, login, association, owner):
     한다 — 둘 다 이벤트 JSON 의 값이고 이슈 본문·제목의 글은 보지 않는다. 유니코드 접기(`casefold`)는 쓰지 않는다: `ſhine88pc`(U+017F) 같은 글자가 `shine88pc` 로 접혀 통과하는 일이 없게(독립 검증 N-6).
     그다음 제목이 `[답변]`(요청에 답하기)·`[요청]`(새 일 맡기기)로 시작해야 하고, 본문의 항목 제목(양식이 만든 `### …`)으로 값을 읽어 **검증된 값만** 담는다:
     요청 번호는 정본 `R-` 와 숫자 세 자리이고 `r001`·`R001`·`r-001`·`r 001` 같은 운영자 표기도 정본으로 읽는다(normalize_request_id), 답은 양식의 선택지 전체 문구와 글자 그대로 같아야 하고(짧은 말로 바꿔 담는다), 선택은 영문·숫자·한글 1~3자(아니면 표시하지 않음 표시), 메모는 글자 수만 담는다.
-    `[요청]` 은 접수만 한다 — T3 승인이 아니다(독립 검증 B-1): 진행 범위(논의·준비까지 / 구현·시험까지)만 읽는다."""
+    `[요청]` 은 접수만 한다 — T3 승인이 아니다(독립 검증 B-1): 진행 범위(논의·준비까지 / 구현·시험까지)만 읽는다.
+    `[답변]` 은 본문 항목 제목으로 두 양식을 가른다(answer_form_kind): `### 대상번호` 가 있으면 새 양식(대상번호·선택·내용 — Submission kind `answer`, 승인 낱말이 없다), `### 요청 번호` 가 있으면 옛 양식(위 설명 그대로),
+    둘 다 있으면 모양 오류, 둘 다 없으면 옛 분기가 옛 문구로 거절한다."""
     owner_name = str(owner or "")
     if not _LOGIN_RE.fullmatch(owner_name):
         return Refusal("no_owner", ())
@@ -445,6 +716,11 @@ def parse_reply(title, body, login, association, owner):
         return Refusal("not_owner_association", ())
     head = str(title or "")
     if head.startswith(REPLY_TITLE_PREFIX.rstrip()):
+        form = answer_form_kind(body)                   # 본문 제목으로 어느 양식인지 가린다: `### 대상번호` = 새 양식, `### 요청 번호` = 옛 양식, 둘 다 있으면 모양 오류, 둘 다 없으면 옛 분기가 옛 문구로 거절
+        if form == "new":
+            return _parse_answer(body)
+        if form == "mixed":
+            return Refusal("bad_shape", (MIXED_FORMS_PROBLEM,))
         values, duplicates = parse_sections(body, [label for _, label in REPLY_FIELDS])
         label_of = dict(REPLY_FIELDS)
         problems = _label_problems(values, duplicates, REPLY_FIELDS, REPLY_REQUIRED)
@@ -514,11 +790,41 @@ def task_comment(sub):
     return _compose(head, notes)
 
 
+OLD_TARGET_NOTE = (f"- 옛 R 번호 요청에는 새 양식으로 승인할 수 없습니다 — 이 답은 접수만 합니다. 승인은 `{REPLY_FORM_NAME}` 양식으로 올려 주세요.")
+NUMBER_CHECK_NOTE = "- 이 번호가 AI 가 보낸 요청의 번호와 맞는지는 이 접수가 알 수 없습니다(접수 워크플로는 요청 파일이 없는 기본 브랜치만 봅니다) — AI 가 이슈를 읽을 때 대조하고, 번호가 틀렸으면 폰으로 알립니다."
+SHAPE_TAIL = (f"이 이슈는 닫고, Issues → New issue 에서 **{ANSWER_FORM_NAME}**(옛 R 번호 요청이면 **{REPLY_FORM_NAME}**, 새 일 맡기기면 **AI 에게 새 일 맡기기(작업 요청)**) "
+              "양식을 골라 다시 올려 주세요. 빈 이슈나 양식 밖의 글은 승인으로 보지 않습니다.")
+
+
+def answer_comment(sub, replaced=None):
+    """새 양식 `[답변]`(대상번호) 접수 코멘트(마크다운). 값은 모두 검증을 통과한 것이다 — 번호 모양·선택 기호(①~⑤)·이슈 번호·내용 글자 수. 내용 글은 되풀이하지 않는다.
+    선택이 없으면 '확인함(승인 아님)'이고, replaced(같은 번호에 앞서 올린 답의 이슈 번호)가 있으면 가장 나중 답이 이긴다는 말을 덧붙인다. 옛 R 번호(`R-149`)면 새 양식으로 승인할 수 없다고 적는다."""
+    old = sub.target.startswith("R-")
+    shown = notify.display_id(sub.target) if old else sub.target                 # 옛 번호는 운영자에게 `r149` 꼴
+    head = (f"접수했습니다 — 요청 **{shown}**(이전 R 번호)" if old else f"접수했습니다 — 확인 요청 **{shown}**")
+    head += (f" · 선택: **{notify.CIRCLED_DIGITS[sub.choice_no - 1]}**" if sub.choice_no else " · 확인함(승인 아님)")
+    head += (f" · 내용: 있음({sub.memo_chars}자)" if sub.memo_chars else "") + "."
+    notes = []
+    if replaced is not None:
+        notes.append(f"- 이 번호에 앞서 올린 답(이슈 #{replaced})이 있어 이 답이 그것을 대체합니다 — 가장 나중 답이 이깁니다(앞 이슈는 지우지 않습니다).")
+    if sub.memo_chars:
+        notes.append("- 내용 글은 AI 가 이슈 본문에서 읽습니다(여기에는 되풀이하지 않습니다).")
+    if sub.choice_invalid:
+        notes.append(f"- 선택 칸의 값이 양식의 선택지(`{CHOICE_NONE}`·①~⑤)가 아니라 표시하지 않았습니다. AI 가 이슈 본문에서 읽습니다.")
+    if old:
+        notes.append(OLD_TARGET_NOTE)
+    elif sub.choice_no:
+        notes.append("- 승인은 그 확인 요청에 승인 보기로 적힌 번호를 직접 고른 경우에만 인정됩니다. AI 가 요청 파일과 대조해 확인합니다.")
+    else:
+        notes.append("- 대상번호만 올린 답은 '확인함' 일 뿐 승인이 아닙니다.")
+    if not sub.choice_no:
+        notes.append(NUMBER_CHECK_NOTE)
+    return _compose(head, notes)
+
+
 def shape_comment(problems):
-    """양식 모양이 달라 처리하지 못했다는 코멘트. 문제 목록은 코드가 정한 고정 문구뿐이다(이슈 글을 되풀이하지 않는다)."""
-    return (f"{ACK_MARK}\n양식 모양이 달라 처리하지 못했습니다 — " + "; ".join(problems) + ".\n\n"
-            "이 이슈는 닫고, Issues → New issue 에서 **AI 요청에 답하기(결정·확인)**(또는 **AI 에게 새 일 맡기기(작업 요청)**) 양식을 골라 다시 올려 주세요. "
-            "빈 이슈나 양식 밖의 글은 승인으로 보지 않습니다.")
+    """양식 모양이 달라 처리하지 못했다는 코멘트. 문제 목록은 코드가 정한 고정 문구뿐이다(이슈 글을 되풀이하지 않는다). 새 양식(대상번호)을 먼저 안내한다."""
+    return f"{ACK_MARK}\n양식 모양이 달라 처리하지 못했습니다 — " + "; ".join(problems) + ".\n\n" + SHAPE_TAIL
 
 
 # ---- GitHub REST(표준 라이브러리) -----------------------------------------------------------------------
@@ -639,8 +945,34 @@ def ensure_label(api, name):
             raise
 
 
+EARLIER_PER_PAGE = 100          # 앞서 올라온 답을 찾을 때 읽는 이슈 수(최근 것부터 한 쪽)
+
+
+def earlier_answer(api, number, target, owner, out):
+    """같은 대상번호에 **앞서** 올라온 소유자의 새 양식 답 중 가장 나중 이슈 번호(없으면 None) — 가장 나중 답이 이기고 앞 답은 지우지 않는다(접수 코멘트·폰이 '대체합니다' 로 알린다).
+    라벨 `운영자응답` 이슈를 `creator=<소유자>` 로 읽고(최근 100건), 각 이슈를 접수 때와 같은 parse_reply 로 다시 판정한다 — 작성자 login·`author_association` 이 소유자가 아니거나 모양이 틀린 이슈·
+    이 이슈 자신과 그보다 뒤 번호·PR 은 세지 않는다. 읽기에 실패하면 None 으로 두고 접수는 계속한다(로그 한 줄)."""
+    try:
+        items = api.request("GET", "/issues", params={"creator": owner, "labels": LABEL_REPLY, "state": "all", "sort": "created", "direction": "desc",
+                                                      "per_page": EARLIER_PER_PAGE})
+    except GitHubError as exc:
+        out(f"운영자 응답 접수: 앞서 올라온 답을 확인하지 못했습니다 — {exc}")
+        return None
+    best = None
+    for item in items if isinstance(items, list) else ():
+        if not isinstance(item, dict) or "pull_request" in item:
+            continue
+        earlier, user = item.get("number"), item.get("user")
+        if isinstance(earlier, bool) or not isinstance(earlier, int) or earlier >= number:
+            continue
+        found = parse_reply(item.get("title"), item.get("body"), user.get("login") if isinstance(user, dict) else None, item.get("author_association"), owner)
+        if isinstance(found, Submission) and found.kind == "answer" and found.target == target and (best is None or earlier > best):
+            best = earlier
+    return best
+
+
 # ---- 응답 접수(ack) ------------------------------------------------------------------------------------
-ACK_WARNING = "::warning::운영자 응답 접수 중 일부를 하지 못했습니다. 이유는 바로 앞 로그 줄에 있습니다(이슈는 그대로이고 AI 가 읽습니다)."
+ACK_WARNING ="::warning::운영자 응답 접수 중 일부를 하지 못했습니다. 이유는 바로 앞 로그 줄에 있습니다(이슈는 그대로이고 AI 가 읽습니다)."
 
 
 def read_event(environ):
@@ -695,6 +1027,8 @@ def run_ack(environ, notifier, root, out, api=None, sleep=time.sleep):
         return 0
     api = api or GitHub(environ.get("GITHUB_REPOSITORY"), token, sleep=sleep)
     is_reply = str(issue.get("title") or "").startswith(REPLY_TITLE_PREFIX.rstrip())
+    form = answer_form_kind(issue.get("body")) if is_reply else ""        # new | old | mixed | none — 새 양식(대상번호)의 모양 오류만 폰으로도 회신한다(옛 양식·번호 없는 글·`[요청]` 은 옛 동작 그대로)
+    new_form = form in ("new", "mixed")
     failures = 0
     label = LABEL_REPLY if is_reply else LABEL_TASK
     present = {str(item.get("name")) for item in issue.get("labels") or () if isinstance(item, dict)}
@@ -706,11 +1040,16 @@ def run_ack(environ, notifier, root, out, api=None, sleep=time.sleep):
         except GitHubError as exc:
             failures += 1
             out(f"운영자 응답 접수: 라벨을 붙이지 못했습니다 — {exc}")
+    replaced = None
     if isinstance(result, Refusal):
         text, summary = shape_comment(result.problems), f"- 이슈 #{number}: 양식 모양이 달라 처리하지 못했다는 코멘트를 달았습니다"
     elif result.kind == "reply":
         text = reply_comment(result, result.request_id in known_request_ids(root))
         summary = f"- 이슈 #{number}: 요청 {result.request_id} · 답 {result.answer} 을 접수했습니다"
+    elif result.kind == "answer":
+        replaced = earlier_answer(api, number, result.target, _owner_of(environ), out)
+        text = answer_comment(result, replaced)
+        summary = f"- 이슈 #{number}: 대상번호 {result.target} 의 답을 접수했습니다(선택 {result.choice_no or '없음'})" + (f" · 이슈 #{replaced} 을 대체" if replaced else "")
     else:
         text, summary = task_comment(result), f"- 이슈 #{number}: 새 일 요청을 접수했습니다(긴급도 {result.urgency})"
     try:
@@ -724,18 +1063,24 @@ def run_ack(environ, notifier, root, out, api=None, sleep=time.sleep):
         return 0
     out(f"운영자 응답 접수: 이슈 #{number} 에 접수 코멘트를 달았습니다")
     notify.write_summary(environ, "### 운영자 응답 접수\n\n" + summary, out)
-    if isinstance(result, Refusal):
-        return 0
+    refused = isinstance(result, Refusal)
+    if refused and not new_form:
+        return 0                                       # 옛 양식·`[요청]` 의 모양 오류는 코멘트만(옛 동작 그대로)
     if not notifier.enabled:
         out(notify.SKIP_LINE)
     else:
         buttons = [("이슈 열기", f"{notify.REPO_URL}/issues/{number}")]
-        if result.kind == "reply":
+        if refused:                                    # 새 양식 오류도 폰으로(TG-STD) — 소유자 판정을 통과한 이슈에만(위에서 이미 거름), 고정 문장만
+            reason = result.problems[0]
+            sent = notifier.notify_answer_error(number, reason, buttons=buttons)
+        elif result.kind == "reply":
             sent = notifier.notify_reply_received(result.request_id, result.answer, number, choice=result.choice, buttons=buttons)
+        elif result.kind == "answer":
+            sent = notifier.notify_answer_received(result.target, result.choice_no, number, replaced=replaced, buttons=buttons)
         else:
             sent = notifier.notify_task_received(number, result.urgency, result.approval_yes, buttons=buttons)
         if sent.sent:
-            out("운영자 응답 접수: 텔레그램으로 접수를 알렸습니다")
+            out("운영자 응답 접수: 텔레그램으로 " + ("접수하지 못했다는 회신을 보냈습니다" if refused else "접수를 알렸습니다"))
         else:
             failures += 1
             out(notifier.scrub(f"운영자 응답 접수: 텔레그램 알림을 보내지 못했습니다 — {notify.describe(sent)}"))
