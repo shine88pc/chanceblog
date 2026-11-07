@@ -273,5 +273,26 @@
     "attempts": 1,
     "reasons": [],
     "image": "ur4desGm6vY"
+  },
+  {
+    "v": 1,
+    "blog": "blogger_macat",
+    "date": "2026-11-07",
+    "generated_at": "2026-11-07T17:32:06.441255+09:00",
+    "status": "draft_uploaded",
+    "topic": "Tips for building a drink-more-water habit",
+    "topic_source": "seed",
+    "title": "Easy Daily Habits to Help You Drink More Water",
+    "labels": [
+      "habits",
+      "daily routine",
+      "wellness"
+    ],
+    "url": "https://macat0722.blogspot.com/",
+    "post_id": "7065830856066653838",
+    "model": "gemini-3.6-flash",
+    "attempts": 1,
+    "reasons": [],
+    "image": "p5EiqkBYIEE"
   }
 ]
