@@ -144,5 +144,26 @@
     "attempts": 1,
     "reasons": [],
     "image": "-lZmnpignB8"
+  },
+  {
+    "v": 1,
+    "blog": "blogger_kcyoon",
+    "date": "2026-11-07",
+    "generated_at": "2026-11-07T19:31:15.332567+09:00",
+    "status": "draft_uploaded",
+    "topic": "중요한 파일을 클라우드와 외장 저장장치에 나눠서 보관하는 기본 요령",
+    "topic_source": "seed",
+    "title": "중요한 파일을 안전하게 보관하는 클라우드와 외장 저장장치 분할 관리법",
+    "labels": [
+      "디지털 정리",
+      "파일 백업",
+      "클라우드 활용"
+    ],
+    "url": "https://kcyoon.blogspot.com/",
+    "post_id": "6227201174517669365",
+    "model": "gemini-3.6-flash",
+    "attempts": 1,
+    "reasons": [],
+    "image": "IisDPFNUS4k"
   }
 ]
