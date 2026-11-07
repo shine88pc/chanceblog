@@ -273,5 +273,17 @@
     "lane": "science",
     "source": "European Commission, Joint Research Centre",
     "source_url": "https://joint-research-centre.ec.europa.eu/jrc-news-and-updates/tourism-generates-more-one-every-10-euros-value-added-eu-2026-11-04_en"
+  },
+  {
+    "date": "2026-11-07",
+    "topic": "Elementary and secondary education: Enrolment growth slows, as school populations shift toward higher grades, 2024/2025",
+    "kr_title": "캐나다 초·중등 공립학교 등록자 수 550만 명 역대 최고… 증가세는 1.6%로 둔화",
+    "en_title": "Canada’s Public School Enrolment Hits Record 5.5 Million as Growth Slows to 1.6%",
+    "kr_image": "https://images.unsplash.com/photo-1580188911874-f95af62924ee?ixid=M3wxMTA2NzEwfDB8MXxzZWFyY2h8MXx8c2Nob29sJTIwaGFsbHdheSUyMGxvY2tlcnN8ZW58MXwwfHx8MTc5NDA0Njg4MXww&auto=format&fit=crop&w=1000&q=80",
+    "en_image": "https://images.unsplash.com/photo-1617755403929-beee5daffbed?ixid=M3wxMTA2NzEwfDB8MXxzZWFyY2h8Mnx8c2Nob29sJTIwaGFsbHdheSUyMGxvY2tlcnN8ZW58MXwwfHx8MTc5NDA0Njg4MXww&auto=format&fit=crop&w=1000&q=80",
+    "slot": 18,
+    "lane": "society",
+    "source": "Statistics Canada",
+    "source_url": "https://www.statcan.gc.ca/daily-quotidien/261104/dq261104d-eng.htm"
   }
 ]
