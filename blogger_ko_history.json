@@ -165,5 +165,26 @@
     "attempts": 1,
     "reasons": [],
     "image": "IisDPFNUS4k"
+  },
+  {
+    "v": 1,
+    "blog": "blogger_kcyoon",
+    "date": "2026-11-08",
+    "generated_at": "2026-11-08T19:38:44.896791+09:00",
+    "status": "draft_uploaded",
+    "topic": "스마트폰 배터리 사용량과 저장공간을 점검하는 기본 설정 순서와 요령",
+    "topic_source": "seed",
+    "title": "스마트폰 배터리와 저장공간을 손쉽게 정리하는 점검 순서",
+    "labels": [
+      "디지털 정리",
+      "스마트폰 관리",
+      "배터리 관리"
+    ],
+    "url": "https://kcyoon.blogspot.com/",
+    "post_id": "5197439892375631981",
+    "model": "gemini-3.6-flash",
+    "attempts": 1,
+    "reasons": [],
+    "image": "W9Z87k4hV08"
   }
 ]
