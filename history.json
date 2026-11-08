@@ -297,5 +297,17 @@
     "lane": "daily_life",
     "source": "Statistics Canada",
     "source_url": "https://www.statcan.gc.ca/daily-quotidien/261106/dq261106b-eng.htm"
+  },
+  {
+    "date": "2026-11-08",
+    "topic": "Progress Residential and Owner Pretium Partners to Pay $49.75 Million to Settle FTC and States’ Charges Over Deceptive Rental Pricing Practices and Other Unlawful Conduct",
+    "kr_title": "임대주택 시장의 '숨겨진 수수료'에 제동: FTC와 4개 주, 프로그레스 레지덴셜과 4,975만 달러 합의",
+    "en_title": "FTC and Four States Secure $49.75 Million Settlement Over Deceptive Rental Pricing",
+    "kr_image": "https://images.unsplash.com/photo-1567496898669-ee935f5f647a?ixid=M3wxMTA2NzEwfDB8MXxzZWFyY2h8MXx8c3VidXJiYW4lMjByZW50YWwlMjBob3VzZXMlMjByb3d8ZW58MXwwfHx8MTc5NDE0NjI4MHww&auto=format&fit=crop&w=1000&q=80",
+    "en_image": "https://images.unsplash.com/photo-1627927518258-b67557570840?ixid=M3wxMTA2NzEwfDB8MXxzZWFyY2h8Mnx8c3VidXJiYW4lMjByZW50YWwlMjBob3VzZXMlMjByb3d8ZW58MXwwfHx8MTc5NDE0NjI4MHww&auto=format&fit=crop&w=1000&q=80",
+    "slot": 18,
+    "lane": "economy",
+    "source": "Federal Trade Commission",
+    "source_url": "https://www.ftc.gov/news-events/news/press-releases/2026/11/progress-residential-owner-pretium-partners-pay-4975-million-settle-ftc-states-charges-over"
   }
 ]
