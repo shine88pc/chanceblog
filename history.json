@@ -285,5 +285,17 @@
     "lane": "society",
     "source": "Statistics Canada",
     "source_url": "https://www.statcan.gc.ca/daily-quotidien/261104/dq261104d-eng.htm"
+  },
+  {
+    "date": "2026-11-08",
+    "topic": "Mortality trends among adults with a history of incarceration, 2015/2016 to 2023/2024",
+    "kr_title": "교정 시설 경험 이후의 삶과 건강: 캐나다 20~49세 성인 조기 사망 통계가 던진 질문",
+    "en_title": "Life After Incarceration: What Canadian Mortality Trends Reveal About Re-entry and Health",
+    "kr_image": "https://images.unsplash.com/photo-1586251695359-0739256d25c2?ixid=M3wxMTA2NzEwfDB8MXxzZWFyY2h8MXx8ZW1wdHklMjB1cmJhbiUyMGhhbGx3YXklMjBzaGFkb3d8ZW58MXwwfHx8MTc5NDEyMDI5OXww&auto=format&fit=crop&w=1000&q=80",
+    "en_image": "https://images.unsplash.com/photo-1763238273638-3264cf27298a?ixid=M3wxMTA2NzEwfDB8MXxzZWFyY2h8Mnx8ZW1wdHklMjB1cmJhbiUyMGhhbGx3YXklMjBzaGFkb3d8ZW58MXwwfHx8MTc5NDEyMDI5OXww&auto=format&fit=crop&w=1000&q=80",
+    "slot": 9,
+    "lane": "daily_life",
+    "source": "Statistics Canada",
+    "source_url": "https://www.statcan.gc.ca/daily-quotidien/261106/dq261106b-eng.htm"
   }
 ]
