@@ -9,6 +9,7 @@
 """
 import os
 import re
+import sys
 import copy
 import json
 import zlib
@@ -27,6 +28,7 @@ from datetime import timezone, timedelta
 from pathlib import Path
 
 from pipeline import drafts  # 승인 흐름(레지스트리 publish_flow: pr)의 이름·판정 규칙. direct(기본)에서는 흐름을 읽는 것 말고 아무것도 하지 않는다
+from pipeline import quality_gate, registry  # 최소 품질 Gate(순수 규칙)와 레지스트리 설정(chance.quality_gate·languages) 읽기. quality_gate 가 off(기본)면 Gate 는 아무것도 하지 않는다
 from pipeline import unsplash_credit  # Unsplash 사진의 ixid 유지·작가 출처 줄(순수 함수 — Chance·이슈 수정·Blogger 가 같은 규칙을 쓴다)
 from pipeline.llm import CALL_TIMEOUT_SECONDS, CallLog, _run_with_timeout, failure_code, failure_status, scrub  # Gemini 요청 기록·시크릿 가리기·호출 시간 상한은 Blogger·이슈 수정과 같은 코드를 쓴다(D-52·D-83)
 
@@ -139,6 +141,9 @@ def write_text_atomic(path, content):
     path = Path(path)
     if DRY_RUN:
         print(f"[DRY_RUN] 쓰기 생략: {path}")
+        return
+    if shadow_run_on():     # 그림자 실행(SHADOW_RUN=1)은 읽기 전용이다 — DRY_RUN 과 같은 쓰기 차단을 코드로 강제한다(결과는 shadow_run 의 쓰기 도구가 SHADOW_OUT 아래에만 쓴다)
+        print(f"[SHADOW_RUN] 쓰기 생략: {path}")
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
@@ -456,7 +461,7 @@ def trigger_download(url):
     """Unsplash API 가이드라인: 사진 사용 시 download 엔드포인트 호출 (실패해도 무시).
     기록된 주소를 부르기 직전에 한 번 더 검사한다(safe_download_url — 호스트가 정확히 api.unsplash.com 인 `/photos/<id>/download` 만, 키가 그 호스트로만 가게). 검사에 걸리면 어떤 요청도 보내지 않는다."""
     loc = unsplash_credit.safe_download_url(_download_locations.get(image_key(url)))
-    if not loc or DRY_RUN or STUB_UNSPLASH:
+    if not loc or DRY_RUN or STUB_UNSPLASH or shadow_run_on():
         return
     try:
         urllib.request.urlopen(_api_request(loc), timeout=10).read()
@@ -851,9 +856,40 @@ def _public_text(text, limit):
     return _one_line(_URL_QUERY.sub(r"\1", _scrub(text)), limit)
 
 
+# SHADOW_RUN 값: 켜짐으로 읽는 값과 꺼짐으로 읽는 값(앞뒤 공백·대소문자 무시). 둘 어느 쪽도 아닌 값(오타·`2`·`garbage`)은 main() 이 실행을 거절한다(종료 2) — 모르는 값을 '꺼짐'으로
+# 읽으면 정지가 풀린 상태에서 일반(쓰기) 실행으로 내려가기 때문이다. 켜짐 집합은 PIPELINE_PAUSE(_pause_on)의 1·true·yes·on 을 포함한다.
+SHADOW_RUN_ON_VALUES = frozenset({"1", "true", "yes", "on", "enabled"})
+SHADOW_RUN_OFF_VALUES = frozenset({"", "0", "false", "no", "off", "disabled"})
+
+
+def _shadow_value():
+    return os.environ.get("SHADOW_RUN", "").strip().lower()
+
+
+def shadow_run_on():
+    """그림자 실행(환경 변수 SHADOW_RUN 이 1·true·yes·on·enabled)인가. 이 모드는 읽기 전용이다: 저장소 파일·git·gh 에 어떤 쓰기도 하지 않고(write_text_atomic 등을 코드로 막는다)
+    후보 글과 보류 사유를 SHADOW_OUT 아래 파일로만 낸다. 호출할 때마다 환경 변수를 읽는다 — 이 변수가 없으면 이전과 동작이 같다."""
+    return _shadow_value() in SHADOW_RUN_ON_VALUES
+
+
+def shadow_run_unrecognized():
+    """SHADOW_RUN 에 값이 있는데 켜짐·꺼짐 어느 쪽으로도 읽을 수 없는가(오타·모르는 값)."""
+    value = _shadow_value()
+    return value not in SHADOW_RUN_ON_VALUES and value not in SHADOW_RUN_OFF_VALUES
+
+
 def _pause_on():
-    """킬 스위치. Blogger 러너(pipeline/run.py)와 같은 값 집합(1/true/yes/on)을 쓴다."""
+    """킬 스위치. Blogger 러너(pipeline/run.py)와 같은 값 집합(1/true/yes/on)을 쓴다.
+    그림자 실행(SHADOW_RUN=1)은 읽기 전용이라 이 검사를 건너뛴다 — 정지 변수는 건드리지 않고, 건너뛰는 것은 이 모드 안에서만이다(main() 이 곧바로 읽기 전용 경로로 넘긴다)."""
+    if shadow_run_on():
+        return False
     return os.environ.get("PIPELINE_PAUSE", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def run_shadow():
+    """SHADOW_RUN=1: pipeline/shadow_run.py 가 후보를 읽기 전용으로 만들어 평가하고 SHADOW_OUT 아래에만 결과를 쓴다(저장소·git·gh 쓰기 없음). 규칙·출력 형식은 docs/QUALITY_GATE.md."""
+    from pipeline import shadow_run    # 읽기 전용 실행 경로 — 이 모드가 아니면 읽지 않는다
+    return shadow_run.run(sys.modules[__name__], os.environ)
 
 
 def skip_line(code, **fields):
@@ -870,7 +906,7 @@ def write_step_summary(markdown):
     """Actions 실행 화면의 요약 칸(GITHUB_STEP_SUMMARY)에 덧붙인다. 로컬 실행에서는 아무 일도 하지 않는다.
     요약은 보고용이라 쓰기에 실패해도 발행 결과를 바꾸지 않는다(대신 한 줄을 남긴다)."""
     target = os.environ.get("GITHUB_STEP_SUMMARY")
-    if not target:
+    if not target or shadow_run_on():
         return
     try:
         with open(target, "a", encoding="utf-8") as fh:
@@ -1684,12 +1720,21 @@ def load_editorial_template():
 
 
 def build_post_prompt(item, recent_titles, category_hint="", allow_skip=False,
-                      editorial_lane="technology"):
+                      editorial_lane="technology", languages=("ko", "en")):
     lane = EDITORIAL_LANES.get(editorial_lane, EDITORIAL_LANES["technology"])
+    # 글의 언어(레지스트리 chance.languages): 기본 ko·en 한 쌍이면 아래 낱말은 모두 예전 글자 그대로이고, ko 만이면 영어를 만들라는 말을 뺀 국문 전용 프롬프트가 된다.
+    pair = tuple(languages) == ("ko", "en")
+    write_in = "한국어와 영어로 각각" if pair else "한국어로"
+    each_post = "각 글의" if pair else "글의"
+    natural = "- 한국어/영어 글은 각 언어에 자연스럽게 쓰고 단순 직역은 피하세요.\n" if pair else "- 한국어로 자연스럽게 쓰세요.\n"
+    contents = "kr_content, en_content에는" if pair else "kr_content에는"
+    en_schema = (f"  \"en_category\": \"{lane['en_category']}\",\n  \"en_title\": \"English Title\",\n  \"en_tags\": [\"Tag1\", \"Tag2\"],\n"
+                 "  \"en_content\": \"English Markdown full content\",\n") if pair else ""
     category_rule = (
         f"- 요청된 카테고리 힌트 [{category_hint}]를 우선 사용하되, 주제와 다르면 억지로 적용하지 마세요.\n"
         if category_hint else
-        f"- 본문 카테고리는 한국어에서 \"{lane['kr_category']}\", 영어에서 \"{lane['en_category']}\"를 사용하세요. 글의 핵심 주제가 편집 축과 맞지 않으면 다른 주제로 다시 고르세요.\n"
+        (f"- 본문 카테고리는 한국어에서 \"{lane['kr_category']}\", 영어에서 \"{lane['en_category']}\"를 사용하세요. 글의 핵심 주제가 편집 축과 맞지 않으면 다른 주제로 다시 고르세요.\n" if pair else
+         f"- 본문 카테고리는 한국어에서 \"{lane['kr_category']}\"를 사용하세요. 글의 핵심 주제가 편집 축과 맞지 않으면 다른 주제로 다시 고르세요.\n")
     )
     if item:
         topic_text = item["title"]
@@ -1720,7 +1765,7 @@ def build_post_prompt(item, recent_titles, category_hint="", allow_skip=False,
     return f"""
 당신은 기술, 경제, 사회, 과학, 문화와 일상을 함께 읽는 교양형 매거진 'Chance_Blog'의 편집자입니다.
 선택된 편집 축은 [{lane['label']}]이며, 이번 축의 중심 범위는 다음과 같습니다: {lane['focus']}.
-아래 주제를 바탕으로 독창적이고 사실에 신중한 블로그 글을 한국어와 영어로 각각 작성하세요.
+아래 주제를 바탕으로 독창적이고 사실에 신중한 블로그 글을 {write_in} 작성하세요.
 
 [주제]
 {topic_text}
@@ -1739,15 +1784,14 @@ def build_post_prompt(item, recent_titles, category_hint="", allow_skip=False,
 - 첫 문단은 주제를 자연스럽게 소개하고 독자가 얻을 답이나 핵심 사실을 분명히 보여 주세요. 본문에서 확인된 사실, 출처의 주장, 편집자의 해석과 전망을 구분하세요.
 - 소스 요약을 문단별로 바꾸어 쓰는 데 그치지 말고, 근거가 허용하는 비교·맥락·한계 또는 실행 가능한 시사점을 제공하세요. 근거가 부족하면 추측으로 채우지 말고 skip을 반환하세요.
 - 관용적인 AI 문구, 중요성을 부풀리는 표현, 반복되는 요약, 억지로 넣은 3단 나열은 덜어내세요. 자연스러움은 구체적인 근거와 명료한 문장에서 나오게 하세요. 오탈자·속어·가짜 개인 경험을 추가하거나 AI 사용 사실을 숨기려 하지 마세요.
-- 한국어/영어 글은 각 언어에 자연스럽게 쓰고 단순 직역은 피하세요.
-- 확인되지 않은 수치, 인용문, 발표 사실을 지어내지 마세요. 기사 문장을 그대로 옮기지 마세요.
+{natural}- 확인되지 않은 수치, 인용문, 발표 사실을 지어내지 마세요. 기사 문장을 그대로 옮기지 마세요.
 {source_rule}{extra_rule}- 본문은 충분한 설명과 분석을 포함하고 Markdown으로 작성하세요.
-- 각 글의 Front Matter에 layout, title, category, tags, lang을 포함하세요.
+- {each_post} Front Matter에 layout, title, category, tags, lang을 포함하세요.
 - image는 쓰지 마세요. 대표 이미지는 시스템이 따로 채웁니다.
 - image_queries: 이 글의 대표 이미지를 Unsplash에서 찾을 영어 검색어 3개.
   구체적인 것부터 일반적인 순서, 각 2~4단어, 주제를 시각적으로 나타내는
   사물/장면 위주, 사람 얼굴/로고/브랜드명/글자는 피하세요.
-- kr_content, en_content에는 완전한 Markdown(Front Matter 포함)을 넣으세요.
+- {contents} 완전한 Markdown(Front Matter 포함)을 넣으세요.
 - JSON 문자열 안의 줄바꿈과 따옴표는 유효한 JSON 규칙을 지키세요.
 - JSON 객체만 반환하고 코드 펜스는 쓰지 마세요.
 
@@ -1759,11 +1803,7 @@ def build_post_prompt(item, recent_titles, category_hint="", allow_skip=False,
   "kr_title": "한국어 제목",
   "kr_tags": ["태그1", "태그2"],
   "kr_content": "한국어 Markdown 전체",
-  "en_category": "{lane['en_category']}",
-  "en_title": "English Title",
-  "en_tags": ["Tag1", "Tag2"],
-  "en_content": "English Markdown full content",
-  "image_queries": ["specific query", "broader query", "general query"]
+{en_schema}  "image_queries": ["specific query", "broader query", "general query"]
 }}
 """
 
@@ -2009,10 +2049,10 @@ def front_matter_problems(content, source=None):
     return problems
 
 
-def check_final_front_matter(data, source=None):
-    """validate_post_data 를 거친 data 의 두 글에 설명·출처 줄까지 더해(실제로 파일이 될 모양으로) 머리말을 검사한다. 문제가 있으면 ValueError —
+def check_final_front_matter(data, source=None, languages=("ko", "en")):
+    """validate_post_data 를 거친 data 의 두 글(languages 가 ko 뿐이면 국문 글 하나)에 설명·출처 줄까지 더해(실제로 파일이 될 모양으로) 머리말을 검사한다. 문제가 있으면 ValueError —
     깨진 글을 발행하느니 그 후보를 거절한다(본문 검증 실패와 같은 길)."""
-    for prefix in ("kr", "en"):
+    for prefix in _prefixes(languages):
         problems = front_matter_problems(add_discovery_metadata(data[f"{prefix}_content"], source), source)
         if problems:
             raise ValueError(f"{prefix.upper()} 글 머리말이 검사를 통과하지 못했습니다: " + " / ".join(problems[:3]))
@@ -2131,18 +2171,23 @@ def _front_matter_from_model(data, prefix, html_lang, image_url):
     return _fresh_front_matter(data, prefix, html_lang, image_url) + body, reason
 
 
-def validate_post_data(data, kr_image, en_image, verified_source_url=None, notes=None):
-    """notes(목록)를 주면 모델이 쓴 머리말을 믿지 못해 다시 쓴 글마다 한 줄(이유 포함, 값은 없음)을 덧붙인다."""
-    for key in ("kr_category", "kr_title", "kr_content",
-                "en_category", "en_title", "en_content"):
+def _prefixes(languages):
+    """글 데이터(kr_*·en_*)의 접두사: 기본 ko·en 한 쌍이면 (kr, en), 레지스트리 chance.languages 가 ko 뿐이면 (kr,) — 영문은 만들지도 검사하지도 쓰지도 않는다."""
+    return ("kr", "en") if tuple(languages) == ("ko", "en") else ("kr",)
+
+
+def validate_post_data(data, kr_image, en_image, verified_source_url=None, notes=None, languages=("ko", "en")):
+    """notes(목록)를 주면 모델이 쓴 머리말을 믿지 못해 다시 쓴 글마다 한 줄(이유 포함, 값은 없음)을 덧붙인다. languages 가 ko 뿐이면 국문 글만 읽고 검사한다(en_* 키가 없어도 된다)."""
+    prefixes = _prefixes(languages)
+    for key in tuple(f"{prefix}_{name}" for prefix in prefixes for name in ("category", "title", "content")):
         if not isinstance(data.get(key), str) or not data[key].strip():
             raise ValueError(f"생성 결과의 {key} 값이 비었거나 문자열이 아닙니다.")
-    for key in ("kr_tags", "en_tags"):
+    for key in tuple(f"{prefix}_tags" for prefix in prefixes):
         if not isinstance(data.get(key), list):
             data[key] = []
         data[key] = [str(t).strip() for t in data[key] if str(t).strip()]
 
-    for prefix, image_url in (("kr", kr_image), ("en", en_image)):
+    for prefix, image_url in tuple(pair for pair in (("kr", kr_image), ("en", en_image)) if pair[0] in prefixes):
         html_lang = "ko" if prefix == "kr" else "en"
         content, reason = _front_matter_from_model(data, prefix, html_lang, image_url)
         if reason and notes is not None:
@@ -2433,15 +2478,29 @@ def reject_detail_lines(report):
     return lines
 
 
+def quality_gate_config(settings):
+    """레지스트리 설정(registry.chance_settings)이 quality_gate: hold 면 Gate 설정(건강 프로필을 읽어 넣는다), 아니면 None — 기본(off)에서는 Gate 를 부르지 않아 이전과 출력이 같다.
+    건강 프로필을 읽지 못하면 RegistryError 로 멈춘다(약한 검사로 조용히 떨어지지 않고, 모델을 부르기 전에 멈춘다)."""
+    if settings.quality_gate != "hold":
+        return None
+    profiles = tuple(registry.load_profile(name) for name in quality_gate.HEALTH_PROFILE_NAMES)
+    return quality_gate.GateConfig(health_profiles=profiles, languages=settings.languages)
+
+
 def generate_blog_posts(topic_override=None, category_hint="", slot=None,
                         allow_auto_topic=True, report=None, draft_flow=False):
-    """KR/EN 글 한 쌍을 만든다. 만들면 (kr_path, en_path), 만들 수 없으면 None.
+    """KR/EN 글 한 쌍을 만든다(레지스트리 chance.languages 가 ["ko"] 면 국문 글 하나). 만들면 (kr_path, en_path — 국문 전용이면 None), 만들 수 없으면 None.
     report(dict)를 넘기면 분야별 수집 결과와 최종 결과 코드(outcome)를 채워 준다. 후보는 분야를 합쳐 MAX_ATTEMPTS 건까지 시도하고 앞 분야의 후보가 모두 탈락하면 다음 분야로 이어지며(A),
     후보별 탈락 기록(rejects)과 시도한 후보 수(attempts)도 채운다(공개 주석 한 줄과 실행 요약에 쓰인다, F).
     draft_flow=True 는 승인 흐름(publish_flow: pr)이다: 글을 만드는 방법은 같고, 이력 항목에 flow·branch·paths 를 더하며 결과 코드는
     PUBLISHED 대신 DRAFT_CREATED 다(공개는 PR 병합이라 '발행했다'고 쓰지 않는다). 파일 올리기는 pipeline/draft_flow.py 가 맡는다."""
     report = report if report is not None else {}
     report.setdefault("lanes", [])
+    settings = registry.chance_settings()           # (quality_gate, languages): 기본 (off, ko·en) — 읽지 못하거나 값이 틀리면 RegistryError 로 멈춘다
+    gate_config = quality_gate_config(settings)     # off 면 None
+    langs = settings.languages
+    prefixes = _prefixes(langs)                     # ("kr", "en") 한 쌍(기본) 또는 ("kr",) 국문 전용
+    lang_args = {} if len(prefixes) == 2 else {"languages": langs}      # 기본(한 쌍)에서는 아래 호출이 예전 그대로다 — 국문 전용일 때만 언어를 넘긴다
     posts = load_posts()
     history = read_history()
     lane_order = editorial_lane_order(slot, history)
@@ -2500,7 +2559,7 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
                 # 모든 모델이 실패하면 RuntimeError 로 그대로 올라간다(인프라 장애 = 빨강).
                 resp = call_gemini_with_fallback(build_post_prompt(
                     item, recent_titles, category_hint, allow_skip=not topic_override,
-                    editorial_lane=editorial_lane))
+                    editorial_lane=editorial_lane, **lang_args))
                 candidate = extract_json_object(resp.text)
         except ValueError as exc:  # 모델이 JSON 을 못 맞춘 것은 이 후보의 탈락이다
             reason = _one_line(exc, 200)
@@ -2525,8 +2584,10 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
             # 설명·출처 줄까지 더한 최종 머리말도 여기서 미리 검사한다(D-80): 깨진 글을 발행하느니 이 후보를 거절하고 다음 후보를 시도한다.
             checked = validate_post_data(copy.deepcopy(candidate), "https://example.invalid/kr.jpg",
                                          "https://example.invalid/en.jpg",
-                                         verified_source_url=(item or {}).get("link"))
-            check_final_front_matter(checked, item)
+                                         verified_source_url=(item or {}).get("link"), **lang_args)
+            check_final_front_matter(checked, item, **lang_args)
+            if gate_config is not None:    # 최소 품질 Gate(chance.quality_gate: hold): 걸리면 QualityHold(ValueError) → 아래에서 '본문 검증 탈락'과 같은 길로 이 후보를 버린다
+                quality_gate.require_pass(quality_gate.check_candidate(checked, item, history, gate_config, as_of=now_kst().date()))
         except ValueError as exc:
             reason = _one_line(exc, 200)
             print(f"  본문 검증 탈락: {reason}")
@@ -2566,16 +2627,16 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
     queries = [q for q in data.get("image_queries", []) if isinstance(q, str)]
     if not queries:
         queries = ["technology", "computer hardware"]
-    images = pick_images(queries, used, 2, allow_pool=True)
-    if len(images) < 2:
-        raise RuntimeError("사용 가능한 대표 이미지를 2개 확보하지 못했습니다. "
+    images = pick_images(queries, used, len(prefixes), allow_pool=True)
+    if len(images) < len(prefixes):
+        raise RuntimeError(f"사용 가능한 대표 이미지를 {len(prefixes)}개 확보하지 못했습니다. "
                            "글을 저장하지 않습니다.")
-    kr_image, en_image = images
+    kr_image, en_image = images[0], (images[1] if len(prefixes) == 2 else None)
     repairs = []
     data = validate_post_data(
         data, kr_image, en_image,
         verified_source_url=(selected_item or {}).get("link"),
-        notes=repairs,
+        notes=repairs, **lang_args,
     )
     for repair in repairs:
         print(f"[참고] {repair}")
@@ -2583,52 +2644,59 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
     now = now_kst()
     date_str, time_str = now.strftime("%Y-%m-%d"), now.strftime("%H%M%S")
     selected_item["title"] = selected_item.get("title") or selected or "원문 기사"
-    data["kr_content"] = add_discovery_metadata(data["kr_content"], selected_item)
-    data["en_content"] = add_discovery_metadata(data["en_content"], selected_item)
-    for prefix in ("kr", "en"):
+    for prefix in prefixes:
+        data[f"{prefix}_content"] = add_discovery_metadata(data[f"{prefix}_content"], selected_item)
+    for prefix in prefixes:
         # 마지막 방어선: 위 후보 검사가 통과했어도(자리표시 이미지로 한 검사) 실제 이미지·출처로 완성한 글의 머리말이 깨졌으면 파일을 쓰지 않는다
         problems = front_matter_problems(data[f"{prefix}_content"], selected_item)
         if problems:
             raise RuntimeError(f"{prefix.upper()} 글 머리말이 검사를 통과하지 못해 글을 저장하지 않습니다: " + " / ".join(problems[:3]))
-    for prefix, image_url in (("kr", kr_image), ("en", en_image)):
+    for prefix, image_url in zip(prefixes, (kr_image, en_image)):
         # 마지막 방어선(출처): 사진 고르기를 통과했어도 작가 출처를 알 수 없는 사진이면 글을 저장하지 않는다(Unsplash 지침 — 출처 없는 사진을 새 글에 쓰지 않는다)
         if not credit_line_for(image_url):
             raise RuntimeError(f"{prefix.upper()} 대표 이미지의 작가 출처를 알 수 없어 글을 저장하지 않습니다.")
     kr_path = safe_category_dir(data["kr_category"], "KR") / f"{date_str}-KR-{time_str}.md"
-    en_path = safe_category_dir(data["en_category"], "EN") / f"{date_str}-EN-{time_str}.md"
+    en_path = safe_category_dir(data["en_category"], "EN") / f"{date_str}-EN-{time_str}.md" if len(prefixes) == 2 else None
+    written = [path for path in (kr_path, en_path) if path is not None]      # 글 파일: 국문 하나 또는 국문·영문 두 개(이 순서)
 
     write_text_atomic(kr_path, data["kr_content"])
-    try:
-        write_text_atomic(en_path, data["en_content"])
-    except Exception:
-        if not DRY_RUN:
-            kr_path.unlink(missing_ok=True)
-        raise
+    if en_path is not None:
+        try:
+            write_text_atomic(en_path, data["en_content"])
+        except Exception:
+            if not DRY_RUN:
+                kr_path.unlink(missing_ok=True)
+            raise
 
     entry = {
         "date": date_str, "topic": selected or "(자동 선정)",
-        "kr_title": data["kr_title"], "en_title": data["en_title"],
+        "kr_title": data["kr_title"], "en_title": data.get("en_title"),
         "kr_image": kr_image, "en_image": en_image, "slot": slot,
         "lane": editorial_lane,
         "source": (selected_item or {}).get("source", ""),
         "source_url": (selected_item or {}).get("link", ""),
     }
+    if len(prefixes) == 1:      # 국문 전용(chance.languages = ["ko"]): 영문 칸을 두지 않고 어떤 언어로 만들었는지 적는다
+        del entry["en_title"], entry["en_image"]
+        entry["languages"] = list(langs)
     if draft_flow:
-        entry.update(drafts.entry_fields(date_str, slot, time_str, [kr_path, en_path]))
+        entry.update(drafts.entry_fields(date_str, slot, time_str, written))
         report["draft_branch"] = entry["branch"]
     history.append(entry)
     write_history(history)
     trigger_download(kr_image)
-    trigger_download(en_image)
-    report.update(outcome="DRAFT_CREATED" if draft_flow else "PUBLISHED", title=data["kr_title"], en_title=data["en_title"],
+    if en_image:
+        trigger_download(en_image)
+    report.update(outcome="DRAFT_CREATED" if draft_flow else "PUBLISHED", title=data["kr_title"], en_title=data.get("en_title"),
                   source=(selected_item or {}).get("source", ""),
-                  paths=[str(kr_path), str(en_path)])
+                  paths=[str(path) for path in written])
     notice = reject_summary_line(report)   # 앞선 후보가 탈락한 뒤에 만든 글이면 그 사유를 공개 주석 한 줄로(첫 후보로 만들었으면 아무것도 하지 않는다)
     if notice:
         print(f"::notice::{notice}")
     print("블로그 글 생성 완료" + (" (DRY_RUN: 파일·기록은 저장되지 않았습니다):" if DRY_RUN else ":"))
-    print(f"- KR: {kr_path}\n- EN: {en_path}\n- 편집 축: {EDITORIAL_LANES[editorial_lane]['label']}\n- 주제: {_one_line(selected or '(자동 선정)', 200)}")
-    print(f"- 이미지: {kr_image}\n         {en_image}")
+    print(f"- KR: {kr_path}\n" + (f"- EN: {en_path}\n" if en_path is not None else "")
+          + f"- 편집 축: {EDITORIAL_LANES[editorial_lane]['label']}\n- 주제: {_one_line(selected or '(자동 선정)', 200)}")
+    print(f"- 이미지: {kr_image}" + (f"\n         {en_image}" if en_image else ""))
     if draft_flow:
         print(f"- 승인 흐름: 연습 실행이라 초안 브랜치 {entry['branch']} 를 올리지 않습니다" if DRY_RUN
               else f"- 승인 흐름: 초안 브랜치 {entry['branch']} 로 올립니다(PR 을 병합하면 공개, 닫으면 폐기)")
@@ -2812,12 +2880,20 @@ def refine_for_drafts(state, slot, history, now):
 
 
 def main():
+    if shadow_run_unrecognized():     # 모르는 SHADOW_RUN 값은 거절한다(꺼짐으로 읽으면 정지가 풀린 상태에서 일반 쓰기 실행으로 내려간다)
+        print(f"::error::SHADOW_RUN 값을 알 수 없어 실행하지 않습니다 — 켜짐: {', '.join(sorted(SHADOW_RUN_ON_VALUES))} / 꺼짐: 비움·{', '.join(sorted(SHADOW_RUN_OFF_VALUES - {''}))}")
+        raise SystemExit(2)
     if _pause_on():
         print(skip_line("PAUSED", var="PIPELINE_PAUSE"))
         print("[일시정지] PIPELINE_PAUSE 가 켜져 있어 실행하지 않습니다.")
         print("::notice::PIPELINE_PAUSE 가 켜져 있어 Chance_Blog 실행을 건너뛰었습니다.")
         write_step_summary("### Chance_Blog 실행 요약\n- 결과: **일시정지** — "
                            "저장소 변수 PIPELINE_PAUSE 가 켜져 있습니다.")
+        return
+    # 병합 순서(제한 재개 잠금의 가드 호출 guard_start 와 같은 자리): 이 그림자 분기가 잠금 가드보다 **앞**에 있어야 한다. 그림자 실행은 읽기 전용이라 잠금 대상이 아니고, 가드가 앞서면
+    # 레지스트리 규칙 위반·하루 상한이 그림자 실행까지 멈춘다(docs/QUALITY_GATE.md §6).
+    if shadow_run_on():      # 그림자 실행: 정지 변수를 보지 않고(위 _pause_on 이 False) 읽기 전용 경로로만 간다 — 아래 일반 실행(쓰기·게시)으로 내려가지 않는다
+        run_shadow()
         return
     # 순서(GATE 의 그림자 분기가 병합된 뒤에도 같다): 정지 검사 → 그림자 분기(SHADOW_RUN, 읽기 전용으로 처리하고 끝난다) → 아래 잠금 가드. 그림자 분기를 이 가드 아래에 두지 않는다 —
     # 그림자 실행은 가드에 닿지 않고, 가드 안의 SHADOW_RUN 예외는 그림자 분기를 지나쳐 온 경우를 위한 방어선일 뿐이다(docs/PUBLISH_PATHS.md §4-2·§7).

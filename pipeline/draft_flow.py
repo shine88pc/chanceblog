@@ -147,7 +147,7 @@ def check_entry(entry):
     paths = entry.get("paths")
     if drafts.parse_branch(entry.get("branch")) is None:
         raise DeliveryError("이력 항목의 초안 브랜치 이름이 올바르지 않습니다.")
-    if not (isinstance(paths, list) and len(paths) == 2 and all(drafts.valid_post_path(p) for p in paths)):
+    if not (isinstance(paths, list) and len(paths) in (1, 2) and all(drafts.valid_post_path(p) for p in paths)):       # 둘 = 국문·영문, 하나 = 국문 전용(레지스트리 chance.languages = ["ko"])
         raise DeliveryError("이력 항목의 글 파일 경로가 올바르지 않습니다.")
 
 
@@ -300,8 +300,9 @@ def deliver(git, client, env, out=print, sleep=time.sleep):
         raise
     out(f"[초안] 이력을 {base} 에 올렸습니다.")
     owner = env.get("GITHUB_REPOSITORY_OWNER") or str(env.get("GITHUB_REPOSITORY", "")).split("/", 1)[0]
-    title = drafts.build_pr_title(entry.get("kr_title"), entry.get("en_title"))
-    body = drafts.build_pr_body(entry, texts[0], texts[1], owner=owner)
+    ko_only = len(texts) == 1                                             # 국문 전용 초안: 글 파일이 하나라 영어 칸이 없다
+    title = drafts.build_pr_title(entry.get("kr_title"), entry.get("en_title"), ko_only=ko_only)
+    body = drafts.build_pr_body(entry, texts[0], None if ko_only else texts[1], owner=owner)
     shown = drafts.neutralize(entry.get("kr_title"), 120)
     try:
         number = open_pull_request(client, branch, base, title, body, sleep)
@@ -326,15 +327,16 @@ def history_entry_for(history, branch):
 def reopen_pull_request(git, client, branch, entry, env, sleep, out):
     """PR 이 없는 초안 브랜치에 PR 을 다시 연다(글은 원격 브랜치에서 읽는다). 돌려주는 값: PR 번호."""
     paths = entry.get("paths")
-    if not (isinstance(paths, list) and len(paths) == 2 and all(drafts.valid_post_path(p) for p in paths)):
+    if not (isinstance(paths, list) and len(paths) in (1, 2) and all(drafts.valid_post_path(p) for p in paths)):
         raise DeliveryError("이력 항목의 글 파일 경로가 올바르지 않습니다.")
     shallow = git.run("rev-parse", "--is-shallow-repository").stdout.strip() == "true"
     git.run("fetch", *(["--depth=1"] if shallow else []), "origin", f"refs/heads/{branch}")    # 얕은 복제(Actions)에서만 깊이를 제한한다
     texts = [git.run("show", f"FETCH_HEAD:{p}").stdout for p in paths]
     owner = env.get("GITHUB_REPOSITORY_OWNER") or str(env.get("GITHUB_REPOSITORY", "")).split("/", 1)[0]
     base = current_branch(git)
-    number = open_pull_request(client, branch, base, drafts.build_pr_title(entry.get("kr_title"), entry.get("en_title")),
-                               drafts.build_pr_body(entry, texts[0], texts[1], owner=owner), sleep)
+    ko_only = len(texts) == 1
+    number = open_pull_request(client, branch, base, drafts.build_pr_title(entry.get("kr_title"), entry.get("en_title"), ko_only=ko_only),
+                               drafts.build_pr_body(entry, texts[0], None if ko_only else texts[1], owner=owner), sleep)
     attach_labels(client, number, out)
     return number
 
