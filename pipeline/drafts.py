@@ -30,7 +30,7 @@ from collections import namedtuple
 from datetime import date
 from pathlib import Path
 
-from pipeline import registry
+from pipeline import draft_labels, registry
 from pipeline.console import one_line
 from pipeline.llm import mask, scrub
 
@@ -38,19 +38,18 @@ FLOW_DIRECT, FLOW_PR = registry.PUBLISH_FLOWS
 CHANCE_KEY = "chance"
 
 BRANCH_PREFIX = "ai/draft/"
-PR_TITLE_PREFIX = "[초안][Chance]"
+CHANNEL_LABEL = "Chance"           # 레지스트리 chance.channel.label 과 같은 글자(시험이 대조한다)
+PR_TITLE_PREFIX = f"[{draft_labels.DRAFT_LABEL}][{CHANNEL_LABEL}]"       # "[초안][Chance]"
 TITLE_LIMIT = 200                  # PR 제목 전체(GitHub 한도 256자 안쪽)
 BODY_LIMIT = 9000                  # PR 본문(GitHub 한도 65,536자보다 훨씬 작게 — 사람이 휴대폰에서 읽는 분량)
 RETENTION_DAYS = 7                 # 병합됐거나 닫힌 초안 브랜치를 지우기까지(브랜치 이름의 날짜 기준)
 ORPHAN_RETRY_DAYS = 3              # PR 이 없는 초안 브랜치에 PR 열기를 다시 시도하는 기간
 MIN_BODY_CHARS = {"kr": 1000, "en": 1500}   # generator.MIN_BODY_CHARS 와 같은 값(시험이 대조한다)
 
-LABEL_DRAFT = "초안"
-LABEL_CHANNEL = "채널:Chance"
-LABELS = (
-    (LABEL_DRAFT, "d4c5f9", "승인 대기 중인 자동 생성 초안(병합하면 공개, 닫으면 폐기)"),
-    (LABEL_CHANNEL, "1d76db", "Chance_Blog(GitHub Pages) 채널"),
-)
+# 초안 PR 에 붙이는 라벨 — 이름·색·설명은 다른 초안 라벨 코드와 함께 pipeline/draft_labels.py 한 곳에서 읽는다(R2-5)
+LABEL_DRAFT = draft_labels.DRAFT_LABEL
+LABEL_CHANNEL = draft_labels.channel_label_name(CHANNEL_LABEL)            # "채널:Chance"
+LABELS = draft_labels.specs_for([CHANNEL_LABEL])
 
 STATE_PENDING = "DRAFT_PENDING"             # 이 슬롯의 초안이 있다(승인 대기이거나 닫힘) — 같은 슬롯을 다시 만들지 않는다
 STATE_CHECK_FAILED = "DRAFT_CHECK_FAILED"   # 초안 브랜치 확인(git ls-remote)을 못 했다 — 이번 실행은 건너뛰고 다음 실행이 다시 본다
@@ -62,6 +61,8 @@ _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _BRANCH_RE = re.compile(r"^ai/draft/(\d{4}-\d{2}-\d{2})-(?:s(\d{1,2})|m(\d{6}))$")
 _SAFE_URL_RE = re.compile(r"^https://[^\s<>\"'\\()\[\]`|]{1,480}$")
 _POST_PATH_RE = re.compile(r"^_posts/[^\x00-\x1f\\]{1,200}\.md$")
+_WORKFLOW_FILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,80}\.ya?ml$")
+_REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$")
 
 
 class DraftFlowError(RuntimeError):
@@ -459,12 +460,17 @@ class GitHubClient:
     def _summary(raw):
         head = raw.get("head") if isinstance(raw.get("head"), dict) else {}
         repo = head.get("repo") if isinstance(head.get("repo"), dict) else {}
+        # labels: PR 에 붙은 라벨 이름 목록. 응답에 라벨 칸이 없거나 모양이 이상하면 None(알 수 없다 — 없다는 뜻이 아니다. 정리 단계가 라벨을 다시 붙일지 정할 때 쓴다, R2 수정 P1)
+        labels = raw.get("labels")
+        names = [item["name"] for item in labels] if isinstance(labels, list) and all(
+            isinstance(item, dict) and isinstance(item.get("name"), str) for item in labels) else None
         return {"number": raw.get("number"), "state": raw.get("state"), "merged": bool(raw.get("merged_at")),
                 "head_ref": head.get("ref"), "head_repo": repo.get("full_name"), "created_at": raw.get("created_at"),
-                "title": raw.get("title")}
+                "title": raw.get("title"), "labels": names}
 
     def list_draft_pull_requests(self, state="all", max_pages=3):
         """이 저장소 안의 초안 브랜치(ai/draft/…)에서 연 PR 목록(최신순, 저장소의 PR 최근 100×max_pages건 안에서). 포크의 PR 은 뺀다.
+        각 PR 은 번호·상태·병합 여부·브랜치·생성 시각·제목과 라벨 이름 목록(labels, 모르면 None)이다.
         결과의 complete 가 False 면 더 오래된 PR 이 목록 밖에 있을 수 있다(PullList)."""
         found = PullList()
         for page in range(1, max_pages + 1):
@@ -505,6 +511,16 @@ class GitHubClient:
 
     def add_labels(self, number, labels):
         self.request("POST", f"/issues/{int(number)}/labels", {"labels": list(labels)})
+
+    # ---- 워크플로 ----
+    def dispatch_workflow(self, workflow_file, ref):
+        """워크플로 파일 하나를 지정한 브랜치에서 수동 실행 이벤트로 시작한다(성공은 응답 본문 없는 204). 권한 `actions: write` 가 필요하다.
+        저장소 기본 토큰이 만든 이슈·PR·push 는 다른 워크플로를 시작시키지 못하는데(GitHub 규칙) 수동 실행 이벤트만 예외라서, 만든 직후 다른 워크플로를 돌리는 길이다.
+        파일 이름과 브랜치 이름은 이 코드가 아는 값이지만 모양이 정해진 것(영문·숫자·`._-/`)이 아니면 요청을 보내지 않고 GitHubError 를 낸다(경로·본문에 낯선 글자를 싣지 않는다)."""
+        if (not isinstance(workflow_file, str) or not isinstance(ref, str) or not _WORKFLOW_FILE_RE.fullmatch(workflow_file)
+                or not _REF_RE.fullmatch(ref) or ".." in ref):
+            raise GitHubError("워크플로 파일 이름이나 브랜치 이름이 올바르지 않습니다")
+        self.request("POST", f"/actions/workflows/{workflow_file}/dispatches", {"ref": ref})
 
 
 def pull_url(repo, number):

@@ -27,6 +27,17 @@ FAIL_STATUSES = {"publish_failed", "llm_failed"}
 PACKAGE_STALE_HINT = (" 열린 `초안` 이슈가 3건 이상 쌓이면 새 초안을 만들지 않고 기록 없이 건너뛰므로 이 경고가 먼저 울릴 수 있습니다 — "
                       "초안을 발행해 이슈를 닫거나 `폐기` 라벨을 붙이면 풀립니다. 3건 미만인데도 새 초안이 없으면 워크플로 실행을 확인하세요.")
 REJECT_STREAK = 5
+# 승인 흐름(publish_flow: pr)에서 STALE(새 초안도 병합도 허용 시간 넘게 없음)이 울리는데 열린 초안이 이만큼(72시간 = 3일) 이상 기다리고 있으면(정확히 72시간도 포함 — 코드는 >=), DRAFT_WAITING(승인 대기)으로
+# 바꿔 가리지 않고 STALE 도 경고로 함께 남긴다 — 초안이 오래 방치됐는데 그 뒤 새 초안이 하나도 안 생겼다면 승인 대기만으로는 설명이 안 되고 생성이 정말 멈췄을 수 있다(R2-2, 2026-11-09).
+# 열린 초안 가운데 하나라도 대기 시간을 읽지 못하면 오래 방치된 것이 있는지 알 수 없으므로 같은 취급으로 STALE 을 남긴다(R2 수정 P4 — GitHub 응답에서는 일어나지 않는 입력이라 최소 변경).
+# 값은 확인 필요 모음이 초안을 '3일 넘게 대기'로 보는 기준(pipeline/inbox.py DRAFT_STALE_DAYS)과 같은 3일이다. 경계만 다르다: 이 점검은 정확히 72시간부터(이상), 모음은 3일을 넘어야(초과) 센다 —
+# 72.000시간인 한 순간만 갈린다(이 모듈은 순수 함수라 inbox 를 가져오지 않고, tests/test_draft_followups.py 가 일수가 같은지 지킨다).
+DRAFT_STALL_HOURS = 72
+STALL_HINT = (" 열린 초안 PR 이 3일 넘게 대기 중이라 승인 대기(DRAFT_WAITING)로도 설명되지만, 새 초안도 병합도 허용 시간을 넘도록 없었습니다 — "
+              "초안을 병합하거나 닫은 뒤에도 새 초안이 안 생기면 워크플로 실행을 확인하세요.")
+# 대기 시간을 알 수 없을 때는 '3일 넘게'라고 단정하지 않는다(R2 수정 P4)
+STALL_HINT_UNKNOWN = (" 열린 초안 PR 이 승인 대기 중이라 승인 대기(DRAFT_WAITING)로도 설명되지만, 초안이 얼마나 기다렸는지 알 수 없고 새 초안도 병합도 허용 시간을 넘도록 없었습니다 — "
+                      "초안을 병합하거나 닫은 뒤에도 새 초안이 안 생기면 워크플로 실행을 확인하세요.")
 PAGES_GRACE_MINUTES = 30
 # 글 커밋 시각은 러너 시계, Pages 실행 생성 시각은 GitHub 서버 시계다. 정상 배포는 커밋 2~3초 뒤에 시작하므로 두 시계가
 # 2초만 어긋나도 '배포가 커밋보다 먼저'로 보여 PAGES_NOT_DEPLOYED(심각)를 오판한다. 비교에 이만큼 여유를 둔다.
@@ -113,12 +124,22 @@ def _waiting_message(pending, now):
             "병합하면 공개, 닫으면 폐기됩니다. 오래 두면 글감이 낡습니다.")
 
 
+def _oldest_wait_hours(pending, now):
+    """열린 초안 중 가장 오래 기다린 것의 대기 시간(시간 단위). 하나라도 생성 시각을 읽지 못하면 None(알 수 없다) —
+    읽은 쪽이 어려도 못 읽은 초안이 오래 방치됐는지는 모른다(R2 수정 P4: 예전에는 읽은 것만 보고 어리면 STALE 을 가렸다)."""
+    times = [_parse_utc(d.get("created_at")) if isinstance(d, dict) else None for d in pending]
+    if not times or any(t is None for t in times):
+        return None
+    return max(max(now - t for t in times).total_seconds(), 0) / 3600
+
+
 def evaluate(blog, history, now, last_content_commit=None, recent_runs=(), post_days=None, pages_runs=None, pending_drafts=None):
     """한 블로그의 문제 목록. recent_runs 는 최신순 [{'conclusion': ..}, ...].
     post_days: 새 글이 나온 KST 날짜 집합(없으면 이력에서 계산, jekyll-git 은 '글 파일이 추가된 커밋'에서 구해 넘긴다).
     pages_runs: Pages 배포 워크플로의 최근 완료 실행(최신순, {'conclusion','created_at'}). 없으면 배포 검사를 하지 않는다.
     pending_drafts: 승인 흐름(publish_flow: pr)에서 열려 있는 초안 PR 목록([{'created_at': ISO}, ...]). 없거나 비어 있으면 아무것도 바꾸지 않는다.
-    있으면 '글이 안 나옴'(STALE·NO_POSTS_DAY)을 멈춤이 아니라 승인 대기로 보고 DRAFT_WAITING(경고)으로 바꾼다."""
+    있으면 '글이 안 나옴'(STALE·NO_POSTS_DAY)을 멈춤이 아니라 승인 대기로 보고 DRAFT_WAITING(경고)으로 바꾼다. 단 STALE 이 울리는데 열린 초안이 DRAFT_STALL_HOURS(72시간)
+    이상 방치됐거나 대기 시간을 알 수 없으면(하나라도 시각을 읽지 못하면 포함) STALE 을 경고로 함께 남긴다(R2-2 — 초안이 오래 열려 있는데 그 뒤 새 초안이 없으면 정말 멈춘 것일 수 있어 가리지 않는다)."""
     if blog.get("mode") == "off":
         return []
     key = blog["key"]
@@ -186,10 +207,16 @@ def evaluate(blog, history, now, last_content_commit=None, recent_runs=(), post_
     # 2-1-1) 승인 흐름(publish_flow: pr): 새 글이 안 나온 것이 멈춤이 아니라 승인 대기일 수 있다. 열린 초안 PR 이 있으면 '글이 안 나옴'
     #        (STALE·NO_POSTS_DAY)을 치명 경고 대신 DRAFT_WAITING(확인 수준)으로 바꾼다. 최근 글이 있으면(위 두 경고가 없으면) 아무것도 하지 않는다.
     #        초안이 없거나 목록을 읽지 못했으면(pending_drafts 가 비었거나 None) 그대로 STALE·NO_POSTS_DAY 가 울린다 — 정말 멈춘 것일 수 있다.
+    #        R2-2: 다만 STALE(새 초안도 병합도 허용 시간 넘게 없음)이 울리는데 열린 초안이 DRAFT_STALL_HOURS 이상 방치됐거나 대기 시간을 알 수 없으면(하나라도 시각을 못 읽으면 포함) '승인 대기'만으로는 설명이 안 된다 —
+    #        오래된 초안이 있다는 이유로 생성이 멈춘 것까지 가리지 않도록 STALE 을 경고로 함께 남긴다(심각이 아닌 경고: 승인 대기 때문일 수도 있어 사람이 가려 볼 일이다).
     if blog.get("publish_flow") == "pr" and pending_drafts:
         if any(f.code in ("STALE", "NO_POSTS_DAY") for f in findings):
+            stale = next((f for f in findings if f.code == "STALE"), None)
             findings = [f for f in findings if f.code not in ("STALE", "NO_POSTS_DAY")]
             findings.append(Finding(key, "DRAFT_WAITING", "warning", _waiting_message(pending_drafts, now)))
+            waited = _oldest_wait_hours(pending_drafts, now)
+            if stale is not None and (waited is None or waited >= DRAFT_STALL_HOURS):
+                findings.append(Finding(key, "STALE", "warning", stale.message + (STALL_HINT if waited is not None else STALL_HINT_UNKNOWN)))
 
     # 2-2) 사이트 배포: 글 커밋 뒤 일정 시간이 지났는데 성공한 Pages 실행이 없거나, 최근 실행이 실패(D-24형)
     if pages_runs is not None and blog.get("platform") == "jekyll-git":

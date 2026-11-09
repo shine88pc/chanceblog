@@ -675,9 +675,11 @@ class CreateIssueTest(unittest.TestCase):
     def test_labels_are_created_with_fixed_colors_only_when_missing(self):
         pub, github, _ = publisher()
         pub.publish_package(make_draft())
-        self.assertEqual(github.labels["초안"]["color"], "fbca04")
-        self.assertEqual(github.labels["채널:티스토리"]["color"], "ff6a3d")
-        self.assertEqual(github.labels["채널:티스토리"]["description"], "티스토리에 올릴 초안 패키지")
+        # 의도한 갱신(R2-5, 2026-11-09): 라벨 색·설명을 만드는 세 곳(이 어댑터·Chance 승인 PR·확인 필요 모음)이 pipeline/draft_labels.py 한 표를 읽는다.
+        # 예전 값(초안 fbca04·채널:티스토리 ff6a3d·'티스토리에 올릴 초안 패키지')은 표의 값(초안 c2e0c6·모든 채널 bfdadc·'초안이 속한 채널: 티스토리')으로 바뀌었다.
+        self.assertEqual(github.labels["초안"]["color"], "c2e0c6")
+        self.assertEqual(github.labels["채널:티스토리"]["color"], "bfdadc")
+        self.assertEqual(github.labels["채널:티스토리"]["description"], "초안이 속한 채널: 티스토리")
         github.requests.clear()
         pub.publish_package(make_draft(date="2026-10-22"))
         self.assertEqual(github.calls("POST", r"^/labels$"), [])                         # 이미 있으면 만들지 않는다
@@ -686,7 +688,7 @@ class CreateIssueTest(unittest.TestCase):
         pub, github, _ = publisher()
         pub.publish_package(make_draft("naver"))
         self.assertEqual(github.issues[0]["labels"], [{"name": "초안"}, {"name": "채널:네이버"}])
-        self.assertEqual(github.labels["채널:네이버"]["color"], "03c75a")
+        self.assertEqual(github.labels["채널:네이버"]["color"], "bfdadc")                 # 의도한 갱신(R2-5): 옛 값 03c75a → 표의 채널 공통 색
 
     def test_a_label_creation_race_422_is_fine_but_other_errors_stop_before_the_issue(self):
         pub, github, _ = publisher()

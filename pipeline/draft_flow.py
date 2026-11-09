@@ -12,9 +12,15 @@ deliver 가 하는 일(publish_flow 가 pr 이고 연습 실행이 아닐 때만
   4. PR 을 연다(5xx·네트워크 오류는 재시도). 저장소 설정이 꺼져 있어 거부(403)되거나 API 오류가 나도 초안 브랜치와 이력은 그대로 남고,
      실행 요약에 안내를 남기며 종료 1(빨강)이다 — 운영자에게 Actions 실패 알림이 가게 한다. 슬롯은 처리된 것이라 다시 만들지 않고,
      다음 실행의 정리 단계가 PR 열기를 다시 시도한다(경고만, 빨강 아님).
-  5. 라벨(초안·채널:Chance)을 붙인다(실패해도 경고만).
+  5. 라벨(초안·채널:Chance)을 붙인다. 실패해도 PR·종료 코드는 그대로지만 조용히 넘기지 않는다(R2 수정 P1): 모음은 라벨 `초안` 으로만 초안 PR 을 알아보므로 라벨이 없으면
+     '발행 대기' 알림이 가지 않는다. 그래서 사유 한 줄에 이어 고정 문장 ::warning::, 실행 요약의 쉬운 말 한 줄을 남기고 아래 6 의 모음 요청은 하지 않는다. 다음 실행의 정리가 다시 붙인다(아래).
+  6. PR 을 열었거나(정리가 PR 을 다시 연 경우 포함) 확인 필요 모음의 '초안 대기'가 새로 생길 때, 모음(ops-inbox.yml)을 수동 실행 이벤트로 바로 돌린다(R2-4, 2026-11-09).
+     저장소 기본 토큰이 연 PR 은 이벤트로 그 워크플로를 시작시키지 못해 정기 갱신(보통 3–6시간)을 기다려야 했다. 모음의 점검이 코멘트(@멘션)와 휴대폰 텔레그램 '발행 대기' 알림을 만든다.
+     이 요청이 실패해도 초안·PR·종료 코드는 그대로고 경고만 남는다(다음 정기 갱신이 같은 것을 보여 준다). 워크플로 파일은 바꾸지 않았다 — 이 모듈이 REST 로 부른다.
+     라벨이 붙은 PR 이 새로 생겼을 때만 부른다(라벨이 없으면 모음이 알아보지 못해 부를 까닭이 없다).
 정리: PR 이 없는 초안 브랜치(최근 ORPHAN_RETRY_DAYS일)는 PR 을 다시 열고, 병합됐거나 닫힌 브랜치와 오래된(RETENTION_DAYS일) PR 없는 브랜치는 지운다.
-열린 PR 이 있는 브랜치는 오래돼도 지우지 않는다. 정리 단계의 실패는 경고일 뿐 실행을 실패시키지 않는다.
+열린 PR 이 있는 브랜치는 오래돼도 지우지 않는다. 열린 PR 인데 우리 라벨(초안·채널:…·폐기)이 하나도 없으면 라벨을 다시 붙인다(R2 수정 P1 — 라벨 붙이기가 한 번 실패한 PR 이 영영
+무라벨로 남지 않게. PR 목록이 라벨을 알려 주지 않았거나 운영자가 일부러 `초안` 만 뗀 PR 은 건드리지 않는다). 정리 단계의 실패는 경고일 뿐 실행을 실패시키지 않는다.
 
 로컬 실행에서는 아무것도 push 하지 않는다: GITHUB_TOKEN·GITHUB_REPOSITORY 가 없으면 '로컬'이라고 알리고 끝낸다.
 종료 코드: 0 정상 / 1 실패(브랜치·이력 push 실패, PR 을 열지 못함, 레지스트리 오류).
@@ -29,7 +35,7 @@ from collections import namedtuple
 from datetime import datetime
 from pathlib import Path
 
-from pipeline import drafts
+from pipeline import draft_labels, drafts
 from pipeline.console import one_line, safe_output
 from pipeline.llm import scrub
 from pipeline.state import KST, StateError, read_json_list
@@ -42,10 +48,18 @@ PUSH_ATTEMPTS = 3
 # ::error::·::warning:: 주석에는 입력 유래 문자열 없이 이 고정 문장만 쓴다(자세한 사유는 일반 로그 줄과 실행 요약에 접어서 남긴다)
 ERROR_PR_FAILED = "::error::초안 브랜치와 이력은 올라갔지만 승인 PR 을 열지 못했습니다. 실행 요약의 안내를 따르세요."
 WARN_HOUSEKEEPING = "::warning::초안 정리 단계에서 일부 작업을 하지 못했습니다(발행에는 영향 없음). 이유는 로그의 바로 앞 줄에 있습니다."
+WARN_INBOX = "::warning::확인 필요 모음을 바로 갱신하도록 요청하지 못했습니다(초안 대기는 다음 정기 갱신 때 모음에 나타납니다). 이유는 로그의 바로 앞 줄에 있습니다."
+# 라벨 붙이기 실패(R2 수정 P1): 모음은 라벨 `초안` 으로만 초안 PR 을 알아본다 — 라벨이 없으면 PR 은 열렸는데 '발행 대기' 알림이 조용히 사라진다. 고정 문장(외부 글 없음)
+WARN_LABELS = ("::warning::초안 PR 에 라벨을 붙이지 못했습니다 — 라벨이 없으면 확인 필요 모음이 그 PR 을 초안으로 알아보지 못해 발행 대기 알림이 가지 않을 수 있습니다. "
+               "다음 실행이 라벨을 다시 붙여 봅니다. 이유는 로그의 바로 앞 줄에 있습니다.")
+SUMMARY_LABELS = ("- 라벨: 라벨을 붙이지 못해 발행 대기 알림이 가지 않을 수 있습니다(다음 실행이 라벨을 다시 붙여 봅니다. "
+                  "급하면 PR 화면에서 라벨 `초안`·`채널:Chance` 를 직접 붙이세요)")
+INBOX_WORKFLOW = "ops-inbox.yml"          # 확인 필요 모음을 만드는 워크플로 파일(.github/workflows/ops-inbox.yml)
 PR_SETTING_HINT = ("저장소 Settings → Actions → General 의 'Allow GitHub Actions to create and approve pull requests' 를 켜거나, "
                    "GitHub 화면에서 직접 PR 을 여세요(브랜치 화면의 'Compare & pull request'). 설정을 켜 두면 다음 실행(30분 안)이 PR 을 다시 열어 봅니다.")
 
-Result = namedtuple("Result", "status branch number detail code title")
+# labeled: 열린 PR 의 라벨(초안·채널:Chance)이 붙었는가(R2 수정 P1). PR 을 열지 않은 결과에서는 뜻이 없어 True 로 둔다.
+Result = namedtuple("Result", "status branch number detail code title labeled", defaults=(True,))
 
 
 class DeliveryError(RuntimeError):
@@ -155,7 +169,7 @@ def write_summary(markdown, env=None, out=print):
         out(f"실행 요약 쓰기 실패(발행에는 영향 없음): {one_line(exc, 150)}")
 
 
-def summary_lines(result, repo, titles=None, housekeeping=None):
+def summary_lines(result, repo, titles=None, housekeeping=None, inbox=None):
     lines = ["### Chance 초안 승인 흐름"]
     if result.status == "opened":
         lines.append("- 결과: **DRAFT_OPENED** — 승인 PR 을 열었습니다. **병합하면 공개, 닫으면 폐기**입니다.")
@@ -170,8 +184,13 @@ def summary_lines(result, repo, titles=None, housekeeping=None):
         lines.append(f"- 결과: **{result.status.upper()}** — {result.detail}")
     if titles:
         lines.append(f"- 제목: {titles}")
+    if result.status == "opened" and not getattr(result, "labeled", True):      # R2 수정 P1: 라벨이 없으면 발행 대기 알림이 가지 않을 수 있다 — 성공처럼 보이지 않게 쉬운 말로 알린다
+        lines.append(SUMMARY_LABELS)
     if housekeeping:
         lines.append("- 정리: " + " · ".join(housekeeping))
+    if inbox is not None:      # R2-4: 모음 즉시 갱신 요청 결과(요청하지 않은 실행에서는 줄이 없다)
+        lines.append("- 확인 필요 모음: " + ("바로 갱신하도록 요청했습니다(모음 이슈에 '초안 대기'가 곧 나타납니다)" if inbox else
+                                       "바로 갱신하도록 요청하지 못했습니다(다음 정기 갱신 때 나타납니다)"))
     return "\n".join(lines)
 
 
@@ -215,13 +234,35 @@ def open_pull_request(client, branch, base, title, body, sleep):
 
 
 def attach_labels(client, number, out):
-    """라벨 만들기·붙이기. 실패해도 PR 은 이미 열렸으므로 경고 줄만 남긴다."""
+    """라벨 만들기·붙이기. 돌려주는 값: 붙였으면 True, 못 붙였으면 False(예외를 올리지 않는다).
+
+    실패해도 PR 은 이미 열렸으니 발행에는 영향이 없다. 하지만 확인 필요 모음은 라벨 `초안` 으로만 초안 PR 을 알아보므로 라벨이 없으면 '발행 대기' 알림이 조용히 사라진다(R2 수정 P1).
+    그래서 사유 한 줄(일반 로그)에 이어 고정 문장 ::warning:: 도 남기고(WARN_LABELS), 호출한 쪽이 결과를 받아 성공 문구와 모음 요청 여부를 정한다.
+    다음 실행의 정리 단계(housekeeping)가 우리 라벨이 하나도 없는 열린 초안 PR 에 다시 붙인다."""
     try:
         for name, color, description in drafts.LABELS:
             client.ensure_label(name, color, description)
         client.add_labels(number, [name for name, _color, _desc in drafts.LABELS])
     except drafts.GitHubError as exc:
         out(f"[초안] 라벨을 붙이지 못했습니다(PR 은 열렸습니다): {one_line(exc, 200)}")
+        out(WARN_LABELS)
+        return False
+    return True
+
+
+def request_inbox_refresh(client, ref, out=print):
+    """확인 필요 모음(ops-inbox.yml)을 지정한 브랜치에서 수동 실행 이벤트로 바로 돌린다. 돌려주는 값: 요청했으면 True, 못 했으면 False(예외를 올리지 않는다).
+
+    승인 PR 을 연 직후에 부른다 — 저장소 기본 토큰이 연 PR·붙인 라벨은 모음 워크플로를 이벤트로 시작시키지 못해서, 부르지 않으면 '초안 대기'가 정기 갱신(보통 3–6시간)에야
+    뜬다. 권한은 워크플로의 `actions: write`(Pages 배포 요청과 같은 권한)다. 실패해도(권한·설정·네트워크) 초안·PR 은 이미 올라갔으므로 경고만 남기고 다음 정기 갱신에 맡긴다."""
+    try:
+        client.dispatch_workflow(INBOX_WORKFLOW, ref)
+    except drafts.GitHubError as exc:
+        out(f"[초안] 확인 필요 모음을 바로 갱신하도록 요청하지 못했습니다: {failure_detail(exc)}")
+        out(WARN_INBOX)
+        return False
+    out("[초안] 확인 필요 모음을 바로 갱신하도록 요청했습니다(초안 대기가 모음에 곧 나타납니다).")
+    return True
 
 
 def failure_detail(exc):
@@ -268,8 +309,8 @@ def deliver(git, client, env, out=print, sleep=time.sleep):
         out(f"[초안] PR 을 열지 못했습니다: {failure_detail(exc)}")
         return Result("branch_only", branch, None, failure_detail(exc), 1, shown)
     out(f"[초안] PR 을 열었습니다: {drafts.pull_url(client.repo, number)}")
-    attach_labels(client, number, out)
-    return Result("opened", branch, number, "", 0, shown)
+    labeled = attach_labels(client, number, out)
+    return Result("opened", branch, number, "", 0, shown, labeled)
 
 
 # ----------------------------------------------------------------------------
@@ -298,8 +339,33 @@ def reopen_pull_request(git, client, branch, entry, env, sleep, out):
     return number
 
 
-def housekeeping(git, client, env, today, skip=(), out=print, sleep=time.sleep):
-    """남은 초안 정리. 돌려주는 값: (설명 문구 목록, 실패한 작업 수). 어떤 실패도 예외로 올리지 않는다."""
+def lacks_labels(pr):
+    """열린 초안 PR 이 우리 라벨(초안·폐기·채널:…)을 하나도 달고 있지 않은가(R2 수정 P1). attach_labels 는 라벨 둘을 한 번에 붙이므로 '하나도 없음'이 붙이기 실패의 흔적이다.
+    PR 목록이 라벨을 알려 주지 않았으면(labels 가 목록이 아님) 알 수 없으니 False — 모르는 채로 손대지 않는다. 운영자가 일부러 `초안` 만 떼고 `채널:…`·`폐기` 를 남긴 PR 도
+    False 다(다시 붙이면 운영자가 한 일을 되돌린다). 열린 PR 이 아니거나 번호를 읽을 수 없어도 False."""
+    number, labels = pr.get("number"), pr.get("labels")
+    if pr.get("state") != "open" or isinstance(number, bool) or not isinstance(number, int) or not isinstance(labels, (list, tuple)):
+        return False
+    ours = (draft_labels.DRAFT_LABEL, draft_labels.DISCARD_LABEL)
+    return not any(name in ours or str(name).startswith(draft_labels.CHANNEL_LABEL_PREFIX) for name in labels)
+
+
+class _Tally:
+    """out 으로 가는 줄을 그대로 넘기면서 라벨 경고(WARN_LABELS)가 몇 번 나갔는지 센다. reopen_pull_request 가 라벨 결과를 돌려주지 않아도 정리 단계가 그 실패를 알 수 있게 한다."""
+
+    def __init__(self, out):
+        self.out, self.label_failures = out, 0
+
+    def __call__(self, text):
+        if text == WARN_LABELS:
+            self.label_failures += 1
+        self.out(text)
+
+
+def housekeeping(git, client, env, today, skip=(), out=print, sleep=time.sleep, stats=None):
+    """남은 초안 정리. 돌려주는 값: (설명 문구 목록, 실패한 작업 수). 어떤 실패도 예외로 올리지 않는다.
+    stats 가 사전이면 다시 연 PR 수를 stats['reopened'] 로, 이번 정리로 라벨이 붙어 모음이 알아볼 수 있게 된 PR 수(다시 연 PR 중 라벨이 붙은 것 + 라벨을 다시 붙인 것)를
+    stats['labeled'] 로 알려 준다(호출한 쪽이 모음 즉시 갱신 여부를 정한다)."""
     notes, failures = [], 0
     try:
         remote = ls_remote_drafts(git)
@@ -317,7 +383,8 @@ def housekeeping(git, client, env, today, skip=(), out=print, sleep=time.sleep):
         if head not in by_head or (pr["state"] == "open" and by_head[head]["state"] != "open"):
             by_head[head] = pr
     complete = bool(getattr(prs, "complete", False))   # 목록이 끝까지 다 읽히지 않았으면 'PR 이 안 보임'이 '없음'이라는 뜻이 아니다(PR 이 없다고 믿고 지우지 않는다)
-    reopened = deleted = 0
+    reopened = reopen_unlabeled = relabeled = relabel_failed = deleted = 0
+    say = _Tally(out)                                  # 다시 연 PR 의 라벨 붙이기 실패를 세려고 reopen_pull_request 에만 넘긴다
     for name in names:
         age = (today - drafts.parse_branch(name).day).days
         pr = by_head.get(name)
@@ -327,23 +394,59 @@ def housekeeping(git, client, env, today, skip=(), out=print, sleep=time.sleep):
                 if entry is None:
                     out(f"[초안] {name}: PR 이 없지만 이력 항목이 없어 다시 열지 못합니다.")
                     continue
-                number = reopen_pull_request(git, client, name, entry, env, sleep, out)
+                failed_before = say.label_failures
+                number = reopen_pull_request(git, client, name, entry, env, sleep, say)
                 out(f"[초안] {name}: PR 을 다시 열었습니다: {drafts.pull_url(client.repo, number)}")
                 reopened += 1
+                if say.label_failures > failed_before:      # PR 은 다시 열렸지만 라벨이 안 붙었다 — 모음이 알아보지 못하니 실패로 센다(다음 실행의 아래 단계가 다시 붙인다)
+                    failures += 1
+                    reopen_unlabeled += 1
             elif age >= drafts.RETENTION_DAYS and (pr["state"] != "open" if pr is not None else complete):
                 git.run("push", "origin", "--delete", name)
                 out(f"[초안] {name}: {drafts.RETENTION_DAYS}일이 지나 지웠습니다({'PR 없음' if pr is None else '병합됨' if pr['merged'] else '닫힘'}).")
                 deleted += 1
+            elif pr is not None and lacks_labels(pr):        # 열린 PR 인데 우리 라벨이 하나도 없다: 라벨 붙이기가 한 번 실패한 PR 이 영영 무라벨로 남지 않게 다시 붙인다(R2 수정 P1)
+                if attach_labels(client, pr["number"], out):
+                    out(f"[초안] {name}: PR #{pr['number']} 에 라벨이 없어 다시 붙였습니다.")
+                    relabeled += 1
+                else:
+                    failures += 1
+                    relabel_failed += 1
         except (GitError, drafts.GitHubError, DeliveryError, OSError) as exc:
             failures += 1
             out(f"[초안] {name}: 정리 작업 실패: {one_line(exc, 300)}")
+    if isinstance(stats, dict):
+        stats["reopened"] = reopened
+        stats["labeled"] = (reopened - reopen_unlabeled) + relabeled
     if reopened:
         notes.append(f"PR 다시 열기 {reopened}건")
+    if relabeled:
+        notes.append(f"라벨 다시 붙이기 {relabeled}건")
+    if reopen_unlabeled + relabel_failed:
+        notes.append(f"라벨을 붙이지 못한 PR {reopen_unlabeled + relabel_failed}건(발행 대기 알림이 가지 않을 수 있음)")
     if deleted:
         notes.append(f"오래된 브랜치 삭제 {deleted}건")
     if failures:
         notes.append(f"정리 실패 {failures}건(다음 실행에서 다시 시도)")
     return notes, failures
+
+
+def request_inbox_refresh_safely(git, client, env, out=print):
+    """모음 즉시 갱신 요청(request_inbox_refresh)을 부른다. 요청할 브랜치는 이번 실행이 초안을 올린 기준 브랜치(현재 브랜치, 못 읽으면 GITHUB_REF_NAME)다.
+    어떤 오류도 이미 끝난 초안 올리기의 결과·종료 코드를 바꾸지 않는다(예상 밖 오류는 종류만 로그에 남긴다)."""
+    try:
+        try:
+            ref = current_branch(git)
+        except (GitError, DeliveryError):
+            ref = str(env.get("GITHUB_REF_NAME", "")).strip()
+            if not ref:
+                out("[초안] 확인 필요 모음을 부를 브랜치를 알 수 없어 건너뜁니다(다음 정기 갱신 때 모음에 나타납니다).")
+                return False
+        return request_inbox_refresh(client, ref, out)
+    except Exception as exc:  # noqa: BLE001 - 모음 즉시 갱신은 덤이다: 예상 밖 오류가 초안 올리기의 결과를 가리면 안 된다(오류 종류만 남긴다)
+        out(f"[초안] 확인 필요 모음 즉시 갱신 중 예상 밖 오류: {type(exc).__name__}")
+        out(WARN_INBOX)
+        return False
 
 
 # ----------------------------------------------------------------------------
@@ -376,13 +479,20 @@ def run(env=None, git=None, client=None, out=print, sleep=time.sleep, now=None):
         out(f"작업 실패: {type(exc).__name__}: {one_line(exc, 400)}")
         write_summary("### Chance 초안 승인 흐름\n- 결과: **실패** — 초안을 올리지 못했습니다(원인은 이 단계의 로그를 보세요).", summary_env, out)
         return 1
+    stats = {}
     try:
         notes, failures = housekeeping(git, client, env, now.astimezone(KST).date(), skip=(result.branch,) if result.branch else (), out=out,
-                                       sleep=sleep)
+                                       sleep=sleep, stats=stats)
     except Exception as exc:  # noqa: BLE001 - 정리는 부가 작업이다: 예상 밖 오류가 이미 끝난 초안 올리기의 결과를 가리면 안 된다(오류 종류는 로그에 남긴다)
         out(f"[초안] 정리 중 예상 밖 오류: {type(exc).__name__}: {one_line(exc, 300)}")
         notes, failures = ["정리 중 예상 밖 오류(다음 실행에서 다시 시도)"], 1
-    write_summary(summary_lines(result, client.repo, result.title, notes), summary_env, out)
+    inbox_refreshed = None
+    delivered_visible = result.status == "opened" and getattr(result, "labeled", True)
+    if delivered_visible or stats.get("labeled"):               # 라벨이 붙은 새 초안 PR 이 생겼을 때만(R2-4). PR 을 열지 못했거나(branch_only) 만든 초안이 없는 실행에서는 요청하지 않는다
+        inbox_refreshed = request_inbox_refresh_safely(git, client, env, out)
+    elif result.status == "opened" or stats.get("reopened"):    # R2 수정 P1: PR 은 열렸는데 라벨이 안 붙었다 — 모음은 라벨로 초안을 알아보니 지금 갱신해도 나타나지 않는다. 성공 문구 없이 이유만 남긴다
+        out("[초안] 라벨이 붙지 않아 확인 필요 모음을 바로 갱신하도록 요청하지 않았습니다(라벨이 붙은 뒤의 점검에 나타납니다).")
+    write_summary(summary_lines(result, client.repo, result.title, notes, inbox=inbox_refreshed), summary_env, out)
     if result.status == "branch_only":
         out(ERROR_PR_FAILED)
     if failures:

@@ -983,7 +983,8 @@ def notify_chance_published(posts, run_info=None, notifier=None):
 
 
 def notify_draft_waiting(channel_label, title, where, url=None, notifier=None):
-    """호출 자리: 티스토리·네이버 초안 패키지와 Chance 승인 대기가 초안을 만든 직후 이 함수를 부른다(아직 연결하지 않았다 — 켜기 전에 연결할 것, docs/ARCHITECTURE.md §4-2-1)."""
+    """호출 자리: Chance 승인 대기는 확인 필요 모음의 점검(scripts/ops_inbox.py)이 새 초안 PR 마다 한 건씩 부른다(R2-4, 2026-11-09). Blogger 초안은 notify_blogger_result 가 부른다.
+    티스토리·네이버 초안 패키지는 아직 연결하지 않았다(docs/ARCHITECTURE.md §4-2-1)."""
     return (notifier or Notifier()).notify_draft_waiting(channel_label, title, where, url=url)
 
 
