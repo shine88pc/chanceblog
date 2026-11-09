@@ -669,6 +669,16 @@ Unsplash API 지침(2026-11-03 원문 확인)은 ① API 가 준 사진 주소�
 
 **관측이 필요한 것**(실제 Unsplash 를 한 번도 호출하지 못했다): 첫 실제 실행에서 ① 응답의 `ixid` 가 영숫자·`_-=` 모양인지(아니면 `[IXID]` 줄이 뜨고 `ixid` 없이 쓴다) ② 사진 조회 응답의 모양 ③ 글 화면에서 출처 줄이 이미지 아래 한 줄로 보이는지.
 
+## 4-10. 구조화 Fact 경로 — 외부 기사 요약 대신 구조화 데이터로 글을 만드는 길, 1단계 부품 (`pipeline/facts.py` 외, 2026-11-09)
+
+운영자 결정(2026-11-09): 자동으로 쓰는 외부 자료는 권리·약관·상업·AI 이용이 분명한 **구조화 데이터**뿐이고, 글은 '공식 구조화 데이터 → 정규화한 Fact → 자체 계산 → 자체 비교·분석 → 자체 문장'으로 만든다(규칙 기반 초안은 AI 없이 돈다). 제한 재개 필수 16항목 중 6번의 **1단계(핵심 부품)** 이다. **새 모듈·새 시험·문서만 있고 생성기·워크플로·레지스트리에는 연결하지 않았다** — 연결(`chance.content_source: "facts"`)은 2단계이고 켜는 것은 T3 다. 객체·계산식·참조 표시·어댑터 계약·체크리스트·이미지 문제·2단계 계획은 [`FACT_PATH.md`](./FACT_PATH.md).
+
+| 모듈 | 역할 | 입출력 |
+|------|------|--------|
+| `pipeline/facts.py`·`calc.py`·`fact_topics.py`·`adapters/`(`base.py`·`mock_stats.py`)·`recipes.py`·`fact_assembler.py` | 불변 값 객체(Fact·출처 기록·계산 결과)와 `⟦F:id⟧` 참조·렌더러(숫자는 모두 Fact 에서, 보이는 소수 자리는 단위 표와 자료의 정밀도 중 큰 쪽) → 결정적 계산식 F01–F14 → 주제 허용 목록(범주별 키·라벨·단위·지역 낱말, 차단 낱말) → 구조화 응답(JSON·CSV)만 읽는 어댑터 계약과 가짜 Provider → Recipe 3개(시계열 변화·지역 비교·임계값 기록)와 규칙 기반 한국어 조립기(`assemble` — 못 맞추면 `Insufficient`, 예외 없음) | **없음**(순수 함수 — 네트워크는 주입된 `opener`, 시각은 인자, 난수 없음, 표준 라이브러리만) |
+
+**연결 금지가 시험으로 지켜진다**: `generator.py`·`pipeline/` 의 다른 모듈·워크플로는 이 모듈들의 이름을 부르지 않는다(`tests/test_fact_structure.py`). SRC(허용 목록)와는 `facts.ProviderLike`·`RegistryLike` 최소 프로토콜(덕 타이핑)로만 맞물리고 그 모듈을 import 하지 않는다.
+
 ## 5. 상태·멱등성·동시성
 
 - **이력 스키마 v1**: `v`, `blog`, `date`(KST `YYYY-MM-DD`), `generated_at`(ISO, KST), `status`, `topic`, `topic_source`(`seed`·`llm`·`override`), `title`, `labels`, `url`, `post_id`, `model`, `attempts`, `reasons[]`, `image`(Blogger에서 대표 사진을 붙인 실행에만 — Unsplash 사진 ID, 이 블로그 이력의 마지막 30개 항목 안에서 같은 사진을 다시 쓰지 않는 기준, §4-7).

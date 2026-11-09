@@ -1,0 +1,1078 @@
+"""구조화 Fact 경로 1단계 — 독립 검증 지적(V-01–V-14) 회귀 시험: 보이는 값끼리 모순 없는 글(속성형)·주제 허용 목록 우회·근거 텍스트에 내부 번호 없음·기간 개수·구간척도 변화율·동률·
+큰 값(퍼징)·SRC 안내 문장·우리말 수 표현·표와 설명의 일치·지역 없는 계열·죽은 방어선. 새 동작마다 이 시험이 있고, 고친 줄을 되돌리면 빨갛게 된다(변이 증명).
+무작위는 시험 안에서 고정 시드로만 쓴다(결정적). 네트워크·시계 없이 돈다."""
+import dataclasses
+import random
+import re
+import types
+import unittest
+from decimal import Decimal
+
+import _bootstrap  # noqa: F401
+import fact_helpers as H
+
+from pipeline import calc as C
+from pipeline import fact_assembler as A
+from pipeline import fact_topics as T
+from pipeline import facts as F
+from pipeline import recipes as R
+from pipeline.adapters import mock_stats as M
+
+RECORD_ID = H.mock_bundle()[1].record_id
+SYLLABLES = "가나다라마바사아자차카타파하거너더러머버서어저처커터퍼허"
+
+
+def months(start, count):
+    year, month = (int(part) for part in start.split("-"))
+    return [f"{year + (month - 1 + i) // 12:04d}-{(month - 1 + i) % 12 + 1:02d}" for i in range(count)]
+
+
+def ending(count, last="2026-03"):
+    """마지막 달이 last 인 count 개 달."""
+    year, month = (int(part) for part in last.split("-"))
+    index = year * 12 + month - 1 - (count - 1)
+    return months(f"{index // 12:04d}-{index % 12 + 1:02d}", count)
+
+
+def series(values, *, periods=None, **kw):
+    """한 계열의 Fact(가짜 수집 기록을 가리킨다). periods 가 없으면 마지막이 2026년 3월인 연속한 달."""
+    periods = periods or ending(len(values))
+    return [H.make_fact(value, period=period, record_id=RECORD_ID, **kw) for value, period in zip(values, periods)]
+
+
+def cross(values, *, period="2026-03", names=None, **kw):
+    """같은 기준일의 지역 묶음(지역 이름은 `가상 지역 가`…)."""
+    out = []
+    for index, value in enumerate(values):
+        name = (names or {}).get(index) or "가상 지역 " + SYLLABLES[index % len(SYLLABLES)]
+        out.append(H.make_fact(value, period=period, region=f"R{index + 1:02d}", region_label=name, record_id=RECORD_ID, **kw))
+    return out
+
+
+def run(recipe, facts, params=None, **kw):
+    return H.run(recipe, facts=facts, params=params if params is not None else {}, **kw)
+
+
+def story(post):
+    return A.story_of(post.body_markdown)
+
+
+def table_rows(post):
+    return [[cell.strip() for cell in line.strip("|").split("|")] for line in post.body_markdown.split("\n") if line.startswith("| 20")]
+
+
+def rank_rows(post):
+    """지역 비교 표의 줄 [순위, 지역, 값, 평균과의 차이]."""
+    return [[cell.strip() for cell in line.strip("|").split("|")] for line in post.body_markdown.split("\n") if re.match(r"\| [0-9]+위 \|", line)]
+
+
+def number(text):
+    return float(text.replace("−", "-").replace("+", "").replace(",", "").rstrip("%p명곳℃위개월분기년번"))
+
+
+class DisplayConsistencyTest(unittest.TestCase):
+    """V-01·V-12: 보이는 값이 서로 어긋나는 헤드라인이 없다 — 표시 소수 자리는 단위 표와 자료의 정밀도 중 큰 쪽이다."""
+
+    def test_the_verifiers_straddling_example_is_now_consistent(self):
+        post = run("R01_time_series", series(["3.30", "3.31", "3.32", "3.33", "3.34", "3.35", "3.36", "3.44", "3.46"]))
+        self.assertEqual(post.title, "가상 지역 가 실업률 3.46%(2026년 3월 기준), 앞 기간보다 0.02%p 높아")
+        self.assertEqual(post.description, "가상 지역 가의 실업률 값은 2026년 2월(3.44%)보다 0.02%p 높은 3.46%입니다(2026년 3월 기준).")
+        self.assertIn("- 바로 앞 기간 대비: +0.02%p, 변화율 +0.58% (견준 기간 2026년 2월, 그때 값 3.44%)", post.body_markdown)
+        self.assertIn("| 2026년 3월 | 3.46% | +0.02%p | +0.58% |", post.body_markdown)
+        self.assertNotIn("달라지지 않은", post.description + post.body_markdown)
+        self.assertEqual(dict(post.decimals), {"%": 2, "%p": 2})
+
+    def test_equal_values_are_the_same_and_only_then(self):
+        same = run("R01_time_series", series(["3.20", "3.30", "3.40", "3.45", "3.30", "3.50", "3.45", "3.50", "3.50"]))
+        self.assertTrue(same.title.endswith("앞 기간과 같아"))
+        self.assertIn("2026년 2월(3.50%)에서 달라지지 않은 3.50%입니다", same.description)
+        self.assertIn("| 2026년 3월 | 3.50% | 0.00%p | 0.00% |", same.body_markdown)
+        near = run("R01_time_series", series(["3.20", "3.30", "3.40", "3.45", "3.30", "3.50", "3.45", "3.50", "3.51"]))
+        self.assertTrue(near.title.endswith("앞 기간보다 0.01%p 높아"), near.title)
+        self.assertNotIn("달라지지 않은", near.description)
+
+    def test_the_unit_table_is_the_minimum_and_the_data_may_be_more_precise(self):
+        ints = run("R01_time_series", series(["10", "12", "11", "13", "12", "14", "13", "15", "16"], unit="명", label="취업자 수", key="labour.employed_persons"))
+        self.assertEqual(dict(ints.decimals), {"명": 0})
+        self.assertIn("16명", ints.title)
+        fine = run("R01_time_series", series(["108.4", "108.6", "108.1", "108.3", "108.2", "108.9", "109.0", "108.8", "108.6"], unit="점", label="물가지수", key="price.index"))
+        self.assertEqual(dict(fine.decimals), {"점": 1})                 # 표 0자리, 자료 1자리 → 1자리(108.4점과 108.6점이 108점·109점으로 뭉개지지 않는다)
+        self.assertIn("108.6점", fine.title)
+        percent_with_ints = run("R01_time_series", series(["3", "4", "3", "5", "4", "6", "5", "4", "6"]))
+        self.assertEqual(dict(percent_with_ints.decimals), {"%": 1, "%p": 1})       # 정수 자료도 단위 표의 1자리(`3.0%`) — 자료의 정밀도를 깎지는 않는다
+
+    def test_display_context_is_the_larger_of_the_table_and_the_data(self):
+        make = lambda value, unit="%": H.make_fact(value, unit=unit)          # noqa: E731
+        self.assertEqual(F.display_context([make("3.5"), make("3.46"), make("3.4")]), {"%": 2, "%p": 2})
+        self.assertEqual(F.display_context([make("3"), make("4")]), {"%": 1, "%p": 1})
+        self.assertEqual(F.display_context([make("3.5000")]), {"%": 1, "%p": 1})                 # 뒤의 0 은 정밀도가 아니다
+        self.assertEqual(F.display_context([make("1200", "명"), make("1200.25", "명")]), {"명": 2})
+        self.assertEqual(F.display_context([make("2.5", "달러")]), {"달러": 2})
+        self.assertEqual(F.display_context([make(None)]), {})                                      # 모름은 정밀도를 말하지 않는다
+        self.assertEqual(F.display_context([make("1.1234")]), {"%": 4, "%p": 4})
+        with self.assertRaises(F.PrecisionLimit):
+            F.display_context([make("1.12345")])
+        self.assertEqual(F.value_decimals(Decimal("3.50")), 1)
+        self.assertEqual(F.value_decimals(Decimal("1E+2")), 0)
+        self.assertEqual(F.value_decimals(Decimal("0")), 0)
+        self.assertEqual(F.decimals_for("%", {"%": 3}), 3)
+        self.assertEqual(F.decimals_for("명", {"%": 3}), 0)
+        self.assertEqual(F.format_with_unit(Decimal("3.5"), "%", context={"%": 3}), "3.500%")
+        self.assertEqual(F.display_sign(Decimal("0.04"), "%p", {"%p": 2}), 1)
+        self.assertEqual(F.display_sign(Decimal("0.04"), "%p"), 0)
+
+    def test_data_more_precise_than_the_display_limit_is_refused_not_rounded(self):
+        result = run("R01_time_series", series(["3.456789", "3.401234", "3.42", "3.46", "3.44", "3.5", "3.46", "3.50", "3.54"]))
+        self.assertIsInstance(result, R.Insufficient)
+        self.assertEqual(result.code, "PRECISION_LIMIT")
+        ok = run("R01_time_series", series(["3.4567", "3.4012", "3.42", "3.46", "3.44", "3.5", "3.46", "3.50", "3.54"]))
+        self.assertIsInstance(ok, A.AssembledPost)
+        self.assertIn("3.5400%", ok.title)
+
+    def test_region_values_that_used_to_look_equal_are_shown_exactly(self):
+        post = run("R02_region_compare", cross(["3.46", "3.54", "3.50", "3.49", "3.51"]), {"key": H.UNEMP})
+        self.assertIsInstance(post, A.AssembledPost)
+        rows = rank_rows(post)
+        self.assertEqual([row[0] for row in rows], ["1위", "2위", "3위", "4위", "5위"])
+        self.assertEqual([row[2] for row in rows], ["3.54%", "3.51%", "3.50%", "3.49%", "3.46%"])
+        self.assertEqual(len({row[2] for row in rows}), 5)
+
+    def test_verdict_needs_the_displayed_numbers_to_agree(self):
+        cur, ref = H.make_fact("3.46"), H.make_fact("3.44", period="2026-02")
+        chg = C.f01_change(cur, ref)
+        exact = F.display_context([cur, ref])
+        self.assertEqual(R.verdict(cur, ref, chg, exact), "UP")
+        self.assertEqual(R.verdict(ref, cur, C.f01_change(ref, cur, require="any"), exact), "DOWN")
+        coarse = {"%": 1, "%p": 1}                       # 보이는 값은 3.5 와 3.4 인데 차이는 0.0 으로 보이는 설정 — 모순이라 판정하지 않는다
+        self.assertIsNone(R.verdict(cur, ref, chg, coarse))
+        same_a, same_b = H.make_fact("3.5"), H.make_fact("3.5", period="2026-02")
+        self.assertEqual(R.verdict(same_a, same_b, C.f01_change(same_a, same_b), {"%": 1, "%p": 1}), "SAME")
+        near_a, near_b = H.make_fact("3.54"), H.make_fact("3.46", period="2026-02")           # 보이는 값은 둘 다 3.5 인데 차이는 +0.1 로 보인다
+        self.assertEqual(F.format_with_unit(near_a.value, "%", context={"%": 1}), F.format_with_unit(near_b.value, "%", context={"%": 1}))
+        self.assertIsNone(R.verdict(near_a, near_b, C.f01_change(near_a, near_b), {"%": 1, "%p": 1}))
+        flat_a, flat_b = H.make_fact("3.5"), H.make_fact("3.5", period="2026-02")
+        wrong = types.SimpleNamespace(value=Decimal("0.4"), unit="%p")                         # 같은 값인데 차이가 있다고 하는 계산 결과
+        self.assertIsNone(R.verdict(flat_a, flat_b, wrong, {"%": 1, "%p": 1}))
+        flipped = types.SimpleNamespace(value=Decimal("-0.4"), unit="%p")                      # 방향이 거꾸로인 차이
+        self.assertIsNone(R.verdict(H.make_fact("3.9"), H.make_fact("3.5", period="2026-02"), flipped, {"%": 1, "%p": 1}))
+
+    def test_an_inconsistent_verdict_makes_no_post(self):
+        original = R.verdict
+        try:
+            R.verdict = lambda *args, **kwargs: None
+            result = run("R01_time_series", H.series_of("R01"), H.R01_PARAMS)
+        finally:
+            R.verdict = original
+        self.assertIsInstance(result, R.Insufficient)
+        self.assertEqual(result.code, "DISPLAY_INCONSISTENT")
+
+    def boundary_series(self, rng):
+        places = rng.choice((0, 1, 2, 3))
+        base = rng.randint(100, 900)
+        values = []
+        for _ in range(rng.choice((6, 9, 12, 15))):
+            base += rng.choice((-3, -2, -1, 0, 0, 1, 2, 3))                    # 아주 작은 걸음 — 반올림 경계에 자주 걸린다
+            values.append(str(Decimal(base) / (Decimal(10) ** places)))
+        return values
+
+    def check_consistency(self, values, post):
+        """시험이 따로 하는 대조: 제목·설명의 말과 '한눈에'·표의 차이가 글에 보이는 두 값과 어긋나지 않는다."""
+        cur, prev = Decimal(values[-1]), Decimal(values[-2])
+        places = max(1, max(F.value_decimals(Decimal(v)) for v in values))
+        shown = lambda v: format(v.quantize(Decimal(1).scaleb(-places)), "f")        # noqa: E731
+        words = {"SAME": ("앞 기간과 같아", "달라지지 않은"), "UP": ("높아", "높은"), "DOWN": ("낮아", "낮은")}
+        expected = "SAME" if cur == prev else "UP" if cur > prev else "DOWN"
+        self.assertIn(words[expected][0], post.title)
+        self.assertIn(words[expected][1], post.description)
+        for other, pair in words.items():
+            if other != expected:
+                self.assertNotIn(pair[0], post.title)
+        line = next(line for line in post.body_markdown.split("\n") if line.startswith("- 바로 앞 기간 대비:"))
+        diff_text = re.search(r"대비: ([+−]?[0-9,.]+)", line).group(1)
+        self.assertAlmostEqual(number(diff_text), float(cur - prev), places=places + 1)
+        self.assertEqual(diff_text.lstrip("+−"), shown(abs(cur - prev)))
+        self.assertEqual(diff_text.startswith("+"), cur > prev)
+        self.assertEqual(diff_text.startswith("−"), cur < prev)
+        self.assertIn(f"그때 값 {shown(prev)}%", line)
+        rows = table_rows(post)
+        for top, below in zip(rows, rows[1:]):                                  # 표의 증감 = 위 줄의 보이는 값 − 아래 줄의 보이는 값(둘 다 연속한 달)
+            if not top[2].startswith("해당"):
+                self.assertAlmostEqual(number(top[1]) - number(below[1]), number(top[2]), places=places + 1)
+
+    def test_no_boundary_series_makes_a_contradictory_post(self):
+        rng = random.Random(20261109)
+        made = 0
+        for _ in range(500):
+            values = self.boundary_series(rng)
+            post = run("R01_time_series", series(values))
+            if isinstance(post, R.Insufficient):
+                self.assertIn(post.code, ("TOO_SHORT", "TOO_FEW_POINTS"), post)
+                continue
+            made += 1
+            self.assertEqual(A.post_problems(post), [])
+            self.check_consistency(values, post)
+        self.assertGreater(made, 350)
+
+
+class TopicAllowListTest(unittest.TestCase):
+    """V-02: 주제 차단이 허용 목록이다 — 키·라벨·단위·지역 낱말이 범주의 허용 목록에 모두 있어야 글이 되고, 차단 낱말은 띄어 써도 걸린다."""
+
+    def post(self, label="실업률", unit="%", key=H.UNEMP, region_label="가상 지역 가", rid="R01_time_series", **kw):
+        facts = series(["3.1", "3.2", "3.3", "3.2", "3.4", "3.5", "3.6", "3.5", "3.7"], label=label, unit=unit, key=key, region_label=region_label, **kw)
+        return run(rid, facts, {"key": key})
+
+    def code(self, result):
+        self.assertIsInstance(result, R.Insufficient, "글이 나왔다")
+        return result.code
+
+    def test_the_verifiers_bypass_examples_are_all_refused(self):
+        for label, key, unit in (("당뇨병 환자 수", "population.patients", "명"), ("주식 지수", "economy.index", "점"), ("지금 사야 할 지수", "economy.index", "점"),
+                                 ("폭발적 증가 지수", "economy.index", "점"), ("무 조건 지수", "economy.index", "점"), ("효 능 지수", "economy.index", "점"),
+                                 ("암 환자 수", "population.total", "명"), ("치료 건수", "population.total", "건"), ("급등 지역", "economy.index", "점"),
+                                 ("반드시 오르는 지수", "economy.index", "점")):
+            with self.subTest(label=label):
+                self.assertIn(self.code(self.post(label=label, key=key, unit=unit)), ("TOPIC_NOT_ALLOWED", "UNKNOWN_TOPIC"))
+        self.assertEqual(self.code(self.post(label="폭발적 증가 지수", key="economy.index", unit="점")), "UNKNOWN_TOPIC")        # 차단 낱말이 아니어도 허용 목록에 없으면 글이 안 된다
+        self.assertEqual(self.code(self.post(label="당뇨병 환자 수", key="population.total", unit="명")), "TOPIC_NOT_ALLOWED")
+        self.assertEqual(self.code(self.post(label="무 조건 지수", key="economy.index", unit="점")), "TOPIC_NOT_ALLOWED")
+
+    def test_spaced_fullwidth_and_hidden_variants_are_found_too(self):
+        for label in ("무 조 건", "무·조·건", "무-조-건", "무　조건", "무​조건", "효 능", "환 자", "주 식", "사 야", "당 뇨", "ＧＭ 보 장"):
+            with self.subTest(label=label):
+                self.assertTrue(T.blocked_in(label), label)
+        self.assertEqual(T.compact("무 조·건-!"), "무조건")
+        self.assertEqual(T.compact("ＡＢＣ １２"), "abc12")
+        self.assertTrue(T.blocked_in("Ｓｔｏｃｋ Ｉｎｄｅｘ", english=True))
+        self.assertTrue(T.blocked_in("Cancer patients", english=True))
+        self.assertEqual(T.blocked_in("암호 길이"), [])                      # 한 글자 낱말 '암' 은 낱말 전체일 때만 — 암호·암석은 과탐하지 않는다
+        self.assertEqual(T.blocked_in("암모니아 농도"), [])
+        self.assertTrue(T.blocked_in("암 지수"))
+
+    def test_every_field_is_checked_not_only_the_label(self):
+        self.assertEqual(self.code(self.post(unit="환자")), "TOPIC_NOT_ALLOWED")
+        for kw, expected in ((dict(region_label="당뇨병 환자 모임"), "TOPIC_NOT_ALLOWED"), (dict(region_label="투자 권유 지역"), "TOPIC_NOT_ALLOWED"),
+                             (dict(region_label="마법 지역"), "UNKNOWN_TOPIC"), (dict(label="실업률 보장"), "TOPIC_NOT_ALLOWED"), (dict(unit="㎜"), "UNKNOWN_TOPIC")):
+            with self.subTest(kw=kw):
+                self.assertEqual(self.code(self.post(**kw)), expected)
+        self.assertEqual(self.code(self.post(key="labour.diabetes_rate")), "UNKNOWN_TOPIC")
+        self.assertEqual(self.code(self.post(key="labour")), "UNKNOWN_TOPIC")
+        english = [dataclasses.replace(fact, label_en="Cancer patients") for fact in series(["3.1"] * 9)]
+        self.assertIsNotNone(T.fact_problem(english[0], R.ALLOWED_DOMAINS))
+        for text in ("주식 투자 추천 통계", "당뇨 환자 통계", "무 조건 통계"):
+            with self.subTest(source=text):
+                result = H.run("R01_time_series", params=H.R01_PARAMS, source=A.SourceInfo(M.MockProvider(), text, M.SOURCE_URL))
+                self.assertEqual(self.code(result), "SOURCE_INFO_INVALID")
+
+    def test_one_unknown_region_refuses_the_whole_comparison(self):
+        """그 지역만 빼고 비교하면 '가장 높은 곳' 이 거짓이 될 수 있다 — 낱말이 허용 목록 밖인 지역이 하나라도 있으면 묶음 전체를 쓰지 않는다."""
+        facts = cross(["3.5", "3.3", "2.9", "3.8", "9.9"], names={4: "마법 지역"})
+        self.assertEqual(self.code(run("R02_region_compare", facts, {"key": H.UNEMP})), "UNKNOWN_TOPIC")
+        facts = cross(["3.5", "3.3", "2.9", "3.8", "9.9"], names={0: "급등 지역"})
+        self.assertEqual(self.code(run("R02_region_compare", facts, {"key": H.UNEMP})), "TOPIC_NOT_ALLOWED")
+        mixed = cross(["3.5", "3.3", "2.9", "3.8"]) + [H.make_fact("1", key="sports.scores", period="2026-03", region="R09", region_label="가상 지역 사", record_id=RECORD_ID)]
+        self.assertIsInstance(run("R02_region_compare", mixed, {}), A.AssembledPost)            # 다른 계열(다른 묶음)의 낱말 문제는 이 묶음을 막지 않는다
+
+    def test_a_series_with_one_bad_label_is_refused_whole(self):
+        facts = series(["3.1", "3.2", "3.3", "3.2", "3.4", "3.5", "3.6", "3.5", "3.7"])
+        facts[3] = dataclasses.replace(facts[3], label_ko="주식 지수")
+        facts[3] = F.Fact.create(**{name: getattr(facts[3], name) for name in ("provider_id", "source_record_id", "kind", "key", "value", "unit", "as_of", "region",
+                                                                                "region_level", "region_label_ko", "region_label_en", "label_ko", "label_en")})
+        self.assertEqual(self.code(run("R01_time_series", facts, {})), "TOPIC_NOT_ALLOWED")
+        differing = series(["3.1", "3.2", "3.3", "3.2", "3.4", "3.5", "3.6", "3.5", "3.7"])
+        other = differing[2]
+        differing[2] = F.Fact.create(other.provider_id, other.source_record_id, other.kind, other.key, other.value, other.unit, other.as_of, other.region, other.region_level,
+                                     other.region_label_ko, other.region_label_en, "고용률", other.label_en)
+        self.assertEqual(self.code(run("R01_time_series", differing, {})), "INCONSISTENT_LABELS")
+
+    def test_a_recipe_only_uses_the_domains_it_allows(self):
+        """어휘 표에 있는 범주라도 Recipe 의 `allowed_domains` 에 없으면 글이 안 된다."""
+        facts = series(["3.1", "3.2", "3.3", "3.2", "3.4", "3.5", "3.6", "3.5", "3.7"], key="economy.growth_rate", label="경제 성장률")
+        self.assertIsInstance(run("R01_time_series", facts, {}), A.AssembledPost)
+        narrow = dataclasses.replace(R.R01_TIME_SERIES, allowed_domains=("labour",))
+        result = run(narrow, facts, {})
+        self.assertEqual(self.code(result), "UNKNOWN_TOPIC")
+        self.assertEqual(T.fact_problem(facts[0], ("labour",))[0], "UNKNOWN_TOPIC")
+        self.assertIsNone(T.fact_problem(facts[0], ("labour", "economy")))
+        self.assertEqual(T.fact_problem(facts[0], ())[0], "UNKNOWN_TOPIC")
+
+    def test_labels_of_one_comparison_must_agree(self):
+        facts = cross(["3.5", "3.3", "2.9", "3.8", "4.2"])
+        other = facts[2]
+        facts[2] = F.Fact.create(other.provider_id, other.source_record_id, other.kind, other.key, other.value, other.unit, other.as_of, other.region, other.region_level,
+                                 other.region_label_ko, other.region_label_en, "고용률", other.label_en)
+        self.assertEqual(self.code(run("R02_region_compare", facts, {"key": H.UNEMP})), "INCONSISTENT_LABELS")
+
+    def test_every_approved_domain_makes_a_post(self):
+        examples = (("labour.unemployment_rate", "실업률", "%"), ("economy.growth_rate", "경제 성장률", "%"), ("price.consumer_index", "소비자물가 지수", "점"),
+                    ("population.total", "총인구", "명"), ("education.students", "학생 수", "명"), ("environment.temperature", "평균기온", "℃"),
+                    ("energy.demand", "전력수요", "MW"), ("space_weather.kp_index", "지자기지수", "Kp"))
+        self.assertEqual({key.split(".")[0] for key, _label, _unit in examples}, set(T.DOMAINS))
+        for key, label, unit in examples:
+            with self.subTest(key=key):
+                post = self.post(label=label, unit=unit, key=key)
+                self.assertIsInstance(post, A.AssembledPost, post)
+                self.assertEqual(post.category, T.DOMAINS[key.split(".")[0]].category)
+                self.assertEqual(A.post_problems(post, allowed_latin=set(re.findall(r"[A-Za-z]{2,}", unit + label))), [])
+
+    def test_the_vocabulary_is_clean(self):
+        self.assertEqual(set(R.TOPIC_CATEGORY), set(T.DOMAINS))
+        for domain_id, domain in T.DOMAINS.items():
+            with self.subTest(domain=domain_id):
+                self.assertEqual(domain.domain_id, domain_id)
+                self.assertNotIn(domain_id, F.BLOCKED_TOPICS)
+                for unit in domain.units:
+                    self.assertIn(unit, F.UNIT_TABLE, f"{unit} 은 단위 표에 명시돼 있어야 한다")
+                    self.assertRegex(unit, F._UNIT_RE.pattern)
+                for word in domain.label_words | T.REGION_WORDS:
+                    self.assertEqual(T.blocked_in(word), [], word)
+                for word in domain.key_words:
+                    self.assertEqual(T.blocked_in(word, english=True), [], word)
+                    self.assertRegex(word, r"\A[a-z]+\Z")
+
+    def test_no_two_approved_words_join_into_a_blocked_word(self):
+        """공백을 지운 글에서 부분 문자열로 찾으므로 허용한 낱말 둘이 붙어 우연히 차단 낱말이 되면 안 된다."""
+        for domain_id, domain in T.DOMAINS.items():
+            words = sorted(domain.label_words)
+            for first in words:
+                for second in words:
+                    self.assertEqual(T.blocked_in(f"{first} {second}"), [], (domain_id, first, second))
+        regions = sorted(T.REGION_WORDS)
+        for first in regions:
+            for second in regions:
+                self.assertEqual(T.blocked_in(f"{first} {second}"), [], (first, second))
+
+    def test_the_blocked_word_lists_cover_the_agreed_examples(self):
+        flat = {word for words in T.BLOCKED_WORDS.values() for word in words}
+        for word in ("환자", "질환", "치료", "완치", "처방", "복용", "효능", "부작용", "당뇨", "고혈압", "치매", "주식", "코인", "펀드", "투자추천", "수익률", "매수", "매도", "사야", "소송",
+                     "판결", "처벌", "보장", "반드시", "무조건", "역대급", "폭등", "급등", "추천", "권유", "때문", "전망", "예측"):
+            self.assertIn(word, flat)
+        self.assertEqual(T.text_problem("주식 투자 안내"), "건강·의료·금융 투자·법률 주제나 과장·단정 낱말이 있음")
+        self.assertIsNone(T.text_problem("공식 통계 안내"))
+
+    def test_the_region_vocabulary_accepts_real_region_names_and_the_mock_pattern(self):
+        facts = series(["3.1", "3.2", "3.3", "3.2", "3.4", "3.5", "3.6", "3.5", "3.7"], region_label="서울특별시")
+        self.assertIsInstance(run("R01_time_series", facts, {}), A.AssembledPost)
+        self.assertIsNone(T.fact_problem(H.make_fact("1", region_label="경기도"), R.ALLOWED_DOMAINS))
+        self.assertIsNone(T.fact_problem(H.make_fact("1", region_label="서울 경기"), R.ALLOWED_DOMAINS))                 # 허용한 낱말로만 이뤄진 이름
+        self.assertIsNone(T.fact_problem(H.make_fact("1", region_label="가상 지역 허"), R.ALLOWED_DOMAINS))
+        self.assertEqual(T.fact_problem(H.make_fact("1", region_label="가상 지역 허허"), R.ALLOWED_DOMAINS)[0], "UNKNOWN_TOPIC")
+        self.assertEqual(T.fact_problem(H.make_fact("1", region_label="서울 마법"), R.ALLOWED_DOMAINS)[0], "UNKNOWN_TOPIC")
+        self.assertIsNone(T.fact_problem(dataclasses.replace(H.make_fact("1"), region_label_ko=None), R.ALLOWED_DOMAINS))      # 지역 이름이 없는 계열은 이 검사로 막지 않는다(글이 안 되는 이유는 따로)
+        self.assertEqual(T.fact_problem(dataclasses.replace(H.make_fact("1"), label_ko=None), R.ALLOWED_DOMAINS)[0], "UNKNOWN_TOPIC")
+
+
+
+def value_numbers(post):
+    """글에 나와도 되는 숫자(시험이 따로 만든 목록): 쓴 Fact·계산 결과의 값(글에 보인 모양)과 기준일·수집일의 숫자. 내부 번호는 없다."""
+    context = dict(post.decimals)
+    out = set()
+    for item in (*post.facts_used, *post.derived):
+        out |= set(A.number_tokens(F.format_with_unit(item.value, item.unit, signed=True, context=context)))
+        out |= set(A.number_tokens(F.format_period_ko(item.as_of)))
+    for record in post.source_records:
+        out |= set(A.number_tokens(F.format_period_ko(record.retrieved_at[:10])))
+    return out
+
+
+class EvidenceTextTest(unittest.TestCase):
+    """V-03: 근거 텍스트에는 값·단위·기준일·지역 이름만 있다 — id 의 숫자가 '근거 숫자'로 세어져 본문에 끼워 넣은 숫자를 못 잡는 일이 없다."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.posts = {rid: H.run(rid, params=params) for rid, params in H.GOLDEN.items()}
+
+    def test_the_evidence_numbers_are_exactly_the_values_and_dates(self):
+        for rid, post in self.posts.items():
+            with self.subTest(recipe=rid):
+                self.assertEqual(set(A.number_tokens(post.evidence_text)), value_numbers(post))
+
+    def test_no_internal_number_is_in_the_evidence(self):
+        for rid, post in self.posts.items():
+            with self.subTest(recipe=rid):
+                text = post.evidence_text
+                self.assertIsNone(re.search(r"[0-9a-f]{16}", text))
+                self.assertIsNone(re.search(r"F[0-9]{2}", text))
+                self.assertNotIn(M.PROVIDER_ID, text)
+                self.assertNotIn(M.SOURCE_NAME, text)
+                for item in (*post.facts_used, *post.derived):
+                    self.assertNotIn(item.fact_id, text)
+                for record in post.source_records:
+                    self.assertNotIn(record.record_id, text)
+                self.assertTrue(text.startswith("근거 자료(규칙 기반 조립, Fact 표)\n"))
+                self.assertEqual(text.count("\n- "), len(post.facts_used) + len(post.derived))
+
+    def test_every_number_that_is_not_a_value_is_caught_when_slipped_into_the_story(self):
+        """id 의 숫자(0–9 와 두 자리 묶음)까지 포함해 값이 아닌 숫자는 하나도 본문에 끼워 넣을 수 없다 — 근거 텍스트에 id 를 다시 싣는 변이는 여기서 빨개진다."""
+        for rid, post in self.posts.items():
+            allowed = value_numbers(post)
+            ids = [item.fact_id for item in (*post.facts_used, *post.derived)] + [record.record_id for record in post.source_records]
+            id_numbers = {run for ident in ids for run in re.findall(r"[0-9]+", ident)}
+            ghosts = sorted({str(n) for n in range(1, 200)} | id_numbers)
+            ghosts = [ghost for ghost in ghosts if ghost not in allowed]
+            self.assertGreater(len(ghosts), 100)
+            self.assertTrue(id_numbers - allowed, "id 에 값이 아닌 숫자 묶음이 있어야 이 시험이 뜻이 있다")
+            for ghost in ghosts:
+                slipped = dataclasses.replace(post, body_markdown=post.body_markdown.replace("## 한눈에\n", f"## 한눈에\n\n- 몰래 넣은 값: {ghost}곳\n", 1))
+                with self.subTest(recipe=rid, ghost=ghost):
+                    self.assertIn("UNTRACED", [problem.split(" ", 1)[0] for problem in A.post_problems(slipped)])
+
+    def test_the_check_also_refuses_a_post_whose_evidence_carries_internal_numbers(self):
+        post = self.posts["R01_time_series"]
+        for dirty in (post.evidence_text + f"- 내부 번호 {post.facts_used[0].fact_id}\n", post.evidence_text.replace("자료값", "자료값 F01_change")):
+            with self.subTest(dirty=dirty[-30:]):
+                self.assertIn("EVIDENCE", [problem.split(" ", 1)[0] for problem in A.post_problems(dataclasses.replace(post, evidence_text=dirty))])
+
+    def test_the_formula_labels_have_no_digits_and_cover_every_formula(self):
+        self.assertEqual(set(C.FORMULA_LABELS), set(C.FORMULAS))
+        for formula_id, label in C.FORMULA_LABELS.items():
+            self.assertIsNone(re.search(r"[0-9]", label), formula_id)
+            self.assertTrue(label.strip() == label and label)
+
+
+SHORT_VOCABULARY = dataclasses.replace(T.VOCABULARY, regions=T.VOCABULARY.regions | frozenset("가나다라마바"))      # 시험용: 한 글자 지역 이름도 허용(실제 허용 목록에는 없다)
+
+
+def short(recipe):
+    return dataclasses.replace(recipe, vocabulary=SHORT_VOCABULARY)
+
+
+class PeriodWordsTest(unittest.TestCase):
+    """V-04: 관측 개수를 기간으로 말하지 않는다 — 기간이 빠짐없이 이어질 때만 '개월·분기·년', 아니면 '관측 N개'."""
+
+    def test_a_missing_month_makes_it_an_observation_count(self):
+        periods = [p for p in months("2025-01", 15) if p != "2026-02"]                       # 앞 기간이 없으면 첫 문단이 '읽은 자료' 후보로 넘어간다
+        facts = series(["3.4", "3.3", "3.3", "3.2", "3.1", "3.0", "3.0", "2.9", "2.9", "3.0", "3.1", "3.2", "3.3", "3.5"], periods=periods)
+        r01 = run("R01_time_series", facts)
+        self.assertIn("(이 글이 읽은 관측 14개 자료의 마지막 값)", r01.description)
+        self.assertNotIn("14개월", r01.description + r01.body_markdown)
+        r03 = run("R03_record_position", facts)
+        self.assertIn("2025년 1월부터 2026년 3월까지 관측 14개입니다", r03.body_markdown)
+        self.assertNotIn("개월입니다", r03.body_markdown)
+        self.assertNotIn("15개월", r01.body_markdown + r03.body_markdown)
+
+    def test_sparse_series_are_not_called_nine_months(self):
+        periods = ["2010-01", "2012-05", "2014-09", "2016-02", "2018-07", "2020-03", "2022-11", "2025-12", "2026-03"]
+        post = run("R03_record_position", series(["3.0", "3.4", "3.1", "2.8", "3.2", "3.5", "3.3", "3.1", "3.2"], periods=periods))
+        self.assertIn("2010년 1월부터 2026년 3월까지 관측 9개입니다", post.body_markdown)
+        self.assertNotIn("9개월", post.body_markdown)
+
+    def test_unknown_values_inside_the_range_also_break_the_run(self):
+        facts = series(["3.4", "3.3", "3.3", "3.2", None, "3.0", "2.9", "2.9", "3.0", "3.1", "3.2", "3.3", "3.2", "3.5", "3.6"])
+        post = run("R03_record_position", facts)
+        self.assertIn("관측 14개입니다", post.body_markdown)
+        self.assertNotIn("개월입니다", post.body_markdown)
+
+    def test_whole_runs_keep_the_period_words(self):
+        facts = series(["3.4", "3.3", "3.3", "3.2", "3.0", "3.0", "2.9", "2.9", "3.0", "3.1", "3.2", "3.3", "3.2", "3.5"])
+        self.assertIn("2025년 2월부터 2026년 3월까지 14개월입니다", run("R03_record_position", facts).body_markdown)
+        quarters = series(["3.1", "3.0", "3.2", "3.3", "3.4", "3.1", "3.5", "3.6"], periods=["2024-Q3", "2024-Q4", "2025-Q1", "2025-Q2", "2025-Q3", "2025-Q4", "2026-Q1", "2026-Q2"])
+        post = run("R03_record_position", quarters, today="2026-08-01")
+        self.assertIn("2024년 3분기부터 2026년 2분기까지 8분기입니다", post.body_markdown)
+        skipped = series(["3.1", "3.0", "3.3", "3.4", "3.1", "3.5", "3.6"], periods=["2024-Q3", "2024-Q4", "2025-Q2", "2025-Q3", "2025-Q4", "2026-Q1", "2026-Q2"])
+        post = run(dataclasses.replace(R.R03_RECORD_POSITION, min_points=7), skipped, today="2026-08-01")
+        self.assertIn("관측 7개입니다", post.body_markdown)
+        self.assertNotIn("분기입니다", post.body_markdown)
+
+    def test_the_short_first_paragraph_also_counts_observations_not_years(self):
+        values = ["2.0", "2.1", "2.4", "2.2", "2.5", "2.6", "2.4", "2.8"]
+        whole = series(values, periods=[str(y) for y in range(2018, 2026)], label="율", region_label="가")
+        self.assertIn("이 글이 읽은 8년 자료의 마지막 값", run(short(R.R01_TIME_SERIES), whole, today="2026-06-01").description)
+        holes = series(values[:-1] + ["2.9"], periods=["2017", "2018", "2019", "2021", "2022", "2023", "2024", "2025"], label="율", region_label="가")
+        post = run(short(R.R01_TIME_SERIES), holes, today="2026-06-01")
+        self.assertIn("이 글이 읽은 관측 8개 자료의 마지막 값", post.description)
+        self.assertNotIn("8년", post.description)
+
+    def test_every_period_count_in_a_record_post_is_true(self):
+        rng = random.Random(7)
+        regular = irregular = 0
+        for _ in range(120):
+            months_ = months("2025-01", 15)
+            keep = sorted(rng.sample(range(15), rng.randint(8, 15)))
+            if 14 not in keep:
+                keep.append(14)
+            periods = [months_[i] for i in keep]
+            values = [str(Decimal(300 + rng.randint(-9, 9)) / 100) for _ in keep]
+            post = run("R03_record_position", series(values, periods=periods))
+            if isinstance(post, R.Insufficient):
+                continue
+            found = re.search(r"까지 (관측 )?([0-9]+)(개월|개)입니다", post.body_markdown)
+            first, last = F.parse_as_of(periods[0]).ordinal, F.parse_as_of(periods[-1]).ordinal
+            if last - first + 1 == len(periods):
+                regular += 1
+                self.assertEqual((found.group(1), found.group(3), int(found.group(2))), (None, "개월", len(periods)))
+            else:
+                irregular += 1
+                self.assertEqual((found.group(1), found.group(3), int(found.group(2))), ("관측 ", "개", len(periods)))
+        self.assertGreater(regular, 3)
+        self.assertGreater(irregular, 60)
+
+
+class RatioScaleTest(unittest.TestCase):
+    """V-05: 0 이 임의인 구간척도(섭씨)와 순위에는 변화율(%)을 만들지 않는다 — 절대 차이만."""
+    TEMPS = ["-5.5", "-3.2", "-0.5", "0.0", "1.2", "4.8", "8.0", "-1.0", "-2.5", "0.5", "3.3", "6.1"]
+
+    def temps(self, **kw):
+        return series(self.TEMPS, key="environment.temperature", unit="℃", label="평균기온", **kw)
+
+    def test_a_temperature_series_has_no_percent_change_anywhere(self):
+        post = run("R01_time_series", self.temps(), {"key": "environment.temperature"})
+        self.assertIsInstance(post, A.AssembledPost, post)
+        self.assertNotIn("변화율", post.title + post.description + post.body_markdown.replace("'바로 앞 기간 대비' 열은", "").replace("변화율은 계산하지 않았습니다", "").replace("증감·변화율·평균·순위", ""))
+        self.assertEqual(len(table_rows(post)[0]), 3)
+        self.assertNotIn("F02_pct_change", post.formulas)
+        self.assertNotIn("F03_yoy", post.formulas)
+        self.assertNotIn("%", re.sub(r"[0-9.]+%p", "", post.body_markdown.split("## 이 숫자를 읽을 때 주의")[0]).replace("(단위 %", ""))
+        self.assertIn("이 단위는 기준점이 임의인 척도라 변화율은 계산하지 않았습니다.", post.body_markdown)
+        self.assertEqual([item for item in post.skipped if item[1] in ("F02_pct_change", "F03_yoy")], [])           # 계산을 시도하지도 않았다
+        self.assertIn("| 2026년 3월 | 6.1℃ | +2.8℃ |", post.body_markdown)
+
+    def test_the_other_recipes_skip_the_ratio_too(self):
+        record = run("R03_record_position", self.temps(), {"key": "environment.temperature"})
+        self.assertIsInstance(record, A.AssembledPost, record)
+        self.assertNotIn("변화율", record.body_markdown.replace("증감·변화율·평균·순위", ""))
+        self.assertNotIn("F02_pct_change", record.formulas)
+        self.assertEqual([item for item in record.skipped if item[1] in ("F02_pct_change", "F03_yoy")], [])           # 기록 글도 변화율은 계산을 시도하지도 않았다
+        regional = run("R02_region_compare", cross(["-3.5", "-1.3", "2.9", "0.0", "-4.2", "1.1"], key="environment.temperature", unit="℃", label="평균기온"), {"key": "environment.temperature"})
+        self.assertIsInstance(regional, A.AssembledPost, regional)
+        self.assertNotIn("%", regional.body_markdown.split("## 이 숫자를 읽을 때 주의")[0])
+
+    def test_percent_and_count_units_keep_their_ratio(self):
+        for unit, key, label in (("%", H.UNEMP, "실업률"), ("명", "labour.employed_persons", "취업자 수"), ("원", "price.average_price", "평균가격")):
+            post = run("R01_time_series", series(["30", "31", "32", "31", "33", "34", "35", "34", "36", "37", "36", "38"], unit=unit, key=key, label=label), {"key": key})
+            with self.subTest(unit=unit):
+                self.assertIsInstance(post, A.AssembledPost, post)
+                self.assertIn("F02_pct_change", post.formulas)
+                self.assertEqual(len(table_rows(post)[0]), 4)
+
+    def test_calc_refuses_ratios_for_non_ratio_units(self):
+        for unit in ("℃", "위", "%p", "Kp", "nT"):
+            cur, ref = H.make_fact("3", unit=unit), H.make_fact("2", unit=unit, period="2026-02")
+            with self.subTest(unit=unit):
+                self.assertFalse(F.ratio_ok(unit))
+                for result in (C.f02_pct_change(cur, ref), C.f03_yoy(cur, H.make_fact("2", unit=unit, period="2025-03")),
+                               C.f05_share(H.make_fact("1", unit=unit), H.make_fact("2", unit=unit))):
+                    self.assertIsInstance(result, C.Skipped)
+                    self.assertEqual(result.reason, "NOT_A_RATIO_SCALE")
+                self.assertIsInstance(C.f01_change(cur, ref), F.DerivedFact)                # 절대 차이는 만든다
+        for unit in ("%", "명", "원", "점", "kWh", "미지정단위"):
+            cur, ref = H.make_fact("3", unit=unit), H.make_fact("2", unit=unit, period="2026-02")
+            with self.subTest(unit=unit):
+                self.assertTrue(F.ratio_ok(unit))
+                self.assertIsInstance(C.f02_pct_change(cur, ref), F.DerivedFact)
+        self.assertTrue(F.ratio_ok(None) and F.ratio_ok(""))
+
+    def test_the_unit_table_marks_exactly_these_units_as_non_ratio(self):
+        self.assertEqual({unit for unit, spec in F.UNIT_TABLE.items() if not spec.ratio_ok}, {"위", "℃", "%p", "Kp", "nT"})
+        self.assertEqual(F.UNIT_DECIMALS["명"], 0)
+        self.assertEqual(F.UNIT_DECIMALS["달러"], 2)
+
+
+class TieTest(unittest.TestCase):
+    """V-06: 동률인 최고·최저를 한 곳(한 기간)으로 단정하지 않는다 — '같은 값 N곳(번)'."""
+
+    def test_region_ties_at_the_top_and_bottom(self):
+        post = run("R02_region_compare", cross(["3.5", "3.5", "2.9", "3.8", "3.8", "3.8"]), {"key": H.UNEMP})
+        self.assertIn("가장 높은 값은 3.8%(같은 값 3곳)", post.title)
+        self.assertIn("가장 높은 값은 3.8%(같은 값 3곳), 가장 낮은 곳은 가상 지역 다(2.9%)입니다", post.description)
+        self.assertIn("- 가장 높은 값: 3.8%(같은 값 3곳)", post.body_markdown)
+        self.assertIn("평균과 가장 높은 값의 차이는", post.body_markdown)
+        for tied in ("가상 지역 라", "가상 지역 마", "가상 지역 바"):
+            self.assertNotIn(tied, post.title + post.description)                      # 알파벳 순서 첫째를 '가장 높은 곳'으로 내세우지 않는다
+        both = run("R02_region_compare", cross(["2.9", "2.9", "3.5", "3.8", "3.8", "3.4"]), {"key": H.UNEMP})
+        self.assertIn("가장 높은 값은 3.8%(같은 값 2곳), 가장 낮은 값은 2.9%(같은 값 2곳)입니다", both.description)
+        self.assertIn("- 가장 낮은 값: 2.9%(같은 값 2곳)", both.body_markdown)
+        self.assertIn("평균과 가장 높은 값의 차이는", both.body_markdown)
+        self.assertIn("가장 낮은 값의 차이는", both.body_markdown)
+        unique = run("R02_region_compare", cross(["3.5", "3.3", "2.9", "3.8", "4.2", "2.7"]), {"key": H.UNEMP})
+        self.assertNotIn("(같은 값 ", unique.title + unique.description + unique.body_markdown)
+
+    def test_a_comparison_where_every_region_is_equal_makes_no_post(self):
+        result = run("R02_region_compare", cross(["3.5"] * 5), {"key": H.UNEMP})
+        self.assertIsInstance(result, R.Insufficient)
+        self.assertEqual(result.code, "NO_VARIATION")
+
+    def test_the_latest_value_is_not_called_the_only_record_when_an_earlier_period_shares_it(self):
+        flat_tail = run("R01_time_series", series(["3.0", "3.1", "3.5", "3.2", "3.1", "3.3", "3.2", "3.4", "3.5"]))
+        self.assertIn("최신 값은 표에서 가장 높은 값과 같고, 그 값은 표에 2번 나옵니다.", flat_tail.body_markdown)
+        self.assertNotIn("가장 높은 값이 바로 최신 값입니다", flat_tail.body_markdown)
+        earlier = run("R01_time_series", series(["3.5", "3.1", "3.5", "3.2", "3.1", "3.3", "3.2", "3.4", "3.3"]))
+        self.assertIn("표에서 가장 높은 값은 3.5%입니다. 이 값은 표에 2번 나오며 가장 나중은 2025년 9월입니다.", earlier.body_markdown)
+        lowest = run("R01_time_series", series(["3.6", "3.1", "3.5", "3.2", "3.1", "3.3", "3.2", "3.4", "3.3"]))
+        self.assertIn("가장 낮은 값은 3.1%입니다. 이 값은 표에 2번 나오며 가장 나중은 2025년 11월입니다.", lowest.body_markdown)
+        sole = run("R01_time_series", series(["3.0", "3.1", "3.2", "3.2", "3.1", "3.3", "3.2", "3.4", "3.5"]))
+        self.assertIn("표에서 가장 높은 값이 바로 최신 값입니다.", sole.body_markdown)
+
+    def test_a_flat_table_does_not_name_a_highest_or_lowest_value(self):
+        post = run("R01_time_series", series(["3.0"] * 9))
+        self.assertIsInstance(post, A.AssembledPost, post)
+        self.assertIn("표에 적은 값이 모두 같아 가장 높은 값과 가장 낮은 값을 가르지 않았습니다.", post.body_markdown)
+        for text in ("표시한 기간 안의 범위", "가장 높은 값이 바로", "최저 3.0%", "최고 3.0%"):
+            self.assertNotIn(text, post.title + post.description + post.body_markdown)
+
+    def test_a_record_that_the_data_shares_with_an_earlier_period_is_called_equal(self):
+        post = run("R03_record_position", series(["3.0", "3.1", "3.5", "3.2", "3.1", "3.3", "3.2", "3.4", "3.5"]))
+        self.assertTrue(post.title.endswith("읽은 자료 안에서 가장 높은 값과 같아"), post.title)
+        self.assertIn("이 글이 읽은 자료(2025년 7월부터 2026년 3월까지) 안에서 가장 높은 값과 같은 3.5%입니다.", post.description)
+        self.assertIn("최신 값이 이 기간에서 가장 높은 값과 같아 범위의 맨 위에 있고, 그 값은 자료에 2번 나옵니다.", post.body_markdown)
+        low = run("R03_record_position", series(["3.5", "3.4", "3.4", "3.3", "3.2", "3.2", "3.1", "3.0", "3.0"]))
+        self.assertTrue(low.title.endswith("읽은 자료 안에서 가장 낮은 값과 같아"), low.title)
+        self.assertIn("최신 값이 이 기간에서 가장 낮은 값과 같아 범위의 맨 아래에 있고, 그 값은 자료에 2번 나옵니다.", low.body_markdown)
+        sole = run("R03_record_position", series(["3.5", "3.4", "3.4", "3.3", "3.2", "3.2", "3.1", "3.0", "2.8"]))
+        self.assertIn("최신 값이 이 기간에서 가장 낮은 값이라 범위의 맨 아래에 있습니다.", sole.body_markdown)
+        self.assertNotIn("나옵니다", sole.body_markdown)
+
+
+class NeverRaisesTest(unittest.TestCase):
+    """V-07: 어떤 입력에서도 예외 없이 글 또는 Insufficient 다 — 값이 범위를 넘으면 Insufficient, 예상 밖 오류도 글을 내보내지 않는 쪽으로 닫는다."""
+
+    def test_changes_beyond_the_range_make_no_value_instead_of_an_exception(self):
+        top = str(10 ** 15 - 1)
+        a, b = H.make_fact(top, unit="명"), H.make_fact("-" + top, unit="명", period="2026-02")
+        c1, c2 = H.make_fact("-" + top, unit="명", region="R02"), H.make_fact("-" + top, unit="명", region="R03")
+        low_mean = C.f08_mean([c1, c2])
+        for result in (C.f01_change(a, b), C.f13_gap(a, c1), C.f06_diff_from_mean(a, low_mean)):
+            self.assertIsInstance(result, C.Skipped)
+            self.assertEqual(result.reason, "VALUE_OUT_OF_RANGE")
+        small_base = [H.make_fact("0.0001", unit="명", period="2026-02"), H.make_fact("100000000000000", unit="명")]
+        result = C.f02_pct_change(small_base[1], small_base[0])
+        self.assertIsInstance(result, C.Skipped)
+        self.assertEqual(result.reason, "VALUE_OUT_OF_RANGE")
+        near = [H.make_fact("500000000000000", unit="명"), H.make_fact("-499999999999999", unit="명", period="2026-02")]
+        self.assertIsInstance(C.f01_change(near[0], near[1]), F.DerivedFact)               # 합이 1e15 아래면 만든다(경계 바로 아래)
+        edge = [H.make_fact("500000000000000", unit="명"), H.make_fact("-500000000000000", unit="명", period="2026-02")]
+        self.assertEqual(C.f01_change(edge[0], edge[1]).reason, "VALUE_OUT_OF_RANGE")                # 정확히 1e15 는 범위 밖
+
+    def test_a_post_with_huge_changes_still_comes_out_or_is_refused_without_an_exception(self):
+        for values in (["900000000000000", "-900000000000000"] * 4, ["0.0001", "100000000000000"] * 4, ["999999999999999", "0"] * 4):
+            facts = series(values, unit="명", key="population.total", label="총인구", periods=ending(len(values)))
+            result = run("R01_time_series", facts, {"key": "population.total"})
+            self.assertTrue(isinstance(result, (A.AssembledPost, R.Insufficient)))
+            if isinstance(result, A.AssembledPost):
+                self.assertEqual(A.post_problems(result), [])
+            else:
+                self.assertNotIn(result.code, ("INTERNAL_ERROR", "PLAN_ERROR"))
+
+    def test_the_value_limit_is_exact(self):
+        self.assertEqual(F.to_decimal("999999999999999"), Decimal("999999999999999"))
+        with self.assertRaises(F.FactFormatError):
+            F.to_decimal("1000000000000000")
+        self.assertEqual(F.validate_fact(H.make_fact("999999999999999")), [])
+        self.assertIn("`value` 이(가) 너무 큼", F.validate_fact(dataclasses.replace(H.make_fact("1"), value=Decimal("1000000000000000"))))
+
+    def test_unexpected_errors_close_toward_no_post(self):
+        def boom(error):
+            def plan(ctx):
+                raise error
+            return dataclasses.replace(R.R01_TIME_SERIES, plan=plan)
+        cases = ((F.FactFormatError(["x"]), "VALUE_OUT_OF_RANGE"), (F.PrecisionLimit("x"), "PRECISION_LIMIT"), (F.UnitMismatch("x"), "PLAN_ERROR"),
+                 (RuntimeError("x"), "INTERNAL_ERROR"), (KeyError("x"), "INTERNAL_ERROR"), (ZeroDivisionError(), "INTERNAL_ERROR"))
+        for error, code in cases:
+            with self.subTest(error=type(error).__name__):
+                result = H.run(boom(error), params=H.R01_PARAMS)
+                self.assertIsInstance(result, R.Insufficient)
+                self.assertEqual(result.code, code)
+                self.assertNotIn("x", result.detail.replace("PLAN", ""))                  # 오류 글은 싣지 않고 종류만
+        with self.assertRaises(KeyboardInterrupt):                                          # 예외 전부가 아니라 프로그램 오류(Exception)만 닫는다
+            H.run(boom(KeyboardInterrupt()), params=H.R01_PARAMS)
+
+    def random_case(self, rng):
+        examples = (("labour.unemployment_rate", "실업률", "%"), ("population.total", "총인구", "명"), ("environment.temperature", "평균기온", "℃"),
+                    ("price.consumer_index", "소비자물가 지수", "점"), ("energy.demand", "전력수요", "MW"))
+        key, label, unit = rng.choice(examples)
+        count = rng.choice((0, 3, 6, 9, 12, 15, 20))
+        magnitude = rng.choice((1, 10, 1000, 10 ** 6, 10 ** 12, 10 ** 14, 10 ** 15 - 1))
+        places = rng.choice((0, 1, 2, 3, 4, 5))
+        values = []
+        for _ in range(count):
+            roll = rng.random()
+            if roll < 0.08:
+                values.append(None)
+            else:
+                number = Decimal(rng.randint(-magnitude, magnitude)) / (Decimal(10) ** places)
+                values.append(None if abs(number) >= Decimal(10) ** 15 else str(number))
+        kind = rng.choice(("month", "month", "gap", "quarter", "year", "cross"))
+        if kind == "cross":
+            return key, label, unit, cross(values, key=key, unit=unit, label=label)
+        if kind == "month":
+            periods = ending(len(values))
+        elif kind == "gap":
+            periods = [p for p in ending(len(values) + 3) if rng.random() > 0.2][:len(values)]
+            values = values[:len(periods)]
+        elif kind == "quarter":
+            periods = [f"{2024 + (i + 1) // 4:04d}-Q{(i + 1) % 4 + 1}" for i in range(len(values))]
+            periods = periods[-len(values):] if values else []
+        else:
+            periods = [str(2026 - len(values) + 1 + i) for i in range(len(values))]
+        return key, label, unit, series(values, periods=periods, key=key, label=label, unit=unit)
+
+    def test_random_inputs_never_raise_and_never_end_in_an_internal_error(self):
+        rng = random.Random(4242)
+        posts = refused = 0
+        for _ in range(700):
+            key, label, unit, facts = self.random_case(rng)
+            for rid in ("R01_time_series", "R02_region_compare", "R03_record_position"):
+                try:
+                    result = H.run(rid, facts=facts, params={"key": key}, today=rng.choice(("2026-04-20", "2026-12-31", "2027-06-01")))
+                except Exception as exc:       # noqa: BLE001
+                    self.fail(f"예외가 올라왔다: {type(exc).__name__}: {exc}")
+                if isinstance(result, A.AssembledPost):
+                    posts += 1
+                    self.assertEqual(A.post_problems(result, allowed_latin=set(re.findall(r"[A-Za-z]{2,}", unit + label))), [])
+                else:
+                    refused += 1
+                    self.assertIsInstance(result, R.Insufficient)
+                    self.assertNotIn(result.code, ("INTERNAL_ERROR", "PLAN_ERROR"), (rid, result))
+        self.assertGreater(posts, 100)
+        self.assertGreater(refused, 100)
+
+
+
+class SrcProviderShapeTest(unittest.TestCase):
+    """V-08: SRC 의 Provider 모양과 맞물린다 — `exceptions`(감사 메모)는 읽지 않고, 독자용 문장은 `reader_notes` 뿐이며, 켜지지 않은(`enabled` 가 True 가 아닌) Provider 는 쓰지 않는다."""
+
+    def src_like(self, **over):
+        base = {name: getattr(M.MockProvider(), name) for name in F.PROVIDER_FIELDS}
+        base.update(over)
+        return types.SimpleNamespace(**base)
+
+    def test_audit_memos_do_not_leak_and_do_not_block(self):
+        memos = ("확인 못 함 — 이용 조건 원문을 2026-10-26 에 읽었고 오늘 다시 확인하지 못함", "공공누리 제1유형 표시 의무 확인 못 함", "약관 3곳 중 1곳만 읽음")
+        provider = self.src_like(exceptions=memos)
+        post = H.run("R01_time_series", params=H.R01_PARAMS, provider=provider)
+        self.assertIsInstance(post, A.AssembledPost, post)
+        self.assertNotIn("확인 못 함", post.body_markdown)
+        self.assertNotIn("제공처 안내", post.body_markdown)                      # reader_notes 가 없으니 안내 줄도 없다
+        self.assertEqual(A.post_problems(post), [])
+        self.assertEqual(A.SourceInfo(provider, "이름", M.SOURCE_URL).reader_notes, ())
+
+    def test_reader_notes_are_added_when_present(self):
+        post = H.run("R01_time_series", params=H.R01_PARAMS, provider=self.src_like(reader_notes=("제3자 자료는 이 이용 허락에 포함되지 않습니다", "이미지와 로고는 제외됩니다.")))
+        self.assertIn("- 제공처 안내: 제3자 자료는 이 이용 허락에 포함되지 않습니다.\n- 제공처 안내: 이미지와 로고는 제외됩니다.\n", post.body_markdown)
+        self.assertEqual(A.post_problems(post), [])
+        self.assertIsNone(re.search(r"[0-9]", post.body_markdown.split("제공처 안내")[1].split("\n")[0].replace("제3자", "")))
+
+    def test_providers_that_are_not_enabled_are_not_used(self):
+        for flag in (False, None, 0, "yes", "True"):
+            with self.subTest(enabled=flag):
+                result = H.run("R01_time_series", params=H.R01_PARAMS, provider=self.src_like(enabled=flag))
+                self.assertIsInstance(result, R.Insufficient)
+                self.assertEqual(result.code, "PROVIDER_NOT_ACTIVE")
+                self.assertIn("켜져 있지 않음", F.provider_active_problem(self.src_like(enabled=flag)))
+                with self.assertRaises(M.AdapterError):
+                    M.MockStatsAdapter(self.src_like(enabled=flag))
+        for provider in (self.src_like(enabled=True), self.src_like(), dataclasses.replace(M.MockProvider())):
+            self.assertIsNone(F.provider_active_problem(provider))
+            self.assertIsInstance(H.run("R01_time_series", params=H.R01_PARAMS, provider=provider), A.AssembledPost)
+        self.assertIsNone(F.provider_active_problem({**{name: getattr(M.MockProvider(), name) for name in F.PROVIDER_FIELDS}, "enabled": True}))
+
+    def test_a_label_that_says_automatable_is_not_enough_when_the_provider_is_off(self):
+        result = H.run("R01_time_series", params=H.R01_PARAMS, provider=self.src_like(effective_status="자동화 가능", enabled=False))
+        self.assertEqual(result.code, "PROVIDER_NOT_ACTIVE")
+
+
+class NumberWordsTest(unittest.TestCase):
+    """V-10: 틀에 우리말 수 표현(절반·곱절·두세 곳·열두 곳·첫 번째·삼 분기·백 퍼센트·영 이하 …)을 쓰지 않는다 — 숫자는 모두 참조 표시다."""
+    FLAGGED = ("절반", "반 토막", "반토막", "곱절", "갑절", "두세 곳", "한두 개", "서너 곳", "열두 곳", "열한 개", "스물세 개", "스무 곳", "서른 명", "첫 번째", "첫째", "둘째", "셋째", "수십 곳",
+               "수백 명", "수천 건", "몇 곳", "몇몇", "삼 분기", "삼십 퍼센트", "백 퍼센트", "이십삼 개월", "영 이하", "영 이상", "이분의 일", "첫 표", "둘째 표", "하나에도", "하나의 값",
+               "두 배", "세 곳", "한 해", "네 번", "다섯 곳", "여섯 가지", "일곱 개", "여덟 명", "아홉 번", "열 곳", "대여섯 곳", "예닐곱 명", "셋 모두", "넷 중", "이 번", "오십 퍼센트")
+    CLEAN = ("한눈에", "이 글이 아는 것은 위 숫자뿐입니다", "이 기간에서 가장 높은 값", "하루", "오르내림", "이 값은 그대로", "세계 곳곳", "열차", "지역 규모 차이", "가장 최근 기간의 값",
+             "표에 적은 값이 모두 같아", "그 값은 표에 나옵니다", "범위의 맨 위에 있습니다", "한쪽으로 치우쳐", "위쪽 표는 아래쪽 표", "플러스가 아니고", "기준점이 임의인 척도", "이 단위는",
+             "같은 값 ", "최신 기간이 맨 위", "자료 없음", "해당 없음", "제3자 자료", "공공누리 제1유형")
+
+    def test_every_such_expression_is_found(self):
+        for text in self.FLAGGED:
+            with self.subTest(text=text):
+                self.assertTrue(F.untraced_numbers(f"앞 {text} 뒤"), text)
+                self.assertTrue(F.untraced_numbers(text), text)
+
+    def test_ordinary_wording_is_not_flagged(self):
+        for text in self.CLEAN:
+            with self.subTest(text=text):
+                self.assertEqual(F.untraced_numbers(text), [], text)
+
+    def test_the_templates_the_recipes_make_have_none(self):
+        tested = 0
+        for rid in H.GOLDEN:
+            post = H.run(rid, params=H.GOLDEN[rid])
+            self.assertEqual(F.untraced_numbers(post.template_markdown), [])
+            tested += 1
+        self.assertEqual(tested, 3)
+        for text in (R.INTRO_TEMPLATE, R.NOTICE_TEMPLATE, *R.CAUTION_COMMON):
+            self.assertEqual(F.untraced_numbers(text), [], text)
+
+    def test_other_script_numerals_are_still_found(self):
+        for text in ("값 3", "값 ３", "값 ①", "값 ½", "값 一二", "값 ٣", "값 ३"):
+            with self.subTest(text=text):
+                self.assertTrue(F.untraced_numbers(text))
+
+
+class TableAndExplanationTest(unittest.TestCase):
+    """V-11: 표와 설명이 어긋나지 않는다 — 표의 첫·끝 기간, 최신 값이 모름인 때의 안내, 지역이 12곳을 넘을 때의 안내, 빠진 기간 안내."""
+
+    def test_the_caption_range_is_the_range_of_the_table(self):
+        values = ["3.4", "3.3", "3.3", "3.2", "3.1", "3.0", "3.0", "2.9", "2.9", "3.0", "3.1", "3.2", "3.3", "3.2", None]
+        post = run("R01_time_series", series(values))
+        self.assertIn("가상 지역 가의 실업률 값을 2025년 3월부터 2026년 3월까지 보여 줍니다", post.body_markdown)
+        rows = table_rows(post)
+        self.assertEqual((rows[0][0], rows[-1][0]), ("2026년 3월", "2025년 3월"))
+        self.assertEqual(rows[0][1:], ["자료 없음", "해당 없음", "해당 없음"])
+        self.assertIn("가장 최근 기간(2026년 3월)의 값은 자료에 없어, 값이 있는 마지막 기간 2026년 2월 기준으로 최신 값을 정했습니다.", post.body_markdown)
+        self.assertIn("2026년 2월 기준", post.title)
+        whole = run("R01_time_series", series(values[:-1] + ["3.5"]))
+        self.assertNotIn("값이 있는 마지막 기간", whole.body_markdown)
+        self.assertIn("2025년 4월부터 2026년 3월까지 보여 줍니다", whole.body_markdown)
+
+    def test_two_trailing_unknown_periods_are_explained_with_the_last_row(self):
+        values = ["3.4", "3.3", "3.3", "3.2", "3.1", "3.0", "3.0", "2.9", "2.9", "3.0", "3.1", "3.2", "3.3", None, None]
+        post = run("R01_time_series", series(values))
+        self.assertIn("2026년 3월까지 보여 줍니다", post.body_markdown)
+        self.assertIn("가장 최근 기간(2026년 3월)의 값은 자료에 없어, 값이 있는 마지막 기간 2026년 1월 기준으로", post.body_markdown)
+        self.assertEqual([row[0] for row in table_rows(post)][:3], ["2026년 3월", "2026년 2월", "2026년 1월"])
+
+    def test_a_period_missing_from_the_source_is_explained_as_skipped(self):
+        periods = [p for p in months("2025-01", 15) if p != "2025-06"]
+        post = run("R01_time_series", series(["3.4", "3.3", "3.3", "3.2", "3.1", "3.0", "2.9", "3.0", "3.1", "3.2", "3.3", "3.2", "3.5", "3.6"], periods=periods))
+        rows = [row[0] for row in table_rows(post)]
+        self.assertIn("2025년 5월", rows)
+        self.assertNotIn("2025년 6월", rows)                                     # 사실 자체가 없는 기간은 표에서 건너뛴다
+        self.assertIn("제공처 자료에 기간 자체가 없으면 표에서 건너뜁니다", post.body_markdown)           # 그 사실을 글이 말한다
+        self.assertIn("값이 비어 있는 기간은 '자료 없음'으로 적고", post.body_markdown)
+
+    def test_more_than_twelve_regions_are_explained(self):
+        values = [str(Decimal(30 + (i * 37) % 23) / 10) for i in range(15)]
+        post = run("R02_region_compare", cross(values), {"key": H.UNEMP})
+        self.assertIsInstance(post, A.AssembledPost, post)
+        self.assertEqual(len(rank_rows(post)), 12)
+        self.assertIn("표에는 값이 높은 12곳만 적었고(전체 15곳), 아래 목록도 표에 적은 곳만 적었습니다.", post.body_markdown)
+        shown = {row[1] for row in rank_rows(post)}
+        listed = {name.strip() for line in post.body_markdown.split("\n") if line.startswith(("- 평균보다 높은 곳:", "- 평균보다 낮은 곳:")) for name in line.split(":", 1)[1].split(",")}
+        self.assertTrue(listed and listed <= shown, listed - shown)
+        for line in post.body_markdown.split("\n"):
+            if line.startswith("- 평균보다 높은 곳 "):
+                counts = re.search(r"평균보다 높은 곳 ([0-9]+)곳, 낮은 곳 ([0-9]+)곳", line)           # 개수는 표가 아니라 전체(15곳) 기준이다
+                self.assertTrue(13 <= int(counts.group(1)) + int(counts.group(2)) <= 15)
+        few = run("R02_region_compare", cross(["3.5", "3.3", "2.9", "3.8", "4.2", "2.7"]), {"key": H.UNEMP})
+        self.assertNotIn("표에는 값이 높은", few.body_markdown)
+
+    def test_exactly_twelve_regions_need_no_note(self):
+        post = run("R02_region_compare", cross([str(Decimal(30 + i) / 10) for i in range(12)]), {"key": H.UNEMP})
+        self.assertEqual(len(rank_rows(post)), 12)
+        self.assertNotIn("표에는 값이 높은", post.body_markdown)
+
+
+class NoRegionTest(unittest.TestCase):
+    """V-13: 지역이 없는 계열은 R01·R03 이 `RENDER_ERROR` 로 끝나지 않고 이유를 말한다(`NO_REGION_SERIES`) — 지역 없는 틀은 2단계."""
+
+    def regionless(self):
+        return [H.make_fact(v, period=p, region=None, level=None, region_label=None, record_id=RECORD_ID)
+                for v, p in zip(["3.1", "3.2", "3.3", "3.2", "3.4", "3.5", "3.6", "3.5", "3.7"], ending(9))]
+
+    def test_a_series_without_regions_says_so(self):
+        for rid in ("R01_time_series", "R03_record_position", "R02_region_compare"):
+            with self.subTest(recipe=rid):
+                result = run(rid, self.regionless())
+                self.assertIsInstance(result, R.Insufficient)
+                self.assertEqual(result.code, "NO_REGION_SERIES")
+                self.assertTrue(result.detail)
+
+    def test_a_series_with_regions_is_still_picked_when_both_are_present(self):
+        mixed = self.regionless() + series(["3.1", "3.2", "3.3", "3.2", "3.4", "3.5", "3.6", "3.5", "3.7"])
+        post = run("R01_time_series", mixed)
+        self.assertIsInstance(post, A.AssembledPost, post)
+        self.assertIn("가상 지역 가", post.title)
+
+    def test_a_blocked_topic_is_reported_before_the_missing_region(self):
+        facts = self.regionless()
+        bad = [H.make_fact(v, key="health.cases", period=p, region=None, level=None, region_label=None, record_id=RECORD_ID) for v, p in zip(["1"] * 9, ending(9))]
+        self.assertEqual(run("R01_time_series", facts + bad).code, "TOPIC_NOT_ALLOWED")                       # 정책으로 막힌 계열의 사유가 먼저다
+        self.assertEqual(run("R01_time_series", facts + bad, {"key": H.UNEMP}).code, "NO_REGION_SERIES")        # 키를 지정하면 그 계열의 사유(지역 없음)가 나온다
+        self.assertEqual(run("R01_time_series", bad, {"key": "health.cases"}).code, "TOPIC_NOT_ALLOWED")
+
+
+class SurvivorsTest(unittest.TestCase):
+    """V-14: 독립 검증이 찾은 생존 변이 — 시험 구멍을 하나씩 막는다(동치·죽은 코드는 코드에서 지웠다)."""
+
+    def test_internal_rounding_is_half_even(self):
+        self.assertEqual(C._quant(Decimal("0.0000000000025")), Decimal("0.000000000002"))              # N09: 12번째 자리의 동률은 짝수 쪽(표시 반올림은 0 에서 먼 쪽)
+        self.assertEqual(C._quant(Decimal("0.0000000000035")), Decimal("0.000000000004"))
+        self.assertEqual(F.round_display(Decimal("0.25"), 1), Decimal("0.3"))
+        self.assertEqual(F.NUMBER_POLICY["internal_rounding"], "ROUND_HALF_EVEN")
+
+    def test_every_agreed_forbidden_phrase_is_still_in_the_list(self):
+        """N12·N14: 규칙을 지워도 시험이 통과하던 구멍 — 합의한 금지 표현 전체를 시험이 따로 적어 둔다(목록에서 하나를 지우면 빨갛다)."""
+        agreed = {
+            "건강": ("치료", "완치", "처방", "복용", "예방 효과", "효능", "부작용", "환자", "질환", "질병", "증상", "진단"),
+            "단정": ("보장", "반드시", "확실히", "확실하게", "무조건", "틀림없이", "분명히", "단언", "명백히", "의심의 여지"),
+            "즉시 효과": ("즉시 효과", "바로 효과", "즉각적인 효과", "당장 효과"),
+            "과장": ("역대급", "폭등", "폭락", "급등", "급락", "사상 최고", "사상 최저", "충격", "대박", "놀라운", "경악", "쇼크", "초유", "전무후무"),
+            "원인 단정": ("때문입니다", "때문에", "때문이다", "탓입니다", "덕분에", "덕분입니다", "원인은", "영향으로", "로 인해", "으로 인해", "으로 인한"),
+            "투자·권유": ("투자 추천", "매수", "매도", "수익률", "유망", "사야 합니다", "팔아야", "추천합니다", "권합니다", "권유", "주식", "코인", "펀드", "증권"),
+            "법률": ("위법입니다", "불법입니다", "처벌", "법적 책임", "소송", "판결", "재판"),
+            "예측": ("예상됩니다", "전망됩니다", "전망입니다", "예측됩니다", "오를 것", "내릴 것", "곧 오", "계속 오"),
+            "번역투": ("에 의해", "를 통해", "을 통해", "에 대한", "것으로 나타났"),
+        }
+        self.assertEqual({category: tuple(phrases) for category, phrases in R.FORBIDDEN_PHRASES.items()}, agreed)
+        for category, phrases in agreed.items():
+            for phrase in phrases:
+                with self.subTest(phrase=phrase):
+                    self.assertIn((category, phrase), A.forbidden_found(f"앞 {phrase} 뒤"))
+                    caught = {found for _category, found in A.forbidden_found(f"앞 {' '.join(phrase.replace(' ', ''))} 뒤")}
+                    if len(phrase.replace(" ", "")) >= 2:
+                        self.assertIn(phrase, caught)                                   # 글자 사이를 띄워 써도 같다
+
+    def test_the_description_must_be_one_sentence(self):
+        """N15: 설명 '한 문장' 규칙 — 길이가 맞아도 문장이 둘이거나 물음·느낌표거나 마침표가 없으면 거절한다(첫 문단도 같이 바꿔 '첫 문단과 같음' 검사에 가려지지 않게)."""
+        post = H.run("R01_time_series", params=H.R01_PARAMS)
+        body = post.body_markdown
+        message = "DESCRIPTION 설명이 한 문장(60자 이상 155자 이하)이 아님"
+        base = "가" * 70
+        cases = ((base + ".", True), (base + ". " + base + ".", False), (base + "?", False), (base + "!", False), (base, False), (base + ". ", False), ("가" * 40 + ". " + "나" * 40 + ".", False),
+                 ("값은 3.5%입니다 " + base + ".", True), ("가" * 70 + "\n" + "나" * 20 + ".", False))
+        for description, ok in cases:
+            changed = dataclasses.replace(post, description=description, body_markdown=body.replace(post.description, description, 1))
+            with self.subTest(description=description[:20] + "…", ok=ok):
+                self.assertEqual(message in A.post_problems(changed), not ok)
+
+    def test_the_provider_of_a_record_must_match_the_provider_of_the_facts(self):
+        """N42: Fact 가 가리키는 출처 기록의 Provider 가 다르면 INVALID_FACTS — 그 검사를 지워도 시험이 통과하던 구멍."""
+        provider, record, facts = H.mock_bundle()
+        other = F.SourceRecord.create("other_stats", record.access_kind, record.request_url, record.retrieved_at, record.response_hash, record.license_snapshot, record.retention_days)
+        pointing = [F.Fact.create(f.provider_id, other.record_id, f.kind, f.key, f.value, f.unit, f.as_of, f.region, f.region_level, f.region_label_ko,
+                                  f.region_label_en, f.label_ko, f.label_en) for f in facts]
+        result = H.run("R01_time_series", facts=pointing, records=[other], params=H.R01_PARAMS)
+        self.assertIsInstance(result, R.Insufficient)
+        self.assertEqual(result.code, "INVALID_FACTS")
+        self.assertIn("Provider", result.detail)
+
+    def test_the_region_recipe_has_no_unreachable_guard_left(self):
+        """N41: 같은 묶음이면 평균·중앙값을 늘 만들 수 있다 — 도달할 수 없던 `NOT_COMPARABLE` 방어선은 지웠고, 계산 칸이 비면 틀 단계에서 글이 거절된다."""
+        import inspect
+        self.assertNotIn("NOT_COMPARABLE", inspect.getsource(R.plan_region_compare))
+        original = C.f08_mean
+        try:
+            C.f08_mean = lambda group: C.Skipped("F08_mean", "TOO_FEW_INPUTS")
+            result = run("R02_region_compare", cross(["3.5", "3.3", "2.9", "3.8", "4.2", "2.7"]), {"key": H.UNEMP})
+        finally:
+            C.f08_mean = original
+        self.assertIsInstance(result, R.Insufficient)
+        self.assertIn(result.code, ("RENDER_ERROR", "TEMPLATE_UNTRACED", "PLAN_ERROR"))
+
+
+
+class CalcHardeningTest(unittest.TestCase):
+    """L-04: 계산 층이 지역이 다른 값끼리의 시간 비교와 같은 입력을 두 번 넣은 묶음을 스스로 거절한다(Recipe 가 막아 주는 동안만 안전하던 구멍)."""
+
+    def assertSkipped(self, result, formula_id, reason):
+        self.assertIsInstance(result, C.Skipped)
+        self.assertEqual((result.formula_id, result.reason), (formula_id, reason))
+
+    def test_changes_need_the_same_region(self):
+        cur = H.make_fact("3.5")
+        other = H.make_fact("3.1", period="2026-02", region="R02", region_label="가상 지역 나")
+        self.assertSkipped(C.f01_change(cur, other), "F01_change", "REGION_MISMATCH")
+        self.assertSkipped(C.f02_pct_change(cur, other), "F02_pct_change", "REGION_MISMATCH")
+        self.assertSkipped(C.f03_yoy(cur, H.make_fact("3.1", period="2025-03", region="R02", region_label="가상 지역 나")), "F03_yoy", "REGION_MISMATCH")
+        self.assertSkipped(C.f01_change(cur, H.make_fact(None, period="2026-02", region="R02")), "F01_change", "MISSING_VALUE")          # 앞선 사유(모름)가 가려지지 않는다
+        self.assertSkipped(C.f01_change(cur, H.make_fact("3.1", period="2026-02", unit="명", region="R02")), "F01_change", "UNIT_MISMATCH")
+        same = H.make_fact("3.1", period="2026-02")
+        for result in (C.f01_change(cur, same), C.f02_pct_change(cur, same), C.f03_yoy(cur, H.make_fact("3.1", period="2025-03"))):
+            self.assertIsInstance(result, F.DerivedFact)
+        self.assertIsInstance(C.f01_change(cur, C.f09_max([H.make_fact("3.9", period="2025-12"), H.make_fact("3.2", period="2026-01")]), require="any"), F.DerivedFact)   # 같은 지역의 최고와는 비교한다
+        self.assertTrue(C.REASON_TEXT["REGION_MISMATCH"] and C.REASON_TEXT["DUPLICATE_INPUT"])
+
+    def test_the_same_input_twice_is_not_a_group(self):
+        a, b, c = H.make_fact("3.5"), H.make_fact("3.1", region="R02"), H.make_fact("2.9", region="R03")
+        for name, result in (("F08", C.f08_mean([a, a, b])), ("F14", C.f14_median([a, a, b])), ("F04", C.f04_rank(a, [a, a, b])), ("F09", C.f09_max([a, a])),
+                             ("F10", C.f10_min([b, b])), ("F11", C.f11_range_position(a, [a, a, b, c]))):
+            with self.subTest(name=name):
+                self.assertIsInstance(result, C.Skipped)
+                self.assertEqual(result.reason, "DUPLICATE_INPUT")
+        for result in (C.f08_mean([a, b, c]), C.f14_median([a, b, c]), C.f04_rank(a, [a, b, c]), C.f09_max([a, b, c]), C.f11_range_position(a, [a, b, c])):
+            self.assertIsInstance(result, F.DerivedFact)
+
+
+class HygieneTest(unittest.TestCase):
+    """L-01·L-03·L-05: id 가 decimal 전역 문맥에 의존하지 않는다 · 실패 사유가 해시 시드와 무관하다 · 숫자는 아라비아 숫자만."""
+
+    def test_ids_do_not_depend_on_the_decimal_context(self):
+        import decimal
+        before = [H.make_fact(value).fact_id for value in ("123456.789", "0.000123", "3.50", "-45.5", "999999999999999")]
+        canon = [F.canonical_number(Decimal(value)) for value in ("123456.789", "0.000123", "3.50", "1E+2", "-0")]
+        with decimal.localcontext() as ctx:
+            ctx.prec, ctx.rounding = 4, decimal.ROUND_DOWN
+            after = [H.make_fact(value).fact_id for value in ("123456.789", "0.000123", "3.50", "-45.5", "999999999999999")]
+            self.assertEqual([F.canonical_number(Decimal(value)) for value in ("123456.789", "0.000123", "3.50", "1E+2", "-0")], canon)
+            self.assertEqual(F.value_decimals(Decimal("123456.789")), 3)
+        self.assertEqual(before, after)
+        self.assertEqual(canon, ["123456.789", "0.000123", "3.5", "100", "0"])
+        for value in ("123456.789", "0.000123"):
+            fact = H.make_fact(value)
+            self.assertEqual(F.validate_fact(fact), [])
+
+    def test_values_with_too_many_digits_are_refused(self):
+        self.assertEqual(F.to_decimal("123456789012345.1234567890123456789012345"), Decimal("123456789012345.1234567890123456789012345"))            # 40 자리
+        with self.assertRaises(F.FactFormatError):
+            F.to_decimal("123456789012345.12345678901234567890123456")                                                                          # 41 자리
+        self.assertEqual(F.NUMBER_POLICY["max_digits"], 40)
+        self.assertLess(F.NUMBER_POLICY["max_digits"], F.NUMBER_POLICY["precision"])
+
+    def test_only_ascii_digits_are_numbers_and_dates(self):
+        for text in ("３.５", "٣", "३", "１２", "3.５"):
+            with self.subTest(text=text):
+                with self.assertRaises(F.FactFormatError):
+                    F.to_decimal(text)
+        for text in ("２０２５", "２０２５-03", "2025-０3", "２０２５-Q1", "2025-03-０1", "2025-03-01T0９:00:00Z"):
+            with self.subTest(text=text):
+                self.assertIsNone(F.parse_as_of(text))
+        self.assertIsNotNone(F.parse_as_of("2025-03-01T09:00:00Z"))
+        self.assertEqual(F.to_decimal("3.5"), Decimal("3.5"))
+
+    def test_the_reason_does_not_depend_on_the_hash_seed(self):
+        """문제가 둘 겹쳐도(출처 기록 없음·기한 지남) 실패 사유 코드는 해시 시드와 무관하게 같다."""
+        import os
+        import subprocess
+        import sys
+        code = ("import sys\nsys.path.insert(0, sys.argv[1])\nsys.path.insert(0, sys.argv[1] + '/tests')\nimport fact_helpers as H\nfrom pipeline import facts as F\n"
+                "provider, record, facts = H.mock_bundle()\n"
+                "other = F.SourceRecord.create('mock_stats', 'api', record.request_url, '2024-01-02T00:00:00Z', 'c' * 64, record.license_snapshot, 30)\n"
+                "mixed = [F.Fact.create(f.provider_id, other.record_id if i % 2 else f.source_record_id, f.kind, f.key, f.value, f.unit, f.as_of, f.region, f.region_level,\n"
+                "                       f.region_label_ko, f.region_label_en, f.label_ko, f.label_en) for i, f in enumerate(facts)]\n"
+                "missing = [F.Fact.create(f.provider_id, 's' + '1' * 16, f.kind, f.key, f.value, f.unit, f.as_of, f.region, f.region_level, f.region_label_ko, f.region_label_en,\n"
+                "                         f.label_ko, f.label_en) if i % 3 == 0 else f for i, f in enumerate(mixed)]\n"
+                "result = H.run('R01_time_series', facts=missing, records=[record, other], params=H.R01_PARAMS)\n"
+                "print(result.code if hasattr(result, 'code') else 'POST')\n")
+        outputs = set()
+        for seed in ("0", "1", "42", "31337"):
+            done = subprocess.run([sys.executable, "-B", "-X", "utf8", "-c", code, str(_bootstrap.ROOT)], capture_output=True, text=True, timeout=240,
+                                  env=dict(os.environ, PYTHONHASHSEED=seed, PYTHONUTF8="1"))
+            self.assertEqual(done.returncode, 0, done.stderr[-400:])
+            outputs.add(done.stdout.strip())
+        self.assertEqual(len(outputs), 1, outputs)
+        self.assertIn(outputs.pop(), ("MISSING_RECORD", "RETENTION_EXPIRED"))
+
+    def test_a_record_dated_after_today_is_not_used(self):
+        provider, record, facts = H.mock_bundle()
+        result = H.run("R01_time_series", params=H.R01_PARAMS, today="2026-04-17")
+        self.assertIsInstance(result, R.Insufficient)
+        self.assertEqual(result.code, "FUTURE_RECORD")
+        self.assertIsInstance(H.run("R01_time_series", params=H.R01_PARAMS, today="2026-04-18"), A.AssembledPost)
+
+
+class QualityMeasurementTest(unittest.TestCase):
+    """글 품질 평가(검증자 의견)를 숫자로 잰다: 분량·주의 절을 뺀 분량·틀 고정 글자 비율 — 문서 §13 의 표가 이 값과 같음을 문서 시험이 확인한다."""
+
+    def test_the_golden_posts_are_measured(self):
+        for rid, params in H.GOLDEN.items():
+            post = H.run(rid, params=params)
+            metrics = H.quality_metrics(post)
+            with self.subTest(recipe=rid):
+                self.assertGreaterEqual(metrics["story"], R.MIN_STORY_CHARS)
+                self.assertEqual(metrics["story"] - metrics["caution"], metrics["pure"])
+                self.assertTrue(0 < metrics["caution"] < metrics["story"])
+                self.assertTrue(0 < metrics["fixed"] < metrics["story"])
+                self.assertEqual(metrics["fixed_percent"], round(100 * metrics["fixed"] / metrics["story"]))
+                self.assertLess(metrics["pure"], R.MIN_STORY_CHARS)             # 정직한 측정: 주의 절을 빼면 세 편 모두 하한(1,000자)에 못 미친다 — 분량의 상당 부분이 고정 문장이다
+
+
+if __name__ == "__main__":
+    unittest.main()
