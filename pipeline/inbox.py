@@ -11,8 +11,8 @@ GitHub 읽기·쓰기와 이슈 관리는 scripts/ops_inbox.py 가 맡는다. �
 
 초안 현황(2026-10-27, 작업요청서 5 PR-B): 채널별로 발행을 기다리는 초안을 한 표로 보여 준다. 초안 모델 — 초안 1건 = 이슈 1개 또는 PR 1개,
 라벨 `초안` + `채널:<채널 라벨>`(채널 라벨은 레지스트리 channel.label), 쓰지 않을 초안은 라벨 `폐기` 또는 닫기. 열린 초안(이슈·PR)이 새로 생기면
-action(코멘트 알림), 3일 넘게 열려 있으면 check. 초안 PR 은 열린 PR 규칙이 이미 action 으로 올린 것(병합하면 됩니다·충돌·검사 실패)이면 그 줄 하나로,
-아니면(검사가 안 돈 PR 등) 초안 항목 하나로만 보인다(같은 PR 이 두 줄이 되지 않게). Blogger 는 이력의 draft_uploaded 를 센 값이다 — Snapshot.published(scripts/ops_inbox.py 가
+action(코멘트 알림), 3일 넘게 열려 있으면 check. 초안 PR 은 검사·병합 상태와 무관하게 초안 항목(draft:<번호>:wait·stale) 하나로만 보이고 열린 PR 규칙의 줄은 항상 뺀다
+(R2, 2026-11-09 — 같은 PR 이 두 줄이 되지 않고, 상태가 바뀔 때마다 id 가 달라져 알림이 되풀이되지도 않게. 충돌·검사 실패는 그 줄의 설명 문구로만 알린다). Blogger 는 이력의 draft_uploaded 를 센 값이다 — Snapshot.published(scripts/ops_inbox.py 가
 블로그 공개 피드로 확인한 게시된 글 번호)가 있으면 이미 게시한 글은 빼고(이슈 #89), 없으면 공개 여부를 몰라 대략치다.
 표는 항목(Item)이 아니라 render() 의 board 인자로 본문 위쪽에 들어간다.
 
@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
+from pipeline import draft_labels
 from pipeline.console import one_line
 from pipeline.llm import mask
 from pipeline.state import KST
@@ -63,16 +64,15 @@ MARKER_IDS_MAX = 80
 
 # 초안 모델(docs/OPS_INBOX.md §3-1): 초안 1건 = 이슈 1개 또는 PR 1개. 라벨 `초안`(대기) + `채널:<채널 라벨>`(어느 채널의 글인가), 쓰지 않을 초안은
 # 라벨 `폐기` 또는 닫기(닫기 = 발행 완료 또는 폐기). 라벨이 저장소에 없으면 scripts/ops_inbox.py 가 만든다(이름·색·설명은 아래 값으로 고정).
-DRAFT_LABEL = "초안"
-DISCARD_LABEL = "폐기"
-CHANNEL_LABEL_PREFIX = "채널:"
-CHANNEL_LABEL_COLOR = "bfdadc"
-DRAFT_LABEL_SPECS = (       # (라벨 이름, 색, 설명)
-    (DRAFT_LABEL, "c2e0c6", "발행 대기 초안(확인 필요 모음의 초안 현황이 센다)"),
-    (DISCARD_LABEL, "cfd3d7", "쓰지 않기로 한 초안(초안 현황에서 빠진다)"),
-)
-LABEL_NAME_MAX = 50            # GitHub 라벨 이름 길이 한도
+# 이름·색·설명은 초안을 만드는 쪽(Chance 승인 PR·티스토리·네이버 초안 이슈)과 함께 pipeline/draft_labels.py 한 곳에서 읽는다(R2-5, 2026-11-09)
+DRAFT_LABEL = draft_labels.DRAFT_LABEL
+DISCARD_LABEL = draft_labels.DISCARD_LABEL
+CHANNEL_LABEL_PREFIX = draft_labels.CHANNEL_LABEL_PREFIX
+CHANNEL_LABEL_COLOR = draft_labels.CHANNEL_COLOR
+DRAFT_LABEL_SPECS = draft_labels.BASE_LABELS       # (라벨 이름, 색, 설명)
+LABEL_NAME_MAX = draft_labels.LABEL_NAME_MAX            # GitHub 라벨 이름 길이 한도
 DRAFT_STALE_DAYS = 3           # 이보다 오래 열려 있는 초안은 action 에서 check 로 내린다(PR_STALE_DAYS 와 같은 값)
+DRAFT_BRANCH_PREFIX = "ai/draft/"       # Chance 승인 흐름의 초안 브랜치 이름 머리(pipeline/drafts.py 의 BRANCH_PREFIX 와 같은 값 — 이 모듈은 순수 함수라 drafts 를 가져오지 않고, tests/test_draft_followups.py 가 같은지 지킨다)
 DRAFT_WINDOW_DAYS = 14         # 초안 현황의 Blogger 칸은 초안함 업로드 기록 중 이 기간 안의 것만 센다(게시 여부는 scripts/ops_inbox.py 가 블로그 공개 피드로 확인해 넘긴다 — 못 읽으면 대략치)
 DRAFT_REMIND_AFTER_HOURS = 6   # 게시 확인을 마친 Blogger 초안은 올린 지 이 시간이 지나도 공개 글에 안 보일 때만 '게시 대기' action 으로 센다 — 올린 직후에는 러너가 이미 텔레그램으로 '발행 대기'를 알렸다
 BOARD_ROWS_MAX = 12            # 초안 현황 표의 최대 줄 수(레지스트리 채널 + 레지스트리에 없는 채널의 초안)
@@ -831,7 +831,7 @@ def stats_items(blogs, histories, now):
 # ----------------------------------------------------------------------------
 def channel_label_name(label):
     """채널 라벨(레지스트리 channel.label) → 초안에 붙이는 GitHub 라벨 이름(예: `채널:티스토리`)."""
-    return f"{CHANNEL_LABEL_PREFIX}{label}"
+    return draft_labels.channel_label_name(label)
 
 
 def _registry_channel(blog):
@@ -852,7 +852,8 @@ def draft_label_specs(blogs):
         if not label or len(name) > LABEL_NAME_MAX or name.casefold() in seen:
             continue
         seen.add(name.casefold())
-        specs.append({"name": name, "color": CHANNEL_LABEL_COLOR, "description": f"초안이 속한 채널: {label}"[:100]})
+        _name, color, description = draft_labels.channel_spec(label)
+        specs.append({"name": name, "color": color, "description": description})
     return specs
 
 
@@ -910,21 +911,27 @@ def _pull_number(item):
     return int(parts[1]) if len(parts) == 3 and parts[0] == "pr" and parts[1].isdigit() else None
 
 
-def draft_items(drafts, now, repo_url, acting_pulls=()):
+_DRAFT_PULL_STATE_NOTES = {       # 열린 PR 규칙이 본 상태(pr:<번호>:<상태> 의 상태) → 초안 PR 항목 설명에 덧붙이는 문구. 사람이 손대야 하는 두 상태만 알린다
+    "conflict": "main 과 충돌해 병합하려면 먼저 풀어야 합니다(만든 AI 에게 충돌 해결을 요청하세요)",
+    "ci_fail": "자동 검사가 실패했습니다(PR 화면의 Checks 에서 원인을 확인하세요)",
+}
+
+
+def draft_items(drafts, now, repo_url, pull_states=None):
     """열린 초안(이슈·PR)마다 한 줄. DRAFT_STALE_DAYS 일 이하로 열려 있으면 action(새 초안 — 새 항목이라 코멘트(@멘션)로 알림), 그보다 오래면 check(알림 없음).
 
     상태가 id 에 들어 있다(draft:<번호>:wait · draft:<번호>:stale) — 같은 초안이 오래되면 새 알림 없이 check 로 옮겨 가고,
     닫았다가 다시 열면 열린 지 DRAFT_STALE_DAYS 일 이내일 때만 새 항목으로 다시 알린다(생성 시각은 그대로라 넘은 초안은 다시 열어도 check 다).
-    PR 초안(kind 'pull')은 열린 PR 규칙(pull_items)도 한 줄로 다룬다. 그 규칙이 이미 action(병합하면 됩니다·충돌·검사 실패)으로 올린 PR — acting_pulls 의 번호 — 은
-    그 항목이 알리므로 초안 항목을 또 만들지 않는다(같은 PR 이 두 번 알림이 되지 않게). 그 밖의 상태(검사 결과 없음·진행 중·계산 중·병합 막힘)에서는 build_items 가
-    그 PR 의 열린 PR 항목을 빼고 이 초안 항목이 대신 알린다: 저장소 기본 토큰으로 연 PR 은 검사가 돌지 않아 '검사 결과 없음'(check, 알림 없음)으로 남기 쉬워서, 이렇게 하지 않으면
-    승인을 기다리는 초안 PR 이 아무 알림 없이 쌓인다."""
+    초안 PR(kind 'pull')의 id 는 **PR 의 검사·병합 상태와 무관하다**(R2, 2026-11-09). 예전에는 열린 PR 규칙이 action(병합하면 됩니다·충돌·검사 실패)으로 올린 PR 은 그 규칙의
+    id(pr:<번호>:ready 등)가 알렸고 그 밖의 상태는 이 항목이 알려서, 병합 가능 여부가 계산 중으로 돌아오거나 상세 조회가 한 번 실패하는 것만으로 같은 초안이 새 id 가 되어 알림이
+    되풀이됐다. 지금은 build_items 가 초안 PR 의 열린 PR 항목을 항상 빼고 이 항목 하나만 남기며, 그 PR 의 열린 PR 규칙 상태(pull_states: PR 번호 → 'conflict'·'ci_fail' 등)는
+    설명 문구로만 덧붙인다(충돌·검사 실패는 사람이 알아야 해서 문구로 남기되 새 알림은 만들지 않는다). pull_states 가 없으면 설명은 상태를 말하지 않는다.
+    저장소 기본 토큰으로 연 PR 은 검사가 돌지 않아 열린 PR 규칙만으로는 '검사 결과 없음'(check, 알림 없음)으로 남기 쉬워서, 이 항목이 없으면 승인을 기다리는 초안 PR 이 아무 알림 없이 쌓인다."""
+    states = pull_states if isinstance(pull_states, dict) else {}
     out = []
     for draft in pending_drafts(drafts):
         number = draft["number"]
         pull = draft["kind"] == "pull"
-        if pull and number in acting_pulls:
-            continue
         created = parse_time(draft.get("created_at"))
         stale = created is not None and now - created > timedelta(days=DRAFT_STALE_DAYS)
         channel = ext(draft.get("channel") or "", 30)
@@ -932,18 +939,20 @@ def draft_items(drafts, now, repo_url, acting_pulls=()):
         title = _draft_title_text(draft, DRAFT_TITLE_MAX)
         url = f"{repo_url}/{'pull' if pull else 'issues'}/{number}"
         where = f"PR #{number}" if pull else f"이슈 #{number}"
+        note = (_DRAFT_PULL_STATE_NOTES.get(states.get(number)) or "") if pull else ""
+        tail = f" · {note}" if note else ""
         if stale:
             out.append(Item(
                 id=f"draft:{number}:stale", level=LEVEL_CHECK, since=created, url=url,
                 title=f"초안 {DRAFT_STALE_DAYS}일 넘게 대기 — {title}",
-                detail=f"{where_channel} · {where} · {DRAFT_STALE_DAYS}일 넘게 열려 있음",
+                detail=f"{where_channel} · {where} · {DRAFT_STALE_DAYS}일 넘게 열려 있음{tail}",
                 hint=("공개하려면 PR 을 병합하고, 쓰지 않기로 했다면 라벨 `폐기`를 붙이거나 PR 을 닫으세요. 병합하거나 닫으면 이 목록에서 사라집니다." if pull else
                       "발행했다면 이슈를 닫고, 쓰지 않기로 했다면 라벨 `폐기`를 붙이거나 닫으세요. 닫으면 이 목록에서 사라집니다.")))
         else:
             out.append(Item(
                 id=f"draft:{number}:wait", level=LEVEL_ACTION, since=created, url=url,
                 title=f"초안 대기 — {title}",
-                detail=f"{where_channel} · {where} · " + ("검토·병합을 기다립니다" if pull else "발행을 기다립니다"),
+                detail=f"{where_channel} · {where} · " + ("검토·병합을 기다립니다" if pull else "발행을 기다립니다") + tail,
                 hint=("PR 을 열어 글을 읽고 병합하면 공개되고(닫으면 폐기), 검사·충돌 상태도 PR 화면에서 봅니다. 쓰지 않을 글은 라벨 `폐기`를 붙이거나 PR 을 닫으세요." if pull else
                       "이슈 본문의 제목·본문·태그를 복사해 직접 발행한 뒤 이슈를 닫으세요(닫기 = 발행 완료). 쓰지 않을 글은 라벨 `폐기`를 붙이거나 닫으세요.")))
     return out
@@ -1141,14 +1150,19 @@ def sort_items(items):
     return sorted(items, key=lambda i: (LEVELS.index(i.level), i.since is None, i.since.timestamp() if i.since else 0.0, i.id))
 
 
-def _pull_items_without_draft_duplicates(pulls, drafts):
-    """(열린 PR 항목, 초안 항목이 건너뛸 PR 번호). 초안 PR 은 한 줄만 남긴다.
+def _split_draft_pulls(pulls, drafts):
+    """(열린 PR 항목 중 초안 PR 의 것을 뺀 목록, {초안 PR 번호: 그 PR 의 열린 PR 규칙 상태}). 초안 PR 은 상태와 무관하게 초안 항목 하나로만 남긴다(R2, 2026-11-09).
 
-    열린 PR 규칙이 action 으로 올린 PR(병합하면 됩니다·충돌·검사 실패)은 그 항목이 알리니 초안 항목을 만들지 않는다(두 번째 값으로 돌려준다).
-    그 밖의 상태(검사 기록 없음·진행 중·계산 중·병합 막힘)인 초안 PR 은 초안 항목(action)이 대신 알리므로 열린 PR 항목을 뺀다."""
-    acting = {n for n in (_pull_number(i) for i in pulls if i.level == LEVEL_ACTION) if n is not None}
-    replaced = {d["number"] for d in pending_drafts(drafts) if d["kind"] == "pull"} - acting
-    return [i for i in pulls if _pull_number(i) not in replaced], acting
+    예전에는 열린 PR 규칙이 action 으로 올린 PR(병합하면 됩니다·충돌·검사 실패)만 열린 PR 줄로 남기고 나머지는 초안 줄로 바꿔서, 같은 초안이 상태가 바뀔 때마다
+    새 id(pr:<번호>:ready ↔ draft:<번호>:wait)가 되어 알림이 되풀이됐다. 이제 초안 PR 의 열린 PR 줄은 항상 빼고(상태는 두 번째 값으로 돌려줘 초안 줄의 설명에 쓴다)
+    id 는 draft:<번호>:wait·stale 하나뿐이다. 초안이 아닌 PR(AI 의 병합 부탁 PR 등)은 예전 그대로 열린 PR 줄이다."""
+    numbers = {d["number"] for d in pending_drafts(drafts) if d["kind"] == "pull"}
+    states = {}
+    for item in pulls:
+        number = _pull_number(item)
+        if number in numbers:
+            states[number] = item.id.split(":")[2]
+    return [i for i in pulls if _pull_number(i) not in numbers], states
 
 
 def build_items(snap):
@@ -1157,12 +1171,12 @@ def build_items(snap):
         raise ValueError(f"저장소 이름 형식이 올바르지 않습니다: {snap.repo!r}")
     repo_url = f"https://github.com/{snap.repo}"
     now = _aware(snap.now)
-    pulls, acting_pulls = _pull_items_without_draft_duplicates(pull_items(snap.pulls, now, repo_url), snap.drafts)
+    pulls, pull_states = _split_draft_pulls(pull_items(snap.pulls, now, repo_url), snap.drafts)
     items = (watchdog_items(snap.issues, repo_url) + pulls
              + run_items(snap.runs, snap.annotations, now, repo_url, names=snap.workflow_names)
              + approval_items(snap.approvals, repo_url, names=snap.workflow_names)
              + pause_items(snap.paused, repo_url) + blog_items(snap.blogs, snap.histories, now, repo_url, snap.published)
-             + stats_items(snap.blogs, snap.histories, now) + draft_items(snap.drafts, now, repo_url, acting_pulls)
+             + stats_items(snap.blogs, snap.histories, now) + draft_items(snap.drafts, now, repo_url, pull_states)
              + failure_items(snap.failures, repo_url) + note_items(snap.notes))
     unique, seen = [], set()
     for item in items:
@@ -1286,12 +1300,32 @@ def action_ids(items):
     return sorted(i.id for i in items if i.level == LEVEL_ACTION)
 
 
-def plan_notice(items, previous_ids, failures=()):
+def draft_branch_pulls(pulls):
+    """열린 PR(normalize_pull 결과) 중 초안 브랜치(ai/draft/…)에서 **이 저장소 안으로** 연 PR 의 번호 집합. 라벨이 아니라 브랜치 이름으로 알아본다 —
+    초안 목록(라벨 `초안`)을 읽지 못한 점검에서도 이 PR 이 초안이라는 사실은 PR 목록만으로 안다(R2 수정 P2). 포크의 PR 은 뺀다(낯선 사람이 브랜치 이름만 흉내 낼 수 있다)."""
+    found = set()
+    for pr in pulls if isinstance(pulls, (list, tuple)) else []:
+        if not isinstance(pr, dict) or pr.get("fork"):
+            continue
+        number = _as_int(pr.get("number"))
+        if number is not None and str(pr.get("head_ref") or "").startswith(DRAFT_BRANCH_PREFIX):
+            found.add(number)
+    return found
+
+
+def plan_notice(items, previous_ids, failures=(), draft_pulls=()):
     """(새로 알릴 action id 목록, 표식에 남길 id 목록).
 
     previous_ids 는 이전 표식의 id(표식이 없으면 None → 지금 있는 action 이 전부 '새 것').
     소스 조회가 실패한 때에는 그 소스의 이전 id 를 표식에 그대로 남긴다 — 조회 실패를 '해소됨'으로 오해했다가 복구 때
-    같은 항목을 또 새 항목으로 알리지 않도록."""
+    같은 항목을 또 새 항목으로 알리지 않도록.
+
+    초안 목록(drafts)만 읽지 못한 점검에서는 초안 PR 이 일반 PR 처럼 보여 열린 PR 규칙의 id(pr:<번호>:ready 등)로 올라온다. 그 줄은 새 알림에서 뺀다(표식에는 남는다 —
+    복구되면 같은 PR 이 초안 항목 draft:<번호>:wait 으로 돌아와 그때 알린다). 뺄 PR 은 둘로 알아본다:
+    ① draft_pulls — 초안 브랜치(ai/draft/…)에서 이 저장소 안으로 연 열린 PR 의 번호(draft_branch_pulls(snapshot.pulls)). 이전 표식에 기대지 않아서, 표식에 id 가 남지 않는
+       3일 넘은 초안(확인 수준 draft:<번호>:stale 은 표식에 안 남는다)도 막는다(R2 수정 P2 — R2-1 은 ② 만 있어서 3일 이내 초안에만 통했고, 3일 넘은 초안은 한 번 더 알렸다).
+    ② 이전 표식의 초안 항목 번호(draft:<번호>:…) — draft_pulls 를 모르는 옛 호출에서도 이미 알린 초안을 또 알리지 않게 하는 보조 장치다(표식에는 action 수준 id 만 남으므로 실제로는 draft:<번호>:wait 뿐).
+    draft_pulls 가 없고 이전 표식도 없으면 아무것도 빼지 않는다(옛 호출과 글자 하나 다르지 않다)."""
     current = set(action_ids(items))
     previous = None if previous_ids is None else set(previous_ids)
     new = sorted(current if previous is None else current - previous)
@@ -1300,6 +1334,10 @@ def plan_notice(items, previous_ids, failures=()):
         prefixes = tuple(p for source, _reason in failures for p in SOURCE_PREFIXES.get(source, ()))
         if prefixes:
             carried = {i for i in previous if i.startswith(prefixes) and i not in current}
+    if any(source == "drafts" for source, _reason in failures):
+        announced = {i.split(":")[1] for i in (previous or ()) if i.startswith("draft:") and i.count(":") == 2}
+        announced |= {str(n) for n in (draft_pulls or ()) if isinstance(n, int) and not isinstance(n, bool)}
+        new = [i for i in new if not (i.startswith("pr:") and i.count(":") == 2 and i.split(":")[1] in announced)]
     return new, sorted(current | carried)
 
 
@@ -1322,3 +1360,28 @@ def alert_lines(items):
     if len(items) > COMMENT_ITEMS_MAX:
         lines.append(f"… 외 {len(items) - COMMENT_ITEMS_MAX}건")
     return lines
+
+
+DRAFT_ALERTS_MAX = 3         # 한 번의 점검에서 '발행 대기' 알림으로 따로 보내는 초안 PR 의 수(넘는 것은 일반 '확인 필요' 알림 줄로 간다 — 한 실행의 텔레그램 5통 상한 안에서 일반 알림 한 통을 남긴다)
+_DRAFT_WAIT_ID_RE = re.compile(r"^draft:([0-9]{1,9}):wait$")
+
+
+def draft_waiting_alerts(new_items, drafts, repo_url, limit=DRAFT_ALERTS_MAX):
+    """새로 알릴 action 항목 중 '초안 PR 대기'(id `draft:<번호>:wait` 이고 그 번호의 대기 초안이 PR)를 텔레그램 `📝 발행 대기` 알림(pipeline/notify.py 의 notify_draft_waiting)
+    재료로 바꾼다(R2-4, 2026-11-09). 돌려주는 값: ([{channel, title, where, url}, …] 최대 limit 건, 그 알림이 맡은 항목 id 집합).
+
+    알림이 맡은 항목은 일반 확인 필요 알림(alert_lines)의 줄에서 빼야 한다 — 같은 초안이 텔레그램에 두 번 가지 않게(호출하는 쪽이 한다). 일반 알림에 PR 초안이 남는 것은
+    limit 을 넘는 때뿐이다. 이슈 초안(티스토리·네이버 패키지)은 예전 그대로 일반 알림이다. 제목·채널은 외부(AI·사람) 글이라 draft_items 와 같은 무력화를 거치고(notify 가 한 번 더 소독한다),
+    링크는 번호로 직접 만든다(API 가 준 주소는 쓰지 않는다)."""
+    pulls = {d["number"]: d for d in pending_drafts(drafts) if d["kind"] == "pull"}
+    out, handled = [], set()
+    for item in new_items:
+        found = _DRAFT_WAIT_ID_RE.fullmatch(item.id)
+        draft = pulls.get(int(found.group(1))) if found else None
+        if draft is None or len(out) >= limit:
+            continue
+        number = draft["number"]
+        out.append({"channel": ext(draft.get("channel") or "", 30) or "채널 표시 없음", "title": _draft_title_text(draft, DRAFT_TITLE_MAX),
+                    "where": f"PR #{number} — 읽고 병합하면 공개, 닫으면 폐기됩니다", "url": f"{repo_url}/pull/{number}"})
+        handled.add(item.id)
+    return out, handled

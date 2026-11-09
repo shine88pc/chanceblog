@@ -38,14 +38,14 @@ from datetime import date as date_type
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 
-from pipeline import gates
+from pipeline import draft_labels, gates
 from pipeline.publishers.base import PublishError, PublishResult, redact
 from pipeline.state import KST
 
 API_ROOT = "https://api.github.com"
-DRAFT_LABEL = "초안"
-CHANNEL_LABEL_PREFIX = "채널:"
-DISCARD_LABEL = "폐기"            # 운영자가 쓰지 않을 초안에 붙인다(이 어댑터는 만들지 않는다). 붙은 이슈는 적체 점검에서 세지 않는다
+DRAFT_LABEL = draft_labels.DRAFT_LABEL                    # 라벨의 이름·색·설명은 다른 초안 라벨 코드와 함께 pipeline/draft_labels.py 한 곳에서 읽는다(R2-5)
+CHANNEL_LABEL_PREFIX = draft_labels.CHANNEL_LABEL_PREFIX
+DISCARD_LABEL = draft_labels.DISCARD_LABEL                # 운영자가 쓰지 않을 초안에 붙인다(이 어댑터는 만들지 않는다). 붙은 이슈는 적체 점검에서 세지 않는다
 OPEN_DRAFT_LIMIT = 3              # 같은 채널에 열린 초안 이슈가 이만큼이면 새 초안을 만들지 않는다(적체 방지)
 TITLE_SHOWN = 60                  # 이슈 제목에 쓰는 글 제목의 최대 글자 수
 COPY_TITLE_MAX = 200              # 복사용 제목 상자의 최대 글자 수
@@ -62,12 +62,8 @@ PACKAGE_INFO = {
     "tistory": {"label": "티스토리", "service": "티스토리", "format": "html"},
     "naver": {"label": "네이버", "service": "네이버 블로그", "format": "rich"},
 }
-# 라벨 색(16진수, # 없음)·설명(100자 이내). 라벨이 없을 때만 만든다.
-LABEL_STYLE = {
-    DRAFT_LABEL: ("fbca04", "AI가 만든 초안 — 읽고 직접 발행한 뒤 이슈를 닫는다(발행 완료)"),
-    CHANNEL_LABEL_PREFIX + "티스토리": ("ff6a3d", "티스토리에 올릴 초안 패키지"),
-    CHANNEL_LABEL_PREFIX + "네이버": ("03c75a", "네이버 블로그에 올릴 초안 패키지"),
-}
+# 라벨 색(16진수, # 없음)·설명(100자 이내)은 pipeline/draft_labels.py 의 표(style_of)가 정한다. 라벨이 없을 때만 만들고, 표가 모르는 이름의 대체 값은 아래다.
+FALLBACK_LABEL_STYLE = ("ededed", "초안 패키지")
 # 정화 통계(gates.sanitize_html 의 stats 키) → 운영자가 읽는 말
 REMOVED_TEXT = {"dropped_blocks": "내용째 지운 블록(script·iframe 등)", "unwrapped_tags": "벗겨 낸 태그", "links_removed": "지운 링크"}
 
@@ -743,7 +739,7 @@ class IssuePackagePublisher:
     def ensure_labels(self, labels):
         """라벨이 없으면 만든다(있으면 그대로). 같은 이름을 동시에 만들어 422 가 나면 이미 있는 것으로 본다."""
         for name in labels:
-            color, description = LABEL_STYLE.get(name, ("ededed", "초안 패키지"))
+            color, description = draft_labels.style_of(name) or FALLBACK_LABEL_STYLE
             if self._request("GET", "/labels/" + urllib.parse.quote(name, safe=""), allow_404=True) is not None:
                 continue
             try:

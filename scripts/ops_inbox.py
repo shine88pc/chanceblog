@@ -598,20 +598,27 @@ def send_alert(alert, new_items, issue_url, out):
         out(f"[참고] 텔레그램 알림 중 예기치 않은 오류({type(exc).__name__}) — 모음 이슈에는 영향이 없습니다")
 
 
-def make_alert(environ, out):
+def make_alert(environ, out, drafts=(), repo_url=""):
     """텔레그램 시크릿(TELEGRAM_BOT_TOKEN·TELEGRAM_CHAT_ID)이 둘 다 있으면 휴대폰 알림 콜백을, 없으면 None 을 돌려준다(None 이면 이 스크립트의 출력은 예전과 같다).
-    콜백은 코멘트와 같은 새 항목의 제목 줄(inbox.alert_lines)을 평문 한 통으로 보낸다."""
+    콜백은 코멘트와 같은 새 항목의 제목 줄(inbox.alert_lines)을 평문 한 통으로 보낸다. 단 새 항목 중 **초안 PR 대기**(id draft:<번호>:wait 이고 PR)는 일반 '확인 필요' 통에서 빼고
+    `📝 발행 대기`(notify_draft_waiting — 어느 PR 을 읽고 병합하면 공개·닫으면 폐기인지 한 줄 + PR 로 가는 버튼)로 한 건씩 따로 보낸다(R2-4, 2026-11-09). 같은 초안이 텔레그램에 두 번
+    가지 않고(일반 통에서 빠진다), 초안 PR 이 없는 점검의 일반 통은 예전과 글자 하나 다르지 않다. drafts·repo_url 을 주지 않으면(옛 호출) 모든 새 항목이 일반 통이다."""
     notifier = notify.Notifier(environ)
     if not notifier.enabled:
         return None
 
     def alert(new_items, issue_url):
-        result = notifier.notify_ops_alert(inbox.alert_lines(new_items), issue_url, count=len(new_items))
-        notify.log_result(result, out)
+        waiting, handled = inbox.draft_waiting_alerts(new_items, drafts, repo_url) if repo_url else ([], set())
+        for one in waiting:
+            notify.log_result(notifier.notify_draft_waiting(one["channel"], one["title"], one["where"], url=one["url"]), out)
+        rest = [item for item in new_items if item.id not in handled]
+        if rest:
+            result = notifier.notify_ops_alert(inbox.alert_lines(rest), issue_url, count=len(rest))
+            notify.log_result(result, out)
     return alert
 
 
-def sync_issue(client, items, visible, failures, owner, repo_url, dry, out, alert=None):
+def sync_issue(client, items, visible, failures, owner, repo_url, dry, out, alert=None, draft_pulls=()):
     """이슈 1개를 만들거나 고친다. 돌려주는 값: {'action': ..., 'number': 번호|None, 'new': 새 action 항목 수, 'comment': ...}.
 
     - 본문은 내용(보이는 마크다운의 해시)이나 알린 action id 가 바뀐 때만 PATCH 한다.
@@ -624,10 +631,12 @@ def sync_issue(client, items, visible, failures, owner, repo_url, dry, out, aler
     - 연습(dry)이면 읽기만 하고 아무것도 쓰지 않는다.
     - alert(새 항목, 이슈 주소)는 휴대폰 알림(텔레그램) 콜백이다. 코멘트를 쓰려고 할 때마다(같은 새 항목 판정, 연습 제외) 코멘트 성공 여부와 무관하게 부르고,
       알림이 실패하거나 예외를 던져도 코멘트·표식·결과·종료 코드는 바뀌지 않는다(서로 영향을 주지 않는다). 코멘트가 실패해 다음 점검이 같은 항목을 다시 알릴 때는
-      휴대폰 알림도 한 번 더 간다 — 위의 '놓치는 쪽보다 한 번 더 알리는 쪽이 낫다'와 같은 원칙이다."""
+      휴대폰 알림도 한 번 더 간다 — 위의 '놓치는 쪽보다 한 번 더 알리는 쪽이 낫다'와 같은 원칙이다.
+    - draft_pulls 는 초안 브랜치(ai/draft/…)에서 연 열린 PR 의 번호 집합(inbox.draft_branch_pulls)이다. 초안 목록만 읽지 못한 점검에서 그 PR 이 일반 PR 줄로 다시 알려지지 않게
+      plan_notice 에 넘긴다(R2 수정 P2). 주지 않으면(옛 호출) 예전과 같다."""
     issue = find_inbox_issue(client)
     marker = inbox.parse_marker(issue.get("body")) if issue else None
-    new_ids, kept_ids = inbox.plan_notice(items, marker.items if marker else None, failures)
+    new_ids, kept_ids = inbox.plan_notice(items, marker.items if marker else None, failures, draft_pulls)
     new_items = [i for i in items if i.id in new_ids]
     result = {"action": "unchanged", "number": issue["number"] if issue else None, "new": len(new_items), "comment": "none"}
     closed = bool(issue) and issue.get("state") != "open"
@@ -768,7 +777,8 @@ def run(environ=None, client=None, now=None, root=ROOT, out=print, sleep=time.sl
     if callable(release):
         release()                                   # 쓰기 단계에서는 남겨 둔 호출도 쓴다
     try:
-        result = sync_issue(client, items, visible, failures, owner, repo_url, dry, out, alert=make_alert(environ, out))
+        result = sync_issue(client, items, visible, failures, owner, repo_url, dry, out, alert=make_alert(environ, out, drafts, repo_url),
+                            draft_pulls=inbox.draft_branch_pulls(pulls))
     except ApiError as exc:
         out(ERROR_ISSUE_FAILED)
         out(f"[이슈 오류 이유] {inbox.ext(exc, 200)}")
