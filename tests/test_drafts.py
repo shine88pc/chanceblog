@@ -22,7 +22,9 @@ ZW = "\u200b"
 
 
 def real_registry():
-    return registry.load_registry()
+    reg = registry.load_registry()
+    reg.pop("resume_lock", None)       # 이 파일은 발행 흐름(publish_flow) 읽기·검증을 본다 — 제한 재개 잠금의 규칙(pr 만 허용 등)에 기대지 않는다(잠금은 test_publish_lock 이 본다)
+    return reg
 
 
 # ----------------------------------------------------------------------------

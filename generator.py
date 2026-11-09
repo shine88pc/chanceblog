@@ -2819,6 +2819,10 @@ def main():
         write_step_summary("### Chance_Blog 실행 요약\n- 결과: **일시정지** — "
                            "저장소 변수 PIPELINE_PAUSE 가 켜져 있습니다.")
         return
+    # 순서(GATE 의 그림자 분기가 병합된 뒤에도 같다): 정지 검사 → 그림자 분기(SHADOW_RUN, 읽기 전용으로 처리하고 끝난다) → 아래 잠금 가드. 그림자 분기를 이 가드 아래에 두지 않는다 —
+    # 그림자 실행은 가드에 닿지 않고, 가드 안의 SHADOW_RUN 예외는 그림자 분기를 지나쳐 온 경우를 위한 방어선일 뿐이다(docs/PUBLISH_PATHS.md §4-2·§7).
+    from pipeline import publish_lock   # 제한 재개 잠금(레지스트리 resume_lock — 기본 꺼짐). 꺼져 있으면 레지스트리를 읽는 것 말고 아무 일도 하지 않는다. 설명: docs/PUBLISH_PATHS.md
+    publish_lock.guard_start(os.environ, HISTORY_FILE, now_kst, FIX_IMAGES, DRY_RUN, write_step_summary)   # 켜져 있는데 규칙을 어기면 글을 만들지 않고 멈춘다(SystemExit 1), 하루 상한이면 건너뛴다(SystemExit 0)
     if STUB_GEMINI and not DRY_RUN:
         raise RuntimeError(
             "GEMINI_API_KEY 환경 변수가 없습니다. "

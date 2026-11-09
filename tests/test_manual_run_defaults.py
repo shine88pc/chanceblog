@@ -22,6 +22,7 @@ import _bootstrap
 import blogger_workflow_helpers as bwf
 import generator as g
 from edits_helpers import ABOUT, image_body, issue, make_edit_root, page_body
+from lock_helpers import guard_off, today_registry, write_registry
 from pipeline import drafts, registry
 from pipeline import run as run_mod
 from pipeline.edits import runner
@@ -264,7 +265,7 @@ class StubPracticeFlowTest(GenerationBase):
     def test_the_stub_path_is_still_the_keyless_dry_run_main_takes(self):
         """키가 없고 연습이면 main() 은 오류 없이 시작한다(키가 없는 실제 실행만 오류) — 기본값 변경이 기대는 기존 동작."""
         env = {k: v for k, v in os.environ.items() if k not in ("PIPELINE_PAUSE", "GITHUB_STEP_SUMMARY")}
-        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(g, "STUB_GEMINI", True), \
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(g, "STUB_GEMINI", True), guard_off(), \
                 mock.patch.object(g, "FIX_IMAGES", False), mock.patch.object(g, "EVENT_NAME", "workflow_dispatch"), \
                 mock.patch.object(g, "generate_blog_posts", return_value=None) as gen:
             value, out = run_captured(g.main)
@@ -406,9 +407,17 @@ class ManualOverCapTest(unittest.TestCase):
         patcher = mock.patch.object(g, "draft_flow_on", return_value=False)
         patcher.start()
         self.addCleanup(patcher.stop)
+        patcher = guard_off()                       # 같은 이유로 제한 재개 잠금 가드도 건너뛴다(가드는 test_publish_lock 이 따로 고정한다)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.summary = Path(tmp.name) / "summary.md"
+        # 상한 2 를 읽는 '제한 재개 잠금 꺼짐' 설정(지금의 레지스트리 값)으로 고정한다 — 켜는 변경(T3)이 chance 하루 상한을 1 로 바꿔도 이 경고 시험(잠금이 꺼진 수동 경로)이
+        # 흔들리지 않게 하려는 것이다. 진짜 레지스트리의 값이 이것과 같은지는 test_publish_lock 의 한 시험이 못박는다.
+        patcher = mock.patch.object(registry, "REGISTRY_PATH", write_registry(Path(tmp.name), today_registry(), "today-blogs.json"))
+        patcher.start()
+        self.addCleanup(patcher.stop)
         env = {k: v for k, v in os.environ.items() if k != "PIPELINE_PAUSE"}
         env["GITHUB_STEP_SUMMARY"] = str(self.summary)
         patcher = mock.patch.dict(os.environ, env, clear=True)

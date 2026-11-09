@@ -88,7 +88,8 @@
 | 옛 이름 | 새 이름 (Actions 탭) | 파일 | 하는 일 | 자동/수동 |
 |---------|----------------------|------|---------|-----------|
 | Chance_Blog Full-Auto Engine | `[Chance] 글 자동 작성·게시` | `chanceblog.yml` | Chance 글 생성·검증·게시 | 자동(매시 17분·47분, 게시 시각은 코드가 판단) + 수동 |
-| (옛 `chanceblog.yml`의 `fix_images` 입력) | `[Chance] 기존 글 이미지 교체(수동)` | `chance-fix-images.yml` | 기존 글의 깨진·누락·중복 이미지만 교체(새 글 없음) | 수동 전용 |
+| (옛 `chanceblog.yml`의 `fix_images` 입력) | `[Chance] 기존 글 이미지 교체(수동)` | `chance-fix-images.yml` | 기존 글의 깨진·누락·중복 이미지만 교체(새 글 없음). 제한 재개 잠금이 켜지면 첫 단계에서 멈춤 | 수동 전용 |
+| (신규) | `[Chance] 그림자 실행(수동, 읽기 전용)` | `chance-shadow.yml` | 글을 올리지 않고 후보 글을 읽기 전용으로 만들어 평가(권한 `contents: read` 뿐, 정지 중에도 가능) | 수동 전용 |
 | Blogger Generate | `[Blogger 영문] 글 자동 작성` | `blogger-en.yml` | 영문 Blogger(macat0722) 글 생성·검증 후 초안 저장 또는 게시(2026-10-29 부터 `mode: draft` — 초안함 업로드). 2026-10-27 전의 이름은 `[Blogger] 글 자동 작성(초안함 업로드)`(`blogger.yml`)였고 영문·한글 두 개로 나뉨 | 자동(매일 02:00 UTC) + 수동 |
 | (신규) | `[Blogger 한글] 글 자동 작성` | `blogger-ko.yml` | 한글 Blogger(kcyoon) 글 생성·검증 후 초안 저장 또는 게시(2026-10-29 부터 `mode: draft` — 초안함 업로드) | 자동(매일 03:30 UTC) + 수동 |
 | (신규) | `[내부] Blogger 글 작성 공용(직접 실행하지 마세요)` | `blogger.yml` | 위 두 워크플로가 부르는 공용 부품(재사용 워크플로). Run workflow 버튼도 정기 실행도 없다 | 직접 실행하지 않음 |

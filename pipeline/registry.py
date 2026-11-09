@@ -21,6 +21,7 @@ import re
 import sys
 from pathlib import Path, PurePosixPath
 
+from pipeline import publish_lock
 from pipeline.console import clean_secret, safe_output, secret_was_cleaned
 from pipeline.gates import SUPPORTED_LANGUAGES, first_match
 
@@ -396,6 +397,7 @@ def validate_registry(reg, root=None):
         return ["레지스트리 최상위는 객체여야 합니다."]
     if reg.get("schema_version") != 1:
         errors.append("schema_version은 1이어야 합니다.")
+    errors.extend(publish_lock.registry_errors(reg))   # 제한 재개 잠금(resume_lock): 켜져 있을 때만 규칙 L1–L7 을 적용한다(꺼져 있으면 값 모양 검사뿐 — pipeline/publish_lock.py)
     blogs = reg.get("blogs")
     if not isinstance(blogs, list) or not blogs:
         return errors + ["blogs는 비어 있지 않은 배열이어야 합니다."]

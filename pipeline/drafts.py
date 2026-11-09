@@ -30,7 +30,7 @@ from collections import namedtuple
 from datetime import date
 from pathlib import Path
 
-from pipeline import draft_labels, registry
+from pipeline import draft_labels, publish_lock, registry
 from pipeline.console import one_line
 from pipeline.llm import mask, scrub
 
@@ -78,7 +78,8 @@ def chance_flow(registry_path=None):
     읽지 못하거나 값이 올바르지 않으면 DraftFlowError 다: 승인 흐름을 켜 둔 채 레지스트리 오류 때문에 조용히 직접 게시로 떨어지면
     승인 없는 게시가 나가므로 멈춘다(레지스트리가 깨지면 CI·워치독이 먼저 알린다). pr 은 jekyll-git·mode auto 에서만 인정한다."""
     try:
-        blog = registry.get_blog(registry.load_registry(registry_path), CHANCE_KEY)
+        reg = registry.load_registry(registry_path)
+        blog = registry.get_blog(reg, CHANCE_KEY)
     except registry.RegistryError as exc:
         raise DraftFlowError(f"발행 흐름을 읽을 수 없습니다: {one_line(exc, 200)}") from exc
     flow = blog.get("publish_flow", registry.DEFAULT_PUBLISH_FLOW)
@@ -86,6 +87,12 @@ def chance_flow(registry_path=None):
         raise DraftFlowError(f"레지스트리 publish_flow 값이 올바르지 않습니다: {one_line(repr(flow), 40)} (direct 또는 pr)")
     if flow == FLOW_PR and (blog.get("platform") != "jekyll-git" or blog.get("mode") != "auto"):
         raise DraftFlowError("publish_flow 가 pr 이면 platform 은 jekyll-git, mode 는 auto 여야 합니다(레지스트리 검증 규칙).")
+    key_problems = publish_lock.lock_key_problems(reg)   # 잠금 키가 오타·잘못된 위치면 꺼진 채로 통과하므로 상태를 알 수 없는 것으로 보고 멈춘다(잠금 키가 없는 지금은 빈 목록 — 이전과 같다)
+    if key_problems:
+        raise DraftFlowError("제한 재개 잠금 키가 잘못 적혀 있어 잠금 상태를 알 수 없습니다: " + one_line("; ".join(key_problems), 300))
+    problems = publish_lock.lock_errors(reg)   # 제한 재개 잠금(resume_lock): 꺼져 있으면 빈 목록(이전과 같다). 켜져 있는데 규칙을 어기면 direct 로도 pr 로도 돌려주지 않고 멈춘다
+    if problems:
+        raise DraftFlowError("제한 재개 잠금이 켜져 있는데 레지스트리가 규칙을 어깁니다: " + one_line("; ".join(problems), 300))
     return flow
 
 
@@ -148,6 +155,24 @@ def posts_exist(entry, exists=os.path.exists):
     """이력 항목의 글 파일이 모두 있는가(승인 흐름의 글이 main 에 병합됐는가). 경로가 없거나 이상하면 없는 것으로 본다."""
     paths = entry.get("paths")
     return isinstance(paths, list) and bool(paths) and all(valid_post_path(p) and exists(p) for p in paths)
+
+
+def unmerged_draft_branches(remote_names, history, exists=os.path.exists):
+    """원격 초안 브랜치 이름 중 글이 아직 main 에 없는 것 — 승인 대기이거나, 닫았지만 브랜치가 아직 정리되지 않은(RETENTION_DAYS) 초안. 이름만으로는 둘을 가를 수 없어
+    둘 다 센다(GitHub API 를 부르려면 토큰이 필요한데 생성기 프로세스에는 쓰기 토큰을 주지 않는다 — 그래서 git 과 이력만 본다). 병합된 초안(이력 항목의 글 파일이 main 에 있음)과
+    이 흐름이 만들지 않는 이름의 브랜치는 세지 않는다. 이력에 항목이 없는 브랜치는 센다(확인되지 않은 것은 열린 것으로 본다).
+    열린 초안 상한(레지스트리 chance.limits.max_open_drafts, pipeline/publish_lock.py 가 읽는다)에 쓰며, 세는 값은 실제 열린 PR 수보다 작지 않아 상한을 넘기는 쪽으로는 틀리지 않는다."""
+    entries = {item.get("branch"): item for item in history
+               if isinstance(item, dict) and item.get("flow") == FLOW_PR and isinstance(item.get("branch"), str)}
+    found = []
+    for name in sorted(set(remote_names)):
+        if parse_branch(name) is None:
+            continue
+        entry = entries.get(name)
+        if entry is not None and posts_exist(entry, exists):
+            continue
+        found.append(name)
+    return found
 
 
 def refine_slot_state(state, slot, history, date_str, branch_exists=False, exists=os.path.exists):
