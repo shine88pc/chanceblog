@@ -977,7 +977,7 @@ PR → **Files changed**와 하단 **Checks**에서 봅니다. 병합을 막아 
 - **바꾸는 것**: **없음.** 권한은 `contents: read` 뿐이고 push·PR·이슈·배포 요청 단계가 없다(체크아웃도 `persist-credentials: false`). 비밀은 생성기 단계의 env 로만 간다(`GEMINI_API_KEY`·`UNSPLASH_ACCESS_KEY`). 이유와 시험은 `docs/PUBLISH_PATHS.md` §5.
 - **언제 도나**: 수동 전용(정기 실행·push·PR·이슈 트리거 없음). 입력 `count`(1–5, 기본 3), `as_of`(측정의 날짜 기준 YYYY-MM-DD, 비우면 오늘 한국 시각). 실행 제목 `[Chance] 그림자 실행 · 수동(읽기 전용: 저장소에 아무것도 쓰지 않음)`.
 - **발행 정지 중에도**: `PIPELINE_PAUSE` 가 켜져 있어도 돈다(생성기가 그림자 모드에서만 정지 검사를 건너뛴다). 정지 변수는 값을 넘길 뿐 바꾸지 않는다. 대신 후보마다 Gemini 를 부르므로 무료 한도를 쓴다(3-13). **이 말과 '저장소에는 아무것도 쓰지 않는다'는 그림자 실행 코드(`pipeline/shadow_run.py`, GATE 묶음)가 먼저 병합된 뒤에만 참이다** — 그 코드가 없는 저장소의 생성기는 `SHADOW_RUN` 을 몰라 일반 실행으로 돌아 글을 만들고 한도를 쓴다. 그래서 첫 단계 `그림자 실행 코드 확인 (없으면 중단)` 이 그 파일이 없으면 실패한다(병합 순서 GATE → LOCK → SHADOW). 출력 형식 문서 `docs/QUALITY_GATE.md` 도 GATE 병합 전에는 저장소에 없다.
-- **정상일 때**: Summary 에 '후보 글 N건 중 최소 품질 Gate 통과 M건 · 보류 K건'(숫자만 — 글·사유 문구는 요약에 옮기지 않는다). 아티팩트 `chance-shadow-<실행 번호>`(보관 14일)에 글(`<번호>/post_ko.md`·`post_en.md`)·사유(`<번호>/result.json`)·측정 보고서(`shadow_report.json`·`shadow_report.md`)가 있다.
+- **정상일 때**: Summary 에 '후보 글 N건 중 최소 품질 Gate 통과 M건 · 보류 K건'(숫자만 — 글·사유 문구는 요약에 옮기지 않는다). 아티팩트 `chance-shadow-<실행 번호>`(보관 14일)에 글(`<번호>/<날짜>-KR-<시각>.md`·`<날짜>-EN-<시각>.md`)·사유(`<번호>/result.json`)·측정 보고서(`shadow_report.json`·`shadow_report.md`)가 있다.
 - **알아 둘 것**: 측정 도구가 저장소에 아직 없으면 `::notice::` 한 줄과 함께 측정 단계만 건너뛴다(글·사유 파일은 그대로 나온다). 아티팩트는 공개 저장소의 공개 산출물이다(초안 PR 과 같은 취급). 이 워크플로를 다른 워크플로가 부르지 않는다.
 
 ## 7. 알려진 한계와 예정

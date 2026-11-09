@@ -97,11 +97,13 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 어느 채널의 것인지
 | 필드 | 설명 / 제약 |
 |------|-------------|
 | `key` | 고유 식별자 `^[a-z][a-z0-9_]{1,30}$` |
-| `name`, `role`, `url`, `languages` | 표시·문서용. `url`은 `https://` |
+| `name`, `role`, `url`, `languages` | 표시·문서용(`jekyll-git` 의 `languages` 는 예외 — 아래 행). `url`은 `https://` |
+| `languages` (`jekyll-git`, 지금은 Chance) | 만드는 글의 언어: `["ko","en"]` 국문·영문 한 쌍(기본, 지금 동작) · `["ko"]` 국문 글 하나(영문은 생성·검증·게시하지 않는다, §4-1-1). 순서는 가리지 않는다(`["en","ko"]` 도 같은 뜻 — 제한 재개 잠금 L6 과 같은 집합). 값 검증의 단일 정의처는 `quality_gate.normalize_languages` 한 함수(레지스트리 검증기·`chance_settings`·Gate 설정이 모두 쓴다). 이 밖의 값은 검증 오류다. **`["ko"]` 로 바꾸는 것은 T3**(게시 방식) |
 | `platform` | `jekyll-git` · `blogger` · `tistory` · `naver`(둘은 초안 패키지 전용 — §7-B-2). 게시 어댑터가 있는 새 플랫폼은 §7.B |
 | `channel` | **필수.** `{"key": "<영문 식별자>", "label": "<채널 라벨>"}` — 항목에 직접 적는다(`defaults`에서 물려받지 않는다). `label`은 `Chance`·`Blogger 영문`·`Blogger 한글`·`티스토리`·`네이버` 중 하나(`registry.CHANNEL_LABELS`, 채널을 나누기 전의 라벨 `Blogger`는 없앴다)이고, **그 블로그 `workflow` 파일의 `name`이 `"[label] …"`로 시작해야 한다**(§2-1. 대괄호로 시작하는 값이라 큰따옴표가 필요하다). `label`·`key`는 블로그끼리 겹칠 수 없다(채널 = 블로그 하나). `공통`·`내부`는 블로그에 속하지 않는 워크플로의 구분이라 여기에 쓰지 않는다. 검증: 레지스트리 검증(REG-1 — `python -m pipeline.registry`·`pipeline.plan`·`pipeline.run`이 같은 규칙을 읽는다). 그래서 **한 워크플로 파일을 채널이 다른 블로그 둘이 나눠 쓸 수 없다** — 채널마다 이름이 다른 워크플로가 필요하다(Blogger 는 채널별 래퍼 `blogger-en.yml`·`blogger-ko.yml`이 공용 `blogger.yml`을 부르고, 래퍼가 레지스트리와 맞는지는 REG-6, §7-A). `tistory`·`naver` platform 블로그의 라벨은 각각 `티스토리`·`네이버`여야 한다(초안 이슈의 라벨 `채널:<라벨>`이 이 값으로 만들어진다) |
 | `mode` | `off` 중지 · `package` 초안 패키지(`tistory`·`naver` 전용이고 이 두 platform 은 `off`·`package` 만 쓴다) — 글을 만들어 GitHub 이슈 1개(라벨 `초안`)로 보여 줄 뿐 공개하지 않는다(`package_issued`, §4-1·§7-B-2) · `draft` 초안 — Blogger는 게시용 시크릿 4종(`blog_id`·`client_id`·`client_secret`·`refresh_token`)이 **모두** 있으면 글을 Blogger **초안함에 업로드**하고(`draft_uploaded`, 공개되지 않음 — 운영자가 Blogger 화면에서 확인한 뒤 직접 게시), **하나도** 없으면 저장소 파일에만 저장하며(`draft`, 오류 아님), **일부만** 있으면 설정 오류(종료 2) · `auto` 자동 게시. **`auto` 전환은 T3** |
 | `publish_flow` | (선택, `jekyll-git`만, 지금은 Chance) 글을 만든 뒤 공개되는 방식. `direct` 만들자마자 main 에 커밋해 게시(기본 — 필드가 없어도 같다, 지금 동작) · `pr` 초안 브랜치와 승인 PR 로 올리고 **사람이 병합해야 공개**(`mode`는 `auto`여야 한다. §4-4). 값이 틀리거나 읽지 못하면 직접 게시로 떨어지지 않고 멈춘다. **`pr`로 바꾸는 것은 T3**(게시 방식) |
+| `quality_gate` | (선택, `jekyll-git`만, 지금은 Chance) 신규 글 최소 품질 Gate. `off`(기본 — 필드가 없어도 같다, 이전과 출력이 같다) · `hold`(후보 글이 규칙 8가지에 걸리면 버리고 다음 후보로, §4-1-1). 값이 틀리거나 읽지 못하면 약한 설정으로 떨어지지 않고 멈춘다. **`hold` 로 바꾸는 것은 T3**(게시 기준) |
 | `workflow`, `entrypoint`, `prompt` | 저장소에 존재하는 파일. `workflow`의 cron 목록에 `schedule.cron`이 들어 있어야 한다(검증기 REG-2, Chance는 17분·47분 두 틱이고 레지스트리에는 17분이 대표값). 초안 패키지 블로그의 `entrypoint`는 `pipeline/run.py`다(별도 생성기 파일이 없다) |
 | `profile` | `pipeline/profiles/<이름>.json`. `blogger`·`tistory`·`naver` 플랫폼은 필수. 글 언어 검사는 `languages`(표시·문서용)가 아니라 프로필의 `language`(`ko`·`en`)가 정한다. 필드와 가드레일은 §7-1 |
 | `state.history`, `state.content_dir` | 이력 파일, 산출물 폴더(저장소 상대 경로, `..` 금지) |
@@ -292,6 +294,24 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 어느 채널의 것인지
 5. 하루 한도는 한국 날짜가 아니라 미국 태평양 시간 자정(한국 시각 오후 4~5시, 서머타임에 따라)에 풀린다. 그래서 한국 날짜가 바뀌어도 한도가 그대로일 수 있고, 이 저장소의 날짜(한국 시각)로 센 숫자와 AI Studio의 하루 숫자는 칸이 어긋난다.
 
 임시 조치이며 알려진 부작용이 있다: 비기술 분야가 계속 비면 글은 사실상 기술·미래 분야에서만 나온다. 2026-10-26 출처 개편이 구글 뉴스 소스를 약관상 쓸 수 있는 직접 RSS로 바꿔 과학·문화에 후보를 만들 수 있게 했다 — 사회·정책은 UN News가 보류 중이지만 집행위원회 소식·캐나다 통계청이 후보를 낸다(아래 '**Chance 소스와 약관 점검**'). 2026-10-26 해외 소스 추가(#35)로 경제·일·사회·정책·일상·마음에도 읽는 소스가 생겼지만(D-62), 주말·월요일 아침에는 공공기관 발표가 적어 분야가 비는 일이 남아 폴백은 그대로 둔다. 콘텐츠 전략 작업(운영자 요청서 3번, 저장소 밖 문서)이 주제 선정을 개편하면서 이 폴백을 대체하거나 정리한다.
+
+### 4-1-1. 최소 품질 Gate와 그림자 실행 (`pipeline/quality_gate.py`·`pipeline/shadow_run.py`, 2026-11-09)
+
+운영자가 정한 제한 재개 순서(정지 유지 → 최소 품질 Gate → 그림자 모드 검증 → `publish_flow: pr` 검증 → 하루 최대 1편 PR → 사람 승인 후 공개)의 앞 두 단계다. 규칙 정의·설정값·출력 형식·한계는 [`QUALITY_GATE.md`](./QUALITY_GATE.md)에 있다.
+
+| 모듈 | 역할 | 입출력 |
+|------|------|--------|
+| `pipeline/quality_gate.py` | 후보 글을 규칙 8가지(QG1 숫자 충실 — 숫자 종류별 대조 · QG2 인용·직함 · QG3 출처 링크와 진짜 본문 분량 — 출처 목록은 글 끝쪽의 '표지 + 링크 + 짧은 꼬리'일 때만 자른다 · QG4 건강 위험 — HEALTH·ASSERT·CLAIM · QG5 행사·회사 · QG6 제목·본문 일치 · QG7 원문 재사용 · QG8 번역 복제)로 평가해 보류 사유 목록을 낸다. 근거 텍스트는 `evidence_text()` 한 함수로만 읽고, `languages` 값 검증은 `normalize_languages()` 한 함수가 정의한다 | **없음**(순수 함수 — 프로필·이력·시계는 부르는 쪽이 넘긴다) |
+| `pipeline/shadow_run.py` | 환경 변수 `SHADOW_RUN` 이 켜짐 값(`1` 등)일 때만 도는 읽기 전용 실행. 후보 `SHADOW_COUNT`건을 일반 실행과 같은 함수로 만들어 검증·Gate 를 돌리고 `SHADOW_OUT` 아래에만 결과를 쓴다. 쓰기·git·gh 를 코드로 막는다 | `SHADOW_OUT` 아래 파일뿐 |
+| `pipeline/registry.py` | `quality_gate`·`languages` 값 검증과 `chance_settings()` 읽기 | 레지스트리 읽기 |
+| `generator.py` | 후보 검증 칸(`check_final_front_matter` 바로 뒤, 같은 `try`)에서 Gate 를 **한 곳**에서 부른다(`quality_gate: hold` 일 때만). `languages: ["ko"]` 면 영문을 빼고, `SHADOW_RUN` 이 켜짐 값(`1`·`true`·`yes`·`on`·`enabled`)이면 정지 검사를 건너뛰어 읽기 전용 경로로 넘기며, 켜짐·꺼짐 어느 쪽도 아닌 값은 거절한다(종료 2) | — |
+| `pipeline/drafts.py`·`draft_flow.py` | 글 파일이 하나인 국문 전용 초안도 올리고 PR 을 다시 연다(글 경로 1개 또는 2개) | git·GitHub(기존과 같음) |
+
+**기본값에서 이전과 같다**: `quality_gate` 가 없거나 `off`, `languages` 가 `["ko","en"]`, `SHADOW_RUN` 이 없으면 Gate 를 부르지 않고 프롬프트·검증·파일·이력·실행 요약·승인 PR 이 옛 코드와 바이트까지 같다(13개 시나리오 × 레지스트리 변형 4가지 = 52쌍을 옛 코드와 견준 증거와 해시 시험은 [`QUALITY_GATE.md`](./QUALITY_GATE.md) §8).
+
+**그림자 실행의 안전선**: 정지 변수는 건드리지 않는다. `SHADOW_RUN` 이 켜짐 값일 때만 `_pause_on()` 이 False 를 돌려주고 `main()` 이 곧바로 읽기 전용 경로로 넘긴다(일반 실행 경로로 내려가지 않는다). 모르는 `SHADOW_RUN` 값은 꺼짐으로 읽지 않고 거절한다. 저장소 파일·git·gh·승인 흐름에는 어떤 쓰기도 하지 않고(감사 훅이 `SHADOW_OUT` 밖의 쓰기를 어느 길이든 막는다) 결과는 저장소 밖 임시 폴더 `SHADOW_OUT` 아래에만 쓴다. 오프라인 측정 도구에는 연결하지 않는다.
+
+**`main()` 의 순서(병합 때 지킨다)**: 모르는 `SHADOW_RUN` 값 거절 → 정지 검사 → 그림자 분기 → (제한 재개 잠금 가드) → 일반 실행. 그림자 분기는 읽기 전용이라 잠금 대상이 아니므로 가드보다 **앞**이다. 자세한 병합 메모는 [`QUALITY_GATE.md`](./QUALITY_GATE.md) §10.
 
 ## 4-2. 워치독 규칙과 알림 방식
 

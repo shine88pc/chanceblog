@@ -316,9 +316,11 @@ def excerpt_of(body, limit=240):
 # ----------------------------------------------------------------------------
 # PR 제목·본문
 # ----------------------------------------------------------------------------
-def build_pr_title(kr_title, en_title, limit=TITLE_LIMIT):
-    """`[초안][Chance] <한국어 제목> / <영어 제목>`. 제목은 각각 소독하고 80자로 줄이며 전체는 limit 이하다."""
+def build_pr_title(kr_title, en_title, limit=TITLE_LIMIT, ko_only=False):
+    """`[초안][Chance] <한국어 제목> / <영어 제목>`(국문 전용 초안이면 `[초안][Chance] <한국어 제목>`). 제목은 각각 소독하고 80자로 줄이며 전체는 limit 이하다."""
     kr = neutralize(kr_title, 80) or "(제목 없음)"
+    if ko_only:
+        return _clip(f"{PR_TITLE_PREFIX} {kr}", limit)
     en = neutralize(en_title, 80) or "(no title)"
     return _clip(f"{PR_TITLE_PREFIX} {kr} / {en}", limit)
 
@@ -343,9 +345,11 @@ def _yn(flag):
 
 
 def build_pr_body(entry, kr_text, en_text, owner=None, repo=None):
-    """승인 PR 본문(마크다운). entry 는 이력 항목, kr_text·en_text 는 글 파일 전체. 모든 외부 유래 문구는 neutralize 를 거친다.
+    """승인 PR 본문(마크다운). entry 는 이력 항목, kr_text·en_text 는 글 파일 전체(국문 전용 초안이면 en_text 가 None 이고 영어 칸을 모두 뺀다). 모든 외부 유래 문구는 neutralize 를 거친다.
 
     구성: 승인 안내(운영자 멘션) · 요약(분야·출처·원문 링크·슬롯) · 제목 · 첫 문단 발췌 · 자동 점검 결과 · 체크리스트 · 안내."""
+    ko_only = en_text is None
+    both = (lambda ko, en: ko) if ko_only else (lambda ko, en: f"{ko} · {en}")      # 영어 칸을 이어 붙이는 자리(국문 전용이면 국문만)
     entry = entry if isinstance(entry, dict) else {}
     kr_front, kr_body = split_post(kr_text)
     en_front, en_body = split_post(en_text)
@@ -359,7 +363,7 @@ def build_pr_body(entry, kr_text, en_text, owner=None, repo=None):
     en_len, en_cite, en_list, en_notice = _facts(en_body, url, MIN_BODY_CHARS["en"])
     mention = f"@{owner} " if valid_owner(owner) else ""
     quotes = []
-    for label, body in (("한국어", kr_body), ("English", en_body)):
+    for label, body in ((("한국어", kr_body),) if ko_only else (("한국어", kr_body), ("English", en_body))):
         excerpt = neutralize(excerpt_of(body), 260) or "(발췌할 문단을 찾지 못했습니다 — 글 파일을 직접 확인하세요)"
         quotes.append(f"> **{label}** {excerpt}")
     lines = [
@@ -372,16 +376,16 @@ def build_pr_body(entry, kr_text, en_text, owner=None, repo=None):
         "",
         "## 제목",
         f"- 한국어: {neutralize(kr_title, 120) or '(제목 없음)'}",
-        f"- English: {neutralize(en_title, 120) or '(no title)'}",
+        *([] if ko_only else [f"- English: {neutralize(en_title, 120) or '(no title)'}"]),
         "",
         "## 첫 문단 발췌",
         "\n>\n".join(quotes),
         "",
         "## 자동 점검 결과(저장 전에 이미 통과한 항목 — 사람의 확인을 대신하지 않습니다)",
-        f"- 본문 분량: 한국어 {kr_len} · 영어 {en_len}",
-        f"- 원문 링크 인용: 한국어 {_yn(kr_cite)} · 영어 {_yn(en_cite)}",
-        f"- 글 끝 출처 목록: 한국어 {_yn(kr_list)} · 영어 {_yn(en_list)}",
-        f"- 출처 고지문(AI 작성·검토 안 받음 안내): 한국어 {_yn(kr_notice)} · 영어 {_yn(en_notice)}",
+        f"- 본문 분량: {both(f'한국어 {kr_len}', f'영어 {en_len}')}",
+        f"- 원문 링크 인용: {both(f'한국어 {_yn(kr_cite)}', f'영어 {_yn(en_cite)}')}",
+        f"- 글 끝 출처 목록: {both(f'한국어 {_yn(kr_list)}', f'영어 {_yn(en_list)}')}",
+        f"- 출처 고지문(AI 작성·검토 안 받음 안내): {both(f'한국어 {_yn(kr_notice)}', f'영어 {_yn(en_notice)}')}",
         "- 제목 유사도: 기존 글·대기 중인 초안과 비슷하지 않음(후보 0.6·생성 제목 0.7 기준, 생성기가 검사함)",
         "",
         "## 승인 체크리스트",
@@ -390,7 +394,7 @@ def build_pr_body(entry, kr_text, en_text, owner=None, repo=None):
         "- [ ] 병합 = 공개(사람 검토 단계)",
         "",
         "## 안내",
-        "- 글은 **Files changed** 의 `_posts/` 파일 두 개(한국어·영어)입니다. 병합하기 전에는 사이트에 보이지 않습니다.",
+        "- 글은 **Files changed** 의 `_posts/` 파일 " + ("하나(한국어)" if ko_only else "두 개(한국어·영어)") + "입니다. 병합하기 전에는 사이트에 보이지 않습니다.",
         "- **병합하면** `main` 에 올라가 `[공통] 사이트 자동 배포`가 실행되고 몇 분 안에 공개됩니다. **닫으면** 글은 올라가지 않습니다"
         f"(브랜치는 {RETENTION_DAYS}일 뒤 자동으로 지워지고, 같은 슬롯·같은 주제는 다시 만들지 않습니다).",
         "- 검사(CI)는 봇이 만든 PR 에서는 자동으로 돌지 않습니다(GitHub 규칙). 글 파일만 바뀌므로 병합에 필요하지 않습니다.",
