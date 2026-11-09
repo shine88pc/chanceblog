@@ -506,8 +506,12 @@ class ChanceSplitTest(unittest.TestCase):
         # chanceblog.yml 에만 새 글 텔레그램 알림 단계가 더 있다(이미지 교체는 새 글이 없어 알리지 않는다) — 그 단계를 뺀 나머지가 같아야 한다
         alert = [s for s in self.steps(self.chance) if "pipeline.notify" in str(s.get("run", ""))]
         self.assertEqual([s["name"] for s in alert], ["텔레그램 알림(새 글)"])
+        # 제한 재개 잠금(2026-11-09, docs/PUBLISH_PATHS.md): 이미지 교체 워크플로에만 첫 단계 '제한 재개 잠금 확인'이 더 있다(chanceblog.yml 은 발행 흐름 확인 단계가 같은 일을 한다) — 그 단계를 뺀 나머지가 같아야 한다
+        lock = [s for s in self.steps(self.fix) if "pipeline.publish_lock" in str(s.get("run", ""))]
+        self.assertEqual([s["name"] for s in lock], ["제한 재개 잠금 확인 (켜져 있으면 직접 커밋 금지)"])
+        self.assertEqual([s for s in self.steps(self.chance) if "pipeline.publish_lock" in str(s.get("run", ""))], [])
         a = [self.normalized(s) for s in self.chance_direct_steps() if s not in alert]
-        b = [self.normalized(s, drop_env=("FIX_IMAGES",)) for s in self.steps(self.fix)]
+        b = [self.normalized(s, drop_env=("FIX_IMAGES",)) for s in self.steps(self.fix) if s not in lock]
         self.assertEqual(len(a), 6)  # checkout · setup-python · 의존성 · 생성기 · 커밋 · Pages 배포 요청
         self.assertEqual(a, b)
         self.assertNotIn("pipeline.notify", " ".join(str(s.get("run", "")) for s in self.steps(self.fix)))
@@ -516,7 +520,7 @@ class ChanceSplitTest(unittest.TestCase):
         added = [s for s in self.steps(self.chance) if s.get("id") == "flow" or "pipeline.draft_flow" in s.get("run", "")]
         self.assertEqual(len(added), 2)
         self.assertEqual(len(self.steps(self.chance)), 9)               # 기준 6 + 승인 흐름 2 + 텔레그램 알림(새 글) 1(알림 단계는 test_steps_are_identical_except_the_fix_images_switch 가 따로 뺀다)
-        self.assertEqual(len(self.steps(self.fix)), 6)                  # 이미지 교체 워크플로는 승인 흐름과 무관하다(새 글을 만들지 않는다)
+        self.assertEqual(len(self.steps(self.fix)), 7)                  # 이미지 교체 워크플로는 승인 흐름과 무관하다(새 글을 만들지 않는다). 기준 6 + 제한 재개 잠금 확인 1(2026-11-09)
 
     def test_fix_images_workflow_still_commits_and_requests_the_pages_deploy(self):
         commit = next(s for s in self.steps(self.fix) if s.get("id") == "commit")
@@ -558,6 +562,8 @@ PREVIOUS_NAMES = {
     "텔레그램 수신 가져오기": "[공통] 텔레그램 수신 가져오기",
     # 병합 부탁 PR 자동 만들기(2026-11-06)도 처음부터 접두사와 함께 만들었다
     "병합 부탁 PR 자동 만들기": "[공통] 병합 부탁 PR 자동 만들기",
+    # 그림자 실행(2026-11-09)도 처음부터 접두사와 함께 만들었다
+    "그림자 실행(수동, 읽기 전용)": "[Chance] 그림자 실행(수동, 읽기 전용)",
     # 영문·한글로 나눈 Blogger 워크플로(2026-10-27): 한글 래퍼와 공용 워크플로도 접두사 뗀 모양을 둔다(영문의 옛 이름은 위 `Blogger 글 자동 작성`)
     "Blogger 한글 글 자동 작성": "[Blogger 한글] 글 자동 작성",
     "Blogger 글 작성 공용(직접 실행하지 마세요)": "[내부] Blogger 글 작성 공용(직접 실행하지 마세요)",
@@ -621,6 +627,7 @@ class NamePrefixTest(unittest.TestCase):
         "operator-reply.yml": "[공통] 운영자 응답 접수",
         "telegram-inbox.yml": "[공통] 텔레그램 수신 가져오기",
         "auto-pr.yml": "[공통] 병합 부탁 PR 자동 만들기",           # 병합 부탁 PR 자동 만들기(운영자 확인 003 의 ②, 2026-11-06) — run-name 은 두지 않는다(실행 제목은 push 한 커밋 제목)
+        "chance-shadow.yml": "[Chance] 그림자 실행(수동, 읽기 전용)",   # 그림자 실행(제한 재개 조건 — 정지를 유지한 채 후보 글을 읽기 전용으로 평가, 2026-11-09)
     }
 
     def test_every_workflow_has_its_approved_name(self):
@@ -639,7 +646,7 @@ class NamePrefixTest(unittest.TestCase):
                 continue
             seen += 1
             self.assertEqual(registry.name_label(run_name), registry.name_label(name), f"{file}: {run_name!r}")
-        self.assertEqual(seen, 11)  # chanceblog · chance-fix-images · issue-edit · blogger-en · blogger-ko · watchdog · ops-inbox · tistory · naver · operator-reply · telegram-inbox(공용 blogger.yml 과 ai-request 는 run-name 이 없다)
+        self.assertEqual(seen, 12)  # chanceblog · chance-fix-images · chance-shadow · issue-edit · blogger-en · blogger-ko · watchdog · ops-inbox · tistory · naver · operator-reply · telegram-inbox(공용 blogger.yml 과 ai-request 는 run-name 이 없다)
 
     def test_registered_blog_workflows_use_their_channel_label(self):
         """레지스트리 channel.label 과 그 블로그 워크플로 이름의 접두사는 같은 글자다(레지스트리 검증도 같은 것을 본다)."""

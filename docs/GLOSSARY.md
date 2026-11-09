@@ -49,6 +49,7 @@
 | 게이트 | 게시 전 자동 검사(파싱 → HTML 정화 → 정책·중복). 하나라도 실패하면 게시하지 않는다(fail closed) | `pipeline/gates.py`, `AGENTS.md` §2 |
 | 어댑터(publisher) | 플랫폼별 게시 구현 | `pipeline/publishers/` |
 | 킬 스위치 | 전체 정지는 저장소 Variables `PIPELINE_PAUSE=true`, 한 블로그만 정지는 그 블로그의 `mode: off` | `docs/SECURITY_GUARDRAILS.md` G-O1 |
+| 제한 재개 잠금(`resume_lock`) | 레지스트리 최상위 스위치(기본 꺼짐). 켜면 사람 승인 없는 공개 경로(Chance 직접 게시·Blogger 자동·수동 즉시 게시·기존 글 이미지 직접 커밋)가 코드로 막히고 하루 최대 1편·열린 초안 상한이 강제된다. 켜고 끄는 것은 T3. 발행 정지(`PIPELINE_PAUSE`)와 다른 스위치다 — 정지는 모든 실행을 멈추고, 잠금은 실행은 하되 승인 없는 공개만 막는다 | `docs/PUBLISH_PATHS.md`, `pipeline/publish_lock.py` |
 | 초안 패키지 | `package` 모드의 결과. 글을 GitHub 이슈 1개(= 초안 1건)로 보여 주고 운영자가 복사해 직접 발행한다. 계정 정보는 저장·처리하지 않는다 | `pipeline/publishers/issue_package.py` |
 | 워치독 | 발행 중단·반복 실패를 감시해 문제일 때만 이슈 `[Watchdog] …` 를 여는 작업. 판단 규칙은 `pipeline/health.py` | `scripts/watchdog.py` |
 | 확인 필요 모음(운영 인박스) | 운영자가 직접 해야 할 일·확인하면 좋은 일을 한곳에 모은 GitHub 이슈 1개(`[운영] 확인 필요 모음`)와 같은 내용의 실행 요약 | `docs/OPS_INBOX.md`, `pipeline/inbox.py` |

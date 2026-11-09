@@ -200,7 +200,8 @@ $o = foreach ($b in @('origin/main') + @(git for-each-ref --format='%(refname:sh
 | 파일 | Actions 이름 | 언제 | 하는 일 |
 |---|---|---|---|
 | `chanceblog.yml` | `[Chance] 글 자동 작성·게시` | 매시 17분·47분 + 수동 | Chance 블로그 글(슬롯 규칙에 따라) 생성·게시 |
-| `chance-fix-images.yml` | `[Chance] 기존 글 이미지 교체(수동)` | 수동 | 기존 글의 이미지를 교체 |
+| `chance-fix-images.yml` | `[Chance] 기존 글 이미지 교체(수동)` | 수동 | 기존 글의 이미지를 교체(제한 재개 잠금이 켜지면 첫 단계에서 멈춤) |
+| `chance-shadow.yml` | `[Chance] 그림자 실행(수동, 읽기 전용)` | 수동 | 후보 글을 읽기 전용으로 만들어 평가(권한 `contents: read` 뿐 — 저장소에 아무것도 쓰지 못함, 정지 중에도 돎) |
 | `issue-edit.yml` | `[Chance] 이슈 수정 요청 처리(수정안 PR 만들기)` | 이슈 양식 접수 + 수동 | 고정 페이지·이미지 수정 요청을 PR 로 만듦(`pipeline/edits`) |
 | `blogger-en.yml` | `[Blogger 영문] 글 자동 작성` | 매일 02:00(한국 11:00) + 수동 | 영문 Blogger 글을 만들어 초안함에 올림 |
 | `blogger-ko.yml` | `[Blogger 한글] 글 자동 작성` | 매일 03:30(한국 12:30) + 수동 | 한글 Blogger 글을 만들어 초안함에 올림 |

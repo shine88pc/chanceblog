@@ -22,6 +22,7 @@ from xml.sax.saxutils import escape
 
 import _bootstrap  # noqa: F401
 import generator as g
+from lock_helpers import guard_off
 
 KST = g.KST
 
@@ -1163,6 +1164,9 @@ class MainPolicyTest(unittest.TestCase):
         # 이 시험들은 직접 게시 경로의 종료 정책을 본다. 진짜 레지스트리의 publish_flow 값(승인 흐름을 켜면 pr)에 기대지 않고, 승인 흐름이었다면
         # 만들 차례인 정기 실행이 부르는 원격 브랜치 확인(git ls-remote, 네트워크)도 시험에서 일어나지 않게 직접 게시로 고정한다.
         patcher = mock.patch.object(g, "draft_flow_on", return_value=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        patcher = guard_off()                       # 같은 이유로 제한 재개 잠금 가드도 건너뛴다(가드는 test_publish_lock 이 따로 고정한다)
         patcher.start()
         self.addCleanup(patcher.stop)
         self.tmp = tempfile.TemporaryDirectory()

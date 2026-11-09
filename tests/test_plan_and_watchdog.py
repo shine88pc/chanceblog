@@ -30,6 +30,7 @@ def registry_all_auto():
     """실제 레지스트리의 모든 블로그를 켜 둔 사본. 운영 중 일시 정지(mode off)와 무관하게 로직을 시험한다.
     초안 패키지 채널(티스토리·네이버)은 mode 가 off·package 만 허용돼(auto 는 레지스트리 검증이 막는다) 켠 상태가 package 다."""
     reg = registry.load_registry()
+    reg.pop("resume_lock", None)   # 모든 블로그를 auto 로 켠 사본이다 — 제한 재개 잠금(Chance 밖 auto 금지)이 켜진 실제 레지스트리의 값을 물려받지 않는다(잠금은 test_publish_lock 이 본다)
     for blog in reg["blogs"]:
         blog["mode"] = "package" if blog["platform"] in registry.PACKAGE_PLATFORMS else "auto"   # 패키지 채널을 auto 로 켜면 plan 의 레지스트리 검증이 먼저 실패한다
     return reg

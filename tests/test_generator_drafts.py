@@ -15,6 +15,7 @@ import _bootstrap
 import generator as g
 from chance_credit_helpers import fake_pool_photo
 from draft_helpers import REAL_PUBLISH_FLOW, HermeticGit
+from lock_helpers import guard_off
 from pipeline import draft_flow, drafts
 from test_generator_slots import at, candidate, long_post, run_captured
 
@@ -34,9 +35,10 @@ def chdir(path):
         os.chdir(old)
 
 
-def run_tick(clone, now, flow="pr", event="schedule", dry=False, feed=None, gemini="ok", remote_exists=False, git_env=None, summary_name="summary.md"):
+def run_tick(clone, now, flow="pr", event="schedule", dry=False, feed=None, gemini="ok", remote_exists=False, git_env=None, summary_name="summary.md", guarded=False):
     """한 번의 실행(generator.main)을 clone 폴더에서 돌린다. 소스·Gemini·이미지 확인은 가짜이고 네트워크는 쓰지 않는다.
     remote_exists: 초안 브랜치 확인(draft_flow.remote_branch_exists)의 가짜 결과(True·False·None). 실제 git 을 쓰려면 'real'.
+    guarded: 기본(False)은 제한 재개 잠금 가드를 건너뛴다 — 이 시험들은 흐름을 보고, 레지스트리의 잠금 값에 기대지 않는다. 가드까지 거치게 하려면 True(test_publish_lock*).
     돌려주는 값: SimpleNamespace(value, out, summary, prompts, history)."""
     clone = Path(clone)
     summary = clone.parent / summary_name
@@ -65,6 +67,8 @@ def run_tick(clone, now, flow="pr", event="schedule", dry=False, feed=None, gemi
                mock.patch.object(g, "fetch_pool_photo", fake_pool_photo),     # 키 없는 실제 실행은 고정 목록 사진의 출처를 조회할 수 없다 → 조회에 성공한 것으로 가정(시험은 이미지가 아니라 흐름을 본다)
                mock.patch.object(g, "get_client", side_effect=AssertionError("가짜 Gemini 만 쓴다")),
                mock.patch.object(drafts, "chance_flow", return_value=flow)]
+    if not guarded:
+        patches.append(guard_off())
     if remote_exists != "real":
         patches.append(mock.patch.object(draft_flow, "remote_branch_exists", return_value=remote_exists))
     with contextlib.ExitStack() as stack, chdir(clone):
@@ -272,7 +276,7 @@ class DirectFlowUnchangedTest(PlainDirBase):
 class FlowLookupTest(PlainDirBase):
     def test_a_broken_registry_stops_the_engine_instead_of_publishing_directly(self):
         with mock.patch.object(drafts, "chance_flow", side_effect=drafts.DraftFlowError("레지스트리 오류")):
-            with chdir(self.clone), mock.patch.object(g, "EVENT_NAME", "schedule"), mock.patch.object(g, "DRY_RUN", False), \
+            with chdir(self.clone), mock.patch.object(g, "EVENT_NAME", "schedule"), mock.patch.object(g, "DRY_RUN", False), guard_off(), \
                     mock.patch.object(g, "STUB_GEMINI", False), mock.patch.object(g, "SLOT_HOURS", [9, 18]), \
                     mock.patch.object(g, "now_kst", return_value=at(9, 20, day=28)), \
                     mock.patch.dict(os.environ, {k: v for k, v in os.environ.items() if k != "PIPELINE_PAUSE"}, clear=True):
@@ -282,7 +286,7 @@ class FlowLookupTest(PlainDirBase):
 
     def test_the_manual_path_reads_the_flow_too(self):
         with mock.patch.object(drafts, "chance_flow", side_effect=drafts.DraftFlowError("레지스트리 오류")):
-            with chdir(self.clone), mock.patch.object(g, "EVENT_NAME", "workflow_dispatch"), mock.patch.object(g, "DRY_RUN", False), \
+            with chdir(self.clone), mock.patch.object(g, "EVENT_NAME", "workflow_dispatch"), mock.patch.object(g, "DRY_RUN", False), guard_off(), \
                     mock.patch.object(g, "STUB_GEMINI", False), mock.patch.object(g, "now_kst", return_value=at(11, 0, day=28)), \
                     mock.patch.dict(os.environ, {k: v for k, v in os.environ.items() if k != "PIPELINE_PAUSE"}, clear=True):
                 with self.assertRaises(drafts.DraftFlowError):
