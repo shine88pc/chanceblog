@@ -15,6 +15,20 @@ layout: null
   <meta property="og:url" content="{{ page.url | absolute_url }}">
   <title>{{ page.title | escape }} · Chance_Blog</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .info-content h2 { padding-top: 1.25rem; padding-bottom: .5rem; border-bottom: 1px solid #334155; font-size: 1.375rem; line-height: 1.5; font-weight: 800; letter-spacing: -.01em; color: #f1f5f9; }
+    .info-content > h2:first-child { padding-top: 0; }
+    .info-content strong { font-weight: 700; color: #f8fafc; }
+    .info-content ul, .info-content ol { padding-left: 1.4rem; }
+    .info-content ul { list-style: disc; }
+    .info-content ol { list-style: decimal; }
+    .info-content li { padding-left: .25rem; }
+    .info-content li + li { margin-top: .625rem; }
+    .info-content li::marker { color: #94a3b8; }
+    .info-content a { color: #93c5fd; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    .info-content a:hover { color: #bfdbfe; }
+    .info-content :focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; border-radius: 2px; }
+  </style>
 </head>
 <body class="min-h-screen bg-slate-950 text-slate-100 antialiased">
   <header class="border-b border-slate-800 bg-slate-900/80">
@@ -31,7 +45,7 @@ layout: null
     <article class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-2xl shadow-blue-950/10 md:p-10">
       <p class="mb-3 text-xs font-bold uppercase tracking-[.18em] text-blue-300">Chance_Blog · 안내</p>
       <h1 class="mb-8 text-3xl font-black tracking-tight text-white md:text-4xl">{{ page.title | escape }}</h1>
-      <div class="space-y-5 text-sm leading-8 text-slate-300 md:text-base">
+      <div class="space-y-5 text-sm leading-8 text-slate-300 md:text-base info-content">
         {{ content }}
       </div>
       <p class="mt-10 border-t border-slate-800 pt-5 text-sm"><a class="font-semibold text-blue-300 hover:text-blue-200" href="{{ '/' | relative_url }}">← 글 목록으로 돌아가기</a></p>
