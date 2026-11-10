@@ -104,6 +104,7 @@ AI_CALL_SITES = {
     },
     "get_client": {
         ("generator.py", "_generate.call"): "SDK 호출 한 번이 클라이언트를 얻는 곳 — 다른 함수가 클라이언트를 직접 얻어 부르면 입구 방벽을 건너뛴다",
+        ("pipeline/egress.py", "<module>"): "외부 접속 예외 표에 데이터로 적힌 글자 get_client 한 줄(호출하지 않는다 — 호출 지점이 아니라 이름만 적은 표)",
     },
     "call_gemini_with_fallback": {
         ("generator.py", "make_image_queries"): "기존 글 이미지 교체의 영어 검색어(제목·태그·분류 — 표식 글은 repair 가 건너뛴다)",

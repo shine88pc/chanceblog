@@ -1,0 +1,5243 @@
+{
+ "_doc": "허용 목록(Source Registry) v1 — 외부 자료를 자동으로 쓸 수 있는 곳의 정본(docs/SOURCE_POLICY.md). Provider 마다 7칸(commercial_use·automated_access·derivative_use·storage·ai_input·attribution·license)의 state·basis·근거 이름·열람일을 적고, 한 칸이라도 UNKNOWN·근거 없음(NOT_READ·NOT_ADDRESSED·IMPLIED)이면 켤 수 없다(pipeline/source_registry.py 검증기). 생성 근거: 2026-11-09 Tier 감사표(69행) 중 데이터 출처 행. 전부 enabled false — 켜는 것은 운영자 승인(T3)이고 증거와 함께 PR 로만 바꾼다. strict_tier 가 실행 기준이고 permissive_interpretation 은 참고용이다(실행에 쓰지 않는다). Provider 의 선택 칸 ai_use(기본 BY_CELL — 7칸 모두 판정)는 NEVER 이면 '이 자료는 AI 에 넘기지 않고 규칙 기반 경로에서만 쓴다'는 우리 쪽 약속이라 ai_input 칸만 strict 판정에서 빠지고(나머지 6칸은 그대로) 코드가 그 자료의 AI 입력을 항상 거부한다 — 이것이 무엇을 켜지는 않는다(enabled 는 따로, 켜는 것은 T3). own_data_only(기본 false)는 true 이면 '이 항목은 제공처 자신이 만든 값만 읽는다(제3자 필드·파일은 읽지 않는다)'는 약속이고, 공공영역·연방정부 저작물 출처 문구는 이 값이 true 인 항목만 쓴다. api 경로는 호출 한도(rate_limit — 제공처가 공개한 'N/minute|hour|day' 문구, 또는 공식 수치 한도가 없다고 확인한 객체 official NONE + 우리 자체 상한 own + note, 모르면 null)가 있어야 켤 수 있고 출처 표시가 조건부면 attribution_template(자리 표시 {title}·{date}·{url} 만, 링크 없음)이 있어야 한다. 이 파일에는 링크·계정·비밀을 넣지 않는다(근거는 문서 이름).",
+ "schema_version": 1,
+ "providers": [
+  {
+   "provider_id": "ec_commission",
+   "name": "European Commission main site (commission.europa.eu) — 소식 RSS·기사 페이지",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "ALLOWED",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "Legal notice — European Commission",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "ALLOWED",
+     "basis": "IMPLIED",
+     "evidence": "robots.txt (commission.europa.eu)",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Legal notice — European Commission",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "ALLOWED",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "Legal notice — European Commission",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "ALLOWED",
+     "basis": "IMPLIED",
+     "evidence": "Legal notice — European Commission",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Legal notice — European Commission",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Legal notice — European Commission",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 1,
+   "effective_status": "자동화 제외",
+   "access": [
+    {
+     "kind": "rss",
+     "hosts": [
+      "commission.europa.eu"
+     ],
+     "paths": [
+      "/node/2/rss_en"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    },
+    {
+     "kind": "html",
+     "hosts": [
+      "commission.europa.eu"
+     ],
+     "paths": [
+      "/news-and-media/news/"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    },
+    {
+     "kind": "html",
+     "hosts": [
+      "ec.europa.eu"
+     ],
+     "paths": [
+      "/commission/presscorner/"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": null
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "Legal notice — European Commission"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "고지가 ‘달리 표시한 경우(개별 저작권 표시)’를 예외로 둠 — 항목·이미지 단위 표시는 피드만으로 가려낼 수 없음",
+    "식별 가능한 개인이 나오는 콘텐츠와 제3자 저작물은 추가 권리 확인 필요",
+    "EU 소유가 아닌 콘텐츠는 권리자에게 직접 허락 필요",
+    "산업재산권(특허·상표·등록 디자인·로고·이름) 대상은 재사용 방침에서 제외, 라이선스 대상 아님",
+    "사진·이미지는 고지가 따로 다루지 않음 — 이 프로젝트는 집행위 이미지를 쓰지 않고 Unsplash 이미지를 씀(공개 글 16편 모두 이미지 호스트 images.unsplash.com)",
+    "다른 기관 자료가 피드·링크에 섞임(Eurostat 소식·Horizon 매거진·Press Corner 등): 코드가 주소로 뺌(_EC_EXCLUDE_LINK). 2026-10-26 자료 기준, 오늘 재확인 못 함."
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "ec_dg_sites",
+   "name": "European Commission department & agency sites (energy · environment · JRC · R&I · employment · cinea)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "ALLOWED",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "commission.europa.eu 공식 페이지",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "ALLOWED",
+     "basis": "IMPLIED",
+     "evidence": "robots.txt (energy.ec.europa.eu)",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "commission.europa.eu 공식 페이지",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "ALLOWED",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "commission.europa.eu 공식 페이지",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "ALLOWED",
+     "basis": "IMPLIED",
+     "evidence": "commission.europa.eu 공식 페이지",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "commission.europa.eu 공식 페이지",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "commission.europa.eu 공식 페이지",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 1,
+   "effective_status": "자동화 제외",
+   "access": [
+    {
+     "kind": "rss",
+     "hosts": [
+      "energy.ec.europa.eu"
+     ],
+     "paths": [
+      "/node/2/rss_en"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    },
+    {
+     "kind": "rss",
+     "hosts": [
+      "environment.ec.europa.eu"
+     ],
+     "paths": [
+      "/node/92/rss_en"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    },
+    {
+     "kind": "rss",
+     "hosts": [
+      "joint-research-centre.ec.europa.eu"
+     ],
+     "paths": [
+      "/node/2/rss_en"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    },
+    {
+     "kind": "rss",
+     "hosts": [
+      "research-and-innovation.ec.europa.eu"
+     ],
+     "paths": [
+      "/node/2/rss_en"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    },
+    {
+     "kind": "rss",
+     "hosts": [
+      "employment-social-affairs.ec.europa.eu"
+     ],
+     "paths": [
+      "/node/2/rss_en"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    },
+    {
+     "kind": "html",
+     "hosts": [
+      "cinea.ec.europa.eu"
+     ],
+     "paths": [
+      "/news-events/news/"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    },
+    {
+     "kind": "html",
+     "hosts": [
+      "energy.ec.europa.eu"
+     ],
+     "paths": [
+      "/news/"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "(바닥글 확인) DG Energy 홈",
+     "(바닥글 확인) DG Environment 홈",
+     "(바닥글 확인) JRC 홈",
+     "(바닥글 확인) DG Research and Innovation 홈",
+     "(바닥글 확인) DG Employment, Social Affairs and Inclusion 홈",
+     "(바닥글 확인) CINEA 홈"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "집행위 고지의 예외 전부(개별 저작권 표시·식별 가능한 개인·제3자 저작물·EU 소유가 아닌 콘텐츠·산업재산권)",
+    "피드에 다른 기관 글이 섞임: EIB·ACER(Energy 피드), Cedefop(Employment 피드), Eurostat 소식, Horizon 매거진, Press Corner — 2026-10-26 자료 기준, 오늘 재확인 못 함. 코드가 주소·분류 태그로 뺌",
+    "JRC 사이트 바닥글은 JRC 전용 ‘개인정보 처리 안내’ 문서와 JRC 데이터 카탈로그·출판물 저장소 링크를 따로 둠 — 저작권·재사용 고지는 아님",
+    "cinea 사이트 바닥글은 자체 ‘데이터 보호’ 페이지를 따로 둠 — 저작권·재사용 고지는 아님",
+    "사진·이미지: 고지가 따로 다루지 않음. 이 프로젝트는 이 사이트들의 이미지를 쓰지 않음"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "ec_digital_strategy",
+   "name": "EU Digital Strategy (digital-strategy.ec.europa.eu)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "ALLOWED",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "Legal notice — EU Digital Strategy",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "ALLOWED",
+     "basis": "IMPLIED",
+     "evidence": "robots.txt (digital-strategy.ec.europa.eu)",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Legal notice — EU Digital Strategy",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "ALLOWED",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "Legal notice — EU Digital Strategy",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "ALLOWED",
+     "basis": "IMPLIED",
+     "evidence": "Legal notice — EU Digital Strategy",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Legal notice — EU Digital Strategy",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Legal notice — EU Digital Strategy",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 1,
+   "effective_status": "자동화 제외",
+   "access": [
+    {
+     "kind": "rss",
+     "hosts": [
+      "digital-strategy.ec.europa.eu"
+     ],
+     "paths": [
+      "/en/rss.xml"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    },
+    {
+     "kind": "html",
+     "hosts": [
+      "digital-strategy.ec.europa.eu"
+     ],
+     "paths": [
+      "/en/news/"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "Legal notice — EU Digital Strategy"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "개별 저작권 표시가 있는 항목은 일반 라이선스보다 우선",
+    "식별 가능한 개인이 나오는 콘텐츠·제3자 저작물은 추가 권리 확인, EU 소유가 아닌 콘텐츠는 권리자 허락",
+    "산업재산권(로고·이름 등) 대상은 라이선스 대상 아님",
+    "사진·영상은 고지가 따로 다루지 않음(이 프로젝트는 이 사이트의 이미지를 쓰지 않음)",
+    "RSS 요약 앞머리에 사이트 잡음(‘Anonymous (not verified)’ 와 날짜)이 붙는다는 점은 2026-10-26 자료 기준, 오늘 재확인 못 함."
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "un_news",
+   "name": "UN News (news.un.org) — 유엔 저작권·이용약관(www.un.org)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "Terms of Use — United Nations website",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "robots.txt (news.un.org)",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "UNKNOWN",
+     "basis": "EXPLICIT",
+     "evidence": "Terms of Use — United Nations website",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "Terms of Use — United Nations website",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "Terms of Use — United Nations website",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Copyright — United Nations",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "Copyright — United Nations",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 4,
+   "permissive_interpretation": 4,
+   "effective_status": "완전 제외",
+   "access": [
+    {
+     "kind": "rss",
+     "hosts": [
+      "news.un.org"
+     ],
+     "paths": [
+      "/feed/subscribe/en/news/all/rss.xml"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    },
+    {
+     "kind": "html",
+     "hosts": [
+      "news.un.org"
+     ],
+     "paths": [
+      "/en/story/"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [
+    "www.un.org"
+   ],
+   "snapshot": {
+    "terms_pages": [
+     "Copyright — United Nations",
+     "Terms of Use — United Nations website",
+     "UN News — navigate (안내 페이지)"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "UN 엠블럼·이름·로고: 열어 본 세 페이지에는 사용 규정이 없음(별도 규정 존재 여부 미확인)",
+    "사진·그래픽·오디오·영상(UN Photo·UN Video 포함): UN News 안내가 ‘저작권 의무를 지킬 것’이라고만 하고 조건은 적지 않음",
+    "제3자 정보 제공자의 의견·자료와 링크된 제3자 사이트는 유엔이 보증하지 않는다고 이용약관이 밝힘",
+    "일부 자료에 더 구체적인 제한이 있을 수 있다고 이용약관이 밝힘"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "eurostat_api",
+   "name": "Eurostat statistics API & dissemination (ec.europa.eu/eurostat) — 구조화 대안 후보",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Copyright notice and free re-use of data — Eurostat",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "ALLOWED",
+     "basis": "IMPLIED",
+     "evidence": "API getting started — Eurostat user guide",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Copyright notice and free re-use of data — Eurostat",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "ALLOWED",
+     "basis": "IMPLIED",
+     "evidence": "Copyright notice and free re-use of data — Eurostat",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "ALLOWED",
+     "basis": "IMPLIED",
+     "evidence": "Copyright notice and free re-use of data — Eurostat",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Copyright notice and free re-use of data — Eurostat",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Copyright notice and free re-use of data — Eurostat",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 2,
+   "effective_status": "자동화 제외",
+   "access": [
+    {
+     "kind": "api",
+     "hosts": [
+      "ec.europa.eu"
+     ],
+     "paths": [
+      "/eurostat/api/dissemination/"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    },
+    {
+     "kind": "html",
+     "hosts": [
+      "ec.europa.eu"
+     ],
+     "paths": [
+      "/eurostat/"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "Copyright notice and free re-use of data — Eurostat",
+     "Web services — Eurostat",
+     "API getting started — Eurostat user guide",
+     "(바닥글 확인) Eurostat 홈"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "비유럽 국가(EU·EFTA·가입 후보국 밖, 예: 미국·일본·중국) 자료는 비상업 재사용만 — 상업 재사용 전에 제거해야 함",
+    "Eurostat 외 출처로 표시된 자료와 다른 기관이 저작권을 일부 또는 전부 가진 공동 발행물은 비상업만",
+    "리히텐슈타인·스위스(1995년부터 지정 상품 분류)·오스트리아(8자리 결합 품목 분류)가 신고한 일부 무역 자료는 판매 불가",
+    "제3자 저작물(사진·삽화)과 로고·상표는 제외(변경 없는 Eurostat 간행물의 일부로 재배포하는 경우 로고는 예외)",
+    "개별 문서가 자체 저작권 조건을 가질 수 있음",
+    "DG EMPL·GROW·TAXUD 의 ‘redisstat’ API(webgate.ec.europa.eu)는 안내 페이지가 같은 구조로 언급할 뿐 이번에 열지 않음"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "data_europa_eu",
+   "name": "data.europa.eu — EU 오픈데이터 포털(구조화 대안 후보)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Legal notice — data.europa.eu",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "ALLOWED",
+     "basis": "IMPLIED",
+     "evidence": "robots.txt (data.europa.eu)",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Legal notice — data.europa.eu",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "CONDITIONAL",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "Legal notice — data.europa.eu",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "CONDITIONAL",
+     "basis": "IMPLIED",
+     "evidence": "Legal notice — data.europa.eu",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Legal notice — data.europa.eu",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Legal notice — data.europa.eu",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 2,
+   "effective_status": "자동화 제외",
+   "access": [
+    {
+     "kind": "api",
+     "hosts": [
+      "data.europa.eu"
+     ],
+     "paths": [
+      "/api/hub/search/"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "Legal notice — data.europa.eu"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "카탈로그된 데이터셋의 라이선스는 제공자마다 다름 — 라이선스 정보가 없으면 원 포털에서 확인",
+    "제3자 소유 콘텐츠는 권리자 허락 필요",
+    "산업재산권(특허·상표·로고·이름) 대상은 제외",
+    "메타데이터에 포함된 제3자 개인정보(포털은 Publications Office 의 정당한 이익을 근거로 게시한다고 설명)"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "jrc_data_catalogue",
+   "name": "JRC Data Catalogue (data.jrc.ec.europa.eu) — 구조화 대안 후보",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "robots.txt (data.jrc.ec.europa.eu)",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "robots.txt (data.jrc.ec.europa.eu)",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "robots.txt (data.jrc.ec.europa.eu)",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "robots.txt (data.jrc.ec.europa.eu)",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "robots.txt (data.jrc.ec.europa.eu)",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "robots.txt (data.jrc.ec.europa.eu)",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "robots.txt (data.jrc.ec.europa.eu)",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 3,
+   "effective_status": "자동화 제외",
+   "access": [
+    {
+     "kind": "html",
+     "hosts": [
+      "data.jrc.ec.europa.eu"
+     ],
+     "paths": [],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [],
+    "read_at": null,
+    "content_hash": "",
+    "expires_at": null
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "알 수 없음(읽지 못함)"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "nasa_web",
+   "name": "NASA 웹사이트 글·보도자료 (www.nasa.gov · science.nasa.gov) — 뉴스 RSS와 기사 쪽",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Guidelines for using NASA Images and Media (H1: Images and Media)",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "ALLOWED",
+     "basis": "EXPLICIT",
+     "evidence": "robots.txt (www.nasa.gov)",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "CONDITIONAL",
+     "basis": "STATUTE",
+     "evidence": "Guidelines for using NASA Images and Media (H1: Images and Media)",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "ALLOWED",
+     "basis": "STATUTE",
+     "evidence": "Guidelines for using NASA Images and Media (H1: Images and Media)",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Guidelines for using NASA Images and Media (H1: Images and Media)",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Guidelines for using NASA Images and Media (H1: Images and Media)",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "CONDITIONAL",
+     "basis": "STATUTE",
+     "evidence": "Guidelines for using NASA Images and Media (H1: Images and Media)",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 1,
+   "permissive_interpretation": 1,
+   "effective_status": "자동화 제외",
+   "access": [
+    {
+     "kind": "rss",
+     "hosts": [
+      "www.nasa.gov"
+     ],
+     "paths": [
+      "/feed/"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    },
+    {
+     "kind": "html",
+     "hosts": [
+      "www.nasa.gov"
+     ],
+     "paths": [],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    },
+    {
+     "kind": "html",
+     "hosts": [
+      "science.nasa.gov"
+     ],
+     "paths": [],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "Guidelines for using NASA Images and Media (H1: Images and Media)",
+     "Advertising Guidelines - NASA",
+     "NASA Web Privacy Policy and Important Notices - NASA"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "NASA 인장(미트볼)·옛 로고타입(웜)·NASA 씰: 공공영역이 아니며 허가 없이 쓸 수 없음(미디어 지침 첫머리). AI 생성 이미지·AI 학습에도 금지(AI 절)",
+    "식별 가능한 인물: 현직 NASA 직원·우주비행사의 이름·초상은 상업 제품·광고에 쓸 수 없고, 은퇴자는 본인 허가, 고인은 유족 허가가 필요할 수 있음",
+    "제3자 저작물: NASA 가 허가를 받아 쓴 자료는 저작권 보유자 이름이 표시됨 — 보유자에게 직접 문의",
+    "광고가 열려 있는 웹사이트에는 NASA 인장 사용 금지(승인 시 예외) — 광고 지침",
+    "NFT·암호화폐 연계 사용 금지",
+    "APOD(오늘의 천체 사진)·사진 설명(image-article): 이번에 읽은 지침 쪽에는 문장이 없음 — 2026-10-26 기록(사진마다 저작권자가 따로 있음)만 있고 오늘 재확인 못 함"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "nasa_images",
+   "name": "NASA 이미지 (assets.science.nasa.gov 등 NASA 사진·그래픽)",
+   "class": "image",
+   "policy": {
+    "commercial_use": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Guidelines for using NASA Images and Media (H1: Images and Media)",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "robots.txt (assets.science.nasa.gov)",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "CONDITIONAL",
+     "basis": "STATUTE",
+     "evidence": "Guidelines for using NASA Images and Media (H1: Images and Media)",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "CONDITIONAL",
+     "basis": "STATUTE",
+     "evidence": "Guidelines for using NASA Images and Media (H1: Images and Media)",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Guidelines for using NASA Images and Media (H1: Images and Media)",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Guidelines for using NASA Images and Media (H1: Images and Media)",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "CONDITIONAL",
+     "basis": "STATUTE",
+     "evidence": "Guidelines for using NASA Images and Media (H1: Images and Media)",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 3,
+   "effective_status": "자동화 제외",
+   "access": [
+    {
+     "kind": "image",
+     "hosts": [
+      "assets.science.nasa.gov"
+     ],
+     "paths": [
+      "/content/dam/science/"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [
+    "science.nasa.gov",
+    "www.nasa.gov"
+   ],
+   "snapshot": {
+    "terms_pages": [
+     "Guidelines for using NASA Images and Media (H1: Images and Media)",
+     "Advertising Guidelines - NASA"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "허가를 받아 쓴 제3자 이미지: 저작권 보유자 이름이 표시됨 — 보유자에게 직접 문의",
+    "식별 가능한 인물(우주복을 입은 우주비행사 포함): 상업 이용 시 본인·유족 허가가 필요할 수 있음, 현직 직원·우주비행사 이름·초상은 상업 제품·광고에 불가",
+    "NASA 인장·웜 로고·씰: 허가 없이 불가, AI 생성 이미지·AI 학습에도 금지",
+    "'아직 게시 승인되지 않음' 표기가 붙은 이미지 사례가 지침 쪽에 있음",
+    "NASA 가 아닌 기관(ESA·STScI 계약업체 등) 크레딧이 붙은 이미지: 이번 지침 쪽에는 문장이 없어 확인 못 함"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "nasa_api",
+   "name": "NASA Open APIs (api.nasa.gov) — 구조화 대안 후보",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "NASA Open APIs",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "NASA Open APIs",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "NASA Open APIs",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "NASA Open APIs",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "NASA Open APIs",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "NASA Open APIs",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "NASA Open APIs",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 3,
+   "effective_status": "자동화 제외",
+   "access": [
+    {
+     "kind": "api",
+     "hosts": [
+      "api.nasa.gov"
+     ],
+     "paths": [],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "NASA Open APIs",
+     "(404 — 페이지 없음)"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "확인 못 함(API 별 제3자 이미지·APOD 저작권자 등은 약관을 읽어야 알 수 있음)"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "fed_board",
+   "name": "미국 연방준비제도 이사회 (www.federalreserve.gov) — 보도자료 RSS·FEDS Notes RSS",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "ALLOWED",
+     "basis": "STATUTE",
+     "evidence": "Federal Reserve Board - Disclaimer",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "ALLOWED",
+     "basis": "IMPLIED",
+     "evidence": "Federal Reserve Board - RSS Feeds",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "ALLOWED",
+     "basis": "STATUTE",
+     "evidence": "Federal Reserve Board - Disclaimer",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "ALLOWED",
+     "basis": "EXPLICIT",
+     "evidence": "Federal Reserve Board - Disclaimer",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "ALLOWED",
+     "basis": "IMPLIED",
+     "evidence": "Federal Reserve Board - Disclaimer",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Federal Reserve Board - Disclaimer",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "CONDITIONAL",
+     "basis": "STATUTE",
+     "evidence": "Federal Reserve Board - Disclaimer",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 1,
+   "effective_status": "자동화 제외",
+   "access": [
+    {
+     "kind": "rss",
+     "hosts": [
+      "www.federalreserve.gov"
+     ],
+     "paths": [
+      "/feeds/press_all.xml",
+      "/feeds/feds_notes.xml"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    },
+    {
+     "kind": "html",
+     "hosts": [
+      "www.federalreserve.gov"
+     ],
+     "paths": [],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "Federal Reserve Board - Disclaimer",
+     "Federal Reserve Board - RSS Feeds"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "이사회가 아닌 곳의 저작권·상표 자료(사진·그래픽 등): 원 저작권자의 허가 필요",
+    "이사회 인장·로고·휘장: 서면 허가 없이 복제·사용 불가('Federal Reserve' 명칭 오용은 18 U.S.C. 709 언급)",
+    "FRB/US 모델·EDO 모델: 변형해 공식 정부 자료처럼 제시 금지(별도 면책)",
+    "연결된 외부 사이트: 각자의 저작권 제한이 있을 수 있음"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "ftc",
+   "name": "미국 연방거래위원회 FTC (www.ftc.gov) — 보도자료 RSS(소비자 보호)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "ALLOWED",
+     "basis": "STATUTE",
+     "evidence": "Website Policy - FTC",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "robots.txt (www.ftc.gov)",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "CONDITIONAL",
+     "basis": "STATUTE",
+     "evidence": "Website Policy - FTC",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "ALLOWED",
+     "basis": "EXPLICIT",
+     "evidence": "Website Policy - FTC",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "ALLOWED",
+     "basis": "IMPLIED",
+     "evidence": "Website Policy - FTC",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Website Policy - FTC",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "CONDITIONAL",
+     "basis": "STATUTE",
+     "evidence": "Website Policy - FTC",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 1,
+   "effective_status": "자동화 제외",
+   "access": [
+    {
+     "kind": "rss",
+     "hosts": [
+      "www.ftc.gov"
+     ],
+     "paths": [
+      "/feeds/press-release-consumer-protection.xml"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    },
+    {
+     "kind": "html",
+     "hosts": [
+      "www.ftc.gov"
+     ],
+     "paths": [
+      "/news-events/news/press-releases/"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "Website Policy - FTC"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "제3자 저작물(사진, 공개 의견 속 자료 등): FTC 가 허락·거절할 수 없으므로 저작권 보유자에게 직접 문의",
+    "FTC 인장·로고: 오용 금지(18 U.S.C. 701)",
+    "FTC 자료가 주를 이루는 저작권 있는 저작물은 17 U.S.C. 403 에 따른 고지가 필요",
+    "연결된 외부 사이트: FTC 가 통제·보증하지 않음"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "nsf",
+   "name": "미국 국립과학재단 NSF (www.nsf.gov) — 뉴스 RSS",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "ALLOWED",
+     "basis": "STATUTE",
+     "evidence": "Web Policies - Policies | NSF",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "ALLOWED",
+     "basis": "IMPLIED",
+     "evidence": "RSS Feeds and Podcasts - Connect | NSF",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "ALLOWED",
+     "basis": "STATUTE",
+     "evidence": "Web Policies - Policies | NSF",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "ALLOWED",
+     "basis": "EXPLICIT",
+     "evidence": "Web Policies - Policies | NSF",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "ALLOWED",
+     "basis": "IMPLIED",
+     "evidence": "Artificial Intelligence Policy and Strategy | NSF",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "ALLOWED",
+     "basis": "EXPLICIT",
+     "evidence": "Web Policies - Policies | NSF",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "CONDITIONAL",
+     "basis": "STATUTE",
+     "evidence": "Web Policies - Policies | NSF",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 1,
+   "effective_status": "자동화 제외",
+   "access": [
+    {
+     "kind": "rss",
+     "hosts": [
+      "www.nsf.gov"
+     ],
+     "paths": [
+      "/rss/rss_www_news.xml"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "Web Policies - Policies | NSF",
+     "Artificial Intelligence Policy and Strategy | NSF",
+     "RSS Feeds and Podcasts - Connect | NSF"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "시각 자료(사진·그래픽·멀티미디어): 일부는 공공영역, 일부는 계약업체 제작, 일부는 소유자 허락으로 사용 — 재사용은 사례별 허가(생성기는 글만 쓰고 이미지는 쓰지 않음)",
+    "식별 가능한 인물: 별도 동의가 필요할 수 있음",
+    "NSF 로고: 브랜드 정책(/policies/brand)이 따로 정함",
+    "저작권 있는 텍스트: 해당 페이지에 개별 표시됨",
+    "연결된 외부 사이트 자료: NSF 가 승인·보증하지 않음"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "statcan",
+   "name": "캐나다 통계청 Statistics Canada (www.statcan.gc.ca · www150.statcan.gc.ca) — The Daily Atom 피드·기사 쪽(RSS·웹, 자동화 제외)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "ALLOWED",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "Statistics Canada Open Licence",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "robots.txt (www150.statcan.gc.ca)",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "CONDITIONAL",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "Statistics Canada Open Licence",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "ALLOWED",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "Statistics Canada Open Licence",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "ALLOWED",
+     "basis": "IMPLIED",
+     "evidence": "Statistics Canada Open Licence",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "CONDITIONAL",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "Statistics Canada Open Licence",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "CONDITIONAL",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "Statistics Canada Open Licence",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 1,
+   "effective_status": "자동화 제외",
+   "access": [
+    {
+     "kind": "rss",
+     "hosts": [
+      "www150.statcan.gc.ca"
+     ],
+     "paths": [
+      "/n1/rss/dai-quo/0-eng.atom"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    },
+    {
+     "kind": "html",
+     "hosts": [
+      "www.statcan.gc.ca"
+     ],
+     "paths": [
+      "/daily-quotidien/"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "Statistics Canada Open Licence",
+     "Terms and conditions - Statistics Canada",
+     "Statistics Canada Open Licence - Frequently Asked Questions (FAQ)",
+     "Web Data Service (WDS) User Guide"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "제3자 지식재산: 사이트에 따로 표시되며 출처를 밝혀야 함, 라이선스 대상 아님",
+    "비기밀 결과만 대상(기밀·억제된 자료 제외), 우편 발송 상품(FAQ Q3)은 별도 조건",
+    "통계청 명칭·문장·로고·휘장·도메인 이름: 서면 허가(재무위원회 사무국) 없이 재현물·관련 자료에 쓰는 것 금지",
+    "캐나다 정부 공식 상징(Canada wordmark·국장·국기 기호): 사전 서면 허가 필요(상업·비상업 불문)",
+    "정보를 합치거나 연결해 사람·기업·조직을 식별하는 행위 금지, 라이선스와 함께 제공된 소프트웨어의 역분해 금지"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "statcan_wds",
+   "name": "캐나다 통계청 Statistics Canada WDS API (www150.statcan.gc.ca) — 구조화 API 만(제공처 조사 전 — 켤 수 없음, 규칙 기반 경로 전용 후보)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "ALLOWED",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "Statistics Canada Open Licence",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "robots.txt (www150.statcan.gc.ca)",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "CONDITIONAL",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "Statistics Canada Open Licence",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "ALLOWED",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "Statistics Canada Open Licence",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "ALLOWED",
+     "basis": "IMPLIED",
+     "evidence": "Statistics Canada Open Licence",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "CONDITIONAL",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "Statistics Canada Open Licence",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "CONDITIONAL",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "Statistics Canada Open Licence",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 1,
+   "effective_status": "자동화 제외",
+   "access": [
+    {
+     "kind": "api",
+     "hosts": [
+      "www150.statcan.gc.ca"
+     ],
+     "paths": [
+      "/t1/wds/rest/"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "Statistics Canada Open Licence",
+     "Terms and conditions - Statistics Canada",
+     "Statistics Canada Open Licence - Frequently Asked Questions (FAQ)",
+     "Web Data Service (WDS) User Guide"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "제3자 지식재산: 사이트에 따로 표시되며 출처를 밝혀야 함, 라이선스 대상 아님",
+    "비기밀 결과만 대상(기밀·억제된 자료 제외), 우편 발송 상품(FAQ Q3)은 별도 조건",
+    "통계청 명칭·문장·로고·휘장·도메인 이름: 서면 허가(재무위원회 사무국) 없이 재현물·관련 자료에 쓰는 것 금지",
+    "캐나다 정부 공식 상징(Canada wordmark·국장·국기 기호): 사전 서면 허가 필요(상업·비상업 불문)",
+    "정보를 합치거나 연결해 사람·기업·조직을 식별하는 행위 금지, 라이선스와 함께 제공된 소프트웨어의 역분해 금지",
+    "제공처 조사 전: 7칸 재확인·호출 한도·출처 문구·WDS 메서드별 경로 좁히기가 끝나기 전에는 켤 수 없음(조사 필요) — 값을 채우지 않았다"
+   ],
+   "retention_days": null,
+   "enabled": false,
+   "ai_use": "NEVER"
+  },
+  {
+   "provider_id": "uk_govuk",
+   "name": "영국 정부 GOV.UK (www.gov.uk) — 부처 뉴스 Atom 피드(DESNZ·Defra·DSIT·AI Security Institute·CMA, RSS·웹, 자동화 제외)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "ALLOWED",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "www.nationalarchives.gov.uk 공식 페이지",
+     "read_at": "2026-10-26"
+    },
+    "automated_access": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Reuse GOV.UK content - GOV.UK",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "CONDITIONAL",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "www.nationalarchives.gov.uk 공식 페이지",
+     "read_at": "2026-10-26"
+    },
+    "storage": {
+     "state": "ALLOWED",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "www.nationalarchives.gov.uk 공식 페이지",
+     "read_at": "2026-10-26"
+    },
+    "ai_input": {
+     "state": "ALLOWED",
+     "basis": "IMPLIED",
+     "evidence": "Terms and conditions - GOV.UK",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "CONDITIONAL",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "www.nationalarchives.gov.uk 공식 페이지",
+     "read_at": "2026-10-26"
+    },
+    "license": {
+     "state": "CONDITIONAL",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "Terms and conditions - GOV.UK",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 1,
+   "effective_status": "자동화 제외",
+   "access": [
+    {
+     "kind": "rss",
+     "hosts": [
+      "www.gov.uk"
+     ],
+     "paths": [
+      "/search/news-and-communications.atom"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "Terms and conditions - GOV.UK",
+     "Reuse GOV.UK content - GOV.UK"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "OGL 이 적용되지 않는 콘텐츠: 약관은 OGL 이 면제 대상을 정한다고만 말하고 목록은 적지 않음. 왕실 저작권·OGL 밖 콘텐츠(제3자 저작물 등)는 GOV.UK 가 보통 저작자·보유자를 표시한다고 함",
+    "개인정보·제3자 권리·로고·왕실 문장은 OGL 적용 대상이 아님(2026-10-26 기록, 오늘 재확인 못 함)",
+    "GOV.UK 나 다른 정부 부처·기관과 제휴했거나 보증을 받았다고 말하려면 허가 필요(약관 '링크' 절)",
+    "서비스·거래 쪽은 자체 약관이 따로 붙을 수 있음(약관 '서비스와 거래' 절)",
+    "바닥글의 'except where otherwise stated': 개별 페이지의 별도 표시는 코드가 가려내지 못함(옛 기록)"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "uk_govuk_api",
+   "name": "영국 정부 GOV.UK Content API (content-api.publishing.service.gov.uk) — 구조화 API 만(제공처 조사 전 — 켤 수 없음, 쓸 경로 미정이라 paths 비움, 규칙 기반 경로 전용 후보)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "ALLOWED",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "www.nationalarchives.gov.uk 공식 페이지",
+     "read_at": "2026-10-26"
+    },
+    "automated_access": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Reuse GOV.UK content - GOV.UK",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "CONDITIONAL",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "www.nationalarchives.gov.uk 공식 페이지",
+     "read_at": "2026-10-26"
+    },
+    "storage": {
+     "state": "ALLOWED",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "www.nationalarchives.gov.uk 공식 페이지",
+     "read_at": "2026-10-26"
+    },
+    "ai_input": {
+     "state": "ALLOWED",
+     "basis": "IMPLIED",
+     "evidence": "Terms and conditions - GOV.UK",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "CONDITIONAL",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "www.nationalarchives.gov.uk 공식 페이지",
+     "read_at": "2026-10-26"
+    },
+    "license": {
+     "state": "CONDITIONAL",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "Terms and conditions - GOV.UK",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 1,
+   "effective_status": "자동화 제외",
+   "access": [
+    {
+     "kind": "api",
+     "hosts": [
+      "content-api.publishing.service.gov.uk"
+     ],
+     "paths": [],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": null
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "Terms and conditions - GOV.UK",
+     "Reuse GOV.UK content - GOV.UK"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "OGL 이 적용되지 않는 콘텐츠: 약관은 OGL 이 면제 대상을 정한다고만 말하고 목록은 적지 않음. 왕실 저작권·OGL 밖 콘텐츠(제3자 저작물 등)는 GOV.UK 가 보통 저작자·보유자를 표시한다고 함",
+    "개인정보·제3자 권리·로고·왕실 문장은 OGL 적용 대상이 아님(2026-10-26 기록, 오늘 재확인 못 함)",
+    "GOV.UK 나 다른 정부 부처·기관과 제휴했거나 보증을 받았다고 말하려면 허가 필요(약관 '링크' 절)",
+    "서비스·거래 쪽은 자체 약관이 따로 붙을 수 있음(약관 '서비스와 거래' 절)",
+    "바닥글의 'except where otherwise stated': 개별 페이지의 별도 표시는 코드가 가려내지 못함(옛 기록)",
+    "제공처 조사 전: 7칸 재확인·쓸 경로(paths)·호출 한도·출처 문구를 정하기 전에는 켤 수 없음(조사 필요) — 값을 채우지 않았다"
+   ],
+   "retention_days": null,
+   "enabled": false,
+   "ai_use": "NEVER"
+  },
+  {
+   "provider_id": "noaa_swpc",
+   "name": "미국 NOAA 우주기상예측센터 SWPC (www.spaceweather.gov, 구 www.swpc.noaa.gov) — 웹 페이지(NOAA 척도 설명 등 사람이 읽는 쪽, 자동 접근 아님)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "ALLOWED",
+     "basis": "EXPLICIT",
+     "evidence": "Disclaimer (National Weather Service)",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Disclaimer (National Weather Service)",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Disclaimer (National Weather Service)",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "ALLOWED",
+     "basis": "STATUTE",
+     "evidence": "Data Access | NOAA / NWS Space Weather Prediction Center",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "ALLOWED",
+     "basis": "IMPLIED",
+     "evidence": "Disclaimer (National Weather Service)",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Disclaimer (National Weather Service)",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "CONDITIONAL",
+     "basis": "STATUTE",
+     "evidence": "Disclaimer (National Weather Service)",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 1,
+   "effective_status": "참고 전용",
+   "access": [
+    {
+     "kind": "html",
+     "hosts": [
+      "www.spaceweather.gov"
+     ],
+     "paths": [
+      "/noaa-scales-explanation"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [
+    "www.swpc.noaa.gov"
+   ],
+   "snapshot": {
+    "terms_pages": [
+     "Homepage | NOAA / NWS Space Weather Prediction Center",
+     "Data Access | NOAA / NWS Space Weather Prediction Center",
+     "Disclaimer (National Weather Service)"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "제3자 데이터·제품: 각 제공자가 라이선스를 가지고 제공 — 제공자에게 문의하라고 안내",
+    "구글·에스리 지도·영상: 구글·에스리 라이선스",
+    "NWS 명칭·시각 식별자(로고): 상표라 허가 없이 쓸 수 없음(로고 요청 안내 있음)",
+    "'별도 표시된 자료'(specifically noted otherwise): 개별 표시 확인 필요",
+    "다른 미국 정부 기관 출처 자료: 면책이 일부 자료가 다른 정부 출처에서 온다고 언급",
+    "NCEI 아카이브·soho.nascom.nasa.gov(SOHO) 등 연결 자료: 이번에 읽지 않음",
+    "참고 호스트 www.swpc.noaa.gov 는 옛 주소 — 2026-11-10 현재 www.spaceweather.gov 로 301 이동(페이지 안 일부 링크는 아직 옛 주소)",
+    "html 경로(/noaa-scales-explanation)는 해설 페이지 — 값은 JSON 에 있으므로 자동 경로로 쓰지 않는다(경로 유형 규칙 A6)"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "noaa_swpc_json",
+   "name": "미국 NOAA 우주기상예측센터 SWPC JSON 데이터 서비스 (services.swpc.noaa.gov) — NOAA 가 만든 값만, 제품 여섯 개(Dataset·Endpoint 단위, 규칙 기반 경로 전용)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "ALLOWED",
+     "basis": "EXPLICIT",
+     "evidence": "Disclaimer (National Weather Service)",
+     "read_at": "2026-11-10"
+    },
+    "automated_access": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Disclaimer (National Weather Service)",
+     "read_at": "2026-11-10"
+    },
+    "derivative_use": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Disclaimer (National Weather Service)",
+     "read_at": "2026-11-10"
+    },
+    "storage": {
+     "state": "ALLOWED",
+     "basis": "STATUTE",
+     "evidence": "Disclaimer (National Weather Service), Service Change Notice 26-21",
+     "read_at": "2026-11-10"
+    },
+    "ai_input": {
+     "state": "ALLOWED",
+     "basis": "IMPLIED",
+     "evidence": "Disclaimer (National Weather Service)",
+     "read_at": "2026-11-10"
+    },
+    "attribution": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Disclaimer (National Weather Service)",
+     "read_at": "2026-11-10"
+    },
+    "license": {
+     "state": "CONDITIONAL",
+     "basis": "STATUTE",
+     "evidence": "Disclaimer (National Weather Service)",
+     "read_at": "2026-11-10"
+    }
+   },
+   "strict_tier": 1,
+   "permissive_interpretation": 1,
+   "effective_status": "자동화 가능",
+   "access": [
+    {
+     "kind": "api",
+     "hosts": [
+      "services.swpc.noaa.gov"
+     ],
+     "paths": [
+      "/products/noaa-planetary-k-index.json",
+      "/products/noaa-planetary-k-index-forecast.json",
+      "/products/noaa-scales.json",
+      "/json/solar-cycle/swpc_observed_ssn.json",
+      "/json/solar-cycle/observed-solar-cycle-indices.json",
+      "/json/goes/primary/xray-flares-7-day.json"
+     ],
+     "auth": "NONE",
+     "rate_limit": {
+      "official": "NONE",
+      "own": {
+       "min_gap_same_file_s": 60,
+       "min_gap_other_file_s": 5,
+       "max_products_per_post": 3,
+       "max_calls_per_product_per_post": 1,
+       "max_calls_per_day": 8,
+       "max_calls_per_month": 100,
+       "max_retries": 1,
+       "retry_after_s": 60,
+       "stop_hours_on_403_429": 24,
+       "stop_product_on_404": true,
+       "request_gzip": true,
+       "daily_product_not_before_utc": "00:30",
+       "daily_product_max_per_day": 1,
+       "fail_closed_on_bad_response": true
+      },
+      "note": "공식 수치 한도 없음. 자체 상한(제안, 공식 값 아님): 같은 파일 60초 이상·다른 파일 5초 이상 간격, 글 하나당 제품 3개까지 각 1회, 하루 8회·월 100회 이하, 실패 시 60초 뒤 1회만 재시도, 429·403 은 24시간 중지·404 는 그 제품만 중지, gzip 요청, 일별 제품은 00:30 UTC 이후 하루 1회, 응답 검증에 실패하면 그 글 중단"
+     },
+     "robots_checked_at": "2026-11-10"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "Homepage | NOAA / NWS Space Weather Prediction Center",
+     "Data Access | NOAA / NWS Space Weather Prediction Center",
+     "Disclaimer (National Weather Service)",
+     "Planetary K-index",
+     "F10.7 cm Radio Emissions",
+     "Solar Cycle Progression",
+     "GOES X-ray Flux",
+     "Service Change Notice 26-21"
+    ],
+    "read_at": "2026-11-10",
+    "content_hash": "",
+    "expires_at": "2027-02-08"
+   },
+   "attribution_template": "자료: {title}, 미국 NOAA 우주기상예측센터({date} 열람). NOAA 가 만든 이 자료는 미국 연방정부 저작물이라 저작권 보호 대상이 아닙니다. 값을 가공해 더한 계산과 설명은 이 블로그의 것이며 NOAA·미국 정부가 인정하거나 보증한 내용이 아닙니다.",
+   "exceptions": [
+    "제3자 데이터·제품: 각 제공자가 라이선스를 가지고 제공 — 제공자에게 문의하라고 안내",
+    "구글·에스리 지도·영상: 구글·에스리 라이선스",
+    "NWS 명칭·시각 식별자(로고): 상표라 허가 없이 쓸 수 없음(로고 요청 안내 있음)",
+    "'별도 표시된 자료'(specifically noted otherwise): 개별 표시 확인 필요",
+    "다른 미국 정부 기관 출처 자료: 면책이 일부 자료가 다른 정부 출처에서 온다고 언급",
+    "NCEI 아카이브·soho.nascom.nasa.gov(SOHO) 등 연결 자료: 이번에 읽지 않음",
+    "범위: NOAA 가 만든 값만 읽는다 — noaa-planetary-k-index(time_tag·Kp·a_running·station_count)·noaa-planetary-k-index-forecast(time_tag·kp·observed·noaa_scale)·noaa-scales(전체)·swpc_observed_ssn(Obsdate·swpc_ssn)·observed-solar-cycle-indices(time-tag·observed_swpc_ssn·smoothed_swpc_ssn 만)·xray-flares-7-day(전체) — 어댑터가 제품별 필드 화이트리스트로 이 필드만 읽는다",
+    "읽지 않는 필드: observed-solar-cycle-indices 의 ssn·smoothed_ssn(S.I.D.C. 브뤼셀 국제 흑점수)·f10.7·smoothed_f10.7(Penticton) — 면책 문서의 공공영역 문구 밖(별개 항목 swpc_sidc_penticton_fields)",
+    "읽지 않는 파일: F10.7 JSON 두 개(캐나다 NRC 가 NRCan 과 협력해 제공 — 별개 항목 swpc_f107_nrc)·kyoto-dst(별개 항목 swpc_kyoto_dst)·45일 예보·태양풍·1분 Kp·goes/primary 의 수 MB 파일",
+    "Kp 입력 자력계 자료(USGS·NRCan·BGS·GFZ·Geoscience Australia·IPGP 등 협력기관)는 읽지 않는다 — NOAA 가 산출한 추정 Kp 만 읽고 독일 GFZ 의 공식 Kp 와 다르므로 'NOAA 추정 Kp' 로 표기한다",
+    "NWS 명칭·로고·시각 식별자·이미지는 쓰지 않고 NOAA·미국 정부의 보증·제휴·승인을 암시하지 않으며 우리 계산을 공식 정부 자료처럼 제시하지 않는다(면책 문서의 세 가지 금지)",
+    "예보 값은 관측과 구분해 예보로 표기한다(Kp 예보 파일은 관측·추정·예보가 한 필드에 섞임). 2026-03 JSON 구조 변경 전례(SCN 26-21)가 있어 응답 검증은 실패 시 닫힌다"
+   ],
+   "retention_days": null,
+   "enabled": false,
+   "ai_use": "NEVER",
+   "own_data_only": true
+  },
+  {
+   "provider_id": "swpc_f107_nrc",
+   "name": "SWPC 서비스에 올라 있는 F10.7 전파 플럭스 JSON 두 개 — 캐나다 NRC 가 NRCan 과 협력해 제공하는 제3자 자료(조사 필요 — 켤 수 없음)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "F10.7 cm Radio Emissions",
+     "read_at": "2026-11-10"
+    },
+    "automated_access": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "F10.7 cm Radio Emissions",
+     "read_at": "2026-11-10"
+    },
+    "derivative_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "F10.7 cm Radio Emissions",
+     "read_at": "2026-11-10"
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "F10.7 cm Radio Emissions",
+     "read_at": "2026-11-10"
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "F10.7 cm Radio Emissions",
+     "read_at": "2026-11-10"
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "F10.7 cm Radio Emissions",
+     "read_at": "2026-11-10"
+    },
+    "license": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "F10.7 cm Radio Emissions",
+     "read_at": "2026-11-10"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": null,
+   "effective_status": "자동화 제외",
+   "access": [
+    {
+     "kind": "api",
+     "hosts": [
+      "services.swpc.noaa.gov"
+     ],
+     "paths": [
+      "/products/10cm-flux-30-day.json",
+      "/json/f107_cm_flux.json"
+     ],
+     "auth": "NONE",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-10"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "F10.7 cm Radio Emissions"
+    ],
+    "read_at": "2026-11-10",
+    "content_hash": "",
+    "expires_at": "2027-02-08"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "제3자 자료: 캐나다 NRC(National Research Council Canada)가 NRCan 과 협력해 제공 — SWPC 페이지가 courtesy 로 밝힘, 면책 문서의 '별도 표시가 없는 한 공공영역' 문구 밖",
+    "JSON 파일 안에는 출처 표시 칸이 없음",
+    "NRC·NRCan 의 이용 조건(상업 이용·보관·가공·AI 입력·출처 표시)은 읽지 않음 — 조사 필요, 그 전에는 쓰지 않는다"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "swpc_kyoto_dst",
+   "name": "SWPC 서비스에 올라 있는 Dst 지수 JSON — 이름상 교토 대학 지구자기 자료센터 자료(제3자 가능성, 조사 필요 — 켤 수 없음)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "Disclaimer (National Weather Service)",
+     "read_at": "2026-11-10"
+    },
+    "automated_access": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "Disclaimer (National Weather Service)",
+     "read_at": "2026-11-10"
+    },
+    "derivative_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "Disclaimer (National Weather Service)",
+     "read_at": "2026-11-10"
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "Disclaimer (National Weather Service)",
+     "read_at": "2026-11-10"
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "Disclaimer (National Weather Service)",
+     "read_at": "2026-11-10"
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "Disclaimer (National Weather Service)",
+     "read_at": "2026-11-10"
+    },
+    "license": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "Disclaimer (National Weather Service)",
+     "read_at": "2026-11-10"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": null,
+   "effective_status": "자동화 제외",
+   "access": [
+    {
+     "kind": "api",
+     "hosts": [
+      "services.swpc.noaa.gov"
+     ],
+     "paths": [
+      "/products/kyoto-dst.json"
+     ],
+     "auth": "NONE",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-10"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "Disclaimer (National Weather Service)"
+    ],
+    "read_at": "2026-11-10",
+    "content_hash": "",
+    "expires_at": "2027-02-08"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "제3자 자료 가능성: 파일 이름이 교토 대학 지구자기 자료센터의 Dst 지수를 가리킴 — 파일은 열지 않았고 출처를 밝힌 SWPC 문서도 읽지 못함",
+    "교토 쪽 이용 조건은 읽지 않음 — 조사 필요, 그 전에는 쓰지 않는다"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "swpc_sidc_penticton_fields",
+   "name": "SWPC 월별 태양주기 지수 파일(observed-solar-cycle-indices)에 NOAA 필드와 섞여 있는 제3자 필드 — SIDC 브뤼셀 흑점수·Penticton F10.7(조사 필요 — 켤 수 없음)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "Solar Cycle Progression",
+     "read_at": "2026-11-10"
+    },
+    "automated_access": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "Solar Cycle Progression",
+     "read_at": "2026-11-10"
+    },
+    "derivative_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "Solar Cycle Progression",
+     "read_at": "2026-11-10"
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "Solar Cycle Progression",
+     "read_at": "2026-11-10"
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "Solar Cycle Progression",
+     "read_at": "2026-11-10"
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "Solar Cycle Progression",
+     "read_at": "2026-11-10"
+    },
+    "license": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "Solar Cycle Progression",
+     "read_at": "2026-11-10"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": null,
+   "effective_status": "참고 전용",
+   "access": [],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "Solar Cycle Progression"
+    ],
+    "read_at": "2026-11-10",
+    "content_hash": "",
+    "expires_at": "2027-02-08"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "제3자 필드: ssn·smoothed_ssn — S.I.D.C. 브뤼셀 국제 흑점수(SWPC 페이지가 출처로 밝힘)",
+    "제3자 필드: f10.7·smoothed_f10.7 — Penticton 측정(F10.7 은 캐나다 NRC·NRCan 제공 계열, 파일 안에는 출처 칸이 없음)",
+    "같은 파일을 읽는 항목 noaa_swpc_json 은 time-tag·observed_swpc_ssn·smoothed_swpc_ssn 만 읽는다(어댑터 필드 화이트리스트) — 위 필드는 읽지 않는다",
+    "SIDC·Penticton 의 이용 조건은 읽지 않음 — 조사 필요, 그 전에는 쓰지 않는다"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "fred_api",
+   "name": "FRED (세인트루이스 연방준비은행 — 연준 이사회와 별개 기관) API·웹 서비스",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "Legal Notices, Information and Disclaimers | FRED | St. Louis Fed",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "FRED API Terms of Use",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "Legal Notices, Information and Disclaimers | FRED | St. Louis Fed",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "Legal Notices, Information and Disclaimers | FRED | St. Louis Fed",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "Legal Notices, Information and Disclaimers | FRED | St. Louis Fed",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Legal Notices, Information and Disclaimers | FRED | St. Louis Fed",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "FRED API Terms of Use",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 4,
+   "permissive_interpretation": 4,
+   "effective_status": "완전 제외",
+   "access": [
+    {
+     "kind": "api",
+     "hosts": [
+      "fred.stlouisfed.org"
+     ],
+     "paths": [
+      "/docs/api/fred"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    },
+    {
+     "kind": "html",
+     "hosts": [
+      "fred.stlouisfed.org"
+     ],
+     "paths": [
+      "/series/"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "FRED API Terms of Use",
+     "Legal Notices, Information and Disclaimers | FRED | St. Louis Fed"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "제3자 시리즈: 사전 승인 필요(은행도 허락 불가) 또는 노트에 Copyright 표시",
+    "Visa Spending Momentum Index: 별도 약관, 컴퓨터 판독 형태로 제3자에게 제공 금지",
+    "FRED·ALFRED 명칭·로고·표장: 호스트 이름·앱 이름에 쓰기 금지",
+    "FRED MCP Connector: 별도 추가 약관"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "unsplash",
+   "name": "Unsplash (api.unsplash.com 검색·사진 조회·다운로드 알림, images.unsplash.com 사진)",
+   "class": "image",
+   "policy": {
+    "commercial_use": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "Guideline: high quality, authentic experiences",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "Guideline: high quality, authentic experiences",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "Guideline: hotlinking images",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Guideline: hotlinking images",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "Guideline: high quality, authentic experiences",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Guideline: attribution",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "Can I use Unsplash images for personal or commercial projects?",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 4,
+   "permissive_interpretation": 4,
+   "effective_status": "완전 제외",
+   "access": [
+    {
+     "kind": "api",
+     "hosts": [
+      "api.unsplash.com"
+     ],
+     "paths": [
+      "/search/photos",
+      "/photos/"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    },
+    {
+     "kind": "image",
+     "hosts": [
+      "images.unsplash.com"
+     ],
+     "paths": [
+      "/photo-"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [
+    "unsplash.com",
+    "help.unsplash.com"
+   ],
+   "snapshot": {
+    "terms_pages": [
+     "Unsplash API Guidelines (도움말 센터)",
+     "Guideline: high quality, authentic experiences",
+     "Guideline: hotlinking images",
+     "Guideline: attribution",
+     "Unsplash Help Center 첫 페이지",
+     "Unsplash License 컬렉션",
+     "Can I use Unsplash images for personal or commercial projects?",
+     "Releases and Trademarks",
+     "An image has been removed — can I still use it?"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "사진 속 사람·재산·상표·로고·건축물 등 제3자 권리는 Unsplash 가 보증하지 않는다(릴리스·상표 허가가 없을 수 있음, 사용자가 별도 확인 — License FAQ 2025-08-08)",
+    "원본 그대로 사진을 상품으로 판매하는 용도, Unsplash 핵심 경험을 복제하는 앱, 사진 모음으로 경쟁 서비스를 만드는 용도는 금지(가이드라인·FAQ 제목 기준)",
+    "API 로 받은 사진에는 API 가이드라인이 추가로 적용된다(핫링크·출처·다운로드 알림·API 콘텐츠 근처 광고 금지)",
+    "Unsplash+ 유료 사진은 별개 약관(이번 조사에서 열지 않음)",
+    "권리 부족으로 삭제된 사진은 계속 사용할 수 있다는 안내에서 제외(사용자 책임)"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "naver_datalab_apihub",
+   "name": "네이버 검색 트렌드(DataLab) API / NAVER API HUB",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "developers.naver.com 공식 페이지",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "developers.naver.com 공식 페이지",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "developers.naver.com 공식 페이지",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "developers.naver.com 공식 페이지",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "developers.naver.com 공식 페이지",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "developers.naver.com 공식 페이지",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "developers.naver.com 공식 페이지",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 3,
+   "effective_status": "자동화 제외",
+   "access": [],
+   "reference_hosts": [
+    "developers.naver.com"
+   ],
+   "snapshot": {
+    "terms_pages": [],
+    "read_at": null,
+    "content_hash": "",
+    "expires_at": null
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "미확인: 약관을 읽지 못해 제3자 저작물·결과 재배포·저장 제외 범위를 모른다"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "mfds",
+   "name": "식품의약품안전처 (www.mfds.go.kr)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "CONDITIONAL",
+     "basis": "STATUTE",
+     "evidence": "저작권정책",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "저작권정책",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "CONDITIONAL",
+     "basis": "STATUTE",
+     "evidence": "저작권정책",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "저작권정책",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "CONDITIONAL",
+     "basis": "IMPLIED",
+     "evidence": "저작권정책",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "CONDITIONAL",
+     "basis": "STATUTE",
+     "evidence": "저작권정책",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "소비기한 표시제 카드뉴스 게시글(공개 글이 인용)",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 3,
+   "effective_status": "참고 전용",
+   "access": [
+    {
+     "kind": "html",
+     "hosts": [
+      "www.mfds.go.kr"
+     ],
+     "paths": [
+      "/brd/m_580/view.do"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    },
+    {
+     "kind": "rss",
+     "hosts": [
+      "www.mfds.go.kr"
+     ],
+     "paths": [
+      "/www/rss/list.do"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "식품의약품안전처 홈",
+     "저작권정책",
+     "소비기한 표시제 카드뉴스 게시글(공개 글이 인용)"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "공공누리 표시가 없는 자료 — 게시 부서 담당자와 사전 협의 대상(저작권정책)",
+    "저작권법 제24조의2 예외: 국가안보 정보·개인 사생활·영업비밀·법률로 공개가 제한된 정보·국유재산으로 관리되는 등록 저작물",
+    "타인·타기관의 저작권(정책이 존중한다는 일반 문구만 있음)",
+    "이미지·로고는 별도 규정이 없고(NOT_ADDRESSED) 인용 글 페이지의 카드뉴스 이미지(PNG 첨부)에는 별도 표시가 없다"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "nst",
+   "name": "국가과학기술연구회 (www.nst.re.kr)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "NST 게시글(한국기계연구원 동남권 오픈랩 소식 안내)",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "RSS 제공",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "NST 게시글(한국기계연구원 동남권 오픈랩 소식 안내)",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "NST 게시글(한국기계연구원 동남권 오픈랩 소식 안내)",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "NST 게시글(한국기계연구원 동남권 오픈랩 소식 안내)",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "NST 게시글(한국기계연구원 동남권 오픈랩 소식 안내)",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "NST 게시글(한국기계연구원 동남권 오픈랩 소식 안내)",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 3,
+   "effective_status": "참고 전용",
+   "access": [
+    {
+     "kind": "html",
+     "hosts": [
+      "www.nst.re.kr"
+     ],
+     "paths": [
+      "/www/selectBbsNttView.do"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    },
+    {
+     "kind": "rss",
+     "hosts": [
+      "www.nst.re.kr"
+     ],
+     "paths": [
+      "/nst/rss/rss.jsp"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "NST 홈",
+     "NST 게시글(한국기계연구원 동남권 오픈랩 소식 안내)",
+     "RSS 제공"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "공공누리 유형 미확인(마크는 있으나 유형 불명)",
+    "첨부파일의 별도 표시 없음(인용 게시글에는 첨부 목록이 비어 있음)",
+    "게시글의 소관기관은 한국기계연구원 — 원문(KIMM) 쪽 조건은 별도(KIMM 호스트는 열지 못함)"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "kimm",
+   "name": "한국기계연구원 (www.kimm.re.kr)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "robots.txt (www.kimm.re.kr)",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 4,
+   "permissive_interpretation": 4,
+   "effective_status": "완전 제외",
+   "access": [
+    {
+     "kind": "html",
+     "hosts": [
+      "www.kimm.re.kr"
+     ],
+     "paths": [
+      "/sub0504/view/id/21491",
+      "/etsc/biz-support-overview"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [],
+    "read_at": null,
+    "content_hash": "",
+    "expires_at": null
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "미확인: 약관·저작권 안내를 열지 않아 제3자 저작물·이미지·로고 제외 범위를 모른다"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "jaxa",
+   "name": "JAXA 宇宙航空研究開発機構 (www.jaxa.jp, www.mmx.jaxa.jp)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "サイトポリシー・利用規約",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "サイトポリシー・利用規約",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "サイトポリシー・利用規約",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "サイトポリシー・利用規約",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "サイトポリシー・利用規約",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "サイトポリシー・利用規約",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "サイトポリシー・利用規約",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 4,
+   "permissive_interpretation": 4,
+   "effective_status": "완전 제외",
+   "access": [
+    {
+     "kind": "html",
+     "hosts": [
+      "www.mmx.jaxa.jp"
+     ],
+     "paths": [
+      "/en/"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    },
+    {
+     "kind": "html",
+     "hosts": [
+      "www.jaxa.jp"
+     ],
+     "paths": [
+      "/press/2026/10/20261018-1_j.html"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "JAXA 홈",
+     "サイトポリシー・利用規約",
+     "MMX 미션 사이트(영문 홈)"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "이미지·영상 소재는 JAXA 디지털 아카이브스(별도 호스트 jda.jaxa.jp)의 이용 조건과 신청이 따로 필요(정책 페이지 안내, 열지 않음)",
+    "MMX 사이트 일부 이미지는 독일 항공우주센터(DLR) 저작권 표기가 붙은 제3자 자료",
+    "JAXA 로고는 등록상표",
+    "JAXA 공식 YouTube 영상 임베드는 신청 없이 가능하나 지정 설명문이 필요(정책 페이지 안내)",
+    "다른 외부 사이트에는 그 사이트의 정책이 적용된다(정책 페이지 안내)"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "kosis_openapi_stat_data",
+   "name": "KOSIS OpenAPI · 통계자료 조회(통계표 수치) — 국가데이터처",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "통계정보 이용지침 (서비스 소개 > 서비스정책)",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "통계정보 활용약관",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "CONDITIONAL",
+     "basis": "IMPLIED",
+     "evidence": "통계정보 이용지침 (서비스 소개 > 서비스정책)",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "CONDITIONAL",
+     "basis": "IMPLIED",
+     "evidence": "통계정보 활용약관",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "IMPLIED",
+     "evidence": "통계정보 이용지침 (서비스 소개 > 서비스정책)",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "통계정보 이용지침 (서비스 소개 > 서비스정책)",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "통계정보 이용지침 (서비스 소개 > 서비스정책)",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 3,
+   "effective_status": "자동화 제외",
+   "access": [
+    {
+     "kind": "api",
+     "hosts": [
+      "kosis.kr"
+     ],
+     "paths": [
+      "/openapi/index/index.jsp"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    },
+    {
+     "kind": "html",
+     "hosts": [
+      "kosis.kr"
+     ],
+     "paths": [],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "통계정보 이용지침 (서비스 소개 > 서비스정책)",
+     "통계정보 활용약관",
+     "사이트 이용약관",
+     "공유서비스(OpenAPI) 안내 (서비스 소개 > Open API)",
+     "KOSIS 공유서비스(OpenAPI) 홈",
+     "KOSIS 국가통계포털 홈"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "수치(통계표 값·통계표 파일): 활용약관 제2조 대상 — 상업 이용·재배포 가능, 출처 표시 필수, 임의 변경·왜곡 금지",
+    "국제통계·북한통계: 비상업 목적만, 재배포 금지(이용지침); 활용약관 제6조는 라이선스 제약 정보를 일부·전부 제공하지 않을 수 있다고 함",
+    "간행물: 공공누리 유형 안내를 따름(유형 번호는 열어 본 페이지에 없음)",
+    "설명문·웹문서·동영상 등 콘텐츠: 저작물로 보호(별도 표시 없으면 국가데이터처 저작권) — 별도 행 kosis_openapi_stat_explain",
+    "이미지·로고·디자인: 운영기관 소유이며 승인 없는 수정·판매·상업 이용 금지(사이트 이용약관 제16조)",
+    "제3자 권리가 포함된 정보·비공개 정보: 제공 대상에서 제외한다고 설명(공공데이터법 제17조, 이용지침)",
+    "가공 없이 KOSIS 통계정보를 그대로 유료 판매하는 행위 금지(이용지침)"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "kosis_openapi_stat_list",
+   "name": "KOSIS OpenAPI · 통계목록 조회(통계표 목록·분류 메타데이터) — 국가데이터처",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "CONDITIONAL",
+     "basis": "IMPLIED",
+     "evidence": "통계정보 활용약관",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "통계정보 활용약관",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "CONDITIONAL",
+     "basis": "IMPLIED",
+     "evidence": "통계정보 이용지침 (서비스 소개 > 서비스정책)",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "CONDITIONAL",
+     "basis": "IMPLIED",
+     "evidence": "통계정보 활용약관",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "통계정보 이용지침 (서비스 소개 > 서비스정책)",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "CONDITIONAL",
+     "basis": "IMPLIED",
+     "evidence": "통계정보 활용약관",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "통계정보 이용지침 (서비스 소개 > 서비스정책)",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 3,
+   "effective_status": "자동화 제외",
+   "access": [
+    {
+     "kind": "api",
+     "hosts": [
+      "kosis.kr"
+     ],
+     "paths": [
+      "/openapi/index/index.jsp"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "통계정보 이용지침 (서비스 소개 > 서비스정책)",
+     "통계정보 활용약관",
+     "사이트 이용약관",
+     "공유서비스(OpenAPI) 안내 (서비스 소개 > Open API)",
+     "KOSIS 공유서비스(OpenAPI) 홈"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "통계표 이름·ID·분류(메타데이터): 활용약관 제2조의 '통계표'에 포함되는지 문서에 없음",
+    "국제통계·북한통계의 목록 항목: 목록에 어떻게 표시되는지 확인 못 함",
+    "이미지·로고·디자인: 운영기관 소유이며 승인 없는 수정·판매·상업 이용 금지(사이트 이용약관 제16조)"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "kosis_openapi_stat_explain",
+   "name": "KOSIS OpenAPI · 통계설명자료·통계표 설명자료 조회(설명문) — 국가데이터처",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "통계정보 이용지침 (서비스 소개 > 서비스정책)",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "통계정보 활용약관",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "통계정보 이용지침 (서비스 소개 > 서비스정책)",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "통계정보 이용지침 (서비스 소개 > 서비스정책)",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "통계정보 이용지침 (서비스 소개 > 서비스정책)",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "통계정보 이용지침 (서비스 소개 > 서비스정책)",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "통계정보 이용지침 (서비스 소개 > 서비스정책)",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 3,
+   "effective_status": "자동화 제외",
+   "access": [
+    {
+     "kind": "api",
+     "hosts": [
+      "kosis.kr"
+     ],
+     "paths": [
+      "/openapi/index/index.jsp"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "통계정보 이용지침 (서비스 소개 > 서비스정책)",
+     "통계정보 활용약관",
+     "사이트 이용약관",
+     "공유서비스(OpenAPI) 안내 (서비스 소개 > Open API)",
+     "KOSIS 공유서비스(OpenAPI) 홈"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "설명문(통계설명자료·통계표 설명자료): 저작물로 보호, 허락 범위가 이름으로 안 나옴 — 운영자 원칙상 해설문은 자동 수집하지 않음",
+    "활용약관 제2조 적용 대상 목록에 설명자료가 없음",
+    "이미지·로고·디자인: 운영기관 소유이며 승인 없는 수정·판매·상업 이용 금지(사이트 이용약관 제16조)"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "bok_ecos_api",
+   "name": "한국은행 경제통계시스템 ECOS Open API (서비스 전체, Endpoint 미조사)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "한국은행 Open API 서비스 (ECOS) — 제목만 읽힘",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "한국은행 Open API 서비스 (ECOS) — 제목만 읽힘",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "한국은행 Open API 서비스 (ECOS) — 제목만 읽힘",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "한국은행 Open API 서비스 (ECOS) — 제목만 읽힘",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "한국은행 Open API 서비스 (ECOS) — 제목만 읽힘",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "한국은행 Open API 서비스 (ECOS) — 제목만 읽힘",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "한국은행 Open API 서비스 (ECOS) — 제목만 읽힘",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 3,
+   "effective_status": "자동화 제외",
+   "access": [
+    {
+     "kind": "api",
+     "hosts": [
+      "ecos.bok.or.kr"
+     ],
+     "paths": [
+      "/api/"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "한국은행 Open API 서비스 (ECOS) — 제목만 읽힘"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "읽지 못해 적용 제외 범위를 알 수 없음(한국은행 본 사이트 저작권 정책이 ECOS 에도 적용되는지도 확인 못 함)"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "kma_apihub_common",
+   "name": "기상청 API허브 · 공통 이용안내·이용약관 (개별 API 미조사)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "기상청 API허브 서비스 이용약관",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "기상청 API허브 서비스 이용약관",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "기상청 API허브 서비스 이용약관",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "기상청 API허브 서비스 이용약관",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "기상청 API허브 서비스 이용약관",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "CONDITIONAL",
+     "basis": "STATUTE",
+     "evidence": "[공지] 기상기후데이터 사용 시 출처표시 안내",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "기상청 API허브 이용안내",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 3,
+   "effective_status": "자동화 제외",
+   "access": [
+    {
+     "kind": "api",
+     "hosts": [
+      "apihub.kma.go.kr"
+     ],
+     "paths": [],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "기상청 API허브 이용안내",
+     "기상청 API허브 서비스 이용약관",
+     "[공지] 기상기후데이터 사용 시 출처표시 안내",
+     "기상청 API허브 홈"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "개별 API(단기예보·초단기·ASOS 관측·특보 등)별 공공누리 유형: 열어 본 페이지에 없음 — 요소별 정책 확인 못 함",
+    "데이터에 공공기관·국외기관·제3자 지식재산이 포함될 수 있음(이용약관 제13조 2항) — 어느 API·필드인지 구분 문장 없음",
+    "프로그램·디자인·상표 등 사이트 자체 권리: 운영기관 귀속(제13조 1항)",
+    "위성·레이더 영상 같은 이미지 제품: 별도 정책 문장을 확인하지 못함"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "kma_opendata_portal",
+   "name": "기상청 기상자료개방포털 (data.kma.go.kr) · 저작권 보호 및 정책 (자료별 유형 미조사)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "CONDITIONAL",
+     "basis": "STATUTE",
+     "evidence": "저작권 보호 및 정책 (기상자료개방포털)",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "저작권 보호 및 정책 (기상자료개방포털)",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "CONDITIONAL",
+     "basis": "IMPLIED",
+     "evidence": "저작권 보호 및 정책 (기상자료개방포털)",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "CONDITIONAL",
+     "basis": "IMPLIED",
+     "evidence": "저작권 보호 및 정책 (기상자료개방포털)",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "IMPLIED",
+     "evidence": "저작권 보호 및 정책 (기상자료개방포털)",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "저작권 보호 및 정책 (기상자료개방포털)",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "CONDITIONAL",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "기상자료개방포털 홈 (기상청 국가기후데이터센터)",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 3,
+   "effective_status": "자동화 제외",
+   "access": [
+    {
+     "kind": "html",
+     "hosts": [
+      "data.kma.go.kr"
+     ],
+     "paths": [
+      "/cmmn/main.do"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "저작권 보호 및 정책 (기상자료개방포털)",
+     "기상자료개방포털 홈 (기상청 국가기후데이터센터)"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "기상청이 저작재산권 전부를 보유한 저작물: 저작권법 제24조의2 근거 자유이용(출처 구체 표시)",
+    "공공누리 제1유형 표시 자료: 자유이용 대상 / 제2·3·4유형: 유형별 제한",
+    "다른 저작자·타 기관과 저작권을 공유한 자료: 단순 열람 외 이용 금지",
+    "공공누리 표시가 없는 자료: 담당자와 사전 협의 필요",
+    "위성·레이더 영상·이미지·로고·국외 자료·유료 자료: 정책 페이지에 언급 없음(확인 못 함)"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "datago_15084084_kma_vilage_fcst",
+   "name": "공공데이터포털 데이터셋 15084084 · 기상청_단기예보 조회서비스 (공공누리 제1유형 표기)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "CONDITIONAL",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "공공데이터 정책 (이용정책·이용약관·개인정보 처리방침 탭)",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "이용가이드 — '공공데이터 활용방법' 오픈API 안내",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "CONDITIONAL",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "공공데이터 정책 (이용정책·이용약관·개인정보 처리방침 탭)",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "CONDITIONAL",
+     "basis": "IMPLIED",
+     "evidence": "공공데이터 정책 (이용정책·이용약관·개인정보 처리방침 탭)",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "IMPLIED",
+     "evidence": "공공데이터 정책 (이용정책·이용약관·개인정보 처리방침 탭)",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "CONDITIONAL",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "기상청_단기예보 조회서비스 (공공데이터포털 오픈API 데이터셋 15084084)",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "CONDITIONAL",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "기상청_단기예보 조회서비스 (공공데이터포털 오픈API 데이터셋 15084084)",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 3,
+   "effective_status": "자동화 제외",
+   "access": [
+    {
+     "kind": "api",
+     "hosts": [
+      "www.data.go.kr"
+     ],
+     "paths": [
+      "/data/15084084/openapi.do"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "기상청_단기예보 조회서비스 (공공데이터포털 오픈API 데이터셋 15084084)",
+     "공공데이터 정책 (이용정책·이용약관·개인정보 처리방침 탭)",
+     "이용가이드 — '공공데이터 활용방법' 오픈API 안내",
+     "이용가이드 — '공공데이터 소개' 탭",
+     "[공지] 기상기후데이터 사용 시 출처표시 안내"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "이용허락범위에 '제3자 권리 포함: 저작권 표시' 가 있음 — 제3자 권리가 어느 요소(수치·설명문·이미지)인지 데이터셋 페이지에 구분이 없음",
+    "요소별(수치·설명문·이미지) 정책 구분 문장은 열어 본 페이지에 없음 — 이용허락범위 한 줄이 데이터셋 전체에 붙어 있음",
+    "포털 서비스 자체의 지식재산(프로그램·디자인 등): 센터 승인 필요(이용약관 제15조 3항)"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "datago_15073861_airkorea_air",
+   "name": "공공데이터포털 데이터셋 15073861 · 한국환경공단_에어코리아_대기오염정보 (공공누리 제3유형 표기)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "CONDITIONAL",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "공공데이터 정책 (이용정책·이용약관·개인정보 처리방침 탭)",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "이용가이드 — '공공데이터 활용방법' 오픈API 안내",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "한국환경공단_에어코리아_대기오염정보 (공공데이터포털 오픈API 데이터셋 15073861)",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "CONDITIONAL",
+     "basis": "IMPLIED",
+     "evidence": "한국환경공단_에어코리아_대기오염정보 (공공데이터포털 오픈API 데이터셋 15073861)",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "공공데이터 정책 (이용정책·이용약관·개인정보 처리방침 탭)",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "한국환경공단_에어코리아_대기오염정보 (공공데이터포털 오픈API 데이터셋 15073861)",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "CONDITIONAL",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "한국환경공단_에어코리아_대기오염정보 (공공데이터포털 오픈API 데이터셋 15073861)",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 4,
+   "permissive_interpretation": 4,
+   "effective_status": "완전 제외",
+   "access": [
+    {
+     "kind": "api",
+     "hosts": [
+      "www.data.go.kr"
+     ],
+     "paths": [
+      "/data/15073861/openapi.do"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    },
+    {
+     "kind": "html",
+     "hosts": [
+      "www.airkorea.or.kr"
+     ],
+     "paths": [
+      "/web"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "한국환경공단_에어코리아_대기오염정보 (공공데이터포털 오픈API 데이터셋 15073861)",
+     "공공데이터 정책 (이용정책·이용약관·개인정보 처리방침 탭)",
+     "이용가이드 — '공공데이터 활용방법' 오픈API 안내",
+     "에어코리아 홈 (한국환경공단)"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "이용허락범위에 '제3자 권리 포함: 저작권 표시' 가 있음 — 데이터셋 안의 요소(수치·메타데이터·설명문 등)를 구분하는 문장이 없어 어느 요소가 제3자 권리인지 불명",
+    "제3유형: 변경금지 — 요약·재구성·번역·AI 가공은 변경에 해당할 가능성(수치 그대로 인용은 사람 판단)",
+    "에어코리아 사이트(HTML)의 저작권 정책은 한국환경공단 사이트(www.keco.or.kr)에 있어 열지 못함"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "datago_15101578_tourapi_kor",
+   "name": "공공데이터포털 데이터셋 15101578 · 한국관광공사_국문 관광정보 서비스_GW (TourAPI, 이용허락범위 '제한 없음' + 사진 별도)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "CONDITIONAL",
+     "basis": "IMPLIED",
+     "evidence": "한국관광공사_국문 관광정보 서비스_GW (공공데이터포털 오픈API 데이터셋 15101578)",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "이용가이드 — '공공데이터 활용방법' 오픈API 안내",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "CONDITIONAL",
+     "basis": "IMPLIED",
+     "evidence": "한국관광공사_국문 관광정보 서비스_GW (공공데이터포털 오픈API 데이터셋 15101578)",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "CONDITIONAL",
+     "basis": "IMPLIED",
+     "evidence": "한국관광공사_국문 관광정보 서비스_GW (공공데이터포털 오픈API 데이터셋 15101578)",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "IMPLIED",
+     "evidence": "한국관광공사_국문 관광정보 서비스_GW (공공데이터포털 오픈API 데이터셋 15101578)",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "CONDITIONAL",
+     "basis": "STANDARD_LICENSE",
+     "evidence": "공공데이터 정책 (이용정책·이용약관·개인정보 처리방침 탭)",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "한국관광공사_국문 관광정보 서비스_GW (공공데이터포털 오픈API 데이터셋 15101578)",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 3,
+   "effective_status": "자동화 제외",
+   "access": [
+    {
+     "kind": "api",
+     "hosts": [
+      "www.data.go.kr"
+     ],
+     "paths": [
+      "/data/15101578/openapi.do"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    },
+    {
+     "kind": "api",
+     "hosts": [
+      "api.visitkorea.or.kr"
+     ],
+     "paths": [],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "한국관광공사_국문 관광정보 서비스_GW (공공데이터포털 오픈API 데이터셋 15101578)",
+     "공공데이터 정책 (이용정책·이용약관·개인정보 처리방침 탭)",
+     "이용가이드 — '공공데이터 활용방법' 오픈API 안내"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "사진(이미지): 공공누리 제1유형·제3유형 혼재(제3유형은 변경금지), 기업 CI·BI 용도 금지, 피사체 명예훼손·인격권 침해 등 용도 금지",
+    "텍스트·메타데이터 필드: 이용허락범위 '제한 없음' — 소개글은 저작권 등에 구애 없이 활용 가능한 정보만 선별했다고 설명",
+    "항목별 저작권 구분을 가려내는 필드가 데이터셋 페이지에 없음 — 사진을 쓰려면 항목별 유형 확인 방법이 먼저 필요",
+    "TourAPI 사이트(api.visitkorea.or.kr)의 이용약관은 열지 못함"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "kca_price_portal",
+   "name": "한국소비자원 참가격 (price.go.kr) · 가격정보 서비스 (대표 Endpoint 미지정)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "한국소비자원 참가격 홈",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "한국소비자원 참가격 홈",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "한국소비자원 참가격 홈",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "한국소비자원 참가격 홈",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "한국소비자원 참가격 홈",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "한국소비자원 참가격 홈",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "한국소비자원 참가격 홈",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 3,
+   "effective_status": "자동화 제외",
+   "access": [
+    {
+     "kind": "html",
+     "hosts": [
+      "www.price.go.kr"
+     ],
+     "paths": [
+      "/tprice/portal/main/main.do"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "한국소비자원 참가격 홈"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "읽은 페이지가 홈 하나뿐이라 적용 제외 범위를 알 수 없음(판매업소·제조사 상표·상품 이미지 등 제3자 요소 구분 문장 없음)"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "kca_ciss_site",
+   "name": "한국소비자원 소비자위해감시시스템 CISS (ciss.go.kr) · robots.txt 만 읽음",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "robots.txt (www.ciss.go.kr)",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "robots.txt (www.ciss.go.kr)",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "robots.txt (www.ciss.go.kr)",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "robots.txt (www.ciss.go.kr)",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "robots.txt (www.ciss.go.kr)",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "robots.txt (www.ciss.go.kr)",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "robots.txt (www.ciss.go.kr)",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 3,
+   "effective_status": "자동화 제외",
+   "access": [
+    {
+     "kind": "html",
+     "hosts": [
+      "www.ciss.go.kr"
+     ],
+     "paths": [],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [],
+    "read_at": null,
+    "content_hash": "",
+    "expires_at": null
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "읽지 못해 적용 제외 범위를 알 수 없음(제조사·상표·제품 사진 등 제3자 요소 구분 확인 못 함)"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "law_open_api_common",
+   "name": "국가법령정보 공동활용 Open API (open.law.go.kr, 법제처) · 공통 (개별 서비스 미조사)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "공동활용 서비스란 (이용안내)",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "CONDITIONAL",
+     "basis": "IMPLIED",
+     "evidence": "공동활용 서비스란 (이용안내)",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "CONDITIONAL",
+     "basis": "IMPLIED",
+     "evidence": "공동활용 서비스란 (이용안내)",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "공동활용 서비스란 (이용안내)",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "공동활용 서비스란 (이용안내)",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "공동활용 서비스란 (이용안내)",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "국가법령정보 공동활용 홈 (법제처)",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 3,
+   "effective_status": "자동화 제외",
+   "access": [
+    {
+     "kind": "api",
+     "hosts": [
+      "open.law.go.kr"
+     ],
+     "paths": [
+      "/LSO/openApi/guideList.do"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "국가법령정보 공동활용 홈 (법제처)",
+     "공동활용 서비스란 (이용안내)"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "서비스 종류별(법령·행정규칙·자치법규·조약·판례/해석례·위원회 결정문·별표서식 목록·영문법령·법령용어·체계도/3단비교/신구법/연혁 등) 저작권 취급을 구분하는 문장 없음",
+    "영문법령(번역)·법령용어·체계도·3단비교·신구법 같은 편집·번역 가공물은 법령 본문과 다른 정책일 수 있으나 사이트 안내에 구분이 없다(확인 못 함)",
+    "판례·결정문 속 개인정보 등 제3자 요소: 언급 없음",
+    "'법정효력/저작권' 안내는 www.law.go.kr(호스트 목록 밖)에 있어 읽지 못함"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "kamis_openapi_common",
+   "name": "농수산물유통정보 KAMIS Open-API (한국농수산식품유통공사) · 공통 (API 17개 개별 미조사)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "KAMIS Open-API 이용안내",
+     "read_at": "2026-11-09"
+    },
+    "automated_access": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "KAMIS Open-API 이용안내",
+     "read_at": "2026-11-09"
+    },
+    "derivative_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "KAMIS Open-API 이용안내",
+     "read_at": "2026-11-09"
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "KAMIS Open-API 이용안내",
+     "read_at": "2026-11-09"
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "KAMIS Open-API 이용안내",
+     "read_at": "2026-11-09"
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "KAMIS Open-API 이용안내",
+     "read_at": "2026-11-09"
+    },
+    "license": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "KAMIS 홈 (한국농수산식품유통공사)",
+     "read_at": "2026-11-09"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 3,
+   "effective_status": "자동화 제외",
+   "access": [
+    {
+     "kind": "api",
+     "hosts": [
+      "www.kamis.or.kr"
+     ],
+     "paths": [
+      "/customer/reference/openapi_list.do"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": "2026-11-09"
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [
+     "KAMIS 홈 (한국농수산식품유통공사)",
+     "KAMIS Open-API 이용안내",
+     "KAMIS 이용안내 > 홈페이지 이용안내"
+    ],
+    "read_at": "2026-11-09",
+    "content_hash": "",
+    "expires_at": "2027-02-07"
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "읽은 페이지에 제3자 자료 표시가 없고 정책 문장 자체가 없어 적용 제외 범위를 알 수 없음",
+    "저작권보호정책(www.at.or.kr)은 호스트 목록 밖이라 읽지 못함, 회원 이용약관은 별도 탭이라 열지 않음"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "pew_rss",
+   "name": "Pew Research Center — RSS 피드(제목·요약)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "www.pewresearch.org 공식 페이지",
+     "read_at": "2026-10-26"
+    },
+    "automated_access": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "www.pewresearch.org 공식 페이지",
+     "read_at": "2026-10-26"
+    },
+    "derivative_use": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "www.pewresearch.org 공식 페이지",
+     "read_at": "2026-10-26"
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "attribution": {
+     "state": "CONDITIONAL",
+     "basis": "EXPLICIT",
+     "evidence": "www.pewresearch.org 공식 페이지",
+     "read_at": "2026-10-26"
+    },
+    "license": {
+     "state": "UNKNOWN",
+     "basis": "NOT_ADDRESSED",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 3,
+   "effective_status": "자동화 제외",
+   "access": [
+    {
+     "kind": "rss",
+     "hosts": [
+      "www.pewresearch.org"
+     ],
+     "paths": [
+      "/feed/"
+     ],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": null
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [],
+    "read_at": null,
+    "content_hash": "",
+    "expires_at": null
+   },
+   "attribution_template": "",
+   "exceptions": [
+    "Pew 차트·이미지·본문 재사용 금지"
+   ],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "pew_html",
+   "name": "Pew Research Center — 기사·데이터 웹페이지",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "automated_access": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "www.pewresearch.org 공식 페이지",
+     "read_at": "2026-10-26"
+    },
+    "derivative_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "license": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 3,
+   "effective_status": "자동화 제외",
+   "access": [
+    {
+     "kind": "html",
+     "hosts": [
+      "www.pewresearch.org"
+     ],
+     "paths": [],
+     "auth": "UNKNOWN",
+     "rate_limit": null,
+     "robots_checked_at": null
+    }
+   ],
+   "reference_hosts": [],
+   "snapshot": {
+    "terms_pages": [],
+    "read_at": null,
+    "content_hash": "",
+    "expires_at": null
+   },
+   "attribution_template": "",
+   "exceptions": [],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "openai_site",
+   "name": "OpenAI 웹사이트(openai.com·developers.openai.com)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "automated_access": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "derivative_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "license": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 3,
+   "effective_status": "참고 전용",
+   "access": [],
+   "reference_hosts": [
+    "openai.com",
+    "developers.openai.com"
+   ],
+   "snapshot": {
+    "terms_pages": [],
+    "read_at": null,
+    "content_hash": "",
+    "expires_at": null
+   },
+   "attribution_template": "",
+   "exceptions": [],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "onepredict_site",
+   "name": "원프레딕트(onepredict.ai)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "automated_access": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "derivative_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "license": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 3,
+   "effective_status": "참고 전용",
+   "access": [],
+   "reference_hosts": [
+    "onepredict.ai"
+   ],
+   "snapshot": {
+    "terms_pages": [],
+    "read_at": null,
+    "content_hash": "",
+    "expires_at": null
+   },
+   "attribution_template": "",
+   "exceptions": [],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "ap_news",
+   "name": "AP 통신(apnews.com)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "automated_access": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "derivative_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "license": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 3,
+   "effective_status": "참고 전용",
+   "access": [],
+   "reference_hosts": [
+    "apnews.com"
+   ],
+   "snapshot": {
+    "terms_pages": [],
+    "read_at": null,
+    "content_hash": "",
+    "expires_at": null
+   },
+   "attribution_template": "",
+   "exceptions": [],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "reuters_news",
+   "name": "로이터(reuters.com)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "automated_access": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "derivative_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "license": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 3,
+   "effective_status": "참고 전용",
+   "access": [],
+   "reference_hosts": [
+    "reuters.com",
+    "www.reuters.com"
+   ],
+   "snapshot": {
+    "terms_pages": [],
+    "read_at": null,
+    "content_hash": "",
+    "expires_at": null
+   },
+   "attribution_template": "",
+   "exceptions": [],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "edaily_news",
+   "name": "이데일리(edaily.co.kr)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "automated_access": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "derivative_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "license": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 3,
+   "effective_status": "참고 전용",
+   "access": [],
+   "reference_hosts": [
+    "edaily.co.kr"
+   ],
+   "snapshot": {
+    "terms_pages": [],
+    "read_at": null,
+    "content_hash": "",
+    "expires_at": null
+   },
+   "attribution_template": "",
+   "exceptions": [],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "foodsafetykorea",
+   "name": "식품안전나라(foodsafetykorea.go.kr)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "automated_access": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "derivative_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "license": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 3,
+   "effective_status": "참고 전용",
+   "access": [],
+   "reference_hosts": [
+    "foodsafetykorea.go.kr"
+   ],
+   "snapshot": {
+    "terms_pages": [],
+    "read_at": null,
+    "content_hash": "",
+    "expires_at": null
+   },
+   "attribution_template": "",
+   "exceptions": [],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "korea_kr",
+   "name": "대한민국 정책브리핑(korea.kr)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "automated_access": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "derivative_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "license": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 3,
+   "effective_status": "참고 전용",
+   "access": [],
+   "reference_hosts": [
+    "korea.kr"
+   ],
+   "snapshot": {
+    "terms_pages": [],
+    "read_at": null,
+    "content_hash": "",
+    "expires_at": null
+   },
+   "attribution_template": "",
+   "exceptions": [],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "law_go_kr",
+   "name": "국가법령정보센터(law.go.kr)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "automated_access": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "derivative_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "license": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 3,
+   "effective_status": "참고 전용",
+   "access": [],
+   "reference_hosts": [
+    "law.go.kr"
+   ],
+   "snapshot": {
+    "terms_pages": [],
+    "read_at": null,
+    "content_hash": "",
+    "expires_at": null
+   },
+   "attribution_template": "",
+   "exceptions": [],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "acquisition_gov",
+   "name": "미국 연방조달 사이트(acquisition.gov)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "automated_access": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "derivative_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "license": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 3,
+   "effective_status": "참고 전용",
+   "access": [],
+   "reference_hosts": [
+    "acquisition.gov"
+   ],
+   "snapshot": {
+    "terms_pages": [],
+    "read_at": null,
+    "content_hash": "",
+    "expires_at": null
+   },
+   "attribution_template": "",
+   "exceptions": [],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "nasa_adjacent",
+   "name": "NASA 계열 보조 호스트(ntrs.nasa.gov·soho.nascom.nasa.gov·hst-docs.stsci.edu)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "automated_access": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "derivative_use": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "license": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    }
+   },
+   "strict_tier": 3,
+   "permissive_interpretation": 3,
+   "effective_status": "참고 전용",
+   "access": [],
+   "reference_hosts": [
+    "ntrs.nasa.gov",
+    "soho.nascom.nasa.gov",
+    "hst-docs.stsci.edu"
+   ],
+   "snapshot": {
+    "terms_pages": [],
+    "read_at": null,
+    "content_hash": "",
+    "expires_at": null
+   },
+   "attribution_template": "",
+   "exceptions": [],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "bbc",
+   "name": "BBC",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "automated_access": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "derivative_use": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "ai_input": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "license": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    }
+   },
+   "strict_tier": 4,
+   "permissive_interpretation": 4,
+   "effective_status": "완전 제외",
+   "access": [],
+   "reference_hosts": [
+    "bbc.com",
+    "bbc.co.uk",
+    "bbci.co.uk"
+   ],
+   "snapshot": {
+    "terms_pages": [],
+    "read_at": null,
+    "content_hash": "",
+    "expires_at": null
+   },
+   "attribution_template": "",
+   "exceptions": [],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "guardian",
+   "name": "The Guardian",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "automated_access": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "derivative_use": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "ai_input": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "license": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    }
+   },
+   "strict_tier": 4,
+   "permissive_interpretation": 4,
+   "effective_status": "완전 제외",
+   "access": [],
+   "reference_hosts": [
+    "theguardian.com",
+    "guardian.co.uk"
+   ],
+   "snapshot": {
+    "terms_pages": [],
+    "read_at": null,
+    "content_hash": "",
+    "expires_at": null
+   },
+   "attribution_template": "",
+   "exceptions": [],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "nature",
+   "name": "Nature",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "automated_access": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "derivative_use": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "license": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    }
+   },
+   "strict_tier": 4,
+   "permissive_interpretation": 4,
+   "effective_status": "완전 제외",
+   "access": [],
+   "reference_hosts": [
+    "nature.com"
+   ],
+   "snapshot": {
+    "terms_pages": [],
+    "read_at": null,
+    "content_hash": "",
+    "expires_at": null
+   },
+   "attribution_template": "",
+   "exceptions": [],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "mit_tr",
+   "name": "MIT Technology Review",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "automated_access": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "derivative_use": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "ai_input": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "license": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    }
+   },
+   "strict_tier": 4,
+   "permissive_interpretation": 4,
+   "effective_status": "완전 제외",
+   "access": [],
+   "reference_hosts": [
+    "technologyreview.com"
+   ],
+   "snapshot": {
+    "terms_pages": [],
+    "read_at": null,
+    "content_hash": "",
+    "expires_at": null
+   },
+   "attribution_template": "",
+   "exceptions": [],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "aitimes",
+   "name": "AI타임스",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "automated_access": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "derivative_use": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "ai_input": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "license": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    }
+   },
+   "strict_tier": 4,
+   "permissive_interpretation": 4,
+   "effective_status": "완전 제외",
+   "access": [],
+   "reference_hosts": [
+    "aitimes.com"
+   ],
+   "snapshot": {
+    "terms_pages": [],
+    "read_at": null,
+    "content_hash": "",
+    "expires_at": null
+   },
+   "attribution_template": "",
+   "exceptions": [],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "etnews",
+   "name": "전자신문",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "automated_access": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "derivative_use": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "license": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    }
+   },
+   "strict_tier": 4,
+   "permissive_interpretation": 4,
+   "effective_status": "완전 제외",
+   "access": [],
+   "reference_hosts": [
+    "etnews.com"
+   ],
+   "snapshot": {
+    "terms_pages": [],
+    "read_at": null,
+    "content_hash": "",
+    "expires_at": null
+   },
+   "attribution_template": "",
+   "exceptions": [],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "ars_technica",
+   "name": "Ars Technica",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "automated_access": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "derivative_use": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "license": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    }
+   },
+   "strict_tier": 4,
+   "permissive_interpretation": 4,
+   "effective_status": "완전 제외",
+   "access": [],
+   "reference_hosts": [
+    "arstechnica.com"
+   ],
+   "snapshot": {
+    "terms_pages": [],
+    "read_at": null,
+    "content_hash": "",
+    "expires_at": null
+   },
+   "attribution_template": "",
+   "exceptions": [],
+   "retention_days": null,
+   "enabled": false
+  },
+  {
+   "provider_id": "ieee_spectrum",
+   "name": "IEEE(Spectrum 포함)",
+   "class": "data",
+   "policy": {
+    "commercial_use": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "automated_access": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "derivative_use": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "storage": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "ai_input": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    },
+    "attribution": {
+     "state": "UNKNOWN",
+     "basis": "NOT_READ",
+     "evidence": "",
+     "read_at": null
+    },
+    "license": {
+     "state": "DENIED",
+     "basis": "EXPLICIT",
+     "evidence": "",
+     "read_at": "2026-10-26"
+    }
+   },
+   "strict_tier": 4,
+   "permissive_interpretation": 4,
+   "effective_status": "완전 제외",
+   "access": [],
+   "reference_hosts": [
+    "ieee.org",
+    "spectrum.ieee.org"
+   ],
+   "snapshot": {
+    "terms_pages": [],
+    "read_at": null,
+    "content_hash": "",
+    "expires_at": null
+   },
+   "attribution_template": "",
+   "exceptions": [],
+   "retention_days": null,
+   "enabled": false
+  }
+ ]
+}

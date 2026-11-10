@@ -31,6 +31,7 @@ from pipeline import ai_guard, provenance  # 글 출처 표식(provenance: facts
 from pipeline import drafts  # 승인 흐름(레지스트리 publish_flow: pr)의 이름·판정 규칙. direct(기본)에서는 흐름을 읽는 것 말고 아무것도 하지 않는다
 from pipeline import quality_gate, registry  # 최소 품질 Gate(순수 규칙)와 레지스트리 설정(chance.quality_gate·languages) 읽기. quality_gate 가 off(기본)면 Gate 는 아무것도 하지 않는다
 from pipeline import unsplash_credit  # Unsplash 사진의 ixid 유지·작가 출처 줄(순수 함수 — Chance·이슈 수정·Blogger 가 같은 규칙을 쓴다)
+from pipeline import source_policy  # 소스 정책(레지스트리 chance.source_policy: legacy 가 기본 — 이전과 같다 / allowlist 는 허용 목록 밖 외부 읽기와 외부 텍스트의 프롬프트·이력·로그 유입을 막는다). legacy 에서는 값을 읽는 것 말고 아무 일도 하지 않는다
 from pipeline.llm import CALL_TIMEOUT_SECONDS, CallLog, _run_with_timeout, failure_code, failure_status, scrub  # Gemini 요청 기록·시크릿 가리기·호출 시간 상한은 Blogger·이슈 수정과 같은 코드를 쓴다(D-52·D-83)
 
 # ============================================================
@@ -1452,6 +1453,7 @@ def _resolve_article_url(url):
     """Google News 리디렉션을 따라가 게시자 원문 URL을 얻습니다."""
     if not url:
         return ""
+    source_policy.egress_gate(url, "resolve", now_kst)   # allowlist: 일반 웹 읽기(resolve)는 관문이 항상 거부한다(legacy 는 아무 일도 하지 않는다). try 밖 — 거부를 삼켜 빈 값으로 넘어가지 않는다
     try:
         req = urllib.request.Request(url, headers={"User-Agent": UA})
         with urllib.request.urlopen(req, timeout=12) as response:
@@ -1464,6 +1466,7 @@ def _resolve_article_url(url):
 
 def _fetch_source_excerpt(url):
     """원문 페이지의 게시자 요약을 가져옵니다. 본문 전문은 수집하지 않습니다."""
+    source_policy.egress_gate(url, "page", now_kst)   # allowlist: 일반 웹 읽기(page)는 관문이 항상 거부한다(legacy 는 아무 일도 하지 않는다). try 밖 — 거부를 삼키지 않는다
     try:
         req = urllib.request.Request(url, headers={"User-Agent": UA})
         with urllib.request.urlopen(req, timeout=12) as response:
@@ -1541,6 +1544,8 @@ def fetch_news_items(editorial_lane=None, stats=None, deadline=None, clock=time.
     now = datetime.datetime.now(timezone.utc)
     max_age = timedelta(hours=NEWS_MAX_AGE_HOURS)
     per_source, attempted, ok_count, time_skipped = [], 0, 0, 0
+    source_mode = source_policy.chance_source_policy()     # legacy(기본)면 아래 허용 목록 분기는 모두 건너뛴다 — 이전과 같다
+    policy_registry = source_policy.news_registry(source_mode, now_kst)   # allowlist 일 때만 허용 목록(Registry), 아니면 None
     for src in NEWS_SOURCES:
         if editorial_lane and src.get("lane") != editorial_lane:
             continue
@@ -1551,10 +1556,14 @@ def fetch_news_items(editorial_lane=None, stats=None, deadline=None, clock=time.
         if _host_in(_host(src.get("url", "")), TERMS_BLOCKED_DOMAINS):
             print(f"  소스 {src['name']}: 약관상 접근하지 않는 도메인(TERMS_BLOCKED_DOMAINS)이라 읽지 않음")
             continue
+        if policy_registry is not None and not policy_registry.is_url_allowed(src.get("url", ""), "feed")[0]:
+            print(f"  소스 {src['name']}: 허용 목록(Registry)의 ACTIVE 가 아니라 읽지 않음(source_policy: allowlist)")   # 피드(RSS)는 유형만으로 Tier 3 — 네트워크 호출 0
+            continue
         if deadline is not None and clock() > deadline:
             time_skipped += 1
             continue
         attempted += 1
+        source_policy.egress_gate(src["url"], "feed", mode=source_mode, registry=policy_registry)   # allowlist 에서는 위 분기가 먼저 걸러 여기에 오지 못한다(관문은 그 보증의 이중 장치). try 밖 — 거부를 수집 실패로 삼키지 않는다
         try:
             req = urllib.request.Request(src["url"], headers={"User-Agent": UA})
             with urllib.request.urlopen(req, timeout=15) as resp:
@@ -1761,6 +1770,7 @@ def build_post_prompt(item, recent_titles, category_hint="", allow_skip=False,
         (f"- 본문 카테고리는 한국어에서 \"{lane['kr_category']}\", 영어에서 \"{lane['en_category']}\"를 사용하세요. 글의 핵심 주제가 편집 축과 맞지 않으면 다른 주제로 다시 고르세요.\n" if pair else
          f"- 본문 카테고리는 한국어에서 \"{lane['kr_category']}\"를 사용하세요. 글의 핵심 주제가 편집 축과 맞지 않으면 다른 주제로 다시 고르세요.\n")
     )
+    item, recent_titles = source_policy.prompt_inputs(source_policy.chance_source_policy(), item, recent_titles)   # allowlist: 자체 제목만(외부 제목·요약·태그 제거). legacy 는 그대로
     if item:
         topic_text = item["title"]
         if item.get("source"):
@@ -2537,6 +2547,9 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
     lang_args = {} if len(prefixes) == 2 else {"languages": langs}      # 기본(한 쌍)에서는 아래 호출이 예전 그대로다 — 국문 전용일 때만 언어를 넘긴다
     posts = load_posts(for_ai=True)      # 표식 글은 빠진 목록 — 아래 titles[-30:] 가 프롬프트의 '최근 다룬 제목' 으로 AI 에 간다
     history = read_history()
+    source_mode = source_policy.chance_source_policy()     # 'legacy'(기본 — 이전과 같다) | 'allowlist'
+    if source_policy.idle_check(source_mode, report, now_kst, print):   # allowlist 인데 ACTIVE 콘텐츠 Provider 가 0 — 네트워크·모델 호출 없이 초록으로 끝(SOURCE_POLICY_NO_ACTIVE_PROVIDER)
+        return None
     lane_order = editorial_lane_order(slot, history)
     editorial_lane = lane_order[0]
     print(f"편집 축: {EDITORIAL_LANES[editorial_lane]['label']}")
@@ -2548,7 +2561,7 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
                 if item.get(k):
                     used.add(image_key(item[k]))
 
-    recent_titles = titles[-30:]
+    recent_titles = source_policy.prompt_titles(source_mode, titles, history)[-30:]   # allowlist: 이력의 외부 글 제목은 '최근 다룬 제목'에도 넣지 않는다
     data, selected, selected_item = None, None, None
     if topic_override:
         verified = fetch_news_items(editorial_lane)
@@ -2562,6 +2575,7 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
     else:
         # 분야별 후보 묶음을 앞에서부터 하나씩 받는다. 앞 분야의 후보가 모두 탈락하면 다음 분야를 이어서 읽는다(분야 합산 MAX_ATTEMPTS 건까지, 시간 상한 안에서 — A).
         batches = iter_candidate_lanes(titles, allow_auto_topic, lane_order, report)
+    batches = source_policy.own_title_batches(source_mode, batches, lambda n: print(f"  자체 제목이 없는 후보 {n}건은 쓰지 않음(source_policy: allowlist)"))   # allowlist: 후보는 자체 제목만 가진다
     report["lane"] = editorial_lane
     report["lane_label"] = EDITORIAL_LANES[editorial_lane]["label"]
     gate_rejects = report["gate_rejects"] = []
@@ -2750,6 +2764,7 @@ OUTCOME_TEXT = {
     "NO_CANDIDATES": "시간 상한으로 일부 분야만 시도했고 후보를 찾지 못했습니다",
     "ALL_REJECTED": "후보는 있었지만 전부 탈락했습니다(Gemini 건너뜀, 제목이 기존 글과 비슷, 또는 본문 검증 탈락)",
     "NO_MATCH": "요청 주제와 연결되는 검증된 기사가 없습니다",
+    "SOURCE_POLICY_NO_ACTIVE_PROVIDER": "소스 정책(allowlist)이 켜져 있고 허용 목록에 ACTIVE 콘텐츠 Provider 가 없어 글감을 읽지 않았습니다(정상 — 할 일 없음, 외부 호출 0)",
 }
 
 
@@ -2853,6 +2868,10 @@ def finish_run(result, report, event, now, slot=None):
     if result is not None:
         return
     where = f"{slot}시 슬롯" if slot is not None else "수동 실행"
+    if outcome == source_policy.NO_ACTIVE_OUTCOME:   # 허용 목록 정책상 읽을 곳이 없는 정상 상태 — 초록 + 안내(ALL_LANES_EMPTY 의 빨강·경고와 구분)
+        print(skip_line(outcome, lanes_tried=0))
+        print(f"::notice::{where}: {OUTCOME_TEXT[outcome]}.")
+        return
     if outcome in ("ALL_LANES_EMPTY", "SOURCES_UNREACHABLE"):
         print(skip_line(outcome, lanes_tried=len(report.get("lanes", []))))
         print(f"::error::{where}: {OUTCOME_TEXT[outcome]}. 실행 요약의 탈락 사유와 수집 실패 개수를 확인하세요.")

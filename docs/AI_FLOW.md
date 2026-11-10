@@ -59,6 +59,7 @@ AI SDK 를 가져오거나 클라이언트를 만들거나 `.generate_content` �
 |------|-----------|------|
 | `_generate` | `generator.py:call_gemini_with_fallback` | 모델 폴백 루프 — SDK 호출 한 번은 이 함수만 부른다(그래야 입구 방벽을 거친다) |
 | `get_client` | `generator.py:_generate.call` | SDK 호출 한 번이 클라이언트를 얻는 곳 — 다른 함수가 직접 얻으면 입구 방벽을 건너뛴다 |
+| `get_client` | `pipeline/egress.py:<module>` | 외부 접속 예외 표에 데이터로 적힌 글자 한 줄 — 호출하지 않는다(호출 지점이 아니라 이름만 적은 표) |
 | `call_gemini_with_fallback` | `generator.py:make_image_queries` | 기존 글 이미지 교체의 영어 검색어 |
 | `call_gemini_with_fallback` | `generator.py:generate_blog_posts` | 새 글 쓰기 — 피드 항목과 최근 제목 30개(표식 글이 빠진 목록) |
 | `call_gemini_with_fallback` | `pipeline/shadow_run.py:_evaluate` | 그림자 실행의 후보 평가 |
