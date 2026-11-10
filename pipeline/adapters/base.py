@@ -107,7 +107,7 @@ def decode_json(raw):
         value = json.loads(text, parse_float=Decimal, parse_int=Decimal, parse_constant=_no_constant, object_pairs_hook=_no_duplicate_pairs)
     except AdapterError:
         raise
-    except (ValueError, RecursionError):
+    except (ValueError, RecursionError, ArithmeticError):        # 아주 큰 지수(`1e99999999999999999999`)는 Decimal 이 InvalidOperation(ArithmeticError 계열)을 올린다 — 이것도 BAD_JSON(S2AFIX D3)
         raise AdapterError("BAD_JSON") from None
     if _too_deep(value):
         raise AdapterError("BAD_JSON")

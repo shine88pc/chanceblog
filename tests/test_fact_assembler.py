@@ -308,7 +308,8 @@ class BranchesTest(unittest.TestCase):
             with self.subTest(region=region):
                 self.assertIsInstance(post, A.AssembledPost)
                 self.assertIn(lead_word, post.description)
-                self.assertTrue(post.title.endswith(title_word), post.title)
+                self.assertTrue(post.title.endswith("숫자로 읽기"), post.title)                  # 제목에는 값도 방향도 없다(D-200) — 방향은 설명과 본문에
+                self.assertNotIn(title_word, post.title)
                 self.assertIn(H.obs(region, "2026-03").region_label_ko, post.title)
 
     def test_record_sentences(self):
@@ -485,7 +486,7 @@ class ShortTextTest(unittest.TestCase):
         post = H.run(short(R.R01_TIME_SERIES), facts=yearly, params={}, today="2026-06-01")
         self.assertIsInstance(post, A.AssembledPost)
         self.assertEqual(post.description, "가의 율 값은 2024년(2.4%)보다 0.4%p 높은 2.8%입니다(2025년 기준, 이 글이 읽은 8년 자료의 마지막 값).")
-        counts = self.facts(["7", "6", "5", "4", "3", "1"], periods=["2025"], regions=["가", "나", "다", "라", "마", "바"], unit="명", label="수")
+        counts = self.facts(["7", "6", "5", "3", "2", "1"], periods=["2025"], regions=["가", "나", "다", "라", "마", "바"], unit="명", label="수")        # 평균 4·중앙값 4(N3: 중앙값이 4.5 처럼 반 칸에 걸리면 한 자리가 늘어 글이 길어진다)
         post = H.run(short(R.R02_REGION_COMPARE), facts=counts, params={}, today="2026-06-01")
         self.assertIsInstance(post, A.AssembledPost)
         self.assertEqual(post.description, "2025년 기준 6곳의 수 값을 견주면 가장 높은 곳은 가(7명), 가장 낮은 곳은 바(1명)입니다(평균 4명).")
@@ -680,7 +681,9 @@ class InsufficientTest(unittest.TestCase):
         self.assertIsInstance(post, A.AssembledPost)
         self.assertIn("- 제공처 안내: 제3자 자료는 제외됩니다.\n- 제공처 안내: 이미지와 로고는 제외됩니다.\n", post.body_markdown)
         self.assertIn(f"- 이용 조건: {M.SOURCE_NAME} 자료를 2026년 4월 18일에 받았습니다. 주소 {M.SOURCE_URL}\n", post.body_markdown)
-        none = dataclasses.replace(M.MockProvider(), reader_notes=(), attribution_template=None)
+        none = dataclasses.replace(M.MockProvider(), reader_notes=(), attribution_template=None, policy={"attribution": {"state": "ALLOWED"}})        # 출처 표시 의무가 없다고 명시한 Provider 만 템플릿 없이 글이 된다(S2AFIX D8)
+        unknown = dataclasses.replace(M.MockProvider(), reader_notes=(), attribution_template=None)                                                   # 정책을 모르면 막는다
+        self.assertEqual(self.code(H.run("R01_time_series", params=H.R01_PARAMS, provider=unknown)), "ATTRIBUTION_REQUIRED")
         plain = H.run("R01_time_series", params=H.R01_PARAMS, provider=none)
         self.assertNotIn("제공처 안내", plain.body_markdown)
         self.assertNotIn("이용 조건", plain.body_markdown)
@@ -867,7 +870,8 @@ class TemplateReviewTest(unittest.TestCase):
         cls.drafts.append(build_draft(R.R02_REGION_COMPARE, facts, {"key": H.UNEMP}))
         series = [f for f in H.series_of("R01") if f.as_of != "2026-02"]
         cls.drafts.append(build_draft(R.R01_TIME_SERIES, series, {"key": H.UNEMP, "region": "R01"}))
-        cls.constants = list(R.CAUTION_COMMON) + [R.NOTICE_TEMPLATE, R.INTRO_TEMPLATE, R.READER_NOTE_PREFIX.strip(), R.MISSING_CELL, R.NA_CELL, *R.SECTION_ORDER]
+        cls.constants = (list(R.CAUTION_COMMON) + [R.NOTICE_TEMPLATE, R.INTRO_TEMPLATE, R.READER_NOTE_PREFIX.strip(), R.MISSING_CELL, R.NA_CELL, *R.SECTION_ORDER]
+                         + [R.intro_template("하루 최대값·개수·평균"), *R.caution_common("하루 최대값·개수·평균")])          # 지역 없는 틀이 쓰는 계산 목록 안내(S2AFIX2 N5)도 같은 글 규칙을 지킨다
 
     def templates(self):
         out = [(None, text) for text in self.constants]

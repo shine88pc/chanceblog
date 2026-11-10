@@ -78,7 +78,8 @@ class DisplayConsistencyTest(unittest.TestCase):
 
     def test_the_verifiers_straddling_example_is_now_consistent(self):
         post = run("R01_time_series", series(["3.30", "3.31", "3.32", "3.33", "3.34", "3.35", "3.36", "3.44", "3.46"]))
-        self.assertEqual(post.title, "가상 지역 가 실업률 3.46%(2026년 3월 기준), 앞 기간보다 0.02%p 높아")
+        self.assertEqual(post.title, "가상 지역 가 실업률, 2025년 7월부터 2026년 3월까지 — 숫자로 읽기")            # 제목에는 값이 없다(D-200) — 값은 설명·본문에
+        self.assertNotIn("3.46", post.title)
         self.assertEqual(post.description, "가상 지역 가의 실업률 값은 2026년 2월(3.44%)보다 0.02%p 높은 3.46%입니다(2026년 3월 기준).")
         self.assertIn("- 바로 앞 기간 대비: +0.02%p, 변화율 +0.58% (견준 기간 2026년 2월, 그때 값 3.44%)", post.body_markdown)
         self.assertIn("| 2026년 3월 | 3.46% | +0.02%p | +0.58% |", post.body_markdown)
@@ -87,20 +88,20 @@ class DisplayConsistencyTest(unittest.TestCase):
 
     def test_equal_values_are_the_same_and_only_then(self):
         same = run("R01_time_series", series(["3.20", "3.30", "3.40", "3.45", "3.30", "3.50", "3.45", "3.50", "3.50"]))
-        self.assertTrue(same.title.endswith("앞 기간과 같아"))
+        self.assertNotIn("3.50", same.title)                                        # 제목에는 값이 없다(D-200)
         self.assertIn("2026년 2월(3.50%)에서 달라지지 않은 3.50%입니다", same.description)
         self.assertIn("| 2026년 3월 | 3.50% | 0.00%p | 0.00% |", same.body_markdown)
         near = run("R01_time_series", series(["3.20", "3.30", "3.40", "3.45", "3.30", "3.50", "3.45", "3.50", "3.51"]))
-        self.assertTrue(near.title.endswith("앞 기간보다 0.01%p 높아"), near.title)
+        self.assertIn("2026년 2월(3.50%)보다 0.01%p 높은 3.51%입니다", near.description)
         self.assertNotIn("달라지지 않은", near.description)
 
     def test_the_unit_table_is_the_minimum_and_the_data_may_be_more_precise(self):
         ints = run("R01_time_series", series(["10", "12", "11", "13", "12", "14", "13", "15", "16"], unit="명", label="취업자 수", key="labour.employed_persons"))
         self.assertEqual(dict(ints.decimals), {"명": 0})
-        self.assertIn("16명", ints.title)
+        self.assertIn("16명", ints.description)
         fine = run("R01_time_series", series(["108.4", "108.6", "108.1", "108.3", "108.2", "108.9", "109.0", "108.8", "108.6"], unit="점", label="물가지수", key="price.index"))
         self.assertEqual(dict(fine.decimals), {"점": 1})                 # 표 0자리, 자료 1자리 → 1자리(108.4점과 108.6점이 108점·109점으로 뭉개지지 않는다)
-        self.assertIn("108.6점", fine.title)
+        self.assertIn("108.6점", fine.description)
         percent_with_ints = run("R01_time_series", series(["3", "4", "3", "5", "4", "6", "5", "4", "6"]))
         self.assertEqual(dict(percent_with_ints.decimals), {"%": 1, "%p": 1})       # 정수 자료도 단위 표의 1자리(`3.0%`) — 자료의 정밀도를 깎지는 않는다
 
@@ -130,7 +131,8 @@ class DisplayConsistencyTest(unittest.TestCase):
         self.assertEqual(result.code, "PRECISION_LIMIT")
         ok = run("R01_time_series", series(["3.4567", "3.4012", "3.42", "3.46", "3.44", "3.5", "3.46", "3.50", "3.54"]))
         self.assertIsInstance(ok, A.AssembledPost)
-        self.assertIn("3.5400%", ok.title)
+        self.assertIn("3.5400%", ok.description)
+        self.assertNotIn("3.5400%", ok.title)
 
     def test_region_values_that_used_to_look_equal_are_shown_exactly(self):
         post = run("R02_region_compare", cross(["3.46", "3.54", "3.50", "3.49", "3.51"]), {"key": H.UNEMP})
@@ -185,11 +187,12 @@ class DisplayConsistencyTest(unittest.TestCase):
         shown = lambda v: format(v.quantize(Decimal(1).scaleb(-places)), "f")        # noqa: E731
         words = {"SAME": ("앞 기간과 같아", "달라지지 않은"), "UP": ("높아", "높은"), "DOWN": ("낮아", "낮은")}
         expected = "SAME" if cur == prev else "UP" if cur > prev else "DOWN"
-        self.assertIn(words[expected][0], post.title)
         self.assertIn(words[expected][1], post.description)
         for other, pair in words.items():
             if other != expected:
-                self.assertNotIn(pair[0], post.title)
+                self.assertNotIn(pair[1], post.description)
+        for pair in words.values():                                             # 제목은 값도 방향도 말하지 않는다(D-200)
+            self.assertNotIn(pair[0], post.title)
         line = next(line for line in post.body_markdown.split("\n") if line.startswith("- 바로 앞 기간 대비:"))
         diff_text = re.search(r"대비: ([+−]?[0-9,.]+)", line).group(1)
         self.assertAlmostEqual(number(diff_text), float(cur - prev), places=places + 1)
@@ -565,7 +568,7 @@ class RatioScaleTest(unittest.TestCase):
         self.assertTrue(F.ratio_ok(None) and F.ratio_ok(""))
 
     def test_the_unit_table_marks_exactly_these_units_as_non_ratio(self):
-        self.assertEqual({unit for unit, spec in F.UNIT_TABLE.items() if not spec.ratio_ok}, {"위", "℃", "%p", "Kp", "nT"})
+        self.assertEqual({unit for unit, spec in F.UNIT_TABLE.items() if not spec.ratio_ok}, {"위", "℃", "%p", "Kp", "nT", "단계"})        # 단계: 등급 단계는 순서척도(S2a)
         self.assertEqual(F.UNIT_DECIMALS["명"], 0)
         self.assertEqual(F.UNIT_DECIMALS["달러"], 2)
 
@@ -574,14 +577,14 @@ class TieTest(unittest.TestCase):
     """V-06: 동률인 최고·최저를 한 곳(한 기간)으로 단정하지 않는다 — '같은 값 N곳(번)'."""
 
     def test_region_ties_at_the_top_and_bottom(self):
-        post = run("R02_region_compare", cross(["3.5", "3.5", "2.8", "3.8", "3.8", "3.8"]), {"key": H.UNEMP})
-        self.assertIn("가장 높은 값은 3.8%(같은 값 3곳)", post.title)
+        post = run("R02_region_compare", cross(["3.4", "3.6", "2.8", "3.8", "3.8", "3.8"]), {"key": H.UNEMP})                # 중앙값 3.7 — 반 칸이 아니다(N3: 3.5·3.5 였을 때는 중앙값 3.65 가 걸려 자리가 늘었다)
+        self.assertNotIn("3.8", post.title)                                                    # 제목에는 값이 없다(D-200)
         self.assertIn("가장 높은 값은 3.8%(같은 값 3곳), 가장 낮은 곳은 가상 지역 다(2.8%)입니다", post.description)
         self.assertIn("- 가장 높은 값: 3.8%(같은 값 3곳)", post.body_markdown)
         self.assertIn("평균과 가장 높은 값의 차이는", post.body_markdown)
         for tied in ("가상 지역 라", "가상 지역 마", "가상 지역 바"):
             self.assertNotIn(tied, post.title + post.description)                      # 알파벳 순서 첫째를 '가장 높은 곳'으로 내세우지 않는다
-        both = run("R02_region_compare", cross(["2.9", "2.9", "3.5", "3.8", "3.8", "3.4"]), {"key": H.UNEMP})
+        both = run("R02_region_compare", cross(["2.9", "2.9", "3.5", "3.8", "3.8", "3.3"]), {"key": H.UNEMP})                 # 중앙값 3.4(3.4 였을 때는 3.45 가 걸렸다)
         self.assertIn("가장 높은 값은 3.8%(같은 값 2곳), 가장 낮은 값은 2.9%(같은 값 2곳)입니다", both.description)
         self.assertIn("- 가장 낮은 값: 2.9%(같은 값 2곳)", both.body_markdown)
         self.assertIn("평균과 가장 높은 값의 차이는", both.body_markdown)
@@ -614,11 +617,11 @@ class TieTest(unittest.TestCase):
 
     def test_a_record_that_the_data_shares_with_an_earlier_period_is_called_equal(self):
         post = run("R03_record_position", series(["3.0", "3.1", "3.5", "3.2", "3.1", "3.3", "3.2", "3.4", "3.5"]))
-        self.assertTrue(post.title.endswith("읽은 자료 안에서 가장 높은 값과 같아"), post.title)
+        self.assertNotIn("3.5", post.title)
         self.assertIn("이 글이 읽은 자료(2025년 7월부터 2026년 3월까지) 안에서 가장 높은 값과 같은 3.5%입니다.", post.description)
         self.assertIn("최신 값이 이 기간에서 가장 높은 값과 같아 범위의 맨 위에 있고, 그 값은 자료에 2번 나옵니다.", post.body_markdown)
         low = run("R03_record_position", series(["3.5", "3.4", "3.4", "3.3", "3.2", "3.2", "3.1", "3.0", "3.0"]))
-        self.assertTrue(low.title.endswith("읽은 자료 안에서 가장 낮은 값과 같아"), low.title)
+        self.assertIn("안에서 가장 낮은 값과 같은 3.0%입니다", low.description)
         self.assertIn("최신 값이 이 기간에서 가장 낮은 값과 같아 범위의 맨 아래에 있고, 그 값은 자료에 2번 나옵니다.", low.body_markdown)
         sole = run("R03_record_position", series(["3.5", "3.4", "3.4", "3.3", "3.2", "3.2", "3.1", "3.0", "2.8"]))
         self.assertIn("최신 값이 이 기간에서 가장 낮은 값이라 범위의 맨 아래에 있습니다.", sole.body_markdown)
@@ -800,7 +803,7 @@ class NumberWordsTest(unittest.TestCase):
             self.assertEqual(F.untraced_numbers(post.template_markdown), [])
             tested += 1
         self.assertEqual(tested, 3)
-        for text in (R.INTRO_TEMPLATE, R.NOTICE_TEMPLATE, *R.CAUTION_COMMON):
+        for text in (R.INTRO_TEMPLATE, R.NOTICE_TEMPLATE, *R.CAUTION_COMMON, R.intro_template("하루 최대값·개수·평균"), *R.caution_common("하루 최대값·개수·평균")):
             self.assertEqual(F.untraced_numbers(text), [], text)
 
     def test_other_script_numerals_are_still_found(self):
@@ -820,7 +823,8 @@ class TableAndExplanationTest(unittest.TestCase):
         self.assertEqual((rows[0][0], rows[-1][0]), ("2026년 3월", "2025년 3월"))
         self.assertEqual(rows[0][1:], ["자료 없음", "해당 없음", "해당 없음"])
         self.assertIn("가장 최근 기간(2026년 3월)의 값은 자료에 없어, 값이 있는 마지막 기간 2026년 2월 기준으로 최신 값을 정했습니다.", post.body_markdown)
-        self.assertIn("2026년 2월 기준", post.title)
+        self.assertIn("2025년 3월부터 2026년 3월까지", post.title)                  # 제목의 기간은 표의 처음·끝 줄(D-200)
+        self.assertIn("2026년 2월 기준", post.description)
         whole = run("R01_time_series", series(values[:-1] + ["3.5"]))
         self.assertNotIn("값이 있는 마지막 기간", whole.body_markdown)
         self.assertIn("2025년 4월부터 2026년 3월까지 보여 줍니다", whole.body_markdown)
@@ -1264,8 +1268,9 @@ class HalfStepTest(unittest.TestCase):
         self.assertEqual(dict(half.decimals), {"명": 1})
         self.assertIn("- 평균: 4.5명(6곳 단순 평균), 중앙값: 4.5명", half.body_markdown)
         self.assertIn("| 1위 | 가상 지역 가 | 7.0명 | +2.5명 |", half.body_markdown)
-        self.assertIn("6곳 비교", half.title)                                      # 세는 말 `곳` 은 자료 단위 `명` 과 달라 정수 그대로
-        whole = run("R02_region_compare", cross(["7", "6", "5", "4", "3", "1"], **kw), {"key": kw["key"]})
+        self.assertIn("6곳의 취업자 수", half.description)                          # 세는 말 `곳` 은 자료 단위 `명` 과 달라 정수 그대로(제목에는 값이 없다 — D-200)
+        self.assertNotIn("6곳", half.title)
+        whole = run("R02_region_compare", cross(["7", "6", "5", "3", "2", "1"], **kw), {"key": kw["key"]})        # 평균 4·중앙값 4 — 어느 쪽도 반 칸이 아니다(N3: 값 7·6·5·4·3·1 은 중앙값이 4.5 라 한 자리로 보인다 — test_space_f2fix)
         self.assertEqual(dict(whole.decimals), {"명": 0})
 
     def test_the_shown_value_minus_the_shown_mean_is_the_shown_difference_in_every_row(self):
@@ -1362,7 +1367,7 @@ class CountUnitTest(unittest.TestCase):
         self.assertIsInstance(post, A.AssembledPost, post)
         self.assertEqual(dict(post.decimals), {"곳": 1})
         text = post.title + "\n" + post.description + "\n" + post.body_markdown + "\n" + post.evidence_text
-        self.assertIn("6곳 비교", post.title)
+        self.assertNotIn("6곳", post.title)                                                    # 제목에는 값(곳 수)이 없다(D-200)
         self.assertIn("6곳의 학교 수", post.description)
         self.assertIn("- 평균보다 높은 곳 3곳, 낮은 곳 3곳", post.body_markdown)
         for wrong in ("6.0곳", "높은 곳 3.0곳", "낮은 곳 3.0곳", "+6.0곳", "1.0위", "2.0위", "+4.0위"):
@@ -1393,7 +1398,7 @@ class CountUnitTest(unittest.TestCase):
         self.assertEqual((F.format_object(count, context=context), F.format_object(rank, signed=True, context=context), F.format_object(mean, context=context)), ("4곳", "+2위", "3.000곳"))
         self.assertEqual(F.format_object(group[0], context=context), F.format_with_unit(group[0].value, "곳", context=context))
         self.assertEqual(F.format_object(group[0], absolute=True, context={}), "4곳")                   # 자리표가 없으면 단위 표의 자리(곳 은 정수 — 0 에서 먼 쪽으로 반올림)
-        self.assertEqual(F.INTEGER_FORMULAS, frozenset({"F04_rank", "F12_count"}))
+        self.assertEqual(F.INTEGER_FORMULAS, frozenset({"F04_rank", "F12_count", "F16_count_between"}))        # F16(기준 이상 개수, S2a)도 정수로 보인다
         for obj, kind, expected in ((count, "V", "4"), (count, "F", "4곳"), (count, "S", "+4곳"), (count, "A", "4곳"), (mean, "V", "3.000"), (mean, "F", "3.000곳")):
             with self.subTest(kind=kind):
                 self.assertEqual(F.render_marker(kind, "x", obj, context), expected)

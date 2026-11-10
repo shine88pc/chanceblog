@@ -11,10 +11,14 @@ from pipeline import secret_patterns
 
 ROOT = _bootstrap.ROOT
 NEW_FILES = ["pipeline/facts.py", "pipeline/calc.py", "pipeline/fact_topics.py", "pipeline/recipes.py", "pipeline/fact_assembler.py",
-             "pipeline/adapters/__init__.py", "pipeline/adapters/base.py", "pipeline/adapters/mock_stats.py"]
-NEW_MODULES = {"facts", "calc", "fact_topics", "recipes", "fact_assembler", "adapters", "adapters.base", "adapters.mock_stats"}
+             "pipeline/adapters/__init__.py", "pipeline/adapters/base.py", "pipeline/adapters/mock_stats.py",
+             "pipeline/adapters/noaa_swpc.py", "pipeline/recipes_noregion.py", "pipeline/fact_candidates.py"]               # 뒤의 셋은 S2a(우주날씨 어댑터·지역 없는 틀·후보 순서)
+NEW_MODULES = {"facts", "calc", "fact_topics", "recipes", "fact_assembler", "adapters", "adapters.base", "adapters.mock_stats",
+               "adapters.noaa_swpc", "recipes_noregion", "fact_candidates"}
 NEW_TESTS = ["tests/fact_helpers.py", "tests/test_fact_facts.py", "tests/test_fact_calc.py", "tests/test_fact_adapters.py", "tests/test_fact_assembler.py",
-             "tests/test_fact_review.py", "tests/test_fact_structure.py", "tests/test_fact_docs.py"]
+             "tests/test_fact_review.py", "tests/test_fact_structure.py", "tests/test_fact_docs.py",
+             "tests/space_helpers.py", "tests/test_space_adapter.py", "tests/test_space_calc.py", "tests/test_space_recipes.py", "tests/test_space_attribution.py",
+             "tests/test_space_candidates.py", "tests/test_space_docs.py", "tests/test_space_fuzz.py", "tests/test_space_f2fix.py", "tests/test_space_gate.py"]
 STDLIB_ALLOWED = {"csv", "dataclasses", "datetime", "decimal", "functools", "hashlib", "io", "json", "re", "typing", "unicodedata"}
 BANNED_MODULES = {"urllib", "socket", "subprocess", "time", "random", "os", "sys", "pathlib", "http", "ssl", "shutil", "tempfile", "secrets", "uuid", "glob",
                   "ctypes", "msvcrt", "threading", "multiprocessing", "asyncio", "logging", "requests", "html", "xml", "generator", "blogger_generator"}
@@ -71,7 +75,7 @@ class ImportsTest(unittest.TestCase):
             self.assertFalse(names & BANNED_MODULES, f"{rel}: {names & BANNED_MODULES}")
 
     def test_no_existing_pipeline_module_is_imported(self):
-        existing = {p.stem for p in (ROOT / "pipeline").glob("*.py")} - {"facts", "calc", "fact_topics", "recipes", "fact_assembler", "__init__"}
+        existing = {p.stem for p in (ROOT / "pipeline").glob("*.py")} - {"facts", "calc", "fact_topics", "recipes", "fact_assembler", "recipes_noregion", "fact_candidates", "__init__"}
         self.assertTrue(existing)
         for rel in NEW_FILES:
             text = source(rel)
@@ -137,7 +141,7 @@ class PurityTest(unittest.TestCase):
 
 class NoConnectionTest(unittest.TestCase):
     """1단계는 새 모듈·새 시험·문서뿐이다 — 생성기·다른 pipeline 모듈·워크플로·스크립트가 새 모듈 이름을 부르지 않는다. 2단계가 한 군데에서 연결한다."""
-    NAMES = r"(?:facts|calc|fact_topics|recipes|fact_assembler|adapters)"
+    NAMES = r"(?:facts|calc|fact_topics|recipes|fact_assembler|adapters|recipes_noregion|fact_candidates)"
     # 문장 단위 import·`-m` 실행·문자열로 모듈 이름을 넘기는 호출만 연결로 본다(주석·문서의 언급은 연결이 아니다 — SRC 의 문서가 인터페이스를 설명할 수 있다)
     PATTERN = re.compile(rf"^\s*(?:from|import)\s+pipeline(?:\.{NAMES}\b|\s+import\s+[^\n#]*\b{NAMES}\b)"
                          rf"|^\s*(?:from|import)\s+{NAMES}\b|-m\s+pipeline\.{NAMES}\b|[\"']pipeline\.{NAMES}[\"']", re.M)
@@ -182,6 +186,34 @@ class NoConnectionTest(unittest.TestCase):
                     mods = [a.name for a in node.names] if isinstance(node, ast.Import) else [node.module or ""]
                     for mod in mods:
                         self.assertNotIn(mod.split(".")[0], {"urllib", "socket", "requests", "http", "ssl"}, rel)
+
+
+class DynamicAttributeTest(unittest.TestCase):
+    """S2AFIX2 N1: 허용 목록 가지의 외부 접속 등록 시험(`test_egress`)은 이름이 동적인 `getattr` 을 사람이 확인해 등록한 지점만 허용한다. 새 모듈은 그런 지점을 새로 만들지 않고 이미 등록된 `F.field_of`
+    (`facts.py`)로 읽는다 — S2a 를 허용 목록 뒤에 합쳤을 때 `_policy_cell_state` 의 한 줄이 시험 셋을 빨갛게 만들었다."""
+    CALLS = {"getattr", "setattr", "delattr"}
+
+    def dynamic_calls(self, rel):
+        found = []
+        for node in ast.walk(tree(rel)):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in self.CALLS:
+                name = node.args[1] if len(node.args) > 1 else None
+                if not isinstance(name, ast.Constant):
+                    found.append((rel, node.lineno, node.func.id))
+        return found
+
+    def test_no_new_file_reads_an_attribute_by_a_computed_name_except_facts_py(self):
+        found = []
+        for rel in NEW_FILES:
+            if rel != "pipeline/facts.py":                                                       # `field_of` 와 직렬화 도우미는 허용 목록 가지가 등록한 지점이다
+                found += self.dynamic_calls(rel)
+        self.assertEqual(found, [], "이름이 동적인 getattr/setattr/delattr 대신 facts.field_of 를 쓴다")
+
+    def test_the_scan_really_finds_a_dynamic_read(self):
+        sample = ast.parse("def f(obj, name):\n    return getattr(obj, name, None)\n\ndef g(obj):\n    return getattr(obj, 'state', None)\n")
+        calls = [node for node in ast.walk(sample) if isinstance(node, ast.Call) and node.func.id in self.CALLS and not isinstance(node.args[1], ast.Constant)]
+        self.assertEqual([node.lineno for node in calls], [2])                                    # 상수 이름은 걸리지 않고 계산한 이름만 걸린다
+        self.assertTrue(self.dynamic_calls("pipeline/facts.py"))                                  # 허용 지점(`field_of` 등)은 실제로 있다 — 검사 대상이 비어 통과하지 않게
 
 
 class HygieneTest(unittest.TestCase):

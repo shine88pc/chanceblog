@@ -23,6 +23,8 @@
 | F12_count | f12_count | 묶음의 개수(세는 단위는 인자) |
 | F13_gap | f13_gap | 같은 기준일 두 값의 차이(a − b: 최고 − 최저 같은 격차, 평균 − 중앙값) |
 | F14_median | f14_median | 같은 기준일·같은 지표 묶음의 중앙값(짝수 개면 가운데 둘의 평균) |
+| F15_day_max | f15_day_max | 한 날(UTC)의 시각 값(3시간 구간 같은) 묶음의 최댓값을 그날(일)의 값으로 — 구간이 모두 있는 날만 |
+| F16_count_between | f16_count_between | 묶음에서 값이 기준 이상(·다른 기준 미만)인 것의 개수 — 0 도 값이다 |
 
 설명: docs/FACT_PATH.md
 """
@@ -61,6 +63,10 @@ REASON_TEXT = {
     "DUPLICATE_INPUT": "같은 입력이 두 번 들어 있어 계산하지 않음",
     "NOT_A_RATIO_SCALE": "기준점이 임의인 척도(섭씨 같은 구간척도)나 순위라 변화율을 계산하지 않음",
     "VALUE_OUT_OF_RANGE": "계산 결과가 다룰 수 있는 범위를 넘어 계산하지 않음",
+    "INCOMPLETE_PERIOD": "기간 안의 값이 모두 있지 않아(구간이 모자라) 계산하지 않음",
+    "DUPLICATE_PERIOD": "같은 시각의 값이 둘 이상이라 계산하지 않음",
+    "NOT_ONE_DAY": "값이 한 날(UTC)의 것이 아니라 계산하지 않음",
+    "BAD_RANGE": "기준 범위가 맞지 않아(값 없음·단위 다름·위쪽 끝이 아래쪽 끝 이하) 계산하지 않음",
 }
 DISCARD_REASONS = frozenset({"MISSING_VALUE", "NON_NUMERIC", "UNIT_MISMATCH", "AS_OF_MISSING"})
 
@@ -463,11 +469,68 @@ def f14_median(group):
         region_level=getattr(anchor, "region_level", None), provider_id=_common_provider(members))
 
 
+@F.exact
+def f15_day_max(group, *, expected_count):
+    """한 날(UTC)의 시각 값 묶음(3시간 구간 같은)의 최댓값을 **그날(일)** 의 값으로 만든다. 묶음은 같은 지표·단위·제공처의 시각(instant) Fact 이고 모두 한 UTC 날짜 안에 있으며
+    `expected_count` 개가 값과 함께 모두 있어야 한다 — 구간이 모자라거나(INCOMPLETE_PERIOD)·값이 없거나·같은 시각이 둘이거나(DUPLICATE_PERIOD)·여러 날에 걸치면(NOT_ONE_DAY)
+    그날의 값을 만들지 않는다. 결과의 기준일은 그 날짜(일)이고, 입력 id 의 첫째는 최댓값을 가진 Fact(동률이면 더 나중 시각)다."""
+    formula_id = "F15_day_max"
+    members = list(group)
+    if not isinstance(expected_count, int) or isinstance(expected_count, bool) or expected_count < 1:
+        return _skip(formula_id, "INCOMPLETE_PERIOD")
+    problem = _group_problem(formula_id, members, same_period=False, min_size=1)
+    if problem is not None:
+        return problem
+    periods = [F.parse_as_of(m.as_of) for m in members]
+    days = {F.utc_day_of(p) for p in periods}
+    if None in days or len(days) != 1:
+        return _skip(formula_id, "NOT_ONE_DAY")
+    if len({p.ordinal for p in periods}) != len(periods):
+        return _skip(formula_id, "DUPLICATE_PERIOD")
+    if len(members) != expected_count:
+        return _skip(formula_id, "INCOMPLETE_PERIOD")
+    chosen = select_extreme(members, highest=True)
+    inputs = (chosen.fact_id,) + tuple(i for i in _ordered_ids(members) if i != chosen.fact_id)
+    return F.DerivedFact.create(formula_id, inputs, chosen.value, chosen.unit, as_of=next(iter(days)), region=chosen.region, key=getattr(chosen, "key", None),
+                                region_level=getattr(chosen, "region_level", None), provider_id=_common_provider(members))
+
+
+@F.exact
+def f16_count_between(group, low, high, unit):
+    """묶음 가운데 값이 `low` 이상이고 `high` 미만인 것의 개수(high 가 None 이면 위쪽 끝이 없다). **0 도 값이다** — 하나도 없으면 0 을 돌려준다(`f12_count` 는 빈 묶음을 만들지 않는다).
+    low·high 는 같은 단위의 기준값(Fact — 값이 있어야 한다)이고 입력 id 에 기준값의 id 가 먼저 들어가 어떤 기준으로 센 것인지 남는다. 묶음은 같은 지표·단위·제공처여야 하고(기간은 달라도 된다)
+    기준값이 묶음 안에 들어 있으면 안 된다. unit 은 세는 단위(우리 낱말)."""
+    formula_id = "F16_count_between"
+    members = list(group)
+    problem = _group_problem(formula_id, members, same_period=False, min_size=1)
+    if problem is not None:
+        return problem
+    bounds = [low] if high is None else [low, high]
+    for bound in bounds:
+        if not _numeric(bound) or bound.value is None:
+            return _skip(formula_id, "BAD_RANGE")
+        if bound.unit != members[0].unit:
+            return _skip(formula_id, "UNIT_MISMATCH")
+    if high is not None and high.value <= low.value:
+        return _skip(formula_id, "BAD_RANGE")
+    member_ids = {m.fact_id for m in members}
+    if len({b.fact_id for b in bounds}) != len(bounds) or any(b.fact_id in member_ids for b in bounds):
+        return _skip(formula_id, "DUPLICATE_INPUT")
+    count = sum(1 for m in members if m.value >= low.value and (high is None or m.value < high.value))
+    periods = [F.parse_as_of(m.as_of) for m in members]
+    latest = max(zip(periods, members), key=lambda pair: (pair[0].ordinal, pair[1].fact_id))[1]
+    keys = {getattr(m, "key", None) for m in members}
+    return F.DerivedFact.create(
+        formula_id, tuple(b.fact_id for b in bounds) + tuple(_ordered_ids(members)), Decimal(count), unit, as_of=latest.as_of, region=None,
+        key=next(iter(keys)) if len(keys) == 1 else None, region_level=None, provider_id=_common_provider(members))
+
+
 # 근거 텍스트에 쓰는 계산식 이름(숫자 없는 우리 낱말 — 계산식 번호 `F01` 의 숫자가 근거 숫자로 세어지지 않게 번호 대신 이 이름을 쓴다, D-131)
 FORMULA_LABELS = {
     "F01_change": "증감", "F02_pct_change": "변화율", "F03_yoy": "전년 같은 기간 대비 변화율", "F04_rank": "순위", "F05_share": "비중",
     "F06_diff_from_mean": "평균과의 차이", "F07_rolling_mean": "이동평균", "F08_mean": "평균", "F09_max": "최댓값", "F10_min": "최솟값",
     "F11_range_position": "범위 안의 위치", "F12_count": "개수", "F13_gap": "격차", "F14_median": "중앙값",
+    "F15_day_max": "하루 최댓값", "F16_count_between": "기준 범위 개수",
 }
 
 FORMULAS = {
@@ -485,4 +548,6 @@ FORMULAS = {
     "F12_count": f12_count,
     "F13_gap": f13_gap,
     "F14_median": f14_median,
+    "F15_day_max": f15_day_max,
+    "F16_count_between": f16_count_between,
 }

@@ -1,0 +1,53 @@
+{
+  "_doc": "NOAA 우주기상예측센터(SWPC) JSON 데이터 서비스 응답 표본 — NOAA 가 만든 공공 자료(미국 연방정부 저작물)이고 운영자 원본이 아니라 저장소에 둔다. 읽은 날은 2026-11-10 이며 제공처 조사에서 제품마다 한 번 받았다. 파일 본문에는 주소 글자를 넣지 않고 출처는 이 파일과 파일 이름에 적는다. 시험이 어댑터의 입력으로만 쓴다.",
+  "files": {
+    "noaa-planetary-k-index-forecast.json": {
+      "host": "services.swpc.noaa.gov",
+      "path": "/products/noaa-planetary-k-index-forecast.json",
+      "product": "kp_outlook",
+      "read_on": "2026-11-10",
+      "sha256": "1fb8737f642a5a78d4f879ea540a6aff2368354d44154fae67974f09c5c616dc",
+      "trim": "응답 전체가 아니라 앞 12건과 뒤 3건(작은 객체는 전체)만 남긴 유효 JSON"
+    },
+    "noaa-planetary-k-index.json": {
+      "host": "services.swpc.noaa.gov",
+      "path": "/products/noaa-planetary-k-index.json",
+      "product": "kp_estimated",
+      "read_on": "2026-11-10",
+      "sha256": "4da11cb72297865b2fe23a39cffd032b9379f3f3ee3c66e1f9a943b06896b639",
+      "trim": "응답 전체가 아니라 앞 12건과 뒤 3건(작은 객체는 전체)만 남긴 유효 JSON"
+    },
+    "noaa-scales.json": {
+      "host": "services.swpc.noaa.gov",
+      "path": "/products/noaa-scales.json",
+      "product": "scales",
+      "read_on": "2026-11-10",
+      "sha256": "4f9cab122cb25aaeab1ee1f4407d933116c242356d1611b69634b61abbba868f",
+      "trim": "응답 전체가 아니라 앞 12건과 뒤 3건(작은 객체는 전체)만 남긴 유효 JSON"
+    },
+    "observed-solar-cycle-indices.json": {
+      "host": "services.swpc.noaa.gov",
+      "path": "/json/solar-cycle/observed-solar-cycle-indices.json",
+      "product": "ssn_monthly",
+      "read_on": "2026-11-10",
+      "sha256": "520b29d7656c566e35999897ecb75598b1f1bac97abe15286a19b4325973c48d",
+      "trim": "응답 전체가 아니라 앞 12건과 뒤 3건(작은 객체는 전체)만 남긴 유효 JSON"
+    },
+    "swpc_observed_ssn.json": {
+      "host": "services.swpc.noaa.gov",
+      "path": "/json/solar-cycle/swpc_observed_ssn.json",
+      "product": "ssn_daily",
+      "read_on": "2026-11-10",
+      "sha256": "562aaada589d78fd07cbcaca80d76db0b8cf655e14086de25b87dcb86c621da4",
+      "trim": "응답 전체가 아니라 앞 12건과 뒤 3건(작은 객체는 전체)만 남긴 유효 JSON"
+    },
+    "xray-flares-7-day.json": {
+      "host": "services.swpc.noaa.gov",
+      "path": "/json/goes/primary/xray-flares-7-day.json",
+      "product": "xray_flares",
+      "read_on": "2026-11-10",
+      "sha256": "f5df93b7157f48012d802d2941874e54edaeb726e1fceba1665150dc274f90c7",
+      "trim": "응답 전체가 아니라 앞 12건과 뒤 3건(작은 객체는 전체)만 남긴 유효 JSON"
+    }
+  }
+}

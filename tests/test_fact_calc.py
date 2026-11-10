@@ -399,13 +399,15 @@ class RegistryOfFormulasTest(unittest.TestCase):
         a, b = MAKE("4", period="2026-03"), MAKE("2", period="2026-02")
         group = [MAKE("4", region="R01"), MAKE("2", region="R02"), MAKE("3", region="R03")]
         window = months(["1", "2", "3"])
+        day_group = [MAKE(str(1 + step % 3), period=f"2026-03-05T{3 * step:02d}:00:00Z", region=None, level=None) for step in range(8)]          # S2a: 한 날 8구간
         calls = {
             "F01_change": lambda: C.f01_change(a, b), "F02_pct_change": lambda: C.f02_pct_change(a, b),
             "F03_yoy": lambda: C.f03_yoy(a, MAKE("2", period="2025-03")), "F04_rank": lambda: C.f04_rank(group[0], group),
             "F05_share": lambda: C.f05_share(group[1], group[0]), "F06_diff_from_mean": lambda: C.f06_diff_from_mean(group[0], C.f08_mean(group)),
             "F07_rolling_mean": lambda: C.f07_rolling_mean(window), "F08_mean": lambda: C.f08_mean(group), "F09_max": lambda: C.f09_max(group),
             "F10_min": lambda: C.f10_min(group), "F11_range_position": lambda: C.f11_range_position(window[1], window), "F12_count": lambda: C.f12_count(group, "곳"),
-            "F13_gap": lambda: C.f13_gap(group[0], group[1]), "F14_median": lambda: C.f14_median(group)}
+            "F13_gap": lambda: C.f13_gap(group[0], group[1]), "F14_median": lambda: C.f14_median(group),
+            "F15_day_max": lambda: C.f15_day_max(day_group, expected_count=8), "F16_count_between": lambda: C.f16_count_between(group, MAKE("3", region="R09"), None, "곳")}
         self.assertEqual(set(calls), set(C.FORMULAS))
         for formula_id, call in calls.items():
             with self.subTest(formula=formula_id):
