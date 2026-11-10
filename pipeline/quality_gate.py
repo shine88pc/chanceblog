@@ -392,14 +392,27 @@ def scan_text_of(parts):
 _ALT_TEXT = re.compile(r"!\[([^\]\n]{1,300})\]\([^)\n]{0,600}\)")
 _HTML_ATTR_TEXT = re.compile(r"""\b(?:title|alt|aria-label)\s*=\s*(?:"([^"\n]{1,300})"|'([^'\n]{1,300})')""", re.I)
 _LINK_TEXT = re.compile(r"(?<!!)\[([^\]\n]{1,300})\]\([^)\n]{0,600}\)")
+_MD_TITLE_TEXT = re.compile(r"""\]\(\s*<?[^)\s>]{1,600}>?\s+(?:"([^"\n]{1,300})"|'([^'\n]{1,300})')\s*\)""")          # [글자](주소 "마우스를 올리면 보이는 글")·![대체글](주소 "설명")
+
+
+def _hidden_pieces(text, links):
+    pieces = [m.group(1) for m in _ALT_TEXT.finditer(text)] + [m.group(1) or m.group(2) for m in _HTML_ATTR_TEXT.finditer(text)] + [m.group(1) or m.group(2) for m in _MD_TITLE_TEXT.finditer(text)]
+    if links:
+        pieces += [m.group(1) for m in _LINK_TEXT.finditer(text)]
+    folded = (_fold(piece).strip() for piece in pieces)                    # 본문(prose_of)과 같은 정규화(NFKC·보이지 않는 서식 문자 제거)
+    return [piece for piece in folded if piece]
 
 
 def hidden_health_text(text):
-    """화면에는 보이지만 prose_of 가 지우거나 출처 목록에서 빼는 글(이미지 대체글·HTML 속성 title·alt·aria-label 의 값·링크 글자)을 모아 돌려준다. 건강 규칙(QG4)만 이것도 읽는다 —
-    효능 단정을 그림 설명이나 링크 글자 속에 숨기지 못하게. 코드 블록은 읽지 않는다(코드의 영어 낱말이 증상·효과 낱말과 겹쳐 기술 글을 오탐하므로 — docs/QUALITY_GATE.md 한계)."""
-    text = _text(text)
-    pieces = [m.group(1) for m in _ALT_TEXT.finditer(text)] + [m.group(1) or m.group(2) for m in _HTML_ATTR_TEXT.finditer(text)] + [m.group(1) for m in _LINK_TEXT.finditer(text)]
-    return "\n".join(piece.strip() for piece in pieces if piece.strip())
+    """화면에는 보이지만 prose_of 가 지우거나 출처 목록에서 빼는 글(이미지 대체글·HTML 속성 title·alt·aria-label 의 값·마크다운 링크의 제목 `(주소 "제목")`·링크 글자)을 모아 돌려준다. 건강 규칙(QG4)은 이것을
+    모두 읽는다 — 효능 단정을 그림 설명이나 링크 글자 속에 숨기지 못하게. 코드 블록은 읽지 않는다(코드의 영어 낱말이 증상·효과 낱말과 겹쳐 기술 글을 오탐하므로 — docs/QUALITY_GATE.md 한계)."""
+    return "\n".join(_hidden_pieces(_text(text), True))
+
+
+def hidden_claim_text(text):
+    """숫자(QG1)·인용·이름(QG2)이 읽는 숨은 글: 이미지 대체글·HTML 속성·마크다운 링크 제목. 링크 글자는 뺀다 — 출처 목록의 링크 제목이 가진 숫자·기관 이름은 주장이 아니라는 규칙(§3-1)이 그대로이고,
+    본문 속 링크 글자는 prose_of 가 이미 읽는다. 조각은 빈 줄로 이어 인용 따옴표가 조각을 건너 짝지어지지 않게 한다."""
+    return "\n\n".join(_hidden_pieces(_text(text), False))
 
 
 def readable_length(story):
@@ -947,12 +960,21 @@ def _hangul_names(text):
     return list(dict.fromkeys(names))
 
 
+_ACRONYM_TOKEN = re.compile(r"[A-Z]{2,5}")
+
+
+def _is_acronym_name(name):
+    """대문자 2–5자로만 된 이름(IMF·WHO·UN·SEC·ECB·MIT)은 기관 이름이지 사람이 아니다 — 'IMF 총재는'·'MIT 교수는'을 인물로 읽지 않는다."""
+    tokens = name.replace(".", " ").split()
+    return bool(tokens) and all(_ACRONYM_TOKEN.fullmatch(token) for token in tokens)
+
+
 def _titled_people(text):
     """직함이 붙은 사람: (라틴 글자 이름 목록, 한글 이름 목록). 글자 모양으로 읽는 근사라 오탐이 있을 수 있고 오탐은 보류 쪽이다."""
     latin = [m.group(1) for rx in (_EN_PERSON_AFTER, _EN_PERSON_AFTER_LOWER, _EN_PERSON_NAME_CEO, _KO_LATIN_NAME_TITLE, _KO_TITLE_LATIN_NAME) for m in rx.finditer(text)]
     for rx in (_EN_PERSON_BEFORE, _EN_PERSON_BEFORE_ONE):          # 직함이 뒤에 오는 어순: 문장 첫머리 낱말·전치사·달 이름으로 시작하는 후보('In March,'·'However,')는 이름이 아니다
         latin += [m.group(1) for m in rx.finditer(text) if m.group(1).split()[0].rstrip(".").casefold() not in _EN_NOT_NAME]
-    return latin, _hangul_names(text)
+    return [name for name in latin if not _is_acronym_name(name)], _hangul_names(text)
 
 
 def _names_in(evidence_norm_words, name):
@@ -1080,63 +1102,109 @@ _SYMPTOM_KO = re.compile(
     r"스트레스(?!\s*테스트)|탈모|비듬|가려움|피부\s*트러블|트러블|여드름|아토피|알레르기|감기|기침|콧물|코막힘|몸살|발열|소화\s*불량|속쓰림|변비|설사|더부룩|어지럼|현기증|"
     r"자세(?=[를을이가은는도])|거북목|일자목|굽은\s*어깨|척추|체형|눈\s*피로|안구\s*건조|시력|체중|뱃살|비만|체지방|혈압|혈당|콜레스테롤|수면|허리|어깨|무릎|관절|근육|피부|소화|"
     # 흔한 증상·질환 이름(검증자의 91개를 포함)
-    r"비염|(?<!하드)(?<!하드 )(?<!SSD)(?<!SSD )(?<!컴퓨터)(?<!컴퓨터 )(?<!서버)(?<!서버 )(?<!플래시)(?<!플래시 )(?<!USB)(?<!USB )디스크(?!\s*(?:공간|용량|드라이브|오류|조각|포맷|복구|정리|파티션|속도|사용량))|무좀|치질|치핵|통풍|이명(?!박)|귀울림|난청|대상포진|오십견|위염|장염|방광염|중이염|결막염|편도염|부비동염|축농증|건선|습진|두드러기|지루성|족저근막염|손목터널|좌골신경|척추측만|탈장|"
-    r"요로결석|신장결석|담석|치주염|구내염|충치|치석|사랑니|턱관절|다래끼|안구건조증|노안|백내장|녹내장|근시|비문증|충혈|저혈압|저혈당|고혈압|빈혈|빈맥|부정맥|두근거림|숨참|호흡곤란|코골이|수면무호흡|"
+    r"비염|(?<!하드)(?<!하드 )(?<!SSD)(?<!SSD )(?<!컴퓨터)(?<!컴퓨터 )(?<!서버)(?<!서버 )(?<!플래시)(?<!플래시 )(?<!USB)(?<!USB )디스크(?!\s*(?:공간|용량|드라이브|오류|조각|포맷|복구|정리|파티션|속도|사용량|어레이|스토리지|백업|암호화))|무좀|치질|치핵|통풍|이명(?!박)|귀울림|난청|대상포진|오십견|위염|장염|방광염|중이염|결막염|편도염|부비동염|축농증|건선|습진|두드러기|지루성|족저근막염|손목터널|좌골신경|척추측만|탈장|"
+    r"요로결석|신장결석|담석|치주염|구내염|충치|치석|사랑니|턱관절|다래끼|안구건조증|노안|백내장|녹내장|근시(?!안)|비문증|충혈|저혈압|저혈당|고혈압|빈혈|빈맥|부정맥|두근거림|숨참|호흡곤란|코골이|수면무호흡|"
     r"야뇨|빈뇨|배뇨|요실금|전립선|갱년기|생리불순|불임|발기부전|흉터|건조증|번아웃|공황\s*발작|불안장애|ADHD|자폐|치매|건망증|이석증|멀미|구토|메스꺼움|구취|입\s*냄새|발냄새|체취|다한증|냉증|수족냉증|"
     r"하지정맥류|관절염|류마티스|골다공증|협심증|뇌졸중|지방간|고지혈증|위궤양|과민성대장|역류성|숙취|오한|재채기|가래(?!떡)|독감|목감기|열감|체기|"
     r"다크서클|홍조|새치|흰머리|원형탈모|두피|셀룰라이트|튼살|내장지방|복부비만|군살|평발|무지외반|티눈|굳은살|액취|구강\s*건조|입\s*마름|(?<!\d)\d+\s*(?:[kK][gG]|㎏|킬로그램|킬로)\s*(?:감량|빼|빠|뺀)|"
     # 접미 규칙: …염(비염·관절염·역류성식도염 — 소금·화학·불꽃의 '염'과 감염·전염은 뺀다), …증(불면증·협착증 — 어근 두 글자 이상, 증명서류는 뺀다), …증후군, …장애, …병
-    r"[가-힣]{1,6}(?<!저)(?<!고)(?<!무)(?<!천일)(?<!정제)(?<!죽)(?<!암)(?<!화)(?<!탄산)(?<!질산)(?<!황산)(?<!인산)(?<!규산)(?<!감)(?<!전)(?<!오)(?<!요)(?<!방)(?<!식)염" + _WORD_END + r"|"
+    r"[가-힣]{1,6}(?<!저)(?<!고)(?<!무)(?<!천일)(?<!정제)(?<!죽)(?<!암)(?<!화)(?<!탄산)(?<!질산)(?<!황산)(?<!인산)(?<!규산)(?<!감)(?<!전)(?<!오)(?<!요)(?<!방)(?<!식)(?<!탈)염" + _WORD_END + r"|"
     r"[가-힣]{2,6}(?<!영수)(?<!허가)(?<!면허)(?<!자격)(?<!등록)(?<!수료)(?<!합격)(?<!회원)(?<!출입)(?<!통행)(?<!학생)(?<!주민)(?<!보험)(?<!신분)(?<!저작권)(?<!참가)(?<!탑승)(?<!임시)(?<!취업)(?<!재직)(?<!졸업)(?<!재학)(?<!납세)(?<!인)(?<!보)(?<!교환)(?<!예약)(?<!계약)(?<!수강)(?<!관람)(?<!이용)(?<!승차)(?<!입장)(?<!사원)(?<!학위)(?<!인정)(?<!검정)증"
     + _WORD_END + r"|"
     r"[가-힣]{2,8}증후군|"
     r"(?:수면|불안|우울|섭식|발달|기억|소화|배뇨|성기능|학습|언어|청각|시각|운동|자폐|공황|강박|양극성|인지|호흡|순환|지적|정신|신경|감각|보행|집중|배변|식이|조현|분리불안|적응|충동조절|성격|해리)\s*장애" + _WORD_END + r"|"
-    r"(?:당뇨|심장|정신|불치|난치|성|피부|만성|신장|지|고질|생활습관|희귀|유전|직업|열대)병" + _WORD_END)
+    r"(?:당뇨|심장|정신|불치|난치|성|피부|만성|신장|지|생활습관|희귀|유전|직업|열대)병" + _WORD_END + r"|"
+    r"(?<![가-힣]{2}의 )고질병" + _WORD_END + r"|"                    # '한국 경제의 고질병'처럼 'X의 고질병'은 비유로 쓰이는 말이다(몸 낱말이 같이 있으면 그 낱말이 증상으로 읽힌다)
+    r"(?<![가-힣])화병" + _WORD_END + r"|"
+    # 목록 밖 낱말(독립 검증이 지은 문장에서 빠진 것): 몸 낱말 뒤의 떨림·쥐는 합친 말로만 읽는다('떨림'·'쥐' 한 낱말은 뜻이 여럿이라 일부러 제외)
+    r"혈액\s*순환|잇몸|(?:눈|손|입술|다리)\s*떨림|(?:다리|종아리)\s*쥐|땀\s*냄새|(?<!복식)(?<!단식)부기" + _WORD_END)
+#   교통·네트워크·경제·소프트웨어 글에서 같은 낱말이 다른 뜻으로 쓰이는 것은 뺀다(영어는 한국어의 `스트레스 테스트` 같은 예외가 없어 검증 때 오탐이 늘었다): pain points·stress test·market/supply chain stress·index weight·memory bloating·
+#   Great Depression·depression-era·pandemic hangover·security posture·market anxiety, 그리고 congestion 은 nasal·chest·sinus 처럼 몸 낱말이 붙은 것만 읽는다. 건강 글에서 흔한 pain·stress·weight·depression 자체는 그대로 읽는다.
 _SYMPTOM_EN = re.compile(
-    r"\b(?:pain|pains|aches?|headaches?|migraines?|fatigue|tiredness|soreness|stiffness|stress|anxiety|insomnia|colds?|cough|flu|acne|eczema|allerg(?:y|ies)|bloating|"
-    r"constipation|nausea|dizziness|hair\s+loss|dandruff|swelling|inflammation|posture|belly\s+fat|body\s+fat|weight|blood\s+pressure|cholesterol|"
-    r"snor(?:e|es|ed|ing)|eye\s*strain|sore\s+throat|runny\s+nose|congestion|heartburn|indigestion|acid\s+reflux|hangovers?|wrinkles?|dark\s+circles|cramps?|vertigo|tinnitus|sciatica|"
-    r"arthritis|gout|hemorrhoids?|asthma|sinus\w*|depression|stiff\s+neck)\b", re.I)
+    r"\b(?:pains?(?!\s+points?)|aches?|headaches?|migraines?|fatigue|tiredness|soreness|stiffness|"
+    r"(?<!market )(?<!financial )(?<!credit )(?<!chain )(?<!rate )(?<!flow )(?<!price )(?<!funding )(?<!liquidity )(?<!systemic )(?<!economic )(?<!fiscal )(?<!bank )(?<!banking )stress(?!\s+tests?)|"
+    r"(?<!market )(?<!inflation )(?<!economic )(?<!investor )(?<!consumer )anxiety|insomnia|colds?(?!\s+(?:start|storage|chain|war|call|email|boot))|cough|flu|acne|eczema|allerg(?:y|ies)|"
+    r"(?<!memory )(?<!code )(?<!software )(?<!data )bloating|constipation|nausea|dizziness|hair\s+loss|dandruff|swelling|inflammation|"
+    r"(?<!security )(?<!cyber )(?<!defense )posture|belly\s+fat|body\s+fat|(?<!index )(?<!portfolio )(?<!risk )weight(?!\s+of\b)|blood\s+pressure|cholesterol|"
+    r"snor(?:e|es|ed|ing)|eye\s*strain|sore\s+(?:throat|muscles?)|runny\s+nose|(?:nasal|chest|sinus|head|lung)\s+congestion|heartburn|indigestion|acid\s+reflux|"
+    r"(?<!pandemic )(?<!covid )(?<!market )(?<!economic )hangovers?|wrinkles?|dark\s+circles|cramps?|vertigo|tinnitus|sciatica|"
+    r"arthritis|gout|hemorrhoids?|asthma|sinus\w*|(?<!great )(?<!economic )(?<!market )depression(?!-era)|stiff\s+neck)\b", re.I)
 # 즉각·단정 부사(한국어는 부사가 동사 앞에 온다). 효과 동사와 함께 있어야 의미가 있다.
+#   시간 낱말은 낱말 하나씩이 아니라 구조로 읽는다: ① 즉효·곧·직후 ② 동작 + 자마자('먹자마자')·동작 + 는 순간('바르는 순간') ③ 기간 단위(초·분·시간·일·주·개월)와 그 뒤에 붙는 말(만에·이내·이면·후면·만) ④ '단 하루에'·'단 한 번'.
 _IMMEDIATE_KO = re.compile(
-    r"즉시|즉각|즉석에서|곧바로|바로|당장|단번에|단숨에|한\s*번에|한\s*방에|순식간(?:에)?|금세|금방|눈\s*깜짝할\s*사이에|눈\s*녹듯|그\s*자리에서|하룻밤(?:\s*(?:만에|에|안에|사이에))?|딱\s*한\s*번|한\s*번만|싹(?=\s)|(?<![가-힣])(?:확|쏙|쫙|쭉|뚝)(?=\s)|"
-    r"(?:하루|이틀|사흘|나흘|일주일|이주일|한\s*달|며칠|\d+\s*(?:분|시간|일|주|개월))\s*(?:이면|이내|만에|안에|내에|동안)|"
-    r"완전(?:히|하게)?|완벽(?:히|하게)?|확실(?:히|하게)?|무조건|반드시|100\s*(?:%|퍼센트)|백\s*퍼센트|영원히|영구(?:적(?:으로)?|히)|평생|깨끗(?:이|하게)|깔끔(?:히|하게)|말끔(?:히|하게)|뿌리\s*뽑|근본적으로|전혀|절대|보장")
+    r"즉시|즉각|즉효(?:성|약)?|즉석에서|곧바로|(?<![가-힣])곧(?![가-힣])|바로|당장|단번에|단숨에|한\s*번에|한\s*방에|순식간(?:에)?|금[세새]|금방|눈\s*깜짝할\s*사이에|눈\s*녹듯|그\s*자리에서|하룻밤(?:\s*(?:만에|에|안에|사이에))?|딱\s*한\s*번|한\s*번만|싹(?=\s)|(?<![가-힣])(?:확|쏙|쫙|쭉|뚝)(?=\s)|"
+    r"[가-힣]{1,8}자마자|[가-힣]{1,6}[는은]\s*순간(?:에|부터)?|직후(?:에)?|"
+    r"(?:하루|이틀|사흘|나흘|사나흘|열흘|보름|일주일|이주일|한\s*달|며칠|(?:한|두|세|네)\s*(?:시간|주)|\d+\s*(?:초|분|시간|일|주|개월))\s*(?:이면|이내|만에|안에|내에|동안|후면|뒤면|만|컷)|"
+    r"단\s*(?:하루|이틀|사흘|한\s*(?:번|알|잔|회|방울)|\d+\s*(?:초|분|시간|일|주|개월|회|번))|"
+    r"완전(?:히|하게)?|완벽(?:히|하게)?|확실(?:히|하게)?|무조건|반드시|100\s*(?:%|퍼센트|퍼(?![가-힣]))|백\s*퍼센트|영원히|영구(?:적(?:으로)?|히)|평생|깨끗(?:이|하게)|깔끔(?:히|하게)|말끔(?:히|하게)|뿌리\s*뽑|근본적으로|전혀|절대|보장")
 # 효과 동사의 어간(활용형: 줄인다·줄이는·줄일 수 있다·줄여 준다·줄여줍니다·풀립니다·가라앉습니다). '나아가'(나아가다)·'낫'(낫다)을 가린다. '치료를 받' 처럼 목적어로 쓴 말(행동)은 효과 동사가 아니다.
 # '멈추'는 증상이 주어인 활용(멈춥니다·멈췄다·멈춰)만 센다 — '작업을 즉시 멈추세요'는 행동이다.
+#   활용형을 낱말마다 손으로 적지 않고 '어간 목록 × 활용 끝 묶음'으로 만든다(`_stems`) — 묶음 하나를 고치면 그 묶음의 모든 낱말이 함께 바뀌고, 새 낱말은 어간만 더하면 모든 활용이 따라온다.
+#   활용 끝 묶음(한 글자씩, 같은 순서 — 지금·해요·과거·관형 -ㄴ·관형 -ㄹ·명사형·합쇼): 이다형 줄이·줄여·줄였·줄인·줄일·줄임·줄입 / 지다형 사라지·사라져·사라졌·사라진·사라질·사라짐·사라집 / 치다·키다·우다·내다·추다·리다·애다형도 같은 순서.
+_END_I, _END_JI, _END_CHI, _END_KI = "이여였인일임입", "지져졌진질짐집", "치쳐쳤친칠침칩", "키켜켰킨킬킴킵"
+_END_U, _END_NAE, _END_CHU, _END_RI, _END_AE = "우워웠운울움웁", "내냈낸낼냄냅", "추춰췄춘출춤춥", "리려렸린릴림립", "애앴앤앨앰앱"
+
+
+def _stems(roots, ends):
+    """어간 목록 × 활용 끝 한 글자 묶음 → 정규식 한 덩어리."""
+    return "(?:" + "|".join(roots) + ")[" + ends + "]"
+
+
+# 좋아지다류: 증상이 나아졌다고 말하는 어간 + 지다(편안해진다·가벼워졌다·괜찮아질 수 있다 …). 나아지다는 '나아가다'를 가리는 아래 낱말 목록에서 따로 읽는다.
+_BECOME_BETTER = ("사라", "없어", "편안해", "편해", "펴", "좋아", "가벼워", "젊어", "시원해", "상쾌해", "산뜻해", "맑아", "말끔해", "깨끗해", "건강해", "튼튼해", "탱탱해", "부드러워", "밝아",
+                  "괜찮아", "누그러", "낮아", "떨어")          # 개운해지다·가뿐해지다는 아래 낱말 목록의 `개운`·`가뿐` 이 이미 읽는다
 _EFFECT_KO = re.compile(
-    r"(?:줄이|줄여|줄인|줄일|줄임|줄입|줄어|줄었|없애|없앤|없앨|없앱|없앴|없어지|없어진|없어져|없어집|없어졌|사라지|사라진|사라질|사라집|사라져|사라졌|해소|풀리|풀려|풀린|풀릴|풀립|풀렸|풀어|해결|교정|바로잡|치료|완치|"
-    r"낫(?:는|습|게|다|고|기|도록|아|지)|나았|나아(?!가)|나은|나을|완화|개선|회복|예방|감량|제거|막아|막는|막은|막을|막습|잡아|잡는|잡은|잡습|날려|날리|날립|날아|덜어|낮추|낮춰|낮춘|낮출|낮춥|끝내|끝냅|"
-    r"가라앉|멈춥|멈춘다|멈췄|멈춰(?!\s*주세요)|멈추게|멎|뚫리|뚫려|뚫린|뚫립|뚫어|뚫습|편안해지|편안해져|편안해집|편해지|편해져|펴지|펴져|펴집|펴\s*주|펴준|정복|차단|녹이|녹여|녹입|녹아|태우|태워|태웁|"
-    r"좋아지|좋아져|좋아집|호전|치유|잊게|잊도록|털어|떨쳐|떨치|몰아내|물리치(?!료)|물리쳐|극복|탈출|퇴치|끝장|개운|가뿐|가벼워지|가벼워집|가벼워져|정상화|떨어지|떨어집|떨어졌|떨어뜨리|떨어트리|씻어\s*내|되찾|되살|되돌리|되돌려|되돌립|젊어지|젊어져|젊어집|재생(?=[시하해합되된됩될됨됐돼])|빠지는|빠집|"
-    r"가시(?=는\s*(?:비밀|비결|비법|효과|마법|차|음료|습관)|어(?:요|집)|었|네요|죠))(?![을를]\s*(?:받|위해|통해))")
+    "(?:" + "|".join((
+        _stems(("줄", "녹"), _END_I), _stems(_BECOME_BETTER, _END_JI), _stems(("고", "떨"), _END_CHI), r"물리(?:치(?!료)|[쳐쳤친칠침칩])", r"(?:진정|안정)시[" + _END_KI + "]", r"(?:진정|안정)(?:되|돼|됩|된)",
+        _stems(("태", "잠재"), _END_U), _stems(("끝", "몰아"), _END_NAE), _stems(("낮",), _END_CHU), _stems(("날", "되돌", "풀", "뚫", "떨어뜨", "떨어트"), _END_RI), _stems(("없",), _END_AE),
+        r"줄어|줄었|풀어|풀었|푸는|풉니|뚫어|뚫었|뚫습|녹아|날아|덜어|덜었|털어|털었|터는|막아|막았|막는|막은|막을|막습|막게|막도록|잡아|잡았|잡는|잡은|잡을|잡습|"
+        r"해소|해결|교정|바로잡|치료|완치|완화|개선|회복|예방|감량|제거|호전|치유|정복|차단|극복|탈출|퇴치|끝장|개운|가뿐|정상화|억제|경감|감소|리셋|박멸|해방|벗어(?:나|난|날|납|났)|"
+        r"낫(?:는|습|게|다|고|기|도록|아|지)|나았|나아(?!가)|나은|나을|가라앉|잦아[드들든듭]|누그러[뜨트]|멈춥|멈춘다|멈췄|멈춰(?!\s*주세요)|멈추게|멎|"
+        r"펴\s*주|펴준|씻어\s*내|잊게|잊도록|되찾|되살|재생(?=[시하해한할함합되된됩될됨됐돼])|빠(?:지는|집|진다|졌|져요|질\s*수)|내려(?:가|간|갑|갔|갈)|빼\s*(?:주|줍|줘|드려|드립)|젊게\s*만[들드든듭]|"
+        r"물러(?:가|간|갑|갔|갈)|달아(?:나|난|납|났|날)|사그라[드들든듭지진졌져]|빠져\s*나|쫓아|다스[리려렸린릴림립]|달래|달랜|달랠|달랬|"
+        r"가시(?=는\s*(?:비밀|비결|비법|효과|마법|차|음료|습관)|어(?:요|집)|었|네요|죠)",
+    )) + r")(?![을를]\s*(?:받|위해|통해))")
 _IMMEDIATE_EN = re.compile(
     r"\b(?:instantly|immediately|instant|immediate|right\s+away|at\s+once|overnight|in\s+(?:minutes|seconds|no\s+time|(?:a|an|one|two|three|four|five|six|seven|ten|\d+)\s+(?:seconds?|minutes?|hours?|days?|nights?|weeks?))|"
     r"within\s+(?:a|an|one|\d+)\s+(?:hour|day|week)s?|completely|totally|fully|permanently|permanent|forever|"
     r"once\s+and\s+for\s+all|guaranteed|definitely|absolutely|always|for\s+good|never\s+again)\b|100\s*%", re.I)
 _EFFECT_EN = re.compile(
-    r"\b(?:eliminat\w*|cur(?:e|es|ed|ing)|relie(?:ve|ves|ved|ving|f)|remov\w*|vanish\w*|disappear\w*|eras(?:e|es|ed|ing)|stop(?:s|ped|ping)?|fix(?:es|ed|ing)?|solv(?:e|es|ed|ing)|"
+    r"\b(?:alleviat\w*|revers\w*|eliminat\w*|cur(?:e|es|ed|ing)|relie(?:ve|ves|ved|ving|f)|remov\w*|vanish\w*|disappear\w*|eras(?:e|es|ed|ing)|stop(?:s|ped|ping)?|fix(?:es|ed|ing)?|solv(?:e|es|ed|ing)|"
     r"end(?:s|ed|ing)?|banish\w*|melt(?:s|ed|ing)?\s+away|reduc(?:e|es|ed|ing)|eas(?:e|es|ed|ing)|heal(?:s|ed|ing)?|clear(?:s|ed|ing)?|gone|kill(?:s|ed|ing)?|"
     r"wip(?:e|es|ed|ing)|get(?:s|ting)?\s+rid\s+of|resolv\w*|prevent(?:s|ed|ing)?|goodbye|farewell|knock(?:s|ed|ing)?\s+out|beat(?:s|ing)?|conquer\w*|eradicat\w*|"
     r"los(?:e|es|ing|t)|shed(?:s|ding)?|burn(?:s|ed|ing)?|drop(?:s|ped|ping)?|treat(?:s|ed|ing)?|soothe\w*|zap\w*|crush\w*|neutraliz\w*)\b", re.I)
 # 글을 효과 단정을 찾을 조각으로 가른다: 문장 경계(마침표·줄바꿈)는 늘 경계이고, 절 경계(쉼표·느낌표·쌍점·물음표)는 짧은 글에서는 경계로 쓰지 않고 긴 글에서는 이웃한 두 절을 함께 본다(물음표는 짧은 질문 뒤에 답이 이어질 때만).
-_HARD_SPLIT = re.compile(r"[.。\n]+")
+# 마침표는 바로 뒤에 영문자·숫자가 붙지 않을 때만 문장 끝이다 — 소수점(99.9%·3.5배), 약어(U.S.·e.g.), 주소(example.com)의 점은 경계가 아니다. 영어 호칭 약어(Dr.·Mr.·Prof.)도 뒤가 이름이라 경계가 아니다.
+# 경계를 덜 자르는 쪽이 안전하다(조각이 커질수록 단정을 더 잘 찾는다) — 본문 위치에서 `통증이 99.9% 즉시 사라집니다`가 마침표 때문에 둘로 갈려 통과하던 것(제목 위치는 보류)을 막는다.
+_SENTENCE_DOT = r"(?<!\bDr)(?<!\bMr)(?<!\bMrs)(?<!\bMs)(?<!\bProf)(?<!\bSt)\.(?![A-Za-z0-9])"
+_HARD_SPLIT = re.compile(rf"(?:{_SENTENCE_DOT}|[。\n])+")
+_SENTENCE_SPLIT = re.compile(rf"(?:{_SENTENCE_DOT}|[!?。！？\n])+")          # 건강 규칙이 문장 하나씩 볼 때(상담 부정 문장·제품 단정)도 같은 경계를 쓴다
 _SOFT_SPLIT = re.compile(r"([,，、;；!！?？]+)")
 CLAIM_SHORT_CHARS = 120            # 제목처럼 이보다 짧은 글은 쉼표·느낌표·물음표뿐 아니라 마침표도 경계로 쓰지 않고 통째로 본다('허리 통증, 즉시 줄이는 방법'·'피로가 심한가요? 즉시 해소')
 CLAIM_QUESTION_CHARS = 40          # 물음표 앞 절이 이 글자 수 이하일 때만 뒤 절과 이어 본다('요즘 피곤하신가요? 이 비타민 하나면 즉시 회복됩니다')
 CLAIM_WINDOW, CLAIM_STEP = 400, 200          # 400자를 넘는 조각은 자르지 않고 겹치는 창(400자 창·200자 간격)으로 훑는다 — 앞 400자만 보면 긴 문장 뒤의 단정이 빠진다
 # 증상이 있는 같은 조각에 '제로·걱정 끝·이제 안녕'처럼 증상이 없어진다고 단정하는 문구가 있으면 효과 동사가 없어도 C 다('두통 제로 비법'·'통증 걱정 끝, 이 의자 하나로').
-_RIDDANCE_KO = re.compile(r"제로(?![가-힣])|걱정\s*(?:끝|없(?:는|이|어))|고민\s*끝|이제\s*(?:끝|안녕)(?![가-힣])|안녕\s*(?=통증|두통|피로|스트레스)|굿바이|작별")
+_RIDDANCE_KO = re.compile(r"제로(?![가-힣])|걱정\s*(?:끝|없(?:는|이|어))|고민\s*끝|이제\s*(?:끝|안녕)(?![가-힣])|안녕\s*(?=통증|두통|피로|스트레스)|굿바이|작별|해방(?=되|돼|됩|된|시키|시켜|시킵|시킨)|즉효(?:성|약)?")
 # 시간 부사(즉시·바로·당장 …) + 효과 동사가 명령형('바로 자세를 교정하세요')이면 그 부사는 행동을 재촉하는 것이지 결과를 단정하는 것이 아니다. 단정 부사(완전히·확실히 …)는 명령형이어도 단정이다('이 샴푸로 완전히 해결하세요').
 _TEMPORAL_KO = frozenset({"즉시", "즉각", "곧바로", "바로", "당장"})
 _IMPERATIVE_AFTER = re.compile(r"\s*[가-힣]{0,2}(?:세요|십시오|시오|합시다|하자|하라)(?![가-힣])|\s*[가-힣]{0,2}\s*(?:보세요|주세요|드세요)")
 _CLAIM_GAP_KO_CAP = 40             # 한국어: 부사와 효과 동사 사이 글자 수의 느슨한 상한(구조 규칙이 주된 판정이고 이것은 멀리 떨어진 말을 잇지 않으려는 안전선이다)
 _CLAIM_GAP_EN = 30
 # 부사와 효과 동사 사이에 다른 서술어(행동)가 끼면 부사는 그 행동 순서를 꾸미는 것이다('즉시 병원에 가서 치료를 받으세요'). 명사구·부사만 끼면 효과 결과를 꾸미는 것이다('즉시 이 베개 하나만으로 줄일 수 있습니다').
+#   '…하고·…하며·…하면서·…하여·…해서'(높임 '…하시고·…하셔서' 포함) 는 앞 낱말이 행동일 때만 행동 서술어다: `하다` 앞의 낱말은 형용사일 수도 있고('안전하고 부드럽게'·'편안하며 확실하게'·'간편해서') 그러면 행동 순서가 아니라 결과를 꾸미는 말이다.
+#   형용사를 가르는 낱말 목록 대신 행동 낱말(아래)만 적는다 — 목록에 없는 행동은 보류(안전한 쪽)로 떨어지고, 형용사를 행동으로 읽는 미탐은 생기지 않는다. '스트레칭을 하고'처럼 하다 앞에 낱말이 없는 하고는 늘 행동이다.
+_DO_VERB_STEMS = (r"(?:확인|기록|점검|측정|관찰|체크|휴식|운동|상담|문의|준비|정리|조절|조정|사용|중단|중지|복용|섭취|실시|진행|시작|이동|대기|연락|신고|검사|진료|진찰|진단|처방|접종|교체|청소|세척|환기|"
+                  r"스트레칭|마사지|명상|산책|샤워|목욕|취침|기상|외출|귀가|예약|방문|내원|처치|보관|분리|착용|부착|적용|비교|선택|구매|구입|신청|등록|시도|실행|참고|검토|저장|입력|설치|재시작|재부팅|출발|도착|"
+                  r"질문|확보|유지|병행|반복|연습|훈련|참여|실천|지속|제외|조치|대화|소독|세안|양치|보온|보습|호흡|이완|관리|조심|주의|"
+                  r"검색|조회|전화|호출|촬영|녹음|메모|압박|고정|냉각|세탁|배치|재측정|재검사|재확인|재시도|접속|로그인|다운로드|업로드|백업|복원|삭제|초기화|재설정|설정|변경|수정|편집|공유|전송|발송|전달|보고|안내|공지|거상)")
 _ACTION_IN_GAP = re.compile(
-    r"세요|십시오|합시다|[가-힣]{1,4}하고(?=\s|$)|하며|하면서|하여|해서|한\s*뒤|한\s*후|한\s*다음|하다가|하자마자|가서|가고|가면|갑니다|찾아가|방문|예약|"
-    r"받고|받아|받으|받는|받습니다|드세요|드시|먹고|먹어|먹으|먹는|마시고|마시면|마셔|바르고|바르면|발라|복용|섭취|취해|취하고|쉬고|쉬어|쉬면|눕|앉아|앉으|일어나|씻고|씻어|닦|찜질|끊고|끊어|끊으|중단")
+    r"세요|십시오|합시다|(?<![가-힣])하시?(?:고|며|면서|여)(?![가-힣])|(?<![가-힣])(?:해서|하셔서)(?![가-힣])|" + _DO_VERB_STEMS + r"(?:하시?고|하시?며|하시?면서|하여|해서|하셔서)|한\s*뒤|한\s*후|한\s*다음|하다가|하자마자|가서|가고|가면|갑니다|찾아가|방문|예약|"
+    r"받고|받아|받으|받는|받습니다|드세요|드시|먹고|먹어|먹으|먹는|마시고|마시면|마셔|바르고|바르면|발라|복용|섭취|취해|취하고|쉬고|쉬어|쉬면|쉬시|눕|앉아|앉으|일어나|씻고|씻어|닦|찜질|끊고|끊어|끊으|중단")
 _OBJECT_IN_GAP = re.compile(r"([가-힣A-Za-z0-9]{1,12}[을를])(?=\s|$)")
+# 사이의 대상이 몸 낱말이고 그 뒤에 부사뿐이면 그 대상은 효과 동사의 대상이다('즉시 몸을 가볍게 풀어 주는'·'즉시 몸 전체를 풀어') — 행동 순서가 아니다. 대상 뒤에 다른 서술어가 이어지면('즉시 눈을 감고 …') 행동이다.
+_BODY_OBJECT = re.compile(r"(?:^|\s)(?:몸|온몸|전신|팔|다리|목|눈|머리|얼굴|손|발|등|가슴|배|엉덩이|골반|허벅지|종아리|손목|발목|뼈|혈관|코|입|귀|치아|컨디션|기분|체력)(?:\s*전체)?[을를]$")
+# 부사(…게·…히·…이·…리와 아주·매우 …)와 형용사 나열('편안하고'·'부드럽고'·'정확하여') — 행동 낱말 목록에 없는 …하고 류는 이미 행동으로 읽히지 않은 말이라 형용사 나열로 본다.
+_GAP_ADVERB = re.compile(r"(?:[가-힣]{1,8}(?:[게히이리]|하고|하며|하여|해서|럽고|롭고)|아주|매우|훨씬|한결|정말|너무|더욱|더|좀|잘|참|꽤|그리고|또한|모두|거의)")
 # 상담을 부정하는 표현(상담·병원 안 가도·없이): 있으면 상담 안내 절이 아니라 위험한 권유다 — 프로필의 상담 절 면제를 받을 수 없다.
 _NEGATED_CONSULT = re.compile(
     r"(?:의사|약사|전문가|전문의|의료진|주치의|병원|한의원|상담|문의|진료|진찰|방문|도움|조언)[^.!?\n]{0,14}?(?:하지\s*않|않아도|않고도|없이|없어도|말고|필요\s*(?:가\s*)?없|안\s*(?:해도|받아도|가도|가고))|"
@@ -1189,7 +1257,38 @@ def _ko_gap_modifies_result(gap):
     명사구·부사만 끼면(이 베개 하나만으로·하루 한 번 이 방법만으로·그리고 영구적으로·눈에 띄게) 효과 결과를 꾸미는 것이다. 너무 멀리(CLAIM_GAP 상한) 떨어진 말은 잇지 않는다."""
     if len(gap) > _CLAIM_GAP_KO_CAP or _ACTION_IN_GAP.search(gap):
         return False
-    return all(_SYMPTOM_KO.search(noun) or _SYMPTOM_EN.search(noun) for noun in _OBJECT_IN_GAP.findall(gap))          # noun 은 조사(을·를)까지 붙은 낱말
+    for match in _OBJECT_IN_GAP.finditer(gap):
+        noun = match.group(1)                                      # noun 은 조사(을·를)까지 붙은 낱말
+        if _SYMPTOM_KO.search(noun) or _SYMPTOM_EN.search(noun):
+            continue
+        if _BODY_OBJECT.search(gap[max(0, match.start() - 4):match.end()]) and all(_GAP_ADVERB.fullmatch(token) for token in gap[match.end():].split()):
+            continue                                               # 몸 낱말 대상 뒤에 부사뿐: 그 대상은 효과 동사의 대상이다('즉시 몸을 가볍게 풀어')
+        return False
+    return True
+
+
+# 효과 동사가 '…는지·…은지·…을지' 로 이어진 절은 결과를 묻는 말이고('통증이 줄어드는지 확인하세요'), '…지 않·…지 못·…지 마' 로 이어지면 효과가 없다·하지 말라는 말이다('바로 줄어들지 않아도 걱정하지 마세요')
+# — 효과를 단정하는 것이 아니다.
+_NOT_ASSERTED = re.compile(r"[가-힣]{0,6}(?:는지|은지|을지|지\s*(?:않|못|말|마))")
+# 효과 명사가 부사 앞에 오는 어순: '통증 해소 효과가 즉시 나타납니다'·'두통 해결 당장 가능합니다'·'허리 통증 완화 지금 바로'. 부사 바로 앞이 효과 명사(+ 효과·조사·지금)이고 뒤가 결과를 말하는 서술어이거나 글 끝이면 결과 단정이다.
+_EFFECT_NOUN_BEFORE = re.compile(r"(?P<noun>해소|해결|교정|치료|완치|완화|개선|회복|예방|감량|제거|호전|치유|극복|퇴치|감소|경감|진정|억제|정상화|차단)(?:\s*(?:효과|효능))?[이가을를은는도]?[,，·]?\s*(?:지금|이제|오늘)?\s*$")
+_RESULT_AFTER = re.compile(r"\s*(?:도\s*)?(?:가능|나타|느[끼낄낍껴]|체감|경험|볼\s*수|누릴|누리|얻|발휘|드러|보이|보입|실현|발생|작용|효과|효능|확인할\s*수|맛볼|만나|보장)")
+_END_OF_UNIT = re.compile(r"[\s!?.…·,;:)\]}\"'’”]*$")
+_NOT_ASSERTED_AFTER = re.compile(r"[^.!?\n]{0,24}?(?:는지|은지|을지|지\s*(?:않|못)|없)")
+
+
+def _effect_noun_before(unit, adverb):
+    """부사 앞에 효과 명사가 붙은 결과 단정이면 그 명사, 아니면 None. 부사 뒤가 '나타납니다·가능합니다·느낄 수 있습니다' 같은 결과 서술어이거나 글 끝일 때만 센다 — '두통 예방 바로 알기'·'통증 치료 바로 시작하세요'는 행동·안내라 아니다."""
+    head = unit[max(0, adverb.start() - 24):adverb.start()]
+    found = _EFFECT_NOUN_BEFORE.search(head)
+    if not found:
+        return None
+    after = unit[adverb.end():adverb.end() + 40]
+    if _NOT_ASSERTED_AFTER.match(after):
+        return None                                                # '효과가 즉시 나타나지 않을 수 있습니다'·'즉시 나타나는지 확인하세요'
+    if _END_OF_UNIT.match(after) or _RESULT_AFTER.match(after):
+        return found.group("noun")
+    return None
 
 
 def _claim_in(unit, lang):
@@ -1203,7 +1302,12 @@ def _claim_in(unit, lang):
             if effect and _ko_gap_modifies_result(unit[adverb.end():effect.start()]):
                 if adverb.group(0) in _TEMPORAL_KO and _IMPERATIVE_AFTER.match(unit, effect.end()):
                     continue                                        # '바로 자세를 교정하세요' — 행동을 재촉하는 말
+                if _NOT_ASSERTED.match(unit, effect.end()):
+                    continue                                        # '통증이 줄어드는지 확인하세요'·'바로 줄어들지 않아도 걱정하지 마세요' — 결과를 묻거나 부정하는 절
                 return symptom.group(0), adverb.group(0), effect.group(0)
+            noun = _effect_noun_before(unit, adverb)
+            if noun:
+                return symptom.group(0), adverb.group(0), noun
         riddance = _RIDDANCE_KO.search(unit)
         if riddance:
             return symptom.group(0), riddance.group(0), riddance.group(0)
@@ -1237,7 +1341,7 @@ def _claim_lang_hit(text):
 _PRODUCT_NOUN = (r"(?:영양제|보충제|건강기능식품|약물|약|식품|식단|음식|차|음료|제품|기기|기구|앱|방법|비법|비결|요법|치료법|운동|스트레칭|습관|베개|의자|샴푸|크림|마스크|패치|침대|매트리스)"
                  r"(?=(?:[이가은는을를로과와의도만]|으로|에게|에서)?(?![가-힣]))")
 _PRODUCT_CURE = re.compile(
-    r"(?:이|그|저|해당)\s*" + _PRODUCT_NOUN + r"[^.!?\n]{0,40}?"
+    r"(?:이|그|저|해당)\s*" + _PRODUCT_NOUN + r"(?:[^.!?\n]|(?<=\d)\.(?=\d)){0,40}?"          # 소수점(99.9%)은 문장 끝이 아니다
     r"(?:낫(?:는다|습니다|게\s*합니다|게\s*해)|나아(?:집니다|진다|져요)|치료(?:합니다|한다|됩니다|된다|해\s*줍니다|해줍니다)|완치(?:합니다|한다|됩니다|된다|시킵니다)|고쳐\s*줍니다|고칩니다|고친다|"
     r"사라집니다|사라진다|없앱니다|없앤다|해결(?:합니다|한다|됩니다|된다)|개선(?:합니다|한다|됩니다|된다))")
 _CURE_GUARD = re.compile(r"않|없다|없습니다|아니|못\s|못합|입증되지|증명되지|확인되지|근거|과학적|주장|광고|허위|과장|주의|믿지|사실이")
@@ -1262,7 +1366,7 @@ def rule_health(lang, title, prose, profiles):
     ⑤ 증상·몸 상태 + 즉각·단정 부사 + 효과 동사(QG4-CLAIM, 제목 포함) — 운영자 판정 C.  ⑥ 제목의 금지 주제 낱말(QG4-TITLE)."""
     label = LANG_LABEL[lang]
     holds = []
-    title, prose = _text(title)[:1000], _squash(_text(prose))
+    title, prose = _squash(_fold(_text(title)))[:1000], _squash(_text(prose))          # 제목도 본문과 같은 정규화(분해형 한글·제로폭 공백·소프트 하이픈으로 쓴 제목의 단정을 놓치지 않는다)
     both = title + "\n" + prose
     for profile in profiles:
         raw, word = gates.body_risk_hit(prose, profile)
@@ -1276,7 +1380,7 @@ def rule_health(lang, title, prose, profiles):
                 holds.append(Hold("QG4-HEALTH", 4, lang, f"{label}: 효능 단정 표현(프로필 banned_patterns, 상담 문구가 있어도 면제 없음) — '{_safe(word, 30)}'"))
                 break
     if not holds:
-        for sentence in re.split(r"[.!?。！？\n]+", prose):
+        for sentence in _SENTENCE_SPLIT.split(prose):
             if sentence.strip() and _NEGATED_CONSULT.search(sentence):
                 topic = None
                 for profile in profiles:
@@ -1301,7 +1405,7 @@ def rule_health(lang, title, prose, profiles):
     if claim is not None:
         holds.append(Hold("QG4-CLAIM", 4, lang, f"{label}: {where}에 증상('{_safe(claim[0], 15)}')을 즉각·단정('{_safe(claim[1], 15)}')으로 해결한다는 효과 표현('{_safe(claim[2], 15)}')"))
     else:
-        for sentence in re.split(r"[.!?。！？\n]+", both):
+        for sentence in _SENTENCE_SPLIT.split(both):
             found = _PRODUCT_CURE.search(sentence)
             if found and not _CURE_GUARD.search(sentence) and _profile_topic(profiles, sentence):
                 holds.append(Hold("QG4-CLAIM", 4, lang, f"{label}: 질환·증상을 이 제품·방법으로 낫게 한다는 효능 단정 — '{_safe(found.group(0), 40)}'(상담 문구가 있어도 면제 없음)"))
@@ -1537,7 +1641,7 @@ def check_candidate(data, source, history=(), config=None, as_of=None):
             report.holds.append(Hold("QG0-INPUT", 0, lang, f"{LANG_LABEL[lang]}: 글이 너무 김({len(content):,}자, 상한 {MAX_BODY_CHARS:,}자)"))
             continue
         front, body = split_front(content)
-        titles[lang] = [t for t in dict.fromkeys([front_title(front)[:300], data_title[:300]]) if t]
+        titles[lang] = [t for t in dict.fromkeys([_fold(front_title(front))[:300], _fold(data_title)[:300]]) if t]          # 제목도 본문(prose_of)과 같은 정규화: NFKC·보이지 않는 서식 문자 제거
         parts = split_story(body)
         stories[lang] = parts.story
         proses[lang] = prose_of(scan_text_of(parts))
@@ -1546,10 +1650,12 @@ def check_candidate(data, source, history=(), config=None, as_of=None):
             continue
         report.facts[f"body_chars_{lang}"] = readable_length(stories[lang])
         report.holds += rule_link_and_length(lang, stories[lang], proses[lang], ref.link, config.minimum(lang))
+        hidden_claims = hidden_claim_text(body)                        # 이미지 대체글·HTML 속성·마크다운 링크 제목 속 숫자·인용·이름도 같은 규칙(QG1·QG2)이 읽는다
+        claim_prose = proses[lang] + ("\n\n" + hidden_claims if hidden_claims else "")
         if evidence.text.strip():
-            report.holds += rule_numbers(lang, proses[lang], evidence.text, as_of)
-            report.holds += rule_quotes(lang, proses[lang], evidence.text)
-        hidden = hidden_health_text(body)                              # 이미지 대체글·HTML 속성·링크 글자 속 단정도 건강 규칙이 읽는다
+            report.holds += rule_numbers(lang, claim_prose, evidence.text, as_of)
+            report.holds += rule_quotes(lang, claim_prose, evidence.text)
+        hidden = hidden_health_text(body)                              # 건강 규칙(QG4)은 링크 글자까지 읽는다
         report.holds += rule_health(lang, " ".join(titles[lang]), proses[lang] + ("\n" + hidden if hidden else ""), config.health_profiles)
         report.holds += rule_event(lang, " ".join(titles[lang]), proses[lang])
         for title in titles[lang]:
