@@ -14,7 +14,7 @@ Fact 와 출처 기록을 Recipe(`pipeline/recipes.py`)에 넣어 `AssembledPost
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Mapping
 
 from pipeline import calc as C
 from pipeline import fact_topics as T
@@ -26,6 +26,10 @@ ATTRIBUTION_PREFIX = "- 이용 조건: "
 LANG = "ko"
 MAX_TAGS = 6
 MIN_DISTINCT_FORMULAS = 2    # 원자료 대비 추가 분석: 서로 다른 계산식이 둘 이상(관문 ③)
+ALWAYS_ALLOWED_LATIN = frozenset({"UTC"})      # 협정 세계시 표기 — 시각(instant)을 글자로 쓰면 `(UTC)` 가 붙는다
+# 제공처가 만든 값에만 맞는 법적 주장(공공영역·연방정부 저작물) — 글자·숫자가 아닌 것(공백·하이픈·점·가운뎃점·밑줄)을 모두 뺀 소문자 글에서 찾는다(`Public-Domain`·`17 U.S.C.` 도 잡는다 — S2AFIX D8).
+# SRC 검증기(`ATTRIBUTION_PUBLIC_DOMAIN_WORDS`)와 같은 표지에 '저작권이 없다'·'자유롭게 쓸 수 있다' 꼴을 더했다(그 모듈을 import 하지 않는다).
+PUBLIC_DOMAIN_CLAIM_WORDS = ("연방정부저작물", "연방정부의저작물", "저작권보호대상이아닙", "저작권보호대상이아니", "저작권보호를받지", "저작권이없", "공공영역", "퍼블릭도메인", "자유롭게쓸수있", "publicdomain", "17usc", "federalwork", "worksofthegovernment")
 
 _SOURCE_NAME_RE = re.compile(r"[가-힣A-Za-z0-9 ·.,&'\-]{1,80}")
 _BRACES = ("{", "}")
@@ -151,6 +155,17 @@ def traceable_numbers(post):
     return allowed
 
 
+def date_numbers(post):
+    """제목에 나와도 되는 숫자: 쓴 Fact·계산 결과의 기준일과 수집일의 숫자뿐이다(값의 숫자는 아니다 — 제목 정책, D-200)."""
+    allowed = set()
+    for item in (*post.facts_used, *post.derived):
+        if item.as_of:
+            allowed |= set(number_tokens(F.format_period_ko(item.as_of)))
+    for record in post.source_records:
+        allowed |= set(number_tokens(F.format_period_ko(record.retrieved_at[:10])))
+    return allowed
+
+
 def latin_words(text):
     return re.findall(r"[A-Za-z]{2,}", _LINK_TARGET.sub("]", text))
 
@@ -181,6 +196,8 @@ def post_problems(post, *, allowed_latin=(), min_story_chars=R.MIN_STORY_CHARS):
     # 제목
     if not title or len(title) > R.MAX_TITLE_CHARS or "\n" in title:
         problems.append("TITLE 제목이 비었거나 길거나 여러 줄임")
+    if not set(number_tokens(title)) <= date_numbers(post):
+        problems.append("TITLE 제목에 기준일·수집일이 아닌 숫자(값)가 있음")
     # 설명: 한 문장, 길이 안, 첫 문단과 같음
     plain_desc = re.sub(r"(?<=\d)\.(?=\d)", "", description)
     if not (R.DESCRIPTION_MIN <= len(description) <= R.DESCRIPTION_MAX) or "\n" in description \
@@ -266,14 +283,63 @@ def _note_problem(text):
     return None
 
 
-def _attribution_line(source, record):
-    """attribution_template 의 `{title}`·`{date}`·`{url}` 만 바꿔 한 줄로. 템플릿이 없으면 빈 문자열, 그 밖의 중괄호가 남으면 None(쓸 수 없다)."""
-    template = source.attribution_template
-    if not template:
+def attribution_line(template, *, title, date, url):
+    """출처 표시 문구 템플릿(레지스트리 `attribution_template`)을 입력으로 받아 `{title}`·`{date}`(열람일)·`{url}` 만 바꾼 한 줄을 만든다. 순수 함수다.
+    템플릿이 비어 있으면(없음·빈 글자) 빈 문자열 `""` — **출처 표시가 조건부(CONDITIONAL)이면 조립기가 이것을 거절한다**(`ATTRIBUTION_REQUIRED`). 모르는 자리 표시(`{x}`)·표시 괄호·물결표가 남거나
+    글자가 아니면 `None`(쓸 수 없다 — 글을 만들지 않는다). 그 밖의 문장은 바꾸지 않는다(AI 를 거치지 않는다)."""
+    if template is None or template == "":
         return ""
-    text = template.replace("{title}", source.name).replace("{date}", F.format_period_ko(record.retrieved_at[:10])).replace("{url}", source.url)
+    if not isinstance(template, str):
+        return None
+    text = template.replace("{title}", title).replace("{date}", date).replace("{url}", url)
     text = " ".join(text.split())
     return None if any(b in text for b in _BRACES) or any(m in text for m in ("⟦", "⟧", "~")) else text
+
+
+def _attribution_line(source, record):
+    """`attribution_line` 에 이 글의 공식 데이터 이름·수집일·주소를 넣는다."""
+    return attribution_line(source.attribution_template, title=source.name, date=F.format_period_ko(record.retrieved_at[:10]), url=source.url)
+
+
+def _policy_cell_state(provider, name):
+    policy = F.field_of(provider, "policy", None)
+    if policy is None or isinstance(policy, (str, bytes, tuple, list)):
+        return None
+    cell = F.field_of(policy, name, None)               # 사전이면 get, 아니면 getattr — 같은 동작(S2AFIX2 N1: 이름이 동적인 getattr 을 이 줄에 직접 두지 않는다 — 외부 접속 등록 시험이 등록된 지점만 허용한다)
+    state = F.field_of(cell, "state", None) if cell is not None else None
+    return state if isinstance(state, str) else None
+
+
+def attribution_required(provider):
+    """이 Provider 는 출처 표시 문구가 있어야 하는가 — 7칸 가운데 출처 표시 칸(`policy.attribution`)이 **명시적으로 `ALLOWED`(표시 의무 없음)가 아니면** True 다: `CONDITIONAL`·`UNKNOWN`·`DENIED`·
+    칸이 없거나 정책을 읽을 수 없는 경우(가짜 Provider 의 빈 `policy` 포함)도 '모르면 막는다' — 이때 문구 템플릿이 비면 글을 만들지 않는다(S2AFIX D8)."""
+    return _policy_cell_state(provider, "attribution") != "ALLOWED"
+
+
+def _squeeze(text):
+    """글자·숫자만 남긴 소문자 글(NFKC 로 전각을 맞추고 공백·하이픈·점·가운뎃점·밑줄을 뺀다)."""
+    return re.sub(r"[\W_]+", "", unicodedata.normalize("NFKC", text)).lower() if isinstance(text, str) else ""
+
+
+def claims_public_domain(text):
+    """출처 문구가 '공공영역·연방정부 저작물이라 저작권 보호 대상이 아니다' 같은 법적 주장을 담았는가(글자·숫자만 남긴 글자 비교 — 하이픈·점·가운뎃점으로 나눠 써도 잡는다)."""
+    squeezed = _squeeze(text)
+    return any(word in squeezed for word in PUBLIC_DOMAIN_CLAIM_WORDS)
+
+
+def attribution_scope_problem(provider, attribution, facts_used):
+    """공공영역 주장이 든 출처 문구는 **그 기관이 만든 값에만** 맞는다. Provider 가 '제공처가 만든 값만 읽는다'(`own_data_only`)를 **명시적으로 참이라고** 하지 않으면(거짓·값 없음·칸 없음 — 모르면 막는다,
+    S2AFIX D8) 그 사유, 쓴 Fact 에 값을 만든 기관(`meta` 의 `producer`)이 없거나 그 이름이 문구에 없으면(제3자 필드를 읽은 Fact) 사유 글자, 문제 없으면 None. 주장이 없는 문구는 보지 않는다."""
+    if not attribution or not claims_public_domain(attribution):
+        return None
+    if F.field_of(provider, "own_data_only", None) is not True:
+        return "출처 문구가 공공영역 주장을 담았는데 Provider 가 제공처가 만든 값만 읽는다고 약속하지 않음(own_data_only 가 참이 아님)"
+    squeezed = _squeeze(attribution)
+    for fact in facts_used:
+        producer = _squeeze(fact.meta_value("producer"))
+        if not producer or producer not in squeezed:
+            return "출처 문구의 공공영역 주장은 문구에 이름이 있는 기관이 만든 값에만 맞는데 그렇지 않은 값이 쓰였음"
+    return None
 
 
 def _sentence(text):
@@ -306,6 +372,12 @@ def _template_ids(templates, slots):
             if target is not None:
                 ids.add(getattr(target, "fact_id", None) or getattr(target, "record_id", None))
     return ids
+
+
+def _used_formulas(templates, slots, pool):
+    """틀들이 가리키는 값에서 계산 입력까지 내려가 만난 계산식 번호의 집합 — 글의 `formulas` 와 같은 뜻이다."""
+    _base, derived = _closure(_template_ids(templates, slots), pool)
+    return {item.formula_id for item in derived.values()}
 
 
 def _describe_derived(obj, pool, depth=0):
@@ -441,6 +513,8 @@ def _assemble(recipe, facts, today, *, records, source, params=None):
     attribution = _attribution_line(source, latest_record)
     if attribution is None:
         return Insufficient("ATTRIBUTION_TEMPLATE_INVALID", "출처 표시 문구에 쓸 수 없는 중괄호·표시 문자가 있음")
+    if not attribution and attribution_required(source.provider):
+        return Insufficient("ATTRIBUTION_REQUIRED", "출처 표시 의무가 조건부이거나 알 수 없는데(ALLOWED 가 아님) 출처 표시 문구 템플릿이 비어 있어 글을 만들지 않는다")
 
     try:
         context = dict(draft.context)
@@ -452,10 +526,18 @@ def _assemble(recipe, facts, today, *, records, source, params=None):
             return Insufficient("DESCRIPTION_LENGTH", "설명이 60자 이상 155자 이하의 한 문장으로 만들어지지 않음")
         title_template, title = title_pick
         lead_template, lead = lead_pick
-        parts = [lead_template, R.INTRO_TEMPLATE]
+        title_problem = R.title_template_problem(title_template)
+        if title_problem is not None:
+            return Insufficient("TITLE_HAS_VALUE", title_problem + " — 제목에는 이름·지역·기준일만 쓴다")
+        intro, common = R.INTRO_TEMPLATE, R.CAUTION_COMMON
+        if recipe.calc_from_formulas:                # 지역 없는 틀: 안내가 이 글이 실제로 쓴 계산식만 말한다(S2AFIX2 N5). 두 안내 문장은 참조가 `⟦T:record⟧`·`⟦L:main⟧`·`⟦U:main⟧` 뿐이라 계산식 집합이 같다
+            words = R.calc_words(_used_formulas([lead_template, R.INTRO_TEMPLATE, *(block for _heading, blocks in draft.sections for block in blocks), *R.CAUTION_COMMON, *draft.caveats], slots, pool))
+            if words is not None:
+                intro, common = R.intro_template(words), R.caution_common(words)
+        parts = [lead_template, intro]
         for heading, blocks in draft.sections:
             parts.append("## " + heading + "\n\n" + "\n\n".join(blocks))
-        caution_lines = list(R.CAUTION_COMMON) + list(draft.caveats)
+        caution_lines = list(common) + list(draft.caveats)
         parts.append("## " + R.H_CAUTION + "\n\n" + "\n".join(caution_lines + [R.READER_NOTE_PREFIX + _sentence(text) for text in notes]))
         template = "\n\n".join(parts)
         bound = F.bind(template, slots)
@@ -476,6 +558,9 @@ def _assemble(recipe, facts, today, *, records, source, params=None):
     base_facts, derived = _closure(_template_ids([template], slots) | {latest_record.record_id}, pool)
     facts_used = tuple(sorted(base_facts.values(), key=lambda f: (f.key, f.region or "", f.as_of or "", f.fact_id)))
     derived_used = tuple(sorted(derived.values(), key=lambda d: (d.formula_id, d.fact_id)))
+    scope = attribution_scope_problem(source.provider, attribution, facts_used)
+    if scope is not None:
+        return Insufficient("ATTRIBUTION_SCOPE_MISMATCH", scope)
     evidence = evidence_text_of(used_records, facts_used, derived_used, pool, context)
     topic = draft.topic
     tags, seen_tags = [], set()
@@ -489,7 +574,8 @@ def _assemble(recipe, facts, today, *, records, source, params=None):
         source_domain=source.domain, lang=LANG, recipe_id=recipe.recipe_id, as_of=draft.as_of, template_markdown=bound,
         source_records=tuple(used_records), dedupe_key="|".join(draft.dedupe), skipped=tuple(draft.skipped),
         formulas=tuple(sorted({d.formula_id for d in derived_used})), recipe_version=recipe.version, decimals=tuple(sorted(context.items())))
-    allowed_latin = set()
+    allowed_latin = set(ALWAYS_ALLOWED_LATIN)
+    allowed_latin.update(re.findall(r"[A-Za-z]{2,}", source.name))          # 공식 데이터 이름의 영문 낱말(NOAA·SWPC·GOES 같은 기관·제품 이름)
     for fact in facts_used:
         for text in (fact.label_ko, fact.region_label_ko, fact.unit):
             allowed_latin.update(re.findall(r"[A-Za-z]{2,}", text or ""))

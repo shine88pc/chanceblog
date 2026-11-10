@@ -65,6 +65,26 @@ H_CAUTION = "이 숫자를 읽을 때 주의"
 H_SOURCE = "출처"
 SECTION_ORDER = (H_GLANCE, H_NUMBERS, H_READING, H_CAUTION, H_SOURCE)
 
+# 제목 정책(R18, 운영자 승인 2026-11-10 — 결정 D-200): **모든 Fact 글의 제목에는 값(숫자)을 넣지 않고 이름(`L`)·지역(`R`)·기준일(`D`·`T`)만 쓴다.** 값이 제목에 있으면 제목이
+# 이력·태그·분류와 함께 AI 입력이 되는 길(감사 R18)이 열리기 때문이다. 기준일 참조는 허용한 칸 이름에서만 — 최신 기준일(`main`·`cur`)·표의 처음·끝 줄(`first_row`·`last_row`)·읽은 자료의 처음(`first`)·수집일(`record`).
+# 설명(description)과 본문에는 값이 있어도 된다(설명은 AI 입력이 아니다 — 감사 보고서 §4·§5-2: AI 가 읽는 칸은 제목·태그·분류뿐).
+TITLE_KINDS = frozenset("LRDT")
+TITLE_DATE_SLOTS = frozenset({("D", "main"), ("D", "cur"), ("D", "first_row"), ("D", "last_row"), ("D", "first"), ("T", "record")})
+TITLE_POLICY_R01 = ("⟦R:main⟧ ⟦L:main⟧, ⟦D:first_row⟧부터 ⟦D:last_row⟧까지 — 숫자로 읽기", "⟦R:main⟧ ⟦L:main⟧, ⟦D:main⟧ 기준 — 숫자로 읽기", "⟦L:main⟧, ⟦D:main⟧ 기준 — 숫자로 읽기")
+TITLE_POLICY_R02 = ("⟦D:main⟧ ⟦L:main⟧ 지역 비교 — 숫자로 읽기", "⟦D:main⟧ ⟦L:main⟧ 지역 비교")
+TITLE_POLICY_R03 = ("⟦R:main⟧ ⟦L:main⟧ 기록 위치, ⟦D:first⟧부터 ⟦D:main⟧까지 — 숫자로 읽기", "⟦R:main⟧ ⟦L:main⟧ 기록 위치, ⟦D:main⟧ 기준 — 숫자로 읽기",
+                    "⟦L:main⟧ 기록 위치, ⟦D:main⟧ 기준 — 숫자로 읽기")
+
+
+def title_template_problem(template):
+    """제목 틀이 정책을 어기는가: 값 참조(`F`·`S`·`A`·`V`·`U`)나 허용하지 않은 기준일 칸이 있으면 사유 글자, 없으면 None."""
+    for kind, ref in F.references(template):
+        if kind not in TITLE_KINDS:
+            return "제목에 값 참조 표시가 있음"
+        if kind in "DT" and (kind, ref) not in TITLE_DATE_SLOTS:
+            return "제목에 허용하지 않은 기준일 칸이 있음"
+    return None
+
 SOURCE_LINK_TOKEN = "@SOURCE_LINK@"
 INTRO_TEMPLATE = (f"이 글의 값은 {SOURCE_LINK_TOKEN}에서 ⟦T:record⟧에 받아 옮긴 구조화 데이터입니다. "
                   "증감·변화율·평균·순위 같은 값은 이 글이 그 숫자로 직접 계산했습니다.")
@@ -75,6 +95,45 @@ CAUTION_COMMON = (
     "- 계산한 값: 증감·변화율·평균·순위는 이 글이 직접 계산했습니다. 계산은 정밀한 값으로 하고 보여 줄 때만 반올림하므로, 보이는 값끼리 다시 계산하면 끝자리가 다를 수 있습니다.",
     "- 이 글이 아는 것: 이 글이 아는 것은 위 숫자뿐입니다. 숫자가 달라진 원인을 이 자료만으로는 알 수 없어 설명하지 않았습니다.",
 )
+# 글이 실제로 계산한 것만 말하는 안내(S2AFIX2 N5): `Recipe.calc_from_formulas` 가 참이면(지역 없는 틀 R04–R06) 위 두 문장('증감·변화율·평균·순위 …')의 계산 목록을 이 글이 쓴 계산식에서 만든다 —
+# Kp 글은 증감·변화율·순위를 계산하지 않는데 고정 문장은 그것을 나열해 같은 글의 주의 줄('날짜 사이의 증감은 계산하지 않았고')과 어긋났다. 기존 틀 R01–R03 은 고정 문장 그대로다(출력 불변).
+# 계산식 번호 → 독자용 낱말(표시 순서대로). 같은 낱말(평균)은 한 번만 쓴다. 숫자·수 낱말은 없다.
+CALC_WORDS = (
+    ("F15_day_max", "하루 최대값"), ("F01_change", "증감"), ("F02_pct_change", "변화율"), ("F03_yoy", "전년 대비 변화율"), ("F04_rank", "순위"), ("F05_share", "비중"),
+    ("F07_rolling_mean", "평균"), ("F08_mean", "평균"), ("F14_median", "중앙값"), ("F06_diff_from_mean", "평균과의 차이"), ("F13_gap", "격차"), ("F09_max", "최고값"), ("F10_min", "최저값"),
+    ("F11_range_position", "범위 안의 위치"), ("F12_count", "개수"), ("F16_count_between", "기준별 개수"),
+)
+CALC_WORD_OF = dict(CALC_WORDS)
+INTRO_CALC_SENTENCE = "{words} 같은 값은 이 글이 그 숫자로 직접 계산했습니다."
+CAUTION_CALC_LINE = "- 계산한 값: {words} 같은 값은 이 글이 직접 계산했습니다. 계산은 정밀한 값으로 하고 보여 줄 때만 반올림하므로, 보이는 값끼리 다시 계산하면 끝자리가 다를 수 있습니다."
+
+
+def calc_words(formula_ids):
+    """글이 쓴 계산식 번호(집합·목록) → '평균·최고값·개수' 같은 독자용 낱말 목록(표시 순서·같은 낱말은 한 번만). 비었거나 모르는 계산식이 있으면 None — 이때는 기존 고정 문장을 그대로 쓴다."""
+    wanted = set(formula_ids or ())
+    if not wanted or not wanted <= set(CALC_WORD_OF):
+        return None
+    words = []
+    for formula_id, word in CALC_WORDS:
+        if formula_id in wanted and word not in words:
+            words.append(word)
+    return "·".join(words)
+
+
+def intro_template(words=None):
+    """첫 문단 뒤의 자료 안내 틀: words 가 있으면 계산 목록을 이 글이 쓴 것으로, 없으면 고정 문장."""
+    if words is None:
+        return INTRO_TEMPLATE
+    return INTRO_TEMPLATE.replace("증감·변화율·평균·순위 같은 값은 이 글이 그 숫자로 직접 계산했습니다.", INTRO_CALC_SENTENCE.format(words=words))
+
+
+def caution_common(words=None):
+    """모든 글이 나누는 주의 줄 넷: words 가 있으면 '계산한 값' 줄의 목록을 이 글이 쓴 것으로 바꾼다."""
+    if words is None:
+        return CAUTION_COMMON
+    return tuple(CAUTION_CALC_LINE.format(words=words) if line.startswith("- 계산한 값:") else line for line in CAUTION_COMMON)
+
+
 NOTICE_TEMPLATE = ("*이 글은 사람이 쓴 글이 아니라, 공개된 구조화 통계를 정해진 규칙으로 자동 정리해 만든 글입니다. "
                    "일반 정보이며 어떤 결정의 근거로 쓰도록 만든 글이 아닙니다. 최신 값은 위 출처에서 직접 확인해 주세요.*")
 READER_NOTE_PREFIX = "- 제공처 안내: "      # Provider 의 `reader_notes`(독자용으로 승인된 문장)만 이 줄이 된다 — SRC 의 `exceptions`(감사 메모)는 읽지 않는다
@@ -119,6 +178,7 @@ class Recipe:
     plan: Callable
     min_story_chars: int = MIN_STORY_CHARS
     vocabulary: Any = T.VOCABULARY
+    calc_from_formulas: bool = False          # 참이면 공통 안내 두 문장의 계산 목록을 글이 쓴 계산식에서 만든다(지역 없는 틀 R04–R06, S2AFIX2 N5)
 
 
 @dataclass(frozen=True)
@@ -391,16 +451,14 @@ def plan_time_series(ctx):
     span = f", 이 글이 읽은 {obs}⟦V:n_all⟧⟦U:n_all⟧ 자료의 마지막 값" if n_all is not None else ""      # 날짜 표기가 짧은 연·분기 자료나 짧은 라벨이면 첫 문단이 60자에 못 미쳐 이 덧말이 있는 후보로 넘어간다
     if chg is not None:
         if chg_verdict == "SAME":
-            titles.append("⟦R:main⟧ ⟦L:main⟧ ⟦F:main⟧(⟦D:main⟧ 기준), 앞 기간과 같아")
             head = "⟦R:main⟧의 ⟦L:main⟧ 값은 ⟦D:prev⟧(⟦F:prev⟧)에서 달라지지 않은 ⟦F:main⟧입니다"
         else:
             up = chg_verdict == "UP"
-            titles.append(f"⟦R:main⟧ ⟦L:main⟧ ⟦F:main⟧(⟦D:main⟧ 기준), 앞 기간보다 ⟦A:chg⟧ {'높아' if up else '낮아'}")
             head = f"⟦R:main⟧의 ⟦L:main⟧ 값은 ⟦D:prev⟧(⟦F:prev⟧)보다 ⟦A:chg⟧ {'높은' if up else '낮은'} ⟦F:main⟧입니다"
         leads.append(head + "(⟦D:main⟧ 기준).")
         if span:
             leads.append(head + f"(⟦D:main⟧ 기준{span}).")
-    titles += ["⟦R:main⟧ ⟦L:main⟧ ⟦F:main⟧(⟦D:main⟧ 기준)", "⟦L:main⟧ ⟦F:main⟧(⟦D:main⟧ 기준)"]
+    titles += TITLE_POLICY_R01        # 제목에는 값을 넣지 않는다(이름·지역·기준일만) — 값은 설명과 본문에(D-200)
     if n_all is not None:
         leads.append(f"⟦D:main⟧ 기준 ⟦R:main⟧의 ⟦L:main⟧ 값은 ⟦F:main⟧입니다(이 글이 읽은 {obs}⟦V:n_all⟧⟦U:n_all⟧ 자료의 마지막 값).")
         if has_range:
@@ -551,9 +609,11 @@ def plan_region_compare(ctx):
     hi_dm = b.derive("hi_dm", C.f06_diff_from_mean(hi, mean))
     lo_dm = b.derive("lo_dm", C.f06_diff_from_mean(lo, mean))
     diffs = [C.f06_diff_from_mean(fact, mean) for fact in ordered]
-    # 지역이 짝수 곳이면 평균이 표시 자리의 반 칸에 정확히 걸칠 수 있다(값 3.4·3.4·3.5·3.5 의 평균 3.45). 평균은 3.5 로, 3.5 인 지역과의 차이 +0.05 는 +0.1 로 반올림되면 '같은 3.5 인데 평균보다
-    # 높다'가 된다 — 그런 값이 있으면 그 단위의 표시 자리를 한 칸 늘려 반올림 없이 보인다(D-152). 평균과 그 차이만 본다(중앙값·격차는 같은 줄에 견주는 말이 없다)
-    context = F.settle_context(context, [item for item in (mean, hi_dm, lo_dm, *diffs) if isinstance(item, F.DerivedFact)])
+    # 지역이 짝수 곳이면 평균·중앙값이 표시 자리의 반 칸에 정확히 걸칠 수 있다(값 3.4·3.4·3.5·3.5 의 평균 3.45, 값 3.3·3.3·3.4·3.6 의 중앙값 3.35). 평균 3.45 는 3.5 로, 3.5 인 지역과의 차이
+    # +0.05 는 +0.1 로 반올림되면 '같은 3.5 인데 평균보다 높다'가 되고, 평균 3.4 와 중앙값 3.35(→3.4)의 차이 0.05(→0.1)는 '같은 3.4 인데 차이가 있다'가 된다 — 그런 값이 있으면 그 단위의
+    # 표시 자리를 한 칸 늘려 반올림 없이 보인다(D-152). 평균·중앙값·평균과의 차이·평균과 중앙값의 차이를 본다(N3). 평균과 중앙값의 차이는 자료 정밀도의 값에서는 평균·중앙값이 걸치지 않으면
+    # 걸치지 않지만(시험이 확인한다) 같은 줄에서 견주는 말이 있으므로 빼지 않는다
+    context = F.settle_context(context, [item for item in (mean, median, mean_med, hi_dm, lo_dm, *diffs) if isinstance(item, F.DerivedFact)])
     above, below, level, rows = [], [], [], []
     for number, fact in enumerate(ordered, start=1):
         b.put(f"v{number}", fact)
@@ -572,8 +632,7 @@ def plan_region_compare(ctx):
 
     hi_part = "가장 높은 곳은 ⟦R:hi⟧(⟦F:hi⟧)" if n_hi is None else "가장 높은 값은 ⟦F:hi⟧(같은 값 ⟦V:n_hi⟧⟦U:n_hi⟧)"
     lo_part = "가장 낮은 곳은 ⟦R:lo⟧(⟦F:lo⟧)" if n_lo is None else "가장 낮은 값은 ⟦F:lo⟧(같은 값 ⟦V:n_lo⟧⟦U:n_lo⟧)"
-    hi_title = "가장 높은 곳은 ⟦R:hi⟧ ⟦F:hi⟧" if n_hi is None else "가장 높은 값은 ⟦F:hi⟧(같은 값 ⟦V:n_hi⟧⟦U:n_hi⟧)"
-    titles = [f"⟦D:hi⟧ ⟦L:hi⟧ ⟦V:n⟧⟦U:n⟧ 비교, {hi_title}", f"⟦D:hi⟧ ⟦L:hi⟧ 지역 비교, {hi_title}", "⟦D:hi⟧ ⟦L:hi⟧ 지역 비교"]
+    titles = list(TITLE_POLICY_R02)        # 제목에는 값(곳 수·최고·최저)을 넣지 않는다(D-200)
     leads = [f"⟦D:hi⟧ 기준 ⟦V:n⟧⟦U:n⟧의 ⟦L:hi⟧ 값을 견주면 {hi_part}, {lo_part}입니다.",
              f"⟦D:hi⟧ 기준 ⟦V:n⟧⟦U:n⟧의 ⟦L:hi⟧ 값을 견주면 {hi_part}, {lo_part}입니다(평균 ⟦F:mean⟧)."]
     glance = ["- 가장 높은 곳: ⟦R:hi⟧ ⟦F:hi⟧" if n_hi is None else "- 가장 높은 값: ⟦F:hi⟧(같은 값 ⟦V:n_hi⟧⟦U:n_hi⟧)",
@@ -669,14 +728,11 @@ def plan_record_position(ctx):
 
     if is_high:
         where = "안에서 가장 높은" if n_hi is None else "안에서 가장 높은 값과 같은"
-        titles = ["⟦R:main⟧ ⟦L:main⟧ ⟦F:main⟧(⟦D:main⟧ 기준), 읽은 자료 안에서 " + ("가장 높아" if n_hi is None else "가장 높은 값과 같아")]
     elif is_low:
         where = "안에서 가장 낮은" if n_lo is None else "안에서 가장 낮은 값과 같은"
-        titles = ["⟦R:main⟧ ⟦L:main⟧ ⟦F:main⟧(⟦D:main⟧ 기준), 읽은 자료 안에서 " + ("가장 낮아" if n_lo is None else "가장 낮은 값과 같아")]
     else:
         where = "안에서 최저와 최고 사이 ⟦F:pos⟧ 지점에 놓인"
-        titles = ["⟦R:main⟧ ⟦L:main⟧ ⟦F:main⟧(⟦D:main⟧ 기준), 최저와 최고 사이 ⟦F:pos⟧ 지점"]
-    titles += ["⟦R:main⟧ ⟦L:main⟧ ⟦F:main⟧(⟦D:main⟧ 기준)", "⟦L:main⟧ ⟦F:main⟧(⟦D:main⟧ 기준)"]
+    titles = list(TITLE_POLICY_R03)        # 제목에는 값(위치·최고·최저)을 넣지 않는다(D-200)
     leads = [f"⟦D:main⟧ 기준 ⟦R:main⟧의 ⟦L:main⟧ 값은 이 글이 읽은 자료(⟦D:first⟧부터 ⟦D:main⟧까지) {where} ⟦F:main⟧입니다."]      # 가장 짧은 라벨·날짜(연)로도 60자 하한을 넘는다(시험이 확인)
 
     glance = ["- 최신 값: ⟦F:main⟧(⟦D:main⟧ 기준)",

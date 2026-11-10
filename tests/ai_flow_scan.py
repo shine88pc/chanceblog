@@ -75,7 +75,7 @@ SKIP_DIRS = frozenset({".git", "__pycache__", "node_modules", "_site", ".ruff_ca
 # 등록 목록 — 지금 코드(Gate 가지 포함)의 호출 지점 전부. 값은 '왜 여기에 있는가' 한 줄이다. 늘리려면 이유를 쓰고 docs/AI_FLOW.md 표를 같이 고친다.
 # ----------------------------------------------------------------------------
 _PIPELINE = "pipeline"
-FACT_MODULE_NAMES = ("facts", "calc", "fact_topics", "recipes", "fact_assembler", "adapters", "adapters.base", "adapters.mock_stats")
+FACT_MODULE_NAMES = ("facts", "calc", "fact_topics", "recipes", "fact_assembler", "adapters", "adapters.base", "adapters.mock_stats", "adapters.noaa_swpc", "recipes_noregion", "fact_candidates")
 FACT_MODULES = frozenset(f"{_PIPELINE}.{name}" for name in FACT_MODULE_NAMES)       # 구조화 Fact 경로 1단계 모듈(트리에 있는 것만 쓴다)
 FACT_PREFIXES = (f"{_PIPELINE}.adapters.",)                                         # 앞으로 생길 제공처 어댑터
 BRIDGES = frozenset({"generator"})                                                   # Fact 와 AI 분기를 한 파일에 두는 유일한 운영 모듈(2단계) — 두 분기의 분리는 AF4 가 지킨다

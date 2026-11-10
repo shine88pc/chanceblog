@@ -61,6 +61,8 @@ UNIT_TABLE = {
     "%": UnitSpec(1), "천명": UnitSpec(0), "만명": UnitSpec(0), "시간": UnitSpec(1), "억원": UnitSpec(0), "조원": UnitSpec(0), "억달러": UnitSpec(0), "학급": UnitSpec(0),
     "㎜": UnitSpec(1), "ppm": UnitSpec(1), "m/s": UnitSpec(1), "km/s": UnitSpec(1), "sfu": UnitSpec(1),
     "kW": UnitSpec(1), "MW": UnitSpec(1), "GW": UnitSpec(1), "kWh": UnitSpec(1), "MWh": UnitSpec(1), "GWh": UnitSpec(1), "TWh": UnitSpec(1),
+    # 우주날씨(NOAA SWPC 어댑터, S2a): 등급 단계(0–5)는 순서척도라 변화율을 만들지 않는다 · X선 플레어 세기는 nW/㎡ 정수(A1.0 = 10, M1.0 = 10,000)
+    "단계": UnitSpec(0, False), "nW/㎡": UnitSpec(0),
 }
 UNIT_DECIMALS = {unit: spec.decimals for unit, spec in UNIT_TABLE.items()}     # 표시 소수 자리 표(단위 표의 한 칸을 따로 본 것)
 
@@ -81,7 +83,7 @@ def exact(function):
     return wrapper
 
 # 순위·개수 계산 결과는 자료의 단위 자리와 상관없이 정수로 보인다(교육 범주의 `곳`·`개` 로 소수 자료를 넣어도 '6.0곳 비교'가 되지 않는다 — 재검증 D9, D-153)
-INTEGER_FORMULAS = frozenset({"F04_rank", "F12_count"})
+INTEGER_FORMULAS = frozenset({"F04_rank", "F12_count", "F16_count_between"})
 
 # ----------------------------------------------------------------------------
 # Fact 종류
@@ -438,6 +440,17 @@ def _month_end(year, month):
     return following - datetime.timedelta(days=1)
 
 
+def utc_day_of(period):
+    """시각(instant) Period 가 속한 **UTC 날짜** 글자(`YYYY-MM-DD`) — 쓴 시간대 표기와 상관없이 UTC 로 센다. 시각이 아니거나 범위를 벗어나면 None."""
+    if period is None or period.granularity != "instant":
+        return None
+    try:
+        day = datetime.date(1970, 1, 1) + datetime.timedelta(days=period.ordinal // 86400)
+    except (OverflowError, ValueError):
+        return None
+    return f"{day.year:04d}-{day.month:02d}-{day.day:02d}"
+
+
 def shift_year(as_of, years):
     """같은 기간의 몇 해 전·후 기준일 글자. 연·분기·월·일만(윤일 2월 29일이 없는 해는 None). instant 는 None."""
     period = parse_as_of(as_of)
@@ -526,7 +539,8 @@ def _record_content(record):
 @dataclass(frozen=True)
 class Fact:
     """정규화한 값 하나. value 가 None 이면 '모름'이다(0 이 아니다). 숫자 종류의 value 는 Decimal, 날짜·시각·글자 종류는 str.
-    label_ko·label_en·region_label_* 은 **우리가 정한 낱말**(어댑터의 라벨 표)이고 제공처의 설명 문장이 아니다."""
+    label_ko·label_en·region_label_* 은 **우리가 정한 낱말**(어댑터의 라벨 표)이고 제공처의 설명 문장이 아니다.
+    meta 는 값의 출처 구분·상태 꼬리표(`producer`·`status` 등 이름순 (이름, 값) 튜플) — 없으면 None 이고 id·JSON 이 꼬리표가 생기기 전과 같다."""
     fact_id: str
     provider_id: str
     source_record_id: str
@@ -541,20 +555,66 @@ class Fact:
     region_label_en: Optional[str] = None
     label_ko: Optional[str] = None
     label_en: Optional[str] = None
+    meta: Optional[tuple] = None
 
     @classmethod
     def create(cls, provider_id, source_record_id, kind, key, value, unit=None, as_of=None, region=None, region_level=None,
-               region_label_ko=None, region_label_en=None, label_ko=None, label_en=None):
+               region_label_ko=None, region_label_en=None, label_ko=None, label_en=None, meta=None):
         if value is not None:
             value = to_decimal(value) if kind in NUMERIC_KINDS else value
         fields_ = {"provider_id": provider_id, "source_record_id": source_record_id, "kind": kind, "key": key, "value": value,
                    "unit": unit, "as_of": as_of, "region": region, "region_level": region_level, "region_label_ko": region_label_ko,
                    "region_label_en": region_label_en, "label_ko": label_ko, "label_en": label_en}
+        meta = normalize_meta(meta)
+        if meta is not None:
+            fields_["meta"] = meta                     # 꼬리표가 없는 Fact 는 칸 자체를 해시에 넣지 않는다 — 꼬리표가 생기기 전과 같은 id
         return cls(compute_fact_id(fields_), **fields_)
 
     @property
     def topic(self):
         return self.key.split(".", 1)[0]
+
+    def meta_value(self, name, default=None):
+        """꼬리표(`meta`)의 한 값. 없으면 default."""
+        for pair_name, pair_value in self.meta or ():
+            if pair_name == name:
+                return pair_value
+        return default
+
+
+# 꼬리표(`meta`): 값이 어디서 왔고 어떤 상태인지를 Fact 에 붙이는 짧은 (이름, 값) 글자쌍 — `producer`(값을 만든 기관)·`status`(observed·estimated·predicted·reference)·`quality`·`satellite` 같은 것.
+# 이름순으로 정렬한 튜플이고 해시에 들어간다(꼬리표가 다르면 다른 Fact). 없으면 None 이고 그때의 id 는 꼬리표가 생기기 전과 바이트까지 같다.
+META_MAX_ITEMS = 8
+_META_NAME_RE = re.compile(r"[a-z][a-z_]{0,23}")
+_META_VALUE_RE = re.compile(r"[A-Za-z0-9_.:\-]{1,32}")
+
+
+def normalize_meta(meta):
+    """사전이나 (이름, 값) 쌍의 나열 → 이름순 튜플(비었거나 None 이면 None). 쌍이 아니면 FactFormatError. 이름·값의 모양은 `validate_fact` 가 본다."""
+    if meta is None:
+        return None
+    try:
+        items = list(meta.items()) if isinstance(meta, Mapping) else [tuple(pair) for pair in meta]
+        if not all(len(pair) == 2 for pair in items):
+            raise ValueError("쌍이 아님")
+        pairs = tuple(sorted(((pair[0], pair[1]) for pair in items), key=lambda pair: (str(pair[0]), str(pair[1]))))
+    except (TypeError, ValueError):
+        raise FactFormatError(["꼬리표(meta)의 모양이 맞지 않음"]) from None
+    return pairs or None
+
+
+def _meta_problems(meta):
+    if not isinstance(meta, tuple) or not 1 <= len(meta) <= META_MAX_ITEMS:
+        return ["`meta` 이(가) 1–8개의 쌍 튜플이 아님"]
+    problems, names = [], []
+    for pair in meta:
+        if not isinstance(pair, tuple) or len(pair) != 2 or not isinstance(pair[0], str) or not isinstance(pair[1], str) \
+                or not _META_NAME_RE.fullmatch(pair[0]) or not _META_VALUE_RE.fullmatch(pair[1]):
+            return ["`meta` 의 이름이나 값 모양이 맞지 않음"]
+        names.append(pair[0])
+    if names != sorted(set(names)):
+        problems.append("`meta` 의 이름이 정렬돼 있지 않거나 겹침")
+    return problems
 
 
 def _value_text(value):
@@ -564,6 +624,9 @@ def _value_text(value):
 def compute_fact_id(fields_):
     content = dict(fields_)
     content["value"] = _value_text(content.get("value"))
+    meta = content.pop("meta", None)
+    if meta is not None:
+        content["meta"] = {name: value for name, value in meta}          # 정렬된 JSON 이라 순서와 무관 — 칸이 없거나 None 이면 해시에 넣지 않는다(이전과 같은 id)
     return content_digest("f", content)
 
 
@@ -709,6 +772,8 @@ def validate_fact(fact):
     problems += _text_problem("label_en", fact.label_en, _LABEL_EN_RE)
     if fact.region is not None and fact.region_level is None:
         problems.append("`region` 이(가) 있는데 `region_level` 이(가) 없음")
+    if fact.meta is not None:
+        problems += _meta_problems(fact.meta)
     if fact.kind in NUMERIC_KINDS:
         if fact.value is not None:
             if not isinstance(fact.value, Decimal) or not fact.value.is_finite():
@@ -841,6 +906,10 @@ def record_to_dict(record):
 def fact_to_dict(fact):
     data = {name: getattr(fact, name) for name in _FACT_KEYS}
     data["value"] = _value_text(fact.value)
+    if fact.meta is None:
+        del data["meta"]                                    # 꼬리표가 없는 Fact 의 JSON 은 꼬리표가 생기기 전과 바이트까지 같다
+    else:
+        data["meta"] = {name: value for name, value in fact.meta}
     return data
 
 
@@ -880,6 +949,10 @@ def fact_from_dict(data):
         if not isinstance(values["value"], str):
             raise FactFormatError(["Fact: 숫자 값은 문자열로 적혀 있어야 함"])
         values["value"] = to_decimal(values["value"])
+    if values["meta"] is not None:
+        if not isinstance(values["meta"], dict):
+            raise FactFormatError(["Fact: 꼬리표(meta)는 사전이어야 함"])
+        values["meta"] = normalize_meta(values["meta"])
     fact = Fact(**values)
     problems = validate_fact(fact)
     if problems:
@@ -960,18 +1033,30 @@ REF_RE = re.compile("⟦([" + MARKER_KINDS + r"]):([A-Za-z0-9_]{1,64})⟧")
 # 우리말 수 표현 — 틀에 쓰지 않는다('두 배·세 곳·열두 곳·삼 분기·절반·수십·두어 곳'). 흔한 낱말(조건·이번·사건·세대·열대·일명·만원·프로그램 …)을 수로 잡지 않도록 구조로 가른다(재검증 D8, D-154):
 #  - 왼쪽 경계: 앞 글자가 한글·영문·숫자가 아니어야 한다('강남구 개발' 의 구, 'A사 번호' 의 사 같은 낱말 끝 글자는 수가 아니다).
 #  - 오른쪽 경계: 세는 말 뒤에 한글이 더 이어지면 조사·어미로 시작할 때만 센다('세 곳이'·'두 배로'·'네 곳에서는' 은 잡고 '일 개선'·'한 프로그램'·'일일 건수' 는 놓친다).
+#    어미에는 서술격 '이다' 의 꼴이 든다(N2, S2a): 받침 있는 세는 말 뒤는 `이다`·`입니다`·`일 때`·`인데` 로, 받침 없는 세는 말 뒤는 `이` 가 줄어 `다·면·며·죠·든·예요·요·고·지·야` 가 바로 붙는다
+#    ('세 곳인데'·'세 곳일 때'·'두 가지다'·'한 해다'·'세 가지면'·'두 가지예요'). 줄어든 꼴은 받침 없는 세는 말 뒤에서만 센다('한 번지'·'한 살다'·'한 분야' 의 번·살·분 은 받침이 있다).
+#    '세는 말 + 어미' 가 흔한 낱말이 되는 짝은 센 말에서 뺀다('한 개인'·'한 주인'·'한 해고'·'한 해지'·'한 대지'·'한 대야'·'한 배지'·'한 개요'·'한 주요' — 이때 `인` 은 인데·인지·인가·인걸·인즉 일 때만 센다).
 #  - 한 글자 수(한·두·세·네·열, 일·삼·사·오·십·백·천·만 …)는 세는 말과 붙여 쓴 꼴이 흔한 낱말과 겹치므로(세대·열대·두건·사건·조건·일개·오명·만원) 띄어 쓴 꼴은 모든 세는 말과, 붙여 쓴 꼴은 겹치지 않는
 #    세는 말(곳·개·번·명·가지·개월·퍼센트 …)만 본다. 두 글자 이상 수(열두·스물·다섯·이십·오륙 …)는 붙여 쓴 꼴도 모두 본다. 지시어 `이`(이 곳·이 점·이 번호)는 한 글자 수로 보지 않는다.
 #  - 수 글자로만 된 흔한 낱말(사이·이사·일일·만일·일이 …)은 두 글자 이상 수에서 뺀다.
 _NUM_LEFT = r"(?<![가-힣A-Za-z0-9])"
-_NUM_RIGHT = r"(?:(?![가-힣])|(?=[이가은는을를의에로도만와과나라씩째쯤간뿐입였으부까보마처밖][가-힣]{0,3}(?![가-힣])))"
+_NUM_PARTICLES = "이가은는을를의에로도만와과나라씩째쯤간뿐입였일으부까보마처밖"      # 조사, 그리고 서술격 '이다' 의 어미 이·입·였·일 로 시작하면 센다
+# 받침 없이 끝나는 세는 말(가지·개·해·배·마리·군데·나라·자리·대·호·주·위·번째·차례·단계·분기·가구·학교·퍼센트·포인트·프로·달러·세·이하·초과·초)의 끝 글자 — 시험이 세는 말 목록과 맞춰 본다
+_NUM_OPEN = "개해배지리데라대호주위례계기구교트로러세하과째초"
+# '이다' 가 줄어 받침 없는 말에 바로 붙는 꼴과, 그 꼴이 흔한 낱말과 겹치는 짝(해고·배고프다 / 해지·대지·주지·배지 / 해야·대야·주야 / 개요·해요·주요·대요·세요)
+_NUM_SHORT_COPULA = r"다|면|며|죠|든|예요|(?<![개해주대세])요|(?<![해배])고|(?<![해대주배])지|(?<![해대주])야"
+# 세는 말 뒤의 `인`(인데·인지·인가): '개인·주인·살인·달인·위인·대인·원인' 처럼 '세는 말 + 인' 이 흔한 낱말이 되는 끝 글자 뒤에서는 인데·인지·인가·인걸·인즉 일 때만 센다
+_NUM_IN_WORDS = "개주살달위대원"
+_NUM_RIGHT = (rf"(?:(?![가-힣])|(?=(?:[{_NUM_PARTICLES}]|(?<![{_NUM_IN_WORDS}])인|(?<=[{_NUM_IN_WORDS}])인(?=[데지가걸즉])"
+              rf"|(?<=[{_NUM_OPEN}])(?:{_NUM_SHORT_COPULA}))[가-힣]{{0,3}}(?![가-힣])))")
 _NATIVE_TENS = "열|스물|스무|서른|마흔|예순|일흔|여든|아흔"
 _NATIVE_UNITS = "한|두|세|네|다섯|여섯|일곱|여덟|아홉"
 # 두 글자 이상(쉰은 한 글자지만 흔한 낱말과 겹치지 않아 여기 둔다): 열두·열다섯·스물세·서른아홉·스무·다섯·여덟, 대략 수 두어·두세. `두어`·`두세` 는 세는 말이 뒤따를 때만 센다(알아 두세요·그대로 두어 의 동사는 수가 아니다)
 _NATIVE_LONG = (rf"(?:(?:{_NATIVE_TENS})(?:{_NATIVE_UNITS})|스물|스무|서른|마흔|쉰|예순|일흔|여든|아흔|다섯|여섯|일곱|여덟|아홉"
                 r"|두어|두세)")
 _NATIVE_SHORT = "한|두|세|네|열|석|넉"
-_NATIVE_COUNTERS = ("개월|번째|퍼센트포인트|퍼센트|분기|주일|자리|지역|기간|차례|단계|가지|군데|마리|사람|가구|학급|학교|기관|나라|시간|곳|개|번|해|달|주|명|건|위|대|호|살|배")
+# 구간·줄·열·날(S2AFIX D12)은 띄어 쓴 꼴만 센다(붙인 꼴은 `_NATIVE_SAFE` 밖). 한 글자 수 `한` 뒤의 `날` 은 아래 정규식에서 뺀다 — '게시를 한 날'·'작업을 한 날' 처럼 하다 의 관형형이 앞에 오는 흔한 말이라서(말뭉치에서 확인).
+_NATIVE_COUNTERS = ("개월|번째|퍼센트포인트|퍼센트|분기|주일|자리|지역|기간|구간|차례|단계|가지|군데|마리|사람|가구|학급|학교|기관|나라|시간|곳|개|번|해|달|주|명|건|위|대|호|살|배|줄|열|날")
 # 한 글자 순우리말 수와 붙여 써도 흔한 낱말과 겹치지 않는 세는 말(세대·열대·두건·한해·한주·세배 는 빠진다)
 _NATIVE_SAFE = "개월|번째|퍼센트|분기|자리|차례|단계|가지|군데|마리|사람|가구|시간|곳|개|번|달|명|살"
 _SINO_DIGITS = "영일이삼사오육륙칠팔구십백천만억조"
@@ -988,7 +1073,7 @@ _NUMBER_WORDS = (r"둘째|셋째|넷째|다섯째|여섯째|일곱째|여덟째|
 _ENGLISH_NUMBER_WORDS = ("one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|twenty|thirty|forty|fifty|hundred|thousand|million|billion|half|double|triple|twice|thrice|zero|dozen")
 _NUMWORD_RE = re.compile("|".join((
     rf"{_NUM_LEFT}(?:{_NATIVE_LONG})[ ]?(?:{_NATIVE_COUNTERS}){_NUM_RIGHT}",
-    rf"{_NUM_LEFT}(?:{_NATIVE_SHORT}) (?:{_NATIVE_COUNTERS}){_NUM_RIGHT}",
+    rf"{_NUM_LEFT}(?!한 날)(?:{_NATIVE_SHORT}) (?:{_NATIVE_COUNTERS}){_NUM_RIGHT}",        # 열한 날·스물한 날 은 위 줄에서 센다
     rf"{_NUM_LEFT}(?:{_NATIVE_SHORT})(?:{_NATIVE_SAFE}){_NUM_RIGHT}",
     rf"{_NUM_LEFT}(?:두|네|열)배{_NUM_RIGHT}",
     rf"{_NUM_LEFT}{_SINO_RUN}[ ]?(?:{_SINO_COUNTERS}){_NUM_RIGHT}",

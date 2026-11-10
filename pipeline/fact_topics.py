@@ -72,10 +72,14 @@ DOMAINS = {d.domain_id: d for d in (
            _w("energy electricity power generation demand supply consumption price oil gas coal renewable solar wind nuclear capacity peak"),
            _w(_COMMON_LABEL + " 전력 발전량 전력수요 최대전력 소비량 사용량 가격 석유 원유 가스 석탄 재생에너지 태양광 풍력 원자력 수력 발전 수요 공급 설비용량"),
            _w("kW MW GW kWh MWh GWh TWh % 원 점")),
+    # 우주날씨(지역 없는 계열): 앞쪽은 1단계의 기본 낱말, 뒤쪽(estimated … x)은 NOAA SWPC 어댑터(S2a)가 쓰는 우리 낱말이다 — 제공처 설명 문장이 아니다.
+    # `장애`·`지원`처럼 `당`·`수` 같은 한 글자 구조 낱말 뒤에서 차단 낱말(`당장`)을 만드는 글자로 시작하는 낱말은 올리지 않는다(`전파 교란`).
     Domain("space_weather", "우주날씨", "과학·환경",
-           _w("space weather geomagnetic kp index solar wind speed density flux xray sunspot number proton electron magnetic field"),
-           _w(_COMMON_LABEL + " 지자기 지자기지수 태양풍 풍속 속도 밀도 엑스선 플럭스 흑점 흑점수 전파 자기장 양성자 전자 Kp"),
-           _w("Kp km/s nT sfu %")),
+           _w("space weather geomagnetic kp index solar wind speed density flux xray sunspot number proton electron magnetic field "
+              "estimated outlook interval scale observed daily monthly radio radiation minor major prob swpc smoothed flare class storm threshold floor a b c m x"),
+           _w(_COMMON_LABEL + " 지자기 지자기지수 태양풍 풍속 속도 밀도 엑스선 플럭스 흑점 흑점수 전파 자기장 양성자 전자 Kp "
+              "NOAA SWPC GOES 추정 예보 폭풍 등급 교란 방사선 확률 낮은 높은 일별 월평균 평활 X선 플레어 세기 기준 A급 B급 C급 M급 X급 하한"),
+           _w("Kp km/s nT sfu % 개 건 단계 nW/㎡")),
 )}
 
 # 지역 낱말(전체 이름이 한 낱말). 시군구·외국 지역은 실제 어댑터를 켤 때 이 표에 올린다
@@ -198,7 +202,7 @@ def fact_problem(fact, allowed_domains, vocabulary=VOCABULARY):
         return "UNKNOWN_TOPIC", "키의 지표 이름에 허용 목록에 없는 낱말이 있어 글로 만들지 않는다"
     if fact.label_ko is None or any(word not in domain.label_words for word in words(fact.label_ko)):
         return "UNKNOWN_TOPIC", "라벨에 허용 목록에 없는 낱말이 있어 글로 만들지 않는다"
-    if fact.unit not in domain.units:
+    if fact.kind in F.NUMERIC_KINDS and fact.unit not in domain.units:          # 글자 종류(분류코드·상태)는 단위가 없다 — 숫자 종류만 단위를 본다
         return "UNKNOWN_TOPIC", "단위가 허용 목록에 없어 글로 만들지 않는다"
     if fact.region_label_ko is not None and not _region_ok(normalize(fact.region_label_ko), vocabulary):
         return "UNKNOWN_TOPIC", "지역 이름이 허용 목록에 없어 글로 만들지 않는다"

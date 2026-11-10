@@ -137,11 +137,15 @@ class DocMatchesCodeTest(unittest.TestCase):
         self.assertIn('startswith("https://")', (ROOT / "tests" / "test_posts_front_matter.py").read_text(encoding="utf-8"))
 
     def test_decisions_are_numbered_without_gaps_and_do_not_reuse_the_register_number(self):
-        """D-101–D-146 은 빠짐없이, 그다음은 D-150 부터(D-147–D-149 는 SRC 의 결함 레지스터 번호와 겹칠 수 있어 일부러 비운다 — D-157). 번호는 순서대로 하나씩 늘어난다."""
+        """D-101–D-146 은 빠짐없이, 그다음은 D-150 부터(D-147–D-149 는 SRC 의 결함 레지스터 번호와 겹칠 수 있어 일부러 비운다 — D-157), S2a 의 결정은 D-200 부터(그 뒤 묶음의 D-200 번대는 번호가 겹치지 않고 오름차순이기만 하면 된다 — 어디까지 있는지는 못박지 않는다). D-150 대는 순서대로 하나씩 늘어난다."""
         decisions = re.findall(r"(?m)^\| (D-\d+) \|", DOC)
         first = [f"D-{n}" for n in range(101, 147)]
-        later = [f"D-{n}" for n in range(150, 150 + len(decisions) - len(first))]
-        self.assertEqual(decisions, first + later)
+        self.assertEqual(decisions[:len(first)], first)
+        numbers = [int(item.split("-")[1]) for item in decisions[len(first):]]
+        low, high = [n for n in numbers if n < 200], [n for n in numbers if n >= 200]
+        self.assertEqual(low, list(range(150, 150 + len(low))))
+        self.assertEqual(high, sorted(set(high)))                              # D-200 번대(S2a 와 그 뒤 묶음)는 번호가 겹치지 않고 오름차순 — 몇 번까지 있는지·빠짐없는지는 못박지 않는다(S2a 자기 번호는 test_space_docs 가 본다)
+        self.assertEqual(numbers, low + high)
         self.assertGreaterEqual(len(decisions), 20)
         self.assertNotIn("D-100", decisions)
         self.assertEqual({"D-147", "D-148", "D-149"} & set(decisions), set())
@@ -173,7 +177,7 @@ class ReviewFixDocsTest(unittest.TestCase):
                 self.assertIn(unit, DOC.split("**단위 표와 변화율**")[1].split("## 6.")[0], unit)
 
     def test_the_quality_table_matches_what_the_code_measures(self):
-        section = DOC[DOC.index("## 13. 한계와 남은 일"):]
+        section = DOC[DOC.index("## 13. 한계와 남은 일"):DOC.index("## 14. ")]                  # 14절(S2a)의 Recipe 표는 따로 본다
         rows = {cells[0]: cells for cells in table_rows(section) if cells[0].startswith("`R0")}
         self.assertEqual(set(rows), {f"`{rid}`" for rid in H.GOLDEN})
         for rid, params in H.GOLDEN.items():
@@ -227,7 +231,7 @@ class FollowUpDocsTest(unittest.TestCase):
         for module, name in ((F, "exact"), (F, "settle_context"), (F, "is_half_tie"), (F, "INTEGER_FORMULAS"), (F, "decimals_of"), (F, "format_object"), (T, "blocked_loose"),
                              (A, "unsafe_free_text")):
             self.assertTrue(hasattr(module, name), name)
-        self.assertEqual(F.INTEGER_FORMULAS, frozenset({"F04_rank", "F12_count"}))
+        self.assertEqual(F.INTEGER_FORMULAS, frozenset({"F04_rank", "F12_count", "F16_count_between"}))        # F16(기준 이상 개수, S2a)도 정수로 보인다
 
     def test_the_decision_number_overlap_is_explained(self):
         row = next(line for line in DOC.splitlines() if line.startswith("| D-157 |"))

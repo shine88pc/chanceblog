@@ -245,6 +245,16 @@ class ParseRejectionTest(unittest.TestCase):
         wide = b"[" + b",".join([b"[1, 2]"] * 5000) + b"]"          # 폭이 넓은 것은 깊이와 무관하게 읽힌다
         self.assertEqual(len(B.decode_json(wide)), 5000)
 
+    def test_numbers_with_huge_exponents_are_bad_json_not_an_arithmetic_error(self):
+        """S2AFIX D3: Decimal 이 받을 수 없는 아주 큰 지수는 InvalidOperation(ArithmeticError 계열)이 아니라 BAD_JSON 이다 — 어댑터 계약은 '어떤 입력에서도 AdapterError'."""
+        for payload in (b"[1e99999999999999999999]", b"[1e-99999999999999999999]", b"[-1e99999999999999999999]", b"[1.5E99999999999999999999]",
+                        b'{"api_version": "v1", "rows": [1e99999999999999999999]}'):
+            with self.subTest(payload=payload[:32]):
+                self.reject(payload, "BAD_JSON")
+                with self.assertRaises(B.AdapterError) as caught:
+                    B.decode_json(payload)
+                self.assertEqual(caught.exception.code, "BAD_JSON")
+
     def test_a_byte_order_mark_is_tolerated(self):
         record, facts = adapter().parse(b"\xef\xbb\xbf" + rows_payload([GOOD_ROW]), api_access(), NOW, {})
         self.assertEqual(len(facts), 2)
@@ -408,7 +418,7 @@ class StructureOfAdaptersTest(unittest.TestCase):
         return ast.parse(path.read_text(encoding="utf-8"), feature_version=(3, 10))
 
     def test_there_are_adapter_files_to_check(self):
-        self.assertEqual([p.name for p in ADAPTER_FILES], ["__init__.py", "base.py", "mock_stats.py"])
+        self.assertEqual([p.name for p in ADAPTER_FILES], ["__init__.py", "base.py", "mock_stats.py", "noaa_swpc.py"])
 
     def test_no_adapter_calls_urlopen_or_imports_a_network_module(self):
         banned = {"urllib", "http", "socket", "ssl", "requests", "httpx", "aiohttp", "ftplib", "smtplib", "xmlrpc", "subprocess"}
