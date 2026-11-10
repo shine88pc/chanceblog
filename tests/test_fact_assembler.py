@@ -163,7 +163,7 @@ class GoldenPostsTest(unittest.TestCase):
         r01 = self.posts["R01_time_series"].body_markdown
         for fragment in ("값은 2026년 2월(3.2%)보다 0.3%p 높은 3.5%입니다(2026년 3월 기준).", "- 바로 앞 기간 대비: +0.3%p, 변화율 +9.4% (견준 기간 2026년 2월, 그때 값 3.2%)",
                          "- 전년 같은 달 대비: +0.2%p, 변화율 +6.1% (견준 기간 2025년 3월, 그때 값 3.3%)", "- 최근 3개월 평균: 3.3%",
-                         "- 표시한 기간 안의 범위: 최저 2.9%(2025년 9월)에서 최고 3.5%(2026년 3월)까지", "| 2026년 3월 | 3.5% | +0.3%p | +9.4% |",
+                         "- 표시한 기간 안의 범위: 최저 2.9%(같은 값 2번, 가장 나중 2025년 9월)에서 최고 3.5%(2026년 3월)까지", "| 2026년 3월 | 3.5% | +0.3%p | +9.4% |",
                          "| 2025년 9월 | 2.9% | 0.0%p | 0.0% |", "| 2025년 4월 | 3.2% | −0.1%p | −3.0% |", "최근 3개월 평균 3.3%보다 0.2%p 높아서"):
             self.assertIn(fragment, r01)
         r02 = self.posts["R02_region_compare"].body_markdown
@@ -171,7 +171,7 @@ class GoldenPostsTest(unittest.TestCase):
                          "- 평균보다 높은 곳 3곳, 낮은 곳 3곳", "- 평균보다 낮은 곳: 가상 지역 나, 가상 지역 다, 가상 지역 바"):
             self.assertIn(fragment, r02)
         r03 = self.posts["R03_record_position"].body_markdown
-        for fragment in ("안에서 가장 높은 3.5%입니다.", "- 자료 기간의 최저: 2.9%(2025년 9월)", "- 범위 안의 위치: 100.0%", "- 최저와의 차이: +0.6%p",
+        for fragment in ("안에서 가장 높은 3.5%입니다.", "- 자료 기간의 최저: 2.9%(같은 값 2번, 가장 나중 2025년 9월)", "- 범위 안의 위치: 100.0%", "- 최저와의 차이: +0.6%p",
                          "| 2026년 2월 | 3.2% | −0.3%p | +0.3%p |", "2025년 1월부터 2026년 3월까지 15개월입니다"):
             self.assertIn(fragment, r03)
 
@@ -485,10 +485,10 @@ class ShortTextTest(unittest.TestCase):
         post = H.run(short(R.R01_TIME_SERIES), facts=yearly, params={}, today="2026-06-01")
         self.assertIsInstance(post, A.AssembledPost)
         self.assertEqual(post.description, "가의 율 값은 2024년(2.4%)보다 0.4%p 높은 2.8%입니다(2025년 기준, 이 글이 읽은 8년 자료의 마지막 값).")
-        counts = self.facts(["7", "6", "5", "4", "3", "2"], periods=["2025"], regions=["가", "나", "다", "라", "마", "바"], unit="명", label="수")
+        counts = self.facts(["7", "6", "5", "4", "3", "1"], periods=["2025"], regions=["가", "나", "다", "라", "마", "바"], unit="명", label="수")
         post = H.run(short(R.R02_REGION_COMPARE), facts=counts, params={}, today="2026-06-01")
         self.assertIsInstance(post, A.AssembledPost)
-        self.assertEqual(post.description, "2025년 기준 6곳의 수 값을 견주면 가장 높은 곳은 가(7명), 가장 낮은 곳은 바(2명)입니다(평균 5명).")
+        self.assertEqual(post.description, "2025년 기준 6곳의 수 값을 견주면 가장 높은 곳은 가(7명), 가장 낮은 곳은 바(1명)입니다(평균 4명).")
         for result in (H.run(short(R.R01_TIME_SERIES), facts=yearly, params={}, today="2026-06-01"), post):
             self.assertEqual(A.post_problems(result), [])
             self.assertEqual(g.front_matter_problems(*generator_file(result)), [])

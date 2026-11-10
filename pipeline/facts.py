@@ -14,11 +14,12 @@ SRC(허용 목록)와의 인터페이스: `ProviderLike`·`RegistryLike` 는 `pi
 설명: docs/FACT_PATH.md
 """
 import datetime
+import functools
 import hashlib
 import json
 import re
 from dataclasses import dataclass, fields
-from decimal import Decimal, InvalidOperation, ROUND_HALF_EVEN, ROUND_HALF_UP, localcontext
+from decimal import Context, Decimal, DivisionByZero, InvalidOperation, Overflow, ROUND_HALF_EVEN, ROUND_HALF_UP, localcontext
 from typing import Any, Iterable, Mapping, Optional, Protocol, Sequence, runtime_checkable
 
 SCHEMA_VERSION = 1
@@ -32,7 +33,7 @@ NUMBER_POLICY = {
     "internal_places": 12,                 # 나눗셈·평균 같은 계산 결과를 이 자리까지 정밀하게 간직한다
     "internal_rounding": ROUND_HALF_EVEN,
     "precision": 60,                       # Decimal 계산 자릿수(넘치면 오류가 아니라 조용히 깎이는 일이 없게 넉넉히)
-    "max_abs_value": Decimal(10) ** 15,    # 이보다 큰 값은 정상 자료가 아니라고 본다
+    "max_abs_value": Decimal(10 ** 15),    # 이보다 큰 값은 정상 자료가 아니라고 본다(정수에서 만들어 어떤 문맥에서도 같은 값)
     "max_display_decimals": 4,             # 자료의 소수 자리가 이를 넘으면 글로 쓰지 않는다(표시는 자료의 정밀도를 깎지 않는다 — D-129)
     "max_digits": 40,                      # 한 값의 유효 숫자 자리 상한 — 넘으면 id 해시·JSON 왕복에서 값이 깎일 수 있어 받지 않는다(`precision` 60 아래)
 }
@@ -62,6 +63,25 @@ UNIT_TABLE = {
     "kW": UnitSpec(1), "MW": UnitSpec(1), "GW": UnitSpec(1), "kWh": UnitSpec(1), "MWh": UnitSpec(1), "GWh": UnitSpec(1), "TWh": UnitSpec(1),
 }
 UNIT_DECIMALS = {unit: spec.decimals for unit, spec in UNIT_TABLE.items()}     # 표시 소수 자리 표(단위 표의 한 칸을 따로 본 것)
+
+# ----------------------------------------------------------------------------
+# 명시한 지역 문맥 — 계산·표시는 호출한 쪽의 decimal 전역 정밀도·반올림·지수 한계·함정(trap)에 기대지 않는다(재검증 D5, D-150)
+# ----------------------------------------------------------------------------
+EXACT_CONTEXT = Context(prec=NUMBER_POLICY["precision"], rounding=ROUND_HALF_EVEN, Emin=-999999, Emax=999999, capitals=1, clamp=0, flags=[],
+                        traps=[InvalidOperation, DivisionByZero, Overflow])
+
+
+def exact(function):
+    """Decimal 을 계산·비교·표시하는 함수를 `EXACT_CONTEXT` 의 복사본 안에서 돌린다. 단항 `abs`·`-`·사칙연산은 현재 전역 문맥의 정밀도로 반올림되므로(전역 정밀도 5 에서
+    `1,234,567.1` 이 `1,234,600.0` 이 되는 식) 호출한 쪽이 전역 문맥을 바꿔 두어도 결과가 달라지지 않게 모든 진입점을 이 장식자로 감싼다."""
+    @functools.wraps(function)
+    def wrapper(*args, **kwargs):
+        with localcontext(EXACT_CONTEXT):
+            return function(*args, **kwargs)
+    return wrapper
+
+# 순위·개수 계산 결과는 자료의 단위 자리와 상관없이 정수로 보인다(교육 범주의 `곳`·`개` 로 소수 자료를 넣어도 '6.0곳 비교'가 되지 않는다 — 재검증 D9, D-153)
+INTEGER_FORMULAS = frozenset({"F04_rank", "F12_count"})
 
 # ----------------------------------------------------------------------------
 # Fact 종류
@@ -143,6 +163,7 @@ class PrecisionLimit(FactError):
 _NUMBER_TEXT_RE = re.compile(r"[+-]?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)")      # 아라비아 숫자만(전각·인도 숫자는 받지 않는다)
 
 
+@exact
 def to_decimal(value):
     """int·str·Decimal(·float)을 Decimal 로. 글자는 `-12.50` 같은 평범한 십진 표기만(지수·밑줄·16진·무한·NaN 은 받지 않는다). 불리언·무한·너무 큰 값은 FactFormatError."""
     if isinstance(value, bool):
@@ -164,20 +185,19 @@ def to_decimal(value):
         raise FactFormatError(["숫자 값을 읽을 수 없음"]) from None
     if not number.is_finite():
         raise FactFormatError(["숫자 값이 유한하지 않음"])
-    if abs(number) >= NUMBER_POLICY["max_abs_value"]:
+    if number.copy_abs() >= NUMBER_POLICY["max_abs_value"]:
         raise FactFormatError(["숫자 값이 너무 큼"])
     if len(number.as_tuple().digits) > NUMBER_POLICY["max_digits"]:
         raise FactFormatError(["숫자 값의 자리가 너무 많음"])
     return number
 
 
+@exact
 def canonical_number(value):
-    """Decimal 의 결정적 글자 모양(지수 표기 없음, 뒤의 0 제거, 음의 0 없음). 해시·직렬화가 쓴다."""
+    """Decimal 의 결정적 글자 모양(지수 표기 없음, 뒤의 0 제거, 음의 0 없음). 해시·직렬화가 쓴다. 호출한 쪽의 decimal 전역 문맥과 상관없이 같은 글자 — 같은 값이면 같은 id(D-144·D-150)."""
     if value == 0:
         return "0"
-    with localcontext() as ctx:                     # 호출한 쪽의 decimal 전역 문맥(정밀도·반올림)과 상관없이 같은 글자 — 같은 값이면 같은 id(D-144)
-        ctx.prec = NUMBER_POLICY["precision"]
-        return format(value.normalize(), "f")
+    return format(value.normalize(), "f")
 
 
 def unit_spec(unit):
@@ -197,14 +217,13 @@ def decimals_for(unit, context=None):
     return unit_spec(unit).decimals
 
 
+@exact
 def value_decimals(value):
     """Decimal 값의 소수 자리(뒤의 0 은 세지 않는다, 정수는 0): 3.50 → 1, 3.46 → 2, 1200 → 0."""
-    with localcontext() as ctx:
-        ctx.prec = NUMBER_POLICY["precision"]
-        exponent = value.normalize().as_tuple().exponent
-    return max(0, -exponent)
+    return max(0, -value.normalize().as_tuple().exponent)
 
 
+@exact
 def display_context(items):
     """글에 쓰는 숫자 Fact 들 → {단위: 표시 소수 자리}. 자리는 **단위 표의 최소 자리와 자료의 소수 자리 중 큰 쪽**이고 한 글 안에서 같은 단위는 같은 자리다 — 그래서 자료의 값은 반올림 없이
     그대로 보이고(3.44 와 3.46 이 둘 다 `3.5` 로 보여 '달라지지 않았다'와 모순되는 일이 없다), 두 값의 차이도 정확히 보인다. 값이 없는(모름) 것은 건너뛴다.
@@ -224,17 +243,17 @@ def display_context(items):
     return context
 
 
+@exact
 def round_display(value, decimals):
     """표시용 반올림(0 에서 먼 쪽 반올림). 내부 값은 이 함수로 바꾸지 않는다."""
-    with localcontext() as ctx:
-        ctx.prec = NUMBER_POLICY["precision"]
-        return value.quantize(Decimal(1).scaleb(-decimals), rounding=NUMBER_POLICY["display_rounding"])
+    return value.quantize(Decimal(1).scaleb(-decimals), rounding=NUMBER_POLICY["display_rounding"])
 
 
+@exact
 def format_decimal(value, decimals, *, signed=False, absolute=False):
     """천 단위 쉼표와 고정 소수 자리로 쓴 숫자. 음수는 `−`(U+2212), signed 이면 양수에 `+`. 반올림해 0 이 되면 부호를 붙이지 않는다. absolute 이면 부호 없이 크기만."""
     rounded = round_display(value, decimals)        # 반올림한 값이 0 이면(`-0.0` 포함) 부호가 붙지 않는다 — 아래 부호는 반올림한 값으로 정한다
-    body = format(abs(rounded), f",.{decimals}f")
+    body = format(rounded.copy_abs(), f",.{decimals}f")       # 단항 abs 는 전역 정밀도로 반올림되므로 copy_abs(D5)
     if absolute:
         return body
     if rounded < 0:
@@ -244,10 +263,53 @@ def format_decimal(value, decimals, *, signed=False, absolute=False):
     return body
 
 
+@exact
 def format_with_unit(value, unit, *, signed=False, absolute=False, context=None):
     return format_decimal(value, decimals_for(unit, context), signed=signed, absolute=absolute) + (unit or "")
 
 
+def decimals_of(obj, context=None):
+    """객체(Fact·계산 결과)를 보일 소수 자리: 순위·개수 계산 결과(`INTEGER_FORMULAS`)는 자료의 단위 자리와 상관없이 정수, 그 밖은 단위 표·자료 정밀도 자리(`display_context`)."""
+    if isinstance(obj, DerivedFact) and obj.formula_id in INTEGER_FORMULAS:
+        return 0
+    return decimals_for(obj.unit, context)
+
+
+@exact
+def format_object(obj, *, signed=False, absolute=False, context=None):
+    """`format_with_unit` 의 객체판 — 세는 단위(순위·개수)는 정수로, 그 밖은 `decimals_of` 자리로 쓴다."""
+    return format_decimal(obj.value, decimals_of(obj, context), signed=signed, absolute=absolute) + (obj.unit or "")
+
+
+@exact
+def is_half_tie(value, places):
+    """value 를 places 자리로 반올림할 때 정확히 반 칸(…5 로 끝나고 그 뒤가 없음)에 걸리는가 — 이때만 반올림 방향이 정해져야 해서 한 칸 어긋난 표시가 나올 수 있다."""
+    return (value.scaleb(places).copy_abs() % 1) == Decimal("0.5")
+
+
+@exact
+def settle_context(context, items):
+    """표시 자리에서 정확히 반 칸에 걸리는 값(예: 짝수 곳의 평균이 3.45)이 있으면 그 단위의 자리를 한 칸 늘려 값이 반올림 없이 보이게 한다(`%` 와 `%p` 는 같이). 반올림은 평균과
+    차이를 따로 하면 방향이 서로 달라 `보이는 값 − 보이는 평균 ≠ 보이는 차이` 가 되기 때문이다(재검증 D6, D-152). 한 값이 걸리는 자리는 하나뿐이라 몇 번 안에 끝난다. 새 사전을 돌려준다."""
+    context = dict(context)
+    limit = NUMBER_POLICY["internal_places"] - 1
+    for _pass in range(limit + 2):                    # 한 값은 많아야 limit 번 늘어난다 — 그 안에 끝난다(바퀴 수에 상한을 둬, 자리표가 늘림을 따르지 않는 이상한 경우에도 무한 반복하지 않는다)
+        changed = False
+        for item in items:
+            value = getattr(item, "value", None)
+            if not isinstance(value, Decimal):
+                continue
+            places = decimals_for(item.unit, context)
+            if places < limit and is_half_tie(value, places):
+                for unit in (("%", "%p") if item.unit in ("%", "%p") else (item.unit,)):
+                    context[unit] = max(decimals_for(unit, context), places + 1)
+                changed = True
+        if not changed:
+            break
+    return context
+
+
+@exact
 def display_sign(value, unit, context=None):
     """표시되는(반올림한) 값의 부호: -1·0·1. '올랐다·내렸다·같다' 는 이 값으로 고른다(0.04 가 `0.0` 으로 보이는데 '올랐다' 고 쓰지 않게)."""
     rounded = round_display(value, decimals_for(unit, context))
@@ -628,6 +690,7 @@ def validate_record(record):
     return problems
 
 
+@exact
 def validate_fact(fact):
     problems = []
     if not isinstance(fact, Fact):
@@ -650,7 +713,7 @@ def validate_fact(fact):
         if fact.value is not None:
             if not isinstance(fact.value, Decimal) or not fact.value.is_finite():
                 problems.append("숫자 종류의 `value` 이(가) 유한한 Decimal 이 아님")
-            elif abs(fact.value) >= NUMBER_POLICY["max_abs_value"]:
+            elif fact.value.copy_abs() >= NUMBER_POLICY["max_abs_value"]:
                 problems.append("`value` 이(가) 너무 큼")
         if not isinstance(fact.unit, str) or not _UNIT_RE.fullmatch(fact.unit):
             problems.append("숫자 종류의 `unit` 이(가) 없거나 형식이 맞지 않음(숫자마다 단위가 있어야 한다)")
@@ -894,14 +957,50 @@ def _reject_number(_text):
 # 종류: F 값+단위(날짜·글자 종류는 그 값) · S 부호 있는 값+단위 · A 크기(절댓값)+단위 · V 값만 · U 단위 · D 기준일 · L 낱말 라벨 · R 지역 낱말 · T 수집일(출처 기록)
 MARKER_KINDS = "FSAVUDLRT"
 REF_RE = re.compile("⟦([" + MARKER_KINDS + r"]):([A-Za-z0-9_]{1,64})⟧")
-# 우리말 수 표현(순우리말 수 관형사+세는 말·한자어 수+세는 말·'절반'·'수십' 같은 낱말) — 틀에 쓰지 않는다. 한자어 한 글자(일·이·삼·사·오…)는 흔한 낱말에 들어 있어 세는 말과 붙은 꼴만 본다
-_NATIVE_NUMBERS = r"(?:열[한두세네]?|스[무물][한두세네]?|서른|마흔|쉰|예순|일흔|여든|아흔|한|두|세|네|다섯|여섯|일곱|여덟|아홉)"
-_NATIVE_COUNTERS = r"(?:배|곳|개|번|가지|해|달|분기|주|명|건|차례|단계|자리|지역|기간|위|대|호|살|세|원|퍼센트|프로)"
-_SINO_NUMBERS = r"(?:영|일|이|삼|사|오|육|칠|팔|구|십|백|천|만|억|조)+"
-_SINO_COUNTERS = r"(?:분기|개월|퍼센트|프로|배|곳|개|명|건|위|번|차례|단계|세|살|원|달러|분의|이하|이상|미만|초과|포인트|%)"
-_NUMBER_WORDS = (r"(?:하나|둘째|셋째|넷째|다섯째|여섯째|일곱째|여덟째|아홉째|열째|첫째|첫|절반|반절|반 ?토막|곱절|갑절|서너|두서너|두세|한두|너덧|네댓|대여섯|예닐곱|여남은"
-                 r"|수십|수백|수천|수만|수억|몇몇|몇)")
-_NUMWORD_RE = re.compile(rf"(?<![가-힣])(?:{_NATIVE_NUMBERS}[ ]?{_NATIVE_COUNTERS}|{_SINO_NUMBERS}[ ]?{_SINO_COUNTERS}|{_NUMBER_WORDS}|(?:둘|셋|넷)(?![가-힣]))")
+# 우리말 수 표현 — 틀에 쓰지 않는다('두 배·세 곳·열두 곳·삼 분기·절반·수십·두어 곳'). 흔한 낱말(조건·이번·사건·세대·열대·일명·만원·프로그램 …)을 수로 잡지 않도록 구조로 가른다(재검증 D8, D-154):
+#  - 왼쪽 경계: 앞 글자가 한글·영문·숫자가 아니어야 한다('강남구 개발' 의 구, 'A사 번호' 의 사 같은 낱말 끝 글자는 수가 아니다).
+#  - 오른쪽 경계: 세는 말 뒤에 한글이 더 이어지면 조사·어미로 시작할 때만 센다('세 곳이'·'두 배로'·'네 곳에서는' 은 잡고 '일 개선'·'한 프로그램'·'일일 건수' 는 놓친다).
+#  - 한 글자 수(한·두·세·네·열, 일·삼·사·오·십·백·천·만 …)는 세는 말과 붙여 쓴 꼴이 흔한 낱말과 겹치므로(세대·열대·두건·사건·조건·일개·오명·만원) 띄어 쓴 꼴은 모든 세는 말과, 붙여 쓴 꼴은 겹치지 않는
+#    세는 말(곳·개·번·명·가지·개월·퍼센트 …)만 본다. 두 글자 이상 수(열두·스물·다섯·이십·오륙 …)는 붙여 쓴 꼴도 모두 본다. 지시어 `이`(이 곳·이 점·이 번호)는 한 글자 수로 보지 않는다.
+#  - 수 글자로만 된 흔한 낱말(사이·이사·일일·만일·일이 …)은 두 글자 이상 수에서 뺀다.
+_NUM_LEFT = r"(?<![가-힣A-Za-z0-9])"
+_NUM_RIGHT = r"(?:(?![가-힣])|(?=[이가은는을를의에로도만와과나라씩째쯤간뿐입였으부까보마처밖][가-힣]{0,3}(?![가-힣])))"
+_NATIVE_TENS = "열|스물|스무|서른|마흔|예순|일흔|여든|아흔"
+_NATIVE_UNITS = "한|두|세|네|다섯|여섯|일곱|여덟|아홉"
+# 두 글자 이상(쉰은 한 글자지만 흔한 낱말과 겹치지 않아 여기 둔다): 열두·열다섯·스물세·서른아홉·스무·다섯·여덟, 대략 수 두어·두세. `두어`·`두세` 는 세는 말이 뒤따를 때만 센다(알아 두세요·그대로 두어 의 동사는 수가 아니다)
+_NATIVE_LONG = (rf"(?:(?:{_NATIVE_TENS})(?:{_NATIVE_UNITS})|스물|스무|서른|마흔|쉰|예순|일흔|여든|아흔|다섯|여섯|일곱|여덟|아홉"
+                r"|두어|두세)")
+_NATIVE_SHORT = "한|두|세|네|열|석|넉"
+_NATIVE_COUNTERS = ("개월|번째|퍼센트포인트|퍼센트|분기|주일|자리|지역|기간|차례|단계|가지|군데|마리|사람|가구|학급|학교|기관|나라|시간|곳|개|번|해|달|주|명|건|위|대|호|살|배")
+# 한 글자 순우리말 수와 붙여 써도 흔한 낱말과 겹치지 않는 세는 말(세대·열대·두건·한해·한주·세배 는 빠진다)
+_NATIVE_SAFE = "개월|번째|퍼센트|분기|자리|차례|단계|가지|군데|마리|사람|가구|시간|곳|개|번|달|명|살"
+_SINO_DIGITS = "영일이삼사오육륙칠팔구십백천만억조"
+_SINO_SHORT = "영일삼사오육칠팔구십백천만억조"            # 지시어와 겹치는 `이` 는 한 글자 수에서 뺀다
+_SINO_STOP = "사이|이사|구이|오이|일일|일이|만일|만조|백조|조사|구조|영구"      # 수 글자로만 된 흔한 낱말(조사원·조사일·구조 위·영구 단계 …)
+_SINO_RUN = rf"(?!(?:{_SINO_STOP}))[{_SINO_DIGITS}]{{2,}}"          # 흔한 낱말로 시작하는 수 글자 덩어리는 수가 아니다(세는 말이 수 글자이기도 한 `조사일`·`구조일` 도)
+_SINO_COUNTERS = "퍼센트포인트|퍼센트|프로|포인트|개월|분기|번째|차례|단계|이하|이상|미만|초과|달러|%|곳|개|명|건|위|번|세|살|원|배|년|일|점|분|초"
+# 한 글자 한자어 수와 붙여 써도 흔한 낱말과 겹치지 않는 세는 말('백퍼센트·십프로·삼개월·사분기' 는 잡고 '조건·사건·만원·일개·구원' 은 놓친다)
+_SINO_SAFE = "퍼센트포인트|퍼센트|프로|포인트|개월|분기|달러|%"
+_NUMBER_WORDS = (r"둘째|셋째|넷째|다섯째|여섯째|일곱째|여덟째|아홉째|열째|첫째|첫|절반|반절|반 ?토막|곱절|갑절|서너|두서너|한두|너덧|너더댓|네댓|대여섯|예닐곱|여남은"
+                 r"|서넛|한둘|두셋|두엇|여럿"
+                 r"|십중팔구|삼삼오오|하나둘|하나하나|하나같이|이틀|사흘|나흘|닷새|엿새|이레|여드레|아흐레|열흘"
+                 r"|수십|수백|수천|수억|몇몇|몇|영하|열에 ?(?:한|두|세|네|다섯|여섯|일곱|여덟|아홉)|반 ?(?:이상|이하|미만|초과)")
+_ENGLISH_NUMBER_WORDS = ("one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|twenty|thirty|forty|fifty|hundred|thousand|million|billion|half|double|triple|twice|thrice|zero|dozen")
+_NUMWORD_RE = re.compile("|".join((
+    rf"{_NUM_LEFT}(?:{_NATIVE_LONG})[ ]?(?:{_NATIVE_COUNTERS}){_NUM_RIGHT}",
+    rf"{_NUM_LEFT}(?:{_NATIVE_SHORT}) (?:{_NATIVE_COUNTERS}){_NUM_RIGHT}",
+    rf"{_NUM_LEFT}(?:{_NATIVE_SHORT})(?:{_NATIVE_SAFE}){_NUM_RIGHT}",
+    rf"{_NUM_LEFT}(?:두|네|열)배{_NUM_RIGHT}",
+    rf"{_NUM_LEFT}{_SINO_RUN}[ ]?(?:{_SINO_COUNTERS}){_NUM_RIGHT}",
+    rf"{_NUM_LEFT}[{_SINO_SHORT}] (?:{_SINO_COUNTERS}){_NUM_RIGHT}",
+    rf"{_NUM_LEFT}[{_SINO_SHORT}](?:{_SINO_SAFE}){_NUM_RIGHT}",
+    rf"{_NUM_LEFT}[십백천만억조]배{_NUM_RIGHT}",
+    rf"{_NUM_LEFT}[{_SINO_DIGITS}][ ]?분의[ ]?[{_SINO_DIGITS}]{_NUM_RIGHT}",
+    rf"{_NUM_LEFT}(?:{_NUMBER_WORDS})",
+    rf"{_NUM_LEFT}수[십백천만억]{{1,2}}여?[ ]?(?:{_SINO_COUNTERS}|{_NATIVE_COUNTERS}){_NUM_RIGHT}",        # 수만 은 '글자 수만' 의 수+만 과 겹쳐 세는 말이 뒤따를 때만
+    rf"{_NUM_LEFT}(?:하나(?!은행|님|금융|카드|증권|로마트)|(?:둘|셋|넷|제로)(?![가-힣]))",        # 하나 는 뒤가 무엇이든 센다(하나의·하나만·하나라도). 둘·셋·넷·제로 는 뒤에 한글이 붙지 않을 때만(둘의 차이·셋팅·제로섬 은 수가 아니다)
+    rf"(?<![A-Za-z0-9])(?i:{_ENGLISH_NUMBER_WORDS})(?![A-Za-z0-9])",
+)))
 FORBIDDEN_TEMPLATE_CHARS = ("{{", "{%", "%}", "}}")
 # 숫자가 들었지만 주장이 아닌 굳은 말('제3자'·공공누리 '제1유형' 같은 이용 조건 용어) — 숫자 검사에서 뺀다
 _FIXED_NUMERIC_TERMS = re.compile(r"제3자|제[1-4]유형")
@@ -1010,18 +1109,19 @@ def render_marker(kind, ref, obj, context=None):
         if obj.kind == KIND_DATETIME:
             return format_period_ko(obj.value)
         return obj.value
-    value = _numeric_value(obj, ref)
+    _numeric_value(obj, ref)
     if kind == "F":
-        return format_with_unit(value, obj.unit, context=context)
+        return format_object(obj, context=context)
     if kind == "S":
-        return format_with_unit(value, obj.unit, signed=True, context=context)
+        return format_object(obj, signed=True, context=context)
     if kind == "A":
-        return format_with_unit(value, obj.unit, absolute=True, context=context)
+        return format_object(obj, absolute=True, context=context)
     if kind == "V":
-        return format_decimal(value, decimals_for(obj.unit, context))
+        return format_decimal(obj.value, decimals_of(obj, context))
     raise TemplateError([f"알 수 없는 표시 종류: {kind}"])
 
 
+@exact
 def render(template, facts, *, context=None):
     """틀을 글로 바꾼다. facts 는 {id: 객체} 이거나 객체의 나열, context 는 `display_context` 가 만든 {단위: 소수 자리}(없으면 단위 표의 자리).
     참조 없는 숫자가 있으면 UntracedNumber, 모르는 id 면 UnknownReference. 렌더링 결과에 표시 문자(⟦ ⟧)나 Liquid 문자가 남으면 TemplateError."""
@@ -1044,6 +1144,7 @@ def render(template, facts, *, context=None):
     return out
 
 
+@exact
 def describe(obj, context=None):
     """근거 텍스트용 한 줄: 낱말 · 지역 · 기준일 · 값. 본문에 나온 값과 같은 글자 모양을 쓴다(Gate 가 글자로 견준다). id·해시 같은 내부 번호는 싣지 않는다."""
     parts = []
@@ -1058,7 +1159,7 @@ def describe(obj, context=None):
     if obj.value is None:
         parts.append("값 없음(모름)")
     elif isinstance(obj, DerivedFact) or obj.kind in NUMERIC_KINDS:
-        parts.append(format_with_unit(obj.value, obj.unit, context=context))
+        parts.append(format_object(obj, context=context))
     elif obj.kind in DATE_KINDS:
         parts.append(format_date_ko(obj.value))
     elif obj.kind == KIND_DATETIME:

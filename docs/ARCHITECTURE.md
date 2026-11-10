@@ -732,7 +732,7 @@ Unsplash API 지침(2026-11-03 원문 확인)은 ① API 가 준 사진 주소�
 
 | 모듈 | 역할 | 입출력 |
 |------|------|--------|
-| `pipeline/facts.py`·`calc.py`·`fact_topics.py`·`adapters/`(`base.py`·`mock_stats.py`)·`recipes.py`·`fact_assembler.py` | 불변 값 객체(Fact·출처 기록·계산 결과)와 `⟦F:id⟧` 참조·렌더러(숫자는 모두 Fact 에서, 보이는 소수 자리는 단위 표와 자료의 정밀도 중 큰 쪽) → 결정적 계산식 F01–F14 → 주제 허용 목록(범주별 키·라벨·단위·지역 낱말, 차단 낱말) → 구조화 응답(JSON·CSV)만 읽는 어댑터 계약과 가짜 Provider → Recipe 3개(시계열 변화·지역 비교·임계값 기록)와 규칙 기반 한국어 조립기(`assemble` — 못 맞추면 `Insufficient`, 예외 없음) | **없음**(순수 함수 — 네트워크는 주입된 `opener`, 시각은 인자, 난수 없음, 표준 라이브러리만) |
+| `pipeline/facts.py`·`calc.py`·`fact_topics.py`·`adapters/`(`base.py`·`mock_stats.py`)·`recipes.py`·`fact_assembler.py` | 불변 값 객체(Fact·출처 기록·계산 결과)와 `⟦F:id⟧` 참조·렌더러(숫자는 모두 Fact 에서, 보이는 소수 자리는 단위 표와 자료의 정밀도 중 큰 쪽, 계산·표시는 호출한 쪽의 decimal 전역 문맥에 기대지 않는 명시한 문맥 안에서) → 결정적 계산식 F01–F14 → 주제 허용 목록(범주별 키·라벨·단위·지역 낱말, 차단 낱말) → 구조화 응답(JSON·CSV)만 읽는 어댑터 계약과 가짜 Provider → Recipe 3개(시계열 변화·지역 비교·임계값 기록)와 규칙 기반 한국어 조립기(`assemble` — 못 맞추면 `Insufficient`, 예외 없음) | **없음**(순수 함수 — 네트워크는 주입된 `opener`, 시각은 인자, 난수 없음, 표준 라이브러리만) |
 
 **연결 금지가 시험으로 지켜진다**: `generator.py`·`pipeline/` 의 다른 모듈·워크플로는 이 모듈들의 이름을 부르지 않는다(`tests/test_fact_structure.py`). SRC(허용 목록)와는 `facts.ProviderLike`·`RegistryLike` 최소 프로토콜(덕 타이핑)로만 맞물리고 그 모듈을 import 하지 않는다.
 

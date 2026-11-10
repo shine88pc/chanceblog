@@ -27,7 +27,7 @@
 설명: docs/FACT_PATH.md
 """
 from dataclasses import dataclass
-from decimal import Decimal, localcontext
+from decimal import Decimal
 
 from pipeline import facts as F
 
@@ -144,23 +144,21 @@ def _same_region(formula_id, a, b):
     return None
 
 
+# 계산은 모두 `facts.exact`(명시한 지역 문맥) 안에서 한다 — 호출한 쪽의 decimal 전역 정밀도·반올림·지수 한계에 기대지 않는다(재검증 D5, D-150)
+@F.exact
 def _quant(value):
     places = F.NUMBER_POLICY["internal_places"]
-    with localcontext() as ctx:
-        ctx.prec = F.NUMBER_POLICY["precision"]
-        return value.quantize(Decimal(1).scaleb(-places), rounding=F.NUMBER_POLICY["internal_rounding"])
+    return value.quantize(Decimal(1).scaleb(-places), rounding=F.NUMBER_POLICY["internal_rounding"])
 
 
+@F.exact
 def _div(numerator, denominator):
-    with localcontext() as ctx:
-        ctx.prec = F.NUMBER_POLICY["precision"]
-        return _quant(numerator / denominator)
+    return _quant(numerator / denominator)
 
 
+@F.exact
 def _mean(values):
-    with localcontext() as ctx:
-        ctx.prec = F.NUMBER_POLICY["precision"]
-        return _quant(sum(values, Decimal(0)) / Decimal(len(values)))
+    return _quant(sum(values, Decimal(0)) / Decimal(len(values)))
 
 
 def _common_provider(items):
@@ -171,9 +169,10 @@ def _common_provider(items):
 _KEEP = object()    # `_derive` 의 칸을 anchor 에서 이어받는다는 표지(None 으로 비우는 것과 구별)
 
 
+@F.exact
 def _derive(formula_id, inputs, value, unit, anchor, *, as_of=_KEEP, region=_KEEP, key=_KEEP, region_level=_KEEP):
     quantized = _quant(value)
-    if abs(quantized) >= F.NUMBER_POLICY["max_abs_value"]:
+    if quantized.copy_abs() >= F.NUMBER_POLICY["max_abs_value"]:
         return _skip(formula_id, "VALUE_OUT_OF_RANGE")            # 값은 정상 범위여도 차이·변화율이 범위를 넘을 수 있다 — 예외로 죽지 않고 값을 만들지 않는다(D-137)
     return F.DerivedFact.create(
         formula_id, tuple(item.fact_id for item in inputs), quantized, unit,
@@ -200,6 +199,7 @@ def _relation(formula_id, cur, ref, require):
     return None
 
 
+@F.exact
 def f01_change(cur, ref, *, require="adjacent"):
     """현재 − 기준. require: adjacent(기본, 바로 앞 기간)·earlier(앞선 기간)·any."""
     formula_id = "F01_change"
@@ -214,6 +214,7 @@ def f01_change(cur, ref, *, require="adjacent"):
     return _derive(formula_id, (cur, ref), cur.value - ref.value, F.diff_unit(cur.unit), cur)
 
 
+@F.exact
 def f02_pct_change(cur, ref, *, require="adjacent"):
     """(현재 − 기준) ÷ 기준 × 100. 기준이 0 이면 DIVISION_BY_ZERO, 음수면 NEGATIVE_BASE."""
     formula_id = "F02_pct_change"
@@ -234,6 +235,7 @@ def f02_pct_change(cur, ref, *, require="adjacent"):
     return _derive(formula_id, (cur, ref), _div((cur.value - ref.value) * 100, ref.value), "%", cur)
 
 
+@F.exact
 def f03_yoy(cur, prior):
     """전년 같은 기간 대비 변화율(%). prior 의 기준일이 정확히 한 해 전 같은 기간이어야 한다."""
     formula_id = "F03_yoy"
@@ -273,6 +275,7 @@ def _ordered_ids(group):
     return sorted(item.fact_id for item in group)
 
 
+@F.exact
 def f04_rank(fact, group):
     """묶음 안의 순위(1 = 가장 높은 값, 동률은 같은 순위·다음 순위는 건너뜀). 대상은 묶음 안에 있어야 하고 묶음은 둘 이상이어야 한다."""
     formula_id = "F04_rank"
@@ -288,6 +291,7 @@ def f04_rank(fact, group):
                                 region_level=getattr(fact, "region_level", None), provider_id=_common_provider(members))
 
 
+@F.exact
 def f05_share(part, total):
     """부분 ÷ 전체 × 100(%). 같은 단위·같은 기준일. 전체가 0 이면 DIVISION_BY_ZERO, 음수가 있으면 NEGATIVE_VALUE, 부분이 전체보다 크면 PART_EXCEEDS_TOTAL."""
     formula_id = "F05_share"
@@ -306,6 +310,7 @@ def f05_share(part, total):
     return _derive(formula_id, (part, total), _div(part.value * 100, total.value), "%", part)
 
 
+@F.exact
 def f08_mean(group):
     """같은 기준일·같은 지표 묶음의 평균(두 개 이상)."""
     formula_id = "F08_mean"
@@ -319,6 +324,7 @@ def f08_mean(group):
         key=getattr(anchor, "key", None), region_level=getattr(anchor, "region_level", None), provider_id=_common_provider(members))
 
 
+@F.exact
 def f06_diff_from_mean(fact, mean):
     """값 − 평균. mean 은 F08(같은 기준일 묶음)이나 F07(이동평균)의 결과여야 하고 같은 단위·같은 기준일·같은 지표여야 한다."""
     formula_id = "F06_diff_from_mean"
@@ -331,6 +337,7 @@ def f06_diff_from_mean(fact, mean):
     return _derive(formula_id, (fact, mean), fact.value - mean.value, F.diff_unit(fact.unit), fact)
 
 
+@F.exact
 def f07_rolling_mean(window):
     """연속한 기간의 평균(두 기간 이상). 같은 지표·같은 지역·같은 단위여야 하고 기간이 빠짐없이 이어져야 한다. 결과의 기준일은 가장 나중 기간."""
     formula_id = "F07_rolling_mean"
@@ -352,7 +359,7 @@ def f07_rolling_mean(window):
 
 def _rank_key_high(item):
     period = F.parse_as_of(item.as_of)
-    return (-item.value, -(period.ordinal if period else 0), item.region or "", item.fact_id)
+    return (item.value.copy_negate(), -(period.ordinal if period else 0), item.region or "", item.fact_id)       # 단항 `-` 는 전역 정밀도로 반올림되므로 copy_negate(D5)
 
 
 def _rank_key_low(item):
@@ -360,6 +367,7 @@ def _rank_key_low(item):
     return (item.value, -(period.ordinal if period else 0), item.region or "", item.fact_id)
 
 
+@F.exact
 def select_extreme(group, *, highest=True):
     """묶음에서 가장 높은(낮은) Fact 하나. 동률이면 더 나중 기준일, 그다음 지역 이름, 그다음 id 순 — 같은 입력이면 항상 같은 Fact 다."""
     members = [m for m in group if _numeric(m) and m.value is not None]
@@ -368,6 +376,7 @@ def select_extreme(group, *, highest=True):
     return sorted(members, key=_rank_key_high if highest else _rank_key_low)[0]
 
 
+@F.exact
 def _extreme(formula_id, group, highest):
     members = list(group)
     problem = _group_problem(formula_id, members, same_period=False)
@@ -379,16 +388,19 @@ def _extreme(formula_id, group, highest):
                                 region_level=getattr(chosen, "region_level", None), provider_id=_common_provider(members))
 
 
+@F.exact
 def f09_max(group):
     """묶음의 최댓값. 결과의 기준일·지역은 그 값을 가진 Fact 의 것이다(입력 id 의 첫째가 그 Fact)."""
     return _extreme("F09_max", group, True)
 
 
+@F.exact
 def f10_min(group):
     """묶음의 최솟값(f09 와 같은 규칙)."""
     return _extreme("F10_min", group, False)
 
 
+@F.exact
 def f11_range_position(cur, group):
     """(현재 − 최저) ÷ (최고 − 최저) × 100(%). 현재가 묶음 안에 있어야 하고 최고와 최저가 달라야 한다(ZERO_RANGE). 0 은 최저, 100 은 최고."""
     formula_id = "F11_range_position"
@@ -406,6 +418,7 @@ def f11_range_position(cur, group):
                                 region_level=cur.region_level, provider_id=_common_provider(members))
 
 
+@F.exact
 def f12_count(group, unit):
     """묶음의 개수(한 개 이상). unit 은 세는 단위('곳'·'개월' 같은 우리 낱말). 모두 값이 있어야 하는 것은 아니다 — 센다."""
     formula_id = "F12_count"
@@ -422,6 +435,7 @@ def f12_count(group, unit):
         key=next(iter(keys)) if len(keys) == 1 else None, region_level=None, provider_id=_common_provider(members))
 
 
+@F.exact
 def f13_gap(a, b):
     """같은 기준일 두 값의 차이(a − b). 같은 지표·같은 단위·같은 기준일이어야 한다(최고 − 최저, 평균 − 중앙값 같은 격차)."""
     formula_id = "F13_gap"
@@ -432,6 +446,7 @@ def f13_gap(a, b):
     return _derive(formula_id, (a, b), a.value - b.value, F.diff_unit(a.unit), a, region=None)
 
 
+@F.exact
 def f14_median(group):
     """같은 기준일·같은 지표 묶음의 중앙값(둘 이상). 짝수 개면 가운데 둘의 평균."""
     formula_id = "F14_median"

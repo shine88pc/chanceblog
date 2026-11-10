@@ -15,10 +15,10 @@ NEW_FILES = ["pipeline/facts.py", "pipeline/calc.py", "pipeline/fact_topics.py",
 NEW_MODULES = {"facts", "calc", "fact_topics", "recipes", "fact_assembler", "adapters", "adapters.base", "adapters.mock_stats"}
 NEW_TESTS = ["tests/fact_helpers.py", "tests/test_fact_facts.py", "tests/test_fact_calc.py", "tests/test_fact_adapters.py", "tests/test_fact_assembler.py",
              "tests/test_fact_review.py", "tests/test_fact_structure.py", "tests/test_fact_docs.py"]
-STDLIB_ALLOWED = {"csv", "dataclasses", "datetime", "decimal", "hashlib", "io", "json", "re", "typing", "unicodedata"}
+STDLIB_ALLOWED = {"csv", "dataclasses", "datetime", "decimal", "functools", "hashlib", "io", "json", "re", "typing", "unicodedata"}
 BANNED_MODULES = {"urllib", "socket", "subprocess", "time", "random", "os", "sys", "pathlib", "http", "ssl", "shutil", "tempfile", "secrets", "uuid", "glob",
                   "ctypes", "msvcrt", "threading", "multiprocessing", "asyncio", "logging", "requests", "html", "xml", "generator", "blogger_generator"}
-BANNED_NAMES = {"open", "print", "input", "exec", "eval", "compile", "__import__"}
+BANNED_NAMES = {"open", "print", "input", "exec", "eval", "compile", "__import__", "abs"}      # abs: 단항 abs 는 decimal 전역 정밀도로 반올림한다 — `copy_abs()` 를 쓴다(D-150)
 BANNED_CALLS = {"now", "today", "utcnow", "getenv", "urlopen", "system", "Popen", "sleep", "monotonic", "perf_counter", "randint", "choice", "shuffle", "random", "urandom"}
 BANNED_ATTRIBUTES = {"environ", "argv"}
 

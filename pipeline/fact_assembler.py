@@ -12,6 +12,7 @@ Fact 와 출처 기록을 Recipe(`pipeline/recipes.py`)에 넣어 `AssembledPost
 설명: docs/FACT_PATH.md
 """
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Any
 
@@ -28,6 +29,10 @@ MIN_DISTINCT_FORMULAS = 2    # 원자료 대비 추가 분석: 서로 다른 계
 
 _SOURCE_NAME_RE = re.compile(r"[가-힣A-Za-z0-9 ·.,&'\-]{1,80}")
 _BRACES = ("{", "}")
+# 자유 글 칸(공식 데이터 이름·독자용 안내 문장)에 쓸 수 없는 글자와 조각: 링크·HTML·마크다운 링크·코드·표를 만드는 기호와 주소 조각(재검증 D4, D-155).
+# `&` 는 막지 않는다 — HTML 엔티티는 영문자나 숫자가 있어야 만들어지고 그것은 글자 체계·숫자 검사가 막는다
+_FREE_TEXT_MARKUP = "<>[]`|\\@"
+_FREE_TEXT_FRAGMENTS = ("http", "://", "www")
 
 
 @dataclass(frozen=True)
@@ -131,7 +136,7 @@ def traceable_numbers(post):
     for item in (*post.facts_used, *post.derived):
         if isinstance(item, F.DerivedFact) or item.kind in F.NUMERIC_KINDS:
             if item.value is not None:
-                allowed |= set(number_tokens(F.format_with_unit(item.value, item.unit, signed=True, context=context)))
+                allowed |= set(number_tokens(F.format_object(item, signed=True, context=context)))
         elif item.value is not None:
             if item.kind in F.DATE_KINDS:
                 allowed |= set(number_tokens(F.format_date_ko(item.value)))
@@ -226,12 +231,21 @@ def post_problems(post, *, allowed_latin=(), min_story_chars=R.MIN_STORY_CHARS):
 # ----------------------------------------------------------------------------
 # 조립
 # ----------------------------------------------------------------------------
+def unsafe_free_text(text):
+    """자유 글 칸(공식 데이터 이름·독자용 안내 문장)에 제어·서식·방향 문자, 링크·HTML·마크다운 링크·코드·표 기호, 주소 조각(`http`·`://`·`www`)이 있는가."""
+    plain = T.normalize(text).lower()
+    return any(unicodedata.category(ch)[0] == "C" or unicodedata.category(ch) in ("Zl", "Zp") for ch in text) \
+        or any(ch in plain for ch in _FREE_TEXT_MARKUP) or any(piece in plain for piece in _FREE_TEXT_FRAGMENTS)
+
+
 def _source_problem(source):
     if not isinstance(source, SourceInfo):
         return "SourceInfo 가 아님"
     if not isinstance(source.name, str) or not _SOURCE_NAME_RE.fullmatch(source.name) or source.name != source.name.strip():
         return "공식 데이터 이름 모양이 맞지 않음"
-    if T.text_problem(source.name) is not None:
+    if unsafe_free_text(source.name):
+        return "공식 데이터 이름에 제어 문자·링크·표시 기호가 있음"
+    if T.text_problem(source.name, loose=True) is not None:
         return "공식 데이터 이름에 건강·의료·금융 투자·법률 주제나 과장·단정 낱말이 있음"
     if F.request_url_problems(source.url) or any(ch in source.url for ch in "()") or source.domain is None:
         return "공식 데이터 페이지 주소가 비밀 없는 https 주소가 아님"
@@ -239,12 +253,15 @@ def _source_problem(source):
 
 
 def _note_problem(text):
-    """독자용 안내 문장(`reader_notes`)이 쓸 수 있는 글인지: 한 줄·120자 안·숫자나 수 표현 없음·표시 문자 없음·차단 낱말과 금지 표현 없음. 문제 사유 또는 None."""
+    """독자용 안내 문장(`reader_notes`)이 쓸 수 있는 글인지: 한 줄·120자 안·제어 문자와 링크·HTML·마크다운 기호 없음·숫자나 수 표현 없음·표시 문자 없음·차단 낱말(낱말 경계와 상관없이)과 금지 표현 없음.
+    문제 사유 또는 None."""
     if not isinstance(text, str) or not text.strip() or "\n" in text or len(text) > 120:
         return "비었거나 여러 줄이거나 120자를 넘음"
+    if unsafe_free_text(text):
+        return "제어 문자·링크·표시 기호가 있음"
     if F.untraced_numbers(text) or any(c in text for c in R.BLOCKED_TEXT_CHARS) or any(b in text for b in F.FORBIDDEN_TEMPLATE_CHARS):
         return "숫자·수 표현이나 표시 문자가 있음"
-    if T.text_problem(text) is not None or forbidden_found(text):
+    if T.text_problem(text, loose=True) is not None or forbidden_found(text):
         return "차단 낱말이나 금지 표현이 있음"
     return None
 
@@ -320,7 +337,7 @@ def evidence_text_of(records, facts_used, derived, pool, context=None):
         parts = [C.FORMULA_LABELS.get(item.formula_id, "계산값")] + [part for part in (label, region) if part]
         if item.as_of:
             parts.append(F.format_period_ko(item.as_of))
-        parts.append(F.format_with_unit(item.value, item.unit, signed=True, context=context))
+        parts.append(F.format_object(item, signed=True, context=context))
         lines.append("- " + " | ".join(parts))
     return "\n".join(lines) + "\n"
 
@@ -346,6 +363,7 @@ def _fits_description(text):
     return R.DESCRIPTION_MIN <= len(text) <= R.DESCRIPTION_MAX and "\n" not in text
 
 
+@F.exact
 def assemble(recipe, facts, today, *, records, source, params=None):
     """(Recipe, Fact 들, 오늘) → AssembledPost 또는 Insufficient. records 는 Fact 들이 가리키는 SourceRecord 들, source 는 SourceInfo.
     params 는 Recipe 에 주는 선택 인자(`key`·`region`·`as_of`)다. 같은 입력이면 항상 같은 글이다.

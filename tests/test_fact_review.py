@@ -1,7 +1,10 @@
 """구조화 Fact 경로 1단계 — 독립 검증 지적(V-01–V-14) 회귀 시험: 보이는 값끼리 모순 없는 글(속성형)·주제 허용 목록 우회·근거 텍스트에 내부 번호 없음·기간 개수·구간척도 변화율·동률·
 큰 값(퍼징)·SRC 안내 문장·우리말 수 표현·표와 설명의 일치·지역 없는 계열·죽은 방어선. 새 동작마다 이 시험이 있고, 고친 줄을 되돌리면 빨갛게 된다(변이 증명).
-무작위는 시험 안에서 고정 시드로만 쓴다(결정적). 네트워크·시계 없이 돈다."""
+병합 뒤 후속 수정(재검증 D3–D12, 파일 끝쪽): 전역 decimal 문맥을 바꿔 바깥에 씌워도 같은 결과(ExactContextTest)·평균이 반 칸에 걸리는 묶음(HalfStepTest)·동률 줄(TieLineTest)·정수 개수
+(CountUnitTest)·우리말 수 표현 구조(NumberWordShapeTest)·자유 글 칸(FreeTextFieldsTest)·재검증이 살려 둔 변이(SecondRoundSurvivorsTest).
+무작위는 시험 안에서 고정 시드로만 쓴다(결정적). 네트워크·시계 없이 돌고, 환경(전역 decimal 문맥·재귀 한계·경로·파일)에 기대지 않는다 — 문맥은 시험 안에서 `decimal.localcontext` 로 씌운다."""
 import dataclasses
+import decimal
 import random
 import re
 import types
@@ -571,9 +574,9 @@ class TieTest(unittest.TestCase):
     """V-06: 동률인 최고·최저를 한 곳(한 기간)으로 단정하지 않는다 — '같은 값 N곳(번)'."""
 
     def test_region_ties_at_the_top_and_bottom(self):
-        post = run("R02_region_compare", cross(["3.5", "3.5", "2.9", "3.8", "3.8", "3.8"]), {"key": H.UNEMP})
+        post = run("R02_region_compare", cross(["3.5", "3.5", "2.8", "3.8", "3.8", "3.8"]), {"key": H.UNEMP})
         self.assertIn("가장 높은 값은 3.8%(같은 값 3곳)", post.title)
-        self.assertIn("가장 높은 값은 3.8%(같은 값 3곳), 가장 낮은 곳은 가상 지역 다(2.9%)입니다", post.description)
+        self.assertIn("가장 높은 값은 3.8%(같은 값 3곳), 가장 낮은 곳은 가상 지역 다(2.8%)입니다", post.description)
         self.assertIn("- 가장 높은 값: 3.8%(같은 값 3곳)", post.body_markdown)
         self.assertIn("평균과 가장 높은 값의 차이는", post.body_markdown)
         for tied in ("가상 지역 라", "가상 지역 마", "가상 지역 바"):
@@ -774,7 +777,7 @@ class NumberWordsTest(unittest.TestCase):
     """V-10: 틀에 우리말 수 표현(절반·곱절·두세 곳·열두 곳·첫 번째·삼 분기·백 퍼센트·영 이하 …)을 쓰지 않는다 — 숫자는 모두 참조 표시다."""
     FLAGGED = ("절반", "반 토막", "반토막", "곱절", "갑절", "두세 곳", "한두 개", "서너 곳", "열두 곳", "열한 개", "스물세 개", "스무 곳", "서른 명", "첫 번째", "첫째", "둘째", "셋째", "수십 곳",
                "수백 명", "수천 건", "몇 곳", "몇몇", "삼 분기", "삼십 퍼센트", "백 퍼센트", "이십삼 개월", "영 이하", "영 이상", "이분의 일", "첫 표", "둘째 표", "하나에도", "하나의 값",
-               "두 배", "세 곳", "한 해", "네 번", "다섯 곳", "여섯 가지", "일곱 개", "여덟 명", "아홉 번", "열 곳", "대여섯 곳", "예닐곱 명", "셋 모두", "넷 중", "이 번", "오십 퍼센트")
+               "두 배", "세 곳", "한 해", "네 번", "다섯 곳", "여섯 가지", "일곱 개", "여덟 명", "아홉 번", "열 곳", "대여섯 곳", "예닐곱 명", "셋 모두", "넷 중", "오십 퍼센트")
     CLEAN = ("한눈에", "이 글이 아는 것은 위 숫자뿐입니다", "이 기간에서 가장 높은 값", "하루", "오르내림", "이 값은 그대로", "세계 곳곳", "열차", "지역 규모 차이", "가장 최근 기간의 값",
              "표에 적은 값이 모두 같아", "그 값은 표에 나옵니다", "범위의 맨 위에 있습니다", "한쪽으로 치우쳐", "위쪽 표는 아래쪽 표", "플러스가 아니고", "기준점이 임의인 척도", "이 단위는",
              "같은 값 ", "최신 기간이 맨 위", "자료 없음", "해당 없음", "제3자 자료", "공공누리 제1유형")
@@ -1072,6 +1075,561 @@ class QualityMeasurementTest(unittest.TestCase):
                 self.assertTrue(0 < metrics["fixed"] < metrics["story"])
                 self.assertEqual(metrics["fixed_percent"], round(100 * metrics["fixed"] / metrics["story"]))
                 self.assertLess(metrics["pure"], R.MIN_STORY_CHARS)             # 정직한 측정: 주의 절을 빼면 세 편 모두 하한(1,000자)에 못 미친다 — 분량의 상당 부분이 고정 문장이다
+
+
+# ----------------------------------------------------------------------------
+# 병합 뒤 후속 수정(재검증 D3–D12) 회귀 시험. 환경(전역 decimal 문맥·재귀 한계·경로·파일)에 기대지 않는다 — 문맥은 시험 안에서 `decimal.localcontext` 로 명시해 바깥에 씌운다
+# ----------------------------------------------------------------------------
+HOSTILE_CONTEXTS = (
+    ("정밀도 5", decimal.Context(prec=5)),
+    ("정밀도 10", decimal.Context(prec=10)),
+    ("정밀도 28", decimal.Context(prec=28)),
+    ("정밀도 50", decimal.Context(prec=50)),
+    ("버림", decimal.Context(prec=7, rounding=decimal.ROUND_DOWN)),
+    ("올림·좁은 지수 범위", decimal.Context(prec=12, rounding=decimal.ROUND_CEILING, Emin=-30, Emax=30)),
+    ("깎일 때마다 오류", decimal.Context(prec=6, rounding=decimal.ROUND_HALF_DOWN,
+                                    traps=[decimal.InvalidOperation, decimal.DivisionByZero, decimal.Overflow, decimal.Inexact, decimal.Rounded])),
+)
+
+
+def shown_number(text):
+    """글에 보인 숫자 글자('+0.05%p'·'−0.5명'·'1,234.5') → Decimal."""
+    return Decimal(text.replace("−", "-").replace("+", "").replace(",", "").rstrip("%p명곳℃위개월분기년번"))
+
+
+class ExactContextTest(unittest.TestCase):
+    """D5(D-150): 계산·표시·해시는 호출한 쪽의 decimal 전역 정밀도·반올림·지수 한계·함정에 기대지 않는다 — 전역 정밀도 5 에서 `1,234,567.1` 이 `1,234,600.0` 이 되던 일.
+    서브프로세스 없이, 시험 안에서 문맥을 명시해 바깥에 씌운다(리눅스·윈도우 같다)."""
+
+    def under_each(self, compute):
+        """compute() 를 정해 둔 문맥에서 한 번(기준), 어지럽힌 바깥 문맥마다 한 번씩 돌려 모두 같은지 본다. 기준 결과를 돌려준다."""
+        with decimal.localcontext(decimal.Context(prec=60)):
+            expected = compute()
+        for name, ctx in HOSTILE_CONTEXTS:
+            with self.subTest(context=name):
+                with decimal.localcontext(ctx):
+                    self.assertEqual(compute(), expected)
+        return expected
+
+    def test_the_verifiers_minimal_example_keeps_every_digit(self):
+        big = Decimal("1234567.1")
+        shown = self.under_each(lambda: (F.format_decimal(big, 1), F.format_decimal(big.copy_negate(), 1, signed=True), F.format_decimal(big, 1, absolute=True), F.format_with_unit(big, "%"),
+                                         F.round_display(big, 0), F.display_sign(Decimal("0.05"), "%p"), F.canonical_number(Decimal("123456789.123456789")),
+                                         F.value_decimals(Decimal("1234567.123456")), F.to_decimal("123456789012.5"), F.display_context([H.make_fact("1234567.12", unit="명")])))
+        self.assertEqual(shown[:4], ("1,234,567.1", "−1,234,567.1", "1,234,567.1", "1,234,567.1%"))
+        self.assertEqual((shown[4], shown[5], shown[6], shown[7], shown[8]), (Decimal("1234567"), 1, "123456789.123456789", 6, Decimal("123456789012.5")))
+        self.assertEqual(shown[9], {"명": 2})
+
+    def test_every_formula_gives_the_same_result_under_any_outer_context(self):
+        make = lambda value, **kw: H.make_fact(value, unit="명", key="labour.employed_persons", label="취업자 수", **kw)          # noqa: E731
+        cur, ref, prior = make("1234567.1234", period="2026-03"), make("1234501.9876", period="2026-02"), make("1200000.5555", period="2025-03")
+        group = [make(v, region=f"R0{i}", region_label=f"가상 지역 {SYLLABLES[i]}")
+                 for i, v in enumerate(("1234567.1234", "2345678.2345", "3456789.3456", "4567890.4567", "5678901.5678", "6789012.6789"), start=1)]
+        window = [make(v, period=p) for v, p in zip(("1111111.1111", "2222222.2222", "3333333.3333"), ("2026-01", "2026-02", "2026-03"))]
+
+        def compute():
+            mean = C.f08_mean(group)
+            results = [C.f01_change(cur, ref), C.f02_pct_change(cur, ref), C.f03_yoy(cur, prior), C.f04_rank(group[2], group), C.f05_share(group[0], group[5]), mean,
+                       C.f06_diff_from_mean(group[1], mean), C.f07_rolling_mean(window), C.f09_max(group), C.f10_min(group), C.f11_range_position(group[2], group),
+                       C.f12_count(group, "곳"), C.f13_gap(group[5], group[0]), C.f14_median(group), C.select_extreme(group, highest=True), C.select_extreme(group, highest=False)]
+            return [(type(item).__name__, item.fact_id, str(item.value)) for item in results]
+
+        baseline = self.under_each(compute)
+        self.assertEqual(len(baseline), 16)
+        self.assertEqual({entry[0] for entry in baseline}, {"DerivedFact", "Fact"})                    # 어느 계산식도 Skipped 가 아니다
+
+    def test_posts_are_identical_under_any_outer_context(self):
+        values = ["1234567.1", "1234601.3", "1234590.7", "1234655.2", "1234640.9", "1234702.4", "1234688.8", "1234733.5", "1234790.6"]
+        kw = {"unit": "명", "key": "labour.employed_persons", "label": "취업자 수"}
+        timeline = series(values, **kw)
+        regions = cross(["2345678.1", "1234567.3", "3456789.5", "4567890.7", "5678901.9", "6789012.3"], **kw)
+
+        def compute():
+            return (run("R01_time_series", timeline, {"key": kw["key"]}), run("R02_region_compare", regions, {"key": kw["key"]}), run("R03_record_position", timeline, {"key": kw["key"]}))
+
+        posts = self.under_each(compute)
+        for post in posts:
+            self.assertIsInstance(post, A.AssembledPost, post)
+            self.assertEqual(A.post_problems(post), [])
+        self.assertIn("1,234,790.6명", posts[0].body_markdown)                 # 끝 자리가 깎이지 않는다(전역 정밀도 5 에서는 `1,234,800.0`)
+        self.assertIn("6,789,012.3명", posts[1].body_markdown)
+        self.assertIn("1,234,567.1명", posts[2].body_markdown)
+
+    def test_the_decorator_pins_precision_rounding_range_and_traps(self):
+        @F.exact
+        def probe():
+            ctx = decimal.getcontext()
+            return (ctx.prec, ctx.rounding, ctx.Emax, ctx.Emin, bool(ctx.traps[decimal.Inexact]), bool(ctx.traps[decimal.InvalidOperation]), bool(ctx.traps[decimal.DivisionByZero]))
+
+        pinned = self.under_each(probe)
+        self.assertEqual(pinned[:2], (F.NUMBER_POLICY["precision"], decimal.ROUND_HALF_EVEN))
+        self.assertTrue(pinned[2] >= 999999 and pinned[3] <= -999999)
+        self.assertEqual(pinned[4:], (False, True, True))
+        for function in (F.format_decimal, F.to_decimal, C.f01_change, C.f09_max, R.plan_time_series, A.assemble):
+            self.assertEqual(function.__name__, function.__wrapped__.__name__)         # functools.wraps — 이름·독스트링이 그대로
+            self.assertTrue(function.__doc__ is None or function.__doc__ == function.__wrapped__.__doc__)
+
+    def test_sort_keys_do_not_round_either(self):
+        """내림차순 정렬 키의 단항 `-` 가 전역 정밀도로 반올림하면 값이 거의 같은 두 지역의 순서가 바뀐다."""
+        regions = cross(["1234567.1234", "1234567.1235", "1234567.1236", "1234567.1237"], unit="명", key="labour.employed_persons", label="취업자 수")
+
+        def order():
+            post = run("R02_region_compare", regions, {"key": "labour.employed_persons"})
+            return [row[1] for row in rank_rows(post)]
+
+        self.assertEqual(self.under_each(order), ["가상 지역 라", "가상 지역 다", "가상 지역 나", "가상 지역 가"])
+
+
+class HalfStepTest(unittest.TestCase):
+    """D6(D-152): 지역이 짝수 곳이라 평균이 표시 자리의 반 칸에 정확히 걸치면(값 3.4·3.4·3.5·3.5 의 평균 3.45) 그 단위의 표시 자리를 한 칸 늘려 반올림 없이 보인다 —
+    평균은 3.5%, 3.5% 인 지역은 평균보다 +0.1%p 높다는 글이 나오지 않는다."""
+
+    def test_is_half_tie(self):
+        for value, places, expected in (("3.45", 1, True), ("3.5", 1, False), ("-3.45", 1, True), ("3.425", 2, True), ("3.425", 1, False), ("3.45", 2, False), ("0.5", 0, True),
+                                        ("4.5", 0, True), ("4", 0, False), ("0.05", 1, True), ("0.15", 1, True), ("2.675", 2, True), ("3.4500", 1, True), ("3.451", 1, False)):
+            with self.subTest(value=value, places=places):
+                self.assertEqual(F.is_half_tie(Decimal(value), places), expected)
+
+    def test_settle_context_adds_a_digit_only_where_a_value_sits_on_a_half_step(self):
+        item = lambda value, unit="%": types.SimpleNamespace(value=Decimal(value), unit=unit)          # noqa: E731
+        base = {"%": 1, "%p": 1, "명": 0}
+        before = dict(base)
+        self.assertEqual(F.settle_context(base, [item("3.45")]), {"%": 2, "%p": 2, "명": 0})
+        self.assertEqual(base, before)                                                      # 받은 사전은 바꾸지 않고 새 사전을 돌려준다
+        self.assertEqual(F.settle_context(base, [item("3.46")]), base)
+        self.assertEqual(F.settle_context(base, []), base)
+        self.assertEqual(F.settle_context(base, [item("0.05", "%p")]), {"%": 2, "%p": 2, "명": 0})          # %p 가 걸리면 % 도 같이
+        self.assertEqual(F.settle_context(base, [item("4.5", "명")]), {"%": 1, "%p": 1, "명": 1})
+        self.assertEqual(F.settle_context(base, [item("-4.5", "명")]), {"%": 1, "%p": 1, "명": 1})
+        self.assertEqual(F.settle_context({"%": 2, "%p": 2}, [item("3.425")]), {"%": 3, "%p": 3})
+        self.assertEqual(F.settle_context({"%": 1, "%p": 1}, [item("3.425")]), {"%": 1, "%p": 1})           # 한 자리에서는 반 칸이 아니다
+        self.assertEqual(F.settle_context(base, [item("3.45"), item("3.425")]), {"%": 3, "%p": 3, "명": 0})   # 한 칸 늘린 자리에서 또 걸리면 더 늘린다
+        self.assertEqual(F.settle_context(base, [item("3.425"), item("3.45")]), {"%": 3, "%p": 3, "명": 0})   # 순서가 바뀌어도 같다(앞 값은 다음 바퀴에서 걸린다)
+        self.assertEqual(F.settle_context({"%": 1, "%p": 3}, [item("3.45")]), {"%": 2, "%p": 3})            # 이미 더 많은 자리로 보이는 짝(%p)은 줄이지 않는다
+        self.assertEqual(F.settle_context({"%": 2, "%p": 3}, [item("3.45", "%p")]), {"%": 2, "%p": 3})       # 이미 정확히 보이면 그대로
+        self.assertEqual(F.settle_context({"%": 1, "%p": 2}, [item("3.45", "%")]), {"%": 2, "%p": 2})        # %p 가 % 보다 작아지지 않는다
+        limit = F.NUMBER_POLICY["internal_places"] - 1
+        deep = item("0." + "0" * (limit) + "5")
+        self.assertEqual(F.settle_context({"%": limit}, [deep])["%"], limit)                                   # 내부 정밀도를 넘는 자리는 늘리지 않고 끝난다(무한 반복 없음)
+
+    def test_settling_always_ends(self):
+        """바퀴 수에 상한이 있어, 자리표가 늘림을 따르지 않는 이상한 경우(변이 '표시 자리 context 무시')에도 끝난다 — 상한이 없던 때는 시험 모듈이 무한 반복에 빠졌다.
+        끝나지 않으면 시험이 멈추지 않고 실패하도록 호출 횟수에 한도를 둔다."""
+        calls = []
+
+        def stuck(unit, context=None):
+            calls.append(unit)
+            if len(calls) > 5000:
+                raise AssertionError("settle_context 가 끝나지 않는다")
+            return F.unit_spec(unit).decimals                          # 늘린 자리를 읽지 않는다
+
+        original = F.decimals_for
+        F.decimals_for = stuck
+        try:
+            settled = F.settle_context({"%": 1, "%p": 1}, [types.SimpleNamespace(value=Decimal("3.45"), unit="%")])
+        finally:
+            F.decimals_for = original
+        self.assertIsInstance(settled, dict)
+        self.assertLessEqual(len(calls), 200)
+
+    def test_a_mean_on_a_half_step_is_shown_exactly(self):
+        post = run("R02_region_compare", cross(["3.4", "3.4", "3.5", "3.5"]), {"key": H.UNEMP})
+        self.assertIsInstance(post, A.AssembledPost, post)
+        self.assertEqual(dict(post.decimals), {"%": 2, "%p": 2})
+        for fragment in ("- 평균: 3.45%(4곳 단순 평균), 중앙값: 3.45%", "| 1위 | 가상 지역 다 | 3.50% | +0.05%p |", "| 1위 | 가상 지역 라 | 3.50% | +0.05%p |",
+                         "| 3위 | 가상 지역 가 | 3.40% | −0.05%p |", "- 평균보다 높은 곳: 가상 지역 다, 가상 지역 라", "- 평균보다 낮은 곳: 가상 지역 가, 가상 지역 나",
+                         "평균과 가장 높은 값의 차이는 0.05%p, 가장 낮은 값의 차이는 0.05%p입니다"):
+            self.assertIn(fragment, post.body_markdown)
+        self.assertNotIn("평균과 같은 곳", post.body_markdown)
+        self.assertEqual(A.post_problems(post), [])
+
+    def test_a_half_step_one_digit_further_is_followed(self):
+        post = run("R02_region_compare", cross(["3.41", "3.41", "3.42", "3.46"]), {"key": H.UNEMP})           # 자료 2자리, 평균 3.425 는 2자리의 반 칸
+        self.assertEqual(dict(post.decimals), {"%": 3, "%p": 3})
+        self.assertIn("- 평균: 3.425%(4곳 단순 평균), 중앙값: 3.415%", post.body_markdown)
+        self.assertIn("| 1위 | 가상 지역 라 | 3.460% | +0.035%p |", post.body_markdown)
+        self.assertIn("| 2위 | 가상 지역 다 | 3.420% | −0.005%p |", post.body_markdown)
+        self.assertIn("| 3위 | 가상 지역 가 | 3.410% | −0.015%p |", post.body_markdown)
+        self.assertEqual(A.post_problems(post), [])
+
+    def test_a_mean_that_is_not_on_a_half_step_keeps_the_table_digits(self):
+        for values in (["3.4", "3.4", "3.4", "3.5"], ["3.4", "3.5", "3.5", "3.6", "3.8"], ["3.3", "3.4", "3.5", "3.5", "3.6", "3.6"]):
+            post = run("R02_region_compare", cross(values), {"key": H.UNEMP})
+            with self.subTest(values=values):
+                self.assertEqual(dict(post.decimals), {"%": 1, "%p": 1})
+
+    def test_whole_number_data_gets_one_decimal_only_when_the_mean_is_a_half(self):
+        kw = {"unit": "명", "key": "labour.employed_persons", "label": "취업자 수"}
+        half = run("R02_region_compare", cross(["7", "6", "5", "4", "3", "2"], **kw), {"key": kw["key"]})
+        self.assertEqual(dict(half.decimals), {"명": 1})
+        self.assertIn("- 평균: 4.5명(6곳 단순 평균), 중앙값: 4.5명", half.body_markdown)
+        self.assertIn("| 1위 | 가상 지역 가 | 7.0명 | +2.5명 |", half.body_markdown)
+        self.assertIn("6곳 비교", half.title)                                      # 세는 말 `곳` 은 자료 단위 `명` 과 달라 정수 그대로
+        whole = run("R02_region_compare", cross(["7", "6", "5", "4", "3", "1"], **kw), {"key": kw["key"]})
+        self.assertEqual(dict(whole.decimals), {"명": 0})
+
+    def test_the_shown_value_minus_the_shown_mean_is_the_shown_difference_in_every_row(self):
+        """속성: 값 − 평균 = 차이 가 보이는 숫자끼리도 성립하고, 평균보다 높다·낮다·같다는 보이는 차이의 부호와 같다(짝수 곳·1자리 자료·평균이 반 칸에 걸치는 묶음이 많은 표본)."""
+        rng = random.Random(20261109)
+        grid, tied, checked = ["3.3", "3.4", "3.5", "3.6"], 0, 0
+        for _case in range(240):
+            values = [rng.choice(grid) for _ in range(rng.choice((4, 6, 8, 10)))]
+            if len(set(values)) == 1:
+                continue
+            post = run("R02_region_compare", cross(values), {"key": H.UNEMP})
+            self.assertIsInstance(post, A.AssembledPost, (values, post))
+            tied += dict(post.decimals)["%"] == 2
+            mean = shown_number(re.search(r"- 평균: ([^(]+)\(", post.body_markdown).group(1))
+            lists = {}
+            for title in ("평균보다 높은 곳", "평균보다 낮은 곳", "평균과 같은 곳"):
+                found = re.search(rf"(?m)^- {title}: (.+)$", post.body_markdown)
+                lists[title] = set(found.group(1).split(", ")) if found else set()
+            for _rank, region, value, diff in rank_rows(post):
+                checked += 1
+                with decimal.localcontext(decimal.Context(prec=60)):
+                    self.assertEqual(shown_number(value) - mean, shown_number(diff), (values, region, value, diff, mean))
+                sign = (shown_number(diff) > 0) - (shown_number(diff) < 0)
+                self.assertIn(region, lists["평균보다 높은 곳" if sign > 0 else "평균보다 낮은 곳" if sign < 0 else "평균과 같은 곳"], (values, region))
+        self.assertGreaterEqual(tied, 25)                       # 평균이 반 칸에 걸리는 묶음을 충분히 겪었다(속성이 비어 있지 않다)
+        self.assertGreater(checked, 500)
+
+
+class TieLineTest(unittest.TestCase):
+    """D7(D-151): 같은 값이 여러 번이면 한 기간 하나로 단정하지 않는다 — R01 '표시한 기간 안의 범위' 줄, R03 '한눈에'의 최고·최저 줄과 위쪽 표(최신 값이 최고·최저가 아니어도)."""
+    BOTH = ["3.0", "3.5", "3.1", "3.5", "3.2", "3.0", "3.3", "3.4", "3.2"]          # 최고 3.5 가 2025년 8월·10월, 최저 3.0 이 2025년 7월·12월(최신 3.2 는 어느 쪽도 아니다)
+
+    def test_the_time_series_range_line(self):
+        both = run("R01_time_series", series(self.BOTH))
+        self.assertIn("- 표시한 기간 안의 범위: 최저 3.0%(같은 값 2번, 가장 나중 2025년 12월)에서 최고 3.5%(같은 값 2번, 가장 나중 2025년 10월)까지", both.body_markdown)
+        high_only = run("R01_time_series", series(["3.0", "3.5", "3.1", "3.5", "3.2", "3.3", "3.3", "3.4", "3.2"]))
+        self.assertIn("- 표시한 기간 안의 범위: 최저 3.0%(2025년 7월)에서 최고 3.5%(같은 값 2번, 가장 나중 2025년 10월)까지", high_only.body_markdown)
+        low_only = run("R01_time_series", series(["3.0", "3.6", "3.1", "3.5", "3.2", "3.0", "3.3", "3.4", "3.2"]))
+        self.assertIn("- 표시한 기간 안의 범위: 최저 3.0%(같은 값 2번, 가장 나중 2025년 12월)에서 최고 3.6%(2025년 8월)까지", low_only.body_markdown)
+        unique = run("R01_time_series", series(["3.0", "3.6", "3.1", "3.5", "3.2", "3.7", "3.3", "3.4", "3.2"]))
+        self.assertIn("- 표시한 기간 안의 범위: 최저 3.0%(2025년 7월)에서 최고 3.7%(2025년 12월)까지", unique.body_markdown)
+        self.assertNotRegex(unique.body_markdown, r"같은 값 [0-9]+번")
+
+    def test_the_record_recipe_glance_and_table_when_the_latest_value_is_in_the_middle(self):
+        post = run("R03_record_position", series(self.BOTH))
+        self.assertIsInstance(post, A.AssembledPost, post)
+        for fragment in ("- 자료 기간의 최고: 3.5%(같은 값 2번, 가장 나중 2025년 10월)", "- 자료 기간의 최저: 3.0%(같은 값 2번, 가장 나중 2025년 12월)",
+                         "| 최고 | 2025년 10월(가장 나중, 같은 값 2번) | 3.5% |", "| 최저 | 2025년 12월(가장 나중, 같은 값 2번) | 3.0% |", "| 최신 | 2026년 3월 | 3.2% |"):
+            self.assertIn(fragment, post.body_markdown)
+        self.assertNotIn("그 값은 자료에", post.body_markdown)                        # 최신 값이 최고·최저가 아니면 제목·해석은 그대로(같은 값 문장은 최신 값이 그 값일 때만)
+        unique = run("R03_record_position", series(["3.0", "3.6", "3.1", "3.5", "3.2", "3.7", "3.3", "3.4", "3.2"]))
+        self.assertIn("- 자료 기간의 최고: 3.7%(2025년 12월)", unique.body_markdown)
+        self.assertIn("| 최고 | 2025년 12월 | 3.7% |", unique.body_markdown)
+        self.assertNotRegex(unique.body_markdown, r"같은 값 [0-9]+번")
+
+    def test_the_record_recipe_when_the_latest_value_is_the_tied_extreme(self):
+        post = run("R03_record_position", series(["3.0", "3.1", "3.5", "3.2", "3.1", "3.3", "3.2", "3.4", "3.5"]))
+        self.assertIn("- 자료 기간의 최고: 3.5%(같은 값 2번, 가장 나중 2026년 3월)", post.body_markdown)
+        self.assertIn("| 최고 | 2026년 3월(가장 나중, 같은 값 2번) | 3.5% |", post.body_markdown)
+        self.assertIn("그 값은 자료에 2번 나옵니다", post.body_markdown)
+        self.assertIn("- 자료 기간의 최저: 3.0%(2025년 7월)", post.body_markdown)
+
+    def test_a_property_every_repeated_extreme_is_said_to_repeat(self):
+        rng = random.Random(7)
+        repeated = 0
+        for _case in range(80):
+            values = [rng.choice(["3.0", "3.1", "3.2", "3.3"]) for _ in range(rng.randint(8, 14))]
+            if len(set(values[-12:])) == 1 or len(set(values)) == 1:
+                continue
+            r01 = run("R01_time_series", series(values))
+            r03 = run("R03_record_position", series(values))
+            self.assertIsInstance(r01, A.AssembledPost, values)
+            self.assertIsInstance(r03, A.AssembledPost, values)
+            shown = values[-12:]
+            line = re.search(r"- 표시한 기간 안의 범위: 최저 ([0-9.]+%)\(([^)]*)\)에서 최고 ([0-9.]+%)\(([^)]*)\)까지", r01.body_markdown)
+            lines = [re.search(rf"- 자료 기간의 {name}: ([0-9.]+%)\(([^)]*)\)", r03.body_markdown) for name in ("최저", "최고")]
+            checks = ((shown, (line.group(1), line.group(3)), (line.group(2), line.group(4))),             # R01: 최저·최고 값, 그 괄호 안 설명
+                      (values, (lines[0].group(1), lines[1].group(1)), (lines[0].group(2), lines[1].group(2))))      # R03
+            for pool, texts, notes in checks:
+                for text, note, extreme in zip(texts, notes, (min(pool), max(pool))):
+                    count = pool.count(extreme)
+                    repeated += count > 1
+                    self.assertEqual(text, f"{extreme}%")
+                    self.assertEqual(f"같은 값 {count}번" in note, count > 1, (values, note))
+        self.assertGreaterEqual(repeated, 60)
+
+
+class CountUnitTest(unittest.TestCase):
+    """D9(D-153): 순위·개수 계산 결과는 자료의 단위 자리와 상관없이 정수로 보인다 — 교육 범주의 `곳`·`개` 로 소수 자료를 넣어도 '6.0곳 비교'가 되지 않는다."""
+
+    def test_region_counts_are_whole_numbers(self):
+        kw = {"key": "education.schools", "unit": "곳", "label": "학교 수"}
+        post = run("R02_region_compare", cross(["3.5", "2.5", "4.5", "1.5", "5.5", "2.5"], **kw), {"key": kw["key"]})
+        self.assertIsInstance(post, A.AssembledPost, post)
+        self.assertEqual(dict(post.decimals), {"곳": 1})
+        text = post.title + "\n" + post.description + "\n" + post.body_markdown + "\n" + post.evidence_text
+        self.assertIn("6곳 비교", post.title)
+        self.assertIn("6곳의 학교 수", post.description)
+        self.assertIn("- 평균보다 높은 곳 3곳, 낮은 곳 3곳", post.body_markdown)
+        for wrong in ("6.0곳", "높은 곳 3.0곳", "낮은 곳 3.0곳", "+6.0곳", "1.0위", "2.0위", "+4.0위"):
+            self.assertNotIn(wrong, text)
+        self.assertIn("| 1위 | 가상 지역 마 | 5.5곳 |", post.body_markdown)           # 자료의 값은 자료 자리 그대로
+        self.assertIn("6곳", post.evidence_text)
+        self.assertEqual(A.post_problems(post), [])
+
+    def test_observation_counts_are_whole_numbers(self):
+        periods = months("2025-01", 12)
+        del periods[3]                                                          # 기간이 빠진 자료 — 세는 말이 `개`(관측 N개)이고 자료 단위도 `개`
+        values = ["12.5", "12.0", "13.5", "13.0", "12.5", "14.0", "13.5", "13.0", "12.0", "12.5", "13.0"]
+        post = run("R03_record_position", series(values, periods=periods, key="education.schools", unit="개", label="학교 수"), {"key": "education.schools", "region": "R01"})
+        self.assertIsInstance(post, A.AssembledPost, post)
+        self.assertEqual(dict(post.decimals), {"개": 1})
+        self.assertIn("관측 11개입니다", post.body_markdown)
+        self.assertNotIn("11.0개", post.body_markdown + post.evidence_text)
+        self.assertIn("14.0개", post.body_markdown)                               # 자료의 값은 자료 자리(1)로
+        self.assertEqual(A.post_problems(post), [])
+        self.assertIn("11", A.traceable_numbers(post))
+        self.assertNotIn("11.0", A.traceable_numbers(post))
+
+    def test_the_display_helpers(self):
+        group = [H.make_fact(v, unit="곳", region=f"R0{i}", region_label=f"가상 지역 {SYLLABLES[i]}", key="education.schools", label="학교 수") for i, v in enumerate(("3.5", "2.5", "4.5", "1.5"), start=1)]
+        count, rank, mean = C.f12_count(group, "곳"), C.f04_rank(group[0], group), C.f08_mean(group)
+        context = {"곳": 3, "위": 2}
+        self.assertEqual((F.decimals_of(count, context), F.decimals_of(rank, context), F.decimals_of(mean, context), F.decimals_of(group[0], context)), (0, 0, 3, 3))
+        self.assertEqual((F.format_object(count, context=context), F.format_object(rank, signed=True, context=context), F.format_object(mean, context=context)), ("4곳", "+2위", "3.000곳"))
+        self.assertEqual(F.format_object(group[0], context=context), F.format_with_unit(group[0].value, "곳", context=context))
+        self.assertEqual(F.format_object(group[0], absolute=True, context={}), "4곳")                   # 자리표가 없으면 단위 표의 자리(곳 은 정수 — 0 에서 먼 쪽으로 반올림)
+        self.assertEqual(F.INTEGER_FORMULAS, frozenset({"F04_rank", "F12_count"}))
+        for obj, kind, expected in ((count, "V", "4"), (count, "F", "4곳"), (count, "S", "+4곳"), (count, "A", "4곳"), (mean, "V", "3.000"), (mean, "F", "3.000곳")):
+            with self.subTest(kind=kind):
+                self.assertEqual(F.render_marker(kind, "x", obj, context), expected)
+        self.assertIn("4곳", F.describe(count, context))
+        self.assertNotIn("4.000곳", F.describe(count, context))
+
+
+class NumberWordShapeTest(unittest.TestCase):
+    """D8(D-154): 우리말 수 표현 검사는 흔한 낱말(조건·이번·사건·세대·열대·일명·만원·프로그램·조사원 …)을 수로 잡지 않고, 두어 곳·서넛·이삼 일·오륙 개·영하 같은 표현은 잡는다.
+    한 글자 수는 띄어 쓴 꼴만(붙여 쓴 꼴은 겹치지 않는 세는 말만), 두 글자 이상 수는 붙여 쓴 꼴도, 세는 말 뒤 한글은 조사일 때만 센다."""
+    CATCH = ("두어 곳", "두어 번", "서넛", "네댓 곳", "대여섯 개", "예닐곱", "한둘", "여럿", "열에 아홉", "십중팔구", "삼삼오오", "이삼 일", "오륙 개", "칠팔 명", "반 이상", "반 이하", "영하",
+             "제로 값", "이틀 연속", "사흘 동안", "열흘", "닷새", "열다섯 곳", "서른다섯 명", "마흔여덟 개", "스물다섯 곳",
+             "세곳", "두곳", "열곳", "한개", "두개", "세개", "네개", "열개", "한번", "세번", "한명", "두명", "열살", "두배", "네배", "열배", "십배", "백배", "천배", "만배", "십프로", "백퍼센트", "삼개월",
+             "사분기", "삼십곳", "이십명", "오천원", "이삼일", "삼십분", "이십점", "사오 명", "한 사람", "세 시간", "두시간", "한 달간", "열 개월간", "한 곳으로", "한 번으로", "한 건으로",
+             "세 곳이", "두 배로", "네 곳에서는", "한 달간의", "세 번째로", "두 곳뿐", "세 곳이었다", "네 곳이상", "하나라도", "하나까지만", "하나씩", "하나하나", "하나같이",
+             "세 대", "열 대", "한 해", "한 주", "한 호", "삼 건", "사 건", "만 원", "억 원", "조 원", "일 위", "삼 위", "영 점", "백 점", "삼 퍼센트포인트", "사분의 삼", "삼 분의 이", "이분의 일",
+             "영 초과", "삼 초과", "이십 초과", "삼 이상", "삼 미만", "삼 이하", "수만 건", "수만 가지", "수만 시간", "수만여 곳", "수십 곳", "수백", "수천억 원", "수십만 명", "수십여 곳",
+             "한 군데", "두 마리", "세 가구", "네 학급", "두 학교", "세 기관", "두 나라", "세 지역", "두 기간", "한 주일", "세 단계", "두 차례", "십 달러", "삼 포인트", "오 프로", "십 년", "삼 점", "오 분",
+             "십 초", "이십 일", "삼 개월", "오 번째", "삼 세", "칠 살", "오 곳", "사 명",
+             "two regions", "half of the values", "TWELVE places", "Double", "zero", "Hundred", "TEN-year", "three of them")
+    PASS = ("이번 달", "이번에는", "사건", "조건", "이용 조건", "이용 조건에 따라 출처를 표시합니다", "조건부", "이건", "일명", "이명", "오명", "구명", "일개", "오개", "구원", "삼세", "사세", "이세", "오세",
+            "일세", "세대", "만원", "억원", "조원", "일부 지역", "이 위", "이위", "일일 건수", "일 개선", "사 건물", "이 개념", "이 곳에서", "이 점에서", "이 번호", "A사 번호",
+            "강남구 개발", "제일 위쪽", "만원 버스", "한명회", "세명대학교", "한달음에", "두개골", "세배 드리다", "두건을 썼다", "한해서 승인", "열대야", "열세를 보였다", "한 프로그램", "한 프로젝트",
+            "한 개인", "한 개념", "한 건강", "한 대표", "두 개발자", "두 번호", "한 위치", "조사원", "조사일", "조사 단계", "구조 위", "영구 단계", "사이 개선", "이사 회의", "오이 구이", "오일 위기",
+            "만일 일이 생기면", "일이 많다", "사이가 좋다", "만조 시간", "백조가 난다", "한국은행", "신한은행", "하나은행", "하나님", "인터넷", "넷플릭스", "제로섬 게임", "알아 두세요", "그대로 두어",
+            "글자 수만", "수만으로", "someone", "phone", "often", "tenant", "bone", "zeroing", "stone", "nonetheless", "평균보다 높은 ⟦F:abc⟧곳", "⟦V:n⟧⟦U:n⟧ 비교", "이 퍼센트", "이 번째",
+            "이상 기후", "조사 대상", "구분 기준", "이번 분기", "한 프로", "한편 이 점에서", "오이", "한국의 하루")
+
+    def test_every_listed_expression_is_found(self):
+        for text in self.CATCH:
+            with self.subTest(text=text):
+                self.assertTrue(F.untraced_numbers(text), text)
+                self.assertTrue(F.untraced_numbers(f"앞 {text} 뒤"), text)
+
+    def test_ordinary_words_are_not_taken_for_numbers(self):
+        for text in self.PASS:
+            with self.subTest(text=text):
+                self.assertEqual(F.untraced_numbers(text), [], text)
+
+    def test_the_old_false_positives_no_longer_block_a_reader_note(self):
+        """검증자가 든 예: `이용 조건에 따라…`·`이번 달 …` 같은 안내 문장이 '숫자·수 표현'으로 막혀 글이 안 되던 일."""
+        for note in ("이용 조건에 따라 출처를 표시합니다", "이번 달 자료는 잠정치입니다", "사건·사고 자료는 포함하지 않았습니다", "세대 구분은 제공처 기준을 따릅니다", "조사원이 방문해 모은 자료입니다"):
+            with self.subTest(note=note):
+                self.assertIsNone(A._note_problem(note), note)
+                post = H.run("R01_time_series", params=H.R01_PARAMS, provider=dataclasses.replace(M.MockProvider(), reader_notes=(note,)))
+                self.assertIsInstance(post, A.AssembledPost, post)
+                self.assertIn(f"- 제공처 안내: {note}.", post.body_markdown)
+        for note in ("두 곳을 뺍니다", "수십 곳이 빠졌습니다", "이삼 일 늦게 받았습니다", "서넛 기관의 자료입니다", "절반은 제외합니다"):
+            with self.subTest(note=note):
+                self.assertIsNotNone(A._note_problem(note), note)
+
+    def test_single_syllable_numbers_need_a_space_unless_the_counter_is_safe(self):
+        """한 글자 수 + 세는 말: 붙여 쓴 꼴이 흔한 낱말과 겹치는 세는 말(대·호·해·주·건·위·원 …)은 띄어 쓴 꼴만 수로 본다."""
+        for number in ("한", "두", "세", "네", "열"):
+            for counter in ("대", "호", "해", "주", "위"):
+                with self.subTest(number=number, counter=counter):
+                    self.assertEqual(F.untraced_numbers(f"{number}{counter}"), [])
+                    self.assertTrue(F.untraced_numbers(f"{number} {counter}"))
+        for number in "일삼사오육칠팔구십백천만억조":
+            for counter in ("건", "개", "명", "곳", "번", "원", "위", "세", "살", "년", "일", "점", "분", "초"):
+                with self.subTest(number=number, counter=counter):
+                    self.assertEqual(F.untraced_numbers(f"{number}{counter}"), [])
+                    self.assertTrue(F.untraced_numbers(f"{number} {counter}"))
+        for number in ("두", "네", "열"):
+            self.assertTrue(F.untraced_numbers(f"{number}배"))
+        for text in ("세배", "한배"):
+            self.assertEqual(F.untraced_numbers(text), [])                 # 세배(설날 절)·한배(같은 배)는 흔한 낱말
+        for text in ("세 배", "한 배"):
+            self.assertTrue(F.untraced_numbers(text))
+        self.assertEqual(F.untraced_numbers("이 곳"), [])                   # 지시어 `이` 는 한 글자 수로 보지 않는다
+        self.assertEqual(F.untraced_numbers("이 점"), [])
+
+    def test_numbers_of_two_or_more_syllables_are_found_even_when_attached(self):
+        for number in ("이십", "삼십", "오십", "백오십", "천오백", "이만", "삼만", "십만", "백만", "천만", "일억", "이삼", "사오", "오륙", "칠팔", "열두", "열다섯", "스물", "스물세", "서른다섯", "마흔", "쉰",
+                       "아흔아홉", "다섯", "여섯", "일곱", "여덟", "아홉", "두어", "두세"):
+            for counter in ("곳", "개", "명", "번", "건"):
+                for text in (f"{number}{counter}", f"{number} {counter}"):
+                    with self.subTest(text=text):
+                        self.assertTrue(F.untraced_numbers(text), text)
+
+    def test_words_made_only_of_number_characters_are_not_numbers(self):
+        for word in ("사이", "이사", "구이", "오이", "일일", "일이", "만일", "만조", "백조", "조사", "구조", "영구"):
+            for counter in ("곳", "개", "명", "건", "원", "일", "년", "점"):
+                for text in (f"{word}{counter}", f"{word} {counter}"):
+                    with self.subTest(text=text):
+                        self.assertEqual(F.untraced_numbers(text), [], text)
+
+    def test_a_hangul_numeral_after_a_digit_is_counted_once(self):
+        """`3만 명`·`5억 원` 은 아라비아 숫자 한 덩어리만 센다(한글 수 낱말로 두 번 세지 않는다)."""
+        for text, expected in (("3만 명", ["3"]), ("5억 원", ["5"]), ("10퍼센트", ["10"]), ("2천만 달러", ["2"]), ("제3자 자료", []), ("약 12만 명", ["12"])):
+            with self.subTest(text=text):
+                self.assertEqual(F.untraced_numbers(text), expected)
+
+    def test_a_long_hostile_text_is_scanned_without_trouble(self):
+        """정규식이 폭발(재귀·역추적)하지 않는다 — 시간을 재지 않고, 어지러운 긴 글이 끝나기만 하면 된다."""
+        for text in ("이" * 5000, "한 곳이" * 2000, "에서" * 3000 + "가", "이나이나" * 2000, "열" * 3000 + " 개", "삼 " * 3000, "a" * 5000, "일" * 4000 + "개", "수" + "십" * 4000, "한 " * 3000 + "프로그램"):
+            self.assertIsInstance(F.untraced_numbers(text), list)
+
+    def test_the_old_survivor_the_chinese_counter_words_are_counters(self):
+        """D-23: 한자어 세는 말 `초과`(이상·이하·미만과 같이)를 지워도 시험이 통과하던 구멍."""
+        for counter in ("초과", "이상", "이하", "미만"):
+            for number in ("영", "삼", "이십", "반"):
+                with self.subTest(number=number, counter=counter):
+                    self.assertTrue(F.untraced_numbers(f"{number} {counter}"))
+
+
+class FreeTextFieldsTest(unittest.TestCase):
+    """D3·D4(D-155): 허용 목록이 없는 자유 글 칸(공식 데이터 이름·독자용 안내 문장 `reader_notes`)은 합성어 꼬리를 나눠 쓴 차단 낱말(`국민환 자 통계`)과 제어·서식·방향 문자·링크·HTML·마크다운
+    기호를 받지 않는다. 낱말 경계와 상관없이 찾는 엄격한 검사는 이 두 칸에만 쓰고(오탐이 있어도 사람이 고친다), Fact 의 라벨 같은 허용 목록 칸은 '낱말 첫머리' 규칙 그대로다."""
+    BAD_NAMES = ("국립당 뇨병통계", "국민환 자 통계", "주 식 시장 통계", "고 혈압 통계", "http 통계", "www 통계", "이름\x07", "이름‮", "이름​", "이름<b>", "이름@기관", "이름[1]", "이름`x`")
+    GOOD_NAMES = ("시험용 가상 통계", "통계청 국가통계포털", "한국 소비자 물가 지수", "R&D 통계", "교육 통계 서비스", "KOSIS 국가통계포털")
+    BAD_NOTES = ("이 자료는 국민환 자 수를 뜻하지 않습니다", "주 식 정보가 아닙니다", "효 능은 알 수 없습니다", "고 혈압 자료가 아닙니다",
+                 "방향‮문자", "영 너비​공백", "벨\x07소리", "줄 바꿈", "탭\t문자", "소프트­하이픈", "문단 나눔", "[여기](링크)를 보세요", "<b>굵게</b> 표시", "`코드` 표시",
+                 "주소는 http 로 시작", "주소 :// 조각", "메일@주소", "www 로 시작", "표|기호", "역슬래시\\기호", "ｈｔｔｐ 전각", "＜b＞ 전각", "＠ 전각")
+    GOOD_NOTES = ("제3자 자료는 제외됩니다", "이미지와 로고는 제외됩니다.", "이용 조건에 따라 출처를 표시합니다", "이 자료는 공식 통계를 가공하지 않았습니다", "일부 지역은 자료가 없습니다",
+                  "R&D 지출은 포함하지 않았습니다", "잠정치이며 개정될 수 있습니다(제공처 기준)")
+
+    def code(self, result):
+        return result.code if isinstance(result, R.Insufficient) else "POST"
+
+    def with_note(self, note):
+        return H.run("R01_time_series", params=H.R01_PARAMS, provider=dataclasses.replace(M.MockProvider(), reader_notes=(note,)))
+
+    def with_name(self, name):
+        return H.run("R01_time_series", params=H.R01_PARAMS, source=A.SourceInfo(M.MockProvider(), name, M.SOURCE_URL))
+
+    def test_the_official_name_refuses_split_spellings_and_markup(self):
+        for name in self.BAD_NAMES:
+            with self.subTest(name=name):
+                self.assertEqual(self.code(self.with_name(name)), "SOURCE_INFO_INVALID")
+
+    def test_ordinary_official_names_are_used(self):
+        for name in self.GOOD_NAMES:
+            with self.subTest(name=name):
+                post = self.with_name(name)
+                self.assertIsInstance(post, A.AssembledPost, post)
+                self.assertIn(f"- [{name}](", post.body_markdown)
+
+    def test_a_reader_note_refuses_split_spellings_control_characters_and_markup(self):
+        for note in self.BAD_NOTES:
+            with self.subTest(note=note):
+                self.assertEqual(self.code(self.with_note(note)), "READER_NOTE_UNSAFE")
+                self.assertIsNotNone(A._note_problem(note))
+
+    def test_ordinary_reader_notes_are_used(self):
+        for note in self.GOOD_NOTES:
+            with self.subTest(note=note):
+                post = self.with_note(note)
+                self.assertIsInstance(post, A.AssembledPost, post)
+                self.assertIn(f"- 제공처 안내: {note if note[-1] in '.!?' else note + '.'}", post.body_markdown)
+                self.assertEqual(A.post_problems(post), [])
+
+    def test_html_entities_cannot_smuggle_characters_either(self):
+        """`&` 자체는 막지 않지만 엔티티(`&lt;`·`&#x202e;`·`&shy;`)는 영문자·숫자가 있어야 만들어지고 그것을 글자 체계·숫자 검사가 막는다 — 어느 쪽이든 글이 나가지 않는다."""
+        for note in ("엔티티 &lt;b&gt; 표시", "방향 &#x202e; 문자", "연자 &shy; 하이픈", "공백 &nbsp; 문자", "영너비 &zwj; 문자"):
+            with self.subTest(note=note):
+                self.assertNotEqual(self.code(self.with_note(note)), "POST")
+
+    def test_unsafe_free_text_unit(self):
+        for text in ("a\x00b", "a‮b", "a​b", "a­b", "a b", "a﻿b", "<", ">", "[", "]", "`", "|", "\\", "@", "HTTP", "Http://", "www", "ＨＴＴＰ", "＜", "＠"):
+            with self.subTest(text=text):
+                self.assertTrue(A.unsafe_free_text(text), repr(text))
+        for text in ("", "평범한 문장입니다.", "R&D 통계", "제3자(제공처 기준) 자료", "쉼표, 마침표. 가운뎃점·하이픈-물음표? 느낌표! 따옴표 '작은' \"큰\"", "한글 ㅋㅋ ㅏ 호환 자모"):
+            with self.subTest(text=text):
+                self.assertFalse(A.unsafe_free_text(text), repr(text))
+
+    def test_the_strict_search_finds_what_the_word_start_rule_cannot(self):
+        self.assertEqual(T.blocked_in("국민환 자 통계"), [])                                                  # 낱말 첫머리 규칙은 합성어 꼬리 분리를 못 잡는다
+        self.assertIn(("건강·의료", "환자"), T.blocked_loose("국민환 자 통계"))
+        self.assertIn(("건강·의료", "당뇨"), T.blocked_loose("국립당 뇨병통계"))
+        self.assertIsNone(T.text_problem("국민환 자 통계"))
+        self.assertIsNotNone(T.text_problem("국민환 자 통계", loose=True))
+        self.assertEqual(T.blocked_in("최고 소비"), [])                                                       # 그 대신 엄격한 검사는 경계를 가로질러 우연히 생긴 글자도 잡는다(문서에 적은 대가)
+        self.assertIn(("법률", "고소"), T.blocked_loose("최고 소비"))
+        self.assertEqual(T.blocked_loose("소비자물가지수 통계"), [])
+        self.assertEqual([found for found in T.blocked_loose("암 약 병") if found[1] in ("암", "약", "병")], [("건강·의료", "암"), ("건강·의료", "약"), ("건강·의료", "병")])
+        self.assertEqual(T.blocked_loose("암호 약속 병아리"), [])
+
+    def test_fact_labels_keep_the_word_start_rule(self):
+        """엄격한 검사를 허용 목록 칸(Fact 의 라벨)까지 넓히면 `최고 소비` 의 `고소` 같은 정상 라벨이 막힌다 — 라벨은 낱말 첫머리 규칙 그대로."""
+        fact = H.make_fact("3.5", key="economy.retail_sales", label="최고 소비", unit="%")
+        self.assertIsNone(T.fact_problem(fact, ("economy",)))
+        split = H.make_fact("3.5", key="labour.unemployment_rate", label="국민환 자")
+        self.assertEqual(T.fact_problem(split, ("labour",))[0], "UNKNOWN_TOPIC")                           # 허용 목록 밖 낱말이라 어차피 막힌다
+
+
+class SecondRoundSurvivorsTest(unittest.TestCase):
+    """D10: 재검증의 변이 24개 중 살아남은 5개를 시험이 잡는다 — 한 낱말 안의 차단 낱말(D-01)·`direction` 이 표시 자리를 무시(D-22)·슬래시로 낱말 가르기(D-05)·한 글자 차단 낱말 `병`(D-07)·`초과`(D-23, 위 NumberWordShapeTest)."""
+
+    def test_a_blocked_word_inside_one_word_is_found(self):
+        """D-01: 낱말 하나 안의 차단 낱말(`한국당뇨병통계`·`실업률환자`)을 세지 않으면 이름이 통과한다."""
+        for text in ("한국당뇨병통계", "실업률환자", "국민환자통계", "주식시장"):
+            with self.subTest(text=text):
+                self.assertTrue(T.blocked_in(text), text)
+        bad = H.make_fact("3.5", label="실업률환자")
+        self.assertEqual(T.fact_problem(bad, ("labour",))[0], "TOPIC_NOT_ALLOWED")
+        self.assertEqual(R.topic_problem(R.R01_TIME_SERIES, [bad]).code, "TOPIC_NOT_ALLOWED")
+
+    def test_separators_split_words_so_that_accidental_words_across_them_are_not_counted(self):
+        """D-05: `/`·`·`·`-`·괄호로 낱말을 가르지 않으면 `최고/소비` 의 `고소`·`판매/수` 의 `매수` 가 차단 낱말로 잡힌다."""
+        for text in ("최고/소비", "판매/수", "최고·소비", "판매·수", "최고-소비", "판매-수", "최고(소비)", "판매(수)", "최고 소비", "판매 수"):
+            with self.subTest(text=text):
+                self.assertEqual(T.blocked_in(text), [], text)
+        for text in ("무/조건", "무·조건", "무-조건", "무(조건)", "무 조건", "효/능", "효 능"):
+            with self.subTest(text=text):
+                self.assertTrue(T.blocked_in(text), text)
+        self.assertEqual(T.words("가/나·다-라(마) 바"), ["가", "나", "다", "라", "마", "바"])
+
+    def test_one_syllable_blocked_words_only_count_as_a_whole_word(self):
+        """D-07: `암`·`약`·`병` 은 낱말 전체가 그 글자일 때만 차단 낱말이다(암호·약속·병아리는 아니다)."""
+        for text in ("병", "암", "약", "병 이야기", "암 통계"):
+            with self.subTest(text=text):
+                self.assertTrue(T.blocked_in(text), text)
+        for text in ("병아리", "암호", "약속", "병아리 약속 암호", "신병교육"):
+            with self.subTest(text=text):
+                self.assertEqual(T.blocked_in(text), [], text)
+        self.assertEqual(T.fact_problem(H.make_fact("3.5", label="병"), ("labour",))[0], "TOPIC_NOT_ALLOWED")
+
+    def test_direction_follows_the_display_digits(self):
+        """D-22: `direction` 이 표시 자리(context)를 무시하면 자료 정밀도가 단위 표 최소보다 큰 글에서 모든 지역이 '평균과 같은 곳'이 되고 표에는 `+0.02%p` 가 적힌다."""
+        diff = types.SimpleNamespace(value=Decimal("0.02"), unit="%p")
+        self.assertEqual((R.direction(diff, {"%p": 3}), R.direction(diff, {"%p": 1}), R.direction(diff)), (1, 0, 0))
+        post = run("R02_region_compare", cross(["3.450", "3.460", "3.470", "3.480", "3.490"]), {"key": H.UNEMP})
+        self.assertIsInstance(post, A.AssembledPost, post)
+        self.assertEqual(dict(post.decimals), {"%": 2, "%p": 2})                              # 자료의 정밀도(2자리)가 단위 표의 최소(1자리)보다 크다
+        self.assertIn("- 평균보다 높은 곳: 가상 지역 마, 가상 지역 라", post.body_markdown)
+        self.assertIn("- 평균보다 낮은 곳: 가상 지역 나, 가상 지역 가", post.body_markdown)
+        self.assertIn("- 평균과 같은 곳: 가상 지역 다", post.body_markdown)
+        self.assertIn("| 1위 | 가상 지역 마 | 3.49% | +0.02%p |", post.body_markdown)
+        self.assertIn("- 평균보다 높은 곳 2곳, 낮은 곳 2곳", post.body_markdown)
+
+    def test_the_verdict_follows_the_display_digits_too(self):
+        cur, ref = H.make_fact("3.464"), H.make_fact("3.461", period="2026-02")
+        diff = C.f01_change(cur, ref)
+        self.assertEqual(R.verdict(cur, ref, diff, {"%": 3, "%p": 3}), "UP")
+        self.assertEqual(R.verdict(cur, ref, diff, {"%": 1, "%p": 1}), "SAME")
 
 
 if __name__ == "__main__":
