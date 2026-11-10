@@ -1,7 +1,7 @@
 """제한 재개 잠금(pipeline/publish_lock.py) 시험 공용 도구: 잠금 규칙을 모두 지키는 레지스트리 사본, 규칙을 하나씩 어기는 변형, 임시 레지스트리 파일.
 
 이 도구가 만드는 '잠금 켬' 레지스트리는 운영자가 나중에 승인해 켤 때(별도 T3 변경) 바뀔 값들과 같다: resume_lock true · chance.publish_flow pr · chance.limits
-max_posts_per_day 1 · max_open_drafts 3. 진짜 pipeline/blogs.json 은 이 시험이 바꾸지 않는다(사본만 만든다). 네트워크·실제 시크릿 없이 돈다.
+max_posts_per_day 1 · max_open_drafts 3 · max_posts_per_week 2(주간 상한 — 규칙 L8). 진짜 pipeline/blogs.json 은 이 시험이 바꾸지 않는다(사본만 만든다). 네트워크·실제 시크릿 없이 돈다.
 """
 import copy
 import json
@@ -51,7 +51,7 @@ def lock_ready(reg=None):
     reg["resume_lock"] = True
     chance = blog_of(reg, CHANCE)
     chance["publish_flow"] = "pr"
-    chance["limits"] = {"max_posts_per_day": 1, "max_open_drafts": 3}
+    chance["limits"] = {"max_posts_per_day": 1, "max_open_drafts": 3, "max_posts_per_week": 2}
     return reg
 
 
@@ -115,6 +115,11 @@ VIOLATIONS = {
     "L7": [("한글 Blogger 하루 상한 2", lambda r: set_limit(r, KCYOON, max_posts_per_day=2)),
            ("영문 Blogger 하루 상한 3", lambda r: set_limit(r, MACAT, max_posts_per_day=3)),
            ("네이버 하루 상한 2", lambda r: set_limit(r, NAVER, max_posts_per_day=2))],
+    # L8 은 '잠금이 켜졌을 때만 위반'인 모양만 둔다(값이 없음·천장 2 를 넘음 — 레지스트리 범위 1–14 안이라 검증기의 일반 검사는 통과한다). 값 모양이 틀린 경우(0·불리언·문자열·소수·음수)는
+    # 잠금이 꺼져 있어도 L8 의 모양 검사가 거절하므로 이 표(꺼짐에서 규칙 오류가 없어야 하는 시험들이 같이 쓴다)가 아니라 WeeklyLimitRuleTest 가 따로 본다.
+    "L8": [("주간 상한이 없음", lambda r: drop_limit(r, CHANCE, "max_posts_per_week")),
+           ("주간 상한이 3", lambda r: set_limit(r, CHANCE, max_posts_per_week=3)),
+           ("주간 상한이 14", lambda r: set_limit(r, CHANCE, max_posts_per_week=14))],
 }
 # 잠금 키를 잘못 적는 변형(검증 지적 1): 잠금 키가 없으면 잠금이 꺼진 것이라, 이름 오타·위치 오류가 켠 줄 알았는데 꺼진 채로 통과하던 길이다. 켠 레지스트리(lock_ready)에도,
 # 지금의 레지스트리(today_registry — 키 없음)에도 적용한다(후자는 '이제 잠금을 적어 넣으려다 오타를 낸' 경우).
@@ -124,10 +129,18 @@ def _move_lock_key(new_name):
     return mutate
 
 
-def _lock_key_into(where):
+def put_in(reg, path, key="resume_lock", value=True):
+    """사본 안의 자리 path 에 키를 둔다. path 의 첫 칸은 'defaults' 이거나 블로그 key, 그다음 칸은 그 안의 사전 이름(없으면 만든다)이다 — 예: ('chance', 'limits')."""
+    node = reg["defaults"] if path[0] == "defaults" else blog_of(reg, path[0])
+    for step in path[1:]:
+        node = node.setdefault(step, {})
+    node[key] = value
+
+
+def _lock_key_into(*path):
     def mutate(reg):
         reg.pop(LOCK_KEY, None)
-        (reg["defaults"] if where == "defaults" else blog_of(reg, CHANCE))[LOCK_KEY] = True
+        put_in(reg, path)
     return mutate
 
 
@@ -140,7 +153,12 @@ KEY_TYPOS = [
     ("뒤 공백 'resume_lock '", _move_lock_key("resume_lock ")),
     ("defaults 안에 둠", _lock_key_into("defaults")),
     ("chance 블로그 항목 안에 둠", _lock_key_into("chance")),
+    ("defaults.limits 안(두 단계)에 둠", _lock_key_into("defaults", "limits")),
+    ("chance.limits 안(두 단계)에 둠", _lock_key_into("chance", "limits")),
 ]
+# 두 단계 이상 깊은 자리(독립 재검증 D1): 정상 레지스트리에 있는 사전 안과 세 단계 깊이까지
+DEEP_PLACES = [("defaults", "limits"), ("defaults", "llm"), ("defaults", "health"), ("chance", "limits"), ("chance", "schedule"), ("chance", "state"), ("chance", "health"),
+               ("blogger_macat", "limits"), ("naver_life_tips", "secrets"), ("defaults", "llm", "nested"), ("chance", "state", "a", "b")]
 # 변형 하나가 함께 어기는 다른 규칙(시험이 둘 다 나와야 한다고 확인한다)
 EXTRA = {("L1", "publish_flow 가 direct"): ("L3",), ("L1", "publish_flow 를 적지 않음"): ("L3",), ("L1", "publish_flow 가 모르는 값"): ("L3",),
          ("L3", "auto 인데 publish_flow 가 direct"): ("L1",), ("L3", "auto 인데 publish_flow 가 없음"): ("L1",)}

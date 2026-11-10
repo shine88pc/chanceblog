@@ -23,7 +23,7 @@ from collections import namedtuple
 from pathlib import Path, PurePosixPath
 
 from pipeline import publish_lock
-from pipeline.console import clean_secret, safe_output, secret_was_cleaned
+from pipeline.console import clean_secret, one_line, safe_output, secret_was_cleaned
 from pipeline.gates import SUPPORTED_LANGUAGES, first_match
 from pipeline import quality_gate    # languages 의 단일 정의처(normalize_languages) — 이 줄은 다른 import 줄과 떨어뜨려 두어 다른 변경과 병합할 때 충돌하지 않게 한다
 
@@ -420,6 +420,23 @@ def load_profile(name, profile_dir=None):
     return profile
 
 
+# limits.max_posts_per_week(선택): 굴러가는 7일에 만드는 글 수의 상한. 값이 있으면 1–14 정수(불리언은 정수가 아니다)여야 하고, 없으면 이전과 같다(주간 상한 없음).
+# 읽는 곳은 제한 재개 잠금(pipeline/publish_lock.py)뿐이다 — 잠금이 켜져 있을 때 Chance 의 값이 1 이상 2 이하여야 하고 생성기 가드가 센다(규칙 L8). 다른 블로그는 이 값을 읽지 않는다.
+# (이 상수는 다른 변경이 손대는 상수 묶음에서 떨어뜨려 이 함수 바로 위에 둔다 — 병합할 때 충돌하지 않게)
+WEEKLY_LIMIT_MAX = 14
+
+
+def _weekly_limit_error(limits, label):
+    """limits.max_posts_per_week 검증(블로그 항목 limits 와 defaults.limits 가 같은 규칙): 키가 없으면(또는 limits 가 객체가 아니면) None — 이전과 같다.
+    값이 있으면 1–14 정수여야 한다. 불리언(True 는 파이썬에서 1 로 계산된다)·문자열·소수·0·음수·null 은 거절한다 — 잘못 적은 값이 조용히 '주간 상한 없음'이 되지 않게."""
+    if not isinstance(limits, dict) or "max_posts_per_week" not in limits:
+        return None
+    value = limits["max_posts_per_week"]
+    if isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= WEEKLY_LIMIT_MAX:
+        return None
+    return f"{label}: limits.max_posts_per_week는 1–{WEEKLY_LIMIT_MAX} 정수여야 합니다(지금 {one_line(repr(value), 40)})."
+
+
 def validate_registry(reg, root=None):
     """레지스트리 오류 목록(비어 있으면 정상). 파일 존재 여부는 root 기준으로 확인한다."""
     root = Path(root) if root else ROOT
@@ -428,7 +445,11 @@ def validate_registry(reg, root=None):
         return ["레지스트리 최상위는 객체여야 합니다."]
     if reg.get("schema_version") != 1:
         errors.append("schema_version은 1이어야 합니다.")
-    errors.extend(publish_lock.registry_errors(reg))   # 제한 재개 잠금(resume_lock): 켜져 있을 때만 규칙 L1–L7 을 적용한다(꺼져 있으면 값 모양 검사뿐 — pipeline/publish_lock.py)
+    errors.extend(publish_lock.registry_errors(reg))   # 제한 재개 잠금(resume_lock): 켜져 있을 때만 규칙 L1–L8 을 적용한다(꺼져 있으면 값 모양 검사뿐 — pipeline/publish_lock.py)
+    defaults_limits = reg["defaults"].get("limits") if isinstance(reg.get("defaults"), dict) else None
+    problem = _weekly_limit_error(defaults_limits, "defaults")   # 물려받는 쪽도 따로 본다: 모든 블로그가 값을 직접 적어 덮어써도, 블로그 목록이 잘못돼 아래에서 일찍 끝나도 defaults 의 잘못된 값은 걸린다
+    if problem:
+        errors.append(problem)
     blogs = reg.get("blogs")
     if not isinstance(blogs, list) or not blogs:
         return errors + ["blogs는 비어 있지 않은 배열이어야 합니다."]
@@ -541,6 +562,9 @@ def validate_registry(reg, root=None):
         per_day = (blog.get("limits") or {}).get("max_posts_per_day")
         if not isinstance(per_day, int) or not 1 <= per_day <= 24:
             errors.append(f"{label}: limits.max_posts_per_day는 1~24 정수여야 합니다.")
+        problem = _weekly_limit_error(raw.get("limits"), label)   # 이 항목이 직접 적은 값(적지 않으면 defaults 의 값을 물려받고 그것은 위에서 한 번 봤다 — 같은 원인으로 오류를 블로그 수만큼 내지 않는다)
+        if problem:
+            errors.append(problem)
 
         models = (blog.get("llm") or {}).get("models")
         if not isinstance(models, list) or not models or not all(isinstance(m, str) and m for m in models):

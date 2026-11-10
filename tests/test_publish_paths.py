@@ -18,13 +18,16 @@ import yaml
 
 import _bootstrap
 import test_publish_lock as lock_tests
-from lock_helpers import (CHANCE, EXTRA, KCYOON, MACAT, VIOLATIONS, blog_of, lock_ready, mutated, real_registry, rules_in, today_registry, with_lock_off)
+from lock_helpers import (CHANCE, EXTRA, KCYOON, MACAT, VIOLATIONS, blog_of, guard_off, lock_ready, mutated, real_registry, rules_in, today_registry, with_lock_off)
 from pipeline import publish_lock, registry
 
 ROOT = _bootstrap.ROOT
 WORKFLOWS = ROOT / ".github" / "workflows"
 DOC = ROOT / "docs" / "PUBLISH_PATHS.md"
 GUIDE = ROOT / "docs" / "ACTIONS_GUIDE.md"
+GUARDRAILS = ROOT / "docs" / "SECURITY_GUARDRAILS.md"
+ARCHITECTURE = ROOT / "docs" / "ARCHITECTURE.md"
+DEFECTS = ROOT / "docs" / "DEFECT_REGISTER.md"
 
 # ----------------------------------------------------------------------------
 # 워크플로 신호: 쓰기 권한·쓰기 명령·파이썬 진입점·쓰기 가능한 외부 액션
@@ -475,9 +478,10 @@ class PublishedDocumentTest(unittest.TestCase):
             self.assertIn(needle, self.TEXT, needle)
 
     def test_the_document_gives_the_merge_order_the_shadow_order_and_the_signpost_rule(self):
-        for needle in ("GATE → LOCK → SHADOW → R2 → SRC → FACT", "정지 검사 → 그림자 분기(GATE 묶음, `SHADOW_RUN`) → 잠금 가드", "표지판 시험은 고치되 지우지 않는다",
+        for needle in ("실제 병합 순서는 계획과 달라졌다", "켜는 변경은 GATE 병합 뒤에만", "정지 검사 → 그림자 분기(GATE 묶음, `SHADOW_RUN`) → 잠금 가드", "표지판 시험은 고치되 지우지 않는다",
                        "`resume_lock is True`", "`reg == lock_ready()`", "pipeline/shadow_run.py", "GATE 가 먼저 병합된 뒤에만 참이다"):
             self.assertIn(needle, self.TEXT, needle)
+        self.assertNotIn("GATE → LOCK → SHADOW → R2 → SRC → FACT", self.TEXT)      # 처음 계획의 순서다 — 실제로는 잠금(M034)이 GATE 보다 먼저 병합됐다(독립 재검증 D8). 옛 문장이 되살아나면 빨강
 
     def test_the_document_lists_the_shadow_run_values_once_and_they_are_the_code_constants(self):
         for value in publish_lock.SHADOW_ON_VALUES + tuple(item for item in publish_lock.SHADOW_OFF_VALUES if item):
@@ -498,6 +502,58 @@ class PublishedDocumentTest(unittest.TestCase):
         self.assertIn("chance-shadow.yml", self.TEXT)
         self.assertIn("contents: read", self.TEXT)
 
+    def test_the_precondition_to_turn_the_lock_on_is_one_line_in_section_6(self):
+        """독립 재검증 D6: 잠금만 병합한 채 켜면 가드의 그림자 값 예외가 하루 상한을 건너뛴다 — '켜기 전 조건: Gate 병합 뒤에만 켠다' 가 켜는 방법(§6)에 한 줄로 있다."""
+        section = self.TEXT[self.TEXT.index("## 6. 켜는 방법"):self.TEXT.index("## 7. 한계와 남은 위험")]
+        self.assertEqual(section.count("**켜기 전 조건: Gate 병합 뒤에만 켠다**"), 1)
+        line = next(item for item in section.splitlines() if "켜기 전 조건" in item)
+        for needle in ("pipeline/shadow_run.py", "SHADOW_RUN", "독립 재검증 D6"):
+            self.assertIn(needle, line, needle)
+
+    def test_the_twelve_tests_of_the_other_branches_that_break_once_the_lock_is_on_are_listed_with_the_fix(self):
+        """독립 재검증 D7: 아직 main 에 없는 SRC 와 GATE 의 새 시험 12개가 켠 합성에서 깨진다 — 켜는 변경이 같은 변경에서 `guard_off()` 로 고치도록 목록과 방법을 문서에 둔다."""
+        section = self.TEXT[self.TEXT.index("## 9. 켜는 변경이 일부러 깨뜨리는 시험 고정값"):]
+        for needle in ("| SRC | `tests/test_generator_source_policy.py` | `AllowlistNoCallTest`(6)·`AllowlistFetchTest`(1)·`LegacyByteTest` 의 하위 시험(4) | 11 |",
+                       "| GATE | `tests/test_shadow_run.py` | `DefaultUnchangedTest.test_a_normal_scheduled_run_writes_the_post_as_before_and_never_touches_the_shadow_path` | 1 |",
+                       "`setUpModule()`", "`tearDownModule()`", "`guard_off()`", "전체 시험을 먼저 돌려 본다"):
+            self.assertIn(needle, section, needle)
+        self.assertTrue(callable(guard_off))                              # 문서가 권하는 도구가 실제로 있다
+
+    def test_the_key_rules_say_how_deep_how_close_and_how_many_and_the_numbers_are_the_code_constants(self):
+        """독립 재검증 D1·D2·D4: K2 는 어느 깊이든(상한 16), K1 의 '오타로 보임' 은 편집 거리 2 이내, 출력은 앞 20개 — 문서의 숫자가 코드 상수와 같다."""
+        rows = {line.split("|")[1].strip(): line for line in self.TEXT.splitlines() if line.startswith("| **K")}
+        self.assertEqual(sorted(rows), ["**K1**", "**K2**"])
+        self.assertIn("편집 거리 %d 이내" % publish_lock.LOCK_KEY_EDITS, rows["**K1**"])
+        for needle in ("`resumelock`", "알 수 없는 최상위 키", "`block`", "`resume_after`", "독립 재검증 D2", "전각·호환 글자를 보통 글자로 풀고"):
+            self.assertIn(needle, rows["**K1**"], needle)
+        for needle in ("**어느 깊이든**", "반복문", "`MAX_KEY_SCAN_DEPTH`(%d" % publish_lock.MAX_KEY_SCAN_DEPTH, "너무 깊다", "`chance.limits`", "독립 재검증 D1"):
+            self.assertIn(needle, rows["**K2**"], needle)
+        self.assertIn("`MAX_KEY_MESSAGES`(%d)" % publish_lock.MAX_KEY_MESSAGES, self.TEXT)
+        self.assertIn("독립 재검증 D4", self.TEXT)
+        for stale in ("`resume`·`lock` 이 들어 있으면", "줄인 이름에 `resume` 이 든 키", "영문 철자에 `resume`·`lock` 이 든"):
+            self.assertNotIn(stale, self.TEXT, stale)                      # 예전의 넓은 판정·한 단계 깊이 문구(D1·D2)
+
+    def test_the_overview_and_the_limits_say_what_the_key_check_catches_and_what_only_the_ci_catches(self):
+        """독립 재검증 D3: '켠 줄 알았는데 꺼져 있는 일이 없다' 는 약속에는 범위 단서가 붙는다 — 쉬운 설명·§1 끝·§7-16 이 같은 말을 한다."""
+        easy = self.TEXT[self.TEXT.index("## 쉬운 설명"):self.TEXT.index("## 1. 한눈에 보기")]
+        self.assertIn("더 깊은 곳", easy)
+        self.assertIn("이름이 전혀 다른 모르는 줄은 병합 전 검사만 거절합니다", easy)
+        overview = self.TEXT[self.TEXT.index("## 1. 한눈에 보기"):self.TEXT.index("## 2. 정의와 판정 기준")]
+        for needle in ("잠금 키 검사가 잡는 범위", "`rsmlck`", "병합 전 검사(검증기 REG-1)만 거절하고 실행 시에는 막지 않는다", "표지판 시험(§9)"):
+            self.assertIn(needle, overview, needle)
+        limits = self.TEXT[self.TEXT.index("## 7. 한계와 남은 위험"):self.TEXT.index("## 8. 설계 결정")]
+        item = limits[limits.index("16. **실행 시 멈춤은 오타로 '보이는' 키만 본다**"):]
+        for needle in ("`resumelock` 을 품거나 `resumelock` 과 편집 거리 2 이내인 최상위 키(K1)", "최상위 밖 어느 깊이(상한 16)", "`check` 의 `꺼짐` 표시"):
+            self.assertIn(needle, item, needle)
+
+    def test_the_decision_rows_for_the_deep_scan_the_narrow_typo_shape_and_the_output_cap_exist(self):
+        decisions = self.TEXT[self.TEXT.index("## 8. 설계 결정"):self.TEXT.index("## 9. 켜는 변경이 일부러 깨뜨리는 시험 고정값")]
+        ids = re.findall(r"(?m)^\| (L-\d+) \|", decisions)
+        self.assertEqual(ids, ["L-%d" % number for number in range(1, len(ids) + 1)])  # 번호가 이어지고 겹치지 않는다
+        self.assertGreaterEqual(len(ids), 19)                                           # L-19(주간 상한)까지 있다 — 뒤에 결정이 더해져도 깨지지 않는다
+        for needle in ("독립 재검증 D1", "(D2)", "(D4)"):
+            self.assertIn(needle, decisions, needle)
+
 
 class OperatorGuideTest(unittest.TestCase):
     """운영자 설명서(docs/ACTIONS_GUIDE.md)가 코드와 어긋난 말을 하지 않는다(검증 지적 5)."""
@@ -513,12 +569,211 @@ class OperatorGuideTest(unittest.TestCase):
     def test_the_shadow_claims_are_tied_to_the_merge_order_in_the_easy_explanation_too(self):
         self.assertIn("그림자 실행 코드가 먼저 병합된 뒤의 이야기입니다", self.SECTION)
         part = self.TEXT[self.TEXT.index("### 6-19."):self.TEXT.index("## 7. 알려진 한계와 예정")]
-        for needle in ("pipeline/shadow_run.py", "병합 순서 GATE → LOCK → SHADOW", "docs/QUALITY_GATE.md"):
+        for needle in ("pipeline/shadow_run.py", "실제 병합 순서는 계획과 달랐습니다", "GATE 병합 뒤에만 합니다", "docs/QUALITY_GATE.md"):
             self.assertIn(needle, part, needle)
+        self.assertNotIn("GATE → LOCK → SHADOW", self.TEXT)              # 처음 계획의 순서 표기(독립 재검증 D8)
 
     def test_the_key_typo_rules_and_the_dry_run_exception_are_explained(self):
         for needle in ("resume_lok", "K1·K2", "L0 은 값 오타만 막고", "연습 실행은 저장하지 않아 그대로"):
             self.assertIn(needle, self.SECTION, needle)
+
+    def test_the_easy_explanation_says_how_deep_and_how_close_and_when_to_turn_it_on(self):
+        for needle in ("그 안의 `limits` 같은 더 깊은 곳도 같습니다", "글자 한두 개만 다른 줄", "`block` 처럼 전혀 다른 모르는 줄은 글 만들기를 멈추지는 않고", "'알 수 없는 최상위 키'",
+                       "그림자 실행 코드(GATE 묶음)가 먼저 병합된 뒤에만 켭니다", "병합 전 검사만 거절합니다"):
+            self.assertIn(needle, self.SECTION, needle)
+        self.assertNotIn("오타로 보이는 줄이 있으면", self.SECTION)             # 예전의 넓은 판정 문구
+
+
+class SecurityListAndRegisterTest(unittest.TestCase):
+    """독립 재검증 D3·D8: T3 목록이 키 규칙·허용 목록·값 집합 변경을 T3 로 적고, 아키텍처 표가 실제 병합 순서를 말하며, 결함 표에 이번 후속의 행이 있다."""
+
+    GUARDRAILS_TEXT = GUARDRAILS.read_text(encoding="utf-8")
+    ARCH_TEXT = ARCHITECTURE.read_text(encoding="utf-8")
+    DEFECT_TEXT = DEFECTS.read_text(encoding="utf-8")
+
+    def test_the_t3_list_names_the_key_rules_the_allow_list_and_the_shadow_value_sets(self):
+        line = next(item for item in self.GUARDRAILS_TEXT.splitlines() if item.startswith("- 제한 재개 잠금(레지스트리 `resume_lock`)을 끄거나"))
+        names = ("RULES", "KEY_RULES", "KNOWN_TOP_LEVEL_KEYS", "SHADOW_ON_VALUES", "SHADOW_OFF_VALUES", "LOCK_KEY_EDITS", "MAX_KEY_SCAN_DEPTH")
+        for name in names:
+            self.assertIn("`%s`" % name if name not in ("RULES", "KEY_RULES") else "`publish_lock.%s`" % name, line, name)
+            self.assertTrue(hasattr(publish_lock, name), "T3 목록이 코드에 없는 이름 %s 를 가리킨다" % name)
+        self.assertIn("(G-C14)", line)
+
+    def test_the_guardrail_row_says_how_deep_and_that_turning_it_on_waits_for_the_shadow_code(self):
+        row = next(item for item in self.GUARDRAILS_TEXT.splitlines() if item.startswith("| G-C14 |"))
+        for needle in ("최상위 밖 어느 깊이든", "`resumelock` 과 편집 거리 2 이내", "켜는 것(그림자 실행 코드 GATE 가 병합된 뒤에만)"):
+            self.assertIn(needle, row, needle)
+
+    def test_the_architecture_doc_says_how_deep_and_does_not_claim_the_old_merge_order(self):
+        for needle in ("최상위 밖(어느 깊이든)의 위치 오류는 K1·K2", "최상위 밖 어느 깊이든 — `defaults`·블로그 항목과 그 안의 `limits` 등, 깊이 상한 16", "K2 — 최상위 밖 어느 깊이든 검사",
+                       "켜는 변경은 GATE 병합 뒤에만 한다"):
+            self.assertIn(needle, self.ARCH_TEXT, needle)
+        self.assertNotIn("병합 순서(GATE 먼저)", self.ARCH_TEXT)
+
+    def test_the_follow_up_rows_d160_to_d165_exist_once_each_with_six_cells(self):
+        ids = re.findall(r"(?m)^\| \*\*(D-\d+)\*\* \|", self.DEFECT_TEXT)
+        self.assertEqual(len(ids), len(set(ids)))
+        needles = {160: ("D1", "K2", "깊이 상한 16"), 161: ("D2", "편집 거리 2"), 162: ("D4", "MAX_KEY_MESSAGES"), 163: ("W05", "W08·W09"), 164: ("D3·D8", "KEY_RULES"), 165: ("D6·D7", "flip.patch")}
+        for number, words in needles.items():
+            row_id = "D-%d" % number
+            self.assertEqual(ids.count(row_id), 1, row_id)
+            row = next(line for line in self.DEFECT_TEXT.splitlines() if line.startswith("| **%s** |" % row_id))
+            self.assertEqual(row.count("|"), 7, row_id)                                 # 표의 여섯 칸 — 칸 안에 세로선이 없다
+            for word in words:
+                self.assertIn(word, row, "%s: %s" % (row_id, word))
+
+
+class WeeklyCapDocumentTest(unittest.TestCase):
+    """주간 상한(규칙 L8)의 문서가 코드와 같은 말을 한다: 규칙 행·§4-4 설계 표·§6 켜는 값·§7 한계·§8 결정·T3 목록·운영자 설명서·아키텍처 표·결함 표.
+    (코드와 동작은 tests/test_publish_lock_weekly.py. 문서에 적은 날짜·숫자·코드 이름이 실제 코드의 출력·상수와 같은지도 여기서 견준다.)"""
+
+    TEXT = DOC.read_text(encoding="utf-8")
+    GUIDE_TEXT = GUIDE.read_text(encoding="utf-8")
+    GUIDE_SECTION = GUIDE_TEXT[GUIDE_TEXT.index("### 3-22. 제한 재개 잠금"):GUIDE_TEXT.index("## 4. 점검 루틴과 키 교체")]
+    GUARDRAILS_TEXT = GUARDRAILS.read_text(encoding="utf-8")
+    ARCH_TEXT = ARCHITECTURE.read_text(encoding="utf-8")
+    DEFECT_TEXT = DEFECTS.read_text(encoding="utf-8")
+    SECTION_4_4 = TEXT[TEXT.index("### 4-4. 주간 상한"):TEXT.index("## 5. 그림자 실행 워크플로")]
+    SECTION_6 = TEXT[TEXT.index("## 6. 켜는 방법"):TEXT.index("## 7. 한계와 남은 위험")]
+    SECTION_7 = TEXT[TEXT.index("## 7. 한계와 남은 위험"):TEXT.index("## 8. 설계 결정")]
+    SECTION_8 = TEXT[TEXT.index("## 8. 설계 결정"):TEXT.index("## 9. 켜는 변경이 일부러 깨뜨리는 시험 고정값")]
+    SECTION_9 = TEXT[TEXT.index("## 9. 켜는 변경이 일부러 깨뜨리는 시험 고정값"):]
+
+    def row(self, text, start):
+        return next(line for line in text.splitlines() if line.startswith(start))
+
+    def test_the_rule_row_says_the_value_the_ceiling_the_shape_and_who_is_not_covered(self):
+        row = self.row(self.TEXT, "| **L8** |")
+        for needle in ("`chance.limits.max_posts_per_week`", "**있어야**", "`MAX_POSTS_PER_WEEK` = %d" % publish_lock.MAX_POSTS_PER_WEEK, "1 이상 2 이하", "불리언", "defaults.limits",
+                       "Chance 밖의 블로그(Blogger·네이버 초안 패키지)에는 주간 상한을 강제하지 않는다", "하루 1편 상한(L7)이 그대로 있다", "§4-4", "확인 요청 007"):
+            self.assertIn(needle, row, needle)
+        self.assertEqual(row.count("|"), 4)                                                      # 세 칸 — 칸 안에 세로선이 없다
+        self.assertEqual(publish_lock.MAX_POSTS_PER_WEEK, 2)
+
+    def test_the_counting_table_has_a_row_for_every_design_choice(self):
+        labels = ("세는 단위", "세는 것", "중복 제거 열쇠", "창 경계", "날짜(이력 항목)", "날짜를 믿을 수 없을 때", "사전이 아닌 항목", "이 흐름이 만들지 않는 브랜치 이름", "초안 목록을 모를 때", "닫은 초안",
+                  "병합된 글", "수동 실행", "연습·그림자·이미지 교체 연습", "상한을 보는 순서", "상한값", "잠금이 꺼져 있을 때", "Chance 밖의 블로그")
+        for label in labels:
+            row = self.row(self.SECTION_4_4, "| %s |" % label)
+            self.assertEqual(row.count("|"), 4, label)
+        self.assertTrue(self.SECTION_4_4.startswith("### 4-4. 주간 상한 — 굴러가는 7일에 최대 2편 (규칙 L8"))
+
+    def test_the_counting_table_names_the_key_the_window_and_the_stop_reasons_the_code_uses(self):
+        for needle in ("초안 브랜치 이름", "`ai/draft/YYYY-MM-DD-sN`", "`ai/draft/YYYY-MM-DD-mHHMMSS`", "양끝 포함", "7일 전은 창 밖", "`flow=pr`", "읽을 수 있는 것만 세고 지나가지 않는다",
+                       "`OPEN_DRAFTS_UNKNOWN`", "`LOCK_WEEKLY_CAP`", "하루 → (원격 목록을 못 읽으면 멈춤) → 열린 초안 → 주간"):
+            self.assertIn(needle, self.SECTION_4_4, needle)
+        source = Path(_bootstrap.ROOT, "pipeline", "publish_lock.py").read_text(encoding="utf-8")
+        for reason in ("HISTORY_DATE_UNREADABLE", "HISTORY_DATE_FUTURE", "DRAFT_BRANCH_DATE_FUTURE"):
+            self.assertIn("`%s`" % reason, self.SECTION_4_4, reason)
+            self.assertIn('"%s"' % reason, source, "문서가 코드에 없는 이유 코드 %s 를 적었다" % reason)
+        self.assertEqual(publish_lock.WEEK_WINDOW_DAYS, 7)
+        self.assertIn("그 6일 전까지", self.SECTION_4_4)
+
+    def test_the_example_lines_in_the_document_are_what_the_guard_prints(self):
+        folder = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, folder, True)
+        history = [lock_tests.entry(date="2026-11-03"), lock_tests.entry(date="2026-11-05")]
+        result = lock_tests.GuardRun(folder, lock_ready(), history=history, remote=[], exists=lambda path: False)
+        self.assertEqual(result.out[0], "[SKIP] code=LOCK_WEEKLY_CAP since=2026-11-03 until=2026-11-09 week=2 cap=2")
+        self.assertIn("`LOCK_WEEKLY_CAP since=2026-11-03 until=2026-11-09 week=2 cap=2`", self.SECTION_4_4)
+        both = lock_tests.GuardRun(folder, lock_ready(), history=[lock_tests.entry(date="2026-11-09"), lock_tests.entry(date="2026-11-07")], remote=[], exists=lambda path: False)
+        self.assertEqual(both.out[0], "[SKIP] code=LOCK_DAILY_CAP date=2026-11-09 today=1 cap=1")
+        self.assertIn("`LOCK_DAILY_CAP`(하루 상한이 먼저)", self.SECTION_4_4)
+        edge = lock_tests.GuardRun(folder, lock_ready(), history=[lock_tests.entry(date="2026-11-02"), lock_tests.entry(date="2026-11-05")], remote=[], exists=lambda path: False)
+        self.assertEqual((edge.code, edge.out), (None, []))                                      # 문서의 '11-02·11-05 글 2건 → 통과'
+        bad = lock_tests.GuardRun(folder, lock_ready(), history=[lock_tests.entry(date="2026-11-9")], remote=[], exists=lambda path: False)
+        self.assertEqual(bad.out[0], "[SKIP] code=LOCK_BLOCKED reason=HISTORY_DATE_UNREADABLE")
+
+    def test_section_6_lists_every_limit_the_ready_registry_sets_with_the_same_value_and_counts_five_values(self):
+        limits = blog_of(lock_ready(), CHANCE)["limits"]
+        self.assertTrue({"max_open_drafts", "max_posts_per_day", "max_posts_per_week"} <= set(limits), sorted(limits))      # 이 묶음의 셋이 있다 — 아래 반복이 모든 한도의 행과 값을 문서와 견준다
+        for key, value in limits.items():
+            cells = [cell.strip() for cell in self.row(self.SECTION_6, "| `chance.limits.%s` |" % key).split("|")[1:-1]]
+            self.assertEqual(cells[2], "`%d`" % value, key)                                       # '켤 때' 칸이 켠 레지스트리 값과 같다
+        self.assertIn("**다섯 값**", self.SECTION_6)
+        self.assertEqual(self.row(self.SECTION_6, "| `chance.limits.max_posts_per_week` |").split("|")[4].strip(), "L8")
+
+    def test_section_7_keeps_its_numbering_and_has_the_new_limits(self):
+        numbers = re.findall(r"(?m)^(\d+)\. ", self.SECTION_7)
+        self.assertEqual(numbers, [str(number) for number in range(1, len(numbers) + 1)])          # 번호가 1부터 이어진다(뒤에 다른 묶음의 항목이 더해져도 깨지지 않는다)
+        self.assertGreaterEqual(len(numbers), 22)                                                    # 이 묶음의 17–22 까지 있다
+        for needle in ("17. **굴러가는 7일은 달력 주와 다르다**", "18. **창 안에서 닫은 초안도 센다**", "19. **세는 값은 이력과 원격 브랜치 목록의 정확도만큼만 정확하다**", "20. **Chance 밖의 블로그에는 주간 상한이 없다**",
+                       "21. **꺼진 잠금의 레지스트리에 값을 적어도 세지 않는다**", "22. **켠 직후 일주일은 켜기 전의 글도 센다, 그리고 워치독이 주간 상한을 모른다**", "`STALE`", "`NO_POSTS_DAY`",
+                       "D-169", "주간 상한(§4-4)도 같은 목록을 쓰므로"):
+            self.assertIn(needle, self.SECTION_7, needle)
+
+    def test_section_9_says_the_twelve_other_branch_tests_were_rechecked_with_the_weekly_cap(self):
+        paragraph = next(line for line in self.SECTION_9.splitlines() if line.startswith("고치는 법:"))
+        for needle in ("주간 상한(L8)을 더한 뒤 같은 합성", "깨지는 시험은 그대로 12개", "36개·82개", "주간 상한 때문에 목록이 늘거나 바뀌지 않았다"):
+            self.assertIn(needle, paragraph, needle)
+
+    def test_the_easy_explanation_section_9_and_the_decision_row_mention_the_weekly_cap(self):
+        easy = self.TEXT[self.TEXT.index("## 쉬운 설명"):self.TEXT.index("## 1. 한눈에 보기")]
+        self.assertIn("일주일(오늘을 포함한 굴러가는 7일)에 만드는 글은 최대 2편", easy)
+        self.assertIn("확인 요청 007 답", self.TEXT[:900])                                           # 맨 위 운영자 결정 인용
+        row = self.row(self.SECTION_9, "| `pipeline/blogs.json` |")
+        for needle in ("`max_posts_per_week` 없음", "§6 의 값 다섯"):
+            self.assertIn(needle, row, needle)
+        self.assertIn("`[SKIP] code=LOCK_WEEKLY_CAP`", self.SECTION_9)
+        decision = self.row(self.SECTION_8, "| L-19 |")
+        for needle in ("주간 상한(L8)", "초안 브랜치 이름으로 중복 제거", "fail closed", "하루 → 열린 초안 → 주간"):
+            self.assertIn(needle, decision, needle)
+
+    def test_the_t3_list_the_guardrail_row_and_the_register_row_name_the_weekly_cap(self):
+        line = next(item for item in self.GUARDRAILS_TEXT.splitlines() if item.startswith("- 제한 재개 잠금(레지스트리 `resume_lock`)을 끄거나"))
+        for name in ("MAX_POSTS_PER_WEEK", "WEEK_WINDOW_DAYS"):
+            self.assertIn("`%s`" % name, line, name)
+            self.assertTrue(hasattr(publish_lock, name), name)
+        for needle in ("`chance.limits.max_posts_per_week`", "레지스트리 값 다섯", "'재개 시 주 1–2편'", "(G-C14)"):
+            self.assertIn(needle, line, needle)
+        guard_row = self.row(self.GUARDRAILS_TEXT, "| G-C14 |")
+        for needle in ("규칙 L0–L8", "`chance.limits.max_posts_per_week`", "'재개 시 주 1–2편'", "달력 주와 다르고 닫은 초안도 창 안에서는 센다"):
+            self.assertIn(needle, guard_row, needle)
+        self.assertNotIn("규칙 L0–L7", guard_row)
+        reg_row = self.row(self.GUARDRAILS_TEXT, "| REG-1(제한 재개 잠금)")
+        for needle in ("규칙 L0–L8", "`max_posts_per_week` 없음·2 초과"):
+            self.assertIn(needle, reg_row, needle)
+
+    def test_the_operator_guide_lists_the_five_values_the_new_code_and_the_new_rule_range(self):
+        for needle in ("`resume_lock: true`", "`chance.publish_flow: pr`", "`chance.limits.max_posts_per_day: 1`", "`max_open_drafts: 3`", "`max_posts_per_week: 2`", "값 **다섯**", "`LOCK_WEEKLY_CAP`",
+                       "L1–L8", "일주일에 만드는 글", "(운영자 조건 '재개 시 주 1–2편')", "워치독의 '글이 안 나옴' 알림 기준은 아직 그것을 모릅니다", "D-169"):
+            self.assertIn(needle, self.GUIDE_SECTION, needle)
+        self.assertNotIn("L1–L7", self.GUIDE_SECTION)
+        values = lock_ready()
+        limits = blog_of(values, CHANCE)["limits"]
+        self.assertEqual({key: limits[key] for key in ("max_posts_per_day", "max_open_drafts", "max_posts_per_week")}, {"max_posts_per_day": 1, "max_open_drafts": 3, "max_posts_per_week": 2})       # 위 값과 같다
+
+    def test_the_architecture_doc_has_the_limit_row_the_code_row_and_the_new_rule_range(self):
+        for needle in ("| `limits.max_posts_per_week` |", "| `LOCK_WEEKLY_CAP` |", "L0–L8", "**주간 상한**(`chance.limits.max_posts_per_week`", "`tests/test_publish_lock_weekly.py`", "하루 → 열린 초안 → 주간"):
+            self.assertIn(needle, self.ARCH_TEXT, needle)
+        self.assertNotIn("규칙 L0–L7 을 어기면", self.ARCH_TEXT)
+        row = self.row(self.ARCH_TEXT, "| `limits.max_posts_per_week` |")
+        for needle in ("1–14 정수", "불리언 아님", "읽는 곳은 제한 재개 잠금뿐이다", "1 이상 2 이하(L8)"):
+            self.assertIn(needle, row, needle)
+
+    def test_the_register_rows_d166_to_d169_exist_once_with_six_cells_and_leave_the_next_branches_numbers_alone(self):
+        ids = re.findall(r"(?m)^\| \*\*(D-\d+)\*\* \|", self.DEFECT_TEXT)
+        self.assertEqual(len(ids), len(set(ids)))
+        needles = {166: ("L8", "LOCK_WEEKLY_CAP", "넷에서 다섯으로"), 167: ("다섯 곳", "WeeklyOddDateTest", "WORKLOG"), 168: ("굴러가는 7일은 달력 주와 다르다", "닫은 초안도 센다", "§7-17–21"),
+                   169: ("워치독", "STALE", "NO_POSTS_DAY", "max_gap_hours", "§7-22")}
+        for number, words in needles.items():
+            row_id = "D-%d" % number
+            self.assertEqual(ids.count(row_id), 1, row_id)
+            row = self.row(self.DEFECT_TEXT, "| **%s** |" % row_id)
+            self.assertEqual(row.count("|"), 7, row_id)                                           # 표의 여섯 칸
+            for word in words:
+                self.assertIn(word, row, "%s: %s" % (row_id, word))
+        for item in ids:                                                                            # D-170 부터는 다른 묶음(허용 목록 D-170–D-178·Fact 후속 D-180·Gate D-185·Gate 후속 D-186–D-189·방어 D-190 이상)이 쓴다 — 이 묶음의 행이 아니다(번호가 겹치지 않는다)
+            if int(item[2:]) >= 170:
+                self.assertNotIn("LOCK_WEEKLY_CAP", self.row(self.DEFECT_TEXT, "| **%s** |" % item), item)
+
+    def test_the_parts_this_work_added_have_no_tilde_and_no_web_link(self):
+        chunks = [self.row(self.TEXT, "| **L8** |"), self.SECTION_4_4, self.SECTION_6, self.SECTION_7, self.row(self.SECTION_8, "| L-19 |"), self.GUIDE_SECTION,
+                  self.row(self.ARCH_TEXT, "| `limits.max_posts_per_week` |"), self.row(self.ARCH_TEXT, "| `LOCK_WEEKLY_CAP` |")] + [self.row(self.DEFECT_TEXT, "| **D-%d** |" % number) for number in (166, 167, 168, 169)]
+        for chunk in chunks:
+            self.assertNotIn("~", chunk)
+            self.assertIsNone(re.search(r"https?://", chunk), chunk[:60])
+            self.assertNotIn("{{", chunk)
 
 
 class RuleMatrixTest(unittest.TestCase):
