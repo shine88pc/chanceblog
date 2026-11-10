@@ -166,6 +166,18 @@ def blocked_in(text, *, english=False):
     return found
 
 
+def blocked_loose(text):
+    """text 에 든 차단 낱말 [(범주, 낱말)] — 공백·부호를 모두 지운 글에서 **낱말 경계와 상관없이** 부분 문자열로 찾는다(`국민환 자 통계` 의 환자 도 잡는다, 재검증 D3).
+    `blocked_in` 의 '낱말 첫머리' 규칙은 정상 입력(`최고 소비`·`판매 수`)을 살리려는 것이라 합성어의 꼬리를 나눠 쓴 우회를 못 잡는다. 이 함수는 그 반대로 엄격해서 경계를 가로질러 우연히 생긴 글자도
+    잡는다(`최고 소비` 의 고소) — 허용 목록이 없는 자유 글 칸(공식 데이터 이름·독자용 안내 문장)에만 쓴다. 그런 칸은 사람이 고쳐 쓸 수 있어 오탐의 값이 작고, 놓치는 쪽의 값이 더 크다(D-155)."""
+    flat = compact(text)
+    found = []
+    for category, listed in BLOCKED_WORDS.items():
+        found += [(category, word) for word in listed if word in flat]
+    found += [("건강·의료", token) for token in _Flat(text).tokens if token in BLOCKED_TOKENS]
+    return found
+
+
 def _region_ok(label, vocabulary):
     return label in vocabulary.regions or any(pattern.fullmatch(label) for pattern in vocabulary.region_patterns) or \
         all(word in vocabulary.regions for word in words(label))
@@ -193,8 +205,8 @@ def fact_problem(fact, allowed_domains, vocabulary=VOCABULARY):
     return None
 
 
-def text_problem(text):
-    """우리 글에 섞일 수 있는 바깥 글(Provider 이름·독자용 안내 문장)에 차단 낱말이 있는지 — 있으면 우리 문장 사유, 없으면 None."""
-    if blocked_in(text):
+def text_problem(text, *, loose=False):
+    """우리 글에 섞일 수 있는 바깥 글(Provider 이름·독자용 안내 문장)에 차단 낱말이 있는지 — 있으면 우리 문장 사유, 없으면 None. loose 이면 낱말 경계와 상관없이 찾는다(`blocked_loose`)."""
+    if (blocked_loose(text) if loose else blocked_in(text)):
         return "건강·의료·금융 투자·법률 주제나 과장·단정 낱말이 있음"
     return None

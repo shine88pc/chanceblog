@@ -303,6 +303,7 @@ def _dedupe(recipe_id, main):
 # ----------------------------------------------------------------------------
 # Recipe 1 — 시계열 변화
 # ----------------------------------------------------------------------------
+@F.exact
 def plan_time_series(ctx):
     recipe = ctx.recipe
     picked = pick_series(ctx, min_points=recipe.min_points)
@@ -416,7 +417,9 @@ def plan_time_series(ctx):
     if mean3 is not None and n3 is not None:
         glance.append("- 최근 ⟦V:n3⟧⟦U:n3⟧ 평균: ⟦F:mean3⟧")
     if has_range:
-        glance.append("- 표시한 기간 안의 범위: 최저 ⟦F:lo⟧(⟦D:lo⟧)에서 최고 ⟦F:hi⟧(⟦D:hi⟧)까지")
+        lo_part = "최저 ⟦F:lo⟧(⟦D:lo⟧)" if n_lo is None else "최저 ⟦F:lo⟧(같은 값 ⟦V:n_lo⟧⟦U:n_lo⟧, 가장 나중 ⟦D:lo⟧)"       # 동률이면 한 기간으로 단정하지 않는다(D-151)
+        hi_part = "최고 ⟦F:hi⟧(⟦D:hi⟧)" if n_hi is None else "최고 ⟦F:hi⟧(같은 값 ⟦V:n_hi⟧⟦U:n_hi⟧, 가장 나중 ⟦D:hi⟧)"
+        glance.append(f"- 표시한 기간 안의 범위: {lo_part}에서 {hi_part}까지")
 
     # -- 숫자로 보기 ----------------------------------------------------------
     columns = "'바로 앞 기간 대비'와 '변화율' 열은" if ratio else "'바로 앞 기간 대비' 열은"
@@ -515,12 +518,13 @@ def pick_cross_section(ctx, *, min_points):
     return enough[0][1]
 
 
+@F.exact
 def plan_region_compare(ctx):
     recipe = ctx.recipe
     group = pick_cross_section(ctx, min_points=recipe.min_points)
     if isinstance(group, Insufficient):
         return group
-    ordered = sorted(group, key=lambda f: (-f.value, f.region, f.fact_id))
+    ordered = sorted(group, key=lambda f: (f.value.copy_negate(), f.region, f.fact_id))       # 단항 `-` 는 전역 정밀도로 반올림되므로 copy_negate(D5)
     top = ordered[0]
     stale = freshness_problem(ctx, top)
     if stale is not None:
@@ -546,10 +550,14 @@ def plan_region_compare(ctx):
     mean_med = b.derive("mean_med", C.f13_gap(mean, median)) if mean is not None and median is not None else None
     hi_dm = b.derive("hi_dm", C.f06_diff_from_mean(hi, mean))
     lo_dm = b.derive("lo_dm", C.f06_diff_from_mean(lo, mean))
+    diffs = [C.f06_diff_from_mean(fact, mean) for fact in ordered]
+    # 지역이 짝수 곳이면 평균이 표시 자리의 반 칸에 정확히 걸칠 수 있다(값 3.4·3.4·3.5·3.5 의 평균 3.45). 평균은 3.5 로, 3.5 인 지역과의 차이 +0.05 는 +0.1 로 반올림되면 '같은 3.5 인데 평균보다
+    # 높다'가 된다 — 그런 값이 있으면 그 단위의 표시 자리를 한 칸 늘려 반올림 없이 보인다(D-152). 평균과 그 차이만 본다(중앙값·격차는 같은 줄에 견주는 말이 없다)
+    context = F.settle_context(context, [item for item in (mean, hi_dm, lo_dm, *diffs) if isinstance(item, F.DerivedFact)])
     above, below, level, rows = [], [], [], []
     for number, fact in enumerate(ordered, start=1):
         b.put(f"v{number}", fact)
-        diff = C.f06_diff_from_mean(fact, mean)
+        diff = diffs[number - 1]
         if isinstance(diff, F.DerivedFact):
             (above if direction(diff, context) > 0 else below if direction(diff, context) < 0 else level).append(number)
         if number > COMPARE_ROWS:
@@ -615,6 +623,7 @@ def plan_region_compare(ctx):
 # ----------------------------------------------------------------------------
 # Recipe 3 — 임계값·기록(자료 기간 안의 최고·최저 대비 현재 위치)
 # ----------------------------------------------------------------------------
+@F.exact
 def plan_record_position(ctx):
     recipe = ctx.recipe
     picked = pick_series(ctx, min_points=recipe.min_points)
@@ -643,8 +652,8 @@ def plan_record_position(ctx):
     is_high, is_low = cur.value == hi.value, cur.value == lo.value          # 최신 값이 최고(최저)와 같은가 — 같은 값이 더 있으면 '공동'이다
     hi_ties = [f for f in valid if f.value == hi.value]
     lo_ties = [f for f in valid if f.value == lo.value]
-    n_hi = b.derive("n_hi", C.f12_count(hi_ties, TIE_UNIT)) if is_high and len(hi_ties) > 1 else None
-    n_lo = b.derive("n_lo", C.f12_count(lo_ties, TIE_UNIT)) if is_low and len(lo_ties) > 1 else None
+    n_hi = b.derive("n_hi", C.f12_count(hi_ties, TIE_UNIT)) if len(hi_ties) > 1 else None        # 최신 값이 최고·최저가 아니어도 같은 값이 여러 번이면 한 기간으로 단정하지 않는다(D-151)
+    n_lo = b.derive("n_lo", C.f12_count(lo_ties, TIE_UNIT)) if len(lo_ties) > 1 else None
     to_hi = None if is_high else b.derive("to_hi", C.f01_change(cur, hi, require="any"))
     pct_hi = None if is_high or not ratio else b.derive("pct_hi", C.f02_pct_change(cur, hi, require="any"))
     to_lo = None if is_low else b.derive("to_lo", C.f01_change(cur, lo, require="any"))
@@ -670,7 +679,9 @@ def plan_record_position(ctx):
     titles += ["⟦R:main⟧ ⟦L:main⟧ ⟦F:main⟧(⟦D:main⟧ 기준)", "⟦L:main⟧ ⟦F:main⟧(⟦D:main⟧ 기준)"]
     leads = [f"⟦D:main⟧ 기준 ⟦R:main⟧의 ⟦L:main⟧ 값은 이 글이 읽은 자료(⟦D:first⟧부터 ⟦D:main⟧까지) {where} ⟦F:main⟧입니다."]      # 가장 짧은 라벨·날짜(연)로도 60자 하한을 넘는다(시험이 확인)
 
-    glance = ["- 최신 값: ⟦F:main⟧(⟦D:main⟧ 기준)", "- 자료 기간의 최고: ⟦F:hi⟧(⟦D:hi⟧)", "- 자료 기간의 최저: ⟦F:lo⟧(⟦D:lo⟧)",
+    glance = ["- 최신 값: ⟦F:main⟧(⟦D:main⟧ 기준)",
+              "- 자료 기간의 최고: ⟦F:hi⟧(⟦D:hi⟧)" if n_hi is None else "- 자료 기간의 최고: ⟦F:hi⟧(같은 값 ⟦V:n_hi⟧⟦U:n_hi⟧, 가장 나중 ⟦D:hi⟧)",
+              "- 자료 기간의 최저: ⟦F:lo⟧(⟦D:lo⟧)" if n_lo is None else "- 자료 기간의 최저: ⟦F:lo⟧(같은 값 ⟦V:n_lo⟧⟦U:n_lo⟧, 가장 나중 ⟦D:lo⟧)",
               "- 범위 안의 위치: ⟦F:pos⟧(낮을수록 최저에, 높을수록 최고에 가깝습니다)"]
     if to_hi is not None:
         tail = ", 최고 대비 변화율 ⟦S:pct_hi⟧" if pct_hi is not None else ""
@@ -678,7 +689,9 @@ def plan_record_position(ctx):
     if to_lo is not None:
         glance.append("- 최저와의 차이: ⟦S:to_lo⟧")
     numbers = ["위쪽 표는 이 글이 읽은 자료 기간의 최고·최저와 최신 값을, 아래쪽 표는 최근 값을 최고·최저와 견준 결과입니다. 최고·최저는 제공처 자료 그대로이고 차이는 이 글이 직접 계산했습니다.",
-               md_table(["구분", "기준 기간", "값"], [["최고", "⟦D:hi⟧", "⟦F:hi⟧"], ["최저", "⟦D:lo⟧", "⟦F:lo⟧"], ["최신", "⟦D:main⟧", "⟦F:main⟧"]], ["l", "l", "r"]),
+               md_table(["구분", "기준 기간", "값"], [["최고", "⟦D:hi⟧" if n_hi is None else "⟦D:hi⟧(가장 나중, 같은 값 ⟦V:n_hi⟧⟦U:n_hi⟧)", "⟦F:hi⟧"],
+                                                    ["최저", "⟦D:lo⟧" if n_lo is None else "⟦D:lo⟧(가장 나중, 같은 값 ⟦V:n_lo⟧⟦U:n_lo⟧)", "⟦F:lo⟧"],
+                                                    ["최신", "⟦D:main⟧", "⟦F:main⟧"]], ["l", "l", "r"]),
                md_table(["기준 기간", "값", "최고와의 차이", "최저와의 차이"], rows, ["l", "r", "r", "r"]),
                "차이는 그 기간의 값에서 최고나 최저의 값을 뺀 것입니다. 그래서 최고와의 차이는 플러스가 아니고, 최저와의 차이는 마이너스가 아닙니다."]
     sentences = [f"이 글이 읽은 자료는 ⟦D:first⟧부터 ⟦D:main⟧까지 {obs}⟦V:n_all⟧⟦U:n_all⟧입니다."]

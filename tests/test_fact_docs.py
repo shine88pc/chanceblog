@@ -1,5 +1,5 @@
 """구조화 Fact 경로 1단계 — 문서 시험: `docs/FACT_PATH.md` 가 코드의 실제 이름·표와 어긋나지 않고, 문서 규칙(물결표·http 링크·Liquid·로컬 경로 없음)을 지키며,
-`docs/ARCHITECTURE.md` 의 §4-10 과 `docs/DEFECT_REGISTER.md` 의 D-100 이 있다. 네트워크 없이 파일만 읽는다."""
+`docs/ARCHITECTURE.md` 의 §4-10 과 `docs/DEFECT_REGISTER.md` 의 D-100·D-180 이 있다. 네트워크 없이 파일만 읽는다."""
 import re
 import unittest
 
@@ -41,8 +41,8 @@ class DocRulesTest(unittest.TestCase):
 
     def test_the_changed_docs_follow_the_same_rules(self):
         new_arch = ARCH[ARCH.index("## 4-10."):ARCH.index("## 5. 상태·멱등성·동시성")]
-        row = next(line for line in REGISTER.splitlines() if line.startswith("| **D-100** |"))
-        for text in (new_arch, row):
+        rows = [next(line for line in REGISTER.splitlines() if line.startswith(f"| **{number}** |")) for number in ("D-100", "D-180")]
+        for text in (new_arch, *rows):
             self.assertNotRegex(text, "[~～〜]")
             self.assertNotRegex(text, r"(?i)https?://|www\.")
             for liquid in ("{{", "{%"):
@@ -137,10 +137,14 @@ class DocMatchesCodeTest(unittest.TestCase):
         self.assertIn('startswith("https://")', (ROOT / "tests" / "test_posts_front_matter.py").read_text(encoding="utf-8"))
 
     def test_decisions_are_numbered_without_gaps_and_do_not_reuse_the_register_number(self):
+        """D-101–D-146 은 빠짐없이, 그다음은 D-150 부터(D-147–D-149 는 SRC 의 결함 레지스터 번호와 겹칠 수 있어 일부러 비운다 — D-157). 번호는 순서대로 하나씩 늘어난다."""
         decisions = re.findall(r"(?m)^\| (D-\d+) \|", DOC)
-        self.assertEqual(decisions, [f"D-{n}" for n in range(101, 101 + len(decisions))])
+        first = [f"D-{n}" for n in range(101, 147)]
+        later = [f"D-{n}" for n in range(150, 150 + len(decisions) - len(first))]
+        self.assertEqual(decisions, first + later)
         self.assertGreaterEqual(len(decisions), 20)
         self.assertNotIn("D-100", decisions)
+        self.assertEqual({"D-147", "D-148", "D-149"} & set(decisions), set())
 
 
 class ReviewFixDocsTest(unittest.TestCase):
@@ -192,16 +196,64 @@ class ChangedDocsTest(unittest.TestCase):
         self.assertEqual(len([cells for cells in table_rows(section) if cells[0].startswith("`pipeline/")]), 1)
         self.assertTrue(ARCH.index("## 4-8.") < ARCH.index("## 4-10.") < ARCH.index("## 5. 상태·멱등성·동시성"))
 
-    def test_the_defect_register_has_exactly_one_new_row_d100(self):
+    def test_the_defect_register_has_exactly_the_new_rows_d100_and_d180(self):
         ids = re.findall(r"(?m)^\| \*\*(D-\d+)\*\* \|", REGISTER)
         self.assertEqual(len(ids), len(set(ids)))
-        self.assertEqual(ids.count("D-100"), 1)
+        self.assertEqual((ids.count("D-100"), ids.count("D-180")), (1, 1))
         row = next(line for line in REGISTER.splitlines() if line.startswith("| **D-100** |"))
         self.assertEqual(row.count("|"), 7)                                              # 표의 여섯 칸
         for needle in ("FACT_PATH.md", "완화", "2단계", "T3", "content_source"):
             self.assertIn(needle, row)
         before = ids[ids.index("D-100") - 1]
         self.assertTrue(88 <= int(before.split("-")[1]) <= 99, before)                   # D-89–D-99 는 다른 가지가 쓰는 번호 — 어느 가지가 먼저 병합돼도 통과
+        follow = next(line for line in REGISTER.splitlines() if line.startswith("| **D-180** |"))
+        self.assertEqual(follow.count("|"), 7)
+        for needle in ("FACT_PATH.md", "해결", "2단계", "D3–D12", "D-170–D-178"):
+            self.assertIn(needle, follow)
+        self.assertGreater(ids.index("D-180"), ids.index("D-100"))                       # 이 묶음의 D-180 행은 번호순 자리(D-100 보다 뒤) — 다른 묶음의 D-150 번대 행이 사이에 들어와도 통과(독립 검증 N1)
+
+
+class FollowUpDocsTest(unittest.TestCase):
+    """병합 뒤 후속 수정(재검증 D3–D12)을 반영한 문서: 결정 D-150–D-157 · 번호 겹침 메모 · §11 3항과 D-144 의 정정 · 한계 절 · 이름이 코드와 같다."""
+
+    def test_the_follow_up_decisions_are_recorded(self):
+        decisions = set(re.findall(r"(?m)^\| (D-\d+) \|", DOC))
+        self.assertTrue({f"D-{n}" for n in range(150, 158)} <= decisions)
+        for needle in ("D3", "D5", "D6", "D7", "D8", "D9", "D10", "D12", "facts.exact", "copy_abs", "copy_negate", "settle_context", "INTEGER_FORMULAS", "blocked_loose", "localcontext"):
+            self.assertIn(needle, DOC)
+
+    def test_the_names_in_the_document_exist_in_the_code(self):
+        from pipeline import fact_assembler as A
+        for module, name in ((F, "exact"), (F, "settle_context"), (F, "is_half_tie"), (F, "INTEGER_FORMULAS"), (F, "decimals_of"), (F, "format_object"), (T, "blocked_loose"),
+                             (A, "unsafe_free_text")):
+            self.assertTrue(hasattr(module, name), name)
+        self.assertEqual(F.INTEGER_FORMULAS, frozenset({"F04_rank", "F12_count"}))
+
+    def test_the_decision_number_overlap_is_explained(self):
+        row = next(line for line in DOC.splitlines() if line.startswith("| D-157 |"))
+        for needle in ("D-129–D-146", "D-140–D-148", "D-170–D-178", "D-150", "D-180", "GATE 2차"):
+            self.assertIn(needle, row)
+
+    def test_the_corrections_of_the_earlier_statements_are_there(self):
+        section = DOC[DOC.index("### 2단계 연결 계획"):DOC.index("## 12. 설계 결정")]
+        item3 = next(line for line in section.splitlines() if line.startswith("3. **Gate 의 두 함수만"))
+        for needle in ("32 이상의 정수는 모두 잡힌다", "32 미만의 정수를 주장으로 읽지 않으므로", "5곳", "17곳", "untraced_numbers", "D-150"):
+            self.assertIn(needle, item3)
+        self.assertNotIn("본문에 끼워 넣은 숫자는 정확히 잡힌다", DOC)
+        d144 = next(line for line in DOC.splitlines() if line.startswith("| D-144 |"))
+        self.assertIn("D-150", d144)
+        self.assertNotIn("표시 자리 계산이 decimal 전역 문맥에 의존하지 않고", d144)
+
+    def test_the_limits_section_names_what_is_still_open(self):
+        section = DOC[DOC.index("## 13. 한계와 남은 일"):]
+        for needle in ("우리말 수 표현 검사는 어휘 목록과 구조 규칙", "오탐", "미탐", "로마 숫자", "자유 글 칸의 엄격한 차단 낱말 검사는 오탐이 있다", "평균이 반 칸에 걸리는 지역 비교",
+                       "허용 목록은 낱말 단위 완전 일치", "RENDER_ERROR", "PRECISION_LIMIT"):
+            self.assertIn(needle, section)
+
+    def test_the_old_false_positives_and_the_new_catches_are_stated_as_examples(self):
+        text = DOC[DOC.index("## 4. 참조 표시"):DOC.index("### 주제 허용 목록")]
+        for needle in ("조건·이번·사건·세대·열대", "두어 곳·서넛·한둘·여럿·이삼 일·오륙 개·십중팔구·영하·반 이상", "지시어 `이`"):
+            self.assertIn(needle, text)
 
 
 if __name__ == "__main__":
