@@ -27,6 +27,7 @@ import xml.etree.ElementTree as ET
 from datetime import timezone, timedelta
 from pathlib import Path
 
+from pipeline import ai_guard, provenance  # 글 출처 표식(provenance: facts) 읽기와, AI 를 부르기 직전에 표식 글의 글자가 프롬프트에 있으면 부르지 않는 방벽(docs/AI_FLOW.md)
 from pipeline import drafts  # 승인 흐름(레지스트리 publish_flow: pr)의 이름·판정 규칙. direct(기본)에서는 흐름을 읽는 것 말고 아무것도 하지 않는다
 from pipeline import quality_gate, registry  # 최소 품질 Gate(순수 규칙)와 레지스트리 설정(chance.quality_gate·languages) 읽기. quality_gate 가 off(기본)면 Gate 는 아무것도 하지 않는다
 from pipeline import unsplash_credit  # Unsplash 사진의 ixid 유지·작가 출처 줄(순수 함수 — Chance·이슈 수정·Blogger 가 같은 규칙을 쓴다)
@@ -265,6 +266,7 @@ def _generate(model_name, prompt, started):
 
 
 def call_gemini_with_fallback(prompt):
+    ai_guard.assert_clean(prompt)    # AI 입구 ①: 표식 글(구조화 공개 자료로 만든 글)의 글자가 프롬프트에 있으면 모델을 한 번도 부르지 않고 AiInputForbidden 을 올린다(재시도·폴백 없음). 표식 글이 없으면 그대로 지나간다
     errors = []
     for model_name in MODEL_CANDIDATES:
         started = time.monotonic()
@@ -580,6 +582,8 @@ JSON 객체만 반환: {{"image_queries": ["...", "...", "..."]}}
         qs = [q.strip() for q in data.get("image_queries", [])
               if isinstance(q, str) and q.strip()]
         return qs[:4] or fallback
+    except ai_guard.AiInputForbidden:
+        raise      # 방벽이 막은 것은 '검색어 생성 실패' 로 삼켜 기본값으로 덮지 않는다 — 입력을 만드는 코드의 결함 신호라 실행이 빨갛게 끝나야 한다
     except Exception as exc:
         print(f"검색어 생성 실패, 기본값 사용: {_one_line(exc, 400)}")
         return fallback
@@ -615,15 +619,25 @@ def date_of(path):
     return m.group(1) if m else "0000-00-00"
 
 
-def load_posts():
+def load_posts(*, for_ai=True):
+    """`_posts` 의 글을 읽는다(날짜순). for_ai 는 키워드로만 받는다(위치 인자로 넘기면 TypeError — 정적 규칙이 못 보는 호출 모양을 코드가 막는다).
+
+    for_ai=True(기본)는 **AI 입력이 될 수 있는 읽기**다 — 새 글 프롬프트의 최근 제목·기존 글 이미지 교체의 검색어·그림자 실행이 이 목록에서 나온다. 표식 글(머리말 `provenance`)과
+    표식 여부를 알 수 없는 글(머리말이 닫히지 않음·표식 값이 이상함)은 목록에 넣지 않는다(알 수 없으면 막는다). 읽지 못하는 파일(읽기 오류·UTF-8 아님)은 어느 쪽이든 건너뛴다.
+    for_ai=False 는 사람·알림·사이트가 읽는 곳 전용이다(모든 글, 글마다 `provenance` 칸에 표식 상태). AI 를 부를 수 있는 함수는 for_ai=False 로 부르지 않는다(tests/ai_flow_scan.py AF6)."""
     posts = []
     if not POSTS_DIR.exists():
         return posts
+    withheld = 0
     for p in POSTS_DIR.rglob("*.md"):
         try:
             text = p.read_text(encoding="utf-8")
-        except OSError as exc:
+        except (OSError, UnicodeDecodeError) as exc:
             print(f"읽기 실패 ({p}): {exc}")
+            continue
+        mark = provenance.mark_of_text(text)
+        if for_ai and provenance.mark_blocks_ai(mark):
+            withheld += 1
             continue
         fm, _ = split_front_matter(text)
         posts.append({
@@ -632,7 +646,10 @@ def load_posts():
             "image": fm_get(fm, "image"),
             "tags": fm_get(fm, "tags"),
             "category": fm_get(fm, "category"),
+            "provenance": mark,
         })
+    if withheld:
+        print(f"[참고] 표식 글(구조화 공개 자료로 만든 글)이거나 표식 여부를 알 수 없는 글 {withheld}편은 AI 입력이 될 수 있는 읽기에서 뺐습니다")
     posts.sort(key=lambda x: (date_of(x["path"]), x["path"].name))
     return posts
 
@@ -665,6 +682,8 @@ def used_keys_from_posts(posts, exclude_path=None):
 
 
 def diagnose(post, used):
+    if provenance.post_blocks_ai(post):      # 표식 글(구조화 공개 자료로 만든 글)은 이미지 점검·교체 대상이 아니다(duplicate·broken·missing 으로 세지 않는다)
+        return None
     img = post["image"]
     if not img:
         return "missing"
@@ -678,6 +697,8 @@ def diagnose(post, used):
 
 
 def repair(post, used):
+    if provenance.post_blocks_ai(post):      # 표식 글의 제목·태그·분류는 AI 검색어 입력이 될 수 없다 — 교체 후보 없음으로 건너뛴다
+        return None
     queries = make_image_queries(post["title"], post["tags"], post["category"])
     picked = pick_images(queries, used, 1, allow_pool=False)
     return picked[0] if picked else None
@@ -692,7 +713,7 @@ FIX_IMAGES_MAX_PER_RUN = 20
 
 
 def fix_images(keyword=None):
-    posts = load_posts()
+    posts = load_posts(for_ai=True)      # 표식 글은 이 목록에 없다 — 사진 교체(AI 검색어)의 대상도, 중복 판정의 기준도 아니다
     print(f"검사 대상 글: {len(posts)}개 (오래된 글의 이미지를 우선 유지)")
     used, targets = set(), []
     for post in posts:
@@ -756,9 +777,13 @@ def is_similar_to_any(text, existing, threshold):
     return any(similarity(text, e) >= threshold for e in existing)
 
 
-def existing_titles(history, posts):
+def existing_titles(history, posts, *, for_ai=True):
+    """이력과 글에서 '이미 다룬 제목' 목록(for_ai 는 키워드로만 받는다). 새 글 프롬프트의 최근 제목(titles[-30:])과 그림자 실행이 이 목록을 AI 입력으로 쓴다.
+    for_ai=True(기본)는 표식 항목(이력의 `provenance` 칸)과 표식 글(글 사전의 `provenance` 칸)의 제목·주제를 뺀다. for_ai=False 는 사람이 읽는 곳 전용(AI 를 부르는 함수는 쓰지 않는다 — AF6)."""
     titles = []
     for item in history:
+        if for_ai and provenance.entry_blocks_ai(item):
+            continue
         if isinstance(item, str):
             titles.append(item)
         elif isinstance(item, dict):
@@ -766,7 +791,7 @@ def existing_titles(history, posts):
                 v = item.get(k)
                 if isinstance(v, str) and v.strip():
                     titles.append(v.strip())
-    titles += [p["title"] for p in posts if p["title"]]
+    titles += [p["title"] for p in posts if p["title"] and not (for_ai and provenance.post_blocks_ai(p))]
     return titles
 
 
@@ -1861,8 +1886,8 @@ _FM_FENCE = re.compile(r"-{3,}[ \t]*")      # 울타리처럼 보이는 줄(대�
 _FM_KEY = re.compile(r"([A-Za-z_][A-Za-z0-9_-]*):(?:[ \t]|\Z)")      # 줄 맨 앞의 `키:` — 콜론 뒤가 공백이나 줄 끝이어야 YAML 매핑이다
 _FM_ITEM = re.compile(r" *-[ \t]+(.*)")      # 값이 빈 앞 키에 이어지는 블록 목록 항목(`  - 값`)
 _FM_SHAPED = re.compile(r"(?:[A-Za-z_][A-Za-z0-9_-]*[ \t]*:|-[ \t]|[ \t#])")      # 머리말 줄처럼 생긴 줄(빈 줄은 따로 센다)
-_FM_KNOWN_KEY = re.compile(r"(?:layout|title|category|tags|lang|image|description)[ \t]*:")      # 글 머리말에만 있는 키
-_FM_RESIDUE = re.compile(r"(?:layout|title|category|tags|lang|image|description|published|date|permalink|slug|source_name|source_url|source_domain)[ \t]*:")      # 본문 앞 세 줄에 남아서는 안 되는 머리말 줄(소문자 키만)
+_FM_KNOWN_KEY = re.compile(r"(?:layout|title|category|tags|lang|image|description|provenance)[ \t]*:")      # 글 머리말에만 있는 키(provenance 는 생성기 전용 출처 표식 — 모델이 둘째 머리말에 심으려는 시도를 머리말 한 덩이로 알아보고 걷어내려고 넣었다)
+_FM_RESIDUE = re.compile(r"(?:layout|title|category|tags|lang|image|description|provenance|published|date|permalink|slug|source_name|source_url|source_domain)[ \t]*:")      # 본문 앞 세 줄에 남아서는 안 되는 머리말 줄(소문자 키만)
 _FM_REQUIRED = ("layout", "title", "category", "lang", "image")
 _FM_MAX_LINE = 2000      # 머리말 한 줄의 상한(검사 정규식이 아주 긴 줄에서 오래 걸리지 않게)
 # 한 줄 목록의 항목: 큰따옴표(JSON 이 아는 이스케이프만)·작은따옴표·평문. 평문 항목은 공백으로 끝나지 못한다 — 꼬리와 뒤의 `[ \t]*` 가 같은 공백을 겹쳐 먹으면 되돌아가기가
@@ -1991,8 +2016,10 @@ def _source_front_fields(source):
     return None
 
 
-def front_matter_problems(content, source=None):
+def front_matter_problems(content, source=None, allow_provenance=False):
     """완성된 글 한 편(머리말 + 본문)의 머리말과 본문 머리를 엄격히 검사해 문제 목록을 돌려준다(비어 있으면 정상).
+    출처 표식 `provenance`(생성기 전용, docs/AI_FLOW.md)는 기본(allow_provenance=False)에서 머리말에 있으면 문제다 — 모델이 쓴 글에는 표식이 없다. allow_provenance=True 는 표식을 쓰는
+    경로(구조화 Fact 글)와 저장소의 완성된 글을 읽는 시험 전용이고, 이때도 표식 키는 하나뿐이고 값이 정확히 facts 여야 한다(모르는 값·둘 이상은 문제).
     검사: 첫 줄이 정확히 `---`·닫는 `---` 줄·CR/BOM/제어 문자 없음·한 줄 한 키·키 중복 없음·값이 안전한 모양(`title` 은 한 줄 JSON 문자열)·필수 키(layout·title·
     category·lang·image)·layout 은 post(줄이 있으면)·lang 은 ko·en·본문이 울타리 줄이나 머리말 줄로 시작하지 않음. source(add_discovery_metadata 에 넘기는 소스 항목)를 주면 엔진이 더하는
     설명(본문에서 뽑을 수 있을 때)과 출처 세 줄이 있고 소스와 같은지도 본다 — `_front_matter_set` 이 머리말을 못 찾아 조용히 지나친 경우가 여기서 드러난다.
@@ -2021,6 +2048,11 @@ def front_matter_problems(content, source=None):
     layout = _fm_layout_problem(keys)
     if layout:
         problems.append(layout)
+    marks = [key for key in keys if key.lower() == provenance.KEY]
+    if marks and not allow_provenance:
+        problems.append("생성기 전용 출처 표식 키(`provenance`)가 머리말에 있음")
+    elif marks and (len(marks) != 1 or _fm_scalar_text(keys[marks[0]][0]) != provenance.FACTS or marks[0] != provenance.KEY):
+        problems.append("출처 표식(`provenance`)이 하나가 아니거나 값이 정확히 facts 가 아님")
     for key in ("category", "image"):
         have = keys.get(key)
         if have and have[0] and not (_fm_scalar_text(have[0]) or "").strip() and f"`{key}` 값이 비어 있음" not in problems:
@@ -2129,6 +2161,8 @@ def _model_header_problems(header):
     layout = _fm_layout_problem(keys)
     if layout:
         problems.append(layout)
+    if any(key.lower() == provenance.KEY for key in keys):      # 출처 표식은 생성기만 쓴다 — 모델이 쓴 표식은 머리말째 믿지 않고 구조화된 값으로 다시 쓴다(표식이 모델 글에 남지 않는다)
+        problems.append("생성기 전용 출처 표식 키(`provenance`)가 모델이 쓴 머리말에 있음")
     problems += [f"`{key}` 는 한 줄 값이어야 함" for key in ("lang", "image") if key in keys and keys[key][1]]
     if _YAML_UNPRINTABLE.search("\n".join(header)):
         problems.append(_YAML_UNPRINTABLE_PROBLEM)
@@ -2501,12 +2535,12 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
     langs = settings.languages
     prefixes = _prefixes(langs)                     # ("kr", "en") 한 쌍(기본) 또는 ("kr",) 국문 전용
     lang_args = {} if len(prefixes) == 2 else {"languages": langs}      # 기본(한 쌍)에서는 아래 호출이 예전 그대로다 — 국문 전용일 때만 언어를 넘긴다
-    posts = load_posts()
+    posts = load_posts(for_ai=True)      # 표식 글은 빠진 목록 — 아래 titles[-30:] 가 프롬프트의 '최근 다룬 제목' 으로 AI 에 간다
     history = read_history()
     lane_order = editorial_lane_order(slot, history)
     editorial_lane = lane_order[0]
     print(f"편집 축: {EDITORIAL_LANES[editorial_lane]['label']}")
-    titles = existing_titles(history, posts)
+    titles = existing_titles(history, posts, for_ai=True)
     used = used_keys_from_posts(posts)
     for item in history:
         if isinstance(item, dict):

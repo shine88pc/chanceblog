@@ -27,7 +27,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 
-from pipeline import unsplash_credit   # ixid 를 남기는 규칙은 Chance·이슈 수정과 같은 공용 모듈에서 정한다
+from pipeline import ai_guard, unsplash_credit   # ixid 를 남기는 규칙은 Chance·이슈 수정과 같은 공용 모듈에서 정한다. ai_guard 는 방벽이 막은 예외를 '검색어 실패' 로 삼키지 않으려고 이름을 가져온다(docs/AI_FLOW.md)
 from pipeline.console import INVISIBLE_RE, one_line
 from pipeline.llm import purpose
 from pipeline.publishers.issue_package import UNSPLASH_UTM   # 출처 표기 링크의 utm 값은 한 곳(초안 패키지와 같은 것)에서 정한다
@@ -197,6 +197,8 @@ def ask_queries(llm, title, labels):
         with purpose(llm, "image-queries"):
             raw, _model = llm(prompt)
         asked = parse_queries(raw)
+    except ai_guard.AiInputForbidden:
+        raise      # 방벽이 막은 것은 '검색어 제안 실패' 로 삼켜 영문 제목·라벨로 덮지 않는다 — 입력을 만드는 코드의 결함 신호다. 바깥 find_main_image 가 `UNEXPECTED(AiInputForbidden)` 한 줄로 남기고 글은 사진 없이 올라간다(D-195)
     except Exception:  # noqa: BLE001 - 검색어 제안 실패는 영문 제목·라벨로 대신한다(원인 문구는 쓰지 않는다: 호출 기록이 이미 남긴다)
         asked = []
     return _dedupe(asked + fallback_queries(title, labels))[:MAX_QUERIES], bool(asked)

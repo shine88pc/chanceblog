@@ -31,6 +31,7 @@
 | 주제 | 약관을 읽은 직접 RSS(NASA·Pew·Federal Reserve·EU 집행위원회 계열·캐나다 통계청·영국 정부 GOV.UK·미 FTC 보도자료·연준 FEDS Notes·미 NSF·영국 CMA 등, UN News는 보류), 신뢰 도메인 허용 목록, 72시간 이내, 출처 원문 검증 | 프로필 시드(영문 34개) + LLM 확장, 쿨다운 60일, 금지 주제 필터(주제 후보·제목·라벨·본문, §7-1), Chance 이력과 교차 중복 방지 |
 | 생성 | Gemini 모델 폴백, KR/EN 쌍, 편집 템플릿 | Gemini 모델 폴백 + 일시 오류 재시도, 형식 엄격 파싱 |
 | 게이트 | `validate_post_data`(길이·인라인 출처·머리말 검사·복구), 최종 머리말 검사(`front_matter_problems`), 제목 유사도 | `pipeline/gates.py`(파싱·HTML 정화·정책·중복), 탈락 사유를 넣어 최대 3회 재작성 |
+| AI 입력 방어 | 구조화 Fact 글의 표식(`provenance: facts`)을 AI 입력에서 뺀다: 읽기(`load_posts`·`existing_titles`)의 기본값이 `for_ai=True`, 이미지 교체(`fix_images`·`repair`·`diagnose`)·그림자 실행이 같은 읽기를 쓰고, AI 입구(`call_gemini_with_fallback`)가 프롬프트에 표식 글의 글자가 있으면 모델을 부르지 않는다(§4-11). 표식 글이 없으면 이전과 같다 | 이력의 표식 항목을 `entry_titles`·`other_blog_titles` 가 건너뛰고(재작성 사유의 다른 블로그 제목) 호출 객체(`pipeline/llm.py`)가 같은 방벽을 거친다(§4-11). Blogger 글 자체에는 표식이 없다 |
 | 게시 | git 커밋 → Pages 배포(`pages.yml`). 봇 커밋 뒤 `gh workflow run pages.yml`로 배포 실행. 레지스트리 `publish_flow: pr`(기본은 `direct`, 지금 꺼짐)이면 커밋 대신 초안 브랜치와 승인 PR 로 올리고 병합이 공개(§4-4) | Blogger API 어댑터(멱등 재시도, 인증 실패 구분, 초안함 업로드 `isDraft`, 쓰기 전 인증 점검 — 아래 §4·§4-1) |
 | 상태 | `history.json`(문자열·객체 혼합 스키마. 승인 흐름의 항목에는 `flow`·`branch`·`paths` 필드가 더 있다 — §4-4) | `blogger_history.json`(스키마 v1, §5) |
 | 관측 | Actions 로그 | 실행 요약 + 이력 status + 워치독 |
@@ -735,6 +736,19 @@ Unsplash API 지침(2026-11-03 원문 확인)은 ① API 가 준 사진 주소�
 | `pipeline/facts.py`·`calc.py`·`fact_topics.py`·`adapters/`(`base.py`·`mock_stats.py`)·`recipes.py`·`fact_assembler.py` | 불변 값 객체(Fact·출처 기록·계산 결과)와 `⟦F:id⟧` 참조·렌더러(숫자는 모두 Fact 에서, 보이는 소수 자리는 단위 표와 자료의 정밀도 중 큰 쪽, 계산·표시는 호출한 쪽의 decimal 전역 문맥에 기대지 않는 명시한 문맥 안에서) → 결정적 계산식 F01–F14 → 주제 허용 목록(범주별 키·라벨·단위·지역 낱말, 차단 낱말) → 구조화 응답(JSON·CSV)만 읽는 어댑터 계약과 가짜 Provider → Recipe 3개(시계열 변화·지역 비교·임계값 기록)와 규칙 기반 한국어 조립기(`assemble` — 못 맞추면 `Insufficient`, 예외 없음) | **없음**(순수 함수 — 네트워크는 주입된 `opener`, 시각은 인자, 난수 없음, 표준 라이브러리만) |
 
 **연결 금지가 시험으로 지켜진다**: `generator.py`·`pipeline/` 의 다른 모듈·워크플로는 이 모듈들의 이름을 부르지 않는다(`tests/test_fact_structure.py`). SRC(허용 목록)와는 `facts.ProviderLike`·`RegistryLike` 최소 프로토콜(덕 타이핑)로만 맞물리고 그 모듈을 import 하지 않는다.
+
+## 4-11. AI 흐름 방어 — 구조화 Fact 글이 AI 로 새지 않게 하는 표식·방벽·정적 규칙 (2026-11-10, 방어 묶음)
+
+운영자 확인 요청 007 의 조건 ①(AI 흐름 전수 확인)은 '지금 길은 0개, 2단계(생성기 연결)를 방어 없이 이으면 9곳이 열린다'였다. 열리는 핵심 이유는 구조화 Fact 글의 제목에 공개 자료의 값이 들어 있고, 기존 코드가 `_posts` 의 제목·태그·분류를 AI 입력으로 보내는 자리가 넷이라는 것이다(새 글의 최근 제목·이미지 교체 검색어·Blogger·Naver 재작성 사유·이슈 수정의 이미지 검색어). 그 길을 Fact 글이 한 편도 없는 지금 먼저 닫았다. **켜는 변경은 없다** — 레지스트리·워크플로·`content_source` 가 하나도 바뀌지 않고, 표식 글이 없으면 모든 흐름의 출력은 이전과 바이트까지 같다. 전체 설명과 표: [`AI_FLOW.md`](./AI_FLOW.md).
+
+| 장치 | 역할 | 시험 |
+|------|------|------|
+| 출처 표식 | 글 머리말의 `provenance: "facts"` 와 이력 항목의 같은 칸. 읽는 곳은 `pipeline/provenance.py` 한 군데, 쓰는 곳은 생성기뿐(지금은 없다). 알 수 없으면 막는다 | `tests/test_provenance.py` |
+| 표식 소비자 | `load_posts`·`existing_titles`·`entry_titles`·`other_blog_titles` 의 기본값이 `for_ai=True`(표식 글 제외), `diagnose`·`repair`·`op_image`·`op_llm_patch`·`pages` 가 표식 글을 AI 로 보내지 않는다 | `tests/test_ai_flow_consumers.py` |
+| 런타임 방벽 | AI 입구 둘(`call_gemini_with_fallback`·`pipeline/llm.py` 의 호출 객체)이 부르기 직전 프롬프트에 표식 글의 제목·설명 글자가 있으면 `AiInputForbidden` 으로 멈춘다. 못 막는 것(뒤쪽 조각·값·의역·번역)은 시험이 '못 막는다'고 단언한다 | `tests/test_ai_guard.py` |
+| 정적 규칙 | `tests/ai_flow_scan.py` 의 AF0–AF6·AF8(AF4 는 진입 함수 목록이 비어 있어 합성 시험뿐, AF7 은 2단계) — 임포트 격리·AI 호출 지점·`llm` 소비자·`_posts` 읽기 지점의 등록과 Fact 분기의 AI 0(진입 함수 목록은 2단계가 채운다) | `tests/test_ai_flow.py`·`tests/test_ai_flow_docs.py` |
+
+**남은 일(2단계·허용 목록 묶음)**: 생성기의 Fact 분기·AI 키 미전달(AF7)·표식 쓰기 연결·`NoConnectionTest` 의 '허용 연결 한 군데' 개정·레지스트리 스키마(AI 에 쓰지 않는 제공처)와 `SOURCE_POLICY.md` 문장 정리는 이 묶음이 하지 않는다([`AI_FLOW.md`](./AI_FLOW.md) §11·§12).
 
 ## 5. 상태·멱등성·동시성
 
