@@ -3,6 +3,7 @@
 초안 브랜치를 세고, 병합된 초안은 빼며 이력에 없는 브랜치는 열린 것으로 센다 ④ 규칙을 어긴 레지스트리는 아무것도 올리지 않는다 — 를 하루하루 따라간다.
 git 프로세스 하나가 1초 가까이 걸리는 PC 가 있어서 이야기 하나를 클래스 하나로 만들고(setUpClass 에서 한 번) 질의는 묶어서 한다. 네트워크·실제 시크릿 없이 돈다."""
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -14,9 +15,12 @@ from test_draft_flow import BRANCH_9, ENV
 from test_generator_drafts import run_tick
 from test_generator_slots import at, candidate
 
+KST = timezone(timedelta(hours=9))
 BRANCH_29 = "ai/draft/2026-10-29-s9"
-BRANCH_30 = "ai/draft/2026-10-30-s9"
-DUMMY_1, DUMMY_2 = "ai/draft/2026-10-30-m000001", "ai/draft/2026-10-30-m000002"
+BRANCH_1104 = "ai/draft/2026-11-04-s9"             # 첫 글(10-28)로부터 7일째 — 주간 상한 창(오늘 포함 7일)에서 첫 글이 막 빠진 날
+NOV_4, NOV_5 = datetime(2026, 11, 4, 9, 20, tzinfo=KST), datetime(2026, 11, 5, 9, 20, tzinfo=KST)
+# 운영자가 열어 두지 않은(이력에 없는) 오래된 초안 브랜치 둘 — 10 월 20 일 것이라 어느 틱의 주간 상한 창에도 들지 않고 열린 초안 수에만 센다
+DUMMY_1, DUMMY_2 = "ai/draft/2026-10-20-m000001", "ai/draft/2026-10-20-m000002"
 
 
 class RealGitLockStoryTest(unittest.TestCase):
@@ -55,25 +59,29 @@ class RealGitLockStoryTest(unittest.TestCase):
         cls.tick3 = tick(cls.day2, at(9, 20, day=29), name="s3.md", feed=[candidate("캐나다 소비자물가지수 발표", "https://www.reuters.com/c")])
         cls.result3 = deliver(cls.day2)
         cls.branches3 = box.origin_branches()
-        # ④ 운영자가 열어 두지 않은 초안 브랜치가 둘 더 있다(이력에 없는 브랜치도 열린 것으로 센다) → 10-30 틱은 상한(3)에 닿아 건너뛴다
+        # ④ 운영자가 열어 두지 않은 오래된 초안 브랜치가 둘 더 있다(이력에 없는 브랜치도 열린 것으로 센다) → 10-30 틱은 열린 초안 상한(3)에 닿아 건너뛴다(주간 상한보다 먼저 보는 상한이다)
         cls.merger = merger = box.clone("merger")
         box.sh(merger, "push", "-q", "origin", f"HEAD:refs/heads/{DUMMY_1}", f"HEAD:refs/heads/{DUMMY_2}")
         cls.day3 = box.clone("day3")
         cls.tick4 = tick(cls.day3, at(9, 20, day=30), name="s4.md", feed=[candidate("다른 날의 기사 제목입니다", "https://www.reuters.com/d")])
         cls.branches4, cls.commits4 = box.origin_branches(), cls.main_commits()
-        # ⑤ 운영자가 10-28·10-29 초안을 병합한다(실제 3-way 병합 + push): 병합된 초안은 세지 않아 열린 것이 둘로 줄고, 10-30 틱이 초안을 만든다
+        # ⑤ 운영자가 10-28·10-29 초안을 병합한다(실제 3-way 병합 + push): 병합된 초안은 열린 초안 수에 세지 않아 열린 것이 둘(오래된 브랜치)로 줄지만,
+        #    병합된 글도 일주일 안이면 주간 상한(2편)에 센다 — 10-30 틱은 이력의 두 글 때문에 건너뛴다(실제 git ls-remote 로 읽은 원격 목록을 이력과 이름으로 이어 센다)
         for branch in (BRANCH_9, BRANCH_29):
             box.sh(merger, "merge", "-q", "--no-ff", "-m", branch, f"origin/{branch}")
         box.sh(merger, "push", "-q", "origin", "HEAD:refs/heads/main")
         cls.day3b = box.clone("day3b")
         cls.tick5 = tick(cls.day3b, at(9, 20, day=30), name="s5.md", feed=[candidate("다른 날의 기사 제목입니다", "https://www.reuters.com/d")])
-        cls.result5 = deliver(cls.day3b)
-        cls.branches5 = box.origin_branches()
+        cls.branches5, cls.status5 = box.origin_branches(), box.sh(cls.day3b, "status", "--porcelain").stdout.strip()
+        # ⑤b 첫 글(10-28)로부터 7일째인 11-04: 10-28 글이 창(10-29부터)을 떠나 주간 상한에 한 편만 남고(오래된 브랜치 둘은 창 밖), 병합된 초안은 열린 것으로 세지 않아 초안이 만들어진다
+        cls.tick5b = tick(cls.day3b, NOV_4, name="s5b.md", feed=[candidate("다른 날의 기사 제목입니다", "https://www.reuters.com/d")])
+        cls.result5b = deliver(cls.day3b)
+        cls.branches5b = box.origin_branches()
         # ⑥ 규칙을 어긴 레지스트리(잠금 켬 + direct): 아무것도 만들지 않고 빨강으로 끝난다
         cls.bad = box.clone("bad")
         before = box.origin_branches()
         cls.bad_posts_before = cls.posts_of(cls.bad)                                      # ⑤ 에서 병합한 10-28·10-29 글(넷)이 main 에 이미 있다
-        cls.tick6 = tick(cls.bad, at(9, 20, day=31), cls.direct_path, "s6.md", flow="direct")
+        cls.tick6 = tick(cls.bad, NOV_5, cls.direct_path, "s6.md", flow="direct")
         cls.branches6_same = box.origin_branches() == before
         cls.bad_posts = cls.posts_of(cls.bad)
 
@@ -115,19 +123,32 @@ class RealGitLockStoryTest(unittest.TestCase):
         self.assertEqual(self.branches3, [BRANCH_9, BRANCH_29, "main"])
 
     def test_three_unmerged_drafts_found_by_a_real_ls_remote_stop_the_next_one(self):
-        """열린 초안 브랜치 넷(10-28·10-29 초안 + 이력에 없는 둘) → 상한(3)에 닿아 건너뛴다. 이력에 없는 브랜치도 열린 것으로 센다."""
+        """열린 초안 브랜치 넷(10-28·10-29 초안 + 이력에 없는 둘) → 상한(3)에 닿아 건너뛴다. 이력에 없는 브랜치도 열린 것으로 센다.
+        같은 틱은 주간 상한(이력의 두 글)에도 닿아 있지만 열린 초안 상한이 먼저 보이는 코드다(주간 상한이 생기기 전에 있던 결과가 바뀌지 않는다)."""
         self.assertIsInstance(self.tick4.value, SystemExit)
         self.assertEqual(self.tick4.value.code, 0)
         self.assertIn("[SKIP] code=OPEN_DRAFTS_CAP open=4 limit=3", self.tick4.out)
+        self.assertNotIn("LOCK_WEEKLY_CAP", self.tick4.out)
         self.assertEqual(self.tick4.prompts, [])
         self.assertEqual(self.branches4, sorted([BRANCH_9, BRANCH_29, DUMMY_1, DUMMY_2, "main"]))
         self.assertEqual(self.commits4, self.commits1 + 1)                                  # 10-29 초안의 이력 커밋 하나뿐 — 이 틱은 아무것도 올리지 않았다
 
-    def test_merged_drafts_are_not_counted_so_the_next_tick_makes_its_draft(self):
-        self.assertIsNone(self.tick5.value)
-        self.assertEqual(self.tick5.history[-1]["branch"], BRANCH_30)
-        self.assertEqual((self.result5.status, self.result5.code), ("opened", 0))
-        self.assertEqual(self.branches5, sorted([BRANCH_9, BRANCH_29, BRANCH_30, DUMMY_1, DUMMY_2, "main"]))
+    def test_merged_drafts_still_count_toward_the_week_so_the_tick_after_the_merge_is_skipped(self):
+        """병합된 초안은 열린 초안 수에서는 빠지지만(열린 것은 오래된 브랜치 둘뿐) 일주일 안의 글이므로 주간 상한(2편)에는 센다 — 실제 ls-remote 의 원격 목록과 이력을 브랜치 이름으로 이어 넷이 아니라 둘로 센다."""
+        self.assertIsInstance(self.tick5.value, SystemExit)
+        self.assertEqual(self.tick5.value.code, 0)
+        self.assertIn("[SKIP] code=LOCK_WEEKLY_CAP since=2026-10-24 until=2026-10-30 week=2 cap=2", self.tick5.out)
+        self.assertNotIn("OPEN_DRAFTS_CAP", self.tick5.out)
+        self.assertEqual(self.tick5.prompts, [])
+        self.assertIn("**LOCK_WEEKLY_CAP**", self.tick5.summary)
+        self.assertEqual(self.branches5, self.branches4)                                    # 병합은 main 만 바꾼다 — 이 틱도 원격을 그대로 두었다
+        self.assertEqual(self.status5, "")                                                  # 가드는 읽기만 한다
+
+    def test_merged_drafts_are_not_counted_as_open_and_once_the_first_leaves_the_week_the_next_tick_makes_its_draft(self):
+        self.assertIsNone(self.tick5b.value)
+        self.assertEqual(self.tick5b.history[-1]["branch"], BRANCH_1104)
+        self.assertEqual((self.result5b.status, self.result5b.code), ("opened", 0))
+        self.assertEqual(self.branches5b, sorted([BRANCH_9, BRANCH_29, BRANCH_1104, DUMMY_1, DUMMY_2, "main"]))
 
     def test_a_registry_that_breaks_a_rule_makes_and_pushes_nothing(self):
         self.assertIsInstance(self.tick6.value, SystemExit)

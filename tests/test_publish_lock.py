@@ -17,7 +17,7 @@ from unittest import mock
 
 import _bootstrap  # noqa: F401
 import generator as g
-from lock_helpers import (CHANCE, KCYOON, MACAT, VIOLATIONS, EXTRA, KEY_TYPOS, blog_of, drop_limit, lock_ready, mutated, real_registry, rules_in, set_in,
+from lock_helpers import (CHANCE, KCYOON, MACAT, VIOLATIONS, EXTRA, KEY_TYPOS, DEEP_PLACES, put_in, blog_of, drop_limit, lock_ready, mutated, real_registry, rules_in, set_in,
                           set_limit, today_registry, with_lock_off, write_registry)
 from pipeline import draft_flow, drafts, plan, publish_lock, registry
 from test_chance_draft_workflow import steps_of
@@ -125,7 +125,7 @@ class RegistryRuleTest(unittest.TestCase):
         self.assertEqual(after.pop("resume_lock"), True)
         chance_before, chance_after = blog_of(before, CHANCE), blog_of(after, CHANCE)
         self.assertEqual(chance_after.pop("publish_flow"), "pr")
-        self.assertEqual(chance_after.pop("limits"), {"max_posts_per_day": 1, "max_open_drafts": 3})
+        self.assertEqual(chance_after.pop("limits"), {"max_posts_per_day": 1, "max_open_drafts": 3, "max_posts_per_week": 2})     # 켜는 값 다섯째: 주간 상한(L8)
         self.assertEqual(chance_before.pop("limits"), {"max_posts_per_day": 2})
         self.assertEqual(chance_before.pop("publish_flow"), "direct")
         self.assertEqual(before, after)                                  # 나머지(Blogger 둘·네이버 모드, 광고 선언 등)는 그대로 규칙을 이미 지킨다
@@ -448,6 +448,19 @@ class ShadowValueTest(GuardBase):
             result = self.guard(reg, history=[entry()], environ={"SHADOW_RUN": "maybe"}, remote="unused")
             self.assertEqual((result.code, result.out, result.summary), (None, [], []))
 
+    def test_with_the_lock_off_an_unknown_value_does_not_skip_the_open_drafts_limit_but_an_on_value_does(self):
+        """독립 재검증 D5(변이 W05 `shadow == "on"` → `!= "off"`): 잠금은 꺼져 있어도 max_open_drafts 값이 있고 pr 흐름이면 열린 초안을 센다 — 그림자 켜짐 값만 건너뛰고 모르는 값은 센다."""
+        reg = with_lock_off(lock_ready())                                                        # 잠금 키 없음 · publish_flow pr · max_open_drafts 3
+        names = [BRANCH_A, BRANCH_B, BRANCH_C]
+        for value in ("maybe", "2", "y", "enable"):
+            result = self.guard(reg, history=[], remote=names, exists=lambda path: False, environ={"SHADOW_RUN": value})
+            with self.subTest(unknown=value):
+                self.assertEqual(result.code, 0)
+                self.assertEqual(result.out[0], "[SKIP] code=OPEN_DRAFTS_CAP open=3 limit=3")
+        for value in ("1", "on", "enabled", " ENABLED "):
+            with self.subTest(on=value):
+                self.assertEqual(self.guard(reg, history=[], remote="unused", environ={"SHADOW_RUN": value}).code, None)         # 세지 않으므로 원격을 읽지도 않는다
+
     def test_the_value_sets_match_the_generator_when_the_shadow_code_is_merged(self):
         try:
             from pipeline import shadow_run  # noqa: F401  (GATE 묶음의 읽기 전용 실행 경로)
@@ -504,7 +517,7 @@ class KeyTypoTest(unittest.TestCase):
                 self.assertEqual(registry.validate_registry(reg), key_errors)                  # 그 밖의 오류는 없다 — 막는 것은 이 규칙뿐이다
                 self.assertEqual(publish_lock.lock_state(reg), "off")                          # 잠금 값 읽기는 이 오타를 못 본다 — 그래서 키 규칙이 필요하다
         self.assertEqual(count, 2 * len(KEY_TYPOS))
-        self.assertEqual(len(KEY_TYPOS), 7)
+        self.assertEqual(len(KEY_TYPOS), 9)                                                   # 요청 6 + 전부 대문자 1 + 두 단계 깊이 둘(독립 재검증 D1)
 
     def test_the_message_says_what_is_wrong_and_where(self):
         reg = lock_ready()
@@ -539,21 +552,97 @@ class KeyTypoTest(unittest.TestCase):
         reg["extra_setting"] = 1
         errors = [error for error in registry.validate_registry(reg) if error.startswith("레지스트리 키 K")]
         self.assertEqual(len(errors), 1)
-        self.assertTrue(errors[0].startswith("레지스트리 키 K1: 최상위에 모르는 키 'extra_setting' 가 있습니다"), errors[0])
+        self.assertTrue(errors[0].startswith("레지스트리 키 K1: 알 수 없는 최상위 키 'extra_setting' 가 있습니다"), errors[0])
         self.assertIn(", ".join(publish_lock.KNOWN_TOP_LEVEL_KEYS), errors[0])                  # 허용 목록을 보여 준다
         self.assertNotIn("오타", errors[0])
         self.assertEqual(publish_lock.lock_key_problems(reg), [])                                # 실행 시에는 새 실패 방식을 만들지 않는다(잠금과 관계없는 키)
         run = GuardRun(self.folder, reg, history=[], remote="unused")
         self.assertEqual((run.code, run.out, run.status), (None, [], []))
 
-    def test_the_typo_shape_is_broad_but_the_known_keys_are_never_flagged(self):
-        for name in ("resume_lok", "Resume_Lock", "RESUME-LOCK", "resumelock", "resume_lock ", " resume_lock", "lock_resume", "publish_lock", "lock", "resume", "resume lock"):
+    CLOSE_NAMES = ("resume_lok", "Resume_Lock", "RESUME-LOCK", "resumelock", "resume_lock ", " resume_lock", "resume_lock_v2", "my-resume-lock", "resumlok", "rsumelck", "reumelok",
+                   "resume_lcok", "resum_lok", "reesume_lock", "resume lock",
+                   "ｒｅｓｕｍｅ_lock", "resume_ｌｏｃｋ", "ＲＥＳＵＭＥ－ＬＯＣＫ", "r\u0435sume_lock", "resume_lock\u200b")
+    ORDINARY_NAMES = ("block", "clock", "unlock", "locked", "resumed", "blocklist", "deadlock", "resume_after", "lock", "resume", "publish_lock", "lock_resume", "resume_unlocked_at")
+
+    def test_only_names_close_to_resume_lock_look_like_a_typo(self):
+        """독립 재검증 D2: 예전에는 줄인 이름에 resume 이나 lock 낱말이 든 모르는 키(block·clock·unlock·locked·resumed·blocklist·resume_after …)가 모두 오타라고 안내되고 실행도 멈췄다.
+        지금은 이름이 resumelock 을 품거나 편집 거리 2 이내일 때만 오타로 본다."""
+        for name in self.CLOSE_NAMES:
             reg = today_registry()
             reg[name] = True
-            with self.subTest(name=name):
-                self.assertEqual(len(publish_lock.lock_key_problems(reg)), 1)
+            with self.subTest(close=name):
+                self.assertTrue(publish_lock._looks_like_lock_key(name))
+                problems = publish_lock.lock_key_problems(reg)
+                self.assertEqual(len(problems), 1)
+                self.assertIn("resume_lock 오타로 보입니다", problems[0])
+        for name in self.ORDINARY_NAMES:
+            reg = today_registry()
+            reg[name] = True
+            with self.subTest(ordinary=name):
+                self.assertFalse(publish_lock._looks_like_lock_key(name))
+                self.assertEqual(publish_lock.lock_key_problems(reg), [])                       # 실행 시에는 멈추지 않는다
         for name in publish_lock.KNOWN_TOP_LEVEL_KEYS:
             self.assertFalse(publish_lock._looks_like_lock_key(name) and name != "resume_lock", name)
+
+    def test_an_ordinary_unknown_key_is_called_unknown_not_a_typo_and_does_not_stop_a_run(self):
+        for name in self.ORDINARY_NAMES:
+            for base in (lock_ready, today_registry):
+                reg = base()
+                reg[name] = 1
+                with self.subTest(name=name, base=base.__name__):
+                    errors = [error for error in registry.validate_registry(reg) if error.startswith("레지스트리 키 K")]
+                    self.assertEqual(len(errors), 1)                                              # 알려진 키만 허용하는 K1 은 그대로 오류다
+                    self.assertTrue(errors[0].startswith("레지스트리 키 K1: 알 수 없는 최상위 키 %s 가 있습니다" % publish_lock._shown(name)), errors[0])
+                    self.assertNotIn("오타", errors[0])
+                    run = GuardRun(self.folder, reg, history=[], remote=[])
+                    self.assertEqual(run.code, None)                                              # 실행은 이 키 때문에 멈추지 않는다
+                    self.assertEqual(run.status, [STATUS_PREFIX + "켜짐"] if base is lock_ready else [])
+
+    def test_the_squashed_name_folds_case_separators_and_full_width_letters(self):
+        """줄인 이름: 전각·호환 글자는 보통 글자로(NFKC), 소문자로, 공백·밑줄·하이픈은 뺀다 — 검증자의 233변형에서 전각 이름은 예전 판정이 잡았으므로 좁히면서 놓치지 않는다."""
+        squash = publish_lock._squash
+        self.assertEqual(squash("Resume-Lock "), "resumelock")
+        self.assertEqual(squash(" resume\tlock"), "resumelock")
+        self.assertEqual(squash("ｒｅｓｕｍｅ＿ｌｏｃｋ"), "resumelock")                             # 전각 글자와 전각 밑줄
+        self.assertEqual(squash("ＲＥＳＵＭＥ－ＬＯＣＫ"), "resumelock")                             # 전각 대문자와 전각 하이픈
+        self.assertEqual(squash("ℝesume_lock"), "resumelock")                                   # 호환 글자(NFKC 가 먼저, 소문자는 그 뒤)
+        self.assertEqual(squash(3), "3")
+        self.assertEqual(squash(None), "none")
+        self.assertEqual(squash("\ud800"), "\ud800")                                            # 짝 없는 서로게이트도 예외 없이
+        self.assertEqual(publish_lock.LOCK_KEY_SQUASHED, squash(publish_lock.LOCK_KEY))
+
+    def test_the_edit_distance_helper_has_exact_boundaries(self):
+        within = publish_lock._within_edits
+        self.assertTrue(within("resumelock", "resumelock", 0))
+        self.assertFalse(within("resumelok", "resumelock", 0))
+        self.assertTrue(within("resumelok", "resumelock", 1))                                   # 글자 하나 빠짐
+        self.assertTrue(within("resumelockx", "resumelock", 1))                                 # 글자 하나 더함
+        self.assertTrue(within("resumelacks", "resumelock", 2))                                 # 바꿈 둘
+        self.assertTrue(within("resumelcok", "resumelock", 2))                                  # 자리 바뀜(교환)은 둘
+        self.assertFalse(within("resumlok", "resumelock", 1))
+        self.assertTrue(within("resumlok", "resumelock", 2))
+        self.assertFalse(within("resumlk", "resumelock", 2))                                    # 셋
+        self.assertFalse(within("x" * 10000, "resumelock", 2))                                  # 길이 차이만으로 거짓 — 계산하지 않는다
+        self.assertTrue(within("", "ab", 2))
+        self.assertFalse(within("", "abc", 2))
+        self.assertEqual(publish_lock.LOCK_KEY_SQUASHED, publish_lock._squash(publish_lock.LOCK_KEY))
+        self.assertEqual((publish_lock.LOCK_KEY_EDITS, publish_lock.MAX_KEY_SCAN_DEPTH, publish_lock.MAX_KEY_MESSAGES), (2, 16, 20))
+
+    def test_the_misplaced_key_rule_sees_typos_too_not_only_the_exact_key(self):
+        """독립 재검증 D5(변이 W08·W09): K2 는 '정확한 resume_lock' 만이 아니라 오타(대소문자·하이픈·글자 하나 빠짐)와 resume_lock 을 품은 이름도 본다 — 문서의 약속을 못박는다."""
+        for name in ("Resume_Lock", "resume_lok", "RESUME-LOCK", "resume_lock_v2", "resume_lock "):
+            for path, where in ((("defaults",), "defaults"), ((CHANCE,), "블로그 'chance'"), ((MACAT,), "블로그 'blogger_macat'")):
+                reg = lock_ready()
+                put_in(reg, path, name)
+                with self.subTest(name=name, where=where):
+                    problems = publish_lock.lock_key_problems(reg)
+                    self.assertEqual(len(problems), 1)
+                    self.assertTrue(problems[0].startswith("레지스트리 키 K2: %s 안에 %s 가 있습니다" % (where, publish_lock._shown(name))), problems[0])
+                    self.assertEqual([error for error in registry.validate_registry(reg) if error.startswith("레지스트리 키 K")], problems)
+        for name in ("limits_note", "block", "resume_after"):                                    # 이름이 다르면 직속에 있어도 오류가 아니다
+            reg = lock_ready()
+            put_in(reg, ("defaults",), name)
+            self.assertEqual(publish_lock.lock_key_problems(reg), [], name)
 
     def test_odd_inputs_never_raise(self):
         for reg in (None, [], "x", 3, {}, {"defaults": None, "blogs": "x"}, {"defaults": [], "blogs": [1, None, {"key": 3}]}, {1: 2, None: 3}):
@@ -596,6 +685,206 @@ class KeyTypoTest(unittest.TestCase):
         self.assertEqual(rules_in([line for line in block.lines if line.startswith("제한 재개 잠금 ")]), {"L1", "L3"})
         self.assertIsNone(publish_lock.registry_block(lock_ready()))
         self.assertIsNone(publish_lock.registry_block(today_registry()))
+
+
+class DeepKeyTest(unittest.TestCase):
+    """독립 재검증 D1(2026-11-09): K2 는 defaults·블로그 항목의 직속 키만 봐서 chance.limits·defaults.limits 같은 두 단계 이상 깊은 곳의 resume_lock 은 검증기·가드가 못 막았다 —
+    켠 사본에서 resume_lock 을 최상위에서 빼 chance.limits 안에 두면 하루 상한 없이 둘째 글이 만들어졌다. 지금은 최상위 밖 어디든(깊이 상한 MAX_KEY_SCAN_DEPTH) 오류다."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.folder = Path(tmp.name)
+
+    @staticmethod
+    def where(path):
+        return ".".join(path) if path[0] == "defaults" else "블로그 '%s'" % path[0] + "".join("." + step for step in path[1:])
+
+    def places(self):
+        for base_label, base in (("켠 레지스트리", lock_ready), ("지금의 레지스트리", today_registry)):
+            for path in DEEP_PLACES:
+                for key in ("resume_lock", "resume_lok", "Resume-Lock"):
+                    reg = base()
+                    reg.pop("resume_lock", None)                      # 진짜 최상위 키를 '빼서' 옮긴 모양(검증자 재현)
+                    put_in(reg, path, key)
+                    yield "%s · %s · %s" % (base_label, ".".join(path), key), path, key, reg
+
+    def test_every_deep_placement_is_exactly_one_validator_error_that_names_the_place(self):
+        count = 0
+        for label, path, key, reg in self.places():
+            count += 1
+            with self.subTest(label):
+                key_errors = [error for error in registry.validate_registry(reg) if error.startswith("레지스트리 키 K")]
+                self.assertEqual(len(key_errors), 1, key_errors)
+                self.assertTrue(key_errors[0].startswith("레지스트리 키 K2: %s 안에 %s 가 있습니다" % (self.where(path), publish_lock._shown(key))), key_errors[0])
+                self.assertEqual(publish_lock.lock_key_problems(reg), key_errors)
+                self.assertEqual(publish_lock.lock_state(reg), "off")                               # 잠금 값 읽기는 이 자리를 못 본다 — 그래서 위치 규칙이 필요하다
+        self.assertEqual(count, 2 * len(DEEP_PLACES) * 3)
+
+    def test_the_verifier_reproduction_a_second_post_without_a_cap_is_stopped(self):
+        """켠 사본에서 resume_lock 을 최상위에서 빼 chance.limits·defaults.limits 안에 두고 오늘 이미 1건 — 예전에는 잠금이 꺼진 줄로 읽혀 가드가 조용히 통과했다."""
+        for path in (("chance", "limits"), ("defaults", "limits")):
+            reg = lock_ready()
+            reg.pop("resume_lock")
+            put_in(reg, path)
+            for kwargs in (dict(), dict(environ={"EVENT_NAME": "workflow_dispatch"})):
+                run = GuardRun(self.folder, reg, history=[entry()], remote=[], **kwargs)
+                with self.subTest(path=path, kwargs=kwargs):
+                    self.assertEqual(run.code, 1)                                                  # None(통과) 이 아니다
+                    self.assertTrue(run.out[0].startswith("[SKIP] code=LOCK_BLOCKED rules=K2"), run.out[0])
+                    self.assertEqual([line for line in run.out if line.startswith("::error::")], ["::error::" + publish_lock.KEY_ERROR])
+
+    def test_every_deep_placement_stops_the_guard_and_chance_flow(self):
+        for label, path, key, reg in self.places():
+            run = GuardRun(self.folder, reg, history=[], remote=[])
+            with self.subTest(label):
+                self.assertEqual(run.code, 1)
+                self.assertTrue(run.out[0].startswith("[SKIP] code=LOCK_BLOCKED rules=K2"), run.out[0])
+                with self.assertRaises(drafts.DraftFlowError) as caught:
+                    drafts.chance_flow(write_registry(self.folder, reg))
+                self.assertIn("제한 재개 잠금 키가 잘못 적혀 있어 잠금 상태를 알 수 없습니다", str(caught.exception))
+
+    def test_a_key_inside_a_list_of_dicts_is_found_and_the_place_is_spelled_out(self):
+        reg = lock_ready()
+        reg["defaults"]["extra"] = [{"x": 1}, {"resume_lock": True}]
+        problems = publish_lock.lock_key_problems(reg)
+        self.assertEqual(len(problems), 1)
+        self.assertTrue(problems[0].startswith("레지스트리 키 K2: defaults.extra[1] 안에 'resume_lock' 가 있습니다"), problems[0])
+        reg = lock_ready()
+        blog_of(reg, CHANCE)["schedule"]["slots_extra"] = [[{"resume_lok": 1}]]
+        self.assertTrue(publish_lock.lock_key_problems(reg)[0].startswith("레지스트리 키 K2: 블로그 'chance'.schedule.slots_extra[0][0] 안에 'resume_lok' 가 있습니다"))
+
+    def test_the_depth_limit_is_inclusive_and_anything_deeper_is_an_error_that_stops_the_run(self):
+        limit = publish_lock.MAX_KEY_SCAN_DEPTH
+
+        def chain(extra_levels):                                           # defaults(깊이 1) 아래로 사전을 extra_levels 개 더 쌓는다
+            reg = lock_ready()
+            node = reg["defaults"]
+            for _ in range(extra_levels):
+                node = node.setdefault("n", {})
+            return reg, node
+        reg, node = chain(limit - 1)                                       # 깊이가 정확히 limit 인 사전
+        node["resume_lock"] = True
+        problems = publish_lock.lock_key_problems(reg)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("안에 'resume_lock' 가 있습니다", problems[0])                                  # 상한 안이라 찾는다
+        reg, node = chain(limit)                                           # 한 단계 더 깊다 — 안을 못 본다
+        node["resume_lock"] = True
+        problems = publish_lock.lock_key_problems(reg)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("너무 깊어(깊이 %d 초과)" % limit, problems[0])
+        reg, node = chain(limit)
+        self.assertEqual(GuardRun(self.folder, reg, history=[], remote=[]).code, 1)
+
+    def test_a_very_deep_registry_is_an_error_and_never_a_recursion_crash(self):
+        reg = lock_ready()
+        node = reg["defaults"]
+        for _ in range(5000):
+            node["n"] = {}
+            node = node["n"]
+        problems = publish_lock.lock_key_problems(reg)
+        self.assertEqual(len(problems), 1)
+        self.assertTrue(problems[0].startswith("레지스트리 키 K2: 레지스트리 구조가 너무 깊어"), problems[0])
+        self.assertEqual(len(publish_lock.registry_errors(reg)), 1)
+        run = GuardRun(self.folder, reg, history=[], remote=[])
+        self.assertEqual(run.code, 1)
+
+    def test_a_cycle_or_a_shared_substructure_is_visited_once(self):
+        reg = lock_ready()
+        reg["defaults"]["loop"] = reg["defaults"]
+        reg["defaults"]["limits"]["resume_lock"] = True
+        self.assertEqual(len(publish_lock.lock_key_problems(reg)), 1)                              # 순환이어도 끝나고 한 번만 센다
+        shared = {"resume_lock": True}
+        node = shared
+        for _ in range(6):
+            node = {str(index): node for index in range(10)}                                        # 같은 하위 구조를 열 곳이 가리킨다 — 길은 10의 6제곱 가지
+        reg = lock_ready()
+        reg["defaults"]["fan"] = node
+        problems = publish_lock.lock_key_problems(reg)
+        self.assertEqual(len(problems), 1)                                                         # 한 번씩만 훑으므로 한 건이다(세 번 훑으면 상한 20 을 채운 줄이 나온다)
+
+    def test_the_scan_never_raises_on_odd_containers(self):
+        reg = lock_ready()
+        reg["defaults"][3] = {"resume_lok": 1}                                                    # 문자열이 아닌 키(JSON 에는 없지만 사전에는 들어갈 수 있다)
+        reg["defaults"][None] = [None, 1, "x", {"k": [{}]}, [[], [None]]]
+        reg["defaults"]["empty"] = {}
+        problems = publish_lock.lock_key_problems(reg)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("안에 'resume_lok' 가 있습니다", problems[0])
+
+    def test_the_real_registry_and_the_registries_of_the_other_branches_have_no_key_problem(self):
+        self.assertEqual(publish_lock.lock_key_problems(real_registry()), [])
+        for reg in (today_registry(), lock_ready()):
+            self.assertEqual(publish_lock.lock_key_problems(reg), [])
+            self.assertEqual(publish_lock.registry_errors(reg), [])
+
+
+class KeyOutputCapTest(unittest.TestCase):
+    """독립 재검증 D4: 모르는 키(오타 모양 포함)가 아주 많아도 검증기·가드의 오류 출력은 앞 MAX_KEY_MESSAGES 개와 '외 N개' 한 줄이다(2만 개에서 4MB 였다)."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.folder = Path(tmp.name)
+
+    def key_lines(self, errors):
+        return [error for error in errors if error.startswith("레지스트리 키 K")]
+
+    def test_many_unknown_top_level_keys_give_a_short_validator_output(self):
+        cap = publish_lock.MAX_KEY_MESSAGES
+        reg = today_registry()
+        for index in range(5000):
+            reg["extra_%d" % index] = index
+        lines = self.key_lines(registry.validate_registry(reg))
+        self.assertEqual(len(lines), cap + 1)
+        self.assertIn("… 외 %d개의 최상위 키가 더 있습니다(출력은 앞 %d개만 냅니다)" % (5000 - cap, cap), lines[-1])
+        self.assertLess(sum(len(line) for line in lines), 20000)
+        self.assertEqual(publish_lock.lock_key_problems(reg), [])                                   # 오타 모양이 아니라 실행은 멈추지 않는다
+
+    def test_the_boundary_is_exact_twenty_unknown_keys_have_no_summary_line_and_twenty_one_have_one(self):
+        cap = publish_lock.MAX_KEY_MESSAGES
+        for total, expected in ((cap, cap), (cap + 1, cap + 1), (cap + 2, cap + 1)):
+            reg = today_registry()
+            for index in range(total):
+                reg["extra_%d" % index] = 1
+            lines = self.key_lines(registry.validate_registry(reg))
+            with self.subTest(total=total):
+                self.assertEqual(len(lines), expected)
+        reg = today_registry()
+        for index in range(cap + 1):
+            reg["extra_%d" % index] = 1
+        self.assertIn("… 외 1개의 최상위 키가 더 있습니다", self.key_lines(registry.validate_registry(reg))[-1])
+
+    def test_many_typo_shaped_top_level_keys_cap_the_runtime_output_too(self):
+        cap = publish_lock.MAX_KEY_MESSAGES
+        reg = lock_ready()
+        for index in range(3000):
+            reg["resume_lock_%d" % index] = True                                                     # resume_lock 을 품은 이름 — 오타 모양
+        problems = publish_lock.lock_key_problems(reg)
+        self.assertEqual(len(problems), cap + 1)
+        self.assertIn("… 외 %d개의 최상위 키가 더 있습니다" % (3000 - cap), problems[-1])
+        run = GuardRun(self.folder, reg, history=[], remote=[])
+        self.assertEqual(run.code, 1)
+        self.assertLess(len(run.out), cap + 10)                                                      # 로그도 작다
+        self.assertLess(len(run.summary[0]), 20000)
+
+    def test_many_misplaced_keys_cap_the_output(self):
+        cap = publish_lock.MAX_KEY_MESSAGES
+        reg = lock_ready()
+        for index in range(3000):
+            reg["defaults"]["resume_lock_%d" % index] = True
+        problems = publish_lock.lock_key_problems(reg)
+        self.assertEqual(len(problems), cap + 1)
+        self.assertIn("… 외 %d개의 resume_lock 모양 이름이 최상위 밖에 더 있습니다(출력은 앞 %d개만 냅니다)" % (3000 - cap, cap), problems[-1])
+        self.assertEqual(len(self.key_lines(registry.validate_registry(reg))), cap + 1)
+
+    def test_a_registry_with_a_few_problems_lists_each_without_a_summary(self):
+        reg = lock_ready()
+        reg["defaults"]["resume_lock"] = True
+        reg["resume_lok"] = True
+        lines = self.key_lines(registry.validate_registry(reg))
+        self.assertEqual(len(lines), 2)
+        self.assertFalse(any("… 외" in line for line in lines))
 
 
 class GuardFixImagesTest(GuardBase):
@@ -656,7 +945,9 @@ class GuardDailyCapTest(GuardBase):
             self.assertEqual(self.guard(lock_ready(), history=[flow_entry]).code, 0)
 
     def test_yesterdays_and_foreign_entries_do_not_count(self):
-        history = [entry(date="2026-11-08"), "문자열", None, {"topic": "날짜 없음"}, {"date": "2026-11-10", "slot": 9}]
+        """어제 항목과 사전이 아닌 항목(옛 형식 제목 문자열·null — 실제 이력 맨 앞에 있다)은 하루 상한에 세지 않는다. 날짜가 없는 사전 항목·오늘보다 뒤 날짜 항목은 이 시험에서 뺐다:
+        주간 상한(L8)이 켜진 뒤로는 그런 항목이 '세지 않고 지나가는' 것이 아니라 일주일 안의 글 수를 셀 수 없게 만들어 가드가 멈춘다(WeeklyOddDateTest 가 그 멈춤을 확인한다)."""
+        history = [entry(date="2026-11-08"), "문자열", None]
         result = self.guard(lock_ready(), history=history, remote=[])
         self.assertEqual((result.code, result.out), (None, []))
 
@@ -699,12 +990,15 @@ class GuardOpenDraftsTest(GuardBase):
         self.assertEqual(result.remote_calls, [1])
 
     def test_two_leave_room_for_one_more(self):
-        result = self.guard(lock_ready(), history=[], remote=[BRANCH_A, BRANCH_B], exists=lambda path: False)
+        """열린 초안 상한(3)만 보는 시험이다 — 주간 상한(L8, 굴러가는 7일에 2편)이 따로 걸리지 않도록 지금(`later`)을 두 초안이 7일보다 오래된 날로 잡았다.
+        같은 두 초안이 일주일 안에 있으면 주간 상한이 막는다(WeeklyOpenDraftsTest)."""
+        result = self.guard(lock_ready(), history=[], remote=[BRANCH_A, BRANCH_B], exists=lambda path: False, now=NOW + timedelta(days=11))
         self.assertEqual((result.code, result.out), (None, []))
 
     def test_merged_branches_do_not_count_even_before_the_branch_is_cleaned_up(self):
+        """병합된 초안은 열린 초안 수에 세지 않는다(주간 상한 이야기가 아니다 — 병합된 글도 일주일 안이면 주간 상한에는 센다: WeeklyOpenDraftsTest). 그래서 지금(`later`)을 일주일 뒤로 잡았다."""
         history = [entry(date="2026-11-07", branch=BRANCH_A), entry(date="2026-11-08", branch=BRANCH_B), entry(date="2026-11-06", branch="ai/draft/2026-11-06-s9")]
-        result = self.guard(lock_ready(), history=history, remote=[BRANCH_A, BRANCH_B, "ai/draft/2026-11-06-s9", "ai/draft/odd"], exists=lambda path: True)
+        result = self.guard(lock_ready(), history=history, remote=[BRANCH_A, BRANCH_B, "ai/draft/2026-11-06-s9", "ai/draft/odd"], exists=lambda path: True, now=NOW + timedelta(days=11))
         self.assertEqual((result.code, result.out), (None, []))
 
     def test_the_limit_is_the_registry_value(self):

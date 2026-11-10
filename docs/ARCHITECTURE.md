@@ -92,7 +92,7 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 어느 채널의 것인지
 
 ## 3. 레지스트리 스키마 (`pipeline/blogs.json`, v1)
 
-최상위: `_doc`, `schema_version`(1), `shared_secrets`(여러 블로그가 함께 쓰는 시크릿 이름), `defaults`(모든 블로그가 상속), `blogs[]`, `resume_lock`(선택 — 제한 재개 잠금, 기본 꺼짐: §4-9). **이 여섯 개 말고는 최상위에 두지 못한다**(검증기 규칙 K1 — `publish_lock.KNOWN_TOP_LEVEL_KEYS` 와 시험이 못박고, 새 키는 둘을 함께 고쳐 더한다. `resume_lock` 오타·잘못된 위치는 K1·K2).
+최상위: `_doc`, `schema_version`(1), `shared_secrets`(여러 블로그가 함께 쓰는 시크릿 이름), `defaults`(모든 블로그가 상속), `blogs[]`, `resume_lock`(선택 — 제한 재개 잠금, 기본 꺼짐: §4-9). **이 여섯 개 말고는 최상위에 두지 못한다**(검증기 규칙 K1 — `publish_lock.KNOWN_TOP_LEVEL_KEYS` 와 시험이 못박고, 새 키는 둘을 함께 고쳐 더한다. `resume_lock` 오타와 최상위 밖(어느 깊이든)의 위치 오류는 K1·K2).
 
 | 필드 | 설명 / 제약 |
 |------|-------------|
@@ -110,7 +110,8 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 어느 채널의 것인지
 | `schedule.cron` | 워크플로 cron 목록 중 하나(대표값). `slots_kst`는 참고 |
 | `limits.max_posts_per_day` | 1–24. 하루 상한(KST 날짜 기준). 수동 `--topic`은 우회. **Chance 는 정기 실행의 슬롯 수(KST 9·18시)가 하루 편수를 정하고 이 값은 수동 실행의 경고에만 쓰인다**(D-54) — 제한 재개 잠금이 켜지면 정기·수동 모두에 코드로 강제하고 값은 1 이어야 한다(§4-9) |
 | `limits.max_open_drafts` | (선택, Chance 승인 흐름 `pr` 에서만 쓴다) 승인을 기다리는(또는 닫은 지 얼마 안 된) 초안 브랜치 수의 상한 — 값이 있으면 그 수에 닿았을 때 새 초안을 만들지 않는다(키가 없으면 이전과 같다). 1 이상 정수. 제한 재개 잠금이 켜져 있으면 필수이고 1 이상 3 이하(§4-9) |
-| `resume_lock` | (**최상위**, 선택) `true` 면 제한 재개 잠금이 켜진다 — 사람 승인 없는 공개 경로를 코드로 막는다(§4-9, [`PUBLISH_PATHS.md`](./PUBLISH_PATHS.md)). 키가 없거나 `false` 면 이전과 같다. `true`·`false` 가 아닌 **값**은 켜진 것으로 읽고 오류다(L0 — 값 오타만). 키 **이름** 오타·`defaults`·블로그 항목 안의 위치 오류는 오류다(K1·K2). **켜고 끄는 것은 T3** |
+| `limits.max_posts_per_week` | (선택) 굴러가는 7일(오늘을 포함해 오늘과 그 6일 전까지, KST 날짜 기준)에 만들어지는 글 수의 상한 — 모든 블로그·`defaults.limits` 에서 알려진 키이고 값이 있으면 1–14 정수(불리언 아님, 레지스트리 검증기가 거절). **읽는 곳은 제한 재개 잠금뿐이다**: 잠금이 켜져 있으면 Chance 의 값이 필수이고 1 이상 2 이하(L8)이며 생성기 가드가 이 값을 센다. 잠금이 꺼져 있거나 Chance 밖의 블로그는 읽지 않는다(키가 없으면 이전과 같다)(§4-9) |
+| `resume_lock` | (**최상위**, 선택) `true` 면 제한 재개 잠금이 켜진다 — 사람 승인 없는 공개 경로를 코드로 막는다(§4-9, [`PUBLISH_PATHS.md`](./PUBLISH_PATHS.md)). 키가 없거나 `false` 면 이전과 같다. `true`·`false` 가 아닌 **값**은 켜진 것으로 읽고 오류다(L0 — 값 오타만). 키 **이름** 오타와 최상위 밖(`defaults`·블로그 항목과 그 안쪽 어느 깊이든)의 위치 오류는 오류다(K1·K2). **켜고 끄는 것은 T3** |
 | `llm.models`, `llm.max_retries` | 모델 폴백 순서, 일시 오류 재시도 횟수 |
 | `secrets` | `{역할: 환경변수(=Secrets) 이름}`. **값은 절대 쓰지 않는다.** 플랫폼별 필수 역할은 `registry.PLATFORMS`. `tistory`·`naver`는 `llm_api_key` **뿐**이다 — 다른 역할이나 이름에 `PASSWORD`·`PASSWD`·`PWD`·`COOKIE`·`SESSION`·`LOGIN`·`CREDENTIAL`이 든 시크릿은 레지스트리 검증(REG-1)이 막는다(구조적 보장은 시크릿 역할이 `llm_api_key` 뿐이라는 것이다 — 이름 검사는 실수를 막는 보조이고 포함 검사라 `PASS_WORD`·`TISTORY_PW` 같은 우회 철자는 통과한다. [`SECURITY_GUARDRAILS.md`](./SECURITY_GUARDRAILS.md) G-S7) |
 | `ad_surface`, `protected_paths` | 광고(AdSense) 심사·수익 대상인지, 승인 없이 못 바꾸는 경로(`/`로 끝나면 폴더). `ad_surface: true`는 사이트 코드가 이 저장소에 있는 `jekyll-git` 블로그에만 쓴다 |
@@ -694,33 +695,36 @@ Unsplash API 지침(2026-11-03 원문 확인)은 ① API 가 준 사진 주소�
 
 ## 4-9. 제한 재개 잠금 — 사람 승인 없는 공개 경로 0개 (`pipeline/publish_lock.py`, 2026-11-09)
 
-운영자 결정(일정·제한 재개, 2026-11-09): 발행 정지(`PIPELINE_PAUSE`)를 풀기 전에 Chance 는 승인 흐름(`publish_flow: pr`)·Blogger 는 초안 전용·자동/직접 게시 꺼짐·하루 최대 1편이어야 하고, 이것을 **코드와 시험으로** 보장하지 못하면 정지를 유지한다. 승인 없이 공개 화면을 바꿀 수 있는 길의 전수조사 표(P1–P6)와 각 길을 막는 방법은 [`PUBLISH_PATHS.md`](./PUBLISH_PATHS.md)가 정본이고, 여기에는 구조만 적는다.
+운영자 결정(일정·제한 재개, 2026-11-09): 발행 정지(`PIPELINE_PAUSE`)를 풀기 전에 Chance 는 승인 흐름(`publish_flow: pr`)·Blogger 는 초안 전용·자동/직접 게시 꺼짐·하루 최대 1편(재개 뒤 일주일에 1–2편 — 확인 요청 007 답, 2026-11-09)이어야 하고, 이것을 **코드와 시험으로** 보장하지 못하면 정지를 유지한다. 승인 없이 공개 화면을 바꿀 수 있는 길의 전수조사 표(P1–P6)와 각 길을 막는 방법은 [`PUBLISH_PATHS.md`](./PUBLISH_PATHS.md)가 정본이고, 여기에는 구조만 적는다.
 
-**스위치**: 레지스트리 최상위 `resume_lock: true`(§3). **키가 없거나 `false` 면 이전과 같다**(꺼짐이 기본 — 켜는 것은 별도 T3 변경이고 이 일은 레지스트리 값을 바꾸지 않았다). 값이 `true`·`false` 가 아니면 켜진 것으로 읽고 오류다(fail closed) — 이것(L0)은 **값 오타만** 막는다. 키 이름 오타(`resume_lok`·대소문자·하이픈·뒤 공백)와 위치 오류(`defaults`·블로그 항목 안)는 잠금과 무관하게 항상 적용되는 규칙 K1(최상위에는 알려진 키만)·K2(`resume_lock` 은 최상위에만)가 막고, 실행 시에도 멈춘다. 알려진 최상위 키는 `publish_lock.KNOWN_TOP_LEVEL_KEYS` 와 시험이 못박는다 — 새 최상위 키를 더하는 변경은 그 목록과 시험을 함께 고친다.
+**스위치**: 레지스트리 최상위 `resume_lock: true`(§3). **키가 없거나 `false` 면 이전과 같다**(꺼짐이 기본 — 켜는 것은 별도 T3 변경이고 이 일은 레지스트리 값을 바꾸지 않았다). 값이 `true`·`false` 가 아니면 켜진 것으로 읽고 오류다(fail closed) — 이것(L0)은 **값 오타만** 막는다. 키 이름 오타(`resume_lok`·대소문자·하이픈·뒤 공백 — 줄인 이름이 `resumelock` 을 품거나 편집 거리 2 이내)와 위치 오류(최상위 밖 어느 깊이든 — `defaults`·블로그 항목과 그 안의 `limits` 등, 깊이 상한 16)는 잠금과 무관하게 항상 적용되는 규칙 K1(최상위에는 알려진 키만)·K2(`resume_lock` 은 최상위에만)가 막고, 실행 시에도 멈춘다(오류 문장은 앞 20개와 '외 N개' 한 줄). 알려진 최상위 키는 `publish_lock.KNOWN_TOP_LEVEL_KEYS` 와 시험이 못박는다 — 새 최상위 키를 더하는 변경은 그 목록과 시험을 함께 고치고, 이 목록·K1·K2·`SHADOW_RUN` 값 집합을 바꾸는 것은 T3 다([`SECURITY_GUARDRAILS.md`](./SECURITY_GUARDRAILS.md) §3).
 
 **켜졌을 때 코드가 강제하는 것**(모두 같은 순수 함수 `publish_lock.lock_errors` 의 규칙을 읽는다):
 
 | 곳 | 하는 일 |
 |----|---------|
-| 레지스트리 검증(`validate_registry` → `python -m pipeline.registry`·`pipeline.plan`·`pipeline.run`·검증기 REG-1) | 항상(잠금과 무관): 알려진 최상위 키만(K1)·`resume_lock` 은 최상위에만(K2). 켜졌을 때 규칙 L0–L7 을 어기면 오류: `chance.publish_flow` 는 `pr`(L1·L3), Chance 밖 블로그의 `mode` 는 `off`·`draft`·`package`(L2), 하루 상한 1(L4·L7), `chance.limits.max_open_drafts` 1 이상 3 이하(L5), `chance.languages` 값(L6) |
-| 생성기 시작 가드(`generator.py` `main()` 정지 검사 직후 한 줄 `publish_lock.guard_start`) | 규칙 위반이면 글을 만들지 않고 `::error::`·종료 1. 기존 글 이미지 교체(main 직접 커밋)는 종료 1. 하루 상한·열린 초안 상한에 닿으면 건너뜀(종료 0). 이력 파일이 깨졌으면 상한을 셀 수 없어 멈춤. 잠금 키가 오타·잘못된 위치(K1·K2)여도 멈춘다. 잠금이 켜져 있으면 로그에 `[잠금] 제한 재개 잠금: 켜짐` 한 줄(꺼져 있으면 — 키가 없는 지금도, `false` 여도 — 아무것도 남기지 않는다). 연습 실행·그림자 실행은 상한을 세지 않는다(가드에 닿은 규칙 위반은 여전히 멈춘다). `SHADOW_RUN` 값 집합은 켜짐 `1·true·yes·on·enabled`·꺼짐 비움·`0·false·no·off·disabled`, 그 밖의 값은 잠금이 켜져 있을 때 종료 2. 합친 뒤 `main()` 순서는 정지 검사 → 그림자 분기(GATE) → 이 가드 — 그림자 분기가 읽기 전용으로 끝나므로 그림자 실행은 가드에 닿지 않고 가드의 그림자 예외는 방어선이다 |
+| 레지스트리 검증(`validate_registry` → `python -m pipeline.registry`·`pipeline.plan`·`pipeline.run`·검증기 REG-1) | 항상(잠금과 무관): 알려진 최상위 키만(K1)·`resume_lock` 은 최상위에만(K2 — 최상위 밖 어느 깊이든 검사). 켜졌을 때 규칙 L0–L8 을 어기면 오류: `chance.publish_flow` 는 `pr`(L1·L3), Chance 밖 블로그의 `mode` 는 `off`·`draft`·`package`(L2), 하루 상한 1(L4·L7), `chance.limits.max_open_drafts` 1 이상 3 이하(L5), `chance.languages` 값(L6), `chance.limits.max_posts_per_week` 가 있고 1 이상 2 이하(L8). 별개로 `limits.max_posts_per_week` 값은 잠금과 무관하게 1–14 정수여야 한다(`registry.py` — 모든 블로그·`defaults.limits`) |
+| 생성기 시작 가드(`generator.py` `main()` 정지 검사 직후 한 줄 `publish_lock.guard_start`) | 규칙 위반이면 글을 만들지 않고 `::error::`·종료 1. 기존 글 이미지 교체(main 직접 커밋)는 종료 1. 하루 상한·열린 초안 상한·주간 상한(굴러가는 7일)에 닿으면 건너뜀(종료 0 — 상한을 보는 순서는 하루 → 열린 초안 → 주간이고 원격 초안 목록은 한 번만 읽는다). 이력 파일이 깨졌거나 이력 항목의 날짜를 믿을 수 없으면(주간 상한) 상한을 셀 수 없어 멈춤. 잠금 키가 오타·잘못된 위치(K1·K2)여도 멈춘다. 잠금이 켜져 있으면 로그에 `[잠금] 제한 재개 잠금: 켜짐` 한 줄(꺼져 있으면 — 키가 없는 지금도, `false` 여도 — 아무것도 남기지 않는다). 연습 실행·그림자 실행은 상한을 세지 않는다(가드에 닿은 규칙 위반은 여전히 멈춘다). `SHADOW_RUN` 값 집합은 켜짐 `1·true·yes·on·enabled`·꺼짐 비움·`0·false·no·off·disabled`, 그 밖의 값은 잠금이 켜져 있을 때 종료 2. 합친 뒤 `main()` 순서는 정지 검사 → 그림자 분기(GATE) → 이 가드 — 그림자 분기가 읽기 전용으로 끝나므로 그림자 실행은 가드에 닿지 않고 가드의 그림자 예외는 방어선이다 |
 | `drafts.chance_flow()`(워크플로 '발행 흐름 확인' 단계·`draft_flow deliver`·생성기가 읽는 한 곳) | 규칙 위반이나 잠금 키 문제(K1·K2)면 `direct` 로도 `pr` 로도 답하지 않고 멈춘다 → 그 단계가 실패하면 뒤 단계(직접 커밋·배포 요청·초안 올리기)가 돌지 않는다. `chanceblog.yml` 은 고치지 않았다(단계 목록을 시험이 고정한다) |
 | Blogger 러너(`pipeline/run.py`) | 레지스트리를 읽자마자 규칙 검사 — 위반이면 어떤 글도 만들지 않고 `::error::`·종료 2. 수동 `publish`(즉시 게시) 입력은 어떤 표기(`publish`·`on`·`1`·`true`·`yes`·`--publish on`)로도 거절. 초안함 업로드(`draft`)·파일 저장(`off`)은 그대로 된다 |
 | `chance-fix-images.yml` 첫 단계(`python -m pipeline.publish_lock check-direct`) | 직접 커밋 워크플로는 잠금이 켜져 있거나 레지스트리를 읽지 못하거나 잠금 키가 잘못 적혀 있으면 멈춘다(연습 실행은 저장하지 않으므로 이 단계를 건너뛴다) |
-| `chance-shadow.yml`(그림자 실행, 읽기 전용) | 체크아웃 바로 뒤 첫 단계가 `pipeline/shadow_run.py`(GATE 묶음)가 없으면 실패한다 — 그 코드가 없으면 생성기가 `SHADOW_RUN` 을 몰라 글을 만들고 한도를 쓰므로 병합 순서(GATE 먼저)를 구조로 지킨다 |
+| `chance-shadow.yml`(그림자 실행, 읽기 전용) | 체크아웃 바로 뒤 첫 단계가 `pipeline/shadow_run.py`(GATE 묶음)가 없으면 실패한다 — 그 코드가 없으면 생성기가 `SHADOW_RUN` 을 몰라 글을 만들고 한도를 쓰므로 GATE 없이 이 워크플로가 도는 것을 구조로 막는다(잠금은 GATE 보다 먼저 병합됐으므로 켜는 변경은 GATE 병합 뒤에만 한다 — [`PUBLISH_PATHS.md`](./PUBLISH_PATHS.md) §6) |
 
 **하루 상한 1편의 단위와 이유**: 이력(`history.json`)의 한국 날짜가 오늘인 항목 수다 — 정기 실행·수동 실행(연습 제외) 모두. 지금(꺼짐)은 정기 실행이 슬롯 2개로만 하루 2편을 지키고 수동 실행은 상한을 따지지 않는다(D-54, §2-1 '수동 실행의 기본값') — 그 동작은 바뀌지 않았고 잠금이 켜질 때만 코드가 강제한다. 승인 대기·닫힘·병합이 모두 이력에 남으므로 닫은 뒤에도 같은 날 다시 만들지 않는다.
 
 **열린 초안 상한**(`chance.limits.max_open_drafts`, 값이 있고 `publish_flow` 가 `pr` 일 때 — 잠금과 무관하게 키가 있으면 적용): 생성기 프로세스에는 저장소 쓰기 토큰을 주지 않으므로(시험이 고정) GitHub API 로 열린 PR 수를 세지 못한다. 그래서 git 으로 원격의 초안 브랜치(`ai/draft/…`)를 읽고 글이 이미 main 에 있는(병합된) 초안을 뺀 수를 센다. **닫은 초안도 브랜치가 정리되기까지(7일) 센다** — 실제 열린 PR 수보다 크거나 같아 상한을 넘기는 쪽으로는 틀리지 않는다. 브랜치를 읽지 못하면 이번 실행을 건너뛴다(fail closed).
 
+**주간 상한**(`chance.limits.max_posts_per_week`, 잠금이 켜져 있을 때만 — 운영자 조건 '재개 시 주 1–2편', 확인 요청 007 답): 굴러가는 7일(오늘을 포함해 오늘과 그 6일 전까지, KST 날짜 — 달력 주가 아니다)에 Chance 가 만든 글이 값(1 또는 2)에 닿으면 정기·수동 실행 모두 새 글을 만들지 않고 정상 건너뜀한다. 센 것은 **이력의 글(공개·승인 대기·닫힌 초안·병합된 글 모두)과 이력에 아직 없는 열린 초안 브랜치**이고 두 목록은 초안 브랜치 이름으로 이어 중복 없이 센다. 날짜를 믿을 수 없는 이력 항목(없음·YYYY-MM-DD 가 아님·오늘보다 뒤)이 있거나 원격 초안 목록을 읽지 못하면 멈춘다(fail closed). 세는 방법·창 경계·이상한 값의 처리 표는 [`PUBLISH_PATHS.md`](./PUBLISH_PATHS.md) §4-4. Chance 밖의 블로그(Blogger·네이버 초안 패키지)에는 강제하지 않는다 — 운영자가 직접 게시하는 초안 흐름이고 하루 상한(L7)이 그대로 있다.
+
 | 코드(`[SKIP] code=…`) | 뜻 | 종료 |
 |-----------------------|----|------|
-| `LOCK_BLOCKED` | 잠금이 켜져 있는데 규칙 위반·이미지 교체·이력 손상 등으로, 또는 잠금 키 오타·잘못된 위치(`rules=K1`·`K2`)로 멈춤(`rules=`·`reason=` 칸) | 1(Blogger 러너는 2, 모르는 `SHADOW_RUN` 값은 2) |
+| `LOCK_BLOCKED` | 잠금이 켜져 있는데 규칙 위반·이미지 교체·이력 손상·이력 날짜를 읽을 수 없음 등으로, 또는 잠금 키 오타·잘못된 위치(`rules=K1`·`K2`)로 멈춤(`rules=`·`reason=` 칸) | 1(Blogger 러너는 2, 모르는 `SHADOW_RUN` 값은 2) |
 | `LOCK_DAILY_CAP` | 오늘 이미 하루 상한만큼 만들어져 건너뜀 | 0 |
+| `LOCK_WEEKLY_CAP` | 최근 7일(굴러가는 창)에 이미 주간 상한만큼 만들어져 건너뜀(`since=`·`until=`·`week=`·`cap=` 칸) | 0 |
 | `OPEN_DRAFTS_CAP` | 열린 초안 브랜치가 상한에 닿아 건너뜀 | 0 |
 | `OPEN_DRAFTS_UNKNOWN` | 열린 초안 브랜치를 읽지 못해 건너뜀(고정 문장 `::warning::`) | 0 |
 
-**검증**: `tests/test_publish_lock.py`(규칙·가드·생성기·러너·명령줄·워크플로 단계 조건), `tests/test_publish_paths.py`(워크플로 쓰기 신호 전수표가 실제 파일과 같음·새 쓰기 길이 생기면 빨강·규칙 매트릭스·그림자 워크플로 읽기 전용). 켜는 값 목록은 [`PUBLISH_PATHS.md`](./PUBLISH_PATHS.md) §6.
+**검증**: `tests/test_publish_lock.py`(규칙·가드·생성기·러너·명령줄·워크플로 단계 조건), `tests/test_publish_lock_weekly.py`(주간 상한 — 규칙 L8·레지스트리 검증·세기·가드·생성기 하루하루·K1·K2 불변), `tests/test_publish_paths.py`(워크플로 쓰기 신호 전수표가 실제 파일과 같음·새 쓰기 길이 생기면 빨강·규칙 매트릭스·그림자 워크플로 읽기 전용). 켜는 값 목록은 [`PUBLISH_PATHS.md`](./PUBLISH_PATHS.md) §6.
 
 ## 4-10. 구조화 Fact 경로 — 외부 기사 요약 대신 구조화 데이터로 글을 만드는 길, 1단계 부품 (`pipeline/facts.py` 외, 2026-11-09)
 
