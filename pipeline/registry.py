@@ -26,6 +26,7 @@ from pipeline import publish_lock
 from pipeline.console import clean_secret, one_line, safe_output, secret_was_cleaned
 from pipeline.gates import SUPPORTED_LANGUAGES, first_match
 from pipeline import quality_gate    # languages 의 단일 정의처(normalize_languages) — 이 줄은 다른 import 줄과 떨어뜨려 두어 다른 변경과 병합할 때 충돌하지 않게 한다
+from pipeline import source_policy  # 소스 정책 값(chance.source_policy: legacy·allowlist) 검증 규칙 — 레지스트리 값 모양만 본다
 
 ROOT = Path(__file__).resolve().parent.parent
 REGISTRY_PATH = Path(__file__).resolve().parent / "blogs.json"
@@ -593,6 +594,7 @@ def validate_registry(reg, root=None):
         if not isinstance(blog.get("ad_surface"), bool):
             errors.append(f"{label}: ad_surface는 true/false여야 합니다.")
         errors.extend(_ads_errors(blog, label))
+        errors.extend(source_policy.registry_errors(blog, label, platform))
         protected = blog.get("protected_paths")
         if not isinstance(protected, list) or not all(_safe_rel(p) for p in protected):
             errors.append(f"{label}: protected_paths는 상대 경로 배열이어야 합니다.")
