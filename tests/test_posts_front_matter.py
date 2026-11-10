@@ -59,8 +59,16 @@ class EveryPostFrontMatterTest(unittest.TestCase):
     def test_every_post_has_a_strictly_valid_front_matter(self):
         for path in all_posts():
             with self.subTest(post=path.relative_to(_bootstrap.ROOT).as_posix()):
-                self.assertEqual(g.front_matter_problems(read(path)), KNOWN_EXCEPTIONS.get(path.name, []),
+                self.assertEqual(g.front_matter_problems(read(path), allow_provenance=True), KNOWN_EXCEPTIONS.get(path.name, []),
                                  "머리말이 깨졌다 — 공개 사이트에서 제목이 파일 이름으로, 분야가 General 로 나온다(이슈 #59). 생성기가 쓴 글이면 test_generator_front_matter.py 를 먼저 본다")
+
+    def test_a_provenance_marker_is_only_ever_the_one_canonical_line(self):
+        """저장소의 완성된 글을 읽는 이 시험만 출처 표식(`provenance`)을 허용하고(allow_provenance=True — 구조화 Fact 글이 올라와도 통과하도록), 그때도 표식은 하나뿐이고 값이 정확히 facts 여야 한다.
+        모델이 쓴 글에 표식이 끼는 일은 생성기의 머리말 검사(기본은 표식 금지)가 막는다(docs/AI_FLOW.md)."""
+        for path in all_posts():
+            with self.subTest(post=path.relative_to(_bootstrap.ROOT).as_posix()):
+                problems = [p for p in g.front_matter_problems(read(path), allow_provenance=True) if "provenance" in p]
+                self.assertEqual(problems, [])
 
     def test_the_known_exceptions_are_still_needed(self):
         by_name = {path.name: path for path in all_posts()}

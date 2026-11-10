@@ -10,6 +10,7 @@ import json
 import re
 from datetime import date
 
+from pipeline import ai_guard   # 방벽이 막은 예외(AiInputForbidden)를 '확장 실패' 로 삼키지 않으려고 이름을 가져온다(docs/AI_FLOW.md)
 from pipeline.gates import most_similar, similarity, topic_allowed
 
 TOPIC_MIN_CHARS, TOPIC_MAX_CHARS = 8, 60
@@ -174,6 +175,8 @@ def pick_topic(profile, history, today, avoid_titles, rng, llm=None, expand_n=8)
         recent = [e.get("topic") for e in history if isinstance(e, dict) and e.get("topic")]
         try:
             raw, _model = llm(expand_prompt(profile, recent, expand_n, today))
+        except ai_guard.AiInputForbidden:
+            raise      # 방벽이 막은 것은 '확장 실패'(LLM 키·할당량 문제로 안내된다)로 삼키지 않는다 — 입력을 만드는 코드의 결함 신호라 실행이 빨갛게 끝나야 한다(D-195)
         except Exception:  # noqa: BLE001 - 확장 실패는 '주제 없음'으로 처리하고 호출자가 기록한다
             return None, "expand_failed"
         for candidate in parse_topic_list(raw):
