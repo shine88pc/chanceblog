@@ -18,6 +18,10 @@
 
 근거 텍스트 경계: Gate 가 '모델에 준 근거'를 읽는 곳은 evidence_text() 함수 하나뿐이다(출처 신원은 source_ref() 하나). 나중에 근거를 다른 모양(구조화 자료와
 출처 기록)으로 바꿔 끼울 때 이 두 함수만 바꾸면 된다 — 규칙 쪽은 그 함수가 돌려주는 글만 본다.
+
+구조화 Fact 글(S2BG): source 가 올바른 Fact 사전(fact_post 가 True 이고 근거·출처 칸이 모두 글인 dict — docs/QUALITY_GATE.md §11)이면 위 두 함수가 그 사전의 근거 텍스트와 출처를 돌려주고,
+허용 호스트(provider_hosts)와 중복 방지 키(dedupe_key)는 fact_ref() 가 읽는다(Fact 사전의 칸을 읽는 곳은 _fact_source() 하나). Fact 글에서만 QG5 에 provider_hosts(정확히 같은 호스트)가 더해지고
+QG7 이 같은 출처 주소 대신 같은 dedupe_key 를 본다 — 피드 글의 평가는 한 글자도 달라지지 않는다. 올바르지 않은 사전(반쪽·위조)은 피드 항목으로 읽혀 근거가 없으면 QG0-NO-SOURCE 로 보류된다.
 """
 import datetime
 import json
@@ -453,12 +457,76 @@ def _squash(text):
 # ----------------------------------------------------------------------------
 Evidence = namedtuple("Evidence", "text summary_chars")
 SourceRef = namedtuple("SourceRef", "link domain name")
+FactRef = namedtuple("FactRef", "hosts dedupe_key")
+_FactSource = namedtuple("_FactSource", "evidence url domain name hosts dedupe_key")
+MAX_PROVIDER_HOSTS = 32                      # provider_hosts 에서 앞의 이만큼만 읽는다(나머지는 무시 — 허용 목록을 넓히지 않는다)
+MAX_HOST_CHARS = 253                         # 호스트 이름의 최대 길이(DNS 한도)
+_ASCII_LOWER = {code: code + 32 for code in range(ord("A"), ord("Z") + 1)}
+_DNS_HOST = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?")      # 점으로 이은 둘 이상의 라벨(영문 소문자·숫자·하이픈, 마지막 라벨은 글자로 시작 — 레지스트리의 호스트 검증과 같은 모양), 스킴·경로·포트·계정·공백·별표는 없다
+
+
+def _ascii_lower(text):
+    """ASCII 대문자만 소문자로 바꾼다. 유니코드 소문자화는 쓰지 않는다 — 켈빈 기호(U+212A) 같은 글자가 소문자화로 ASCII `k` 가 되어 다른 호스트와 같아지는 것을 막는다."""
+    return text.translate(_ASCII_LOWER)
+
+
+def _fact_source(source):
+    """구조화 Fact 글의 source 사전(docs/QUALITY_GATE.md §11 의 인터페이스)이 올바르면 그 값을 한 번 읽어 모은 기록, 아니면 None.
+    올바른 사전 = `fact_post` 가 정확히 True 이고(1·"true"·None 은 아니다) `evidence_text`·`source_url`·`source_domain`·`source_name` 이 모두 글(str)인 dict.
+    그 밖의 모양(키 일부 없음·글이 아닌 값·표지가 True 가 아님)은 올바른 Fact 사전이 아니다 — 부르는 쪽이 피드 항목으로 읽고 근거가 없으면 QG0-NO-SOURCE 로 보류하므로 위조된 반쪽 사전은 Gate 를 지나가지 못한다.
+    `fact_post` 는 생성기가 레지스트리·조립기의 값으로 사전을 만들 때만 넣는 내부 표지이고 피드 파서는 이 키를 만들지 않는다. Fact 사전의 칸을 읽는 곳은 이 함수 하나다."""
+    if not isinstance(source, dict) or source.get("fact_post") is not True:
+        return None
+    evidence, url, domain, name = (source.get(key) for key in ("evidence_text", "source_url", "source_domain", "source_name"))
+    if not all(isinstance(value, str) for value in (evidence, url, domain, name)):
+        return None
+    return _FactSource(evidence, url, domain, name, source.get("provider_hosts"), source.get("dedupe_key"))
+
+
+def _clean_host(item):
+    """provider_hosts 의 항목 하나를 정규화한 호스트 이름(ASCII 소문자, 끝 점 하나 제거)으로, 호스트 모양이 아니면 None: 글이 아님·빈 글자·공백·`*`·스킴·경로·포트·사용자 정보·비 ASCII 글자·
+    라벨 하나뿐인 이름·마지막 라벨이 글자로 시작하지 않는 이름(IP 주소)은 모두 이상한 모양이다."""
+    if not isinstance(item, str) or not item or len(item) > MAX_HOST_CHARS + 1:
+        return None
+    host = _ascii_lower(item)
+    if host.endswith("."):
+        host = host[:-1]
+    if len(host) > MAX_HOST_CHARS or not _DNS_HOST.fullmatch(host):
+        return None
+    return host
+
+
+def _provider_hosts(raw):
+    """레지스트리 Provider 의 허용 호스트 목록(`provider_hosts`, list 나 tuple)에서 쓸 수 있는 호스트만 정규화해 중복 없이 튜플로. 이상한 항목은 무시하고(허용 목록을 넓히지 않는다) 목록이 아니거나
+    모두 이상하면 빈 튜플이다. 글 하나(str)는 목록이 아니다. 앞의 MAX_PROVIDER_HOSTS 개만 읽는다."""
+    if not isinstance(raw, (list, tuple)):
+        return ()
+    hosts = []
+    for item in raw[:MAX_PROVIDER_HOSTS]:
+        host = _clean_host(item)
+        if host is not None and host not in hosts:
+            hosts.append(host)
+    return tuple(hosts)
+
+
+def fact_ref(source):
+    """구조화 Fact 글(올바른 Fact 사전)이 아니면 None. 맞으면 FactRef(hosts, dedupe_key): hosts 는 QG5 가 더해 줄 Provider 허용 호스트(정규화·검증한 튜플), dedupe_key 는 QG7 이 비교할 중복 방지 키
+    (빈 글자·공백뿐·글이 아니면 None — QG0-DEDUPE-KEY 로 보류된다). provider_hosts 는 피드 항목에서는 읽지 않는다."""
+    fact = _fact_source(source)
+    if fact is None:
+        return None
+    key = fact.dedupe_key
+    return FactRef(_provider_hosts(fact.hosts), key if isinstance(key, str) and key.strip() else None)
 
 
 def evidence_text(source):
     """모델에 넘긴 근거(generator.build_post_prompt 가 프롬프트에 싣는 것: 제목·출처 이름·게시 시각·기사 요약)를 한 글로 이어 돌려준다.
     게시 시각은 UTC 날짜와 한국 날짜를 둘 다 적는다(글이 한국 날짜로 쓸 수 있다). 근거가 없으면(source 가 비었으면) 빈 글이다.
-    summary_chars 는 그중 기사 요약의 글자 수(그림자 결과의 source_text_chars)."""
+    summary_chars 는 그중 기사 요약의 글자 수(그림자 결과의 source_text_chars).
+    구조화 Fact 글(올바른 Fact 사전)이면 조립기가 만든 근거 텍스트(`evidence_text` 칸의 앞 MAX_EVIDENCE_CHARS 자)를 요약 글자 수 0 으로 돌려준다 — 기사 요약이 아니다."""
+    fact = _fact_source(source)
+    if fact is not None:
+        return Evidence(fact.evidence[:MAX_EVIDENCE_CHARS], 0)
     if not isinstance(source, dict):
         return Evidence("", 0)
     title = "" if source.get("title") is None else str(source.get("title"))
@@ -478,7 +546,10 @@ def evidence_text(source):
 
 
 def source_ref(source):
-    """출처 신원: (검증된 원문 주소, 게시자 도메인, 출처 이름). 근거 글이 아니라 '어디서 왔나'만 읽는다."""
+    """출처 신원: (검증된 원문 주소, 게시자 도메인, 출처 이름). 근거 글이 아니라 '어디서 왔나'만 읽는다. 구조화 Fact 글(올바른 Fact 사전)이면 `source_url`·`source_domain`(ASCII 소문자)·`source_name` 이다."""
+    fact = _fact_source(source)
+    if fact is not None:
+        return SourceRef(fact.url, _ascii_lower(fact.domain), fact.name)
     if not isinstance(source, dict):
         return SourceRef("", "", "")
     pick = lambda key: "" if source.get(key) is None else str(source.get(key)).strip()   # noqa: E731
@@ -1456,6 +1527,21 @@ def rule_company(domain, public_domains):
     return [Hold("QG5-COMPANY", 5, "post", f"출처 도메인이 공공·연구기관 목록 밖이거나 알 수 없음 — {_safe(host or '(없음)', 60)}")]
 
 
+def rule_company_fact(domain, public_domains, provider_hosts):
+    """QG5 회사 발표(구조화 Fact 글용): 허용 도메인은 `rule_company` 와 같은 공공·연구·국제기구 목록(접미 일치)에 **레지스트리 Provider 의 허용 호스트(provider_hosts)를 정확히 같은 호스트일 때만 더한** 것이다.
+    provider_hosts 는 여기서도 `_provider_hosts` 로 다시 정규화한다(이상한 항목은 무시, 접미사·하위 도메인 일치 없음). 자동화 제외 도메인이 먼저 이긴다 — provider_hosts 에 있어도 보류한다.
+    소문자는 ASCII 글자만 바꾸고(`_ascii_lower`), 끝 점은 하나만 떼어 견준다(끝 점이 둘 이상인 이름은 어느 호스트와도 같지 않다). 글의 도메인 자신도 호스트 이름 모양이어야 한다(`_clean_host` — 공공 목록의 접미 일치에
+    `x/.nasa.gov`·앞 공백 같은 모양이 지나가지 않게). 자동화 제외 도메인만 끝 점을 모두 떼고 넓게 판정한다."""
+    raw = _ascii_lower(domain if isinstance(domain, str) else "")
+    loose = raw.rstrip(".")
+    if loose and _domain_in(loose, EXCLUDED_SOURCE_DOMAINS):
+        return [Hold("QG5-COMPANY", 5, "post", f"자동화에서 제외한 출처 도메인 — {_safe(loose, 60)}")]
+    host = _clean_host(raw)
+    if host is not None and (_domain_in(host, public_domains) or host in _provider_hosts(provider_hosts)):
+        return []
+    return [Hold("QG5-COMPANY", 5, "post", f"출처 도메인이 공공·연구기관 목록과 제공처 허용 호스트 밖이거나 호스트 이름이 아니거나 알 수 없음 — {_safe(loose or '(없음)', 60)}")]
+
+
 # 제목이 약속하는 내용(약속어) → 본문에 있어야 하는 낱말. 제목에 약속어가 있는데 본문에 그 낱말이 하나도 없으면 약속을 못 지킨 제목이다(예: 제목은 '추이'인데 본문에 추이가 없다).
 _PROMISES = (
     ("추이", ("추이", "동향", "트렌드", "시계열", "trend")),
@@ -1558,6 +1644,18 @@ def rule_reuse(link, history):
     return []
 
 
+def rule_reuse_fact(dedupe_key, history):
+    """QG7 같은 원문 재사용(구조화 Fact 글용): 같은 출처 주소 대신 **같은 중복 방지 키(dedupe_key)** 를 본다 — 제품마다 주소가 고정된 공식 자료는 지난주 글과 주소가 늘 같아 주소 검사는 두 번째 글부터 모두 막는다.
+    이력 항목의 dedupe_key 가 정확히 같을 때만 QG7-REUSE 로 보류한다(키가 없는 옛 항목·글이 아닌 값·dict 가 아닌 항목은 건너뜀). 키가 비었거나 글이 아니면(None 포함) 같은 글을 막을 수 없으므로
+    QG7 이 아니라 입력 이상(QG0-DEDUPE-KEY)으로 보류한다(fail closed)."""
+    if not isinstance(dedupe_key, str) or not dedupe_key.strip():
+        return [Hold("QG0-DEDUPE-KEY", 0, "post", "구조화 Fact 글의 중복 방지 키(dedupe_key)가 비었거나 글이 아니라 같은 글을 막을 수 없음")]
+    for entry in history or ():
+        if isinstance(entry, dict) and entry.get("dedupe_key") == dedupe_key:
+            return [Hold("QG7-REUSE", 7, "post", "이력에 같은 중복 방지 키(dedupe_key)로 만든 글이 이미 있음")]
+    return []
+
+
 _LIST_ITEM = re.compile(r"^[ \t]*(?:[-*+]|\d{1,3}[.)])[ \t]+")
 _HEADING_ITEM = re.compile(r"^[ \t]{0,3}#{1,6}[ \t]+")
 
@@ -1626,6 +1724,7 @@ def check_candidate(data, source, history=(), config=None, as_of=None):
     report = GateReport()
     evidence = evidence_text(source)
     ref = source_ref(source)
+    fact = fact_ref(source)                  # 구조화 Fact 글이 아니면 None — 그러면 아래 평가는 이 묶음 앞과 한 글자도 다르지 않다
     report.facts["source_text_chars"] = evidence.summary_chars
     report.facts["evidence_chars"] = len(evidence.text)
     if not evidence.text.strip():
@@ -1660,8 +1759,12 @@ def check_candidate(data, source, history=(), config=None, as_of=None):
         report.holds += rule_event(lang, " ".join(titles[lang]), proses[lang])
         for title in titles[lang]:
             report.holds += rule_title(lang, title, proses[lang])
-    report.holds += rule_company(ref.domain, config.public_domains)
-    report.holds += rule_reuse(ref.link, history)
+    if fact is None:
+        report.holds += rule_company(ref.domain, config.public_domains)
+        report.holds += rule_reuse(ref.link, history)
+    else:                                    # 구조화 Fact 글: QG5 에 Provider 허용 호스트(정확히 같은 호스트)를 더하고, QG7 은 같은 dedupe_key 를 본다(docs/QUALITY_GATE.md §11)
+        report.holds += rule_company_fact(ref.domain, config.public_domains, fact.hosts)
+        report.holds += rule_reuse_fact(fact.dedupe_key, history)
     if stories.get("ko") is not None and stories.get("en") is not None:       # 국문 전용이면 영문 글을 모으지 않으므로(위 반복) 이 규칙은 쌍일 때만 돈다
         clone, detail = rule_clone(stories["ko"], stories["en"], proses["ko"], proses["en"])
         report.holds += clone
