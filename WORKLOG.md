@@ -7,6 +7,44 @@
 
 ---
 
+## [2026-11-10] Claude – WDWEEK: 워치독 주 단위 보완 — 제한 재개 잠금이 켜진 Chance 만 마지막 글 허용 시간 +7일·'어제 새 글 없음' 알림 없음, 그 밖은 바이트까지 같음 (결함 D-169 해소, 결정 D-220–D-224) (T2 — 병합 전·독립 검증 전, 켜는 변경은 따로)
+
+**작업자**: Claude (WDWEEK 구현자). 총괄 지시서 `audit6/WDWEEK_BRIEF.md` 를 그대로 따랐다 — 운영자 승인 008(2026-11-10)의 재개 조건 '주 1–2편'에서는 글이 며칠 없는 것이 정상인데 워치독의 `STALE`(Chance 36시간)·`NO_POSTS_DAY` 는 하루 한 편에 가깝던 때의 기준이라 켠 직후부터 거짓 경보가 쌓인다(결함 D-169). 켜기 전에 이것을 고치는 묶음이다. 블로그 `origin/main` `b6b5ea7`(M043 병합 직후)에서 시작해 새 작업 폴더 `wt_wdweek`(가지 `ai/claude/NO-MERGE-wdweek-wip`)에서만 일했고, 작업 도중 main 이 `0752fda`(M044 병합 직후)로 앞서가 총괄 지시로 그 위로 옮겼다(rebase — 충돌은 `docs/DEFECT_REGISTER.md` 표 끝 한 곳뿐이었고 M044 의 D-210–D-219 뒤에 D-220–D-224 를 번호순으로 이었다. 코드·시험·그 밖의 문서는 충돌이 없었다). 로컬 커밋 둘까지만 만들었다(push·병합 가지·PR 은 만들지 않았다 — 최종 병합 가지는 총괄이 한 커밋으로 만든다). 네트워크 접속은 하지 않았다(로컬 origin/main 이 이미 `0752fda` 라 `git fetch` 를 하지 않았다).
+**대상**: `pipeline/health.py`·`scripts/watchdog.py`·`tests/test_health_weekly.py`(새)·`tests/test_watchdog_weekly.py`(새)·`tests/test_watchdog_weekly_docs.py`(새)·`tests/test_publish_paths.py`(두 곳)·문서(`docs/PUBLISH_PATHS.md`·`ARCHITECTURE.md`·`ACTIONS_GUIDE.md`·`DEFECT_REGISTER.md` 의 D-169 해결·D-220–D-224).
+**등급**: T2 — 코드·시험·문서. **켜는 변경은 하지 않았다** — `pipeline/blogs.json` 값(`health.max_gap_hours` 포함)·`.github/`·광고 표면·정지 변수·Blogger 코드·글 파일은 그대로다.
+
+### 변경 사항
+
+- **`evaluate(..., *, weekly_cap=None)`**(`pipeline/health.py`): 키워드 전용·기본 `None` = 이전과 같음. 1 이상 정수(참/거짓 제외 — 그 밖의 값은 모두 이전 동작, 경보가 더 울리는 쪽)가 오면 주 단위 모드: ① `STALE` 허용 시간 = 설정값 + `WEEK_WINDOW_DAYS`(잠금 모듈의 7일) × 24시간(Chance 36 → 204시간), 문구에 '주 단위 기준(상한 N편): 설정값 36시간에 7일을 더했습니다' ② `NO_POSTS_DAY` 는 울리지 않는다. 나머지 검사(`FAIL_STREAK`·`RUN_FAIL_STREAK`·`REJECT_STREAK`·`UNPUBLISHED`·`PAGES_*`·`NO_ACTIVITY`)와 승인 흐름의 `DRAFT_WAITING` 변환(새 허용 시간 기준으로 `STALE` 이 울릴 때만 일어남 — 72시간 규칙 그대로)은 그대로고, 새 `Finding` 은 없다(상한에 닿아 쉬는 동안 정보 이슈를 만들지 않는다). 순수 함수 그대로(I/O·시각·무작위·네트워크 추가 없음, 임포트는 상수 하나).
+- **`chance_weekly_cap(reg)`·`collect` 배선**(`scripts/watchdog.py`): 제한 재개 잠금이 켜져 있고(`lock_active`) 잠금 키가 잘못 적혀 있지 않고(`lock_key_problems` 없음) 규칙을 어기지 않고(`lock_errors` 없음) `weekly_posts_limit` 가 1 이상 정수일 때만 그 값을 주고, `collect` 는 **Chance 에만** `weekly_cap` 을 넘긴다(잠금 가드가 읽는 함수를 그대로 가져다 썼다). 그 밖(잠금 꺼짐·상한 없음·키 오타·규칙 위반·레지스트리를 읽지 못함·Chance 아닌 블로그)은 키워드를 넘기지 않아 `evaluate` 호출의 모양과 출력이 이전과 바이트까지 같다. 주 단위로 점검할 때만 로그에 `[참고] chance: 주 단위 기준으로 점검합니다…` 한 줄. **지시서보다 한 가지 더 엄격하다**: `lock_errors`(규칙 L0–L8 위반)도 본다 — 어기면 생성기 가드가 글을 만들지 않고 멈추므로 그 상태에서 경보를 늦추지 않으려는 것이다(워치독 `main` 은 레지스트리 검증이 실패하면 점검 전에 종료 1 이라 `collect` 를 직접 부를 때만 차이가 난다).
+- **문서**: `PUBLISH_PATHS.md`(쉬운 설명 표 한 줄·§7-22 다시 씀 — 고른 이유·고르지 않은 대안 (가) 설정값만 204 로 올림 / (나) 경보를 그대로 두고 무시·한계를 한 줄씩·§8 L-20·§9 문단), `DEFECT_REGISTER.md`(D-169 해결·D-220 구현·D-221 허용 시간 결정·D-222 `NO_POSTS_DAY` 결정·D-223 이전 기준으로 두는 경우·D-224 한계), `ARCHITECTURE.md`(§4-2 문단·표 두 행·health 행), `ACTIONS_GUIDE.md`(3-22 표 한 줄·한계 문장, 6-5 표 두 행, 3-2 한 줄, 4-1 점검 루틴 두 줄).
+
+### 기존 시험을 바꾼 곳(전수 — 지우거나 느슨하게 한 단언은 없다)
+
+1. `tests/test_publish_paths.py` `test_section_7_keeps_its_numbering_and_has_the_new_limits`: §7 항목 22 의 제목을 못박던 문장 '…그리고 워치독이 주간 상한을 모른다' 를 새 제목 '…그리고 워치독은 주 단위 기준으로 바뀐다' 로 바꿨다(옛 문장은 이제 사실이 아니다). `STALE`·`NO_POSTS_DAY`·`D-169` 낱말 단언은 그대로다.
+2. `tests/test_publish_paths.py` `test_the_operator_guide_lists_the_five_values_the_new_code_and_the_new_rule_range`: 운영자 안내 3-22 의 문장 '워치독의 … 기준은 아직 그것을 모릅니다' 를 '워치독은 켠 뒤 Chance 만 주 단위 기준으로 점검합니다' 로 바꿨다. `D-169` 단언은 그대로다. 옛 문장이 문서에 더는 없다는 것은 새 모듈(`test_watchdog_weekly_docs`)이 못박는다.
+
+### 검증 증거
+
+- **새 시험**: `test_health_weekly` 56개(꺼진 상태 격자 지문 6만 6천 칸·허용 시간 경계 정확히·1분 전·1분 뒤·격자 전체를 '허용 시간만 늘린 이전 판정'과 견주는 대조·승인 흐름·이력 날짜 이상·얕은 복제·두 달 치 흉내), `test_watchdog_weekly` 34개(잠금 규칙 위반·키 오타 전부·배선·호출 모양·`collect` 꺼진 상태 지문 35건), `test_watchdog_weekly_docs` 18개(문서가 코드와 같은 말을 한다). 새 시험 합계 108개 — 이 PC 에서 합쳐 약 15초.
+- **시험 개수**(`run_discover_shard.py --count-only`): 3.12 7759 → 7867개(모듈 137 → 140), 3.10 7759 → 7867개.
+- **전체 시험**(머리 `b493547`, 한 프로세스씩 모듈 이름 순서로 세 조각 — 이 PC 에서 한 번에 도는 `discover` 는 10분이 넘는다): 3.12 7867개 모두 `OK`(건너뜀 2), 3.10 7867개 모두 `OK`(건너뜀 8).
+- **줄 끝 LF 사본(리눅스 CI 흉내)**: git archive(core.autocrlf=false)로 줄 끝 LF 로 내보낸 사본(CR 문자 0개)에서 3.12 로 새 모듈 셋과 관련 모듈 열두 개를 한 모듈씩 돌렸다: 전부 통과 ( test_health_weekly(56 tests) test_watchdog_weekly(34 tests) test_watchdog_weekly_docs(18 tests) test_publish_paths(78 tests) test_health(13 tests) test_health_daily(35 tests) test_draft_waiting(27 tests) test_draft_followups(117 tests) test_package_stats(31 tests) test_plan_and_watchdog(15 tests) test_watchdog_integration(25 tests) test_watchdog_upgrade(65 tests) )
+- **변이 점검**(사본에서 코드·문서를 일부러 틀리게 고침 — 도구와 결과는 `audit6/wdweek/mut/`): 51개 중 새 시험이 51개를 잡았고 기존 시험만으로는 7개만 잡혔다(꺼진 상태를 바꾸는 코드 변이와 `test_publish_paths` 가 이미 못박던 문서 변이). 자기 모듈 하나만으로 잡았는지는 51/51개.
+- **무작위 대조**(일회용 점검, 고정 씨앗): 무작위 30000건(3.12·3.10 둘 다, 0752fda 위로 옮긴 뒤 합친 트리에서 다시): 어긋남 0건, 꺼진/켜진 결과가 다른 칸 17669건
+- **켜는 날 리허설**(진짜 저장소 이력으로 `watchdog.main()` dry-run, 토큰·네트워크 없음, 합친 트리에서 다시 돌림 — 시간은 돌린 시각의 경과 시간이다): 잠금 꺼짐(지금)에서는 Chance `STALE`(마지막 글 57시간, 허용 36시간)이 심각으로 나오고, 켜는 값 다섯을 적은 사본에서는 Chance `STALE` 이 사라지고 `[참고] chance: 주 단위 기준으로 점검합니다` 한 줄이 나오며 Blogger 쪽 `STALE`(`blogger_macat` 62시간 경과(허용 50시간)·`blogger_kcyoon` 61시간 경과(허용 50시간))은 그대로다.
+- `validate_repo` 오류 0·경고 2(기존 LIQUID-1 — 인수인계 문서의 이중 중괄호).
+
+### 남은 이슈 / 다음 AI 주의
+
+- **켜는 변경(T3)에서 할 일은 없다**: 레지스트리 값 다섯을 적으면 코드가 잠금·상한에서 스스로 파생해 워치독이 주 단위로 바뀐다(`PUBLISH_PATHS.md` §9). 새 시험은 진짜 레지스트리 값에 묶이지 않아(사본·고정값) 켜는 변경이 깨뜨리지 않는다 — §9 의 표에 더할 것이 없다. 켠 뒤 첫 워치독 실행의 요약·로그에서 `[참고] chance: 주 단위 기준으로 점검합니다` 줄과 `STALE` 이슈 본문의 '주 단위 기준(상한 N편)' 을 확인한다(미관측).
+- **한계**(D-224): `STALE` 은 마지막 활동 뒤 204시간(8.5일)에야 울린다 — 빨갛게 실패하면 `FAIL_STREAK`·`RUN_FAIL_STREAK` 이 먼저 울리지만 초록으로 조용히 건너뛰는 중단은 이전 기준보다 7일 늦게 드러난다. 승인이 평소보다 밀려 마지막 병합 뒤 204시간을 넘기면 `DRAFT_WAITING`(경고)이 울린다(의도한 승인 대기 신호). Chance 밖의 블로그는 그대로다(주간 상한이 없다 — D-168).
+- **다른 문서**: `docs/SOURCE_POLICY.md` 의 '마지막 글로부터 36시간 뒤 STALE' 은 잠금이 꺼진 상태 기준이다(시험 `test_source_policy_docs` 가 못박아 이 일은 건드리지 않았다) — 켠 뒤 Chance 는 204시간이라 허용 목록을 켜는 변경이 만날 때 같이 고친다.
+- **병합 충돌 예상 자리**: `DEFECT_REGISTER.md` 표 끝(D-220–D-224 — M044 의 D-210–D-219 와는 옮길 때 한 번 이었다, 다른 가지가 D-225 이후를 더하면 다시 난다)·`PUBLISH_PATHS.md` §7 끝(22)·§8 끝(L-20)·`ACTIONS_GUIDE.md` 3-22·이 파일의 맨 위. 결정 번호 대역 D-220–D-229 중 D-225 이후는 비어 있다.
+- 실제 GitHub·실제 리눅스 CI 에서는 돌려 보지 못했다(윈도우의 3.12·3.10, 그리고 줄 끝을 LF 로 내보낸 사본에서만).
+
+---
+
 ## [2026-11-10] Claude – DOC: 인수인계/작업내용.md 현행화(11-07 이후 사흘치)와 작업 요청서 7(영상 분석문 교차 검증) 결과 기록 (T1 — 문서 한 파일)
 
 **작업자**: Claude (총괄). 문서 초안은 다른 에이전트가 쓰고 총괄이 검토·보정했다. 새 작업 폴더 `wt_m039`(가지 `ai/claude/M039-worklog-task7`)에서 일했다.
