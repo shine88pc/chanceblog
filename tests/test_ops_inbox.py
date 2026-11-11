@@ -1176,13 +1176,13 @@ class BlogDraftsItemTest(unittest.TestCase):
         blog = blog or h.make_blog()
         return inbox.blog_items([blog], {blog["key"]: history}, now, URL)
 
-    def test_uploaded_drafts_within_a_week_are_a_waiting_action(self):
+    def test_uploaded_drafts_within_a_week_are_a_waiting_item_that_is_no_action_until_the_review_signals_exist(self):
+        # 2026-11-11 정리(요구 5): 6시간 넘게 공개되지 않았다는 사실만으로는 '게시 대기' action 이 아니다 — 품질 Gate 통과·건강·안전 차단 없음·공개 피드 확인이 없으면 참고(검토 조건 미확인)다
         history = [h.make_entry("draft_uploaded", ago(days=1)), h.make_entry("draft_uploaded", ago(days=3)),
                    h.make_entry("posted", ago(days=2))]
         item = one(self.build(history))
-        self.assertEqual(item.level, "action")
-        self.assertIn("초안 2건 게시 대기", item.title)
-        self.assertEqual(item.url, "https://www.blogger.com/")
+        self.assertEqual(item.level, "info")
+        self.assertIn("초안 2건 대기(검토 조건 미확인)", item.title)
         self.assertEqual(item.since, NOW - timedelta(days=3))
         self.assertTrue(item.id.startswith("blogger:blogger_macat:drafts:"))
 

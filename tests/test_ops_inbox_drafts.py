@@ -559,7 +559,7 @@ class DraftBoardTest(unittest.TestCase):
 
     def test_a_stopped_channel_with_pending_drafts_shows_the_count_and_says_stopped(self):
         row = table_rows(self.board(drafts=[h.make_draft(51, "[초안][네이버] 글", "네이버", hours=3)]))[3]
-        self.assertEqual(row[:3], ["네이버", "1 (정지 중)", "1일 미만"])
+        self.assertEqual(row[:3], ["네이버", "1 (정지 전 초안)", "1일 미만"])           # 2026-11-11 정리(요구 4): 멈춘 채널의 초안은 '정지 전 초안'이다(공개를 권하지 않는다)
 
     def test_channel_names_match_ignoring_case(self):
         row = table_rows(self.board(drafts=[h.make_draft(41, channel="티스토리"), h.make_draft(42, channel="Chance")]))
@@ -662,7 +662,7 @@ class DraftBoardTest(unittest.TestCase):
         blogs = blogs4()
         drafts = [h.make_draft(61, channel="네이버"), h.make_draft(62, channel="네이버")]
         rows = table_rows(self.board(blogs=blogs, drafts=drafts, notes=self.CAP, histories={"blogger_macat": []}))
-        self.assertEqual(rows[3][1], "2+ (정지 중)")
+        self.assertEqual(rows[3][1], "2+ (정지 전 초안)")
 
     def test_the_blogger_estimate_never_gets_a_plus_unless_github_drafts_share_the_channel(self):
         history = [h.make_entry("draft_uploaded", ago(days=2)), h.make_entry("draft_uploaded", ago(days=3))]
@@ -1754,10 +1754,10 @@ class DraftGuideMatchesCodeTest(unittest.TestCase):
         self.assertIn(f"최근 {inbox.DRAFT_WINDOW_DAYS}일 초안함 업로드", self.guide)
 
     def test_the_table_cell_words_in_the_guide_are_the_ones_the_code_prints(self):
-        for word in ("자동 공개", "정지", "조회 실패", "(대략)", "(미등록)", "(채널 표시 없음)", "1일 미만", "(정지 중)", "그 밖의 채널"):
+        for word in ("자동 공개", "정지", "조회 실패", "(대략)", "(미등록)", "(채널 표시 없음)", "1일 미만", "(정지 전 초안)", "그 밖의 채널"):
             self.assertIn(word, self.doc, word)
         source = (_bootstrap.ROOT / "pipeline" / "inbox.py").read_text(encoding="utf-8")
-        for word in ("자동 공개", "조회 실패", "(대략)", "(미등록)", "(채널 표시 없음)", "1일 미만", "(정지 중)", "그 밖의 채널"):
+        for word in ("자동 공개", "조회 실패", "(대략)", "(미등록)", "(채널 표시 없음)", "1일 미만", "(정지 전 초안)", "그 밖의 채널"):
             self.assertIn(word, source, word)
         self.assertIn("채널 | 대기 초안 | 가장 오래된 | 최신 초안", self.doc)
         self.assertEqual(inbox.BOARD_HEADER, ("채널", "대기 초안", "가장 오래된", "최신 초안"))

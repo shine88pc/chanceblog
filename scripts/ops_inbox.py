@@ -23,6 +23,10 @@ Blogger 초안 게시 확인: 최근 초안함에 올린 기록이 있는 Blogge
 '게시 대기'에서 뺀다(로그인·시크릿 없이 공개 주소만 읽는다). 피드를 읽지 못하면 그 블로그의 '게시 대기'는 새로 알리지 않고 '조회 실패' 항목으로 남긴다.
 한 소스(이슈·PR·실행 기록·주석·이력 파일)를 읽지 못해도 멈추지 않고 '조회 실패' 항목으로 남긴 뒤 계속한다.
 스크립트 자체의 버그(예상 밖 예외)는 그대로 올려 실행을 빨갛게 한다.
+
+오래된 항목 정리(2026-11-11, docs/OPS_INBOX.md §10): 승인 대기 실행의 head 가지마다 그 가지의 PR 상태를 한 번 읽어(GET /pulls 의 state=all·head 조회, 최대 MAX_APPROVAL_LOOKUPS 가지) 병합됐거나 닫힌
+가지의 승인 대기를 모음에서 뺀다(모르면 예전처럼 싣는다). 운영자 결정 데이터(pipeline/ops_inbox_policy.json)를 읽어 분류에 쓴다 — 파일이 없으면 예전 규칙 그대로이고, 있는데 올바르지 않으면
+예전 규칙으로 표시하고 모음 맨 위에 안내 한 줄을 더한다. 이 스크립트가 쓰는 것은 여전히 이슈·코멘트·라벨뿐이다(새 읽기 호출만 늘었다).
 종료 코드: 0 정상(조회 일부 실패 포함) / 1 이슈·코멘트 쓰기 실패 / 2 설정 오류
 """
 import http.client
@@ -39,7 +43,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from pipeline import inbox, notify  # noqa: E402
+from pipeline import inbox, inbox_policy, notify  # noqa: E402
 from pipeline.console import safe_output  # noqa: E402
 from pipeline.registry import ROOT, RegistryError, load_registry, merged_blog  # noqa: E402
 from pipeline.state import StateError, read_json_list  # noqa: E402
@@ -61,11 +65,13 @@ MAX_DRAFT_PAGES = 3      # 열린 `초안` 이슈·PR 은 한 쪽 100건씩 최�
 DRAFTS_PER_PAGE = 100
 MAX_LABEL_CREATES = 10   # 초안 모델 라벨을 한 번의 점검에서 새로 만드는 수의 상한(초안·폐기 + 채널 라벨 — 채널 라벨 종류가 6개라 모두 있어도 8개). 목록 읽기 1회와 합해 라벨에 쓰는 호출은 11회 이하
 MAX_JOBS_PER_RUN = 6
+MAX_APPROVAL_LOOKUPS = 10   # 승인 대기 실행의 가지 PR 상태를 한 번의 점검에서 읽는 가지의 수(가지마다 호출 1회). 넘는 가지는 모르는 것이라 예전처럼 싣는다
 MAX_READ_SECONDS = 300    # 읽기에 쓰는 시간 상한(잡 제한 10분 안에 쓰기까지 끝내려고). 호출 하나는 20초에서 끊긴다
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 FEED_TIMEOUT_SECONDS = 15      # Blogger 공개 피드 한 번을 읽는 데 기다리는 최대 시간
 FEED_MAX_RESULTS = 500         # 피드가 한 번에 주는 최대 글 수(최신순 — 최근 초안은 이 안에 있다)
 FEED_MAX_BYTES = 4000000       # 피드 응답은 이 크기까지만 읽는다
+_BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$")                         # 가지 PR 상태를 조회할 가지 이름의 모양(공백·콜론·물음표 따위가 든 이름은 조회하지 않는다)
 _BLOGSPOT_URL_RE = re.compile(r"^https://[a-z0-9][a-z0-9-]{0,62}\.blogspot\.com/?$")     # 레지스트리의 블로그 주소가 이 모양일 때만 피드를 읽는다
 _FEED_POST_ID_RE = re.compile(r"\.post-(\d+)$")                                       # tag:blogger.com,1999:blog-<블로그 번호>.post-<글 번호>
 
@@ -204,6 +210,30 @@ def read_histories(root, blogs, failures):
     if bad:
         failures.append(("history", "; ".join(bad)))
     return out
+
+
+def read_policy(root, today=None):
+    """운영자 결정 데이터(pipeline/ops_inbox_policy.json)를 읽는다. 돌려주는 값: (Policy | None, 모음 맨 위 안내 글, 로그 글).
+    - 파일이 없다 → (None, "", "") — 예전 규칙 그대로이고 본문·로그 어디에도 새 글자가 없다(정책 파일 없음 모드).
+    - 읽지 못하거나 올바르지 않다(너무 큼·JSON 오류·같은 칸 두 번·너무 깊은 중첩·모르는 칸·길이·날짜·종류·키 모양·비밀·번호 모양 …) → (None, 안내 한 줄, 로그 한 줄) — 예전 규칙으로 표시하고
+      예외로 죽지 않는다(읽기 오류·UTF-8 오류·재귀 한도·메모리 부족도 같다).
+    today(한국 날짜)를 주면 오늘보다 뒤의 날짜(시작일·결정일)가 든 파일도 올바르지 않은 것으로 본다(D8).
+    파일은 읽기만 한다(고치는 것은 사람이 검토하는 병합뿐이다). 실행 환경의 절대 경로와 파일 내용은 안내에 싣지 않고 저장소 안의 파일 이름과 짧은 사유만 싣는다."""
+    path = Path(root) / inbox_policy.POLICY_FILE
+    try:
+        if not path.is_file():
+            return None, "", ""
+        with open(path, "rb") as fh:
+            raw = fh.read(inbox_policy.MAX_POLICY_BYTES + 1)
+        policy = inbox_policy.parse_policy_text(raw.decode("utf-8"), today)
+        return policy, "", ""
+    except inbox_policy.PolicyError as exc:
+        reason = str(exc)
+    except (OSError, ValueError, RecursionError, MemoryError) as exc:             # 읽기 오류·UTF-8 이 아님(UnicodeDecodeError 는 ValueError 의 하위)·재귀 한도·메모리 부족(D3)
+        reason = f"파일을 읽지 못했습니다({type(exc).__name__})"
+    reason = inbox.ext(reason, 120)
+    return (None, f"참고: 정책 파일({inbox_policy.POLICY_FILE})을 읽지 못했어요 — 이번 점검은 운영자 결정 없이 예전 규칙으로 표시합니다({reason}).",
+            f"[참고] 정책 파일을 읽지 못해 운영자 결정 없이 예전 규칙으로 표시합니다: {reason}")
 
 
 def parse_feed_post_ids(text):
@@ -461,6 +491,79 @@ def fetch_approvals(client, failures):
         return []
     found = data.get("workflow_runs") if isinstance(data, dict) else None
     return [r for r in found if isinstance(r, dict)] if isinstance(found, list) else []
+
+
+def _branch_pulls(listing, branch, repo):
+    """GET /pulls 응답에서 head.ref 가 그 가지이고 head.repo 가 이 저장소(포크가 아님)인 PR 들 → (PR, head) 쌍. 조회 매개변수가 걸러 준다고 믿지 않고 응답의 PR 마다 직접 확인한다."""
+    for pr in listing if isinstance(listing, list) else []:
+        if not isinstance(pr, dict):
+            continue
+        head = pr.get("head") if isinstance(pr.get("head"), dict) else {}
+        head_repo = head.get("repo") if isinstance(head.get("repo"), dict) else {}
+        if head.get("ref") == branch and str(head_repo.get("full_name") or "").lower() == str(repo).lower():
+            yield pr, head
+
+
+def branch_pr_state(listing, branch, repo):
+    """GET /pulls?state=all&head=<소유자>:<가지> 응답 → 그 가지 PR 의 상태: 'open'(열린 PR 이 하나라도 있음)·'merged'·'closed'·None(이 가지의 PR 을 찾지 못함 — 모름).
+    응답의 PR 마다 head.ref 가 그 가지이고 head.repo 가 이 저장소(포크가 아님)인지 직접 확인한다(_branch_pulls).
+    state 가 open·closed 가 아닌 값은 건너뛴다(모르는 채로 숨기지 않는다). 닫힌 PR 은 merged_at 이 있으면 병합된 것이다."""
+    found = set()
+    for pr, _head in _branch_pulls(listing, branch, repo):
+        state = str(pr.get("state") or "").lower()
+        if state == "open":
+            found.add("open")
+        elif state == "closed":
+            found.add("merged" if pr.get("merged_at") else "closed")
+    for state in ("open", "merged", "closed"):          # 열린 PR 이 하나라도 있으면 살아 있는 가지다
+        if state in found:
+            return state
+    return None
+
+
+def branch_pr_heads(listing, branch, repo):
+    """같은 응답에서 그 가지의 병합됐거나 닫힌 PR 들의 head 커밋(40자 소문자 16진)의 집합. 커밋을 읽을 수 없으면 그 PR 은 빠진다 — 승인 대기 실행의 head_sha 가 이 집합에 있을 때만 모음이
+    그 실행을 '이미 처리된 것'으로 뺀다(같은 이름의 가지에 새 커밋이 올라오면 새 일이라 보이게, D2)."""
+    found = set()
+    for pr, head in _branch_pulls(listing, branch, repo):
+        sha = str(head.get("sha") or "").lower()
+        if str(pr.get("state") or "").lower() == "closed" and _SHA_RE.fullmatch(sha):
+            found.add(sha)
+    return frozenset(found)
+
+
+def fetch_approval_prs(client, approvals, repo, failures, own=inbox.OWN_WORKFLOW, heads=None):
+    """승인 대기 실행의 head 가지마다(중복 없이, 최대 MAX_APPROVAL_LOOKUPS 가지) 그 가지 PR 의 상태를 한 번 읽는다 → {가지 이름: 'open'·'merged'·'closed'}.
+    PR 을 못 찾은 가지·모양이 이상한 이름·조회 실패·상한을 넘은 가지는 키가 없다 — 모르는 승인 대기를 숨기지 않으려고 모음이 예전처럼 싣는다.
+    heads(dict)를 주면 상태를 알아낸 가지마다 같은 응답의 끝난 PR 들의 head 커밋 집합을 채운다(branch_pr_heads — 같은 호출에서 읽으므로 호출이 늘지 않는다).
+    읽지 못한 것이 있으면 ('approval_prs', 사유) 한 건만 남긴다(점검은 계속한다)."""
+    branches = []
+    for run in inbox.approval_runs(approvals, own):
+        branch = run.get("head_branch")
+        if isinstance(branch, str) and _BRANCH_RE.fullmatch(branch) and branch not in branches:
+            branches.append(branch)
+    owner = str(repo).split("/", 1)[0]
+    states, errors = {}, []
+    for branch in branches[:MAX_APPROVAL_LOOKUPS]:
+        try:
+            listing = client.get("/pulls", state="all", head=f"{owner}:{branch}", per_page=10)
+        except ApiBudgetError as exc:
+            errors.append(f"{branch}: {exc}")
+            break
+        except ApiError as exc:
+            errors.append(f"{branch}: {exc}")
+            continue
+        if not isinstance(listing, list):
+            errors.append(f"{branch}: 응답이 목록이 아닙니다")
+            continue
+        state = branch_pr_state(listing, branch, repo)
+        if state is not None:
+            states[branch] = state
+            if heads is not None:
+                heads[branch] = branch_pr_heads(listing, branch, repo)
+    if errors:
+        failures.append(("approval_prs", errors[0] + (f" (외 {len(errors) - 1}건)" if len(errors) > 1 else "")))
+    return states
 
 
 def fetch_annotations(client, runs, now, failures, notes):
@@ -740,6 +843,7 @@ def run(environ=None, client=None, now=None, root=ROOT, out=print, sleep=time.sl
     failures, notes = [], []
     blogs = read_blogs(root, failures)
     histories = read_histories(root, blogs, failures)
+    policy, banner, policy_log = read_policy(root, inbox.kst_date(now))          # 운영자 결정 데이터. 없으면 예전 규칙 그대로(본문·로그에 새 글자 없음), 올바르지 않으면 예전 규칙 + 맨 위 안내 한 줄
     # 게시 확인(블로그 공개 피드). feed_fetcher 가 없으면(시험·옛 호출) 확인하지 않고 이력만 센 대략치로 둔다 — main() 이 진짜 읽기 함수를 넘긴다
     published = fetch_published(blogs, histories, now, failures, feed_fetcher) if feed_fetcher is not None else None
     issues = fetch_issues(client, failures)
@@ -749,11 +853,13 @@ def run(environ=None, client=None, now=None, root=ROOT, out=print, sleep=time.sl
     names = read_workflow_names(root, files)
     runs = fetch_runs(client, files, now, branch, failures, repo)
     approvals = fetch_approvals(client, failures)
+    branch_heads = {}
+    branch_prs = fetch_approval_prs(client, approvals, repo, failures, heads=branch_heads)      # 승인 대기가 없으면 호출 0회. 주석 읽기보다 먼저 한다(주석은 남는 호출만 쓴다)
     annotations = fetch_annotations(client, runs, now, failures, notes)
     snapshot = inbox.Snapshot(
         now=now, repo=repo, issues=issues, pulls=pulls, runs=runs, approvals=approvals, annotations=annotations,
         paused=inbox.is_truthy(environ.get("PIPELINE_PAUSE")), blogs=blogs, histories=histories, failures=failures, notes=notes,
-        workflow_names=names, drafts=drafts, published=published)
+        workflow_names=names, drafts=drafts, published=published, branch_prs=branch_prs, branch_pr_heads=branch_heads, policy=policy)
     items = inbox.build_items(snapshot)
     try:
         board = inbox.draft_board(snapshot)
@@ -764,8 +870,13 @@ def run(environ=None, client=None, now=None, root=ROOT, out=print, sleep=time.sl
     counts = {level: sum(1 for i in items if i.level == level) for level in inbox.LEVELS}
     out(f"[점검] 지금 해야 할 일 {counts['action']}건 · 확인하면 좋은 것 {counts['check']}건 · 참고 {counts['info']}건 "
         f"(조회 실패 {len(failures)}건, GitHub API 호출 {getattr(client, 'calls', 0)}회)")
-    visible = inbox.render(items, repo_url, inbox.BODY_LIMIT, board=board)
-    summary_md = inbox.render(items, repo_url, inbox.SUMMARY_LIMIT, board=board)
+    if policy_log:
+        out(policy_log)
+    finished = sum(1 for run_ in inbox.approval_runs(approvals) if inbox.approval_run_finished(run_, repo, branch_prs, branch_heads))
+    if finished:
+        out(f"[참고] 병합됐거나 닫힌 가지의 오래된 승인 대기 실행 {finished}건은 모음에서 뺐습니다(PR 상태를 알아낸 가지 {len(branch_prs)}개).")
+    visible = inbox.render(items, repo_url, inbox.BODY_LIMIT, board=board, banner=banner)
+    summary_md = inbox.render(items, repo_url, inbox.SUMMARY_LIMIT, board=board, banner=banner)
     out(summary_md)
     _write_summary(environ, summary_md, out)
 
