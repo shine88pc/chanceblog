@@ -12,13 +12,14 @@ from pipeline import secret_patterns
 ROOT = _bootstrap.ROOT
 NEW_FILES = ["pipeline/facts.py", "pipeline/calc.py", "pipeline/fact_topics.py", "pipeline/recipes.py", "pipeline/fact_assembler.py",
              "pipeline/adapters/__init__.py", "pipeline/adapters/base.py", "pipeline/adapters/mock_stats.py",
-             "pipeline/adapters/noaa_swpc.py", "pipeline/recipes_noregion.py", "pipeline/fact_candidates.py"]               # 뒤의 셋은 S2a(우주날씨 어댑터·지역 없는 틀·후보 순서)
+             "pipeline/adapters/noaa_swpc.py", "pipeline/recipes_noregion.py", "pipeline/fact_candidates.py", "pipeline/fact_supply.py"]               # S2a 가 셋(우주날씨 어댑터·지역 없는 틀·후보 순서), S2b 가 하나(후보 공급)를 더했다
 NEW_MODULES = {"facts", "calc", "fact_topics", "recipes", "fact_assembler", "adapters", "adapters.base", "adapters.mock_stats",
-               "adapters.noaa_swpc", "recipes_noregion", "fact_candidates"}
+               "adapters.noaa_swpc", "recipes_noregion", "fact_candidates", "fact_supply"}
 NEW_TESTS = ["tests/fact_helpers.py", "tests/test_fact_facts.py", "tests/test_fact_calc.py", "tests/test_fact_adapters.py", "tests/test_fact_assembler.py",
              "tests/test_fact_review.py", "tests/test_fact_structure.py", "tests/test_fact_docs.py",
              "tests/space_helpers.py", "tests/test_space_adapter.py", "tests/test_space_calc.py", "tests/test_space_recipes.py", "tests/test_space_attribution.py",
-             "tests/test_space_candidates.py", "tests/test_space_docs.py", "tests/test_space_fuzz.py", "tests/test_space_f2fix.py", "tests/test_space_gate.py"]
+             "tests/test_space_candidates.py", "tests/test_space_docs.py", "tests/test_space_fuzz.py", "tests/test_space_f2fix.py", "tests/test_space_gate.py",
+             "tests/fact_branch_helpers.py", "tests/test_fact_select.py", "tests/test_fact_supply.py", "tests/test_fact_branch.py", "tests/test_fact_shadow.py", "tests/test_fact_readers.py", "tests/test_fact_branch_docs.py"]      # 뒤의 일곱은 S2b
 STDLIB_ALLOWED = {"csv", "dataclasses", "datetime", "decimal", "functools", "hashlib", "io", "json", "re", "typing", "unicodedata"}
 BANNED_MODULES = {"urllib", "socket", "subprocess", "time", "random", "os", "sys", "pathlib", "http", "ssl", "shutil", "tempfile", "secrets", "uuid", "glob",
                   "ctypes", "msvcrt", "threading", "multiprocessing", "asyncio", "logging", "requests", "html", "xml", "generator", "blogger_generator"}
@@ -75,7 +76,7 @@ class ImportsTest(unittest.TestCase):
             self.assertFalse(names & BANNED_MODULES, f"{rel}: {names & BANNED_MODULES}")
 
     def test_no_existing_pipeline_module_is_imported(self):
-        existing = {p.stem for p in (ROOT / "pipeline").glob("*.py")} - {"facts", "calc", "fact_topics", "recipes", "fact_assembler", "recipes_noregion", "fact_candidates", "__init__"}
+        existing = {p.stem for p in (ROOT / "pipeline").glob("*.py")} - {"facts", "calc", "fact_topics", "recipes", "fact_assembler", "recipes_noregion", "fact_candidates", "fact_supply", "__init__"}
         self.assertTrue(existing)
         for rel in NEW_FILES:
             text = source(rel)
@@ -140,8 +141,10 @@ class PurityTest(unittest.TestCase):
 
 
 class NoConnectionTest(unittest.TestCase):
-    """1단계는 새 모듈·새 시험·문서뿐이다 — 생성기·다른 pipeline 모듈·워크플로·스크립트가 새 모듈 이름을 부르지 않는다. 2단계가 한 군데에서 연결한다."""
-    NAMES = r"(?:facts|calc|fact_topics|recipes|fact_assembler|adapters|recipes_noregion|fact_candidates)"
+    """1단계는 새 모듈·새 시험·문서뿐이었다. **S2b 가 연결한 모양**: 생성기·다른 pipeline 모듈·워크플로·스크립트 가운데 새 모듈 이름을 부르는 곳은 `generator.py` 의 한 줄(`from pipeline import fact_supply`)뿐이다
+    — 그 밖의 연결(생성기의 Fact 분기가 필요로 하는 어댑터·후보·조립기)은 모두 그 한 모듈을 거친다. 역방향·분기 안쪽은 정적 규칙 AF1·AF4·AF8(tests/ai_flow_scan.py)이 지킨다(docs/AI_FLOW.md §12-2)."""
+    NAMES = r"(?:facts|calc|fact_topics|recipes|fact_assembler|adapters|recipes_noregion|fact_candidates|fact_supply)"
+    ALLOWED = {"generator.py": 1}      # 허용 연결: generator.py 에 Fact 모듈을 부르는 줄이 정확히 한 군데
     # 문장 단위 import·`-m` 실행·문자열로 모듈 이름을 넘기는 호출만 연결로 본다(주석·문서의 언급은 연결이 아니다 — SRC 의 문서가 인터페이스를 설명할 수 있다)
     PATTERN = re.compile(rf"^\s*(?:from|import)\s+pipeline(?:\.{NAMES}\b|\s+import\s+[^\n#]*\b{NAMES}\b)"
                          rf"|^\s*(?:from|import)\s+{NAMES}\b|-m\s+pipeline\.{NAMES}\b|[\"']pipeline\.{NAMES}[\"']", re.M)
@@ -154,12 +157,15 @@ class NoConnectionTest(unittest.TestCase):
         targets += [ROOT / "pipeline" / "blogs.json"]
         return [t for t in targets if t.exists()]
 
-    def test_nobody_outside_the_new_files_names_the_new_modules(self):
+    def test_nobody_outside_the_new_files_names_the_new_modules_except_the_one_connection(self):
+        """S2b(D-233): 개정 전에는 '아무도 부르지 않는다'였다. 이제 generator.py 의 정확히 한 줄만 허용하고 그 밖은 모두 0 이다 — 두 줄·0줄·다른 파일의 한 줄 더는 빨개진다(약해진 것이 아니라 한 군데로 좁혀 못박았다)."""
         targets = self.scan_targets()
         self.assertGreater(len(targets), 30)
         for path in targets:
-            with self.subTest(file=path.relative_to(ROOT).as_posix()):
-                self.assertIsNone(self.PATTERN.search(path.read_text(encoding="utf-8")))
+            rel = path.relative_to(ROOT).as_posix()
+            with self.subTest(file=rel):
+                hits = self.PATTERN.findall(path.read_text(encoding="utf-8"))
+                self.assertEqual(len(hits), self.ALLOWED.get(rel, 0))
 
     def test_other_tests_do_not_import_the_new_modules_either_except_ours(self):
         mine = {rel.split("/", 1)[1] for rel in NEW_TESTS}
@@ -169,12 +175,19 @@ class NoConnectionTest(unittest.TestCase):
             with self.subTest(file=path.name):
                 self.assertIsNone(self.PATTERN.search(path.read_text(encoding="utf-8")))
 
-    def test_the_registry_has_no_switch_for_the_new_path_yet(self):
+    def test_the_registry_file_holds_no_value_for_the_new_switch(self):
+        """S2b(D-230): 개정 전에는 생성기·레지스트리 코드에 `content_source` 가 있으면 빨개졌다. 이제 **코드는 스위치를 안다**(값을 읽는 곳은 source_policy 한 군데) — 그러나 레지스트리 파일(`blogs.json`)에는 값이
+        없다(켜는 변경은 T3 — 별도 승인). `registry.py` 는 여전히 이 이름을 쓰지 않고(검증은 source_policy.registry_errors 가 맡는다), 레지스트리 값을 읽는 코드(`.get("content_source")`)는 source_policy 와
+        이력 항목을 읽는 fact_candidates 뿐이다."""
         text = source("pipeline/blogs.json")
         for needle in ("content_source", "fact", "facts"):
             self.assertNotIn(needle, text)
         self.assertNotIn("content_source", source("pipeline/registry.py"))
-        self.assertNotIn("content_source", source("generator.py"))
+        self.assertIn("content_source", source("pipeline/source_policy.py"))
+        reader = re.compile(r"""\.get\(\s*["']content_source["']|\[\s*["']content_source["']\s*\]""")
+        files = [ROOT / "generator.py", ROOT / "blogger_generator.py"] + sorted((ROOT / "pipeline").rglob("*.py")) + sorted((ROOT / "scripts").glob("*.py"))
+        readers = {path.relative_to(ROOT).as_posix() for path in files if reader.search(path.read_text(encoding="utf-8"))}
+        self.assertEqual(readers, {"pipeline/source_policy.py", "pipeline/fact_candidates.py"})
 
     def test_the_new_tests_are_offline(self):
         for rel in NEW_TESTS:

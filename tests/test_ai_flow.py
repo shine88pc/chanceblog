@@ -218,6 +218,8 @@ BLIND_SPOTS = (
         "def go(x):", "    exec('from generator import call_gemini_with_fallback as f; f(x)')")), False),
     ("B15", "`_posts` 읽기 탐지가 놓치는 모양: 함수 밖에 둔 다른 이름의 상수(`POST_FOLDER = '_posts'` 뒤 `os.listdir(POST_FOLDER)`)·상수 목록을 돌며 훑기·매개변수 기본값의 `_posts`·글 하나를 경로로 바로 읽기·이어붙인 경로", add("pipeline/extra15.py", src(
         "import os", "", "POST_FOLDER = '_posts'", "", "def names():", "    return os.listdir(POST_FOLDER)")), False),
+    ("B16", "Fact 분기 안에서 이름 있는 안쪽 함수를 부르지 않고 값으로만 넘기거나 담는다(콜백·목록·키워드 인자 — `handlers = [_cb]`) — AF4 는 안쪽 함수를 '부르는 줄' 만 따라가고 값으로 쓰인 안쪽 함수의 몸통은 읽지 않는다",
+     edit("generator.py", DEF_FACT, DEF_FACT + "    def _cb():\n        return generate_blog_posts()\n    handlers = [_cb]\n"), True),
 )
 
 

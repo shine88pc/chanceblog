@@ -14,7 +14,14 @@ FACT(구조화 Fact 경로)와의 계약: allowlist 에서 후보가 흐름에 �
 (tests/test_source_policy.py 가 통과 동작을 못박고 docs/SOURCE_POLICY.md 9절이 의무로 적는다). `legacy_policy_notice` 는 legacy 인데 AI 정책이 원문 외부 텍스트 입력 금지일 때 알릴 한 줄이다(호출하는 곳은 FACT 2단계 몫 — 생성기는 건드리지 않는다).
 
 표준 라이브러리와 pipeline 의 다른 모듈만 쓴다. 입출력은 `chance_source_policy`(레지스트리 읽기)·`news_registry`/`idle_check`/`egress_gate`(허용 목록 읽기)뿐이고 시각은 읽지 않는다(오늘은 인자).
+
+콘텐츠 출처 스위치(레지스트리 chance.content_source, S2b)
+- `feed`(기본 — 항목에 적지 않아도 같다): 지금과 같다(피드 기사 → Gemini 글). 이 모듈의 함수는 값을 읽는 것 말고 아무 일도 하지 않는다.
+- `facts`: 구조화 Fact 경로(`docs/FACT_PATH.md` §15) — 후보를 규칙 기반 조립기가 만들고 AI 를 부르지 않는다. **허용 목록 모드(`source_policy: allowlist`)·국문 단독(`languages: ["ko"]`)·승인 흐름(`publish_flow: pr`) 위에서만** 쓸 수 있다
+  (`registry_errors` 가 어기면 거절한다). 켜는 것은 T3 다 — 이 변경은 pipeline/blogs.json 의 값을 바꾸지 않는다. 시작할 때의 안전장치 4가지는 `fact_start_problems`(순수)가 판정한다.
 """
+import sys
+
 from pipeline import egress, source_registry
 
 LEGACY, ALLOWLIST = "legacy", "allowlist"
@@ -22,10 +29,23 @@ SOURCE_POLICIES = (LEGACY, ALLOWLIST)
 DEFAULT_SOURCE_POLICY = LEGACY
 NO_ACTIVE_OUTCOME = "SOURCE_POLICY_NO_ACTIVE_PROVIDER"
 OWN_TITLE_KEY = "own_title"
+CONTENT_FEED, CONTENT_FACTS = "feed", "facts"
+CONTENT_SOURCES = (CONTENT_FEED, CONTENT_FACTS)
+DEFAULT_CONTENT_SOURCE = CONTENT_FEED
+FACT_NOT_READY_OUTCOME = "FACT_NOT_READY"          # facts 인데 시작 조건을 못 채워 글을 만들지 않고 정상 종료(초록 + 안내)
+FACT_WAITING_OUTCOME = "FACT_WAITING"              # 차례인 글감이 시각 때문에 기다린다(다음 실행이 이어 간다 — 초록 + 안내)
+FACT_NO_CANDIDATE_OUTCOME = "FACT_NO_CANDIDATE"    # 오늘 낼 수 있는 글감이 없다(이번 기간에 이미 냈거나 같은 제품의 글과 간격이 모자람 — 초록 + 안내)
+FACT_ALL_SKIPPED_OUTCOME = "FACT_ALL_SKIPPED"      # 후보는 있었지만 모두 건너뛰었다(자료 부족·호출 거부·검사 탈락 — 초록 + 경고)
+FACT_QUIET_OUTCOMES = (FACT_NOT_READY_OUTCOME, FACT_WAITING_OUTCOME, FACT_NO_CANDIDATE_OUTCOME)
 
 
 def registry_errors(blog, label, platform):
-    """레지스트리 검증(registry.validate_registry)이 부르는 규칙: source_policy 는 legacy·allowlist 중 하나이고 platform jekyll-git(Chance)에서만 쓴다. 적지 않았으면 문제 없음(legacy)."""
+    """레지스트리 검증(registry.validate_registry)이 부르는 규칙: source_policy 는 legacy·allowlist 중 하나이고 platform jekyll-git(Chance)에서만 쓴다. 적지 않았으면 문제 없음(legacy).
+    S2b: content_source 규칙도 여기서 함께 본다(`content_source_errors`) — 적지 않았으면 문제 없음(feed)."""
+    return _source_policy_errors(blog, label, platform) + content_source_errors(blog, label, platform)
+
+
+def _source_policy_errors(blog, label, platform):
     if "source_policy" not in blog:
         return []
     value = blog["source_policy"]
@@ -34,6 +54,28 @@ def registry_errors(blog, label, platform):
     if platform != "jekyll-git":
         return [f"{label}: source_policy는 platform jekyll-git 에서만 쓸 수 있습니다(지금 platform: {platform!r}). Blogger·초안 패키지는 외부 본문을 읽지 않습니다."]
     return []
+
+
+def content_source_errors(blog, label, platform):
+    """content_source 규칙(S2b, D-230): ① 적지 않았으면 문제 없음(feed) ② 값은 feed·facts 중 하나 ③ platform jekyll-git 에서만 ④ **facts 는 허용 목록 모드(source_policy: allowlist)·국문 단독(languages: ["ko"])·
+    승인 흐름(publish_flow: pr) 위에서만** — 어느 하나라도 아니면 거절한다(허용 목록 밖의 외부 읽기·영문 짝 글·사람 승인 없는 공개가 facts 와 함께 켜지지 않게)."""
+    if "content_source" not in blog:
+        return []
+    value = blog["content_source"]
+    if not isinstance(value, str) or value not in CONTENT_SOURCES:
+        return [f"{label}: content_source는 {CONTENT_SOURCES} 중 하나여야 합니다: {str(value)[:40]!r}"]
+    if platform != "jekyll-git":
+        return [f"{label}: content_source는 platform jekyll-git 에서만 쓸 수 있습니다(지금 platform: {platform!r})."]
+    if value != CONTENT_FACTS:
+        return []
+    errors = []
+    if blog.get("source_policy", DEFAULT_SOURCE_POLICY) != ALLOWLIST:
+        errors.append(f"{label}: content_source 가 facts 이면 source_policy 는 allowlist 여야 합니다(지금 {str(blog.get('source_policy', DEFAULT_SOURCE_POLICY))[:20]!r}) — facts 는 허용 목록 모드 위에서만 켭니다.")
+    if blog.get("languages") != ["ko"]:
+        errors.append(f"{label}: content_source 가 facts 이면 languages 는 [\"ko\"] 여야 합니다(국문 단독 — 영문 짝 글을 만들지 않습니다).")
+    if blog.get("publish_flow", "direct") != "pr":
+        errors.append(f"{label}: content_source 가 facts 이면 publish_flow 는 pr 이어야 합니다(사람이 PR 을 병합해야 공개 — 사람 승인 없는 공개 경로를 만들지 않습니다).")
+    return errors
 
 
 def chance_source_policy(registry_path=None, key="chance"):
@@ -45,6 +87,69 @@ def chance_source_policy(registry_path=None, key="chance"):
     if not isinstance(value, str) or value not in SOURCE_POLICIES:
         raise registry.RegistryError(f"레지스트리 source_policy 값이 올바르지 않습니다: {str(value)[:40]!r} ({' 또는 '.join(SOURCE_POLICIES)})")
     return value
+
+
+def content_source_of(blog):
+    """블로그 항목(기본값을 합친 사전)의 content_source('feed'|'facts') — **값을 읽는 곳은 이 함수 하나다**(S2b, D-230). 적지 않았으면 feed(지금과 같다). 값이 올바르지 않으면 ValueError."""
+    value = blog.get("content_source", DEFAULT_CONTENT_SOURCE) if isinstance(blog, dict) else DEFAULT_CONTENT_SOURCE
+    if not isinstance(value, str) or value not in CONTENT_SOURCES:
+        raise ValueError(f"레지스트리 content_source 값이 올바르지 않습니다: {str(value)[:40]!r} ({' 또는 '.join(CONTENT_SOURCES)})")
+    return value
+
+
+def chance_content_source(registry_path=None, key="chance"):
+    """레지스트리에서 chance 블로그의 content_source('feed'|'facts'). 항목에 적지 않았으면 feed. 레지스트리를 읽지 못하거나 값이 올바르지 않으면 RegistryError 다 —
+    값을 못 읽었다고 조용히 feed 로 떨어지지 않고 멈춘다(chance_source_policy 와 같은 원칙)."""
+    from pipeline import registry        # 지연 import: registry.py 가 이 모듈을 import 하므로 순환을 피한다
+    blog = registry.get_blog(registry.load_registry(registry_path), key)
+    try:
+        return content_source_of(blog)
+    except ValueError as exc:
+        raise registry.RegistryError(str(exc)) from exc
+
+
+def fact_start_problems(content_source, source_policy_value, registry_problems, sources, provider_id):
+    """facts 분기를 시작해도 되는지(순수, D-232) — 문제 문장 목록(비어 있으면 시작해도 된다). 하나라도 있으면 호출한 쪽은 **글을 만들지 않고 이유를 한 줄로 남기고 정상 종료**한다
+    (예외로 죽지 않고, 이력·파일을 바꾸지 않고, 피드 경로로 되돌아가지도 않는다). 켜기 전 안전장치 네 가지:
+    ① content_source 가 facts ② source_policy 가 allowlist ③ 레지스트리가 유효(검증 오류 0) ④ 필요한 Provider(provider_id)가 허용 목록에서 ACTIVE(enabled 이고 strict_tier·상태·기한·경로·호출 한도 조건 통과).
+    sources 는 허용 목록(Registry)이거나 None(읽지 못함). 문장은 고정 문구와 Provider 식별자뿐이다(외부 글을 싣지 않는다)."""
+    problems = []
+    if content_source != CONTENT_FACTS:
+        problems.append("content_source 가 facts 가 아니라 구조화 Fact 경로를 시작하지 않음")
+    if source_policy_value != ALLOWLIST:
+        problems.append("source_policy 가 allowlist 가 아님(facts 는 허용 목록 모드 위에서만 돈다)")
+    if registry_problems:
+        problems.append(f"레지스트리 검증 오류 {len(registry_problems)}건(python -m pipeline.registry 로 확인)")
+    if sources is None:
+        problems.append("허용 목록(Registry)을 읽지 못함")
+        return problems
+    provider = sources.get(provider_id)
+    if provider is None:
+        problems.append(f"허용 목록에 {provider_id} 가 없음")
+    elif not sources.is_active(provider_id):
+        reasons = sources.inactive_reasons().get(provider_id)
+        why = " ".join(str(reasons[0]).split())[:120] if reasons else ("enabled 가 false" if not provider.enabled else "활성 조건을 통과하지 못함")
+        problems.append(f"{provider_id} 가 ACTIVE 가 아님(strict_tier {provider.strict_tier}·{provider.effective_status}) — {why}")
+    return problems
+
+
+def fact_start(today, provider_id, registry_path=None, sources_path=None, key="chance"):
+    """facts 분기의 시작 점검에 필요한 것을 파일에서 읽어 (문제 목록, 허용 목록 Registry 또는 None) 을 돌려준다. 레지스트리·허용 목록 파일을 읽지 못하면 그 사실이 문제 문장이 된다(예외를 올리지 않는다).
+    파일을 읽는 것 말고 아무 일도 하지 않는다(요청을 보내지 않고 시계를 부르지 않는다 — 오늘은 인자)."""
+    from pipeline import registry        # 지연 import(순환 방지)
+    content, policy, found = None, None, []
+    try:
+        reg = registry.load_registry(registry_path)
+        blog = registry.get_blog(reg, key)
+        content, policy = content_source_of(blog), blog.get("source_policy", DEFAULT_SOURCE_POLICY)
+        found = registry.validate_registry(reg)
+    except (registry.RegistryError, ValueError) as exc:
+        found = [str(exc)[:120]]
+    try:
+        sources = source_registry.load_registry(sources_path, _today(today))
+    except source_registry.SourceRegistryError:
+        sources = None
+    return fact_start_problems(content, policy, found, sources, provider_id), sources
 
 
 def _today(today):
@@ -153,3 +258,22 @@ def own_title_batches(mode, batches, on_drop=None):
                 yield lane, kept
 
     return filtered()
+
+
+def main(argv=None):
+    """명령줄: `python -m pipeline.source_policy content-source` — 레지스트리의 chance.content_source(feed|facts)를 한 줄로 낸다. 읽지 못하면 아무것도 내지 않고 종료 1
+    (워크플로의 '읽기 단계' 자리 — AF7 패치 초안이 이 출력을 `== 'feed'` 로 견주어 AI 키를 넘길지 정한다: 출력이 비면 키가 새지 않는 닫힌 쪽이다)."""
+    args = list(sys.argv[1:] if argv is None else argv)
+    if args != ["content-source"]:
+        print("사용법: python -m pipeline.source_policy content-source", file=sys.stderr)
+        return 2
+    try:
+        print(chance_content_source())
+    except Exception as exc:     # noqa: BLE001 — 읽지 못한 이유를 한 줄로만 남기고 출력은 비운다(닫힌 쪽)
+        print(f"::error::레지스트리의 content_source 를 읽지 못했습니다({type(exc).__name__})", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

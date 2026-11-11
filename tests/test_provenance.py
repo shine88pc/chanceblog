@@ -18,7 +18,7 @@ from pipeline import provenance as P
 from pipeline import state
 
 ROOT = _bootstrap.ROOT
-MARKER_WRITERS = set()          # 표식을 쓰는 (파일, 호출 이름) — 지금은 없다. 2단계가 생성기의 한 군데를 이유와 함께 올리고 docs/AI_FLOW.md 의 표도 고친다
+MARKER_WRITERS = {("generator.py", "with_marker"), ("generator.py", "entry_with_marker")}          # 표식을 쓰는 (파일, 호출 이름) — S2b 가 생성기의 Fact 분기 한 군데(글: fact_check_post, 이력: fact_history_entry)를 올렸다. docs/AI_FLOW.md §6 '표식 쓰는 곳' 이 같은 말을 한다
 HEADER ='---\nlayout: post\ntitle: "제목"\n{extra}---\n\n본문\n'
 
 
@@ -284,8 +284,8 @@ class WriterTest(unittest.TestCase):
             P.entry_with_marker("사전이 아님")
 
     def test_only_the_generator_may_write_the_marker(self):
-        """표식을 쓰는 함수(with_marker·entry_with_marker)는 provenance.py 밖에서 부르지 않는다 — 지금은 부르는 곳이 0이다(2단계의 구조화 Fact 분기가 생성기 안의 한 군데로 연결한다).
-        그 한 군데를 올릴 때는 MARKER_WRITERS 와 docs/AI_FLOW.md 의 '표식 쓰는 곳' 표를 같이 고친다."""
+        """표식을 쓰는 함수(with_marker·entry_with_marker)는 provenance.py 밖에서 부르지 않는다 — 부르는 곳은 생성기의 구조화 Fact 분기 한 군데뿐이다(S2b, 각 함수를 정확히 한 번 — 아래 시험).
+        그 곳이 달라지면 MARKER_WRITERS 와 docs/AI_FLOW.md 의 '표식 쓰는 곳' 절을 같이 고친다."""
         writers = set()
         for path in sorted(list((ROOT / "pipeline").rglob("*.py")) + [ROOT / "generator.py", ROOT / "blogger_generator.py"] + sorted((ROOT / "scripts").glob("*.py"))):
             rel = path.relative_to(ROOT).as_posix()
@@ -298,6 +298,19 @@ class WriterTest(unittest.TestCase):
                     if name in ("with_marker", "entry_with_marker"):
                         writers.add((rel, name))
         self.assertEqual(writers, MARKER_WRITERS)
+
+    def test_the_generator_writes_each_marker_at_exactly_one_call_site_inside_the_fact_branch(self):
+        """S2b: 두 함수의 호출 줄이 각각 정확히 하나이고 Fact 분기의 함수 안이다(글: fact_check_post, 이력: fact_history_entry) — 피드 흐름(generate_blog_posts)에는 표식이 없다."""
+        tree = ast.parse((ROOT / "generator.py").read_text(encoding="utf-8"))
+        sites = {}
+        for function in [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]:
+            for node in ast.walk(function):
+                if isinstance(node, ast.Call):
+                    name = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
+                    if name in ("with_marker", "entry_with_marker"):
+                        sites.setdefault(name, []).append(function.name)
+        self.assertEqual({name: sorted(set(owners)) for name, owners in sites.items()}, {"with_marker": ["fact_check_post"], "entry_with_marker": ["fact_history_entry"]})
+        self.assertEqual({name: len(owners) for name, owners in sites.items()}, {"with_marker": 1, "entry_with_marker": 1})
 
 
 class GeneratorIntegrationTest(unittest.TestCase):

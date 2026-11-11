@@ -13,6 +13,10 @@ generator.py 는 환경 변수 SHADOW_RUN=1 일 때 main() 에서 이 모듈의 
 
 이 모듈은 오프라인 측정 도구를 불러오지 않는다 — 측정은 워크플로가 두 번째 단계에서 별도 프로세스로 한다(연결 금지, 시험이 소스를 읽어 확인한다).
 출력 형식과 설정은 docs/QUALITY_GATE.md 에 있다.
+
+구조화 Fact 분기(레지스트리 chance.content_source: facts, S2b): 같은 읽기 전용 구간 안에서 `run_facts` 가 후보를 **AI 없이** 만든다 — 일반 실행과 같은 함수(`g.fact_prepare`: 이력의 발행일로 차례를 정하는 공급 함수 →
+어댑터 → 조립기)를 쓰고 Gemini·피드·사진을 부르지 않는다(Gemini 키도 필요 없다). 만든 글은 최소 품질 Gate 를 **항상** 돌려 평가하고(일반 그림자 실행과 같다) 결과는 같은 모양(`result.json`·`run.json`)으로 SHADOW_OUT 아래에만 쓴다.
+네트워크 읽기는 허용 목록 관문·호출 예산을 거치는 읽기뿐이다(저장소·git·gh 에는 쓰지 않는다 — 읽기 전용 구간의 방어 코드가 그대로 감시한다). 설명: docs/FACT_PATH.md §15
 """
 import contextlib
 import copy
@@ -25,7 +29,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from pipeline import quality_gate, registry
+from pipeline import quality_gate, registry, source_policy
 
 SCHEMA = 1
 DEFAULT_COUNT = 3
@@ -494,6 +498,57 @@ def _result(attempt, outcome, reasons, validation_reason, gate_input, facts, ite
 
 
 # ----------------------------------------------------------------------------
+# 구조화 Fact 분기(AI 없음)
+# ----------------------------------------------------------------------------
+def facts_branch_on():
+    """레지스트리 content_source 가 facts 인가. 읽지 못하거나 값이 올바르지 않으면 False — 기본(feed)은 이전과 같고, 뒤이은 `registry.chance_settings()` 가 같은 이유로 멈춘다."""
+    try:
+        return source_policy.chance_content_source() == source_policy.CONTENT_FACTS
+    except Exception:       # noqa: BLE001 — 값을 알 수 없으면 Fact 분기로 가지 않는다
+        return False
+
+
+def run_facts(g, config, languages, writer, out, count, notes):
+    """그림자 실행의 구조화 Fact 분기(읽기 전용 구간 안에서 부른다). 켜기 전 안전장치(`g.fact_context` — 하나라도 아니면 후보 0건으로 끝)를 지나면 `g.fact_prepare`(일반 실행과 같은 공급 함수)로 후보를 count 건까지
+    만들고, 후보마다 최소 품질 Gate 를 돌려 결과를 SHADOW_OUT 아래에 쓴다(형식은 일반 그림자 실행과 같다: 번호 폴더의 글 파일·result.json, 맨 위 run.json). AI 는 부르지 않는다. 돌려주는 값: run.json 내용."""
+    history = g.read_history()
+    now = g.now_kst()
+    problems, sources, provider, access = g.fact_context(now)
+    out(f"[그림자] 구조화 Fact 분기를 시작합니다(후보 {count}건까지, AI 호출 없음, 결과 폴더는 저장소 밖 임시 폴더).")
+    prepared, fact_notes = [], []
+    if problems:
+        out("::notice::[그림자] 구조화 Fact 분기를 시작하지 않습니다 — " + _line(" / ".join(problems), 300))
+    else:
+        prepared, supplied = g.fact_prepare(now, history, sources, provider, access, limit=count, gate_config=None)
+        fact_notes = g.fact_notes(supplied)
+    for note in fact_notes:
+        out(f"[그림자] {_line(note, 200)}")
+    summaries = []
+    for attempt, item in enumerate(prepared, start=1):
+        folder, stamp, post = attempt_folder(attempt), attempt_stamp(now, attempt), item.post
+        report = quality_gate.check_candidate({"kr_title": post.title, "kr_content": item.content}, item.gate_source, history, config, as_of=now.date())
+        outcome = "HELD" if report.holds else "PASSED"
+        name = post_filename("ko", stamp)
+        feed_shaped = {"link": post.source_url, "source": post.source_name, "publisher_domain": post.source_domain}
+        result = build_result(attempt, outcome, report.lines(), "", "validated", report.facts, len(item.gate_source["evidence_text"]), "rule", "facts", feed_shaped,
+                              {"ko": post.title, "en": ""}, languages, {"ko": name}, now.isoformat())
+        writer.write(f"{folder}/{name}", item.marked)
+        writer.write_json(f"{folder}/{RESULT_FILE}", result)
+        summaries.append({"attempt": attempt, "passed": result["passed"], "outcome": outcome, "hold_codes": result["hold_codes"], "lane": result["lane"]})
+        out(f"[그림자 {folder}] {'통과' if result['passed'] else '보류'}" + (f" [{', '.join(dict.fromkeys(result['hold_codes']))}]" if result["hold_codes"] else "") + f" — {_line(post.title, 80)}")
+    attempts = len(prepared)
+    passed = sum(1 for summary in summaries if summary["passed"])
+    run_info = {"schema": SCHEMA, "requested": count, "attempts": attempts, "passed": passed, "held_or_rejected": attempts - passed, "languages": list(languages),
+                "outcome": "COMPLETED" if attempts else "NO_CANDIDATES", "lanes_tried": [g.FACT_LANE_LABEL], "notes": list(notes) + [_line(text, 200) for text in problems + fact_notes],
+                "generated_at": now.isoformat(), "attempts_summary": summaries}
+    writer.write_json(RUN_FILE, run_info)
+    out(f"SHADOW_DONE attempts={attempts} passed={passed} held_or_rejected={attempts - passed}")
+    if not attempts:
+        out(f"::warning::그림자 실행: 평가할 후보가 없었습니다({run_info['outcome']}).")
+    return run_info
+
+
+# ----------------------------------------------------------------------------
 # 진입점
 # ----------------------------------------------------------------------------
 def run(g, environ=None, out=print):
@@ -511,7 +566,8 @@ def run(g, environ=None, out=print):
         out(f"::notice::{note}")
     if str(environ.get("PIPELINE_PAUSE", "")).strip().lower() in {"1", "true", "yes", "on"}:
         out("::notice::PIPELINE_PAUSE 가 켜져 있지만 그림자 실행은 읽기 전용이라 건너뛰지 않습니다(정지 변수는 그대로 둡니다).")
-    if g.STUB_GEMINI and not g.DRY_RUN:
+    facts_mode = facts_branch_on()
+    if g.STUB_GEMINI and not g.DRY_RUN and not facts_mode:
         raise RuntimeError("GEMINI_API_KEY 환경 변수가 없습니다. 그림자 실행은 실제 모델로 후보 글을 만듭니다.")
     settings = registry.chance_settings()
     languages = settings.languages
@@ -520,6 +576,8 @@ def run(g, environ=None, out=print):
     writer = ShadowWriter(out_dir)
     writer.ensure_root()
     with read_only(g, out_dir):
+        if facts_mode:      # 구조화 Fact 분기: 후보를 공급 함수로만 만들고(AI 없음) 아래 피드 후보 반복문으로 내려가지 않는다 — 읽기 전용 구간은 그대로 지켜진다
+            return run_facts(g, config, languages, writer, out, count, notes)
         history = g.read_history()
         posts = g.load_posts()
         now = g.now_kst()
