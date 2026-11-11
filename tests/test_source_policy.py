@@ -242,10 +242,10 @@ class HygieneTest(unittest.TestCase):
         return names
 
     def test_source_policy_and_egress_import_only_what_they_need(self):
-        self.assertEqual(self.imports(self.tree("source_policy.py")), {"pipeline.egress", "pipeline.source_registry", "pipeline.registry"})   # registry 는 순환을 피하려고 함수 안에서만(지연 import)
+        self.assertEqual(self.imports(self.tree("source_policy.py")), {"pipeline.egress", "pipeline.source_registry", "pipeline.registry", "sys"})   # registry 는 순환을 피하려고 함수 안에서만(지연 import). sys 는 S2b 의 명령줄(`content-source`)이 쓴다 — 표준 라이브러리의 sys 하나뿐이고 아래 금지 모듈(os·subprocess·socket·ctypes·msvcrt) 시험은 그대로다
         self.assertEqual(self.imports(self.tree("egress.py")), {"collections.namedtuple", "pipeline.source_registry", "re", "urllib.error", "urllib.parse", "urllib.request"})   # 검사된 opener 가 urllib.request 를 쓴다
         top_level = [n for n in self.tree("source_policy.py").body if isinstance(n, (ast.Import, ast.ImportFrom))]
-        self.assertEqual(sorted(alias.name for n in top_level for alias in n.names), ["egress", "source_registry"])
+        self.assertEqual(sorted(alias.name for n in top_level for alias in n.names), ["egress", "source_registry", "sys"])
 
     def test_no_clock_randomness_or_forbidden_modules(self):
         banned = {"now", "utcnow", "today", "time", "monotonic", "random", "urandom", "uuid4"}

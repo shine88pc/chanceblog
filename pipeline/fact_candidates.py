@@ -11,11 +11,18 @@
   후보가 된다 — 대표는 묶음 안에서 기간 번호(ISO 주 번호·달 번호)만큼 돌려 정해 같은 제품을 읽는 글감이 기간마다 번갈아 나온다. 묶음 안의 어느 글감이든 같은 기간의 키가 `done_keys` 에 있으면 그 묶음은
   후보에서 빠진다. 같은 제품의 같은 7일 자료로 만든 두 글은 표의 (날짜, 값)이 모두 같아 거의 같은 글이 되기 때문이다. **이웃 기간(일요일 발행과 다음 날 월요일 발행)의 자료 창이 겹치는 것은 이 함수가 막지
   못한다** — 키가 날짜가 아니라 기간 이름이라서다. 이력에 글을 낸 날짜를 함께 남겨 같은 제품의 다음 글을 자료 창 길이만큼 띄우는 것은 S2b 의 몫이다(docs/FACT_PATH.md §14-5).
-- 켜기·실제 발행 수(주 1–2편)·사람 승인은 이 함수의 일이 아니다. 이 모듈은 호출하는 곳이 없다(연결 금지 — 시험이 확인).
+- 켜기·실제 발행 수(주 1–2편)·사람 승인은 이 함수의 일이 아니다.
 
-설명: docs/FACT_PATH.md §14
+**S2b — 이력의 발행일을 읽는 후보 선택 `select_candidates`(순수)**: 위 `plan_candidates` 는 이력을 보지 않고 주 번호만큼 돌려 정해 이웃 기간의 자료 창 겹침을 막지 못하고 요일 대기 때문에 굶는 글감이 있었다
+(§14-7). 공급 함수(`fact_supply.supply`)는 대신 이 함수를 쓴다 — 이력에서 글감마다 가장 최근에 낸 날(KST 날짜)을 읽어 ① **가장 오래 전에 낸 글감이 먼저**(한 번도 안 낸 글감이 맨 앞, 같으면 글감 순서)
+② **같은 묶음은 이어서**(대표가 `Insufficient` 면 같은 묶음의 다음 글감 — 같은 제품이라 이미 받은 응답을 다시 쓴다) ③ 이번 기간에 이미 낸 글감과 같은 묶음은 닫힌다 ④ **같은 제품을 읽은 글과 자료 창 길이만큼 띄운다**
+(Kp·플레어·등급은 7일, 월 글감 두 제품은 한 달 주기 28일) ⑤ 요일 대기는 월 글감(달의 일)에만 남는다 — 주 글감은 그 주 어느 요일에나 낼 수 있어야 주 상한 1–2편에서도 모든 글감이 차례가 온다(D-231).
+시각은 읽지 않는다(오늘과 협정 세계시 분은 인자). `plan_candidates` 와 `representative` 는 이전 그대로 두고 S2a 시험도 그대로다.
+
+설명: docs/FACT_PATH.md §14·§15
 """
 import datetime
+import re
 from dataclasses import dataclass
 
 from pipeline import facts as F
@@ -44,11 +51,12 @@ class CandidateSpec:
 
 @dataclass(frozen=True)
 class Candidate:
-    """오늘 만들 수 있는 후보: 글감·중복 방지 키·글을 만들 때 쓸 변수·읽을 제품."""
+    """오늘 만들 수 있는 후보: 글감·중복 방지 키·글을 만들 때 쓸 변수·읽을 제품. `ready` 는 지금 시각에 읽어도 되는가(S2b — 일별 제품의 협정 세계시 하한. 기본 True)."""
     spec: CandidateSpec
     candidate_key: str
     params: tuple
     products: tuple
+    ready: bool = True
 
     @property
     def recipe_id(self):
@@ -156,3 +164,93 @@ def week_start(today):
     """오늘이 속한 ISO 주의 월요일(`datetime.date`) — 후보 기간의 시작일을 문서·시험이 확인하는 데 쓴다."""
     day = _day(today)
     return day - datetime.timedelta(days=day.isoweekday() - 1)
+
+
+# ----------------------------------------------------------------------------
+# S2b: 이력의 발행일을 읽는 후보 선택
+# ----------------------------------------------------------------------------
+SPEC_BY_ID = {spec.spec_id: spec for spec in SPECS}
+WINDOW_DAYS = {"kp_estimated": 7, "xray_flares": 7, "scales": 7, "ssn_daily": 28, "ssn_monthly": 28}      # 같은 제품을 읽은 두 글 사이의 최소 간격(일) = 글이 읽는 자료 창 길이(주 글감은 7일, 월 글감은 한 달 주기)
+DEFAULT_WINDOW_DAYS = 7
+NOT_BEFORE_UTC_MINUTES = {"ssn_daily": 30}           # 일별 제품은 협정 세계시 0시 30분 이후에 읽는다(조사 보고서 H8 — 레지스트리 자체 상한 `daily_product_not_before_utc`)
+FACTS_MARK = "facts"                                 # 이력 항목의 `content_source` 값(provenance 표식과 같은 낱말)
+_KEY_RE = re.compile(r"space_weather\.([a-z_]+):(\d{4}-(?:W\d{2}|\d{2}))")
+
+
+@dataclass(frozen=True)
+class Made:
+    """이력이 말해 주는 지난 글: last(글감 spec_id → 가장 최근에 낸 날 — 읽을 수 없는 날짜는 datetime.date.max 로 둔다, 막는 쪽)·keys(낸 candidate_key 들)·dedupe(낸 글의 dedupe_key 들)."""
+    last: dict
+    keys: frozenset
+    dedupe: frozenset
+
+
+def spec_id_of_key(candidate_key):
+    """`space_weather.kp_weekly:2026-W45` → `kp_weekly`. 알려진 글감의 키 모양이 아니면 None."""
+    found = _KEY_RE.fullmatch(candidate_key) if isinstance(candidate_key, str) else None
+    return found.group(1) if found and found.group(1) in SPEC_BY_ID else None
+
+
+def made_from_history(history):
+    """이력(history.json 의 항목 목록)에서 Fact 글(`content_source` 가 facts 이고 candidate_key 가 있는 항목)만 읽는다. 다른 항목·깨진 항목은 건너뛴다(옛 항목은 그대로 읽힌다).
+    날짜(`date`)를 읽을 수 없으면 date.max 로 둔다 — 그 글감과 같은 제품은 막히고(막는 쪽) 순서에서는 가장 최근에 낸 것이 된다."""
+    last, keys, dedupe = {}, set(), set()
+    for entry in history if isinstance(history, (list, tuple)) else ():
+        if not isinstance(entry, dict) or entry.get("content_source") != FACTS_MARK:
+            continue
+        key = entry.get("candidate_key")
+        spec_id = spec_id_of_key(key)
+        if spec_id is None:
+            continue
+        keys.add(key)
+        try:
+            day = F.as_date(entry.get("date"))
+        except F.FactFormatError:
+            day = datetime.date.max
+        if spec_id not in last or day > last[spec_id]:
+            last[spec_id] = day
+        dedupe_key = entry.get("dedupe_key")
+        if isinstance(dedupe_key, str) and dedupe_key:
+            dedupe.add(dedupe_key)
+    return Made(last, frozenset(keys), frozenset(dedupe))
+
+
+def _data_ready(spec, day):
+    """자료가 준비된 기간인가: 월 글감은 달의 `due` 일부터, 주 글감은 그 주 어느 요일에나(S2a 의 요일 대기는 굶는 글감을 만들어 이 선택에서는 쓰지 않는다 — D-231)."""
+    return spec.period == PERIOD_WEEK or day.day >= spec.due
+
+
+def _spaced(spec, day, last_read):
+    """같은 제품을 읽은 지난 글과 자료 창 길이만큼 떨어졌는가."""
+    for product in spec.products:
+        previous = last_read.get(product)
+        if previous is not None and (day - previous).days < WINDOW_DAYS.get(product, DEFAULT_WINDOW_DAYS):
+            return False
+    return True
+
+
+def select_candidates(today, made, minutes_utc=None):
+    """오늘 낼 수 있는 후보를 **먼저 낼 차례** 순서로(순수 함수 — 시각은 인자). 대상: 이번 기간에 같은 묶음에서 아직 내지 않았고, 자료가 준비됐고(`_data_ready`), 같은 제품을 읽은 지난 글과 자료 창 길이만큼 떨어진 글감.
+    순서: 이력에서 가장 오래 전에 낸 글감이 먼저(한 번도 안 낸 글감이 맨 앞, 같으면 글감 순서), 같은 묶음의 글감은 묶음에서 가장 앞선 글감의 자리에 이어 붙여 묶음 안 폴백이 한 번 받은 응답을 다시 쓰게 한다.
+    minutes_utc(그날 협정 세계시 0시부터의 분)를 주면 일별 제품(`NOT_BEFORE_UTC_MINUTES`)을 읽는 글감은 그 시각 전에는 `ready=False` 로 돌려준다(차례를 건너뛰지 않고 기다리게 하려는 표시 — 판단은 공급 함수의 일)."""
+    day = F.as_date(today)
+    closed = {GROUP_OF[spec.spec_id] for spec in SPECS if candidate_key(spec, day) in made.keys}
+    last_read = {}
+    for spec in SPECS:
+        when = made.last.get(spec.spec_id)
+        for product in spec.products if when is not None else ():
+            if product not in last_read or when > last_read[product]:
+                last_read[product] = when
+    eligible = [spec for spec in sorted(SPECS, key=lambda item: item.order)
+                if len(spec.products) <= MAX_PRODUCTS_PER_POST and GROUP_OF[spec.spec_id] not in closed and _data_ready(spec, day) and _spaced(spec, day, last_read)]
+    eligible.sort(key=lambda spec: (made.last.get(spec.spec_id, datetime.date.min), spec.order))
+    out, placed = [], set()
+    for spec in eligible:
+        group = GROUP_OF[spec.spec_id]
+        if group in placed:
+            continue
+        placed.add(group)
+        for member in (item for item in eligible if GROUP_OF[item.spec_id] is group):
+            ready = minutes_utc is None or all(minutes_utc >= NOT_BEFORE_UTC_MINUTES.get(product, 0) for product in member.products)
+            out.append(Candidate(member, candidate_key(member, day), tuple(sorted(member.params().items())), member.products, ready))
+    return tuple(out)

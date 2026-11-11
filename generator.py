@@ -24,6 +24,7 @@ import urllib.parse
 import urllib.request
 import urllib.error
 import xml.etree.ElementTree as ET
+from collections import namedtuple
 from datetime import timezone, timedelta
 from pathlib import Path
 
@@ -32,6 +33,8 @@ from pipeline import drafts  # 승인 흐름(레지스트리 publish_flow: pr)�
 from pipeline import quality_gate, registry  # 최소 품질 Gate(순수 규칙)와 레지스트리 설정(chance.quality_gate·languages) 읽기. quality_gate 가 off(기본)면 Gate 는 아무것도 하지 않는다
 from pipeline import unsplash_credit  # Unsplash 사진의 ixid 유지·작가 출처 줄(순수 함수 — Chance·이슈 수정·Blogger 가 같은 규칙을 쓴다)
 from pipeline import source_policy  # 소스 정책(레지스트리 chance.source_policy: legacy 가 기본 — 이전과 같다 / allowlist 는 허용 목록 밖 외부 읽기와 외부 텍스트의 프롬프트·이력·로그 유입을 막는다). legacy 에서는 값을 읽는 것 말고 아무 일도 하지 않는다
+from pipeline import egress  # 외부 호출 관문(허용 목록 밖 호스트 거부)·호출 예산 — 구조화 Fact 경로의 연결 코드(fact_opener)가 주입되는 opener 를 감쌀 때만 쓴다
+from pipeline import fact_supply  # 구조화 Fact 경로(레지스트리 chance.content_source: facts)의 후보 공급 — 생성기가 Fact 모듈을 부르는 유일한 연결 한 줄이다(시험 NoConnectionTest). 그 분기는 AI 를 부르지 않는다(docs/AI_FLOW.md §12)
 from pipeline.llm import CALL_TIMEOUT_SECONDS, CallLog, _run_with_timeout, failure_code, failure_status, scrub  # Gemini 요청 기록·시크릿 가리기·호출 시간 상한은 Blogger·이슈 수정과 같은 코드를 쓴다(D-52·D-83)
 
 # ============================================================
@@ -2545,6 +2548,8 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
     langs = settings.languages
     prefixes = _prefixes(langs)                     # ("kr", "en") 한 쌍(기본) 또는 ("kr",) 국문 전용
     lang_args = {} if len(prefixes) == 2 else {"languages": langs}      # 기본(한 쌍)에서는 아래 호출이 예전 그대로다 — 국문 전용일 때만 언어를 넘긴다
+    if source_policy.chance_content_source() == source_policy.CONTENT_FACTS:      # 구조화 Fact 경로(content_source: facts): 피드·기사·모델·사진을 쓰지 않는 별도 함수가 처음부터 끝까지 맡는다. 기본(feed)에서는 이 줄이 레지스트리 값을 읽을 뿐 아무 일도 하지 않는다
+        return generate_fact_post(gate_config, report, slot=slot, draft_flow=draft_flow, topic_override=topic_override)
     posts = load_posts(for_ai=True)      # 표식 글은 빠진 목록 — 아래 titles[-30:] 가 프롬프트의 '최근 다룬 제목' 으로 AI 에 간다
     history = read_history()
     source_mode = source_policy.chance_source_policy()     # 'legacy'(기본 — 이전과 같다) | 'allowlist'
@@ -2752,6 +2757,215 @@ def generate_blog_posts(topic_override=None, category_hint="", slot=None,
 
 
 # ============================================================
+# 구조화 Fact 경로(레지스트리 chance.content_source: facts) — S2b
+# ============================================================
+# 이 구역의 함수는 AI 를 한 번도 부르지 않는다. 진입 함수 generate_fact_post 와 그 함수가 부르는 곳은 정적 규칙 AF4·AF8 이 읽는다(tests/ai_flow_scan.py 의 DEFAULT_ENTRIES) —
+# 그러니 이 구역에서 피드·기사 발췌·구글 뉴스 해석기·Gemini 호출·프롬프트 조립·사진 선택·이미지 검색어 함수를 부르거나 이름으로 참조하지 않는다.
+# 기본(content_source 가 없거나 feed)에서는 이 구역이 한 번도 실행되지 않는다. 켜는 것은 T3 — 설명: docs/FACT_PATH.md §15
+FACT_CARD_PATH = "assets/fact-card.svg"            # 모든 Fact 글이 같이 쓰는 저장소 안 자체 카드 이미지(사진 아님 — 로고·상표·외부 자원이 없는 추상 그림)
+FACT_CARD_FILE = Path(__file__).resolve().parent / FACT_CARD_PATH
+FACT_CONFIG_FILE = Path(__file__).resolve().parent / "_config.yml"
+FACT_LANE_LABEL = "구조화 공개 자료"                 # 실행 요약의 '편집 축' 칸에 쓰는 이름(Fact 글은 편집 분야 추첨을 거치지 않는다)
+FACT_USER_AGENT = UA
+PreparedFact = namedtuple("PreparedFact", "post candidate content marked gate_source image")      # 파일이 될 글 한 편: 조립된 글·후보·표식 전 글·표식이 든 글·Gate 에 넘기는 source·이미지 주소
+
+
+def fact_site_url(config_path=None):
+    """사이트 주소(`_config.yml` 의 url + baseurl, 끝 슬래시 없음) — 공개 값을 읽기만 한다. 읽을 수 없거나 모양이 올바르지 않으면 RuntimeError(자체 이미지 주소를 만들 수 없어 글을 만들지 않는다)."""
+    try:
+        text = Path(config_path or FACT_CONFIG_FILE).read_text(encoding="utf-8")
+    except OSError as exc:
+        raise RuntimeError("사이트 설정(_config.yml)을 읽을 수 없어 자체 이미지 주소를 만들지 못합니다.") from exc
+    url = re.search(r"(?m)^url:[ \t]*[\"']?([^\"'\s#]+)[\"']?[ \t]*(?:#.*)?$", text)
+    base = re.search(r"(?m)^baseurl:[ \t]*[\"']?([^\"'\s#]*)[\"']?[ \t]*(?:#.*)?$", text)
+    prefix = base.group(1).rstrip("/") if base else ""
+    if not url or not re.fullmatch(r"https://[A-Za-z0-9.\-]+(?::\d{1,5})?", url.group(1).rstrip("/")) or (prefix and not re.fullmatch(r"/[A-Za-z0-9._~\-/]*", prefix)):
+        raise RuntimeError("사이트 설정(_config.yml)의 url·baseurl 모양이 올바르지 않아 자체 이미지 주소를 만들지 못합니다.")
+    return url.group(1).rstrip("/") + prefix
+
+
+def fact_card_url(config_path=None):
+    """Fact 글 머리말 `image` 에 쓰는 자체 카드 이미지의 https 절대 주소(사이트 주소 + `assets/…`)."""
+    return f"{fact_site_url(config_path)}/{FACT_CARD_PATH}"
+
+
+def _fact_gunzip(body, limit):
+    """gzip 으로 온 응답을 풀되 풀린 크기가 limit 를 넘으면 거기서 자른다(압축 폭탄 방어 — 어댑터가 상한 초과(TOO_LARGE)로 거절한다). 풀 수 없는 응답은 ValueError."""
+    try:
+        unpacked = zlib.decompressobj(16 + zlib.MAX_WBITS).decompress(body, limit)
+    except zlib.error as exc:
+        raise ValueError("gzip 응답을 풀 수 없습니다") from exc
+    return unpacked
+
+
+def make_fact_transport(sources):
+    """실제 호출 한 번을 하는 transport(url, *, timeout, max_bytes) -> bytes 를 만든다 — 허용 목록(Registry)이 판정하는 검사된 opener(리다이렉트 0번: 호출 한 번이 요청 한 번)로 보내고
+    응답은 max_bytes + 1 바이트까지만 읽는다(넘으면 어댑터가 거절한다). gzip 을 요청하고(호출 한도 own.request_gzip) 받으면 풀어서 돌려준다. 시험은 이 함수를 가짜로 바꾼다(시험은 네트워크에 접속하지 않는다)."""
+    opener = egress.build_checked_opener("fact", sources, max_redirects=0)
+    return lambda url, *, timeout, max_bytes: _fact_fetch(opener, url, timeout, max_bytes)      # 이름 있는 안쪽 함수 대신 람다: 정적 규칙(AF4)이 호출을 이 함수의 것으로 읽어 전부 훑는다
+
+
+def _fact_fetch(opener, url, timeout, max_bytes):
+    """검사된 opener 로 요청 한 번을 보내 응답 본문을 돌려준다(gzip 이면 풀어서). max_bytes + 1 바이트까지만 읽는다."""
+    request = urllib.request.Request(url, headers={"User-Agent": FACT_USER_AGENT, "Accept": "application/json", "Accept-Encoding": "gzip"})
+    with opener.open(request, timeout=timeout) as response:
+        body = response.read(max_bytes + 1)
+        packed = str(response.headers.get("Content-Encoding", "")).strip().lower() == "gzip"
+    return _fact_gunzip(body, max_bytes + 1) if packed else body
+
+
+def fact_opener(sources, provider, access, transport=None):
+    """어댑터에 주입하는 opener 와 그 호출 예산(CallBudget)을 만든다 — 연결 코드 한 군데(D-233). transport(실제 호출 한 번)를 ① 허용 목록 관문(`egress.check_url` — 허용 목록 밖·ACTIVE 가 아닌 Provider·
+    허용 밖 경로면 어댑터 오류 `EGRESS_DENIED`) ② 호출 예산(`egress.budgeted` — 한 실행의 호출 상한·같은 주소 성공 응답 재사용·403·429 면 그 실행에서 Provider 중지·404 면 그 주소 중지·실패 3회 뒤 건너뜀,
+    막히면 어댑터 오류 `BUDGET_DENIED`)으로 감싼다. 호출 한도를 모르는 Provider 는 한 실행의 상한이 0 이라 어떤 호출도 나가지 않는다(닫힌 쪽). transport 를 안 주면 실제 호출(`make_fact_transport`)이다."""
+    budget = egress.budget_for(provider.provider_id, access.rate_limit)
+    send = egress.budgeted(transport if transport is not None else make_fact_transport(sources), budget)
+    return (lambda url, *, timeout, max_bytes: _fact_send(sources, send, url, timeout, max_bytes)), budget
+
+
+def _fact_send(sources, send, url, timeout, max_bytes):
+    """주입되는 opener 한 번의 호출: 관문 판정 → 호출 예산을 거친 호출. 관문·예산이 막으면 어댑터 오류(`EGRESS_DENIED`·`BUDGET_DENIED`)로 바꿔 올린다(요청은 나가지 않았다)."""
+    try:
+        egress.check_url(url, "fact", sources)
+        return send(url, timeout=timeout, max_bytes=max_bytes)
+    except egress.EgressDenied:
+        raise fact_supply.AdapterError("EGRESS_DENIED") from None
+    except egress.CallBudgetDenied as exc:
+        raise fact_supply.AdapterError("BUDGET_DENIED", exc.code) from None
+
+
+def fact_file_text(post, image_url):
+    """조립된 Fact 글(AssembledPost)을 파일이 될 모양(머리말 + 본문 + 설명·출처 세 줄)으로 만든다 — 머리말은 생성기의 기존 함수가 쓰고(제목·분류·태그는 조립기 값, 사진은 자체 카드 이미지 주소 하나)
+    표식은 아직 없다. 돌려주는 값: (글, 머리말 검사에 넘기는 소스 사전)."""
+    data = {"kr_title": post.title, "kr_category": post.category, "kr_tags": list(post.tags)}
+    source = {"link": post.source_url, "source": post.source_name, "publisher_domain": post.source_domain, "title": post.source_name}
+    content = add_discovery_metadata(_fresh_front_matter(data, "kr", "ko", image_url) + post.body_markdown, source)
+    return content.rstrip() + "\n", source
+
+
+def fact_context(now):
+    """facts 분기를 시작해도 되는지 파일에서 읽어 점검한다(읽기만 한다 — 요청을 보내지 않는다). 켜기 전 안전장치(D-232): content_source 가 facts·source_policy 가 allowlist·레지스트리 검증 오류 0·
+    Provider 가 ACTIVE(enabled·strict_tier·기한)이고, 더해서 NOAA api 접근 경로와 자체 카드 이미지 파일·그 주소를 만들 사이트 주소(_config.yml)가 있어야 한다. 돌려주는 값: (문제 문장 목록, 허용 목록 Registry 또는 None,
+    Provider 또는 None, api 접근 경로 또는 None) — 문제가 하나라도 있으면 호출한 쪽은 글을 만들지 않는다."""
+    problems, sources = source_policy.fact_start(now.date(), fact_supply.PROVIDER_ID)
+    provider = sources.get(fact_supply.PROVIDER_ID) if sources is not None else None
+    access = fact_supply.api_access(provider) if provider is not None else None
+    if provider is not None and access is None and not problems:
+        problems.append(f"{fact_supply.PROVIDER_ID} 에 NOAA api 접근 경로가 없음")
+    if not FACT_CARD_FILE.is_file():
+        problems.append(f"자체 카드 이미지 파일({FACT_CARD_PATH})이 없음")
+    try:
+        fact_card_url()
+    except RuntimeError as exc:
+        problems.append(str(exc))
+    return problems, sources, provider, access
+
+
+def fact_prepare(now, history, sources, provider, access, limit=1, gate_config=None, transport=None):
+    """Fact 글 후보를 만든다 — 읽기 전용(파일·이력에 쓰지 않는다. 그림자 실행도 이 함수를 쓴다). 공급 함수(fact_supply.supply)가 이력의 발행일로 차례를 정하고 후보마다 어댑터 → 조립기를 돌리며,
+    후보마다 이 함수가 넘기는 검사(accept)가 ① 머리말·본문·설명·출처 줄·표식까지 더한 최종 글의 머리말 검사(front_matter_problems(…, allow_provenance=True)) ② gate_config 가 있으면(chance.quality_gate: hold)
+    최소 품질 Gate 를 돌린다 — Gate 에는 `fact_supply.gate_source` 의 사전(`fact_post`·`evidence_text`·`provider_hosts`…)을 넘긴다. 거절된 후보는 건너뛰고 다음 글감으로 넘어간다.
+    표식은 여기 한 군데에서만 쓴다(provenance.with_marker — 시험 MARKER_WRITERS). 돌려주는 값: (PreparedFact 목록, SupplyResult)."""
+    image = fact_card_url()
+    opener, _budget = fact_opener(sources, provider, access, transport)
+    prepared = []
+    result = fact_supply.supply(today=now.date(), retrieved_at=now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), history=history, provider=provider, opener=opener, limit=limit,
+                                accept=lambda post, candidate: fact_check_post(post, candidate, image, provider, history, now, gate_config, prepared))      # 람다: 이름 있는 안쪽 함수 대신 — 정적 규칙(AF4)이 이 호출도 이 함수의 것으로 읽는다
+    return prepared, result
+
+
+def fact_check_post(post, candidate, image, provider, history, now, gate_config, prepared):
+    """후보 글 한 편의 검사(공급 함수의 accept): 파일이 될 글을 만들고(fact_file_text) 표식을 더한 뒤(여기 한 군데 — provenance.with_marker) ① 최종 머리말 검사 ② gate_config 가 있으면 최소 품질 Gate 를 돌린다.
+    통과하면 prepared 에 더하고 None, 거절이면 사유 코드(글자). 표식이 든 글이 검사에 넘어가는 것이고 Gate 에는 표식 전 글을 넘긴다(피드 글의 Gate 입력과 같은 모양 — 머리말 한 줄이 본문 규칙에 쓰이지 않는다)."""
+    content, source = fact_file_text(post, image)
+    try:
+        marked = provenance.with_marker(content)
+    except ValueError:
+        return "MARKER_ERROR"
+    if front_matter_problems(marked, source, allow_provenance=True):
+        return "FRONT_MATTER"
+    gate_source = fact_supply.gate_source(post, provider)
+    if gate_config is not None:
+        report = quality_gate.check_candidate({"kr_title": post.title, "kr_content": content}, gate_source, history, gate_config, as_of=now.date())
+        if report.holds:
+            return "GATE:" + "+".join(report.codes())
+    prepared.append(PreparedFact(post, candidate, content, marked, gate_source, image))
+    return None
+
+
+def fact_history_entry(item, now, slot):
+    """Fact 글의 이력 항목. `topic`·`kr_title` 은 조립기의 자체 제목이고(외부 제목이 없다), 중복 방지·차례 정하기에 쓰는 칸(candidate_key·dedupe_key·recipe_id·as_of·content_source)이 더해지며,
+    출처 표식(`provenance: facts`)이 붙는다 — AI 입력을 만드는 읽기(최근 제목 등)가 이 항목을 건너뛴다(docs/AI_FLOW.md). 영문 칸은 없다(국문 단독)."""
+    post = item.post
+    entry = {"date": now.strftime("%Y-%m-%d"), "topic": post.title, "kr_title": post.title, "kr_image": item.image, "slot": slot,
+             "source": post.source_name, "source_url": post.source_url, "languages": ["ko"],
+             "candidate_key": item.candidate.candidate_key, "dedupe_key": post.dedupe_key, "recipe_id": post.recipe_id, "as_of": post.as_of, "content_source": source_policy.CONTENT_FACTS}
+    return provenance.entry_with_marker(entry)
+
+
+def fact_notes(result):
+    """공급 결과를 사람이 읽는 줄로(고정 글자뿐 — 글감 이름·사유 코드): 건너뛴 글감마다 한 줄, 기다리는 글감이 있으면 한 줄."""
+    notes = [f"Fact 글감 {spec_id} 건너뜀: {code}" for spec_id, code in result.skipped]
+    if result.waiting:
+        notes.append(f"Fact 글감 {result.waiting} 은(는) 일별 제품의 협정 세계시 하한 때문에 기다림")
+    return notes
+
+
+def fact_stop(report, outcome, lines):
+    """글을 만들지 않고 끝낸다(예외 없음 — 이력·파일을 바꾸지 않는다). lines 가 있으면 이유를 한 줄로 남기고 결과 코드를 적는다."""
+    if lines:
+        print("[구조화 Fact] 글을 만들지 않습니다 — " + " / ".join(lines))
+    report["outcome"] = outcome
+    return None
+
+
+def generate_fact_post(gate_config, report, slot=None, draft_flow=False, topic_override=None, transport=None):
+    """구조화 Fact 경로의 글 만들기(content_source: facts) — 만들면 (국문 글 경로, None), 못 만들면 None. **이 함수는 AI 를 한 번도 부르지 않는다**: 피드·기사 발췌·구글 뉴스 해석기·Gemini·프롬프트·
+    사진 선택·사진 사용 알림을 부르지 않는다(정적 규칙 AF4·AF8 의 진입 함수).
+    흐름: 켜기 전 안전장치(fact_context — 하나라도 아니면 이유를 한 줄 남기고 정상 종료) → 이력을 읽어 오늘 낼 글감을 차례대로 시도(fact_prepare) → 첫 글 하나를 파일·이력에 쓴다.
+    파일 이름·분류 폴더·승인 흐름 항목(draft_flow)은 기존 규칙 그대로다(주 상한·하루 1편·열린 초안 상한·일시정지는 실행 앞의 잠금 가드가 맡는다). 국문 단독이라 영문 짝 글·영문 폴더는 없다.
+    transport 는 시험이 실제 호출 대신 넣는 가짜 transport 다(주지 않으면 make_fact_transport)."""
+    report.setdefault("lanes", [])
+    report["lane_label"] = FACT_LANE_LABEL
+    now = now_kst()
+    if topic_override:
+        return fact_stop(report, source_policy.FACT_NOT_READY_OUTCOME, ["facts 경로는 요청한 주제를 받지 않는다(후보는 이력과 공개 구조화 자료가 정한다)"])
+    problems, sources, provider, access = fact_context(now)
+    if problems:
+        return fact_stop(report, source_policy.FACT_NOT_READY_OUTCOME, problems)
+    print("구조화 Fact 경로(content_source: facts): AI 를 부르지 않고 허용 목록의 공개 구조화 자료로 글을 만듭니다.")
+    history = read_history()
+    prepared, result = fact_prepare(now, history, sources, provider, access, 1, gate_config, transport)
+    report["fact_notes"] = fact_notes(result)
+    for note in report["fact_notes"]:
+        print(f"  {note}")
+    if not prepared:
+        outcome = (source_policy.FACT_WAITING_OUTCOME if result.waiting else source_policy.FACT_ALL_SKIPPED_OUTCOME if result.skipped else source_policy.FACT_NO_CANDIDATE_OUTCOME)
+        return fact_stop(report, outcome, [])
+    item = prepared[0]
+    post = item.post
+    date_str, time_str = now.strftime("%Y-%m-%d"), now.strftime("%H%M%S")
+    kr_path = safe_category_dir(post.category, "KR") / f"{date_str}-KR-{time_str}.md"
+    if kr_path.exists():
+        report["fact_notes"].append(f"Fact 글감 {item.candidate.spec.spec_id} 건너뜀: FILE_EXISTS")
+        return fact_stop(report, source_policy.FACT_ALL_SKIPPED_OUTCOME, ["같은 이름의 글 파일이 이미 있어 덮어쓰지 않음"])
+    write_text_atomic(kr_path, item.marked)
+    entry = fact_history_entry(item, now, slot)
+    if draft_flow:
+        entry.update(drafts.entry_fields(date_str, slot, time_str, [kr_path]))
+        report["draft_branch"] = entry["branch"]
+    history.append(entry)
+    write_history(history)
+    report.update(outcome="DRAFT_CREATED" if draft_flow else "PUBLISHED", title=post.title, en_title=None, source=post.source_name, paths=[str(kr_path)])
+    print("블로그 글 생성 완료" + (" (DRY_RUN: 파일·기록은 저장되지 않았습니다):" if DRY_RUN else ":"))
+    print(f"- KR: {kr_path}\n- 구조화 자료: {post.source_name} · 글감 {item.candidate.spec.spec_id}\n- 이미지: {item.image}")
+    if draft_flow:
+        print(f"- 승인 흐름: 연습 실행이라 초안 브랜치 {entry['branch']} 를 올리지 않습니다" if DRY_RUN
+              else f"- 승인 흐름: 초안 브랜치 {entry['branch']} 로 올립니다(PR 을 병합하면 공개, 닫으면 폐기)")
+    return kr_path, None
+
+
+# ============================================================
 # 진입점
 # ============================================================
 PRACTICE_PUBLISHED_TEXT = "연습으로 글을 만들어 봤습니다(저장하지 않았습니다)"   # 연습 실행의 PUBLISHED: 아무것도 저장하지 않았는데 발행된 것처럼 읽히지 않게
@@ -2765,6 +2979,10 @@ OUTCOME_TEXT = {
     "ALL_REJECTED": "후보는 있었지만 전부 탈락했습니다(Gemini 건너뜀, 제목이 기존 글과 비슷, 또는 본문 검증 탈락)",
     "NO_MATCH": "요청 주제와 연결되는 검증된 기사가 없습니다",
     "SOURCE_POLICY_NO_ACTIVE_PROVIDER": "소스 정책(allowlist)이 켜져 있고 허용 목록에 ACTIVE 콘텐츠 Provider 가 없어 글감을 읽지 않았습니다(정상 — 할 일 없음, 외부 호출 0)",
+    source_policy.FACT_NOT_READY_OUTCOME: "구조화 Fact 경로(content_source: facts)의 시작 조건을 채우지 못해 글을 만들지 않았습니다(정상 — 이유는 위 줄, 파일·이력은 그대로)",
+    source_policy.FACT_WAITING_OUTCOME: "차례인 Fact 글감이 일별 제품의 협정 세계시 하한 때문에 기다립니다(정상 — 다음 실행이 이어 갑니다)",
+    source_policy.FACT_NO_CANDIDATE_OUTCOME: "오늘 낼 수 있는 Fact 글감이 없습니다(정상 — 이번 기간에 이미 냈거나 같은 제품의 글과 간격이 모자랍니다)",
+    source_policy.FACT_ALL_SKIPPED_OUTCOME: "Fact 글감 후보는 있었지만 모두 건너뛰었습니다(자료 부족·호출 거부·검사 탈락 — 사유는 위 줄)",
 }
 
 
@@ -2829,6 +3047,7 @@ def render_run_summary(event, now, slot, report):
     if isinstance(calls, dict) and "attempts" in calls:   # 0회도 적는다(finish_run 이 항상 넣는다). 항목 자체가 없으면 값을 지어내지 않는다
         lines.append(f"- {_gemini_count_line(calls)}")
     lines += [f"- {note}" for note in report.get("gemini_notes", [])]
+    lines += [f"- {note}" for note in report.get("fact_notes", [])]      # 구조화 Fact 경로의 건너뜀 줄(기본 실행에는 없다)
     unsplash = _unsplash_line(report.get("unsplash_rate"))
     if unsplash:
         lines.append(f"- {unsplash}")
@@ -2869,6 +3088,10 @@ def finish_run(result, report, event, now, slot=None):
         return
     where = f"{slot}시 슬롯" if slot is not None else "수동 실행"
     if outcome == source_policy.NO_ACTIVE_OUTCOME:   # 허용 목록 정책상 읽을 곳이 없는 정상 상태 — 초록 + 안내(ALL_LANES_EMPTY 의 빨강·경고와 구분)
+        print(skip_line(outcome, lanes_tried=0))
+        print(f"::notice::{where}: {OUTCOME_TEXT[outcome]}.")
+        return
+    if outcome in source_policy.FACT_QUIET_OUTCOMES:   # 구조화 Fact 경로의 정상 건너뜀(시작 조건 미충족·시각 대기·오늘 낼 글감 없음) — 초록 + 안내. 후보를 모두 건너뛴 FACT_ALL_SKIPPED 는 아래 일반 경고로 간다
         print(skip_line(outcome, lanes_tried=0))
         print(f"::notice::{where}: {OUTCOME_TEXT[outcome]}.")
         return
@@ -2932,6 +3155,15 @@ def refine_for_drafts(state, slot, history, now):
     return drafts.refine_slot_state(state, slot, history, date_str, exists)
 
 
+def facts_without_key():
+    """레지스트리 content_source 가 facts 면 True — 구조화 Fact 경로는 AI 를 부르지 않으므로 Gemini 키가 없어도 실행한다(AI 키를 주지 않는 실행 — docs/FACT_PATH.md §15). 레지스트리를 읽지 못하거나 값이
+    올바르지 않으면 False(옛 동작 그대로: 키가 없으면 멈춘다). 키가 있으면 main 이 이 함수를 부르지 않는다(레지스트리를 더 읽지 않는다)."""
+    try:
+        return source_policy.chance_content_source() == source_policy.CONTENT_FACTS
+    except Exception:       # noqa: BLE001 — 값을 알 수 없으면 느슨하게 하지 않는다
+        return False
+
+
 def main():
     if shadow_run_unrecognized():     # 모르는 SHADOW_RUN 값은 거절한다(꺼짐으로 읽으면 정지가 풀린 상태에서 일반 쓰기 실행으로 내려간다)
         print(f"::error::SHADOW_RUN 값을 알 수 없어 실행하지 않습니다 — 켜짐: {', '.join(sorted(SHADOW_RUN_ON_VALUES))} / 꺼짐: 비움·{', '.join(sorted(SHADOW_RUN_OFF_VALUES - {''}))}")
@@ -2952,7 +3184,7 @@ def main():
     # 그림자 실행은 가드에 닿지 않고, 가드 안의 SHADOW_RUN 예외는 그림자 분기를 지나쳐 온 경우를 위한 방어선일 뿐이다(docs/PUBLISH_PATHS.md §4-2·§7).
     from pipeline import publish_lock   # 제한 재개 잠금(레지스트리 resume_lock — 기본 꺼짐). 꺼져 있으면 레지스트리를 읽는 것 말고 아무 일도 하지 않는다. 설명: docs/PUBLISH_PATHS.md
     publish_lock.guard_start(os.environ, HISTORY_FILE, now_kst, FIX_IMAGES, DRY_RUN, write_step_summary)   # 켜져 있는데 규칙을 어기면 글을 만들지 않고 멈춘다(SystemExit 1), 하루 상한이면 건너뛴다(SystemExit 0)
-    if STUB_GEMINI and not DRY_RUN:
+    if STUB_GEMINI and not DRY_RUN and not facts_without_key():
         raise RuntimeError(
             "GEMINI_API_KEY 환경 변수가 없습니다. "
             "Settings > Secrets and variables > Actions에서 확인하세요.")

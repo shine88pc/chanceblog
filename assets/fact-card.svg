@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" fill="none" role="img" aria-labelledby="title description">
+  <title id="title">공개 구조화 자료 글의 장식 카드</title>
+  <desc id="description">값도 글자도 없는 추상 그래프 모양의 장식 그림입니다. 실제 자료·기관 로고·사진이 아니며 글의 내용을 설명하지 않습니다.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="630" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#16294f"/><stop offset=".6" stop-color="#0d1a36"/><stop offset="1" stop-color="#0a1226"/>
+    </linearGradient>
+    <linearGradient id="line" x1="120" y1="0" x2="1080" y2="0" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#54d9f3" stop-opacity=".15"/><stop offset=".45" stop-color="#54d9f3"/><stop offset="1" stop-color="#f7c96c"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <g stroke="#ffffff" stroke-opacity=".08" stroke-width="2">
+    <path d="M120 150H1080M120 270H1080M120 390H1080M120 510H1080"/>
+    <path d="M120 120V540M360 120V540M600 120V540M840 120V540M1080 120V540"/>
+  </g>
+  <path d="M120 430L270 380L420 405L570 300L720 335L870 230L1020 180" stroke="url(#line)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <g fill="#0d1a36" stroke="#54d9f3" stroke-width="5">
+    <circle cx="270" cy="380" r="12"/><circle cx="570" cy="300" r="12"/><circle cx="870" cy="230" r="12"/>
+  </g>
+  <circle cx="1020" cy="180" r="14" fill="#f7c96c"/>
+</svg>

@@ -3,6 +3,7 @@
 문서의 표가 등록 상수(tests/ai_flow_scan.py)·방벽 상수(pipeline/ai_guard.py)·시험의 번호와 **양쪽으로** 같아야 한다: 코드에 항목이 늘었는데 표가 그대로이거나, 표에 있는데 코드에 없으면 빨강이다.
 설명 문장이 옳은지는 시험이 알 수 없으므로 사람이 본다. 문서 규칙(물결표·링크·Liquid·로컬 경로 없음)과 다른 문서에 한 고침(ARCHITECTURE·DEFECT_REGISTER·SECURITY_GUARDRAILS·ACTIONS_GUIDE·FACT_PATH)도 본다.
 """
+import ast
 import re
 import unittest
 
@@ -184,9 +185,20 @@ class TablesMatchCodeTest(unittest.TestCase):
         self.assertIn("R1·R2·R12·R14·R15·R18", ids[-1])
 
     def test_the_marker_writer_section_matches_the_test(self):
-        self.assertEqual(provenance_test.MARKER_WRITERS, set())
-        self.assertIn("지금 없다", chunk("### 표식 쓰는 곳"))
-        self.assertIn("MARKER_WRITERS", chunk("### 표식 쓰는 곳"))
+        """S2b(D-235): 개정 전에는 `MARKER_WRITERS` 가 비어 있고 6절이 '지금 없다' 였다. 이제 생성기의 Fact 분기 두 군데가 쓴다 — 글(`fact_check_post` 의 `with_marker`)과 이력(`fact_history_entry` 의
+        `entry_with_marker`). 절이 코드의 실제 호출 위치(`generator.py` 에서 표식 쓰는 함수를 부르는 최상위 함수)와 `MARKER_WRITERS` 와 같은 말을 해야 한다."""
+        owners = {}
+        tree = ast.parse((ROOT / "generator.py").read_text(encoding="utf-8"))
+        for function in [node for node in tree.body if isinstance(node, ast.FunctionDef)]:
+            for node in ast.walk(function):
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in ("with_marker", "entry_with_marker"):
+                    owners.setdefault(node.func.attr, set()).add(function.name)
+        self.assertEqual(owners, {"with_marker": {"fact_check_post"}, "entry_with_marker": {"fact_history_entry"}})
+        self.assertEqual({("generator.py", name) for name in owners}, provenance_test.MARKER_WRITERS)
+        section = chunk("### 표식 쓰는 곳")
+        for needle in ("MARKER_WRITERS", "`generator.py:fact_check_post`", "`generator.py:fact_history_entry`", "`with_marker`", "`entry_with_marker`"):
+            self.assertIn(needle, section)
+        self.assertNotIn("지금 없다", section)
 
     def test_the_mark_state_table_matches_the_code(self):
         from pipeline import provenance
@@ -208,7 +220,9 @@ class HandOverTest(unittest.TestCase):
             self.assertRegex(stage2, rf"(?m)^{number}\. {re.escape(key)}")
         self.assertIn("DEFAULT_ENTRIES", stage2)
         self.assertIn("허용 연결 한 군데", stage2)
-        self.assertFalse(S.DEFAULT_ENTRIES)       # 진입 함수 목록은 지금 비어 있다 — 2단계가 채운다
+        # S2b(D-240): 개정 전에는 `assertFalse(S.DEFAULT_ENTRIES)`('진입 함수 목록은 지금 비어 있다')였다. 2단계가 둘을 올렸으므로 '둘이 등록돼 있다' 로 고친다 —
+        # 목록이 줄면(AF4·AF8 이 Fact 분기에 걸리지 않게 된다) 빨개지고, 진입 함수가 더해지는 것(S2c 등)은 막지 않는다.
+        self.assertTrue({("generator.py", "generate_fact_post"), ("pipeline/shadow_run.py", "run_facts")} <= set(S.DEFAULT_ENTRIES))
 
     def test_the_stage_two_instructions_keep_their_key_decisions(self):
         """D-199: 문서 표 시험은 설명 문단·12절 지시를 못 본다(지시를 정반대로 바꿔도 초록이었다) — 2단계 지시의 핵심 낱말을 못박는다: AF7 은 닫힌 쪽 극성(`== 'feed'`)·괄호 밖 연결·식 전체 평가 시험·키를 뺄 수 없는 넷, 별도 함수 조건, 같이 고칠 단언과 NoConnectionTest 코드."""

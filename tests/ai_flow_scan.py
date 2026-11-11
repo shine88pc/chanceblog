@@ -9,14 +9,14 @@
   AF1 F-IMPORTS       Fact 모듈 ↔ AI 모듈 임포트 단방향 격리: 둘 사이의 추이적 폐포(함수 안 임포트 포함), 다리는 BRIDGES 뿐이고 다리 안쪽은 따라가지 않는다
   AF2 AI-PRIMITIVES   AI SDK 임포트·클라이언트 생성·`.generate_content`(호출·별칭 참조)·AI 제공처 주소 글자는 등록된 함수(AI_PRIMITIVES)에만
   AF3 LLM-CONSUMERS   호출 객체 `llm(...)` 를 부르는 함수(LLM_CONSUMERS)와 호출 객체를 만드는 함수(LLM_FACTORY_CALLERS)는 등록된 곳에만
-  AF4 FACT-NO-AI      DEFAULT_ENTRIES(Fact 분기 진입 함수 — 설정 fact_entries)에서 호출·참조로 닿는 함수에 AI 가능 함수·AI 이름이 없다(별칭·콜백 참조 포함). 지금 진입 함수 목록은 비어 있다 — 2단계가 채운다
+  AF4 FACT-NO-AI      DEFAULT_ENTRIES(Fact 분기 진입 함수 — 설정 fact_entries)에서 호출·참조로 닿는 함수에 AI 가능 함수·AI 이름이 없다(별칭·콜백 참조 포함). 진입 함수는 둘이다: generator.generate_fact_post·shadow_run.run_facts(S2b 가 올렸다)
   AF5 AI-CALL-SITES   `call_gemini_with_fallback`·`build_post_prompt`·`make_image_queries` 를 부르거나 참조하는 곳은 등록된 함수(AI_CALL_SITES)뿐
   AF6 POSTS-FOR-AI    `_posts` 를 읽는 함수는 모두 POSTS_READERS 에 올라 있고, AI 가능 함수·Fact 분기는 표식을 거르지 않는 읽기를 **직접** 부르지 못하며 for_ai 를 끄거나 변수·`**옵션`·위치 인자로 넘기지 못한다.
                       그에 더해 for_ai 를 켜지 않은 채 거르는 읽기를 부르는 모든 함수(UNFILTERED_SITES)와 사람용 읽기를 부르는 모든 함수(HUMAN_CALLERS)는 AI 가능 여부와 상관없이 등록돼야 한다 —
                       중립 도우미 한 단계를 거치는 우회는 도우미의 등록 없이는 생길 수 없다(등록은 사람이 보는 자리다. 함수 이름을 변수로 옮겨 부르는 모양은 못 본다)
   AF8 NO-DYNAMIC      Fact 모듈이 subprocess·importlib·runpy·ctypes·multiprocessing·socket 을 가져오거나 exec/eval·동적 임포트 호출·서브프로세스 호출이 있으면 위반이고, Fact 분기에서 닿는 함수에는 이름이 동적인
                       getattr·`globals()[식]` 도 위반이다(Fact 모듈 안의 비상수 getattr 는 정당한 쓰임이 있어 세지 않는다 — 못 잡는다)
-  (AF7 워크플로 AI 키 식은 `content_source` 스위치가 생기는 2단계가 더한다 — docs/AI_FLOW.md)
+  (AF7 워크플로 AI 키 식은 T3 라 S2b 도 규칙을 더하지 않고 패치 초안만 만들었다 — docs/AI_FLOW.md §12-3)
   AF0 PARSE           읽을 수 없거나 문법 오류인 파일은 확인하지 못한 것이므로 위반이다(알 수 없으면 막는다)
 
 등록 목록(AI_PRIMITIVES·LLM_CONSUMERS·LLM_FACTORY_CALLERS·AI_CALL_SITES·POSTS_READERS)은 지금 코드의 호출 지점 전부로 시작하고 **이유와 함께** 적는다. 새 항목을 올리려면 이유를 쓰고
@@ -75,7 +75,7 @@ SKIP_DIRS = frozenset({".git", "__pycache__", "node_modules", "_site", ".ruff_ca
 # 등록 목록 — 지금 코드(Gate 가지 포함)의 호출 지점 전부. 값은 '왜 여기에 있는가' 한 줄이다. 늘리려면 이유를 쓰고 docs/AI_FLOW.md 표를 같이 고친다.
 # ----------------------------------------------------------------------------
 _PIPELINE = "pipeline"
-FACT_MODULE_NAMES = ("facts", "calc", "fact_topics", "recipes", "fact_assembler", "adapters", "adapters.base", "adapters.mock_stats", "adapters.noaa_swpc", "recipes_noregion", "fact_candidates")
+FACT_MODULE_NAMES = ("facts", "calc", "fact_topics", "recipes", "fact_assembler", "adapters", "adapters.base", "adapters.mock_stats", "adapters.noaa_swpc", "recipes_noregion", "fact_candidates", "fact_supply")
 FACT_MODULES = frozenset(f"{_PIPELINE}.{name}" for name in FACT_MODULE_NAMES)       # 구조화 Fact 경로 1단계 모듈(트리에 있는 것만 쓴다)
 FACT_PREFIXES = (f"{_PIPELINE}.adapters.",)                                         # 앞으로 생길 제공처 어댑터
 BRIDGES = frozenset({"generator"})                                                   # Fact 와 AI 분기를 한 파일에 두는 유일한 운영 모듈(2단계) — 두 분기의 분리는 AF4 가 지킨다
@@ -139,7 +139,10 @@ HUMAN_CALLERS = {
     ("scripts/verify_pages_deploy.py", "select_newest"): "배포 뒤 공개 확인의 최신 글 고르기(find_candidates) — 사이트 주소만 만든다",
 }
 RISKY_IMPORT_ROOTS = frozenset({"subprocess", "importlib", "runpy", "ctypes", "multiprocessing", "socket"})      # Fact 모듈이 가져오면 위반(AF8): 프로세스·동적 로드·네이티브 호출·네트워크
-DEFAULT_ENTRIES = frozenset()      # Fact 분기 진입 함수 (파일, 함수) — 2단계가 생성기에 Fact 분기를 만들 때 채운다(지금은 비어 있다: AF4 는 합성 소스로만 시험한다)
+DEFAULT_ENTRIES = frozenset({      # Fact 분기 진입 함수 (파일, 함수) — S2b 가 채웠다: 생성기의 Fact 글 만들기와 그림자 실행의 Fact 분기. 둘 다 AI 이름을 한 번도 쓰지 않는 별도 함수이고(generate_blog_posts·run 자체가 아니다 — AF4 가 자기 자신에 걸린다) 여기서 닿는 모든 곳이 AF4·AF8 에 읽힌다
+    ("generator.py", "generate_fact_post"),
+    ("pipeline/shadow_run.py", "run_facts"),
+})
 
 
 @dataclasses.dataclass(frozen=True)

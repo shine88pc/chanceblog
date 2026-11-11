@@ -5,6 +5,7 @@
 2. hold 에서는 규칙에 걸린 후보를 '본문 검증 탈락'과 같은 길로 버리고 다음 후보로 넘어가며, 전부 탈락하면 글 없이 경고로 끝난다.
 3. languages 가 ["ko"] 면 영문은 만들지도·검증하지도·쓰지도 않는다(프롬프트·이력·글 파일·승인 초안).
 """
+import ast
 import datetime
 import hashlib
 import json
@@ -432,13 +433,21 @@ class ConnectionIsolationTest(unittest.TestCase):
                      "pipeline/health.py", "pipeline/inbox.py", "pipeline/main_image.py"):
             self.assertNotIn("quality_gate", (ROOT / name).read_text(encoding="utf-8"), name)
 
-    def test_generator_calls_the_gate_in_exactly_one_place_inside_the_candidate_validation(self):
+    def test_generator_calls_the_gate_in_exactly_two_places_the_feed_candidate_validation_and_the_fact_check(self):
+        """S2b(D-234): 개정 전에는 '정확히 한 곳(피드 후보 검증)'이었다. 구조화 Fact 분기가 두 번째 한 곳(`fact_check_post` — 후보 글 한 편의 검사)에서 같은 Gate 를 부른다 — 두 곳 모두 정확히 한 줄이고 그 밖에는 없으며,
+        피드 쪽은 이전과 같은 모양(머리말 최종 검사 바로 뒤 같은 try 안, 보류는 ValueError 로 후보 탈락)이다. `require_pass` 는 피드 쪽 한 곳뿐이다(Fact 쪽은 보류 코드를 글감 건너뜀 사유로 쓴다)."""
         text = (ROOT / "generator.py").read_text(encoding="utf-8")
-        self.assertEqual(text.count("quality_gate.check_candidate("), 1)
+        self.assertEqual(text.count("quality_gate.check_candidate("), 2)
         self.assertEqual(text.count("quality_gate.require_pass("), 1)
         before, _, after = text.partition("quality_gate.check_candidate(")
         self.assertIn("check_final_front_matter(checked, item", before.rsplit("def ", 1)[1])        # 같은 함수·같은 try 안, 머리말 최종 검사 바로 뒤
         self.assertIn("except ValueError as exc:", "\n".join(after.splitlines()[:3]))
+        owners = []
+        for function in [node for node in ast.walk(ast.parse(text)) if isinstance(node, ast.FunctionDef)]:
+            for node in ast.walk(function):
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "check_candidate":
+                    owners.append(function.name)
+        self.assertEqual(sorted(owners), ["fact_check_post", "generate_blog_posts"])
 
     def test_generator_never_imports_the_shadow_measuring_tool(self):
         for name in ("generator.py", "pipeline/quality_gate.py"):

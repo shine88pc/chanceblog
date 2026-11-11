@@ -43,6 +43,7 @@ MESSAGES = {
     "BAD_RETRIEVED_AT": "수집 시각이 시간대 포함 ISO 시각이 아님",
     "BAD_PROVIDER": "Provider 객체가 약속한 필드를 갖추지 않았거나 자동화 가능 상태가 아님",
     "EGRESS_DENIED": "외부 호출 관문이 허용 목록 밖이라 거부함",
+    "BUDGET_DENIED": "호출 예산(한 실행의 호출 상한·실패 건너뜀·403·429 중지)이 막아 호출하지 않음",
 }
 _DETAIL_RE = re.compile(r"[가-힣A-Za-z0-9 _()\-:]{1,40}")
 
