@@ -194,7 +194,7 @@ Gemini 같은 AI 는 데이터 출처가 아니라 처리기라 허용 목록과
 ## 11. 켜는 순서(T3 — 운영자 승인)
 
 1. 구조화 Provider 하나를 **증거와 함께 PR 로** `enabled: true`(공식 약관·robots·호출 한도를 읽어 7칸을 직접 근거로 채우고, `attribution_template`·`snapshot.expires_at`·`access[].paths`·api 경로의 `rate_limit` 을 채운다. 규칙 기반 경로 전용이면 `ai_use: NEVER`). `python -m pipeline.source_registry --today YYYY-MM-DD` 와 시험이 통과해야 한다. 약관 판독은 사람이 하고 운영 중에는 약관을 해석하지 않는다.
-2. 구조화 Fact 경로(2단계)가 생성기 한 곳에서 후보를 공급하고 프롬프트에 원문 링크·출처 규칙을 대신하는 근거가 연결되도록 한다(T2). **이 단계가 끝나기 전에는 3번(`allowlist` 켜기)을 하지 않는다** — 켜야 한다면 36시간 경보 임계(`chance.health.max_gap_hours`) 조정이나 정지 변수 병행을 같은 승인에 묶는다(12절).
+2. 구조화 Fact 경로(2단계)가 생성기 한 곳에서 후보를 공급하고 프롬프트에 원문 링크·출처 규칙을 대신하는 근거가 연결되도록 한다(T2). **이 단계가 끝나기 전에는 3번(`allowlist` 켜기)을 하지 않는다** — 켜야 한다면 36시간(제한 재개 잠금이 켜진 Chance 는 204시간) 경보 임계(`chance.health.max_gap_hours`) 조정이나 정지 변수 병행을 같은 승인에 묶는다(12절).
 3. `pipeline/blogs.json` 의 `chance` 항목에 `"source_policy": "allowlist"` 를 더한다(T3 — 정책). 되돌리는 것(legacy)도 정책 변경이라 T3 이고, 사고 때의 비상 정지는 `PIPELINE_PAUSE` 다.
 4. 확인: 연습 실행(`dry_run`)의 요약에 `SOURCE_POLICY_NO_ACTIVE_PROVIDER`(ACTIVE 0) 또는 후보 생성 줄이 보이는지, 로그에 외부 제목이 없는지.
 
@@ -203,7 +203,7 @@ Gemini 같은 AI 는 데이터 출처가 아니라 처리기라 허용 목록과
 ## 12. 한계와 남은 일
 
 - **`allowlist` 를 켠 뒤의 상태(실험으로 확인한 사실, D-174)**:
-  ① 켜면 **새 글이 0** 이다 — 실행은 `SOURCE_POLICY_NO_ACTIVE_PROVIDER`(종료 0, 초록)로 끝나고, 마지막 글로부터 `chance.health.max_gap_hours`(36시간)가 지나면 `health.evaluate` 가 `STALE`(critical)을 내 워치독 경보가 울린다. **켜는 순서: FACT 2단계(후보 공급과 프롬프트 근거)가 연결되기 전에는 켜지 않는다. 켜야 한다면 임계 조정이나 정지 변수 병행을 같은 승인에 묶는다.**
+  ① 켜면 **새 글이 0** 이다 — 실행은 `SOURCE_POLICY_NO_ACTIVE_PROVIDER`(종료 0, 초록)로 끝나고, 마지막 글로부터 `chance.health.max_gap_hours`(36시간 — 제한 재개 잠금이 켜진 Chance 는 204시간)가 지나면 `health.evaluate` 가 `STALE`(critical)을 내 워치독 경보가 울린다. **켜는 순서: FACT 2단계(후보 공급과 프롬프트 근거)가 연결되기 전에는 켜지 않는다. 켜야 한다면 임계 조정이나 정지 변수 병행을 같은 승인에 묶는다.**
   ② 가상 ACTIVE Provider 를 켜고 후보 공급이 없으면 `ALL_LANES_EMPTY`(빨강)가 매시간 반복된다 — 배치가 어긋난 것을 드러내려는 의도다(9절 4항).
   ③ 후보가 공급돼도 프롬프트에 원문 링크·출처 규칙이 없어, 실제 경로는 건너뛰거나(`검증된 출처가 제공되지 않았습니다`) 본문 검증(원문 링크 인용)에서 전부 탈락한다(`ALL_REJECTED`, 초록+경고). **연습(스텁) 실행은 스텁이 링크를 후보에서 직접 가져와 `PUBLISHED` 로 보이는 어긋남이 있다** — 연습과 실제가 다르다. FACT 2단계 설계가 풀 일이다. 이 상태는 **피드형(일반) 후보 흐름이 `allowlist` 로 돌 때**의 것이다 — Fact 후보(`content_source: facts`)는 이 흐름을 지나지 않고 프롬프트도 없다(FACT_PATH 11절). 그래서 위 계약(`prompt_inputs`·`own_title_batches`)을 Fact 후보에 적용하는 것이 아니라 FACT 2단계가 이 경로를 대체한다.
 - SDK 가 직접 하는 호출(Gemini·Blogger OAuth)은 관문을 지날 수 없어 등록 목록에 있다. 운영 호스트 목록의 SDK 호스트는 코드에 문자열이 없어 확인하지 못했다(공개 문서 기준).

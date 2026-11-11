@@ -698,7 +698,7 @@ class WeeklyCapDocumentTest(unittest.TestCase):
         self.assertEqual(numbers, [str(number) for number in range(1, len(numbers) + 1)])          # 번호가 1부터 이어진다(뒤에 다른 묶음의 항목이 더해져도 깨지지 않는다)
         self.assertGreaterEqual(len(numbers), 22)                                                    # 이 묶음의 17–22 까지 있다
         for needle in ("17. **굴러가는 7일은 달력 주와 다르다**", "18. **창 안에서 닫은 초안도 센다**", "19. **세는 값은 이력과 원격 브랜치 목록의 정확도만큼만 정확하다**", "20. **Chance 밖의 블로그에는 주간 상한이 없다**",
-                       "21. **꺼진 잠금의 레지스트리에 값을 적어도 세지 않는다**", "22. **켠 직후 일주일은 켜기 전의 글도 센다, 그리고 워치독이 주간 상한을 모른다**", "`STALE`", "`NO_POSTS_DAY`",
+                       "21. **꺼진 잠금의 레지스트리에 값을 적어도 세지 않는다**", "22. **켠 직후 일주일은 켜기 전의 글도 센다, 그리고 워치독은 주 단위 기준으로 바뀐다**", "`STALE`", "`NO_POSTS_DAY`",
                        "D-169", "주간 상한(§4-4)도 같은 목록을 쓰므로"):
             self.assertIn(needle, self.SECTION_7, needle)
 
@@ -736,7 +736,7 @@ class WeeklyCapDocumentTest(unittest.TestCase):
 
     def test_the_operator_guide_lists_the_five_values_the_new_code_and_the_new_rule_range(self):
         for needle in ("`resume_lock: true`", "`chance.publish_flow: pr`", "`chance.limits.max_posts_per_day: 1`", "`max_open_drafts: 3`", "`max_posts_per_week: 2`", "값 **다섯**", "`LOCK_WEEKLY_CAP`",
-                       "L1–L8", "일주일에 만드는 글", "(운영자 조건 '재개 시 주 1–2편')", "워치독의 '글이 안 나옴' 알림 기준은 아직 그것을 모릅니다", "D-169"):
+                       "L1–L8", "일주일에 만드는 글", "(운영자 조건 '재개 시 주 1–2편')", "워치독은 켠 뒤 Chance 만 주 단위 기준으로 점검합니다", "D-169"):
             self.assertIn(needle, self.GUIDE_SECTION, needle)
         self.assertNotIn("L1–L7", self.GUIDE_SECTION)
         values = lock_ready()

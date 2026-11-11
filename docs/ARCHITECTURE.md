@@ -117,7 +117,7 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 어느 채널의 것인지
 | `secrets` | `{역할: 환경변수(=Secrets) 이름}`. **값은 절대 쓰지 않는다.** 플랫폼별 필수 역할은 `registry.PLATFORMS`. `tistory`·`naver`는 `llm_api_key` **뿐**이다 — 다른 역할이나 이름에 `PASSWORD`·`PASSWD`·`PWD`·`COOKIE`·`SESSION`·`LOGIN`·`CREDENTIAL`이 든 시크릿은 레지스트리 검증(REG-1)이 막는다(구조적 보장은 시크릿 역할이 `llm_api_key` 뿐이라는 것이다 — 이름 검사는 실수를 막는 보조이고 포함 검사라 `PASS_WORD`·`TISTORY_PW` 같은 우회 철자는 통과한다. [`SECURITY_GUARDRAILS.md`](./SECURITY_GUARDRAILS.md) G-S7) |
 | `ad_surface`, `protected_paths` | 광고(AdSense) 심사·수익 대상인지, 승인 없이 못 바꾸는 경로(`/`로 끝나면 폴더). `ad_surface: true`는 사이트 코드가 이 저장소에 있는 `jekyll-git` 블로그에만 쓴다 |
 | `ads` | 광고 선언 `off`·`pending_gate`·`on`(적지 않으면 `defaults.ads` = `off`). 아래 '광고 선언' 절 |
-| `health` | 워치독 기준: `max_gap_hours`, `max_failure_streak`. `max_unpublished_days`는 지금 **쓰이지 않는다**(UNPUBLISHED는 첫 발생부터 경고하도록 바뀌었다 — 호환을 위해 필드만 남김) |
+| `health` | 워치독 기준: `max_gap_hours`, `max_failure_streak`. `max_unpublished_days`는 지금 **쓰이지 않는다**(UNPUBLISHED는 첫 발생부터 경고하도록 바뀌었다 — 호환을 위해 필드만 남김). 제한 재개 잠금이 켜진 Chance 는 `max_gap_hours` 에 7일을 더한 값으로 본다(§4-2 '주 단위 기준') |
 | `source_policy` | (선택, `jekyll-git`만, 지금은 Chance) 외부 콘텐츠를 읽는 방식. `legacy`(기본 — 필드가 없어도 같다, 지금 동작이고 출력이 바이트까지 같다) · `allowlist`(허용 목록(Source Registry)의 ACTIVE Provider 만 읽는다: 피드·기사 페이지 발췌·구글 뉴스 해석기 호출 0, 외부 제목·요약·태그가 프롬프트·이력·로그에 들어가지 않고, ACTIVE 콘텐츠 Provider 가 0 이면 초록 결과 코드 `SOURCE_POLICY_NO_ACTIVE_PROVIDER`). 값이 틀리거나 읽지 못하면 느슨한 쪽(legacy)으로 떨어지지 않고 멈춘다. 설명 [`SOURCE_POLICY.md`](./SOURCE_POLICY.md). **`allowlist` 로 바꾸는 것은 T3**(정책) |
 
 시크릿 이름은 블로그마다 고유해야 하고(`shared_secrets` 예외), 값 전달은 [§6](#6-시크릿-전달-방식)을 따른다.
@@ -320,13 +320,13 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 어느 채널의 것인지
 
 ## 4-2. 워치독 규칙과 알림 방식
 
-워치독(`watchdog.yml`)은 하루 2회(UTC 03:30·15:30 = 한국시간 12:30·00:30, GitHub 예약 실행은 몇 시간 늦게 돌 수 있다) 이력·마지막 글 커밋·최근 실행 결과를 보고 **사람이 개입해야 하는 상황만** GitHub 이슈로 알린다. 규칙은 `pipeline/health.py`(순수 함수), 입출력은 `scripts/watchdog.py`. 기준값은 `pipeline/blogs.json`의 블로그별 `health`(Chance는 `max_gap_hours` 36).
+워치독(`watchdog.yml`)은 하루 2회(UTC 03:30·15:30 = 한국시간 12:30·00:30, GitHub 예약 실행은 몇 시간 늦게 돌 수 있다) 이력·마지막 글 커밋·최근 실행 결과를 보고 **사람이 개입해야 하는 상황만** GitHub 이슈로 알린다. 규칙은 `pipeline/health.py`(순수 함수), 입출력은 `scripts/watchdog.py`. 기준값은 `pipeline/blogs.json`의 블로그별 `health`(Chance는 `max_gap_hours` 36). **제한 재개 잠금(§4-9)이 켜진 뒤의 Chance 는 주 단위 기준**으로 본다(`STALE` 허용 시간이 설정값 + 7일, `NO_POSTS_DAY` 없음 — 표 아래 '주 단위 기준').
 
 | 코드 | 수준 | 조건 |
 |------|------|------|
-| `STALE` | 심각 | 마지막 활동(글 파일이 **추가된** 커밋 시각 또는 이력) 이후 `max_gap_hours` 초과. 초안 패키지 채널(`mode: package`)은 열린 `초안` 이슈가 3건 이상이라 러너가 새 초안을 이력 없이 건너뛰는 동안에도 이 코드가 울린다 — 멈춘 것이 아니라 운영자의 발행·정리를 기다리는 것일 수 있어 문구에 원인 후보와 푸는 법을 덧붙였다(`PACKAGE_STALE_HINT`, D-86. 분류·심각도는 그대로) |
+| `STALE` | 심각 | 마지막 활동(글 파일이 **추가된** 커밋 시각 또는 이력) 이후 `max_gap_hours` 초과. 초안 패키지 채널(`mode: package`)은 열린 `초안` 이슈가 3건 이상이라 러너가 새 초안을 이력 없이 건너뛰는 동안에도 이 코드가 울린다 — 멈춘 것이 아니라 운영자의 발행·정리를 기다리는 것일 수 있어 문구에 원인 후보와 푸는 법을 덧붙였다(`PACKAGE_STALE_HINT`, D-86. 분류·심각도는 그대로). **주 단위 기준**(제한 재개 잠금이 켜진 Chance): 허용 시간이 `max_gap_hours` + 7일(36 → 204시간)이고 문구에 '주 단위 기준(상한 N편)'이 붙는다 |
 | `NO_ACTIVITY` | 경고 | 발행·초안 기록이 전혀 없음 |
-| `NO_POSTS_DAY` | 경고 / 심각 | mode auto: 닫힌 한국시간 하루 기준 어제 새 글 0건이면 경고, 그제도 0건이면 심각(오늘 새 글이 나왔으면 회복. `STALE`이 울리면 중복 알림 안 함) |
+| `NO_POSTS_DAY` | 경고 / 심각 | mode auto: 닫힌 한국시간 하루 기준 어제 새 글 0건이면 경고, 그제도 0건이면 심각(오늘 새 글이 나왔으면 회복. `STALE`이 울리면 중복 알림 안 함). 주 단위 기준(제한 재개 잠금이 켜진 Chance)에서는 울리지 않는다 |
 | `DRAFT_WAITING` | 경고 | 승인 흐름(`publish_flow: pr`) 블로그에서 열린 초안 PR(이 저장소의 `ai/draft/…` 브랜치)이 있는 동안 위 `STALE`·`NO_POSTS_DAY`를 이것으로 **바꾼다**: 새 글이 안 나온 것은 멈춤이 아니라 승인 대기이기 때문이다(대기 N건·가장 오래된 N일 전, 병합하면 공개·닫으면 폐기, 오래 두면 글감이 낡는다는 안내). 초안 PR 이 없거나 목록을 읽지 못하면 바꾸지 않아 `STALE`이 그대로 울린다(§4-4). **단 `STALE`이 울리는데 열린 초안이 72시간(3일, `health.DRAFT_STALL_HOURS`) 이상 방치됐거나 대기 시간을 알 수 없으면(하나라도 시각을 읽지 못하면 포함) `STALE`을 경고(심각이 아님)로 함께 남긴다**(R2-2, 2026-11-09) — 초안이 오래 열려 있는데 그 뒤 새 초안도 병합도 허용 시간 넘게 없으면 승인 대기만으로는 설명이 안 되고 생성이 정말 멈췄을 수 있어서다. 이유: ① `STALE`은 마지막 활동(새 초안을 만든 시각 또는 병합 시각)이 `max_gap_hours`(Chance 36시간)를 넘을 때만 울리므로 어린 초안(72시간 미만)이 있으면 새 초안이 안 나온 시간이 아직 3일을 못 채운 것이다 ② 72시간은 확인 필요 모음이 초안을 '3일 넘게 대기'로 보는 기준(`DRAFT_STALE_DAYS`)과 같은 3일이다(경계만 다르다: 이 점검은 정확히 72시간부터 '이상', 모음은 3일을 넘어야 '넘게' — 72.000시간인 한 순간만 갈린다). `STALE` 문구는 대기 시간을 알면 '3일 넘게 대기 중', 모르면 '얼마나 기다렸는지 알 수 없고'라고 쓴다 ③ 승인 대기 때문에 새 초안이 안 생기는 것(열린 초안 상한 등)일 수도 있어 심각이 아니라 경고로 둔다. `NO_POSTS_DAY`는 예전처럼 `DRAFT_WAITING`으로만 바뀐다(최근 초안이 있다는 뜻이라 생성이 멈춘 신호가 아니다) |
 | `FAIL_STREAK` / `REJECT_STREAK` | 심각 / 경고 | 최근 N회 연속 실패 / 5회 연속 게이트 탈락 |
 | `UNPUBLISHED` | 경고 | mode auto인데 가장 최근 실행이 게시 없이 저장소 초안만 남김(이력의 사유를 인용). 게시 대상인데 게시 시크릿이 없으면 종료 2로 빨강이라 지금은 새로 생기지 않는다. `mode: draft`의 `draft_uploaded`(Blogger 초안함에 올림)는 게시 없는 초안이 아니라 '글이 나온 날'로 센다 |
@@ -335,6 +335,8 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 어느 채널의 것인지
 | `RUN_FAIL_STREAK` | 심각 | 워크플로가 최근 N회 연속 실패 |
 
 `DRAFT_WAITING`을 가리려면 열린 PR 목록을 읽어야 해서 `watchdog.yml`에 `pull-requests: read` 권한을 더했다(읽기 전용). 승인 흐름이 아닌 블로그(지금 모두)에서는 PR 목록을 읽지 않는다.
+
+**주 단위 기준 — 제한 재개 잠금 아래의 Chance(결함 D-169 해소, D-220–D-224)**: 잠금(§4-9)이 주 1–2편만 만들게 하므로 글이 며칠 없는 것이 정상이다. 하루 한 편에 가깝던 때의 기준(`STALE` 36시간·`NO_POSTS_DAY`)을 그대로 두면 켠 직후부터 정상 운영 중에도 거짓 경보가 쌓인다. 그래서 `evaluate` 에 선택 키워드 `weekly_cap`(기본 `None` = 이전과 같음)을 더했고, `scripts/watchdog.py` 의 `chance_weekly_cap` 이 **잠금이 켜져 있고 잠금 키가 잘못 적혀 있지 않고 규칙을 어기지 않고 `chance.limits.max_posts_per_week` 가 1 이상 정수일 때만, Chance 에만** 그 값을 넘긴다(잠금 가드와 같은 `publish_lock` 의 읽기 함수). 주 단위 모드에서는 ① `STALE` 허용 시간 = 설정값(`max_gap_hours`) + `WEEK_WINDOW_DAYS`(7일) × 24시간(Chance 36 → 204시간) ② `NO_POSTS_DAY` 없음 — 나머지 검사와 `DRAFT_WAITING` 변환(새 허용 시간 기준으로 `STALE` 이 울릴 때만)은 그대로다. 잠금이 꺼져 있거나 상한이 없거나 키·규칙에 문제가 있거나 레지스트리를 읽지 못하면 이전 기준 그대로다(출력이 바이트까지 같다 — 경보가 더 울리는 쪽이 안전한 쪽). 실행 로그에는 주 단위로 점검할 때만 `[참고] chance: 주 단위 기준으로 점검합니다…` 한 줄이 남는다. 레지스트리 값(`health.max_gap_hours` 포함)과 워크플로는 바꾸지 않았다. 시험: `tests/test_health_weekly.py`(평가 규칙·꺼진 상태 지문·두 달 흉내)·`tests/test_watchdog_weekly.py`(어느 레지스트리에서 주 단위로 보는가·배선)·`tests/test_watchdog_weekly_docs.py`(문서 표류 방지). 근거·고르지 않은 대안·한계: [`PUBLISH_PATHS.md`](./PUBLISH_PATHS.md) §7-22.
 
 알림 방식: (블로그, 코드)마다 이슈 하나를 유지한다. 저장소 소유자를 담당자로 지정하고 본문에 @멘션하며, 열려 있는 동안 본문을 최신 내용으로 갱신하고, 심각 건이 48시간 지나도 풀리지 않으면 코멘트로 다시 알린다. 조건이 풀리거나 다른 알림으로 대체되면 자동으로 닫는다. 한 실행에서 새로 만드는 이슈는 5건까지(심각 건 먼저). 이 실행(워크플로)은 **이번에 새로 생긴 심각 건이 있을 때만 빨강(종료 1)**이 되어 Actions 실패 알림도 가고, 이미 알린 심각 건이 이어지는 동안은 초록이다. `PIPELINE_PAUSE`가 켜져 있으면 알림을 만들지 않는다. 글 파일 추가 판정은 git 이력이 필요해 워크플로가 `fetch-depth: 0`으로 받아야 한다(얕은 복제면 경고를 내고 이력 파일로만 판단한다).
 
