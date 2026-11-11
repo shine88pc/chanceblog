@@ -23,8 +23,11 @@ URL = h.REPO_URL
 BLOG_URL = "https://macat0722.blogspot.com/"
 
 
+GOOD_SIGNALS = {"review_quality": "pass", "review_safety": "clear"}      # 2026-11-11 정리(요구 5): 이 두 신호가 이력에 적힌 초안만 '게시 검토' action 이 된다(없으면 참고) — 여기서는 늘 적어 두고 세는 규칙을 본다
+
+
 def draft(hours, post_id="1001", **extra):
-    return h.make_entry("draft_uploaded", ago(hours=hours), post_id=post_id, **extra)
+    return h.make_entry("draft_uploaded", ago(hours=hours), post_id=post_id, **dict(GOOD_SIGNALS, **extra))
 
 
 def items_for(history, published, now=NOW, blog=None):
@@ -95,17 +98,18 @@ class ConfirmedDraftItemTest(unittest.TestCase):
         published = {"blogger_macat": frozenset({"4083806990162343742", "2480285108542104321", "3589268332908477760", "999"})}
         self.assertEqual(items_for(history, published), [])
 
-    def test_the_old_behaviour_would_have_counted_the_same_history_as_waiting(self):
+    def test_without_a_feed_check_the_same_history_is_counted_but_only_as_unconfirmed(self):
         history = [draft(70, "1"), draft(60, "2"), draft(20, "3")]
         item = items_for(history, None)[0]
-        self.assertIn("초안 3건 게시 대기", item.title)
+        self.assertEqual(item.level, "info")                     # 2026-11-11 정리: 공개 여부를 확인하지 못했으니 게시 검토 action 이 아니라 참고다
+        self.assertIn("초안 3건 대기(검토 조건 미확인)", item.title)
         self.assertIn("이력으로는 게시했는지 알 수 없어", item.detail)
 
     def test_a_draft_that_is_still_not_public_after_the_grace_hours_is_reported_once(self):
         history = [draft(10, "1"), draft(40, "2")]
         [item] = items_for(history, {"blogger_macat": frozenset({"1"})})
         self.assertEqual(item.level, "action")
-        self.assertIn("초안 1건 게시 대기", item.title)
+        self.assertIn("초안 1건 게시 검토", item.title)
         self.assertEqual(item.since, NOW - timedelta(hours=40))
         self.assertIn(f"{inbox.DRAFT_REMIND_AFTER_HOURS}시간", item.detail)
         self.assertIn("공개 주소", item.detail)
@@ -116,7 +120,7 @@ class ConfirmedDraftItemTest(unittest.TestCase):
         history = [draft(0.5, "1"), draft(inbox.DRAFT_REMIND_AFTER_HOURS - 0.01, "2")]
         self.assertEqual(items_for(history, {"blogger_macat": frozenset()}), [])
         [item] = items_for([draft(inbox.DRAFT_REMIND_AFTER_HOURS, "2")], {"blogger_macat": frozenset()})        # 경계: 6시간이 되면 센다
-        self.assertIn("초안 1건 게시 대기", item.title)
+        self.assertIn("초안 1건 게시 검토", item.title)
 
     def test_the_same_draft_becomes_an_item_only_after_the_grace_hours_pass(self):
         history = [draft(1, "1")]
@@ -125,10 +129,12 @@ class ConfirmedDraftItemTest(unittest.TestCase):
         later = NOW + timedelta(hours=inbox.DRAFT_REMIND_AFTER_HOURS)
         self.assertEqual(len(items_for(history, published, now=later)), 1)
 
-    def test_an_entry_without_a_post_id_cannot_be_confirmed_so_it_is_counted(self):
-        history = [h.make_entry("draft_uploaded", ago(hours=30)), h.make_entry("draft_uploaded", ago(hours=30), post_id="")]
+    def test_an_entry_without_a_post_id_cannot_be_confirmed_so_it_is_counted_but_not_called_reviewable(self):
+        history = [h.make_entry("draft_uploaded", ago(hours=30), **GOOD_SIGNALS), h.make_entry("draft_uploaded", ago(hours=30), post_id="", **GOOD_SIGNALS)]
         [item] = items_for(history, {"blogger_macat": frozenset({"1"})})
-        self.assertIn("초안 2건 게시 대기", item.title)
+        self.assertEqual(item.level, "info")                     # 2026-11-11 정리: 글 번호가 없으면 공개 피드로 '아직 안 보임'을 확인할 수 없어 사람 검토 조건이 빠진다
+        self.assertIn("초안 2건 대기(검토 조건 미확인)", item.title)
+        self.assertIn(inbox.REVIEWABLE_GAP, item.detail)
 
     def test_integer_ids_from_the_feed_match_the_text_ids_in_the_history(self):
         self.assertEqual(items_for([draft(30, "4083806990162343742")], {"blogger_macat": {4083806990162343742}}), [])
@@ -139,7 +145,7 @@ class ConfirmedDraftItemTest(unittest.TestCase):
     def test_only_published_drafts_inside_the_week_window_matter_and_old_ones_still_fade_away(self):
         history = [draft(24 * 7 + 1, "1"), draft(24 * 2, "2")]
         [item] = items_for(history, {"blogger_macat": frozenset()})
-        self.assertIn("초안 1건 게시 대기", item.title)
+        self.assertIn("초안 1건 게시 검토", item.title)
 
     def test_the_item_id_still_follows_the_newest_waiting_draft(self):
         base = items_for([draft(40, "1")], {"blogger_macat": frozenset()})[0].id
@@ -392,12 +398,14 @@ class RunWithConfirmationTest(unittest.TestCase):
         code, text = self.run_inbox(lambda url: frozenset({"4083806990162343742", "2480285108542104321"}))
         self.assertEqual(code, 0)
         self.assertNotIn("게시 대기", text)
+        self.assertNotIn("게시 검토", text)                       # 2026-11-11 정리: 낱말이 바뀌었으니 새 낱말과 '검토 조건 미확인'도 없어야 한다
+        self.assertNotIn("검토 조건 미확인", text)
         self.assertIn("공개 주소(피드)에서 아직 보이지 않는 글만", text)
 
     def test_the_draft_that_is_still_not_public_is_reported(self):
         code, text = self.run_inbox(lambda url: frozenset({"4083806990162343742"}))
         self.assertEqual(code, 0)
-        self.assertIn("초안 1건 게시 대기", text)
+        self.assertIn("초안 1건 게시 검토", text)
 
     def test_a_feed_that_cannot_be_read_is_reported_as_a_lookup_failure_and_not_as_waiting(self):
         def broken(url):
@@ -405,13 +413,15 @@ class RunWithConfirmationTest(unittest.TestCase):
         code, text = self.run_inbox(broken)
         self.assertEqual(code, 0)
         self.assertIn("조회 실패 — Blogger 게시 확인", text)
-        self.assertNotIn("초안 2건 게시 대기", text)
-        self.assertNotIn("초안 1건 게시 대기", text)
+        for old_or_new in ("초안 2건 게시 대기", "초안 1건 게시 대기", "초안 2건 게시 검토", "초안 1건 게시 검토", "검토 조건 미확인"):
+            self.assertNotIn(old_or_new, text)
 
     def test_without_a_fetcher_nothing_is_read_from_the_network_and_the_old_count_stays(self):
         code, text = self.run_inbox(None)
         self.assertEqual(code, 0)
-        self.assertIn("초안 2건 게시 대기", text)
+        self.assertIn("초안 2건 대기(검토 조건 미확인)", text)                # 2026-11-11 정리: 게시 확인이 없으니 이력만 센 값은 게시 검토 action 이 아니라 참고다
+        self.assertIn("이력으로는 게시했는지 알 수 없어", text)
+        self.assertNotIn("건 게시 검토", text)                    # 설명 문장에는 '게시 검토' 낱말이 있다 — action 제목(초안 N건 게시 검토)만 없어야 한다
 
     def test_main_passes_the_real_feed_reader(self):
         with mock.patch.object(oi, "run", return_value=0) as fake_run, mock.patch.object(oi, "safe_output"):
