@@ -137,9 +137,9 @@ ALLOWED = {
     "blogger-ko.yml": entry({"contents:write"}, uses={"./.github/workflows/blogger.yml"}),
     "blogger.yml": RECORD_PUSH,
     "chance-fix-images.yml": entry({"actions:write", "contents:write"}, {"gh workflow run", "git commit", "git push"}, {"generator.py", "pipeline.publish_lock"}),
-    "chance-shadow.yml": entry(py={"generator.py", "pipeline.quality_shadow"}, uses={"actions/upload-artifact"}),
+    "chance-shadow.yml": entry(py={"generator.py", "pipeline.quality_shadow", "pipeline.source_policy"}, uses={"actions/upload-artifact"}),      # source_policy: AF7 의 읽기 단계(레지스트리 값을 한 줄 출력 — 읽기만 한다)
     "chanceblog.yml": entry({"actions:write", "contents:write", "pull-requests:write"}, {"gh workflow run", "git commit", "git push"},
-                            {"generator.py", "pipeline.draft_flow", "pipeline.notify"}),
+                            {"generator.py", "pipeline.draft_flow", "pipeline.notify", "pipeline.source_policy"}),      # source_policy: AF7 의 읽기 단계(읽기만 한다)
     "guardrails.yml": entry(py={"pipeline.notify", "scripts/validate_repo.py"}),
     "issue-edit.yml": entry({"actions:write", "contents:write", "issues:write", "pull-requests:write"},
                             {"gh issue", "gh label", "gh pr create", "gh workflow run", "git commit", "git push"}, {"pipeline.edits.runner"}),
@@ -852,7 +852,7 @@ class ShadowWorkflowCannotWriteTest(unittest.TestCase):
         self.assertEqual(found["cmds"], set())
         self.assertEqual(found["perms"], set())
         self.assertEqual(found["uses"], {"actions/upload-artifact"})
-        self.assertEqual(found["py"], {"generator.py", "pipeline.quality_shadow"})
+        self.assertEqual(found["py"], {"generator.py", "pipeline.quality_shadow", "pipeline.source_policy"})      # source_policy 는 AF7 의 읽기 단계 — 레지스트리 값을 한 줄 낸다(쓰기 없음)
         for forbidden in ("git ", "gh ", "curl", "GITHUB_TOKEN", "GH_TOKEN", "secrets.GITHUB", "pull-requests", "contents: write", "issues: write", "actions: write",
                           "workflow_run", "pull_request", "schedule"):
             self.assertNotIn(forbidden, self.code, forbidden)

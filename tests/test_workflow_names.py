@@ -495,12 +495,15 @@ class ChanceSplitTest(unittest.TestCase):
         step = dict(step)
         if isinstance(step.get("if"), str):
             step["if"] = step["if"].replace(" && steps.flow.outputs.flow != 'pr'", "")
+        env = step.get("env")
+        if isinstance(env, dict) and isinstance(env.get("GEMINI_API_KEY"), str):      # AF7: 글 작성 워크플로의 키 식에만 닫힌 쪽 조건 한 조각이 더해졌다(test_manual_run_defaults 가 두 식을 글자 그대로 못박는다)
+            step["env"] = dict(env, GEMINI_API_KEY=env["GEMINI_API_KEY"].replace(" && steps.source.outputs.content_source == 'feed'", ""))
         return step
 
     def chance_direct_steps(self):
-        """승인 흐름이 더한 두 단계('발행 흐름 확인'·'초안 올리기')를 뺀 chanceblog.yml 단계."""
+        """승인 흐름이 더한 두 단계('발행 흐름 확인'·'초안 올리기')와 AF7 이 더한 '콘텐츠 출처 확인' 단계를 뺀 chanceblog.yml 단계."""
         return [self.direct_path(s) for s in self.steps(self.chance)
-                if s.get("id") != "flow" and "pipeline.draft_flow" not in s.get("run", "")]
+                if s.get("id") not in ("flow", "source") and "pipeline.draft_flow" not in s.get("run", "")]
 
     def test_steps_are_identical_except_the_fix_images_switch(self):
         # chanceblog.yml 에만 새 글 텔레그램 알림 단계가 더 있다(이미지 교체는 새 글이 없어 알리지 않는다) — 그 단계를 뺀 나머지가 같아야 한다
@@ -519,7 +522,12 @@ class ChanceSplitTest(unittest.TestCase):
     def test_the_draft_flow_added_exactly_two_steps_to_chanceblog(self):
         added = [s for s in self.steps(self.chance) if s.get("id") == "flow" or "pipeline.draft_flow" in s.get("run", "")]
         self.assertEqual(len(added), 2)
-        self.assertEqual(len(self.steps(self.chance)), 9)               # 기준 6 + 승인 흐름 2 + 텔레그램 알림(새 글) 1(알림 단계는 test_steps_are_identical_except_the_fix_images_switch 가 따로 뺀다)
+        self.assertEqual(len(self.steps(self.chance)), 10)              # 기준 6 + 승인 흐름 2 + 텔레그램 알림(새 글) 1(알림 단계는 test_steps_are_identical_except_the_fix_images_switch 가 따로 뺀다) + 콘텐츠 출처 확인 1(AF7)
+        source = [s for s in self.steps(self.chance) if s.get("id") == "source"]
+        self.assertEqual(len(source), 1)
+        self.assertIn("python -m pipeline.source_policy content-source", source[0]["run"])
+        self.assertLess(self.steps(self.chance).index(source[0]), next(i for i, s in enumerate(self.steps(self.chance)) if s.get("run") == "python generator.py"))      # 읽기 단계가 생성기 단계보다 앞이다
+        self.assertEqual([s for s in self.steps(self.fix) if s.get("id") == "source"], [])                                # 이미지 교체 워크플로에는 읽기 단계가 없다(새 글을 만들지 않는다)
         self.assertEqual(len(self.steps(self.fix)), 7)                  # 이미지 교체 워크플로는 승인 흐름과 무관하다(새 글을 만들지 않는다). 기준 6 + 제한 재개 잠금 확인 1(2026-11-09)
 
     def test_fix_images_workflow_still_commits_and_requests_the_pages_deploy(self):

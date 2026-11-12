@@ -39,18 +39,20 @@ def generator_step(workflow):
     return next(s for s in load(workflow)["jobs"]["build"]["steps"] if s.get("run") == "python generator.py")
 
 
-def value_of(template, event, inputs=None, secrets=None, event_inputs=None):
-    """워크플로의 `${{ … }}` 식을 GitHub 규칙대로 평가한다. inputs 는 입력 컨텍스트, event_inputs 는 github.event.inputs(문자열)."""
+def value_of(template, event, inputs=None, secrets=None, event_inputs=None, content_source="feed"):
+    """워크플로의 `${{ … }}` 식을 GitHub 규칙대로 평가한다. inputs 는 입력 컨텍스트, event_inputs 는 github.event.inputs(문자열).
+    content_source 는 글 작성 워크플로의 '콘텐츠 출처 확인' 단계 출력(`steps.source.outputs.content_source` — 기본 feed, None 이면 출력이 없는 경우)이다."""
     ctx = context(event, inputs)
     ctx["secrets"] = secrets if secrets is not None else {"GEMINI_API_KEY": "fake-gemini-secret"}
+    ctx["steps"] = {"source": {"outputs": {} if content_source is None else {"content_source": content_source}}}
     if event_inputs is not None:
         ctx["github"]["event"] = {"inputs": event_inputs}
     return render(template, ctx)
 
 
-def gemini_key(workflow, event, inputs=None, secret="fake-gemini-secret"):
+def gemini_key(workflow, event, inputs=None, secret="fake-gemini-secret", content_source="feed"):
     secrets = {"GEMINI_API_KEY": secret} if secret is not None else {}
-    return value_of(generator_step(workflow)["env"]["GEMINI_API_KEY"], event, inputs, secrets)
+    return value_of(generator_step(workflow)["env"]["GEMINI_API_KEY"], event, inputs, secrets, content_source=content_source)
 
 
 # ----------------------------------------------------------------------------
@@ -79,13 +81,31 @@ class ChanceWorkflowDefaultsTest(unittest.TestCase):
         self.assertEqual(gemini_key("chanceblog.yml", "schedule"), "fake-gemini-secret")
         self.assertEqual(gemini_key("chanceblog.yml", "schedule", {"dry_run": True}), "fake-gemini-secret")   # 정기 실행에는 입력이 없다
 
+    def test_a_content_source_other_than_feed_never_hands_the_key_to_the_post_workflow_but_the_image_workflow_still_gets_it(self):
+        """AF7: 읽기 단계 출력이 facts·빈 값·모르는 값·출력 없음이면 글 작성 워크플로의 키는 이벤트·입력 조합과 상관없이 빈 글자다(닫힌 쪽). 이미지 교체 워크플로는 식이 그대로다."""
+        combos = (("schedule", None), ("workflow_dispatch", {"dry_run": False, "real_ai": False}), ("workflow_dispatch", {"dry_run": True, "real_ai": True}),
+                  ("workflow_dispatch", {"dry_run": True, "real_ai": False}), ("workflow_dispatch", {"dry_run": False}))
+        for source in ("facts", "", None, "weird", "fact", "feed2", " feed"):
+            for event, inputs in combos:
+                with self.subTest(source=source, event=event, inputs=inputs):
+                    self.assertEqual(gemini_key("chanceblog.yml", event, inputs, content_source=source), "")
+        for event, inputs in combos[:2]:
+            self.assertEqual(gemini_key("chance-fix-images.yml", event, inputs, content_source="facts"), "fake-gemini-secret")
+            self.assertEqual(gemini_key("chanceblog.yml", event, inputs, content_source="feed"), "fake-gemini-secret")      # feed 는 옛 동작 그대로
+
     def test_without_the_secret_nothing_is_passed(self):
         for event, inputs in (("schedule", None), ("workflow_dispatch", {"dry_run": False}), ("workflow_dispatch", {"dry_run": True, "real_ai": True})):
             self.assertEqual(gemini_key("chanceblog.yml", event, inputs, secret=None), "")
 
-    def test_both_chance_workflows_use_the_same_key_expression_and_still_wire_the_secret(self):
+    def test_the_two_chance_workflows_differ_only_by_the_content_source_clause_and_still_wire_the_secret(self):
+        """AF7: 글 작성 워크플로의 키 식에만 닫힌 쪽 조건(`steps.source.outputs.content_source == 'feed'`)이 더해졌다 — 이미지 교체 워크플로는 새 글을 만들지 않고 모델이 검색어를 쓰므로 콘텐츠 출처와 상관없이 키를 넘긴다.
+        (전에는 두 식이 같아야 했다 — 같음을 '조각 하나만 다름' 으로 좁혀 두 식을 글자 그대로 못박았다.)"""
         exprs = {wf: generator_step(wf)["env"]["GEMINI_API_KEY"] for wf in CHANCE_WORKFLOWS}
-        self.assertEqual(len(set(exprs.values())), 1, exprs)
+        old = "${{ (github.event_name != 'workflow_dispatch' || !inputs.dry_run || inputs.real_ai) && secrets.GEMINI_API_KEY || '' }}"
+        clause = " && steps.source.outputs.content_source == 'feed'"
+        self.assertEqual(exprs["chance-fix-images.yml"], old)
+        self.assertEqual(exprs["chanceblog.yml"], old.replace(" && secrets.GEMINI_API_KEY", clause + " && secrets.GEMINI_API_KEY"))
+        self.assertEqual(exprs["chanceblog.yml"].replace(clause, ""), exprs["chance-fix-images.yml"])
         for wf in CHANCE_WORKFLOWS:
             self.assertIn("secrets.GEMINI_API_KEY", exprs[wf])                 # 검증기 REG-3(시크릿 연결) 이 보는 글자
             self.assertEqual(generator_step(wf)["env"]["UNSPLASH_ACCESS_KEY"], "${{ secrets.UNSPLASH_ACCESS_KEY }}")
