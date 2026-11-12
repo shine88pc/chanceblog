@@ -10,10 +10,12 @@ from pathlib import Path
 
 import _bootstrap  # noqa: F401
 from pipeline import quality_gate as qg, registry
+from registry_states import pre_flip_registry
 
 
 def real():
-    return registry.load_registry()
+    """변이의 바탕: 켜기 전 고정 표본(켜기 전 진짜 레지스트리와 같은 사본) — 켜는 변경(T3) 뒤의 진짜 값(국문 단독·콘텐츠 출처 facts)이 이 파일의 값 검증·읽기 시험을 흔들지 않게 한다. 진짜 값을 못박는 시험은 `registry.load_registry()` 를 직접 읽는다."""
+    return pre_flip_registry()
 
 
 def chance_entry(reg):
@@ -28,10 +30,11 @@ def errors_for(change):
 
 class RealRegistryUnchangedTest(unittest.TestCase):
     def test_the_real_registry_has_no_quality_gate_and_keeps_both_languages(self):
-        entry = chance_entry(real())
+        reg = registry.load_registry()          # 진짜 파일을 직접 읽는다(real() 은 고정 표본이다)
+        entry = chance_entry(reg)
         self.assertNotIn("quality_gate", entry)
         self.assertEqual(entry["languages"], ["ko", "en"])
-        self.assertEqual(registry.validate_registry(real()), [])
+        self.assertEqual(registry.validate_registry(reg), [])
 
     def test_the_default_settings_are_off_and_both_languages(self):
         self.assertEqual(registry.chance_settings(), ("off", ("ko", "en")))

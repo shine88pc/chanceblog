@@ -19,6 +19,7 @@ from unittest import mock
 
 import _bootstrap
 from draft_helpers import REPO, FakeGit, FakeGitHub, HermeticGit, OriginTemplate, Sandbox, post_text, write_draft
+from lock_helpers import pre_flip
 from pipeline import draft_flow, drafts
 from pipeline.state import KST
 from test_generator_drafts import run_tick
@@ -711,6 +712,7 @@ class RemoteBranchLogicTest(FakeBase):
 # ----------------------------------------------------------------------------
 # 실제 git 이야기: 하루가 흘러가는 순서대로 한 저장소(임시 bare origin)에서
 # ----------------------------------------------------------------------------
+@pre_flip
 class ApprovalStoryTest(unittest.TestCase):
     """09시 초안(그날은 저장소 설정이 꺼져 PR 열기가 거부됨) → 30분 뒤 틱(같은 슬롯 DRAFT_PENDING, 설정을 켠 뒤 PR 다시 열기) → 18시 초안(PR 열림)
     → 두 PR 을 두 순서로 병합 → 병합 뒤 틱(ALREADY_PUBLISHED) → 7일 뒤 정리. 실제 git 과 실제 생성기(가짜 소스·가짜 Gemini)를 쓴다.

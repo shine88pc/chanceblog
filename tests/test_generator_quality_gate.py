@@ -21,6 +21,7 @@ import _bootstrap
 import generator as g
 import quality_gate_helpers as h
 from chance_credit_helpers import fake_pool_photo
+from lock_helpers import pre_flip
 from pipeline import drafts, quality_gate as qg, registry
 from test_generator_slots import at, run_captured
 
@@ -55,6 +56,7 @@ def without_images(text):
     return "\n".join(line for line in text.split("\n") if not line.startswith("image:") and "unsplash.com" not in line and not line.startswith("![Thumbnail]"))
 
 
+@pre_flip
 class GenerationBase(unittest.TestCase):
     """generate_blog_posts 전체 흐름(가짜 피드·가짜 Gemini·임시 폴더)을 설정(settings)별로 돌린다. 운영과 같이 상대 경로(_posts·history.json)로 임시 폴더 안에서 돈다."""
 
@@ -165,7 +167,7 @@ class DefaultOffTest(GenerationBase):
         self.assertEqual(calls, [])
 
     def test_the_real_registry_is_off_and_both_languages(self):
-        self.assertEqual(registry.chance_settings(), OFF_BOTH)
+        self.assertEqual(registry.chance_settings(_bootstrap.ROOT / "pipeline" / "blogs.json"), OFF_BOTH)      # 클래스 도구(pre_flip)가 기본 경로를 켜기 전 표본으로 돌리므로 진짜 파일을 경로로 직접 읽는다
 
 
 class HoldModeTest(GenerationBase):

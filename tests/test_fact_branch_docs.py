@@ -9,10 +9,12 @@ import xml.etree.ElementTree as ElementTree
 import _bootstrap
 import ai_flow_scan as SCAN
 import generator as g
+import lock_helpers
+import registry_states
 import test_fact_select as SEL
 import test_fact_structure as STRUCT
 
-from pipeline import egress, fact_candidates as K, fact_supply, shadow_run, source_policy
+from pipeline import drafts, egress, fact_candidates as K, fact_supply, publish_lock, shadow_run, source_policy
 from pipeline.adapters import base as adapter_base
 
 ROOT = _bootstrap.ROOT
@@ -24,6 +26,8 @@ SOURCE_POLICY_DOC = (ROOT / "docs" / "SOURCE_POLICY.md").read_text(encoding="utf
 SECTION = DOC[DOC.index("## 15. S2b"):]
 DECISIONS = [f"D-{number}" for number in range(230, 247)]
 DEFECTS = [f"D-{number}" for number in range(250, 257)]
+FOLLOW_DECISIONS = [f"D-{number}" for number in (*range(290, 300), 308, 309)]      # S2BFIX(독립 검증 S2b 의 후속)가 더한 결정(300–307 은 결함 행의 번호)
+FOLLOW_DEFECTS = [f"D-{number}" for number in range(300, 308)]              # 같은 묶음이 더한 결함 행
 FORBIDDEN = "(?i)" + "|".join(("ca-" + "pub", "ads" + "ense", r"pub-\d{8,}", "chance" + "blog", "shine" + "88", "kc" + "yoon", "pew" + "research"))
 BLOG_WORKFLOW = "chance" + "blog.yml"             # 글 작성 워크플로 파일 이름(문서·시험 파일에는 글자 그대로 쓰지 않는다 — 실제 식별자 검사)
 SHADOW_WORKFLOW = "chance-shadow.yml"
@@ -132,7 +136,7 @@ class DecisionAndDefectRowsTest(unittest.TestCase):
         positions = [found.index(number) for number in DEFECTS]
         self.assertEqual(positions, list(range(positions[0], positions[0] + len(DEFECTS))))
         self.assertGreater(positions[0], found.index("D-219"))
-        states = {"D-250": "해결", "D-251": "해결", "D-253": "완화", "D-254": "열림", "D-255": "완화", "D-256": "열림"}
+        states = {"D-250": "해결", "D-251": "해결", "D-253": "완화", "D-254": "해결", "D-255": "완화", "D-256": "해결"}      # D-254·D-256 은 S2BFIX 가 해결로 고쳤다(의도적 변경 — 이전 기대는 둘 다 열림)
         for number in DEFECTS:
             row = register_row(number)
             self.assertEqual(row.count("|"), 7, number)                       # 표의 여섯 칸
@@ -160,6 +164,138 @@ class DecisionAndDefectRowsTest(unittest.TestCase):
                               (shadow_run, ("facts_branch_on",)), (egress, ("CallBudget",))):
             for name in names:
                 self.assertTrue(hasattr(module, name), (module.__name__, name))
+
+
+class FollowUpRowsTest(unittest.TestCase):
+    """S2BFIX(독립 검증 S2b 의 후속): 새 결정 D-290–D-299·결함 D-300–D-307·해결로 고친 기존 행 D-254·D-256·§15 의 새 문장이 코드·다른 문서와 어긋나지 않는다.
+    다른 가지의 번호를 못박지 않는다 — 이 묶음의 행이 있고 서로 이어지는지만 본다."""
+    POINTERS = {"D-300": "D-291", "D-301": "D-290", "D-302": "D-298", "D-303": "D-299", "D-304": "D-296", "D-305": "D-292", "D-306": "D-297", "D-307": "D-293"}
+    STATES = {"D-300": "해결", "D-301": "해결", "D-302": "완화", "D-303": "해결", "D-304": "해결", "D-305": "해결", "D-306": "해결", "D-307": "해결"}
+
+    def test_the_new_decisions_come_after_d246_once_each_in_order_with_three_cells_and_the_document_rules(self):
+        found = re.findall(r"(?m)^\| (D-\d+) \|", DOC)
+        for number in FOLLOW_DECISIONS:
+            self.assertEqual(found.count(number), 1, number)
+        positions = [found.index(number) for number in FOLLOW_DECISIONS]
+        self.assertEqual(positions, list(range(positions[0], positions[0] + len(FOLLOW_DECISIONS))))       # 빠짐없이 이어진다
+        self.assertGreater(positions[0], found.index("D-246"))
+        for number in FOLLOW_DECISIONS:
+            row = row_of(DOC, number)
+            self.assertEqual(row.count("|"), 4, number)                                                      # 표의 세 칸(번호·결정·이유)
+            self.assertNotRegex(row, "[~～〜]")
+            self.assertNotRegex(row, r"(?i)https?://|www\.|\bftp://")
+            self.assertNotRegex(row, r"[A-Za-z]:[\\/]|/Users/|/home/|\\\\")
+            self.assertNotRegex(row, FORBIDDEN)
+            for liquid in ("{{", "{%", "%}", "}}"):
+                self.assertNotIn(liquid, row)
+
+    def test_each_new_decision_names_the_code_it_decides_and_the_code_has_those_names_and_values(self):
+        needles = {
+            "D-290": ("_fact_fetch", "FACT_READ_DEADLINE_SECONDS", "FACT_READ_CHUNK_BYTES", "read1", "fact_clock", "OPENER_FAILED", "TimeoutError", "60초", "64KiB"),
+            "D-291": ("facts_without_key", "FIX_IMAGES", "fix_images", "feed"),
+            "D-292": ("read_history_strict", "FACT_NOT_READY", "generate_fact_post", "read_history"),
+            "D-293": ("draft_flow", "FACT_NOT_READY", "DRAFT_CREATED", "PUBLISHED"),
+            "D-294": ("build_pr_body", "is_fact_draft", "provenance: facts", "AI 미사용"),
+            "D-295": ("write_history", "200", "date.max", "시뮬레이션"),
+            "D-296": ("fact_supply", "run_facts", "AST", "fact_clock", "tests/ai_flow_scan.py"),
+            "D-297": ("dedupe_key", "QG7-REUSE", "run_facts", "HELD"),
+            "D-298": ("SOURCE_POLICY.md", "§15-10", "D-237", "run_call_cap"),
+            "D-299": ("noaa_swpc_json", "T3", "임시 사본", "최소 품질 Gate", "제한 재개 잠금"),
+            "D-308": ("pre_flip", "registry_states", "EXPECTED_STATE", "pre_flip_blogs.json", "REGISTRY_PATH", "DEFAULT_PATH", "test_registry_state", "알려진 상태"),
+            "D-309": ("670건", "25모듈", "tools/netblock", "D-308", "S2b 검증 D4"),
+        }
+        self.assertEqual(set(needles), set(FOLLOW_DECISIONS))
+        for number, words in needles.items():
+            for word in words:
+                self.assertIn(word, row_of(DOC, number), (number, word))
+        for name in ("fact_clock", "_fact_read", "_fact_fetch", "FACT_READ_DEADLINE_SECONDS", "FACT_READ_CHUNK_BYTES", "facts_without_key", "generate_fact_post"):
+            self.assertTrue(hasattr(g, name), name)
+        self.assertEqual((g.FACT_READ_DEADLINE_SECONDS, g.FACT_READ_CHUNK_BYTES), (60, 64 * 1024))             # 문서의 60초·64KiB
+        self.assertIn(f"`FACT_READ_DEADLINE_SECONDS`({g.FACT_READ_DEADLINE_SECONDS}초)", row_of(DOC, "D-290"))      # 상수 값이 문서의 같은 자리에 같은 모양으로 적혀 있다
+        self.assertIn(f"`FACT_READ_CHUNK_BYTES`({g.FACT_READ_CHUNK_BYTES // 1024}KiB)", row_of(DOC, "D-290"))
+        self.assertTrue(hasattr(drafts, "is_fact_draft"))
+        self.assertTrue(hasattr(publish_lock, "read_history_strict"))
+        self.assertTrue(hasattr(g, "read_history_strict"))
+        self.assertTrue(hasattr(lock_helpers, "pre_flip") and hasattr(lock_helpers, "PreFlipRegistry"))                    # D-308: 데코레이터와 도구가 있다
+        self.assertEqual(registry_states.STATE_NAMES, ("pre_flip", "p2", "p3"))                                            # 알려진 상태 셋(문서 D-308 의 이름)
+        self.assertIn(registry_states.EXPECTED_STATE, registry_states.STATE_NAMES)
+
+    def test_the_new_defect_rows_come_after_d268_with_six_cells_the_expected_state_and_a_pointer_to_their_decision(self):
+        found = re.findall(r"(?m)^\| \*\*(D-\d+)\*\* \|", REGISTER)
+        self.assertEqual(len(found), len(set(found)))
+        positions = [found.index(number) for number in FOLLOW_DEFECTS]
+        self.assertEqual(positions, list(range(positions[0], positions[0] + len(FOLLOW_DEFECTS))))
+        self.assertGreater(positions[0], found.index("D-268"))
+        for number in FOLLOW_DEFECTS:
+            row = register_row(number)
+            self.assertEqual(row.count("|"), 7, number)                                                      # 표의 여섯 칸
+            cells = [cell.strip() for cell in row.strip().strip("|").split("|")]
+            self.assertEqual(cells[1], "낮음", number)                                                         # 독립 검증이 매긴 심각도(낮음 넷·정보 다섯 가운데 정보도 낮음 행으로 올렸다)
+            self.assertTrue(cells[4].replace("*", "").startswith(self.STATES[number]), (number, cells[4]))
+            self.assertIn("S2BFIX", cells[4], number)
+            self.assertIn(self.POINTERS[number], row, number)                                                # 결정 번호로 이어진다
+            self.assertNotRegex(row, "[~～〜]")
+            self.assertNotRegex(row, r"(?i)https?://|www\.|\bftp://")
+            self.assertNotRegex(row, FORBIDDEN)
+            for liquid in ("{{", "{%", "%}", "}}"):
+                self.assertNotIn(liquid, row)
+        self.assertEqual(len(set(self.POINTERS.values())), len(self.POINTERS))                              # 결함 행마다 다른 결정을 가리킨다
+        self.assertTrue(set(self.POINTERS.values()) <= set(FOLLOW_DECISIONS))
+
+    def test_the_two_old_rows_are_marked_resolved_and_point_to_the_new_rows(self):
+        for number, pointers in (("D-254", ("D-294", "D-307")), ("D-256", ("D-295",))):
+            row = register_row(number)
+            cells = [cell.strip() for cell in row.strip().strip("|").split("|")]
+            self.assertTrue(cells[4].replace("*", "").startswith("해결"), (number, cells[4]))
+            self.assertIn("S2BFIX", cells[4])
+            for pointer in pointers:
+                self.assertIn(pointer, row, (number, pointer))
+
+
+    def test_section_15_10_states_the_call_total_limit_and_the_decision_item_and_the_other_new_sentences_are_there(self):
+        part = sub_section(SECTION, "### 15-10.")
+        for word in ("호출 합계·간격은 지키지 못한다", "D-298", "같은 파일 60초·다른 파일 5초", "24–30번", "3–5회", "후보를 모두 건너뛰는 날", "켜기 전 결정 항목", "날짜별 호출 횟수", "SOURCE_POLICY.md", "D-237"):
+            self.assertIn(word, part, word)
+        self.assertIn("계산으로 만든 초안(AI 미사용)", part)                                                  # D-254 는 고쳤다
+        self.assertNotIn("켜기 전에 고친다", part)
+        self.assertIn("D-295", part)
+        self.assertIn("HISTORY_DATE_UNREADABLE", part)
+        connection = sub_section(SECTION, "### 15-4.", "### 15-5.")
+        self.assertIn("| 응답을 60초 안에 다 받지 못함", connection)
+        self.assertIn("D-290", connection)
+        approval = sub_section(SECTION, "### 15-5.", "### 15-6.")
+        for word in ("read_history_strict", "D-292", "D-293", "D-294", "계산으로 만든 초안(AI 미사용)", "FACT_NOT_READY"):
+            self.assertIn(word, approval, word)
+        self.assertIn("D-292", sub_section(SECTION, "### 15-2.", "### 15-3."))
+        self.assertIn("D-293", sub_section(SECTION, "### 15-2.", "### 15-3."))
+
+    def test_the_t3_patch_table_has_the_companion_column_and_names_the_three_patch_drafts(self):
+        """D-299: 켜기 전 T3 패치 표(§15-8)에 '동반 수정(시험·문서)' 칸이 있고 다섯 행 모두 다섯 칸이며 패치 초안 세 이름(저장소 밖 파일의 이름)이 적혀 있다. 켜는 변경을 적용한 뒤에도 표 모양은 그대로다 — 행의 상태 칸만 바뀐다."""
+        part = sub_section(SECTION, "### 15-8.", "### 15-9.")
+        rows = table_rows(part)
+        self.assertEqual(rows[0], ["순서", "변경", "등급", "상태", "동반 수정(시험·문서)"])
+        self.assertEqual([cells[0] for cells in rows[1:]], ["1", "2", "3", "4", "5"])
+        for cells in rows[1:]:
+            self.assertEqual(len(cells), 5, cells[0])
+        for name in ("01_af7_workflow_key", "02_flip_values", "03_gate_lock"):
+            self.assertIn(name, part, name)
+        for forbidden in ("C:", "audit6", "flip_patches", "/Users/"):
+            self.assertNotIn(forbidden, part, forbidden)                                                    # 저장소 밖 파일은 이름만 적고 경로를 적지 않는다
+
+    def test_the_t3_section_splits_what_the_branch_already_holds_from_what_the_patches_carry(self):
+        """D-308·D-309: §15-8 이 '병합 가지가 먼저 담은 것' 과 '패치가 담는 것' 을 나눠 적고 검증 D4 의 짐작보다 컸다는 사실(25모듈 약 670건)과 알려진 상태 가드를 말한다."""
+        part = sub_section(SECTION, "### 15-8.", "### 15-9.")
+        for word in ("병합 가지가 먼저 담은 것과 패치가 담는 것(D-308·D-309)", "시험 25모듈 약 670건", "tests/registry_states.py", "tests/test_registry_state.py", "lock_helpers.pre_flip", "EXPECTED_STATE", "켜기 전·후 어느 상태에서도 초록"):
+            self.assertIn(word, part, word)
+        self.assertIn("tests/test_registry_state.py", sub_section(SECTION, "### 15-9.", "### 15-10."))
+        self.assertEqual(register_row("D-303").count("670건"), 1)
+
+    def test_the_other_documents_say_the_history_read_is_a_reason_for_the_quiet_stop(self):
+        row = next(line for line in ACTIONS.splitlines() if line.startswith("| `FACT_NOT_READY` |"))
+        self.assertIn("이력 파일 읽기", row)
+        exit_row = next(line for line in ARCH.splitlines() if line.startswith("| 정상 건너뜀(Fact 경로) |"))
+        self.assertIn("이력 파일 읽기", exit_row)
+        self.assertEqual(exit_row.count("|"), 6)
 
 
 class CodeTablesTest(unittest.TestCase):
@@ -555,7 +691,7 @@ class WorkflowStateTest(unittest.TestCase):
         decision = row_of(DOC, "D-241")
         for word in ("괄호 **밖**", "`읽기 단계 출력 == 'feed'`", "`&&`", "T3"):
             self.assertIn(word, decision, word)
-        self.assertIn("패치 초안", sub_section(SECTION, "### 15-8.", "### 15-9."))
+        self.assertIn("01_af7_workflow_key", sub_section(SECTION, "### 15-8.", "### 15-9."))      # 표의 첫 패치 이름 — 켜는 변경을 적용한 뒤에는 '패치 초안' 이 '적용함·병합함' 으로 바뀌므로 이름으로 묻는다(같은 강도)
 
     def test_the_real_workflows_expressions_evaluate_without_error_in_either_state(self):
         for name in self.FILES:

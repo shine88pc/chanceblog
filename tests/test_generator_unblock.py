@@ -21,6 +21,7 @@ from unittest import mock
 
 import _bootstrap  # noqa: F401
 import generator as g
+from lock_helpers import pre_flip
 from pipeline import llm
 
 KST = g.KST
@@ -93,6 +94,7 @@ def notices_of(out):
     return [line for line in out.splitlines() if line.startswith("::notice::")]
 
 
+@pre_flip
 class FlowBase(unittest.TestCase):
     """DRY_RUN + 가짜 피드·가짜 모델·임시 폴더로 generate_blog_posts 전체 흐름을 돌린다(파일은 쓰지 않는다). 분야 순서는 ORDER 로 고정한다."""
 
@@ -549,6 +551,7 @@ class IterCandidateLanesTest(unittest.TestCase):
 # ======================================================================================================================
 # A-b — 같은 슬롯 창 안에서 시도마다 분야 순서가 달라진다
 # ======================================================================================================================
+@pre_flip
 class LaneOrderBucketTest(unittest.TestCase):
     HISTORY = [{"date": f"2026-10-{20 + i // 2}", "topic": f"t{i}", "lane": ORDER[i % 6], "slot": 9 if i % 2 == 0 else 18}
                for i in range(25)]
@@ -745,6 +748,7 @@ def feed(description, title="기사 제목 입니다"):
             "</channel></rss>").encode("utf-8")
 
 
+@pre_flip
 class SummaryLimitTest(unittest.TestCase):
     def test_the_default_limit_is_1800_and_far_above_the_old_300(self):
         self.assertEqual(g.SUMMARY_MAX_CHARS, 1800)
@@ -862,6 +866,7 @@ class OldModels:
         return SimpleNamespace(text=step)
 
 
+@pre_flip
 class GeminiCallOptionsTest(unittest.TestCase):
     def setUp(self):
         self.log = llm.CallLog(label="chance", purpose="post", out=print)

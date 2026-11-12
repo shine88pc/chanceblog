@@ -19,6 +19,7 @@ from xml.sax.saxutils import escape
 
 import _bootstrap  # noqa: F401
 import generator as g
+from lock_helpers import pre_flip
 from test_generator_slots import FakeResponse, rss, run_captured
 
 ROOT = _bootstrap.ROOT
@@ -419,6 +420,7 @@ class ExclusionRuleTest(unittest.TestCase):
         self.assertFalse(self.excluded(FEDS, "FEDS Note: A Short Analysis of Bond Market Liquidity", link="https://www.federalreserve.gov/econres/notes/feds-notes/x.html", categories=("FEDS Notes",)))
 
 
+@pre_flip
 class DateFormatTest(unittest.TestCase):
     def test_the_date_shapes_the_six_feeds_really_use_are_read_with_their_offsets(self):
         # 2026-11-05 실제 피드에서 본 모양(날짜 글자만 — 본문 아님). 읽지 못하면 72시간 검사를 건너뛰어 묵은 글감이 통과하므로 모양마다 못박는다.
@@ -442,6 +444,7 @@ class DateFormatTest(unittest.TestCase):
                 self.assertIn("AGE 1", out)
 
 
+@pre_flip
 class EngineWithFakeFeedsTest(unittest.TestCase):
     """실제 엔진(fetch_news_items)이 새 소스 6곳의 가짜 피드에서 후보를 만든다 — 기사 페이지·주소 해석은 부르면 실패."""
 
@@ -572,6 +575,7 @@ class EngineWithFakeFeedsTest(unittest.TestCase):
             self.assertEqual(timeout, 15)
 
 
+@pre_flip
 class LaneFlowWithNewSourcesTest(unittest.TestCase):
     """분야 이어가기(iter_candidate_lanes)와 후보 고르기(pick_topic_candidates)가 새 소스의 후보를 올린다 — 가짜 피드, 모델은 부르지 않는다."""
 
@@ -670,6 +674,7 @@ class PostAssemblyTest(unittest.TestCase):
                     self.assertIn(f'source_name: "{spec["display"]}"', out)
 
 
+@pre_flip
 class ExistingBehaviourUnchangedTest(unittest.TestCase):
     def test_the_old_fourteen_source_definitions_are_byte_identical_to_the_state_before_this_change(self):
         old = [s for s in g.NEWS_SOURCES if s["name"] in OLD_NAMES]

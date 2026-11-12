@@ -15,7 +15,7 @@ import _bootstrap
 import generator as g
 from chance_credit_helpers import fake_pool_photo
 from draft_helpers import REAL_PUBLISH_FLOW, HermeticGit
-from lock_helpers import guard_off
+from lock_helpers import guard_off, pre_flip
 from pipeline import draft_flow, drafts
 from test_generator_slots import at, candidate, long_post, run_captured
 
@@ -98,6 +98,7 @@ class PlainDirBase(unittest.TestCase):
         return sorted(p.relative_to(self.clone).as_posix() for p in (self.clone / "_posts").rglob("*.md"))
 
 
+@pre_flip
 class PrFlowGenerationTest(PlainDirBase):
     def test_a_due_slot_makes_a_draft_entry_with_flow_branch_and_paths(self):
         tick = run_tick(self.clone, at(9, 20, day=28))
@@ -208,6 +209,7 @@ class PrFlowGenerationTest(PlainDirBase):
         self.assertEqual(set(g.DRAFT_SKIP_REASONS), {drafts.STATE_PENDING, drafts.STATE_CHECK_FAILED})
 
 
+@pre_flip
 class PendingTitleTest(PlainDirBase):
     """⑦ 대기 중이거나 닫힌 초안의 제목·주제는 이력에 남아 있어, 같은 날 다음 슬롯의 후보와 겹치면 후보에서 빠진다."""
 
@@ -246,6 +248,7 @@ class PendingTitleTest(PlainDirBase):
             self.assertIn(expected, titles)
 
 
+@pre_flip
 class DirectFlowUnchangedTest(PlainDirBase):
     """direct(기본)에서는 이력 항목·요약에 승인 흐름의 흔적이 없다."""
 

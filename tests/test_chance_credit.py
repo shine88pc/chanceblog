@@ -17,6 +17,7 @@ from unittest import mock
 import _bootstrap
 import generator as g
 from chance_credit_helpers import FAKE_KEY, PHOTO_RAW, ChanceBase, FakeApi, http_error, pool_photo_item
+from lock_helpers import pre_flip
 from main_image_helpers import FakeResponse, photo_item, results
 from pipeline import unsplash_credit as uc
 from test_generator_front_matter import legacy_validate_post_data
@@ -417,6 +418,7 @@ class ValidatePostDataTest(ChanceBase):
         self.assertNotIn("Photo by", description)
 
 
+@pre_flip
 class GenerationFlowTest(ChanceBase):
     """generate_blog_posts 전체 흐름: 가짜 기사·가짜 Gemini·가짜 Unsplash·임시 폴더."""
 

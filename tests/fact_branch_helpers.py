@@ -23,6 +23,7 @@ import test_space_recipes as TR
 
 from pipeline import registry, source_registry
 from pipeline.adapters import noaa_swpc as N
+from registry_states import pre_flip_registry
 
 ROOT = _bootstrap.ROOT
 KST = datetime.timezone(datetime.timedelta(hours=9))
@@ -89,7 +90,7 @@ class FakeNoaa:
 
 def facts_registry(**chance):
     """실제 blogs.json 의 사본에서 chance 항목만 facts 로 켠 모양(시험 안에서만). 값을 더 바꾸려면 키워드로 넘긴다(값이 None 이면 그 키를 지운다)."""
-    reg = json.loads((ROOT / "pipeline" / "blogs.json").read_text(encoding="utf-8"))
+    reg = pre_flip_registry()      # 켜기 전 고정 표본에서 출발한다(진짜 파일이 켜는 변경(T3) 뒤 값이어도 이 도우미의 바탕은 같다)
     values = {"content_source": "facts", "source_policy": "allowlist", "languages": ["ko"], "publish_flow": "pr"}
     values.update(chance)
     for blog in reg["blogs"]:
