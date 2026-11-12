@@ -39,7 +39,7 @@
 | 채널·채널 라벨 | 운영자 화면에서 블로그를 묶어 부르는 이름. 레지스트리 `channel`(`key`·`label`)에 적고 라벨은 `Chance`·`Blogger 영문`·`Blogger 한글`·`티스토리`·`네이버` 다섯 중 하나다. 워크플로 이름 맨 앞 `[라벨]`·초안 이슈 라벨(`채널:<라벨>`)·현황판이 같은 글자를 쓴다. 블로그에 속하지 않는 워크플로는 `[공통]`·`[내부]` | `pipeline/registry.py`, `docs/ACTIONS_GUIDE.md` §2 |
 | 플랫폼 | 올리는 방식. `jekyll-git`(저장소에 커밋 → GitHub Pages) · `blogger`(Blogger API) · `naver`·`tistory`(초안 패키지만 — 공식 자동 게시 수단이 없다) | `pipeline/registry.py`, `pipeline/publishers/` |
 | 모드(`mode`) | 블로그마다 하나. `off` 정지 · `draft` 초안(공개 안 함 — Blogger 는 초안함에 올리고, 게시용 시크릿이 없으면 저장소 파일에만 저장) · `package` 초안 패키지(`naver`·`tistory` 전용) · `auto` 자동 게시. 정지한 이유는 `note` 에 적는다 | `pipeline/registry.py` |
-| 게시 방식(`publish_flow`) | Chance 전용. `direct` 만들자마자 main 에 올려 공개(기본) · `pr` 초안 브랜치와 PR 로 올리고 운영자가 병합하면 공개(지금 꺼짐). `pr` 로 바꾸는 것은 T3 | `pipeline/registry.py`, `pipeline/drafts.py` |
+| 게시 방식(`publish_flow`) | Chance 전용. `direct` 만들자마자 main 에 올려 공개(기본) · `pr` 초안 브랜치와 PR 로 올리고 운영자가 병합하면 공개(지금 Chance 의 값). `pr` 로 바꾸는 것은 T3 | `pipeline/registry.py`, `pipeline/drafts.py` |
 | 광고 선언(`ads`) | 그 블로그의 광고 **의도**. `off` 없음(새 블로그의 시작값) · `pending_gate` 품질 게이트를 통과하면 켜려는 곳 · `on` 광고 코드가 사이트에 들어 있음(코드를 우리가 관리하는 `jekyll-git` 에서만). 올리는 편집은 T3 | `pipeline/registry.py`, `docs/SECURITY_GUARDRAILS.md` G-C10 |
 | 광고 표면 | 광고 심사·광고 코드에 영향을 주는 파일(`index.html`·`privacy.md`·`about.md`·`contact.md`·`_includes/`·`_layouts/`·`_config.yml`·`robots.txt`·사이트 인증 파일 등). 전체 목록은 레지스트리의 `protected_paths`. 승인 없이 바꾸지 않는다 | `AGENTS.md` §2, `docs/CHARTER.md` §6.2 |
 | 슬롯 | 글을 만드는 시각 칸. 레지스트리 `schedule.slots_kst` 에 한국 시각(시) 목록으로 적는다(Chance 는 9시·18시). 예약 실행(`cron`)의 시각은 UTC 다 | `pipeline/blogs.json`, `docs/ACTIONS_GUIDE.md` §8 |

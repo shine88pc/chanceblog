@@ -30,15 +30,17 @@ def real_data():
 class RealFileTest(unittest.TestCase):
     """저장소에 들어 있는 실제 허용 목록: 감사표(2026-11-09, 69행)에서 옮긴 56 Provider 에 접근 경로별로 쪼갠 항목 6개(구조화 API 3·SWPC 서비스의 제3자 자료 3)를 더한 62 Provider 이고 전부 꺼져 있다."""
 
-    def test_the_real_file_is_valid_with_and_without_a_date(self):
+    def test_the_real_file_is_valid_with_a_date_and_only_asks_for_a_date_without_one(self):
         self.assertEqual(sr.validate_registry(real_data(), TODAY), [])
-        self.assertEqual(sr.validate_registry(real_data()), [])        # 오늘을 안 줘도 enabled 가 없으니 문제 없음
+        errors = sr.validate_registry(real_data())          # 켜는 변경(T3, 패치 02) 뒤: 켜진 제공처의 만료를 확인하려면 오늘이 필요하다 — 켜진 곳 하나만 그것을 묻는다(전에는 enabled 가 없어 문제 없었다)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertTrue(errors[0].startswith("noaa_swpc_json: [A4]"), errors)
 
-    def test_nothing_is_enabled_so_nothing_is_active(self):
+    def test_only_the_noaa_entry_is_enabled_and_it_is_the_only_active_provider(self):
         data = real_data()
-        self.assertEqual([p["provider_id"] for p in data["providers"] if p["enabled"] is not False], [])    # 켜는 것은 T3 — 이 변경은 켜지 않는다
+        self.assertEqual([p["provider_id"] for p in data["providers"] if p["enabled"] is not False], ["noaa_swpc_json"])    # 켜는 변경(T3, 패치 02) 뒤: 켜진 곳은 이 하나뿐(전에는 하나도 없었다)
         registry = sr.load_registry(today=TODAY)
-        self.assertEqual(registry.active_providers(), [])
+        self.assertEqual([p.provider_id for p in registry.active_providers()], ["noaa_swpc_json"])
         self.assertEqual(registry.inactive_reasons(), {})
         self.assertEqual(registry.report_lines(), [])
 

@@ -149,7 +149,7 @@ class NumberingTest(unittest.TestCase):
         self.assertNotRegex(DOC, r"생성기에 연결(?:했|됐|되었)")
         self.assertIn("연결은 2단계", DOC)
         self.assertIn("켜는 설정은 아직 없다", DOC)
-        self.assertNotIn("content_source", (ROOT / "pipeline" / "blogs.json").read_text(encoding="utf-8"))
+        self.assertEqual((ROOT / "pipeline" / "blogs.json").read_text(encoding="utf-8").count('"content_source": "facts"'), 1)      # 켜는 변경(T3, 패치 02) 뒤(전에는 글자 content_source 가 없었다 — 이 문서의 '켜는 설정은 아직 없다' 는 1단계 시점의 기록이다)
 
 
 class FollowUpN2N4DocsTest(unittest.TestCase):

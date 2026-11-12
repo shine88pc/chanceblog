@@ -1,15 +1,15 @@
 # 허용 목록(Source Registry)·외부 호출 관문·소스 정책 스위치
 
-> 구현: 2026-11-09, 변경 등급 T2(`pipeline/` 코어·`generator.py`·레지스트리 스키마). 독립 검증(조건부 통과, 높음 0건)의 지적을 반영한 수정 라운드(2026-11-09, 결함 D-170–D-178)와 병합 준비 라운드(2026-11-10, 결함 D-179 — 합성 트리 등록·관문 인정 오판 정정·운영자 결정 007 반영)를 거쳤고 운영자 병합 대기. **켜는 것(`source_policy: allowlist`, Provider `enabled: true`)은 T3** — 이 변경은 `pipeline/blogs.json` 의 값을 바꾸지 않았고 허용 목록의 모든 Provider 는 꺼져 있다.
+> 구현: 2026-11-09, 변경 등급 T2(`pipeline/` 코어·`generator.py`·레지스트리 스키마). 독립 검증(조건부 통과, 높음 0건)의 지적을 반영한 수정 라운드(2026-11-09, 결함 D-170–D-178)와 병합 준비 라운드(2026-11-10, 결함 D-179 — 합성 트리 등록·관문 인정 오판 정정·운영자 결정 007 반영)를 거쳤고 운영자 병합 대기. **켜는 것(`source_policy: allowlist`, Provider `enabled: true`)은 T3** — 이 변경(구현 병합 시점)은 `pipeline/blogs.json` 의 값을 바꾸지 않았고 허용 목록의 모든 Provider 는 꺼져 있었다(켠 뒤의 상태는 14절과 `FACT_PATH.md` §15 의 상태 줄).
 > 근거: 운영자 결정 2026-11-09(외부 출처 아키텍처 방향 변경 · Desktop 독립 운영 기준 · R-216 조립 전 반영). 상위 문서: [`CHARTER.md`](./CHARTER.md)·[`SECURITY_GUARDRAILS.md`](./SECURITY_GUARDRAILS.md)(G-L2 외부 입력은 데이터), 구조: [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
 ## 1. 한눈에
 
 1. **자동으로 쓰는 외부 자료는 권리·약관·상업·AI 이용이 분명한 구조화 데이터(API·CSV·데이터셋)뿐**이다. 외부 RSS 요약·기사·페이지 본문·검색 스니펫·외부 사진은 발행자가 정부여도 **유형만으로 Tier 3(자동화 제외)** 이다.
 2. 그런 자료는 **허용 목록(`pipeline/source_registry.json`)** 에 등록되고 이용 조건 **7칸이 모두 확인된(UNKNOWN 0) Provider** 만 켤 수 있다. 한 칸이라도 UNKNOWN·근거 없음(`IMPLIED`·`NOT_ADDRESSED`·`NOT_READ`)이면 그 Provider 는 자동화에서 꺼진다(검증기가 켜는 저장을 거부).
-3. 외부로 나가는 호출의 **주소는 한 관문(`pipeline/egress.py`)이 판정**한다 — 통과하는 것은 고정 운영 호스트의 **허용 목적·허용 경로**와 허용 목록의 ACTIVE Provider 호스트(목적 `fact`)뿐이다. 지금 코드의 외부 접속 지점 가운데 관문(`check_url`)을 직접 거치는 곳은 아직 없다(콘텐츠 경로 셋은 `allowlist` 에서만 `source_policy.egress_gate` 가 막는다) — 나머지는 이유와 '무엇이 막는지'와 함께 등록돼 있다. 자료를 AI 처리기에 넘길 때의 관문은 `egress.check_ai_input` 이고 `ai_use` 가 NEVER 인 Provider 는 항상 거부한다(7절·14절). **호출 목록 시험(AST)은 알려진 모양의 호출을 모아 등록 목록과 비교할 뿐 우회를 막는 보증이 아니며, 사람 검토가 마지막 방어선이다**(잡지 못하는 모양은 7절의 사각지대 표).
-4. 레지스트리 `chance.source_policy` 한 값이 **`legacy`(기본 — 지금과 같음, 출력이 바이트까지 같다)** 와 **`allowlist`(새 모드)** 를 가른다. `allowlist` 는 피드·기사 페이지 발췌·구글 뉴스 해석기 호출이 0이고 외부 제목·요약·태그가 프롬프트·이력·로그에 들어가지 않으며, ACTIVE 콘텐츠 Provider 가 0 이면 **초록으로 끝나는 '일 없음'** 이다. **켠 뒤의 상태(새 글 0·36시간 뒤 경보 등)는 12절에 있다 — FACT 2단계 연결 전에는 켜지 않는다.**
-5. 허용 목록은 Tier 감사표(2026-11-09, 69행) 중 데이터 출처 56 Provider 에 접근 경로별로 쪼갠 6곳(14절)을 더한 **62 Provider** 이고 **ACTIVE 는 0** 이다. 운영자 결정 007(규칙 기반 경로에서만 AI 입력 칸을 판정에서 뺀다)로 구조화 API 세 곳이 '켤 수 있는 후보'가 됐고, 그 가운데 NOAA 제공처 조사(2026-11-10)로 칸·경로·호출 한도·출처 문구가 확인된 `noaa_swpc_json` 하나가 켜기 직전 모양이다(규칙을 모두 통과 — 켜지는 않았다, `enabled` 는 T3). 켜기 전에 사람이 약관을 읽고 증거와 함께 PR 로 올린다.
+3. 외부로 나가는 호출의 **주소는 한 관문(`pipeline/egress.py`)이 판정**한다 — 통과하는 것은 고정 운영 호스트의 **허용 목적·허용 경로**와 허용 목록의 ACTIVE Provider 호스트(목적 `fact`)뿐이다. 지금 코드에서 관문(`check_url`)을 직접 거치는 곳은 규칙 기반 Fact 경로의 호출 한 곳이다(`generator.py` 의 `fact_opener` 가 만든 호출 도구가 호출 직전에 `egress.check_url(url, "fact", sources)` 를 부른다 — 허용 목록 밖·ACTIVE 가 아닌 제공처는 요청이 나가지 않는다). 콘텐츠 경로 셋은 `allowlist` 에서만 `source_policy.egress_gate` 가 막는다 — 그 밖의 접속 지점은 이유와 '무엇이 막는지'와 함께 등록돼 있다. 자료를 AI 처리기에 넘길 때의 관문은 `egress.check_ai_input` 이고 `ai_use` 가 NEVER 인 Provider 는 항상 거부한다(7절·14절). **호출 목록 시험(AST)은 알려진 모양의 호출을 모아 등록 목록과 비교할 뿐 우회를 막는 보증이 아니며, 사람 검토가 마지막 방어선이다**(잡지 못하는 모양은 7절의 사각지대 표).
+4. 레지스트리 `chance.source_policy` 한 값이 **`legacy`(기본 — 옛 동작과 같음, 출력이 바이트까지 같다)** 와 **`allowlist`(새 모드)** 를 가른다. `allowlist` 는 피드·기사 페이지 발췌·구글 뉴스 해석기 호출이 0이고 외부 제목·요약·태그가 프롬프트·이력·로그에 들어가지 않으며, ACTIVE 콘텐츠 Provider 가 0 이면 **초록으로 끝나는 '일 없음'** 이다. **켠 뒤의 상태(새 글 0·36시간 뒤 경보 등)는 12절에 있다 — FACT 2단계 연결 전에는 켜지 않는다.**
+5. 허용 목록은 Tier 감사표(2026-11-09, 69행) 중 데이터 출처 56 Provider 에 접근 경로별로 쪼갠 6곳(14절)을 더한 **62 Provider** 이고 **ACTIVE 는 1**(`noaa_swpc_json` — 규칙 기반 Fact 경로 전용) 이다. 운영자 결정 007(규칙 기반 경로에서만 AI 입력 칸을 판정에서 뺀다)로 구조화 API 세 곳이 '켤 수 있는 후보'가 됐고, 그 가운데 NOAA 제공처 조사(2026-11-10)로 칸·경로·호출 한도·출처 문구가 확인된 `noaa_swpc_json` 하나를 켰다(규칙을 모두 통과 — `enabled: true` 는 T3 별도 PR 로 바꿨다). 나머지 61곳은 모두 꺼져 있다. 다른 제공처를 켤 때도 켜기 전에 사람이 약관을 읽고 증거와 함께 PR 로 올린다.
 
 ## 2. 이 일이 맡는 제한 재개 필수 항목(1–5)
 
@@ -25,7 +25,7 @@
 
 | 파일 | 역할 | 입출력 |
 |------|------|--------|
-| `pipeline/source_registry.json` | 허용 목록 정본(Provider 62, 전부 `enabled: false`). 증거·링크 없이 기관·문서 이름만 | 데이터 |
+| `pipeline/source_registry.json` | 허용 목록 정본(Provider 62, 켜진 것은 `noaa_swpc_json` 하나 — 나머지는 `enabled: false`). 증거·링크 없이 기관·문서 이름만 | 데이터 |
 | `pipeline/source_registry.py` | `validate_registry`(순수)·`load_registry`·`Registry`·`Provider`(frozen)·`split_https_url`·허용 목적 `ALLOWED_PURPOSES`·AI 처리기 정책 검증·로더, `ai_use`·구조화 호출 한도(`RateLimit`)·`parse_rate_limit`·출처 문구 모양 검증 | 파일 읽기(로더·`main` 뿐), 시각을 읽지 않음 |
 | `pipeline/ai_processor_policy.json` | AI 처리기(Gemini) 정책 11칸(출처가 아니라 처리기라 허용 목록 밖). 실행 중에는 읽지 않는다(10절) | 데이터 |
 | `pipeline/egress.py` | 외부 호출 관문 `check_url`·운영 호스트 규칙 `OPS_RULES`·검사된 opener `build_checked_opener`·최종 주소 재판정 `check_final_url`·AI 입력 거부 `check_ai_input`·호출 예산 `CallBudget`·`budgeted`·`run_call_cap`·등록 목록 `EGRESS_EXCEPTIONS` | 판정 함수는 없음(요청을 보내지 않는다) — opener 를 쓰는 쪽이 보낸다. 호출 예산은 한 실행의 메모리뿐(새 영구 상태 없음) |
@@ -213,7 +213,7 @@ Gemini 같은 AI 는 데이터 출처가 아니라 처리기라 허용 목록과
 - 감사표 69행 밖의 후보(공공데이터포털 데이터셋·NWS)는 약관 판독 뒤 같은 PR 흐름으로 더한다.
 - 호출 목록 시험은 보증이 아니다(7절) — 새 외부 접속이 생기는 변경은 시험이 초록이어도 사람이 읽는다.
 - 호출 한도(`rate_limit`)는 NOAA 항목만 값이 있고(공식 수치 한도 없음 + 우리 자체 상한 제안) 나머지 api 경로는 null 이라 켤 수 없다. 호출 예산은 한 실행 몫이고 하루·월 합계는 못 지킨다(7절 — 영구 상태가 필요하다).
-- NOAA 항목이 규칙을 모두 통과해도 켜기 전에 남은 일이 있다 — 14절의 '켜기 전 남은 확인'(제3자 조건·Data Citation 지침 원문·G 등급 경계값 등)과 FACT 2단계(어댑터의 필드 화이트리스트·지역 없는 글 틀·문장 규칙).
+- NOAA 항목이 규칙을 모두 통과해도 켜기 전에 남은 일이 있었다(운영자 승인으로 켠 뒤에도 기록으로 남는다) — 14절의 '켜기 전 남은 확인'(제3자 조건·Data Citation 지침 원문·G 등급 경계값 등)과 FACT 2단계(어댑터의 필드 화이트리스트·지역 없는 글 틀·문장 규칙).
 
 ## 13. 시험·검증
 
@@ -230,11 +230,11 @@ python -m pipeline.source_registry --today YYYY-MM-DD
 
 1. **결정**(2026-11-09 20:33, 선택 2): AI 를 쓰지 않는 규칙 기반 경로에서만 AI 입력 칸을 판정에서 뺀다. 조건 셋 — ① 수집부터 발행까지 이 자료가 AI 단계로 흐르는 길이 없는지 전수 확인(끝남: 지금 0개, 2단계를 방어 없이 이으면 9곳 — AI 흐름 감사 보고서) ② 제공처별 칸 확인·호출 한도 확인·출처 표시 문구 자동 첨부 뒤에 켜는 변경은 따로 ③ 재개는 주 1–2편·사람 승인·계산이 값을 더하는 글만. **이 결정은 아무것도 켜지 않는다.**
 2. **코드에 표현한 것**: `ai_use`(4절)·`egress.check_ai_input`(7절)·출처 문구 모양 S9·`own_data_only` S11·구조화 호출 한도 S10·A11·호출 예산(7절). 기본값(`ai_use` 없음 = BY_CELL)에서 원래 56곳의 7칸 계산 결과는 쪼개기 전과 바이트까지 같다(시험이 예전 계산을 기준 구현으로 두고 비교한다).
-3. **세 제공처를 접근 경로별로 쪼갠 결과**(전부 `enabled: false`, `chance.source_policy` 는 legacy 그대로):
+3. **세 제공처를 접근 경로별로 쪼갠 결과**(쪼갠 시점에는 전부 `enabled: false`·`chance.source_policy` 는 legacy 그대로였고, 지금은 `noaa_swpc_json` 만 `enabled: true`·`chance.source_policy` 는 allowlist 다):
 
 | 항목 | 무엇 | 지금 상태 | 켜기 전 남은 것 |
 |------|------|-----------|-----------------|
-| `noaa_swpc_json` | NOAA 가 만든 값만, 제품 파일 여섯 개(Kp 추정·Kp 예보 포함·NOAA 등급·SWPC 일별 흑점수·월별 태양주기 지수의 SWPC 필드·GOES X선 플레어 7일) | NOAA 조사(2026-11-10)로 7칸 대조(일치 6·근거 이름 불일치 1 — 저장 칸 근거를 면책 문서로 교정)·경로 여섯 파일·키 불필요·robots 확인·자체 호출 상한(공식 수치 한도 없음)·출처 문구(연방법 고지 포함)가 반영돼 **켠다고 가정하면 규칙을 모두 통과**한다. `ai_use: NEVER`·`own_data_only: true` | 켜는 변경 자체(`enabled` — T3), 아래 5·6항, FACT 2단계(어댑터의 필드 화이트리스트·지역 없는 글 틀·문장 규칙·AI 로 안 가는 연결), 켜기 전 남은 확인 |
+| `noaa_swpc_json` | NOAA 가 만든 값만, 제품 파일 여섯 개(Kp 추정·Kp 예보 포함·NOAA 등급·SWPC 일별 흑점수·월별 태양주기 지수의 SWPC 필드·GOES X선 플레어 7일) | NOAA 조사(2026-11-10)로 7칸 대조(일치 6·근거 이름 불일치 1 — 저장 칸 근거를 면책 문서로 교정)·경로 여섯 파일·키 불필요·robots 확인·자체 호출 상한(공식 수치 한도 없음)·출처 문구(연방법 고지 포함)가 반영돼 **켜도 규칙을 모두 통과**한다(지금은 켜져 있다). `ai_use: NEVER`·`own_data_only: true` | 켜는 변경 자체(`enabled` — T3, 켰다), 아래 5·6항, FACT 2단계(어댑터의 필드 화이트리스트·지역 없는 글 틀·문장 규칙·AI 로 안 가는 연결), 켜기 전 남은 확인 |
 | `statcan_wds` | 캐나다 통계청 WDS 구조화 API | 조사 전 — 값을 채우지 않았다. 저장 등급 3·상태 자동화 제외라 A1·A9 로 막히고 출처 문구(A5)와 호출 한도(A11)가 비어 있다. `ai_use: NEVER` | 제공처 조사(7칸 재확인·호출 한도·출처 문구·WDS 메서드별 경로 좁히기) |
 | `uk_govuk_api` | 영국 정부 GOV.UK Content API | 조사 전 — 값을 채우지 않았다. 쓸 경로를 모르면 `paths` 를 비워 A10 으로 막힌다(A1·A5·A9·A11 도). `ai_use: NEVER` | 제공처 조사(7칸 재확인·쓸 경로·호출 한도·출처 문구) |
 | `swpc_f107_nrc`·`swpc_kyoto_dst`·`swpc_sidc_penticton_fields` | SWPC 서비스에 올라 있는 제3자 자료: F10.7 JSON 둘(캐나다 NRC 가 NRCan 과 협력해 제공)·Dst JSON(교토 대학 자료로 보임)·월별 지수 파일 안의 SIDC 흑점수와 Penticton F10.7 필드 | 7칸 UNKNOWN(읽지 않음)·조사 필요. 앞의 둘은 경로가 있어 켜도 막히고, 셋째는 파일 안의 필드라 열 경로가 없다(참고 전용) | 각 제공처(NRC·NRCan·교토 대학·SIDC)의 이용 조건 조사 — 그 전에는 쓰지 않는다 |
@@ -242,14 +242,14 @@ python -m pipeline.source_registry --today YYYY-MM-DD
 4. **NOAA 항목의 범위 한정(가장 중요)**: 면책 문서의 '별도 표시가 없는 한 공공영역' 문구와 17 U.S.C. 403 고지는 **NOAA 가 만든 값에만** 맞는다. 그래서 이 항목은 `own_data_only: true` 로 NOAA 가 만든 값만 읽겠다고 약속하고, 연방정부 저작물 문구가 든 출처 문구는 이 값이 true 인 항목만 쓴다(S11 — 제3자 필드를 읽는 항목이 쓰면 거절). 경로도 쓰는 파일 여섯 개로 좁혔다(`/json/` 전체·html 경로·45일 예보·F10.7·태양풍·1분 Kp·수 MB 파일은 뺐다).
 5. **어댑터 필드 화이트리스트(FACT 2단계 의무 — 같은 파일 안에 제3자 필드가 섞여 있어서)**: 어댑터는 제품마다 읽는 필드의 목록을 따로 가지고 목록에 없는 필드는 읽지 않는다(모르는 필드가 생겨도 무시, 필요한 필드가 없거나 형이 다르면 그 글을 중단 — 실패 시 닫힘). 제품별 허용 필드: `noaa-planetary-k-index` 는 `time_tag`·`Kp`·`a_running`·`station_count`, `noaa-planetary-k-index-forecast` 는 `time_tag`·`kp`(소문자)·`observed`·`noaa_scale`, `noaa-scales` 는 전체, `swpc_observed_ssn` 은 `Obsdate`·`swpc_ssn`, `observed-solar-cycle-indices` 는 `time-tag`·`observed_swpc_ssn`·`smoothed_swpc_ssn` **만**(`ssn`·`smoothed_ssn`(SIDC)·`f10.7`·`smoothed_f10.7`(Penticton)은 읽지 않는다), `xray-flares-7-day` 는 전체. 시각 키가 제품마다 다르고(`time_tag`·`time-tag`·`Obsdate`) 결측 표기도 다르며(-1.0·null·레코드 없음) 정렬이 다른 파일이 있고 2026-03 에 JSON 구조가 바뀐 전례(서비스 변경 공지 26-21)가 있어 제품별 필드 표와 형 검사를 따로 둔다. 추정 Kp 는 독일 GFZ 의 공식 Kp 와 달라 글에 'NOAA 추정 Kp' 로 쓰고, 예보 값은 관측과 구분해 '예보' 로 쓴다.
 6. **NOAA 항목의 호출 한도(공식 수치 한도 없음 — 아래는 우리 자체 상한 제안)**: 레지스트리 `rate_limit` 에 구조화해 적었다 — 같은 파일 60초 이상·다른 파일 5초 이상 간격, 글 하나당 제품 3개까지 각 1회, 하루 8회·월 100회 이하, 실패 시 60초 뒤 1회만 재시도, 429·403 은 24시간 중지·404 는 그 제품만 중지, gzip 요청, 일별 제품은 00:30 UTC 이후 하루 1회, 응답 검증에 실패하면 그 글 중단. 코드가 지키는 것은 한 실행의 호출 상한(글 하나가 재시도까지 쓰는 6번)·재시도 1번·403·429 중지·404 주소 중지·같은 주소 재사용·선행 조건이고(7절), 간격·하루·월 합계·24시간 중지·gzip·일별 제품 시각은 어댑터·연결 코드의 의무다. 식별 가능한 User-Agent(연락처 값은 운영자가 정함)를 권장한다(문서 요구는 없다).
-7. **켜기 전 남은 확인(NOAA 조사에서 읽지 못한 것)**: ① 제3자 조건 셋(SIDC·NRC/NRCan·교토 대학) ② Kp 입력 자력계 제공기관과 GFZ 공식 Kp 의 조건 ③ NOAA 전체 Data Citation 지침 원문, NWS 명칭을 가공 자료의 출처 표기에 쓰는 것이 허용 범위에 정확히 들어가는지 ④ NCEI 보관소의 이용 조건 ⑤ Privacy Policy·Information Quality 페이지 등 ⑥ Kp `time_tag` 가 구간 시작 시각이라는 명시 문구·`a_running` 의 정의·`station_count` 신뢰도 기준 ⑦ G 등급의 3분의 1 경계값(4.67·5.67 등) 처리 ⑧ 45일 예보 `issued` 가 6일 전인 이유·ETag 변화·확정치 대체 정책. 운영자 결정이 필요한 것: 제3자 셋을 따로 조사할지, User-Agent 의 연락처 값, '30일 폭풍 일수'를 텍스트 제품으로 할지 JSON 을 매일 쌓을지, 기관 명칭을 가공 자료의 출처 표기에 쓰는 범위.
+7. **켜기 전 남은 확인(NOAA 조사에서 읽지 못한 것 — 운영자 승인으로 켠 뒤에도 기록으로 남는다)**: ① 제3자 조건 셋(SIDC·NRC/NRCan·교토 대학) ② Kp 입력 자력계 제공기관과 GFZ 공식 Kp 의 조건 ③ NOAA 전체 Data Citation 지침 원문, NWS 명칭을 가공 자료의 출처 표기에 쓰는 것이 허용 범위에 정확히 들어가는지 ④ NCEI 보관소의 이용 조건 ⑤ Privacy Policy·Information Quality 페이지 등 ⑥ Kp `time_tag` 가 구간 시작 시각이라는 명시 문구·`a_running` 의 정의·`station_count` 신뢰도 기준 ⑦ G 등급의 3분의 1 경계값(4.67·5.67 등) 처리 ⑧ 45일 예보 `issued` 가 6일 전인 이유·ETag 변화·확정치 대체 정책. 운영자 결정이 필요한 것: 제3자 셋을 따로 조사할지, User-Agent 의 연락처 값, '30일 폭풍 일수'를 텍스트 제품으로 할지 JSON 을 매일 쌓을지, 기관 명칭을 가공 자료의 출처 표기에 쓰는 범위.
 8. **출처 문구 자리 표시**: NOAA 항목의 `attribution_template` 은 조립기가 `이용 조건:` 줄에 그대로 붙이는 한 줄이다. `{title}` 자리에는 조립기가 글에 밝히는 공식 데이터 이름(`source.name` — 한글·영문·숫자·공백·`·.,&'-` 만 1–80자, 괄호·슬래시·콜론은 쓸 수 없다. 예: `NOAA SWPC 행성 K 지수 추정값`·`NOAA 우주기상 등급 현황`·`SWPC 일별 흑점수`·`SWPC 월별 태양주기 지수`·`GOES X선 플레어 목록`)이, `{date}` 자리에는 **열람일**(자료 기준일이 아니다)이 들어간다. 이 문구의 연방법 고지 문장은 NOAA 가 만든 값에만 맞으므로 4항의 범위 한정과 S11 이 함께 묶는다. 로고·이미지·NWS 명칭·시각 식별자는 쓰지 않고 보증·제휴를 암시하는 표현·우리 것이라는 권리 주장은 검증기가 거절한다(S9).
 9. **스냅샷**: NOAA 항목의 약관 문서 이름에 `Planetary K-index`·`F10.7 cm Radio Emissions`·`Solar Cycle Progression`·`GOES X-ray Flux`·`Service Change Notice 26-21` 을 더했고 열람일은 2026-11-10, 점검 기한은 90일 뒤다. 내용 해시는 비워 뒀다 — 계산 규칙(정규화)이 코드·문서에 없고 발췌 파일이 두 쪽(면책·Data Access)뿐이다.
 
 ## 15. 콘텐츠 출처 스위치(`chance.content_source`) — S2b
 
-`source_policy`(8절)가 '외부 콘텐츠를 어떤 규칙으로 읽는가' 라면 `content_source` 는 '글감이 어디서 오는가' 다. `feed`(기본 — 적지 않아도 같다)는 지금 동작(피드 기사를 Gemini 가 쓴다)이고 `facts` 는 허용 목록의 구조화 Fact 제공처(지금은 `noaa_swpc_json` 하나)가 준 자료를 규칙 기반 조립기가 글로 만든다 — **AI·피드·기사 발췌·구글 뉴스 해석기·프롬프트·사진 선택을 부르지 않는다**([`FACT_PATH.md`](./FACT_PATH.md) §15).
+`source_policy`(8절)가 '외부 콘텐츠를 어떤 규칙으로 읽는가' 라면 `content_source` 는 '글감이 어디서 오는가' 다. `feed`(기본 — 적지 않아도 같다)는 옛 동작(피드 기사를 Gemini 가 쓴다)이고 `facts` 는 허용 목록의 구조화 Fact 제공처(지금은 `noaa_swpc_json` 하나)가 준 자료를 규칙 기반 조립기가 글로 만든다 — **AI·피드·기사 발췌·구글 뉴스 해석기·프롬프트·사진 선택을 부르지 않는다**([`FACT_PATH.md`](./FACT_PATH.md) §15).
 
 - **값과 검증**: `feed`·`facts` 둘뿐이고 `jekyll-git`(Chance)에서만 쓴다. `facts` 는 `source_policy: allowlist`·`languages: ["ko"]`·`publish_flow: pr` 위에서만 받는다(`registry_errors` 가 거절한다). 값을 읽는 곳은 `source_policy.content_source_of` 한 함수이고, 읽지 못하거나 이상한 값이면 조용히 `feed` 로 떨어지지 않고 멈춘다(`source_policy` 와 같은 원칙).
-- **허용 목록과의 관계**: `facts` 분기는 시작할 때 제공처가 ACTIVE(`enabled`·`strict_tier`·상태·기한·접근 경로·호출 한도)여야 하고 아니면 글을 만들지 않고 정상 종료한다(`FACT_NOT_READY`). 외부 호출은 모두 `egress.check_url(url, "fact", sources)` 관문과 호출 예산(`budget_for` — 한 실행의 호출 상한·같은 주소 성공 응답 재사용·403·429·404·실패 3회)을 지나고 호출 한도를 모르면 호출이 0 이다(7절). 그래서 지금 값(모든 제공처 꺼짐)에서는 스위치를 `facts` 로 잘못 바꿔도 새 글이 나올 수 없다.
-- **하지 않은 것**: `pipeline/blogs.json`·`pipeline/source_registry.json` 의 값은 바뀌지 않았다 — 켜는 것(스위치·제공처 `enabled`)은 T3 이고 순서는 [`FACT_PATH.md`](./FACT_PATH.md) §15-8 이다.
+- **허용 목록과의 관계**: `facts` 분기는 시작할 때 제공처가 ACTIVE(`enabled`·`strict_tier`·상태·기한·접근 경로·호출 한도)여야 하고 아니면 글을 만들지 않고 정상 종료한다(`FACT_NOT_READY`). 외부 호출은 모두 `egress.check_url(url, "fact", sources)` 관문과 호출 예산(`budget_for` — 한 실행의 호출 상한·같은 주소 성공 응답 재사용·403·429·404·실패 3회)을 지나고 호출 한도를 모르면 호출이 0 이다(7절). 그래서 제공처가 모두 꺼져 있으면(켜기 전의 값) 스위치를 `facts` 로 잘못 바꿔도 새 글이 나올 수 없다 — 지금은 `noaa_swpc_json` 하나가 켜져 있어 그 제공처의 자료로 글이 만들어진다.
+- **하지 않은 것**(S2b 병합 시점): `pipeline/blogs.json`·`pipeline/source_registry.json` 의 값은 바뀌지 않았다 — 켜는 것(스위치·제공처 `enabled`)은 T3 이고(켠 뒤의 상태는 `FACT_PATH.md` §15 의 상태 줄) 순서는 [`FACT_PATH.md`](./FACT_PATH.md) §15-8 이다.

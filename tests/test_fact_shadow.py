@@ -182,7 +182,7 @@ class ShadowFactsRunTest(ShadowFactsBase):
 
 class ShadowFactsNotReadyTest(ShadowFactsBase):
     def test_a_start_condition_not_met_means_zero_candidates_and_a_normal_end_with_the_reason_in_run_json(self):
-        self.use(FB.facts_registry(), json.loads((FB.ROOT / "pipeline" / "source_registry.json").read_text(encoding="utf-8")))       # Provider 꺼짐 — 지금 저장소의 실제 상태
+        self.use(FB.facts_registry(), FB.real_sources(noaa_enabled=False))       # Provider 꺼짐 — 진짜 허용 목록 사본에서 NOAA 만 끈다(켜는 변경 뒤의 실제 파일은 켜져 있다)
         before = snapshot(self.work)
         info, lines = self.run_shadow("3")
         self.assertEqual(snapshot(self.work), before)

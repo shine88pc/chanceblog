@@ -57,7 +57,7 @@ class SwitchHelpersTest(unittest.TestCase):
     def test_active_content_providers_are_the_active_data_providers(self):
         self.assertEqual([p.provider_id for p in sp.active_content_providers(active())], ["fixture_stats"])
         self.assertEqual(sp.active_content_providers(none_active()), [])
-        self.assertEqual(sp.active_content_providers(sr.load_registry(today=TODAY)), [])      # 실제 파일: ACTIVE 0
+        self.assertEqual([p.provider_id for p in sp.active_content_providers(sr.load_registry(today=TODAY))], ["noaa_swpc_json"])      # 실제 파일: 켜는 변경(T3, 패치 02) 뒤 ACTIVE 하나(전에는 0)
 
     def test_idle_check(self):
         report, lines = {}, []

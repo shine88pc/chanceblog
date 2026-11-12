@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       count:
-        description: '그림자로 만들어 볼 후보 글 수(1–5, 기본 3). 후보마다 Gemini 를 부르므로 무료 한도를 씁니다 — 저장소에는 아무것도 쓰지 않습니다'
+        description: '그림자로 만들어 볼 후보 글 수(1–5, 기본 3). 콘텐츠 출처가 feed 면 후보마다 Gemini 를 불러 무료 한도를 쓰고 facts 면 AI 를 부르지 않습니다 — 저장소에는 아무것도 쓰지 않습니다'
         type: choice
         default: '3'
         options:

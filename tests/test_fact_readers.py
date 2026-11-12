@@ -162,7 +162,7 @@ class MainRunTest(FB.FactEnv):
         self.assertIn("지금 만들 글이 없습니다", out)
 
     def test_a_scheduled_facts_run_that_is_not_ready_ends_green_and_leaves_everything_alone(self):
-        self.use(FB.facts_registry(), json.loads((FB.ROOT / "pipeline" / "source_registry.json").read_text(encoding="utf-8")))        # Provider 꺼짐 — 지금 저장소의 실제 상태
+        self.use(FB.facts_registry(), FB.real_sources(noaa_enabled=False))        # Provider 꺼짐 — 진짜 허용 목록 사본에서 NOAA 만 끈다(켜는 변경 뒤의 실제 파일은 켜져 있다)
         out, error = self.run_main()
         self.assertIsNone(error)
         self.assertEqual(self.files(), [])
@@ -259,8 +259,8 @@ class CommandLineTest(unittest.TestCase):
             code = source_policy.main(args)
         return code, out.getvalue(), err.getvalue()
 
-    def test_it_prints_the_value_of_the_real_registry_which_is_feed(self):
-        self.assertEqual(self.run_cli(["content-source"]), (0, "feed\n", ""))
+    def test_it_prints_the_value_of_the_real_registry_which_is_facts(self):
+        self.assertEqual(self.run_cli(["content-source"]), (0, "facts\n", ""))                                                   # 켜는 변경(T3, 패치 02) 뒤(전에는 feed)
 
     def test_it_prints_facts_for_a_facts_registry_and_nothing_when_it_cannot_read(self):
         import tempfile

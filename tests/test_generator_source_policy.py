@@ -129,11 +129,13 @@ class Base(unittest.TestCase):
 # ----------------------------------------------------------------------------
 @pre_flip
 class LegacyByteTest(unittest.TestCase):
-    def test_the_real_registry_does_not_set_source_policy_so_the_default_is_legacy(self):
-        path = ROOT / "pipeline" / "blogs.json"          # 클래스 도구(pre_flip)가 기본 경로를 켜기 전 표본으로 돌리므로 진짜 파일을 경로로 직접 읽는다
+    def test_the_real_registry_sets_source_policy_allowlist_on_the_chance_entry_only(self):
+        """켜는 변경(T3, 패치 02) 뒤: 진짜 레지스트리는 Chance 항목에만 allowlist 를 적고 나머지는 값이 없다(기본 legacy). 클래스 도구(pre_flip)가 기본 경로를 켜기 전 표본으로 돌리므로 진짜 파일을 경로로 직접 읽는다."""
+        path = ROOT / "pipeline" / "blogs.json"
         reg = registry.load_registry(path)
-        self.assertEqual([blog.get("source_policy") for blog in reg["blogs"]], [None] * len(reg["blogs"]))      # 켜는 것은 T3 — 이 변경은 값을 바꾸지 않았다
-        self.assertEqual(source_policy.chance_source_policy(path), "legacy")
+        self.assertEqual({blog["key"]: blog["source_policy"] for blog in reg["blogs"] if "source_policy" in blog}, {"chance": "allowlist"})
+        self.assertEqual(source_policy.chance_source_policy(path), "allowlist")
+        self.assertEqual(source_policy.DEFAULT_SOURCE_POLICY, "legacy")
         self.assertEqual(registry.validate_registry(reg), [])
 
     def test_legacy_scenarios_match_the_old_generator_byte_for_byte(self):

@@ -127,8 +127,13 @@ class RulesAndNumbersTest(unittest.TestCase):
             by_status[p.effective_status] = by_status.get(p.effective_status, 0) + 1
         self.assertIn(f"`자동화 제외` {by_status['자동화 제외']}·`참고 전용` {by_status['참고 전용']}·`완전 제외` {by_status['완전 제외']}", DOC)
         self.assertIn(f"`data` {sum(1 for p in providers if p.provider_class == 'data')}·`image` {sum(1 for p in providers if p.provider_class == 'image')}", DOC)
-        self.assertEqual(len(registry.active_providers()), 0)
-        self.assertIn("ACTIVE 는 0", DOC)
+        self.assertEqual([p.provider_id for p in registry.active_providers()], ["noaa_swpc_json"])      # 켜는 변경(T3, 패치 02) 뒤: 켜진 곳은 이 하나(전에는 0)
+        self.assertIn("ACTIVE 는 1", DOC)
+        paragraph = next(line for line in DOC.splitlines() if line.startswith("5. 허용 목록은 Tier 감사표"))      # N2(D-321): 켜는 변경 뒤 이 문단이 앞뒤가 맞는다 — 'ACTIVE 는 1' 이면서 '켜지는 않았다' 가 남지 않는다
+        for stale in ("ACTIVE 는 0", "켜지는 않았다", "켜기 직전 모양"):
+            self.assertNotIn(stale, paragraph)
+        self.assertIn("`noaa_swpc_json` 하나를 켰다", paragraph)
+        self.assertIn("나머지 61곳은 모두 꺼져 있다", paragraph)
 
     def test_the_interface_promised_to_the_fact_path_exists_under_the_documented_names(self):
         section = DOC.split("## 6. 질의 API", 1)[1].split("## 7.", 1)[0]
