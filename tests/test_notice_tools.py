@@ -248,7 +248,7 @@ class ConstantsMatchThePipelineTest(unittest.TestCase):
             self.assertEqual(nn.NAME_RE.fullmatch(name) is not None, ol.REQUEST_NAME_RE.fullmatch(name) is not None, name)
 
     def test_kinds_limits_and_the_pr_title_rules(self):
-        self.assertEqual(nt.NOTICE_TYPE_OF_KIND, notify.NOTICE_KIND_TYPES)
+        self.assertEqual(nt.NOTICE_TYPE_OF_KIND, {kind: number_type for kind, number_type in notify.NOTICE_KIND_TYPES.items() if kind != "merged"})       # 병합완료 확인(merged)은 새 번호를 먹지 않아 번호를 정하는 이 표에 없다(만드는 도구는 make_merged_notice.py)
         self.assertEqual({key: nt.LIMITS[key] for key in ol.NOTICE_LIMITS}, ol.NOTICE_LIMITS)
         self.assertEqual((nt.LIMITS["title"], nt.LIMITS["summary"], nt.LIMITS["pr_title"]), (ol.TITLE_MAX, ol.SUMMARY_MAX, notify.PR_TITLE_LIMIT))
         self.assertEqual(set(nt.LIMITS), {"title", "summary", "pr_title", *ol.NOTICE_LIMITS})

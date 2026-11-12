@@ -82,7 +82,7 @@ ALERT_MARK = chr(0x1F6A8)       # 🚨
 BELL_MARK, SIREN_MARK = chr(0x1F514), chr(0x1F6A8)
 
 # 운영자 요청함(AI 의 요청·운영자의 응답, pipeline/operator_loop.py): 요청 종류와 한국어 라벨, 요청 번호 모양, 글자 수 상한. 사용자 지시 2026-10-28
-REQUEST_KIND_LABELS = {"merge": "병합 부탁", "run": "실행 부탁", "confirm": "확인 부탁", "decision": "결정 부탁", "info": "알림"}
+REQUEST_KIND_LABELS = {"merge": "병합 부탁", "run": "실행 부탁", "confirm": "확인 부탁", "decision": "결정 부탁", "info": "알림", "merged": "병합완료 확인"}
 REQUEST_ANSWER_KINDS = ("confirm", "decision")     # 운영자가 양식으로 답해야 하는 종류('답하는 법' 한 줄을 붙인다)
 REQUEST_ID_RE = re.compile(r"R-[0-9]{3}")       # 정본 — 요청 파일 이름·앞머리 id·로그·기록은 이 꼴 그대로. 운영자가 읽는 글은 display_id 로 `r090` 꼴(2026-11-04 운영자 요청)
 REQUEST_TITLE_LIMIT = 80
@@ -618,6 +618,22 @@ class Notifier:
         except Exception as exc:  # noqa: BLE001
             return self._result(False, False, None, INTERNAL_ERROR, type(exc).__name__)
 
+    def notify_merged(self, no, fields, buttons=None, more=0):
+        """병합완료 확인 한 통(HTML, 운영자 요청 2026-11-12) — 정상은 `[M050] 병합완료 확인 - 정상` 한 줄, 이상은 그 줄 + 사유 한 줄. no·fields 는 operator_loop.parse_request 가 검증한 값이다."""
+        try:
+            text = format_merged(no, fields, more=more)
+            return self.send_message(text, parse_mode="HTML", buttons=buttons)
+        except Exception as exc:  # noqa: BLE001
+            return self._result(False, False, None, INTERNAL_ERROR, type(exc).__name__)
+
+    def notify_merged_unreadable(self, request_id, buttons=None, more=0):
+        """칸이 맞지 않는 병합완료 확인 파일의 고정 문구 한 통(HTML) — 파일의 제목·요약·결과·번호는 싣지 않는다(format_merged_unreadable). request_id 는 operator_loop.parse_request 가 검증한 값이다."""
+        try:
+            text = format_merged_unreadable(request_id, more=more)
+            return self.send_message(text, parse_mode="HTML", buttons=buttons)
+        except Exception as exc:  # noqa: BLE001
+            return self._result(False, False, None, INTERNAL_ERROR, type(exc).__name__)
+
     def notify_answer_received(self, target, choice_no, issue_number, replaced=None, buttons=None):
         """새 양식(`대상번호`)의 답을 접수했다는 확인 한 통(평문). 값은 코드가 검증한 것(번호 모양·선택 기호·이슈 번호)만 받는다."""
         try:
@@ -753,7 +769,8 @@ def format_task_received(issue_number, urgency, approval_yes):
 # 접두어·번호만 영어이고 라벨·문장은 한글 고정 문자열이다. 요청 파일 앞머리 `no` 가 있는 파일만 이 모양으로 가고(operator_loop.parse_request) 없는 옛 파일은 format_ai_request 그대로다.
 NOTICE_PROGRESS, NOTICE_MERGE, NOTICE_ASK = "progress", "merge", "ask"
 NOTICE_LABELS = {NOTICE_PROGRESS: "진행 현황", NOTICE_MERGE: "병합 요청", NOTICE_ASK: "확인 요청"}
-NOTICE_KIND_TYPES = {"info": NOTICE_PROGRESS, "merge": NOTICE_MERGE, "decision": NOTICE_ASK, "confirm": NOTICE_ASK, "run": NOTICE_ASK}     # 요청 종류(kind) → 번호 유형
+NOTICE_KIND_TYPES = {"info": NOTICE_PROGRESS, "merge": NOTICE_MERGE, "decision": NOTICE_ASK, "confirm": NOTICE_ASK, "run": NOTICE_ASK,
+                     "merged": NOTICE_MERGE}     # 요청 종류(kind) → 번호 유형. 병합완료 확인(merged)은 새 번호를 먹지 않고 확인하는 병합 요청(merge)의 M 번호를 그대로 쓴다
 # 표준 표기만 번호다: 1~999 는 세 자리 0 채움(`001`~`999`), 1000~9999 는 네 자리(`1000`~`9999`) — 앞에 0 을 더 붙인 네 자리(`P0012`·`0003`)는 번호가 아니다(같은 번호가 두 글자로 적혀
 # '유형별 중복 금지'를 피하지 못하게). ASCII 숫자만(`[0-9]`) — 전각·원문자·다른 나라 숫자도 번호가 아니다. 쓸 때는 fullmatch(줄 바꿈 꼬리표 금지)
 NOTICE_NO_RE = re.compile(r"[PM]?(?:(?!000)[0-9]{3}|[1-9][0-9]{3})")
@@ -935,6 +952,46 @@ def format_notice(no, fields, urgency="보통", work="", pr=None, more=0):
     lines = builder(no, fields, urgency=urgency, work=work).split("\n")
     if pr is not None:
         lines.insert(1, f"관련 PR: #{_positive_int(pr, 'pr')}")
+    if more:
+        lines.extend(["", f"… 외 {_positive_int(more, 'more')}건 (저장소의 인수인계/요청함/ 폴더에서 확인하세요)"])
+    return "\n".join(lines)
+
+
+# ---- 병합완료 확인(kind: merged — 운영자 요청 2026-11-12) -------------------------------------------------------------
+# 운영자가 병합을 마친 뒤 '제대로 됐는지'만 짧게 보는 알림이다. 진행 현황 번호(P)를 쓰지 않는다 — 번호는 확인하는 병합 요청의 M 번호를 그대로 쓰고(새 번호를 먹지 않고 다음 M 번호 계산에도
+# 들어가지 않는다), 정상이면 제목 한 줄뿐, 이상이면 제목 + 사유 한 줄이다(단추는 operator_loop.request_buttons — 정상은 없음·이상은 '요청 열기' 하나). 긴급도·번호 줄·예상 완료·본문은 없다.
+MERGED_KIND = "merged"
+MERGED_OK, MERGED_BAD = "정상", "이상"
+MERGED_RESULTS = (MERGED_OK, MERGED_BAD)
+MERGED_SUMMARY_LIMITS = {MERGED_OK: 60, MERGED_BAD: 100}      # summary 글자 수 상한(검증기 REQ-1) — 폰에는 이상일 때만 싣고 같은 한도로 줄인다
+
+
+def merged_title(no, result):
+    """병합완료 확인의 제목 `[M050] 병합완료 확인 - 정상` — 요청 파일의 `title` 과 폰 첫 줄이 이 글 그대로다. no 가 M 번호가 아니거나 result 가 정상·이상이 아니면 ValueError(키 이름)."""
+    if notice_type(no) != NOTICE_MERGE:
+        raise ValueError("no")
+    if result not in MERGED_RESULTS:
+        raise ValueError("result")
+    return f"[{no}] {REQUEST_KIND_LABELS[MERGED_KIND]} - {result}"
+
+
+def format_merged(no, fields, more=0):
+    """병합완료 확인 알림의 HTML 글: 정상 = 제목 한 줄뿐, 이상 = 제목 + 사유(summary) 한 줄. more 가 있으면 끝에 '… 외 N건'(한 푸시에 담지 못한 요청 수, format_notice 와 같은 줄).
+    fields: result(정상·이상)·summary(이상일 때 필수 — 한 줄로 소독해 싣는다). 번호 모양·결과 값이 어긋나거나 이상인데 사유가 비면 ValueError(키 이름)."""
+    fields = fields if isinstance(fields, dict) else {}
+    lines = [merged_title(no, fields.get("result"))]
+    if fields.get("result") == MERGED_BAD:
+        lines.append(_notice_value(fields, "summary", MERGED_SUMMARY_LIMITS[MERGED_BAD]))
+    if more:
+        lines.extend(["", f"… 외 {_positive_int(more, 'more')}건 (저장소의 인수인계/요청함/ 폴더에서 확인하세요)"])
+    return "\n".join(lines)
+
+
+def format_merged_unreadable(request_id, more=0):
+    """`kind: merged` 로 읽혔지만 칸이 맞지 않는 요청 파일의 알림 글(고정 문구 — 독립 검증 D1, 2026-11-12). 파일의 title·summary·result·no 는 **하나도 싣지 않는다**: `정상`·`이상` 글자가 폰에 나가는 길은
+    엄격히 읽힌 파일 + merged_title 이 만든 제목 하나뿐이어야 하고, 틀린 파일의 제목(예: result 는 이상인데 제목은 `- 정상`)이 그대로 나가 거짓 '정상' 이 되는 일을 막는다.
+    싣는 값은 요청 번호 하나(display_id — 정본 R-nnn 이 아니면 ValueError('request_id'))뿐이다. more 가 있으면 끝에 '… 외 N건'(format_notice 와 같은 줄)."""
+    lines = [f"{WARN_MARK} 병합완료 확인 파일 모양이 틀려 내용을 싣지 않았습니다(요청 {display_id(request_id)}) — 요청 열기 단추로 확인하세요"]
     if more:
         lines.extend(["", f"… 외 {_positive_int(more, 'more')}건 (저장소의 인수인계/요청함/ 폴더에서 확인하세요)"])
     return "\n".join(lines)
