@@ -31,6 +31,9 @@ from pipeline import fact_candidates as K
 from pipeline import fact_supply
 from pipeline.adapters import noaa_swpc as N
 
+FEED_SIMILARITY_LINE = "- 제목 유사도: 기존 글·대기 중인 초안과 비슷하지 않음(후보 0.6·생성 제목 0.7 기준, 생성기가 검사함)"          # 피드 글 승인 PR 본문의 줄(바이트 불변 — 이 묶음이 바꾸지 않았다)
+FACT_SIMILARITY_LINE = "- 제목 유사도: 해당 없음(계산 글은 제목을 견주지 않고, 같은 기간·같은 자료로 이미 낸 글이 있으면 후보에서 빼는 중복 키로 막음)"      # N1(D-320): 계산 글 본문의 줄
+
 
 def edit_provider(data, change):
     for item in data["providers"]:
@@ -434,7 +437,8 @@ class CreatedPostTest(FB.FactEnv):
 
     def test_the_approval_pr_body_calls_a_calculated_draft_what_it_is_and_every_other_body_keeps_the_old_words(self):
         """D-254: 승인 PR 본문은 사람이 병합 전에 읽는다. 규칙 기반 계산 글에 'AI 가 만든 초안'·AI 고지문 점검 줄이 나오면 거짓 안내다. 글 머리말과 이력 항목에 표식이 **둘 다** 있을 때만 문구를 바꾸고
-        (하나라도 없으면 옛 문구 — AI 미사용이라고 잘못 말하지 않는 쪽), 피드 글(표식 없음)의 본문은 바이트까지 그대로다."""
+        (하나라도 없으면 옛 문구 — AI 미사용이라고 잘못 말하지 않는 쪽), 피드 글(표식 없음)의 본문은 바이트까지 그대로다.
+        N1(D-320): 같은 본문의 '제목 유사도' 줄도 하지 않은 검사를 했다고 안내하지 않도록 계산 글에서만 '해당 없음' 이고 표식이 하나뿐인 본문·피드 글은 옛 줄이다."""
         value, _report, _out = self.run_ok()
         entry = self.history()[0]
         text = (self.work / value[0]).read_text(encoding="utf-8")
@@ -446,6 +450,12 @@ class CreatedPostTest(FB.FactEnv):
         self.assertNotIn("출처 고지문", body)                                                           # 계산 글에는 AI 고지문 점검 줄이 없다
         self.assertIn("- 본문 분량: 한국어 ", body)                                                       # 다른 점검 줄은 그대로
         self.assertIn("- 글 끝 출처 목록: 한국어 ", body)
+        self.assertEqual(lines.count(FACT_SIMILARITY_LINE), 1)                                         # N1: 하지 않은 제목 유사도 검사를 했다고 안내하지 않는다 — '해당 없음' 한 줄
+        self.assertNotIn(FEED_SIMILARITY_LINE, body)
+        self.assertNotIn("생성기가 검사함", body)
+        self.assertEqual(len([line for line in lines if line.startswith("- 제목 유사도")]), 1)
+        two_languages = drafts.build_pr_body(entry, text, text, owner="owner")                          # 두 언어 모양으로 불러도 계산 글이면 같은 줄이다(표식이 정하고 언어 수가 정하지 않는다)
+        self.assertEqual(two_languages.splitlines().count(FACT_SIMILARITY_LINE), 1)
         old = "- 이 글은 AI 가 만든 초안이고 이 PR 은 `[Chance] 글 자동 작성·게시` 워크플로가 만들었습니다."
         without_text_mark = text.replace('provenance: "facts"\n', "")
         without_entry_mark = {key: item for key, item in entry.items() if key != "provenance"}
@@ -458,6 +468,33 @@ class CreatedPostTest(FB.FactEnv):
                 self.assertEqual(plain.splitlines()[-1], old)
                 self.assertIn("- 출처 고지문(AI 작성·검토 안 받음 안내): 한국어 ", plain)
                 self.assertNotIn("AI 미사용", plain)
+                self.assertEqual(plain.splitlines().count(FEED_SIMILARITY_LINE), 1)                    # N1: 표식이 하나만 있거나 값이 달라도(피드 글 포함) 옛 줄 그대로
+                self.assertNotIn(FACT_SIMILARITY_LINE, plain)
+                self.assertNotIn("해당 없음", plain)
+
+    def test_a_calculated_body_differs_from_the_feed_body_of_the_same_text_in_exactly_three_places(self):
+        """N1: 같은 글·같은 이력 항목에서 표식만 뺀 피드 모양 본문과 계산 글 본문을 줄 단위로 견준다 — 다른 곳은 정확히 셋(AI 고지문 점검 줄이 빠짐·제목 유사도 줄이 '해당 없음'·마지막 안내 줄)이고
+        나머지 줄은 하나도 다르지 않다. 계산 글에서만 바뀐다는 것(피드 글 본문은 바이트까지 그대로)을 줄 단위로 못박는다."""
+        value, _report, _out = self.run_ok()
+        entry = self.history()[0]
+        text = (self.work / value[0]).read_text(encoding="utf-8")
+        fact_lines = drafts.build_pr_body(entry, text, None, owner="owner").splitlines()
+        feed_entry = {key: item for key, item in entry.items() if key != "provenance"}
+        feed_lines = drafts.build_pr_body(feed_entry, text.replace('provenance: "facts"\n', ""), None, owner="owner").splitlines()
+        self.assertNotEqual(fact_lines, feed_lines)
+        expected, notice, similarity, last = [], 0, 0, 0
+        for line in feed_lines:
+            if line.startswith("- 출처 고지문(AI 작성·검토 안 받음 안내)"):
+                notice += 1
+                continue                                                                                  # ① 이 줄은 계산 글에 없다
+            if line == FEED_SIMILARITY_LINE:
+                similarity, line = similarity + 1, FACT_SIMILARITY_LINE                                   # ② 이 줄만 바뀐다
+            elif line.startswith("- 이 글은 AI 가 만든 초안이고"):
+                last, line = last + 1, "- 이 글은 계산으로 만든 초안(AI 미사용)이고 이 PR 은 `[Chance] 글 자동 작성·게시` 워크플로가 만들었습니다."      # ③
+            expected.append(line)
+        self.assertEqual((notice, similarity, last), (1, 1, 1))
+        self.assertEqual(fact_lines, expected)
+        self.assertEqual(len(fact_lines), len(feed_lines) - 1)
 
     def test_a_manual_run_without_a_slot_uses_a_time_stamped_branch(self):
         _value, _report, _out = self.run_ok(slot=None)

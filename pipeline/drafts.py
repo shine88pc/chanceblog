@@ -354,7 +354,8 @@ def build_pr_body(entry, kr_text, en_text, owner=None, repo=None):
     """승인 PR 본문(마크다운). entry 는 이력 항목, kr_text·en_text 는 글 파일 전체(국문 전용 초안이면 en_text 가 None 이고 영어 칸을 모두 뺀다). 모든 외부 유래 문구는 neutralize 를 거친다.
 
     구성: 승인 안내(운영자 멘션) · 요약(분야·출처·원문 링크·슬롯) · 제목 · 첫 문단 발췌 · 자동 점검 결과 · 체크리스트 · 안내.
-    계산으로 만든 초안(`is_fact_draft`)은 AI 고지문 점검 줄을 빼고 마지막 안내를 '계산으로 만든 초안(AI 미사용)' 으로 쓴다 — 그 밖(피드 글)은 바이트까지 같다."""
+    계산으로 만든 초안(`is_fact_draft`)은 AI 고지문 점검 줄을 빼고, 제목 유사도 줄을 '해당 없음' 으로 바꾸고(그 검사는 피드 글 경로에만 있다 — 하지 않은 검사를 했다고 안내하지 않는다),
+    마지막 안내를 '계산으로 만든 초안(AI 미사용)' 으로 쓴다 — 그 밖(피드 글)은 바이트까지 같다."""
     ko_only = en_text is None
     both = (lambda ko, en: ko) if ko_only else (lambda ko, en: f"{ko} · {en}")      # 영어 칸을 이어 붙이는 자리(국문 전용이면 국문만)
     entry = entry if isinstance(entry, dict) else {}
@@ -394,7 +395,8 @@ def build_pr_body(entry, kr_text, en_text, owner=None, repo=None):
         f"- 원문 링크 인용: {both(f'한국어 {_yn(kr_cite)}', f'영어 {_yn(en_cite)}')}",
         f"- 글 끝 출처 목록: {both(f'한국어 {_yn(kr_list)}', f'영어 {_yn(en_list)}')}",
         *([] if fact_draft else [f"- 출처 고지문(AI 작성·검토 안 받음 안내): {both(f'한국어 {_yn(kr_notice)}', f'영어 {_yn(en_notice)}')}"]),
-        "- 제목 유사도: 기존 글·대기 중인 초안과 비슷하지 않음(후보 0.6·생성 제목 0.7 기준, 생성기가 검사함)",
+        ("- 제목 유사도: 해당 없음(계산 글은 제목을 견주지 않고, 같은 기간·같은 자료로 이미 낸 글이 있으면 후보에서 빼는 중복 키로 막음)" if fact_draft
+         else "- 제목 유사도: 기존 글·대기 중인 초안과 비슷하지 않음(후보 0.6·생성 제목 0.7 기준, 생성기가 검사함)"),
         "",
         "## 승인 체크리스트",
         "- [ ] 원문과 수치·사실을 대조했다",

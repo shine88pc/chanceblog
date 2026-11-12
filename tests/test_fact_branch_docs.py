@@ -1,10 +1,17 @@
 """S2b 문서·워크플로 시험: `docs/FACT_PATH.md` §15 와 결정 D-230–D-246·결함 레지스터 D-250–D-256·다른 문서의 S2b 줄이 코드의 실제 이름·표·값과 어긋나지 않고,
 워크플로의 AI 키 식(AF7)이 **지금 상태(`content_source` 를 모른다)와 패치 뒤 상태 어느 쪽이든** 문서와 맞으며 패치 식이 어떤 조합에서도 `facts` 실행에 키를 넘기지 않음을 증명한다.
 네트워크 없이 파일만 읽는다(워크플로 식은 이 파일의 작은 평가기로 모든 조합을 계산한다 — GitHub 식의 부분집합: `||`·`&&`·`!`·`==`·`!=`·괄호·글자·`true`/`false`/`null`·점 이름)."""
+import contextlib
+import inspect
+import io
 import itertools
+import json
 import re
+import tempfile
 import unittest
 import xml.etree.ElementTree as ElementTree
+from pathlib import Path
+from unittest import mock
 
 import _bootstrap
 import ai_flow_scan as SCAN
@@ -13,6 +20,7 @@ import lock_helpers
 import registry_states
 import test_fact_select as SEL
 import test_fact_structure as STRUCT
+import test_quality_gate_fact as QGF
 
 from pipeline import drafts, egress, fact_candidates as K, fact_supply, publish_lock, shadow_run, source_policy
 from pipeline.adapters import base as adapter_base
@@ -22,6 +30,7 @@ DOC = (ROOT / "docs" / "FACT_PATH.md").read_text(encoding="utf-8")
 REGISTER = (ROOT / "docs" / "DEFECT_REGISTER.md").read_text(encoding="utf-8")
 ARCH = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
 ACTIONS = (ROOT / "docs" / "ACTIONS_GUIDE.md").read_text(encoding="utf-8")
+PUBLISH = (ROOT / "docs" / "PUBLISH_PATHS.md").read_text(encoding="utf-8")
 SOURCE_POLICY_DOC = (ROOT / "docs" / "SOURCE_POLICY.md").read_text(encoding="utf-8")
 SECTION = DOC[DOC.index("## 15. S2b"):]
 DECISIONS = [f"D-{number}" for number in range(230, 247)]
@@ -202,7 +211,7 @@ class FollowUpRowsTest(unittest.TestCase):
             "D-298": ("SOURCE_POLICY.md", "§15-10", "D-237", "run_call_cap"),
             "D-299": ("noaa_swpc_json", "T3", "임시 사본", "최소 품질 Gate", "제한 재개 잠금"),
             "D-308": ("pre_flip", "registry_states", "EXPECTED_STATE", "pre_flip_blogs.json", "REGISTRY_PATH", "DEFAULT_PATH", "test_registry_state", "알려진 상태"),
-            "D-309": ("670건", "25모듈", "tools/netblock", "D-308", "S2b 검증 D4"),
+            "D-309": ("670건", "25모듈", "재현 방법", "sitecustomize", "NoOutbound", "D-308", "S2b 검증 D4"),      # N4(D-323): 저장소 밖 도구 이름 대신 방법의 원리와 저장소 안의 도구
         }
         self.assertEqual(set(needles), set(FOLLOW_DECISIONS))
         for number, words in needles.items():
@@ -296,6 +305,185 @@ class FollowUpRowsTest(unittest.TestCase):
         exit_row = next(line for line in ARCH.splitlines() if line.startswith("| 정상 건너뜀(Fact 경로) |"))
         self.assertIn("이력 파일 읽기", exit_row)
         self.assertEqual(exit_row.count("|"), 6)
+
+
+class S2bfix2DocsTest(unittest.TestCase):
+    """S2BFIX2(S2BFIX 독립 검증의 새 문제 N1–N7 중 처리분): 새 결정 D-320–D-325·결함 D-326–D-331·§15-8 권고 순서·D-309 재현 서술·§15-10 한계 문장이 코드·다른 문서와 어긋나지 않는다.
+    다른 가지의 번호·전체 최댓값을 못박지 않는다 — 이 묶음의 행이 있고 서로 이어지는지만 본다."""
+    NEW_DECISIONS = [f"D-{number}" for number in range(320, 326)]
+    NEW_DEFECTS = [f"D-{number}" for number in range(326, 332)]
+    POINTERS = {"D-326": "D-320", "D-327": "D-321", "D-328": "D-322", "D-329": "D-323", "D-330": "D-324", "D-331": "D-325"}
+    STATES = {"D-326": "해결", "D-327": "해결", "D-328": "해결", "D-329": "해결", "D-330": "열림", "D-331": "열림"}
+    SEVERITY = {"D-326": "낮음", "D-327": "낮음", "D-328": "정보", "D-329": "정보", "D-330": "정보", "D-331": "정보"}
+    FACT_LINE = "- 제목 유사도: 해당 없음(계산 글은 제목을 견주지 않고, 같은 기간·같은 자료로 이미 낸 글이 있으면 후보에서 빼는 중복 키로 막음)"
+    FEED_LINE = "- 제목 유사도: 기존 글·대기 중인 초안과 비슷하지 않음(후보 0.6·생성 제목 0.7 기준, 생성기가 검사함)"
+    GATE_FAMILIES = ["QG0", "QG1", "QG2", "QG3", "QG4", "QG5", "QG6", "QG7", "QG8"]
+
+    @staticmethod
+    def order_steps(paragraph):
+        """권고 순서 문단을 ①…⑥ 여섯 조각으로 자른다(각 표시가 처음 나오는 자리 — 뒤쪽 문장에서 되풀이되는 표시는 보지 않는다)."""
+        positions, cursor = [], 0
+        for mark in "①②③④⑤⑥":
+            index = paragraph.index(mark + " ", cursor)
+            positions.append(index)
+            cursor = index + 1
+        return [paragraph[start:end] for start, end in zip(positions, positions[1:] + [None])]
+
+    def test_the_new_decision_rows_follow_d309_once_each_in_order_with_three_cells_and_the_document_rules(self):
+        found = re.findall(r"(?m)^\| (D-\d+) \|", DOC)
+        for number in self.NEW_DECISIONS:
+            self.assertEqual(found.count(number), 1, number)
+        positions = [found.index(number) for number in self.NEW_DECISIONS]
+        self.assertEqual(positions, list(range(positions[0], positions[0] + len(self.NEW_DECISIONS))))       # 빠짐없이 이어진다
+        self.assertGreater(positions[0], found.index("D-309"))
+        for number in self.NEW_DECISIONS:
+            row = row_of(DOC, number)
+            self.assertEqual(row.count("|"), 4, number)                                                      # 표의 세 칸(번호·결정·이유)
+            self.assertNotRegex(row, "[~～〜]")
+            self.assertNotRegex(row, r"(?i)https?://|www\.|\bftp://")
+            self.assertNotRegex(row, r"[A-Za-z]:[\\/]|/Users/|/home/|\\\\")
+            self.assertNotRegex(row, FORBIDDEN)
+            for liquid in ("{{", "{%", "%}", "}}"):
+                self.assertNotIn(liquid, row)
+
+    def test_each_new_decision_names_the_code_and_the_words_it_decides(self):
+        needles = {
+            "D-320": ("build_pr_body", "is_fact_draft", "제목 유사도", "해당 없음", "dedupe_key", "select_candidates", "바이트까지", "S2BFIX N1"),
+            "D-321": ("02_flip_values", "SOURCE_POLICY.md", "5항", "README.md", "AI_COLLAB.md", "ARCHITECTURE.md", "KR/EN", "재실행 스크립트", "N2·N8"),
+            "D-322": ("권고 순서", "여섯 단계", "03_gate_lock", "8편", "4편", "PUBLISH_PATHS.md", "S2BFIX N3"),
+            "D-323": ("D-309", "도구 이름을 빼고", "sitecustomize", "NoOutbound", "run_real_cli", "S2BFIX N4"),
+            "D-324": ("RecursionError", "read_history_strict", "OSError", "ValueError", "20만 겹", "재귀 한계를 넘는", "S2BFIX N5"),
+            "D-325": ("QG1–QG8", "QG0–QG8", "40번 되풀이한 문단", "보는 것이 없다", "S2c", "quality_gate.py", "고정 문장", "S2BFIX N7"),
+        }
+        self.assertEqual(set(needles), set(self.NEW_DECISIONS))
+        for number, words in needles.items():
+            for word in words:
+                self.assertIn(word, row_of(DOC, number), (number, word))
+        self.assertIn(self.FACT_LINE[len("- 제목 유사도: "):], row_of(DOC, "D-320"))                         # 결정 행이 코드가 쓰는 문구를 그대로 인용한다
+
+    def test_the_new_defect_rows_follow_d307_with_six_cells_the_expected_severity_state_and_a_pointer_to_their_decision(self):
+        found = re.findall(r"(?m)^\| \*\*(D-\d+)\*\* \|", REGISTER)
+        self.assertEqual(len(found), len(set(found)))
+        positions = [found.index(number) for number in self.NEW_DEFECTS]
+        self.assertEqual(positions, list(range(positions[0], positions[0] + len(self.NEW_DEFECTS))))
+        self.assertGreater(positions[0], found.index("D-307"))
+        for number in self.NEW_DEFECTS:
+            row = register_row(number)
+            self.assertEqual(row.count("|"), 7, number)                                                      # 표의 여섯 칸
+            cells = [cell.strip() for cell in row.strip().strip("|").split("|")]
+            self.assertEqual(cells[1], self.SEVERITY[number], number)                                         # 독립 검증이 매긴 심각도 그대로
+            self.assertTrue(cells[4].replace("*", "").startswith(self.STATES[number]), (number, cells[4]))
+            self.assertIn("S2BFIX2", cells[4], number)
+            self.assertIn(self.POINTERS[number], row, number)                                                # 결정 번호로 이어진다
+            self.assertNotRegex(row, "[~～〜]")
+            self.assertNotRegex(row, r"(?i)https?://|www\.|\bftp://")
+            self.assertNotRegex(row, FORBIDDEN)
+            for liquid in ("{{", "{%", "%}", "}}"):
+                self.assertNotIn(liquid, row)
+        self.assertEqual(len(set(self.POINTERS.values())), len(self.POINTERS))                              # 결함 행마다 다른 결정을 가리킨다
+        self.assertTrue(set(self.POINTERS.values()) <= set(self.NEW_DECISIONS))
+        self.assertIn("> D-326–D-331 은 2026-11-12 에 추가했다(", REGISTER)                                    # 머리말의 번호 대역 안내
+
+    def test_the_calculated_draft_line_in_the_decision_is_what_the_code_writes_and_the_other_two_places_name_the_decision(self):
+        """N1(D-320): 최소 입력(글 머리말·이력 항목에 표식이 둘 다 있다)으로 부른 `build_pr_body` 의 제목 유사도 줄이 결정 행이 인용한 문구와 같고, 표식이 하나뿐이면 옛 줄이다 — 문서와 코드가 같은 말을 한다."""
+        text = '---\nlayout: post\ntitle: "시험 제목"\nprovenance: "facts"\n---\n본문 문단입니다.\n'
+        entry = {"provenance": "facts", "kr_title": "시험 제목"}
+        self.assertTrue(drafts.is_fact_draft(entry, text))
+        lines = drafts.build_pr_body(entry, text, None, owner="owner").splitlines()
+        self.assertEqual([line for line in lines if line.startswith("- 제목 유사도")], [self.FACT_LINE])
+        feed = drafts.build_pr_body({"kr_title": "시험 제목"}, text, None, owner="owner").splitlines()          # 이력 항목에 표식이 없다 → 옛 줄
+        self.assertEqual([line for line in feed if line.startswith("- 제목 유사도")], [self.FEED_LINE])
+        self.assertIn("D-320", sub_section(SECTION, "### 15-5.", "### 15-6."))
+        self.assertIn("D-320", sub_section(SECTION, "### 15-10."))
+
+    def test_the_recommended_order_has_six_steps_and_the_gate_and_lock_patch_comes_before_the_pause_is_released(self):
+        """N3(D-322): 권고 순서 ①–⑥ 의 ④ 가 패치 03(Gate 켜기와 잠금 켜기)이고 ⑥ 정지를 푸는 단계보다 앞이며 ③ 값 패치 뒤다. 실측 한 문장과 `PUBLISH_PATHS.md` §6 의 같은 순서 문장이 있다."""
+        part = sub_section(SECTION, "### 15-8.", "### 15-9.")
+        paragraph = next(line for line in part.splitlines() if line.startswith("권고 순서(총괄 결정 대기):"))
+        steps = self.order_steps(paragraph)
+        self.assertEqual(len(steps), 6)
+        for step, words in zip(steps, (("정지 변수를 켠다",), ("AF7", "1번"), ("2·3번 값",), ("4번", "03_gate_lock", "Gate 켜기", "잠금"), ("그림자 실행", "3회", "§11 11항"), ("정지를 푼다", "첫 승인 초안"))):
+            for word in words:
+                self.assertIn(word, step, (step[:20], word))
+        gate_step = next(index for index, step in enumerate(steps) if "03_gate_lock" in step)
+        release_step = next(index for index, step in enumerate(steps) if "정지를 푼다" in step)
+        values_step = next(index for index, step in enumerate(steps) if "2·3번 값" in step)
+        self.assertEqual((values_step, gate_step, release_step), (2, 3, 5))                                  # 값 → Gate·잠금 → (그림자 실행) → 정지 해제
+        for word in ("**④ 는 ⑥ 보다 앞이어야 한다**", "`PUBLISH_PATHS.md` §6", "잠금 꺼짐은 초안 8편(하루 두 편인 날 3일)", "잠금 켬은 4편(주 2편씩, 하루 두 편인 날 0)", "D-322"):
+            self.assertIn(word, paragraph, word)
+        self.assertIn("잠금·최소 품질 Gate·그림자 검증이 끝난 뒤 운영자가 해제", PUBLISH)                    # 순서의 근거 문장이 그 문서에 그대로 있다
+        self.assertIn("아래 권고 순서의 첫 단계", next(line for line in part.splitlines() if line.startswith("| 5 |")))      # 표 5번 행(정지 변수)은 ① 을 가리킨다
+        self.assertIn("권고 순서 ⑤", sub_section(SECTION, "### 15-10."))                                    # 그림자 실행을 가리키는 쪽의 번호가 따라 옮겨졌다
+        self.assertIn("그림자 실행", steps[4])
+        self.assertNotIn("권고 순서 ④", DOC)
+
+    def test_the_second_patch_row_lists_the_documents_the_flip_values_make_false(self):
+        """N2(D-321): 표 2번 행의 동반 수정 칸이 값 때문에 거짓이 되는 문서 서술 넷을 이름으로 적는다(패치 파일은 저장소 밖 — 이 문서의 목록이 켜는 PR 작성자의 체크리스트다)."""
+        part = sub_section(SECTION, "### 15-8.", "### 15-9.")
+        row = next(cells for cells in table_rows(part)[1:] if cells[0] == "2")
+        self.assertEqual(len(row), 5)
+        for word in ("docs/SOURCE_POLICY.md", "§1 5항", "켜지는 않았다", "README.md", "Bilingual (KR/EN)", "AI_COLLAB.md", "§3.2", "KR/EN 생성", "docs/ARCHITECTURE.md", "§2", "KR/EN 쌍", "국문 단독", "시험이 못박지 않아", "거짓인 채 남는다", "D-321"):
+            self.assertIn(word, row[4], word)
+        for name in ("docs/SOURCE_POLICY.md", "README.md", "AI_COLLAB.md", "docs/ARCHITECTURE.md"):
+            self.assertTrue((ROOT / name).is_file(), name)
+
+    def test_the_d309_row_points_to_tools_that_exist_in_the_repository_and_the_old_out_of_repository_tool_is_not_named(self):
+        """N4(D-323): D-309 행의 재현 서술 — 방법의 원리와 저장소 안의 같은 원리의 도구 둘. 가리킨 도구가 실제로 저장소에 있고 옛 저장소 밖 도구의 이름은 문서 어디에도 없다."""
+        row = row_of(DOC, "D-309")
+        for word in ("670건", "25모듈", "재현 방법", "sitecustomize", "PYTHONPATH", "NoOutbound", "run_real_cli", "tests/telegram_inbox_helpers.py", "tests/test_generator_source_policy.py", "D-308", "S2b 검증 D4"):
+            self.assertIn(word, row, word)
+        self.assertNotIn("netblock", DOC)
+        helpers = (ROOT / "tests" / "telegram_inbox_helpers.py").read_text(encoding="utf-8")
+        self.assertRegex(helpers, r"(?m)^class NoOutbound\b")
+        for name in ("socket.socket", "connect", "getaddrinfo", "self.attempts"):
+            self.assertIn(name, helpers.split("class NoOutbound", 1)[1], name)                                  # 연결·이름 해석 시도를 막고 기록한다
+        cli_test = (ROOT / "tests" / "test_generator_source_policy.py").read_text(encoding="utf-8")
+        self.assertIn("def run_real_cli", cli_test)
+        for name in ("socket.socket.connect = blocked", "socket.create_connection = blocked", "socket.getaddrinfo = blocked"):
+            self.assertIn(name, cli_test, name)
+
+    def test_a_history_file_nested_beyond_the_recursion_limit_ends_all_three_readers_with_the_same_exception(self):
+        """N5(D-324): 깊이가 재귀 한계를 넘는 이력은 Fact 경로의 엄격한 읽기만이 아니라 잠금 가드의 읽기와 피드 경로의 읽기도 같은 `RecursionError` 로 끝난다 — 가짜 예외로 본다(실제 20만 겹 파일은 환경마다 한계가 달라 쓰지 않는다).
+        평범한 깨짐(`JSONDecodeError`)은 세 읽기가 모두 조용히 처리하는 대조군이다."""
+        part = sub_section(SECTION, "### 15-10.")
+        for word in ("20만 겹", "RecursionError", "read_history_strict", "D-324", "조용히 멈추지 않고", "종료 1", "이력·파일 변경 0", "NOAA 요청 0", "해 없음", "같은 규칙·같은 예외", "코드는 바꾸지 않았다"):
+            self.assertIn(word, part, word)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "history.json"
+            path.write_text("[]", encoding="utf-8")
+            with mock.patch.object(g, "HISTORY_FILE", path):
+                with mock.patch("json.loads", side_effect=json.JSONDecodeError("깨짐", "x", 0)):                 # 대조군: 평범한 깨짐
+                    self.assertIsNone(g.read_history_strict())
+                    self.assertIsNone(publish_lock.read_history_strict(path))
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        self.assertEqual(g.read_history(), [])
+                with mock.patch("json.loads", side_effect=RecursionError("너무 깊다")):
+                    with self.assertRaises(RecursionError):
+                        g.read_history_strict()
+                    with self.assertRaises(RecursionError):
+                        publish_lock.read_history_strict(path)
+                    with self.assertRaises(RecursionError):
+                        g.read_history()
+            self.assertEqual(path.read_text(encoding="utf-8"), "[]")                                         # 파일은 그대로다
+        self.assertIn("except (OSError, ValueError)", inspect.getsource(g.read_history_strict))               # 문서가 말하는 '잡는 예외' 가 코드의 그 줄이다
+
+    def test_the_gate_lets_a_paragraph_of_one_sentence_repeated_forty_times_through_and_its_rule_families_are_only_qg0_to_qg8(self):
+        """N7(D-325): Gate 에 문장 반복을 보는 규칙이 없다 — 반복 문단을 본문에 붙여도 보류 0 이고, 본문을 반복으로만 채워 걸리는 것은 제목의 숫자·낱말 규칙(QG6)뿐이다. 규칙 갈래가 QG0–QG8 이라는 것도 못박는다
+        (새 규칙 갈래가 생기면 이 시험과 §15-10 한계 문장을 함께 고친다)."""
+        part = sub_section(SECTION, "### 15-10.")
+        for word in ("고정 문장 반복", "보류 규칙이 없다", "QG1–QG8", "40번 되풀이한 문단", "반복 때문이 아니라", "QG6-TITLE-NUMBER", "이 묶음 밖", "S2c 입력이다", "pipeline/quality_gate.py", "D-325"):
+            self.assertIn(word, part, word)
+        source = (ROOT / "pipeline" / "quality_gate.py").read_text(encoding="utf-8")
+        self.assertEqual(sorted(set(re.findall(r'Hold\("(QG\d)-', source))), self.GATE_FAMILIES)
+        self.assertIn("QG6-TITLE-NUMBER", source)
+        post = QGF.golden_posts()["r04_kp"]
+        head, divider, body = QGF.TR.generator_file(post)[0].partition("\n---\n")
+        self.assertEqual(divider, "\n---\n")
+        repeated = "이 값은 위성이 재는 지구 자기장의 흔들림 정도를 뜻합니다. 값이 클수록 흔들림이 큽니다. 이 값만으로 사람이나 설비에 어떤 영향이 있다고 말할 수는 없습니다. " * 40
+        self.assertEqual(QGF.run(post).codes(), [])                                                          # 대조군: 원래 글은 보류 0
+        self.assertEqual(QGF.run(post, content=head + divider + body + "\n\n" + repeated).codes(), [])        # 반복 문단을 붙여도 보류 0
+        only_repeated = QGF.run(post, content=head + divider + repeated).codes()
+        self.assertTrue(only_repeated and set(only_repeated) <= {"QG6-TITLE-NUMBER", "QG6-TITLE-WORD"}, only_repeated)
 
 
 class CodeTablesTest(unittest.TestCase):
