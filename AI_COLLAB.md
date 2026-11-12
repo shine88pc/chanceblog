@@ -33,7 +33,7 @@
 
 ### Chance_Blog 상세
 - **저장소**: `shine88pc/chanceblog`
-- **목적**: 기술·경제·사회·과학·문화·일상을 연결하는 한국어·영어 교양형 매거진
+- **목적**: 기술·경제·사회·과학·문화·일상을 연결하는 교양형 매거진(새 글은 국문 단독, 지난 글에는 영어도 있다)
 - **기술 스택**: Jekyll + 커스텀 `index.html` (Tailwind CDN)
 - **현재 주요 목표**: Google AdSense 승인 및 수익화 + 콘텐츠 품질 유지
 
@@ -103,7 +103,7 @@ Blogger 자동화는 **Chance_Blog 기존 엔진의 연장선**으로 설계한�
 | 단계 | 역할 | 비고 |
 |------|------|------|
 | ① 공통 주제 발굴 | 기존 generator.py 로직 재사용 또는 공통 주제 풀 유지 | 건강·생활 연결 가능한 주제 우선 |
-| ②-A Chance_Blog | 근거·맥락·분석 중심 KR/EN 생성 | 기존 유지 |
+| ②-A Chance_Blog | 근거·맥락·분석 중심 KR/EN 생성(구조화 Fact 경로를 켠 뒤의 새 글은 AI 없이 만든 국문 단독 — `docs/FACT_PATH.md`) | 기존 유지 |
 | ②-B Blogger | 같은 큰 주제 → 실용 버전으로 완전 재작성 | blogger_generator.py |
 
 ### 3.3 Blogger용 생성 규칙 (확정)

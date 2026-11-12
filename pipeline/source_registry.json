@@ -1864,7 +1864,7 @@
     "예보 값은 관측과 구분해 예보로 표기한다(Kp 예보 파일은 관측·추정·예보가 한 필드에 섞임). 2026-03 JSON 구조 변경 전례(SCN 26-21)가 있어 응답 검증은 실패 시 닫힌다"
    ],
    "retention_days": null,
-   "enabled": false,
+   "enabled": true,
    "ai_use": "NEVER",
    "own_data_only": true
   },

@@ -396,7 +396,7 @@ class RealRegistryAfterTheSplitTest(unittest.TestCase):
 
     def test_the_noaa_entry_carries_the_researched_values(self):
         noaa = self.noaa
-        self.assertEqual((noaa["class"], noaa["enabled"], noaa["ai_use"], noaa["own_data_only"], noaa["strict_tier"], noaa["effective_status"]), ("data", False, "NEVER", True, 1, "자동화 가능"))
+        self.assertEqual((noaa["class"], noaa["enabled"], noaa["ai_use"], noaa["own_data_only"], noaa["strict_tier"], noaa["effective_status"]), ("data", True, "NEVER", True, 1, "자동화 가능"))      # enabled: 켜는 변경(T3, 패치 02) 뒤 True(전에는 False)
         self.assertEqual(len(noaa["access"]), 1)
         access = noaa["access"][0]
         self.assertEqual((access["kind"], access["hosts"], access["paths"], access["auth"], access["robots_checked_at"]), ("api", ["services.swpc.noaa.gov"], NOAA_PATHS, "NONE", "2026-11-10"))

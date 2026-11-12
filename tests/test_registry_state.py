@@ -40,7 +40,7 @@ class KnownStatesTest(unittest.TestCase):
         self.assertEqual([publish_lock.lock_state(reg) for reg in (before, after_values, after_lock)], ["off", "off", "on"])
         chance_before, chance_values, chance_lock = (RS.chance_of(reg) for reg in (before, after_values, after_lock))
         self.assertEqual({key for key in chance_values if chance_before.get(key) != chance_values[key]} | (set(chance_before) - set(chance_values)),
-                         {"languages", "publish_flow", "source_policy", "content_source", "limits"})
+                         {"languages", "publish_flow", "source_policy", "content_source", "limits", "role"})          # role: 패치 02 가 고치는 설명 문구(켠 뒤 상태에는 새 문구)
         self.assertEqual({key for key in chance_lock if chance_values.get(key) != chance_lock[key]}, {"quality_gate", "limits"})
         others = [blog for blog in before["blogs"] if blog["key"] != "chance"]
         self.assertEqual(others, [blog for blog in after_lock["blogs"] if blog["key"] != "chance"])         # Chance 말고 다른 항목은 어느 상태에서도 그대로다

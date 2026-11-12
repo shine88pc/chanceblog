@@ -22,7 +22,7 @@ REAL_BLOGS = ROOT / "pipeline" / "blogs.json"
 REAL_SOURCES = ROOT / "pipeline" / "source_registry.json"
 
 STATE_NAMES = ("pre_flip", "p2", "p3")
-EXPECTED_STATE = "pre_flip"                         # 켜는 PR 이 이 한 줄을 한 칸 옮긴다(pre_flip → p2 → p3)
+EXPECTED_STATE = "p2"                         # 켜는 PR 이 이 한 줄을 한 칸 옮긴다(pre_flip → p2 → p3)
 ENABLED_PROVIDERS = {"pre_flip": [], "p2": ["noaa_swpc_json"], "p3": ["noaa_swpc_json"]}      # 허용 목록(pipeline/source_registry.json)에서 켜진 제공처
 
 
@@ -42,7 +42,7 @@ def state_registry(name):
     reg = pre_flip_registry()
     chance = chance_of(reg)
     if name in ("p2", "p3"):
-        chance.update(languages=["ko"], publish_flow="pr", source_policy="allowlist", content_source="facts")
+        chance.update(role="교양·분석형 매거진 (출처 기반, 새 글은 국문 단독 — 지난 글은 KR/EN)", languages=["ko"], publish_flow="pr", source_policy="allowlist", content_source="facts")      # role: 패치 02 가 고치는 설명 문구(켠 뒤 상태에도 들어간다)
         chance["limits"] = {"max_posts_per_day": 2, "max_posts_per_week": 2}
     if name == "p3":
         reg["resume_lock"] = True

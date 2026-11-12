@@ -117,6 +117,30 @@ def sources_registry(enabled=True, **provider):
     return data
 
 
+def real_sources(noaa_enabled=None):
+    """진짜 허용 목록 파일의 사본(시험 안에서만). noaa_enabled 가 None 이면 파일에 적힌 그대로, 참·거짓이면 `noaa_swpc_json` 의 켜짐만 그 값으로 바꾼다 — 다른 제공처는 건드리지 않는다
+    (이 경로가 읽는 제공처는 그 하나뿐이다 — `fact_supply.PROVIDER_ID`. 다른 제공처를 켜는 별건 변경이 이 시험 도우미를 빨갛게 만들지 않는다)."""
+    data = json.loads((ROOT / "pipeline" / "source_registry.json").read_text(encoding="utf-8"))
+    if noaa_enabled is not None:
+        for item in data["providers"]:
+            if item["provider_id"] == PROVIDER_ID:
+                item["enabled"] = noaa_enabled
+    return data
+
+
+def real_blogs(**chance):
+    """진짜 blogs.json 의 사본(시험 안에서만). 키워드를 주면 chance 항목의 값만 바꾼다(값이 None 이면 그 키를 지운다) — 안 주면 파일에 적힌 그대로다."""
+    reg = json.loads((ROOT / "pipeline" / "blogs.json").read_text(encoding="utf-8"))
+    for blog in reg["blogs"]:
+        if blog["key"] == "chance":
+            for key, value in chance.items():
+                if value is None:
+                    blog.pop(key, None)
+                else:
+                    blog[key] = value
+    return reg
+
+
 def write_json(path, value):
     Path(path).write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
     return Path(path)

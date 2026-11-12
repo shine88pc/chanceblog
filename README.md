@@ -18,7 +18,7 @@
 
 - **Live site**: https://shine88pc.github.io/chanceblog/
 - **Repository**: `shine88pc/chanceblog` (**유일한 공식 소스**)
-- **Type**: Bilingual (KR/EN) magazine + dual blog with Blogger (practical life)
+- **Type**: Bilingual (KR/EN) magazine (new Chance posts are Korean-only while the structured-data Fact path is on) + dual blog with Blogger (practical life)
 - **Stack**: Jekyll + custom `index.html` (Tailwind CDN)
 - **Current priority**: Google AdSense approval; Blogger automation (draft/API)
 

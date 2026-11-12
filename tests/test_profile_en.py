@@ -126,7 +126,7 @@ class RealRegistryEnglishTest(unittest.TestCase):
         self.assertEqual((blog["schedule"], blog["limits"], blog["state"]),
                          ({"cron": "0 2 * * *"}, {"max_posts_per_day": 1},
                           {"history": "blogger_history.json", "content_dir": "_blogger_drafts"}))
-        self.assertEqual(registry.get_blog(registry.load_registry(), "chance")["languages"], ["ko", "en"])  # Chance 항목은 그대로
+        self.assertEqual(registry.get_blog(registry.load_registry(), "chance")["languages"], ["ko"])  # 켜는 변경(T3, 패치 02) 뒤: Chance 항목은 국문 단독(전에는 ["ko", "en"] 그대로)
 
     def test_the_korean_profile_and_prompt_are_kept_for_a_future_korean_blog(self):
         self.assertTrue((REAL / "pipeline" / "profiles" / "blogger_practical_ko.json").exists())

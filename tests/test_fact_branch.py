@@ -111,11 +111,15 @@ class RegistryRulesTest(unittest.TestCase):
     def errors(self, **chance):
         return source_policy.content_source_errors({"content_source": "facts", **chance}, "블로그 'chance'", "jekyll-git")
 
-    def test_the_real_registry_is_valid_and_holds_no_value_for_the_switch(self):
+    def test_the_real_registry_is_valid_and_sets_the_switch_to_facts_on_the_chance_entry_only_with_its_three_companions(self):
+        """켜는 변경(T3, 패치 02): 진짜 레지스트리가 유효하고 Chance 항목에만 스위치 `facts` 와 그 짝 셋(허용 목록 모드·국문 단독·승인 흐름)이 있다. 전에는 값이 없고 `feed` 였다."""
         reg = registry.load_registry()
         self.assertEqual(registry.validate_registry(reg), [])
-        self.assertEqual(source_policy.chance_content_source(), "feed")
-        self.assertNotIn("content_source", json.dumps(reg))
+        self.assertEqual(source_policy.chance_content_source(), "facts")
+        chance = registry.get_blog(reg, "chance")
+        self.assertEqual((chance["content_source"], chance["source_policy"], chance["languages"], chance["publish_flow"]), ("facts", "allowlist", ["ko"], "pr"))
+        self.assertEqual([blog["key"] for blog in reg["blogs"] if "content_source" in blog], ["chance"])
+        self.assertNotIn("content_source", reg["defaults"])
 
     def test_facts_needs_allowlist_korean_only_and_the_approval_flow(self):
         self.assertEqual(self.errors(source_policy="allowlist", languages=["ko"], publish_flow="pr"), [])
@@ -191,19 +195,37 @@ class StartGuardTest(FB.FactEnv):
         self.assertEqual(report["outcome"], "DRAFT_CREATED")
         self.assertEqual(len(self.posts()), 1)
 
-    def test_the_provider_off_which_is_the_real_state_of_the_repository_makes_nothing(self):
-        real_sources = json.loads((FB.ROOT / "pipeline" / "source_registry.json").read_text(encoding="utf-8"))
-        self.assertFalse(any(item["enabled"] for item in real_sources["providers"]))                 # 62곳 모두 꺼진 채
-        self.use(FB.facts_registry(), real_sources)
+    def test_in_the_real_allowlist_every_provider_except_the_one_the_path_reads_is_still_off(self):
+        """전에는 '허용 목록의 62곳이 모두 꺼져 있다' 를 단언했다 — 켜는 변경(T3, 패치 02)이 NOAA 를 켜므로 '이 경로가 읽는 제공처(`noaa_swpc_json`)를 뺀 나머지가 모두 꺼져 있다' 로 바꿨다:
+        켜지면 안 되는 제공처는 여전히 못박힌다(단언을 약하게 만들지 않는다). NOAA 의 켜짐 자체는 값으로 보지 않고 아래 두 시험이 행동으로 보인다(진짜 두 파일 그대로면 초안이 나오고 NOAA 를 끈 사본이면 아무것도 나오지 않는다).
+        다른 제공처를 켜는 별건 PR 은 이 시험을 자기 제공처 이름으로 고친다(켜는 PR 이 의도적으로 고치는 값 표지판)."""
+        self.assertEqual(fact_supply.PROVIDER_ID, FB.PROVIDER_ID)
+        on = sorted(item["provider_id"] for item in FB.real_sources()["providers"] if item["enabled"] and item["provider_id"] != FB.PROVIDER_ID)
+        self.assertEqual(on, [])
+
+    def test_turning_off_the_one_provider_the_path_reads_in_the_real_allowlist_makes_nothing(self):
+        """진짜 허용 목록 사본에서 이 경로가 읽는 제공처 하나(`noaa_swpc_json`)를 끄면 글이 나오지 않는다(켜는 변경 뒤의 실제 파일에서는 그 하나가 켜져 있다)."""
+        self.use(FB.real_blogs(), FB.real_sources(noaa_enabled=False))
         out, _report = self.assert_not_ready("ACTIVE 가 아님")
         self.assertIn(FB.PROVIDER_ID, out)
 
-    def test_the_real_registry_files_with_only_the_switch_flipped_still_make_nothing(self):
-        """켜는 값 하나(content_source·source_policy 등)를 실수로 바꿔도 Provider 가 꺼져 있는 한 새 글이 나올 수 없다 — 지금 저장소의 상태 그대로."""
-        self.use(FB.facts_registry(), json.loads((FB.ROOT / "pipeline" / "source_registry.json").read_text(encoding="utf-8")))
-        self.assert_not_ready()
-        self.use(FB.facts_registry(source_policy=None), json.loads((FB.ROOT / "pipeline" / "source_registry.json").read_text(encoding="utf-8")))
+    def test_the_real_registry_files_as_they_are_make_a_draft_and_each_companion_value_removed_makes_nothing(self):
+        """진짜 두 파일 그대로(켜는 변경 뒤)는 초안이 만들어지고, 짝 값(허용 목록 모드·국문 단독·승인 흐름)이나 NOAA 켜짐 하나를 사본에서 빼면 아무 글도 나오지 않는다."""
+        self.use(FB.real_blogs(), FB.real_sources())
+        value, report, out, error = self.run_branch()
+        self.assertIsNone(error, error)
+        self.assertEqual(report["outcome"], "DRAFT_CREATED")
+        for post in self.posts():
+            post.unlink()
+        (self.work / "history.json").unlink()
+        self.noaa.calls.clear()                                                              # 한 시험 안에서 여러 번 돌리므로 가짜 NOAA 의 기록을 비운다('요청 도구도 만들지 않았다' 확인이 처음 실행에 걸리지 않게)
+        self.noaa.factory_calls = 0
+        self.use(FB.real_blogs(source_policy=None), FB.real_sources())
         self.assert_not_ready("allowlist")
+        self.use(FB.real_blogs(languages=["ko", "en"]), FB.real_sources())
+        self.assert_not_ready("레지스트리 검증 오류")
+        self.use(FB.real_blogs(publish_flow="direct"), FB.real_sources())
+        self.assert_not_ready("레지스트리 검증 오류")
 
     def test_source_policy_must_be_allowlist(self):
         self.use(FB.facts_registry(source_policy="legacy"), FB.sources_registry())

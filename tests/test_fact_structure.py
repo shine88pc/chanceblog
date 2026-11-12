@@ -175,13 +175,13 @@ class NoConnectionTest(unittest.TestCase):
             with self.subTest(file=path.name):
                 self.assertIsNone(self.PATTERN.search(path.read_text(encoding="utf-8")))
 
-    def test_the_registry_file_holds_no_value_for_the_new_switch(self):
+    def test_the_registry_file_holds_the_new_switch_value_on_the_chance_entry_only(self):
         """S2b(D-230): 개정 전에는 생성기·레지스트리 코드에 `content_source` 가 있으면 빨개졌다. 이제 **코드는 스위치를 안다**(값을 읽는 곳은 source_policy 한 군데) — 그러나 레지스트리 파일(`blogs.json`)에는 값이
         없다(켜는 변경은 T3 — 별도 승인). `registry.py` 는 여전히 이 이름을 쓰지 않고(검증은 source_policy.registry_errors 가 맡는다), 레지스트리 값을 읽는 코드(`.get("content_source")`)는 source_policy 와
         이력 항목을 읽는 fact_candidates 뿐이다."""
-        text = source("pipeline/blogs.json")
-        for needle in ("content_source", "fact", "facts"):
-            self.assertNotIn(needle, text)
+        text = source("pipeline/blogs.json")                                 # 켜는 변경(T3, 패치 02) 뒤: 값은 Chance 항목 한 군데에만 있다(전에는 글자 자체가 없었다)
+        self.assertEqual(text.count("content_source"), 1)
+        self.assertEqual(text.count('"content_source": "facts"'), 1)
         self.assertNotIn("content_source", source("pipeline/registry.py"))
         self.assertIn("content_source", source("pipeline/source_policy.py"))
         reader = re.compile(r"""\.get\(\s*["']content_source["']|\[\s*["']content_source["']\s*\]""")
