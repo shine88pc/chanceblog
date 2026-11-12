@@ -799,8 +799,11 @@ def check_request_files(root, files):
     """REQ-1: `인수인계/요청함/` 의 요청 파일(`R-001_짧은-영문-설명.md`)이 정해진 모양인지 — 파일 이름·앞머리(id·kind·title·summary·urgency·pr·created)·id 와 이름의 일치·
     제목 80자·요약 300자·중복 id 없음. 이 모양을 지킨 파일만 push 때 텔레그램으로 알려진다(pipeline/operator_loop.py). README.md 는 설명 문서라 건너뛴다.
     알림 번호(TG-STD): `no` 가 있는 파일은 번호 모양·kind 와의 유형 일치(info=P·merge=M·그 밖=숫자)·유형별 칸·글자 수 상한·PR 제목 안전을 보고, **같은 알림 번호를 가진 파일이
-    둘이면 오류**(유형마다 번호가 따로 늘어 P012·M012·012 는 서로 다른 번호다). 번호가 NOTICE_NO_REQUIRED_FROM_R 이상인 파일은 `no` 가 필요하다 — 그보다 앞선 옛 파일은 옛 모양 그대로 통과한다."""
+    둘이면 오류**(유형마다 번호가 따로 늘어 P012·M012·012 는 서로 다른 번호다). 번호가 NOTICE_NO_REQUIRED_FROM_R 이상인 파일은 `no` 가 필요하다 — 그보다 앞선 옛 파일은 옛 모양 그대로 통과한다.
+    병합완료 확인(`kind: merged`, 2026-11-12)은 새 번호를 쓰지 않고 확인하는 병합 요청의 M 번호를 그대로 쓰므로 위 '같은 번호 둘' 규칙에서 빼고 따로 본다: 같은 번호의 병합 요청(`kind: merge`)이
+    이 요청함에 있어야 하고(없으면 짝 없는 확인) 같은 번호의 병합완료 확인은 하나뿐이다(둘째부터 오류 — operator_loop.merged_pairing_problems)."""
     out, seen, seen_no = [], {}, {}
+    entries = []                    # (경로, Request) — 읽는 데 성공한 요청 파일들(병합완료 확인의 짝 규칙이 본다)
     prefix = loop_mod.REQUEST_DIR + "/"
     for rel in files:
         if not rel.startswith(prefix):
@@ -828,11 +831,15 @@ def check_request_files(root, files):
         if request.id in seen:
             out.append(err("REQ-1", f"요청 번호 {request.id} 가 {seen[request.id]} 와 같습니다 — 요청 번호는 파일마다 달라야 합니다(답 이슈가 어느 요청인지 가려야 합니다)", rel))
         seen.setdefault(request.id, rel)
-        if request.no:
+        entries.append((rel, request))
+        if request.no and request.kind != loop_mod.MERGED_KIND:
             if request.no in seen_no:
                 out.append(err("REQ-1", f"알림 번호 {request.no} 가 {seen_no[request.no]} 와 같습니다 — 알림 번호는 유형별로 파일마다 달라야 합니다"
                                         "(`인수인계/도구/work/next_notice_no.py` 로 다음 번호를 구합니다)", rel))
             seen_no.setdefault(request.no, rel)
+    numbers = {rel: request.no for rel, request in entries}
+    for rel, code in loop_mod.merged_pairing_problems(entries):
+        out.append(err("REQ-1", f"{one_line(loop_mod.problem_text(code))} (no: {numbers[rel]})", rel))
     return out
 
 

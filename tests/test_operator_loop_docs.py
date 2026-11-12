@@ -91,7 +91,7 @@ class GuideMatchesFormsTest(unittest.TestCase):
 
     def test_the_kind_table_lists_every_label_the_telegram_message_can_show(self):
         rows = table_rows(self.guide, "종류")
-        self.assertEqual([row[0] for row in rows], [notify.REQUEST_KIND_LABELS[kind] for kind in ("merge", "run", "confirm", "decision", "info")])
+        self.assertEqual([row[0] for row in rows], [notify.REQUEST_KIND_LABELS[kind] for kind in ("merge", "run", "confirm", "decision", "info", "merged")])
         self.assertEqual(set(row[0] for row in rows), set(notify.REQUEST_KIND_LABELS.values()))
 
     def test_the_kinds_that_need_an_answer_are_the_ones_the_guide_says_get_the_how_to_answer_line(self):

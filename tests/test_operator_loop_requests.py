@@ -519,7 +519,7 @@ class MessageTest(unittest.TestCase):
         return notify.format_ai_request(**base)
 
     def test_the_header_names_the_request_number_and_the_kind_in_korean(self):
-        labels = {"merge": "병합 부탁", "run": "실행 부탁", "confirm": "확인 부탁", "decision": "결정 부탁", "info": "알림"}
+        labels = {"merge": "병합 부탁", "run": "실행 부탁", "confirm": "확인 부탁", "decision": "결정 부탁", "info": "알림", "merged": "병합완료 확인"}
         self.assertEqual(notify.REQUEST_KIND_LABELS, labels)
         for kind, label in labels.items():
             first = self.fmt(kind=kind).splitlines()[0]

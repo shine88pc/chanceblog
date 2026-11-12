@@ -58,7 +58,11 @@ NOTICE_KEYS = ("no", "work")                                                    
 PROGRESS_KEYS = ("at", "now", "changed", "next", "eta", "waiting", "check")           # 진행 현황: 기준 시각(KST)·현재 진행·직전 보고 이후·다음 계획·예상 완료·확인/승인 대기·(선택) 점검 한 줄
 MERGE_KEYS = ("repo", "target", "pr_title", "verify", "state")                        # 병합 요청: 저장소·병합 대상·실제 PR 제목(글자 그대로)·검증 결과·(선택) 상태
 ASK_KEYS = ("options", "default", "approve")                                          # 확인 요청: (선택) 보기 · 기본 보기 번호 · 승인으로 읽는 보기 번호
-REQUEST_KEYS = (*BASE_KEYS, *NOTICE_KEYS, *PROGRESS_KEYS, *MERGE_KEYS, *ASK_KEYS)   # 앞머리에서 읽는 키(그 밖의 키는 런타임에서 무시, 검증기에서는 오류)
+MERGED_KIND = notify.MERGED_KIND
+MERGED_KEYS = ("result",)                                                             # 병합완료 확인(kind: merged, 운영자 요청 2026-11-12): 결과 `정상`·`이상`
+MERGED_LABEL_COMPACT = "".join(notify.REQUEST_KIND_LABELS[MERGED_KIND].split())          # 사유(summary)에 이 글자가 있으면 거절(공백은 세지 않는다 — merged_summary_label)
+MERGED_ALLOWED = ("id", "kind", "title", "summary", "no", "result", "created")        # 병합완료 확인 파일의 앞머리에 쓸 수 있는 칸 전부 — 긴급도·PR·작업 번호·다른 알림 유형의 칸은 오류(짧은 확인 알림에 덧붙일 칸이 없다)
+REQUEST_KEYS = (*BASE_KEYS, *NOTICE_KEYS, *PROGRESS_KEYS, *MERGE_KEYS, *ASK_KEYS, *MERGED_KEYS)   # 앞머리에서 읽는 키(그 밖의 키는 런타임에서 무시, 검증기에서는 오류)
 NOTICE_ALLOWED = {notify.NOTICE_PROGRESS: PROGRESS_KEYS, notify.NOTICE_MERGE: MERGE_KEYS, notify.NOTICE_ASK: ASK_KEYS}
 NOTICE_REQUIRED = {notify.NOTICE_PROGRESS: ("at", "now", "changed", "next", "eta", "waiting"), notify.NOTICE_MERGE: ("repo", "target", "pr_title", "verify"), notify.NOTICE_ASK: ()}
 NOTICE_LIMITS = {**{key: limit for key, _label, limit in notify.PROGRESS_ITEMS}, "check": notify.CHECK_LIMIT, "target": notify.TARGET_LIMIT, "verify": notify.VERIFY_LIMIT,
@@ -118,6 +122,15 @@ PROBLEMS = {
     "pr_title_control": "pr_title 에 제어 문자·보이지 않는 글자·줄 바꿈이 있습니다(글자 그대로 눈으로 같은지 볼 수 없습니다)",
     "pr_title_secret": "pr_title 에 비밀 값처럼 보이는 글자가 있습니다(PR 제목은 고치지 않고 그대로만 보내므로 보낼 수 없습니다)",
     "long_pr_title": f"pr_title 이 {notify.PR_TITLE_LIMIT}자를 넘습니다(PR 제목은 줄이지 않고 그대로 보냅니다 — PR 제목을 줄이세요)",
+    # 병합완료 확인(kind: merged, 운영자 요청 2026-11-12) — 문구에 외부 값은 없다
+    "bad_result": "result 는 `정상` 또는 `이상` 이어야 합니다",
+    "missing_result": "`result` 칸이 없거나 비어 있습니다(병합완료 확인에는 필요합니다 — `정상` 또는 `이상`)",
+    "merged_title_mismatch": "title 은 정확히 `[M050] 병합완료 확인 - 정상` 꼴(번호와 결과가 `no`·`result` 와 같은 값)이어야 합니다",
+    "long_merged_summary": (f"병합완료 확인의 summary 는 정상이면 {notify.MERGED_SUMMARY_LIMITS[notify.MERGED_OK]}자, "
+                            f"이상이면 {notify.MERGED_SUMMARY_LIMITS[notify.MERGED_BAD]}자 이하 한 줄이어야 합니다"),
+    "merged_unpaired": "병합완료 확인의 `no` 와 같은 번호(M 번호)를 쓰는 병합 부탁(`kind: merge`) 요청 파일이 이 요청함에 없습니다 — 짝 없는 병합완료 확인은 보내지 않습니다",
+    "merged_duplicate": "같은 병합 부탁(같은 M 번호)의 병합완료 확인이 이미 있습니다 — 하나만 둡니다(이상을 알린 뒤 고친 결과는 다른 알림(`info`)으로 보냅니다 — 알림은 새로 더해진 파일만 고르므로 파일을 고쳐도 다시 가지 않습니다)",
+    "merged_summary_label": "병합완료 확인의 summary(사유)에는 `병합완료 확인` 글자를 쓰지 않습니다 — 폰의 둘째 줄이 제목 줄처럼 읽힙니다",
 }
 for _key in ("at", "now", "changed", "next", "eta", "waiting", "repo", "target", "pr_title", "verify"):
     PROBLEMS["missing_" + _key] = f"`{_key}` 칸이 없거나 비어 있습니다(이 알림 유형에는 필요합니다)"
@@ -208,24 +221,33 @@ def parse_request(name, text, strict=False):
         except ValueError:
             raise RequestError("bad_created") from None
     no, work, fields, notice_error = "", "", (), ""
+    title, summary = values["title"], values["summary"]
     problem = notice_problem(values, values["kind"], int(match.group(1)), strict)
     if problem and strict:
         raise RequestError(problem)
     if problem:
         notice_error = problem                  # 런타임: 새 칸이 맞지 않으면 알림을 잃지 않으려고 옛 모양(제목·요약)으로 보낸다 — 이유는 run_requests 가 로그에 남긴다
+        if values["kind"] == MERGED_KIND:       # 병합완료 확인만은 옛 모양으로 보내지 않는다: 틀린 파일의 제목(`- 정상` 인데 result 는 이상)이 폰에 그대로 나가 거짓 '정상' 이 되지 않게 글을 비워 돌려준다(D1)
+            title = summary = ""                # (폰에는 run_requests 가 요청 번호만 든 고정 문구 notify.format_merged_unreadable 을 보낸다)
     elif "no" in values:
         no, work = values["no"], values.get("work", "")
-        wanted = (*NOTICE_ALLOWED[notify.notice_type(no)], *(["summary"] if notify.notice_type(no) == notify.NOTICE_ASK else []))
-        fields = tuple((key, values[key]) for key in (*wanted,) if key in values)
-    return Request(request_id, values["kind"], values["title"], values["summary"], urgency, int(pr) if pr else None, created, str(name), no, work, fields, notice_error)
+        if values["kind"] == MERGED_KIND:
+            fields = (("result", values["result"]), ("summary", values["summary"]))          # 병합완료 확인: 결과와(이상일 때 폰에 싣는) 사유 한 줄
+        else:
+            wanted = (*NOTICE_ALLOWED[notify.notice_type(no)], *(["summary"] if notify.notice_type(no) == notify.NOTICE_ASK else []))
+            fields = tuple((key, values[key]) for key in (*wanted,) if key in values)
+    return Request(request_id, values["kind"], title, summary, urgency, int(pr) if pr else None, created, str(name), no, work, fields, notice_error)
 
 
 def notice_problem(values, kind, number, strict):
     """앞머리의 알림 칸(`no`·`work`·유형별 칸)이 맞는지 — 문제 코드(PROBLEMS 의 키)를 돌려주고 없으면 빈 글. values 는 앞머리 값(글), kind 는 이미 검증한 요청 종류, number 는 파일 이름의 요청 번호(정수).
 
     `no` 가 없는 파일은 옛 모양이다(새 칸이 하나라도 있으면 문제, strict 이고 번호가 NOTICE_NO_REQUIRED_FROM_R 이상이면 `no` 가 필요). `no` 가 있으면 번호 모양·kind 와의 유형 일치(info=P·merge=M·그 밖=숫자)·유형별 필수 칸·다른 유형의 칸 금지·값 모양을 본다.
+    kind 가 merged(병합완료 확인, 2026-11-12)이면 위 유형별 규칙을 거치지 않고 전용 규칙(_merged_problem)으로 본다.
     strict=True(검증기)는 글자 수 상한과 PR 제목의 안전(제어·보이지 않는 글자·비밀 모양·200자)까지 본다 — 런타임은 받고 보낼 때 줄이되 PR 제목은 줄이지 않고 notify 가 보낼 수 없으면 보내지 않는다."""
-    present = [key for key in values if key in (*NOTICE_KEYS, *PROGRESS_KEYS, *MERGE_KEYS, *ASK_KEYS)]
+    present = [key for key in values if key in (*NOTICE_KEYS, *PROGRESS_KEYS, *MERGE_KEYS, *ASK_KEYS, *MERGED_KEYS)]
+    if kind == MERGED_KIND:                                  # 병합완료 확인은 칸이 따로 정해진 새 종류라 아래 유형별 규칙을 거치지 않는다(`result` 는 다른 종류에서는 `foreign_key`)
+        return _merged_problem(values, strict)
     if "no" not in values:
         if present:
             return "notice_keys_without_no"
@@ -265,6 +287,52 @@ def notice_problem(values, kind, number, strict):
             if len(values.get(key, "")) > limit:
                 return "long_" + key
     return ""
+
+
+def _merged_problem(values, strict):
+    """병합완료 확인(`kind: merged`)의 문제 코드(없으면 빈 글). `no` 는 확인하는 병합 요청의 M 번호이고(요청 번호와 무관하게 늘 필요 — 새 종류다) `result` 는 `정상`·`이상`이며, 쓸 수 있는 칸은
+    MERGED_ALLOWED 뿐이다(긴급도·PR·작업 번호·다른 알림 유형의 칸은 foreign_key). `title` 은 번호·결과로 정해진 글(notify.merged_title)과 글자 그대로 같아야 하고, strict 이면 summary 가
+    정상 60자·이상 100자 이하여야 한다. summary(사유)에는 `병합완료 확인` 글자(공백 없이 비교)를 쓸 수 없다 — 제목 꼴 사유가 폰의 둘째 줄에서 첫 줄과 어긋나 보이는 것을 막는다(두 읽기 모두).
+    같은 번호의 병합 요청이 있는지·병합완료 확인이 하나뿐인지는 다른 파일을 봐야 해서 이 함수가 아니라 merged_pairing_problems(검증기 REQ-1)가 본다."""
+    if "no" not in values:
+        return "no_required"
+    no = values["no"]
+    kind_type = notify.notice_type(no)
+    if not kind_type:
+        return "bad_no"
+    if kind_type != notify.NOTICE_KIND_TYPES[MERGED_KIND]:
+        return "no_kind_mismatch"
+    if any(key not in MERGED_ALLOWED for key in values):
+        return "foreign_key"
+    result = values.get("result", "")
+    if not notify.clean_text(result, 10 ** 6):
+        return "missing_result"
+    if result not in notify.MERGED_RESULTS:
+        return "bad_result"
+    if values["title"] != notify.merged_title(no, result):
+        return "merged_title_mismatch"
+    if MERGED_LABEL_COMPACT in "".join(values["summary"].split()):
+        return "merged_summary_label"
+    if strict and len(values["summary"]) > notify.MERGED_SUMMARY_LIMITS[result]:
+        return "long_merged_summary"
+    return ""
+
+
+def merged_pairing_problems(entries):
+    """요청함의 요청 파일들(entries: [(파일 이름, Request)] — 읽는 데 성공한 것만, 검증기 REQ-1 이 넘긴다)에서 병합완료 확인(kind: merged)의 짝 규칙을 본다 → [(파일 이름, 문제 코드)](entries 의 순서).
+    ① 같은 M 번호를 쓰는 병합 요청(`kind: merge`)이 있어야 한다(merged_unpaired) ② 같은 M 번호의 병합완료 확인은 하나뿐이다 — 둘째부터 merged_duplicate(첫째가 이긴다).
+    번호가 없는 것(옛 모양으로 폴백한 파일)은 보지 않는다."""
+    merge_numbers = {request.no for _name, request in entries if request.kind == "merge" and request.no}
+    problems, seen = [], set()
+    for name, request in entries:
+        if request.kind != MERGED_KIND or not request.no:
+            continue
+        if request.no not in merge_numbers:
+            problems.append((name, "merged_unpaired"))
+        if request.no in seen:
+            problems.append((name, "merged_duplicate"))
+        seen.add(request.no)
+    return problems
 
 
 def _ask_problem(values, strict):
@@ -366,6 +434,9 @@ REQUEST_PROBLEM_WARNING = "::warning::요청 파일을 읽지 못해 알리지 �
 GIT_WARNING = "::warning::새 요청 파일을 가려내지 못해 알림을 보내지 않았습니다(중복·도배를 막으려는 것입니다). 이유는 바로 앞 로그 줄에 있습니다."
 NOTICE_FALLBACK_WARNING = ("::warning::요청 파일의 알림 칸(no·at·now 등)이 맞지 않아 번호 없는 옛 모양으로 보낸 알림이 있습니다. 이유는 바로 앞 로그 줄에 있습니다"
                            "(파일을 고쳐 새 번호로 다시 보내세요).")
+MERGED_UNREADABLE_LINE = "AI 요청 알림: {name} 은 병합완료 확인 파일의 칸이 맞지 않아 파일의 제목·요약·결과를 싣지 않고 고정 문구로 보냅니다 — {problem}"
+MERGED_UNREADABLE_WARNING = ("::warning::병합완료 확인 요청 파일의 칸이 맞지 않아 내용 없이 고정 문구로 보낸 알림이 있습니다. 이유는 바로 앞 로그 줄에 있습니다"
+                             "(파일을 고쳐도 다시 알리지 않으니 확인 결과는 다른 알림(info)으로 보내세요).")
 
 
 def skipped_line(names):
@@ -386,7 +457,12 @@ BLOG_REPO = notify.REPO_URL.split("github.com/", 1)[1]          # `shine88pc/cha
 def request_buttons(request, ref_name, default_branch):
     """요청 알림의 버튼(최대 4). 옛 파일(`no` 없음): ① 요청 열기(그 파일, 이 브랜치) ② PR 열기(pr 이 있을 때) ③ 답하기(새 이슈 양식 고르기) ④ 사용법(기본 브랜치).
     번호 있는 파일(TG-STD): 확인 요청은 ① 답하기(새 답변 양식 `ai-answer.yml` 바로 열기)로 시작하고, 진행 현황·병합 요청은 답할 일이 없어 답하기가 없다.
-    병합 요청의 저장소가 이 블로그 저장소가 아니면(예: 데스크톱) PR 열기를 달지 않는다 — 주소가 블로그 저장소의 같은 번호 PR 을 가리켜 틀리고 허용 주소도 아니다. 주소는 코드가 만든다."""
+    병합 요청의 저장소가 이 블로그 저장소가 아니면(예: 데스크톱) PR 열기를 달지 않는다 — 주소가 블로그 저장소의 같은 번호 PR 을 가리켜 틀리고 허용 주소도 아니다. 주소는 코드가 만든다.
+    병합완료 확인(`merged`, 2026-11-12)은 정상이면 단추가 없고(제목 한 줄뿐) 이상이면 '요청 열기' 하나이며, 칸이 맞지 않아 고정 문구로 가는 파일(번호 없음)도 '요청 열기' 하나다."""
+    if request.kind == MERGED_KIND:                          # 병합완료 확인(2026-11-12): 정상은 제목 한 줄뿐 단추 없음, 이상·칸이 틀린 파일은 내용을 읽으러 가는 '요청 열기' 하나
+        if request.no and dict(request.fields).get("result") == notify.MERGED_OK:
+            return []
+        return [("요청 열기", blob_url(ref_name, f"{REQUEST_DIR}/{request.name}"))]
     kind = notify.notice_type(request.no) if request.no else ""
     fields = dict(request.fields)
     buttons = [("답하기", notify.NEW_ANSWER_URL)] if kind == notify.NOTICE_ASK else []
@@ -462,14 +538,22 @@ def run_requests(environ, notifier, root, out, runner=subprocess.run):
         out(REQUEST_PROBLEM_WARNING)
     sending = sorted(requests, key=lambda request: request.name)
     shown, hidden = sending[:MAX_REQUEST_MESSAGES], len(sending) - MAX_REQUEST_MESSAGES
-    failed, lines, fallbacks, duplicates = 0, [], 0, 0
+    failed, lines, fallbacks, duplicates, unreadables = 0, [], 0, 0, 0
     for index, request in enumerate(shown):
         more = hidden if index == len(shown) - 1 and hidden > 0 else 0
         buttons = request_buttons(request, ref_name, default_branch)
-        if request.notice_error:                         # 새 칸이 맞지 않아도 알림을 잃지 않는다 — 옛 모양(제목·요약)으로 보내고 이유를 남긴다
+        unreadable = request.kind == MERGED_KIND and bool(request.notice_error)     # 병합완료 확인으로 읽혔지만 칸이 맞지 않는 파일 — 옛 모양(제목·요약)이 아니라 고정 문구만 보낸다(D1: 거짓 '정상' 방지)
+        if unreadable:
+            unreadables += 1
+            out(MERGED_UNREADABLE_LINE.format(name=request.name, problem=problem_text(request.notice_error)))
+        elif request.notice_error:                       # 새 칸이 맞지 않아도 알림을 잃지 않는다 — 옛 모양(제목·요약)으로 보내고 이유를 남긴다
             fallbacks += 1
             out(f"AI 요청 알림: {request.name} 의 알림 칸이 맞지 않아 옛 모양(제목·요약)으로 보냅니다 — {problem_text(request.notice_error)}")
-        if request.no:
+        if unreadable:
+            result = notifier.notify_merged_unreadable(request.id, buttons=buttons, more=more)
+        elif request.no and request.kind == MERGED_KIND:           # 병합완료 확인(2026-11-12): 정상은 제목 한 줄, 이상은 제목 + 사유 한 줄
+            result = notifier.notify_merged(request.no, dict(request.fields), buttons=buttons, more=more)
+        elif request.no:
             result = notifier.notify_notice(request.no, dict(request.fields), urgency=request.urgency, work=request.work, pr=request.pr, buttons=buttons, more=more)
         else:
             result = notifier.notify_ai_request(request.id, request.kind, request.title, request.summary, urgency=request.urgency, pr=request.pr, buttons=buttons, more=more)
@@ -481,7 +565,8 @@ def run_requests(environ, notifier, root, out, runner=subprocess.run):
             failed += 1
             out(notifier.scrub(f"AI 요청 알림: {request.id} 을 보내지 못했습니다 — {notify.describe(result)}"))
             lines.append(f"- {request.id}: 보내지 못했습니다({result.reason})")
-        if request.no:                                   # 알림 번호가 다른 가지의 다른 요청 파일과 겹쳤는지(로그 경고만 — 알림은 이미 보냈고 이 확인은 알림을 막지 않는다)
+        if request.no and request.kind != MERGED_KIND:   # 알림 번호가 다른 가지의 다른 요청 파일과 겹쳤는지(로그 경고만 — 알림은 이미 보냈고 이 확인은 알림을 막지 않는다)
+                                                         # (병합완료 확인은 짝인 병합 요청과 같은 M 번호를 쓰므로 여기서 겹침으로 세지 않는다 — 짝·중복은 검증기 REQ-1 이 본다)
             twins = other_files_with_notice_no(root, request.no, request.name, runner=runner)
             if twins:
                 duplicates += 1
@@ -492,6 +577,8 @@ def run_requests(environ, notifier, root, out, runner=subprocess.run):
         out(REQUEST_WARNING_LINE)
     if fallbacks:
         out(NOTICE_FALLBACK_WARNING)
+    if unreadables:
+        out(MERGED_UNREADABLE_WARNING)
     if duplicates:
         out(NOTICE_DUPLICATE_WARNING)
     if lines:

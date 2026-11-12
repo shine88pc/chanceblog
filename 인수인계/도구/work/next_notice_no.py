@@ -3,7 +3,8 @@
 알림 번호는 요청 번호 R-nnn 과 별개이고 유형마다 따로 늘어난다: 진행 현황 `P001`, 병합 요청 `M001`, 확인 요청은 숫자만 `001`(세 자리 0 채움, 999 다음은 네 자리, 000 은 없다).
 요청 번호(J3)를 정하는 것과 같은 방법으로 읽는다 — 블로그 저장소의 `refs/remotes/origin/main` 과 `refs/remotes/origin/ai/*` 모든 가지의 `인수인계/요청함/` **바로 아래**
 `R-nnn_슬러그.md` 파일 앞머리(`---` 사이)의 `no:` 줄을 모아 유형별 최댓값 + 1 을 낸다. `--local` 이면 로컬 가지(`refs/heads/*`)도, `--dir` 이면 그 작업 폴더의
-`인수인계/요청함/` 파일(아직 커밋·push 전인 파일)도 읽는다. 세지 않는 것: 하위 폴더의 파일·`README.md`·앞머리 밖(본문)의 `no:`·번호 모양이 아닌 값. 번호는 9999 를 넘지 못한다(넘으면 오류).
+`인수인계/요청함/` 파일(아직 커밋·push 전인 파일)도 읽는다. 세지 않는 것: 하위 폴더의 파일·`README.md`·앞머리 밖(본문)의 `no:`·번호 모양이 아닌 값·
+`kind: merged`(병합완료 확인 — 확인하는 병합 요청의 M 번호를 다시 쓴 것이라 새 번호를 먹지 않는다) 파일. 번호는 9999 를 넘지 못한다(넘으면 오류).
 
 사용: python -X utf8 next_notice_no.py [--repo <git 저장소, 기본 현재 폴더>] [--dir <작업 폴더>]... [--local] [--type P|M|ask]
   기본 출력은 세 줄이다:  P 다음 번호: P012 (지금 최댓값 P011 — R-168_progress-p011.md @ origin/main)
@@ -95,7 +96,10 @@ def parse_no(value):
 
 
 def front_numbers(text):
-    """파일 글 하나의 앞머리 `no:` 값들 중 번호 모양인 것들 — [(유형, 순번), …]. 나머지 값은 무시한다."""
+    """파일 글 하나의 앞머리 `no:` 값들 중 번호 모양인 것들 — [(유형, 순번), …]. 나머지 값은 무시한다.
+    병합완료 확인(`kind: merged`, 2026-11-12)의 `no` 는 확인하는 병합 요청의 번호를 다시 쓴 것이라 세지 않는다 — 새 번호를 먹지 않고 다음 M 번호 계산에도 들어가지 않는다."""
+    if "merged" in front_values(text, "kind"):
+        return []
     return [found for found in (parse_no(value) for value in front_values(text)) if found is not None]
 
 
