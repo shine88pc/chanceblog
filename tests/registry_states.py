@@ -22,7 +22,7 @@ REAL_BLOGS = ROOT / "pipeline" / "blogs.json"
 REAL_SOURCES = ROOT / "pipeline" / "source_registry.json"
 
 STATE_NAMES = ("pre_flip", "p2", "p3")
-EXPECTED_STATE = "p2"                         # 켜는 PR 이 이 한 줄을 한 칸 옮긴다(pre_flip → p2 → p3)
+EXPECTED_STATE = "p3"                         # 켜는 PR 이 이 한 줄을 한 칸 옮긴다(pre_flip → p2 → p3)
 ENABLED_PROVIDERS = {"pre_flip": [], "p2": ["noaa_swpc_json"], "p3": ["noaa_swpc_json"]}      # 허용 목록(pipeline/source_registry.json)에서 켜진 제공처
 
 

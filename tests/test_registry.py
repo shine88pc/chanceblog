@@ -37,7 +37,7 @@ class RealRegistryTest(unittest.TestCase):
         blog = registry.get_blog(real_registry(), "blogger_macat")
         self.assertEqual(blog["llm"]["max_retries"], 2)            # defaults 에서 상속
         self.assertEqual(blog["limits"]["max_posts_per_day"], 1)   # 블로그 값이 우선
-        self.assertEqual(registry.get_blog(real_registry(), "chance")["limits"]["max_posts_per_day"], 2)
+        self.assertEqual(registry.get_blog(real_registry(), "chance")["limits"]["max_posts_per_day"], 1)      # 제한 재개 잠금(L4)이 켜져 하루 1편(전에는 2)
 
     def test_defaults_mode_is_draft_so_a_blog_without_its_own_mode_never_publishes_by_itself(self):
         # 2026-10-25 20:26 에 auto 로 바뀌었던 것을 2026-10-26 운영자 답변으로 draft 로 되돌렸다. mode 없이 추가한 새 블로그가 곧바로 자동 게시되지 않게 한다.
