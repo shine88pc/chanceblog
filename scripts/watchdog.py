@@ -11,6 +11,9 @@
 열려 있는 동안 본문을 최신 내용으로 갱신하며, 심각 건은 며칠이 지나도 풀리지 않으면 코멘트로 다시 알린다.
 이 실행(워크플로)은 '새로 생긴 심각 건'이 있을 때만 실패(빨강)로 끝나 Actions 실패 알림도 간다.
 
+주 1–2편 운영(제한 재개 잠금이 켜진 Chance)에서는 글이 며칠 없는 것이 정상이므로, 잠금이 켜져 있고 규칙을 지키며 주간 상한이 있을 때만 Chance 를 주 단위 기준으로 점검한다
+(health.evaluate 의 weekly_cap — 마지막 글 허용 시간이 설정값에 7일을 더한 값이 되고 '어제 새 글 없음'은 울리지 않는다). 그 밖에는 모두 이전 기준 그대로다(chance_weekly_cap).
+
 글 커밋 시각은 git 이력에서 읽으므로 워크플로의 checkout 은 fetch-depth: 0 이어야 한다. 얕은 복제면 가장 위 커밋이
 모든 파일을 '새로 추가'한 것처럼 보이므로, ::warning:: 을 내고 git 기반 판정은 건너뛴다(이력 파일 기반 판정만 한다).
 """
@@ -29,6 +32,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pipeline.console import safe_output  # noqa: E402
 from pipeline.health import REAL_POST_STATUSES, Finding, entry_time, evaluate  # noqa: E402
+from pipeline.publish_lock import (CHANCE_KEY, WEEK_WINDOW_DAYS, lock_active, lock_errors,  # noqa: E402
+                                   lock_key_problems, weekly_posts_limit)
 from pipeline.registry import ROOT, enabled_blogs, load_registry, validate_registry  # noqa: E402
 from pipeline.state import KST, StateError, read_json_list  # noqa: E402
 
@@ -272,10 +277,21 @@ def _history_post_stats(history, now):
     return sum(1 for t in times if now - t <= timedelta(days=7)), (max(times) if times else None)
 
 
+def chance_weekly_cap(reg):
+    """Chance 를 주 단위 기준으로 점검할 때의 주간 상한(편수). 아니면 None — 이전 기준(허용 시간 그대로·NO_POSTS_DAY 포함)이다.
+    주 단위로 보는 것은 제한 재개 잠금이 켜져 있고(lock_active), 잠금 키가 잘못 적혀 있지 않고(lock_key_problems 없음), 규칙을 어기지 않고(lock_errors 없음 — 어기면 생성기 가드가 글을 만들지 않고 멈춘다)
+    chance.limits.max_posts_per_week 가 1 이상 정수일 때뿐이다(weekly_posts_limit — 잠금 가드가 읽는 값과 같은 함수). 레지스트리가 사전이 아니어도(읽지 못한 경우) None 이다:
+    모르는 상태에서는 경보가 더 울리는 쪽(이전 기준)이 안전한 쪽이다. 읽기만 하고 아무것도 바꾸지 않는다."""
+    if lock_key_problems(reg) or not lock_active(reg) or lock_errors(reg):
+        return None
+    return weekly_posts_limit(reg)
+
+
 def collect(reg, root, now, client=None):
     """(문제 목록, 블로그별 현황). 현황은 실행 요약 표에 쓴다(마지막 글 시각, 최근 7일 글 수)."""
     findings, stats = [], []
     pages_runs = None
+    chance_cap = chance_weekly_cap(reg)   # 잠금이 켜진 Chance 만 주 단위 기준(없으면 None — evaluate 를 이전과 똑같이 부른다)
     if client is not None:
         try:
             # main 브랜치의 실행만: 다른 ref 에서 workflow_dispatch 로 돌린 성공을 '배포됨'으로 세지 않는다.
@@ -322,8 +338,12 @@ def collect(reg, root, now, client=None):
                 pending = client.list_open_draft_pulls()
             except Exception as exc:  # noqa: BLE001 - 조회 실패는 이 구분만 건너뛰고 다른 검사를 막지 않는다
                 print(f"[참고] {blog['key']} 초안 PR 목록 조회 실패(승인 대기 구분을 건너뜀): {_oneline(exc)}")
+        weekly = {}
+        if chance_cap is not None and blog["key"] == CHANCE_KEY:   # Chance 에만, 그리고 키워드는 켜졌을 때만 넘긴다 — 꺼진 상태의 호출 모양이 이전과 같다
+            weekly = {"weekly_cap": chance_cap}
+            print(f"[참고] {blog['key']}: 주 단위 기준으로 점검합니다(주간 상한 {chance_cap}편 — 마지막 활동 허용 시간에 {WEEK_WINDOW_DAYS}일을 더하고 '어제 새 글 없음'은 알리지 않습니다).")
         blog_findings = evaluate(blog, history, now, last_content_commit=last_content, recent_runs=runs,
-                                 post_days=post_days, pages_runs=pages, pending_drafts=pending)
+                                 post_days=post_days, pages_runs=pages, pending_drafts=pending, **weekly)
         findings.extend(blog_findings)
         stats.append({"key": blog["key"], "mode": blog.get("mode"), "last_post": last_post, "posts_7d": posts_7d,
                       "codes": [f.code for f in blog_findings]})

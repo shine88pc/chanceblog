@@ -23,6 +23,7 @@ import yaml
 import _bootstrap
 import generator as g
 from chance_credit_helpers import fake_pool_photo
+from lock_helpers import pre_flip
 from pipeline import unsplash_credit
 from test_generator_slots import at, candidate, run_captured
 
@@ -610,6 +611,7 @@ class ValidatePostDataHeaderTest(unittest.TestCase):
 # ======================================================================================================================
 # 후보를 거르는 길과 마지막 방어선
 # ======================================================================================================================
+@pre_flip
 class GateAndGuardTest(unittest.TestCase):
     """generate_blog_posts 전체 흐름(가짜 피드·가짜 Gemini·임시 폴더)에서 깨진 머리말이 어디서 어떻게 걸러지는지."""
 

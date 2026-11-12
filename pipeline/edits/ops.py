@@ -14,7 +14,7 @@ import json
 import re
 from pathlib import Path
 
-from pipeline import unsplash_credit
+from pipeline import ai_guard, provenance, unsplash_credit
 from pipeline.edits import checks, frontmatter, safety
 from pipeline.llm import purpose
 
@@ -237,6 +237,10 @@ def check_outbound(named_texts):
 
 
 def op_llm_patch(text, fields, cfg, llm):
+    # 출처 표식이 있는 파일(구조화 공개 자료로 만든 글)과 표식 여부를 알 수 없는 파일(머리말이 닫히지 않음·읽을 수 없는 모양)은 페이지 원문 전체가 AI 로 나가는 이 길에 들일 수 없다 — op_image 와 같은 규칙이다(알 수 없으면 막는다, D-199).
+    # 대상은 원래 루트의 고정 페이지뿐이라 평소에는 일어나지 않고, 지금의 고정 페이지는 모두 표식 없음·머리말 없음으로 읽혀 동작이 그대로다(시험이 확인한다).
+    if provenance.blocks_ai(text):
+        raise EditError("이 파일은 구조화 공개 자료로 만든 글(출처 표식)이거나 머리말을 안전하게 읽을 수 없어 AI 수정을 받지 않습니다.")
     request = frontmatter.normalize_newlines(fields.get("after", "")).strip()
     before = frontmatter.normalize_newlines(fields.get("before", "")).strip()
     # AI 로 나가는 것(요청·변경 전·페이지 원문 전체)을 호출 전에 점검한다. 이메일·전화번호는 연락처 수정이 정당한 용도라 막지 않는다.
@@ -249,6 +253,8 @@ def op_llm_patch(text, fields, cfg, llm):
     try:
         with purpose(llm, "patch"):
             raw, _model = llm(prompt)
+    except ai_guard.AiInputForbidden:
+        raise      # 방벽이 막은 것은 '인프라 실패' 로 분류하지 않는다 — 입력을 만드는 코드의 결함 신호(러너가 오류 결과로 남기고 실행이 빨갛게 끝난다)
     except Exception as exc:  # noqa: BLE001 - 호출 라이브러리별 예외를 한곳에서 인프라 실패로 분류
         raise InfraError(f"AI 호출 실패: {type(exc).__name__}",
                          detail=safety.log_text(f"{type(exc).__name__}: {exc}", 300)) from exc
@@ -308,6 +314,8 @@ def image_queries(request, title, tags, llm=None):
         with purpose(llm, "image-queries"):
             raw, _ = llm(prompt)
         queries = [q.strip() for q in extract_json_object(raw).get("image_queries", []) if isinstance(q, str) and q.strip()]
+    except ai_guard.AiInputForbidden:
+        raise      # 방벽이 막은 것은 '검색어 제안 실패' 로 삼켜 요청 문구로 덮지 않는다(결함 신호)
     except Exception:  # noqa: BLE001 - 검색어 제안 실패는 요청 문구로 대체한다
         queries = []
     return (queries[:3] + fallback) if queries else fallback
@@ -329,6 +337,9 @@ def apply_image(text, old_url, new_url, credit=""):
 
 
 def op_image(text, fields, post, root, llm=None, picker=None):
+    # 표식 글(구조화 공개 자료로 만든 글)과 표식 여부를 알 수 없는 글은 대표 이미지를 바꾸지 않는다: 제목·태그가 AI 검색어 입력이 되는 길이라 AI 를 부르기 전에 거절한다(알 수 없으면 막는다).
+    if provenance.blocks_ai(text):
+        raise EditError("이 글은 구조화 공개 자료로 만든 글이거나 머리말을 안전하게 읽을 수 없어 대표 이미지를 자동으로 바꾸지 않습니다. 공개 자료로 만든 글의 이미지는 운영자가 직접 정합니다.")
     request = frontmatter.normalize_newlines(fields.get("user_prompt", "")).strip()
     if not request:
         raise EditError("'원하는 이미지 설명'이 비어 있습니다.")

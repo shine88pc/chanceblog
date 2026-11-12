@@ -96,7 +96,7 @@ class NoticeNumberTest(unittest.TestCase):
 
     def test_each_kind_maps_to_exactly_one_number_type(self):
         self.assertEqual(set(notify.NOTICE_KIND_TYPES), set(notify.REQUEST_KIND_LABELS))
-        self.assertEqual(notify.NOTICE_KIND_TYPES, {"info": "progress", "merge": "merge", "decision": "ask", "confirm": "ask", "run": "ask"})
+        self.assertEqual(notify.NOTICE_KIND_TYPES, {"info": "progress", "merge": "merge", "decision": "ask", "confirm": "ask", "run": "ask", "merged": "merge"})       # merged(병합완료 확인)는 확인하는 병합 요청의 M 번호를 그대로 쓴다
 
     def test_the_labels_are_korean_and_only_the_prefix_and_the_digits_are_english(self):
         self.assertEqual(notify.NOTICE_LABELS, {"progress": "진행 현황", "merge": "병합 요청", "ask": "확인 요청"})

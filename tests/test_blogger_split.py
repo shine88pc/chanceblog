@@ -486,7 +486,7 @@ class MonitoringContinuityTest(unittest.TestCase):
         files = oi.list_workflow_files(REAL)
         calls = len([f for f in files if f != inbox.OWN_WORKFLOW])
         self.assertLessEqual(calls + 12, oi.MAX_CALLS_WITH_TOKEN, (calls, oi.MAX_CALLS_WITH_TOKEN))   # 워크플로 파일마다 한 번 + 이슈·PR·검사 읽기: 한도(150) 안이다
-        self.assertEqual(len(files), 18)                                                                  # 열두 개였다가 공용 하나·래퍼 둘이 더해져 열다섯, 운영자 요청함의 ai-request·operator-reply 로 열일곱, 텔레그램 수신 telegram-inbox 로 열여덟
+        self.assertEqual(len(files), 20)                                                                  # 열두 개였다가 공용 하나·래퍼 둘이 더해져 열다섯, 운영자 요청함의 ai-request·operator-reply 로 열일곱, 텔레그램 수신 telegram-inbox 로 열여덟, 병합 부탁 PR 자동 만들기 auto-pr 로 열아홉(auto-pr 는 main 에서 돌지 않아 모음이 main 의 실행을 읽어도 항목이 생기지 않는다 — 호출만 한 번 는다. 새 워크플로를 더하면 이 숫자를 의도적으로 올린다). 그림자 실행 chance-shadow(2026-11-09, 수동 전용)로 스물
 
 
 class SplitDocsAreCurrentTest(unittest.TestCase):

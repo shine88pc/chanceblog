@@ -18,6 +18,7 @@ from unittest import mock
 
 import _bootstrap  # noqa: F401
 import generator as g
+from lock_helpers import pre_flip
 from test_generator_slots import FakeResponse, at, long_post, rss, run_captured
 
 # 소스 이름 앞부분 → 그 소스 규칙에만 있는 문장(2026-10-27 main 의 글자 그대로). 지침을 정리하면서 이 문장들이 그대로 남았는지 고정한다.
@@ -130,6 +131,7 @@ class GroundingRulesTextTest(unittest.TestCase):
                 self.assertRegex(rule, r"(?:세요|마세요)\.$")
 
 
+@pre_flip
 class EverySourcePromptTest(unittest.TestCase):
     """소스 목록을 코드에서 읽어 순회한다(보류 소스 포함) — 소스를 더해도 규칙이 빠지지 않는다."""
 
@@ -202,6 +204,7 @@ class EverySourcePromptTest(unittest.TestCase):
                 self.assertEqual(repeated, [])
 
 
+@pre_flip
 class SourceOwnRulesStayTest(unittest.TestCase):
     """소스별 규칙의 고유 문장은 지침을 정리한 뒤에도 그대로 남는다(약관 조건·보증 암시 금지·링크 글자 등)."""
 
@@ -293,6 +296,7 @@ class DocsTest(unittest.TestCase):
                 self.assertIn(word, rows[0])
 
 
+@pre_flip
 class SentPromptTest(unittest.TestCase):
     """엔진이 실제로 모델에 보내는 프롬프트(generate_blog_posts → call_gemini_with_fallback)에도 규칙이 들어간다."""
 

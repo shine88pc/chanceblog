@@ -36,6 +36,8 @@ def _candidates(root, discover):
             rel = spec_mod.normalize_path(name)
         except ValueError as exc:
             raise PagesError(str(exc)) from exc
+        if rel == "_posts" or rel.startswith("_posts/"):      # 글은 고정 페이지가 아니다 — 본문 전체를 AI 에 보내는 수정(llm_patch·text)의 대상이 글로 번지지 않게 막는다(docs/AI_FLOW.md)
+            raise PagesError(f"discover.include 에 `_posts` 아래 글은 올릴 수 없습니다(글은 고정 페이지가 아닙니다): {rel}")
         if not (root / rel).is_file():
             raise PagesError(f"discover.include 의 파일이 없습니다: {rel}")
         found[rel] = True

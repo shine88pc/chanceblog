@@ -243,15 +243,19 @@ class DraftItemsTest(unittest.TestCase):
         self.assertEqual((issue.url, pull.url), (f"{URL}/issues/16", f"{URL}/pull/15"))
         self.assertNotEqual(issue.hint, pull.hint)
 
-    def test_a_pull_request_the_pull_rule_already_alerts_on_gets_no_second_item(self):
+    def test_a_pull_request_draft_keeps_its_item_whatever_the_pull_rule_says(self):
+        # 의도한 갱신(R2-1, 2026-11-09): 예전에는 열린 PR 규칙이 action 으로 올린 PR 번호(acting_pulls)에는 초안 항목을 만들지 않았다 — 그 줄(pr:<번호>:ready 등)이 알렸다.
+        # 같은 초안이 상태에 따라 id 가 바뀌어 알림이 되풀이되므로(docs/OPS_INBOX.md §4 의 옛 '한계'), 이제 초안 PR 은 상태와 무관하게 초안 항목을 항상 만든다.
         both = [h.make_draft(15, pull=True, channel="Chance"), h.make_draft(16, channel="티스토리"), h.make_draft(17, pull=True, channel="Chance")]
-        self.assertEqual([i.id for i in inbox.draft_items(both, NOW, URL, acting_pulls={15})], ["draft:16:wait", "draft:17:wait"])
-        self.assertEqual([i.id for i in inbox.draft_items(both, NOW, URL, acting_pulls={15, 17})], ["draft:16:wait"])
-        self.assertEqual([i.id for i in inbox.draft_items(both, NOW, URL)], ["draft:15:wait", "draft:16:wait", "draft:17:wait"])      # 기본값: 모두 만든다
+        every = ["draft:15:wait", "draft:16:wait", "draft:17:wait"]
+        self.assertEqual([i.id for i in inbox.draft_items(both, NOW, URL, {15: "ready"})], every)
+        self.assertEqual([i.id for i in inbox.draft_items(both, NOW, URL, {15: "ready", 17: "conflict"})], every)
+        self.assertEqual([i.id for i in inbox.draft_items(both, NOW, URL)], every)
 
-    def test_the_skip_list_is_for_pull_requests_only_an_issue_with_the_same_number_keeps_its_item(self):
-        # 이슈와 PR 은 번호를 함께 쓰므로 실제로는 겹치지 않는다 — 종류를 번호만으로 가리지 않는다는 방어
-        self.assertEqual([i.id for i in inbox.draft_items([h.make_draft(15)], NOW, URL, acting_pulls={15})], ["draft:15:wait"])
+    def test_a_pull_state_never_changes_an_issue_drafts_item_even_with_the_same_number(self):
+        # 이슈와 PR 은 번호를 함께 쓰므로 실제로는 겹치지 않는다 — 종류를 번호만으로 가리지 않는다는 방어(예전에는 '건너뛸 PR 번호' 목록이 같은 방어를 받았다)
+        item, = inbox.draft_items([h.make_draft(15)], NOW, URL, {15: "conflict"})
+        self.assertEqual((item.id, item.detail), ("draft:15:wait", "채널 티스토리 · 이슈 #15 · 발행을 기다립니다"))
 
     def test_a_pull_request_draft_keeps_no_item_when_it_is_closed_discarded_or_from_a_stranger(self):
         drafts = [h.make_draft(1, pull=True, state="closed"), h.make_draft(2, pull=True, extra_labels=("폐기",)),
@@ -295,12 +299,16 @@ class DraftItemsTest(unittest.TestCase):
         odd, = self.items([h.make_draft(5, "제목", "\\")])                                   # 무력화하면 사라지는 글자뿐인 라벨은 없는 것과 같다
         self.assertEqual(odd.detail, "채널 표시 없음 · 이슈 #5 · 발행을 기다립니다")
 
-    def test_the_skip_list_is_empty_by_default_so_no_pull_request_number_is_skipped(self):
-        self.assertEqual(inspect.signature(inbox.draft_items).parameters["acting_pulls"].default, ())
+    def test_no_pull_request_number_is_ever_skipped_and_the_state_list_is_empty_by_default(self):
+        # 의도한 갱신(R2-1, 2026-11-09): '건너뛸 PR 번호'(acting_pulls)는 없어졌다 — 초안 PR 은 번호가 무엇이든 항목을 만든다. 네 번째 자리는 상태 표(pull_states)다
+        parameters = inspect.signature(inbox.draft_items).parameters
+        self.assertNotIn("acting_pulls", parameters)
+        self.assertIsNone(parameters["pull_states"].default)
         numbers = list(range(1, 130)) + [255, 300, 401]                                       # 7·77 처럼 눈에 띄는 번호도 빠짐없이
         drafts = [h.make_draft(n, pull=True, channel="Chance") for n in numbers]
         self.assertEqual([i.id for i in inbox.draft_items(drafts, NOW, URL)], [f"draft:{n}:wait" for n in numbers])
         self.assertEqual([i.id for i in inbox.draft_items(drafts, NOW, URL, ())], [f"draft:{n}:wait" for n in numbers])
+        self.assertEqual([i.id for i in inbox.draft_items(drafts, NOW, URL, {n: "ready" for n in numbers})], [f"draft:{n}:wait" for n in numbers])
 
     def test_a_title_ending_in_a_backslash_cannot_break_the_bold_title(self):
         for title in ("[초안][티스토리] 제목\\", "[초안][티스토리] 제목 \\ \\", "[초안][티스토리] 제목\\\\\\"):
@@ -343,8 +351,9 @@ class DraftItemsTest(unittest.TestCase):
 
 
 class PullRequestDraftAlertTest(unittest.TestCase):
-    """초안 PR 한 건은 한 줄만 남는다: 열린 PR 규칙이 이미 action 이면 그 줄, 아니면 초안 항목.
-    저장소 기본 토큰이 연 PR 은 검사가 돌지 않아 열린 PR 규칙으로는 알림 없는 '검사 결과 없음'(check)으로 남기 때문이다(GitHub 규칙)."""
+    """초안 PR 한 건은 검사·병합 상태와 무관하게 초안 항목 한 줄만 남는다(R2-1, 2026-11-09 — 예전에는 열린 PR 규칙이 이미 action 이면 그 줄, 아니면 초안 항목이어서
+    상태가 바뀔 때마다 id 가 달라져 알림이 되풀이됐다). 저장소 기본 토큰이 연 PR 은 검사가 돌지 않아 열린 PR 규칙으로는 알림 없는 '검사 결과 없음'(check)으로 남기 때문에
+    초안 항목이 있어야 한다(GitHub 규칙)."""
 
     def ids(self, pulls=(), drafts=(), **kw):
         return {i.id for i in inbox.build_items(snap(pulls=list(pulls), drafts=list(drafts), **kw))}
@@ -368,11 +377,13 @@ class PullRequestDraftAlertTest(unittest.TestCase):
             self.assertNotIn("action", alone, name)                                                # 대조: 초안 표시가 없으면 어느 것도 알림이 아니다
             self.assertEqual(self.ids([pull], [self.pr_draft()]), {"draft:15:wait"}, name)
 
-    def test_every_pull_state_the_pull_rule_alerts_on_stays_and_the_draft_item_steps_aside(self):
+    def test_every_pull_state_the_pull_rule_alerts_on_is_replaced_by_the_draft_item_too(self):
+        # 의도한 갱신(R2-1, 2026-11-09): 예전에는 열린 PR 규칙이 action 으로 올린 세 상태(병합하면 됩니다·충돌·검사 실패)에서는 그 줄(pr:15:ready 등)이 남고 초안 항목이 물러났다.
+        # 그러면 같은 초안이 상태가 바뀔 때마다 새 id 가 되어 알림이 되풀이돼서, 이제 어느 상태에서도 초안 항목 하나뿐이다(상태는 설명 문구로만 알린다).
         states = {"ready": h.make_pull(15), "conflict": h.make_pull(15, mergeable=False, state="dirty"), "ci_fail": h.make_pull(15, ci="fail")}
         for name, pull in states.items():
-            self.assertEqual(self.ids([pull], [self.pr_draft()]), {f"pr:15:{name}"}, name)         # 같은 PR 이 두 번 알림이 되지 않는다
-            self.assertEqual(self.ids([pull], [self.pr_draft(hours=100)]), {f"pr:15:{name}"}, name)
+            self.assertEqual(self.ids([pull], [self.pr_draft()]), {"draft:15:wait"}, name)         # 같은 PR 이 두 줄도, 상태마다 다른 id 도 되지 않는다
+            self.assertEqual(self.ids([pull], [self.pr_draft(hours=100)]), {"draft:15:stale"}, name)
 
     def test_a_github_draft_pull_request_or_an_unlisted_one_is_still_announced(self):
         # 열린 PR 규칙은 GitHub 의 draft 상태 PR 을 건너뛰므로 초안 항목이 유일한 알림이다
@@ -403,12 +414,14 @@ class PullRequestDraftAlertTest(unittest.TestCase):
         self.assertEqual([(i.id, i.level) for i in items], [("draft:15:stale", "check")])
         self.assertEqual(inbox.plan_notice(items, ["draft:15:wait"]), ([], []))
 
-    def test_when_the_checks_finish_the_pull_rule_takes_over_and_that_is_announced_as_a_new_state(self):
+    def test_when_the_checks_finish_nothing_is_announced_again(self):
+        # 의도한 갱신(R2-1, 2026-11-09): 예전에는 검사가 끝나 열린 PR 규칙이 pr:15:ready 로 넘겨받으면 '상태가 바뀌었다'며 한 번 더 알렸다(그리고 계산 중으로 돌아오면 또 알렸다).
+        # 한 초안은 한 번만 알린다 — id 는 그대로 draft:15:wait 이다.
         waiting = inbox.build_items(snap(pulls=[h.make_pull(15, ci="pending")], drafts=[self.pr_draft()]))
         _, kept = inbox.plan_notice(waiting, None)
         self.assertEqual(kept, ["draft:15:wait"])
         done = inbox.build_items(snap(pulls=[h.make_pull(15)], drafts=[self.pr_draft()]))
-        self.assertEqual(inbox.plan_notice(done, kept), (["pr:15:ready"], ["pr:15:ready"]))
+        self.assertEqual(inbox.plan_notice(done, kept), ([], ["draft:15:wait"]))
 
     def test_a_failed_pull_lookup_still_announces_the_draft(self):
         for source in ("pulls", "pull_details"):
@@ -546,7 +559,7 @@ class DraftBoardTest(unittest.TestCase):
 
     def test_a_stopped_channel_with_pending_drafts_shows_the_count_and_says_stopped(self):
         row = table_rows(self.board(drafts=[h.make_draft(51, "[초안][네이버] 글", "네이버", hours=3)]))[3]
-        self.assertEqual(row[:3], ["네이버", "1 (정지 중)", "1일 미만"])
+        self.assertEqual(row[:3], ["네이버", "1 (정지 전 초안)", "1일 미만"])           # 2026-11-11 정리(요구 4): 멈춘 채널의 초안은 '정지 전 초안'이다(공개를 권하지 않는다)
 
     def test_channel_names_match_ignoring_case(self):
         row = table_rows(self.board(drafts=[h.make_draft(41, channel="티스토리"), h.make_draft(42, channel="Chance")]))
@@ -649,7 +662,7 @@ class DraftBoardTest(unittest.TestCase):
         blogs = blogs4()
         drafts = [h.make_draft(61, channel="네이버"), h.make_draft(62, channel="네이버")]
         rows = table_rows(self.board(blogs=blogs, drafts=drafts, notes=self.CAP, histories={"blogger_macat": []}))
-        self.assertEqual(rows[3][1], "2+ (정지 중)")
+        self.assertEqual(rows[3][1], "2+ (정지 전 초안)")
 
     def test_the_blogger_estimate_never_gets_a_plus_unless_github_drafts_share_the_channel(self):
         history = [h.make_entry("draft_uploaded", ago(days=2)), h.make_entry("draft_uploaded", ago(days=3))]
@@ -1293,13 +1306,14 @@ class RunWithDraftsTest(unittest.TestCase):
         return fake, root
 
     def test_a_pull_request_draft_the_pull_rule_alerts_on_is_counted_but_alerted_only_once(self):
+        # 의도한 갱신(R2-1, 2026-11-09): 검사가 통과해 열린 PR 규칙이 '병합하면 됩니다'로 올릴 상태여도 줄은 초안 항목 하나(draft:15:wait)이고 표식에도 그 id 만 남는다
         fake, root = self.pull_world([h.make_check("validate")])
         self.run_script(fake, root)
         body = self.body(fake)
         self.assertEqual(table_rows(body)[0][:3], ["Chance", "1", "1일 미만"])
-        self.assertEqual(body.count("PR #15 병합하면 됩니다"), 1)
-        self.assertNotIn("초안 대기", body)
-        self.assertEqual(inbox.parse_marker(body).items, ("pr:15:ready",))
+        self.assertEqual(body.count("초안 대기 — 승인 대기 글"), 1)
+        self.assertNotIn("PR #15 병합하면 됩니다", body)
+        self.assertEqual(inbox.parse_marker(body).items, ("draft:15:wait",))
 
     def test_a_pull_request_draft_without_checks_is_announced_as_a_draft_with_one_comment(self):
         # 저장소 기본 토큰이 연 PR 은 검사가 돌지 않는다 — 열린 PR 규칙만으로는 알림 없는 '검사 결과 없음'이 되던 경우
@@ -1740,10 +1754,10 @@ class DraftGuideMatchesCodeTest(unittest.TestCase):
         self.assertIn(f"최근 {inbox.DRAFT_WINDOW_DAYS}일 초안함 업로드", self.guide)
 
     def test_the_table_cell_words_in_the_guide_are_the_ones_the_code_prints(self):
-        for word in ("자동 공개", "정지", "조회 실패", "(대략)", "(미등록)", "(채널 표시 없음)", "1일 미만", "(정지 중)", "그 밖의 채널"):
+        for word in ("자동 공개", "정지", "조회 실패", "(대략)", "(미등록)", "(채널 표시 없음)", "1일 미만", "(정지 전 초안)", "그 밖의 채널"):
             self.assertIn(word, self.doc, word)
         source = (_bootstrap.ROOT / "pipeline" / "inbox.py").read_text(encoding="utf-8")
-        for word in ("자동 공개", "조회 실패", "(대략)", "(미등록)", "(채널 표시 없음)", "1일 미만", "(정지 중)", "그 밖의 채널"):
+        for word in ("자동 공개", "조회 실패", "(대략)", "(미등록)", "(채널 표시 없음)", "1일 미만", "(정지 전 초안)", "그 밖의 채널"):
             self.assertIn(word, source, word)
         self.assertIn("채널 | 대기 초안 | 가장 오래된 | 최신 초안", self.doc)
         self.assertEqual(inbox.BOARD_HEADER, ("채널", "대기 초안", "가장 오래된", "최신 초안"))
@@ -1758,11 +1772,13 @@ class DraftGuideMatchesCodeTest(unittest.TestCase):
     def test_the_pull_request_draft_rule_in_the_guide_is_what_the_code_does(self):
         rows = [line for line in self.doc.splitlines() if line.startswith("| 초안(PR) |")]
         self.assertEqual(len(rows), 1)
-        for phrase in ("열린 PR 줄(`pr:<번호>:…`)은 빼서", "`draft:<번호>:wait`", "`/pull/번호`", "검사 결과 없음"):
+        # 의도한 갱신(R2-1, 2026-11-09): 문서가 '상태와 무관한 id 하나'를 말한다(예전 문구 '새 id라 **한 번 더** 알립니다'는 없어졌다)
+        for phrase in ("열린 PR 줄(`pr:<번호>:…`)은 상태와 상관없이 항상 빼서", "`draft:<번호>:wait`", "`/pull/번호`", "검사 결과 없음", "PR의 검사·병합 상태와 무관"):
             self.assertIn(phrase, rows[0], phrase)
-        for phrase in ("`pr:<번호>:ready`·`conflict`·`ci_fail`", "새 id라 **한 번 더** 알립니다", "초안 PR은 한 줄만 남깁니다",
+        for phrase in ("`pr:<번호>:ready`·`conflict`·`ci_fail`처럼 열린 PR 규칙이 action으로 올릴 상태까지", "**한 번만** 알립니다", "초안 PR은 한 줄만 남깁니다",
                        "PR 목록이나 상세를 읽지 못한 점검에서도 초안 항목은 그대로 알립니다."):
             self.assertIn(phrase, self.doc, phrase)
+        self.assertNotIn("새 id라 **한 번 더** 알립니다", self.doc)
         self.assertIn("초안 PR은 한 줄만 남긴다", self.arch)
         # 문서가 action 으로 꼽은 세 상태가 실제로 열린 PR 규칙의 action 이다(그 밖의 상태는 action 이 아니다)
         made = {i.id.rsplit(":", 1)[1] for i in inbox.pull_items([h.make_pull(15), h.make_pull(16, mergeable=False, state="dirty"), h.make_pull(17, ci="fail")], NOW, URL)
@@ -1772,10 +1788,10 @@ class DraftGuideMatchesCodeTest(unittest.TestCase):
         self.assertEqual(quiet, {"no_ci", "pending", "blocked"})
 
     def test_the_limits_found_in_the_first_review_are_written_down_as_the_code_behaves(self):
-        # 초안 PR 이 한 번 더 알려지는 경우(승인 흐름을 켜기 전에 정할 일)
-        for phrase in ("**한계(초안 PR이 한 번 더 알려지는 경우)**", "초안 PR이 이미 `pr:<번호>:ready`로 알려진 뒤 열린 PR 줄이 일시적으로 action에서 빠지는 점검",
-                       "`mergeable`)가 다시 null로 돌아옴·상세 조회 실패·열린 PR 목록 조회 실패", "`draft:<번호>:wait`가 새 id라 한 번 더 알립니다",
-                       "승인 흐름(`publish_flow: pr`)을 켜기 전에 초안 PR 항목 id를 PR 상태와 무관하게 통일하는 것이 권고입니다"):
+        # 초안 PR 이 한 번 더 알려지던 경우는 R2(2026-11-09)에서 id 를 통일해 해소했고, 문서는 해소됐다고 적는다(예전에는 '켜기 전에 정할 일'이라고 적혀 있었다)
+        for phrase in ("**옛 한계(해소됨, 2026-11-09 R2)**", "초안 PR이 이미 `pr:<번호>:ready`로 알려진 뒤 열린 PR 줄이 일시적으로 action에서 빠지는 점검",
+                       "`mergeable`)가 다시 null로 돌아옴·상세 조회 실패·열린 PR 목록 조회 실패", "`draft:<번호>:wait`가 새 id라 한 번 더 알려졌습니다",
+                       "초안 PR 항목 id를 PR 상태와 무관하게 통일하는 권고를 이렇게 처리했습니다"):
             self.assertIn(phrase, self.doc, phrase)
         # 표식은 알린 id 를 80개까지만 남긴다
         self.assertIn(f"알린 action id를 {inbox.MARKER_IDS_MAX}개(`MARKER_IDS_MAX`)까지만 남깁니다", self.doc)

@@ -15,20 +15,16 @@ from unittest import mock
 import _bootstrap  # noqa: F401
 from verify_pages_helpers import BASE, KR, EN, KST, NOW, SITE_CONFIG, make_repo, post_of, v
 
-# 2026-10-25 공개 사이트 posts.json 에서 옮겨 온 (path -> absoluteUrl) 15건 중 10건(MIT TR 쌍 2건·IEEE Spectrum 쌍 2건·Ars Technica 1편은 2026-10-26에 비공개로 돌려 아래 PUBLIC_MISSING으로 옮겼다)(로컬 사본. 이 테스트는 사이트에 접속하지 않는다).
+# 2026-10-25 공개 사이트 posts.json 에서 옮겨 온 (path -> absoluteUrl) 15건 중 10건(MIT TR 쌍 2건·IEEE Spectrum 쌍 2건·Ars Technica 1편은 2026-10-26에, 회사 발표·종료 행사 기계연·원프레딕트 쌍 4건은 2026-11-09 M026 에서 비공개로 돌려 아래 PUBLIC_MISSING으로 옮겼다)(로컬 사본. 이 테스트는 사이트에 접속하지 않는다).
 PUBLIC_SNAPSHOT = {
     "_posts/일상·마음/2026-10-20-KR-141500.md": "https://shine88pc.github.io/chanceblog/posts/2026/10/20/korean-food-date-labels/",
     "_posts/Everyday Life/2026-10-20-EN-141500.md": "https://shine88pc.github.io/chanceblog/posts/2026/10/20/south-korea-food-date-labels/",
     "_posts/과학 환경/2026-10-20-KR-125000.md": "https://shine88pc.github.io/chanceblog/posts/2026/10/20/KR-125000/",
     "_posts/EN - Science & Environment/2026-10-20-EN-125000.md": "https://shine88pc.github.io/chanceblog/posts/2026/10/20/EN-125000/",
-    "_posts/산업 AI/2026-10-19-KR-195755.md": "https://shine88pc.github.io/chanceblog/posts/2026/10/19/KR-195755/",
-    "_posts/KR - 테크 인사이트/2026-10-19-KR-103939.md": "https://shine88pc.github.io/chanceblog/posts/2026/10/19/KR-103939/",
-    "_posts/Industrial AI/2026-10-19-EN-195755.md": "https://shine88pc.github.io/chanceblog/posts/2026/10/19/EN-195755/",
-    "_posts/EN - Tech Insights/2026-10-19-EN-103939.md": "https://shine88pc.github.io/chanceblog/posts/2026/10/19/EN-103939/",
     "_posts/EN - Space & Robotics/2026-10-18-EN-233513.md": "https://shine88pc.github.io/chanceblog/posts/2026/10/18/EN-233513/",
     "_posts/2026-10-18-AI.md": "https://shine88pc.github.io/chanceblog/posts/2026/10/18/AI/",
 }
-# 저장소에는 있으나 `published: false`라 공개 posts.json에 없는 14건(2026-10-25 사본의 5건 + 2026-10-26에 비공개로 돌린 9건).
+# 저장소에는 있으나 `published: false`라 공개 posts.json에 없는 글(2026-10-25 사본의 5건 + 2026-10-26에 비공개로 돌린 9건 + 2026-11-09 M026 에서 돌린 스냅샷 4건; 스냅샷 밖에서 비공개로 돌린 글은 여기에 넣지 않는다).
 PUBLIC_MISSING = [
     # 2026-10-26 운영자 승인으로 비공개 전환(약관이 금지하는 매체 출처: MIT Technology Review 쌍 2026-10-21, AI타임스 쌍 2026-10-25)
     "_posts/기술·미래/2026-10-21-KR-135226.md",
@@ -47,6 +43,11 @@ PUBLIC_MISSING = [
     "_posts/EN - Tech Geopolitics/2026-10-18-EN-161948.md",
     "_posts/KR - 테크 이야기/2026-10-18-KR-233513.md",
     "_posts/KR - 하드웨어 인사이트/2026-10-18-KR-161948.md",
+    # 2026-11-09 운영자 승인(확인 요청 006 결정 5, M026)으로 임시 비공개 전환(S03 원프레딕트 AI 네이티브 팩토리 = 회사 발표 요약 중심, S04 기계연 동남권 오픈랩 = 끝난 행사 안내)
+    "_posts/산업 AI/2026-10-19-KR-195755.md",
+    "_posts/KR - 테크 인사이트/2026-10-19-KR-103939.md",
+    "_posts/Industrial AI/2026-10-19-EN-195755.md",
+    "_posts/EN - Tech Insights/2026-10-19-EN-103939.md",
 ]
 REAL_BASE = "https://shine88pc.github.io/chanceblog/"
 

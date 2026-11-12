@@ -123,5 +123,68 @@
     "attempts": 1,
     "reasons": [],
     "image": "hpjSkU2UYSU"
+  },
+  {
+    "v": 1,
+    "blog": "blogger_kcyoon",
+    "date": "2026-11-06",
+    "generated_at": "2026-11-06T20:15:31.260422+09:00",
+    "status": "draft_uploaded",
+    "topic": "검색으로 찾을 때와 AI에게 물어볼 때를 나눠서 고르는 간단한 선택 기준",
+    "topic_source": "seed",
+    "title": "검색창과 AI 챗봇 중 무엇을 쓸지 빠르게 판단하는 선택 기준 4가지",
+    "labels": [
+      "AI 활용",
+      "디지털 정리",
+      "정보 검색"
+    ],
+    "url": "https://kcyoon.blogspot.com/",
+    "post_id": "5975874774713530110",
+    "model": "gemini-3.6-flash",
+    "attempts": 1,
+    "reasons": [],
+    "image": "-lZmnpignB8"
+  },
+  {
+    "v": 1,
+    "blog": "blogger_kcyoon",
+    "date": "2026-11-07",
+    "generated_at": "2026-11-07T19:31:15.332567+09:00",
+    "status": "draft_uploaded",
+    "topic": "중요한 파일을 클라우드와 외장 저장장치에 나눠서 보관하는 기본 요령",
+    "topic_source": "seed",
+    "title": "중요한 파일을 안전하게 보관하는 클라우드와 외장 저장장치 분할 관리법",
+    "labels": [
+      "디지털 정리",
+      "파일 백업",
+      "클라우드 활용"
+    ],
+    "url": "https://kcyoon.blogspot.com/",
+    "post_id": "6227201174517669365",
+    "model": "gemini-3.6-flash",
+    "attempts": 1,
+    "reasons": [],
+    "image": "IisDPFNUS4k"
+  },
+  {
+    "v": 1,
+    "blog": "blogger_kcyoon",
+    "date": "2026-11-08",
+    "generated_at": "2026-11-08T19:38:44.896791+09:00",
+    "status": "draft_uploaded",
+    "topic": "스마트폰 배터리 사용량과 저장공간을 점검하는 기본 설정 순서와 요령",
+    "topic_source": "seed",
+    "title": "스마트폰 배터리와 저장공간을 손쉽게 정리하는 점검 순서",
+    "labels": [
+      "디지털 정리",
+      "스마트폰 관리",
+      "배터리 관리"
+    ],
+    "url": "https://kcyoon.blogspot.com/",
+    "post_id": "5197439892375631981",
+    "model": "gemini-3.6-flash",
+    "attempts": 1,
+    "reasons": [],
+    "image": "W9Z87k4hV08"
   }
 ]

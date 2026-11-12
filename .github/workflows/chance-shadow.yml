@@ -1,0 +1,150 @@
+name: "[Chance] 그림자 실행(수동, 읽기 전용)"
+run-name: "[Chance] 그림자 실행 · 수동(읽기 전용: 저장소에 아무것도 쓰지 않음)"
+
+# 실제 글을 올리지 않고 '지금 코드가 후보 글을 어떻게 만들고 어떻게 거르는지'만 눈으로 평가하는 수동 실행이다(제한 재개 조건: 그림자 모드 3회·초안 10개 이상 평가).
+# 발행 정지(PIPELINE_PAUSE)가 켜져 있어도 이 워크플로는 돈다 — 생성기가 환경 변수 SHADOW_RUN=1 일 때만 정지 검사를 건너뛰고, 그 모드는 저장소 파일(_posts·history.json 등)을 쓰지 않으며
+# git·gh 를 부르지 않고 만든 후보 글과 보류 사유를 SHADOW_OUT 폴더에만 쓴다(출력 형식은 docs/QUALITY_GATE.md). 정지 변수는 값을 읽어 넘길 뿐 바꾸지 않는다.
+#
+# 이 워크플로가 어떤 쓰기도 하지 못하는 이유(docs/PUBLISH_PATHS.md §5, 시험은 tests/test_publish_paths.py):
+#   1. 트리거는 workflow_dispatch(수동) 하나뿐이다 — 정기 실행·push·PR·이슈 이벤트가 없다.
+#   2. 권한은 contents: read 뿐이다 — 저장소에 push 할 수 없고 PR·이슈·배포 요청(actions: write)도 만들 수 없다. 체크아웃은 persist-credentials: false 라 토큰이 git 설정에 남지 않는다.
+#   3. 단계에 git push·git commit·gh 호출이 없고 GITHUB_TOKEN 을 어느 단계에도 넘기지 않는다. 비밀(Gemini·Unsplash 키)은 생성기 단계의 env 로만 넘긴다.
+#   4. 결과는 러너 임시 폴더에만 쓰고 실행 요약(숫자만)과 아티팩트(보관 14일)로 낸다.
+# 측정 단계는 별도 프로세스다: 측정 도구(pipeline/quality_shadow.py — 별도 변경으로 들어온다)가 저장소에 있을 때만 돌고 없으면 건너뛴다(생성기는 측정 도구를 불러오지 않는다).
+#
+# 병합 순서: 이 워크플로는 그림자 실행 코드(pipeline/shadow_run.py 와 generator.py 의 SHADOW_RUN 분기 — GATE 묶음)가 **먼저** 병합된 뒤에만 안전하다.
+# 그 코드가 없는 저장소의 생성기는 SHADOW_RUN 을 모르기 때문에 일반 실행으로 돌아 글을 만들고 Gemini 무료 한도를 쓴다(읽기 전용이 아니게 된다 — 그래서 아래 첫 단계가
+# 파일이 없으면 실패한다). '발행 정지 중에도 돈다·읽기 전용이다'는 말도 그 코드가 들어온 뒤에만 참이다. 출력 형식 문서 docs/QUALITY_GATE.md 도 GATE 병합 전에는 저장소에 없다.
+
+on:
+  workflow_dispatch:
+    inputs:
+      count:
+        description: '그림자로 만들어 볼 후보 글 수(1–5, 기본 3). 후보마다 Gemini 를 부르므로 무료 한도를 씁니다 — 저장소에는 아무것도 쓰지 않습니다'
+        type: choice
+        default: '3'
+        options:
+          - '1'
+          - '2'
+          - '3'
+          - '4'
+          - '5'
+      as_of:
+        description: '측정의 날짜 기준 YYYY-MM-DD(행사 안내 판정에 쓰입니다). 비우면 오늘(한국 시각)'
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chance-shadow
+  cancel-in-progress: false
+
+jobs:
+  shadow:
+    name: 그림자 실행·측정
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      # 그림자 실행 코드가 이 저장소에 없으면 여기서 멈춘다(Gemini 를 부르기 전). 없는 채로 돌면 위 '병합 순서' 설명대로 일반 실행이 되어 글을 만들고 한도를 쓴다.
+      - name: 그림자 실행 코드 확인 (없으면 중단)
+        run: |
+          if [ ! -f pipeline/shadow_run.py ]; then
+            echo "::error::이 저장소에는 그림자 실행 코드(pipeline/shadow_run.py)가 없어 중단합니다 — 그 코드가 들어오기 전에는 생성기가 SHADOW_RUN 을 몰라 일반 실행으로 돌아 글을 만들고 Gemini 한도를 씁니다."
+            exit 1
+          fi
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install "google-genai>=2,<3"
+
+      # 생성기를 읽기 전용 그림자 모드로 돌린다. 정기·수동 글 작성 워크플로와 같은 코드·같은 비밀 이름을 쓰지만 SHADOW_RUN=1 이라 저장소에는 아무것도 쓰지 않는다.
+      # PIPELINE_PAUSE 는 값을 그대로 넘긴다(정지가 켜져 있어도 그림자 모드는 건너뛰어 돌고, 정지 변수는 바뀌지 않는다). SHADOW_COUNT 는 선택 입력(1–5)이다.
+      - name: 그림자 실행 — 후보 글 만들기(저장소에 쓰지 않음)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
+          EVENT_NAME: ${{ github.event_name }}
+          PIPELINE_PAUSE: ${{ vars.PIPELINE_PAUSE }}
+          SHADOW_RUN: '1'
+          SHADOW_OUT: ${{ runner.temp }}/chance_shadow_out
+          SHADOW_COUNT: ${{ inputs.count }}
+        run: |
+          mkdir -p "$SHADOW_OUT"
+          python generator.py
+
+      # 측정은 생성기와 별도 프로세스에서 한다(오프라인 도구, 네트워크 없음). 도구가 아직 저장소에 없으면 건너뛴다. 생성이 일부 실패했어도 있는 글은 잰다.
+      - name: 그림자 측정 (측정 도구가 있을 때만)
+        if: ${{ !cancelled() }}
+        env:
+          SHADOW_OUT: ${{ runner.temp }}/chance_shadow_out
+          REPORT_DIR: ${{ runner.temp }}/chance_shadow_report
+          AS_OF: ${{ inputs.as_of }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob globstar
+          mkdir -p "$REPORT_DIR"
+          if [ ! -f pipeline/quality_shadow.py ]; then
+            echo "::notice::측정 도구(pipeline/quality_shadow.py)가 이 저장소에 아직 없어 측정 단계를 건너뜁니다. 그림자 글은 아티팩트로 받을 수 있습니다."
+            exit 0
+          fi
+          as_of="${AS_OF:-}"
+          if [ -z "$as_of" ]; then
+            as_of="$(date -u -d '+9 hours' +%F)"
+          fi
+          if ! [[ "$as_of" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+            echo "::error::측정의 날짜 기준(as_of)은 YYYY-MM-DD 모양이어야 합니다."
+            exit 1
+          fi
+          posts=("$SHADOW_OUT"/**/*.md)
+          if [ "${#posts[@]}" -eq 0 ]; then
+            echo "::notice::측정할 그림자 글이 없어 측정 단계를 건너뜁니다."
+            exit 0
+          fi
+          python -m pipeline.quality_shadow --posts "$SHADOW_OUT" --as-of "$as_of" --out "$REPORT_DIR/shadow_report.json"
+          python -m pipeline.quality_shadow --posts "$SHADOW_OUT" --as-of "$as_of" --out "$REPORT_DIR/shadow_report.md"
+
+      # 실행 요약에는 숫자와 고정 문장만 쓴다(글·사유 문구는 외부·AI 유래라 요약에 옮기지 않는다 — 자세한 내용은 아티팩트).
+      - name: 그림자 결과 요약
+        if: ${{ !cancelled() }}
+        env:
+          SHADOW_OUT: ${{ runner.temp }}/chance_shadow_out
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          results=("$SHADOW_OUT"/*/result.json)
+          total="${#results[@]}"
+          passed=0
+          for file in "${results[@]}"; do
+            if [ "$(jq -r '.passed == true' "$file")" = "true" ]; then
+              passed=$((passed + 1))
+            fi
+          done
+          {
+            echo "### Chance 그림자 실행 결과(읽기 전용)"
+            echo "- 저장소·이력·글 폴더에 아무것도 쓰지 않았습니다. 이 워크플로의 권한은 contents: read 뿐이고 push·PR·이슈 단계가 없습니다."
+            echo "- 후보 글 ${total}건 중 최소 품질 Gate 통과 ${passed}건 · 보류 $((total - passed))건"
+            echo "- 글 파일·보류 사유(result.json)와 측정 보고서는 아래 아티팩트에서 받습니다."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 그림자 결과 아티팩트 올리기
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: chance-shadow-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/chance_shadow_out
+            ${{ runner.temp }}/chance_shadow_report
+          if-no-files-found: warn
+          retention-days: 14

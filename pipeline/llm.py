@@ -22,6 +22,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Optional
 
+from pipeline import ai_guard   # AI 입구 ②(호출 객체)의 방벽 — 표식 글의 글자가 프롬프트에 있으면 모델을 부르지 않는다(docs/AI_FLOW.md)
 from pipeline.console import md_cell, one_line
 from pipeline.secret_patterns import SECRET_PATTERNS
 
@@ -448,6 +449,7 @@ def make_gemini_llm(api_key, models, max_retries=2, sleep=time.sleep, client_fac
         return holder["c"]
 
     def call(prompt):
+        ai_guard.assert_clean(prompt)    # 표식 글의 글자가 프롬프트에 있으면 모델을 한 번도 부르지 않고 AiInputForbidden — 재시도·모델 폴백 없음(LLMError 가 아니라 호출한 쪽이 그대로 올린다)
         errors = []
         for model in [m for m in models if m not in dead] + [m for m in models if m in dead]:
             for attempt in range(max_retries + 1):

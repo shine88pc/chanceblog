@@ -47,7 +47,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from pipeline import gates, main_image, notify
+from pipeline import gates, main_image, notify, publish_lock
 from pipeline.auth_check import auth_check, exit_code_for, label_for, safe_code, sentence_for
 from pipeline.console import md_cell, one_line, safe_output
 from pipeline.llm import LLMError, call_log_of, make_gemini_llm, purpose
@@ -182,6 +182,19 @@ def summary_head(blog):
 def skip_line(code, **fields):
     """건너뜀·실패를 로그에서 한 줄로 찾게 하는 규격: [SKIP] code=CODE key=value ... (docs/ARCHITECTURE.md 4-1)."""
     return " ".join([f"[SKIP] code={code}"] + [f"{key}={value}" for key, value in fields.items()])
+
+
+def _lock_stop(out, environ, block, blog=None):
+    """제한 재개 잠금(pipeline/publish_lock.py)이 글 만들기를 막을 때의 줄·`::error::`(고정 문장)·실행 요약. 종료 2(설정 오류)로 끝내는 쪽이 부른다.
+    blog 가 있으면(레지스트리에서 확인된 블로그) 요약 머리와 주석에 그 key 를 쓰고, 없으면(레지스트리를 검증하기 전) 고정 문장만 쓴다."""
+    out(skip_line(block.code, **({"blog": blog["key"]} if blog else {})))
+    for line in block.lines:
+        out(f"[설정 오류] {line}")
+    out(f"::error::[{blog['key']}] {block.error}" if blog else f"::error::{block.error}")
+    if blog:
+        _summarize(environ, blog, block.code, md_cell(block.error, 200))
+    else:
+        _write_summary(environ, f"### Blogger 실행 요약\n- 결과: **{block.code}** — {md_cell(block.error, 200)}")
 
 
 def _summarize(environ, blog, code, text, ai_lines=()):
@@ -558,6 +571,10 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
     # ---- 설정 -------------------------------------------------------------
     try:
         reg = load_registry(root / "pipeline" / "blogs.json")
+        lock_block = publish_lock.registry_block(reg)   # 제한 재개 잠금(레지스트리 resume_lock, 기본 꺼짐): 켜져 있는데 레지스트리가 규칙을 어기면 어떤 글도 만들지 않는다
+        if lock_block is not None:
+            _lock_stop(out, environ, lock_block)
+            return EXIT_CONFIG
         errors = validate_registry(reg, root)
         if errors:
             out("[설정 오류] 레지스트리 검증 실패:\n  - " + "\n  - ".join(errors))
@@ -624,6 +641,10 @@ def run(argv=None, environ=None, now=None, llm=None, publisher_factory=None, rng
         _summarize(environ, blog, "INVALID_PUBLISH", message)
         return EXIT_CONFIG
     delivery = decide_delivery(policy, blog["mode"])
+    lock_block = publish_lock.publish_block(reg, blog["key"]) if delivery == "publish" else None   # 제한 재개 잠금: 즉시 게시(수동 publish 입력 포함)는 하지 않는다 — 초안함(draft)·파일(off)만
+    if lock_block is not None:
+        _lock_stop(out, environ, lock_block, blog)
+        return EXIT_CONFIG
     secret_values = _secret_values(blog, environ)  # 오류 문구에서 실제 값을 가린다
     if is_package:
         secret_values = secret_values + [str(environ.get("GITHUB_TOKEN") or "").strip()]   # 이슈 API 오류 문구에 실릴 수 있는 토큰도 가린다

@@ -7,6 +7,251 @@
 
 ---
 
+## [2026-11-10] Claude – WDWEEK: 워치독 주 단위 보완 — 제한 재개 잠금이 켜진 Chance 만 마지막 글 허용 시간 +7일·'어제 새 글 없음' 알림 없음, 그 밖은 바이트까지 같음 (결함 D-169 해소, 결정 D-220–D-224) (T2 — 병합 전·독립 검증 전, 켜는 변경은 따로)
+
+**작업자**: Claude (WDWEEK 구현자). 총괄 지시서 `audit6/WDWEEK_BRIEF.md` 를 그대로 따랐다 — 운영자 승인 008(2026-11-10)의 재개 조건 '주 1–2편'에서는 글이 며칠 없는 것이 정상인데 워치독의 `STALE`(Chance 36시간)·`NO_POSTS_DAY` 는 하루 한 편에 가깝던 때의 기준이라 켠 직후부터 거짓 경보가 쌓인다(결함 D-169). 켜기 전에 이것을 고치는 묶음이다. 블로그 `origin/main` `b6b5ea7`(M043 병합 직후)에서 시작해 새 작업 폴더 `wt_wdweek`(가지 `ai/claude/NO-MERGE-wdweek-wip`)에서만 일했고, 작업 도중 main 이 `0752fda`(M044 병합 직후)로 앞서가 총괄 지시로 그 위로 옮겼다(rebase — 충돌은 `docs/DEFECT_REGISTER.md` 표 끝 한 곳뿐이었고 M044 의 D-210–D-219 뒤에 D-220–D-224 를 번호순으로 이었다. 코드·시험·그 밖의 문서는 충돌이 없었다). 로컬 커밋 둘까지만 만들었다(push·병합 가지·PR 은 만들지 않았다 — 최종 병합 가지는 총괄이 한 커밋으로 만든다). 네트워크 접속은 하지 않았다(로컬 origin/main 이 이미 `0752fda` 라 `git fetch` 를 하지 않았다).
+**대상**: `pipeline/health.py`·`scripts/watchdog.py`·`tests/test_health_weekly.py`(새)·`tests/test_watchdog_weekly.py`(새)·`tests/test_watchdog_weekly_docs.py`(새)·`tests/test_publish_paths.py`(두 곳)·문서(`docs/PUBLISH_PATHS.md`·`ARCHITECTURE.md`·`ACTIONS_GUIDE.md`·`DEFECT_REGISTER.md` 의 D-169 해결·D-220–D-224).
+**등급**: T2 — 코드·시험·문서. **켜는 변경은 하지 않았다** — `pipeline/blogs.json` 값(`health.max_gap_hours` 포함)·`.github/`·광고 표면·정지 변수·Blogger 코드·글 파일은 그대로다.
+
+### 변경 사항
+
+- **`evaluate(..., *, weekly_cap=None)`**(`pipeline/health.py`): 키워드 전용·기본 `None` = 이전과 같음. 1 이상 정수(참/거짓 제외 — 그 밖의 값은 모두 이전 동작, 경보가 더 울리는 쪽)가 오면 주 단위 모드: ① `STALE` 허용 시간 = 설정값 + `WEEK_WINDOW_DAYS`(잠금 모듈의 7일) × 24시간(Chance 36 → 204시간), 문구에 '주 단위 기준(상한 N편): 설정값 36시간에 7일을 더했습니다' ② `NO_POSTS_DAY` 는 울리지 않는다. 나머지 검사(`FAIL_STREAK`·`RUN_FAIL_STREAK`·`REJECT_STREAK`·`UNPUBLISHED`·`PAGES_*`·`NO_ACTIVITY`)와 승인 흐름의 `DRAFT_WAITING` 변환(새 허용 시간 기준으로 `STALE` 이 울릴 때만 일어남 — 72시간 규칙 그대로)은 그대로고, 새 `Finding` 은 없다(상한에 닿아 쉬는 동안 정보 이슈를 만들지 않는다). 순수 함수 그대로(I/O·시각·무작위·네트워크 추가 없음, 임포트는 상수 하나).
+- **`chance_weekly_cap(reg)`·`collect` 배선**(`scripts/watchdog.py`): 제한 재개 잠금이 켜져 있고(`lock_active`) 잠금 키가 잘못 적혀 있지 않고(`lock_key_problems` 없음) 규칙을 어기지 않고(`lock_errors` 없음) `weekly_posts_limit` 가 1 이상 정수일 때만 그 값을 주고, `collect` 는 **Chance 에만** `weekly_cap` 을 넘긴다(잠금 가드가 읽는 함수를 그대로 가져다 썼다). 그 밖(잠금 꺼짐·상한 없음·키 오타·규칙 위반·레지스트리를 읽지 못함·Chance 아닌 블로그)은 키워드를 넘기지 않아 `evaluate` 호출의 모양과 출력이 이전과 바이트까지 같다. 주 단위로 점검할 때만 로그에 `[참고] chance: 주 단위 기준으로 점검합니다…` 한 줄. **지시서보다 한 가지 더 엄격하다**: `lock_errors`(규칙 L0–L8 위반)도 본다 — 어기면 생성기 가드가 글을 만들지 않고 멈추므로 그 상태에서 경보를 늦추지 않으려는 것이다(워치독 `main` 은 레지스트리 검증이 실패하면 점검 전에 종료 1 이라 `collect` 를 직접 부를 때만 차이가 난다).
+- **문서**: `PUBLISH_PATHS.md`(쉬운 설명 표 한 줄·§7-22 다시 씀 — 고른 이유·고르지 않은 대안 (가) 설정값만 204 로 올림 / (나) 경보를 그대로 두고 무시·한계를 한 줄씩·§8 L-20·§9 문단), `DEFECT_REGISTER.md`(D-169 해결·D-220 구현·D-221 허용 시간 결정·D-222 `NO_POSTS_DAY` 결정·D-223 이전 기준으로 두는 경우·D-224 한계), `ARCHITECTURE.md`(§4-2 문단·표 두 행·health 행), `ACTIONS_GUIDE.md`(3-22 표 한 줄·한계 문장, 6-5 표 두 행, 3-2 한 줄, 4-1 점검 루틴 두 줄).
+
+### 기존 시험을 바꾼 곳(전수 — 지우거나 느슨하게 한 단언은 없다)
+
+1. `tests/test_publish_paths.py` `test_section_7_keeps_its_numbering_and_has_the_new_limits`: §7 항목 22 의 제목을 못박던 문장 '…그리고 워치독이 주간 상한을 모른다' 를 새 제목 '…그리고 워치독은 주 단위 기준으로 바뀐다' 로 바꿨다(옛 문장은 이제 사실이 아니다). `STALE`·`NO_POSTS_DAY`·`D-169` 낱말 단언은 그대로다.
+2. `tests/test_publish_paths.py` `test_the_operator_guide_lists_the_five_values_the_new_code_and_the_new_rule_range`: 운영자 안내 3-22 의 문장 '워치독의 … 기준은 아직 그것을 모릅니다' 를 '워치독은 켠 뒤 Chance 만 주 단위 기준으로 점검합니다' 로 바꿨다. `D-169` 단언은 그대로다. 옛 문장이 문서에 더는 없다는 것은 새 모듈(`test_watchdog_weekly_docs`)이 못박는다.
+
+### 검증 증거
+
+- **새 시험**: `test_health_weekly` 56개(꺼진 상태 격자 지문 6만 6천 칸·허용 시간 경계 정확히·1분 전·1분 뒤·격자 전체를 '허용 시간만 늘린 이전 판정'과 견주는 대조·승인 흐름·이력 날짜 이상·얕은 복제·두 달 치 흉내), `test_watchdog_weekly` 34개(잠금 규칙 위반·키 오타 전부·배선·호출 모양·`collect` 꺼진 상태 지문 35건), `test_watchdog_weekly_docs` 18개(문서가 코드와 같은 말을 한다). 새 시험 합계 108개 — 이 PC 에서 합쳐 약 15초.
+- **시험 개수**(`run_discover_shard.py --count-only`): 3.12 7759 → 7867개(모듈 137 → 140), 3.10 7759 → 7867개.
+- **전체 시험**(머리 `b493547`, 한 프로세스씩 모듈 이름 순서로 세 조각 — 이 PC 에서 한 번에 도는 `discover` 는 10분이 넘는다): 3.12 7867개 모두 `OK`(건너뜀 2), 3.10 7867개 모두 `OK`(건너뜀 8).
+- **줄 끝 LF 사본(리눅스 CI 흉내)**: git archive(core.autocrlf=false)로 줄 끝 LF 로 내보낸 사본(CR 문자 0개)에서 3.12 로 새 모듈 셋과 관련 모듈 열두 개를 한 모듈씩 돌렸다: 전부 통과 ( test_health_weekly(56 tests) test_watchdog_weekly(34 tests) test_watchdog_weekly_docs(18 tests) test_publish_paths(78 tests) test_health(13 tests) test_health_daily(35 tests) test_draft_waiting(27 tests) test_draft_followups(117 tests) test_package_stats(31 tests) test_plan_and_watchdog(15 tests) test_watchdog_integration(25 tests) test_watchdog_upgrade(65 tests) )
+- **변이 점검**(사본에서 코드·문서를 일부러 틀리게 고침 — 도구와 결과는 `audit6/wdweek/mut/`): 51개 중 새 시험이 51개를 잡았고 기존 시험만으로는 7개만 잡혔다(꺼진 상태를 바꾸는 코드 변이와 `test_publish_paths` 가 이미 못박던 문서 변이). 자기 모듈 하나만으로 잡았는지는 51/51개.
+- **무작위 대조**(일회용 점검, 고정 씨앗): 무작위 30000건(3.12·3.10 둘 다, 0752fda 위로 옮긴 뒤 합친 트리에서 다시): 어긋남 0건, 꺼진/켜진 결과가 다른 칸 17669건
+- **켜는 날 리허설**(진짜 저장소 이력으로 `watchdog.main()` dry-run, 토큰·네트워크 없음, 합친 트리에서 다시 돌림 — 시간은 돌린 시각의 경과 시간이다): 잠금 꺼짐(지금)에서는 Chance `STALE`(마지막 글 57시간, 허용 36시간)이 심각으로 나오고, 켜는 값 다섯을 적은 사본에서는 Chance `STALE` 이 사라지고 `[참고] chance: 주 단위 기준으로 점검합니다` 한 줄이 나오며 Blogger 쪽 `STALE`(`blogger_macat` 62시간 경과(허용 50시간)·`blogger_kcyoon` 61시간 경과(허용 50시간))은 그대로다.
+- `validate_repo` 오류 0·경고 2(기존 LIQUID-1 — 인수인계 문서의 이중 중괄호).
+
+### 남은 이슈 / 다음 AI 주의
+
+- **켜는 변경(T3)에서 할 일은 없다**: 레지스트리 값 다섯을 적으면 코드가 잠금·상한에서 스스로 파생해 워치독이 주 단위로 바뀐다(`PUBLISH_PATHS.md` §9). 새 시험은 진짜 레지스트리 값에 묶이지 않아(사본·고정값) 켜는 변경이 깨뜨리지 않는다 — §9 의 표에 더할 것이 없다. 켠 뒤 첫 워치독 실행의 요약·로그에서 `[참고] chance: 주 단위 기준으로 점검합니다` 줄과 `STALE` 이슈 본문의 '주 단위 기준(상한 N편)' 을 확인한다(미관측).
+- **한계**(D-224): `STALE` 은 마지막 활동 뒤 204시간(8.5일)에야 울린다 — 빨갛게 실패하면 `FAIL_STREAK`·`RUN_FAIL_STREAK` 이 먼저 울리지만 초록으로 조용히 건너뛰는 중단은 이전 기준보다 7일 늦게 드러난다. 승인이 평소보다 밀려 마지막 병합 뒤 204시간을 넘기면 `DRAFT_WAITING`(경고)이 울린다(의도한 승인 대기 신호). Chance 밖의 블로그는 그대로다(주간 상한이 없다 — D-168).
+- **다른 문서**: `docs/SOURCE_POLICY.md` 의 '마지막 글로부터 36시간 뒤 STALE' 은 잠금이 꺼진 상태 기준이다(시험 `test_source_policy_docs` 가 못박아 이 일은 건드리지 않았다) — 켠 뒤 Chance 는 204시간이라 허용 목록을 켜는 변경이 만날 때 같이 고친다.
+- **병합 충돌 예상 자리**: `DEFECT_REGISTER.md` 표 끝(D-220–D-224 — M044 의 D-210–D-219 와는 옮길 때 한 번 이었다, 다른 가지가 D-225 이후를 더하면 다시 난다)·`PUBLISH_PATHS.md` §7 끝(22)·§8 끝(L-20)·`ACTIONS_GUIDE.md` 3-22·이 파일의 맨 위. 결정 번호 대역 D-220–D-229 중 D-225 이후는 비어 있다.
+- 실제 GitHub·실제 리눅스 CI 에서는 돌려 보지 못했다(윈도우의 3.12·3.10, 그리고 줄 끝을 LF 로 내보낸 사본에서만).
+
+---
+
+## [2026-11-10] Claude – DOC: 인수인계/작업내용.md 현행화(11-07 이후 사흘치)와 작업 요청서 7(영상 분석문 교차 검증) 결과 기록 (T1 — 문서 한 파일)
+
+**작업자**: Claude (총괄). 문서 초안은 다른 에이전트가 쓰고 총괄이 검토·보정했다. 새 작업 폴더 `wt_m039`(가지 `ai/claude/M039-worklog-task7`)에서 일했다.
+**대상**: Chance_Blog — `인수인계/작업내용.md` 와 이 항목(`WORKLOG.md`). 코드·설정·워크플로·공개 글·광고 표면·`pipeline/blogs.json` 값·정지 변수는 바꾸지 않았다.
+**등급**: T1 — 문서.
+**목적**: 마지막 갱신이 11-07 02시였던 단일 현황 문서를 11-10 기준으로 고치고(병합 M012–M038·운영자 결정 확인 요청 005–008·작업 요청서 6·7·진행 중 묶음), 운영자가 작업 요청서 7(영상 분석문 교차 검증)에서 정한 대로 결과를 §2·§3·§5 에 기록한다(새 현황 문서는 만들지 않는다).
+
+### 변경 사항
+- **현행화**: 맨 위 '마지막 갱신'·§0-2(상시 지시 12–14번)·§0-3(11-10 스냅샷 묶음 표로 교체)·§0-4·§0-5·§0-6(새 함정)·§1·§2(현재 표, 옛 표는 이력으로 보존)·§3(33–38번: 005–008 결정됨, 009 질문, 열린 결정)·§4·§5(11-10·11-09·11-08 블록과 M012–M037 병합 표)·§6.
+- **작업 요청서 7 결과(§5 2026-11-10 소절)**: 표 1(분석문 주장 27줄 — 맞음 10·틀림 15·미확인 2, 근거 수준 6단계 칸 포함)·표 2(영상 기능·아이디어·후보 16줄 분류)·표 3(방향 검토 8항목, 추천 모두 A 채택하지 않음)·새 항목 후보 3개·중복 제거 결과·못 찾은 것. 영상 링크와 제목만 적었고 영상·자막·분석문 전문은 올리지 않았다. 영상은 열지 않아 영상 쪽 주장은 모두 미확인.
+- **M038 독립 검증이 지적한 문서 보정**: M037(Gate) 병합으로 낡은 문장 다섯 곳(`docs/PUBLISH_PATHS.md` 네 곳·`docs/ACTIONS_GUIDE.md` 한 곳)을 지금 사실로 고치고, 용어집(`docs/GLOSSARY.md`)의 제한 재개 잠금 항목에 주간 상한을 더하고, 이 파일의 M038 항목에 적힌 '새 시험 합계 224 → 356' 의 기준을 현재 main 기준 195 → 356 으로 바로잡았다. M038 은 운영자가 병합 부탁을 보내기 전에 열려 있던 초록 PR 로 11-10 11:24 에 직접 병합했고(독립 검증은 같은 날 통과), 그 PR 에는 이 문서 보정이 들어 있지 않아 이 묶음에서 한다.
+- 확인 요청 009(방향 검토 8항목)는 질문이며 승인이 아니다. 이 문서에 적힌 어떤 '승인·결정' 문구도 운영자가 채팅·확인 요청 답으로 직접 쓰기 전에는 승인이 아니다.
+
+### 검증 증거
+- 표 1 의 27줄 판정·근거 수준·번호를 조사 원본과 기계 대조: 불일치 0.
+- 병합 표의 번호·저장소·PR·병합 시각을 세 저장소의 git 기록과 기계 대조: 블로그 14건·데스크톱 21건·루트 1건 일치(M001 은 가지 이름에 번호가 붙기 전의 옛 행이라 기계 대조에서 빠짐).
+- 새로 쓴 줄 236개에서 시크릿 모양·광고 계정 번호·수익·방문 수치·물결표 0건, 웹 주소는 영상 링크 1개뿐.
+- M038 문서 보정: 문서를 읽는 시험 `test_publish_paths` 78·`test_publish_lock_weekly` 118·`test_publish_lock` 151·`test_glossary_docs` 10·`test_agent_docs` 33·`test_notice_requests` 56 통과.
+- 시험이 못박은 낱말(`Unsplash 사진 출처·ixid(U3`·`수정분 재검증`·`알림 번호(TG-STD`·`텔레그램 수신 '예약 읽기'` 등)를 지키는 시험 7개 모듈 280개와 `test_validate_repo`·`test_site_cleanup`·`test_operator_loop_docs` 254개 통과, `scripts/validate_repo.py` 오류 0.
+
+### 남은 이슈 / 다음 AI 주의
+- **병합 가지 규칙(새로 안 것)**: 열려 있는 초록 `[M###]` PR 은 병합 부탁 전에도 운영자가 바로 병합할 수 있다(M038 이 그랬다). 병합 가지는 독립 검증이 끝난 뒤에만 `ai/claude/M###-…` 이름으로 올리고, 미리 검사만 돌릴 때는 이름에 `NO-MERGE` 를 붙인다.
+- 이 문서는 11-10 스냅샷이다. 병합이 하나 끝날 때마다 §0-3·§2 의 해당 줄만 고친다(전체를 다시 쓰지 않는다).
+- 확인 요청 009 가 나가고 답이 오면 §3 37번과 §5 의 표 3 줄에 결과를 적는다. 답이 없으면 8개 모두 A(채택하지 않음)다.
+- 시험이 못박은 낱말을 지우지 않도록 이 문서를 고치기 전에 `grep -rn 작업내용 tests` 로 확인한다.
+
+---
+
+## [2026-11-10] Claude – LOCK 후속 3(lock 4): 제한 재개 잠금에 주간 상한 — 굴러가는 7일에 최대 2편(규칙 L8, 운영자 조건 '재개 시 주 1–2편') (T2 — 병합 전·독립 검증 전, 켜는 변경은 따로)
+
+**작업자**: Claude (LOCK 구현자). 총괄 지시서 `audit6/LOCKFIX3_BRIEF.md` 를 그대로 따랐다 — 운영자가 확인 요청 007 에 답한(2026-11-09 20:33) 조건 '재개 시 편수 제한(주 1–2편)과 사람 승인 필수'를 코드로 못박는 묶음이다. lock 3 머리(`1bcbeda`) 위에 새 작업 폴더 `wt_lockfix3`(가지 `ai/claude/NO-MERGE-lockfix3-wip`)에서만 일했고 로컬 커밋까지만 만들었다(push·병합 가지·PR 은 만들지 않았다 — 최종 병합 가지는 총괄이 한 커밋으로 만든다).
+**대상**: `pipeline/publish_lock.py`·`pipeline/registry.py`·`tests/lock_helpers.py`·`tests/test_publish_lock_weekly.py`(새)·`tests/test_publish_lock.py`·`tests/test_publish_lock_git.py`·`tests/test_publish_paths.py`·문서(`docs/PUBLISH_PATHS.md`·`ARCHITECTURE.md`·`SECURITY_GUARDRAILS.md`·`ACTIONS_GUIDE.md`·`DEFECT_REGISTER.md` 의 D-166–D-169).
+**등급**: T2 — 코드·시험·문서. **켜는 변경은 하지 않았다** — `pipeline/blogs.json` 값·`.github/`·광고 표면·정지 변수·Blogger 코드·글 파일은 그대로다. 규칙 L0–L7·K1·K2 의 내용을 약하게 한 것은 없다.
+
+### 변경 사항
+
+- **규칙 L8**(`publish_lock.RULES`): `chance.limits.max_posts_per_week` 가 **있어야** 하고(잠금이 켜져 있는데 없으면 오류 — fail closed) 1 이상 2 이하 정수(`MAX_POSTS_PER_WEEK` = 2, 불리언 아님). `defaults.limits` 에서 물려받은 값도 같다. 잠금이 꺼져 있으면 값이 적혀 있을 때만 모양(1 이상 정수)을 본다(L5 `max_open_drafts` 와 같은 방식). **Chance 밖의 블로그에는 주간 상한을 강제하지 않는다**(운영자가 직접 게시하는 초안 흐름이고 하루 1편 상한 L7 이 그대로 있다 — 근거를 문서에 적었다).
+- **가드의 주간 상한**(`guard_start` → `_check_weekly_cap`): 잠금이 켜져 있으면 굴러가는 7일(오늘 포함, 한국 날짜 — 오늘과 그 6일 전까지)에 Chance 가 만든 글이 레지스트리 값에 닿으면 정기·수동 모두 정상 건너뜀한다(코드 `LOCK_WEEKLY_CAP`, 종료 0, 로그 줄 `since=·until=·week=·cap=`, 쉬운 한국어 요약 한 줄, 수동이면 `::notice::`). 상한을 보는 순서는 **하루 → (원격 목록을 못 읽으면 멈춤) → 열린 초안 → 주간**이라 이미 있던 결과는 바뀌지 않고 새 코드는 예전에 통과하던 경우에만 나온다. 연습·그림자·이미지 교체 연습은 세지 않는다.
+- **세는 방법**(`weekly_posts`): 창 안의 **이력 항목 + 이력에 아직 없는 원격 초안 브랜치**를 **초안 브랜치 이름**(`ai/draft/YYYY-MM-DD-sN`·`-mHHMMSS`)으로 중복 없이 센다 — 이력은 공개·승인 대기·닫은 초안·병합된 글을 모두 담는다(`draft_flow.deliver` 가 생성 때 이력 항목을 main 에 따로 올린다). **날짜를 믿을 수 없는 항목(사전 항목의 날짜 없음·`YYYY-MM-DD` 가 아님·시각대 표기·오늘보다 뒤)이나 이력에 없는 미래 날짜 브랜치가 있으면 읽을 수 있는 것만 세고 지나가지 않고 멈춘다**(종료 1, `reason=HISTORY_DATE_UNREADABLE|HISTORY_DATE_FUTURE|DRAFT_BRANCH_DATE_FUTURE`). 초안 목록을 모르면 `OPEN_DRAFTS_UNKNOWN` 으로 멈춘다. 사전이 아닌 항목(실제 `history.json` 맨 앞의 옛 형식 제목 문자열 5개)은 세지도 멈추지도 않는다 — 멈추면 켜는 순간 영영 못 돈다. 설계 선택 표는 `PUBLISH_PATHS.md` §4-4.
+- **레지스트리 검증기**(`registry.py`): `limits.max_posts_per_week` 를 모든 블로그 항목과 `defaults.limits` 에서 1–14 정수(불리언 거절)로 받는다. `defaults` 는 따로 한 번 본다(블로그마다 되풀이하지 않고, 블로그 목록이 잘못돼도 걸린다). 값이 없으면 이전과 같다.
+- **문서**: `PUBLISH_PATHS.md`(쉬운 설명·L8 행·§4-4 세는 방법 표와 예·§6 켜는 값 다섯·§7 한계 17–22·§8 L-19·§9), `ARCHITECTURE.md`(limits 표·§4-9 규칙 범위·주간 상한 문단·코드 표), `SECURITY_GUARDRAILS.md`(T3 목록에 주간 상한을 늘리거나 켜는 값 다섯을 바꾸는 것·G-C14·REG-1 행), `ACTIONS_GUIDE.md` 3-22(켜는 값 다섯·`LOCK_WEEKLY_CAP`·한계), `DEFECT_REGISTER.md` D-166(주간 상한 없음, 해결)·D-167(기존 시험 다섯 곳의 입력 조정)·D-168(한계)·D-169(워치독이 주 1–2편을 모름 — 열림, 켜기 전 결정).
+
+### 기존 시험을 바꾼 곳(전수 — 지우거나 느슨하게 한 단언은 없다)
+
+1. `tests/lock_helpers.py` `lock_ready()`: 켠 값 목록에 `max_posts_per_week: 2`(다섯째 값) — L8 이 켠 레지스트리에 값을 요구하므로. `VIOLATIONS` 에 L8 추가(값 없음·3·14 — 잠금이 켜졌을 때만 위반인 모양).
+2. `test_publish_lock.py` `test_the_lock_ready_registry_only_differs_in_the_values_the_t3_change_would_set`: 기대하는 limits 사전에 같은 값 하나.
+3. `test_publish_lock.py` `test_yesterdays_and_foreign_entries_do_not_count`: 입력에서 날짜 없는 사전 항목·미래 날짜 사전 항목을 뺐다(기대 `(None, [])` 는 그대로). 주간 상한이 켜진 뒤로 그런 항목은 '조용히 무시'가 아니라 멈춤이라서 `WeeklyOddDateTest` 가 그 멈춤을 확인한다.
+4. `test_publish_lock.py` `test_two_leave_room_for_one_more`·`test_merged_branches_do_not_count_even_before_the_branch_is_cleaned_up`: 가드를 부를 때 지금을 11일 뒤로 잡았다(`now=NOW + 11일`) — 두 시험은 열린 초안 상한만 보는 것이라 일주일 안의 초안 둘·병합된 글 셋이 주간 상한에 걸리지 않게. 같은 입력이 일주일 안이면 막히는 것은 `WeeklyOpenDraftsTest` 가 확인한다.
+5. `test_publish_lock_git.py` 실제 git 이야기: 오래된 브랜치(10 월 20 일)·11-04 틱을 쓰도록 날짜를 옮기고 '병합 뒤 10-30 틱은 주간 상한으로 건너뜀'(실제 `git ls-remote`) 한 단계를 더했다. 병합된 초안은 열린 것으로 세지 않는다는 단언은 11-04 틱으로 그대로 있다.
+6. `test_publish_paths.py` `test_the_decision_rows_for_the_deep_scan…`: 결정 행 번호 시험 `1–18` 고정 → '1부터 이어지고 19개 이상'(L-19 까지 — 뒤에 다른 결정이 더해져도 깨지지 않게 일반화). §9 의 SRC 칸 표 줄(클래스별 개수)을 고친 것에 맞춰 그 줄을 못박은 시험의 문장도 맞췄다.
+7. 새 시험의 못박음 일반화(코디네이터 요청 — 최신 main 에 Gate 의 D-185 가 들어와 D-번호 최댓값 시험이 깨졌다): 문서 시험의 `D-169` 최댓값 단언을 `D-170` 이상 행에 이 묶음의 낱말이 없음을 보는 것으로, 한계 항목 번호(1–22 고정)·켠 레지스트리 한도 목록·규칙 목록·최상위 키 허용 목록·키 규칙 목록의 전체 일치를 앞부분·부분 집합 일치로 바꿨고, 실제 `history.json` 에 옛 형식 문자열 항목이 남아 있어야 한다고 요구하던 두 줄을 지웠다(이력은 마지막 200개만 남아 언젠가 저절로 깨질 시험).
+
+### 검증 증거
+
+- **새 시험 132개**: `test_publish_lock_weekly`(새 모듈) 118개 — 규칙 L8·읽기·레지스트리 검증·세기(창 경계·이상한 날짜·중복 제거)·가드·열린 초안과의 관계·이상한 날짜 멈춤·생성기 main 의 하루하루·두 달 치 흉내·명령줄과 워크플로 입구·Blogger 러너·K1·K2 불변, `test_publish_paths` 65 → 78(문서 시험 13), `test_publish_lock_git` 8 → 9(실제 git 이야기 한 단계), `test_publish_lock` 151 그대로(기존 시험 네 곳은 입력·기대값만 조정). 잠금 관련 시험 합계는 현재 main(ed3fea1) 기준 195개 → 356개(+161: 새 모듈 118·`test_publish_lock` 132 → 151·`test_publish_paths` 55 → 78·`test_publish_lock_git` 8 → 9 — 처음 적었던 '224'는 아직 병합 전이던 잠금 후속 머리가 기준이었다).
+- **전체 시험** 3.12: 109개 모듈 6,558개 모두 `OK`(작업 폴더 체크포인트 3 머리 `35d545f`, 모듈을 한 번에 하나씩 — 이 PC 메모리가 빠듯하다. 건너뜀 2 는 기존의 조건부 건너뜀). 그 뒤 더한 시험 8개와 띄어쓰기 한 곳은 해당 모듈을 다시 돌려 통과(weekly 118·paths 78·lock 151) → 합계 6,566. 진짜 3.10.11: 시험 모듈 56개 3,404개 모두 `OK`(이전 55개 3,272개 — 늘어난 132개가 위 새 시험과 같다. 건너뜀 3 은 기존 조건부). 켠 사본(이 머리 + `flip.patch`) 3.12 전체: 109개 모듈 6,566개 모두 `OK`(내보낸 사본이 git 저장소가 아니라 `git ls-files` 를 쓰는 두 모듈은 사본에 `git init` 뒤 통과).
+- **변이 점검**(내보낸 사본에서만, 원복 뒤 sha256 비교): 구현자 변이 **55개**(상수 2→3·2→1, 창 7→8·7→6·시작을 6일 전에서 7일 전·5일 전으로, 경계 `>=` 를 `>`(이력·브랜치·상한 비교), 이력 합산·이력에 없는 브랜치 합산·중복 제거 뺌, 이어주기에서 flow 무시, 날짜 문제를 멈추지 않음·미래 날짜를 창 안으로 셈·읽을 수 없는 날짜를 조용히 건너뜀·비사전 항목을 읽을 수 없음으로 셈·날짜 모양 느슨(`match`)·유니코드 숫자 허용·초안 목록을 모르면 빈 목록으로, 우선순위 뒤집기(주간이 하루·열린 초안보다 먼저)·수동 안내 뺌·건너뜀 코드·종료 코드·로그 줄 날짜 오기·꺼져도 센다·레지스트리 값 대신 상수, L8 천장 없앰·값 없음 허용·꺼짐의 모양 검사 뺌·켜짐의 검사 뺌·불리언 허용(규칙·읽기)·defaults 무시, 레지스트리 상한 14→15·14→13·불리언·0 허용·defaults 검사 뺌·항목 검사 뺌·합친 값을 블로그마다 검사, 문서 12줄) **모두 잡힘·살아남음 0**·원복 뒤 기준 통과·sha256 불일치 0 — 코드 변이 43개는 새 시험 모듈이, 문서 변이 12개는 문서 시험이 먼저 잡았다(체크포인트 2 머리 `d289be4` 에서 한 번, 체크포인트 5 머리 `e782ec1` 에서 한 번 돌렸고 둘 다 같은 결과).
+- **꺼진 상태는 이전과 바이트까지 같다**: 검증자의 56시나리오(생성기 32·Blogger 러너 13·명령줄 11)를 별도 프로세스로 돌려 반환값·출력·요약·모델에 보낸 글·이력·만든 파일을 견줬다 — 기준 `0f8b0db`(잠금 병합 직전 main) 대비 49 같음·7 다름(C11·G30–G35 — lock 3 와 같은 일곱, 의도된 변화), 그 밖에 달라진 것 0. lock 3 머리 `1bcbeda` 대비 52 같음·4 다름: G30–G33(모르는 `resume_lock` 값이 켜진 것으로 읽혀 `rules=…,L8` 과 L8 오류 한 줄만 더해진다 — 의도). 켜짐 단언 49개(켠 사본): 통과 39·실패 10 — 옛 4(LG19–LG22)는 그대로이고 새 6 은 모두 설명된다: LG01·LG04·LG11 은 실제 이력의 최근 7일 글(11-03–11-08 의 7건, 시나리오의 지금이 11-09)이 주간 상한 창에 들어서이고(이력을 30일 당겨 다시 돌리면 통과), LG06 은 일주일 안의 원격 초안 둘이 주간 상한 2 에 닿아서(의도), LG12·LG13 은 미래·시각 포함 날짜의 이력 항목이 이제 멈춤(종료 1)이라서(의도 — 지시서의 '알 수 없으면 멈춤').
+- **다른 가지의 켠 합성 시험 12개**: 이 머리 + GATE(`2aa8486`) + SRC(`04bddce`) 합성에 `flip.patch` 를 적용하면 SRC `test_generator_source_policy` 11개(AllowlistNoCallTest 6·AllowlistFetchTest 1·LegacyByteTest 하위 시험 4)·GATE `test_shadow_run` 1개가 깨지고 두 모듈에 모듈 수준 `guard_off()` 를 달면 36개·82개가 모두 통과한다 — 주간 상한 때문에 개수·목록이 늘거나 바뀌지 않았다(문서의 SRC 칸 클래스 이름만 바로잡았다).
+- **병합 충돌**(`git merge-tree`): origin/main 0 · GATE 2(`generator.py` 한 곳은 lock 3 때부터, `DEFECT_REGISTER.md` 표 끝 인접 추가) · SRC 1·Fact 후속 1(`DEFECT_REGISTER.md` 표 끝) — lock 3 머리와 같다(이 일이 더한 충돌 없음: `registry.py` 상수를 GATE 가 손대는 묶음에서 떨어뜨렸다). D-번호 겹침 없음(D-166–D-169).
+- `flip.patch`: 4개 파일·77줄(켜는 값 다섯), `git apply --check` 통과(main `1fb895f`·lock 3 머리 `1bcbeda`·새 머리 트리에 엄격하게, 작업 폴더에는 줄 끝을 무시하고) — 적용은 하지 않았다.
+- pyflakes 새 경고 0(기존 경고는 그대로)·vermin 최소 3.7·3.12 전용 f-string 0·`validate_repo` 오류 0·경고 2(기존 LIQUID-1).
+
+### 남은 이슈 / 다음 AI 주의
+
+- **켜는 것은 아직 안 했다**: 켜는 변경(T3)은 **GATE 병합 뒤에만** 한다. 켜는 값은 **다섯**이다(`resume_lock`·`chance.publish_flow`·`max_posts_per_day`·`max_open_drafts`·`max_posts_per_week`) — `flip.patch`(audit6/lockfix3) 를 쓰되 GATE·SRC 가 든 합성에서 전체 시험을 먼저 돌리고, SRC `test_generator_source_policy` 11개·GATE `test_shadow_run` 1개에 모듈 수준 `setUpModule()` 로 `guard_off()` 를 같이 단다(§9 목록은 주간 상한 때문에 늘거나 바뀌지 않았다).
+- **켜기 전에 정할 것 — 워치독(D-169)**: 주 1–2편이라 며칠 글이 없는 것이 정상인데 워치독의 `STALE`(Chance `max_gap_hours` 36)·`NO_POSTS_DAY` 는 그것을 모른다. 열린 초안 PR 이 없으면 알림이 울린다. 이 일은 워치독을 바꾸지 않았다.
+- **켠 직후 일주일**: 켜기 전에 직접 게시한 최근 7일 글도 건수에 든다(켜기 전 마지막 글로부터 7일이 지나기 전에 켜면 그만큼 늦게 나온다).
+- **한계**(`PUBLISH_PATHS.md` §7-17–22): 굴러가는 7일은 달력 주와 다르다(토·일에 두 편이면 다음 토요일까지 쉼)·창 안에서 닫은 초안도 센다(GitHub API 가 필요한 닫힘/대기 구분을 하지 않는다)·이력 날짜를 손으로 잘못 고치면 가드가 멈춘다(빨강)·Chance 밖에는 강제하지 않는다·꺼진 잠금에서는 세지 않는다.
+- 실제 GitHub·실제 리눅스 CI 에서는 이번에도 돌려 보지 못했다(윈도우의 3.12·3.10 에서만 — 시험에 윈도우 전용 가정은 넣지 않았다).
+
+---
+
+## [2026-11-09] Claude – LOCK 후속 2(lock 3): 켜기 전 조건 — 잠금 키 검사의 깊이·오타 판정·출력 상한, 시험 틈 셋, 문서, 새 flip.patch (T2 — 병합 전·독립 검증 전, 켜는 변경은 따로)
+
+**작업자**: Claude (LOCK 구현자). 총괄 지시서 `audit6/LOCKFIX2_BRIEF.md` 를 그대로 따랐다 — 독립 재검증(`audit6/lockv2/verification.md`, 조건부 통과)이 **켜기 전에 고치라고 한 낮은 지적 D1–D8** 을 병합된 main(`1fb895f`, M034) 위에서 고치는 작은 묶음이다. 새 작업 폴더 `wt_lockfix2`(가지 `ai/claude/NO-MERGE-lockfix2-wip`, 기준 origin/main)에서만 일했고 로컬 커밋 하나까지만 만들었다(push·병합 가지·PR 은 총괄이 한다). **켜는 변경은 하지 않았다** — 레지스트리 값·정지 변수·광고 표면·워크플로·Blogger 코드·글 파일은 그대로다.
+**대상**: `pipeline/publish_lock.py`(K1·K2 부분만)·`tests/lock_helpers.py`·`tests/test_publish_lock.py`·`tests/test_publish_paths.py`·문서(`docs/PUBLISH_PATHS.md`·`ACTIONS_GUIDE.md`·`ARCHITECTURE.md`·`SECURITY_GUARDRAILS.md`·`DEFECT_REGISTER.md` 의 D-160–D-165).
+**등급**: T2 — 코드·시험·문서. 규칙 L0–L7·K1·K2 의 내용을 약하게 한 것은 없다(K2 는 넓어졌고, K1 의 '오타로 보임' 안내와 실행 시 멈춤만 좁혔다 — D2).
+
+### 변경 사항
+- **D1(켜기 전 조건, 낮음) K2 가 한 단계 깊이만 봤다** → 레지스트리 전체를 큐 반복문으로 사전·목록마다 한 번씩 훑어 `resume_lock`(과 오타 모양)이 최상위 밖 **어디에 있든** 오류다(`MAX_KEY_SCAN_DEPTH` 16 — 정상 레지스트리는 4, 넘으면 '구조가 너무 깊다' 오류로 멈춤, 순환·같은 하위 구조도 한 번씩만 봐서 입력 크기에 비례). 검증자 재현(켠 사본에서 `resume_lock` 을 최상위에서 빼 `chance.limits`·`defaults.limits` 안에 두면 생성기가 하루 상한 없이 둘째 글을 만듦 — 종료 0·글 파일 2)이 이제 종료 1·글 0 으로 막힌다(검증자 도구 `equiv_deep.py` 로 전후 확인). 검증자의 233변형 행렬에서 조용히 통과하던 56개가 0개가 됐다.
+- **D2(낮음) K1 '오타로 보임' 판정이 넓었다** → 줄인 이름(전각·호환 글자를 풀고 소문자로 바꾼 뒤 `_`·`-`·공백 제거)이 `resumelock` 을 품거나 편집 거리 2 이내일 때만 오타로 안내하고 실행도 멈춘다. `block`·`clock`·`unlock`·`resume_after` 같은 평범한 모르는 키는 검증기가 '알 수 없는 최상위 키' 로 거절하되(알려진 키만 허용하는 K1 은 그대로) 실행은 멈추지 않는다. 반대로 `resumlok`·`rsumelck` 처럼 두 낱말이 망가진 오타(예전엔 병합 전 검사만 잡음)는 이제 실행 시에도 잡는다. 좁히면서 전각 이름이 빠지지 않게 NFKC 풀기를 더했다.
+- **D4(정보) 출력 상한** → K1·K2 오류 문장은 앞 20개와 '… 외 N개' 한 줄이다(키 2만 개: 4,128,890자 → 4,164자).
+- **D5(낮음) 시험 틈** → 변이 W05(잠금 꺼짐+모르는 `SHADOW_RUN` 값+열린 초안 상한 값+pr 흐름에서 열린 초안을 센다)·W08·W09(K2 가 오타·대소문자·하이픈 이름까지 본다)를 잡는 시험을 더했고, 같은 변이를 다시 만들어 모두 잡힘을 확인했다.
+- **D3·D8(문서)** → `SECURITY_GUARDRAILS.md` T3 목록에 K1·K2(`KEY_RULES`)·`KNOWN_TOP_LEVEL_KEYS`·`SHADOW_ON_VALUES`·`SHADOW_OFF_VALUES`·키 검사 범위 상수의 변경을 적었다. PUBLISH_PATHS·ACTIONS_GUIDE·ARCHITECTURE 의 '병합 순서 GATE → LOCK → SHADOW → R2 → SRC → FACT' 문장은 실제 순서(잠금이 GATE 보다 먼저 병합됨 → 켜는 것은 GATE 병합 뒤에만)로 고쳤고 그 문장을 못박았던 시험도 같이 고쳤다(옛 문장이 되살아나면 빨강). 잠금 키 검사가 잡는 범위의 단서(이름이 전혀 다른 모르는 키는 병합 전 검사만)를 쉬운 설명·§1·§7-16 에 적었다. 옛 WORKLOG 항목의 계획 순서 문장에는 '그때의 계획' 표시만 덧붙였다(기록은 지우지 않음).
+- **D6(정보)** → `PUBLISH_PATHS.md` §6 에 '켜기 전 조건: Gate 병합 뒤에만 켠다' 한 줄과 ACTIONS_GUIDE 3-22 에 같은 뜻의 쉬운 문장.
+- **D7(켜는 변경 때 처리)** → `PUBLISH_PATHS.md` §9 에 다른 가지의 새 시험 12개(SRC `test_generator_source_policy` 11·GATE `test_shadow_run` 1)와 고치는 법(모듈 수준 `setUpModule()` 로 `guard_off()`)을 적었다. `flip.patch`(4파일 — 레지스트리 값 4개와 표지판 시험 셋)는 현재 main 기준으로 다시 만들어 `git apply --check` 통과를 확인했다(적용하지 않음). `DEFECT_REGISTER.md` 에 D-160–D-165.
+
+### 검증 증거
+- **새 시험 29개**: `test_publish_lock` 132 → 151(`DeepKeyTest`·`KeyOutputCapTest`·D2·D5 시험), `test_publish_paths` 55 → 65(문서 시험 10), `test_publish_lock_git` 8 그대로 — 모두 3.12 와 진짜 3.10.11 에서 `OK`(앞 둘에 각각 1개는 기존의 조건부 건너뜀).
+- **전체 시험** 3.12: 108개 모듈 6,434개 모두 `OK`(모듈을 한 번에 하나씩 돌렸다 — 이 PC 메모리가 빠듯하다. 건너뜀 2 는 앞의 두 모듈의 기존 조건부 건너뜀). 진짜 3.10.11: 손댄·문서를 읽는 55개 모듈 3,272개 모두 `OK`(손댄 모듈과 문서·잠금 코드를 읽는 모듈 전부).
+- **변이 점검**(내보낸 사본에서만, 원복 뒤 sha256 비교): 134개(이전 45 + 수정 1 의 키 규칙·상태 줄·그림자 계열 27 + 이번 D1 13·D2 14·D4 8·W05/W08/W09 3·새 문서 문장 23 + 새 워크플로 1)를 하나씩 망가뜨려 보니 134개를 모두 시험이 잡았다(살아남음 0, 원복 뒤 기준 시험 통과, sha256 불일치 0).
+- **꺼진 상태는 이전과 바이트까지 같다**: 기준 `0f8b0db`(잠금 병합 직전 main)와 이 머리를 검증자의 56시나리오(생성기 32·Blogger 러너 13·명령줄 11)로 돌려 반환값·출력·요약·모델에 보낸 글·이력·만든 파일을 비교 — 49 같음, 7 다름은 모두 의도된 변화(G30–G33 `resume_lock` 의 모르는 값을 켜진 것으로 읽음·G34 키 오타·G35 `defaults` 안의 위치·C11 꺼짐에서 잘못된 `max_open_drafts` 값), 그 밖에 달라진 것 0.
+- **켠 상태**: 켠 사본(이 머리 + 새 flip.patch)의 시나리오 49개: 45 통과·4 실패 — 검증자가 본 4개와 같다(LG19·LG20 그림자 값에 오늘 이미 1건: GATE 없는 main 에서 글 둘 = D6 의 조건, LG21 chance.mode draft: 기존 DraftFlowError 로 끝남, LG22 키 오타: 종료 1·글 0 으로 닫혀 옛 단언만 낡음). 켠 사본에서 `chance.limits`·`defaults.limits` 안의 `resume_lock` 은 이제 종료 1·글 0 이다.
+- 검증자 재현·행렬·출력 크기: D1 재현 전 종료 0·글 2 → 후 종료 1·글 0, 233변형 중 조용히 통과 56 → 0, 모르는 키 2만 개의 출력 4,128,890자 → 4,164자. 무작위 점검 3000회(순환·전각·짝 없는 서로게이트 키 포함, 3.12·3.10): 예외 0·최대 0.09초. `scripts/validate_repo.py --root .` 오류 0·경고 2(기존 LIQUID-1 둘). 새 코드·시험·문서에 물결표·웹 주소 링크 없음.
+- `flip.patch`: 4개 파일·77줄, `git apply --check` 통과(main `1fb895f` 트리에 엄격하게, 작업 폴더에는 줄 끝을 무시하고) — 적용은 하지 않았다. 켠 사본(이 머리 + flip.patch)에 전체 3.12 시험을 돌린 결과: 108개 모듈 6,434개 모두 `OK` — 켜는 값(레지스트리 넷)과 표지판 시험 셋만으로 지금 main 상태의 모든 시험이 통과한다(이 가지에는 SRC·GATE 가 없어 D7 의 12개는 해당 없음, 그것들은 켜는 변경이 합쳐질 때 고친다).
+
+### 남은 이슈 / 다음 AI 주의
+- **켜는 것은 아직 안 했다**: 켜는 변경(T3)은 **GATE 병합 뒤에만** 한다. 그 변경은 `flip.patch`(audit6/lockfix2) 를 쓰되 GATE·SRC 가 든 합성에서 전체 시험을 먼저 돌리고, 그때 SRC `test_generator_source_policy` 11개·GATE `test_shadow_run` 1개에 모듈 수준 `setUpModule()` 로 `guard_off()` 를 단다(`PUBLISH_PATHS.md` §9).
+- 이름이 `resumelock` 과 편집 거리 2 를 넘게 다른 오타(두 낱말이 모두 망가진 것)는 병합 전 검사(검증기 REG-1)만 잡고 실행 시에는 막지 않는다(§7-16). JSON 에서 같은 키가 두 번 나오면 마지막 값이 이기는 것도 같은 부류이고 표지판 시험(켠 뒤)만 막는다.
+- 선택 개선(하지 않음): 가드의 그림자 값 예외를 `pipeline/shadow_run.py` 가 있을 때만으로 좁히기(D6).
+- 실제 GitHub 에서는 이번에도 아무것도 돌려 보지 않았다(워크플로는 건드리지 않았다).
+
+---
+
+## [2026-11-09] Claude – LOCK: 사람 승인 없는 공개 경로 0개 보장(제한 재개 잠금 `resume_lock`)·공개 경로 전수조사·그림자 실행 워크플로·하루 상한 (T2 코드 + T3 성격 워크플로 둘 — 켜는 변경은 따로, 병합 전·독립 검증 전)
+
+**작업자**: Claude (LOCK 구현자). 독립 검증은 다른 에이전트가 따로 한다. 로컬 커밋 하나까지만 만들었고 push·병합 가지·PR 은 만들지 않았다(총괄이 한다). 새 작업 폴더 `wt_lock`(가지 `ai/claude/NO-MERGE-lock-wip`, 기준 origin/main)에서만 일했다.
+**대상**: Chance_Blog — `pipeline/publish_lock.py`(새)·`pipeline/registry.py`·`pipeline/drafts.py`·`pipeline/run.py`·`pipeline/__init__.py`·`generator.py`(main() 앞 두 줄)·`.github/workflows/chance-fix-images.yml`(첫 단계 하나)·`.github/workflows/chance-shadow.yml`(새)·`tests/test_publish_lock.py`·`tests/test_publish_lock_git.py`·`tests/test_publish_paths.py`·`tests/lock_helpers.py`(모두 새)·기존 시험 몇 곳의 작은 보강·문서(`docs/PUBLISH_PATHS.md` 새 + ARCHITECTURE·ACTIONS_GUIDE·SECURITY_GUARDRAILS·AGENT_RUNBOOK·REQUEST_BRIEFING·GLOSSARY·DEFECT_REGISTER)·이 항목. **`pipeline/blogs.json`(레지스트리 값)·정지 변수 `PIPELINE_PAUSE`·광고 표면·시크릿·`_config.yml`·글·`chanceblog.yml` 은 그대로다.**
+**등급**: T2 — `pipeline/`·`generator.py` 로직. 워크플로 둘(`chance-fix-images.yml` 한 단계 추가, `chance-shadow.yml` 신설)은 T3 성격이라 이유를 파일마다 주석으로 적었다. 잠금을 **켜는 것**(레지스트리 값 넷)은 별도 T3 병합이다.
+**목적**: 운영자 결정(2026-11-09) — 발행 정지를 풀기 전에 Chance 는 승인 흐름(`publish_flow: pr`), Blogger 는 초안 전용, 자동·직접 게시는 꺼짐, 하루 최대 1편, 사람 승인 없는 공개 경로 0개가 성립해야 하고, 코드와 시험으로 보장하지 못하면 정지를 유지한다. 그 보장을 레지스트리 스위치 하나(기본 꺼짐)로 만든다.
+
+### 변경 사항
+- **전수조사**(`docs/PUBLISH_PATHS.md`): 워크플로 20개를 쓰기 신호(권한·`git push`·`gh`·파이썬 진입점·외부 액션)로 읽어 공개 경로를 P1(Chance 직접 게시)·P2(기존 글 이미지 교체)·P3(Blogger 자동)·P4(Blogger 수동 즉시 게시)·P5(워크플로 밖 직접 push)·P6(Pages 배포는 수단)로 정리했다. 지금 열려 있는 것은 P1·P2·P4(P3 은 두 블로그가 `draft` 라 닫힘)이고 모두 `PIPELINE_PAUSE` 로만 멈춰 있다. P5 는 막지 못한다(남은 위험).
+- **잠금 규칙과 가드**(`pipeline/publish_lock.py`): 레지스트리 최상위 `resume_lock`(없거나 false 면 아무것도 안 함, 모르는 값은 켜진 것으로 읽음). 켜면 규칙 L0–L7(값은 true·false 만 / chance 는 `pr` / Chance 밖 mode 는 off·draft·package / auto 는 pr 와 함께 / chance 하루 1편 / 열린 초안 상한 1–3 / languages / 다른 블로그 하루 1편)을 검증기(`pipeline.registry`)·`drafts.chance_flow()`(워크플로의 '발행 흐름 확인'·`draft_flow deliver`·생성기)·Blogger 러너(`pipeline/run.py`, 수동 `publish` 즉시 게시도 거절)가 같은 함수로 읽는다. 생성기는 `main()` 정지 검사 직후 `publish_lock.guard_start(...)` 한 줄만 부른다(규칙 위반 → `::error::`+종료 1, 하루 상한(정기·수동 모두) → 정상 건너뜀, 열린 초안 상한 → 건너뜀, 이력이 깨져 세지 못하면 멈춤, 기존 글 이미지 교체는 거절). 연습 실행·그림자 실행(`SHADOW_RUN`)은 상한을 세지 않는다. 결함 D-54(수동 실행이 하루 상한을 따지지 않음)를 잠금 아래에서 코드로 닫는다.
+- **워크플로**: `chance-fix-images.yml` 첫 단계 `python -m pipeline.publish_lock check-direct`(잠금이 켜져 있거나 레지스트리를 못 읽으면 종료 1 — 직접 커밋 길). `chance-shadow.yml` 신설: 수동 전용·`contents: read` 만·`persist-credentials: false`·`GITHUB_TOKEN` 을 어느 단계에도 안 넘김·정지 변수는 값만 넘김·측정 도구가 있을 때만 별도 프로세스로 측정·실행 요약은 숫자만·아티팩트 보관 14일(`SHADOW_RUN`·`SHADOW_OUT`·`SHADOW_COUNT` 인터페이스 — 생성기 쪽은 GATE 묶음이 구현). `chanceblog.yml` 은 단계 목록을 시험이 못박고 있어 손대지 않았다(발행 흐름 확인 단계가 `chance_flow()` 로 실패하면 뒤 단계가 돌지 않는다는 것을 시험이 단계 조건으로 계산해 보인다).
+- **시험**: 새 시험 147개 — `tests/test_publish_lock.py` 103(규칙 행렬·가드·`main()`·Blogger 러너 감시자·워크플로 단계 시뮬레이션·명령줄·'가드를 거친 실행 = 건너뛴 실행'), `tests/test_publish_paths.py` 36(워크플로 20개 전체의 쓰기 신호 표와 문서 일치·새 쓰기 길이 생기면 빨강·그림자 읽기 전용·기록 파일이 Jekyll 공개 경로가 아님), `tests/test_publish_lock_git.py` 8(실제 git·임시 bare origin·실제 생성기로 하루하루 따라감). 기존 시험은 새 워크플로·단계 때문에 개수·이름 표만 고쳤고(`test_workflow_names`·`test_operator_loop_workflows`·`test_blogger_split`) 약하게 만든 것은 없다.
+- **기존 시험의 켜는 변경 대비 보강**: `generator.main` 을 임시 폴더에서 돌리는 기존 시험(`test_generator_drafts` 의 `run_tick`·`test_generator_slots` `MainPolicyTest`·`test_manual_run_defaults` 둘·`test_gemini_call_log` 하나)은 잠금 가드를 `guard_off()`(tests/lock_helpers.py)로 건너뛰고 흐름만 본다 — `draft_flow_on` 을 시험 쪽에서 고정해 온 것과 같은 방식이다. `test_run.make_root` 는 실제 레지스트리를 복사한 임시 저장소에서 `resume_lock` 키를 뺀다. 내 시험은 '꺼짐' 기준으로 진짜 레지스트리 대신 `today_registry()` 를 쓰고, 진짜 값에 묶인 것은 `LockStateTest.test_the_real_registry_has_the_lock_off_today` 한 시험뿐이다. 켜는 변경이 깨뜨리는 나머지 기존 시험의 고정값은 `docs/PUBLISH_PATHS.md` §9 에 목록으로 있다.
+
+### 검증 증거
+- **새 시험 147개**: `tests/test_publish_lock.py` 103·`tests/test_publish_paths.py` 36·`tests/test_publish_lock_git.py` 8 — 파이썬 3.12 와 진짜 3.10.11 모두 `OK`(3.10 은 새 시험 셋과 손댄 기존 시험을 합친 15개 모듈 1,119개).
+- **전체 시험(꺼짐 = 이 가지 그대로)** 3.12: 98개 모듈 5,675개 모두 `OK`(모듈을 한 번에 하나씩 돌렸다 — 이 PC 메모리가 빠듯하다). 그 뒤에 손댄 시험(`test_drafts`·`test_plan_and_watchdog`·`test_manual_run_defaults`)과 문서를 읽는 `test_publish_paths`·`test_publish_lock` 은 다시 돌려 `OK`. 이 항목을 더한 뒤 WORKLOG·문서·저장소 전체를 읽는 모듈(`test_main_image_run`·`test_notice_requests`·`test_operator_loop_docs`·`test_secret_invisible`·`test_guardrails`·`test_security_settings`·`test_site_cleanup`·`test_agent_docs`·`test_glossary_docs`·`test_request_number_notation`·`test_notice_numbers`·`test_publish_paths`·`test_validate_repo`)도 다시 돌려 `OK`.
+- **꺼짐 = 이전과 같다**: ① 기준 브랜치(origin/main)와 이 브랜치를 같은 입력 시나리오 30개로 돌려 반환값·출력·요약·모델에 보낸 글·이력을 비교 — 30/30 같음(시험 도구가 넣는 지금 시각과 임시 폴더 이름만 가렸다. 프로그램 코드는 그 뒤 바뀌지 않았다) ② 가드를 건 채 기존 시험 모듈(워크플로·문서·레지스트리·생성기·초안)을 그대로 돌려 통과(시험 보강 전) ③ `GeneratorMainTest` 의 `…the_guard_changes_nothing…` 시험이 가드를 거친 실행과 건너뛴 실행을 6개 시나리오로 비교 ④ `git diff` 로 `pipeline/blogs.json`·`chanceblog.yml`·`_config.yml`·`index.html`·`_includes`·`_layouts`·글·이력 변경 0.
+- **켜는 값 복사본 시험**(저장소 밖): 레지스트리 파일에 값 넷을 글자 그대로 넣은 복사본에 전체 시험을 돌렸더니 8개 모듈이 흔들렸다(`test_drafts`·`test_generator_drafts`·`test_manual_run_defaults`·`test_plan_and_watchdog`·`test_registry`·`test_ops_inbox_drafts`·`test_batch2_integration`·`test_publish_lock`) — 원인은 ① 켜는 변경이 일부러 깨뜨리는 표지판 시험 ② 레지스트리를 복사해 쓰는 임시 저장소·사본이 잠금 키를 물려받는 것과 가드가 임시 폴더에서 멈추는 것(이번에 시험 쪽만 보강). 보강한 뒤 표지판 3곳(`REAL_PUBLISH_FLOW` 한 줄·`test_registry` 한 줄·`test_publish_lock` 한 시험, 목록은 `docs/PUBLISH_PATHS.md` §9)만 고친 복사본은 전체 98개 모듈 5,675개 `OK`, `scripts/validate_repo.py --root .` 오류 0건, `python -m pipeline.publish_lock check` 켜짐·`pipeline.draft_flow flow` `pr`. 그 복사본과의 차이를 `git apply --ignore-whitespace` 로 적용하는 패치(77줄)로 남겨 총괄 보고서에 적었다.
+- **변이 점검**(작업 폴더 사본에서만, 복원 뒤 원본과 sha256 비교): 규칙 L0–L7 각각·가드(하루 상한·열린 초안 상한·이미지 교체 거절·깨진 이력 멈춤·원격 못 읽음)·`chance_flow` 잠금 검사·검증기의 규칙 호출·Blogger 러너 두 곳·생성기의 가드 호출·워크플로 단계(`chance-fix-images.yml` 잠금 단계·`chanceblog.yml` 커밋 단계 조건)·그림자 워크플로의 읽기 전용 신호 다섯·다른 워크플로의 새 쓰기 길 셋·`_config.yml` 의 이력 제외 삭제·문서의 켜는 값 이름 삭제 등 46곳을 하나씩 망가뜨려 보니 46곳을 모두 시험이 잡았다(살아남은 것 0). 원복 뒤 기준 시험 통과·sha256 불일치 0. 시험을 보강하기 전과 마지막 시험 상태에서 두 번 돌렸고 결과가 같다.
+- 워크플로: actionlint 1.7.12 + shellcheck 0.11.0 으로 바뀐 워크플로 둘 오류 0. 새 코드에 `msvcrt`·`ctypes`·역슬래시 경로·물결표 없음. `scripts/validate_repo.py --root .` 오류 0건(경고 2건은 기존 LIQUID-1 둘).
+
+### 남은 이슈 / 다음 AI 주의
+- **켜는 것은 아직 안 했다**: `pipeline/blogs.json` 에 `resume_lock: true`·`chance.publish_flow: "pr"`·`chance.limits.max_posts_per_day: 1`·`chance.limits.max_open_drafts: 3` 네 값을 함께 넣는 변경이 별도 T3 병합이다(하나라도 빠지면 검증이 빨강이라 병합 전에 걸린다). 같은 변경에서 `docs/PUBLISH_PATHS.md` §9 의 시험 고정값을 고친다. `PIPELINE_PAUSE` 해제는 그 뒤 운영자가 한다.
+- **그림자 병합 지점 둘**: ① `generator.py` `main()` 정지 검사 근처를 GATE 묶음도 고친다 — 충돌하면 정지 검사 → (그림자 모드 분기) → 가드 호출 순서를 지킨다. ② SHADOW 묶음의 `NotConnectedTest` 는 워크플로가 `quality_shadow` 를 언급하면 실패하고, `chance-shadow.yml` 은 측정 도구가 있을 때만 그것을 부른다 — 병합 때 그 시험이 `chance-shadow.yml` 을 허용해야 한다. 생성기의 그림자 모드(정지 우회·쓰기 차단)는 GATE 쪽 코드가 맡는다.
+- 새 시험에서 `generator.main` 을 돌리면 가드를 `guard_off()` 로 건너뛰고(`run_tick` 은 기본이 건너뜀), 잠금 자체를 보는 시험만 `guarded=True` 로 돌린다.
+- 실제 GitHub 에서는 아무것도 돌려 보지 않았다(워크플로는 actionlint+shellcheck 와 단계 조건 시뮬레이션만). `actions/checkout@v6`·`actions/setup-python@v6` 는 이 저장소의 다른 워크플로와 같은 버전이고, `actions/upload-artifact@v6` 는 이 저장소에서 처음 쓰는 액션이라(GitHub 공식 액션, 버전 6 이 있다는 것은 공개 릴리스 목록으로 확인) 그림자 워크플로의 첫 실제 실행에서 확인한다. 닫은 초안은 브랜치가 정리되는 7일까지 열린 초안으로 센다(새 초안이 쉬는 쪽의 오차).
+
+### 수정 1 (2026-11-09, 독립 검증 지적 1–8 반영 — 같은 가지 위의 새 WIP 커밋)
+
+독립 검증 판정은 '조건부 통과'였다(꺼진 상태는 이전과 바이트까지 같고, 켜면 P1–P4 가 실제로 닫힌다 — 단 켜기 전에 문제 1 을 막고 병합 순서·합성 충돌을 정리해야 한다). 지시서 `audit6/LOCKFIX_BRIEF.md` 를 그대로 따랐다. 레지스트리 값·정지 변수·광고 표면·`chanceblog.yml`·`gates.py`·Blogger 코드는 바꾸지 않았다.
+- **문제 1(키 오타·위치 오류가 잠금을 꺼진 채 통과시킴)**: 레지스트리 검증기가 **알려진 최상위 키만** 허용한다(K1 — `publish_lock.KNOWN_TOP_LEVEL_KEYS` 여섯 개, 현재 `blogs.json` 의 최상위 키를 세어 못박았고 시험이 그 목록을 못박는다). 모르는 키가 resume_lock 오타로 보이면(줄인 이름에 `resume`·`lock`) 'resume_lock 오타로 보입니다' 라고 알려 주고, `defaults`·블로그 항목 안의 `resume_lock` 은 오류다(K2). 오타로 보이는 키·잘못된 위치는 **실행 시에도** 가드·`chance_flow`·Blogger 러너·`check`·`check-direct` 가 멈춘다. 잠금 키가 없는 현재 레지스트리는 그대로 통과한다. 가드는 잠금이 켜져 있을 때만 로그에 `[잠금] 제한 재개 잠금: 켜짐` 한 줄을 남기고(꺼져 있으면 — 키가 없든 `false` 든 — 출력이 이전과 바이트까지 같아야 해서 남기지 않는다. '키가 있을 때만'(꺼짐 줄 포함)은 `false` 시나리오 둘이 달라져 이쪽을 골랐다), `check`·`check-direct` 는 늘 로그와(`GITHUB_STEP_SUMMARY` 가 있으면) 실행 요약에 남긴다. L0 은 값 오타만 막는다고 코드 주석·문서를 고쳤고 §9 에 표지판 시험은 고치되 지우지 않는다고 적었다.
+- **문제 2(병합 순서·합성 충돌)**: 병합 순서 GATE → LOCK → SHADOW → R2 → SRC → FACT(그때의 계획이다 — 실제 순서는 달라졌다, 맨 위 lock 3 항목). `main()` 순서는 A(정지 검사 → 그림자 분기 → 잠금 가드)로 확정해 코드 주석과 문서(§4-2·§7)에 적었고 가드의 그림자 예외는 방어선으로 주석했다. GATE 의 `languages` 검증은 잠금과 무관하게 항상 켜져 있어 `RegistryRuleTest` 의 '모든 규칙을 깨는 레지스트리' 시험에서 languages 항목을 뺐다(이유 주석 — GATE 가 있든 없든 통과). `chance-shadow.yml` 은 체크아웃 바로 뒤 첫 단계가 `pipeline/shadow_run.py` 가 없으면 '이 저장소에는 그림자 실행 코드가 없어 중단합니다' 로 실패하고, 맨 위 주석·`PUBLISH_PATHS.md`·`ACTIONS_GUIDE.md` 가 병합 순서 의존을 적는다.
+- **문제 3(`SHADOW_RUN=on` 판정 불일치)**: 켜짐 `1·true·yes·on·enabled`, 꺼짐 비움·`0·false·no·off·disabled`(대소문자·앞뒤 공백 무시)로 맞추고, 그 밖의 값은 **잠금이 켜져 있을 때** 가드가 거절한다(종료 2). 꺼져 있으면 가드가 값을 보지 않는다(출력이 이전과 같다). GATE 병합 뒤 생성기의 판정과 같은 집합인지 견주는 시험을 두었다(이 가지에서는 건너뜀).
+- **문제 4(변이 생존 6개)**: ① 두 잠금 워크플로의 `run:` 본문에 이중 중괄호 식이 없음(입력은 env 로만) ② `chanceblog.yml` 발행 흐름 확인 단계의 `continue-on-error`·`|| true`·`set +e` 부재(마지막 알림 단계만 일부러 `continue-on-error`) ③ 워크플로별 쓰기 명령 **개수**를 `COUNTS` 로 못박음 ④ 허용 언어를 정확히 `{ko, en}` 으로(`ja` 변형 추가). V26(`set -euo pipefail` 삭제)은 동치 변이다 — Actions 의 기본 셸이 `bash -e` 이고 그 단계들에는 파이프·미설정 변수 읽기가 없어 동작이 같다.
+- **문제 5(문서 불일치)**: 'LOCK_DAILY_CAP 수동 노란 안내' → '실행 요약의 안내 줄'(코드는 `::notice::`), 그림자 '정지 중에도 돈다·읽기 전용'은 GATE 병합 뒤에만 참임을 ACTIONS_GUIDE 쉬운 설명에도, `chanceblog.yml` 수동 입력 설명 '(수동 게시는 … 하루 상한을 따지지 않습니다)' 는 켠 뒤 틀리므로 §9 의 켠 뒤 문구 목록에 추가(워크플로 파일은 이 가지에서 바꾸지 않음), `docs/QUALITY_GATE.md` 는 GATE 병합 전에는 없다는 주석.
+- **문제 6(이미지 교체 워크플로 연습 실행)**: 입력 `dry_run` 은 boolean(커밋 단계가 이미 같은 식을 쓴다)이라 첫 단계에 조건 `!inputs.dry_run` 을 달았다 — 연습 실행(저장 안 함)은 막지 않고 실제 교체만 멈춘다. 규칙 위반이면 생성기 가드가 연습도 멈춘다.
+- **문제 7·8(문서)**: `PUBLISH_PATHS.md` §7 에 원격 초안 목록을 못 읽으면 초록으로 조용히 건너뛴다(워치독 36시간 알림으로만 드러남)·닫은 초안 7일·하루 '1편' 은 한·영 한 쌍·L6 이 GATE 보다 느슨함을 적었다(코드 변경 없음).
+- **검증(수정 1)**: 새 시험 147 → 195개(`test_publish_lock` 103→132·`test_publish_paths` 36→55·`test_publish_lock_git` 8; 앞 둘에 각각 1개는 조건부 건너뜀 — GATE 병합 뒤에만 견주는 시험·리눅스에서만 도는 셸 시험). 전체 3.12: 98개 모듈 5,675 → 5,723개 모두 `OK`. 진짜 3.10.11: 손댄 15개 모듈 1,167개 `OK`. 변이 점검(작업 폴더의 내보낸 사본에서만): 이전 46개 중 낡은 둘을 고치고 새 27개(키 규칙·상태 줄·그림자 값·그림자 첫 단계·연습 실행 조건, 검증자가 살린 V08·V17·V27·V28·V32)를 더한 73개를 모두 잡았다(살아남음 0, 원복 뒤 기준 통과, sha256 불일치 0). 꺼진 상태 바이트 비교(검증자 시나리오 56개를 기준선 origin/main 과 이 가지로 별도 프로세스에서 견줌): 49개 같음, 7개 다름 — 이상한 값 네 개·`max_open_drafts` 잘못된 값 하나는 설계상, 오타 키·`defaults` 안 위치 둘은 이번에 막은 구멍이다(`resume_lock: false` 시나리오는 같다). 켜는 변경 복사본(새 `flip.patch`, 77줄·4파일): 전체 5,723개 `OK`, 잠금 켬 시나리오 49개 중 45 통과(키 오타 LB208·LC07·LC08 통과, LG22 는 종료 1·글 0)·4개는 알려진 것(그림자 값 LG19·LG20 은 GATE 가 없는 이 가지만의 틈, LG21 은 기존 동작). `scripts/validate_repo.py --root .` 오류 0건(경고 2건은 기존), actionlint 1.7.12 + shellcheck 0.11.0 오류 0.
+
+---
+
+## [2026-11-07] Claude – 문서·도구 사본 갱신: 작업 내용 현행화·자동 PR 첫 관측 기록·AI 도구 사본 동기화 (T1 – 문서·AI 도구 사본·시험만, 병합 전)
+
+**작업자**: Claude (구현자). 병합은 운영자가. T1 이라 독립 검증은 필수가 아니다(코드·워크플로·광고 표면·`mode`·시크릿·정책 변경 0).
+**대상**: 공통 – `인수인계/작업내용.md`·`docs/ARCHITECTURE.md` §4-6-3·`docs/DEFECT_REGISTER.md`(관측 행)·`docs/AGENT_RUNBOOK.md` J3 5·`docs/ACTIONS_GUIDE.md` 6-18·`인수인계/PR_병합_방법.md`·`인수인계/운영자_요청함_사용법.md`·`WORKLOG.md`(이 항목)·`인수인계/도구/README.md`·`인수인계/도구/work/make_request.py`·`인수인계/도구/work/scratch/wait_ci.py`·`tests/test_auto_pr_workflow.py`(문서 문구 시험)·`tests/test_wait_ci_gate.py`(새).
+**등급**: T1 – `.github/`·`pipeline/`·`index.html`·`_config.yml`·글·`mode`·광고 표면·`docs/CHARTER.md` 의 정책 변경이 없다.
+**목적**: ① 저장소가 진실이어야 하는데 단일 현황 문서가 2026-11-06 15:47 이후 갱신되지 않아, 새 세션이 저장소만 읽고는 하루 사이의 큰 일(병합 M001~M011·자동 PR 첫 관측·재부팅·번호 체계)을 알 수 없었다 ② 자동 PR 워크플로 문서가 '첫 관측으로 확인한다'고 적어 둔 곳을 관측한 사실로 고친다 ③ AI 도구 사본이 작업 사본보다 낡았다.
+
+### 변경 사항
+- `작업내용.md`(최소 갱신, 구조 그대로): 맨 위 '마지막 갱신'(2026-11-07 02시)·§0-2(3번 병합 부탁 현행, 11번 상시 위임 새로)·§0-3(스냅샷 교체)·§0-5(낡은 예약 번호 정리)·§0-6(23:00 재부팅 뒤 이어가기)·§1(맨 위 항목과 낡은 문장 셋)·§2(새 행 4개, 낡은 행 3개 표시)·§3 32번(R-119 병합 사실)·§5(2026-11-07 새로, 11-06 보강, 11-05 새로 – 병합 알림 번호 ↔ 요청 ↔ 저장소 PR ↔ 병합 시각 표 포함)·§6(① 비고·④·⑤). 시험이 못박은 낱말은 그대로 두었다(`grep -rn 작업내용 tests` 로 먼저 확인).
+- **자동 PR 첫 관측**(2026-11-07, 블로그 M010 가지 `ai/claude/M010-auto-pr-blog-1` 의 첫 push 와 PR #148 – 공개 REST·git 으로 직접 확인): ① 가지 push(01:26:22) 뒤 새 워크플로가 2분 45초 만에 초록, 가드레일 검사가 끝난 13초 뒤 봇이 PR #148 을 01:29:03 에 만들었다(제목·본문 = 커밋 그대로, 1커밋·14파일). 저장소 설정 'Allow GitHub Actions to create and approve pull requests' 는 이미 켜져 있었다(공개 주석에는 러너 이미지 공지 한 줄뿐, 권한 경고 없음). ② PR 이 만들어진 5초 뒤 `[공통] PR 변경 범위 검사` 의 `pull_request` 실행이 job 없이 `action_required` 로 생겼다(예상대로 – 옛 문서의 '시작시키지 않는다(예상)' 가 틀렸음이 확인됨). 병합 12초 전(01:58:35) 운영자 계정이 그 실행을 한 번 더 돌려 두 번째 시도가 건너뜀(job `이슈 요청 범위 확인` 건너뜀)으로 끝났고 병합 뒤 저장소의 `action_required` 실행은 0건이다. ③ 병합(운영자 Squash and merge, 01:58:47)의 병합 커밋 `23a3f89` 는 작성자 = PR 작성자인 `github-actions[bot]`, 커미터 = GitHub, 트리 = 가지 트리. ④ 요청 전용 가지(`NO-MERGE-…`)에 요청 파일을 올린 01:54 의 push 에는 이 워크플로가 돌지 않았다. ⑤ 데스크톱 저장소는 운영자가 PR #34 를 02:04 에 먼저 만들어(봇이 만든 것이 아님) 봇이 PR 을 만든 사례가 아직 없다(그 저장소의 첫 자동 PR 실행은 02:19 초록, 공개 주석은 러너 이미지 공지 한 줄뿐).
+  **미관측으로 남긴 것**: 승인 없이 병합했을 때 승인 대기 실행이 사라지는지·남는지(PR #148 은 운영자가 병합 직전에 그 실행을 다시 돌렸다) / 확인 필요 모음의 '승인 대기' 항목·텔레그램 알림이 생기는지(모음의 정기 실행이 PR 이 열려 있던 동안 돌지 않았다 – 마지막 정기 실행 11-06 21:29) / 실제 403 문구(블로그 저장소는 설정이 켜져 있어 볼 수 없다) / 러너 로캘 / 실행 요약의 문장(로그인 없이 읽을 수 없다) / 운영자가 누른 것이 승인 단추인지 재실행인지(공개 기록으로 구분되지 않는다). `mergeable_state` 가 병합 전 `unstable`(병합 가능 표시)이었다는 것은 구현 세션이 병합 전에 읽은 값을 옮겼다.
+  기록한 곳: `docs/ARCHITECTURE.md` §4-6-3(④ 승인 대기·⑤ 설정·⑥ 병합 커밋 작성자·⑧ 첫 실행·⑬ 403·⑭ 로캘)·`docs/DEFECT_REGISTER.md` 관측 체크리스트의 G-A12 행(D-87 행처럼 '관측 결과' 를 이어 붙임)·`docs/AGENT_RUNBOOK.md` J3 5·`인수인계/PR_병합_방법.md`·`인수인계/운영자_요청함_사용법.md`·`docs/ACTIONS_GUIDE.md` 6-18(지시서 목록 밖이지만 같은 '첫 관측으로 확인합니다' 문장이라 함께 맞춤). **위 [2026-11-06] 항목(병합 부탁 PR 자동 만들기 워크플로 준비)은 남의 항목이라 고치지 않았다**(J5) – 그 항목의 '지금도 켜져 있는지는 확인하지 못했다'·'관측하지 못했다' 는 이 항목으로 대체된다.
+- 시험 `tests/test_auto_pr_workflow.py`: 기존 needle 은 하나도 약화·삭제하지 않았다 – '사라질 것으로 본다/봅니다' 는 승인 없이 병합한 경우가 미관측이라 그대로다. '관측은 봇 PR #13 이 닫힐 때의 failure 뿐' 이라는 시험 주석 두 줄을 사실에 맞게 고치고, 새 시험 1개(관측한 사실이 문서마다 적혀 있고 옛 '관측 대기' 문장이 되살아나지 않았는지)를 더했다. 옛 문서(origin/main)로는 새 시험이 실패한다.
+- AI 도구 사본 동기화: `인수인계/도구/work/make_request.py`(관문의 `bad = [...]` 줄이 `wait_ci.run_ok` 를 쓴다)·`scratch/wait_ci.py`(`APPROVAL_PENDING_OK`·`run_ok()`·HTML 대체 읽기 `_runs_for_html` 과 `action required` 상태 매핑·`main()` 이 `run_ok` 사용)를 작업 사본과 맞췄다(줄 끝은 작업 폴더의 CRLF 유지, 커밋은 LF). **작업 사본 `wait_ci.py` 112행에 편집 도구가 정규식의 단어 경계 표시(역슬래시 b)를 진짜 백스페이스 글자(U+0008)로 바꿔 넣은 곳이 있어**(숨은 글자 검사가 잡았다) 저장소 사본에서는 단어 경계로 되돌렸다 – 그대로 두면 HTML 대체 읽기의 '걸린 시간' 칸이 조용히 비었다. 새 시험 `tests/test_wait_ci_gate.py`: `run_ok` 가 성공·건너뜀·중립과 알려진 이름의 `action_required` 만 참으로 세고(다른 이름의 승인 대기·실패·취소·진행 중은 거짓) 알려진 이름이 실제 워크플로 이름과 같으며(`pr-scope-check.yml`) 그 검사가 AI 가지 PR 을 건너뛰는 조건이 있는지, 관문(`default_gate`)이 그 승인 대기가 낀 가짜 목록은 통과시키고 다른 `action_required`·진짜 실패·취소·진행 중·빈 목록은 막는지, `wait_ci.main` 이 같은 규칙인지, HTML 읽기의 상태 매핑과 읽는 순서, 두 파일에 숨은 제어 글자가 없는지를 못박는다. 도구 README 에 한 줄.
+
+### 증거
+- **시험(이 PC, 부하를 보며 모듈 하나씩)**: 3.12 – `tests/test_*.py` 전체 95개 모듈을 하나씩 돌려(14분 24초) **5,528개 통과·실패 모듈 0**(새 시험 27개 포함). 3.10.11(개발 도구 폴더의 3.10 가상환경) – 지시서의 최소 목록 13개 모듈(`test_agent_docs`·`test_notice_requests`·`test_glossary_docs`·`test_telegram_inbox_docs`·`test_notice_tools`·`test_auto_pr_workflow`·`test_workflow_names`·`test_pr_ready_workflows`·`test_operator_loop_docs`·`test_request_number_notation`·`test_security_settings`·`test_guardrails`·새 `test_wait_ci_gate`) 619개 통과(2분 50초). 새 도구 시험 `test_wait_ci_gate` 26개는 3.12·3.10 모두 통과한다.
+- **변이 점검**: 새 도구 시험은 도구 코드를 한 곳씩 일부러 틀리게 고친 사본 14개(관문이 옛 '초록' 집합만 봄·`run_ok` 가 모든 `action_required` 를 초록으로 셈·알려진 이름이면 결론을 무시·예외 이름이 하나 늘어남·`main` 이 옛 집합을 씀·읽는 순서에서 HTML 을 건너뜀·HTML 읽기에서 `action required` 매핑이 빠짐·실패를 성공으로 매핑·다른 커밋 행도 받음·다른 가지 행도 받음·정규식에 백스페이스 글자·관문의 '완료 아님' 검사 빠짐·실패 이유 목록에 모든 실행을 적음·빈 목록 통과)를 **14/14 모두 잡았다**(처음 점검에서 한 곳이 살아남아 시험 입력을 하나 더했다). 새 문서 시험은 옛 문서(`origin/main` 의 파일)로 돌리면 실패한다.
+- `python -X utf8 scripts/validate_repo.py --root .` 오류 0건·경고 2건(기존 LIQUID-1, `--base origin/main` 도 같음). `pyflakes` 지적 0건(변경한 파이썬 4개)·`vermin --target=3.10-` 최소 3.8·3.10 컴파일 통과. 숨은 글자 검사(`_scan_invisible.py`)는 변경한 파일 모두 0건 – 단 **작업 사본 `wait_ci.py` 에서는 1건**(112행 U+0008)을 찾아 저장소 사본에서 고쳤다. 변경은 문서·도구 사본·시험뿐이고 `.github/`·`pipeline/` 은 한 줄도 바꾸지 않았다.
+- 이 증거 줄을 채운 뒤에는 문서만 바뀌었으므로 검증기와 문서를 읽는 시험 모듈(`test_notice_requests`·`test_main_image_run`·`test_workflow_names`·`test_auto_pr_workflow` 등)만 다시 돌렸다(전체는 위 실행에서 통과). 독립 검증은 없다(T1). 확인하지 못한 것은 위 '미관측으로 남긴 것'.
+
+### 다음 AI 주의
+- 위 '미관측으로 남긴 것' 은 **다음에 같은 일이 생겼을 때 사실로 고친다** – 특히 데스크톱 저장소에서 봇이 PR 을 처음 만들 때(설정이 꺼져 있으면 권한 오류(403) 경고 문구가 첫 관측이 된다)와, 운영자가 승인 대기 줄을 건드리지 않고 병합했을 때 그 실행이 어떻게 되는지.
+- `.github/workflows/auto-pr.yml` 머리 주석에 '병합하면 사라질 것으로 본다(… 첫 관측으로 확인한다)' 가 그대로 남아 있다(워크플로 파일이라 T1 인 이 묶음에서 못 고쳤다). 다음 워크플로 변경(T3)에서 같이 고치되, `tests/test_auto_pr_workflow.py` 의 머리 주석 needle '사라질 것으로 본다' 는 그 문장이 남는 동안 유지한다.
+- 작업 폴더 W 의 `scratch/wait_ci.py` 에는 112행에 백스페이스 글자가 아직 있다(이 저장소의 사본이 고친 쪽) – `setup_workspace.py` 로 새로 복사하면 고쳐진 사본이 간다. 정규식을 편집 도구로 고칠 때는 단어 경계 표시 같은 역슬래시 글자를 `chr(92)` 로 넣고, 쓴 뒤 숨은 글자 검사(`_scan_invisible.py`)를 돌린다.
+- 이번 범위 밖이라 **그대로 둔 낡은 곳**: `docs/REQUEST_BRIEFING.md` §8(2026-10-27 밤 기준 진행 현황)·`작업내용.md` §3 25번(네이버 '병합 대기')·§4·§2 의 옛 행들·`인수인계/도구/README.md` 흐름 A 의 요청 푸시 대상이 옛 요청 가지 이름 `ai/claude/desktop-bootstrap-merge` 로 적힌 곳(지금 요청 전용 가지는 `ai/claude/NO-MERGE-operator-requests`). 다음 현황 정리에서 고친다.
+- 문서 숫자(병합 시각·PR 번호)는 02:30 에 공개 REST·git 으로 읽은 값이다. 봇이 올리는 글 커밋의 시각은 UTC(+0000)로 찍힌다 – 한국 시각은 +9시간.
+
+---
+
+## [2026-11-06] Claude – 병합 부탁 PR 자동 만들기 워크플로(`auto-pr.yml`) 준비 (T3 — 병합 전·독립 검증 전, 켜는 것은 병합 부탁으로 따로)
+
+**작업자**: Claude (구현자). 병합은 운영자가. 독립 검증은 구현자와 다른 주체가 새 clone 에서 따로 한다(워크플로·보안 영역이라 필수).
+**대상**: 공통 — `.github/workflows/auto-pr.yml`(새)·`tests/test_auto_pr_workflow.py`(새)·`tests/test_workflow_names.py`(이름 표)·`tests/test_operator_loop_workflows.py`(워크플로 개수 18→19)·`tests/test_blogger_split.py`(확인 필요 모음이 실행을 읽는 워크플로 파일 개수 18→19)·문서(`docs/ARCHITECTURE.md` 표·§4-6-3·§9, `docs/AGENT_RUNBOOK.md` §5·J3 5, `docs/SECURITY_GUARDRAILS.md` G-A12·§3·§5·§6, `docs/ACTIONS_GUIDE.md` 6-18, `docs/REQUEST_BRIEFING.md`, `docs/DEFECT_REGISTER.md` 관측 한 줄, `인수인계/PR_병합_방법.md`, `인수인계/운영자_요청함_사용법.md`). 데스크톱 저장소에도 같은 기능의 워크플로를 따로 준비했다(그쪽 기록은 데스크톱 `docs/DECISIONS.md`).
+**등급**: T3 취급(워크플로는 `docs/CHARTER.md` §5 표에서는 T2 인데 PR 만들기 권한과 저장소 설정 한 줄에 닿는 보안 영역이라 운영자 승인 병합 + 독립 검증 — 2026-11-07 독립 검증의 지적으로 인용을 표와 맞게 고침).
+**목적**: 운영자의 병합 절차(폰 → GitHub PC 버전 → 노란 배너 → Create pull request → 병합)에서 'PR 만들기' 단계를 없애 병합 한 번만 누르게 한다(운영자 확인 003 에서 ② 'PR 만들기만 자동화'를 고름, 2026-11-06 20:18). **병합은 하지 않는다.**
+
+### 변경 사항
+- `auto-pr.yml`(`[공통] 병합 부탁 PR 자동 만들기`): 트리거는 `push` 하나·가지 `ai/claude/M###-*`·`ai/claude/M####-*` 뿐(요청 가지 `NO-MERGE-…` 에는 안 돎). 권한 `contents: read`·`pull-requests: write`·`actions: read`. `uses:`·시크릿·체크아웃 없이 러너의 `gh` 로 API 여섯 가지만 부른다(커밋 메시지·기존 PR 목록·가지 끝·검사 실행·main 과의 거리·PR 만들기 한 번). 가지 이름·커밋 제목이 같은 번호이고 가지의 PR 이 없고 가지 끝이 아직 이 커밋이고 `guardrails.yml` 이 성공이고 main 위 한 커밋(`ahead_by` 1)일 때만, 30초 간격·최대 40분 기다린 뒤 PR 을 만든다. PR 을 만들지 않는 모든 경우(검사 실패·취소·가지 끝 변경·이미 PR 있음·시간 초과·GitHub 응답 연속 5회 못 읽음·저장소 설정 꺼짐 403)는 **실패가 아니라 경고와 함께 성공**으로 끝난다 — 운영자가 PR 화면의 빨간 표시를 검사 실패로 오해하지 않게. 값은 모두 `env:` 로만 넘기고 `run:` 에 표현식이 없으며 쓰기 전에 정규식으로 거른다. 로그·요약에는 고정 문장과 PR 번호만 쓴다.
+- 시험 `tests/test_auto_pr_workflow.py`: ① 모양(트리거·권한·`uses:`·시크릿·병합 호출·`gh` 주소 순서까지) + **일부러 망가뜨린 사본 19개가 모두 걸리는지** ② 가지 필터(글로브)와 스크립트 정규식이 같은 가지를 가리는 표 23줄 ③ 진짜 bash 로 `run:` 을 돌리는 동작 시험 25개(가짜 `gh` 는 셸 함수 — 정상·제목 번호 불일치·길이 경계 200/201·제어 문자·가지 이름 규칙 밖·이미 PR 있음·검사 실패/취소/시간 초과·가지 끝 변경·ahead 2→1·검사 진행 중→성공·기다림 시간 초과·연속 5회 읽기 실패·기다리는 사이 직접 만든 PR·권한 오류·제목·본문의 셸 문자·CRLF) ④ 문서 문구.
+- 기존 시험 세 곳을 의도적으로 갱신: `test_workflow_names.py` 의 이름 표 2곳(새 워크플로의 이름과 접두사 없던 시절의 이름), `test_operator_loop_workflows.py` 의 워크플로 개수 18→19, `test_blogger_split.py` 의 '확인 필요 모음이 실행을 읽는 워크플로 파일 개수' 18→19(첫 전체 실행에서 이 한 줄만 빨갰다 — 모음은 main 의 실행만 읽고 이 워크플로는 main 에서 돌지 않아 항목이 생기지 않으며 호출만 한 번 는다, 한도 150 안).
+
+### 증거
+- **전체 시험**: `python -X utf8 -m unittest discover -s tests` — **5,491개 통과**(이 PC 24분, 워크플로·시험·문서를 확정한 뒤의 두 번째 전체 실행). 첫 전체 실행(5,490개)에서는 `test_blogger_split` 의 워크플로 파일 개수 한 줄만 빨갛게 나와 위 '기존 시험 세 곳' 으로 고쳤다. 그 뒤 워크플로 머리 주석·문서 문장·이 증거 줄만 바뀌어 문서를 읽는 시험 모듈과 새 시험의 정적·문서 부분은 다시 돌려 통과했다. 새 시험 `test_auto_pr_workflow` 40개(모양 8·변이 1(사본 19개)·가지 표 3·동작 25·문서 3)는 3.12 와 3.10 에서 모두 통과한다. 검증기 `python scripts/validate_repo.py --root .` 오류 0건·경고 2건(기존 LIQUID-1). 스크립트 논리를 한 곳씩 일부러 틀리게 고친 사본 18개(ahead 비교·가지 끝 비교·제목 검사·길이 한도·제어 문자·연속 실패 횟수·403 분류·본문 전달·기존 PR 수·`--state all`·기다림 한도·두 번째 PR 확인·따옴표·검사 상태 식·compare 기준 등) 중 17개를 동작 시험이 잡았다 — 못 잡은 1개(CR 제거 `tr -d '\r'`)는 이 PC 의 Git Bash 가 명령 치환·awk 에서 CR 을 스스로 지우기 때문이며 리눅스에서는 잡힐 것으로 본다(미관측).
+- 이 PC 에서 actionlint 1.7.12(`-shellcheck=` 로 셸 연동을 끈 채)와 shellcheck 0.11.0(actionlint 와 같은 제외 목록·`--shell=bash`, 꺼낸 스크립트에 직접)을 따로 돌려 둘 다 지적 0건 — **actionlint 가 shellcheck 연동으로 4096바이트가 넘는 스크립트를 파이프로 넘기면 이 PC(윈도)에서 멈춘다**(스크립트 내용과 무관, 크기 4097바이트에서 재현; 리눅스 CI 에서는 해당 없는 것으로 본다 — 미관측). 두 도구는 `C:\ccgui\tools` 에 공식 배포본(actionlint 는 게시된 체크섬 대조)으로 격리 설치했다.
+- 읽기 호출 세 가지의 실제 응답 모양은 공개 REST 로 읽어 확인했다(2026-11-06, 인증 없이: `git/ref/heads/<`/` 가 든 가지>` 200·`.object.sha`, `…/guardrails.yml/runs?head_sha=…&event=push&per_page=5` 200·실행 1개 `completed`·`success`, `compare/main...<sha>` 200·`ahead_by` 정수). 쓰기(`POST …/pulls`)·`gh pr list`(GraphQL)·`[0-9]` 가지 필터는 관측하지 못했다(가짜 `gh`·actionlint 로만). 첫 실제 병합 가지 push 에서 볼 것은 `docs/DEFECT_REGISTER.md` 관측 체크리스트의 맨 끝 줄에 있다.
+
+### 다음 AI 주의
+- 병합 가지의 **커밋 제목은 `[M번호] `(가지 이름의 번호와 같게)로 시작**해야 PR 이 만들어진다. 앞선 병합 전의 커밋을 품은 가지(쌓은 가지)는 `ahead_by` 가 1 이 되지 않아 PR 을 안 만든다.
+- **자동으로 만든 PR 은 `pull_request` 워크플로를 '승인 대기'로 만든다**(GitHub 공식 문서 'When GITHUB_TOKEN triggers workflow runs' + 이 저장소 봇 PR #13 의 기록: PR 을 만든 3초 뒤 `PR Scope Check`·`Guardrails` 실행이 만들어졌고 job 이 0개였으며 PR 을 닫자 failure 로 끝났다). 그래서 이 저장소 문서 곳곳의 '`GITHUB_TOKEN` 으로 연 PR 은 `pull_request` 워크플로를 시작시키지 않는다(예상)'(`docs/ARCHITECTURE.md` §4-4 의 초안 PR 표·`docs/OPS_INBOX.md`·`docs/ACTIONS_GUIDE.md` 의 봇 PR 설명·`docs/SECURITY_GUARDRAILS.md` G-A10)는 틀렸다 — 이 변경에서는 고치지 않고 새 절 §4-6-3 에만 바로잡아 적었다. 자동 만들기의 PR 은 병합 상자에 `[공통] PR 변경 범위 검사` 승인 대기가 보이고 확인 필요 모음이 '승인 대기'로 올릴 수 있다(승인은 필요 없다). 모음이 `ai/claude/M…` 의 승인 대기를 무시하게 고칠지는 따로 정한다.
+- 켜려면 저장소 설정 'Allow GitHub Actions to create and approve pull requests'(Settings → Actions → General → Workflow permissions)가 필요하다 — 이슈 수정 워크플로가 같은 설정을 쓰고 2026-10-25 에 그 설정으로 봇 PR #13 이 만들어졌으므로 그때는 켜져 있었다(지금도 켜져 있는지는 확인하지 못했다). 데스크톱 저장소는 봇이 만든 PR 이 하나도 없어(PR 29개 모두 운영자 작성) 꺼져 있을 가능성이 크다. 꺼져 있어도 경고만 남고 노란 배너로 진행한다. 이 설정은 워크플로의 PR '승인'도 허용하므로 워크플로에 승인 호출을 넣는 변경은 받지 않는다(시험이 막는다).
+- push 로 도는 워크플로는 push 한 커밋의 파일 그대로 돈다(`ai-request.yml` 과 같은 신뢰 경계). 이 파일을 바꾸는 변경은 T3 로 다루고, 시험의 `static_problems`·변이 19개를 함께 고친다.
+
+### 수정 1 (2026-11-07, 독립 검증 두 렌즈 반영 — 같은 가지 위의 새 WIP 커밋)
+- **로캘**: 제목 길이 검사 `${#title}` 가 로캘에 따라 글자·바이트로 달라 129자·293바이트 한국어 제목이 기본 로캘에서 '200자 초과'로 거절됐다 → 스크립트 첫머리에 `export LC_ALL=C.UTF-8`. 시험은 비윈도에서 `LC_ALL=C.UTF-8` 을 직접 줘 이 가정을 가렸으므로 일부러 `LC_ALL=C`(`POSIX`·로캘 변수 없음 포함)로 돌리고 129자 제목·한국어 200/201자 경계를 시험한다.
+- **시험 틈 메움**: 검사 결론 `skipped`·`neutral`·`action_required`·`stale`·`startup_failure`·결론 없음·실행 0개를 거절·기다림으로 시험, 쉬는 줄 `sleep "$poll"`·기본값(30초·2400초)을 가짜 sleep(시계를 앞으로 돌림)으로 시험, 가지·SHA 정규식 앵커·`ahead_by` 숫자 확인·본문 6만 바이트 한도(경계 60000/60001·바이트 기준)·CR 제거 줄·엄격 모드(`set -euo pipefail` 첫 줄)·deny-list(`perl`·`set +e`·`|| true`·`trap`)를 못박고 추가 변이 22개가 모두 걸리는지 시험한다.
+- **문서**: 커밋 제목·본문이 PR 로 그대로 공개된다는 문장·포크 PR 에서 안 도는 이유·PR 제목은 첫 push 때의 커밋 제목으로 고정된다는 문장·'병합하면 사라집니다' → '사라질 것으로 봅니다(첫 관측으로 확인)'·'T3' 의 근거를 CHARTER 표(워크플로는 T2)와 맞게·옛 가정이 남은 두 곳(`ops-inbox.yml` 주석·`pipeline/inbox.py` 주석)·알려진 한계 한 줄씩을 §4-6-3 에 적었다. 확인 필요 모음의 '승인 대기' 안내문(눌러서 시작)이 운영자 안내(누르지 말 것)와 반대인 것은 후속 T2 묶음 `DEFERRED`(코드는 이번에 바꾸지 않음).
+
+---
+
 ## [2026-11-06] Claude – TG-STD 텔레그램 알림 표준화: 알림 번호 P001·M001·001, 표준 메시지 3종, 새 답변 양식(대상번호) (T3 — 운영자 승인 계획 R-165, 병합 전·독립 검증 전)
 
 **작업자**: Claude (구현자). 병합은 운영자가. 독립 검증은 구현자와 다른 AI 가 따로 한다(`pipeline/` 코어·검증기·승인 채널이라 T2 필수).

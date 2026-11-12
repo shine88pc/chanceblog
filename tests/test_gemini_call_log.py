@@ -28,6 +28,7 @@ from unittest import mock
 import _bootstrap
 import generator as g
 from edits_helpers import image_body, issue, make_edit_root, page_body
+from lock_helpers import guard_off
 from pipeline import llm as llm_mod
 from pipeline import run as run_mod
 from pipeline.edits import runner, safety
@@ -1231,7 +1232,7 @@ class ChanceSummaryTest(ChanceBase):
             target = Path(tmp) / "summary.md"
             env = {k: v for k, v in os.environ.items() if k != "PIPELINE_PAUSE"}
             env["GITHUB_STEP_SUMMARY"] = str(target)
-            with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(g, "FIX_IMAGES", True), \
+            with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(g, "FIX_IMAGES", True), guard_off(), \
                     mock.patch.object(g, "DRY_RUN", False), mock.patch.object(g, "STUB_GEMINI", False), \
                     mock.patch.object(g, "fix_images", fake_fix):
                 capture(g.main)

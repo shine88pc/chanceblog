@@ -252,5 +252,68 @@
     "attempts": 1,
     "reasons": [],
     "image": "9HykCSoVx5g"
+  },
+  {
+    "v": 1,
+    "blog": "blogger_macat",
+    "date": "2026-11-06",
+    "generated_at": "2026-11-06T18:05:11.282103+09:00",
+    "status": "draft_uploaded",
+    "topic": "A 5-minute night reset for an easier morning",
+    "topic_source": "seed",
+    "title": "A 5-Minute Night Reset for a Calmer Morning",
+    "labels": [
+      "evening routine",
+      "everyday habits",
+      "morning prep"
+    ],
+    "url": "https://macat0722.blogspot.com/",
+    "post_id": "3250975050207275929",
+    "model": "gemini-3.6-flash",
+    "attempts": 1,
+    "reasons": [],
+    "image": "ur4desGm6vY"
+  },
+  {
+    "v": 1,
+    "blog": "blogger_macat",
+    "date": "2026-11-07",
+    "generated_at": "2026-11-07T17:32:06.441255+09:00",
+    "status": "draft_uploaded",
+    "topic": "Tips for building a drink-more-water habit",
+    "topic_source": "seed",
+    "title": "Easy Daily Habits to Help You Drink More Water",
+    "labels": [
+      "habits",
+      "daily routine",
+      "wellness"
+    ],
+    "url": "https://macat0722.blogspot.com/",
+    "post_id": "7065830856066653838",
+    "model": "gemini-3.6-flash",
+    "attempts": 1,
+    "reasons": [],
+    "image": "p5EiqkBYIEE"
+  },
+  {
+    "v": 1,
+    "blog": "blogger_macat",
+    "date": "2026-11-08",
+    "generated_at": "2026-11-08T17:45:50.436893+09:00",
+    "status": "draft_uploaded",
+    "topic": "What to do instead of scrolling your phone before bed",
+    "topic_source": "seed",
+    "title": "Simple Things to Do Instead of Bedtime Scrolling",
+    "labels": [
+      "bedtime habits",
+      "sleep routine",
+      "evening winddown"
+    ],
+    "url": "https://macat0722.blogspot.com/",
+    "post_id": "2842475330937894399",
+    "model": "gemini-3.6-flash",
+    "attempts": 1,
+    "reasons": [],
+    "image": "lMQv3xVa8X4"
   }
 ]

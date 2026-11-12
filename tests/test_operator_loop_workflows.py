@@ -335,7 +335,7 @@ class NewWorkflowsInTheRepositoryTest(unittest.TestCase):
 
     def test_workflow_count_and_the_other_workflows_are_untouched_by_name(self):
         names = sorted(path.name for path in WORKFLOWS.glob("*.yml"))
-        self.assertEqual(len(names), 18)                      # 텔레그램 수신(telegram-inbox.yml, 2026-11-04)이 열여덟째다
+        self.assertEqual(len(names), 20)                      # 그림자 실행(chance-shadow.yml, 2026-11-09)이 스무째다(병합 부탁 PR 자동 만들기 auto-pr.yml 2026-11-06 이 열아홉째, 텔레그램 수신 telegram-inbox.yml 은 열여덟째, 2026-11-04) — 새 워크플로를 더하면 이 숫자를 의도적으로 올린다
         self.assertIn("ai-request.yml", names)
         self.assertIn("operator-reply.yml", names)
 

@@ -30,7 +30,7 @@ from collections import namedtuple
 from datetime import date
 from pathlib import Path
 
-from pipeline import registry
+from pipeline import draft_labels, provenance, publish_lock, registry
 from pipeline.console import one_line
 from pipeline.llm import mask, scrub
 
@@ -38,19 +38,18 @@ FLOW_DIRECT, FLOW_PR = registry.PUBLISH_FLOWS
 CHANCE_KEY = "chance"
 
 BRANCH_PREFIX = "ai/draft/"
-PR_TITLE_PREFIX = "[초안][Chance]"
+CHANNEL_LABEL = "Chance"           # 레지스트리 chance.channel.label 과 같은 글자(시험이 대조한다)
+PR_TITLE_PREFIX = f"[{draft_labels.DRAFT_LABEL}][{CHANNEL_LABEL}]"       # "[초안][Chance]"
 TITLE_LIMIT = 200                  # PR 제목 전체(GitHub 한도 256자 안쪽)
 BODY_LIMIT = 9000                  # PR 본문(GitHub 한도 65,536자보다 훨씬 작게 — 사람이 휴대폰에서 읽는 분량)
 RETENTION_DAYS = 7                 # 병합됐거나 닫힌 초안 브랜치를 지우기까지(브랜치 이름의 날짜 기준)
 ORPHAN_RETRY_DAYS = 3              # PR 이 없는 초안 브랜치에 PR 열기를 다시 시도하는 기간
 MIN_BODY_CHARS = {"kr": 1000, "en": 1500}   # generator.MIN_BODY_CHARS 와 같은 값(시험이 대조한다)
 
-LABEL_DRAFT = "초안"
-LABEL_CHANNEL = "채널:Chance"
-LABELS = (
-    (LABEL_DRAFT, "d4c5f9", "승인 대기 중인 자동 생성 초안(병합하면 공개, 닫으면 폐기)"),
-    (LABEL_CHANNEL, "1d76db", "Chance_Blog(GitHub Pages) 채널"),
-)
+# 초안 PR 에 붙이는 라벨 — 이름·색·설명은 다른 초안 라벨 코드와 함께 pipeline/draft_labels.py 한 곳에서 읽는다(R2-5)
+LABEL_DRAFT = draft_labels.DRAFT_LABEL
+LABEL_CHANNEL = draft_labels.channel_label_name(CHANNEL_LABEL)            # "채널:Chance"
+LABELS = draft_labels.specs_for([CHANNEL_LABEL])
 
 STATE_PENDING = "DRAFT_PENDING"             # 이 슬롯의 초안이 있다(승인 대기이거나 닫힘) — 같은 슬롯을 다시 만들지 않는다
 STATE_CHECK_FAILED = "DRAFT_CHECK_FAILED"   # 초안 브랜치 확인(git ls-remote)을 못 했다 — 이번 실행은 건너뛰고 다음 실행이 다시 본다
@@ -62,6 +61,8 @@ _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _BRANCH_RE = re.compile(r"^ai/draft/(\d{4}-\d{2}-\d{2})-(?:s(\d{1,2})|m(\d{6}))$")
 _SAFE_URL_RE = re.compile(r"^https://[^\s<>\"'\\()\[\]`|]{1,480}$")
 _POST_PATH_RE = re.compile(r"^_posts/[^\x00-\x1f\\]{1,200}\.md$")
+_WORKFLOW_FILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,80}\.ya?ml$")
+_REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$")
 
 
 class DraftFlowError(RuntimeError):
@@ -77,7 +78,8 @@ def chance_flow(registry_path=None):
     읽지 못하거나 값이 올바르지 않으면 DraftFlowError 다: 승인 흐름을 켜 둔 채 레지스트리 오류 때문에 조용히 직접 게시로 떨어지면
     승인 없는 게시가 나가므로 멈춘다(레지스트리가 깨지면 CI·워치독이 먼저 알린다). pr 은 jekyll-git·mode auto 에서만 인정한다."""
     try:
-        blog = registry.get_blog(registry.load_registry(registry_path), CHANCE_KEY)
+        reg = registry.load_registry(registry_path)
+        blog = registry.get_blog(reg, CHANCE_KEY)
     except registry.RegistryError as exc:
         raise DraftFlowError(f"발행 흐름을 읽을 수 없습니다: {one_line(exc, 200)}") from exc
     flow = blog.get("publish_flow", registry.DEFAULT_PUBLISH_FLOW)
@@ -85,6 +87,12 @@ def chance_flow(registry_path=None):
         raise DraftFlowError(f"레지스트리 publish_flow 값이 올바르지 않습니다: {one_line(repr(flow), 40)} (direct 또는 pr)")
     if flow == FLOW_PR and (blog.get("platform") != "jekyll-git" or blog.get("mode") != "auto"):
         raise DraftFlowError("publish_flow 가 pr 이면 platform 은 jekyll-git, mode 는 auto 여야 합니다(레지스트리 검증 규칙).")
+    key_problems = publish_lock.lock_key_problems(reg)   # 잠금 키가 오타·잘못된 위치면 꺼진 채로 통과하므로 상태를 알 수 없는 것으로 보고 멈춘다(잠금 키가 없는 지금은 빈 목록 — 이전과 같다)
+    if key_problems:
+        raise DraftFlowError("제한 재개 잠금 키가 잘못 적혀 있어 잠금 상태를 알 수 없습니다: " + one_line("; ".join(key_problems), 300))
+    problems = publish_lock.lock_errors(reg)   # 제한 재개 잠금(resume_lock): 꺼져 있으면 빈 목록(이전과 같다). 켜져 있는데 규칙을 어기면 direct 로도 pr 로도 돌려주지 않고 멈춘다
+    if problems:
+        raise DraftFlowError("제한 재개 잠금이 켜져 있는데 레지스트리가 규칙을 어깁니다: " + one_line("; ".join(problems), 300))
     return flow
 
 
@@ -147,6 +155,24 @@ def posts_exist(entry, exists=os.path.exists):
     """이력 항목의 글 파일이 모두 있는가(승인 흐름의 글이 main 에 병합됐는가). 경로가 없거나 이상하면 없는 것으로 본다."""
     paths = entry.get("paths")
     return isinstance(paths, list) and bool(paths) and all(valid_post_path(p) and exists(p) for p in paths)
+
+
+def unmerged_draft_branches(remote_names, history, exists=os.path.exists):
+    """원격 초안 브랜치 이름 중 글이 아직 main 에 없는 것 — 승인 대기이거나, 닫았지만 브랜치가 아직 정리되지 않은(RETENTION_DAYS) 초안. 이름만으로는 둘을 가를 수 없어
+    둘 다 센다(GitHub API 를 부르려면 토큰이 필요한데 생성기 프로세스에는 쓰기 토큰을 주지 않는다 — 그래서 git 과 이력만 본다). 병합된 초안(이력 항목의 글 파일이 main 에 있음)과
+    이 흐름이 만들지 않는 이름의 브랜치는 세지 않는다. 이력에 항목이 없는 브랜치는 센다(확인되지 않은 것은 열린 것으로 본다).
+    열린 초안 상한(레지스트리 chance.limits.max_open_drafts, pipeline/publish_lock.py 가 읽는다)에 쓰며, 세는 값은 실제 열린 PR 수보다 작지 않아 상한을 넘기는 쪽으로는 틀리지 않는다."""
+    entries = {item.get("branch"): item for item in history
+               if isinstance(item, dict) and item.get("flow") == FLOW_PR and isinstance(item.get("branch"), str)}
+    found = []
+    for name in sorted(set(remote_names)):
+        if parse_branch(name) is None:
+            continue
+        entry = entries.get(name)
+        if entry is not None and posts_exist(entry, exists):
+            continue
+        found.append(name)
+    return found
 
 
 def refine_slot_state(state, slot, history, date_str, branch_exists=False, exists=os.path.exists):
@@ -290,9 +316,11 @@ def excerpt_of(body, limit=240):
 # ----------------------------------------------------------------------------
 # PR 제목·본문
 # ----------------------------------------------------------------------------
-def build_pr_title(kr_title, en_title, limit=TITLE_LIMIT):
-    """`[초안][Chance] <한국어 제목> / <영어 제목>`. 제목은 각각 소독하고 80자로 줄이며 전체는 limit 이하다."""
+def build_pr_title(kr_title, en_title, limit=TITLE_LIMIT, ko_only=False):
+    """`[초안][Chance] <한국어 제목> / <영어 제목>`(국문 전용 초안이면 `[초안][Chance] <한국어 제목>`). 제목은 각각 소독하고 80자로 줄이며 전체는 limit 이하다."""
     kr = neutralize(kr_title, 80) or "(제목 없음)"
+    if ko_only:
+        return _clip(f"{PR_TITLE_PREFIX} {kr}", limit)
     en = neutralize(en_title, 80) or "(no title)"
     return _clip(f"{PR_TITLE_PREFIX} {kr} / {en}", limit)
 
@@ -316,11 +344,21 @@ def _yn(flag):
     return "있음" if flag else "**없음(확인 필요)**"
 
 
-def build_pr_body(entry, kr_text, en_text, owner=None, repo=None):
-    """승인 PR 본문(마크다운). entry 는 이력 항목, kr_text·en_text 는 글 파일 전체. 모든 외부 유래 문구는 neutralize 를 거친다.
+def is_fact_draft(entry, kr_text):
+    """계산으로 만든(구조화 Fact) 초안인가 — 글 머리말과 이력 항목에 생성기가 단 표식(`provenance: facts`)이 **둘 다** 있을 때만 참이다. 하나라도 없거나 모르는 값이면 거짓 —
+    그러면 PR 본문은 옛 문구(AI 가 만든 초안)를 그대로 쓴다: AI 미사용이라고 잘못 말하느니 AI 를 썼다고 적는 쪽이 안전하다(D-254)."""
+    return provenance.mark_of_text(kr_text) == provenance.MARK_FACTS and provenance.entry_mark(entry) == provenance.MARK_FACTS
 
-    구성: 승인 안내(운영자 멘션) · 요약(분야·출처·원문 링크·슬롯) · 제목 · 첫 문단 발췌 · 자동 점검 결과 · 체크리스트 · 안내."""
+
+def build_pr_body(entry, kr_text, en_text, owner=None, repo=None):
+    """승인 PR 본문(마크다운). entry 는 이력 항목, kr_text·en_text 는 글 파일 전체(국문 전용 초안이면 en_text 가 None 이고 영어 칸을 모두 뺀다). 모든 외부 유래 문구는 neutralize 를 거친다.
+
+    구성: 승인 안내(운영자 멘션) · 요약(분야·출처·원문 링크·슬롯) · 제목 · 첫 문단 발췌 · 자동 점검 결과 · 체크리스트 · 안내.
+    계산으로 만든 초안(`is_fact_draft`)은 AI 고지문 점검 줄을 빼고 마지막 안내를 '계산으로 만든 초안(AI 미사용)' 으로 쓴다 — 그 밖(피드 글)은 바이트까지 같다."""
+    ko_only = en_text is None
+    both = (lambda ko, en: ko) if ko_only else (lambda ko, en: f"{ko} · {en}")      # 영어 칸을 이어 붙이는 자리(국문 전용이면 국문만)
     entry = entry if isinstance(entry, dict) else {}
+    fact_draft = is_fact_draft(entry, kr_text)
     kr_front, kr_body = split_post(kr_text)
     en_front, en_body = split_post(en_text)
     kr_title = entry.get("kr_title") or front_value(kr_front, "title")
@@ -333,7 +371,7 @@ def build_pr_body(entry, kr_text, en_text, owner=None, repo=None):
     en_len, en_cite, en_list, en_notice = _facts(en_body, url, MIN_BODY_CHARS["en"])
     mention = f"@{owner} " if valid_owner(owner) else ""
     quotes = []
-    for label, body in (("한국어", kr_body), ("English", en_body)):
+    for label, body in ((("한국어", kr_body),) if ko_only else (("한국어", kr_body), ("English", en_body))):
         excerpt = neutralize(excerpt_of(body), 260) or "(발췌할 문단을 찾지 못했습니다 — 글 파일을 직접 확인하세요)"
         quotes.append(f"> **{label}** {excerpt}")
     lines = [
@@ -346,16 +384,16 @@ def build_pr_body(entry, kr_text, en_text, owner=None, repo=None):
         "",
         "## 제목",
         f"- 한국어: {neutralize(kr_title, 120) or '(제목 없음)'}",
-        f"- English: {neutralize(en_title, 120) or '(no title)'}",
+        *([] if ko_only else [f"- English: {neutralize(en_title, 120) or '(no title)'}"]),
         "",
         "## 첫 문단 발췌",
         "\n>\n".join(quotes),
         "",
         "## 자동 점검 결과(저장 전에 이미 통과한 항목 — 사람의 확인을 대신하지 않습니다)",
-        f"- 본문 분량: 한국어 {kr_len} · 영어 {en_len}",
-        f"- 원문 링크 인용: 한국어 {_yn(kr_cite)} · 영어 {_yn(en_cite)}",
-        f"- 글 끝 출처 목록: 한국어 {_yn(kr_list)} · 영어 {_yn(en_list)}",
-        f"- 출처 고지문(AI 작성·검토 안 받음 안내): 한국어 {_yn(kr_notice)} · 영어 {_yn(en_notice)}",
+        f"- 본문 분량: {both(f'한국어 {kr_len}', f'영어 {en_len}')}",
+        f"- 원문 링크 인용: {both(f'한국어 {_yn(kr_cite)}', f'영어 {_yn(en_cite)}')}",
+        f"- 글 끝 출처 목록: {both(f'한국어 {_yn(kr_list)}', f'영어 {_yn(en_list)}')}",
+        *([] if fact_draft else [f"- 출처 고지문(AI 작성·검토 안 받음 안내): {both(f'한국어 {_yn(kr_notice)}', f'영어 {_yn(en_notice)}')}"]),
         "- 제목 유사도: 기존 글·대기 중인 초안과 비슷하지 않음(후보 0.6·생성 제목 0.7 기준, 생성기가 검사함)",
         "",
         "## 승인 체크리스트",
@@ -364,11 +402,11 @@ def build_pr_body(entry, kr_text, en_text, owner=None, repo=None):
         "- [ ] 병합 = 공개(사람 검토 단계)",
         "",
         "## 안내",
-        "- 글은 **Files changed** 의 `_posts/` 파일 두 개(한국어·영어)입니다. 병합하기 전에는 사이트에 보이지 않습니다.",
+        "- 글은 **Files changed** 의 `_posts/` 파일 " + ("하나(한국어)" if ko_only else "두 개(한국어·영어)") + "입니다. 병합하기 전에는 사이트에 보이지 않습니다.",
         "- **병합하면** `main` 에 올라가 `[공통] 사이트 자동 배포`가 실행되고 몇 분 안에 공개됩니다. **닫으면** 글은 올라가지 않습니다"
         f"(브랜치는 {RETENTION_DAYS}일 뒤 자동으로 지워지고, 같은 슬롯·같은 주제는 다시 만들지 않습니다).",
         "- 검사(CI)는 봇이 만든 PR 에서는 자동으로 돌지 않습니다(GitHub 규칙). 글 파일만 바뀌므로 병합에 필요하지 않습니다.",
-        "- 이 글은 AI 가 만든 초안이고 이 PR 은 `[Chance] 글 자동 작성·게시` 워크플로가 만들었습니다.",
+        ("- 이 글은 계산으로 만든 초안(AI 미사용)이고" if fact_draft else "- 이 글은 AI 가 만든 초안이고") + " 이 PR 은 `[Chance] 글 자동 작성·게시` 워크플로가 만들었습니다.",
     ]
     return _clip("\n".join(lines), BODY_LIMIT)
 
@@ -459,12 +497,17 @@ class GitHubClient:
     def _summary(raw):
         head = raw.get("head") if isinstance(raw.get("head"), dict) else {}
         repo = head.get("repo") if isinstance(head.get("repo"), dict) else {}
+        # labels: PR 에 붙은 라벨 이름 목록. 응답에 라벨 칸이 없거나 모양이 이상하면 None(알 수 없다 — 없다는 뜻이 아니다. 정리 단계가 라벨을 다시 붙일지 정할 때 쓴다, R2 수정 P1)
+        labels = raw.get("labels")
+        names = [item["name"] for item in labels] if isinstance(labels, list) and all(
+            isinstance(item, dict) and isinstance(item.get("name"), str) for item in labels) else None
         return {"number": raw.get("number"), "state": raw.get("state"), "merged": bool(raw.get("merged_at")),
                 "head_ref": head.get("ref"), "head_repo": repo.get("full_name"), "created_at": raw.get("created_at"),
-                "title": raw.get("title")}
+                "title": raw.get("title"), "labels": names}
 
     def list_draft_pull_requests(self, state="all", max_pages=3):
         """이 저장소 안의 초안 브랜치(ai/draft/…)에서 연 PR 목록(최신순, 저장소의 PR 최근 100×max_pages건 안에서). 포크의 PR 은 뺀다.
+        각 PR 은 번호·상태·병합 여부·브랜치·생성 시각·제목과 라벨 이름 목록(labels, 모르면 None)이다.
         결과의 complete 가 False 면 더 오래된 PR 이 목록 밖에 있을 수 있다(PullList)."""
         found = PullList()
         for page in range(1, max_pages + 1):
@@ -505,6 +548,16 @@ class GitHubClient:
 
     def add_labels(self, number, labels):
         self.request("POST", f"/issues/{int(number)}/labels", {"labels": list(labels)})
+
+    # ---- 워크플로 ----
+    def dispatch_workflow(self, workflow_file, ref):
+        """워크플로 파일 하나를 지정한 브랜치에서 수동 실행 이벤트로 시작한다(성공은 응답 본문 없는 204). 권한 `actions: write` 가 필요하다.
+        저장소 기본 토큰이 만든 이슈·PR·push 는 다른 워크플로를 시작시키지 못하는데(GitHub 규칙) 수동 실행 이벤트만 예외라서, 만든 직후 다른 워크플로를 돌리는 길이다.
+        파일 이름과 브랜치 이름은 이 코드가 아는 값이지만 모양이 정해진 것(영문·숫자·`._-/`)이 아니면 요청을 보내지 않고 GitHubError 를 낸다(경로·본문에 낯선 글자를 싣지 않는다)."""
+        if (not isinstance(workflow_file, str) or not isinstance(ref, str) or not _WORKFLOW_FILE_RE.fullmatch(workflow_file)
+                or not _REF_RE.fullmatch(ref) or ".." in ref):
+            raise GitHubError("워크플로 파일 이름이나 브랜치 이름이 올바르지 않습니다")
+        self.request("POST", f"/actions/workflows/{workflow_file}/dispatches", {"ref": ref})
 
 
 def pull_url(repo, number):

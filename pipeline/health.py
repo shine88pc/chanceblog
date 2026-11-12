@@ -6,6 +6,7 @@
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 
+from pipeline.publish_lock import WEEK_WINDOW_DAYS
 from pipeline.state import KST
 
 # 파이프라인이 살아 있고 산출물을 만든 상태. generated_unpublished 도 포함한다
@@ -27,10 +28,25 @@ FAIL_STATUSES = {"publish_failed", "llm_failed"}
 PACKAGE_STALE_HINT = (" 열린 `초안` 이슈가 3건 이상 쌓이면 새 초안을 만들지 않고 기록 없이 건너뛰므로 이 경고가 먼저 울릴 수 있습니다 — "
                       "초안을 발행해 이슈를 닫거나 `폐기` 라벨을 붙이면 풀립니다. 3건 미만인데도 새 초안이 없으면 워크플로 실행을 확인하세요.")
 REJECT_STREAK = 5
+# 승인 흐름(publish_flow: pr)에서 STALE(새 초안도 병합도 허용 시간 넘게 없음)이 울리는데 열린 초안이 이만큼(72시간 = 3일) 이상 기다리고 있으면(정확히 72시간도 포함 — 코드는 >=), DRAFT_WAITING(승인 대기)으로
+# 바꿔 가리지 않고 STALE 도 경고로 함께 남긴다 — 초안이 오래 방치됐는데 그 뒤 새 초안이 하나도 안 생겼다면 승인 대기만으로는 설명이 안 되고 생성이 정말 멈췄을 수 있다(R2-2, 2026-11-09).
+# 열린 초안 가운데 하나라도 대기 시간을 읽지 못하면 오래 방치된 것이 있는지 알 수 없으므로 같은 취급으로 STALE 을 남긴다(R2 수정 P4 — GitHub 응답에서는 일어나지 않는 입력이라 최소 변경).
+# 값은 확인 필요 모음이 초안을 '3일 넘게 대기'로 보는 기준(pipeline/inbox.py DRAFT_STALE_DAYS)과 같은 3일이다. 경계만 다르다: 이 점검은 정확히 72시간부터(이상), 모음은 3일을 넘어야(초과) 센다 —
+# 72.000시간인 한 순간만 갈린다(이 모듈은 순수 함수라 inbox 를 가져오지 않고, tests/test_draft_followups.py 가 일수가 같은지 지킨다).
+DRAFT_STALL_HOURS = 72
+STALL_HINT = (" 열린 초안 PR 이 3일 넘게 대기 중이라 승인 대기(DRAFT_WAITING)로도 설명되지만, 새 초안도 병합도 허용 시간을 넘도록 없었습니다 — "
+              "초안을 병합하거나 닫은 뒤에도 새 초안이 안 생기면 워크플로 실행을 확인하세요.")
+# 대기 시간을 알 수 없을 때는 '3일 넘게'라고 단정하지 않는다(R2 수정 P4)
+STALL_HINT_UNKNOWN = (" 열린 초안 PR 이 승인 대기 중이라 승인 대기(DRAFT_WAITING)로도 설명되지만, 초안이 얼마나 기다렸는지 알 수 없고 새 초안도 병합도 허용 시간을 넘도록 없었습니다 — "
+                      "초안을 병합하거나 닫은 뒤에도 새 초안이 안 생기면 워크플로 실행을 확인하세요.")
 PAGES_GRACE_MINUTES = 30
 # 글 커밋 시각은 러너 시계, Pages 실행 생성 시각은 GitHub 서버 시계다. 정상 배포는 커밋 2~3초 뒤에 시작하므로 두 시계가
 # 2초만 어긋나도 '배포가 커밋보다 먼저'로 보여 PAGES_NOT_DEPLOYED(심각)를 오판한다. 비교에 이만큼 여유를 둔다.
 PAGES_CLOCK_SKEW_SECONDS = 120
+# 주 단위 모드(evaluate 의 weekly_cap — 제한 재개 잠금 아래에서 굴러가는 7일에 1–2편만 만드는 Chance. 켤지는 scripts/watchdog.py 가 판단해 넘긴다): STALE 허용 시간에 더하는 시간.
+# 상한이 1 이면 글 사이가 정확히 주간 창(WEEK_WINDOW_DAYS = 7일)까지 정상이고, 그 위에 설정값(Chance 36시간)이 하루 한 번 도는 실행·재작성 실패·후보 탈락의 여유를 맡는다(Chance 36 → 204시간).
+# 창의 길이는 잠금 모듈의 상수를 그대로 가져온다(따로 적지 않는다 — 창이 바뀌면 같이 바뀐다).
+WEEKLY_EXTRA_HOURS = WEEK_WINDOW_DAYS * 24
 
 
 @dataclass(frozen=True)
@@ -113,18 +129,41 @@ def _waiting_message(pending, now):
             "병합하면 공개, 닫으면 폐기됩니다. 오래 두면 글감이 낡습니다.")
 
 
-def evaluate(blog, history, now, last_content_commit=None, recent_runs=(), post_days=None, pages_runs=None, pending_drafts=None):
+def _oldest_wait_hours(pending, now):
+    """열린 초안 중 가장 오래 기다린 것의 대기 시간(시간 단위). 하나라도 생성 시각을 읽지 못하면 None(알 수 없다) —
+    읽은 쪽이 어려도 못 읽은 초안이 오래 방치됐는지는 모른다(R2 수정 P4: 예전에는 읽은 것만 보고 어리면 STALE 을 가렸다)."""
+    times = [_parse_utc(d.get("created_at")) if isinstance(d, dict) else None for d in pending]
+    if not times or any(t is None for t in times):
+        return None
+    return max(max(now - t for t in times).total_seconds(), 0) / 3600
+
+
+def weekly_mode_cap(weekly_cap):
+    """주 단위 모드의 주간 상한: 1 이상 정수(참/거짓 제외)면 그 값, 그 밖(None·0·음수·참/거짓·소수·문자열·목록 …)은 None = 이전 동작.
+    모르는 값은 주 단위로 읽지 않는다 — 경보가 더 울리는 쪽(이전 기준)이 안전한 쪽이다."""
+    if isinstance(weekly_cap, int) and not isinstance(weekly_cap, bool) and weekly_cap >= 1:
+        return weekly_cap
+    return None
+
+
+def evaluate(blog, history, now, last_content_commit=None, recent_runs=(), post_days=None, pages_runs=None, pending_drafts=None, *, weekly_cap=None):
     """한 블로그의 문제 목록. recent_runs 는 최신순 [{'conclusion': ..}, ...].
     post_days: 새 글이 나온 KST 날짜 집합(없으면 이력에서 계산, jekyll-git 은 '글 파일이 추가된 커밋'에서 구해 넘긴다).
     pages_runs: Pages 배포 워크플로의 최근 완료 실행(최신순, {'conclusion','created_at'}). 없으면 배포 검사를 하지 않는다.
     pending_drafts: 승인 흐름(publish_flow: pr)에서 열려 있는 초안 PR 목록([{'created_at': ISO}, ...]). 없거나 비어 있으면 아무것도 바꾸지 않는다.
-    있으면 '글이 안 나옴'(STALE·NO_POSTS_DAY)을 멈춤이 아니라 승인 대기로 보고 DRAFT_WAITING(경고)으로 바꾼다."""
+    있으면 '글이 안 나옴'(STALE·NO_POSTS_DAY)을 멈춤이 아니라 승인 대기로 보고 DRAFT_WAITING(경고)으로 바꾼다. 단 STALE 이 울리는데 열린 초안이 DRAFT_STALL_HOURS(72시간)
+    이상 방치됐거나 대기 시간을 알 수 없으면(하나라도 시각을 읽지 못하면 포함) STALE 을 경고로 함께 남긴다(R2-2 — 초안이 오래 열려 있는데 그 뒤 새 초안이 없으면 정말 멈춘 것일 수 있어 가리지 않는다).
+    weekly_cap: 주 단위 모드의 주간 상한(1 이상 정수 — None 과 그 밖의 값은 모두 '꺼짐 = 이전과 같음'). 부르는 쪽이 제한 재개 잠금이 켜진 Chance 에만 넘긴다(이 함수는 블로그 이름을 보지 않는다).
+    주 1–2편 운영에서는 글이 며칠 없는 것이 정상이므로 켜지면 ① STALE 허용 시간이 설정값(max_gap_hours)에 WEEKLY_EXTRA_HOURS(7일)를 더한 값이 되고 문구에 '주 단위 기준(상한 N편)'을 밝힌다 ② NO_POSTS_DAY 는 울리지 않는다.
+    나머지 검사와 승인 흐름의 DRAFT_WAITING 변환은 그대로다(변환은 새 허용 시간 기준으로 STALE 이 울릴 때만 일어난다). 주간 상한에 닿아 쉬는 동안 새 알림은 만들지 않는다."""
     if blog.get("mode") == "off":
         return []
     key = blog["key"]
     cfg = blog.get("health", {})
     gap_hours = cfg.get("max_gap_hours", 48)
     streak_n = cfg.get("max_failure_streak", 3)
+    cap = weekly_mode_cap(weekly_cap)
+    allowed_hours = gap_hours if cap is None else gap_hours + WEEKLY_EXTRA_HOURS   # 주 단위 모드: 설정값 + 7일(Chance 36 → 204시간)
     now = _aware(now)
     entries = [e for e in history if isinstance(e, dict)]
     findings = []
@@ -141,11 +180,13 @@ def evaluate(blog, history, now, last_content_commit=None, recent_runs=(), post_
     else:
         last = max(candidates)
         hours = (now - last).total_seconds() / 3600
-        if hours > gap_hours:
+        if hours > allowed_hours:
             hint = PACKAGE_STALE_HINT if blog.get("mode") == "package" else ""
+            basis = (f"허용 {gap_hours}시간" if cap is None else
+                     f"허용 {allowed_hours}시간 — 주 단위 기준(상한 {cap}편): 설정값 {gap_hours}시간에 {WEEK_WINDOW_DAYS}일을 더했습니다")
             findings.append(Finding(key, "STALE", "critical",
                                     f"마지막 활동({last.astimezone(KST):%Y-%m-%d %H:%M} KST) 이후 {hours:.0f}시간 경과 "
-                                    f"(허용 {gap_hours}시간)." + hint))
+                                    f"({basis})." + hint))
 
     # 2) 연속 실패 / 연속 게이트 탈락 / 시크릿 미등록
     statuses = [e.get("status") for e in entries if e.get("status")]
@@ -168,7 +209,8 @@ def evaluate(blog, history, now, last_content_commit=None, recent_runs=(), post_
 
     # 2-1) 닫힌 KST 하루 단위: 어제 새 글이 0건이면 경고, 그제도 0건이면 심각. 오늘 이미 새 글이 나왔으면 회복된 것이다.
     #      (STALE 이 이미 울리면 같은 원인이므로 중복 알림을 만들지 않는다.)
-    if blog.get("mode") == "auto" and not any(f.code in ("STALE", "NO_ACTIVITY") for f in findings):
+    #      주 단위 모드(cap 있음)에서는 이 검사를 하지 않는다 — 주 1–2편 운영에서는 글이 없는 날이 정상이다. 살아 있음은 위 STALE(늘린 허용 시간)·아래 연속 실패·배포 검사가 본다.
+    if blog.get("mode") == "auto" and cap is None and not any(f.code in ("STALE", "NO_ACTIVITY") for f in findings):
         days = set(post_days) if post_days is not None else set()
         days |= post_days_from_history(entries, drafts_count=post_days is None)
         today = now.astimezone(KST).date()
@@ -186,10 +228,16 @@ def evaluate(blog, history, now, last_content_commit=None, recent_runs=(), post_
     # 2-1-1) 승인 흐름(publish_flow: pr): 새 글이 안 나온 것이 멈춤이 아니라 승인 대기일 수 있다. 열린 초안 PR 이 있으면 '글이 안 나옴'
     #        (STALE·NO_POSTS_DAY)을 치명 경고 대신 DRAFT_WAITING(확인 수준)으로 바꾼다. 최근 글이 있으면(위 두 경고가 없으면) 아무것도 하지 않는다.
     #        초안이 없거나 목록을 읽지 못했으면(pending_drafts 가 비었거나 None) 그대로 STALE·NO_POSTS_DAY 가 울린다 — 정말 멈춘 것일 수 있다.
+    #        R2-2: 다만 STALE(새 초안도 병합도 허용 시간 넘게 없음)이 울리는데 열린 초안이 DRAFT_STALL_HOURS 이상 방치됐거나 대기 시간을 알 수 없으면(하나라도 시각을 못 읽으면 포함) '승인 대기'만으로는 설명이 안 된다 —
+    #        오래된 초안이 있다는 이유로 생성이 멈춘 것까지 가리지 않도록 STALE 을 경고로 함께 남긴다(심각이 아닌 경고: 승인 대기 때문일 수도 있어 사람이 가려 볼 일이다).
     if blog.get("publish_flow") == "pr" and pending_drafts:
         if any(f.code in ("STALE", "NO_POSTS_DAY") for f in findings):
+            stale = next((f for f in findings if f.code == "STALE"), None)
             findings = [f for f in findings if f.code not in ("STALE", "NO_POSTS_DAY")]
             findings.append(Finding(key, "DRAFT_WAITING", "warning", _waiting_message(pending_drafts, now)))
+            waited = _oldest_wait_hours(pending_drafts, now)
+            if stale is not None and (waited is None or waited >= DRAFT_STALL_HOURS):
+                findings.append(Finding(key, "STALE", "warning", stale.message + (STALL_HINT if waited is not None else STALL_HINT_UNKNOWN)))
 
     # 2-2) 사이트 배포: 글 커밋 뒤 일정 시간이 지났는데 성공한 Pages 실행이 없거나, 최근 실행이 실패(D-24형)
     if pages_runs is not None and blog.get("platform") == "jekyll-git":

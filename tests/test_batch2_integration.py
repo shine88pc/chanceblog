@@ -3,7 +3,7 @@
 네 작업은 서로를 모른 채 같은 기준 위에서 만들어져 각자의 시험은 자기 기준만 본다. 여기서는 서로의 값을 직접 읽어 '같은 약속을 쓰는지'를 고정한다:
 ① 라벨·제목 약속(만드는 쪽 E·C 와 읽는 쪽 B 가 같은 글자를 쓴다) ② 만든 초안이 확인 필요 모음에 '초안 대기' 한 줄·코멘트 하나·휴대폰 알림 한 통으로 나오는 길
 ③ 레지스트리 검증(E 의 publish_flow 와 C 의 package 모드·플랫폼이 한 파일에서 함께 산다) ④ chanceblog.yml 의 단계 순서(E 의 두 단계 뒤 TG 의 알림 단계)와
-'켜기 전에 연결할 것'(E·C 가 초안을 만든 직후 ops-inbox 즉시 실행·발행 대기 알림은 일부러 연결하지 않았다)이 문서와 코드에서 같게 말해지는지.
+'초안 생성 직후 연결'(Chance 승인 PR 은 R2, 2026-11-09 에 ops-inbox 즉시 실행·발행 대기 알림을 이었고 티스토리·네이버 초안 패키지는 아직 잇지 않았다)이 문서와 코드에서 같게 말해지는지.
 네트워크는 쓰지 않는다(가짜 GitHub·가짜 텔레그램 HTTP).
 """
 import inspect
@@ -131,9 +131,11 @@ class BoardSeesTheMakersTest(unittest.TestCase):
         comments = fake.comments[self.inbox_issue(fake)["number"]]
         self.assertEqual(len(comments), 1)
         self.assertIn("초안 대기 — 승인 대기 글 / Waiting post", comments[0])
+        # 의도한 갱신(R2-4, 2026-11-09): 새 초안 PR 의 휴대폰 알림은 일반 '확인 필요 모음 — 새로 해야 할 일 N건' 통이 아니라 `📝 발행 대기` 한 통이다
+        # (notify_draft_waiting — 어느 PR 을 읽고 병합하면 공개·닫으면 폐기인지 한 줄과 그 PR 로 가는 버튼). 통 수는 그대로 한 통이다.
         text = net.bodies()[0]["text"]
-        self.assertTrue(text.startswith(f"{notify.PIN_MARK} 확인 필요 모음 — 새로 해야 할 일 1건\n"))
-        self.assertIn("초안 대기 — 승인 대기 글 / Waiting post", text)
+        self.assertEqual(text, f"{notify.MEMO_MARK} <b>발행 대기</b> — Chance: 승인 대기 글 / Waiting post\n→ PR #15 — 읽고 병합하면 공개, 닫으면 폐기됩니다")
+        self.assertNotIn("확인 필요 모음 — 새로 해야 할 일", text)
         self.assertEqual(leaks(self.out, json.dumps(fake.comments, ensure_ascii=False), json.dumps(fake.issues, ensure_ascii=False)), [])
 
     def test_a_package_issue_is_one_waiting_line_one_comment_and_one_phone_alert(self):
@@ -158,15 +160,21 @@ class BoardSeesTheMakersTest(unittest.TestCase):
         self.assertEqual(len(fake.writes()), writes)
         self.assertEqual(len(fake.comments[self.inbox_issue(fake)["number"]]), 1)
 
-    def test_two_new_drafts_in_one_check_are_one_comment_and_one_phone_message(self):
+    def test_two_new_drafts_in_one_check_are_one_comment_and_two_phone_messages(self):
+        # 의도한 갱신(R2-4, 2026-11-09): 이름은 '한 통'이었다. 이제 초안 PR 은 `📝 발행 대기` 한 통, 티스토리 초안 이슈는 일반 '확인 필요' 한 통(PR 초안은 일반 통에서 빠진다)이라 두 통이다.
+        # 코멘트(@멘션)는 예전처럼 하나이고 두 초안이 모두 들어 있다.
         fake, root = self.world(chance_pr=True, package_issue=True)
         code, net = self.check(fake, root)
-        self.assertEqual((code, net.calls), (0, 1))
-        self.assertEqual(len(fake.comments[self.inbox_issue(fake)["number"]]), 1)
-        text = net.bodies()[0]["text"]
-        self.assertIn("새로 해야 할 일 2건", text)
-        self.assertIn("승인 대기 글 / Waiting post", text)
-        self.assertIn("맛집 지도 만드는 법", text)
+        self.assertEqual((code, net.calls), (0, 2))
+        comments = fake.comments[self.inbox_issue(fake)["number"]]
+        self.assertEqual(len(comments), 1)
+        self.assertIn("승인 대기 글 / Waiting post", comments[0])
+        self.assertIn("맛집 지도 만드는 법", comments[0])
+        waiting, general = (body["text"] for body in net.bodies())
+        self.assertTrue(waiting.startswith(f"{notify.MEMO_MARK} <b>발행 대기</b> — Chance: 승인 대기 글 / Waiting post\n"))
+        self.assertTrue(general.startswith(f"{notify.PIN_MARK} 확인 필요 모음 — 새로 해야 할 일 1건\n"))
+        self.assertIn("맛집 지도 만드는 법", general)
+        self.assertNotIn("승인 대기 글", general)
 
     def test_without_the_telegram_secrets_the_board_and_the_comment_are_the_same(self):
         fake, root = self.world(chance_pr=True, package_issue=True)
@@ -233,7 +241,7 @@ class RegistryCombinationTest(unittest.TestCase):
 
 
 # ----------------------------------------------------------------------------
-# ④ chanceblog.yml — 단계 순서와 '켜기 전에 연결할 것'
+# ④ chanceblog.yml — 단계 순서와 '초안 생성 직후 연결'
 # ----------------------------------------------------------------------------
 class ChanceblogWorkflowTest(unittest.TestCase):
     def alert_step(self):
@@ -249,7 +257,7 @@ class ChanceblogWorkflowTest(unittest.TestCase):
                                  "초안 올리기와 승인 PR 열기 (승인 흐름일 때만)", "텔레그램 알림(새 글)"])
 
     def test_the_new_post_alert_runs_after_a_direct_push_and_never_in_the_approval_flow(self):
-        """승인 흐름에서는 글을 main 에 커밋하지 않아 pushed 출력이 없다 → 새 글 알림 단계는 돌지 않는다(발행 대기 알림은 '켜기 전에 연결할 것')."""
+        """승인 흐름에서는 글을 main 에 커밋하지 않아 pushed 출력이 없다 → 새 글 알림 단계는 돌지 않는다(승인 흐름의 알림은 모음의 `발행 대기` — R2-4)."""
         for event, inputs in (("schedule", {}), ("workflow_dispatch", {"dry_run": False})):
             for flow, pushed_when_commit_runs, expected in (("direct", "true", True), ("pr", "true", False)):
                 with self.subTest(event=event, flow=flow):
@@ -265,24 +273,31 @@ class ChanceblogWorkflowTest(unittest.TestCase):
             alert = evaluate(self.alert_step()["if"], "schedule", {}, flow, pushed="true" if evaluate(self.commit_step()["if"], "schedule", {}, flow) else "")
             self.assertFalse(runs and alert, flow)
 
-    def test_the_connections_that_are_not_made_are_written_down_where_the_docs_and_the_code_agree(self):
-        """E·C 가 초안을 만든 직후 ops-inbox 즉시 실행·발행 대기 알림은 일부러 연결하지 않았다. 연결하면 이 시험과 ARCHITECTURE §4-2-1 의
-        '켜기 전에 연결할 것' 단락을 함께 고친다(문서가 '아직 연결하지 않았다'고 말하는데 코드가 연결돼 있거나 그 반대가 되지 않게)."""
+    def test_the_connections_are_written_down_where_the_docs_and_the_code_agree(self):
+        """R2-4(2026-11-09)에 갱신: Chance 승인 PR 은 만들어진 직후 pipeline/draft_flow.py 가 ops-inbox 를 수동 실행으로 부르고(워크플로 파일은 그대로) 그 점검이 텔레그램
+        `📝 발행 대기`(notify_draft_waiting)를 보낸다. 티스토리·네이버 초안 패키지는 아직 잇지 않았다 — 그 경로(issue_package·run._package_deliver)·초안 규칙(drafts.py)·Chance 엔진(generator.py)은
+        알림·모음 호출을 갖지 않는다(옛 시험은 draft_flow.py 도 갖지 않는다고 못박았다 — 이제 draft_flow.py 만 모음 호출을 갖고 알림은 여전히 직접 보내지 않는다).
+        연결을 더 넓히면 이 시험과 ARCHITECTURE §4-2-1 의 '초안 생성 직후 연결' 단락을 함께 고친다."""
         guide = (REAL / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
         start = guide.index("### 4-2-1.")
         section = guide[start:guide.index("\n## ", start)]
-        self.assertIn("**켜기 전에 연결할 것**", section)
-        self.assertIn("ops-inbox.yml", section.split("**켜기 전에 연결할 것**")[1])
-        self.assertIn("notify_draft_waiting", section.split("**켜기 전에 연결할 것**")[1])
-        for name, source in (("pipeline/draft_flow.py", (REAL / "pipeline" / "draft_flow.py").read_text(encoding="utf-8")),
-                             ("pipeline/publishers/issue_package.py", (REAL / "pipeline" / "publishers" / "issue_package.py").read_text(encoding="utf-8")),
+        self.assertIn("**초안 생성 직후 연결**", section)
+        tail = section.split("**초안 생성 직후 연결**")[1]
+        for word in ("ops-inbox.yml", "notify_draft_waiting", "pipeline/draft_flow.py", "티스토리·네이버 초안 패키지는 **아직 연결하지 않았다**", "R2, 2026-11-09"):
+            self.assertIn(word, tail)
+        self.assertNotIn("**켜기 전에 연결할 것**", section)
+        flow = (REAL / "pipeline" / "draft_flow.py").read_text(encoding="utf-8")
+        self.assertIn("ops-inbox.yml", flow)
+        self.assertIn("dispatch_workflow", flow)
+        self.assertNotIn("notify", flow.replace("noqa", ""), "draft_flow.py 가 텔레그램 알림을 직접 부른다 — 알림은 모음의 점검이 보낸다(시크릿이 이 단계에 없다)")
+        for name, source in (("pipeline/publishers/issue_package.py", (REAL / "pipeline" / "publishers" / "issue_package.py").read_text(encoding="utf-8")),
                              ("pipeline/run.py 의 초안 패키지 경로", inspect.getsource(run_mod._package_deliver)),
                              # 초안 브랜치 이름·이력 필드를 정하는 쪽과 Chance 엔진도 알림·모음 호출을 갖지 않는다(여기서 이어 버리는 길을 막는다)
                              ("pipeline/drafts.py", (REAL / "pipeline" / "drafts.py").read_text(encoding="utf-8")),
                              ("generator.py", (REAL / "generator.py").read_text(encoding="utf-8"))):
             with self.subTest(source=name):
-                self.assertNotIn("notify", source.replace("noqa", ""), f"{name} 이 텔레그램 알림을 부른다 — ARCHITECTURE §4-2-1 의 '켜기 전에 연결할 것'과 이 시험을 고친다")
-                self.assertNotIn("ops-inbox", source, f"{name} 이 ops-inbox 를 부른다 — ARCHITECTURE §4-2-1 의 '켜기 전에 연결할 것'과 이 시험을 고친다")
+                self.assertNotIn("notify", source.replace("noqa", ""), f"{name} 이 텔레그램 알림을 부른다 — ARCHITECTURE §4-2-1 의 '초안 생성 직후 연결'과 이 시험을 고친다")
+                self.assertNotIn("ops-inbox", source, f"{name} 이 ops-inbox 를 부른다 — ARCHITECTURE §4-2-1 의 '초안 생성 직후 연결'과 이 시험을 고친다")
                 self.assertNotIn("workflow_dispatch", source)
 
     def test_the_workflows_that_make_drafts_do_not_call_the_inbox_or_the_waiting_alert_either(self):
@@ -294,15 +309,15 @@ class ChanceblogWorkflowTest(unittest.TestCase):
         for name, text in pieces.items():
             for word in forbidden:
                 with self.subTest(workflow=name, word=word):
-                    self.assertNotIn(word, text, f"{name} 이 {word} 를 쓴다 — ARCHITECTURE §4-2-1 의 '켜기 전에 연결할 것'과 이 시험을 고친다")
+                    self.assertNotIn(word, text, f"{name} 이 {word} 를 쓴다 — ARCHITECTURE §4-2-1 의 '초안 생성 직후 연결'과 이 시험을 고친다")
         for name in ("tistory.yml", "naver.yml", "chanceblog.yml"):
             with self.subTest(workflow=name, check="gh workflow run"):
                 called = set(re.findall(r"gh workflow run (\S+)", (REAL / ".github" / "workflows" / name).read_text(encoding="utf-8")))
                 self.assertLessEqual(called, {"pages.yml"}, f"{name} 이 pages.yml 말고 다른 워크플로를 부른다(모음 즉시 실행을 이으려면 문서와 이 시험을 함께 고친다)")
 
-    def test_the_operator_docs_say_the_waiting_alert_is_not_connected_yet(self):
-        """기능(`notify_draft_waiting`)은 병합됐지만 E·C 의 초안 생성 직후 호출은 아직 연결하지 않았고 승인 흐름에서는 새 글 알림 단계가 돌지 않는다(ARCHITECTURE §4-2-1·§4-5).
-        운영자가 읽는 두 곳이 '병합 = 연결'로 읽히면 안 된다(INT 검증 N1): TELEGRAM_SETUP.md §1 표의 '발행 대기' 행과 ACTIONS_GUIDE 3-18 '무엇이 오나'."""
+    def test_the_operator_docs_say_where_the_waiting_alert_is_connected_and_where_it_is_not(self):
+        """R2-4(2026-11-09)에 갱신. 기능(`notify_draft_waiting`)은 Chance 승인 PR 에 이어졌고(초안 PR 을 연 직후 모음을 바로 돌리고 그 점검이 보낸다) 티스토리·네이버 초안 패키지에는 아직 잇지 않았다.
+        승인 흐름(`pr`)에서는 새 글 알림 단계가 돌지 않는다(글을 main 에 커밋하지 않아서). 운영자가 읽는 두 곳이 이 셋을 같게 말해야 한다(INT 검증 N1): TELEGRAM_SETUP.md §1 표의 '발행 대기' 행과 ACTIONS_GUIDE 3-18 '무엇이 오나'."""
         telegram = (REAL / ".github" / "editorial" / "TELEGRAM_SETUP.md").read_text(encoding="utf-8")
         row = next(line for line in telegram.splitlines() if line.startswith("| 발행 대기 |"))
         guide = (REAL / "docs" / "ACTIONS_GUIDE.md").read_text(encoding="utf-8")
@@ -312,8 +327,10 @@ class ChanceblogWorkflowTest(unittest.TestCase):
         for where, text in (("TELEGRAM_SETUP.md §1 표 '발행 대기' 행", row), ("ACTIONS_GUIDE 3-18 '무엇이 오나'", what_comes)):
             with self.subTest(doc=where):
                 self.assertIn("notify_draft_waiting", text)
-                self.assertIn("연결하지 않았", text)
-                self.assertIn("승인 흐름", text)            # 승인 흐름(pr)에서는 새 글 알림 단계도 돌지 않는다
+                self.assertIn("확인 필요 모음", text)           # Chance 승인 PR 의 발행 대기는 모음의 점검이 보낸다
+                self.assertIn("R2, 2026-11-09", text)
+                self.assertIn("연결하지 않았", text)            # 티스토리·네이버 초안 패키지는 아직이다
+                self.assertIn("승인 흐름", text)                # 승인 흐름(pr)에서는 새 글 알림 단계도 돌지 않는다
                 self.assertNotIn("병합된 뒤", text)
                 self.assertNotIn("(**예정**)", text)
 

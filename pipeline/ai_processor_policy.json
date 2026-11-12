@@ -1,0 +1,23 @@
+{
+  "_doc": "AI 처리기 정책(AI_PROCESSOR_POLICY) — Gemini 같은 AI 는 데이터 출처가 아니라 처리기라 허용 목록(source_registry.json)에 넣지 않고 이 파일 11칸으로 따로 둔다(docs/SOURCE_POLICY.md). 검증: pipeline/source_registry.py 의 validate_ai_policy — 원문 외부 텍스트·민감 정보 입력 금지, 의료 조언 생성 금지, 입력 범위, 키 보관 위치는 고정값이라 이 파일에서 바꾸면 검증이 거부한다(완화는 코드·문서·승인이 함께). 모르는 값은 UNKNOWN. 이 파일에는 링크·키·계정을 넣지 않는다.",
+  "schema_version": 1,
+  "processor": "google_gemini_api",
+  "professional_business_use": "ALLOWED",
+  "consumer_use": "DENIED",
+  "free_service_data_use": "USED_FOR_PRODUCT_IMPROVEMENT",
+  "paid_service_data_policy": "NOT_USED_FOR_PRODUCT_IMPROVEMENT",
+  "sensitive_data_allowed": false,
+  "medical_advice_use": "DENIED",
+  "input_scope": "SIGNAL_AND_VERIFIED_MINIMAL_FACTS",
+  "raw_source_text_allowed": false,
+  "credential_storage": "WINDOWS_CREDENTIAL_MANAGER_AND_ACTIONS_SECRETS",
+  "policy_version": "gemini-api-additional-terms-2026-03-23",
+  "policy_verified_at": "2026-11-09",
+  "notes": [
+    "professional_business_use·consumer_use·free_service_data_use·paid_service_data_policy 는 2026-11-09 감사가 읽은 Gemini API 추가 약관(시행일 2026-03-23)의 요지다 — 이용은 업무·전문 목적으로 한정되고 소비자 용도가 아니며, 무료 등급은 입력·출력이 제품 개선에 쓰이고 사람 검토자가 읽을 수 있고 유료 등급은 제품 개선에 쓰이지 않는다. 요약 도구를 거쳐 읽은 것이라 원문 확인을 권한다.",
+    "이 저장소의 사용이 업무·전문 목적에 해당하는지, 우리 키가 무료 등급인지 유료 등급인지는 운영자만 확인할 수 있다(문서 기록상 무료). 무료 등급이면 공개 전 전체 초안과 비공개 원고를 넣지 않는다.",
+    "고정 기본값(검증기가 이 파일의 값이 바뀌면 거부한다 — 코드는 이 파일을 실행 중에 읽지 않는다): 원문 외부 텍스트(기사·해설문·RSS 요약·Raw API 전체 응답) 입력 금지, Signal 과 검증된 최소 Fact 만 입력, 개인·기밀·자격증명 입력 금지, 의료 조언 생성 금지, 키는 Windows 자격 증명 관리자(Desktop)와 GitHub Actions 시크릿에만 둔다.",
+    "코드는 이 파일을 실행 중에 읽지 않는다. allowlist 에서만 코드가 같은 원칙(prompt_inputs — 자체 제목만 입력)을 고정된 모양으로 지키며, legacy 에서는 외부 기사 요약이 지금도 Gemini 입력으로 간다(정책 값과 어긋난 알려진 상태). 이 파일은 검증기 점검(python -m pipeline.source_registry)과 FACT 2단계의 계약 기준이다(docs/SOURCE_POLICY.md 10절).",
+    "허용 목록 Provider 의 ai_use 가 NEVER 이면(규칙 기반 경로 전용 — 운영자 결정 007) 그 자료는 AI 처리기에 넘기지 않으므로 이 파일의 input_scope 는 그 Provider 에는 적용되지 않고 AI 입력은 항상 거부된다(egress.check_ai_input, docs/SOURCE_POLICY.md 10절). BY_CELL 인 Provider 에만 input_scope 가 범위를 정한다."
+  ]
+}

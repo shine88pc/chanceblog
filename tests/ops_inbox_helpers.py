@@ -4,6 +4,7 @@ FakeGitHub 는 scripts/ops_inbox.GitHubClient 와 같은 모양(get·post·patch
 모르는 경로를 부르면 AssertionError 를 내서(스크립트 버그) 테스트가 조용히 지나가지 않게 한다.
 """
 import copy
+import hashlib
 import json
 import re
 import sys
@@ -67,6 +68,20 @@ def make_pull(number, ci="pass", mergeable=True, state="clean", **kw):
               "pending": [make_check("validate", None, "in_progress")], "none": [], "unknown": None}[ci]
     from pipeline import inbox
     return inbox.normalize_pull(raw, {"mergeable": mergeable, "mergeable_state": state}, checks)
+
+
+def make_history_pull(number, branch, state="closed", merged=True, repo=REPO, sha=SHA, title="오래된 변경 제안"):
+    """GET /pulls?state=all&head=<소유자>:<가지> 가 돌려주는 PR 객체 모양. 닫힌 PR 은 merged_at 이 있으면 병합된 것이다(2026-11-11 확인 필요 모음 정리)."""
+    return {"number": number, "title": title, "state": state, "merged_at": "2026-11-10T09:00:00Z" if (merged and state == "closed") else None,
+            "head": {"ref": branch, "sha": sha, "repo": {"full_name": repo}}, "base": {"ref": "main", "repo": {"full_name": REPO}}}
+
+
+def make_approval_run(run_id, branch="ai/claude/M029-example", sha=None, created=None, name="PR 변경 범위 검사", path=".github/workflows/pr-scope-check.yml",
+                      title="[M029] 예시 변경", event="pull_request"):
+    """승인 대기(action_required) 실행 — GET /actions/runs?status=action_required 가 돌려주는 모양."""
+    return {"id": run_id, "name": name, "display_title": title, "path": path, "status": "completed", "conclusion": "action_required", "event": event,
+            "head_branch": branch, "head_sha": sha or hashlib.sha1(str(run_id).encode("ascii")).hexdigest(), "created_at": created or ago(hours=30),
+            "head_repository": {"full_name": REPO}, "html_url": f"{REPO_URL}/actions/runs/{run_id}"}
 
 
 def make_check(name, conclusion="success", status="completed"):
@@ -134,6 +149,7 @@ class FakeGitHub:
         self.log = []                  # [(method, path, params 또는 payload)]
         self.issues = []               # 이슈·PR(pull=True) dict
         self.pulls = []                # 목록용 PR dict (make_pull_raw)
+        self.history_pulls = []        # 가지 이름으로 찾는 닫힌·병합된 PR dict (make_history_pull) — GET /pulls 에 head 매개변수가 있을 때만 쓴다(열린 목록 조회는 그대로)
         self.details = {}              # PR 번호 → 상세 dict (목록이면 호출마다 차례로 돌려주고 마지막 것을 반복, 예외 값이면 그 호출에서 낸다)
         self.check_runs = {}           # sha → check run 목록
         self.runs = {}                 # 워크플로 파일 → 실행 목록(없는 파일은 404)
@@ -179,6 +195,12 @@ class FakeGitHub:
         if path == "/issues":
             return copy.deepcopy(self._list_issues(params))
         if path == "/pulls":
+            if "head" in params:                        # 가지 이름으로 찾기: GitHub 처럼 '<소유자>:<가지>' 로 거르고 state(all·open·closed)를 따른다. 열린 PR(self.pulls)은 state 가 없으면 open 이다
+                branch = str(params["head"]).split(":", 1)[-1]
+                wanted = params.get("state", "open")
+                found = [pr for pr in self.history_pulls + [dict(p, state=p.get("state", "open")) for p in self.pulls]
+                         if pr["head"]["ref"] == branch and wanted in ("all", pr.get("state", "open"))]
+                return copy.deepcopy(found[:params.get("per_page", 30)])
             return copy.deepcopy(self.pulls)
         match = re.fullmatch(r"/pulls/(\d+)", path)
         if match:

@@ -253,12 +253,15 @@ class FakeGitHub:
         self.repo = repo
         self.prs, self.calls = {}, []
         self.create_errors, self.list_error, self.label_error = [], None, None
+        self.dispatch_error = None           # dispatch_workflow 가 던질 오류(확인 필요 모음 즉시 갱신 요청이 실패하는 경우)
         self.labels = {}
         self._next = 40
 
-    def add_pr(self, number, head, state="open", merged=False, created="2026-10-28T00:00:00Z"):
+    def add_pr(self, number, head, state="open", merged=False, created="2026-10-28T00:00:00Z", labels=None):
+        """labels 의 기본은 이 흐름이 PR 을 열 때 붙이는 두 라벨(정상인 PR). 라벨 붙이기가 실패한 PR 은 labels=[] 로 만든다 — 정리 단계가 그런 열린 PR 에 라벨을 다시 붙인다(R2 수정 P1)."""
+        names = [name for name, _color, _desc in drafts.LABELS] if labels is None else list(labels)
         self.prs[number] = {"number": number, "state": state, "merged": merged, "head_ref": head, "head_repo": self.repo,
-                            "created_at": created, "title": "t", "body": "", "base": "main", "labels": []}
+                            "created_at": created, "title": "t", "body": "", "base": "main", "labels": names}
 
     def create_pull_request(self, title, head, base, body):
         self.calls.append(("create", head))
@@ -300,6 +303,11 @@ class FakeGitHub:
         if self.label_error is not None:
             raise self.label_error
         self.prs[number]["labels"] = list(labels)
+
+    def dispatch_workflow(self, workflow_file, ref):
+        self.calls.append(("dispatch", workflow_file, ref))
+        if self.dispatch_error is not None:
+            raise self.dispatch_error
 
     def verbs(self):
         return [c[0] for c in self.calls]

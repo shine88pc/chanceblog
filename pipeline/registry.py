@@ -19,10 +19,14 @@ import copy
 import json
 import re
 import sys
+from collections import namedtuple
 from pathlib import Path, PurePosixPath
 
-from pipeline.console import clean_secret, safe_output, secret_was_cleaned
+from pipeline import publish_lock
+from pipeline.console import clean_secret, one_line, safe_output, secret_was_cleaned
 from pipeline.gates import SUPPORTED_LANGUAGES, first_match
+from pipeline import quality_gate    # languages 의 단일 정의처(normalize_languages) — 이 줄은 다른 import 줄과 떨어뜨려 두어 다른 변경과 병합할 때 충돌하지 않게 한다
+from pipeline import source_policy  # 소스 정책 값(chance.source_policy: legacy·allowlist) 검증 규칙 — 레지스트리 값 모양만 본다
 
 ROOT = Path(__file__).resolve().parent.parent
 REGISTRY_PATH = Path(__file__).resolve().parent / "blogs.json"
@@ -49,6 +53,16 @@ CHANNEL_LABELS = ("Chance", "Blogger 영문", "Blogger 한글", "티스토리", 
 # 운영자가 PR 을 병합하면 공개(사람 승인 흐름, pipeline/drafts.py). 항목에 적지 않으면 direct. pr 로 바꾸는 것은 T3(게시 방식)다.
 PUBLISH_FLOWS = ("direct", "pr")
 DEFAULT_PUBLISH_FLOW = "direct"
+
+# 신규 글 최소 품질 Gate(jekyll-git 전용, 지금은 Chance): off = 꺼짐(기본 — 필드가 없어도 같다, 이전과 출력이 같다) · hold = 후보 글이 규칙(pipeline/quality_gate.py)에 걸리면
+# 버리고 다음 후보로 넘어간다(전부 탈락하면 그 실행은 글 없이 경고로 끝난다). 켜는(hold) 것은 T3(게시 기준)다. 설명: docs/QUALITY_GATE.md
+QUALITY_GATE_MODES = ("off", "hold")
+DEFAULT_QUALITY_GATE = "off"
+# jekyll-git(Chance)의 languages 는 표시용이 아니라 만드는 글의 언어를 정한다: ["ko","en"] = 국문·영문 한 쌍(기본, 지금 동작) · ["ko"] = 국문 글 하나(영문은 생성·검증·게시하지 않는다).
+# 허용 값의 단일 정의처는 quality_gate.normalize_languages 다(ko 를 포함하고 ko·en 만 겹침 없이 든 목록, 순서 무관 — ["en","ko"] 도 한 쌍). 이 밖의 값은 오류다.
+# 아래 CHANCE_LANGUAGE_SETS 는 그 정규 모양 목록이고 quality_gate.LANGUAGE_SETS 와 같음을 시험이 대조한다. 다른 플랫폼의 languages 는 지금처럼 표시·프로필 대조용이다.
+CHANCE_LANGUAGE_SETS = (["ko", "en"], ["ko"])
+DEFAULT_CHANCE_LANGUAGES = ["ko", "en"]
 
 # 플랫폼별 필수 시크릿 역할. 새 플랫폼을 지원하려면 여기와 publishers/ 어댑터를 함께 추가한다.
 PLATFORMS = {
@@ -125,6 +139,25 @@ def get_blog(reg, key):
         if isinstance(raw, dict) and raw.get("key") == key:
             return merged_blog(reg, raw)
     raise RegistryError(f"레지스트리에 없는 블로그 키: {key}")
+
+
+ChanceSettings = namedtuple("ChanceSettings", "quality_gate languages")
+
+
+def chance_settings(registry_path=None, key="chance"):
+    """레지스트리에서 chance 블로그의 ChanceSettings(quality_gate: 'off'|'hold', languages: ('ko','en')|('ko',)). 항목에 적지 않았으면 기본값(off · ko·en)이다.
+    레지스트리를 읽지 못하거나 값이 올바르지 않으면 RegistryError 다 — 값을 못 읽었다고 조용히 약한 설정(Gate 꺼짐·영문 포함)으로 떨어지지 않고 멈춘다(drafts.chance_flow 와 같은 원칙)."""
+    blog = get_blog(load_registry(registry_path), key)
+    gate = blog.get("quality_gate", DEFAULT_QUALITY_GATE)
+    if gate not in QUALITY_GATE_MODES:
+        raise RegistryError(f"레지스트리 quality_gate 값이 올바르지 않습니다: {str(gate)[:40]!r} ({' 또는 '.join(QUALITY_GATE_MODES)})")
+    langs = blog.get("languages", DEFAULT_CHANCE_LANGUAGES)
+    if blog.get("platform") == "jekyll-git":
+        canonical = quality_gate.normalize_languages(langs)
+        if canonical is None:
+            raise RegistryError(f"레지스트리 languages 값이 올바르지 않습니다: {str(langs)[:60]!r} ({list(CHANCE_LANGUAGE_SETS)} 중 하나, 순서 무관)")
+        langs = canonical
+    return ChanceSettings(gate, tuple(langs))
 
 
 def enabled_blogs(reg, platform=None):
@@ -388,6 +421,23 @@ def load_profile(name, profile_dir=None):
     return profile
 
 
+# limits.max_posts_per_week(선택): 굴러가는 7일에 만드는 글 수의 상한. 값이 있으면 1–14 정수(불리언은 정수가 아니다)여야 하고, 없으면 이전과 같다(주간 상한 없음).
+# 읽는 곳은 제한 재개 잠금(pipeline/publish_lock.py)뿐이다 — 잠금이 켜져 있을 때 Chance 의 값이 1 이상 2 이하여야 하고 생성기 가드가 센다(규칙 L8). 다른 블로그는 이 값을 읽지 않는다.
+# (이 상수는 다른 변경이 손대는 상수 묶음에서 떨어뜨려 이 함수 바로 위에 둔다 — 병합할 때 충돌하지 않게)
+WEEKLY_LIMIT_MAX = 14
+
+
+def _weekly_limit_error(limits, label):
+    """limits.max_posts_per_week 검증(블로그 항목 limits 와 defaults.limits 가 같은 규칙): 키가 없으면(또는 limits 가 객체가 아니면) None — 이전과 같다.
+    값이 있으면 1–14 정수여야 한다. 불리언(True 는 파이썬에서 1 로 계산된다)·문자열·소수·0·음수·null 은 거절한다 — 잘못 적은 값이 조용히 '주간 상한 없음'이 되지 않게."""
+    if not isinstance(limits, dict) or "max_posts_per_week" not in limits:
+        return None
+    value = limits["max_posts_per_week"]
+    if isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= WEEKLY_LIMIT_MAX:
+        return None
+    return f"{label}: limits.max_posts_per_week는 1–{WEEKLY_LIMIT_MAX} 정수여야 합니다(지금 {one_line(repr(value), 40)})."
+
+
 def validate_registry(reg, root=None):
     """레지스트리 오류 목록(비어 있으면 정상). 파일 존재 여부는 root 기준으로 확인한다."""
     root = Path(root) if root else ROOT
@@ -396,6 +446,11 @@ def validate_registry(reg, root=None):
         return ["레지스트리 최상위는 객체여야 합니다."]
     if reg.get("schema_version") != 1:
         errors.append("schema_version은 1이어야 합니다.")
+    errors.extend(publish_lock.registry_errors(reg))   # 제한 재개 잠금(resume_lock): 켜져 있을 때만 규칙 L1–L8 을 적용한다(꺼져 있으면 값 모양 검사뿐 — pipeline/publish_lock.py)
+    defaults_limits = reg["defaults"].get("limits") if isinstance(reg.get("defaults"), dict) else None
+    problem = _weekly_limit_error(defaults_limits, "defaults")   # 물려받는 쪽도 따로 본다: 모든 블로그가 값을 직접 적어 덮어써도, 블로그 목록이 잘못돼 아래에서 일찍 끝나도 defaults 의 잘못된 값은 걸린다
+    if problem:
+        errors.append(problem)
     blogs = reg.get("blogs")
     if not isinstance(blogs, list) or not blogs:
         return errors + ["blogs는 비어 있지 않은 배열이어야 합니다."]
@@ -439,6 +494,8 @@ def validate_registry(reg, root=None):
         langs = blog.get("languages")
         if not isinstance(langs, list) or not langs or not all(isinstance(x, str) and x for x in langs):
             errors.append(f"{label}: languages는 문자열 배열이어야 합니다.")
+        elif platform == "jekyll-git" and quality_gate.normalize_languages(langs) is None:
+            errors.append(f"{label}: platform jekyll-git 의 languages 는 {list(CHANCE_LANGUAGE_SETS)} 중 하나여야 합니다(ko 를 포함하고 ko·en 만 겹침 없이, 순서 무관 — 글을 만드는 언어를 정합니다): {langs!r}")
         if blog.get("mode") not in MODES:
             errors.append(f"{label}: mode는 {MODES} 중 하나여야 합니다.")
         elif blog.get("mode") == "package" and platform not in PACKAGE_PLATFORMS:
@@ -459,6 +516,13 @@ def validate_registry(reg, root=None):
                 # mode 를 적지 않았거나 올바르지 않은 값이면 위의 mode 오류가 이미 원인을 알려 준다(같은 원인으로 오류를 두 번 내지 않는다)
                 errors.append(f"{label}: publish_flow 가 pr 이면 mode 는 auto 여야 합니다(자동으로 만들고 사람이 PR 을 병합해 공개). "
                               f"지금 mode: {raw.get('mode')!r}")
+        if "quality_gate" in blog:
+            gate_mode = blog["quality_gate"]
+            if gate_mode not in QUALITY_GATE_MODES:
+                errors.append(f"{label}: quality_gate는 {QUALITY_GATE_MODES} 중 하나여야 합니다: {gate_mode!r}")
+            elif platform != "jekyll-git":
+                errors.append(f"{label}: quality_gate는 platform jekyll-git 에서만 쓸 수 있습니다(지금 platform: {platform!r}). "
+                              "Blogger 의 글 검사는 프로필 게이트(pipeline/gates.py)입니다.")
 
         for field in ("workflow", "entrypoint", "prompt"):
             value = blog.get(field)
@@ -499,6 +563,9 @@ def validate_registry(reg, root=None):
         per_day = (blog.get("limits") or {}).get("max_posts_per_day")
         if not isinstance(per_day, int) or not 1 <= per_day <= 24:
             errors.append(f"{label}: limits.max_posts_per_day는 1~24 정수여야 합니다.")
+        problem = _weekly_limit_error(raw.get("limits"), label)   # 이 항목이 직접 적은 값(적지 않으면 defaults 의 값을 물려받고 그것은 위에서 한 번 봤다 — 같은 원인으로 오류를 블로그 수만큼 내지 않는다)
+        if problem:
+            errors.append(problem)
 
         models = (blog.get("llm") or {}).get("models")
         if not isinstance(models, list) or not models or not all(isinstance(m, str) and m for m in models):
@@ -527,6 +594,7 @@ def validate_registry(reg, root=None):
         if not isinstance(blog.get("ad_surface"), bool):
             errors.append(f"{label}: ad_surface는 true/false여야 합니다.")
         errors.extend(_ads_errors(blog, label))
+        errors.extend(source_policy.registry_errors(blog, label, platform))
         protected = blog.get("protected_paths")
         if not isinstance(protected, list) or not all(_safe_rel(p) for p in protected):
             errors.append(f"{label}: protected_paths는 상대 경로 배열이어야 합니다.")

@@ -1,0 +1,17 @@
+[
+ {"time-tag": "1749-01", "ssn": 96.7, "smoothed_ssn": -1.0, "observed_swpc_ssn": -1.0, "smoothed_swpc_ssn": -1.0, "f10.7": -1.0, "smoothed_f10.7": -1.0},
+ {"time-tag": "1749-02", "ssn": 104.3, "smoothed_ssn": -1.0, "observed_swpc_ssn": -1.0, "smoothed_swpc_ssn": -1.0, "f10.7": -1.0, "smoothed_f10.7": -1.0},
+ {"time-tag": "1749-03", "ssn": 116.7, "smoothed_ssn": -1.0, "observed_swpc_ssn": -1.0, "smoothed_swpc_ssn": -1.0, "f10.7": -1.0, "smoothed_f10.7": -1.0},
+ {"time-tag": "1749-04", "ssn": 92.8, "smoothed_ssn": -1.0, "observed_swpc_ssn": -1.0, "smoothed_swpc_ssn": -1.0, "f10.7": -1.0, "smoothed_f10.7": -1.0},
+ {"time-tag": "1749-05", "ssn": 141.7, "smoothed_ssn": -1.0, "observed_swpc_ssn": -1.0, "smoothed_swpc_ssn": -1.0, "f10.7": -1.0, "smoothed_f10.7": -1.0},
+ {"time-tag": "1749-06", "ssn": 139.2, "smoothed_ssn": -1.0, "observed_swpc_ssn": -1.0, "smoothed_swpc_ssn": -1.0, "f10.7": -1.0, "smoothed_f10.7": -1.0},
+ {"time-tag": "1749-07", "ssn": 158.0, "smoothed_ssn": 135.9, "observed_swpc_ssn": -1.0, "smoothed_swpc_ssn": -1.0, "f10.7": -1.0, "smoothed_f10.7": -1.0},
+ {"time-tag": "1749-08", "ssn": 110.5, "smoothed_ssn": 137.9, "observed_swpc_ssn": -1.0, "smoothed_swpc_ssn": -1.0, "f10.7": -1.0, "smoothed_f10.7": -1.0},
+ {"time-tag": "1749-09", "ssn": 126.5, "smoothed_ssn": 140.2, "observed_swpc_ssn": -1.0, "smoothed_swpc_ssn": -1.0, "f10.7": -1.0, "smoothed_f10.7": -1.0},
+ {"time-tag": "1749-10", "ssn": 125.8, "smoothed_ssn": 143.8, "observed_swpc_ssn": -1.0, "smoothed_swpc_ssn": -1.0, "f10.7": -1.0, "smoothed_f10.7": -1.0},
+ {"time-tag": "1749-11", "ssn": 264.3, "smoothed_ssn": 146.4, "observed_swpc_ssn": -1.0, "smoothed_swpc_ssn": -1.0, "f10.7": -1.0, "smoothed_f10.7": -1.0},
+ {"time-tag": "1749-12", "ssn": 142.0, "smoothed_ssn": 147.9, "observed_swpc_ssn": -1.0, "smoothed_swpc_ssn": -1.0, "f10.7": -1.0, "smoothed_f10.7": -1.0},
+ {"time-tag": "2026-08", "ssn": 76.0, "smoothed_ssn": -1.0, "observed_swpc_ssn": 81.32, "smoothed_swpc_ssn": -1.0, "f10.7": 116.22, "smoothed_f10.7": -1.0},
+ {"time-tag": "2026-09", "ssn": 60.3, "smoothed_ssn": -1.0, "observed_swpc_ssn": 68.73, "smoothed_swpc_ssn": -1.0, "f10.7": 105.41, "smoothed_f10.7": -1.0},
+ {"time-tag": "2026-10", "ssn": 45.7, "smoothed_ssn": -1.0, "observed_swpc_ssn": 61.71, "smoothed_swpc_ssn": -1.0, "f10.7": 108.47, "smoothed_f10.7": -1.0}
+]
