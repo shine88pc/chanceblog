@@ -98,14 +98,14 @@ class LockStateTest(unittest.TestCase):
             self.assertEqual(publish_lock.lock_errors(reg), [])
             self.assertEqual(publish_lock.registry_errors(reg), [])
 
-    def test_the_real_registry_has_the_lock_off_today(self):
+    def test_the_real_registry_has_the_lock_on_with_exactly_the_flip_values(self):
         """레지스트리 값을 바꾸는 것(켜기)은 별도 T3 병합이다 — 이 일은 값을 바꾸지 않는다. 켜는 변경은 이 시험을 함께 고친다(`today_registry()` 대신 `lock_ready()`).
         '꺼짐' 기준의 다른 시험은 진짜 레지스트리가 아니라 `today_registry()` 를 쓰므로, 진짜 값에 묶인 것은 이 시험 하나다."""
         reg = real_registry()
         from registry_states import state_registry
-        self.assertNotIn("resume_lock", reg)
-        self.assertEqual(publish_lock.lock_state(reg), "off")
-        self.assertEqual(reg, state_registry("p2"))          # 켜는 변경(T3, 패치 02) 뒤: 잠금은 아직 꺼져 있고 값(스위치·허용 목록 모드·국문 단독·승인 흐름·주간 상한)이 알려진 상태 p2 와 정확히 같다(패치 03 이 잠금을 켠다)
+        self.assertIs(reg["resume_lock"], True)
+        self.assertEqual(publish_lock.lock_state(reg), "on")
+        self.assertEqual(reg, state_registry("p3"))          # 켜는 변경(T3, 패치 02·03) 뒤: 잠금이 켜져 있고 값(스위치·허용 목록 모드·국문 단독·승인 흐름·Gate·상한)이 알려진 상태 p3 와 정확히 같다
 
 
 class RegistryRuleTest(unittest.TestCase):

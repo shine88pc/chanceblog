@@ -163,7 +163,7 @@ $o = foreach ($b in @('origin/main') + @(git for-each-ref --format='%(refname:sh
 ### J7. 블로그 운영 관측과 수동 실행 안내
 
 - 블로그 상태는 `pipeline/blogs.json` 의 `mode`(`off`·`draft`·`auto`)가 정합니다. 켜기·`auto` 전환은 T3 입니다. Blogger 는 `draft` 로 글을 **초안함에만** 올리고 **공개는 운영자가 직접** 합니다.
-- **하루 상한**: 같은 날(KST) 이미 올라간 글이 있으면 정기 실행은 초록이지만 글을 만들지 않습니다(상한 값은 `pipeline/blogs.json` 의 `limits.max_posts_per_day` — Chance 2, Blogger 영문·한글 각 1). 수동 실행은 **'직접 정할 주제'를 채우면 상한을 건너뜁니다**(비우면 건너뜀 안내만).
+- **하루 상한**: 같은 날(KST) 이미 올라간 글이 있으면 정기 실행은 초록이지만 글을 만들지 않습니다(상한 값은 `pipeline/blogs.json` 의 `limits.max_posts_per_day` — Chance 1(켜기 전 2), Blogger 영문·한글 각 1). 수동 실행은 **'직접 정할 주제'를 채우면 상한을 건너뜁니다**(비우면 건너뜀 안내만).
 - **수동 실행은 운영자가** 합니다(AI 는 Run workflow 를 누를 수 없습니다). 안내 요청(`kind: run`)에는 운영자가 따라 할 단계와 **붙여 넣을 주제 문장을 요약에** 씁니다: Actions → 워크플로 이름 → Run workflow → 직접 정할 주제 칸에 붙여 넣기 → **연습 실행 체크 해제** → 글을 어디까지: **`draft` 그대로**(`publish` 는 즉시 공개) → 초록 Run workflow.
 - 첫 글·사진·모델 등 새 기능은 **정기 실행 결과로** 확인합니다(J6). 사진은 실행 주석 `대표 사진을 붙였습니다(…)`·이력 `image`·초안 사본 맨 위의 이미지 주소로 읽습니다. 초안함에서 모양을 보는 것은 운영자 몫입니다.
 

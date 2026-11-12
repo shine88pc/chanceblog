@@ -29,16 +29,16 @@ def errors_for(change):
 
 
 class RealRegistryUnchangedTest(unittest.TestCase):
-    def test_the_real_registry_has_no_quality_gate_and_is_korean_only(self):
-        """켜는 변경(T3, 패치 02) 뒤: 진짜 레지스트리의 Chance 항목은 Gate 값이 없고(꺼짐) 국문 단독이다(전에는 두 언어). 진짜 파일을 직접 읽는다(real() 은 고정 표본이다)."""
+    def test_the_real_registry_has_the_gate_on_hold_and_is_korean_only(self):
+        """켜는 변경(T3, 패치 02·03) 뒤: 진짜 레지스트리의 Chance 항목은 Gate 가 hold 이고 국문 단독이다(전에는 Gate 값이 없고 두 언어). 진짜 파일을 직접 읽는다(real() 은 고정 표본이다)."""
         reg = registry.load_registry()
         entry = chance_entry(reg)
-        self.assertNotIn("quality_gate", entry)
+        self.assertEqual(entry["quality_gate"], "hold")
         self.assertEqual(entry["languages"], ["ko"])
         self.assertEqual(registry.validate_registry(reg), [])
 
-    def test_the_default_settings_are_off_and_korean_only(self):
-        self.assertEqual(registry.chance_settings(), ("off", ("ko",)))
+    def test_the_default_settings_are_hold_and_korean_only(self):
+        self.assertEqual(registry.chance_settings(), ("hold", ("ko",)))
 
     def test_the_allowed_values_match_the_gate_module(self):
         self.assertEqual([tuple(s) for s in registry.CHANCE_LANGUAGE_SETS], list(qg.LANGUAGE_SETS))

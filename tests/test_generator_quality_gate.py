@@ -166,9 +166,9 @@ class DefaultOffTest(GenerationBase):
                 run_captured(g.generate_blog_posts, slot=self.slot, allow_auto_topic=False, report={})
         self.assertEqual(calls, [])
 
-    def test_the_real_registry_is_off_and_korean_only(self):
-        """켜는 변경(T3, 패치 02) 뒤: 진짜 레지스트리는 Gate 꺼짐·국문 단독이다(전에는 꺼짐·두 언어). 클래스 도구(pre_flip)가 기본 경로를 켜기 전 표본으로 돌리므로 진짜 파일을 경로로 직접 읽는다."""
-        self.assertEqual(registry.chance_settings(_bootstrap.ROOT / "pipeline" / "blogs.json"), OFF_KO)
+    def test_the_real_registry_is_hold_and_korean_only(self):
+        """켜는 변경(T3, 패치 02·03) 뒤: 진짜 레지스트리는 Gate hold·국문 단독이다(전에는 꺼짐·두 언어). 클래스 도구(pre_flip)가 기본 경로를 켜기 전 표본으로 돌리므로 진짜 파일을 경로로 직접 읽는다."""
+        self.assertEqual(registry.chance_settings(_bootstrap.ROOT / "pipeline" / "blogs.json"), HOLD_KO)
 
 
 class HoldModeTest(GenerationBase):
