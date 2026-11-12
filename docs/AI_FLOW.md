@@ -13,12 +13,12 @@
 | c Blogger·Naver 재작성 | 다른 블로그 이력 제목(최대 100자) → 탈락 사유 `[DUP_OTHER]` → 재작성 프롬프트 | `state.other_blog_titles` → `gates.check_post` → `run.build_prompt` |
 | d 이슈 수정(이미지 변경) | 글 제목·태그 → 영어 검색어 | `edits.ops.op_image` → `image_queries` |
 
-장치는 네 겹이다. **1차는 구조다**(아래 ①②), ③은 마지막 방벽이고 ④ 정적 규칙은 이 묶음 안에 있다(그 가운데 AI 키를 주지 않는 규칙 AF7 만 T3 의 워크플로 변경과 함께 더한다).
+장치는 네 겹이다. **1차는 구조다**(아래 ①②), ③은 마지막 방벽이고 ④ 정적 규칙은 이 묶음 안에 있다(그 가운데 AI 키를 주지 않는 규칙 AF7 은 T3 의 워크플로 변경(키 식)으로 처리했다).
 
 1. **출처 표식** `provenance: "facts"` — 생성기만 쓰는 머리말 한 줄과 이력 항목의 한 칸(§6). 알 수 없으면 막는다.
 2. **표식 소비자** — AI 입력을 만드는 읽기(`load_posts`·`existing_titles`·`entry_titles`·`other_blog_titles`)의 기본값이 '표식 글을 거름'(`for_ai=True`)이고, `fix_images`·`repair`·`diagnose`·`op_image`·`op_llm_patch`·`pages` 가 표식 글을 AI 로 보내지 않는다(§5).
 3. **런타임 방벽** `pipeline/ai_guard.py` — AI 입구 둘이 부르기 직전에 프롬프트를 훑어 표식 글의 제목·설명 글자가 있으면 모델을 부르지 않는다(§7). 못 막는 것도 시험이 '못 막는다'고 단언한다.
-4. **정적 규칙** `tests/ai_flow_scan.py`(AF0–AF6·AF8 — AF4 는 S2b 가 올린 진입 함수 둘에 걸리고 AF7 은 T3 라 패치 초안만 있다) — 새 AI 호출 지점·새 `_posts` 읽기 지점·임포트 격리·Fact 분기의 AI 0 을 소스로 못박는다(§8). AI 키를 주지 않는 것(AF7)은 워크플로 변경(T3)과 함께 더한다(§12-3).
+4. **정적 규칙** `tests/ai_flow_scan.py`(AF0–AF6·AF8 — AF4 는 S2b 가 올린 진입 함수 둘에 걸리고 AF7 은 T3 워크플로 패치로 병합했다) — 새 AI 호출 지점·새 `_posts` 읽기 지점·임포트 격리·Fact 분기의 AI 0 을 소스로 못박는다(§8). AI 키를 주지 않는 것(AF7)은 워크플로 변경(T3)으로 더했다(§12-3).
 
 ## 2. 안전 기본값 다섯 가지
 
@@ -191,7 +191,7 @@ AI 를 부를 수 있는 함수와 Fact 분기는 `human` 읽기를 **직접** �
 | AF6 | POSTS-FOR-AI | `_posts` 를 읽는 함수는 모두 등록돼 있고, AI 가능 함수·Fact 분기는 `human` 읽기를 **직접** 부르지 못하며 `for_ai` 를 켠 채로만(끄거나 변수·`**옵션`·위치 인자로 넘기지 못한다) `filtered` 읽기를 직접 부른다. 더해서 `for_ai` 를 켜지 않은 채 읽는 모든 함수(`UNFILTERED_SITES`)와 사람용 읽기를 부르는 모든 함수(`HUMAN_CALLERS`)는 AI 가능 여부와 상관없이 등록돼야 한다 | 표식을 거르지 않는 읽기 |
 | AF8 | NO-DYNAMIC | Fact 모듈이 `subprocess`·`importlib`·`runpy`·`ctypes`·`multiprocessing`·`socket` 을 가져오거나 `exec`/`eval`·동적 임포트·서브프로세스 호출이 있으면 위반이고, Fact 분기에서 닿는 함수에는 이름이 동적인 `getattr`·`globals()[식]` 도 위반이다(Fact 모듈 안의 비상수 `getattr` 는 정당한 쓰임이 있어 세지 않는다 — 못 잡는다, B12) | 이름 조립·동적 실행 |
 
-**AF7(워크플로의 AI 키 식 — `chanceblog.yml`·`chance-shadow.yml` 에서 `content_source` 가 `facts` 면 키를 비운다)은 규칙으로 더하지 않았다.** 스위치(`content_source`)는 S2b 가 코드에 이었지만 워크플로의 키 식을 바꾸는 것은 T3 라 패치 초안과 식 증명 시험만 만들었다(§12-3). 워크플로가 바뀐 뒤 규칙을 더한다.
+**AF7(워크플로의 AI 키 식 — `chanceblog.yml`·`chance-shadow.yml` 에서 `content_source` 가 `facts` 면 키를 비운다)은 규칙 파일에는 더하지 않았다.** 스위치(`content_source`)는 S2b 가 코드에 이었고 워크플로의 키 식은 T3 패치로 바꿨다 — 식 증명 시험(`tests/test_fact_branch_docs.py`·`tests/test_manual_run_defaults.py`)이 모든 조합으로 지킨다(§12-3).
 
 ### 사각지대 — 시험(`BlindSpotTest`)이 '못 잡는다'고 단언한다
 
@@ -231,7 +231,7 @@ AI 를 부를 수 있는 함수와 Fact 분기는 `human` 읽기를 **직접** �
 | R13 | 읽기 경로 고정 | 한다 — AF6 의 읽기 지점 등록·`for_ai` 규칙. Fact 묶음을 저장한다면 `_posts`·`history.json`·`pages.json`·프롬프트 파일 밖 별도 폴더에 두고 `_config.yml` 의 `exclude` 에 올린다(지금은 저장 계획이 없어 시험으로 고정만 — 프롬프트 파일(레지스트리 `prompt` 와 `.github/editorial` 아래 글)에 표식 줄이 없음은 `tests/test_ai_flow.py` 의 `PromptFilesTest` 가 고정한다) |
 | R16 | 연결 코드를 이어 붙이기 전의 사전 확인 | 하지 않는다 — 2단계 몫: 연결 전에 §3·§4·§5 의 표와 §12-1 의 같이 고칠 시험 단언 목록을 먼저 읽고, 새 호출 지점·읽기 지점을 등록한다 |
 | R17 | 시험·문서 보호 | 한다 — 이 문서·`tests/test_ai_flow_docs.py`·`SECURITY_GUARDRAILS.md` G-L10(시험 약화는 T3) |
-| R1·R2·R12·R14·R15·R18 | 후보 공급 한 함수·AI 키 미전달·영문·출처 문구 자동 첨부·호출 한도·제목 정책 | S2b(2026-11-11)가 R1(후보 공급 한 함수 — `fact_supply.supply`)·R15(호출 한도 — 연결 코드가 호출 예산을 건다)를 이었고 R12(영문 없음)·R14(출처 문구)·R18(제목 정책)은 S2a 부품을 연결했다. **R2(AI 키 미전달)는 T3 패치 초안만 있고 적용하지 않았다**(§12-3) |
+| R1·R2·R12·R14·R15·R18 | 후보 공급 한 함수·AI 키 미전달·영문·출처 문구 자동 첨부·호출 한도·제목 정책 | S2b(2026-11-11)가 R1(후보 공급 한 함수 — `fact_supply.supply`)·R15(호출 한도 — 연결 코드가 호출 예산을 건다)를 이었고 R12(영문 없음)·R14(출처 문구)·R18(제목 정책)은 S2a 부품을 연결했다. **R2(AI 키 미전달)는 T3 워크플로 패치로 병합했다**(§12-3) |
 
 ## 10. 방벽이 걸렸을 때(운영 신호)
 
@@ -265,7 +265,7 @@ AI 를 부를 수 있는 함수와 Fact 분기는 `human` 읽기를 **직접** �
 
 ## 12. 2단계가 채울 것
 
-이 묶음은 2단계가 만들 연결 자리를 비워 두었다. 2단계(생성기 연결)가 할 일이다 — S2b(2026-11-11)가 1–6항을 이었고(AF7 은 T3 패치 초안만) 구현 상태는 §12-3 에 있다.
+이 묶음은 2단계가 만들 연결 자리를 비워 두었다. 2단계(생성기 연결)가 할 일이다 — S2b(2026-11-11)가 1–6항을 이었고(AF7 은 T3 워크플로 패치로 병합했다) 구현 상태는 §12-3 에 있다.
 
 1. **Fact 분기 진입 함수 등록**: `tests/ai_flow_scan.py` 의 `DEFAULT_ENTRIES` 에 생성기의 Fact 분기 진입 함수(파일, 함수)를 올린다 — 올리는 순간 AF4·AF8 이 Fact 분기에 걸린다. 합성 시험(`FACT_BRANCH`)이 규칙이 작동함을 이미 보인다. `BRIDGES` 는 `generator` 하나로 둔다.
 2. **`NoConnectionTest` 개정**: `tests/test_fact_structure.py` 의 '아무도 새 모듈 이름을 부르지 않는다' 를 '허용 연결 한 군데' 형태 — `generator.py` 한 군데만 허용(그 임포트 줄 정확히 하나)하고 그 밖은 금지 — 로 고친다. 역방향·분기 안쪽은 AF1·AF4 가 지킨다. 이 묶음의 시험 파일은 그 시험의 정규식에 걸리는 줄이 없게 짜 두었다(`tests/test_ai_flow.py` 의 `OtherLanesSafetyTest`).
@@ -307,18 +307,18 @@ AI 를 부를 수 있는 함수와 Fact 분기는 `human` 읽기를 **직접** �
 
 ### 12-3. S2b 구현 상태(2026-11-11)
 
-위 1–6항을 S2b 가 이었다(7항은 이 묶음 밖이다). 켜지는 값은 하나도 없다 — `pipeline/blogs.json`·허용 목록 파일·워크플로·광고 표면은 바뀌지 않았다. 설계 결정은 [`FACT_PATH.md`](./FACT_PATH.md) §12 의 D-230–D-246, 결함 레지스터는 D-250–D-256 이다.
+위 1–6항을 S2b 가 이었다(7항은 이 묶음 밖이다). S2b 병합 시점에는 켜지는 값이 하나도 없었다 — `pipeline/blogs.json`·허용 목록 파일·워크플로·광고 표면은 바뀌지 않았다(켜는 변경은 `FACT_PATH.md` §15-8). 설계 결정은 [`FACT_PATH.md`](./FACT_PATH.md) §12 의 D-230–D-246, 결함 레지스터는 D-250–D-256 이다.
 
 | 항 | S2b 에서 한 것 | 위치 |
 |---|---|---|
 | 1 진입 함수 등록 | `DEFAULT_ENTRIES` 에 `generator.py:generate_fact_post`·`pipeline/shadow_run.py:run_facts` 를 올렸다 — AF4·AF8 이 실제 분기에 걸린다(위반 0). `BRIDGES` 는 `generator` 하나 그대로 | `tests/ai_flow_scan.py` |
 | 2 `NoConnectionTest` 개정 | '허용 연결 한 군데' — `generator.py` 에서 Fact 모듈을 부르는 줄이 정확히 하나(`from pipeline import fact_supply`)이고 그 밖은 0 | `tests/test_fact_structure.py` |
-| 3 AF7 | 규칙은 더하지 않았다(워크플로가 바뀌어야 초록이 된다 — T3). 패치 초안(읽기 단계와 닫힌 쪽 식)과 식을 모든 조합으로 평가하는 시험을 만들었다. 지금 워크플로가 `content_source` 를 모른다는 사실과 패치 뒤에 기대하는 동작을 문서 시험이 못박는다 | `tests/test_fact_branch_docs.py`·[`FACT_PATH.md`](./FACT_PATH.md) §15-8 |
+| 3 AF7 | 규칙은 더하지 않았다(워크플로가 바뀌어야 초록이 된다 — T3). 읽기 단계와 닫힌 쪽 식은 워크플로 패치로 병합했고 식을 모든 조합으로 평가하는 시험을 만들었다. 패치 전 상태(워크플로가 `content_source` 를 모른다)와 패치 뒤에 기대하는 동작을 모두 문서 시험이 못박는다 | `tests/test_fact_branch_docs.py`·[`FACT_PATH.md`](./FACT_PATH.md) §15-8 |
 | 4 표식 쓰는 곳 | 두 군데: `fact_check_post`(글)·`fact_history_entry`(이력). `MARKER_WRITERS`·6절·시험을 같이 고쳤다. Fact 글의 최종 머리말 검사는 `allow_provenance=True` | `generator.py`·`tests/test_provenance.py` |
 | 5 후보 공급 | 그림자 실행은 `_evaluate` 앞에 같은 분기(`run_facts`)를 두었고 후보는 두 길 모두 `generator.fact_prepare`(공급 함수 `fact_supply.supply` → 어댑터 → 조립기)로 만든다. **별도 함수 조건**을 지켰다 — 진입 함수는 AI 이름을 한 번도 쓰지 않는다. 새 호출 지점은 없다(§4 표 그대로) | `pipeline/shadow_run.py`·`generator.py` |
 | 6 제목 정책·이미지·영문 | 제목 정책은 S2a(D-200)가 틀 단계에서 지키고, 이미지는 자체 카드 한 장(사진 선택 없음), 영문은 만들지 않는다(레지스트리가 `facts` 에 국문 단독을 요구한다) | `assets/fact-card.svg`·`pipeline/source_policy.py` |
 
-**켜기 전에 남은 것**: AF7 패치(T3)는 `facts` 를 켜기 **전에** 병합해야 한다. 패치 전에는 두 워크플로가 `content_source` 를 몰라 `facts` 실행에도 Gemini 키가 환경에 간다(Fact 분기는 쓰지 않지만 키 미전달이라는 한 겹이 빠진다 — 결함 D-252). 패치 초안은 읽기 단계(`python -m pipeline.source_policy content-source` 의 한 줄 출력)와 닫힌 쪽 식(`기존 조건 && 읽기 단계 출력 == 'feed' && 비밀 || ''` 꼴 — 새 조건은 기존 조건의 괄호 밖)이고, 식은 이벤트 종류·`dry_run`·`real_ai`·출력 값·비밀 유무의 모든 조합으로 평가해 `feed` 가 아니면 키가 비는 것을 시험이 증명한다. 켜기 전 순서와 T3 목록은 [`FACT_PATH.md`](./FACT_PATH.md) §15-8 에 있다.
+**켜기 전에 남은 것(처리됨)**: AF7 패치(T3)는 `facts` 를 켜기 **전에** 병합해야 했다 — 패치 전에는 두 워크플로가 `content_source` 를 몰라 `facts` 실행에도 Gemini 키가 환경에 갔다(Fact 분기는 쓰지 않지만 키 미전달이라는 한 겹이 빠진다 — 결함 D-252). 패치는 읽기 단계(`python -m pipeline.source_policy content-source` 의 한 줄 출력)와 닫힌 쪽 식(`기존 조건 && 읽기 단계 출력 == 'feed' && 비밀 || ''` 꼴 — 새 조건은 기존 조건의 괄호 밖)이고, 식은 이벤트 종류·`dry_run`·`real_ai`·출력 값·비밀 유무의 모든 조합으로 평가해 `feed` 가 아니면 키가 비는 것을 시험이 증명한다. 켜기 전 순서와 T3 목록은 [`FACT_PATH.md`](./FACT_PATH.md) §15-8 에 있다.
 
 ## 13. 한계
 
@@ -331,6 +331,6 @@ AI 를 부를 수 있는 함수와 Fact 분기는 `human` 읽기를 **직접** �
 - 정적 규칙·시험의 환경 한계: 파이썬 3.10(윈도우)에서 약 36000단계 이상으로 깊은 한 줄 식은 파서가 예외가 아니라 프로세스를 끝낸다(사람이 쓰는 소스에서는 나오지 않는 크기, 리눅스는 확인하지 못했다). 윈도우 정션 순환이 있으면 3.10 의 `rglob` 이 죽는다(시험의 파일 탐색 한 곳 — 스캐너는 `os.walk` 를 쓴다).
 - 시험 시간: 새 모듈 5개가 이 PC 에서 더하는 시간은 약 84초(여러 에이전트가 같이 돌 때)이고 검사 잡 상한은 10분이다 — 합쳐진 뒤 첫 실행의 소요 시간을 보고 여유를 확인한다.
 - 'T3' 지정(G-L10·시험 약화는 T3)은 문서일 뿐 기계로 강제되지 않는다 — `.github/CODEOWNERS`·`pr-scope-check.yml` 을 이 묶음이 바꾸지 않았다(제약). 새 파일(`pipeline/ai_guard.py`·`pipeline/provenance.py`·`tests/ai_flow_scan.py`)의 변경을 자동으로 T3 로 잡는 장치는 없고, 켜기 전 결정 목록에 둔다.
-- S2b 가 이은 Fact 분기의 AI 방어는 사람이 쓰는 규칙에도 기댄다: AF4 의 사각지대 B16(값으로만 쓰인 안쪽 함수)과 워크플로의 키 식(AF7 — T3, 패치 초안뿐)이다. 패치를 적용하기 전에 `facts` 를 켜면 키가 실행 환경에 가므로 켜기 전 순서에서 AF7 패치가 먼저다([`FACT_PATH.md`](./FACT_PATH.md) §15-8).
+- S2b 가 이은 Fact 분기의 AI 방어는 사람이 쓰는 규칙에도 기댄다: AF4 의 사각지대 B16(값으로만 쓰인 안쪽 함수)과 워크플로의 키 식(AF7 — T3 워크플로 패치로 병합했다)이다. 패치를 적용하기 전에 `facts` 를 켜면 키가 실행 환경에 갔으므로 켜기 전 순서에서 AF7 패치가 먼저였다([`FACT_PATH.md`](./FACT_PATH.md) §15-8).
 - 키 등급(무료·유료)과 제공처의 실제 호출 한도는 확인하지 못했다.
 - 두 번째 독립 검증(2026-11-10)이 정보·낮음으로 남긴 것 — 고치지 않았고 동작·값 유출에는 영향이 없다: 위치 인자 상한(`FILTERED_POSITIONAL_MAX`)의 `existing_titles`·`other_blog_titles`·`entry_titles` 값과 `HEADER_SCAN_LIMIT`·`RACY_NS` 상수 값을 시험이 못박지 않는다(위치 인자는 `for_ai` 가 키워드 전용이라 실행 때 `TypeError` 가 막는다) · 기준선 위반 한 건이 사각지대 시험 여러 개를 연쇄로 빨갛게 한다(허용 목록을 합칠 때 원인은 11절 7항의 등록 두 줄이다) · 방벽이 훑는 글 확장자(`.md`·`.markdown`·`.mdown`·`.mkd`·`.html`·`.htm`)에 Jekyll 기본(`markdown`·`mkdown`·`mkdn`·`mkd`·`md`)의 `.mkdown`·`.mkdn` 이 없다(생성기와 `load_posts` 는 `.md` 만 쓰므로 지금 길은 없다 — 사람이 글 이름을 바꾸면 방벽만 못 본다).

@@ -536,8 +536,8 @@ class WorkflowStructureTest(unittest.TestCase):
 
     def test_the_other_chanceblog_steps_did_not_change(self):
         names = [s.get("name") or s.get("uses") for s in steps_of("chanceblog.yml", "build")]
-        # 알림 말고 단계 목록은 승인 흐름(Chance 승인 PR)이 더한 두 단계('발행 흐름 확인'·'초안 올리기')를 포함한다
-        self.assertEqual(names, ["actions/checkout@v6", "actions/setup-python@v6", "발행 흐름 확인 (레지스트리 publish_flow)", "의존성 설치",
+        # 알림 말고 단계 목록은 승인 흐름(Chance 승인 PR)이 더한 두 단계('발행 흐름 확인'·'초안 올리기')와 AF7 이 더한 '콘텐츠 출처 확인' 을 포함한다
+        self.assertEqual(names, ["actions/checkout@v6", "actions/setup-python@v6", "발행 흐름 확인 (레지스트리 publish_flow)", "콘텐츠 출처 확인 (레지스트리 content_source)", "의존성 설치",
                                  "AI 블로그 제너레이터 실행", "변경 사항 커밋", "Pages 배포 실행 (새 커밋이 있을 때만)",
                                  "초안 올리기와 승인 PR 열기 (승인 흐름일 때만)", "텔레그램 알림(새 글)"])
         wf = load("chanceblog.yml")

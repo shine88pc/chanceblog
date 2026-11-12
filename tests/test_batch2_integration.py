@@ -252,7 +252,7 @@ class ChanceblogWorkflowTest(unittest.TestCase):
 
     def test_the_steps_run_in_this_order_with_the_alert_last(self):
         names = [step.get("name") or step.get("uses") for step in steps_of()]
-        self.assertEqual(names, ["actions/checkout@v6", "actions/setup-python@v6", "발행 흐름 확인 (레지스트리 publish_flow)", "의존성 설치",
+        self.assertEqual(names, ["actions/checkout@v6", "actions/setup-python@v6", "발행 흐름 확인 (레지스트리 publish_flow)", "콘텐츠 출처 확인 (레지스트리 content_source)", "의존성 설치",
                                  "AI 블로그 제너레이터 실행", "변경 사항 커밋", "Pages 배포 실행 (새 커밋이 있을 때만)",
                                  "초안 올리기와 승인 PR 열기 (승인 흐름일 때만)", "텔레그램 알림(새 글)"])
 

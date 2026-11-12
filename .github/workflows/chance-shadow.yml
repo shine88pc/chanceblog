@@ -64,6 +64,14 @@ jobs:
         with:
           python-version: '3.10'
 
+      # 콘텐츠 출처(레지스트리 chance.content_source: feed 기본 | facts)를 읽는다 — facts 그림자 실행에는 AI 키를 넘기지 않는다(닫힌 쪽: == 'feed' 일 때만). 읽지 못하면 이 단계가 실패해 생성기 전에 멈춘다.
+      - name: 콘텐츠 출처 확인 (레지스트리 content_source)
+        id: source
+        run: |
+          set -euo pipefail
+          value=$(python -m pipeline.source_policy content-source)
+          echo "content_source=${value}" >> "$GITHUB_OUTPUT"
+
       - name: 의존성 설치
         run: |
           python -m pip install --upgrade pip
@@ -73,7 +81,7 @@ jobs:
       # PIPELINE_PAUSE 는 값을 그대로 넘긴다(정지가 켜져 있어도 그림자 모드는 건너뛰어 돌고, 정지 변수는 바뀌지 않는다). SHADOW_COUNT 는 선택 입력(1–5)이다.
       - name: 그림자 실행 — 후보 글 만들기(저장소에 쓰지 않음)
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEY: ${{ steps.source.outputs.content_source == 'feed' && secrets.GEMINI_API_KEY || '' }}
           UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
           EVENT_NAME: ${{ github.event_name }}
           PIPELINE_PAUSE: ${{ vars.PIPELINE_PAUSE }}

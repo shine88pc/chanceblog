@@ -863,7 +863,7 @@ class WorkflowStateTest(unittest.TestCase):
     def test_the_documents_say_the_state_that_is_true(self):
         patched = self.states()[BLOG_WORKFLOW][2]
         status = [cell.strip() for cell in register_row("D-252").strip().strip("|").split("|")][4]
-        section = sub_section(SECTION, "**AF7 패치 초안**", "### 15-9.")
+        section = sub_section(SECTION, "**AF7(워크플로의 키 식)**", "### 15-9.")
         if patched:
             self.assertNotIn("열림", status, "AF7 패치를 적용했으면 D-252 의 상태를 고친다(해결)")
             self.assertNotIn("지금 두 워크플로는 `content_source` 를 모르고", section, "AF7 패치를 적용했으면 15-8 의 현재 상태 문장을 고친다")
@@ -873,7 +873,7 @@ class WorkflowStateTest(unittest.TestCase):
             self.assertIn("지금 두 워크플로는 `content_source` 를 모르고", section)
 
     def test_the_expressions_the_section_describes_are_the_ones_proven_here(self):
-        section = sub_section(SECTION, "**AF7 패치 초안**", "### 15-9.")
+        section = sub_section(SECTION, "**AF7(워크플로의 키 식)**", "### 15-9.")
         for word in ("`python -m pipeline.source_policy content-source`", "== 'feed'", "괄호 밖", "`&&` 가 `||` 보다 먼저 묶여", "모든 조합"):
             self.assertIn(word, section, word)
         decision = row_of(DOC, "D-241")
