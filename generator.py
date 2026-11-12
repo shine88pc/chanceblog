@@ -167,6 +167,18 @@ def read_history():
         return []
 
 
+def read_history_strict():
+    """이력 파일의 목록 — 파일이 없으면 [](아직 글이 없다), 깨졌거나(읽을 수 없는 글자 포함) 목록이 아니면 None. `read_history` 와 달리 깨진 이력을 빈 기록으로 읽고 계속하지 않는다:
+    이력을 통째로 다시 쓰는 길(구조화 Fact 경로)이 깨진 이력을 덮어쓰지 않게 한다. 잠금 가드의 같은 이름 함수와 같은 규칙이다(같은 입력에서 같은 결과임을 시험이 확인한다 — D-292)."""
+    if not HISTORY_FILE.exists():
+        return []
+    try:
+        data = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, list) else None
+
+
 def write_history(history):
     write_text_atomic(
         HISTORY_FILE,
@@ -2767,6 +2779,8 @@ FACT_CARD_FILE = Path(__file__).resolve().parent / FACT_CARD_PATH
 FACT_CONFIG_FILE = Path(__file__).resolve().parent / "_config.yml"
 FACT_LANE_LABEL = "구조화 공개 자료"                 # 실행 요약의 '편집 축' 칸에 쓰는 이름(Fact 글은 편집 분야 추첨을 거치지 않는다)
 FACT_USER_AGENT = UA
+FACT_READ_DEADLINE_SECONDS = 60                    # 응답 한 번을 요청부터 끝까지 받는 전체 시간 상한(초) — 소켓 연산마다의 timeout 과 별개다(천천히 흘리는 응답이 끝없이 이어지지 않게, D-290)
+FACT_READ_CHUNK_BYTES = 64 * 1024                  # 응답 본문을 이 크기 이하의 조각으로 읽는다(조각마다 마감을 본다)
 PreparedFact = namedtuple("PreparedFact", "post candidate content marked gate_source image")      # 파일이 될 글 한 편: 조립된 글·후보·표식 전 글·표식이 든 글·Gate 에 넘기는 source·이미지 주소
 
 
@@ -2805,11 +2819,37 @@ def make_fact_transport(sources):
     return lambda url, *, timeout, max_bytes: _fact_fetch(opener, url, timeout, max_bytes)      # 이름 있는 안쪽 함수 대신 람다: 정적 규칙(AF4)이 호출을 이 함수의 것으로 읽어 전부 훑는다
 
 
-def _fact_fetch(opener, url, timeout, max_bytes):
-    """검사된 opener 로 요청 한 번을 보내 응답 본문을 돌려준다(gzip 이면 풀어서). max_bytes + 1 바이트까지만 읽는다."""
+def fact_clock():
+    """연결 코드가 시계를 읽는 **유일한 곳**(응답 읽기 마감 판정 전용 단조 시계 — 날짜·시각이 아니다). 시험은 이 함수를 가짜로 바꾸거나 `_fact_fetch(…, clock=가짜)` 로 가짜 시계를 넣는다(진짜 시간·소켓에 기대지 않는다)."""
+    return time.monotonic()
+
+
+def _fact_read(response, limit, started, clock, deadline):
+    """응답 본문을 조각(FACT_READ_CHUNK_BYTES 이하)으로 읽어 limit 바이트까지 모은다. **조각을 읽기 전마다** 시작(started)부터의 경과가 deadline(초)을 넘었는지 보고 넘었으면 TimeoutError 를 올린다
+    (정확히 마감이면 통과 — 넘을 때만 닫는다). 소켓 읽기를 한 번만 하고 돌아오는 read1 이 있으면 그것으로 읽는다(read 는 조각이 찰 때까지 안에서 기다려 한 바이트씩 흘리는 응답에서는 마감을 볼 수 없다).
+    limit 에 닿으면 멈춘다(어댑터가 상한 초과로 거절한다). 빈 조각이 오면 끝이다."""
+    read = getattr(response, "read1", None) or response.read
+    parts, size = [], 0
+    while size < limit:
+        if clock() - started > deadline:
+            raise TimeoutError(f"응답을 {deadline}초 안에 다 받지 못했습니다")
+        piece = read(min(FACT_READ_CHUNK_BYTES, limit - size))
+        if not piece:
+            break
+        parts.append(piece)
+        size += len(piece)
+    return b"".join(parts)
+
+
+def _fact_fetch(opener, url, timeout, max_bytes, clock=None, deadline=None):
+    """검사된 opener 로 요청 한 번을 보내 응답 본문을 돌려준다(gzip 이면 풀어서). max_bytes + 1 바이트까지만 읽고, **요청을 시작한 때부터 deadline 초(기본 FACT_READ_DEADLINE_SECONDS) 안에** 다 받지 못하면
+    TimeoutError 를 올린다(어댑터가 OPENER_FAILED 로 닫는다 — 호출 예산은 실패로 센다). clock·deadline 은 시험이 넣는 자리다(안 주면 fact_clock·상수)."""
+    tick = fact_clock if clock is None else clock
+    seconds = FACT_READ_DEADLINE_SECONDS if deadline is None else deadline
     request = urllib.request.Request(url, headers={"User-Agent": FACT_USER_AGENT, "Accept": "application/json", "Accept-Encoding": "gzip"})
+    started = tick()
     with opener.open(request, timeout=timeout) as response:
-        body = response.read(max_bytes + 1)
+        body = _fact_read(response, max_bytes + 1, started, tick, seconds)
         packed = str(response.headers.get("Content-Encoding", "")).strip().lower() == "gzip"
     return _fact_gunzip(body, max_bytes + 1) if packed else body
 
@@ -2928,13 +2968,17 @@ def generate_fact_post(gate_config, report, slot=None, draft_flow=False, topic_o
     report.setdefault("lanes", [])
     report["lane_label"] = FACT_LANE_LABEL
     now = now_kst()
+    if not draft_flow:      # 방어 한 겹(D-293): 직접 게시 모양의 글·이력은 이 함수가 쓰지 않는다 — 레지스트리 검증(publish_flow: pr)과 main 이 넘기는 draft_flow_on() 이 먼저 막지만 함수 수준에서도 닫는다
+        return fact_stop(report, source_policy.FACT_NOT_READY_OUTCOME, ["facts 경로는 승인 흐름(publish_flow: pr)으로만 글을 만든다(사람이 PR 을 병합해야 공개 — 직접 게시 경로 없음)"])
     if topic_override:
         return fact_stop(report, source_policy.FACT_NOT_READY_OUTCOME, ["facts 경로는 요청한 주제를 받지 않는다(후보는 이력과 공개 구조화 자료가 정한다)"])
     problems, sources, provider, access = fact_context(now)
     if problems:
         return fact_stop(report, source_policy.FACT_NOT_READY_OUTCOME, problems)
     print("구조화 Fact 경로(content_source: facts): AI 를 부르지 않고 허용 목록의 공개 구조화 자료로 글을 만듭니다.")
-    history = read_history()
+    history = read_history_strict()      # read_history 는 깨진 이력을 빈 기록으로 읽고 계속한다 — 이 길은 이력을 통째로 다시 쓰므로 엄격히 읽는다
+    if history is None:      # 깨진 이력으로 차례를 정하면 같은 글감을 되풀이하고 write_history 가 새 항목만 남겨 이력을 덮어쓴다(D-292) — 글을 만들지 않고 파일을 그대로 둔다
+        return fact_stop(report, source_policy.FACT_NOT_READY_OUTCOME, ["이력 파일(history.json)을 읽을 수 없어(깨짐) 글을 만들지 않습니다 — 손상된 이력은 덮어쓰지 않으니 사람이 파일을 확인하세요"])
     prepared, result = fact_prepare(now, history, sources, provider, access, 1, gate_config, transport)
     report["fact_notes"] = fact_notes(result)
     for note in report["fact_notes"]:
@@ -2951,17 +2995,15 @@ def generate_fact_post(gate_config, report, slot=None, draft_flow=False, topic_o
         return fact_stop(report, source_policy.FACT_ALL_SKIPPED_OUTCOME, ["같은 이름의 글 파일이 이미 있어 덮어쓰지 않음"])
     write_text_atomic(kr_path, item.marked)
     entry = fact_history_entry(item, now, slot)
-    if draft_flow:
-        entry.update(drafts.entry_fields(date_str, slot, time_str, [kr_path]))
-        report["draft_branch"] = entry["branch"]
+    entry.update(drafts.entry_fields(date_str, slot, time_str, [kr_path]))      # 위에서 승인 흐름임을 확인했다 — 이력 항목은 언제나 flow·branch·paths 를 가진다
+    report["draft_branch"] = entry["branch"]
     history.append(entry)
     write_history(history)
-    report.update(outcome="DRAFT_CREATED" if draft_flow else "PUBLISHED", title=post.title, en_title=None, source=post.source_name, paths=[str(kr_path)])
+    report.update(outcome="DRAFT_CREATED", title=post.title, en_title=None, source=post.source_name, paths=[str(kr_path)])
     print("블로그 글 생성 완료" + (" (DRY_RUN: 파일·기록은 저장되지 않았습니다):" if DRY_RUN else ":"))
     print(f"- KR: {kr_path}\n- 구조화 자료: {post.source_name} · 글감 {item.candidate.spec.spec_id}\n- 이미지: {item.image}")
-    if draft_flow:
-        print(f"- 승인 흐름: 연습 실행이라 초안 브랜치 {entry['branch']} 를 올리지 않습니다" if DRY_RUN
-              else f"- 승인 흐름: 초안 브랜치 {entry['branch']} 로 올립니다(PR 을 병합하면 공개, 닫으면 폐기)")
+    print(f"- 승인 흐름: 연습 실행이라 초안 브랜치 {entry['branch']} 를 올리지 않습니다" if DRY_RUN
+          else f"- 승인 흐름: 초안 브랜치 {entry['branch']} 로 올립니다(PR 을 병합하면 공개, 닫으면 폐기)")
     return kr_path, None
 
 
@@ -3157,7 +3199,10 @@ def refine_for_drafts(state, slot, history, now):
 
 def facts_without_key():
     """레지스트리 content_source 가 facts 면 True — 구조화 Fact 경로는 AI 를 부르지 않으므로 Gemini 키가 없어도 실행한다(AI 키를 주지 않는 실행 — docs/FACT_PATH.md §15). 레지스트리를 읽지 못하거나 값이
-    올바르지 않으면 False(옛 동작 그대로: 키가 없으면 멈춘다). 키가 있으면 main 이 이 함수를 부르지 않는다(레지스트리를 더 읽지 않는다)."""
+    올바르지 않으면 False(옛 동작 그대로: 키가 없으면 멈춘다). 키가 있으면 main 이 이 함수를 부르지 않는다(레지스트리를 더 읽지 않는다).
+    **기존 글 사진 교체(FIX_IMAGES)는 Fact 분기로 가지 않고 모델로 검색어를 만드는 쓰기 경로이므로 완화하지 않는다** — 키가 없으면 feed 값과 같이 멈춘다(D-291)."""
+    if FIX_IMAGES:
+        return False
     try:
         return source_policy.chance_content_source() == source_policy.CONTENT_FACTS
     except Exception:       # noqa: BLE001 — 값을 알 수 없으면 느슨하게 하지 않는다

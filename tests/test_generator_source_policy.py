@@ -20,6 +20,8 @@ from unittest import mock
 
 import _bootstrap  # noqa: F401
 import generator as g
+from lock_helpers import pre_flip
+from registry_states import pre_flip_registry
 import source_policy_scenarios as sc
 from pipeline import egress, registry, source_policy, source_registry as sr
 from source_registry_helpers import GOOD_HOST, TODAY, good_provider, registry_data
@@ -57,6 +59,7 @@ def active_registry():
     return sr.build_registry(registry_data(good_provider()), TODAY)
 
 
+@pre_flip
 class Base(unittest.TestCase):
     """생성기를 임시 작업 폴더에서 막힌 네트워크·가짜 모델로 돌리는 바탕. mode 는 source_policy 값(시험이 레지스트리 대신 이 값을 쓴다)."""
     mode = "allowlist"
@@ -124,11 +127,13 @@ class Base(unittest.TestCase):
 # ----------------------------------------------------------------------------
 # 1. legacy: 옛 생성기와 바이트 동일
 # ----------------------------------------------------------------------------
+@pre_flip
 class LegacyByteTest(unittest.TestCase):
     def test_the_real_registry_does_not_set_source_policy_so_the_default_is_legacy(self):
-        reg = registry.load_registry()
+        path = ROOT / "pipeline" / "blogs.json"          # 클래스 도구(pre_flip)가 기본 경로를 켜기 전 표본으로 돌리므로 진짜 파일을 경로로 직접 읽는다
+        reg = registry.load_registry(path)
         self.assertEqual([blog.get("source_policy") for blog in reg["blogs"]], [None] * len(reg["blogs"]))      # 켜는 것은 T3 — 이 변경은 값을 바꾸지 않았다
-        self.assertEqual(source_policy.chance_source_policy(), "legacy")
+        self.assertEqual(source_policy.chance_source_policy(path), "legacy")
         self.assertEqual(registry.validate_registry(reg), [])
 
     def test_legacy_scenarios_match_the_old_generator_byte_for_byte(self):
@@ -213,10 +218,14 @@ class AllowlistNoCallTest(Base):
         shutil.copy(ROOT / ".github" / "editorial" / "CHANCE_BLOG_TEMPLATE.md", root / ".github" / "editorial" / "CHANCE_BLOG_TEMPLATE.md")
         (root / "_posts").mkdir()
         (root / "history.json").write_text("[]", encoding="utf-8")
-        reg = json.loads((root / "pipeline" / "blogs.json").read_text(encoding="utf-8"))
+        reg = pre_flip_registry()          # 켜기 전 고정 표본에서 출발한다(자식 프로세스는 부모의 경로 패치를 보지 못하고 진짜 파일은 켜는 변경 뒤 값일 수 있다)
         if policy is not None:
             next(blog for blog in reg["blogs"] if blog["key"] == "chance")["source_policy"] = policy
         (root / "pipeline" / "blogs.json").write_text(json.dumps(reg, ensure_ascii=False), encoding="utf-8")
+        sources = json.loads((root / "pipeline" / "source_registry.json").read_text(encoding="utf-8"))
+        for provider in sources["providers"]:
+            provider["enabled"] = False          # 켜기 전 허용 목록(켜진 곳 없음)
+        (root / "pipeline" / "source_registry.json").write_text(json.dumps(sources, ensure_ascii=False), encoding="utf-8")
         guard = ("import runpy, socket\n"
                  "def blocked(*a, **k):\n    raise AssertionError('network attempt')\n"
                  "socket.socket.connect = blocked\nsocket.create_connection = blocked\nsocket.getaddrinfo = blocked\n"
@@ -582,6 +591,7 @@ class OutcomeCodeTest(Base):
 # ----------------------------------------------------------------------------
 # 3. 레지스트리 값
 # ----------------------------------------------------------------------------
+@pre_flip
 class RegistryValueTest(unittest.TestCase):
     def reg(self, **fields):
         reg = registry.load_registry()

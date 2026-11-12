@@ -7,10 +7,14 @@
 3. **AI 0**: 피드·기사 발췌·모델·프롬프트·사진·이미지 검색어 함수를 한 번도 부르지 않고(부르면 시험이 실패하는 감시자) 모델 호출 횟수가 0 이다.
 4. **연결 코드**(`fact_opener`): 허용 목록 관문·호출 예산 — 허용 밖 호스트·ACTIVE 가 아닌 Provider·호출 예산 소진·429/403 중지·404·실패 3회 뒤 건너뜀·같은 주소 응답 재사용·응답 깨짐.
 5. **Gate 연결**: 후보 사전의 모양(아홉 키)·보류되면 다음 글감·현재 Gate 가 그 모양을 몰라도 예외 없음.
-6. 기본(feed)에서는 이 분기가 한 번도 실행되지 않는다(옛 생성기와의 바이트 비교는 `test_generator_source_policy` 의 GOLDEN 이 맡는다)."""
+6. 기본(feed)에서는 이 분기가 한 번도 실행되지 않는다(옛 생성기와의 바이트 비교는 `test_generator_source_policy` 의 GOLDEN 이 맡는다).
+7. **S2BFIX(독립 검증 S2b 의 후속)**: 응답 읽기 전체 시간 상한(D2)·깨진 이력이면 멈춤(D7)·승인 흐름이 아니면 멈춤(D9)·승인 PR 본문의 계산 글 문구(D-254)·이력 200개 한계(D-256)·
+   Fact 구역이 사진·기사 읽기를 부르지 않음(D5)."""
 import ast
 import contextlib
+import datetime
 import io
+import itertools
 import json
 import tempfile
 import unittest
@@ -22,7 +26,7 @@ import _bootstrap  # noqa: F401
 import fact_branch_helpers as FB
 import generator as g
 
-from pipeline import drafts, draft_flow, egress, provenance, publish_lock, quality_gate, registry, source_policy, source_registry
+from pipeline import ai_guard, drafts, draft_flow, egress, provenance, publish_lock, quality_gate, registry, source_policy, source_registry
 from pipeline import fact_candidates as K
 from pipeline import fact_supply
 from pipeline.adapters import noaa_swpc as N
@@ -41,6 +45,63 @@ class HttpStatus(Exception):
     def __init__(self, code):
         super().__init__(f"HTTP {code}")
         self.code = code
+
+
+class FakeClock:
+    """가짜 단조 시계(진짜 시간에 기대지 않는다): 부를 때마다 지금 값을 돌려주고 `advance` 로 앞으로 보낸다."""
+
+    def __init__(self, start=500.0):
+        self.now, self.calls = start, 0
+
+    def __call__(self):
+        self.calls += 1
+        return self.now
+
+    def advance(self, seconds):
+        self.now += seconds
+
+
+class DrippingResponse:
+    """응답 대역: 읽을 때마다 시계를 step 초 앞으로 보내고 조각 하나를 돌려준다(pieces 가 바닥나면 빈 조각 = 끝, 끝없는 이터레이터도 된다). 요청한 크기는 asked 에 남고 요청보다 큰 조각은 잘라 나눠 준다.
+    `read1`(소켓 읽기 한 번 — 진짜 HTTPResponse 가 가진 것)과 `read` 가 같은 동작이다. 소켓·진짜 시간 없음."""
+
+    def __init__(self, clock, pieces, step, encoding=""):
+        self.clock, self.pieces, self.step = clock, iter(pieces), step
+        self.headers, self.asked, self.pending = {"Content-Encoding": encoding}, [], b""
+
+    def _next(self, size=-1):
+        self.asked.append(size)
+        self.clock.advance(self.step)
+        if not self.pending:
+            self.pending = next(self.pieces, b"")
+        out, self.pending = self.pending[:size], self.pending[size:]
+        return out
+
+    read1 = read = _next
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class ReadOnlyResponse(DrippingResponse):
+    """`read1` 이 없는 응답 대역(`read` 만 있다) — 연결 코드는 read 로 물러난다."""
+    read1 = None
+
+
+class DrippingOpener:
+    """`opener.open` 대역: 요청을 적고(requests) 시계를 open_seconds 만큼 보낸 뒤(연결·머리글에 걸린 시간) 응답 대역을 돌려준다."""
+
+    def __init__(self, response, clock=None, open_seconds=0):
+        self.response, self.clock, self.open_seconds, self.requests = response, clock, open_seconds, []
+
+    def open(self, request, timeout=None):
+        self.requests.append((request, timeout))
+        if self.clock is not None:
+            self.clock.advance(self.open_seconds)
+        return self.response
 
 
 class RegistryRulesTest(unittest.TestCase):
@@ -340,14 +401,63 @@ class CreatedPostTest(FB.FactEnv):
         self.assertEqual(publish_lock.weekly_posts(self.history(), [], self.now.date()).count, 1)
         self.assertEqual(publish_lock.posts_today(self.history(), "2026-11-10"), 1)
 
-    def test_without_the_approval_flow_argument_the_run_ends_as_published_and_has_no_branch(self):
+    def test_without_the_approval_flow_the_run_stops_and_writes_nothing(self):
+        """D9 — **의도적으로 바꾼 시험**(S2BFIX). 예전 이름은 `…_without_the_approval_flow_argument_the_run_ends_as_published_and_has_no_branch`: draft_flow=False 로 부르면 flow·branch·paths 가 없는
+        직접 게시 모양의 글·이력이 써지고 `PUBLISHED` 로 끝나는 것을 기대했다. 독립 검증(S2b D9)이 그것을 '함수 수준에서는 승인 흐름이 강제되지 않는다' 는 구멍으로 짚었다 — 자동 공개 경로가 없는 것은
+        레지스트리 검증(publish_flow: pr)과 main 이 넘기는 값의 합성뿐이었다. 이제 `generate_fact_post` 는 승인 흐름(draft_flow 참)이 아니면 `FACT_NOT_READY` 로 멈추고 글·이력·요청을 만들지 않는다(방어 한 겹).
+        대조군(속이 비지 않게): 같은 설정에서 승인 흐름이면 초안이 만들어진다."""
         self.use(FB.facts_registry(), FB.sources_registry())
-        value, report, _out = self.run_ok(draft_flow=False)
-        entry = self.history()[0]
-        self.assertEqual(report["outcome"], "PUBLISHED")
+        before = self.files()
+        for flow in (False, None, 0, ""):
+            with self.subTest(draft_flow=flow):
+                value, report, out, error = self.run_branch(draft_flow=flow)
+                self.assertIsNone(error, error)
+                self.assertIsNone(value)
+                self.assertEqual(report["outcome"], source_policy.FACT_NOT_READY_OUTCOME)
+                self.assertNotIn("draft_branch", report)
+                self.assertEqual(self.files(), before)                                                # 글·이력 파일이 생기지 않았다
+                self.assertEqual((self.noaa.factory_calls, self.noaa.calls), (0, []))                  # 요청 도구도 만들지 않았다
+                lines = [line for line in out.splitlines() if line.startswith("[구조화 Fact] 글을 만들지 않습니다")]
+                self.assertEqual(len(lines), 1, out)                                                   # 이유는 한 줄
+                self.assertIn("승인 흐름", lines[0])
+        for spy in self.spies.values():
+            spy.assert_not_called()
+        report = {}
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertIsNone(g.generate_fact_post(None, report))                                    # 인자를 안 주면(기본값 False) 멈춘다 — 열린 쪽이 기본값이 아니다
+        self.assertEqual((report["outcome"], self.files()), (source_policy.FACT_NOT_READY_OUTCOME, before))
+        value, report, _out = self.run_ok(draft_flow=True)
+        self.assertEqual(report["outcome"], "DRAFT_CREATED")                                           # 대조군
+        self.assertEqual(len(self.posts()), 1)
         for key in ("flow", "branch", "paths"):
-            self.assertNotIn(key, entry)
-        self.assertNotIn("draft_branch", report)
+            self.assertIn(key, self.history()[0])
+
+    def test_the_approval_pr_body_calls_a_calculated_draft_what_it_is_and_every_other_body_keeps_the_old_words(self):
+        """D-254: 승인 PR 본문은 사람이 병합 전에 읽는다. 규칙 기반 계산 글에 'AI 가 만든 초안'·AI 고지문 점검 줄이 나오면 거짓 안내다. 글 머리말과 이력 항목에 표식이 **둘 다** 있을 때만 문구를 바꾸고
+        (하나라도 없으면 옛 문구 — AI 미사용이라고 잘못 말하지 않는 쪽), 피드 글(표식 없음)의 본문은 바이트까지 그대로다."""
+        value, _report, _out = self.run_ok()
+        entry = self.history()[0]
+        text = (self.work / value[0]).read_text(encoding="utf-8")
+        self.assertTrue(drafts.is_fact_draft(entry, text))
+        body = drafts.build_pr_body(entry, text, None, owner="owner")
+        lines = body.splitlines()
+        self.assertEqual(lines[-1], "- 이 글은 계산으로 만든 초안(AI 미사용)이고 이 PR 은 `[Chance] 글 자동 작성·게시` 워크플로가 만들었습니다.")
+        self.assertNotIn("AI 가 만든 초안", body)
+        self.assertNotIn("출처 고지문", body)                                                           # 계산 글에는 AI 고지문 점검 줄이 없다
+        self.assertIn("- 본문 분량: 한국어 ", body)                                                       # 다른 점검 줄은 그대로
+        self.assertIn("- 글 끝 출처 목록: 한국어 ", body)
+        old = "- 이 글은 AI 가 만든 초안이고 이 PR 은 `[Chance] 글 자동 작성·게시` 워크플로가 만들었습니다."
+        without_text_mark = text.replace('provenance: "facts"\n', "")
+        without_entry_mark = {key: item for key, item in entry.items() if key != "provenance"}
+        wrong_entry_mark = dict(entry, provenance="other")
+        for label, pair in (("글에 표식이 없다", (entry, without_text_mark)), ("이력에 표식이 없다", (without_entry_mark, text)), ("둘 다 없다(피드 글)", (without_entry_mark, without_text_mark)),
+                            ("이력의 표식 값이 다르다", (wrong_entry_mark, text)), ("이력이 사전이 아니다", ("문자열", text)), ("글이 없다", (entry, None))):
+            with self.subTest(case=label):
+                self.assertFalse(drafts.is_fact_draft(*pair))
+                plain = drafts.build_pr_body(pair[0], pair[1], None, owner="owner")
+                self.assertEqual(plain.splitlines()[-1], old)
+                self.assertIn("- 출처 고지문(AI 작성·검토 안 받음 안내): 한국어 ", plain)
+                self.assertNotIn("AI 미사용", plain)
 
     def test_a_manual_run_without_a_slot_uses_a_time_stamped_branch(self):
         _value, _report, _out = self.run_ok(slot=None)
@@ -357,9 +467,11 @@ class CreatedPostTest(FB.FactEnv):
 
     def test_no_feed_page_model_prompt_photo_or_search_function_is_ever_called_and_the_model_call_count_is_zero(self):
         urlopen = mock.patch("urllib.request.urlopen", side_effect=AssertionError("네트워크 직접 접속"))
-        with urlopen, mock.patch.dict(g.GEMINI_CALLS, {"attempts": 0, "failed": 0}):
+        guard = mock.patch.object(ai_guard, "assert_clean", side_effect=AssertionError("AI 입구 방벽에 걸렸다 — 이 분기는 AI 입력을 만들지 않는다"))      # 방벽을 켠 채로도(부르면 실패) 걸리지 않는다
+        with urlopen, guard as barrier, mock.patch.dict(g.GEMINI_CALLS, {"attempts": 0, "failed": 0}):
             _value, _report, _out = self.run_ok()
             self.assertEqual(g.GEMINI_CALLS, {"attempts": 0, "failed": 0})
+            barrier.assert_not_called()
         for name, spy in self.spies.items():
             spy.assert_not_called()
         self.assertEqual(self.noaa.products(), ["kp_estimated"])
@@ -463,6 +575,172 @@ class RotationThroughHistoryTest(FB.FactEnv):
         self.assertNotIn("kp_estimated", self.noaa.products()[calls_before:])                              # Kp 제품은 부르지도 않았다
 
 
+class HistoryReadTest(FB.FactEnv):
+    """D7(독립 검증 S2b): Fact 경로는 이력으로 차례를 정하고 끝에 이력 전체를 다시 쓴다 — 깨진 이력을 빈 기록으로 읽고 진행하면 같은 글감을 되풀이하고 이력을 새 항목 하나로 덮어쓴다.
+    이제 진입에서 엄격히 읽어(잠금 가드가 쓰는 `publish_lock.read_history_strict`) 읽을 수 없으면 글을 만들지 않고 이유 한 줄로 정상 종료한다. 피드 경로는 이전 그대로다(빈 기록으로 진행)."""
+    BROKEN = (b"{broken", b"", b"   \n", b"null", b"{}", b'{"a": 1}', b'"text"', b"5", b"NaN", b"[1, 2", b"[]]", b"\xef\xbb\xbf[]", b"\xff\xfe[]")
+
+    def assert_stopped(self, out, error, value, report):
+        self.assertIsNone(error, error)
+        self.assertIsNone(value)
+        self.assertEqual(report["outcome"], source_policy.FACT_NOT_READY_OUTCOME)
+        self.assertEqual((self.noaa.factory_calls, self.noaa.calls), (0, []))                              # 요청 도구도 만들지 않았다
+        lines = [line for line in out.splitlines() if line.startswith("[구조화 Fact] 글을 만들지 않습니다")]
+        self.assertEqual(len(lines), 1, out)                                                               # 이유는 한 줄
+        self.assertIn("history.json", lines[0])
+        for spy in self.spies.values():
+            spy.assert_not_called()
+
+    def test_an_unreadable_history_stops_the_run_and_leaves_the_file_as_it_was(self):
+        path = self.work / "history.json"
+        for raw in self.BROKEN:
+            with self.subTest(raw=raw):
+                path.write_bytes(raw)
+                value, report, out, error = self.run_branch()
+                self.assert_stopped(out, error, value, report)
+                self.assertEqual(path.read_bytes(), raw)                                                    # 깨진 이력을 덮어쓰지 않는다
+                self.assertEqual(self.files(), ["history.json"])                                             # 글 파일도 없다
+
+    def test_the_generators_strict_reader_agrees_with_the_lock_guards_on_every_input(self):
+        """D-292: 생성기의 `read_history_strict` 는 잠금 가드의 같은 이름 함수와 같은 규칙이다 — 두 함수가 같은 입력(깨진 모양 전부·좋은 모양·없는 파일·폴더)에서 같은 결과를 낸다(규칙이 따로 어긋나지 않게)."""
+        path = self.work / "history.json"
+        for raw in (*self.BROKEN, b"[]", b" [ ] \n", b'[{"a": 1}, "x", null]', b"[1, 2]", b'[{"date": "2026-11-01"}]'):
+            with self.subTest(raw=raw):
+                path.write_bytes(raw)
+                self.assertEqual(g.read_history_strict(), publish_lock.read_history_strict(path))
+        path.unlink()
+        self.assertEqual((g.read_history_strict(), publish_lock.read_history_strict(path)), ([], []))          # 없는 파일 = 아직 글이 없다
+        path.mkdir()
+        self.assertEqual((g.read_history_strict(), publish_lock.read_history_strict(path)), (None, None))      # 폴더는 읽을 수 없다
+
+    def test_a_start_condition_problem_is_reported_before_the_history_problem_and_the_history_is_not_even_read_then(self):
+        """D-292: 이력은 시작 점검을 통과한 뒤에 읽는다 — 제공처가 꺼져 있고 이력도 깨졌으면 이유 한 줄은 제공처 이야기이고(지금 저장소의 실제 상태에서 이유가 바뀌지 않는다) 이력 파일은 그대로다."""
+        self.use(FB.facts_registry(), FB.sources_registry(enabled=False))
+        path = self.work / "history.json"
+        path.write_bytes(b"{broken")
+        value, report, out, error = self.run_branch()
+        self.assertIsNone(error, error)
+        self.assertIsNone(value)
+        self.assertEqual(report["outcome"], source_policy.FACT_NOT_READY_OUTCOME)
+        lines = [line for line in out.splitlines() if line.startswith("[구조화 Fact] 글을 만들지 않습니다")]
+        self.assertEqual(len(lines), 1, out)
+        self.assertIn(FB.PROVIDER_ID, lines[0])
+        self.assertNotIn("history.json", lines[0])
+        self.assertEqual(path.read_bytes(), b"{broken")
+
+    def test_a_history_path_that_is_a_folder_stops_the_run_too(self):
+        (self.work / "history.json").mkdir()
+        value, report, out, error = self.run_branch()
+        self.assert_stopped(out, error, value, report)
+        self.assertTrue((self.work / "history.json").is_dir())
+        self.assertEqual(self.posts(), [])
+
+    def test_a_missing_or_empty_list_history_is_a_first_run_and_goes_on(self):
+        for raw in (None, b"[]", b" [ ] \n"):
+            with self.subTest(raw=raw):
+                for leftover in self.work.glob("history.json"):
+                    leftover.unlink()
+                for post in self.posts():
+                    post.unlink()
+                if raw is not None:
+                    (self.work / "history.json").write_bytes(raw)
+                value, report, out, error = self.run_branch()
+                self.assertIsNone(error, error)
+                self.assertIsNotNone(value, (report, out))
+                self.assertEqual(report["outcome"], "DRAFT_CREATED")
+                self.assertEqual(len(self.history()), 1)
+
+    def test_a_readable_list_with_garbage_entries_goes_on_and_keeps_every_old_entry(self):
+        old = [1, "문자열 항목", None, {"date": "깨진 날짜", "topic": "옛 글"}, {"date": "2026-10-01", "topic": "옛 글 둘"}]
+        self.set_history(old)
+        value, report, out, error = self.run_branch()
+        self.assertIsNone(error, error)
+        self.assertIsNotNone(value)
+        after = self.history()
+        self.assertEqual(after[:len(old)], old)                                                              # 읽을 수 있는 이력의 옛 항목은 하나도 잃지 않는다
+        self.assertEqual(len(after), len(old) + 1)
+
+    def test_the_feed_path_is_unchanged_it_still_reads_a_broken_history_as_empty_and_goes_on(self):
+        self.use(FB.facts_registry(content_source=None), FB.sources_registry())
+        self.patch_value(g, "fetch_news_items", lambda editorial_lane=None, stats=None, deadline=None, clock=None: [])
+        path = self.work / "history.json"
+        path.write_bytes(b"{broken")
+        value, report, out, error = self.run_branch()
+        self.assertIsNone(error)
+        self.assertIsNone(value)
+        self.assertEqual(report["outcome"], "ALL_LANES_EMPTY")                                              # 피드 경로의 결과 코드 그대로
+        self.assertIn("history.json 읽기 실패, 빈 기록으로 진행", out)                                       # 피드 경로의 옛 동작: 깨진 이력은 빈 기록으로 읽고 계속한다
+        self.assertEqual(path.read_bytes(), b"{broken")
+
+
+class HistoryLimitTest(FB.FactEnv):
+    """D-256: `write_history` 는 마지막 200개만 남기고 읽을 수 없는 날짜는 그 제품을 막는 쪽으로 읽힌다(`made_from_history`). 이력이 가득 찬 상태에서도 후보 선택은 이력에 남은 Fact 글로 가장 오래 전에 낸 글감을
+    고르고 새 글을 더하면 가장 오래된 항목 하나만 밀려난다. 한 글감의 마지막 글이 밀려나면 그 글감은 낸 적 없는 것으로 읽혀 먼저 차례가 온다(문서화한 한계 — 주 1–2편이면 마지막 글이 밀려나려면 새 항목이 200개 쌓여야 한다)."""
+
+    def filler(self, count):
+        start = datetime.date(2025, 1, 1)
+        return [{"date": (start + datetime.timedelta(days=index)).isoformat(), "topic": f"옛 글 {index}", "kr_title": f"옛 글 {index}"} for index in range(count)]
+
+    def fact_entry(self, spec_id, day, **extra):
+        spec = K.SPEC_BY_ID[spec_id]
+        item = {"date": day, "topic": f"지난 글 {spec_id}", "content_source": "facts", "candidate_key": K.candidate_key(spec, day), "dedupe_key": f"old|{spec_id}|{day}", "provenance": "facts"}
+        item.update(extra)
+        return item
+
+    def test_a_full_history_still_picks_the_subject_made_longest_ago_and_pushes_out_only_the_oldest_entry(self):
+        recent = [self.fact_entry("flares_weekly", "2026-10-05"), self.fact_entry("scales_weekly", "2026-10-12"), self.fact_entry("kp_weekly", "2026-10-19"),
+                  self.fact_entry("sunspot_daily_monthly", "2026-10-26"), self.fact_entry("sunspot_monthly_monthly", "2026-10-27")]
+        history = self.filler(195) + recent
+        self.assertEqual(len(history), 200)
+        self.set_history(history)
+        value, report, out, error = self.run_branch()
+        self.assertIsNone(error, error)
+        self.assertIsNotNone(value, (report, out))
+        after = self.history()
+        self.assertEqual(len(after), 200)                                                                     # 한 편을 더해도 200개 — 가장 오래된 하나가 밀려났다
+        self.assertEqual(after[:-1], history[1:])
+        self.assertEqual(after[-1]["candidate_key"], "space_weather.kp_storm_weekly:2026-W46")              # 한 번도 안 낸 글감이 맨 앞(Kp 묶음에서 안 낸 쪽) — 월 글감 둘은 28일 간격에 막혀 있다
+        self.assertEqual(self.noaa.products(), ["kp_estimated"])
+
+    def test_the_same_product_is_still_held_back_by_the_window_when_the_history_is_full(self):
+        recent = [self.fact_entry(name, "2026-10-05") for name in ("flares_weekly", "scales_weekly", "kp_weekly", "sunspot_daily_monthly", "sunspot_monthly_monthly")] + [self.fact_entry("kp_storm_weekly", "2026-11-06")]
+        history = self.filler(194) + recent
+        self.assertEqual(len(history), 200)
+        self.set_history(history)
+        value, report, out, error = self.run_branch()
+        self.assertIsNone(error, error)
+        self.assertIsNotNone(value, (report, out))
+        self.assertEqual(self.history()[-1]["candidate_key"], "space_weather.flares_weekly:2026-W46")        # 나흘 전에 Kp 를 읽은 글이 있어 Kp 두 글감은 7일 간격에 막히고 다음 차례인 플레어 글이 나온다
+        self.assertEqual(self.noaa.products(), ["xray_flares"])                                               # Kp 제품은 부르지도 않았다
+
+    def test_a_subject_whose_only_entry_is_pushed_out_reads_as_never_made_which_is_the_documented_limit(self):
+        old = self.fact_entry("scales_weekly", "2026-01-05")
+        history = [old] + self.filler(199)
+        self.assertEqual(len(history), 200)
+        self.assertEqual(set(K.made_from_history(history).last), {"scales_weekly"})
+        self.set_history(history)
+        value, report, out, error = self.run_branch()
+        self.assertIsNone(error, error)
+        self.assertIsNotNone(value)
+        after = self.history()
+        self.assertEqual((len(after), old in after), (200, False))                                           # 가장 오래된 항목(그 글감의 마지막 글)이 밀려났다
+        self.assertEqual(after[:-1], history[1:])                                                            # 그 밖의 항목은 그대로다
+        made = K.made_from_history(after)
+        self.assertNotIn("scales_weekly", made.last)                                                         # 낸 적 없는 것으로 읽힌다 — 막는 쪽이 아니라 먼저 차례가 오는 쪽으로 틀린다
+        self.assertEqual(set(made.last), {after[-1]["candidate_key"].split(":")[0].replace("space_weather.", "")})
+
+    def test_a_fact_entry_with_a_broken_date_blocks_its_product_and_is_kept_as_it_is(self):
+        broken = self.fact_entry("kp_weekly", "2026-10-05", date="깨진 날짜")
+        self.set_history(self.filler(10) + [broken])
+        value, report, out, error = self.run_branch()
+        self.assertIsNone(error, error)
+        self.assertIsNotNone(value)
+        after = self.history()
+        self.assertIn(broken, after)                                                                          # 고치지도 지우지도 않는다 — 사람이 고칠 때까지 그 제품은 막힌다
+        self.assertEqual(after[-1]["candidate_key"], "space_weather.flares_weekly:2026-W46")                # Kp 묶음이 막혀 안 낸 글감 중 차례가 가장 앞선 플레어 글이 나온다
+        self.assertEqual(self.noaa.products(), ["xray_flares"])
+
+
 class FailureModesTest(FB.FactEnv):
     def sources_with(self, **own):
         data = FB.sources_registry()
@@ -529,6 +807,26 @@ class FailureModesTest(FB.FactEnv):
         self.assertIsNone(value)
         self.assertEqual(self.noaa.products(), ["kp_estimated", "xray_flares", "scales"])                  # 세 번째 실패 뒤 월 글감 둘은 호출이 나가지 않았다
         self.assertTrue(any("SKIPPED_AFTER_FAILURES" in note or "BUDGET_DENIED" in note for note in report["fact_notes"]))
+
+    def test_a_response_that_drips_past_the_deadline_closes_the_product_and_never_makes_a_post(self):
+        """D2: 실제 연결 코드(`_fact_fetch`)에 천천히 흘리는 응답 대역과 가짜 시계를 물린다 — 제품마다 마감을 넘겨 `OPENER_FAILED` 로 닫히고(세 번 실패한 뒤의 제품은 호출 예산이 막는다) 글·이력은 없다."""
+        clock, responses = FakeClock(), []
+
+        def slow(url, *, timeout, max_bytes):
+            responses.append(DrippingResponse(clock, itertools.repeat(b"x"), 19))
+            return g._fact_fetch(DrippingOpener(responses[-1], clock), url, timeout, max_bytes, clock=clock)
+        self.patch_value(g, "make_fact_transport", lambda sources: slow)
+        value, report, out, error = self.run_branch()
+        self.assertIsNone(error)
+        self.assertIsNone(value)
+        self.assertEqual(report["outcome"], source_policy.FACT_ALL_SKIPPED_OUTCOME)
+        self.assertEqual(self.files(), [])
+        notes = report["fact_notes"]
+        self.assertEqual(len(notes), 6)
+        self.assertTrue(all(note.endswith(("ADAPTER:OPENER_FAILED", "ADAPTER:BUDGET_DENIED")) for note in notes), notes)
+        self.assertEqual(sum(note.endswith("ADAPTER:OPENER_FAILED") for note in notes), 4)                # Kp 두 글감(같은 제품 — 실패를 기억한다)·플레어·등급
+        self.assertEqual(len(responses), 3)                                                                # 세 제품만 불렀고 세 번째 실패 뒤의 월 글감 둘은 호출이 나가지 않았다
+        self.assertTrue(all(len(response.asked) == 4 for response in responses))
 
     def test_a_broken_response_never_makes_a_post(self):
         for product in ("kp_estimated", "xray_flares", "scales", "ssn_daily", "ssn_monthly"):
@@ -634,7 +932,8 @@ class OpenerTest(unittest.TestCase):
 
             def read(self, size=-1):
                 self.read_sizes.append(size)
-                return self.body[:size]
+                piece, self.body = self.body[:size], self.body[size:]          # 흐르는 응답처럼 읽은 만큼 줄어든다(S2BFIX: 응답을 조각으로 읽으므로 같은 앞부분을 되풀이해 돌려주는 대역으로는 시험할 수 없다)
+                return piece
 
             def __enter__(self):
                 return self
@@ -666,7 +965,8 @@ class OpenerTest(unittest.TestCase):
             self.assertEqual(timeout, 7)
             self.assertEqual(request.get_header("Accept-encoding"), "gzip")
             self.assertTrue(request.get_header("User-agent"))
-            self.assertEqual(response.read_sizes, [1001])
+            wire = gzipped if response.headers["Content-Encoding"] == "gzip" else raw
+            self.assertEqual(response.read_sizes, [1001, 1001 - len(wire)])                               # 첫 요청이 한 바이트 더(max_bytes + 1)이고 그 뒤는 남은 몫만 — 마지막 빈 조각이 끝을 알린다(S2BFIX: 전에는 한 번에 [1001])
         self.assertTrue(packed)
         bomb = zlib.compressobj(wbits=31)
         zipped = bomb.compress(b"0" * 5_000_000) + bomb.flush()
@@ -676,6 +976,122 @@ class OpenerTest(unittest.TestCase):
         self.assertEqual(len(body), 1001)                                                                 # 압축을 푼 크기가 한도 + 1 에서 잘려 어댑터가 거절한다(압축 폭탄 방어)
         with self.assertRaises(ValueError):
             g._fact_gunzip(b"not gzip at all", 100)
+
+
+class ResponseDeadlineTest(unittest.TestCase):
+    """D2(독립 검증 S2b): `timeout` 은 소켓 연산마다의 시간이라 천천히 흘리는 응답은 오래 이어질 수 있었다 — 소켓 읽기마다 19초씩 걸리면 상한(1 MiB)까지 사실상 끝나지 않고 워크플로 시간 제한이 끊을 때까지 간다.
+    이제 응답을 조각으로 읽으며 요청 시작부터의 경과가 마감(60초)을 **넘으면** 닫는다. 가짜 응답·가짜 시계만 쓴다(소켓·진짜 시간에 기대지 않는다 — 검증자의 slow_drip 도구와 같은 원리)."""
+    URL = "https://services.swpc.noaa.gov/products/noaa-scales.json"
+    KINDS = (DrippingResponse, ReadOnlyResponse)
+
+    def setup_fetch(self, pieces, step, kind=DrippingResponse, open_seconds=0, encoding=""):
+        clock = FakeClock()
+        response = kind(clock, pieces, step, encoding)
+        return DrippingOpener(response, clock, open_seconds), response, clock
+
+    def fetch(self, opener, clock, max_bytes=1000, deadline=60):
+        return g._fact_fetch(opener, self.URL, 20, max_bytes, clock=clock, deadline=deadline)
+
+    def test_a_body_that_arrives_in_time_comes_back_whole_from_either_kind_of_response(self):
+        for kind in self.KINDS:
+            with self.subTest(kind=kind.__name__):
+                opener, response, clock = self.setup_fetch([b"ab", b"cd", b"ef"], 1, kind)
+                self.assertEqual(self.fetch(opener, clock), b"abcdef")
+                self.assertEqual(response.asked, [1001, 999, 997, 995])                                  # 조각마다 남은 만큼(max_bytes + 1 에서 받은 몫을 뺀 것)만 요청하고 마지막은 빈 조각(끝)이다
+                self.assertEqual(len(opener.requests), 1)
+                request, socket_timeout = opener.requests[0]
+                self.assertEqual(socket_timeout, 20)                                                      # 소켓 timeout 은 그대로 넘어간다 — 마감은 그 위에 더한 것이다
+                self.assertEqual(request.get_header("Accept-encoding"), "gzip")
+
+    def test_the_deadline_is_looked_at_before_every_read_and_a_slow_drip_is_closed_at_it(self):
+        """한 번 읽는 데 19초씩(소켓 timeout 20초 아래) 걸리는 끝없는 응답 — 마감이 없으면 상한까지 끝나지 않는다. 읽기 앞마다 경과를 보니 네 번째 읽기까지(경과 0·19·38·57초) 하고 다섯 번째 앞(76초)에서 닫힌다."""
+        for kind in self.KINDS:
+            with self.subTest(kind=kind.__name__):
+                opener, response, clock = self.setup_fetch(itertools.repeat(b"x"), 19, kind)
+                with self.assertRaises(TimeoutError) as caught:
+                    self.fetch(opener, clock)
+                self.assertEqual(len(response.asked), 4)
+                self.assertEqual(str(caught.exception), "응답을 60초 안에 다 받지 못했습니다")             # 고정 문장과 숫자뿐 — 주소·받은 응답 글자를 싣지 않는다
+
+    def test_exactly_the_deadline_passes_and_the_next_instant_fails(self):
+        """마감 직전·정확히 마감·직후(연결·머리글에 걸린 시간 open_seconds 로 첫 읽기 앞의 경과를 정한다): 59.999 와 60 은 통과하고 60.001 부터는 첫 조각을 읽기 전에 닫힌다 — 시작은 요청을 열기 전이다."""
+        for seconds, passes in ((0, True), (59.999, True), (60, True), (60.001, False), (61, False), (500, False)):
+            with self.subTest(open_seconds=seconds):
+                opener, response, clock = self.setup_fetch([b"abc"], 0, open_seconds=seconds)
+                if passes:
+                    self.assertEqual(self.fetch(opener, clock), b"abc")
+                else:
+                    with self.assertRaises(TimeoutError):
+                        self.fetch(opener, clock)
+                    self.assertEqual(response.asked, [])                                                  # 한 바이트도 읽지 않고 닫았다
+
+    def test_the_deadline_also_counts_the_time_the_reads_themselves_take(self):
+        """한 번 읽을 때마다 20초 — 읽기 앞의 경과는 0·20·40·60. 네 번째 읽기(경과 정확히 60초)까지는 하고 그 뒤 경과 80초 앞에서 닫힌다. 본문이 세 조각이면 네 번째 읽기가 끝을 알려 통과하고 네 조각이면 닫힌다."""
+        opener, response, clock = self.setup_fetch([b"a", b"b", b"c"], 20)
+        self.assertEqual(self.fetch(opener, clock), b"abc")
+        self.assertEqual(len(response.asked), 4)
+        opener, response, clock = self.setup_fetch([b"a", b"b", b"c", b"d"], 20)
+        with self.assertRaises(TimeoutError):
+            self.fetch(opener, clock)
+        self.assertEqual(len(response.asked), 4)
+
+    def test_the_socket_read_once_function_is_preferred_and_read_is_only_the_fallback(self):
+        """진짜 HTTPResponse 의 `read(n)` 은 n 바이트가 찰 때까지 안에서 기다려 한 바이트씩 흘리는 응답에서는 마감을 볼 수 없다 — 소켓 읽기를 한 번만 하는 `read1` 이 있으면 그것으로만 읽는다(없으면 read 로 물러난다 — 위 시험)."""
+        class Read1Only(DrippingResponse):
+            read1 = DrippingResponse._next
+
+            def read(self, size=-1):
+                raise AssertionError("read1 이 있는데 read 로 읽었다")
+        opener, response, clock = self.setup_fetch([b"ab", b"cd"], 1, Read1Only)
+        self.assertEqual(self.fetch(opener, clock), b"abcd")
+        self.assertEqual(len(response.asked), 3)
+
+    def test_each_read_asks_for_at_most_one_chunk_and_never_past_the_limit(self):
+        for kind in self.KINDS:
+            with self.subTest(kind=kind.__name__):
+                opener, response, clock = self.setup_fetch([b"x" * 300000], 1, kind)
+                body = self.fetch(opener, clock, max_bytes=200000)
+                self.assertEqual(len(body), 200001)                                                       # max_bytes + 1 에서 멈춘다(어댑터가 상한 초과로 거절한다)
+                self.assertEqual(response.asked, [65536, 65536, 65536, 3393])
+                self.assertTrue(all(size <= g.FACT_READ_CHUNK_BYTES for size in response.asked))
+
+    def test_a_gzip_body_is_unpacked_after_the_pieces_are_joined_and_a_bomb_is_still_cut(self):
+        raw = b'{"a": 1}' * 50
+        packer = zlib.compressobj(wbits=31)
+        packed = packer.compress(raw) + packer.flush()
+        opener, response, clock = self.setup_fetch([packed[:10], packed[10:30], packed[30:]], 1, encoding="gzip")
+        self.assertEqual(self.fetch(opener, clock), raw)
+        bomb = zlib.compressobj(wbits=31)
+        zipped = bomb.compress(b"0" * 5_000_000) + bomb.flush()
+        opener, response, clock = self.setup_fetch([zipped[start:start + 100] for start in range(0, len(zipped), 100)], 0, encoding="gzip")
+        self.assertEqual(len(self.fetch(opener, clock)), 1001)                                             # 압축을 푼 크기가 한도 + 1 에서 잘린다(이전과 같다)
+
+    def test_the_default_clock_and_deadline_are_the_modules_own_and_are_read_when_called(self):
+        clock = FakeClock()
+        response = DrippingResponse(clock, itertools.repeat(b"x"), 3)
+        with mock.patch.object(g, "fact_clock", clock), mock.patch.object(g, "FACT_READ_DEADLINE_SECONDS", 5):
+            with self.assertRaises(TimeoutError):
+                g._fact_fetch(DrippingOpener(response, clock), self.URL, 20, 1000)
+        self.assertEqual(len(response.asked), 2)                                                          # 경과 0·3초에서 읽고 6초(5초 초과) 앞에서 닫혔다
+        self.assertEqual((g.FACT_READ_DEADLINE_SECONDS, g.FACT_READ_CHUNK_BYTES), (60, 65536))             # 기본값은 60초·64KiB
+        self.assertIsInstance(g.fact_clock(), float)
+        self.assertLessEqual(g.fact_clock(), g.fact_clock())                                               # 단조 시계다
+
+    def test_through_the_real_transport_and_the_adapter_a_timeout_is_an_opener_failure_that_counts_against_the_run(self):
+        clock = FakeClock()
+        response = DrippingResponse(clock, itertools.repeat(b"x"), 19)
+        sources = source_registry.build_registry(FB.sources_registry(), "2026-11-10")
+        provider = sources.get(FB.PROVIDER_ID)
+        access = fact_supply.api_access(provider)
+        with mock.patch.object(egress, "build_checked_opener", lambda *args, **kwargs: DrippingOpener(response, clock)), mock.patch.object(g, "fact_clock", clock):
+            transport = g.make_fact_transport(sources)
+            opener, budget = g.fact_opener(sources, provider, access, transport)
+            with self.assertRaises(fact_supply.AdapterError) as caught:
+                N.NoaaSwpcAdapter(provider, "scales").fetch(access, {}, opener)
+        self.assertEqual(caught.exception.code, "OPENER_FAILED")
+        self.assertEqual((budget.calls, budget.failures), (1, 1))                                          # 호출 예산은 실패로 센다(세 번이면 이 실행의 나머지 호출이 멈춘다)
+        self.assertEqual(len(response.asked), 4)
+        self.assertNotIn("http", str(caught.exception))
 
 
 class GateConnectionTest(FB.FactEnv):
@@ -774,6 +1190,78 @@ class NoNamedInnerFunctionTest(unittest.TestCase):
         sample = "def fact_a():\n    def inner():\n        return 1\n    return inner\n\n\ndef fact_b():\n    return (lambda: 1)()\n\n\ndef other():\n    def inner():\n        return 2\n"
         self.assertEqual(self.inner_functions(sample, lambda name: name.startswith("fact_")), [("fact_a", "inner")])
         self.assertEqual(self.inner_functions(sample), [("fact_a", "inner"), ("other", "inner")])
+
+
+class FactZoneExternalReadTest(unittest.TestCase):
+    """D5(독립 검증 S2b): 정적 규칙 AF4·AF8 은 **AI 이름**만 본다 — AI 가 아닌 외부 읽기(사진·기사 읽기)를 Fact 구역이 불러도 위반으로 읽지 않는다(검증자가 구역에 한 줄씩 넣은 `pick_images(1)`·`search_unsplash`·
+    `trigger_download`·`url_ok`·`fetch_pool_photo`·`_fetch_source_excerpt`·`_resolve_article_url`·`fetch_news_items()` 는 모두 위반 0 이었다). 막는 것은 FactEnv 의 동적 감시자(12개 이름)뿐이라 드물게 도는 갈래(예외 경로)에
+    숨은 호출은 못 본다. 이 시험이 Fact 구역(생성기의 `fact_*`·`_fact_*`·`make_fact_*`·`generate_fact_*`, 공급 모듈 `fact_supply` 전체, 그림자 분기의 `run_facts`·`facts_branch_on`)의 소스를 AST 로 읽어 그 이름이
+    호출·참조·`getattr` 에 글자로 넘기는 이름 어디에도 없음을 단언한다. 구역 이름이 바뀌어 검사 대상이 조용히 비지 않게 함수 개수 하한도 단언한다."""
+    ZONE = NoNamedInnerFunctionTest.ZONE
+    PHOTO_READS = frozenset({"pick_images", "search_unsplash", "trigger_download", "url_ok", "fetch_pool_photo", "_api_request", "_note_unsplash_rate", "_record_photo", "_forget_photo", "credit_line_for",
+                             "fix_images", "repair", "UNSPLASH_KEY", "STUB_UNSPLASH", "UNSPLASH_RATE", "IMAGE_POOL"})
+    ARTICLE_READS = frozenset({"fetch_news_items", "_fetch_source_excerpt", "_resolve_article_url", "pick_topic_candidates", "iter_candidate_lanes", "collect_candidates", "NEWS_SOURCES", "urlopen"})
+    EXTERNAL_READS = PHOTO_READS | ARTICLE_READS | frozenset(FB.AI_NAMES)
+    CLOCK_ATTRIBUTES = frozenset({"monotonic", "monotonic_ns", "perf_counter", "process_time", "time", "time_ns", "utcnow", "now", "today", "sleep"})
+
+    def read(self, rel):
+        return (_bootstrap.ROOT / rel).read_text(encoding="utf-8")
+
+    def zone_functions(self):
+        generated = [node for node in ast.parse(self.read("generator.py")).body if isinstance(node, ast.FunctionDef) and node.name.startswith(self.ZONE)]
+        supply = [node for node in ast.walk(ast.parse(self.read("pipeline/fact_supply.py"))) if isinstance(node, ast.FunctionDef)]
+        shadow = [node for node in ast.parse(self.read("pipeline/shadow_run.py")).body if isinstance(node, ast.FunctionDef) and node.name in ("run_facts", "facts_branch_on")]
+        return generated, supply, shadow
+
+    def names_in(self, node):
+        """함수 하나 안에서 읽은 이름 전부: 맨 이름·속성 이름·이름처럼 생긴 글자 상수(`getattr(g, "이름")`·`globals()["이름"]`)."""
+        found = set()
+        for child in ast.walk(node):
+            if isinstance(child, ast.Name):
+                found.add(child.id)
+            elif isinstance(child, ast.Attribute):
+                found.add(child.attr)
+            elif isinstance(child, ast.Constant) and isinstance(child.value, str) and child.value.isidentifier():
+                found.add(child.value)
+        return found
+
+    def test_the_fact_zone_never_names_a_photo_or_article_read_or_an_ai_function(self):
+        generated, supply, shadow = self.zone_functions()
+        for node in generated + supply + shadow:
+            with self.subTest(function=node.name):
+                self.assertEqual(sorted(self.names_in(node) & self.EXTERNAL_READS), [], node.name)
+
+    def test_the_zone_is_really_found_so_the_check_cannot_pass_by_looking_at_nothing(self):
+        generated, supply, shadow = self.zone_functions()
+        names = {node.name for node in generated}
+        self.assertGreaterEqual(len(generated), 15, sorted(names))
+        self.assertTrue({"generate_fact_post", "fact_prepare", "fact_check_post", "fact_opener", "fact_context", "fact_history_entry", "make_fact_transport", "_fact_fetch", "_fact_read", "fact_clock"} <= names, sorted(names))
+        self.assertGreaterEqual(len(supply), 6, [node.name for node in supply])
+        self.assertIn("supply", {node.name for node in supply})
+        self.assertEqual(sorted(node.name for node in shadow), ["facts_branch_on", "run_facts"])
+
+    def test_the_scan_really_sees_a_call_a_bare_reference_a_name_given_as_text_and_an_attribute(self):
+        sample = ast.parse("def fact_a(g):\n    return g.pick_images([])\n\ndef fact_b():\n    return fetch_news_items\n\ndef fact_c(g):\n    return getattr(g, 'url_ok')\n\n"
+                           "def fact_d(opener):\n    return opener.open('x')\n\ndef fact_e(urllib):\n    return urllib.request.urlopen('x')\n")
+        found = {node.name: self.names_in(node) & self.EXTERNAL_READS for node in sample.body}
+        self.assertEqual(found, {"fact_a": {"pick_images"}, "fact_b": {"fetch_news_items"}, "fact_c": {"url_ok"}, "fact_d": set(), "fact_e": {"urlopen"}})
+
+    def test_every_generator_function_that_opens_an_address_outside_the_zone_is_in_the_list_and_every_listed_name_exists(self):
+        """새 외부 읽기 함수가 생성기에 생기면 이 목록에 더해야 한다 — 안 그러면 여기서 빨개진다(목록이 낡아 구역의 검사가 약해지지 않게)."""
+        body = ast.parse(self.read("generator.py")).body
+        openers = {node.name for node in body if isinstance(node, ast.FunctionDef) and not node.name.startswith(self.ZONE)
+                   and any(isinstance(child, ast.Attribute) and child.attr == "urlopen" for child in ast.walk(node))}
+        self.assertGreaterEqual(len(openers), 7, sorted(openers))
+        self.assertLessEqual(openers, self.EXTERNAL_READS, f"주소를 여는 생성기 함수가 목록에 없다: {sorted(openers - self.EXTERNAL_READS)} — 목록(EXTERNAL_READS)에 더한다")
+        defined = {node.name for node in body if isinstance(node, ast.FunctionDef)}
+        defined |= {target.id for node in body if isinstance(node, ast.Assign) for target in node.targets if isinstance(target, ast.Name)}
+        self.assertEqual(sorted((self.EXTERNAL_READS - {"urlopen"}) - defined), [], "목록에 있는데 생성기에 없는 이름(오타·이름 변경)")
+
+    def test_the_zone_reads_the_clock_in_exactly_one_place_which_a_test_can_replace(self):
+        """시계는 생성기 안 한 군데(`fact_clock`)에서만 읽는다 — 마감 판정이 여러 시계를 섞지 않고 시험이 한 군데만 바꾸면 되게(D-290)."""
+        generated, supply, shadow = self.zone_functions()
+        hits = [(node.name, child.attr) for node in generated + supply + shadow for child in ast.walk(node) if isinstance(child, ast.Attribute) and child.attr in self.CLOCK_ATTRIBUTES]
+        self.assertEqual(hits, [("fact_clock", "monotonic")])
 
 
 if __name__ == "__main__":

@@ -22,7 +22,7 @@ import _bootstrap
 import blogger_workflow_helpers as bwf
 import generator as g
 from edits_helpers import ABOUT, image_body, issue, make_edit_root, page_body
-from lock_helpers import guard_off, today_registry, write_registry
+from lock_helpers import guard_off, pre_flip, today_registry, write_registry
 from pipeline import drafts, registry
 from pipeline import run as run_mod
 from pipeline.edits import runner
@@ -171,6 +171,7 @@ class DefaultPracticeRunCallsNoGeminiTest(unittest.TestCase):
         self.assertEqual(self.flags_for("chanceblog.yml", "schedule"), ["False", "False"])
 
 
+@pre_flip
 class GenerationBase(unittest.TestCase):
     LINK = "https://www.reuters.com/a"
 

@@ -5,11 +5,13 @@ max_posts_per_day 1 · max_open_drafts 3 · max_posts_per_week 2(주간 상한 �
 """
 import copy
 import json
+import tempfile
 from pathlib import Path
 from unittest import mock
 
 import _bootstrap
-from pipeline import publish_lock, registry
+from pipeline import publish_lock, registry, source_registry
+from registry_states import FIXTURE, pre_flip_registry
 
 ROOT = _bootstrap.ROOT
 
@@ -33,12 +35,64 @@ def today_registry():
     """진짜 레지스트리를 '제한 재개 잠금이 꺼진 오늘의 값'으로 맞춘 사본(resume_lock 키 없음 · chance.publish_flow direct · chance.limits 하루 2편) —
     '꺼져 있으면 이전과 같다'를 보는 시험의 기준이다. 진짜 레지스트리를 그대로 쓰지 않는 까닭: 켜는 변경(T3)이 레지스트리 값을 바꿔도 그 시험들이 흔들리지 않게 하려는 것이다.
     진짜 값이 이것과 같은지는 한 곳(`LockStateTest.test_the_real_registry_has_the_lock_off_today`)만 못박는다 — 켜는 변경은 그 시험 하나를 함께 고친다."""
-    reg = real_registry()
-    reg.pop("resume_lock", None)
-    chance = blog_of(reg, CHANCE)
-    chance["publish_flow"] = "direct"
-    chance["limits"] = {"max_posts_per_day": 2}
-    return reg
+    return pre_flip_registry()      # 켜기 전 고정 표본(tests/fixtures/registry_states — 켜기 전 진짜 레지스트리와 바이트까지 같은 사본): 켜는 변경(T3) 뒤에도 같은 값이다. 진짜 값과의 어긋남은 tests/test_registry_state.py 가 막는다
+
+
+class PreFlipRegistry:
+    """진짜 레지스트리가 '켜는 변경 뒤' 값(콘텐츠 출처 facts·허용 목록 모드·국문 단독·승인 흐름·상한·Gate·제한 재개 잠금·허용 목록의 NOAA 켜짐)이어도 켜기 전 경로(피드·두 언어·직접 게시·잠금 꺼짐·ACTIVE 제공처 없음)를
+    시험하는 시험 클래스가 흔들리지 않게 한다. 시작해 두면 `registry.REGISTRY_PATH` 가 켜기 전 고정 표본(`tests/fixtures/registry_states/pre_flip_blogs.json` — 켜기 전 진짜 레지스트리와 같은 사본)을,
+    `source_registry.DEFAULT_PATH` 가 진짜 허용 목록에서 `enabled` 만 모두 끈 임시 사본을 가리키고 멈추면 되돌린다(허용 목록은 켜는 변경 말고도 조사 갱신으로 자주 바뀌어 고정 표본 대신 진짜 파일에서 끈 사본을 쓴다 —
+    켜진 곳이 없다는 것만 켜기 전 값이다). 레지스트리를 읽는 코드(생성기·그림자 실행·Gate 설정·초안 흐름·잠금 가드·소스 정책)는 모두 그 경로를 부르는 때에 읽으므로 한 번의 패치로 같이 따라온다.
+    진짜 값을 못박는 표지판 시험은 이 도구를 쓰지 않는다(진짜 파일 `ROOT/pipeline/blogs.json` 을 경로로 직접 읽는다). 어긋남은 `tests/test_registry_state.py` 가 막는다."""
+
+    def __init__(self):
+        self._folder = None
+        self._patches = []
+
+    def start(self):
+        self._folder = tempfile.TemporaryDirectory()
+        data = json.loads(Path(source_registry.DEFAULT_PATH).read_text(encoding="utf-8"))
+        for provider in data["providers"]:
+            provider["enabled"] = False
+        sources = Path(self._folder.name) / "source_registry.json"
+        sources.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+        self._patches = [mock.patch.object(registry, "REGISTRY_PATH", FIXTURE), mock.patch.object(source_registry, "DEFAULT_PATH", sources)]
+        for patch in self._patches:
+            patch.start()
+
+    def stop(self):
+        for patch in reversed(self._patches):
+            patch.stop()
+        self._folder.cleanup()
+
+
+def pre_flip(cls):
+    """시험 클래스 데코레이터 — 그 클래스가 도는 동안 `PreFlipRegistry` 를 켠다(`setUpClass`·`tearDownClass` 에 끼운다). 클래스의 다른 시험 도구(`setUp` 등)는 그대로다.
+    바탕 클래스와 물려받은 클래스가 둘 다 달려도 안쪽부터 차례로 되돌아온다(클래스마다 스택을 둔다)."""
+    original_set_up = cls.setUpClass.__func__
+    original_tear_down = cls.tearDownClass.__func__
+
+    def set_up_class(klass):
+        if "_pre_flip_stack" not in klass.__dict__:
+            klass._pre_flip_stack = []
+        pre = PreFlipRegistry()
+        pre.start()
+        klass._pre_flip_stack.append(pre)
+        try:
+            original_set_up(klass)
+        except BaseException:
+            klass._pre_flip_stack.pop().stop()
+            raise
+
+    def tear_down_class(klass):
+        try:
+            original_tear_down(klass)
+        finally:
+            klass._pre_flip_stack.pop().stop()
+
+    cls.setUpClass = classmethod(set_up_class)
+    cls.tearDownClass = classmethod(tear_down_class)
+    return cls
 
 
 def blog_of(reg, key):
@@ -46,8 +100,8 @@ def blog_of(reg, key):
 
 
 def lock_ready(reg=None):
-    """진짜 레지스트리 사본을 '잠금 켬 + 규칙 전부 지킴' 으로 바꾼다. 전체 레지스트리 검증도 통과해야 한다(시험이 확인한다)."""
-    reg = real_registry() if reg is None else copy.deepcopy(reg)
+    """켜기 전 고정 표본의 사본(`today_registry()`)을 '잠금 켬 + 규칙 전부 지킴' 으로 바꾼다 — 켜는 변경(T3) 뒤에도 같은 바탕이다. 전체 레지스트리 검증도 통과해야 한다(시험이 확인한다)."""
+    reg = today_registry() if reg is None else copy.deepcopy(reg)
     reg["resume_lock"] = True
     chance = blog_of(reg, CHANCE)
     chance["publish_flow"] = "pr"

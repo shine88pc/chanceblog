@@ -30,7 +30,7 @@ from collections import namedtuple
 from datetime import date
 from pathlib import Path
 
-from pipeline import draft_labels, publish_lock, registry
+from pipeline import draft_labels, provenance, publish_lock, registry
 from pipeline.console import one_line
 from pipeline.llm import mask, scrub
 
@@ -344,13 +344,21 @@ def _yn(flag):
     return "있음" if flag else "**없음(확인 필요)**"
 
 
+def is_fact_draft(entry, kr_text):
+    """계산으로 만든(구조화 Fact) 초안인가 — 글 머리말과 이력 항목에 생성기가 단 표식(`provenance: facts`)이 **둘 다** 있을 때만 참이다. 하나라도 없거나 모르는 값이면 거짓 —
+    그러면 PR 본문은 옛 문구(AI 가 만든 초안)를 그대로 쓴다: AI 미사용이라고 잘못 말하느니 AI 를 썼다고 적는 쪽이 안전하다(D-254)."""
+    return provenance.mark_of_text(kr_text) == provenance.MARK_FACTS and provenance.entry_mark(entry) == provenance.MARK_FACTS
+
+
 def build_pr_body(entry, kr_text, en_text, owner=None, repo=None):
     """승인 PR 본문(마크다운). entry 는 이력 항목, kr_text·en_text 는 글 파일 전체(국문 전용 초안이면 en_text 가 None 이고 영어 칸을 모두 뺀다). 모든 외부 유래 문구는 neutralize 를 거친다.
 
-    구성: 승인 안내(운영자 멘션) · 요약(분야·출처·원문 링크·슬롯) · 제목 · 첫 문단 발췌 · 자동 점검 결과 · 체크리스트 · 안내."""
+    구성: 승인 안내(운영자 멘션) · 요약(분야·출처·원문 링크·슬롯) · 제목 · 첫 문단 발췌 · 자동 점검 결과 · 체크리스트 · 안내.
+    계산으로 만든 초안(`is_fact_draft`)은 AI 고지문 점검 줄을 빼고 마지막 안내를 '계산으로 만든 초안(AI 미사용)' 으로 쓴다 — 그 밖(피드 글)은 바이트까지 같다."""
     ko_only = en_text is None
     both = (lambda ko, en: ko) if ko_only else (lambda ko, en: f"{ko} · {en}")      # 영어 칸을 이어 붙이는 자리(국문 전용이면 국문만)
     entry = entry if isinstance(entry, dict) else {}
+    fact_draft = is_fact_draft(entry, kr_text)
     kr_front, kr_body = split_post(kr_text)
     en_front, en_body = split_post(en_text)
     kr_title = entry.get("kr_title") or front_value(kr_front, "title")
@@ -385,7 +393,7 @@ def build_pr_body(entry, kr_text, en_text, owner=None, repo=None):
         f"- 본문 분량: {both(f'한국어 {kr_len}', f'영어 {en_len}')}",
         f"- 원문 링크 인용: {both(f'한국어 {_yn(kr_cite)}', f'영어 {_yn(en_cite)}')}",
         f"- 글 끝 출처 목록: {both(f'한국어 {_yn(kr_list)}', f'영어 {_yn(en_list)}')}",
-        f"- 출처 고지문(AI 작성·검토 안 받음 안내): {both(f'한국어 {_yn(kr_notice)}', f'영어 {_yn(en_notice)}')}",
+        *([] if fact_draft else [f"- 출처 고지문(AI 작성·검토 안 받음 안내): {both(f'한국어 {_yn(kr_notice)}', f'영어 {_yn(en_notice)}')}"]),
         "- 제목 유사도: 기존 글·대기 중인 초안과 비슷하지 않음(후보 0.6·생성 제목 0.7 기준, 생성기가 검사함)",
         "",
         "## 승인 체크리스트",
@@ -398,7 +406,7 @@ def build_pr_body(entry, kr_text, en_text, owner=None, repo=None):
         "- **병합하면** `main` 에 올라가 `[공통] 사이트 자동 배포`가 실행되고 몇 분 안에 공개됩니다. **닫으면** 글은 올라가지 않습니다"
         f"(브랜치는 {RETENTION_DAYS}일 뒤 자동으로 지워지고, 같은 슬롯·같은 주제는 다시 만들지 않습니다).",
         "- 검사(CI)는 봇이 만든 PR 에서는 자동으로 돌지 않습니다(GitHub 규칙). 글 파일만 바뀌므로 병합에 필요하지 않습니다.",
-        "- 이 글은 AI 가 만든 초안이고 이 PR 은 `[Chance] 글 자동 작성·게시` 워크플로가 만들었습니다.",
+        ("- 이 글은 계산으로 만든 초안(AI 미사용)이고" if fact_draft else "- 이 글은 AI 가 만든 초안이고") + " 이 PR 은 `[Chance] 글 자동 작성·게시` 워크플로가 만들었습니다.",
     ]
     return _clip("\n".join(lines), BODY_LIMIT)
 

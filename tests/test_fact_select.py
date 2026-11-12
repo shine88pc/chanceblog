@@ -312,5 +312,91 @@ class NoStarvationTest(unittest.TestCase):
             self.assertEqual(set(ALL) - {name for _day, name in simulate(*self.YEAR, weekly_cap=cap, model="calendar")}, set())      # 새 선택은 같은 조건에서 모두 나온다
 
 
+# ----------------------------------------------------------------------------
+# D-256: 이력은 마지막 200개만 남는다(`generator.write_history`). 자르는 이력으로 2년을 시뮬레이션해 선택이 달라지지 않음을 보인다.
+# ----------------------------------------------------------------------------
+HISTORY_CAP = 200      # generator.write_history 가 남기는 항목 수(끝에서 끝까지는 test_fact_branch 의 HistoryLimitTest 가 확인한다)
+
+
+def fillers(count, start=datetime.date(2025, 1, 1)):
+    """Fact 글이 아닌 이력 항목(피드 글 모양) — 이력 한계에서 Fact 항목을 밀어내는 것들."""
+    return [{"date": (start + datetime.timedelta(days=index)).isoformat(), "topic": f"옛 글 {index}", "kr_title": f"옛 글 {index}"} for index in range(count)]
+
+
+def simulate_capped(start, end, weekly_cap, cap=None, extra=0):
+    """`simulate`(굴러가는 7일·하루 1편)와 같되 시작 이력에 Fact 글이 아닌 항목 extra 개를 두고 새 글을 더할 때마다 이력을 마지막 cap 개로 자른다(cap 이 None 이면 자르지 않는다).
+    돌려주는 값: ([(날짜, spec_id)], 마지막 이력)."""
+    history, posts = fillers(extra), []
+    day = start
+    while day <= end:
+        if publish_lock.posts_today(history, day.isoformat()) < 1 and week_count(history, day, "rolling") < weekly_cap:
+            ready = [candidate for candidate in K.select_candidates(day, K.made_from_history(history), minutes_utc=600) if candidate.ready]
+            if ready:
+                history.append(entry(ready[0].spec.spec_id, day))
+                history = history[-cap:] if cap is not None else history
+                posts.append((day, ready[0].spec.spec_id))
+        day += datetime.timedelta(days=1)
+    return posts, history
+
+
+class HistoryCapTest(unittest.TestCase):
+    SPAN = (datetime.date(2026, 1, 1), datetime.date(2027, 12, 31))
+
+    def test_cutting_the_history_to_two_hundred_never_changes_a_single_pick_over_two_years(self):
+        """이력에 Fact 항목 말고 150개가 먼저 있어도, 새 글을 더할 때마다 마지막 200개로 잘라도(주 상한 1·2) 고른 글감·날짜가 하나도 달라지지 않는다 — 글감마다 마지막 글은 늘 마지막 열두 편 안에 있다."""
+        for weekly_cap in (1, 2):
+            with self.subTest(weekly_cap=weekly_cap):
+                free, whole = simulate_capped(*self.SPAN, weekly_cap, cap=None, extra=150)
+                capped, kept = simulate_capped(*self.SPAN, weekly_cap, cap=HISTORY_CAP, extra=150)
+                self.assertEqual(capped, free)
+                self.assertEqual(len(kept), HISTORY_CAP)
+                self.assertGreater(len(whole), HISTORY_CAP + 20)                                  # 시험이 속이 비지 않게: 실제로 잘렸다
+                self.assertGreaterEqual(len(capped), 52 * 2 * weekly_cap - 6)
+                self.assertEqual({name for _day, name in capped}, set(ALL))                       # 굶는 글감이 없다
+
+    def test_the_cap_only_matters_when_it_is_far_below_two_hundred_and_a_tiny_cap_is_the_control(self):
+        """한계가 선택에 닿으려면 이력이 한 주 상한 몫의 글 수십 개보다 훨씬 작아야 한다: 24(여섯 글감 × 4)부터 200 까지는 같고, 하나로 자르면 달라진다(대조군 — 이력이 선택을 정한다는 증거)."""
+        free, _whole = simulate_capped(*self.SPAN, 2, cap=None, extra=150)
+        for cap in (200, 100, 50, 24):
+            with self.subTest(cap=cap):
+                self.assertEqual(simulate_capped(*self.SPAN, 2, cap=cap, extra=150)[0], free)
+        self.assertNotEqual(simulate_capped(*self.SPAN, 2, cap=1, extra=150)[0], free)
+
+    def test_two_posts_that_read_the_same_product_are_a_window_apart_with_a_full_cut_history_too(self):
+        for weekly_cap in (1, 2, 3):
+            with self.subTest(weekly_cap=weekly_cap):
+                posts, _kept = simulate_capped(*self.SPAN, weekly_cap, cap=HISTORY_CAP, extra=150)
+                last = {}
+                for day, spec_id in posts:
+                    for product in SPEC[spec_id].products:
+                        if product in last:
+                            self.assertGreaterEqual((day - last[product]).days, K.WINDOW_DAYS[product], (weekly_cap, day, spec_id, product))
+                        last[product] = day
+
+    def test_an_entry_pushed_out_of_the_history_reads_as_never_made_which_is_the_documented_limit(self):
+        """문서화한 한계: 한 글감의 마지막 글이 이력에서 밀려나면 그 글감은 낸 적 없는 것으로 읽혀 안 낸 글감과 같이 먼저 차례가 온다(막는 쪽이 아니다). 밀려나려면 그 뒤로 새 항목이 200개 쌓여야 한다."""
+        old = entry("scales_weekly", "2026-01-05")
+        recent = [entry(name, "2026-11-01") for name in ("kp_weekly", "kp_storm_weekly", "flares_weekly", "sunspot_daily_monthly", "sunspot_monthly_monthly")]
+        kept = [old] + recent
+        self.assertEqual(ids("2026-12-20", kept)[0], "scales_weekly")                                    # 아직 이력에 있으면 다른 글감이 모두 11월에 냈으니 가장 오래 전에 낸 글감이라 맨 앞
+        pushed = recent                                                                                   # 200개 한계로 가장 오래된 항목이 밀려난 이력
+        self.assertNotIn("scales_weekly", K.made_from_history(pushed).last)
+        self.assertEqual(ids("2026-12-20", pushed)[0], "scales_weekly")                                   # 낸 적 없는 글감으로 읽혀도 맨 앞 — 순서가 달라지지 않는 보통의 경우
+        self.assertEqual(ids("2026-12-20", pushed), ids("2026-12-20", kept))
+
+    def test_a_broken_date_blocks_the_product_and_a_future_date_blocks_it_until_the_window_has_passed(self):
+        """문서화한 동작(D-246): 읽을 수 없는 날짜는 가장 늦은 날(date.max)로 읽혀 그 제품을 읽는 글감을 모두 막고(고칠 때까지), 미래 날짜는 창 길이만큼 지나야 풀린다. 어느 쪽이든 다른 제품은 그대로 나온다."""
+        broken = entry("flares_weekly", "2026-11-01", date="어제")
+        self.assertEqual(K.made_from_history([broken]).last, {"flares_weekly": datetime.date.max})
+        for day in ("2026-11-10", "2027-06-01", "2099-01-01"):
+            order = ids(day, [broken])
+            self.assertNotIn("flares_weekly", order)
+            self.assertIn("kp_weekly", order)
+        future = [entry("flares_weekly", "2026-11-20")]
+        self.assertNotIn("flares_weekly", ids("2026-11-10", future))
+        self.assertNotIn("flares_weekly", ids("2026-11-26", future))                                      # 20일 뒤 7일 창이 지나기 전
+        self.assertIn("flares_weekly", ids("2026-11-27", future))                                         # 정확히 7일 뒤
+
+
 if __name__ == "__main__":
     unittest.main()

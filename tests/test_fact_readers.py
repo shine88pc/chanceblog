@@ -176,6 +176,47 @@ class MainRunTest(FB.FactEnv):
             self.run_main()
         self.assertIn("GEMINI_API_KEY", str(caught.exception))
 
+    def test_a_photo_replacement_run_without_a_key_stops_exactly_like_the_feed_value_even_when_the_registry_says_facts(self):
+        """D1(독립 검증 S2b): 키 없는 완화는 Fact 글 만들기에만 해당한다. 사진 교체(FIX_IMAGES)는 Fact 분기로 가지 않고 모델로 검색어를 만들어 기존 글을 고치는 쓰기 경로라 키가 없으면 feed 값에서와 같이 멈춰야 한다
+        (예전에는 facts 값에서 키 검사를 지나 `fix_images` 로 들어갔다). 종료(예외)·문구·표준 출력·실행 요약이 두 레지스트리 값에서 같다."""
+        self.patch_value(g, "FIX_IMAGES", True)
+        self.patch_value(g, "fix_images", mock.Mock(side_effect=AssertionError("키 없는 사진 교체가 fix_images 로 들어갔다")))
+        results = {}
+        for label, blogs in (("facts", FB.facts_registry()), ("feed", FB.facts_registry(content_source=None))):
+            self.use(blogs, FB.sources_registry())
+            self.summary.write_text("", encoding="utf-8")
+            out, error = io.StringIO(), None
+            with contextlib.redirect_stdout(out):
+                try:
+                    g.run_cli()
+                except Exception as exc:       # noqa: BLE001 — 종료 방식(예외 종류·문구)을 견주려고 받는다
+                    error = exc
+            results[label] = (type(error).__name__, str(error), out.getvalue(), self.summary.read_text(encoding="utf-8"))
+        self.assertEqual(results["facts"], results["feed"])
+        kind, message, printed, summary = results["facts"]
+        self.assertEqual(kind, "RuntimeError")
+        self.assertIn("GEMINI_API_KEY 환경 변수가 없습니다", message)
+        self.assertIn("작업 실패: RuntimeError", printed)
+        self.assertIn("**실패** — RuntimeError", summary)
+        self.assertEqual(self.files(), [])
+        self.assertFalse(g.facts_without_key())                                                                                   # 사진 교체 실행에서는 키 없는 완화가 꺼진다
+        self.patch_value(g, "FIX_IMAGES", False)
+        self.use(FB.facts_registry(), FB.sources_registry())
+        self.assertTrue(g.facts_without_key())                                                                                    # 대조군: 같은 레지스트리로 Fact 글 만들기면 완화된다
+
+    def test_a_photo_replacement_practice_run_is_untouched_by_the_key_check_in_both_values(self):
+        """연습 실행(DRY_RUN)은 키 검사를 하지 않는다(이전과 같다) — D1 의 수정이 연습 실행의 동작을 바꾸지 않는다."""
+        self.patch_value(g, "FIX_IMAGES", True)
+        self.patch_value(g, "DRY_RUN", True)
+        spy = mock.Mock(return_value="사진 교체 연습")
+        self.patch_value(g, "fix_images", spy)
+        for blogs in (FB.facts_registry(), FB.facts_registry(content_source=None)):
+            self.use(blogs, FB.sources_registry())
+            out, error = self.run_main()
+            self.assertIsNone(error)
+            self.assertIn("[DRY_RUN] 시작", out)
+        self.assertEqual(spy.call_count, 2)
+
     def test_the_key_check_is_skipped_only_when_the_registry_clearly_says_facts(self):
         self.assertTrue(g.facts_without_key())
         self.use(FB.facts_registry(content_source="feed"), FB.sources_registry())

@@ -16,6 +16,7 @@ import _bootstrap
 import generator as g
 from draft_helpers import LINK, REAL_PUBLISH_FLOW, REPO, post_text
 from pipeline import drafts, registry
+from registry_states import pre_flip_registry
 
 ROOT = _bootstrap.ROOT
 ZW = "\u200b"
@@ -32,7 +33,7 @@ def real_registry():
 # ----------------------------------------------------------------------------
 class PublishFlowRegistryTest(unittest.TestCase):
     def errors(self, mutate):
-        reg = copy.deepcopy(real_registry())
+        reg = pre_flip_registry()      # 변이의 바탕은 켜기 전 고정 표본(진짜 값을 못박는 시험은 아래 real_registry() 를 그대로 읽는다)
         mutate(reg)
         return registry.validate_registry(reg)
 
@@ -109,7 +110,7 @@ class PublishFlowRegistryTest(unittest.TestCase):
 
 class ChanceFlowTest(unittest.TestCase):
     def reg_file(self, mutate=None):
-        reg = copy.deepcopy(real_registry())
+        reg = pre_flip_registry()      # 변이의 바탕은 켜기 전 고정 표본(진짜 값을 못박는 시험은 아래 real_registry() 를 그대로 읽는다)
         if mutate:
             mutate(reg)
         tmp = tempfile.TemporaryDirectory()

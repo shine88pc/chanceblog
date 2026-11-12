@@ -22,7 +22,7 @@ from xml.sax.saxutils import escape
 
 import _bootstrap  # noqa: F401
 import generator as g
-from lock_helpers import guard_off
+from lock_helpers import guard_off, pre_flip
 
 KST = g.KST
 
@@ -381,6 +381,7 @@ class CollectCandidatesTest(unittest.TestCase):
         self.assertEqual(calls, self.ORDER)  # 실제 시계는 상한 전이므로 다음 분야는 계속 시도한다
 
 
+@pre_flip
 class FetchNewsStatsTest(unittest.TestCase):
     """소스 줄과 stats 에 탈락 사유가 정확히 남는지."""
     FEED = "https://feed.test/economy"
@@ -877,6 +878,7 @@ class LaneReportTest(unittest.TestCase):
         self.assertEqual(report["candidates"], 0)
 
 
+@pre_flip
 class GenerateWithFallbackTest(unittest.TestCase):
     """DRY_RUN + 가짜 Gemini/Unsplash 로 generate_blog_posts 전체 흐름(파일은 쓰지 않음)."""
 
@@ -1150,6 +1152,7 @@ class GenerateWithFallbackTest(unittest.TestCase):
         self.assertIsNotNone(value)
 
 
+@pre_flip
 class MainPolicyTest(unittest.TestCase):
     """main()/finish_run 의 종료 정책: 정상 스킵 0, 경고 0(+주석), 모든 분야 비음 1."""
 
@@ -1620,6 +1623,7 @@ class IntEnvTest(unittest.TestCase):
                 self.assertEqual(g._int_env("X_TEST_INT", 7), expected)
 
 
+@pre_flip
 class SourceNoticeTest(unittest.TestCase):
     """소스 약관이 요구하는 고지문과 글 작성 지침 한 줄이 글과 프롬프트에 정확히 들어가는지."""
     LINK = "https://www.nasa.gov/a"

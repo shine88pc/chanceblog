@@ -143,6 +143,25 @@ class ShadowFactsRunTest(ShadowFactsBase):
         self.assertEqual(results["02"]["hold_codes"], ["QG1-NUMBER"])
         self.assertEqual([entry["passed"] for entry in self.run_info()["attempts_summary"]], [True, False, True])
 
+    def test_the_gate_gets_the_history_so_a_same_dedupe_key_without_the_fact_mark_is_held_for_reuse(self):
+        """D8(독립 검증 S2b, 변이 v29): 그림자 분기가 Gate 에 이력 대신 빈 목록을 넘겨도 다른 시험은 통과했다. 후보와 같은 `dedupe_key` 가 든 이력 항목(`content_source` 칸이 없어 후보 선택은 건너뛴다)이면
+        Gate 의 QG7 이 같은 글로 보고 보류한다 — 그 결과가 결과 폴더에 HELD·QG7-REUSE 로 남는지 단언한다. 대조군: 키가 다르면 통과한다."""
+        real = FB.FactEnv.NOW
+        prepared, _supplied = g.fact_prepare(real, [], *g.fact_context(real)[1:], limit=1)
+        key = prepared[0].post.dedupe_key
+        self.assertTrue(key)
+        self.set_history([{"date": "2026-11-03", "topic": "지난 글", "dedupe_key": key}])
+        info, _lines = self.run_shadow("1")
+        result = self.results()["01"]
+        self.assertEqual((result["outcome"], result["hold_codes"], result["passed"]), ("HELD", ["QG7-REUSE"], False))
+        self.assertEqual((info["attempts"], info["passed"], info["held_or_rejected"]), (1, 0, 1))
+        self.assertEqual(self.run_info()["attempts_summary"][0]["hold_codes"], ["QG7-REUSE"])
+        self.out_dir = self.out_dir.parent / "control"
+        self.set_history([{"date": "2026-11-03", "topic": "지난 글", "dedupe_key": key + "|다른 키"}])
+        info, _lines = self.run_shadow("1")
+        self.assertEqual(self.results()["01"]["outcome"], "PASSED")
+        self.assertEqual((info["attempts"], info["passed"]), (1, 1))
+
     def test_the_count_limits_the_number_of_candidates(self):
         for count, expected in (("1", 1), ("2", 2), ("5", 5), ("9", 5), ("", 3)):
             with self.subTest(count=count):
