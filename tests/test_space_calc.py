@@ -258,6 +258,37 @@ class SeasonRankTest(unittest.TestCase):
             ctx.rounding = decimal.ROUND_DOWN
             self.assertEqual(C.f17_season_rank(group[0], group), base)
 
+    def test_values_that_differ_only_in_the_second_decimal_keep_different_ranks(self):
+        """S2C1B D-345: 순위는 값 그대로의 크기 비교다 — 반올림한 값으로 매기면 100.30·100.40·100.31·99.99 가 모두 100 이라 같은 순위가 된다. 단위 시험의 값이 모두 정수라 이것을 한 번도 확인하지 않았다."""
+        group = self.octobers(["100.30", "100.40", "100.31", "99.99"])
+        self.assertEqual([C.f17_season_rank(fact, group).value for fact in group], [Decimal(3), Decimal(1), Decimal(2), Decimal(4)])      # 100.40 > 100.31 > 100.30 > 99.99
+        edge = self.octobers(["100.49", "100.51", "100.50", "99.51"])                       # 반올림하면 100·101·100·100 — 정수 경계(반 칸)의 양쪽에 있는 값
+        self.assertEqual([C.f17_season_rank(fact, edge).value for fact in edge], [Decimal(3), Decimal(1), Decimal(2), Decimal(4)])
+        thousandths = self.octobers(["100.301", "100.304", "100.299"])                      # 소수 셋째 자리까지 — 반올림 자리를 바꿔(소수 둘째·첫째 자리) 비교해도 같은 순위가 되지 않는다
+        self.assertEqual([C.f17_season_rank(fact, thousandths).value for fact in thousandths], [Decimal(2), Decimal(1), Decimal(3)])
+
+    def test_a_tie_needs_exactly_equal_values_even_when_the_values_are_nearly_equal(self):
+        """S2C1B D-345: 같은 순위는 값이 정확히 같을 때만이고 다음 순위는 건너뛴다 — 0.01 차이는 같은 순위가 아니다."""
+        group = self.octobers(["100.30", "100.30", "100.31", "100.29"])
+        self.assertEqual([C.f17_season_rank(fact, group).value for fact in group], [Decimal(2), Decimal(2), Decimal(1), Decimal(4)])
+        spelled = self.octobers(["100.30", "100.3", "100.300", "100.31"])                    # 쓴 모양이 달라도 값이 같으면 같은 순위다
+        self.assertEqual([C.f17_season_rank(fact, spelled).value for fact in spelled], [Decimal(2), Decimal(2), Decimal(2), Decimal(1)])
+
+    def test_it_agrees_with_an_exact_count_on_random_groups_of_nearly_equal_values_where_rounding_would_not(self):
+        """S2C1B D-345: 소수 둘째 자리의 거의 같은 값(가운데 값에서 0.6 안)으로 무작위 묶음을 만들어 값 그대로 센 순위와 대조한다. 같은 입력을 반올림해 세면 어긋나는 묶음이 많아, 이 시험은 반올림 비교를 실제로 가려낸다."""
+        rng = random.Random(1717)
+        sharp = 0
+        for case in range(200):
+            size = rng.randint(3, 9)
+            center = Decimal(rng.randint(50, 150))
+            values = [center + Decimal(rng.randint(-60, 60)) / 100 for _ in range(size)]
+            group = self.octobers([str(value) for value in values], first_year=1997)
+            target = rng.randrange(size)
+            want = 1 + sum(1 for value in values if value > values[target])
+            self.assertEqual(C.f17_season_rank(group[target], group).value, Decimal(want), (case, values, target))
+            sharp += want != 1 + sum(1 for value in values if round(value) > round(values[target]))
+        self.assertGreater(sharp, 100)                                                          # 반올림해 세면 다른 순위가 되는 묶음이 절반 넘게 들어 있다 — 시험이 헛돌지 않는다
+
     def test_it_agrees_with_a_plain_count_on_random_groups(self):
         rng = random.Random(170)
         for case in range(150):

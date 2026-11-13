@@ -197,5 +197,39 @@ class RegisterRowsTest(unittest.TestCase):
             self.assertIn(number, SECTION, number)
 
 
+class FollowUpTest(unittest.TestCase):
+    """S2C1B(D-344·D-345): S2c-1 독립 검증의 권고 둘을 고친 기록이 결함 레지스터와 §16-7 에 있고 코드의 실제 이름과 맞는다. 이 묶음의 번호만 본다(다른 묶음의 번호·전체 최댓값은 못박지 않는다)."""
+    FOLLOW_UP = ("D-344", "D-345")
+
+    def test_the_two_rows_exist_once_each_after_d343_with_six_cells_and_the_right_marks(self):
+        found = re.findall(r"(?m)^\| \*\*(D-\d+)\*\* \|", REGISTER)
+        positions = [found.index(number) for number in ("D-343",) + self.FOLLOW_UP]
+        self.assertEqual(positions, sorted(positions))
+        for number, severity in (("D-344", "낮음"), ("D-345", "정보")):
+            self.assertEqual(found.count(number), 1, number)
+            row = register_row(number)
+            self.assertEqual(len(cells(row)), 6, number)
+            self.assertEqual(cells(row)[1], severity, number)
+            self.assertTrue(cells(row)[4].startswith("**해결**"), (number, cells(row)[4][:30]))
+            self.assertIn("§16-7", row, number)
+            assert_doc_rules(self, row, number)
+
+    def test_each_row_names_what_it_is_about(self):
+        expected = {"D-344": ("표에 실은", "이 글이 읽은 12개월", "n_all", "count_window", "SPAN_READ_TABLE", "MonthlyReadScopeTest", "시드 0·2·4·5", "골든 여섯 편은 바이트까지 같다"),
+                    "D-345": ("F17", "round(m.value) > round(fact.value)", "SeasonRankTest", "MonthlyLongRecordFuzzTest", "OracleSelfTest", "제품 코드는 바꾸지 않았다")}
+        for number, needles in expected.items():
+            for needle in needles:
+                self.assertIn(needle, register_row(number), (number, needle))
+
+    def test_the_section_says_the_follow_up_and_the_names_it_states_are_the_codes(self):
+        for needle in ("S2C1B", "D-344", "D-345", "표에 실은", "SPAN_READ_TABLE", "count_window", "MonthlyReadScopeTest", "골든 여섯 편은 바이트까지 같다"):
+            self.assertIn(needle, SECTION, needle)
+        self.assertEqual((RN.SPAN_READ_ALL, RN.SPAN_READ_TABLE), ("이 글이 읽은", "표에 실은"))
+        self.assertEqual(len(re.findall(r"(?m)^## ", DOC[DOC.index("## 16. S2c-0"):])), 1)             # 이 절은 §16 안에 덧붙였고 새 절을 만들지 않았다
+        self.assertTrue(DOC.rstrip().endswith("설계 요약: [`S2C_PLAN.md`](./S2C_PLAN.md)"))               # 끝 안내 줄은 그대로다
+        for relative in re.findall(r"`(tests/[A-Za-z0-9_]+\.py)`", SECTION[SECTION.index("S2c-1 후속"):]):
+            self.assertTrue((ROOT / relative).is_file(), relative)
+
+
 if __name__ == "__main__":
     unittest.main()

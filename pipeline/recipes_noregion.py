@@ -73,6 +73,10 @@ SEASON_SENTENCE_BOTH = ("같은 달끼리 견주면 최신 값은 이 글이 읽
 SEASON_SENTENCE_RANK = "같은 달끼리 견주면 최신 값은 이 글이 읽은 ⟦V:same_n⟧⟦U:same_n⟧ 가운데 ⟦F:same_rank⟧에 놓입니다."
 SEASON_SENTENCE_LOW = "이 글이 읽은 자료에서 최신 값보다 낮은 달이 마지막으로 나온 것은 ⟦V:last_since⟧⟦U:last_since⟧ 전인 ⟦D:last_low⟧입니다."
 SEASON_CAUTION = ("- 순위와 마지막으로 낮았던 달: 이 글이 읽은 자료 안에서만 견준 것이라 더 오래된 달은 알지 못합니다. 가장 최근 달의 값은 잠정치일 수 있어 나중에 고쳐지면 순위와 달이 달라질 수 있습니다.")
+# 첫 문단 머리 설명의 '읽은 범위' 말머리(S2c-1 후속 D-344): `n_all` 이 읽은 값 전체를 세는 글감(일별 흑점수·Kp — `count_window` 0)은 '이 글이 읽은', 표 창(최근 12개월)만 세는 글감(월별 — `count_window` 양수)은 '표에 실은' 이라 말한다.
+# 월별 글의 새 구역('이 글이 읽은 같은 달 30년'·'이 글이 읽은 자료')은 읽은 기록 전체(360개월)를 가리키므로, 같은 글 안에서 '이 글이 읽은' 이 서로 다른 범위를 가리키지 않게 한다. 두 말은 뜻으로만 갈린다(난수·날짜 없음, 같은 입력은 같은 글). 숫자·수 낱말은 없다(수는 참조 표시뿐).
+SPAN_READ_ALL = "이 글이 읽은"
+SPAN_READ_TABLE = "표에 실은"
 FLARE_ABOUT = ("X선 플레어는 태양이 내는 X선의 세기가 가파르게 올랐다가 가라앉는 사건입니다. 플레어는 가장 셌던 순간의 세기에 따라 A·B·C·M·X로 나누고, "
                "글자가 뒤로 갈수록 센 플레어이며 같은 글자 안에서는 글자 뒤에 붙은 수가 클수록 더 셉니다.")
 FLARE_LIMIT = "플레어의 건수와 등급은 태양에서 일어난 사건을 정리한 것일 뿐, 그 플레어가 지구의 통신이나 설비에 어떤 영향을 주었는지는 알려 주지 않습니다."
@@ -211,7 +215,7 @@ class SeriesSubject:
     about: str = ""                   # '이 값은 무엇인가·어떻게 읽나' 배경 문단 — 숫자 칸 맨 앞(S2AFIX D5)
     limit: str = ""                   # '이 값이 말해 주지 않는 것' 문장 — 해석 둘째 문단 끝(S2AFIX D5)
     season: bool = False              # 월 단위 글감만: 같은 달 순위·마지막으로 낮았던 달·같은 달 해마다 표를 더한다(S2c-1 — 어댑터가 360개월을 보관해야 뜻이 있다)
-    count_window: int = 0             # 0 이면 '이 글이 읽은 N개월' 이 읽은 값 전체를 세고, 양수면 최근 그만큼의 기간(표 창)만 센다 — 보관이 360개월이라 전체를 세면 먼 달 하나의 빈칸이 머리 문장의 '개월' 을 '관측 N개' 로 바꾼다(S2c-1)
+    count_window: int = 0             # 0 이면 `n_all`(머리 문장의 '이 글이 읽은 N개월')이 읽은 값 전체를 세고, 양수면 최근 그만큼의 기간만 센다 — 그 기간은 표 창이라 `table_rows` 와 같아야 하고 머리 문장은 '표에 실은 N개월'(`SPAN_READ_TABLE`)이라 말한다. 보관이 360개월이라 전체를 세면 먼 달 하나의 빈칸이 머리 문장의 '개월' 을 '관측 N개' 로 바꾼다(S2c-1·D-344)
 
 
 SERIES_SUBJECTS = (
@@ -277,7 +281,8 @@ def plan_noregion_series(ctx):
     lbl = raw[-1]
     context = F.display_context(valid)
     granularity = subject.granularity
-    counted = [f for f in valid if _ordinal(f) > _ordinal(cur) - subject.count_window] if subject.count_window else valid        # '이 글이 읽은 N개월' 이 세는 값: 월별 글감은 표 창(12개월)으로 한정한다(S2c-1)
+    counted = [f for f in valid if _ordinal(f) > _ordinal(cur) - subject.count_window] if subject.count_window else valid        # `n_all` 이 세는 값: 월별 글감은 표 창(12개월)으로 한정한다(S2c-1) — 표에 실은 값 수와 같다
+    read = SPAN_READ_TABLE if subject.count_window > 0 else SPAN_READ_ALL                                                       # 머리 문장의 읽은 범위 말머리: 표 창만 세면 '표에 실은', 읽은 값 전체를 세면 '이 글이 읽은'(D-344)
     regular = R.is_regular(counted)
     count_unit = _unit_word(granularity) if regular else R.OBSERVATION_UNIT
     obs = "" if regular else "관측 "
@@ -342,7 +347,7 @@ def plan_noregion_series(ctx):
     first_row, last_row = shown[0], shown[-1]
     b.put("first_row", first_row)
     b.put("last_row", last_row)
-    n_all = b.derive("n_all", C.f12_count(counted, count_unit))
+    n_all = b.derive("n_all", C.f12_count(counted, count_unit))        # 머리 문장이 말하는 읽은 범위의 개수 — `count_window` 가 양수면 표 창 안의 값 수(표에 실은 값 수와 같다, D-344)
     smoothed = {f.as_of: f for f in facts_with_key(ctx, subject.smoothed_key)} if subject.smoothed_key else {}
     if smoothed and (R.topic_problem(recipe, list(smoothed.values())) is not None or any(f.meta_value("status") not in MEASURED for f in smoothed.values())):
         smoothed = {}
@@ -402,7 +407,7 @@ def plan_noregion_series(ctx):
     titles = [f"⟦L:lbl⟧ {subject.title_word}, ⟦D:first_row⟧부터 ⟦D:last_row⟧까지 — 숫자로 읽기", f"⟦L:lbl⟧ {subject.title_word}, ⟦D:cur⟧ 기준 — 숫자로 읽기",
               f"⟦L:lbl⟧ {subject.title_word}, ⟦D:cur⟧ 기준"]
     leads = []
-    span = f", 이 글이 읽은 {obs}⟦V:n_all⟧⟦U:n_all⟧ 자료의 마지막 값" if n_all is not None else ""
+    span = f", {read} {obs}⟦V:n_all⟧⟦U:n_all⟧ 자료의 마지막 값" if n_all is not None else ""
     if chg is not None:
         if chg_verdict == "SAME":
             head = f"⟦L:lbl⟧의 {word}은 ⟦D:prev⟧(⟦F:prev⟧)에서 달라지지 않은 ⟦F:cur⟧입니다"
@@ -419,9 +424,9 @@ def plan_noregion_series(ctx):
         if span:
             leads.append(head + f"(⟦D:cur⟧ 기준{span}).")
     if n_all is not None:
-        leads.append(f"⟦D:cur⟧ 기준 ⟦L:lbl⟧의 {word}은 ⟦F:cur⟧입니다(이 글이 읽은 {obs}⟦V:n_all⟧⟦U:n_all⟧ 자료의 마지막 값).")
+        leads.append(f"⟦D:cur⟧ 기준 ⟦L:lbl⟧의 {word}은 ⟦F:cur⟧입니다({read} {obs}⟦V:n_all⟧⟦U:n_all⟧ 자료의 마지막 값).")
         if has_range:
-            leads.append(f"⟦D:cur⟧ 기준 ⟦L:lbl⟧의 {word}은 ⟦F:cur⟧입니다(이 글이 읽은 {obs}⟦V:n_all⟧⟦U:n_all⟧ 자료의 마지막 값이며 최저는 ⟦F:lo⟧, 최고는 ⟦F:hi⟧입니다).")
+            leads.append(f"⟦D:cur⟧ 기준 ⟦L:lbl⟧의 {word}은 ⟦F:cur⟧입니다({read} {obs}⟦V:n_all⟧⟦U:n_all⟧ 자료의 마지막 값이며 최저는 ⟦F:lo⟧, 최고는 ⟦F:hi⟧입니다).")
 
     # -- 한눈에 ---------------------------------------------------------------
     glance = [f"- 최신 값: ⟦F:cur⟧(⟦D:cur⟧ 기준)"]
