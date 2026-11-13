@@ -790,4 +790,6 @@ S2c 설계(요약 [`S2C_PLAN.md`](./S2C_PLAN.md))의 둘째 묶음이다. 월별
 
 새 시험 파일 둘: `tests/test_fact_thin.py`(얇음 측정 일곱 값의 정의·손으로 센 틀·골든 여섯 편에서 독립 계산과 같음·기준 대비 늘지 않음·순수 모듈)·`tests/test_s2c1_docs.py`(이 절과 결함 레지스터 D-338–D-343). 같은 묶음이 더한 시험: `tests/test_space_calc.py`(F17·F18·F19)·`tests/test_space_recipes.py`(월별 새 구역을 일반 파이썬 재계산과 대조 · 세는 범위 · 되풀이 정리)·`tests/test_space_adapter.py`(보관 360개월)·`tests/test_fact_shadow.py`(`thin` 블록). 바뀐 기존 시험은 모두 새 동작에 맞춘 것이고 단언을 줄이지 않았다: 정수 계산식 집합을 정확히 못박은 셋(`test_space_docs`·`test_fact_docs`·`test_fact_review`)·계산식 호출표(`test_fact_calc`)·공통 안내 두 문장 단언(`test_space_recipes` 셋·`test_space_gate` 하나)·계산 낱말 전체 목록·월별 표 시험·60개월 창 시험(`test_the_monthly_window_is_360_months_with_six_provisional`)·그림자 결과 키 집합(`test_shadow_raw`)·구조 시험의 모듈·시험 목록(`test_fact_structure`·`tests/ai_flow_scan.py`).
 
+**S2c-1 후속(S2C1B, D-344·D-345)**: 독립 검증의 권고 둘을 작게 고쳤다. ① 월별 흑점수 글의 첫 문단 덧말·문장 변형이 표 창의 개수를 '이 글이 읽은 12개월(관측 11개) 자료' 라 말해 같은 글의 '이 글이 읽은 같은 달 30년'(읽은 기록 360개월)과 범위가 어긋나던 것을, `count_window` 가 양수일 때 '표에 실은 12개월(관측 11개) 자료의 마지막 값' 으로 바꿨다(`n_all` 은 표 창 안의 값 수이고 말머리는 `SPAN_READ_TABLE` — `tests/test_space_recipes.py` 의 `MonthlyReadScopeTest` 가 지킨다). ② F17 이 반올림한 값으로 순위를 매겨도 단위 시험이 못 잡던 틈을 소수 둘째 자리의 거의 같은 값 시험으로 메웠다(`tests/test_space_calc.py`·`tests/test_space_fuzz.py` — 제품 코드는 바꾸지 않았다). 골든 여섯 편은 바이트까지 같다.
+
 설계 요약: [`S2C_PLAN.md`](./S2C_PLAN.md)

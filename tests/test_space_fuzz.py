@@ -406,6 +406,18 @@ class FuzzTest(unittest.TestCase):
         self.assertEqual(run_fuzz(20, 7), run_fuzz(20, 7))
 
 
+def same_month_ranks(rows):
+    """(값 그대로 센 같은 달 순위, 반올림한 값으로 센 순위) — 월별 응답에서 가장 최근 360개월 가운데 최신 달과 달 번호가 같은 값만. 같은 달이 셋 미만이면 None(글에 순위가 없다)."""
+    last_row = max(month_index(row["time-tag"]) for row in rows)
+    kept = {row["time-tag"]: Decimal(str(row["observed_swpc_ssn"])) for row in rows if not missing(row["observed_swpc_ssn"]) and month_index(row["time-tag"]) > last_row - MONTHLY_KEPT}
+    cur_tag = max(kept, key=month_index)
+    same = [value for tag, value in kept.items() if tag[5:] == cur_tag[5:]]
+    if len(same) < 3:
+        return None
+    cur = kept[cur_tag]
+    return 1 + sum(1 for value in same if value > cur), 1 + sum(1 for value in same if round(value) > round(cur))
+
+
 class MonthlyLongRecordFuzzTest(unittest.TestCase):
     """S2c-1: 월별 글만 따로 무작위로 돌린다(길이 8–400개월·빠진 달·같은 값·값이 비는 달·정수 값) — 글이 나오면 표와 새 구역(같은 달 순위·마지막으로 낮았던 달·해마다 표)이 독립 오라클과 같고
     불변식이 지켜지며 같은 입력이면 같은 글이고, 글이 안 나오면 사유는 예기치 않은 것이 아니다."""
@@ -453,6 +465,54 @@ class MonthlyLongRecordFuzzTest(unittest.TestCase):
         self.assertGreater(with_low, 40)
         self.assertGreater(with_table, 25)
 
+    def near_equal_payload(self, rng):
+        """같은 달 값 몇 개를 최신 값에서 0.5 안(소수 둘째 자리)이지만 같지는 않은 값으로, 몇 개는 정확히 같은 값으로 바꾼 월별 응답(S2C1B D-345) — 반올림한 값으로 순위를 매기면 오라클과 어긋난다.
+        기존 응답의 값은 모두 '정수 + 0.25' 라 서로 다른 값은 1 이상 떨어져 있어 반올림 비교와 값 그대로의 비교가 같은 순위를 냈다. 바뀐 값은 같은 달 것뿐이라 그 밖의 칸(표·마지막으로 낮았던 달)은 오라클이 그대로 대조한다."""
+        count = rng.choice((61, 120, 250, 358, 360, 361, 400))                              # 같은 달이 셋 이상 있어 순위가 나오는 길이
+        rows = H.ssn_monthly_rows("2026-%02d" % rng.randint(7, 10), count, seed=rng.randint(1, 10 ** 6), third_party=rng.random() < 0.5)
+        month = rows[-1]["time-tag"][5:]
+        cur = Decimal(str(rows[-1]["observed_swpc_ssn"]))
+        steps = [step for step in range(-49, 50) if step and cur + Decimal(step) / 100 >= 0]
+        for row in rows[:-1]:
+            if row["time-tag"][5:] != month:
+                continue
+            roll = rng.random()
+            if roll < 0.5:
+                row["observed_swpc_ssn"] = float(cur + Decimal(rng.choice(steps)) / 100)
+            elif roll < 0.65:
+                row["observed_swpc_ssn"] = float(cur)
+        for _ in range(rng.choice((0, 0, 1, 3))):                                           # 값이 비는 달(마지막 달은 남긴다)
+            rows[rng.randrange(0, len(rows) - 1)]["observed_swpc_ssn"] = -1.0
+        return rows
+
+    def test_monthly_posts_with_nearly_equal_same_month_values_match_the_oracle_and_a_rounded_rank_would_not(self):
+        """S2C1B D-345: 같은 달 값 가운데 최신 값에서 0.5 안으로 가까운 값이 섞인 입력에서도 글의 같은 달 순위·마지막으로 낮았던 달·해마다 표가 독립 오라클(값 그대로 센 값)과 같다.
+        반올림한 값으로 순위를 매기면 이 입력의 상당수에서 오라클과 어긋난다(시험이 그만큼의 사례를 실제로 넣었는지 센다)."""
+        rng = random.Random(f"{SEED}:monthly-near")
+        made = ranked = sharp = 0
+        for case in range(60):
+            rows = self.near_equal_payload(rng)
+            record, facts = H.parse_value("ssn_monthly", rows)
+            source = A.SourceInfo(H.provider(attribution_template=H.TEST_TEMPLATE), N.product_source_name("ssn_monthly"), N.product_url("ssn_monthly"))
+            post = A.assemble(RN.R04_NOREGION_SERIES, facts, H.TODAY, records=[record], source=source, params={"key": RN.KEY_SSN_MONTHLY})
+            where = f"가까운 값 사례 {case}"
+            if isinstance(post, R.Insufficient):
+                self.assertNotIn(post.code, UNEXPECTED, f"{where}: {post.code} {post.detail}")
+                continue
+            made += 1
+            self.assertEqual(post_problems(post, source.name), [], where)
+            self.assertEqual(oracle_problems("ssn_monthly", "R04_NOREGION_SERIES", rows, post), [], where)
+            found = RANK_LINE.search(post.body_markdown)
+            ranks = same_month_ranks(rows)
+            if found:
+                ranked += 1
+                self.assertIsNotNone(ranks, where)
+                self.assertEqual(int(found.group(2)), ranks[0], where)                         # 글의 순위는 값 그대로 센 순위다
+                sharp += ranks[0] != ranks[1]
+        self.assertGreater(made, 50)                                                           # 시험이 속이 비지 않게
+        self.assertGreater(ranked, 45)
+        self.assertGreater(sharp, 20)                                                          # 반올림하면 다른 순위가 되는 사례가 실제로 들어 있다
+
     def test_value_mutations_of_the_facts_still_never_raise_or_make_an_unexpected_reason(self):
         rng = random.Random(f"{SEED}:monthly-facts")
         outcomes = {}
@@ -486,6 +546,25 @@ class OracleSelfTest(unittest.TestCase):
             digit = "9" if text[start] != "9" else "8"
             broken = TR.dataclasses.replace(post, body_markdown=text[:start] + digit + text[start + 1:])
             self.assertTrue(oracle_problems(product, recipe_id, json.loads(json.dumps(rows)), broken), name)
+
+    def test_the_monthly_oracle_tells_the_exact_rank_from_a_rounded_rank(self):
+        """S2C1B D-345: 오라클은 값 그대로 센다 — 가까운 값을 반올림해 같은 순위로 매긴 글(옛 변이)은 오라클이 잡는다. 입력: 같은 달 6년이 100.30(최신)·100.40·100.31·99.99·100.30·100.49."""
+        recipe_id, product, rows, params = TR.golden_cases()["r04_ssn_monthly"]
+        rows = json.loads(json.dumps(rows))
+        near = {"2026-10": 100.30, "2025-10": 100.40, "2024-10": 100.31, "2023-10": 99.99, "2022-10": 100.30, "2021-10": 100.49}
+        for row in rows:
+            if row["time-tag"] in near:
+                row["observed_swpc_ssn"] = near[row["time-tag"]]
+        record, facts = H.parse_value(product, rows)
+        post = A.assemble(RN.R04_NOREGION_SERIES, facts, H.TODAY, records=[record], source=TR.test_source(), params=params)
+        self.assertIsInstance(post, A.AssembledPost, post)
+        self.assertEqual(monthly_season_problems(rows, post), [])
+        found = RANK_LINE.search(post.body_markdown)
+        self.assertEqual((int(found.group(1)), int(found.group(2))), (6, 4))                    # 100.40·100.31·100.49 가 더 높다 — 같은 달 6년 가운데 4위
+        self.assertEqual(same_month_ranks(rows), (4, 1))                                        # 반올림하면 여섯 값이 모두 100 이라 1위가 된다
+        start, end = found.span(2)
+        rounded = TR.dataclasses.replace(post, body_markdown=post.body_markdown[:start] + "1" + post.body_markdown[end:])
+        self.assertTrue(monthly_season_problems(rows, rounded))                                 # 반올림한 순위를 말하는 글은 오라클이 잡는다
 
     def test_the_monthly_oracle_notices_a_changed_rank_months_ago_year_or_table_value(self):
         recipe_id, product, rows, params = TR.golden_cases()["r04_ssn_monthly"]
