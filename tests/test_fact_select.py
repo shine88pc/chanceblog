@@ -6,9 +6,13 @@ import random
 import unittest
 
 import _bootstrap  # noqa: F401
+import hold_helpers as HH
 
 from pipeline import fact_candidates as K
 from pipeline import publish_lock
+
+# S2C0-a: 이 모듈은 임시 제외·처음 낼 글감과 상관없는 정책(글감 여섯 전부)을 시험한다 — 두 상수를 비운 이전 동작으로 돌린다(단언은 하나도 바꾸지 않았다). 기본 상수의 동작은 tests/test_fact_hold.py 가 시험한다
+setUpModule, tearDownModule = HH.module_fixtures()
 
 SPEC = {spec.spec_id: spec for spec in K.SPECS}
 ALL = [spec.spec_id for spec in K.SPECS]

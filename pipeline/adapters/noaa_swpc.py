@@ -17,6 +17,7 @@
 모든 Fact 에 꼬리표(`meta`)를 붙인다: `producer=NOAA`(값을 만든 기관)·`status`(observed 관측·estimated 추정·predicted 예보·reference 기준값)·필요하면 `quality=provisional`(월별 최근 6개월 잠정치)·
 `satellite`(플레어를 기록한 위성)·`stations`(Kp 를 낸 관측소 수). **예보·추정 구간은 관측과 다른 키(`kp_outlook`)로 나뉘어** 관측 계열에 섞이지 않는다.
 기준값 Fact(`status=reference`)는 응답이 아니라 우리 낱말 표(NOAA 지자기 폭풍 첫 등급 = Kp 5, X선 등급의 하한)에서 온 값으로, 개수를 셀 때 어떤 기준으로 셌는지 입력 id 에 남기려고 같은 수집 기록에 붙인다.
+**오늘 행·이번 달 행(S2C0-b)**: 일별 흑점수의 오늘(UTC) 날짜 행과 월별의 이번 달 행은 다른 행과 똑같이 엄격하게 검사한 뒤 **그 행만** 쓰지 않는다(버린 행 수·날짜는 `adapter.notes` 에 고정 문장으로 남는다 — 공급 함수가 `SupplyResult.notes` 로 올린다). 그보다 뒤 날짜의 행은 날짜가 어긋난 파일이라 제품 전체를 `BAD_SHAPE` 로 거절하고, 쓸 수 있는 행이 하나도 남지 않아도 거절한다. 오늘 행이 없는 입력은 이전과 바이트까지 같다.
 
 계약은 `pipeline/adapters/base.py` 를 따른다: `fetch` 는 주입된 opener 로만 바이트를 얻고(관문은 SRC2 가 병합한 뒤 S2b 가 연결한다) `parse` 는 `(SourceRecord, [Fact])` 를 돌려준다.
 어댑터는 요청 경로를 제품 하나로 못박고 호스트가 `services.swpc.noaa.gov` 가 아니면 `BAD_ACCESS` 로 거부한다. 설명: docs/FACT_PATH.md §14
@@ -216,6 +217,7 @@ class NoaaSwpcAdapter(StructuredAdapter):
         super().__init__(provider, max_bytes=MAX_RESPONSE_BYTES if max_bytes is None else max_bytes, max_rows=MAX_ROWS if max_rows is None else max_rows)
         self.product = product
         self.raw_max_rows = product.raw_max_rows if max_rows is None else max_rows
+        self.notes = []              # 마지막으로 읽은 응답에서 쓰지 않고 버린 행의 기록(우리 낱말의 고정 문장) — `parse` 가 시작할 때 비운다(S2C0-b)
 
     def _access_parts(self, access):
         kind = F.field_of(access, "kind")
@@ -230,6 +232,7 @@ class NoaaSwpcAdapter(StructuredAdapter):
 
     @F.exact
     def parse(self, raw, access, retrieved_at, params=None):
+        self.notes = []
         return super().parse(raw, access, retrieved_at, params)
 
     def build_facts(self, decoded, record, retrieved_at):
@@ -351,8 +354,8 @@ def _parse_scales(adapter, decoded, record, retrieved_at):
 
 def _parse_ssn_daily(adapter, decoded, record, retrieved_at):
     rows = _rows(decoded, adapter.raw_max_rows)
-    _now, _today_text, today_ordinal, _month_ordinal = _clock(retrieved_at)
-    seen, parsed = set(), []
+    _now, today_text, today_ordinal, _month_ordinal = _clock(retrieved_at)
+    seen, parsed, left_out = set(), [], 0
     for number, row in enumerate(rows, start=1):
         _exact_keys(row, SSN_DAILY_KEYS, number)
         stamp = row["Obsdate"]
@@ -361,9 +364,17 @@ def _parse_ssn_daily(adapter, decoded, record, retrieved_at):
         day = _day(stamp[:10], number)
         ordinal = F.parse_as_of(day).ordinal
         _unique(seen, ordinal, number)
-        if ordinal >= today_ordinal:
-            raise _bad(number)                                   # 오늘 날짜의 일별 값은 아직 끝나지 않은 날이라 완성된 값이 아니다
-        parsed.append((ordinal, day, _number(row["swpc_ssn"], number, low=0, high=1000, integer=True)))
+        if ordinal > today_ordinal:
+            raise _bad(number)                                   # 내일(UTC) 이후 날짜의 행은 날짜가 어긋난 파일이다 — 제품 전체를 거절한다(S2C0-b: 완화는 오늘 행 하나뿐, 모르는 모양은 닫는다)
+        value = _number(row["swpc_ssn"], number, low=0, high=1000, integer=True)          # 오늘 행의 값도 다른 행과 똑같이 엄격하게 본다
+        if ordinal == today_ordinal:
+            left_out += 1                                        # 오늘(UTC) 날짜의 일별 값은 아직 끝나지 않은 날이라 완성된 값이 아니다 — 그 행만 쓰지 않는다(중복은 위에서 거절하니 한 행뿐이다)
+            continue
+        parsed.append((ordinal, day, value))
+    if not parsed:
+        raise AdapterError("BAD_SHAPE")                          # 오늘 행만 있어 쓸 수 있는 행이 하나도 없다
+    if left_out:
+        adapter.notes.append(f"ssn_daily: 오늘(UTC {today_text}) 날짜의 일별 값 {left_out}개는 끝나지 않은 날이라 쓰지 않았습니다")
     parsed.sort(key=lambda item: item[0])
     floor = parsed[-1][0] - SSN_DAILY_KEEP_DAYS + 1
     return [adapter.make_fact(record, F.KIND_OBSERVATION, "sunspot_daily_swpc", value, day, _meta(STATUS_OBSERVED)) for ordinal, day, value in parsed if ordinal >= floor]
@@ -371,8 +382,8 @@ def _parse_ssn_daily(adapter, decoded, record, retrieved_at):
 
 def _parse_ssn_monthly(adapter, decoded, record, retrieved_at):
     rows = _rows(decoded, adapter.raw_max_rows)
-    _now, _today_text, _day_ordinal, month_ordinal = _clock(retrieved_at)
-    seen, parsed = set(), []
+    _now, today_text, _day_ordinal, month_ordinal = _clock(retrieved_at)
+    seen, parsed, left_out = set(), [], 0
     for number, row in enumerate(rows, start=1):
         if not isinstance(row, dict) or not SSN_MONTHLY_REQUIRED <= set(row) or set(row) - SSN_MONTHLY_REQUIRED - SSN_MONTHLY_IGNORED:
             raise _bad(number)                                   # 필요한 칸이 없거나 모르는 칸이 있다 — 제3자 필드의 값은 보지 않는다(이름만)
@@ -381,9 +392,17 @@ def _parse_ssn_monthly(adapter, decoded, record, retrieved_at):
         if period is None or period.granularity != "month":
             raise _bad(number)
         _unique(seen, period.ordinal, number)
-        if period.ordinal >= month_ordinal:
-            raise _bad(number)                                   # 진행 중인 달(이번 달)의 월평균은 완성된 값이 아니다
-        parsed.append((period.ordinal, month, _number(row["observed_swpc_ssn"], number, low=0, high=1000), _number(row["smoothed_swpc_ssn"], number, low=0, high=1000)))
+        if period.ordinal > month_ordinal:
+            raise _bad(number)                                   # 다음 달 이후의 행은 날짜가 어긋난 파일이다 — 제품 전체를 거절한다(S2C0-b: 완화는 이번 달 행 하나뿐)
+        observed, smoothed = _number(row["observed_swpc_ssn"], number, low=0, high=1000), _number(row["smoothed_swpc_ssn"], number, low=0, high=1000)      # 이번 달 행의 값도 똑같이 엄격하게 본다
+        if period.ordinal == month_ordinal:
+            left_out += 1                                        # 진행 중인 달(이번 달)의 월평균은 완성된 값이 아니다 — 그 행만 쓰지 않는다
+            continue
+        parsed.append((period.ordinal, month, observed, smoothed))
+    if not parsed:
+        raise AdapterError("BAD_SHAPE")                          # 이번 달 행만 있어 쓸 수 있는 행이 하나도 없다
+    if left_out:
+        adapter.notes.append(f"ssn_monthly: 이번 달(UTC {today_text[:7]}) 월평균 값 {left_out}개는 끝나지 않은 달이라 쓰지 않았습니다")
     parsed.sort(key=lambda item: item[0])
     last = parsed[-1][0]
     facts = []

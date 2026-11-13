@@ -16,6 +16,7 @@ from unittest import mock
 import _bootstrap
 import ai_flow_scan as SCAN
 import generator as g
+import hold_helpers as HH
 import lock_helpers
 import registry_states
 import test_fact_select as SEL
@@ -589,7 +590,13 @@ class CodeTablesTest(unittest.TestCase):
 
 
 class SimulationTableTest(unittest.TestCase):
-    """§15-9 의 52주 표는 시험이 그대로 다시 계산해 문서와 견준다 — 문서의 숫자가 코드와 어긋나면 빨개진다."""
+    """§15-9 의 52주 표는 시험이 그대로 다시 계산해 문서와 견준다 — 문서의 숫자가 코드와 어긋나면 빨개진다. S2C0-a: 그 표는 임시 제외·처음 낼 글감이 없는 정책(글감 여섯 전부)의 계산이라 두 상수를 비워 다시 계산한다(표와 단언은 그대로).
+    기본 상수의 시뮬레이션은 tests/test_fact_hold.py 와 FACT_PATH §16 이 따로 다룬다."""
+
+    def setUp(self):
+        patch = HH.policy_off()
+        patch.start()
+        self.addCleanup(patch.stop)
 
     def computed(self, model, cap, picker=None):
         posts = SEL.simulate(*SEL.NoStarvationTest.YEAR, weekly_cap=cap, model=model, picker=picker)

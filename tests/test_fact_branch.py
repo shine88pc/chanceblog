@@ -25,11 +25,15 @@ from unittest import mock
 import _bootstrap  # noqa: F401
 import fact_branch_helpers as FB
 import generator as g
+import hold_helpers as HH
 
 from pipeline import ai_guard, drafts, draft_flow, egress, provenance, publish_lock, quality_gate, registry, source_policy, source_registry
 from pipeline import fact_candidates as K
 from pipeline import fact_supply
 from pipeline.adapters import noaa_swpc as N
+
+# S2C0-a: 이 모듈은 임시 제외·처음 낼 글감과 상관없는 정책(글감 여섯 전부)을 시험한다 — 두 상수를 비운 이전 동작으로 돌린다(단언은 하나도 바꾸지 않았다). 기본 상수의 동작은 tests/test_fact_hold.py 가 시험한다
+setUpModule, tearDownModule = HH.module_fixtures()
 
 FEED_SIMILARITY_LINE = "- 제목 유사도: 기존 글·대기 중인 초안과 비슷하지 않음(후보 0.6·생성 제목 0.7 기준, 생성기가 검사함)"          # 피드 글 승인 PR 본문의 줄(바이트 불변 — 이 묶음이 바꾸지 않았다)
 FACT_SIMILARITY_LINE = "- 제목 유사도: 해당 없음(계산 글은 제목을 견주지 않고, 같은 기간·같은 자료로 이미 낸 글이 있으면 후보에서 빼는 중복 키로 막음)"      # N1(D-320): 계산 글 본문의 줄

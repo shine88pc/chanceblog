@@ -11,6 +11,8 @@
 
 사유 코드(`skipped` 의 둘째 칸, 고정 글자뿐 — 외부 글을 싣지 않는다): `ADAPTER:<어댑터 오류 코드>`(예: `EGRESS_DENIED`·`BUDGET_DENIED`·`OPENER_FAILED`·`BAD_SHAPE`)·`ADAPTER:UNEXPECTED_ERROR`·`INSUFFICIENT:<조립기 사유 코드>`·
 `DUPLICATE:DEDUPE_KEY`·`REJECTED:<accept 가 돌려준 사유(영문·숫자·`_.:-` 60자)>`·`BAD_INPUT:TODAY`·`BAD_INPUT:RETRIEVED_AT`. 이 함수는 입력이 이상해도 예외를 올리지 않고 글 대신 사유를 돌려준다.
+`SupplyResult.notes`(S2C0-b)는 이 실행이 읽은 제품에서 어댑터가 **쓰지 않고 버린 행**의 기록이다(어댑터의 `notes` — 오늘(UTC) 날짜의 일별 흑점수 행·이번 달의 월별 행, 우리 낱말의 고정 문장) — 건너뜀이 아니라 알림이라 `skipped` 와 따로 두고
+글을 못 만든 날의 결과 코드(`FACT_ALL_SKIPPED` 등)를 바꾸지 않는다.
 
 `gate_source(post, provider)` 는 최소 품질 Gate 에 넘기는 후보의 `source` 사전을 만든다 — 키는 `GATE_SOURCE_KEYS` 아홉 개이고 `provider_hosts` 는 **레지스트리의 Provider 접근 경로 호스트 전체**에서만 채운다
 (글·응답에서 읽은 값을 쓰지 않는다). Gate 쪽은 별도 묶음(S2BG)이 이 모양을 읽게 고친다.
@@ -35,12 +37,13 @@ _UNSAFE_REASON_CHARS = re.compile(r"[^A-Za-z0-9_.:\-]")
 @dataclass(frozen=True)
 class SupplyResult:
     """공급 결과. posts·candidates 는 같은 순서의 짝(글 하나마다 그 글을 낸 후보 — candidate_key 가 이력에 남는다). skipped 는 ((글감 spec_id, 사유 코드), …) 시도한 순서,
-    waiting 은 시각 때문에 기다리는 글감 spec_id(없으면 빈 글자), considered 는 차례가 와서 살펴본 글감 spec_id 들(순서대로)."""
+    waiting 은 시각 때문에 기다리는 글감 spec_id(없으면 빈 글자), considered 는 차례가 와서 살펴본 글감 spec_id 들(순서대로), notes 는 읽은 제품에서 쓰지 않고 버린 행의 기록(고정 문장, 없으면 빈 튜플 — S2C0-b)."""
     posts: tuple = ()
     candidates: tuple = ()
     skipped: tuple = ()
     waiting: str = ""
     considered: tuple = ()
+    notes: tuple = ()
 
 
 def _entries(value):
@@ -71,6 +74,17 @@ def api_access(provider):
     return None
 
 
+def product_id_of_url(url):
+    """제품 파일의 https 주소 → 제품 id(`kp_estimated` 등 — 우리 제품 표 `noaa_swpc.PRODUCTS` 의 id). 표에 있는 주소와 **글자 하나까지 같은** 것만 알아본다(질의·조각·대소문자가 다른 호스트·끝 공백·다른 호스트는 None).
+    그림자 실행의 원본 응답 보관이 파일 이름을 정할 때 쓴다(S2C0-c) — 주소의 어떤 조각도 파일 이름이 되지 않는다."""
+    if not isinstance(url, str):
+        return None
+    for product_id in N.PRODUCTS:
+        if url == N.product_url(product_id):
+            return product_id
+    return None
+
+
 def _reason(text):
     """accept 가 돌려준 사유를 고정 글자 모양으로(영문·숫자·`_.:-` 만, 60자) — 외부·모델 글이 사유 코드에 섞이지 않게 한다."""
     cleaned = _UNSAFE_REASON_CHARS.sub("_", str(text))[:MAX_REASON_CHARS]
@@ -78,17 +92,17 @@ def _reason(text):
 
 
 def _load(product_id, provider, access, opener, retrieved_at, loaded):
-    """제품 하나를 이 실행에서 한 번만 읽는다(성공도 실패도 기억). 돌려주는 값: (수집 기록, Fact 튜플, 실패 코드 또는 None)."""
+    """제품 하나를 이 실행에서 한 번만 읽는다(성공도 실패도 기억). 돌려주는 값: (수집 기록, Fact 튜플, 실패 코드 또는 None, 버린 행의 기록 튜플)."""
     if product_id not in loaded:
         try:
             adapter = N.NoaaSwpcAdapter(provider, product_id)
             raw = adapter.fetch(access, {}, opener)
             record, facts = adapter.parse(raw, access, retrieved_at)
-            loaded[product_id] = (record, tuple(facts), None)
+            loaded[product_id] = (record, tuple(facts), None, tuple(adapter.notes))
         except AdapterError as exc:
-            loaded[product_id] = (None, (), exc.code)
+            loaded[product_id] = (None, (), exc.code, ())
         except Exception:      # noqa: BLE001 — 어댑터 하나의 예상 밖 오류가 다른 글감까지 막지 않게 그 글감만 건너뛴다(고정 코드만 남긴다)
-            loaded[product_id] = (None, (), "UNEXPECTED_ERROR")
+            loaded[product_id] = (None, (), "UNEXPECTED_ERROR", ())
     return loaded[product_id]
 
 
@@ -123,7 +137,7 @@ def supply(*, today, retrieved_at, history, provider, opener, accept=None, limit
             continue
         records, facts, failure = [], [], None
         for product_id in candidate.products:
-            record, product_facts, failure = _load(product_id, provider, access, opener, retrieved_at, loaded)
+            record, product_facts, failure, _left_out = _load(product_id, provider, access, opener, retrieved_at, loaded)
             if failure:
                 break
             records.append(record)
@@ -150,4 +164,5 @@ def supply(*, today, retrieved_at, history, provider, opener, accept=None, limit
         posts.append(post)
         chosen.append(candidate)
         closed.add(K.GROUP_OF[spec_id])
-    return SupplyResult(tuple(posts), tuple(chosen), tuple(skipped), waiting, tuple(considered))
+    notes = tuple(note for _record, _facts, _failure, left_out in loaded.values() for note in left_out)      # 읽은 제품마다 한 번만(제품은 한 실행에 한 번 읽는다) — 읽은 순서대로
+    return SupplyResult(tuple(posts), tuple(chosen), tuple(skipped), waiting, tuple(considered), notes)
