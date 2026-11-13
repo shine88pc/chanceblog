@@ -20,6 +20,7 @@ NEW_TESTS = ["tests/fact_helpers.py", "tests/test_fact_facts.py", "tests/test_fa
              "tests/space_helpers.py", "tests/test_space_adapter.py", "tests/test_space_calc.py", "tests/test_space_recipes.py", "tests/test_space_attribution.py",
              "tests/test_space_candidates.py", "tests/test_space_docs.py", "tests/test_space_fuzz.py", "tests/test_space_f2fix.py", "tests/test_space_gate.py",
              "tests/fact_branch_helpers.py", "tests/test_fact_select.py", "tests/test_fact_supply.py", "tests/test_fact_branch.py", "tests/test_fact_shadow.py", "tests/test_fact_readers.py", "tests/test_fact_branch_docs.py"]      # 뒤의 일곱은 S2b
+NEW_TESTS += ["tests/hold_helpers.py", "tests/test_fact_hold.py", "tests/test_fact_today_row.py", "tests/test_shadow_raw.py", "tests/test_s2c0_docs.py"]      # S2c-0(S2C0-a)가 더한 시험 — 후보·공급 모듈을 가져오는 시험은 이 목록에 올려야 한다(NoConnectionTest)
 STDLIB_ALLOWED = {"csv", "dataclasses", "datetime", "decimal", "functools", "hashlib", "io", "json", "re", "typing", "unicodedata"}
 BANNED_MODULES = {"urllib", "socket", "subprocess", "time", "random", "os", "sys", "pathlib", "http", "ssl", "shutil", "tempfile", "secrets", "uuid", "glob",
                   "ctypes", "msvcrt", "threading", "multiprocessing", "asyncio", "logging", "requests", "html", "xml", "generator", "blogger_generator"}

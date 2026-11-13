@@ -6,9 +6,11 @@ import copy
 import datetime
 import hashlib
 import json
+import random
 import re
 import unittest
 from decimal import Decimal
+from unittest import mock
 
 import _bootstrap
 import space_helpers as H
@@ -329,7 +331,8 @@ class ShapeRejectionTest(unittest.TestCase):
         vary("ssn_monthly", "필수 칸이 없음", lambda v: v[0].pop("time-tag"))
         vary("ssn_monthly", "월 형식", lambda v: v[0].update({"time-tag": "1749-13"}))
         vary("ssn_monthly", "미래 달", lambda v: v[-1].update({"time-tag": "2026-12"}))
-        vary("ssn_monthly", "이번 달(진행 중)", lambda v: v[-1].update({"time-tag": "2026-11"}))
+        vary("ssn_monthly", "이번 달 행의 값이 글자", lambda v: v[-1].update({"time-tag": "2026-11", "observed_swpc_ssn": "61.7"}))                 # S2C0-b: 이번 달 행 자체는 이제 검사한 뒤 쓰지 않는다(TodayRowTest) — 그 행의 값이 이상하면 여전히 거절한다
+        vary("ssn_daily", "오늘 행의 값이 글자", lambda v: v.append({"Obsdate": "2026-11-10T00:00:00", "swpc_ssn": "57"}))                         # S2C0-b: 오늘 행도 같은 규칙
         vary("ssn_monthly", "값이 글자", lambda v: v[-1].update(observed_swpc_ssn="61.7"))
         vary("xray_flares", "등급 문자", lambda v: v[0].update(max_class="Z1.0"))
         vary("xray_flares", "등급에 수가 없음", lambda v: v[0].update(max_class="M"))
@@ -426,8 +429,10 @@ class OrderDuplicateFutureTest(unittest.TestCase):
         reject(self, "kp_outlook", ahead)
         flares = H.flare_rows([("2026-11-04T06:15:00Z", "C1.2"), ("2026-11-10T01:30:00Z", "C1.3")])
         reject(self, "xray_flares", flares)
-        daily = H.ssn_daily_rows("2026-11-10", 5)
-        reject(self, "ssn_daily", daily)                                                                             # 오늘 날짜의 일별 값은 아직 없다
+        daily = H.ssn_daily_rows("2026-11-11", 5)
+        reject(self, "ssn_daily", daily)                                                                             # S2C0-b: 마지막 행이 내일(UTC)이면 날짜가 어긋난 파일이라 제품 전체를 여전히 거절한다
+        _record, facts = H.parse_value("ssn_daily", H.ssn_daily_rows("2026-11-10", 5))                               # S2C0-b: 마지막 행이 오늘(UTC)이면 그 행만 쓰지 않는다(전에는 제품 전체를 거절했다)
+        self.assertEqual([fact.as_of for fact in facts], ["2026-11-06", "2026-11-07", "2026-11-08", "2026-11-09"])
         H.parse_value("ssn_daily", H.ssn_daily_rows("2026-11-09", 5))
 
     def test_a_retrieval_time_that_is_not_an_instant_is_refused(self):
@@ -436,6 +441,298 @@ class OrderDuplicateFutureTest(unittest.TestCase):
                 with self.assertRaises(B.AdapterError) as caught:
                     H.parse_fixture("kp_estimated", retrieved_at=bad)
                 self.assertEqual(caught.exception.code, "BAD_RETRIEVED_AT")
+
+
+def old_parse_ssn_daily(adapter, decoded, record, retrieved_at):
+    """S2a 의 `_parse_ssn_daily` 를 이 변경 전(기준 main)의 소스 그대로 옮긴 골든 — 오늘 이후 행이 하나라도 있으면 제품 전체를 거절한다. 오늘 행이 없는 입력에서 새 파서가 이것과 **같은 결과**를 내야 한다."""
+    rows = N._rows(decoded, adapter.raw_max_rows)
+    _now, _today_text, today_ordinal, _month_ordinal = N._clock(retrieved_at)
+    seen, parsed = set(), []
+    for number, row in enumerate(rows, start=1):
+        N._exact_keys(row, N.SSN_DAILY_KEYS, number)
+        stamp = row["Obsdate"]
+        if not isinstance(stamp, str) or not N._MIDNIGHT_RE.fullmatch(stamp):
+            raise N._bad(number)
+        day = N._day(stamp[:10], number)
+        ordinal = F.parse_as_of(day).ordinal
+        N._unique(seen, ordinal, number)
+        if ordinal >= today_ordinal:
+            raise N._bad(number)
+        parsed.append((ordinal, day, N._number(row["swpc_ssn"], number, low=0, high=1000, integer=True)))
+    parsed.sort(key=lambda item: item[0])
+    floor = parsed[-1][0] - N.SSN_DAILY_KEEP_DAYS + 1
+    return [adapter.make_fact(record, F.KIND_OBSERVATION, "sunspot_daily_swpc", value, day, N._meta(N.STATUS_OBSERVED)) for ordinal, day, value in parsed if ordinal >= floor]
+
+
+def old_parse_ssn_monthly(adapter, decoded, record, retrieved_at):
+    """S2a 의 `_parse_ssn_monthly` 를 이 변경 전의 소스 그대로 옮긴 골든 — 이번 달 이후 행이 하나라도 있으면 제품 전체를 거절한다."""
+    rows = N._rows(decoded, adapter.raw_max_rows)
+    _now, _today_text, _day_ordinal, month_ordinal = N._clock(retrieved_at)
+    seen, parsed = set(), []
+    for number, row in enumerate(rows, start=1):
+        if not isinstance(row, dict) or not N.SSN_MONTHLY_REQUIRED <= set(row) or set(row) - N.SSN_MONTHLY_REQUIRED - N.SSN_MONTHLY_IGNORED:
+            raise N._bad(number)
+        month = row["time-tag"]
+        period = F.parse_as_of(month) if isinstance(month, str) else None
+        if period is None or period.granularity != "month":
+            raise N._bad(number)
+        N._unique(seen, period.ordinal, number)
+        if period.ordinal >= month_ordinal:
+            raise N._bad(number)
+        parsed.append((period.ordinal, month, N._number(row["observed_swpc_ssn"], number, low=0, high=1000), N._number(row["smoothed_swpc_ssn"], number, low=0, high=1000)))
+    parsed.sort(key=lambda item: item[0])
+    last = parsed[-1][0]
+    facts = []
+    for ordinal, month, observed, smoothed in parsed:
+        if ordinal <= last - N.SSN_MONTHLY_KEEP_MONTHS:
+            continue
+        quality = "provisional" if ordinal > last - N.PROVISIONAL_MONTHS else None
+        facts.append(adapter.make_fact(record, F.KIND_OBSERVATION, "sunspot_monthly_swpc", observed, month, N._meta(N.STATUS_OBSERVED, quality=quality)))
+        facts.append(adapter.make_fact(record, F.KIND_OBSERVATION, "sunspot_monthly_smoothed_swpc", smoothed, month, N._meta(N.STATUS_OBSERVED, quality=quality)))
+    return facts
+
+
+OLD_PARSERS = {"ssn_daily": old_parse_ssn_daily, "ssn_monthly": old_parse_ssn_monthly}
+DAILY_NOTE = "ssn_daily: 오늘(UTC 2026-11-10) 날짜의 일별 값 1개는 끝나지 않은 날이라 쓰지 않았습니다"
+MONTHLY_NOTE = "ssn_monthly: 이번 달(UTC 2026-11) 월평균 값 1개는 끝나지 않은 달이라 쓰지 않았습니다"
+
+
+def outcome(product_id, raw, parsers=None, **kw):
+    """어댑터가 raw 를 읽은 결과: ('ok', 수집 기록, Fact 목록) 또는 ('error', 코드, 문장). parsers 를 주면 그 파서 표로 바꿔 끼워 읽는다."""
+    with mock.patch.dict(N.PARSERS, parsers or {}):
+        try:
+            record, facts = H.parse_bytes(product_id, raw, **kw)
+        except B.AdapterError as exc:
+            return ("error", exc.code, str(exc))
+    return ("ok", record, facts)
+
+
+def fact_shape(facts):
+    return [(f.key, f.as_of, f.value, f.unit, f.label_ko, f.meta) for f in facts]
+
+
+class TodayRowTest(unittest.TestCase):
+    """S2C0-b: 일별 흑점수의 오늘(UTC) 날짜 행·월별의 이번 달 행 하나 때문에 제품 전체가 거절되던 것을 그 행만 쓰지 않도록 고쳤다. **완화는 그 한 가지뿐이다** — 그 행도 다른 행과 똑같이 엄격하게 검사한 뒤 버리고,
+    내일 이후 날짜의 행·자료형·범위·결측 표기·중복·키가 다른 행은 전과 같이 제품 전체를 거절하며(날짜가 어긋난 파일은 닫는다), 쓸 수 있는 행이 하나도 남지 않으면 거절한다. 오늘 행이 없는 입력은 이전과 바이트까지 같다.
+    수집 시각은 이 파일의 고정값 2026-11-10T01:10:00Z(오늘 UTC 2026-11-10, 이번 달 2026-11)이고 응답은 Decimal 로 읽는 어댑터 경로를 그대로 거친다(JSON 숫자를 정수로만 읽지 않는다)."""
+    TODAY_ROW = {"Obsdate": "2026-11-10T00:00:00", "swpc_ssn": 57}
+
+    def past(self, count=30, last="2026-11-09"):
+        return H.ssn_daily_rows(last, count)
+
+    # ---- 일별 ----
+    def test_the_row_of_today_is_checked_and_left_out_and_everything_else_is_the_same(self):
+        with_today = H.ssn_daily_rows("2026-11-10", 30)
+        record_with, facts_with = H.parse_value("ssn_daily", with_today)
+        record_without, facts_without = H.parse_value("ssn_daily", with_today[:-1])
+        self.assertEqual(with_today[-1]["Obsdate"], "2026-11-10T00:00:00")
+        self.assertEqual(fact_shape(facts_with), fact_shape(facts_without))                                    # 오늘 행을 뺀 같은 입력과 Fact 의 내용·순서가 같다
+        self.assertEqual((len(facts_with), facts_with[-1].as_of), (29, "2026-11-09"))
+        self.assertNotEqual(record_with.response_hash, record_without.response_hash)                              # 응답 바이트가 다르니 수집 기록은 다르다 — 값은 같다
+        self.assertEqual(F.validate_bundle(F.FactBundle((record_with,), tuple(facts_with))), [])
+        self.assertNotIn("2026-11-10", {fact.as_of for fact in facts_with})
+
+    def test_a_missing_value_marker_on_the_today_row_is_fine_and_the_row_is_still_left_out(self):
+        for marker in (None, -1, -1.0, 0, 57):
+            row = dict(self.TODAY_ROW, swpc_ssn=marker)
+            with self.subTest(marker=marker):
+                _record, facts = H.parse_value("ssn_daily", self.past() + [row])
+                self.assertEqual(facts[-1].as_of, "2026-11-09")
+
+    def test_the_row_of_today_is_validated_as_strictly_as_any_other_row_before_it_is_left_out(self):
+        bad_rows = [dict(self.TODAY_ROW, swpc_ssn="57"), dict(self.TODAY_ROW, swpc_ssn=True), dict(self.TODAY_ROW, swpc_ssn=1.5), dict(self.TODAY_ROW, swpc_ssn=-5),
+                    dict(self.TODAY_ROW, swpc_ssn=1001), dict(self.TODAY_ROW, swpc_ssn=[57]), dict(self.TODAY_ROW, extra=1), {"Obsdate": "2026-11-10T00:00:00"}, {"swpc_ssn": 57},
+                    dict(self.TODAY_ROW, Obsdate="2026-11-10T12:00:00"), dict(self.TODAY_ROW, Obsdate="2026-11-10"), dict(self.TODAY_ROW, Obsdate=20261110), dict(self.TODAY_ROW, Obsdate="2026-11-10T00:00:00Z"),
+                    dict(self.TODAY_ROW, Obsdate="2026-13-10T00:00:00"), "문자열 행", None, 5, [1, 2]]
+        for bad in bad_rows:
+            with self.subTest(row=bad):
+                reject(self, "ssn_daily", self.past() + [bad])
+
+    def test_a_row_that_is_only_today_or_leaves_nothing_after_the_cut_is_refused_and_so_is_a_repeated_day(self):
+        reject(self, "ssn_daily", [dict(self.TODAY_ROW)])                                                       # 오늘 행만 있다 — 쓸 수 있는 행이 없다
+        reject(self, "ssn_daily", [])                                                                           # 전과 같다(빈 목록)
+        reject(self, "ssn_daily", self.past() + [dict(self.TODAY_ROW), dict(self.TODAY_ROW, swpc_ssn=58)], "DUPLICATE_ROW")      # 오늘 행이 둘 — 중복 검사는 그대로
+        reject(self, "ssn_daily", self.past() + [dict(self.TODAY_ROW), dict(self.past()[3])], "DUPLICATE_ROW")                    # 오늘 행이 있어도 다른 날의 중복은 거절
+
+    def test_rows_after_today_are_still_refused_whatever_else_the_file_holds(self):
+        tomorrow = {"Obsdate": "2026-11-11T00:00:00", "swpc_ssn": 60}
+        far = {"Obsdate": "2027-12-25T00:00:00", "swpc_ssn": 60}
+        for label, rows in (("오늘 행 + 내일 행", self.past() + [dict(self.TODAY_ROW), tomorrow]), ("내일 행만 더함", self.past() + [tomorrow]), ("멀리 뒤", self.past() + [far]),
+                            ("오늘 행 + 멀리 뒤", self.past() + [dict(self.TODAY_ROW), far]), ("순서가 섞임", [tomorrow] + self.past() + [dict(self.TODAY_ROW)])):
+            with self.subTest(case=label):
+                reject(self, "ssn_daily", rows)
+        reject(self, "ssn_daily", H.ssn_daily_rows("2026-11-10", 30), retrieved_at="2026-11-09T23:59:59Z")        # 수집 시각이 하루 앞이면 마지막 행(11-10)이 '내일'이다
+
+    def test_the_cut_follows_the_utc_day_of_the_collection_time_to_the_second(self):
+        rows = H.ssn_daily_rows("2026-11-10", 30)
+        for stamp, last_day, count in (("2026-11-10T00:00:00Z", "2026-11-09", 29), ("2026-11-10T23:59:59Z", "2026-11-09", 29), ("2026-11-11T00:00:00Z", "2026-11-10", 30), ("2026-11-11T23:59:59Z", "2026-11-10", 30)):
+            with self.subTest(collected=stamp):
+                _record, facts = H.parse_value("ssn_daily", rows, retrieved_at=stamp)
+                self.assertEqual((len(facts), facts[-1].as_of), (count, last_day))                                   # 오늘 한 행만 버린다 — 어제 행은 쓴다
+        _record, facts = H.parse_value("ssn_daily", rows, retrieved_at="2026-11-10T09:30:00+09:00")                # 시간대 표기가 있어도 협정 세계시 날(11-10 00:30Z)로 읽는다
+        self.assertEqual(facts[-1].as_of, "2026-11-09")
+
+    def test_the_order_of_the_rows_does_not_matter_including_the_row_of_today(self):
+        rows = H.ssn_daily_rows("2026-11-10", 40, gaps=(7, 20))
+        base = fact_shape(H.parse_value("ssn_daily", rows)[1])
+        shuffled = list(reversed(rows))
+        shuffled = shuffled[1::2] + shuffled[0::2]
+        self.assertEqual(fact_shape(H.parse_value("ssn_daily", shuffled)[1]), base)
+        self.assertEqual(fact_shape(H.parse_value("ssn_daily", [rows[-1]] + rows[:-1])[1]), base)
+
+    def test_the_thousands_of_rows_file_with_the_row_of_today_gives_the_same_four_hundred_facts(self):
+        rows = H.ssn_daily_rows("2026-11-10", 9905, gaps=(5, 700, 701))
+        record, facts = H.parse_value("ssn_daily", rows)
+        self.assertEqual(len(facts), 400)
+        self.assertEqual((facts[0].as_of, facts[-1].as_of), (str(datetime.date(2026, 11, 9) - datetime.timedelta(days=399)), "2026-11-09"))
+        self.assertEqual(F.validate_bundle(F.FactBundle((record,), tuple(facts))), [])
+        reject(self, "ssn_daily", H.ssn_daily_rows("2026-11-10", 150), "TOO_MANY_ROWS", max_rows=100)             # 행 수 상한은 오늘 행까지 센다 — 전과 같다
+
+    def test_the_realistic_fixture_without_a_today_row_parses_exactly_as_before(self):
+        raw = H.fixture_bytes(H.FIXTURE_FILES["ssn_daily"])
+        self.assertEqual(outcome("ssn_daily", raw), outcome("ssn_daily", raw, OLD_PARSERS))
+
+    # ---- 월별 ----
+    def monthly_with_current(self, **changes):
+        rows = H.ssn_monthly_rows("2026-10", 24)
+        current = dict(rows[-1], **{"time-tag": "2026-11"})
+        current.update(changes)
+        return rows, current
+
+    def test_the_row_of_the_current_month_is_checked_and_left_out_and_the_rest_is_the_same(self):
+        rows, current = self.monthly_with_current()
+        record_with, facts_with = H.parse_value("ssn_monthly", rows + [current])
+        record_without, facts_without = H.parse_value("ssn_monthly", rows)
+        self.assertEqual(fact_shape(facts_with), fact_shape(facts_without))
+        self.assertEqual(facts_with[-1].as_of, "2026-10")
+        self.assertNotIn("2026-11", {fact.as_of for fact in facts_with})
+        self.assertEqual([f.as_of for f in facts_with if f.meta_value("quality") == "provisional"], [f"2026-{month:02d}" for month in range(5, 11) for _ in range(2)])      # 잠정치 여섯 달은 지난달(10월) 기준 그대로
+        self.assertNotEqual(record_with.response_hash, record_without.response_hash)
+
+    def test_the_current_month_row_is_validated_strictly_and_later_months_and_a_lone_row_are_refused(self):
+        rows, current = self.monthly_with_current()
+        for label, changes in (("관측값 글자", {"observed_swpc_ssn": "7"}), ("평활값 범위 밖", {"smoothed_swpc_ssn": 5000}), ("관측값 음수", {"observed_swpc_ssn": -3.5}), ("관측값 불리언", {"observed_swpc_ssn": True}),
+                               ("모르는 칸", {"surprise": 1}), ("달 모양이 다름", {"time-tag": "2026-11-05"})):
+            with self.subTest(case=label):
+                reject(self, "ssn_monthly", rows + [dict(current, **changes)])
+        missing = dict(current)
+        del missing["smoothed_swpc_ssn"]
+        reject(self, "ssn_monthly", rows + [missing])
+        reject(self, "ssn_monthly", rows + [dict(current, **{"time-tag": "2026-12"})])                          # 다음 달 행 — 날짜가 어긋난 파일
+        reject(self, "ssn_monthly", rows + [current, dict(current, **{"time-tag": "2027-03"})])
+        reject(self, "ssn_monthly", [current])                                                                  # 이번 달 행만 있다 — 쓸 수 있는 행이 없다
+        reject(self, "ssn_monthly", rows + [current, dict(current)], "DUPLICATE_ROW")
+        reject(self, "ssn_monthly", rows + [dict(rows[3])], "DUPLICATE_ROW")
+
+    def test_the_current_month_cut_follows_the_utc_month_of_the_collection_time(self):
+        rows, current = self.monthly_with_current()
+        for stamp, last_month in (("2026-11-01T00:00:00Z", "2026-10"), ("2026-11-30T23:59:59Z", "2026-10"), ("2026-12-01T00:00:00Z", "2026-11")):
+            with self.subTest(collected=stamp):
+                _record, facts = H.parse_value("ssn_monthly", rows + [current], retrieved_at=stamp)
+                self.assertEqual(facts[-1].as_of, last_month)
+        reject(self, "ssn_monthly", rows + [current], retrieved_at="2026-10-31T23:59:59Z")                      # 수집 시각이 한 달 앞이면 11월 행이 '다음 달'이다
+
+    # ---- 기록 ----
+    def test_a_dropped_row_is_reported_in_the_adapter_notes_with_its_count_and_date_and_nothing_else_is(self):
+        adapter = H.adapter("ssn_daily")
+        raw = H.dumps(H.ssn_daily_rows("2026-11-10", 30))
+        self.assertEqual(adapter.notes, [])
+        adapter.parse(raw, H.access_of(), H.RETRIEVED_AT, {})
+        self.assertEqual(adapter.notes, [DAILY_NOTE])
+        adapter.parse(H.dumps(H.ssn_daily_rows("2026-11-09", 30)), H.access_of(), H.RETRIEVED_AT, {})
+        self.assertEqual(adapter.notes, [])                                                                      # 다음 읽기가 시작될 때 비워진다 — 지난 읽기의 기록이 남지 않는다
+        rows, current = self.monthly_with_current()
+        monthly = H.adapter("ssn_monthly")
+        monthly.parse(H.dumps(rows + [current]), H.access_of(), H.RETRIEVED_AT, {})
+        self.assertEqual(monthly.notes, [MONTHLY_NOTE])
+        for product_id in H.FIXTURE_FILES:
+            kept = H.adapter(product_id)
+            kept.parse(H.fixture_bytes(H.FIXTURE_FILES[product_id]), H.access_of(), H.RETRIEVED_AT, {})
+            self.assertEqual(kept.notes, [], product_id)                                                         # 표본에는 버린 행이 없다 — 기록도 없다
+
+    def test_a_refused_input_leaves_no_note_behind_that_could_be_mistaken_for_a_success(self):
+        adapter = H.adapter("ssn_daily")
+        with self.assertRaises(B.AdapterError):
+            adapter.parse(H.dumps(H.ssn_daily_rows("2026-11-11", 30)), H.access_of(), H.RETRIEVED_AT, {})
+        self.assertEqual(adapter.notes, [])
+
+    def test_the_notes_are_fixed_sentences_with_our_own_words_and_digits_only(self):
+        for note in (DAILY_NOTE, MONTHLY_NOTE):
+            self.assertNotRegex(note, r"(?i)https?:|[~～〜]|\{|\}")
+            self.assertLess(len(note), 120)
+
+    # ---- 오늘 행이 없는 입력은 이전과 바이트까지 같다 ----
+    def random_input(self, rng, product_id):
+        """오늘 행(·이번 달 행)이 없는 입력 — 정상 입력과 한 군데를 일부러 망가뜨린 입력을 섞는다. 망가뜨림은 날짜를 오늘로 만들지 않는다(그 경우만 의도한 차이다)."""
+        if product_id == "ssn_daily":
+            count = rng.choice((1, 2, 3, 5, 30, 400, 450))
+            rows = H.ssn_daily_rows("2026-11-09", count, gaps=tuple(rng.sample(range(count), min(count - 1, rng.randint(0, 3)))), seed=rng.randint(1, 999))
+            stamp_keys = ("Obsdate",)
+        else:
+            count = rng.choice((1, 2, 7, 24, 80))
+            rows = H.ssn_monthly_rows("2026-10", count, seed=rng.randint(1, 999), third_party=rng.random() < 0.7)
+            stamp_keys = ("time-tag",)
+        if rng.random() < 0.55 and rows:
+            victim = rng.randrange(len(rows))
+            kind = rng.choice(("value_text", "value_range", "value_bool", "drop_key", "extra_key", "bad_stamp", "future", "dup", "shuffle", "not_dict"))
+            if kind == "shuffle":
+                rng.shuffle(rows)
+                return rows
+            row = dict(rows[victim])
+            value_key = "swpc_ssn" if product_id == "ssn_daily" else "observed_swpc_ssn"
+            if kind == "value_text":
+                row[value_key] = "7"
+            elif kind == "value_range":
+                row[value_key] = 99999
+            elif kind == "value_bool":
+                row[value_key] = False
+            elif kind == "drop_key":
+                row.pop(value_key, None)
+            elif kind == "extra_key":
+                row["extra"] = 1
+            elif kind == "bad_stamp":
+                row[stamp_keys[0]] = "2026-11-0"
+            elif kind == "future":
+                row[stamp_keys[0]] = "2027-01-01T00:00:00" if product_id == "ssn_daily" else "2027-01"
+            elif kind == "dup" and len(rows) > 1:
+                row = dict(rows[(victim + 1) % len(rows)])
+            elif kind == "not_dict":
+                row = 5
+            rows[victim] = row
+        return rows
+
+    def test_without_a_today_row_the_new_parsers_equal_the_old_source_on_600_random_inputs_including_the_refusals(self):
+        rng = random.Random(20261113)
+        refused = ok = 0
+        for case in range(600):
+            product_id = rng.choice(("ssn_daily", "ssn_monthly"))
+            raw = H.dumps(self.random_input(rng, product_id))
+            with self.subTest(case=case, product=product_id):
+                new = outcome(product_id, raw)
+                old = outcome(product_id, raw, OLD_PARSERS)
+                self.assertEqual(new, old)                                                                      # 성공이면 수집 기록·Fact 가 같고, 거절이면 코드·문장이 같다
+                refused += new[0] == "error"
+                ok += new[0] == "ok"
+        self.assertGreater(refused, 60)                                                                         # 시험이 속이 비지 않게: 거절 입력도 정상 입력도 충분히 섞였다
+        self.assertGreater(ok, 150)
+
+    def test_the_golden_differs_from_the_new_parser_exactly_when_a_today_row_is_present_which_keeps_the_comparison_honest(self):
+        raw = H.dumps(H.ssn_daily_rows("2026-11-10", 30))
+        self.assertEqual(outcome("ssn_daily", raw, OLD_PARSERS)[0], "error")
+        self.assertEqual(outcome("ssn_daily", raw)[0], "ok")
+        rows, current = self.monthly_with_current()
+        raw = H.dumps(rows + [current])
+        self.assertEqual(outcome("ssn_monthly", raw, OLD_PARSERS)[0], "error")
+        self.assertEqual(outcome("ssn_monthly", raw)[0], "ok")
+
+    def test_other_products_do_not_get_the_same_leniency(self):
+        """다른 제품(Kp·플레어·등급)의 오늘·미래 시각 처리 규칙은 건드리지 않았다 — 미래 시각 행은 전과 같이 거절한다."""
+        rows = H.kp_rows("2026-11-09", 1)
+        rows.append({"time_tag": "2026-11-10T03:00:00", "Kp": 1.0, "a_running": 4, "station_count": 8})
+        reject(self, "kp_estimated", rows)
+        reject(self, "xray_flares", H.flare_rows([("2026-11-04T06:15:00Z", "C1.2"), ("2026-11-10T01:30:00Z", "C1.3")]))
+        scales = H.scales_object(date_now="2026-11-12")
+        reject(self, "scales", scales)
 
 
 class LimitsTest(unittest.TestCase):

@@ -17,10 +17,15 @@ generator.py 는 환경 변수 SHADOW_RUN=1 일 때 main() 에서 이 모듈의 
 구조화 Fact 분기(레지스트리 chance.content_source: facts, S2b): 같은 읽기 전용 구간 안에서 `run_facts` 가 후보를 **AI 없이** 만든다 — 일반 실행과 같은 함수(`g.fact_prepare`: 이력의 발행일로 차례를 정하는 공급 함수 →
 어댑터 → 조립기)를 쓰고 Gemini·피드·사진을 부르지 않는다(Gemini 키도 필요 없다). 만든 글은 최소 품질 Gate 를 **항상** 돌려 평가하고(일반 그림자 실행과 같다) 결과는 같은 모양(`result.json`·`run.json`)으로 SHADOW_OUT 아래에만 쓴다.
 네트워크 읽기는 허용 목록 관문·호출 예산을 거치는 읽기뿐이다(저장소·git·gh 에는 쓰지 않는다 — 읽기 전용 구간의 방어 코드가 그대로 감시한다). 설명: docs/FACT_PATH.md §15
+
+**원본 응답 보관(S2C0-c)**: Fact 분기는 어댑터에 넣는 transport 를 `RawRecorder` 로 감싸 받은 응답 바이트를 SHADOW_OUT 바로 아래 `raw_<제품 id>.json` 파일과 색인 `raw_index.json`(제품 id·바이트 수·sha256·수집 시각 UTC)으로 남긴다 —
+개선 전 기준선을 같은 입력으로 바이트까지 다시 만들 수 있게 하려는 것이다. 새 네트워크 호출은 없다(받은 바이트를 그대로 돌려주는 감쌈뿐). 본문 바이트만 남기고 요청·응답 머리글·주소는 남기지 않는다. 쓰는 길은 `ShadowWriter` 하나이고(밖이면 거절)
+총 크기에 상한이 있다. 보관이 실패해도 그림자 실행의 본 결과는 그대로이고 실패 사실만 `run.json` 의 `notes` 에 남는다. 하위 폴더를 만들지 않는 것은 하위 폴더마다 `result.json` 을 읽는 소비자가 있어서다. 이 모듈은 남긴 파일을 읽지 않는다.
 """
 import contextlib
 import copy
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -37,6 +42,10 @@ MAX_COUNT = 5
 POST_KIND = {"ko": "KR", "en": "EN"}          # 글 파일 이름의 종류 칸. 이름은 `YYYY-MM-DD-KR-HHMMSS.md` / `-EN-` 모양이다(생성기의 글 파일 이름 규칙과 같다 — 측정 도구가 변환 없이 읽는다)
 RESULT_FILE = "result.json"
 RUN_FILE = "run.json"
+RAW_PREFIX = "raw_"                       # 원본 응답 파일 이름의 앞머리(`raw_<제품 id>.json`) — SHADOW_OUT 바로 아래에 둔다(하위 폴더를 만들지 않는다: 폴더마다 `result.json` 을 읽는 소비자가 있다)
+RAW_INDEX_FILE = "raw_index.json"
+_RAW_PRODUCT = re.compile(r"[a-z0-9_]{1,40}")        # 파일 이름이 되는 제품 id 의 모양(우리 제품 표의 id 뿐 — 경로 조각·점·글자 밖은 남기지 않는다)
+RAW_MAX_TOTAL_BYTES = 2 * 1024 * 1024     # 원본 응답을 남기는 총 크기 상한 — 정상 합계는 약 0.6 MiB(일별 흑점수 한 파일이 478 KB 로 대부분)이고 넘기는 응답은 남기지 않고 색인에 사유를 적는다
 FORBIDDEN_PROGRAMS = ("git", "gh")
 PLACEHOLDER_THUMBNAIL = re.compile(r"(?m)^!\[Thumbnail\]\(https://example\.invalid/[^)\n]*\)[ \t]*\n?")
 PLACEHOLDER_IMAGE_LINE = re.compile(r"(?m)^image:[ \t]*\"?https://example\.invalid/[^\n]*\n")      # 머리말의 자리표시 대표 사진 줄(검증용 가짜 주소)
@@ -128,6 +137,15 @@ class ShadowWriter:
         target.parent.mkdir(parents=True, exist_ok=True)
         tmp = target.with_name(target.name + ".tmp")
         tmp.write_text(text, encoding="utf-8")
+        tmp.replace(target)
+        return target
+
+    def write_bytes(self, relative, data):
+        """바이트를 그대로 쓴다(원본 응답 보관용) — 경로 규칙과 임시 파일 교체는 `write` 와 같다."""
+        target = self.target(relative)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_name(target.name + ".tmp")
+        tmp.write_bytes(data)
         tmp.replace(target)
         return target
 
@@ -498,6 +516,75 @@ def _result(attempt, outcome, reasons, validation_reason, gate_input, facts, ite
 
 
 # ----------------------------------------------------------------------------
+# 원본 응답 보관(S2C0-c) — 받은 바이트를 SHADOW_OUT 아래에만 남긴다(읽는 코드는 없다)
+# ----------------------------------------------------------------------------
+def _run_clock(now):
+    """공급 함수가 어댑터에 넘기는 수집 시각(협정 세계시 `YYYY-MM-DDTHH:MM:SSZ`)과 글을 내는 날(한국 날짜) — `generator.fact_prepare` 가 쓰는 값과 같다(원본 응답과 함께 색인에 남겨 같은 입력으로 다시 만들 수 있게 한다)."""
+    return now.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), now.date().isoformat()
+
+
+class RawRecorder:
+    """어댑터에 주입하는 transport(`send(url, timeout=, max_bytes=) -> bytes`)를 감싸는 원본 응답 보관기. 받은 바이트는 **한 글자도 바꾸지 않고 그 객체 그대로** 돌려주고, 성공한 응답만 SHADOW_OUT 바로 아래 `raw_<제품 id>.json`
+    으로 쓰며(같은 제품이 또 오면 `_2`·`_3` 을 붙인다) 색인 `raw_index.json`(제품 id·바이트 수·sha256·수집 시각 UTC·남기지 않은 응답과 사유)을 응답마다 다시 쓴다 — 도중에 끝나도 색인은 쓴 파일과 맞는다.
+    새 네트워크 호출은 없다. 요청·응답 머리글과 주소는 남기지 않고 제품 id 만 쓴다(`product_of` 가 우리 제품 표의 주소가 아니면 None → 남기지 않는다). 총 크기에 상한(`RAW_MAX_TOTAL_BYTES`)이 있고 응답 하나가 호출 상한(`max_bytes`)을
+    넘어도 남기지 않는다(어댑터가 거절하는 응답이다). 쓰는 길은 `ShadowWriter` 하나라 경로가 SHADOW_OUT 밖이면 `ShadowViolation` 이고 이 예외는 삼키지 않는다 — 다만 어댑터가 전송 중의 모든 예외를 `OPENER_FAILED` 로 바꾸므로 그 자리에서는 올리지 않고
+    기억했다가 `check` 가 공급이 끝난 뒤 올린다. **보관이 실패해도 본 결과는 그대로다**: 전송 자체의 예외는 그대로
+    올라가고(보관은 성공한 응답만 본다), 그 밖의 보관 실패(디스크·권한 등)는 삼키고 실패 사실을 `problems`·`not_stored` 에 남긴다(`notes()` 가 `run.json` 의 메모로 돌려준다). 이 클래스는 남긴 파일을 읽지 않는다."""
+
+    def __init__(self, send, writer, product_of, retrieved_at, today):
+        self.send, self.writer, self.product_of = send, writer, product_of
+        self.retrieved_at, self.today = retrieved_at, today
+        self.files, self.not_stored, self.problems = [], [], []
+        self.total = 0
+        self.counts = {}
+        self.violation = None
+
+    def __call__(self, url, *, timeout, max_bytes):
+        body = self.send(url, timeout=timeout, max_bytes=max_bytes)
+        try:
+            self._keep(url, body, max_bytes)
+        except ShadowViolation as exc:
+            self.violation = exc      # 삼키지 않는다 — 어댑터의 일반 예외 처리가 삼키지 못하게 여기서 올리지 않고 `check` 가 끝에서 올린다
+        except Exception as exc:      # noqa: BLE001 — 원본 보관이 실패해도 그림자 실행의 본 결과는 그대로다(실패 사실만 메모에 남긴다)
+            self.problems.append(f"원본 응답 보관에 실패했습니다({type(exc).__name__}) — 본 결과에는 영향이 없습니다")
+        return body
+
+    def check(self):
+        """보관 중 읽기 전용 위반(`ShadowViolation`)이 있었으면 올린다 — 호출한 쪽(`run_facts`)이 공급이 끝난 뒤 부른다."""
+        if self.violation is not None:
+            raise self.violation
+
+    def _keep(self, url, body, max_bytes):
+        if not isinstance(body, (bytes, bytearray)):
+            return
+        size, product = len(body), self.product_of(url)
+        if not isinstance(product, str) or _RAW_PRODUCT.fullmatch(product) is None:
+            self.not_stored.append({"product": "unknown", "reason": "UNKNOWN_PRODUCT", "bytes": size})
+        elif size > max_bytes:
+            self.not_stored.append({"product": product, "reason": "TOO_LARGE", "bytes": size})
+        elif self.total + size > RAW_MAX_TOTAL_BYTES:
+            self.not_stored.append({"product": product, "reason": "OVER_TOTAL_LIMIT", "bytes": size})
+        else:
+            data = bytes(body)
+            number = self.counts.get(product, 0) + 1
+            name = f"{RAW_PREFIX}{product}.json" if number == 1 else f"{RAW_PREFIX}{product}_{number}.json"
+            try:
+                self.writer.write_bytes(name, data)
+            except OSError:
+                self.not_stored.append({"product": product, "reason": "WRITE_FAILED", "bytes": size})
+            else:
+                self.counts[product] = number
+                self.total += size
+                self.files.append({"product": product, "file": name, "bytes": size, "sha256": hashlib.sha256(data).hexdigest()})
+        self.writer.write_json(RAW_INDEX_FILE, {"schema": SCHEMA, "retrieved_at": self.retrieved_at, "today_kst": self.today, "total_bytes": self.total, "total_limit_bytes": RAW_MAX_TOTAL_BYTES,
+                                                "responses": self.files, "not_stored": self.not_stored})
+
+    def notes(self):
+        """`run.json` 의 메모로 돌려줄 고정 문장 목록: 보관이 실패한 사실과 남기지 않은 응답(제품 id·사유 코드뿐)."""
+        return list(self.problems) + [f"원본 응답을 남기지 않았습니다({item['product']}, {item['reason']})" for item in self.not_stored]
+
+
+# ----------------------------------------------------------------------------
 # 구조화 Fact 분기(AI 없음)
 # ----------------------------------------------------------------------------
 def facts_branch_on():
@@ -510,19 +597,25 @@ def facts_branch_on():
 
 def run_facts(g, config, languages, writer, out, count, notes):
     """그림자 실행의 구조화 Fact 분기(읽기 전용 구간 안에서 부른다). 켜기 전 안전장치(`g.fact_context` — 하나라도 아니면 후보 0건으로 끝)를 지나면 `g.fact_prepare`(일반 실행과 같은 공급 함수)로 후보를 count 건까지
-    만들고, 후보마다 최소 품질 Gate 를 돌려 결과를 SHADOW_OUT 아래에 쓴다(형식은 일반 그림자 실행과 같다: 번호 폴더의 글 파일·result.json, 맨 위 run.json). AI 는 부르지 않는다. 돌려주는 값: run.json 내용."""
+    만들고, 후보마다 최소 품질 Gate 를 돌려 결과를 SHADOW_OUT 아래에 쓴다(형식은 일반 그림자 실행과 같다: 번호 폴더의 글 파일·result.json, 맨 위 run.json). AI 는 부르지 않는다. 받은 원본 응답은 transport 를 감싸 `raw_<제품 id>.json`·`raw_index.json` 으로 함께 남긴다(S2C0-c). 돌려주는 값: run.json 내용."""
     history = g.read_history()
     now = g.now_kst()
     problems, sources, provider, access = g.fact_context(now)
     out(f"[그림자] 구조화 Fact 분기를 시작합니다(후보 {count}건까지, AI 호출 없음, 결과 폴더는 저장소 밖 임시 폴더).")
-    prepared, fact_notes = [], []
+    prepared, fact_notes, recorder = [], [], None
     if problems:
         out("::notice::[그림자] 구조화 Fact 분기를 시작하지 않습니다 — " + _line(" / ".join(problems), 300))
     else:
-        prepared, supplied = g.fact_prepare(now, history, sources, provider, access, limit=count, gate_config=None)
+        retrieved_at, today_text = _run_clock(now)
+        recorder = RawRecorder(g.make_fact_transport(sources), writer, g.fact_supply.product_id_of_url, retrieved_at, today_text)      # S2C0-c: 같은 transport 를 감싸 받은 바이트를 결과 폴더에 남긴다(새 호출 없음)
+        prepared, supplied = g.fact_prepare(now, history, sources, provider, access, limit=count, gate_config=None, transport=recorder)
+        recorder.check()
         fact_notes = g.fact_notes(supplied)
     for note in fact_notes:
         out(f"[그림자] {_line(note, 200)}")
+    raw_notes = recorder.notes() if recorder is not None else []
+    if recorder is not None and recorder.files:
+        out(f"[그림자] 받은 원본 응답 {len(recorder.files)}건({recorder.total} 바이트)을 결과 폴더에 남겼습니다({RAW_INDEX_FILE}) — 새 네트워크 호출은 없습니다")
     summaries = []
     for attempt, item in enumerate(prepared, start=1):
         folder, stamp, post = attempt_folder(attempt), attempt_stamp(now, attempt), item.post
@@ -539,7 +632,7 @@ def run_facts(g, config, languages, writer, out, count, notes):
     attempts = len(prepared)
     passed = sum(1 for summary in summaries if summary["passed"])
     run_info = {"schema": SCHEMA, "requested": count, "attempts": attempts, "passed": passed, "held_or_rejected": attempts - passed, "languages": list(languages),
-                "outcome": "COMPLETED" if attempts else "NO_CANDIDATES", "lanes_tried": [g.FACT_LANE_LABEL], "notes": list(notes) + [_line(text, 200) for text in problems + fact_notes],
+                "outcome": "COMPLETED" if attempts else "NO_CANDIDATES", "lanes_tried": [g.FACT_LANE_LABEL], "notes": list(notes) + [_line(text, 200) for text in problems + fact_notes + raw_notes],
                 "generated_at": now.isoformat(), "attempts_summary": summaries}
     writer.write_json(RUN_FILE, run_info)
     out(f"SHADOW_DONE attempts={attempts} passed={passed} held_or_rejected={attempts - passed}")

@@ -14,9 +14,13 @@ from unittest import mock
 import _bootstrap  # noqa: F401
 import fact_branch_helpers as FB
 import generator as g
+import hold_helpers as HH
 
 from pipeline import ai_guard, draft_flow, drafts, health, inbox, provenance, publish_lock, registry, source_policy, state
 from pipeline import fact_candidates as K
+
+# S2C0-a: 이 모듈은 임시 제외·처음 낼 글감과 상관없는 정책(글감 여섯 전부)을 시험한다 — 두 상수를 비운 이전 동작으로 돌린다(단언은 하나도 바꾸지 않았다). 기본 상수의 동작은 tests/test_fact_hold.py 가 시험한다
+setUpModule, tearDownModule = HH.module_fixtures()
 
 
 class ReadersBase(FB.FactEnv):

@@ -15,9 +15,13 @@ from unittest import mock
 import _bootstrap  # noqa: F401
 import fact_branch_helpers as FB
 import generator as g
+import hold_helpers as HH
 
 from pipeline import fact_supply, quality_gate, registry, shadow_run
 from pipeline.adapters import noaa_swpc as N
+
+# S2C0-a: 이 모듈은 임시 제외·처음 낼 글감과 상관없는 정책(글감 여섯 전부)을 시험한다 — 두 상수를 비운 이전 동작으로 돌린다(단언은 하나도 바꾸지 않았다). 기본 상수의 동작은 tests/test_fact_hold.py 가 시험한다
+setUpModule, tearDownModule = HH.module_fixtures()
 
 
 def snapshot(folder):
@@ -77,7 +81,8 @@ class ShadowFactsRunTest(ShadowFactsBase):
         results = self.results()
         self.assertEqual(sorted(results), ["01", "02", "03"])
         names = sorted(str(path.relative_to(self.out_dir)).replace("\\", "/") for path in self.out_dir.rglob("*") if path.is_file())
-        self.assertEqual(names, ["01/2026-11-10-KR-101200.md", "01/result.json", "02/2026-11-10-KR-101201.md", "02/result.json", "03/2026-11-10-KR-101202.md", "03/result.json", "run.json"])
+        self.assertEqual(names, ["01/2026-11-10-KR-101200.md", "01/result.json", "02/2026-11-10-KR-101201.md", "02/result.json", "03/2026-11-10-KR-101202.md", "03/result.json",
+                                 "raw_index.json", "raw_kp_estimated.json", "raw_scales.json", "raw_xray_flares.json", "run.json"])          # S2C0-c: 받은 원본 응답 셋(제품마다 한 파일)과 색인이 SHADOW_OUT 바로 아래에 더해졌다 — 나머지는 그대로다
         self.assertTrue(any(line.startswith("SHADOW_DONE attempts=3") for line in lines), lines)
         self.assertFalse(any("EN" in name for name in names))
         for number, result in results.items():

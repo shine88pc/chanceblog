@@ -2944,10 +2944,11 @@ def fact_history_entry(item, now, slot):
 
 
 def fact_notes(result):
-    """공급 결과를 사람이 읽는 줄로(고정 글자뿐 — 글감 이름·사유 코드): 건너뛴 글감마다 한 줄, 기다리는 글감이 있으면 한 줄."""
+    """공급 결과를 사람이 읽는 줄로(고정 글자뿐 — 글감 이름·사유 코드): 건너뛴 글감마다 한 줄, 기다리는 글감이 있으면 한 줄, 어댑터가 쓰지 않고 버린 행(오늘 날짜 행 등 — S2C0-b)이 있으면 제품마다 한 줄."""
     notes = [f"Fact 글감 {spec_id} 건너뜀: {code}" for spec_id, code in result.skipped]
     if result.waiting:
         notes.append(f"Fact 글감 {result.waiting} 은(는) 일별 제품의 협정 세계시 하한 때문에 기다림")
+    notes.extend(f"Fact 제품 {note}" for note in result.notes)
     return notes
 
 

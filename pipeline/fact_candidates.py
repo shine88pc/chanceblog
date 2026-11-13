@@ -19,7 +19,12 @@
 (Kp·플레어·등급은 7일, 월 글감 두 제품은 한 달 주기 28일) ⑤ 요일 대기는 월 글감(달의 일)에만 남는다 — 주 글감은 그 주 어느 요일에나 낼 수 있어야 주 상한 1–2편에서도 모든 글감이 차례가 온다(D-231).
 시각은 읽지 않는다(오늘과 협정 세계시 분은 인자). `plan_candidates` 와 `representative` 는 이전 그대로 두고 S2a 시험도 그대로다.
 
-설명: docs/FACT_PATH.md §14·§15
+**S2c-0(S2C0-a) — 재개 직후 글감 순서 안전장치**: 이력에 Fact 글이 없으면 글감 순서(`order`)가 앞선 글감부터 나와 처음 글이 가장 얇은 주간 글감(Kp 일별·플레어·Kp 폭풍 기준·등급 현황)으로 쏠린다.
+`HELD_SPEC_IDS`(기본 `scales_weekly`·`kp_storm_weekly`)에 든 글감은 `select_candidates` 가 후보에서 빼고(수집 호출도 하지 않는다) `FIRST_SPEC_IDS`(기본 `sunspot_monthly_monthly`)는 이력에 한 번도 안 낸
+글감들 사이에서 먼저 나온다. 이력은 그대로 읽는다 — 제외한 글감의 지난 글도 묶음 닫힘·같은 제품 간격에 그대로 쓰이고, 제외했다고 '낸 것'으로 세지 않는다. 두 상수를 빈 튜플로 바꾸면 이전 동작과 바이트까지 같다.
+`plan_candidates`(S2a)와 `order` 값은 바꾸지 않았다.
+
+설명: docs/FACT_PATH.md §14·§15·§16
 """
 import datetime
 import re
@@ -170,6 +175,9 @@ def week_start(today):
 # S2b: 이력의 발행일을 읽는 후보 선택
 # ----------------------------------------------------------------------------
 SPEC_BY_ID = {spec.spec_id: spec for spec in SPECS}
+# S2c-0(S2C0-a): 재개 직후 글감 순서 안전장치 — 값이 없으면(빈 튜플) 이전 동작과 바이트까지 같다. 되돌리기는 이 두 줄을 빈 튜플로 바꾸는 것뿐이다. docs/FACT_PATH.md §16·docs/S2C_PLAN.md
+HELD_SPEC_IDS = ("scales_weekly", "kp_storm_weekly")       # 보강(S2c-1·2) 전까지 후보에서 임시로 뺀 얇은 글감: 등급 현황(표 재배열뿐)·Kp 폭풍 기준(같은 Kp 파일로 일별 최대값 글과 겹침). 수집 호출도 하지 않는다
+FIRST_SPEC_IDS = ("sunspot_monthly_monthly",)             # 이력에 한 번도 안 낸 글감들 사이에서 먼저 낼 글감(목록 순서대로) — 이력이 비었을 때 첫 글을 가장 나은 글감으로. 이미 낸 글감의 순서·`order` 값은 건드리지 않는다
 WINDOW_DAYS = {"kp_estimated": 7, "xray_flares": 7, "scales": 7, "ssn_daily": 28, "ssn_monthly": 28}      # 같은 제품을 읽은 두 글 사이의 최소 간격(일) = 글이 읽는 자료 창 길이(주 글감은 7일, 월 글감은 한 달 주기)
 DEFAULT_WINDOW_DAYS = 7
 NOT_BEFORE_UTC_MINUTES = {"ssn_daily": 30}           # 일별 제품은 협정 세계시 0시 30분 이후에 읽는다(조사 보고서 H8 — 레지스트리 자체 상한 `daily_product_not_before_utc`)
@@ -229,11 +237,21 @@ def _spaced(spec, day, last_read):
     return True
 
 
+def _first_rank(spec, last):
+    """정렬 키의 둘째 칸(S2C0-a): **이력에 한 번도 안 낸 글감 사이에서만** FIRST_SPEC_IDS 에 든 글감이 먼저다(목록 순서대로). 나머지 글감과 이미 낸 글감은 모두 같은 값이라 글감 순서(`order`)가 그대로 이긴다 —
+    FIRST_SPEC_IDS 가 비면 모든 글감이 같은 값(0)이라 정렬 결과가 이전과 같다."""
+    if spec.spec_id in last or spec.spec_id not in FIRST_SPEC_IDS:
+        return len(FIRST_SPEC_IDS)
+    return FIRST_SPEC_IDS.index(spec.spec_id)
+
+
 def select_candidates(today, made, minutes_utc=None):
     """오늘 낼 수 있는 후보를 **먼저 낼 차례** 순서로(순수 함수 — 시각은 인자). 대상: 이번 기간에 같은 묶음에서 아직 내지 않았고, 자료가 준비됐고(`_data_ready`), 같은 제품을 읽은 지난 글과 자료 창 길이만큼 떨어진 글감.
     순서: 이력에서 가장 오래 전에 낸 글감이 먼저(한 번도 안 낸 글감이 맨 앞, 같으면 글감 순서), 같은 묶음의 글감은 묶음에서 가장 앞선 글감의 자리에 이어 붙여 묶음 안 폴백이 한 번 받은 응답을 다시 쓰게 한다.
+    `HELD_SPEC_IDS` 의 글감은 대상이 아니고(S2C0-a) 한 번도 안 낸 글감 사이에서는 `FIRST_SPEC_IDS` 의 글감이 먼저다.
     minutes_utc(그날 협정 세계시 0시부터의 분)를 주면 일별 제품(`NOT_BEFORE_UTC_MINUTES`)을 읽는 글감은 그 시각 전에는 `ready=False` 로 돌려준다(차례를 건너뛰지 않고 기다리게 하려는 표시 — 판단은 공급 함수의 일)."""
     day = F.as_date(today)
+    held = frozenset(HELD_SPEC_IDS)          # 임시 제외(S2C0-a): 후보 목록에서만 뺀다 — 아래 closed·last_read 는 이력 전체를 그대로 읽는다(제외한 글감도 이력에 남은 글은 '낸 것'이고, 제외했다고 '낸 것'이 되지는 않는다)
     closed = {GROUP_OF[spec.spec_id] for spec in SPECS if candidate_key(spec, day) in made.keys}
     last_read = {}
     for spec in SPECS:
@@ -242,8 +260,8 @@ def select_candidates(today, made, minutes_utc=None):
             if product not in last_read or when > last_read[product]:
                 last_read[product] = when
     eligible = [spec for spec in sorted(SPECS, key=lambda item: item.order)
-                if len(spec.products) <= MAX_PRODUCTS_PER_POST and GROUP_OF[spec.spec_id] not in closed and _data_ready(spec, day) and _spaced(spec, day, last_read)]
-    eligible.sort(key=lambda spec: (made.last.get(spec.spec_id, datetime.date.min), spec.order))
+                if spec.spec_id not in held and len(spec.products) <= MAX_PRODUCTS_PER_POST and GROUP_OF[spec.spec_id] not in closed and _data_ready(spec, day) and _spaced(spec, day, last_read)]
+    eligible.sort(key=lambda spec: (made.last.get(spec.spec_id, datetime.date.min), _first_rank(spec, made.last), spec.order))
     out, placed = [], set()
     for spec in eligible:
         group = GROUP_OF[spec.spec_id]
