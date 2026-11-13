@@ -411,7 +411,7 @@ SRC 가 `pipeline/source_registry.py` 에서 `Registry.get(provider_id) -> Provi
 | `kp_outlook` Kp 예보 포함 | `/products/noaa-planetary-k-index-forecast.json` | `time_tag`·`kp`·`observed`·`noaa_scale` | `observed` 는 세 값(observed·estimated·predicted)뿐 · `noaa_scale` 은 null 이나 G1–G5 | 구간의 `observed` 값 그대로 — 관측 구간은 `kp_estimated`, 추정·예보 구간은 `kp_outlook`, 등급 라벨은 `interval_scale_*` | 예보 구간이 관측 구간보다 시각이 앞섬 · 관측이라는 구간이 미래 · 시각이 수집 시각에서 400일 넘게 과거거나 30일 넘게 미래 · 위와 같음 |
 | `scales` NOAA 우주기상 등급 | `/products/noaa-scales.json` | 키 `-1`·`0`·`1`·`2`·`3` 와 `DateStamp`·`TimeStamp`·`R`·`S`·`G` 전체 | 전부 따옴표 문자열이거나 null · **'0' 은 값 0(등급 없음)** · 등급 0–5·확률 0–100 정수 | 어제·지금은 `observed`, 향후 3일은 `predicted` | 키 집합이 다름 · 값이 문자열이 아님 · 날짜가 거꾸로이거나 '지금' 칸이 수집일과 하루 넘게 어긋난 오래된 파일 |
 | `ssn_daily` SWPC 일별 흑점수 | `/json/solar-cycle/swpc_observed_ssn.json` | `Obsdate`(자정 시각)·`swpc_ssn` | **레코드 없음 = 그날이 없음**(채워 넣지 않는다) · null·-1 은 값 없음 · 정수 0–1000 · 최근 400일만 Fact | `observed` | 칸 이름 · 자정이 아닌 시각 · 소수 · 범위 밖 · 미래 날짜 · 같은 날 두 번 · 원자료 행 3만 초과(`TOO_MANY_ROWS`) |
-| `ssn_monthly` 월별 태양주기 지수 | `/json/solar-cycle/observed-solar-cycle-indices.json` | `time-tag`·`observed_swpc_ssn`·`smoothed_swpc_ssn` **만** — 제3자 필드(`ssn`·`smoothed_ssn`·`f10.7`·`smoothed_f10.7`)는 이름만 알 뿐 **값을 읽지도 Fact 로 만들지도 않는다** | -1.0·null 은 값 없음 · 최근 60개월만 Fact | `observed` · 최근 6개월은 `quality=provisional` | 필수 칸이 없거나 모르는 칸이 있음 · 월 형식 · 미래 달 · 같은 달 두 번 |
+| `ssn_monthly` 월별 태양주기 지수 | `/json/solar-cycle/observed-solar-cycle-indices.json` | `time-tag`·`observed_swpc_ssn`·`smoothed_swpc_ssn` **만** — 제3자 필드(`ssn`·`smoothed_ssn`·`f10.7`·`smoothed_f10.7`)는 이름만 알 뿐 **값을 읽지도 Fact 로 만들지도 않는다** | -1.0·null 은 값 없음 · 최근 360개월(30년)만 Fact(S2c-1 이 60 에서 늘렸다 — §16-7) | `observed` · 최근 6개월은 `quality=provisional` | 필수 칸이 없거나 모르는 칸이 있음 · 월 형식 · 미래 달 · 같은 달 두 번 |
 | `xray_flares` GOES X선 플레어 7일 | `/json/goes/primary/xray-flares-7-day.json` | `max_time`·`max_class`·`satellite`(나머지 아홉 칸은 이름만 확인) | 등급은 `[ABCMX]` + 수(예 `M2.1`) · 세기는 등급에서 정수 nW/㎡ 로(A1.0 = 10, M1.0 = 10,000) | `observed` · 꼬리표 `satellite` | 칸 이름 · `Z` 가 없는 시각 · 등급 형식 · 위성 번호 · 미래 시각 · 같은 시각 두 번 |
 
 공통: 시각은 모두 UTC 로 고정한다(시간대 표기가 없는 시각은 UTC 로 보고 `Z` 를 붙인다) · 시각으로 정렬해 입력 순서가 달라도 같은 Fact 가 나온다 · 오류 문구에 값·주소·응답 본문이 없다(행 번호뿐) · 모든 Fact 의 꼬리표에 `producer=NOAA`. 글에 밝히는 공식 데이터 이름은 어댑터의 낱말 표(`product_source_name`)에서 온다 — 제공처 설명 문장·로고·NWS 명칭은 어디에도 없다.
@@ -437,7 +437,7 @@ SRC 가 `pipeline/source_registry.py` 에서 `Registry.get(provider_id) -> Provi
 
 | Recipe | 글감(`params["key"]`) | 계산식 | 제목 틀(값 없음) | 최소 입력 |
 |---|---|---|---|---|
-| `R04_NOREGION_SERIES` 지역 없는 시계열 | 일별 최대 Kp(`kp_estimated` — 하루 구간이 모두 있는 날만 F15 로 일 값)·SWPC 일별 흑점수(7일 평균·30일 평균을 그 앞 30일 평균과 견줌)·월평균 흑점수(전년 같은 달 대비·평활값 열·잠정치 표시 열) | F01 F02 F03 F06 F07 F09 F10 F12 F15 | 이름 일별 최대값·추이, 처음 기준일부터 끝 기준일까지 — 숫자로 읽기 | 값이 있는 기간 5·10·8개(글감별) |
+| `R04_NOREGION_SERIES` 지역 없는 시계열 | 일별 최대 Kp(`kp_estimated` — 하루 구간이 모두 있는 날만 F15 로 일 값)·SWPC 일별 흑점수(7일 평균·30일 평균을 그 앞 30일 평균과 견줌)·월평균 흑점수(전년 같은 달 대비·평활값 열·잠정치 표시 열 + S2c-1: 최근 12개월 평균과 그 앞 12개월 평균 비교·같은 달 순위·마지막으로 낮았던 달·같은 달 해마다 표 — §16-7) | F01 F02 F03 F06 F07 F09 F10 F12 F15 F17 F18 F19 | 이름 일별 최대값·추이, 처음 기준일부터 끝 기준일까지 — 숫자로 읽기 | 값이 있는 기간 5·10·8개(글감별) |
 | `R05_THRESHOLD_COUNT` 기준 이상 개수 | 폭풍 기준 이상인 날·구간(`kp_estimated` + 기준값 `kp_storm_threshold`)·플레어 등급별 건수(`xray_flare_flux` + 등급 하한 다섯 개) | F07 F09 F10 F12 F15 F16 | 이름 기준 이상인 날 수, …까지 · 이름별 건수, 수집일 기준 — 숫자로 읽기 | 구간이 모두 있는 날 5일 · 플레어 5건 |
 | `R06_SCALE_OUTLOOK` 등급 현황과 예보 | 어제·지금의 전파 교란·방사선 폭풍·지자기 폭풍 등급과 향후 3일 확률·등급 예보 | F01 F07 F09 F12 | NOAA 우주기상 등급 현황과 예보, 기준일 — 숫자로 읽기 | 예보 날짜 2일 |
 

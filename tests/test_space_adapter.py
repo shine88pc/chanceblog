@@ -735,6 +735,65 @@ class TodayRowTest(unittest.TestCase):
         reject(self, "scales", scales)
 
 
+def month_tag(index):
+    """YYYY-MM 글자(index 는 연 * 12 + 달 - 1)."""
+    return f"{index // 12:04d}-{index % 12 + 1:02d}"
+
+
+class MonthlyKeepTest(unittest.TestCase):
+    """S2c-1: 월별 지수는 가장 최근 달에서 360개월(30년)까지 Fact 로 보관한다(전에는 60개월) — 같은 달 순위·마지막으로 낮았던 달이 더 긴 기록을 읽으려는 것이다. 제3자 필드는 여전히 읽지 않는다."""
+    LAST = 2026 * 12 + 9          # 2026-10
+
+    def observed(self, facts):
+        return [fact for fact in facts if fact.key == "space_weather.sunspot_monthly_swpc"]
+
+    def smoothed(self, facts):
+        return [fact for fact in facts if fact.key == "space_weather.sunspot_monthly_smoothed_swpc"]
+
+    def test_the_constant_is_360_months_and_the_provisional_count_is_unchanged(self):
+        self.assertEqual(N.SSN_MONTHLY_KEEP_MONTHS, 360)
+        self.assertEqual(N.PROVISIONAL_MONTHS, 6)
+        self.assertLess(2 * N.SSN_MONTHLY_KEEP_MONTHS, B.MAX_ROWS)                                               # Fact 수(관측+평활)는 어댑터 행 상한 안이다
+
+    def test_exactly_the_latest_360_months_are_kept_when_the_file_is_longer(self):
+        rows = H.ssn_monthly_rows("2026-10", 400)
+        _record, facts = H.parse_value("ssn_monthly", rows)
+        observed, smoothed = self.observed(facts), self.smoothed(facts)
+        self.assertEqual((len(observed), len(smoothed), len(facts)), (360, 360, 720))
+        self.assertEqual([fact.as_of for fact in observed], [month_tag(index) for index in range(self.LAST - 359, self.LAST + 1)])      # 1996-11 … 2026-10, 이어지고 한 달도 겹치지 않는다
+        self.assertEqual(observed[0].as_of, "1996-11")
+        self.assertEqual([fact.as_of for fact in smoothed], [fact.as_of for fact in observed])
+        self.assertNotIn("1996-10", {fact.as_of for fact in facts})                                                # 361번째로 오래된 달은 버린다
+        self.assertEqual(F.validate_bundle(F.FactBundle((_record,), tuple(facts))), [])
+
+    def test_a_file_as_long_as_the_real_one_is_kept_whole(self):
+        rows = H.ssn_monthly_rows("2026-10", 358)                                                               # 1997-01 부터 2026-10 까지 358개월(조사 보고서가 확인한 길이)
+        _record, facts = H.parse_value("ssn_monthly", rows)
+        observed = self.observed(facts)
+        self.assertEqual((len(observed), observed[0].as_of, observed[-1].as_of), (358, "1997-01", "2026-10"))
+        values = [Decimal(str(row["observed_swpc_ssn"])) for row in rows]
+        self.assertEqual([fact.value for fact in observed], values)                                              # 값도 한 달씩 그대로
+        for count in (1, 60, 61, 359, 360, 361):
+            with self.subTest(rows=count):
+                _r, kept = H.parse_value("ssn_monthly", H.ssn_monthly_rows("2026-10", count))
+                self.assertEqual(len(self.observed(kept)), min(count, 360))
+
+    def test_the_provisional_mark_is_still_only_on_the_latest_six_months_and_third_party_fields_are_still_not_read(self):
+        _record, facts = H.parse_value("ssn_monthly", H.ssn_monthly_rows("2026-10", 400))
+        provisional = sorted({fact.as_of for fact in facts if fact.meta_value("quality") == "provisional"})
+        self.assertEqual(provisional, [month_tag(index) for index in range(self.LAST - 5, self.LAST + 1)])
+        self.assertEqual({fact.key for fact in facts}, {"space_weather.sunspot_monthly_swpc", "space_weather.sunspot_monthly_smoothed_swpc"})
+        self.assertEqual({fact.meta_value("producer") for fact in facts}, {"NOAA"})
+
+    def test_the_current_month_row_is_still_left_out_before_the_keep_is_counted(self):
+        rows = H.ssn_monthly_rows("2026-10", 400)
+        current = dict(rows[-1], **{"time-tag": "2026-11"})
+        _record, facts = H.parse_value("ssn_monthly", rows + [current])
+        observed = self.observed(facts)
+        self.assertEqual((len(observed), observed[0].as_of, observed[-1].as_of), (360, "1996-11", "2026-10"))      # 이번 달(2026-11) 행은 보관 창을 정하는 데 들어가지 않는다
+        self.assertNotIn("2026-11", {fact.as_of for fact in facts})
+
+
 class LimitsTest(unittest.TestCase):
     def test_too_large_too_deep_and_too_many_rows(self):
         raw = H.fixture_bytes(H.FIXTURE_FILES["kp_estimated"])
@@ -776,11 +835,13 @@ class LimitsTest(unittest.TestCase):
         self.assertEqual(F.validate_bundle(F.FactBundle((record,), tuple(facts))), [])
         reject(self, "ssn_daily", H.ssn_daily_rows("2026-11-09", 150), "TOO_MANY_ROWS", max_rows=100)
 
-    def test_the_monthly_window_is_sixty_months_with_six_provisional(self):
+    def test_the_monthly_window_is_360_months_with_six_provisional(self):
+        """S2c-1: 보관 창을 60개월에서 360개월로 늘렸다(옛 이름 `…_is_sixty_months_…`, 옛 기대 값 120·60·2021-11) — 같은 3334행 입력에서 새 기대 값을 정확히 못박는다."""
         rows = H.ssn_monthly_rows("2026-10", 3334)
         _record, facts = H.parse_value("ssn_monthly", rows)
         observed = [f for f in facts if f.key == "space_weather.sunspot_monthly_swpc"]
-        self.assertEqual((len(facts), len(observed), observed[0].as_of, observed[-1].as_of), (120, 60, "2021-11", "2026-10"))
+        self.assertEqual((len(facts), len(observed), observed[0].as_of, observed[-1].as_of), (720, 360, "1996-11", "2026-10"))
+        self.assertEqual(len(observed), N.SSN_MONTHLY_KEEP_MONTHS)
         self.assertEqual([f.as_of for f in observed if f.meta_value("quality") == "provisional"], [f"2026-{month:02d}" for month in range(5, 11)])
 
 

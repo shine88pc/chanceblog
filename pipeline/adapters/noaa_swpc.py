@@ -9,7 +9,7 @@
 | `kp_outlook` Kp 예보 포함 | `time_tag`·`kp`·`observed`·`noaa_scale` | `kp_estimated`(관측 구간) · `kp_outlook`(추정·예보 구간) · `interval_scale_observed`·`interval_scale_outlook` · 기준값 |
 | `scales` NOAA 우주기상 등급 | 전체(따옴표 문자열·null) | `daily_scale_*`(어제·지금) · `outlook_scale_geomagnetic`·`outlook_prob_*`(향후 3일) |
 | `ssn_daily` SWPC 일별 흑점수 | `Obsdate`·`swpc_ssn` | `sunspot_daily_swpc`(최근 400일) |
-| `ssn_monthly` 월별 태양주기 지수 | `time-tag`·`observed_swpc_ssn`·`smoothed_swpc_ssn` **만** — 제3자 필드(`ssn`·`smoothed_ssn`·`f10.7`·`smoothed_f10.7`)는 값을 읽지도 Fact 로 만들지도 않는다 | `sunspot_monthly_swpc`·`sunspot_monthly_smoothed_swpc`(최근 60개월) |
+| `ssn_monthly` 월별 태양주기 지수 | `time-tag`·`observed_swpc_ssn`·`smoothed_swpc_ssn` **만** — 제3자 필드(`ssn`·`smoothed_ssn`·`f10.7`·`smoothed_f10.7`)는 값을 읽지도 Fact 로 만들지도 않는다 | `sunspot_monthly_swpc`·`sunspot_monthly_smoothed_swpc`(최근 360개월) |
 | `xray_flares` GOES X선 플레어 7일 | `max_time`·`max_class`·`satellite`(나머지는 칸 이름만 확인) | `xray_flare_class`·`xray_flare_flux` · 기준값 `xray_class_floor_*` |
 
 처리 규칙: 시각은 모두 UTC 로 고정(시간대 표기가 없는 시각은 UTC 로 보고 `Z` 를 붙인다) · 결측(null·-1·-1.0·SWPC 일별 흑점수의 '레코드 없음')은 값 없음(`None`, 0 이 아니다)으로 통일하고
@@ -35,7 +35,7 @@ FUTURE_SKEW_SECONDS = 900             # 서버와 우리 시계가 어긋나도 
 OUTLOOK_PAST_DAYS = 400               # 예보 파일의 시각이 수집 시각에서 이만큼보다 더 과거이면 정상 자료가 아니다
 OUTLOOK_FUTURE_DAYS = 30              # …이만큼보다 더 미래여도 마찬가지(예보는 3일치)
 SSN_DAILY_KEEP_DAYS = 400             # 일별 흑점수: 가장 최근 날짜에서 이 일수 안의 기록만 Fact 로
-SSN_MONTHLY_KEEP_MONTHS = 60          # 월별 지수: 가장 최근 달에서 이 개월 수 안의 기록만 Fact 로
+SSN_MONTHLY_KEEP_MONTHS = 360         # 월별 지수: 가장 최근 달에서 이 개월 수(30년) 안의 기록만 Fact 로 — S2c-1 이 60 에서 늘렸다(같은 달 순위·마지막으로 낮았던 달이 더 긴 기록을 읽는다)
 PROVISIONAL_MONTHS = 6                # 월별 지수의 최근 이 개월은 잠정치
 KP_STORM_THRESHOLD = Decimal(5)       # NOAA 지자기 폭풍 첫 등급(G1)에 해당하는 Kp — 기준값 Fact 의 값(우리 낱말 표)
 STATUS_OBSERVED, STATUS_ESTIMATED, STATUS_PREDICTED, STATUS_REFERENCE = "observed", "estimated", "predicted", "reference"
