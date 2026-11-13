@@ -1246,6 +1246,15 @@ class MonthlyLongRecordTest(unittest.TestCase):
         self.assertEqual(second_table(post)[:3], [(2025, 10, Decimal(100), Decimal(0)), (2024, 10, Decimal(120), Decimal(-20)), (2023, 10, Decimal(100), Decimal(0))])
         self.check_against_plain(values, post, "ties")
 
+    def test_nearly_equal_values_of_the_same_month_get_different_ranks_in_the_post(self):
+        """S2C1B D-345: 같은 달 값이 소수 둘째 자리에서만 다르면(100.30·100.40·100.31·99.99) 순위도 다르다 — 반올림한 값으로 매기면 모두 같은 순위가 된다. 같은 값(100.30)은 앞서지 않는다."""
+        values = values_with(60, {"2022-10": 100.30, "2023-10": 99.99, "2024-10": 100.31, "2025-10": 100.40, "2026-10": 100.30}, base=200.0)
+        post = monthly_post(values)
+        self.assertIsInstance(post, A.AssembledPost, post)
+        rank = self.RANK_RE.search(post.body_markdown)
+        self.assertEqual((int(rank.group(1)), int(rank.group(2))), (5, 3))                          # 100.40·100.31 이 더 높다 — 같은 달 5년 가운데 3위
+        self.check_against_plain(values, post, "near")
+
     def test_the_months_ago_counts_whole_months_across_a_year_boundary(self):
         values = values_with(40, {"2025-11": 90.0, "2025-12": 150.0, "2026-01": 100.0}, base=200.0, last_month="2026-01")
         post = monthly_post(values, "2026-01", retrieved_at="2026-02-10T01:10:00Z", today="2026-02-10")
@@ -1397,6 +1406,159 @@ class MonthlyCountWindowTest(unittest.TestCase):
         ctx = R.PlanContext(RN.R04_NOREGION_SERIES, tuple(sorted(facts, key=lambda fact: fact.fact_id)), F.as_date(H.TODAY), {"key": "space_weather.sunspot_daily_swpc"})
         draft = RN.R04_NOREGION_SERIES.plan(ctx)
         self.assertEqual((draft.slots["n_all"].value, draft.slots["n_all"].unit), (Decimal(69), "개"))      # 빠진 날이 있는 일별 자료는 69일이 아니라 관측 69개 — 옛 동작 그대로
+
+
+def monthly_post_from_rows(rows):
+    """월별 응답 행 → 글. `monthly_post` 와 같지만 행을 직접 고친 입력(마지막 달 값이 비는 것 같은)을 넣을 때 쓴다."""
+    record, facts = H.parse_value("ssn_monthly", rows)
+    return A.assemble(RN.R04_NOREGION_SERIES, facts, H.TODAY, records=[record], source=test_source(), params={"key": MONTHLY_KEY})
+
+
+def draft_of_product(product, rows, key):
+    """제품 응답 행 → 글로 조립하기 전의 초안(Draft). 첫 문단 후보(`leads`)와 칸 값(`slots`)을 직접 본다."""
+    record, facts = H.parse_value(product, rows)
+    ctx = R.PlanContext(RN.R04_NOREGION_SERIES, tuple(sorted(facts, key=lambda fact: fact.fact_id)), F.as_date(H.TODAY), {"key": key})
+    draft = RN.R04_NOREGION_SERIES.plan(ctx)
+    if not isinstance(draft, R.Draft):
+        raise AssertionError(draft)
+    return draft
+
+
+class MonthlyReadScopeTest(unittest.TestCase):
+    """S2C1B D-344: 월별 글의 첫 문단이 말하는 '읽은 범위'(`n_all`)는 표 창(12개월)이라 '이 글이 읽은' 이 아니라 '표에 실은' 이라 쓴다.
+    같은 글의 '이 글이 읽은 같은 달 30년'·'이 글이 읽은 자료'는 읽은 기록 전체(360개월)를 가리키므로, 한 글 안에서 '이 글이 읽은' 이 서로 다른 범위를 가리키지 않는다.
+    어긋남은 드문 길에서만 나왔다 — 기본 틀 문장이 60자에 못 미칠 때(값이 한 자리 정수)·표 창 안에 빈칸이 있을 때 — 그 길을 재현해 지킨다. 소수 둘째 자리의 실제 모양(골든)은 이 덧말을 쓰지 않아 바뀌지 않는다."""
+    SEEDS = (0, 2, 4, 5)              # 358개월 한 자리 정수 값에서 기본 틀이 짧아 덧말 변형이 나오는 시드(독립 검증자의 재현)
+    TABLE_SPAN = re.compile(r"\(\d{4}년 \d+월 기준, 표에 실은 (관측 )?(\d+)(개월|개) 자료의 마지막 값\)\.$")
+    OLD_SCOPE = re.compile(r"이 글이 읽은 (?:관측 )?\d+(?:개월|개)")                    # 표 창의 개수를 '읽은 범위' 처럼 말하던 옛 문구
+    ALLOWED_AFTER_READ = re.compile(r"^(?:같은|자료|\d+년)")                              # 글에 남는 '이 글이 읽은' 은 읽은 기록 전체(같은 달 N년·자료·N년)만 가리킨다
+    ALLOWED_LATIN = {"NOAA", "SWPC", "UTC"}
+
+    @staticmethod
+    def one_digit(seed, count=358):
+        rng = random.Random(seed)
+        return [rng.randint(0, 9) for _ in range(count)]
+
+    def table_values(self, post):
+        """월별 표(첫째 표)의 (값이 있는 줄 수, 전체 줄 수) — 같은 달 해마다 표는 세지 않는다."""
+        lines = post.body_markdown.split("\n")
+        start = next(index for index, line in enumerate(lines) if line.startswith("| 기준 기간 | 값 | 바로 앞 기간 대비 증감"))
+        rows = []
+        for line in lines[start + 2:]:
+            if not line.startswith("|"):
+                break
+            rows.append([cell.strip() for cell in line.strip("|").split("|")])
+        return sum(1 for row in rows if row[1] != R.MISSING_CELL), len(rows)
+
+    def assert_one_scope_in_the_post(self, post, label):
+        whole = post.title + "\n" + post.description + "\n" + post.body_markdown
+        self.assertIsNone(self.OLD_SCOPE.search(whole), label)                                   # 글 어디에도 '이 글이 읽은 12개월'·'이 글이 읽은 관측 N개' 가 없다
+        for found in re.finditer(r"이 글이 읽은 (\S+)", whole):
+            self.assertRegex(found.group(1), self.ALLOWED_AFTER_READ.pattern, (label, found.group(0)))
+        self.assertIn("이 글이 읽은 같은 달", post.body_markdown, label)                          # 새 구역은 읽은 기록 전체를 말한다
+        self.assertEqual(A.post_problems(post, allowed_latin=self.ALLOWED_LATIN), [], label)
+
+    def test_a_one_digit_series_names_the_table_window_in_the_first_paragraph_while_the_body_keeps_the_whole_record_scope(self):
+        for seed in self.SEEDS:
+            post = monthly_post(self.one_digit(seed))
+            with self.subTest(seed=seed):
+                self.assertIsInstance(post, A.AssembledPost, post)
+                found = self.TABLE_SPAN.search(post.description)
+                self.assertIsNotNone(found, post.description)
+                self.assertEqual(found.groups(), (None, "12", "개월"))                            # 빈칸 없는 표 창 — '표에 실은 12개월'
+                self.assertTrue(post.body_markdown.startswith(post.description + "\n\n"))
+                self.assertIn("이 글이 읽은 같은 달 30년 가운데", post.body_markdown)               # 새 구역은 읽은 기록 전체(360개월 = 30년)를 말한다
+                self.assertIn("이 글이 읽은 자료", post.body_markdown)
+                self.assert_one_scope_in_the_post(post, seed)
+
+    def test_the_whole_first_paragraph_of_a_one_digit_series_is_pinned(self):
+        values = [(index * 3) % 10 for index in range(356)] + [7, 5]                              # 난수 없는 한 자리 정수 값 358개월 — 마지막 두 달이 7·5
+        post = monthly_post(values)
+        self.assertIsInstance(post, A.AssembledPost, post)
+        self.assertEqual(post.description, "SWPC 월평균 흑점수의 값은 2026년 9월(7개)보다 2개 낮은 5개입니다(2026년 10월 기준, 표에 실은 12개월 자료의 마지막 값).")
+        self.assertEqual(post.body_markdown.split("\n\n")[0], post.description)
+        self.assert_one_scope_in_the_post(post, "pinned")
+        self.assertEqual((RN.SPAN_READ_ALL, RN.SPAN_READ_TABLE), ("이 글이 읽은", "표에 실은"))      # 말머리 두 말의 글자도 못박는다
+
+    def test_a_hole_inside_the_table_window_says_observations_of_the_table_and_a_hole_far_back_keeps_the_months(self):
+        near = monthly_post(self.one_digit(1), drop=(350,))                                        # 표 창(마지막 12개월) 안의 달 하나가 없다 — 이어지지 않으니 '관측 11개'
+        far = monthly_post(self.one_digit(0), drop=(30,))                                          # 표 창 밖의 먼 달 하나가 없다 — 표 창은 그대로 12개월
+        for label, post, want in (("창 안", near, "표에 실은 관측 11개 자료의 마지막 값"), ("창 밖", far, "표에 실은 12개월 자료의 마지막 값")):
+            with self.subTest(hole=label):
+                self.assertIsInstance(post, A.AssembledPost, post)
+                self.assertTrue(post.description.endswith(f"(2026년 10월 기준, {want})."), post.description)
+                self.assert_one_scope_in_the_post(post, label)
+
+    def test_every_first_paragraph_candidate_of_the_monthly_subject_says_the_table_words_and_the_other_subjects_keep_the_read_words(self):
+        whole = draft_of_product("ssn_monthly", monthly_rows_from(self.one_digit(0)), MONTHLY_KEY)
+        holed = draft_of_product("ssn_monthly", [row for index, row in enumerate(monthly_rows_from(self.one_digit(0))) if index != 350], MONTHLY_KEY)
+        for label, draft, count_words in (("12개월", whole, "표에 실은 ⟦V:n_all⟧⟦U:n_all⟧ 자료의 마지막 값"), ("관측 11개", holed, "표에 실은 관측 ⟦V:n_all⟧⟦U:n_all⟧ 자료의 마지막 값")):
+            spans = [lead for lead in draft.leads if "자료의 마지막 값" in lead]
+            with self.subTest(monthly=label):
+                self.assertGreaterEqual(len(spans), 3)                                             # 덧말 변형 · '마지막 값' 문장 · 최저·최고가 있는 문장 — 글에 거의 뽑히지 않는 후보까지 모두 본다
+                self.assertTrue(any("최저는" in lead for lead in spans))
+                for lead in spans:
+                    self.assertIn(count_words, lead)
+                    self.assertNotIn("이 글이 읽은", lead)
+        daily = draft_of_product("ssn_daily", H.ssn_daily_rows("2026-11-09", 70), "space_weather.sunspot_daily_swpc")
+        gappy = draft_of_product("ssn_daily", H.ssn_daily_rows("2026-11-09", 70, gaps=(20,)), "space_weather.sunspot_daily_swpc")
+        kp = draft_of_product("kp_estimated", H.kp_rows("2026-11-02", 8, storm_days=(2,), partial_last=3), KP_KEY)
+        for label, draft, count_words in (("일별 흑점수", daily, "이 글이 읽은 ⟦V:n_all⟧⟦U:n_all⟧ 자료의 마지막 값"), ("빠진 날 있는 일별 흑점수", gappy, "이 글이 읽은 관측 ⟦V:n_all⟧⟦U:n_all⟧ 자료의 마지막 값"),
+                                          ("Kp", kp, "이 글이 읽은 ⟦V:n_all⟧⟦U:n_all⟧ 자료의 마지막 값")):
+            spans = [lead for lead in draft.leads if "자료의 마지막 값" in lead]
+            with self.subTest(other=label):
+                self.assertGreaterEqual(len(spans), 2)
+                for lead in spans:
+                    self.assertIn(count_words, lead)                                               # 읽은 값 전체를 세는 글감은 옛 말머리 그대로다
+                    self.assertNotIn("표에 실은", lead)
+
+    def test_the_number_in_the_first_paragraph_is_the_number_of_valued_rows_the_table_lists(self):
+        monthly = RN.SERIES_BY_KEY[MONTHLY_KEY]
+        self.assertEqual(monthly.count_window, monthly.table_rows)                                 # '표에 실은' 이라 말하므로 세는 창과 표 창이 같아야 한다
+        for subject in RN.SERIES_SUBJECTS:
+            if subject.count_window > 0:
+                self.assertEqual(subject.count_window, subject.table_rows, subject.key)
+        base = self.one_digit(0)
+        empty_last = monthly_rows_from(base)
+        empty_last[-1]["observed_swpc_ssn"] = -1.0                                                 # 마지막 달 값이 비었다 — 값이 있는 마지막 달(9월) 기준 12개월 + 빈 줄
+        empty_inside = monthly_rows_from(base)
+        empty_inside[-4]["observed_swpc_ssn"] = -1.0                                               # 표 창 안의 한 달 값이 비었다 — 줄은 있으나 값이 없다
+        cases = (("빈칸 없음", monthly_post(base), 12, True, 12), ("창 안 한 달 없음", monthly_post(base, drop=(350,)), 11, False, 11), ("창 안 두 달 없음", monthly_post(base, drop=(351, 348)), 10, False, 10),
+                 ("창 밖 한 달 없음", monthly_post(base, drop=(30,)), 12, True, 12), ("마지막 달 값 없음", monthly_post_from_rows(empty_last), 12, True, 13),
+                 ("창 안 값 없음", monthly_post_from_rows(empty_inside), 11, False, 12), ("열 달만 있음", monthly_post(base[-10:]), 10, True, 10), ("여덟 달만 있음", monthly_post(base[-8:]), 8, True, 8))
+        for label, post, number, months, listed in cases:
+            with self.subTest(case=label):
+                self.assertIsInstance(post, A.AssembledPost, post)
+                found = self.TABLE_SPAN.search(post.description)
+                self.assertIsNotNone(found, post.description)
+                valued, rows = self.table_values(post)
+                self.assertEqual((int(found.group(2)), valued, rows), (number, number, listed))   # 첫 문단의 개수 = 표에서 값이 있는 줄 수
+                self.assertEqual(found.group(3) == "개월", months)                                  # 이어지는 달이면 기간('12개월')·아니면 관측 개수
+                self.assertEqual(found.group(1) is not None, not months)
+
+    def test_every_first_paragraph_candidate_follows_the_text_rules_and_the_same_input_gives_the_same_post(self):
+        rows = monthly_rows_from(self.one_digit(0))
+        for label, drafted in (("12개월", draft_of_product("ssn_monthly", rows, MONTHLY_KEY)), ("관측 11개", draft_of_product("ssn_monthly", [row for index, row in enumerate(rows) if index != 350], MONTHLY_KEY))):
+            for lead in drafted.leads:
+                plain = F.REF_RE.sub("", lead)
+                with self.subTest(case=label, lead=lead[:24]):
+                    self.assertEqual(F.untraced_numbers(lead), [])
+                    self.assertEqual(A.particle_problems(lead), [])
+                    self.assertIsNone(re.search(R.VARYING_PARTICLE_PATTERNS[2], lead))
+                    self.assertEqual(A.forbidden_found(plain), [])
+                    self.assertEqual(A.blocked_found(plain), [])
+                    self.assertNotRegex(lead, r"[~～〜]|https?://|\{|\}")
+                    for claim in ("역대", "기록적", "때문", "원인", "영향", "탓", "예측", "전망", "예상"):
+                        self.assertNotIn(claim, lead)
+        values = self.one_digit(2)
+        self.assertEqual(monthly_post(values), monthly_post(list(values)))                         # 같은 입력은 같은 글 — 말머리는 뜻(세는 창)으로만 갈리고 난수·날짜가 없다
+        self.assertEqual(monthly_post(values, drop=(350,)), monthly_post(values, drop=(350,)))
+
+    def test_the_golden_monthly_post_keeps_its_plain_first_paragraph(self):
+        post = build("r04_ssn_monthly")
+        self.assertTrue(post.description.endswith("(2026년 10월 기준)."))                            # 소수 둘째 자리의 실제 모양은 기본 틀이 60자를 넘어 덧말 변형을 쓰지 않는다
+        self.assertNotIn("표에 실은", post.body_markdown)
+        self.assertIsNone(self.OLD_SCOPE.search(post.body_markdown))
 
 
 class RepeatCleanupTest(unittest.TestCase):
