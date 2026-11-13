@@ -810,7 +810,7 @@ def plan_scale_outlook(ctx):
 
 R04_NOREGION_SERIES = Recipe(
     "R04_NOREGION_SERIES", 1, "지역 없는 시계열",
-    "지역이 없는 한 지표의 일별·월별 시계열(구간 값은 하루 최댓값으로)에서 최신값·바로 앞 기간 대비·최근 평균·앞 창과의 비교·전년 같은 달 대비·표시 기간의 범위를 만든다.",
+    "지역이 없는 한 지표의 일별·월별 시계열(구간 값은 하루 최댓값으로)에서 최신값·바로 앞 기간 대비·최근 평균·앞 창과의 비교·전년 같은 달 대비·표시 기간의 범위를 만들고, 월별 글감은 같은 달 순위·이 글이 읽은 자료에서 마지막으로 낮았던 달·같은 달 해마다 값 표도 만든다(S2c-1).",
     SPACE_DOMAINS, ("F01_change", "F02_pct_change", "F03_yoy", "F06_diff_from_mean", "F07_rolling_mean", "F09_max", "F10_min", "F12_count", "F15_day_max", "F17_season_rank", "F18_last_lower", "F19_months_between"),
     5, 120, plan_noregion_series, calc_from_formulas=True)
 R05_THRESHOLD_COUNT = Recipe(

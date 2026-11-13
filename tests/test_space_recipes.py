@@ -1334,6 +1334,12 @@ class MonthlyLongRecordTest(unittest.TestCase):
                     self.assertNotIn(claim, text)
                 self.assertNotRegex(plain, r"\d")
                 self.assertNotRegex(text, CALC_CLAIM_RE.pattern)                                       # 새 문장은 '직접 계산했습니다' 를 되풀이하지 않는다(S1-b)
+        self.assertIn("이 글이 읽은 자료 안에서만", RN.SEASON_CAUTION)                                  # 정직 고지: 읽은 자료 안에서만 견줬다는 한정
+        self.assertIn("더 오래된 달은 알지 못합니다", RN.SEASON_CAUTION)
+        self.assertIn("잠정치", RN.SEASON_CAUTION)                                                       # 가장 최근 달의 값이 잠정치일 수 있다는 줄(설계 위험 ①)
+        self.assertIn("고쳐지면 순위와 달이 달라질 수 있습니다", RN.SEASON_CAUTION)
+        self.assertIn("이 글이 읽은 자료 안에서", RN.SEASON_LOW_BULLET)
+        self.assertIn("값이 같으면 같은 순위입니다", RN.SEASON_RANK_BULLET)
 
     def test_the_limits_line_is_only_added_when_a_new_number_is_there_and_the_subject_flags_are_what_the_design_says(self):
         monthly = RN.SERIES_BY_KEY[MONTHLY_KEY]
