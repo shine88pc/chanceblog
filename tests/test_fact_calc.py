@@ -400,6 +400,7 @@ class RegistryOfFormulasTest(unittest.TestCase):
         group = [MAKE("4", region="R01"), MAKE("2", region="R02"), MAKE("3", region="R03")]
         window = months(["1", "2", "3"])
         day_group = [MAKE(str(1 + step % 3), period=f"2026-03-05T{3 * step:02d}:00:00Z", region=None, level=None) for step in range(8)]          # S2a: 한 날 8구간
+        season = [MAKE(str(value), period=f"{2020 + index}-10") for index, value in enumerate((3, 1, 2, 5))]          # S2c-1: 같은 달(10월)·서로 다른 해
         calls = {
             "F01_change": lambda: C.f01_change(a, b), "F02_pct_change": lambda: C.f02_pct_change(a, b),
             "F03_yoy": lambda: C.f03_yoy(a, MAKE("2", period="2025-03")), "F04_rank": lambda: C.f04_rank(group[0], group),
@@ -407,7 +408,9 @@ class RegistryOfFormulasTest(unittest.TestCase):
             "F07_rolling_mean": lambda: C.f07_rolling_mean(window), "F08_mean": lambda: C.f08_mean(group), "F09_max": lambda: C.f09_max(group),
             "F10_min": lambda: C.f10_min(group), "F11_range_position": lambda: C.f11_range_position(window[1], window), "F12_count": lambda: C.f12_count(group, "곳"),
             "F13_gap": lambda: C.f13_gap(group[0], group[1]), "F14_median": lambda: C.f14_median(group),
-            "F15_day_max": lambda: C.f15_day_max(day_group, expected_count=8), "F16_count_between": lambda: C.f16_count_between(group, MAKE("3", region="R09"), None, "곳")}
+            "F15_day_max": lambda: C.f15_day_max(day_group, expected_count=8), "F16_count_between": lambda: C.f16_count_between(group, MAKE("3", region="R09"), None, "곳"),
+            "F17_season_rank": lambda: C.f17_season_rank(season[0], season), "F18_last_lower": lambda: C.f18_last_lower(window[-1], window[:-1]),           # S2c-1
+            "F19_months_between": lambda: C.f19_months_between(MAKE("4", period="2026-03"), MAKE("2", period="2025-11"))}
         self.assertEqual(set(calls), set(C.FORMULAS))
         for formula_id, call in calls.items():
             with self.subTest(formula=formula_id):

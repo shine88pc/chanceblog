@@ -28,8 +28,9 @@ from pipeline.adapters import noaa_swpc as N
 ROOT = _bootstrap.ROOT
 setUpModule, tearDownModule = HH.module_fixtures()      # 이 모듈은 글감 여섯 전부를 읽는 흐름에서 보관 장치를 본다 — 기본 상수에서의 보관은 DefaultPolicyTest 가 따로 본다
 RUN_KEYS = {"schema", "requested", "attempts", "passed", "held_or_rejected", "languages", "outcome", "lanes_tried", "notes", "generated_at", "attempts_summary"}
-RESULT_KEYS = {"schema", "attempt", "passed", "outcome", "hold_reasons", "hold_codes", "validation", "gate", "source_text_chars", "model", "lane", "source_url", "source_name", "source_domain",
-               "title_ko", "title_en", "languages", "files", "published", "generated_at"}
+OLD_RESULT_KEYS = {"schema", "attempt", "passed", "outcome", "hold_reasons", "hold_codes", "validation", "gate", "source_text_chars", "model", "lane", "source_url", "source_name", "source_domain",
+                   "title_ko", "title_en", "languages", "files", "published", "generated_at"}      # S2c-1 전의 칸(S2c-0 시점) — 그대로 있어야 한다
+RESULT_KEYS = OLD_RESULT_KEYS | {"thin"}      # S2c-1 이 새 키 하나(`thin` — 얇음 측정)를 더했다
 THREE_PRODUCTS = ["kp_estimated", "xray_flares", "scales"]       # 글감 순서대로 첫 셋(kp_weekly·flares_weekly·scales_weekly)이 읽는 제품
 RETRIEVED, TODAY = "2026-11-10T01:12:00Z", "2026-11-10"
 
@@ -133,6 +134,7 @@ class MainResultUnchangedTest(RawBase):
         self.assertEqual(set(self.run_info()), RUN_KEYS)                                                     # 새 필드가 없다 — 기존 소비자가 보던 칸 그대로
         for result in self.results().values():
             self.assertEqual(set(result), RESULT_KEYS)
+            self.assertEqual(set(result) - {"thin"}, OLD_RESULT_KEYS)                                       # 옛 칸은 하나도 빠지지 않았고 새 칸은 `thin` 하나뿐이다
         self.assertEqual(self.run_info()["notes"], [])                                                       # 보관이 잘 되면 메모도 없다
 
     def test_a_run_without_any_response_leaves_no_raw_file(self):

@@ -21,6 +21,9 @@ NEW_TESTS = ["tests/fact_helpers.py", "tests/test_fact_facts.py", "tests/test_fa
              "tests/test_space_candidates.py", "tests/test_space_docs.py", "tests/test_space_fuzz.py", "tests/test_space_f2fix.py", "tests/test_space_gate.py",
              "tests/fact_branch_helpers.py", "tests/test_fact_select.py", "tests/test_fact_supply.py", "tests/test_fact_branch.py", "tests/test_fact_shadow.py", "tests/test_fact_readers.py", "tests/test_fact_branch_docs.py"]      # 뒤의 일곱은 S2b
 NEW_TESTS += ["tests/hold_helpers.py", "tests/test_fact_hold.py", "tests/test_fact_today_row.py", "tests/test_shadow_raw.py", "tests/test_s2c0_docs.py"]      # S2c-0(S2C0-a)가 더한 시험 — 후보·공급 모듈을 가져오는 시험은 이 목록에 올려야 한다(NoConnectionTest)
+NEW_FILES += ["pipeline/fact_thin.py"]      # S2c-1 이 더한 순수 모듈(얇음 측정) — 같은 순수·격리·3.10 문법 검사를 받는다
+NEW_MODULES |= {"fact_thin"}
+NEW_TESTS += ["tests/test_fact_thin.py", "tests/test_s2c1_docs.py"]      # S2c-1 이 더한 시험 — Fact 모듈을 가져오는 시험은 이 목록에 올려야 한다(NoConnectionTest)
 STDLIB_ALLOWED = {"csv", "dataclasses", "datetime", "decimal", "functools", "hashlib", "io", "json", "re", "typing", "unicodedata"}
 BANNED_MODULES = {"urllib", "socket", "subprocess", "time", "random", "os", "sys", "pathlib", "http", "ssl", "shutil", "tempfile", "secrets", "uuid", "glob",
                   "ctypes", "msvcrt", "threading", "multiprocessing", "asyncio", "logging", "requests", "html", "xml", "generator", "blogger_generator"}
@@ -77,7 +80,7 @@ class ImportsTest(unittest.TestCase):
             self.assertFalse(names & BANNED_MODULES, f"{rel}: {names & BANNED_MODULES}")
 
     def test_no_existing_pipeline_module_is_imported(self):
-        existing = {p.stem for p in (ROOT / "pipeline").glob("*.py")} - {"facts", "calc", "fact_topics", "recipes", "fact_assembler", "recipes_noregion", "fact_candidates", "fact_supply", "__init__"}
+        existing = {p.stem for p in (ROOT / "pipeline").glob("*.py")} - {"facts", "calc", "fact_topics", "recipes", "fact_assembler", "recipes_noregion", "fact_candidates", "fact_supply", "fact_thin", "__init__"}
         self.assertTrue(existing)
         for rel in NEW_FILES:
             text = source(rel)
@@ -144,7 +147,7 @@ class PurityTest(unittest.TestCase):
 class NoConnectionTest(unittest.TestCase):
     """1단계는 새 모듈·새 시험·문서뿐이었다. **S2b 가 연결한 모양**: 생성기·다른 pipeline 모듈·워크플로·스크립트 가운데 새 모듈 이름을 부르는 곳은 `generator.py` 의 한 줄(`from pipeline import fact_supply`)뿐이다
     — 그 밖의 연결(생성기의 Fact 분기가 필요로 하는 어댑터·후보·조립기)은 모두 그 한 모듈을 거친다. 역방향·분기 안쪽은 정적 규칙 AF1·AF4·AF8(tests/ai_flow_scan.py)이 지킨다(docs/AI_FLOW.md §12-2)."""
-    NAMES = r"(?:facts|calc|fact_topics|recipes|fact_assembler|adapters|recipes_noregion|fact_candidates|fact_supply)"
+    NAMES = r"(?:facts|calc|fact_topics|recipes|fact_assembler|adapters|recipes_noregion|fact_candidates|fact_supply|fact_thin)"
     ALLOWED = {"generator.py": 1}      # 허용 연결: generator.py 에 Fact 모듈을 부르는 줄이 정확히 한 군데
     # 문장 단위 import·`-m` 실행·문자열로 모듈 이름을 넘기는 호출만 연결로 본다(주석·문서의 언급은 연결이 아니다 — SRC 의 문서가 인터페이스를 설명할 수 있다)
     PATTERN = re.compile(rf"^\s*(?:from|import)\s+pipeline(?:\.{NAMES}\b|\s+import\s+[^\n#]*\b{NAMES}\b)"

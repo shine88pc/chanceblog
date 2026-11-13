@@ -83,7 +83,7 @@ def exact(function):
     return wrapper
 
 # 순위·개수 계산 결과는 자료의 단위 자리와 상관없이 정수로 보인다(교육 범주의 `곳`·`개` 로 소수 자료를 넣어도 '6.0곳 비교'가 되지 않는다 — 재검증 D9, D-153)
-INTEGER_FORMULAS = frozenset({"F04_rank", "F12_count", "F16_count_between"})
+INTEGER_FORMULAS = frozenset({"F04_rank", "F12_count", "F16_count_between", "F17_season_rank", "F19_months_between"})
 
 # ----------------------------------------------------------------------------
 # Fact 종류

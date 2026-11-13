@@ -3,6 +3,7 @@
 못박는 것: 레지스트리 content_source 가 facts 일 때만 이 분기로 간다(읽지 못하거나 이상한 값이면 이 분기로 가지 않는다) · AI 를 한 번도 부르지 않고 Gemini 키 없이 돈다 · 후보는 일반 실행과 같은 함수(`g.fact_prepare`)로 만든다 ·
 결과는 일반 그림자 실행과 같은 모양(번호 폴더의 글 파일·result.json·run.json — 측정 도구가 읽는 이름)으로 SHADOW_OUT 아래에만 쓰고 저장소 작업 폴더의 바이트는 그대로다 · Gate 는 항상 돌린다 ·
 시작 조건을 못 채우면 후보 0건으로 정상 종료한다(run.json 에 이유). 읽기 전용 구간의 방어 코드(쓰기·git 차단)는 그대로 감시한다."""
+import ast
 import contextlib
 import hashlib
 import io
@@ -17,7 +18,7 @@ import fact_branch_helpers as FB
 import generator as g
 import hold_helpers as HH
 
-from pipeline import fact_supply, quality_gate, registry, shadow_run
+from pipeline import fact_supply, fact_thin, quality_gate, registry, shadow_run
 from pipeline.adapters import noaa_swpc as N
 
 # S2C0-a: 이 모듈은 임시 제외·처음 낼 글감과 상관없는 정책(글감 여섯 전부)을 시험한다 — 두 상수를 비운 이전 동작으로 돌린다(단언은 하나도 바꾸지 않았다). 기본 상수의 동작은 tests/test_fact_hold.py 가 시험한다
@@ -183,6 +184,77 @@ class ShadowFactsRunTest(ShadowFactsBase):
         titles = [result["title_ko"] for result in self.results().values()]
         self.assertIn("플레어", titles[0])                                                                  # 안 낸 글감 중 차례가 가장 앞선 플레어 글이 먼저다
         self.assertFalse(any("Kp" in title for title in titles))
+
+
+class ThinBlockTest(ShadowFactsBase):
+    """S2c-1 S1-c: Fact 분기의 `result.json` 에 새 키 `thin`(얇음 측정 일곱 정수)이 더해진다 — 글에서만 계산하고 판정이 아니라 신호이며, 다른 칸·`run.json`·글 파일은 바이트까지 그대로다."""
+
+    def plain_results(self, name):
+        """같은 입력으로 `thin_of` 를 표지 값으로 바꿔 돌린 결과(thin 말고는 같아야 하는 기준)와 폴더."""
+        self.out_dir = self.out_dir.parent / name
+        with mock.patch.object(fact_supply, "thin_of", lambda post: "표지"):
+            info, _lines = self.run_shadow("3")
+        return self.out_dir, info
+
+    def test_every_result_carries_the_measure_of_its_own_post(self):
+        info, _lines = self.run_shadow("3")
+        real = FB.FactEnv.NOW
+        prepared, _supplied = g.fact_prepare(real, [], *g.fact_context(real)[1:], limit=3)
+        results = self.results()
+        self.assertEqual((info["attempts"], len(prepared), sorted(results)), (3, 3, ["01", "02", "03"]))
+        for number, item in zip(sorted(results), prepared):
+            thin = results[number]["thin"]
+            with self.subTest(attempt=number):
+                self.assertEqual(thin, fact_thin.measure(item.post))
+                self.assertEqual(sorted(thin), sorted(fact_thin.FIELDS))                                      # 파일에는 키 이름순으로 적혀 있다
+                self.assertEqual(thin["evidence_chars"], results[number]["source_text_chars"])                # 같은 글자 수를 두 곳이 같게 말한다
+                self.assertGreater(thin["fixed_pct"], 0)
+                self.assertTrue(all(type(value) is int for value in thin.values()))
+
+    def test_only_the_thin_key_is_new_and_every_other_field_file_and_the_run_summary_are_what_they_were(self):
+        plain_dir, plain_info = self.plain_results("plain")
+        plain = {folder.name: json.loads((folder / "result.json").read_text(encoding="utf-8")) for folder in sorted(plain_dir.iterdir()) if folder.is_dir()}
+        self.out_dir = self.out_dir.parent / "real"
+        info, _lines = self.run_shadow("3")
+        real = self.results()
+        self.assertEqual(sorted(real), sorted(plain))
+        for number in real:
+            with self.subTest(attempt=number):
+                self.assertEqual(plain[number]["thin"], "표지")
+                self.assertEqual({key: value for key, value in real[number].items() if key != "thin"}, {key: value for key, value in plain[number].items() if key != "thin"})
+                self.assertEqual(set(real[number]) - {"thin"}, set(plain[number]) - {"thin"})
+        for path in sorted(self.out_dir.rglob("*")):
+            relative = path.relative_to(self.out_dir)
+            if path.is_file() and path.name != "result.json":
+                self.assertEqual(path.read_bytes(), (plain_dir / relative).read_bytes(), relative.as_posix())      # 글 파일·run.json·원본 응답은 바이트까지 같다
+        self.assertEqual(info, plain_info)
+        self.assertNotIn("thin", self.run_info())
+        self.assertTrue(all("thin" not in entry for entry in self.run_info()["attempts_summary"]))
+
+    def test_a_failing_measure_leaves_an_error_name_in_the_block_and_changes_nothing_else(self):
+        plain_dir, _plain_info = self.plain_results("plain")
+        plain = {folder.name: json.loads((folder / "result.json").read_text(encoding="utf-8")) for folder in sorted(plain_dir.iterdir()) if folder.is_dir()}
+        self.out_dir = self.out_dir.parent / "failing"
+        with mock.patch.object(fact_thin, "measure", side_effect=ValueError("SECRET-PATH-TEXT")):
+            info, _lines = self.run_shadow("3")
+        self.assertEqual((info["attempts"], info["outcome"]), (3, "COMPLETED"))
+        results = self.results()
+        for number, result in results.items():
+            with self.subTest(attempt=number):
+                self.assertEqual(result["thin"], {"error": "ValueError"})
+                self.assertEqual({key: value for key, value in result.items() if key != "thin"}, {key: value for key, value in plain[number].items() if key != "thin"})
+        self.assertNotIn("SECRET", json.dumps(results, ensure_ascii=False))
+
+    def test_the_block_never_changes_a_verdict_and_makes_no_hold_code(self):
+        info, _lines = self.run_shadow("3")
+        for result in self.results().values():
+            self.assertNotIn("THIN", " ".join(result["hold_codes"]))
+            self.assertEqual(result["passed"], result["outcome"] == "PASSED")
+        source = (_bootstrap.ROOT / "pipeline" / "fact_thin.py").read_text(encoding="utf-8")
+        self.assertNotRegex(source, r"Hold\(|QG\d|hold_codes")                                               # 측정 모듈은 보류 코드를 만들지 않는다
+        shadow = (_bootstrap.ROOT / "pipeline" / "shadow_run.py").read_text(encoding="utf-8")
+        calls = [node for node in ast.walk(ast.parse(shadow)) if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "thin_of"]
+        self.assertEqual(len(calls), 1)                                                                        # 그림자 실행이 측정 함수를 부르는 곳은 한 군데(설명 글은 세지 않는다)
 
 
 class ShadowFactsNotReadyTest(ShadowFactsBase):

@@ -4,7 +4,7 @@
 
 | Recipe | 글감 | 계산식 |
 |---|---|---|
-| `R04_NOREGION_SERIES` 지역 없는 시계열 | 일별 최대 Kp(구간 값을 하루 최댓값으로) · SWPC 일별 흑점수 · 월평균 흑점수 추이 | F01 F02 F06 F07 F09 F10 F12 F15 |
+| `R04_NOREGION_SERIES` 지역 없는 시계열 | 일별 최대 Kp(구간 값을 하루 최댓값으로) · SWPC 일별 흑점수 · 월평균 흑점수 추이(+ 같은 달 순위·마지막으로 낮았던 달, S2c-1) | F01 F02 F03 F06 F07 F09 F10 F12 F15 F17 F18 F19 |
 | `R05_THRESHOLD_COUNT` 기준 이상 개수 | 폭풍 기준 이상인 날(Kp) · 플레어 등급별 건수 | F09 F12 F15 F16 |
 | `R06_SCALE_OUTLOOK` 등급 현황과 예보 | NOAA 우주기상 등급(어제·지금)과 향후 3일 확률·등급 예보 | F01 F07 F09 F12 |
 
@@ -41,6 +41,8 @@ FLARE_FLOOR_LETTERS = ("a", "b", "c", "m", "x")
 KP_INTERVALS_PER_DAY = 8        # 3시간 구간 하루치 — 이 개수가 모두 있는 날만 일별 값을 만든다(구간이 모자란 날은 건너뛴다)
 DAY_TABLE_ROWS = 14
 MONTH_TABLE_ROWS = 12
+SEASON_TABLE_ROWS = 8           # 같은 달 해마다 표의 최대 줄 수(가까운 해부터) — 월별 글감(S2c-1)
+SEASON_COUNT_UNIT = "년"         # 같은 달 값이 몇 해에 있는지 세는 말
 SPACE_DOMAINS = ("space_weather",)
 MEASURED = frozenset({"observed"})
 FORECAST = frozenset({"predicted", "estimated"})
@@ -62,6 +64,15 @@ SSN_ABOUT_DAILY = ("흑점수는 태양 표면에 나타나는 어두운 점인 
 SSN_ABOUT_MONTHLY = ("흑점수는 태양 표면에 나타나는 어두운 점인 흑점을 관측해 얻는 지표로, 태양 활동을 가늠하는 데 쓰입니다. "
                      "이 글의 값은 SWPC가 달마다 그 달의 일별 흑점수를 평균해 낸 월별 값이라, 하루하루의 들쭉날쭉함이 덜해 흐름을 읽기 쉽습니다.")
 SSN_LIMIT = "흑점수는 태양에서 관측된 흑점의 양만 나타낼 뿐, 그 값이 지구의 통신이나 설비에 어떤 영향을 주었는지는 알려 주지 않습니다."
+# 월별 글의 '더 긴 기록 속 위치'(S2c-1): '이 글이 읽은 자료 안에서만' 말하고 '역대'·'기록적'·원인·영향을 말하지 않는다. 같은 달 순위는 높은 값이 앞서고 같은 값은 같은 순위다.
+SEASON_RANK_BULLET = "- 같은 달 순위: 이 글이 읽은 같은 달 ⟦V:same_n⟧⟦U:same_n⟧ 가운데 최신 값은 ⟦F:same_rank⟧입니다(높은 값이 앞서고 값이 같으면 같은 순위입니다)"
+SEASON_LOW_BULLET = "- 최신 값보다 낮았던 마지막 달(이 글이 읽은 자료 안에서): ⟦D:last_low⟧(⟦F:last_low⟧), ⟦V:last_since⟧⟦U:last_since⟧ 전"
+SEASON_TABLE_INTRO = ("같은 달의 값은 아래 표에서 해마다 견줍니다. 표는 같은 달의 이전 해 값을 가까운 해부터 보여 주고, '최신 값과의 차이'는 ⟦D:cur⟧의 값 ⟦F:cur⟧에서 그 해의 값을 뺀 것입니다.")
+SEASON_SENTENCE_BOTH = ("같은 달끼리 견주면 최신 값은 이 글이 읽은 ⟦V:same_n⟧⟦U:same_n⟧ 가운데 ⟦F:same_rank⟧에 놓이고, 이 글이 읽은 자료에서 이보다 낮은 달이 마지막으로 나온 것은 "
+                        "⟦V:last_since⟧⟦U:last_since⟧ 전인 ⟦D:last_low⟧입니다.")
+SEASON_SENTENCE_RANK = "같은 달끼리 견주면 최신 값은 이 글이 읽은 ⟦V:same_n⟧⟦U:same_n⟧ 가운데 ⟦F:same_rank⟧에 놓입니다."
+SEASON_SENTENCE_LOW = "이 글이 읽은 자료에서 최신 값보다 낮은 달이 마지막으로 나온 것은 ⟦V:last_since⟧⟦U:last_since⟧ 전인 ⟦D:last_low⟧입니다."
+SEASON_CAUTION = ("- 순위와 마지막으로 낮았던 달: 이 글이 읽은 자료 안에서만 견준 것이라 더 오래된 달은 알지 못합니다. 가장 최근 달의 값은 잠정치일 수 있어 나중에 고쳐지면 순위와 달이 달라질 수 있습니다.")
 FLARE_ABOUT = ("X선 플레어는 태양이 내는 X선의 세기가 가파르게 올랐다가 가라앉는 사건입니다. 플레어는 가장 셌던 순간의 세기에 따라 A·B·C·M·X로 나누고, "
                "글자가 뒤로 갈수록 센 플레어이며 같은 글자 안에서는 글자 뒤에 붙은 수가 클수록 더 셉니다.")
 FLARE_LIMIT = "플레어의 건수와 등급은 태양에서 일어난 사건을 정리한 것일 뿐, 그 플레어가 지구의 통신이나 설비에 어떤 영향을 주었는지는 알려 주지 않습니다."
@@ -199,6 +210,8 @@ class SeriesSubject:
     show_change: bool = True          # '바로 앞 기간 대비' 증감·변화율 열과 줄을 둔다. Kp 는 거짓 — 제공처가 3분의 1 단위 값을 소수로 줄여 적어 두 값의 차이가 한 끝자리 어긋난다(S2AFIX D9)
     about: str = ""                   # '이 값은 무엇인가·어떻게 읽나' 배경 문단 — 숫자 칸 맨 앞(S2AFIX D5)
     limit: str = ""                   # '이 값이 말해 주지 않는 것' 문장 — 해석 둘째 문단 끝(S2AFIX D5)
+    season: bool = False              # 월 단위 글감만: 같은 달 순위·마지막으로 낮았던 달·같은 달 해마다 표를 더한다(S2c-1 — 어댑터가 360개월을 보관해야 뜻이 있다)
+    count_window: int = 0             # 0 이면 '이 글이 읽은 N개월' 이 읽은 값 전체를 세고, 양수면 최근 그만큼의 기간(표 창)만 센다 — 보관이 360개월이라 전체를 세면 먼 달 하나의 빈칸이 머리 문장의 '개월' 을 '관측 N개' 로 바꾼다(S2c-1)
 
 
 SERIES_SUBJECTS = (
@@ -214,10 +227,10 @@ SERIES_SUBJECTS = (
          "- 빠진 날: 제공처 자료에 기록이 없는 날은 값이 없는 것으로 보고 평균과 변화에서 뺐습니다. 날짜는 협정 세계시(UTC)입니다."),
         ("우주날씨", "흑점수 추이", "숫자로 읽기"), intro_object="추이를", about=SSN_ABOUT_DAILY, limit=SSN_LIMIT),
     SeriesSubject(
-        KEY_SSN_MONTHLY, "month", "", "값", "추이", 3, 0, True, 8, 120, MONTH_TABLE_ROWS,
+        KEY_SSN_MONTHLY, "month", "", "값", "추이", 3, 12, True, 8, 120, MONTH_TABLE_ROWS,
         ("- 월평균: 제공처가 달마다 그 달의 일별 흑점수를 평균해 낸 값이고, 평활값은 제공처가 여러 달에 걸쳐 따로 평활해 준 값입니다. 평활값이 없는 달은 '자료 없음'으로 적었습니다.",
          "- 잠정치 표시: 표의 '잠정치 표시' 열이 '잠정'인 달은 제공처가 잠정치로 표시한 달이라 나중에 고쳐질 수 있고, 그 달이 들어간 증감과 평균도 같은 한계가 있습니다."),
-        ("우주날씨", "흑점수 추이", "숫자로 읽기"), KEY_SSN_SMOOTHED, True, intro_object="추이를", about=SSN_ABOUT_MONTHLY, limit=SSN_LIMIT),
+        ("우주날씨", "흑점수 추이", "숫자로 읽기"), KEY_SSN_SMOOTHED, True, intro_object="추이를", about=SSN_ABOUT_MONTHLY, limit=SSN_LIMIT, season=True, count_window=MONTH_TABLE_ROWS),
 )
 SERIES_BY_KEY = {subject.key: subject for subject in SERIES_SUBJECTS}
 
@@ -264,7 +277,8 @@ def plan_noregion_series(ctx):
     lbl = raw[-1]
     context = F.display_context(valid)
     granularity = subject.granularity
-    regular = R.is_regular(valid)
+    counted = [f for f in valid if _ordinal(f) > _ordinal(cur) - subject.count_window] if subject.count_window else valid        # '이 글이 읽은 N개월' 이 세는 값: 월별 글감은 표 창(12개월)으로 한정한다(S2c-1)
+    regular = R.is_regular(counted)
     count_unit = _unit_word(granularity) if regular else R.OBSERVATION_UNIT
     obs = "" if regular else "관측 "
     ratio = F.ratio_ok(cur.unit)
@@ -328,7 +342,7 @@ def plan_noregion_series(ctx):
     first_row, last_row = shown[0], shown[-1]
     b.put("first_row", first_row)
     b.put("last_row", last_row)
-    n_all = b.derive("n_all", C.f12_count(valid, count_unit))
+    n_all = b.derive("n_all", C.f12_count(counted, count_unit))
     smoothed = {f.as_of: f for f in facts_with_key(ctx, subject.smoothed_key)} if subject.smoothed_key else {}
     if smoothed and (R.topic_problem(recipe, list(smoothed.values())) is not None or any(f.meta_value("status") not in MEASURED for f in smoothed.values())):
         smoothed = {}
@@ -366,6 +380,22 @@ def plan_noregion_series(ctx):
     lo_ties = [f for f in shown_valid if lo is not None and f.value == lo.value]
     n_hi = b.derive("n_hi", C.f12_count(hi_ties, TIE_UNIT)) if has_range and len(hi_ties) > 1 else None
     n_lo = b.derive("n_lo", C.f12_count(lo_ties, TIE_UNIT)) if has_range and len(lo_ties) > 1 else None
+
+    # 더 긴 기록 속 위치(S2c-1, 월별 글감만): 같은 달 순위(F17)·이 글이 읽은 자료에서 마지막으로 이보다 낮았던 달(F18)과 몇 개월 전인지(F19)·같은 달 해마다 값 표. 이번 달 행은 어댑터가 이미 뺐다
+    same_rank = same_n = last_low = last_since = None
+    season_rows = []
+    if subject.season:
+        cur_month = F.parse_as_of(cur.as_of).month
+        same_month = [f for f in valid if F.parse_as_of(f.as_of).month == cur_month]
+        same_rank = b.derive("same_rank", C.f17_season_rank(cur, same_month))
+        same_n = b.derive("same_n", C.f12_count(same_month, SEASON_COUNT_UNIT)) if same_rank is not None else None
+        last_low = b.derive("last_low", C.f18_last_lower(cur, [f for f in valid if _ordinal(f) < cur_ord]))
+        last_since = b.derive("last_since", C.f19_months_between(cur, last_low)) if last_low is not None else None
+        if same_rank is not None:
+            for number, fact in enumerate(reversed([f for f in same_month if _ordinal(f) < cur_ord][-SEASON_TABLE_ROWS:]), start=1):
+                b.put(f"ys{number}", fact)
+                diff = b.derive(f"yd{number}", C.f01_change(cur, fact, require="earlier"))
+                season_rows.append([f"⟦D:ys{number}⟧", f"⟦F:ys{number}⟧", f"⟦S:yd{number}⟧" if diff else R.NA_CELL])
 
     # -- 제목(값 없음)·첫 문단(= 설명, 한 문장) --------------------------------
     word = subject.value_word
@@ -412,6 +442,10 @@ def plan_noregion_series(ctx):
         lo_part = "최저 ⟦F:lo⟧(⟦D:lo⟧)" if n_lo is None else "최저 ⟦F:lo⟧(같은 값 ⟦V:n_lo⟧⟦U:n_lo⟧, 가장 나중 ⟦D:lo⟧)"
         hi_part = "최고 ⟦F:hi⟧(⟦D:hi⟧)" if n_hi is None else "최고 ⟦F:hi⟧(같은 값 ⟦V:n_hi⟧⟦U:n_hi⟧, 가장 나중 ⟦D:hi⟧)"
         glance.append(f"- 표시한 기간 안의 범위: {lo_part}에서 {hi_part}까지")
+    if same_rank is not None and same_n is not None:
+        glance.append(SEASON_RANK_BULLET)
+    if last_low is not None and last_since is not None:
+        glance.append(SEASON_LOW_BULLET)
 
     # -- 숫자로 보기 ----------------------------------------------------------
     calc_columns = "'바로 앞 기간 대비' 열" if not ratio else "'바로 앞 기간 대비'와 '변화율' 열"
@@ -435,6 +469,9 @@ def plan_noregion_series(ctx):
     if last_row is not cur:
         notes.append("가장 최근 기간(⟦D:last_row⟧)의 값은 자료에 없어, 값이 있는 마지막 기간 ⟦D:cur⟧ 기준으로 최신 값을 정했습니다.")
     numbers.append(" ".join(notes))
+    if season_rows:
+        numbers.append(SEASON_TABLE_INTRO)
+        numbers.append(md_table(["기준 기간", "값", "최신 값과의 차이"], season_rows, ["l", "r", "r"]))
 
     # -- 비교·해석(이 글의 해석) ------------------------------------------------
     sentences = []
@@ -475,13 +512,20 @@ def plan_noregion_series(ctx):
             high = "표에서 가장 높은 값은 ⟦D:hi⟧의 ⟦F:hi⟧입니다." if n_hi is None else "표에서 가장 높은 값은 ⟦F:hi⟧입니다. 이 값은 표에 ⟦V:n_hi⟧⟦U:n_hi⟧ 나오며 가장 나중은 ⟦D:hi⟧입니다."
             low = "가장 낮은 값은 ⟦D:lo⟧의 ⟦F:lo⟧입니다." if n_lo is None else "가장 낮은 값은 ⟦F:lo⟧입니다. 이 값은 표에 ⟦V:n_lo⟧⟦U:n_lo⟧ 나오며 가장 나중은 ⟦D:lo⟧입니다."
             sentences.append(high + " " + low)
+    if same_rank is not None and same_n is not None and last_low is not None and last_since is not None:
+        sentences.append(SEASON_SENTENCE_BOTH)
+    elif same_rank is not None and same_n is not None:
+        sentences.append(SEASON_SENTENCE_RANK)
+    elif last_low is not None and last_since is not None:
+        sentences.append(SEASON_SENTENCE_LOW)
     reading = ["**이 글의 해석**: " + " ".join(sentences) if sentences else "**이 글의 해석**: 비교할 수 있는 값이 모자라 숫자만 옮겼습니다.",
                "짧은 오르내림만으로 흐름이 바뀌었다고 말하기는 어렵습니다. "
-               + ("이 자료만으로는 움직임의 원인을 알 수 없으며, 이 글은 여러 기간을 함께 놓고 평균과 범위만 계산했습니다. " + subject.limit if subject.limit
-                  else "이 자료만으로는 움직임의 원인을 알 수 없고 지구에 어떤 영향이 있는지도 말하지 않으며, 여러 기간을 함께 놓고 평균과 범위만 계산했습니다.")]
+               + ("이 글은 여러 기간을 함께 놓고 평균과 범위만 계산했습니다. " + subject.limit if subject.limit
+                  else "이 글은 지구에 어떤 영향이 있는지도 말하지 않으며, 여러 기간을 함께 놓고 평균과 범위만 계산했습니다.")]      # 원인을 알 수 없다는 말은 주의 줄 '이 글이 아는 것' 이 한 번만 한다(S2c-1 S1-b)
     tags = [lbl.label_ko] + list(subject.tags)
+    cautions = list(subject.cautions) + ([SEASON_CAUTION] if same_rank is not None or last_low is not None else [])
     return Draft(cur, b.slots, titles, leads, [(R.H_GLANCE, [md_bullets(glance)]), (R.H_NUMBERS, numbers), (R.H_READING, reading)],
-                 list(subject.cautions), tags, lbl.topic, cur.as_of, b.registry, b.skipped, (recipe.recipe_id, subject.key, "-", cur.as_of), context)
+                 cautions, tags, lbl.topic, cur.as_of, b.registry, b.skipped, (recipe.recipe_id, subject.key, "-", cur.as_of), context)
 
 
 # ----------------------------------------------------------------------------
@@ -648,7 +692,7 @@ def _plan_flare_classes(ctx):
               "- 등급별 건수는 아래 표에 적었습니다."]
     numbers = [FLARE_ABOUT, "아래 표는 읽은 기간에 기록된 X선 플레어를 등급 문자별로 나누어 센 것입니다. 등급은 제공처 자료 그대로이고 건수는 이 글이 직접 센 것입니다.",
                md_table(["등급", "건수"], rows, ["l", "r"]),
-               "각 등급은 최대 세기가 그 등급의 하한 이상이고 바로 위 등급의 하한 미만인 플레어를 셌습니다. 해당하는 플레어가 없는 등급도 건수 칸에 이 글이 센 건수를 그대로 적었습니다."]
+               "각 등급은 최대 세기가 그 등급의 하한 이상이고 바로 위 등급의 하한 미만인 플레어를 셌습니다. 해당하는 플레어가 없는 등급도 건수 칸을 비우지 않고 센 결과를 그대로 적었습니다."]
     sentences = ["M급 이상 플레어는 모두 ⟦V:n_m_up⟧⟦U:n_m_up⟧입니다. 그 가운데 X급은 ⟦V:n_x⟧⟦U:n_x⟧입니다.",
                  "읽은 기간에서 가장 큰 플레어는 ⟦D:hi⟧의 ⟦F:cls_hi⟧입니다." if n_hi is None else "읽은 기간에서 가장 큰 세기는 ⟦F:cls_hi⟧입니다. 같은 세기가 ⟦V:n_hi⟧⟦U:n_hi⟧ 있으며 가장 나중은 ⟦D:hi⟧입니다."]
     reading = ["**이 글의 해석**: " + " ".join(sentences),
@@ -766,8 +810,8 @@ def plan_scale_outlook(ctx):
 
 R04_NOREGION_SERIES = Recipe(
     "R04_NOREGION_SERIES", 1, "지역 없는 시계열",
-    "지역이 없는 한 지표의 일별·월별 시계열(구간 값은 하루 최댓값으로)에서 최신값·바로 앞 기간 대비·최근 평균·앞 창과의 비교·전년 같은 달 대비·표시 기간의 범위를 만든다.",
-    SPACE_DOMAINS, ("F01_change", "F02_pct_change", "F03_yoy", "F06_diff_from_mean", "F07_rolling_mean", "F09_max", "F10_min", "F12_count", "F15_day_max"),
+    "지역이 없는 한 지표의 일별·월별 시계열(구간 값은 하루 최댓값으로)에서 최신값·바로 앞 기간 대비·최근 평균·앞 창과의 비교·전년 같은 달 대비·표시 기간의 범위를 만들고, 월별 글감은 같은 달 순위·이 글이 읽은 자료에서 마지막으로 낮았던 달·같은 달 해마다 값 표도 만든다(S2c-1).",
+    SPACE_DOMAINS, ("F01_change", "F02_pct_change", "F03_yoy", "F06_diff_from_mean", "F07_rolling_mean", "F09_max", "F10_min", "F12_count", "F15_day_max", "F17_season_rank", "F18_last_lower", "F19_months_between"),
     5, 120, plan_noregion_series, calc_from_formulas=True)
 R05_THRESHOLD_COUNT = Recipe(
     "R05_THRESHOLD_COUNT", 1, "기준 이상 개수",

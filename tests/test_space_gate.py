@@ -128,7 +128,7 @@ class GateAcceptsTheNewPostsTest(unittest.TestCase):
                 continue                                                                      # 입력이 모자라 글이 안 나온 경우는 관문이 볼 글이 없다
             made[kind] += 1
             self.assertEqual(held(report_of(post)), [], (kind, post.title))
-            self.assertEqual(TR.notice_words(post), (R.calc_words(post.formulas),) * 2, (kind, post.title))               # S2AFIX2 N5: 공통 안내가 이 글이 쓴 계산식만 말한다
+            self.assertEqual(TR.notice_words(post), (None, R.calc_words(post.formulas)), (kind, post.title))               # S2AFIX2 N5: 공통 안내(주의 줄)가 이 글이 쓴 계산식만 말한다 — S2c-1 S1-b: 첫 문단 뒤 안내는 같은 목록을 되풀이하지 않는다
         for kind in KINDS:
             self.assertGreaterEqual(made[kind], PER_KIND - 2, (kind, made))                   # 시험이 속이 비지 않게: 종류마다 거의 모든 입력이 글이 된다
         self.assertGreaterEqual(sum(made.values()), 6 * (PER_KIND - 2))

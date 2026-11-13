@@ -204,7 +204,7 @@ class GoldenSpacePostsTest(unittest.TestCase):
                 self.assertTrue(post.evidence_text.startswith("근거 자료(규칙 기반 조립, Fact 표)\n"))
 
     def test_the_posts_never_claim_what_the_data_cannot_say(self):
-        claims = ("오로라", "정전", "통신 장애", "통신 두절", "위성 고장", "항공", "위험합니다", "안전합니다", "때문", "영향으로", "탓", "원인은", "예측", "예상", "전망", "건강", "피해")
+        claims = ("오로라", "정전", "통신 장애", "통신 두절", "위성 고장", "항공", "위험합니다", "안전합니다", "때문", "영향으로", "탓", "원인은", "예측", "예상", "전망", "건강", "피해", "역대", "기록적")      # S2c-1: 새 월별 문장이 '역대'·'기록적' 으로 읽히지 않게 둘을 더했다
         for name, post in self.posts.items():
             text = post.title + "\n" + post.description + "\n" + post.body_markdown
             with self.subTest(post=name):
@@ -612,8 +612,9 @@ class SeriesRecipeTest(unittest.TestCase):
         rows = H.ssn_monthly_rows("2026-10", 70)
         record, facts = H.parse_value("ssn_monthly", rows)
         post = A.assemble(RN.R04_NOREGION_SERIES, facts, H.TODAY, records=[record], source=test_source(), params={"key": "space_weather.sunspot_monthly_swpc"})
-        table = table_rows(post)
-        self.assertEqual(len(table), 12)
+        every_row = table_rows(post)
+        self.assertEqual(len(every_row), 12 + 5)                                                  # S2c-1: 앞 12줄은 월별 표, 뒤 5줄은 같은 달 해마다 표(2025–2021년 10월)
+        table = every_row[:12]
         self.assertEqual([row[-1] for row in table], ["잠정"] * 6 + ["표시 없음"] * 6)           # 최근 6개월은 잠정치
         self.assertEqual([row[-2] for row in table[:6]], ["자료 없음"] * 6)                       # 평활값은 최근 6개월이 비어 있다
         self.assertTrue(all(row[-2].endswith("개") for row in table[6:]))
@@ -910,23 +911,26 @@ class CalcNoteTest(unittest.TestCase):
     def setUpClass(cls):
         cls.posts = {name: build(name) for name in golden_cases()}
 
-    def test_both_sentences_name_exactly_the_calculations_each_golden_post_uses(self):
+    def test_the_caution_line_names_exactly_the_calculations_each_golden_post_uses_and_the_intro_no_longer_repeats_the_list(self):
+        """S2c-1 S1-b: 전에는 첫 문단 뒤 안내와 주의 줄 '계산한 값' 두 곳이 같은 계산 목록을 말했다(`first == second`). 이제 목록은 주의 줄 한 곳뿐이고 첫 문단 뒤 안내는 받아 옮긴 사실 한 문장이다 —
+        주의 줄의 목록이 글이 쓴 계산식과 정확히 같다는 옛 단언(낱말 표 전체를 훑는 것까지)은 그대로 두었다."""
         for name, post in self.posts.items():
             first, second = notice_words(post)
             used = {R.CALC_WORD_OF[formula_id] for formula_id in post.formulas}
             with self.subTest(post=name):
-                self.assertIsNotNone(first)
-                self.assertEqual(first, second)                                                   # 두 문장의 낱말 목록은 같다
-                self.assertEqual(first, R.calc_words(post.formulas))
-                self.assertEqual(set(first.split("·")), used)                                      # 쓴 계산식의 낱말뿐 — 안 쓴 계산식의 낱말은 없다
+                self.assertIsNone(first)                                                          # 첫 문단 뒤 안내에는 '… 같은 값은 이 글이 그 숫자로 직접 계산했습니다' 가 없다
+                self.assertIsNotNone(second)
+                self.assertEqual(second, R.calc_words(post.formulas))
+                self.assertEqual(set(second.split("·")), used)                                     # 쓴 계산식의 낱말뿐 — 안 쓴 계산식의 낱말은 없다
                 for word in {word for _formula, word in R.CALC_WORDS}:
-                    self.assertEqual(word in first.split("·"), word in used, word)                  # 낱말 표의 모든 낱말이 쓴 계산식에 있을 때만 들어 있다
+                    self.assertEqual(word in second.split("·"), word in used, word)                 # 낱말 표의 모든 낱말이 쓴 계산식에 있을 때만 들어 있다
                 self.assertNotIn("증감·변화율·평균·순위", post.body_markdown)
+                self.assertNotIn("그 숫자로 직접 계산했습니다", post.body_markdown)
 
     def test_kp_posts_do_not_claim_a_change_a_rate_or_a_rank_and_do_not_contradict_their_own_last_caution(self):
         for name in ("r04_kp", "r05_kp_storm"):
             body = self.posts[name].body_markdown
-            words = notice_words(self.posts[name])[0].split("·")
+            words = notice_words(self.posts[name])[1].split("·")
             with self.subTest(post=name):
                 for word in ("증감", "변화율", "전년 대비 변화율", "순위", "비중"):
                     self.assertNotIn(word, words)
@@ -934,14 +938,15 @@ class CalcNoteTest(unittest.TestCase):
                 for word in ("증감", "변화율", "순위"):
                     self.assertNotIn(word, rest)                                                  # 글 어디에도 계산했다는 말이 없다(계산하지 않았다는 한 문장만 남는다)
         self.assertIn(self.SENTENCE_OF_KP, self.posts["r04_kp"].body_markdown)
-        self.assertEqual(notice_words(self.posts["r04_kp"])[0], "하루 최대값·평균·평균과의 차이·최고값·최저값·개수")
+        self.assertEqual(notice_words(self.posts["r04_kp"])[1], "하루 최대값·평균·평균과의 차이·최고값·최저값·개수")
 
     def test_the_other_posts_keep_the_calculations_they_really_make(self):
-        self.assertTrue({"증감", "변화율"} <= set(notice_words(self.posts["r04_ssn_daily"])[0].split("·")))
-        self.assertIn("전년 대비 변화율", notice_words(self.posts["r04_ssn_monthly"])[0].split("·"))
-        self.assertIn("기준별 개수", notice_words(self.posts["r05_kp_storm"])[0].split("·"))
-        self.assertIn("기준별 개수", notice_words(self.posts["r05_flares"])[0].split("·"))
-        scales = notice_words(self.posts["r06_scales"])[0].split("·")
+        self.assertTrue({"증감", "변화율"} <= set(notice_words(self.posts["r04_ssn_daily"])[1].split("·")))
+        self.assertIn("전년 대비 변화율", notice_words(self.posts["r04_ssn_monthly"])[1].split("·"))
+        self.assertTrue({"같은 달 순위", "마지막으로 낮은 달", "경과 개월"} <= set(notice_words(self.posts["r04_ssn_monthly"])[1].split("·")))       # S2c-1: 월별 글이 새로 쓰는 계산식의 낱말
+        self.assertIn("기준별 개수", notice_words(self.posts["r05_kp_storm"])[1].split("·"))
+        self.assertIn("기준별 개수", notice_words(self.posts["r05_flares"])[1].split("·"))
+        scales = notice_words(self.posts["r06_scales"])[1].split("·")
         self.assertIn("증감", scales)
         for word in ("변화율", "순위", "하루 최대값"):
             self.assertNotIn(word, scales)                                                        # 등급 글은 변화율·순위를 계산하지 않는다
@@ -960,7 +965,7 @@ class CalcNoteTest(unittest.TestCase):
         self.assertEqual(R.calc_words({"F07_rolling_mean", "F08_mean"}), "평균")                  # 같은 낱말은 한 번만
         self.assertEqual(R.calc_words(["F10_min", "F09_max", "F15_day_max"]), "하루 최대값·최고값·최저값")
         self.assertEqual(R.calc_words(("F16_count_between", "F12_count", "F01_change")), "증감·개수·기준별 개수")
-        self.assertEqual(R.calc_words(frozenset(R.CALC_WORD_OF)), "하루 최대값·증감·변화율·전년 대비 변화율·순위·비중·평균·중앙값·평균과의 차이·격차·최고값·최저값·범위 안의 위치·개수·기준별 개수")
+        self.assertEqual(R.calc_words(frozenset(R.CALC_WORD_OF)), "하루 최대값·증감·변화율·전년 대비 변화율·순위·비중·평균·중앙값·평균과의 차이·격차·최고값·최저값·범위 안의 위치·개수·기준별 개수·같은 달 순위·마지막으로 낮은 달·경과 개월")      # S2c-1 이 뒤에 셋을 더했다
         for nothing in (None, (), [], set(), frozenset()):
             self.assertIsNone(R.calc_words(nothing))
         self.assertIsNone(R.calc_words({"F07_rolling_mean", "F99_unknown"}))                      # 모르는 계산식이 섞이면 만들지 않는다(고정 문장으로 돌아감)
@@ -1086,6 +1091,404 @@ class RecipeRegistryTest(unittest.TestCase):
                 self.assertTrue(line.startswith("- "))
                 self.assertEqual(F.untraced_numbers(line), [], line)
             self.assertEqual(R.title_template_problem(f"⟦L:lbl⟧ {subject.title_word}, ⟦D:cur⟧ 기준"), None)
+
+
+MONTHLY_KEY = "space_weather.sunspot_monthly_swpc"
+CALC_CLAIM_RE = re.compile(r"직접 (?:계산|골랐|센)|이 글이 (?:센|직접)")           # 설계 부록 A 의 '직접 계산·골랐다·센 것 표명' 을 세는 정규식(문장·항목 단위)
+CAUSE_RE = re.compile(r"원인[^.]*(?:알 수 없|설명하지 않)|(?:알 수 없|설명하지 않)[^.]*원인")
+
+
+def monthly_rows_from(values, last_month="2026-10"):
+    """주어진 값(오래된 달부터)으로 만든 월별 응답 행 — 마지막 값이 last_month 의 값이다. 평활값은 없음(-1)·제3자 칸은 넣지 않는다."""
+    year, month = (int(part) for part in last_month.split("-"))
+    start = year * 12 + month - 1 - (len(values) - 1)
+    return [{"time-tag": f"{(start + index) // 12:04d}-{(start + index) % 12 + 1:02d}", "observed_swpc_ssn": float(value), "smoothed_swpc_ssn": -1.0} for index, value in enumerate(values)]
+
+
+def monthly_post(values, last_month="2026-10", *, provider=None, drop=(), retrieved_at=H.RETRIEVED_AT, today=H.TODAY, extra_rows=()):
+    rows = [row for index, row in enumerate(monthly_rows_from(values, last_month)) if index not in drop] + list(extra_rows)
+    record, facts = H.parse_value("ssn_monthly", rows, retrieved_at=retrieved_at)
+    return A.assemble(RN.R04_NOREGION_SERIES, facts, today, records=[record], source=test_source(provider), params={"key": MONTHLY_KEY})
+
+
+def values_with(count, overrides, *, base=50.0, last_month="2026-10"):
+    """count 개월 값(전부 base)에서 `YYYY-MM` → 값 으로 몇 달만 바꾼 목록."""
+    year, month = (int(part) for part in last_month.split("-"))
+    end = year * 12 + month - 1
+    values = [base] * count
+    for tag, value in overrides.items():
+        y, m = (int(part) for part in tag.split("-"))
+        values[count - 1 - (end - (y * 12 + m - 1))] = value
+    return values
+
+
+KEPT_MONTHS = 360         # 어댑터가 가장 최근 달에서 이만큼의 개월만 Fact 로 보관한다(S2c-1 명세) — 글이 읽는 기록의 길이
+
+
+def plain_season(values, last_month="2026-10"):
+    """독립 대조: 응답 값에서 일반 파이썬으로 센 같은 달 순위·묶음 크기·마지막으로 낮았던 달(달 번호·값·몇 개월 전)·같은 달의 이전 해들(가까운 해부터). 글이 읽는 것은 가장 최근 360개월뿐이다."""
+    values = values[-KEPT_MONTHS:]
+    year, month = (int(part) for part in last_month.split("-"))
+    end = year * 12 + month - 1
+    dated = [(end - (len(values) - 1) + index, Decimal(str(value))) for index, value in enumerate(values)]
+    cur_index, cur = dated[-1]
+    same = [(index, value) for index, value in dated if index % 12 == cur_index % 12]
+    lower = [(index, value) for index, value in dated[:-1] if value < cur]
+    return {"n": len(same), "rank": 1 + sum(1 for _index, value in same if value > cur), "cur": cur,
+            "last": (lower[-1][0], lower[-1][1], cur_index - lower[-1][0]) if lower else None,
+            "earlier_same": [(index, value) for index, value in reversed(same[:-1])]}
+
+
+def second_table(post):
+    """'최신 값과의 차이' 표의 줄 [(연, 월, 값, 차이)] — 없으면 빈 목록."""
+    lines = post.body_markdown.split("\n")
+    header = "| 기준 기간 | 값 | 최신 값과의 차이 |"
+    if header not in lines:
+        return []
+    out = []
+    for line in lines[lines.index(header) + 2:]:
+        if not line.startswith("|"):
+            break
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        found = re.fullmatch(r"(\d+)년 (\d+)월", cells[0])
+        out.append((int(found.group(1)), int(found.group(2)), Decimal(cells[1].rstrip("개").replace(",", "")), Decimal(cells[2].rstrip("개").replace(",", "").replace("−", "-"))))
+    return out
+
+
+def calc_claim_units(post):
+    """본문(출처 앞)에서 '직접 계산했다·골랐다·셌다' 를 말하는 문장·항목 수(표 줄·소제목 제외)."""
+    count = 0
+    for block in re.split(r"\n\s*\n", story(post)):
+        for line in block.split("\n"):
+            text = line.strip()
+            if not text or text.startswith(("#", "|")):
+                continue
+            units = [text] if text.startswith("- ") else [part for part in re.split(r"(?<=[.!?])\s+", text) if part]
+            count += sum(1 for unit in units if CALC_CLAIM_RE.search(unit))
+    return count
+
+
+class MonthlyLongRecordTest(unittest.TestCase):
+    """S2c-1 S1-a: 월별 흑점수 글의 '더 긴 기록 속 위치' — 같은 달 순위·이 글이 읽은 자료에서 마지막으로 낮았던 달과 몇 개월 전인지·같은 달 해마다 값 표·최근 12개월 평균과 그 앞 12개월 평균 비교.
+    모든 새 값은 응답 값에서 일반 파이썬으로 다시 센 값(독립 대조)과 같고 '역대'·'기록적'·원인·영향을 말하지 않는다."""
+    RANK_RE = re.compile(r"- 같은 달 순위: 이 글이 읽은 같은 달 (\d+)년 가운데 최신 값은 (\d+)위입니다\(높은 값이 앞서고 값이 같으면 같은 순위입니다\)")
+    LOW_RE = re.compile(r"- 최신 값보다 낮았던 마지막 달\(이 글이 읽은 자료 안에서\): (\d+)년 (\d+)월\(([\d,.]+)개\), (\d+)개월 전")
+    SENTENCE_BOTH = re.compile(r"같은 달끼리 견주면 최신 값은 이 글이 읽은 (\d+)년 가운데 (\d+)위에 놓이고, 이 글이 읽은 자료에서 이보다 낮은 달이 마지막으로 나온 것은 (\d+)개월 전인 (\d+)년 (\d+)월입니다\.")
+
+    def check_against_plain(self, values, post, label, last_month="2026-10"):
+        want = plain_season(values, last_month)
+        text = post.body_markdown
+        rank = self.RANK_RE.search(text)
+        self.assertIsNotNone(rank, label)
+        self.assertEqual((int(rank.group(1)), int(rank.group(2))), (want["n"], want["rank"]), label)
+        low = self.LOW_RE.search(text)
+        if want["last"] is None:
+            self.assertIsNone(low, label)
+            self.assertIn(("last_low", "F18_last_lower", "NO_MATCH"), post.skipped, label)
+        else:
+            index, value, since = want["last"]
+            self.assertIsNotNone(low, label)
+            self.assertEqual((int(low.group(1)), int(low.group(2)), Decimal(low.group(3).replace(",", "")), int(low.group(4))), (index // 12, index % 12 + 1, value, since), label)
+        rows = second_table(post)
+        self.assertEqual(rows, [(index // 12, index % 12 + 1, value, want["cur"] - value) for index, value in want["earlier_same"][:RN.SEASON_TABLE_ROWS]], label)
+
+    def test_every_new_number_matches_a_plain_python_recount_on_random_inputs(self):
+        rng = random.Random(2113)
+        for case in range(60):
+            count = rng.choice((25, 26, 30, 37, 61, 120, 250, 358, 400))
+            values = [round(rng.uniform(5, 200), 2) for _ in range(count)]
+            if case % 3 == 0:
+                values = [float(rng.randint(0, 6) * 10) for _ in range(count)]                    # 값이 자주 겹치는 입력(동률·같은 값)
+            post = monthly_post(values)
+            with self.subTest(case=case, months=count):
+                self.assertIsInstance(post, A.AssembledPost, post)
+                self.check_against_plain(values, post, case)
+                self.assertEqual(A.post_problems(post, allowed_latin={"NOAA", "SWPC", "UTC"}), [])
+
+    def test_the_golden_post_shows_the_section_in_each_of_its_places(self):
+        post = build("r04_ssn_monthly")
+        body = post.body_markdown
+        glance = body[body.index("## 한눈에"):body.index("## 숫자로 보기")]
+        self.assertEqual(len(re.findall(r"(?m)^- ", glance)), 8)                                   # 새 줄 셋(12개월 평균 비교·같은 달 순위·마지막으로 낮았던 달)이 한눈에를 3줄 늘렸다
+        self.assertIn("- 최근 12개월 평균 142.00개, 그 앞 12개월 평균 110.58개 대비 +31.42개, 변화율 +28.4%", glance)
+        self.assertRegex(glance, self.RANK_RE.pattern)
+        self.assertRegex(glance, self.LOW_RE.pattern)
+        self.assertEqual(len(second_table(post)), 5)
+        self.assertIn("**이 글의 해석**:", body)
+        self.assertIsNotNone(self.SENTENCE_BOTH.search(body))
+        self.assertIn("최근 12개월 평균은 그 앞 12개월 평균보다 31.42개 높습니다.", body)
+        self.assertEqual(sum(1 for line in body.split("\n") if line.startswith("## ")), 5)                    # 절 순서는 그대로 다섯 — 새 구역은 기존 절 안의 줄과 표다
+        self.assertEqual(tuple(re.findall(r"(?m)^## (.+)$", body)), R.SECTION_ORDER)
+
+    def test_the_table_lists_the_nearest_years_first_at_most_eight_with_the_difference_from_the_latest_value(self):
+        values = [round(100 + (index * 37) % 91 + index / 100, 2) for index in range(400)]
+        post = monthly_post(values)
+        rows = second_table(post)
+        want = plain_season(values)
+        self.assertEqual(len(want["earlier_same"]), 29)                                              # 이 글이 읽은 360개월 가운데 같은 달 30개 — 이전 해는 29개
+        self.assertEqual(len(rows), RN.SEASON_TABLE_ROWS)
+        self.assertEqual(RN.SEASON_TABLE_ROWS, 8)
+        self.assertEqual([year for year, _month, _value, _diff in rows], list(range(2025, 2017, -1)))      # 가까운 해부터
+        self.assertEqual({month for _year, month, _value, _diff in rows}, {10})
+        for year, _month, value, diff in rows:
+            self.assertEqual(diff, want["cur"] - value, year)
+        self.assertIn(f"같은 달 {want['n']}년 가운데", post.body_markdown)
+        self.assertEqual(want["n"], 30)
+
+    def test_ties_share_a_rank_and_a_month_with_the_same_value_is_not_called_lower(self):
+        values = values_with(60, {"2022-10": 80.0, "2023-10": 100.0, "2024-10": 120.0, "2025-10": 100.0, "2026-10": 100.0}, base=200.0)
+        values[-2], values[-3] = 100.0, 90.0                                                          # 2026-09 은 이번 값과 같고 2026-08 은 낮다
+        post = monthly_post(values)
+        self.assertIsInstance(post, A.AssembledPost, post)
+        rank, low = self.RANK_RE.search(post.body_markdown), self.LOW_RE.search(post.body_markdown)
+        self.assertEqual((int(rank.group(1)), int(rank.group(2))), (5, 2))                          # 같은 달 다섯 해 가운데 100 보다 높은 값은 120 하나 — 같은 값 100 이 셋이어도 모두 2위
+        self.assertEqual((int(low.group(1)), int(low.group(2)), Decimal(low.group(3)), int(low.group(4))), (2026, 8, Decimal(90), 2))      # 같은 값(2026-09)은 건너뛰고 두 달 전
+        self.assertEqual(second_table(post)[:3], [(2025, 10, Decimal(100), Decimal(0)), (2024, 10, Decimal(120), Decimal(-20)), (2023, 10, Decimal(100), Decimal(0))])
+        self.check_against_plain(values, post, "ties")
+
+    def test_the_months_ago_counts_whole_months_across_a_year_boundary(self):
+        values = values_with(40, {"2025-11": 90.0, "2025-12": 150.0, "2026-01": 100.0}, base=200.0, last_month="2026-01")
+        post = monthly_post(values, "2026-01", retrieved_at="2026-02-10T01:10:00Z", today="2026-02-10")
+        self.assertIsInstance(post, A.AssembledPost, post)
+        low = self.LOW_RE.search(post.body_markdown)
+        self.assertEqual((int(low.group(1)), int(low.group(2)), int(low.group(4))), (2025, 11, 2))
+        self.check_against_plain(values, post, "boundary", "2026-01")
+
+    def test_a_new_low_leaves_out_the_last_lower_month_and_keeps_the_rank_and_the_limits_line(self):
+        values = [round(60 + (index % 17) * 3.5, 2) for index in range(60)]
+        values[-1] = 1.5                                                                             # 읽은 자료 안에서 가장 낮다
+        post = monthly_post(values)
+        self.assertIsInstance(post, A.AssembledPost, post)
+        self.assertIsNone(self.LOW_RE.search(post.body_markdown))
+        self.assertNotIn("마지막으로 나온 것은", post.body_markdown)
+        self.assertIn(("last_low", "F18_last_lower", "NO_MATCH"), post.skipped)
+        self.assertIsNotNone(self.RANK_RE.search(post.body_markdown))
+        self.assertIn("같은 달끼리 견주면 최신 값은 이 글이 읽은 5년 가운데 5위에 놓입니다.", post.body_markdown)         # 순위만 있는 문장
+        self.assertIn(RN.SEASON_CAUTION, post.body_markdown)
+        self.assertNotIn("F18_last_lower", post.formulas)
+        self.assertNotIn("F19_months_between", post.formulas)
+        self.check_against_plain(values, post, "new low")
+
+    def test_fewer_than_three_years_of_the_same_month_leave_out_the_rank_and_the_table_but_keep_the_last_lower_month(self):
+        values = [round(100 + (index * 7) % 23 + index / 10, 2) for index in range(24)]               # 2024-11 … 2026-10 — 10월은 2025·2026 두 해뿐
+        values[-1] = 123.45
+        post = monthly_post(values)
+        self.assertIsInstance(post, A.AssembledPost, post)
+        self.assertIsNone(self.RANK_RE.search(post.body_markdown))
+        self.assertEqual(second_table(post), [])
+        self.assertNotIn("같은 달 순위", post.body_markdown)
+        self.assertNotIn("최신 값과의 차이", post.body_markdown)
+        self.assertIn(("same_rank", "F17_season_rank", "TOO_FEW_INPUTS"), post.skipped)
+        want = plain_season(values)
+        low = self.LOW_RE.search(post.body_markdown)
+        self.assertIsNotNone(low)
+        self.assertEqual(int(low.group(4)), want["last"][2])
+        self.assertIn("이 글이 읽은 자료에서 최신 값보다 낮은 달이 마지막으로 나온 것은", post.body_markdown)                   # 마지막으로 낮은 달만 있는 문장
+        self.assertIn(RN.SEASON_CAUTION, post.body_markdown)
+
+    def test_without_enough_months_for_either_new_number_the_post_is_the_old_one_plus_nothing(self):
+        values = [round(100 + (index * 11) % 29, 2) for index in range(8)] + [50.0]                  # 아홉 달 — 12개월 평균 비교도 같은 달 순위도 없고 마지막 값이 가장 낮아 낮았던 달도 없다
+        post = monthly_post(values)
+        self.assertIsInstance(post, A.AssembledPost, post)
+        for text in ("같은 달 순위", "낮았던 마지막 달", "최신 값과의 차이", "최근 12개월 평균", "순위와 마지막으로 낮았던 달", "마지막으로 나온 것은"):
+            self.assertNotIn(text, post.body_markdown)
+        self.assertNotIn(RN.SEASON_CAUTION, post.body_markdown)
+        self.assertFalse({"F17_season_rank", "F18_last_lower", "F19_months_between"} & set(post.formulas))
+
+    def test_the_current_months_row_is_not_an_input_of_the_new_numbers(self):
+        values = [round(100 + (index * 13) % 41 + index / 50, 2) for index in range(61)]
+        current = {"time-tag": "2026-11", "observed_swpc_ssn": 0.5, "smoothed_swpc_ssn": -1.0}        # 이번 달(2026-11) 행 — 들어갔다면 1위·가장 낮은 달 후보였을 값
+        plain, with_current = monthly_post(values), monthly_post(values, extra_rows=[current])
+        self.assertIsInstance(with_current, A.AssembledPost, with_current)
+        self.assertEqual(with_current.body_markdown, plain.body_markdown)
+        self.assertEqual(with_current.title, plain.title)
+        self.assertNotIn("2026-11", {fact.as_of for fact in with_current.facts_used})                  # 이번 달 값은 어떤 계산의 입력도 아니다
+        self.assertEqual(second_table(with_current), second_table(plain))
+
+    def test_the_post_never_calls_a_value_a_record_or_all_time_and_does_not_say_why(self):
+        for case, count in enumerate((30, 100, 358)):
+            values = [round(60 + (index * 29) % 83 + index / 7, 2) for index in range(count)]
+            post = monthly_post(values)
+            text = post.title + post.description + post.body_markdown
+            with self.subTest(months=count):
+                for word in ("역대", "기록적", "사상", "최초", "유례", "전례"):
+                    self.assertNotIn(word, text)
+                self.assertEqual(A.forbidden_found(text), [])
+                self.assertEqual(A.blocked_found(text), [])
+                self.assertIn("이 글이 읽은 자료", post.body_markdown)                               # 읽은 자료 안에서만 말한다고 밝힌다
+                self.assertIn(RN.SEASON_CAUTION, post.body_markdown)
+
+    def test_the_new_sentences_obey_the_text_rules_and_say_nothing_about_causes_or_effects(self):
+        texts = (RN.SEASON_RANK_BULLET, RN.SEASON_LOW_BULLET, RN.SEASON_TABLE_INTRO, RN.SEASON_SENTENCE_BOTH, RN.SEASON_SENTENCE_RANK, RN.SEASON_SENTENCE_LOW, RN.SEASON_CAUTION)
+        for text in texts:
+            plain = F.REF_RE.sub("", text)
+            with self.subTest(text=text[:24]):
+                self.assertEqual(F.untraced_numbers(text), [])
+                self.assertEqual(A.forbidden_found(plain), [])
+                self.assertEqual(A.blocked_found(plain), [])
+                self.assertEqual(A.particle_problems(text), [])
+                self.assertIsNone(re.search(R.VARYING_PARTICLE_PATTERNS[2], text))
+                self.assertEqual(re.findall(r"[A-Za-z]{2,}", plain), [])
+                self.assertNotRegex(text, r"[~～〜]|https?://|\{|\}")
+                for claim in ("역대", "기록적", "때문", "원인", "영향", "탓", "예측", "전망", "예상"):
+                    self.assertNotIn(claim, text)
+                self.assertNotRegex(plain, r"\d")
+                self.assertNotRegex(text, CALC_CLAIM_RE.pattern)                                       # 새 문장은 '직접 계산했습니다' 를 되풀이하지 않는다(S1-b)
+        self.assertIn("이 글이 읽은 자료 안에서만", RN.SEASON_CAUTION)                                  # 정직 고지: 읽은 자료 안에서만 견줬다는 한정
+        self.assertIn("더 오래된 달은 알지 못합니다", RN.SEASON_CAUTION)
+        self.assertIn("잠정치", RN.SEASON_CAUTION)                                                       # 가장 최근 달의 값이 잠정치일 수 있다는 줄(설계 위험 ①)
+        self.assertIn("고쳐지면 순위와 달이 달라질 수 있습니다", RN.SEASON_CAUTION)
+        self.assertIn("이 글이 읽은 자료 안에서", RN.SEASON_LOW_BULLET)
+        self.assertIn("값이 같으면 같은 순위입니다", RN.SEASON_RANK_BULLET)
+
+    def test_the_limits_line_is_only_added_when_a_new_number_is_there_and_the_subject_flags_are_what_the_design_says(self):
+        monthly = RN.SERIES_BY_KEY[MONTHLY_KEY]
+        self.assertEqual((monthly.season, monthly.count_window, monthly.compare, monthly.window), (True, RN.MONTH_TABLE_ROWS, 12, 3))
+        for key, subject in RN.SERIES_BY_KEY.items():
+            if key != MONTHLY_KEY:
+                self.assertEqual((subject.season, subject.count_window), (False, 0), key)             # 다른 글감은 그대로다
+        self.assertNotIn(RN.SEASON_CAUTION, monthly.cautions)                                         # 정적 목록이 아니라 새 구역이 있을 때만 더해진다
+        for name in ("r04_kp", "r04_ssn_daily"):
+            self.assertNotIn(RN.SEASON_CAUTION, build(name).body_markdown)
+
+    def test_the_evidence_text_of_a_full_thirty_year_input_stays_small_and_every_number_is_traceable(self):
+        values = [round(40 + (index * 53) % 151 + (index % 12) * 1.5, 2) for index in range(358)]      # 실제 파일 길이(358개월)
+        post = monthly_post(values)
+        self.assertIsInstance(post, A.AssembledPost, post)
+        self.assertLessEqual(len(post.evidence_text), 15_000)                                         # 설계의 목표(관문 상한 20,000자의 75%)
+        self.assertLess(len(post.evidence_text), 20_000)
+        self.assertLessEqual(set(A.number_tokens(story(post))), A.traceable_numbers(post))
+        self.assertLessEqual(set(A.number_tokens(post.evidence_text)), A.traceable_numbers(post))
+        self.assertEqual(F.untraced_numbers(post.template_markdown), [])
+        self.assertLess(len(post.facts_used), 120)                                                    # F18 은 찾은 달 뒤의 달만 입력으로 싣는다 — 358개월 전부가 근거로 실리지 않는다
+        self.assertTrue(set(post.facts_used) and all(fact.provider_id == "noaa_swpc_json" for fact in post.facts_used))
+
+
+class MonthlyCountWindowTest(unittest.TestCase):
+    """S2c-1 S1-a 숨은 부작용: 보관이 360개월로 늘어도 '이 글이 읽은 N개월' 의 범위와 '개월'/'관측 N개' 말투는 표 창(12개월)으로 정한다."""
+
+    def draft_of(self, values, **kw):
+        rows = [row for index, row in enumerate(monthly_rows_from(values)) if index not in kw.get("drop", ())]
+        record, facts = H.parse_value("ssn_monthly", rows)
+        ctx = R.PlanContext(RN.R04_NOREGION_SERIES, tuple(sorted(facts, key=lambda fact: fact.fact_id)), F.as_date(H.TODAY), {"key": MONTHLY_KEY})
+        draft = RN.R04_NOREGION_SERIES.plan(ctx)
+        self.assertIsInstance(draft, R.Draft, draft)
+        return draft
+
+    def test_a_complete_series_counts_exactly_the_table_window(self):
+        for count in (13, 70, 358, 400):
+            draft = self.draft_of([100.0 + index % 7 for index in range(count)])
+            with self.subTest(months=count):
+                n_all = draft.slots["n_all"]
+                self.assertEqual((n_all.value, n_all.unit), (Decimal(12), "개월"))                  # 읽은 값이 몇 개월이든 12개월 — 표 창
+                self.assertTrue(all("관측 " not in lead for lead in draft.leads))
+
+    def test_a_hole_far_back_does_not_turn_the_months_into_observations_but_a_hole_in_the_window_does(self):
+        values = [100.0 + index % 7 for index in range(200)]
+        far = self.draft_of(values, drop=(30,))                                                      # 30 개월 전쯤 하나가 비었다(표 창 밖)
+        near = self.draft_of(values, drop=(190,))                                                    # 표 창 안
+        self.assertEqual((far.slots["n_all"].value, far.slots["n_all"].unit), (Decimal(12), "개월"))
+        self.assertTrue(all("관측 " not in lead for lead in far.leads))
+        self.assertEqual((near.slots["n_all"].value, near.slots["n_all"].unit), (Decimal(11), "개"))   # 창 안의 빈칸은 '개월' 이 아니라 '관측 11개'
+        self.assertTrue(any("관측 " in lead for lead in near.leads))
+
+    def test_the_daily_and_kp_subjects_still_count_everything_they_read(self):
+        record, facts = H.parse_value("ssn_daily", H.ssn_daily_rows("2026-11-09", 70, gaps=(20,)))
+        ctx = R.PlanContext(RN.R04_NOREGION_SERIES, tuple(sorted(facts, key=lambda fact: fact.fact_id)), F.as_date(H.TODAY), {"key": "space_weather.sunspot_daily_swpc"})
+        draft = RN.R04_NOREGION_SERIES.plan(ctx)
+        self.assertEqual((draft.slots["n_all"].value, draft.slots["n_all"].unit), (Decimal(69), "개"))      # 빠진 날이 있는 일별 자료는 69일이 아니라 관측 69개 — 옛 동작 그대로
+
+
+class RepeatCleanupTest(unittest.TestCase):
+    """S2c-1 S1-b: 같은 글 안의 같은 설명 되풀이를 줄인다 — 받은 날짜 4→3(둘은 첫 문단 뒤 안내·출처 절)·'직접 계산' 표명 3(4)→2·'원인을 알 수 없다' 2→1. 정직 고지는 그대로 한 번씩 남는다. R01–R03 은 바이트까지 그대로다."""
+    DATE = "2026년 11월 10일"
+    HONEST_NOTICES = ("이 글이 아는 것은 위 숫자뿐입니다", "숫자가 달라진 원인을 이 자료만으로는 알 수 없어 설명하지 않았습니다", "이 글은 사람이 쓴 글이 아니라, 공개된 구조화 통계를 정해진 규칙으로 자동 정리해 만든 글입니다",
+                      "이 글은 값을 가져온 뒤의 개정 여부를 확인하지 않았습니다", "계산은 정밀한 값으로 하고 보여 줄 때만 반올림하므로, 보이는 값끼리 다시 계산하면 끝자리가 다를 수 있습니다", "- 이용 조건: ", "— 열람 ")
+
+    @classmethod
+    def setUpClass(cls):
+        cls.posts = {name: build(name) for name in golden_cases()}
+        cls.dated = {name: build(name, provider_=H.provider(attribution_template=H.B_TEMPLATE)) for name in golden_cases()}          # 실제 출처 문구는 열람일이 든다
+
+    def test_each_calc_claim_is_said_by_two_units_only_the_table_introduction_and_the_caution_line(self):
+        for name, post in self.posts.items():
+            with self.subTest(post=name):
+                self.assertEqual(calc_claim_units(post), 2)
+                self.assertIn("- 계산한 값: ", post.body_markdown)
+                self.assertEqual(len(re.findall(r"(?m)^- 계산한 값: ", post.body_markdown)), 1)
+
+    def test_the_received_date_is_in_the_intro_and_the_source_section_only(self):
+        for name, post in self.dated.items():
+            body = post.body_markdown
+            with self.subTest(post=name):
+                self.assertEqual(len(re.findall(r"(?:열람|받아 옮긴|받은 값)", body)), 3)              # 첫 문단 뒤 안내 하나·출처 줄의 열람일·이용 조건 줄의 열람일
+                self.assertEqual(body.split("## 출처")[0].count("받아 옮긴"), 1)
+                self.assertEqual(body.split("## 출처")[1].count("열람"), 2)
+                self.assertEqual(body.split("## 출처")[1].count(self.DATE), 2)
+                revision = next(line for line in body.split("\n") if line.startswith("- 잠정치와 개정:"))
+                self.assertNotRegex(revision, r"\d")                                                  # 잠정치와 개정 줄에는 날짜가 없다
+                self.assertNotIn("받은 값", body)
+        for name, post in self.posts.items():
+            with self.subTest(default=name):
+                self.assertEqual(len(re.findall(r"(?:열람|받아 옮긴|받은 값)", post.body_markdown)), 2)    # 시험용 출처 문구에는 열람일이 없다 — 안내와 출처 줄
+
+    def test_the_intro_is_one_sentence_and_the_cause_is_said_once(self):
+        for name, post in self.posts.items():
+            body = post.body_markdown
+            lead_gap = body.split("\n\n")[1]
+            with self.subTest(post=name):
+                self.assertEqual(lead_gap, f"이 글의 값은 [공식 자료]({TEST_SOURCE_URL})에서 {self.DATE}에 받아 옮긴 구조화 데이터입니다.")
+                self.assertEqual(sum(1 for unit in re.split(r"(?<=[.!?])\s+|\n", story(post)) if CAUSE_RE.search(unit)), 1)
+                self.assertEqual(story(post).count("원인"), 1)
+
+    def test_the_honest_notices_each_stay_exactly_once(self):
+        for name, post in self.posts.items():
+            with self.subTest(post=name):
+                for notice in self.HONEST_NOTICES:
+                    self.assertEqual(post.body_markdown.count(notice), 1, notice)
+                self.assertIn("**이 글의 해석**:", post.body_markdown)
+                self.assertTrue(post.body_markdown.rstrip().endswith("최신 값은 위 출처에서 직접 확인해 주세요.*"))
+
+    def test_the_cleanup_only_removed_sentences_and_nothing_else_was_added_to_the_common_lines(self):
+        words = "하루 최대값·개수·평균"
+        self.assertEqual(R.intro_template(words), R.INTRO_FACT)
+        self.assertEqual(R.intro_template(None), R.INTRO_TEMPLATE)
+        self.assertEqual(R.INTRO_TEMPLATE, R.INTRO_FACT + " " + R.INTRO_CALC_OLD)
+        self.assertEqual(R.INTRO_TEMPLATE, "이 글의 값은 " + R.SOURCE_LINK_TOKEN + "에서 ⟦T:record⟧에 받아 옮긴 구조화 데이터입니다. 증감·변화율·평균·순위 같은 값은 이 글이 그 숫자로 직접 계산했습니다.")      # 기존 틀의 문장은 글자 하나 그대로
+        old, new = R.CAUTION_COMMON, R.caution_common(words)
+        self.assertEqual(len(old), len(new))
+        changed = [index for index, (before, after) in enumerate(zip(old, new)) if before != after]
+        self.assertEqual(changed, [1, 2])                                                             # 둘째 줄(잠정치와 개정)과 셋째 줄(계산한 값)만 바뀌고 첫째·넷째 줄은 그대로다
+        self.assertEqual(new[1], R.CAUTION_REVISION_LINE)
+        self.assertEqual(new[0], old[0])
+        self.assertEqual(new[3], old[3])
+        for text in (R.INTRO_FACT, R.CAUTION_REVISION_LINE):
+            self.assertEqual(F.untraced_numbers(text), [])
+            self.assertEqual(A.forbidden_found(F.REF_RE.sub("", text)), [])
+            self.assertEqual(A.particle_problems(text), [])
+
+    def test_the_old_recipes_keep_the_old_common_sentences_including_the_date_in_the_revision_line(self):
+        for recipe_id, params in FH.GOLDEN.items():
+            old = FH.run(recipe_id, params=params)
+            body = old.body_markdown
+            with self.subTest(recipe=recipe_id):
+                self.assertIn("받아 옮긴 구조화 데이터입니다. 증감·변화율·평균·순위 같은 값은 이 글이 그 숫자로 직접 계산했습니다.", body)
+                self.assertRegex(body, r"- 잠정치와 개정: 가장 최근 기간의 값은 잠정치일 수 있고 나중에 고쳐질 수 있습니다\. 이 글은 2026년 4월 18일에 받은 값을 그대로 옮겼으며 이후 개정 여부는 확인하지 않았습니다\.")
+                self.assertNotIn("값을 가져온 뒤의 개정 여부", body)
+
+    def test_the_flare_table_note_no_longer_repeats_that_the_post_counted_it_itself(self):
+        body = self.posts["r05_flares"].body_markdown
+        self.assertIn("등급은 제공처 자료 그대로이고 건수는 이 글이 직접 센 것입니다.", body)
+        self.assertIn("해당하는 플레어가 없는 등급도 건수 칸을 비우지 않고 센 결과를 그대로 적었습니다.", body)
+        self.assertNotIn("이 글이 센 건수", body)
+
+    def test_r04_reading_keeps_its_calculation_statement_and_the_limit_but_not_the_cause_clause(self):
+        for name in ("r04_kp", "r04_ssn_daily", "r04_ssn_monthly"):
+            with self.subTest(post=name):
+                body = self.posts[name].body_markdown
+                self.assertIn("짧은 오르내림만으로 흐름이 바뀌었다고 말하기는 어렵습니다. 이 글은 여러 기간을 함께 놓고 평균과 범위만 계산했습니다. ", body)
+                self.assertNotIn("이 자료만으로는 움직임의 원인을 알 수 없", body)
+                self.assertIn("알려 주지 않습니다", body)                                              # 영향을 말하지 않는다는 한계 문장은 그대로
 
 
 if __name__ == "__main__":
