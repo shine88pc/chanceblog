@@ -231,7 +231,7 @@ class FollowUpDocsTest(unittest.TestCase):
         for module, name in ((F, "exact"), (F, "settle_context"), (F, "is_half_tie"), (F, "INTEGER_FORMULAS"), (F, "decimals_of"), (F, "format_object"), (T, "blocked_loose"),
                              (A, "unsafe_free_text")):
             self.assertTrue(hasattr(module, name), name)
-        self.assertEqual(F.INTEGER_FORMULAS, frozenset({"F04_rank", "F12_count", "F16_count_between"}))        # F16(기준 이상 개수, S2a)도 정수로 보인다
+        self.assertEqual(F.INTEGER_FORMULAS, frozenset({"F04_rank", "F12_count", "F16_count_between", "F17_season_rank", "F19_months_between"}))        # F16(기준 이상 개수, S2a)도 정수로 보이고 S2c-1 이 F17(같은 달 순위)·F19(경과 개월 수)를 더했다 — 정확한 집합을 못박는다
 
     def test_the_decision_number_overlap_is_explained(self):
         row = next(line for line in DOC.splitlines() if line.startswith("| D-157 |"))

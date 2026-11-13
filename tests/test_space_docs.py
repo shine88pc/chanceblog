@@ -81,7 +81,7 @@ class SectionTest(unittest.TestCase):
             self.assertIn(formula_id, DOC)
             self.assertIn(f"`{C.FORMULAS[formula_id].__name__}", DOC)
         self.assertIn("INTEGER_FORMULAS`: F04·F12·F16", DOC)
-        self.assertEqual(F.INTEGER_FORMULAS, frozenset({"F04_rank", "F12_count", "F16_count_between"}))
+        self.assertEqual(F.INTEGER_FORMULAS, frozenset({"F04_rank", "F12_count", "F16_count_between", "F17_season_rank", "F19_months_between"}))      # S2c-1 이 F17(같은 달 순위)·F19(경과 개월 수)를 더했다 — 정확한 집합은 그대로 못박는다
         self.assertIn("등급 단계(단계)는 `ratio_ok` 가 거짓", DOC)
 
     def test_the_recipe_table_of_the_section_matches_the_code(self):

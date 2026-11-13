@@ -86,8 +86,9 @@ def title_template_problem(template):
     return None
 
 SOURCE_LINK_TOKEN = "@SOURCE_LINK@"
-INTRO_TEMPLATE = (f"이 글의 값은 {SOURCE_LINK_TOKEN}에서 ⟦T:record⟧에 받아 옮긴 구조화 데이터입니다. "
-                  "증감·변화율·평균·순위 같은 값은 이 글이 그 숫자로 직접 계산했습니다.")
+INTRO_FACT = f"이 글의 값은 {SOURCE_LINK_TOKEN}에서 ⟦T:record⟧에 받아 옮긴 구조화 데이터입니다."
+INTRO_CALC_OLD = "증감·변화율·평균·순위 같은 값은 이 글이 그 숫자로 직접 계산했습니다."
+INTRO_TEMPLATE = INTRO_FACT + " " + INTRO_CALC_OLD
 # 안 변하는 조사(에서)로 이어지게: `[공식 자료](주소)에서`
 CAUTION_COMMON = (
     "- 지표와 단위: ⟦L:main⟧(단위 ⟦U:main⟧). 다른 기관의 같은 이름 지표와는 정의가 다를 수 있어 직접 견주지 않았습니다.",
@@ -97,14 +98,16 @@ CAUTION_COMMON = (
 )
 # 글이 실제로 계산한 것만 말하는 안내(S2AFIX2 N5): `Recipe.calc_from_formulas` 가 참이면(지역 없는 틀 R04–R06) 위 두 문장('증감·변화율·평균·순위 …')의 계산 목록을 이 글이 쓴 계산식에서 만든다 —
 # Kp 글은 증감·변화율·순위를 계산하지 않는데 고정 문장은 그것을 나열해 같은 글의 주의 줄('날짜 사이의 증감은 계산하지 않았고')과 어긋났다. 기존 틀 R01–R03 은 고정 문장 그대로다(출력 불변).
+# S2c-1 S1-b: 같은 글 안의 같은 설명 되풀이를 줄인다 — 첫 문단 뒤 안내는 '받아 옮긴 사실' 한 문장만 두고(계산 목록은 주의 줄 '계산한 값' 이 한 번만 말한다), '잠정치와 개정' 줄에서 받은 날짜를 뺀다(날짜는 첫 문단 뒤 안내와 출처 절에 있다). R01–R03 은 그대로다.
 # 계산식 번호 → 독자용 낱말(표시 순서대로). 같은 낱말(평균)은 한 번만 쓴다. 숫자·수 낱말은 없다.
 CALC_WORDS = (
     ("F15_day_max", "하루 최대값"), ("F01_change", "증감"), ("F02_pct_change", "변화율"), ("F03_yoy", "전년 대비 변화율"), ("F04_rank", "순위"), ("F05_share", "비중"),
     ("F07_rolling_mean", "평균"), ("F08_mean", "평균"), ("F14_median", "중앙값"), ("F06_diff_from_mean", "평균과의 차이"), ("F13_gap", "격차"), ("F09_max", "최고값"), ("F10_min", "최저값"),
     ("F11_range_position", "범위 안의 위치"), ("F12_count", "개수"), ("F16_count_between", "기준별 개수"),
+    ("F17_season_rank", "같은 달 순위"), ("F18_last_lower", "마지막으로 낮은 달"), ("F19_months_between", "경과 개월"),      # S2c-1: 월별 흑점수 글의 '더 긴 기록 속 위치'
 )
 CALC_WORD_OF = dict(CALC_WORDS)
-INTRO_CALC_SENTENCE = "{words} 같은 값은 이 글이 그 숫자로 직접 계산했습니다."
+CAUTION_REVISION_LINE = "- 잠정치와 개정: 가장 최근 기간의 값은 잠정치일 수 있고 나중에 고쳐질 수 있습니다. 이 글은 값을 가져온 뒤의 개정 여부를 확인하지 않았습니다."      # 받은 날짜는 첫 문단 뒤 안내와 출처 절이 말한다 — 여기서 되풀이하지 않는다(S2c-1 S1-b)
 CAUTION_CALC_LINE = "- 계산한 값: {words} 같은 값은 이 글이 직접 계산했습니다. 계산은 정밀한 값으로 하고 보여 줄 때만 반올림하므로, 보이는 값끼리 다시 계산하면 끝자리가 다를 수 있습니다."
 
 
@@ -121,17 +124,18 @@ def calc_words(formula_ids):
 
 
 def intro_template(words=None):
-    """첫 문단 뒤의 자료 안내 틀: words 가 있으면 계산 목록을 이 글이 쓴 것으로, 없으면 고정 문장."""
+    """첫 문단 뒤의 자료 안내 틀: words 가 없으면(기존 틀 R01–R03) 고정 두 문장 그대로, 있으면(지역 없는 틀 R04–R06) 받아 옮긴 사실 한 문장만이다 — 계산 목록('직접 계산했습니다')은 같은 글의 주의 줄
+    '계산한 값' 이 이 글이 쓴 계산식으로 한 번만 말한다(같은 목록을 두 번 되풀이하지 않는다, S2c-1 S1-b)."""
     if words is None:
         return INTRO_TEMPLATE
-    return INTRO_TEMPLATE.replace("증감·변화율·평균·순위 같은 값은 이 글이 그 숫자로 직접 계산했습니다.", INTRO_CALC_SENTENCE.format(words=words))
+    return INTRO_FACT
 
 
 def caution_common(words=None):
-    """모든 글이 나누는 주의 줄 넷: words 가 있으면 '계산한 값' 줄의 목록을 이 글이 쓴 것으로 바꾼다."""
+    """모든 글이 나누는 주의 줄 넷: words 가 있으면 '계산한 값' 줄의 목록을 이 글이 쓴 것으로 바꾸고 '잠정치와 개정' 줄에서 받은 날짜를 뺀다(날짜는 첫 문단 뒤 안내·출처 절에 있다 — S2c-1 S1-b)."""
     if words is None:
         return CAUTION_COMMON
-    return tuple(CAUTION_CALC_LINE.format(words=words) if line.startswith("- 계산한 값:") else line for line in CAUTION_COMMON)
+    return tuple(CAUTION_CALC_LINE.format(words=words) if line.startswith("- 계산한 값:") else CAUTION_REVISION_LINE if line.startswith("- 잠정치와 개정:") else line for line in CAUTION_COMMON)
 
 
 NOTICE_TEMPLATE = ("*이 글은 사람이 쓴 글이 아니라, 공개된 구조화 통계를 정해진 규칙으로 자동 정리해 만든 글입니다. "

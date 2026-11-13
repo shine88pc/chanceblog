@@ -14,6 +14,8 @@
 `SupplyResult.notes`(S2C0-b)는 이 실행이 읽은 제품에서 어댑터가 **쓰지 않고 버린 행**의 기록이다(어댑터의 `notes` — 오늘(UTC) 날짜의 일별 흑점수 행·이번 달의 월별 행, 우리 낱말의 고정 문장) — 건너뜀이 아니라 알림이라 `skipped` 와 따로 두고
 글을 못 만든 날의 결과 코드(`FACT_ALL_SKIPPED` 등)를 바꾸지 않는다.
 
+`thin_of(post)`(S2c-1)는 그림자 결과의 `thin` 블록(얇음 측정 일곱 값)을 조립된 글에서 만든다 — 순수 모듈 `fact_thin` 을 감싸고 실패해도 예외를 올리지 않는다.
+
 `gate_source(post, provider)` 는 최소 품질 Gate 에 넘기는 후보의 `source` 사전을 만든다 — 키는 `GATE_SOURCE_KEYS` 아홉 개이고 `provider_hosts` 는 **레지스트리의 Provider 접근 경로 호스트 전체**에서만 채운다
 (글·응답에서 읽은 값을 쓰지 않는다). Gate 쪽은 별도 묶음(S2BG)이 이 모양을 읽게 고친다.
 
@@ -24,6 +26,7 @@ from dataclasses import dataclass
 
 from pipeline import fact_assembler as A
 from pipeline import fact_candidates as K
+from pipeline import fact_thin as THIN
 from pipeline import facts as F
 from pipeline.adapters import noaa_swpc as N
 from pipeline.adapters.base import AdapterError
@@ -83,6 +86,15 @@ def product_id_of_url(url):
         if url == N.product_url(product_id):
             return product_id
     return None
+
+
+def thin_of(post):
+    """그림자 결과에 싣는 얇음 측정 블록(S2c-1) — 조립된 글에서만 계산하는 일곱 정수(`fact_thin.measure`: 고정 글자 비율·순수 고정 문장 수·값 문장 수·C 등급 계산 문장 수·직접 계산 표명 수·받은 날짜 표기 수·근거 텍스트 글자 수).
+    판정이 아니라 사람이 먼저 볼 순서를 정하는 신호다. 계산이 예상 밖으로 실패해도 그림자 실행의 본 결과는 그대로이고 블록에는 예외 이름(우리 고정 글자가 아닌 파이썬 이름뿐)만 남는다(`{"error": …}`)."""
+    try:
+        return THIN.measure(post)
+    except Exception as exc:      # noqa: BLE001 — 측정은 보조 신호다: 실패가 그림자 실행의 본 결과를 막지 않게 한다
+        return {"error": type(exc).__name__}
 
 
 def _reason(text):

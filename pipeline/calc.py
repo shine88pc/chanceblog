@@ -25,6 +25,9 @@
 | F14_median | f14_median | 같은 기준일·같은 지표 묶음의 중앙값(짝수 개면 가운데 둘의 평균) |
 | F15_day_max | f15_day_max | 한 날(UTC)의 시각 값(3시간 구간 같은) 묶음의 최댓값을 그날(일)의 값으로 — 구간이 모두 있는 날만 |
 | F16_count_between | f16_count_between | 묶음에서 값이 기준 이상(·다른 기준 미만)인 것의 개수 — 0 도 값이다 |
+| F17_season_rank | f17_season_rank | 같은 달·서로 다른 해의 월 값 묶음 안 순위(1 = 가장 높음, 동률은 같은 순위, 묶음 셋 미만이면 만들지 않는다) |
+| F18_last_lower | f18_last_lower | 이전 달 가운데 이번보다 값이 낮은 가장 나중 달 — 결과는 그 달의 값이고 기준일이 그 달이다(없으면 만들지 않는다) |
+| F19_months_between | f19_months_between | 두 월 값의 기준일 사이 개월 수(나중 달 − 앞선 달) |
 
 설명: docs/FACT_PATH.md
 """
@@ -67,6 +70,10 @@ REASON_TEXT = {
     "DUPLICATE_PERIOD": "같은 시각의 값이 둘 이상이라 계산하지 않음",
     "NOT_ONE_DAY": "값이 한 날(UTC)의 것이 아니라 계산하지 않음",
     "BAD_RANGE": "기준 범위가 맞지 않아(값 없음·단위 다름·위쪽 끝이 아래쪽 끝 이하) 계산하지 않음",
+    "NOT_MONTHLY": "월 단위 기준일이 아니라 계산하지 않음",
+    "NOT_SAME_SEASON": "같은 달의 값이 아닌 것이 섞여 있어 순위를 계산하지 않음",
+    "DUPLICATE_MONTH": "같은 달의 값이 둘 이상이라 계산하지 않음",
+    "NO_MATCH": "조건에 맞는 값이 묶음에 없어 계산하지 않음",
 }
 DISCARD_REASONS = frozenset({"MISSING_VALUE", "NON_NUMERIC", "UNIT_MISMATCH", "AS_OF_MISSING"})
 
@@ -525,12 +532,92 @@ def f16_count_between(group, low, high, unit):
         key=next(iter(keys)) if len(keys) == 1 else None, region_level=None, provider_id=_common_provider(members))
 
 
+MIN_SEASON_MEMBERS = 3      # F17 의 최소 묶음 크기 — 해가 둘뿐이면 '둘 가운데 몇 번째' 가 순위의 뜻을 잃어 만들지 않는다
+
+
+@F.exact
+def f17_season_rank(fact, group):
+    """같은 달(월 단위 기준일의 달 번호가 같은)·서로 다른 해의 값 묶음 안 순위(1 = 가장 높은 값, 동률은 같은 순위·다음 순위는 건너뜀 — F04 와 같은 규칙). F04 는 기준일이 같은 묶음만 받아 해마다의 같은 달을
+    견줄 수 없어(`PERIOD_MISMATCH`) 따로 둔다. 묶음은 `MIN_SEASON_MEMBERS` 개 이상이고 모두 같은 지표·단위·제공처·지역의 월 값(값이 있는)이며 달 번호가 같고 해가 서로 달라야 하고(다르면 `NOT_SAME_SEASON`·
+    같은 해가 둘이면 `DUPLICATE_MONTH`) 대상이 묶음 안에 있어야 한다. 결과의 기준일은 대상의 기준일, 입력 id 의 첫째는 대상이다."""
+    formula_id = "F17_season_rank"
+    members = list(group)
+    problem = _group_problem(formula_id, members, same_period=False, min_size=MIN_SEASON_MEMBERS)
+    if problem is not None:
+        return problem
+    periods = [F.parse_as_of(m.as_of) for m in members]
+    if any(p.granularity != "month" for p in periods):
+        return _skip(formula_id, "NOT_MONTHLY")
+    if len({m.region for m in members}) != 1:
+        return _skip(formula_id, "REGION_MISMATCH")
+    if len({p.month for p in periods}) != 1:
+        return _skip(formula_id, "NOT_SAME_SEASON")
+    if len({p.year for p in periods}) != len(periods):
+        return _skip(formula_id, "DUPLICATE_MONTH")
+    if fact.fact_id not in {m.fact_id for m in members}:
+        return _skip(formula_id, "NOT_IN_GROUP")
+    rank = 1 + sum(1 for m in members if m.value > fact.value)
+    inputs = (fact.fact_id,) + tuple(i for i in _ordered_ids(members) if i != fact.fact_id)
+    return F.DerivedFact.create(formula_id, inputs, Decimal(rank), "위", as_of=fact.as_of, region=fact.region, key=getattr(fact, "key", None),
+                                region_level=getattr(fact, "region_level", None), provider_id=_common_provider(members))
+
+
+@F.exact
+def f18_last_lower(cur, group):
+    """`group`(앞선 달들) 가운데 값이 `cur` 보다 **낮은** 가장 나중 달 — 결과는 그 달의 값이고 기준일이 그 달이다(같은 값은 낮은 것이 아니다). 그런 달이 없으면 `NO_MATCH`(값을 만들지 않는다).
+    묶음은 모두 `cur` 와 같은 지표·단위·제공처·지역의 월 값(값이 있는)이고 `cur` 보다 앞선 서로 다른 달이어야 한다(`cur` 가 묶음 안에 있으면 `DUPLICATE_INPUT`·같거나 나중 달이면 `NOT_EARLIER`·같은 달이 둘이면
+    `DUPLICATE_MONTH`·월 단위가 아니면 `NOT_MONTHLY`). 입력 id 는 찾은 달·`cur`·그 달보다 나중인 달들(그 달 뒤로는 모두 `cur` 이상이라는 것을 받치는 값)뿐이다 — 그 달보다 앞선 달은 결과를 정하지 않으므로 싣지 않는다
+    (그래서 근거 텍스트가 30년치 월 값으로 부풀지 않는다). 입력 id 의 첫째는 찾은 달이다."""
+    formula_id = "F18_last_lower"
+    members = list(group)
+    problem = _group_problem(formula_id, members + [cur], same_period=False, min_size=2)
+    if problem is not None:
+        return problem
+    cur_period = F.parse_as_of(cur.as_of)
+    if cur_period.granularity != "month":
+        return _skip(formula_id, "NOT_MONTHLY")
+    if len({m.region for m in members} | {cur.region}) != 1:
+        return _skip(formula_id, "REGION_MISMATCH")
+    ordinal_of = {m.fact_id: F.parse_as_of(m.as_of).ordinal for m in members}
+    if any(ordinal >= cur_period.ordinal for ordinal in ordinal_of.values()):
+        return _skip(formula_id, "NOT_EARLIER")
+    if len(set(ordinal_of.values())) != len(members):
+        return _skip(formula_id, "DUPLICATE_MONTH")
+    lower = [m for m in members if m.value < cur.value]
+    if not lower:
+        return _skip(formula_id, "NO_MATCH")
+    chosen = max(lower, key=lambda m: ordinal_of[m.fact_id])
+    after = sorted(m.fact_id for m in members if ordinal_of[m.fact_id] > ordinal_of[chosen.fact_id])
+    inputs = (chosen.fact_id, cur.fact_id) + tuple(after)
+    return F.DerivedFact.create(formula_id, inputs, chosen.value, chosen.unit, as_of=chosen.as_of, region=chosen.region, key=getattr(chosen, "key", None),
+                                region_level=getattr(chosen, "region_level", None), provider_id=_common_provider(members + [cur]))
+
+
+@F.exact
+def f19_months_between(later, earlier):
+    """두 월 값의 기준일 사이 개월 수(나중 달의 달 번호 − 앞선 달의 달 번호, 단위 `개월`). 둘 다 월 단위·같은 지표·단위·제공처·지역·값이 있어야 하고 `earlier` 가 `later` 보다 앞선 달이어야 한다
+    (`NOT_EARLIER`·월 단위가 아니면 `NOT_MONTHLY`). `earlier` 는 Fact 이거나 F18 같은 계산 결과(기준일이 그 달)여도 된다. 결과의 기준일은 `later` 의 것이다."""
+    formula_id = "F19_months_between"
+    problem = _pair(formula_id, later, earlier, same_period=False)
+    if problem is None:
+        problem = _same_region(formula_id, later, earlier)
+    if problem is not None:
+        return problem
+    period_later, period_earlier = F.parse_as_of(later.as_of), F.parse_as_of(earlier.as_of)
+    if period_later.granularity != "month":
+        return _skip(formula_id, "NOT_MONTHLY")
+    if period_earlier.ordinal >= period_later.ordinal:
+        return _skip(formula_id, "NOT_EARLIER")
+    return _derive(formula_id, (later, earlier), Decimal(period_later.ordinal - period_earlier.ordinal), "개월", later)
+
+
 # 근거 텍스트에 쓰는 계산식 이름(숫자 없는 우리 낱말 — 계산식 번호 `F01` 의 숫자가 근거 숫자로 세어지지 않게 번호 대신 이 이름을 쓴다, D-131)
 FORMULA_LABELS = {
     "F01_change": "증감", "F02_pct_change": "변화율", "F03_yoy": "전년 같은 기간 대비 변화율", "F04_rank": "순위", "F05_share": "비중",
     "F06_diff_from_mean": "평균과의 차이", "F07_rolling_mean": "이동평균", "F08_mean": "평균", "F09_max": "최댓값", "F10_min": "최솟값",
     "F11_range_position": "범위 안의 위치", "F12_count": "개수", "F13_gap": "격차", "F14_median": "중앙값",
     "F15_day_max": "하루 최댓값", "F16_count_between": "기준 범위 개수",
+    "F17_season_rank": "같은 달 순위", "F18_last_lower": "마지막으로 낮은 달", "F19_months_between": "경과 개월 수",
 }
 
 FORMULAS = {
@@ -550,4 +637,7 @@ FORMULAS = {
     "F14_median": f14_median,
     "F15_day_max": f15_day_max,
     "F16_count_between": f16_count_between,
+    "F17_season_rank": f17_season_rank,
+    "F18_last_lower": f18_last_lower,
+    "F19_months_between": f19_months_between,
 }

@@ -1398,7 +1398,7 @@ class CountUnitTest(unittest.TestCase):
         self.assertEqual((F.format_object(count, context=context), F.format_object(rank, signed=True, context=context), F.format_object(mean, context=context)), ("4곳", "+2위", "3.000곳"))
         self.assertEqual(F.format_object(group[0], context=context), F.format_with_unit(group[0].value, "곳", context=context))
         self.assertEqual(F.format_object(group[0], absolute=True, context={}), "4곳")                   # 자리표가 없으면 단위 표의 자리(곳 은 정수 — 0 에서 먼 쪽으로 반올림)
-        self.assertEqual(F.INTEGER_FORMULAS, frozenset({"F04_rank", "F12_count", "F16_count_between"}))        # F16(기준 이상 개수, S2a)도 정수로 보인다
+        self.assertEqual(F.INTEGER_FORMULAS, frozenset({"F04_rank", "F12_count", "F16_count_between", "F17_season_rank", "F19_months_between"}))        # F16(기준 이상 개수, S2a)도 정수로 보이고 S2c-1 이 F17(같은 달 순위)·F19(경과 개월 수)를 더했다 — 정확한 집합을 못박는다
         for obj, kind, expected in ((count, "V", "4"), (count, "F", "4곳"), (count, "S", "+4곳"), (count, "A", "4곳"), (mean, "V", "3.000"), (mean, "F", "3.000곳")):
             with self.subTest(kind=kind):
                 self.assertEqual(F.render_marker(kind, "x", obj, context), expected)
