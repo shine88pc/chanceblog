@@ -200,6 +200,46 @@ def number(text):
     return Decimal(text.replace("−", "-").replace("+", "").replace(",", "").rstrip("Kp%개건구간일단계"))
 
 
+RANK_LINE = re.compile(r"- 같은 달 순위: 이 글이 읽은 같은 달 (\d+)년 가운데 최신 값은 (\d+)위입니다")
+LOW_LINE = re.compile(r"- 최신 값보다 낮았던 마지막 달\(이 글이 읽은 자료 안에서\): (\d+)년 (\d+)월\(([\d,.]+)개\), (\d+)개월 전")
+MONTHLY_KEPT = 360                                  # 어댑터가 보관하는 개월 수(S2c-1 명세) — 글이 읽는 기록의 길이
+
+
+def month_index(tag):
+    return int(tag[:4]) * 12 + int(tag[5:]) - 1
+
+
+def monthly_season_problems(rows, post):
+    """S2c-1: 월별 글의 같은 달 순위·마지막으로 낮았던 달·같은 달 해마다 표를 응답 값에서 일반 파이썬으로 다시 센 값과 견준다. 글에 새 줄이 있으면 값이 같고 없으면 그 조건이 정말 성립하지 않는다(셋 미만·더 낮은 달 없음)."""
+    last_row = max(month_index(row["time-tag"]) for row in rows)
+    kept = {row["time-tag"]: Decimal(str(row["observed_swpc_ssn"])) for row in rows if not missing(row["observed_swpc_ssn"]) and month_index(row["time-tag"]) > last_row - MONTHLY_KEPT}
+    cur_tag = max(kept, key=month_index)
+    cur = kept[cur_tag]
+    text = post.body_markdown
+    problems = []
+    same = [(tag, value) for tag, value in kept.items() if tag[5:] == cur_tag[5:]]
+    rank = RANK_LINE.search(text)
+    if len(same) >= 3:
+        want = (len(same), 1 + sum(1 for _tag, value in same if value > cur))
+        if rank is None or (int(rank.group(1)), int(rank.group(2))) != want:
+            problems.append(f"오라클: 같은 달 순위가 다름 {want}")
+    elif rank is not None:
+        problems.append("오라클: 같은 달이 셋 미만인데 순위가 있음")
+    lower = [(tag, value) for tag, value in kept.items() if month_index(tag) < month_index(cur_tag) and value < cur]
+    low = LOW_LINE.search(text)
+    if lower:
+        tag, value = max(lower, key=lambda item: month_index(item[0]))
+        want_low = (int(tag[:4]), int(tag[5:]), value, month_index(cur_tag) - month_index(tag))
+        if low is None or (int(low.group(1)), int(low.group(2)), Decimal(low.group(3).replace(",", "")), int(low.group(4))) != want_low:
+            problems.append(f"오라클: 마지막으로 낮은 달이 다름 {want_low}")
+    elif low is not None:
+        problems.append("오라클: 더 낮은 달이 없는데 마지막으로 낮은 달이 있음")
+    earlier = sorted(((month_index(tag), value) for tag, value in same if tag != cur_tag), reverse=True)[:RN.SEASON_TABLE_ROWS] if len(same) >= 3 else []
+    if TR.second_table(post) != [(index // 12, index % 12 + 1, value, cur - value) for index, value in earlier]:
+        problems.append("오라클: 같은 달 해마다 표가 다름")
+    return problems
+
+
 def oracle_problems(product, recipe_id, value, post):
     """응답(JSON 구조)과 글의 표·한눈에를 견준다. 문제 목록(비면 같다)."""
     problems = []
@@ -264,6 +304,7 @@ def oracle_problems(product, recipe_id, value, post):
             got = {row[0]: number(row[1]) for row in table(post, "| 기준 기간 | 값") if row[1] != R.MISSING_CELL}
             if got != {f"{int(tag[:4])}년 {int(tag[5:])}월": item for tag, item in shown.items()}:
                 problems.append("오라클: 월평균 흑점수 표가 다름")
+            problems += monthly_season_problems(value, post)
     return problems
 
 
@@ -365,6 +406,71 @@ class FuzzTest(unittest.TestCase):
         self.assertEqual(run_fuzz(20, 7), run_fuzz(20, 7))
 
 
+class MonthlyLongRecordFuzzTest(unittest.TestCase):
+    """S2c-1: 월별 글만 따로 무작위로 돌린다(길이 8–400개월·빠진 달·같은 값·값이 비는 달·정수 값) — 글이 나오면 표와 새 구역(같은 달 순위·마지막으로 낮았던 달·해마다 표)이 독립 오라클과 같고
+    불변식이 지켜지며 같은 입력이면 같은 글이고, 글이 안 나오면 사유는 예기치 않은 것이 아니다."""
+
+    def payload(self, rng):
+        count = rng.choice((8, 12, 24, 25, 26, 36, 61, 120, 250, 358, 360, 361, 400))
+        rows = H.ssn_monthly_rows("2026-%02d" % rng.randint(7, 10), count, seed=rng.randint(1, 10 ** 6), third_party=rng.random() < 0.5)
+        if rng.random() < 0.4:                                                    # 값이 자주 겹치게
+            for row in rows:
+                row["observed_swpc_ssn"] = float(rng.randint(0, 6) * 10)
+        for _ in range(rng.choice((0, 0, 1, 3, 8))):                              # 빠진 달(마지막 달은 남긴다)
+            if len(rows) > 3:
+                del rows[rng.randrange(0, len(rows) - 1)]
+        for _ in range(rng.choice((0, 0, 1, 3))):                                 # 값이 비는 달(마지막 달은 남긴다)
+            if len(rows) > 3:
+                rows[rng.randrange(0, len(rows) - 1)]["observed_swpc_ssn"] = -1.0
+        return rows
+
+    def test_monthly_posts_match_the_oracle_and_never_break_an_invariant(self):
+        rng = random.Random(f"{SEED}:monthly-long")
+        made = with_rank = with_low = with_table = 0
+        for case in range(100):
+            rows = self.payload(rng)
+            shuffled = list(rows)
+            rng.shuffle(shuffled)
+            record, facts = H.parse_value("ssn_monthly", rows)
+            source = A.SourceInfo(H.provider(attribution_template=rng.choice((H.TEST_TEMPLATE, H.B_TEMPLATE))), N.product_source_name("ssn_monthly"), N.product_url("ssn_monthly"))
+            params = {"key": RN.KEY_SSN_MONTHLY}
+            post = A.assemble(RN.R04_NOREGION_SERIES, facts, H.TODAY, records=[record], source=source, params=params)
+            where = f"월별 사례 {case}"
+            if isinstance(post, R.Insufficient):
+                self.assertNotIn(post.code, UNEXPECTED, f"{where}: {post.code} {post.detail}")
+                continue
+            made += 1
+            self.assertEqual(post_problems(post, source.name), [], where)
+            self.assertEqual(oracle_problems("ssn_monthly", "R04_NOREGION_SERIES", rows, post), [], where)
+            record2, facts2 = H.parse_value("ssn_monthly", shuffled)
+            again = A.assemble(RN.R04_NOREGION_SERIES, facts2, H.TODAY, records=[record2], source=source, params=params)
+            self.assertEqual(again.body_markdown, post.body_markdown, where)                  # 행 순서가 달라도 같은 글
+            with_rank += RANK_LINE.search(post.body_markdown) is not None
+            with_low += LOW_LINE.search(post.body_markdown) is not None
+            with_table += bool(TR.second_table(post))
+        self.assertGreater(made, 70)                                                           # 시험이 속이 비지 않게
+        self.assertGreater(with_rank, 25)
+        self.assertGreater(with_low, 40)
+        self.assertGreater(with_table, 25)
+
+    def test_value_mutations_of_the_facts_still_never_raise_or_make_an_unexpected_reason(self):
+        rng = random.Random(f"{SEED}:monthly-facts")
+        outcomes = {}
+        for case in range(50):
+            rows = self.payload(rng)
+            record, facts = H.parse_value("ssn_monthly", rows)
+            mutated, how = mutate_facts(facts, rng)
+            source = A.SourceInfo(H.provider(attribution_template=H.B_TEMPLATE), N.product_source_name("ssn_monthly"), N.product_url("ssn_monthly"))
+            try:
+                result = A.assemble(RN.R04_NOREGION_SERIES, mutated, H.TODAY, records=[record], source=source, params={"key": RN.KEY_SSN_MONTHLY})
+            except Exception as error:      # noqa: BLE001 — 조립기는 어떤 입력에서도 예외를 올리지 않는다
+                raise AssertionError(f"월별 Fact 사례 {case} 변형 {how}: 예외 {type(error).__name__}") from None
+            code = result.code if isinstance(result, R.Insufficient) else "POST"
+            self.assertNotIn(code, UNEXPECTED, f"월별 Fact 사례 {case} 변형 {how}: {code}")
+            outcomes[code] = outcomes.get(code, 0) + 1
+        self.assertGreater(outcomes.get("POST", 0), 10)
+
+
 class OracleSelfTest(unittest.TestCase):
     """오라클이 헛돌지 않는다 — 글의 숫자를 일부러 고치면 오라클이 잡는다."""
 
@@ -380,6 +486,26 @@ class OracleSelfTest(unittest.TestCase):
             digit = "9" if text[start] != "9" else "8"
             broken = TR.dataclasses.replace(post, body_markdown=text[:start] + digit + text[start + 1:])
             self.assertTrue(oracle_problems(product, recipe_id, json.loads(json.dumps(rows)), broken), name)
+
+    def test_the_monthly_oracle_notices_a_changed_rank_months_ago_year_or_table_value(self):
+        recipe_id, product, rows, params = TR.golden_cases()["r04_ssn_monthly"]
+        post = TR.build("r04_ssn_monthly")
+        clean = json.loads(json.dumps(rows))
+        self.assertEqual(monthly_season_problems(clean, post), [])
+        text = post.body_markdown
+        for label, pattern in (("순위", RANK_LINE), ("낮은 달 개월 수", LOW_LINE)):
+            found = pattern.search(text)
+            self.assertTrue(found, label)
+            start, end = found.span(len(found.groups()))
+            number = text[start:end]
+            changed = text[:start] + str(int(number) + 1) + text[end:]
+            self.assertTrue(monthly_season_problems(clean, TR.dataclasses.replace(post, body_markdown=changed)), label)
+        table_cell = re.search(r"(?m)^\| 2025년 10월 \| ([0-9][0-9,.]*)", text)
+        start = table_cell.start(1)
+        digit = "9" if text[start] != "9" else "8"
+        self.assertTrue(monthly_season_problems(clean, TR.dataclasses.replace(post, body_markdown=text[:start] + digit + text[start + 1:])))
+        dropped = "\n".join(line for line in text.split("\n") if not line.startswith("- 같은 달 순위"))
+        self.assertTrue(monthly_season_problems(clean, TR.dataclasses.replace(post, body_markdown=dropped)))                  # 순위 줄이 빠져도 잡는다
 
 
 if __name__ == "__main__":
