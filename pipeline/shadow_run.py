@@ -21,6 +21,9 @@ generator.py 는 환경 변수 SHADOW_RUN=1 일 때 main() 에서 이 모듈의 
 **원본 응답 보관(S2C0-c)**: Fact 분기는 어댑터에 넣는 transport 를 `RawRecorder` 로 감싸 받은 응답 바이트를 SHADOW_OUT 바로 아래 `raw_<제품 id>.json` 파일과 색인 `raw_index.json`(제품 id·바이트 수·sha256·수집 시각 UTC)으로 남긴다 —
 개선 전 기준선을 같은 입력으로 바이트까지 다시 만들 수 있게 하려는 것이다. 새 네트워크 호출은 없다(받은 바이트를 그대로 돌려주는 감쌈뿐). 본문 바이트만 남기고 요청·응답 머리글·주소는 남기지 않는다. 쓰는 길은 `ShadowWriter` 하나이고(밖이면 거절)
 총 크기에 상한이 있다. 보관이 실패해도 그림자 실행의 본 결과는 그대로이고 실패 사실만 `run.json` 의 `notes` 에 남는다. 하위 폴더를 만들지 않는 것은 하위 폴더마다 `result.json` 을 읽는 소비자가 있어서다. 이 모듈은 남긴 파일을 읽지 않는다.
+
+**얇음 측정(S2c-1)**: Fact 분기의 `result.json` 에는 새 키 `thin` 이 더해진다 — `g.fact_supply.thin_of(post)`(순수 모듈 `fact_thin`)가 글을 만들 때 틀을 아는 상태에서 센 일곱 정수(`fixed_pct`·`pure_units`·`value_units`·`c_units`·
+`calc_claims`·`date_marks`·`evidence_chars`)다. 판정이 아니라 사람이 먼저 볼 순서를 정하는 신호라 보류 코드를 만들지 않고 이 모듈은 그 값을 읽지도 않는다. 기존 키의 값과 `run.json`·글 파일은 바이트까지 그대로다. 피드 경로의 `result.json` 에는 없다.
 """
 import contextlib
 import copy
@@ -625,6 +628,7 @@ def run_facts(g, config, languages, writer, out, count, notes):
         feed_shaped = {"link": post.source_url, "source": post.source_name, "publisher_domain": post.source_domain}
         result = build_result(attempt, outcome, report.lines(), "", "validated", report.facts, len(item.gate_source["evidence_text"]), "rule", "facts", feed_shaped,
                               {"ko": post.title, "en": ""}, languages, {"ko": name}, now.isoformat())
+        result["thin"] = g.fact_supply.thin_of(post)      # S2c-1: 얇음 측정(일곱 정수 — 판정이 아니라 신호) — 새 키 하나뿐이고 다른 칸의 값·바이트는 그대로다
         writer.write(f"{folder}/{name}", item.marked)
         writer.write_json(f"{folder}/{RESULT_FILE}", result)
         summaries.append({"attempt": attempt, "passed": result["passed"], "outcome": outcome, "hold_codes": result["hold_codes"], "lane": result["lane"]})
