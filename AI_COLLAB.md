@@ -5,8 +5,9 @@
 > You are currently working in the `shine88pc/chanceblog` repository.  
 > **Before performing any action** (reading other files, editing, generating content, answering questions about the code, etc.), you **MUST**:
 >
-> 1. Read this entire `AI_COLLAB.md` file.
+> 1. Read the **30-second card** at the top of `인수인계/작업내용.md` (§0-A), then §0-1 (the order to continue) - the current starting point (the file is hundreds of KB, so read only its first 40 lines first and the other sections only when needed).
 > 2. Read the latest entries in `WORKLOG.md`.
+> 3. Read this entire `AI_COLLAB.md` file (the content rules).
 >
 > This requirement applies **even if the human user did not mention these files**.  
 > Skipping this step is considered a violation of the project rules and can cause conflicts with other AIs.
@@ -193,6 +194,8 @@ chanceblog/
 ---
 
 ## 5. AI 작업 전 필수 체크리스트
+
+(현행 시작점 — 2026-11-15) 이 체크리스트에 앞서 `인수인계/작업내용.md` 맨 위 §0-A 30초 카드와 §0-1 을 먼저 읽는다. 읽는 순서는 ① 그 카드 ② `WORKLOG.md` 최신 항목 ③ 이 문서이고, 아래 체크리스트는 그 뒤에 따른다.
 
 1. [ ] `AI_COLLAB.md` 전체 읽기
 2. [ ] `WORKLOG.md` 최신 항목 3~5개 읽기
