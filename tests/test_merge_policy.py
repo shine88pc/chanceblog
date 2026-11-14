@@ -846,19 +846,24 @@ class PreconditionsTest(unittest.TestCase):
                  "current_paths": "scope_matches", "checks": "checks_pass", "independent_verification": "independent_verified", "has_conflict": "no_conflict",
                  "classification": "scope_matches", "secret_findings": "no_secret_exposure", "rollback_method": "rollback_confirmed"}
         self.assertEqual(set(owner), set(FACT_KEYS_16))
+        special = {"has_conflict": "알 수 없습니다", "secret_findings": "결과가 없습니다", "rollback_method": "문장이 없습니다"}      # 값이 없을 때 이 세 조건이 쓰는 쉬운 말
         for key in FACT_KEYS_16:
-            with self.subTest(key=key, how="missing"):
-                facts = good_facts()
-                del facts[key]
-                verdict = mp.check_preconditions(facts)
-                self.assertFalse(verdict.ok)
-                self.assertEqual(verdict.failed_codes, (owner[key],))
-            with self.subTest(key=key, how="none"):
-                facts = good_facts()
-                facts[key] = None
-                verdict = mp.check_preconditions(facts)
-                self.assertFalse(verdict.ok)
-                self.assertEqual(verdict.failed_codes, (owner[key],))
+            for how in ("missing", "none"):
+                with self.subTest(key=key, how=how):
+                    facts = good_facts()
+                    if how == "missing":
+                        del facts[key]
+                    else:
+                        facts[key] = None
+                    verdict = mp.check_preconditions(facts)
+                    self.assertFalse(verdict.ok)
+                    self.assertEqual(verdict.failed_codes, (owner[key],))
+                    reason = verdict.failures[0].reason
+                    if key in special:
+                        self.assertIn(special[key], reason)
+                    else:                                                                     # 값이 없다고 말하고, 어느 값인지 이름을 댄다
+                        self.assertIn("필요한 값이 없습니다", reason)
+                        self.assertIn(key, reason)
 
     def test_an_empty_or_non_dictionary_facts_fails_every_condition(self):
         for facts in ({}, None, [], "facts", 5, [("approved_number", "M075")]):
@@ -1109,11 +1114,13 @@ class ExplanationTest(unittest.TestCase):
         self.assertEqual(mp.render_explanation(**crowded).count("\n- GitHub Actions Workflow:"), 1)
 
     def test_render_strips_invisible_characters_and_limits_length(self):
-        base = dict(number="M075", pr_number=198, head_sha="c" * 40, changed_paths=["a.py"], what="변경" + chr(0x200B) + " 내용을 바꿉니다" + chr(0x202E), why=ANSWERS[1], user_change=ANSWERS[2],
+        base = dict(number="M075", pr_number=198, head_sha="c" * 40, changed_paths=["a.py"], what="변경" + chr(0x200B) + " 내용을 바꿉니다" + chr(0x202E) + chr(27) + chr(7), why=ANSWERS[1], user_change=ANSWERS[2],
                     risk=ANSWERS[3], check_summary=ANSWERS[4], rollback="가" * 2000)
         text = mp.render_explanation(**base)
         self.assertEqual(self.problems(text), [])
         self.assertIn("변경 내용을 바꿉니다", text)
+        for char in (chr(0x200B), chr(0x202E), chr(27), chr(7)):                                   # 보이지 않는 글자와 제어 문자는 지워진다
+            self.assertNotIn(char, text)
         rollback_line = [line for line in text.split("\n") if line.startswith("되돌리기 ")][0]
         self.assertLessEqual(len(rollback_line), len("되돌리기 ") + 400)
 

@@ -205,6 +205,42 @@ class ListsMatchTest(unittest.TestCase):
         self.assertIn(sentence, DOC.replace("`", ""))
 
 
+class OperatorStatementsPinnedTest(unittest.TestCase):
+    """운영자 결정의 문장 단위 약속이 문서에서 빠지지 않았다 — 낱말만이 아니라 약속(누가·무엇을·언제)을 못박는다."""
+
+    PINS = (
+        (2, "독자 판단 자동 병합이 아닙니다"),
+        (2, "전문용어가 아니라 사용자가 체감할 변화 중심으로"),
+        (5, "같은 승인으로 다른 PR 을 병합하거나"),
+        (5, "새 커밋이 더해지거나 변경 파일 목록이 달라지거나 번호가 맞지 않으면 기존 승인은 **무효**"),
+        (5, "새 설명과 새 승인을 받아야 합니다"),
+        (6, "빠진 값은 실패"),
+        (6, "하나라도 실패하면 병합하지 않고"),
+        (7, "12항목에 하나도 안 걸리고"),
+        (7, "선언이 거짓이어도 운영자 전용"),
+        (8, "운영자 PC 의 Git 자격 증명"),
+        (8, "강제 push"),
+        (9, "추가 변경을 자동 병합하지 않습니다"),
+        (9, "되돌리기 위한 요청과 쉬운 원인 설명을 **먼저**"),
+        (10, "**즉시 중지 규칙:** 문제가 한 건이라도 발생하면 AI 병합을 **즉시 중지**하고"),
+        (10, "기존 운영자 직접 병합 방식으로 돌아갑니다"),
+        (11, "워크플로 파일(`.github/`)"),
+        (12, "운영자 결정으로만"),
+    )
+
+    def test_each_promise_is_in_its_section(self):
+        for number, phrase in self.PINS:
+            with self.subTest(section=number, phrase=phrase):
+                self.assertIn(phrase, SECTIONS[number])
+
+    def test_the_design_memo_names_the_constraints_of_the_workflow_way(self):
+        memo = subsection("11-2")
+        for phrase in ("AI 세션은 병합 자격 증명을 갖지 않습니다", "승인 시점의 머리 SHA", "후속 워크플로", "`workflow_dispatch`", "소유자 계정의 글에서만", "기본 가지의 것만 실행하고 PR 쪽 파일은 읽기만",
+                       "병합된 PR 이력", "트리 해시", "확인 필요"):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, memo)
+
+
 class ExamplesMatchCodeTest(unittest.TestCase):
     EXPLANATION = mp.render_explanation("M075", 198, "a1b2c3d" + "0" * 33, ["src/chanceblog_desktop/content/drafts_store.py", "tests/test_drafts_store.py"], *ANSWERS)
     NOTICE = mp.render_completion_notice("M075", 198, "e4f5a6b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e", "저장 버튼과 저장된 초안 목록이 앱에 반영되었습니다.", "전체 통과", "이상 없음",

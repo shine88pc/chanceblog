@@ -208,7 +208,7 @@ AI 가 PR 작성 → 검사와 독립 검증 → 쉬운 병합 설명 발송 →
 |---|---|---|
 | 1 | GitHub Actions Workflow | 경로 `.github/` 아래의 모든 파일 |
 | 2 | 광고·AdSense·ads.txt | 경로 `index.html`·`_layouts/`·`_includes/`·`_config.yml`·`ads.txt`(`app-ads.txt` 포함), 추가된 줄의 `adsbygoogle`·`ca-pub-`, 광고 선언이 든 `pipeline/blogs.json` |
-| 3 | 공개 게시물과 고정 페이지 | 경로 `_posts/`(어느 깊이든)·`about.md`·`contact.md`·`privacy.md`·`categories.md`·`pages.json`·`assets/`, 그리고 `posts.json`·`feed.xml`·`robots.txt`·맨 위 폴더의 HTML·초안 폴더·발행 이력 파일 |
+| 3 | 공개 게시물과 고정 페이지 | 경로 `_posts/`(어느 깊이든)·`about.md`·`contact.md`·`privacy.md`·`categories.md`·`pages.json`·`assets/`, 그리고 `posts.json`·`feed.xml`·`robots.txt`·저장소 맨 위의 HTML 파일·초안 폴더·발행 이력 파일 |
 | 4 | PIPELINE_PAUSE | 추가된 줄의 `PIPELINE_PAUSE`, 경로 `pipeline/ops_inbox_policy.json` |
 | 5 | 발행 모드와 발행 재개 | 경로 `pipeline/blogs.json`·`pipeline/ops_inbox_policy.json`, 사람의 선언 |
 | 6 | Provider 활성화 | 경로 `pipeline/source_registry.json`, 사람의 선언 |
@@ -231,7 +231,7 @@ AI 가 PR 작성 → 검사와 독립 검증 → 쉬운 병합 설명 발송 →
 
 ### 7-4. 데스크톱 앱 저장소의 규칙
 
-앱 저장소(`desktop`)는 `.github/`·`requirements*.txt`·`vendor/`·`VERSION`·패키징 설정·비밀 모양을 운영자 전용으로 봅니다. 위 12항목 중 워크플로(`.github/`)·의존성(`requirements*.txt`·`vendor/`)·키와 비밀(비밀 모양)은 같은 항목으로 걸립니다.
+앱 저장소(`desktop`)는 `.github/`·`requirements*.txt`·`vendor/`·`VERSION`·패키징 설정·비밀 모양을 운영자 전용으로 봅니다. 위 12항목 중 워크플로(`.github/`)·의존성(`requirements*.txt`·`vendor/`)·키와 비밀(비밀 모양)은 같은 항목으로 걸립니다. 추가된 줄의 내용 규칙(광고 코드 낱말·`PIPELINE_PAUSE`·비밀 모양·삭제 명령)은 두 저장소에 똑같이 적용되고, 광고·공개 글·발행 설정 파일의 경로 규칙은 블로그 저장소에만 적용됩니다.
 
 ### 7-5. 12항목 밖에서 보수적으로 더한 표시 (운영자 판단 필요)
 
