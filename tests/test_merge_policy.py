@@ -322,12 +322,12 @@ class ApprovalValidityTest(unittest.TestCase):
                 self.assertFalse(mp.approval_still_valid(SHA_A, SHA_A, bad, paths))
 
     def test_normalize_path(self):
-        self.assertEqual(mp.normalize_path("a/b.py"), "a/b.py")
-        self.assertEqual(mp.normalize_path("./a//b.py"), "a/b.py")
-        self.assertEqual(mp.normalize_path(" a\\b.py \n"), "a/b.py")
+        self.assertEqual(mp.normalize_repo_path("a/b.py"), "a/b.py")
+        self.assertEqual(mp.normalize_repo_path("./a//b.py"), "a/b.py")
+        self.assertEqual(mp.normalize_repo_path(" a\\b.py \n"), "a/b.py")
         for bad in ("", " ", ".", "./", "..", "a/../b", "../a", "/a", "\\a", "C" + ":/a", "C" + ":\\a", "a\x00b", "a\x1bb", None, 5, b"a", ["a"]):
             with self.subTest(bad=repr(bad)):
-                self.assertIsNone(mp.normalize_path(bad))
+                self.assertIsNone(mp.normalize_repo_path(bad))
 
 
 class ApprovalLedgerTest(unittest.TestCase):

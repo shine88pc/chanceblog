@@ -180,7 +180,7 @@ def _sha(value):
     return value.lower() if isinstance(value, str) and _SHA_RE.fullmatch(value) is not None else None
 
 
-def normalize_path(raw):
+def normalize_repo_path(raw):
     """저장소 안 상대 경로를 '/' 로 통일해 돌려준다. 글자가 아니거나·비었거나·절대 경로(앞 '/'·드라이브 글자)이거나·제어 문자가 있거나·`..` 구간이 있으면 None(확인할 수 없는 입력)."""
     if not isinstance(raw, str):
         return None
@@ -207,7 +207,7 @@ def _path_set(paths):
         return None
     found = set()
     for item in items:
-        normal = normalize_path(item)
+        normal = normalize_repo_path(item)
         if normal is None:
             return None
         found.add(normal)
@@ -847,7 +847,7 @@ def explanation_problems(text, pr_title=None):
             problems.append("변경 파일 목록이 비어 있습니다")
         elif declared_count != len(listed):
             problems.append("변경 파일 개수(" + str(declared_count) + ")와 적힌 파일 수(" + str(len(listed)) + ")가 다릅니다")
-        if any(normalize_path(item) != item for item in listed):
+        if any(normalize_repo_path(item) != item for item in listed):
             problems.append("변경 파일 목록에 올바르지 않은 경로가 있습니다")
     heads = [index for index, line in enumerate(lines) if line.startswith(_CHECKLIST_HEAD)]
     if len(heads) != 1:
