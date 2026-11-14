@@ -831,14 +831,16 @@ class PreconditionsTest(unittest.TestCase):
                 self.assertEqual(self.failed(facts), ("no_secret_exposure",))
 
     def test_condition_8_the_rollback_method_must_be_concrete(self):
-        for text in ("", "   ", "없음", "해당 없음", "미정", "TBD", "n/a", "-", "되돌림", "짧은 문장", None, 5, ["되돌리기"]):
+        for text in ("", "   ", "없음", "해당 없음", "미정", "TBD", "n/a", "-", "되돌림", "짧은 문장", "가나다라마바사아자", "  가나다   라마바사아  ", None, 5, ["되돌리기"]):         # 열 자 미만(공백은 접어서 센다 — 뒤의 것은 접으면 아홉 자)
             with self.subTest(text=text):
                 facts = good_facts()
                 facts["rollback_method"] = text
                 self.assertEqual(self.failed(facts), ("rollback_confirmed",))
-        facts = good_facts()
-        facts["rollback_method"] = "이 병합 커밋 하나를 되돌리는 PR 을 만듭니다."
-        self.assertTrue(mp.check_preconditions(facts).ok)
+        for text in ("이 병합 커밋 하나를 되돌리는 PR 을 만듭니다.", "가나다라마바사아자차", "가나다라 마바사아자차"):                                                         # 열 자부터는 통과
+            with self.subTest(text=text):
+                facts = good_facts()
+                facts["rollback_method"] = text
+                self.assertTrue(mp.check_preconditions(facts).ok)
 
     def test_a_missing_value_is_a_failure_of_the_condition_that_needs_it(self):
         owner = {"approved_number": "number_match", "approved_pr_number": "number_match", "pr_number": "number_match", "pr_title_label": "number_match", "consumed_numbers": "number_match",
@@ -986,17 +988,31 @@ class ExplanationTest(unittest.TestCase):
             with self.subTest(answer=answer):
                 self.assert_problem(self.problems(replace_once(text, first, EXPLANATION_6[0] + " " + answer)), EXPLANATION_6[0])
 
+    def test_the_answer_length_and_hangul_boundaries(self):
+        """8자 미만이거나 한글이 4자 미만이면 문제, 그 경계의 바로 안쪽은 통과 — 두 기준이 서로를 가리지 않는다."""
+        text = make_text()
+        first = EXPLANATION_6[0] + " " + ANSWERS[0]
+        for answer, flagged in (("가나다라마바사", True), ("가나다라마바사아", False), ("abcdefg가나다", True), ("abcd가나다라", False), ("가나다라마", True), ("가나다라", True),
+                                ("가나다라마바사아자", False), ("abcdefghi가나다", True), ("abcdefg가나다라", False)):
+            with self.subTest(answer=answer):
+                problems = self.problems(replace_once(text, first, EXPLANATION_6[0] + " " + answer))
+                self.assertEqual(any(EXPLANATION_6[0] in problem and "한글" in problem for problem in problems), flagged)
+
     def test_an_item_written_twice_is_reported(self):
         text = make_text() + "왜 필요한가요? 한 번 더 적은 이유입니다.\n"
         self.assert_problem(self.problems(text), "두 번 이상", "왜 필요한가요?")
 
     def test_the_first_line_must_be_the_request_line_with_a_standard_number(self):
         text = make_text()
-        self.assert_problem(self.problems("\n".join(text.split("\n")[1:])), "첫 줄")
-        self.assert_problem(self.problems(replace_once(text, "병합 요청 M075\n", "병합 요청 M75\n")), "첫 줄")
-        self.assert_problem(self.problems(replace_once(text, "병합 요청 M075\n", "병합 요청 M0075\n")), "첫 줄")
-        self.assert_problem(self.problems(replace_once(text, "병합 요청 M075\n", "승인 요청 M075\n")), "첫 줄")
-        self.assert_problem(self.problems(replace_once(text, "병합 요청 M075\n", "병합 요청 M075 입니다\n")), "첫 줄")
+        message = "첫 줄이 '병합 요청 M075' 모양이 아닙니다(번호는 M 뒤에 세 자리 또는 네 자리 숫자)"                  # 다른 불일치 문구가 아니라 바로 이 문제여야 한다
+        self.assertIn(message, self.problems("\n".join(text.split("\n")[1:])))
+        self.assertIn(message, self.problems(replace_once(text, "병합 요청 M075\n", "병합 요청 M75\n")))
+        self.assertIn(message, self.problems(replace_once(text, "병합 요청 M075\n", "병합 요청 M0075\n")))
+        self.assertIn(message, self.problems(replace_once(text, "병합 요청 M075\n", "승인 요청 M075\n")))
+        self.assertIn(message, self.problems(replace_once(text, "병합 요청 M075\n", "병합 요청 M075 입니다\n")))
+        for bad in ("M75", "M0075", "M000", "M12345"):                      # 표준이 아닌 번호가 첫 줄·승인 예·글 속에서 모두 같아도(서로 일치해도) 통과하지 않는다
+            with self.subTest(bad=bad):
+                self.assertIn(message, self.problems(text.replace("M075", bad)))
 
     def test_the_pr_number_and_head_commit_are_required_once(self):
         text = make_text()
