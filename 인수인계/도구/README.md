@@ -110,7 +110,7 @@ REST 호출은 로그인 없이 IP 당 시간당 60회입니다 — 한 번 쓰�
 | `an_a_candidates.md`·`an_b_channels.md`·`an_c_ui_tests_docs.md` | 데스크톱 코드 조사(후보·제안·보관함·프로필 / 채널·초안·서비스·연결·이관 / 화면·시험·CI·문서) — main `3b1294b` 기준 |
 | `r131_draft.md`·`r131_operator_answer.md` | 5채널 전략 분석·결정 요청(R-131)의 초안, 운영자 답(조건 7개)과 내 해석·구현자별 변경 |
 | `r134_draft.md`·`r134_fill.py`·`r135_draft.md`·`r135_fill.py` | N1(R-134)·P0(R-135) **병합 부탁 요청 초안과 채우개** — 검증 문구를 `r134_verify.txt`·`r135_verify.txt` 로 써 두고 `python -X utf8 r134_fill.py R-134 시작HH:MM 끝HH:MM "NN분 NN초" 가지이름 "21파일"` 로 요청 파일을 만든다(검사 초록 관문 포함, 자리표시가 남으면 실패) |
-| `양식/merge_request_template_v2.md`·`양식/progress_draft_template.md` | 운영자가 정한 **병합 부탁 양식**(무엇을 바꾸는지·왜 필요한지·체감 변화·위험과 영향·시험·독립 검증 결과·원복 방법을 쉬운 말로, 'AI 병합은 꺼져 있고 운영자가 직접 병합' 문구와 운영자 전용 항목 점검 포함)과 **진행 현황 초안 양식**(병합 관련 문구 규칙의 '열린 PR' 절과 맨 끝 고정 문장 포함) — `setup_workspace.py` 가 `W` 바로 아래로 복사한다(크론 프롬프트 v3 이 `W/progress_draft_template.md` 를 부른다) |
+| `양식/merge_request_template_v2.md`·`양식/progress_draft_template.md` | 운영자가 정한 **병합 부탁 양식**(무엇을 바꾸는지·왜 필요한지·체감 변화·위험과 영향·시험·독립 검증 결과·원복 방법을 쉬운 말로, 'AI 병합 기능이 꺼져 있어 운영자께서 직접 병합해 주세요' 문구와 운영자 전용 12항목 점검 포함)과 **진행 현황 초안 양식**(병합 관련 문구 규칙의 '열린 PR' 절과 맨 끝 고정 문장 포함) — `setup_workspace.py` 가 `W` 바로 아래로 복사한다(크론 프롬프트 v3 이 `W/progress_draft_template.md` 를 부른다) |
 
 지시서의 개발 도구 경로(`C:\ccgui\...` 같은 것)는 처음 PC 의 배치입니다 — 새 PC 에서는 `py -0p` 로 3.12·3.10 의 실제 위치를 확인해 읽는 대로 바꿔 쓰고, 표는 `docs/SESSION_START.md` §2-4 를 참고합니다. 도구 사본 쪽은 고정 경로를 쓰지 않습니다(1절).
 
@@ -158,7 +158,7 @@ python -X utf8 <W>/wt_r30/scripts/validate_repo.py --root <W>/wt_r30
 python -X utf8 <W>/scratch/resume_check.py --work <W>
 ```
 
-- 이렇게 나오면 정상: `validate_repo.py` 는 마지막 줄이 `요약: 오류 0건, 경고 N건 — 통과` 입니다(`WF-0 PyYAML 이 없어 워크플로 보안 검사를 건너뜁니다` 경고는 PyYAML 이 없는 PC 에서 늘 나오는 정상 경고). `resume_check.py` 는 `지금:`·`저장소 main 머리: 블로그 … | 데스크톱 … | 루트 …`·`요청 가지 머리:`·`블로그 열린 PR:`·`최근 이슈` 줄과 두 작업 폴더의 상태를 보이고 경로나 비밀은 찍지 않습니다.
+- 이렇게 나오면 정상: `scripts/validate_repo.py` 는 마지막 줄이 `요약: 오류 0건, 경고 N건 — 통과` 입니다(`WF-0 PyYAML 이 없어 워크플로 보안 검사를 건너뜁니다` 경고는 PyYAML 이 없는 PC 에서 늘 나오는 정상 경고). `resume_check.py` 는 `지금:`·`저장소 main 머리: 블로그 … | 데스크톱 … | 루트 …`·`요청 가지 머리:`·`블로그 열린 PR:`·`최근 이슈` 줄과 두 작업 폴더의 상태를 보이고 경로나 비밀은 찍지 않습니다.
 - 아니면: 머리 자리에 `?` 가 나오면 그 저장소를 읽지 못한 것이니 네트워크를 확인합니다. 오류가 1건 이상이면 고치지 말고 보고합니다.
 
 **②′ 번들 없이 시작할 때**(번들 가지가 없거나 이미 정리됐을 때) — 이 저장소를 받은 폴더에서:
