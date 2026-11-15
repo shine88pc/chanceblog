@@ -1239,6 +1239,7 @@ class SetupWorkspaceTest(unittest.TestCase):
         self.assertEqual(commands, [])
         self.assertEqual([command for command, _options in reads], [["git", "-C", str(blog), "rev-parse", "--abbrev-ref", "HEAD"]])
         self.assertNotIn("shell", reads[0][1])
+        self.assertEqual(reads[0][1]["timeout"], 60)                                          # git 이 멈춰도 무한정 기다리지 않는다
         self.assertIn("현재 가지: " + setup.REQUEST_BRANCH, out)
         for absent in ("checkout", "주의", "읽지 못했다", "분리된"):
             self.assertNotIn(absent, out, absent)
@@ -1252,6 +1253,7 @@ class SetupWorkspaceTest(unittest.TestCase):
         self.assertEqual(commands, [], "자동으로 옮기지 않는다 — 어떤 git 명령도 setup.run 으로 부르지 않는다")
         self.assertEqual(len(reads), 1)
         self.assertEqual(reads[0][0], ["git", "-C", str(blog), "rev-parse", "--abbrev-ref", "HEAD"])
+        self.assertEqual(reads[0][1]["timeout"], 60)
         self.assertIn("현재 가지: main", out)
         self.assertIn(f"푸시 전 변경이 없으면 `git -C {blog} checkout {setup.REQUEST_BRANCH}`", out)
         self.assertIn("자동으로 옮기지 않는다", out)
@@ -1260,9 +1262,10 @@ class SetupWorkspaceTest(unittest.TestCase):
         self.assertIn("다음:", out)
 
     def test_a_branch_that_cannot_be_read_is_said_loudly_and_does_not_stop_the_run(self):
-        """권고-A: git 이 현재 가지를 못 읽으면(오류·빈 출력·git 이 안 뜸·시간 초과·분리된 HEAD) 크게 말하고 죽지는 않는다 — 나머지(속보 자료·데스크톱 clone·다음 안내)는 계속 돈다."""
+        """권고-A·C: git 이 현재 가지를 못 읽으면(오류·빈 출력·git 이 안 뜸·시간 초과·커밋 없는 저장소의 HEAD+종료 코드 128) 크게 말하고(분리된 HEAD 는 따로 말한다) 죽지는 않는다 — 나머지(속보 자료·데스크톱 clone·다음 안내)는 계속 돈다."""
         cases = (
             ("git 오류(종료 코드 128)", dict(output="", returncode=128), "현재 가지: 읽지 못했다", "status"),
+            ("종료 코드 128 인데 출력은 HEAD(커밋 없는 저장소)", dict(output="HEAD\n", returncode=128), "현재 가지: 읽지 못했다", "status"),
             ("출력이 비었다", dict(output="\n"), "현재 가지: 읽지 못했다", "status"),
             ("git 을 띄우지 못함", dict(error=OSError("없음")), "현재 가지: 읽지 못했다", "status"),
             ("시간 초과", dict(error=subprocess.TimeoutExpired("git", 60)), "현재 가지: 읽지 못했다", "status"),
@@ -1275,6 +1278,11 @@ class SetupWorkspaceTest(unittest.TestCase):
                 self.assertEqual(commands, [])
                 self.assertEqual(len(reads), 1)
                 self.assertIn(said, out)
+                if said.startswith("현재 가지: 읽지 못했다"):
+                    self.assertIn("(git 오류·시간 초과·저장소가 아니거나 커밋이 없다)", out)          # 원인을 한 가지로 단정하지 않는다
+                    self.assertNotIn("분리된", out)                                                # 종료 코드가 0 이 아니면 HEAD 가 찍혀도 분리된 HEAD 로 알리지 않는다
+                else:
+                    self.assertNotIn("읽지 못했다", out)
                 self.assertIn("주의:", out)
                 self.assertIn(advice, out)
                 self.assertIn("다음:", out)
@@ -1327,6 +1335,10 @@ class SetupWorkspaceTest(unittest.TestCase):
             self.assertEqual(setup.current_branch(repo), setup.REQUEST_BRANCH)
             run_git("checkout", "-q", "--detach", cwd=repo)
             self.assertEqual(setup.current_branch(repo), "HEAD")                                 # 분리된 HEAD 는 가지 이름이 없다
+            unborn = tmp / "unborn"
+            unborn.mkdir()
+            run_git("init", "-q", cwd=unborn)
+            self.assertIsNone(setup.current_branch(unborn))                                      # 커밋이 없으면 git 은 HEAD 를 찍고 종료 코드 128 — 분리된 HEAD 로 잘못 알리면 안 된다
             plain = tmp / "plain"
             plain.mkdir()
             with mock.patch.dict(os.environ, {"GIT_CEILING_DIRECTORIES": str(tmp)}):             # 위 폴더의 저장소를 찾아 올라가지 않게 한다
@@ -1690,7 +1702,8 @@ class ReadmeFirstStartSectionTest(unittest.TestCase):
         tar = [line for line in bullets if "tar.exe" in line]
         crlf = [line for line in bullets if "SPEC INVALID" in line]
         self.assertEqual((len(tar), len(crlf)), (1, 1))
-        for needle in ("한글 파일명", "`git archive", "git -C <저장소> -c core.autocrlf=false worktree add --detach <새 폴더> <커밋>", "git -C <저장소> worktree remove <새 폴더>"):
+        for needle in ("한글 파일명", "`git archive", "git -C <저장소> -c core.autocrlf=false worktree add --detach <새 폴더> <커밋>", "git -C <저장소> worktree remove <새 폴더>",
+                       "`git -C <저장소> -c core.autocrlf=false archive --format=zip HEAD -o <파일>.zip`", "파이썬 `zipfile`", "한글 파일명이 맞게 풀립니다"):
             self.assertIn(needle, tar[0], needle)
         self.assertNotIn("`git worktree remove", tar[0])                                         # 저장소 폴더 밖에서 부르면 어느 저장소의 작업 폴더인지 모른다
         for needle in ("CRLF", "변이", "LF 로 체크아웃한 폴더", "`sha256`"):

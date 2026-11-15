@@ -86,7 +86,7 @@ def clone(url, folder):
 
 
 def current_branch(folder):
-    """폴더의 현재 가지 이름 — 읽기 전용 `git rev-parse --abbrev-ref HEAD` 한 번만 부른다. 분리된 HEAD 면 `HEAD`, 읽지 못하면(git 오류·저장소 아님·커밋 없음) None. 어떤 경우에도 죽지 않는다."""
+    """폴더의 현재 가지 이름 — 읽기 전용 `git rev-parse --abbrev-ref HEAD` 한 번만 부른다. 분리된 HEAD 면 `HEAD`, 읽지 못하면(git 오류·시간 초과·저장소 아님·커밋 없음) None. 어떤 경우에도 죽지 않는다."""
     try:
         done = subprocess.run(["git", "-C", str(folder), "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
     except (OSError, subprocess.SubprocessError):
@@ -103,7 +103,7 @@ def report_existing_clone(blog):
     if branch == REQUEST_BRANCH:
         print(f"현재 가지: {branch}")
     elif branch is None:
-        print("현재 가지: 읽지 못했다(git 오류 — 저장소가 아니거나 커밋이 없다)")
+        print("현재 가지: 읽지 못했다(git 오류·시간 초과·저장소가 아니거나 커밋이 없다)")
         print(f"주의: 요청 가지({REQUEST_BRANCH}) 위에 있는지 `git -C {blog} status` 로 직접 확인한다 — 푸시 전 변경이 없으면 {switch} 로 옮긴다(자동으로 옮기지 않는다)")
     elif branch == "HEAD":
         print("현재 가지: 없음(분리된 HEAD)")
