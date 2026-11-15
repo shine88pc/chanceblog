@@ -20,7 +20,7 @@
 | [operator-telegram-requests-only.md](./operator-telegram-requests-only.md) | 운영자는 텔레그램 요청(R-번호)만 처리 — GitHub 알림·배너는 무시 |
 | [approval-scope-and-site-checks.md](./approval-scope-and-site-checks.md) | T3 승인은 목록 항목에만 유효, 사이트 변경은 병합 전 실제 Jekyll 빌드 비교 |
 | [prohibited-sources-policy.md](./prohibited-sources-policy.md) | 약관·표기·robots.txt 가 막는 소스는 접근하지 않는다 |
-| [feedback-merge-request-format.md](./feedback-merge-request-format.md) | 병합 부탁 요청 파일 형식(링크 금지·`[R-nnn]` 제목·한 커밋 가지) |
+| [feedback-merge-request-format.md](./feedback-merge-request-format.md) | 병합 부탁 요청 파일 형식(링크 금지·`[M###]` 제목·한 커밋 가지 — 연결 파일 본문은 11-02 판이라 옛 `[R-nnn]` 표기, 현행은 작업내용 §0-2 3번) |
 | [feedback-precheck-ci-before-merge-request.md](./feedback-precheck-ci-before-merge-request.md) | 병합 부탁은 검사가 이미 초록일 때만 |
 | [feedback-merge-ready-no-wait.md](./feedback-merge-ready-no-wait.md) | PR 을 만들자마자 병합만 하면 되게(블로그 PR 이벤트 검사 구조) |
 | [feedback-merge-check-self.md](./feedback-merge-check-self.md) | 운영자가 병합했는지는 AI 가 직접 확인(보고 요구 금지) |
@@ -52,4 +52,4 @@
 | [task-request-file-designation.md](./task-request-file-designation.md) · [handoff-md-is-rough-baseline-is-this-session.md](./handoff-md-is-rough-baseline-is-this-session.md) | 새 작업요청서는 채팅 지목 전에는 접수만 · 옛 핸드오프 md 는 개요 |
 
 ## 빠진 것
-옛 PC 의 매시간 이어가기 로그(`resume-after-reboot` 등 수백 KB)·세션 상태·PPTX 작업 환경(이 저장소와 무관)은 옮기지 않았습니다. 현재 상태는 `인수인계/작업내용.md` §0, 도구는 [`인수인계/도구/README.md`](../도구/README.md) 입니다.
+옛 PC 의 매시간 이어가기 로그(`resume-after-reboot` 등 수백 KB)·세션 상태·PPTX 작업 환경(이 저장소와 무관)은 옮기지 않았습니다. 현재 상태는 `인수인계/작업내용.md` 의 §0-A 카드와 §0-1, 도구는 [`인수인계/도구/README.md`](../도구/README.md) 입니다.

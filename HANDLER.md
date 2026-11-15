@@ -1,5 +1,7 @@
 # Chance_Blog + Blogger 멀티 AI 핸들러
 
+> **현행 시작점(2026-11-15)**: 처음 오는 AI 는 이 파일의 필독 순서보다 먼저 [`인수인계/작업내용.md`](./인수인계/작업내용.md) 맨 위 §0-A 30초 카드와 §0-1 을 읽는다(파일이 수백 KB 라 `### 0-2.` 제목 줄 앞까지만 먼저 읽는다). 이 파일의 §0·§3 P1 재개 절차·§8·§10 은 역사 기록이다.
+
 > **⛔ 모든 AI (Grok / GPT / Claude 등) 작업 시작 전 필수**
 >
 > 1. 이 파일 `HANDLER.md` 전체 읽기
@@ -14,6 +16,8 @@
 ---
 
 ## 0. 현재 상태 한눈에 (2026-10-20 갱신, Chance 행·알려진 결함·Actions 이름은 2026-10-25, Blogger·텔레그램·요청함 행은 2026-10-29)
+
+> **역사 기록 — 현행은 작업내용 §0-A**([`인수인계/작업내용.md`](./인수인계/작업내용.md) 맨 위 30초 카드). 아래 표는 2026-10-20–29 시점의 구조·규칙 요약이라 낡았을 수 있습니다.
 
 > **현황의 기준은 [`인수인계/작업내용.md`](./인수인계/작업내용.md) 입니다.** 이 표는 구조·규칙 요약이라 ⏳ 표시가 낡았을 수 있습니다 — 의심되면 작업내용.md 와 실제 상태(`python scripts/github_status.py status`)를 먼저 믿으세요.
 >
@@ -233,6 +237,8 @@ VS Code:
 
 ## 8. 다음 AI에게 전달할 인수인계 문 (복붙용)
 
+> **역사 기록 — 현행은 작업내용 §0-A.** 아래 복붙 블록은 2026-10 시점의 문구입니다. 지금은 새 세션에 '저장소 chanceblog 의 인수인계/작업내용.md 맨 위 30초 카드부터 읽고 이어서 진행해줘.' 한 문장이면 됩니다.
+
 아래 블록을 새 AI 세션(GPT·Grok·Claude 등) 첫 메시지에 붙여 넣으면 된다.
 
 ```text
@@ -298,6 +304,8 @@ VS Code:
 
 ## 10. 다른 PC(외부 로컬)에서 이어받기
 
+> **역사 기록 — 현행 이어받기는 작업내용 §0-A 30초 카드와 §0-1 입니다.** 다만 5번의 Blogger 인증·시크릿 발급 절차는 인증이 막힐 때의 대응 절차로 지금도 참고합니다(워치독·확인 필요 모음이 이 절을 가리킵니다).
+
 작업 PC의 파일을 메일·USB 등으로 꺼낼 수 없는 경우를 전제로, **모든 작업물과 진행 기록은 이 저장소(`main`)에 있다.** 새 PC에서는 아래 순서로 이어받는다.
 
 1. Git과 Python 3.10 이상을 설치한다.
@@ -314,7 +322,7 @@ VS Code:
    1. `client_secret.json`은 저장소에 없다. Google Cloud Console → 사용자 인증 정보에서 **데스크톱 앱 OAuth 클라이언트** JSON을 받아(필요하면 새로 만든다) 저장소 **루트**에 `client_secret.json`으로 저장한다. 절차는 `.github/editorial/BLOGGER_API_SETUP.md`.
    2. `pip install google-auth-oauthlib` 후 `python scripts/get_blogger_token.py`를 실행한다 (브라우저에서 Google 동의).
    3. 출력된 `BLOGGER_CLIENT_ID`·`BLOGGER_CLIENT_SECRET`·`BLOGGER_REFRESH_TOKEN`과 Blogger 설정의 `BLOGGER_BLOG_ID`를 GitHub **Settings → Secrets and variables → Actions**에 등록한다. 값은 채팅·저장소·메일에 남기지 않는다.
-   4. Actions → **[Blogger 영문] 글 자동 작성**(한글은 **[Blogger 한글] 글 자동 작성**, 시크릿 `BLOGGER_KO_*`·별도 계정 — `.github/editorial/BLOGGER_API_SETUP.md` §7) → Run workflow로 첫 실행을 확인한다. `연습 실행` 체크를 푼 채(기본이 켜짐이라 그대로 두면 가짜 AI 응답으로 연습만 하고 아무것도 저장하지 않는다) `publish`를 `draft`(기본값)로 두면 Blogger **초안함**에 올라가고 공개되지 않는다(`off`는 저장소 파일만, `publish`는 즉시 게시라 처음에는 고르지 않는다). 올리기 전에 인증 점검이 먼저 돌고, 시크릿 등록 직후에는 `인증 점검만 실행` 입력으로 먼저 확인할 수 있다. 정지(mode off) 중에는 수동 실행도 대상 0개이므로 먼저 mode를 draft로 켠다(T3, 채팅 승인). 초안함에 올린 글과 `publish`를 `off`로 만든 초안도 같은 날 하루 상한을 쓴다.
+   4. Actions → **[Blogger 영문] 글 자동 작성**(한글은 **[Blogger 한글] 글 자동 작성**, 시크릿 `BLOGGER_KO_*`·별도 계정 — `.github/editorial/BLOGGER_API_SETUP.md` §7) → Run workflow로 첫 실행을 확인한다. `연습 실행` 체크를 푼 채(기본이 켜짐이라 그대로 두면 가짜 AI 응답으로 연습만 하고 아무것도 저장하지 않는다) `publish`를 `draft`(기본값)로 두면 Blogger **초안함**에 올라가고 공개되지 않는다(`off`는 저장소 파일만, `publish`는 즉시 게시라 처음에는 고르지 않는다). 올리기 전에 인증 점검이 먼저 돌고, 시크릿 등록 직후에는 `인증 점검만 실행` 입력으로 먼저 확인할 수 있다. 정지(mode off) 중에는 수동 실행도 대상 0개이므로 먼저 mode를 draft로 켠다(T3 — 승인은 작업내용 §0-2 17번 방식). 초안함에 올린 글과 `publish`를 `off`로 만든 초안도 같은 날 하루 상한을 쓴다.
 6. 작업 중에는 `git add`를 파일을 지정해서 하고, push 전에 `git status`로 비밀 파일이 없는지 확인한다. `.gitignore`가 `client_secret*.json`·`token*.json`·`.env*`·키 파일(`*.pem`·`*.key` 등)·서비스 계정 JSON을 막아 준다(이름 규칙이라 `123.txt` 같은 일반 이름은 못 막는다 — CI의 검증기 SEC-2가 사후에 잡는다).
 7. 작업 후: WORKLOG.md 최상단 기록 → 커밋(AI 이름·대상 명시) → `git pull --rebase origin main` → push.
 
