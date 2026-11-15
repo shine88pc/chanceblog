@@ -279,6 +279,7 @@ class OperatorStatementsPinnedTest(unittest.TestCase):
         (7, "12항목 목록을 넓힌 것이 아니라 **12항목 밖의 표시**"),
         (7, "**이 목록은 저장소가 바뀔 때마다 유지가 필요하다.**"),
         (7, "AI 가 읽고 따르는 규칙 문서 18개도 운영자 전용입니다"),
+        (7, "(줄 끝의 줄 바꿈만 떼고 경로 자체는 다듬지 않습니다)"),
         (7, "용어 사전(`docs/GLOSSARY.md`)은 규칙이 아니라 사전이라 넣지 않았습니다"),
         (7, "- **운영자 확인 대기 항목**: 용어 사전 `docs/GLOSSARY.md` 를 규칙 문서 목록에 넣을지"),
         (7, "`openssl s_client`·`socat`·`aria2c`·`npm publish`·`docker push`·`pip install` 같은 것도 따로 잡지 않습니다"),
@@ -766,6 +767,7 @@ class DefectRegisterTest(unittest.TestCase):
             self.assertIn(mark, row)
         self.assertIn("**해결**(총괄(AI)의 보수적 판단 2026-11-15 — 운영자 확인 대기", row)
         self.assertNotIn("**열림**", row)
+        self.assertIn("규칙 문서 18개", row)                                                                          # 안전 목록의 규칙 문서 개수(WIP 7: 10개 → 18개)와 대장 행이 어긋나지 않게
         for old in ("총괄 2026-11-15" + ":", "운영자 결정 " + "D-347"):
             self.assertNotIn(old, row)
         for word in ("policy_self", "packaging_release", "invalid_input", "safety_guard", "external_connection", "승인 문구는 엄격하게 유지한다", "ClassifySafetyGuardTest",
