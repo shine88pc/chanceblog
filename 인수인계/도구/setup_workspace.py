@@ -8,6 +8,7 @@
      같은 이름이 W 에 이미 있으면 저장소 것으로 덮어쓴다(저장소가 진실이다 — W 의 도구는 상태를 갖지 않는다).
   2. W/wt_r30  <- 블로그 저장소(chanceblog)를 clone 하고 요청 가지 `ai/claude/NO-MERGE-operator-requests`(요청 파일을 쌓는 병합 금지 가지)로 전환한다.
      **이미 clone 돼 있으면 clone 도 가지 전환도 하지 않고 그대로 둔다** — 푸시 전 요청 파일·커밋이 사라지지 않게 하려는 것이다(가지를 원격 머리로 되돌리는 `checkout -B` 는 방금 새로 clone 했을 때만 한다).
+     대신 읽기 전용 `git rev-parse --abbrev-ref HEAD` 로 현재 가지를 한 줄 알리고, 요청 가지가 아니면(복제가 도중에 끊겼거나 손으로 `main` 에 받아 둔 폴더) 푸시 전 변경이 없을 때 직접 옮기는 명령을 안내한다(자동으로 옮기지 않는다).
      요청 가지에 `인수인계/이어가기_자료/` 가 있으면 그 파일(병합 없이 갱신되는 최신 보고서·검증 결과)을 W 로 덮어 복사한다.
   3. W/cd_repo <- 데스크톱 저장소(chanceblog-desktop)를 clone 한다(기본 가지, 이미 있으면 건너뛴다).
 `--no-clone` 이면 1 만 한다(저장소를 이미 받아 둔 경우, 또는 복사만 점검할 때 — 네트워크를 쓰지 않는다).
@@ -84,6 +85,34 @@ def clone(url, folder):
     return True
 
 
+def current_branch(folder):
+    """폴더의 현재 가지 이름 — 읽기 전용 `git rev-parse --abbrev-ref HEAD` 한 번만 부른다. 분리된 HEAD 면 `HEAD`, 읽지 못하면(git 오류·저장소 아님·커밋 없음) None. 어떤 경우에도 죽지 않는다."""
+    try:
+        done = subprocess.run(["git", "-C", str(folder), "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    name = done.stdout.strip()
+    return name if done.returncode == 0 and name else None
+
+
+def report_existing_clone(blog):
+    """이미 있는 wt_r30 은 건드리지 않고 현재 가지만 알린다 — 요청 가지가 아니면 직접 옮기는 명령을 안내한다(자동 전환은 하지 않는다: 푸시 전 요청 파일·커밋 보존이 먼저)."""
+    print(f"이미 있음 — 가지 전환 건너뜀: {blog} (푸시 전 요청 파일·커밋이 사라지지 않게 그대로 둔다 — 최신으로 맞추는 것은 사람이 상태를 보고 직접 한다)")
+    branch = current_branch(blog)
+    switch = f"`git -C {blog} checkout {REQUEST_BRANCH}`"
+    if branch == REQUEST_BRANCH:
+        print(f"현재 가지: {branch}")
+    elif branch is None:
+        print("현재 가지: 읽지 못했다(git 오류 — 저장소가 아니거나 커밋이 없다)")
+        print(f"주의: 요청 가지({REQUEST_BRANCH}) 위에 있는지 `git -C {blog} status` 로 직접 확인한다 — 푸시 전 변경이 없으면 {switch} 로 옮긴다(자동으로 옮기지 않는다)")
+    elif branch == "HEAD":
+        print("현재 가지: 없음(분리된 HEAD)")
+        print(f"주의: 요청 가지가 아니다 — `git -C {blog} status` 로 푸시 전 변경·커밋이 없는 것을 본 뒤 {switch} 로 옮긴다(자동으로 옮기지 않는다)")
+    else:
+        print(f"현재 가지: {branch}")
+        print(f"주의: 요청 가지({REQUEST_BRANCH})가 아니다 — 푸시 전 변경이 없으면 {switch} 로 옮긴다(자동으로 옮기지 않는다 — 푸시 전 커밋을 지키려고)")
+
+
 def main():
     args = [arg for arg in sys.argv[1:] if not arg.startswith("--")]
     if len(args) != 1:
@@ -102,7 +131,7 @@ def main():
         run("git", "checkout", "-B", REQUEST_BRANCH, f"origin/{REQUEST_BRANCH}", cwd=blog)
         print(f"요청 가지로 전환: {blog} @ {REQUEST_BRANCH}")
     else:
-        print(f"이미 있음 — 가지 전환 건너뜀: {blog} (푸시 전 요청 파일·커밋이 사라지지 않게 그대로 둔다 — 최신으로 맞추는 것은 사람이 상태를 보고 직접 한다)")
+        report_existing_clone(blog)
     copy_live_materials(blog, target)
     clone(DESKTOP, target / "cd_repo")
     print()

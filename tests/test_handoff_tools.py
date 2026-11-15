@@ -282,6 +282,13 @@ class InventoryAndExistenceTest(unittest.TestCase):
             ast.parse(source, filename=path.name, feature_version=(3, 10))
             self.assertTrue(source.endswith("\n"), path.name)
 
+    def test_only_notice_tools_names_the_root_repository_folder_so_no_tool_creates_it(self):
+        """README(make_request 행)는 `W/root_repo` 를 어느 도구도 만들지 않으니 직접 clone 하라고 한다 — 이 폴더 이름을 입에 올리는 도구는 읽기만 하는 notice_tools 하나뿐이다.
+        만드는 도구(setup_workspace 포함)가 생기면 이 시험이 빨개져 README 문장도 함께 고치게 한다."""
+        users = sorted(path.name for path in [*WORK.glob("*.py"), *SCRATCH.glob("*.py"), SETUP] if "root_repo" in read(path))
+        self.assertEqual(users, ["notice_tools.py"])
+        self.assertIn("어느 도구도 만들지 않으니", table_row(read(README), "make_request.py"))
+
 
 # ==== 3. 읽기 전용·푸시 없음 — 약속을 구조로 못박는다 =========================================
 READ_ONLY_SCRIPTS = ("check_notify", "ci_web", "memfree", "merge_guard", "resume_check", "run_annotations", "run_steps_times", "run_times", "runs_by_sha", "shadow_check_1115",
@@ -407,6 +414,17 @@ class MergeGuardTest(unittest.TestCase):
                      "feed.xml", "assets/img.png"):
             self.assertEqual(tier([path]), "C", path)
             self.assertEqual(tier(["docs/a.md", "tests/t.py", path]), "C", path)           # 운영자 전용 경로가 하나라도 있으면 다른 파일이 문서·시험이어도 C
+
+    PROTECTION_GAP = ("privacy.md", "categories.md", "robots.txt", "posts.json", "pipeline/ai_processor_policy.json", "pipeline/ops_inbox_policy.json", "pipeline/egress.py", "scripts/validate_repo.py")
+
+    def test_the_paths_the_readme_says_are_not_yet_operator_only_really_are_not(self):
+        """README merge_guard 행의 '한계' 줄이 글자만이 아니라 코드와 묶인다 — 이 여덟 경로가 운영자 전용(C)이 되면 이 시험이 빨개져 README 줄과 이 목록을 함께 고치게 한다."""
+        row = table_row(read(README), "merge_guard.py")
+        for path in self.PROTECTION_GAP:
+            self.assertEqual(self.mg.tier([path]), "B", f"{path} 가 이제 운영자 전용(C)이다 — README merge_guard 행의 '한계' 줄과 이 시험의 PROTECTION_GAP 을 함께 고친다")
+            self.assertIn(f"`{path}`", row, path)
+        for path in (".github/workflows/x.yml", "ads.txt", "index.html", "pipeline/blogs.json"):                 # 대조군: 지금도 운영자 전용인 것
+            self.assertEqual(self.mg.tier([path]), "C", path)
 
     def test_a_clean_documents_only_branch_is_eligible(self):
         result = self.inspect(FakeGit())
@@ -1084,9 +1102,33 @@ def make_origin(folder, extra_branch=None):
         run_git("checkout", "-q", "main", cwd=folder)
 
 
+def fake_branch_reader(output="", returncode=0, error=None):
+    """setup_workspace.current_branch 가 부르는 하위 프로세스(subprocess.run) 자리에 끼우는 가짜 — 불린 (명령, 옵션)을 calls 에 적고 (출력, 종료 코드)를 돌려주거나 error 를 던진다."""
+    calls = []
+
+    def fake(command, **kwargs):
+        calls.append((list(command), kwargs))
+        if error is not None:
+            raise error
+        return types.SimpleNamespace(returncode=returncode, stdout=output, stderr="")
+
+    return fake, calls
+
+
 class SetupWorkspaceTest(unittest.TestCase):
     def setUp(self):
         self.setup = load_tool(SETUP)
+
+    def run_main_with_existing_clones(self, reader):
+        """블로그·데스크톱 clone 이 모두 이미 있는 W 에서 main 을 돌린다(clone 은 False, 하위 프로세스는 reader) → (setup.run 으로 부른 명령들, 출력, 블로그 clone 폴더)."""
+        setup = self.setup
+        commands = []
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            target = Path(tmp) / "W"
+            with mock.patch.object(setup, "run", side_effect=lambda *args, cwd=None: commands.append((args, cwd))), mock.patch.object(setup, "clone", return_value=False), \
+                    mock.patch.object(setup.subprocess, "run", reader), mock.patch.object(setup.shutil, "which", return_value="git"), mock.patch.object(sys, "argv", ["setup_workspace.py", str(target)]):
+                _result, out, _err = capture(setup.main)
+            return commands, out, target.resolve() / "wt_r30"
 
     def test_copy_tools_puts_every_file_where_the_readme_says_and_overwrites_a_stale_copy(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
@@ -1162,6 +1204,7 @@ class SetupWorkspaceTest(unittest.TestCase):
         이미 있는 clone 이면 fetch·checkout·reset 어떤 git 명령도 부르지 않고 건너뛴다고 알린다(새로 받는 데스크톱 저장소와는 따로 본다)."""
         setup = self.setup
         commands, cloned = [], []
+        reader, reads = fake_branch_reader(setup.REQUEST_BRANCH + "\n")
 
         def fake_clone(url, folder):
             cloned.append(folder.name)
@@ -1170,26 +1213,71 @@ class SetupWorkspaceTest(unittest.TestCase):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             target = Path(tmp) / "W"
             with mock.patch.object(setup, "run", side_effect=lambda *args, cwd=None: commands.append((args, cwd))), \
-                    mock.patch.object(setup, "clone", side_effect=fake_clone), \
+                    mock.patch.object(setup, "clone", side_effect=fake_clone), mock.patch.object(setup.subprocess, "run", reader), \
                     mock.patch.object(setup.shutil, "which", return_value="git"), mock.patch.object(sys, "argv", ["setup_workspace.py", str(target)]):
                 _result, out, _err = capture(setup.main)
+            blog_folder = target.resolve() / "wt_r30"
         self.assertEqual(cloned, ["wt_r30", "cd_repo"])
         self.assertEqual(commands, [], "이미 있는 clone 에는 어떤 git 명령도 부르지 않는다(fetch 도 checkout 도)")
+        self.assertEqual([command for command, _options in reads], [["git", "-C", str(blog_folder), "rev-parse", "--abbrev-ref", "HEAD"]], "부른 것은 현재 가지를 읽는 읽기 전용 명령 하나뿐")
         self.assertIn("이미 있음 — 가지 전환 건너뜀", out)
         self.assertNotIn("요청 가지로 전환", out)
         self.assertIn("다음:", out)
 
     def test_a_workspace_with_both_clones_already_there_is_left_exactly_as_it_is(self):
-        setup = self.setup
-        commands = []
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-            target = Path(tmp) / "W"
-            with mock.patch.object(setup, "run", side_effect=lambda *args, cwd=None: commands.append((args, cwd))), \
-                    mock.patch.object(setup, "clone", return_value=False), \
-                    mock.patch.object(setup.shutil, "which", return_value="git"), mock.patch.object(sys, "argv", ["setup_workspace.py", str(target)]):
-                _result, out, _err = capture(setup.main)
+        reader, reads = fake_branch_reader(self.setup.REQUEST_BRANCH + "\n")
+        commands, out, _blog = self.run_main_with_existing_clones(reader)
         self.assertEqual(commands, [])
+        self.assertEqual(len(reads), 1)                                                       # 읽기 전용 명령 하나(블로그 clone 의 현재 가지)뿐
         self.assertEqual(out.count("가지 전환 건너뜀"), 1)
+
+    def test_an_existing_clone_on_the_request_branch_is_read_with_one_read_only_command_and_gets_no_advice(self):
+        """권고-A(독립 재검증): 건너뛸 때 현재 가지를 읽기 전용 명령 하나로 알린다 — 요청 가지면 한 줄뿐이고 안내·경고가 없다."""
+        setup = self.setup
+        reader, reads = fake_branch_reader(setup.REQUEST_BRANCH + "\n")
+        commands, out, blog = self.run_main_with_existing_clones(reader)
+        self.assertEqual(commands, [])
+        self.assertEqual([command for command, _options in reads], [["git", "-C", str(blog), "rev-parse", "--abbrev-ref", "HEAD"]])
+        self.assertNotIn("shell", reads[0][1])
+        self.assertIn("현재 가지: " + setup.REQUEST_BRANCH, out)
+        for absent in ("checkout", "주의", "읽지 못했다", "분리된"):
+            self.assertNotIn(absent, out, absent)
+        self.assertIn("다음:", out)
+
+    def test_an_existing_clone_on_another_branch_gets_the_one_line_command_to_switch_and_is_not_switched(self):
+        """권고-A: 새 clone 은 됐는데 요청 가지로 못 옮긴 폴더(또는 손으로 main 에 받아 둔 폴더)를 다시 돌리면 현재 가지를 알리고 직접 옮기는 명령을 안내한다 — 자동으로 옮기지는 않는다."""
+        setup = self.setup
+        reader, reads = fake_branch_reader("main\n")
+        commands, out, blog = self.run_main_with_existing_clones(reader)
+        self.assertEqual(commands, [], "자동으로 옮기지 않는다 — 어떤 git 명령도 setup.run 으로 부르지 않는다")
+        self.assertEqual(len(reads), 1)
+        self.assertEqual(reads[0][0], ["git", "-C", str(blog), "rev-parse", "--abbrev-ref", "HEAD"])
+        self.assertIn("현재 가지: main", out)
+        self.assertIn(f"푸시 전 변경이 없으면 `git -C {blog} checkout {setup.REQUEST_BRANCH}`", out)
+        self.assertIn("자동으로 옮기지 않는다", out)
+        self.assertEqual(out.count("checkout"), 1)                                            # 안내는 한 번 — 실행하지 않고 글로만
+        self.assertNotIn("요청 가지로 전환", out)
+        self.assertIn("다음:", out)
+
+    def test_a_branch_that_cannot_be_read_is_said_loudly_and_does_not_stop_the_run(self):
+        """권고-A: git 이 현재 가지를 못 읽으면(오류·빈 출력·git 이 안 뜸·시간 초과·분리된 HEAD) 크게 말하고 죽지는 않는다 — 나머지(속보 자료·데스크톱 clone·다음 안내)는 계속 돈다."""
+        cases = (
+            ("git 오류(종료 코드 128)", dict(output="", returncode=128), "현재 가지: 읽지 못했다", "status"),
+            ("출력이 비었다", dict(output="\n"), "현재 가지: 읽지 못했다", "status"),
+            ("git 을 띄우지 못함", dict(error=OSError("없음")), "현재 가지: 읽지 못했다", "status"),
+            ("시간 초과", dict(error=subprocess.TimeoutExpired("git", 60)), "현재 가지: 읽지 못했다", "status"),
+            ("분리된 HEAD", dict(output="HEAD\n"), "현재 가지: 없음(분리된 HEAD)", "checkout"),
+        )
+        for label, options, said, advice in cases:
+            with self.subTest(label):
+                reader, reads = fake_branch_reader(**options)
+                commands, out, _blog = self.run_main_with_existing_clones(reader)            # 예외 없이 끝까지 돈다
+                self.assertEqual(commands, [])
+                self.assertEqual(len(reads), 1)
+                self.assertIn(said, out)
+                self.assertIn("주의:", out)
+                self.assertIn(advice, out)
+                self.assertIn("다음:", out)
 
     def test_rerunning_in_a_real_workspace_with_unpushed_work_keeps_the_commit_and_the_files(self):
         """진짜 git(로컬 임시 저장소 둘 — 네트워크 없음)으로: 처음 실행은 clone·요청 가지 전환을 하고, 푸시 전 요청 커밋과 커밋 전 파일을 둔 뒤 다시 돌려도 그대로 남는다.
@@ -1225,18 +1313,83 @@ class SetupWorkspaceTest(unittest.TestCase):
             self.assertEqual((wt / "memo.txt").read_text(encoding="utf-8"), "커밋 전 메모\n")
             self.assertIn("이미 있음 — 가지 전환 건너뜀", second)
             self.assertNotIn("요청 가지로 전환", second)
+            self.assertIn("현재 가지: " + setup.REQUEST_BRANCH, second)                          # 요청 가지 위라는 것만 알리고 경고·안내는 없다
+            self.assertNotIn("주의", second)
+
+    def test_current_branch_reads_a_real_repository_a_detached_head_and_something_that_is_not_a_repository(self):
+        setup = self.setup
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            tmp = Path(tmp)
+            repo = tmp / "repo"
+            make_origin(repo, setup.REQUEST_BRANCH)
+            self.assertEqual(setup.current_branch(repo), "main")
+            run_git("checkout", "-q", setup.REQUEST_BRANCH, cwd=repo)
+            self.assertEqual(setup.current_branch(repo), setup.REQUEST_BRANCH)
+            run_git("checkout", "-q", "--detach", cwd=repo)
+            self.assertEqual(setup.current_branch(repo), "HEAD")                                 # 분리된 HEAD 는 가지 이름이 없다
+            plain = tmp / "plain"
+            plain.mkdir()
+            with mock.patch.dict(os.environ, {"GIT_CEILING_DIRECTORIES": str(tmp)}):             # 위 폴더의 저장소를 찾아 올라가지 않게 한다
+                self.assertIsNone(setup.current_branch(plain))
+            self.assertIsNone(setup.current_branch(tmp / "없는 폴더"))
+
+    def test_a_clone_left_on_main_is_not_touched_says_so_and_the_advised_command_works(self):
+        """권고-A: 손으로 main 에 받아 둔(복제가 도중에 끊겨 요청 가지로 못 옮긴 폴더도 같은 모양) wt_r30 를 다시 돌리면 예전 글은 종료 코드 0 과 '이미 있음' 뿐이었다 —
+        이제는 현재 가지와 직접 옮기는 명령을 알린다. 가지·커밋·파일·reflog 는 그대로이고 안내한 명령은 실제로 먹는다(진짜 임시 git 저장소 둘 — 네트워크 없음)."""
+        setup = self.setup
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            tmp = Path(tmp)
+            blog, desktop, work = tmp / "blog-origin", tmp / "desktop-origin", tmp / "W"
+            make_origin(blog, setup.REQUEST_BRANCH)
+            make_origin(desktop)
+            wt = work / "wt_r30"
+
+            def run_setup():
+                with mock.patch.object(setup, "BLOG", str(blog)), mock.patch.object(setup, "DESKTOP", str(desktop)), mock.patch.dict(os.environ, git_env()), \
+                        mock.patch.object(sys, "argv", ["setup_workspace.py", str(work)]):
+                    return capture(setup.main)[1]
+
+            run_setup()                                                                          # 새 W — 요청 가지로 전환됨
+            run_git("checkout", "-q", "main", cwd=wt)                                            # 손으로 main 으로 옮긴 모양
+            (wt / "main-work.txt").write_text("main 위의 푸시 전 작업\n", encoding="utf-8", newline="\n")
+            run_git("add", "-A", cwd=wt)
+            run_git("commit", "-q", "-m", "main 위의 푸시 전 커밋", cwd=wt)
+            (wt / "memo.txt").write_text("커밋 전 메모\n", encoding="utf-8", newline="\n")
+
+            def state():
+                return (run_git("rev-parse", "HEAD", cwd=wt), run_git("branch", "--list", cwd=wt), run_git("reflog", cwd=wt))
+
+            before = state()
+            second = run_setup()
+            self.assertEqual(state(), before, "읽기만 해야 한다 — 커밋·가지·reflog 가 그대로여야 한다")
+            self.assertEqual(run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt), "main")
+            self.assertEqual((wt / "main-work.txt").read_text(encoding="utf-8"), "main 위의 푸시 전 작업\n")
+            self.assertEqual(run_git("status", "--porcelain", cwd=wt), "?? memo.txt")
+            self.assertIn("이미 있음 — 가지 전환 건너뜀", second)
+            self.assertIn("현재 가지: main", second)
+            self.assertNotIn("요청 가지로 전환", second)
+            found = re.search(r"푸시 전 변경이 없으면 `git -C (.+?) checkout " + re.escape(setup.REQUEST_BRANCH) + "`", second)
+            self.assertIsNotNone(found, second)
+            self.assertEqual(Path(found.group(1)).resolve(), wt.resolve())                       # 안내한 폴더가 바로 그 clone 이다
+            run_git("-C", found.group(1), "checkout", setup.REQUEST_BRANCH, cwd=tmp)             # 안내한 명령 그대로 — 실제로 먹는다
+            self.assertEqual(run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt), setup.REQUEST_BRANCH)
+            self.assertEqual(run_git("log", "main", "-1", "--format=%s", cwd=wt), "main 위의 푸시 전 커밋")      # main 위 커밋은 main 에 그대로
 
     def test_the_documents_tell_the_truth_about_rerunning_in_an_existing_workspace(self):
         doc = self.setup.__doc__
-        for needle in ("이미 clone 돼 있으면 clone 도 가지 전환도 하지 않고 그대로 둔다", "이미 만든 W 에서 다시 돌릴 때는 `--no-clone`", "푸시 전 요청 파일·커밋이 사라지지 않게"):
+        for needle in ("이미 clone 돼 있으면 clone 도 가지 전환도 하지 않고 그대로 둔다", "이미 만든 W 에서 다시 돌릴 때는 `--no-clone`", "푸시 전 요청 파일·커밋이 사라지지 않게",
+                       "읽기 전용 `git rev-parse --abbrev-ref HEAD` 로 현재 가지를 한 줄 알리고", "직접 옮기는 명령을 안내한다(자동으로 옮기지 않는다)"):
             self.assertIn(needle, doc, needle)
         self.assertNotIn("이미 clone 돼 있으면 건너뛴다", doc)                                    # 가지 전환까지 건너뛴다는 오해를 부르던 옛 문장
         readme = read(README)
         s8 = section(readme, 8)
         prime = s8[s8.index("**②′ 번들 없이 시작할 때**"): s8.index("**③ 푸시 권한 점검**")]
         for needle in ("이미 만든 `<W>` 에서 다시 돌릴 때는 `--no-clone` 으로만 다시 돌립니다", "이미 있음 — 가지 전환 건너뜀", "푸시 전 요청 파일·커밋이 사라지지 않게",
-                       "git -C <W>/wt_r30 status", "git -C <W>/wt_r30 pull --ff-only origin ai/claude/NO-MERGE-operator-requests"):
+                       "git -C <W>/wt_r30 status", "git -C <W>/wt_r30 pull --ff-only origin ai/claude/NO-MERGE-operator-requests",
+                       "`현재 가지: …` 한 줄로 보입니다", "git -C <W>/wt_r30 checkout ai/claude/NO-MERGE-operator-requests", "자동으로 옮기지는 않습니다", "git -C <W>/wt_r30 fetch origin",
+                       "**가지가 요청 가지인지 먼저 확인**", "git -C <W>/wt_r30 rev-parse --abbrev-ref HEAD", "다른 가지 위에서 `pull` 하면 그 가지가 요청 가지 머리로 빨리 감깁니다"):
             self.assertIn(needle, prime, needle)
+        self.assertLess(prime.index("**가지가 요청 가지인지 먼저 확인**"), prime.index("git -C <W>/wt_r30 pull --ff-only"))      # pull 보다 가지 확인이 먼저 나온다
         last = s8[s8.index("**두 PC 를 동시에 가동하지 않습니다.**"):]
         for needle in ("이미 만든 `<W>` 는 지우거나 다시 만들지 말고", "`--no-clone` 으로만 다시 돌립니다"):
             self.assertIn(needle, last, needle)
@@ -1537,8 +1690,9 @@ class ReadmeFirstStartSectionTest(unittest.TestCase):
         tar = [line for line in bullets if "tar.exe" in line]
         crlf = [line for line in bullets if "SPEC INVALID" in line]
         self.assertEqual((len(tar), len(crlf)), (1, 1))
-        for needle in ("한글 파일명", "`git archive", "git -C <저장소> -c core.autocrlf=false worktree add --detach <새 폴더> <커밋>", "git worktree remove"):
+        for needle in ("한글 파일명", "`git archive", "git -C <저장소> -c core.autocrlf=false worktree add --detach <새 폴더> <커밋>", "git -C <저장소> worktree remove <새 폴더>"):
             self.assertIn(needle, tar[0], needle)
+        self.assertNotIn("`git worktree remove", tar[0])                                         # 저장소 폴더 밖에서 부르면 어느 저장소의 작업 폴더인지 모른다
         for needle in ("CRLF", "변이", "LF 로 체크아웃한 폴더", "`sha256`"):
             self.assertIn(needle, crlf[0], needle)
 
@@ -1554,7 +1708,8 @@ class ReadmeFirstStartSectionTest(unittest.TestCase):
         """권고-2: 검사 관문의 면제는 자동 검사가 없는 루트 홈 저장소 한 곳뿐이다 — '초록이어야 파일이 만들어진다' 를 절대 규칙처럼 쓰지 않는다."""
         row = table_row(self.text, "make_request.py")
         for needle in ("예외 한 곳", "`shine88pc/shine88pc.github.io`", "루트 홈 저장소", "검사 실행이 하나도 없어도", "블로그·데스크톱 저장소는 예외가 없고", "실행이 하나라도 있으면 모두 초록",
-                       "사람이 요청 본문에 적고", "`W/root_repo`"):
+                       "사람이 요청 본문에 적고", "`W/root_repo`", "머리 커밋 제목은 `W/root_repo` 에서 읽는다",
+                       "실행 목록을 읽다가 실패해도", "네트워크 오류", "같은 이유로 통과시킨다", "어느 도구도 만들지 않으니", "`W/root_repo` 에 직접 clone 해 둔다"):
             self.assertIn(needle, row, needle)
 
     def test_the_limits_the_verifier_found_are_written_in_the_tool_rows(self):
@@ -2238,6 +2393,16 @@ class MakeRequestTildeTest(unittest.TestCase):
         self.assertEqual([path.name for path in self.folder.iterdir()], ["R-198_note.md"])
         self.assertIn("파일 R-198_note.md", out)
 
+    def test_the_comment_beside_the_tilde_check_explains_in_words_why_digits_looked_glued(self):
+        """en dash 로 고친 뒤 주석의 예시('15–20')가 '왜 숫자가 붙어 보였나' 와 어긋나 보였다 — 이유를 글로 풀어 쓴다(새 물결표를 만들지 않는다)."""
+        found = re.search(r'^\s*if "' + chr(126) + r'" in text:\s*#\s*(.*)$', read(WORK / "make_request.py"), re.M)
+        self.assertIsNotNone(found)
+        comment = found.group(1)
+        for needle in ("마크다운(GFM)이 물결표 한 쌍을 취소선으로 처리", "물결표로 범위를 쓴 두 곳", "숫자가 붙어 보였다", "확인 요청 006"):
+            self.assertIn(needle, comment, needle)
+        self.assertNotIn(chr(126), comment)
+        self.assertIsNone(re.search("[0-9]" + chr(0x2013) + "[0-9]", comment), "en dash 예시는 '붙어 보인 이유' 설명과 어긋난다")
+
     def test_the_link_refusal_comes_before_the_tilde_one_and_both_are_plain_exits(self):
         with self.assertRaises(SystemExit) as stop:
             self.mr.check_draft(INFO_DRAFT_TEXT.replace("@TESTS@", "http://x.invalid ~"), "R-198")
@@ -2332,6 +2497,14 @@ class EgressReasonsAreTruthfulTest(unittest.TestCase):
             self.assertIn("sys.argv", read(SCRATCH / name), name)                                # 저장소를 인자로 받는다는 사실이 코드에 있다
         self.assertIn('"shine88pc/chanceblog"', read(SCRATCH / "run_times.py"))                  # 기본값이 자기 저장소라는 사실도 코드에 있다
         self.assertIn('"shine88pc/chanceblog"', read(SCRATCH / "web_runs.py"))
+
+    def test_the_source_policy_document_calls_the_tools_what_the_tool_gate_text_calls_them(self):
+        """docs/SOURCE_POLICY.md 7절은 '사람이 실행하는 도구' 라고 적었는데 등록 장부의 관문 문구는 AI 세션도 직접 실행한다고 고쳤다 — 두 곳이 같은 말을 한다(숫자 줄은 test_source_policy_docs 가 지킨다)."""
+        phrase = "사람이나 AI 세션이 직접 실행하는 도구"
+        self.assertIn(phrase, egress._G_TOOL)
+        doc = read(ROOT / "docs" / "SOURCE_POLICY.md")
+        self.assertIn(phrase + "(`인수인계/도구/`의 `urlopen`", doc)
+        self.assertNotIn("사람이 실행하는 도구", doc)
 
     def test_the_tool_gate_text_does_not_claim_that_nothing_calls_the_tools_but_people(self):
         gate = egress._G_TOOL
