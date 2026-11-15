@@ -2,9 +2,11 @@
 
 문서의 글이 옳은지는 시험이 알 수 없어 사람이 본다. 여기서는 낱말·번호·표·예시 글·이름을 코드와 대조하고(문서의 목록 = 시험에 글자 그대로 적어 둔 운영자 원문 = 모듈 상수), 문서 규칙(물결표·웹 주소·Liquid·
 로컬 경로 없음)과 모듈의 성질 — 표준 라이브러리 `re`·`dataclasses` 만, 네트워크·파일 쓰기·환경 변수·시간·난수 없음, 어디서도 import 되지 않음(지금은 꺼져 있음) — 을 정적으로 지킨다.
+또 블로그 저장소의 기본 거부 목록(SITE_INTERNAL_ENTRIES)을 실제 `_config.yml` 의 exclude 와 사이트 정리 시험의 상수에 맞춰 보고(읽기만 한다), 사이트로 내보내지는 실제 파일이 하나도 AI 병합 대상이 아닌지 본다.
 이 시험은 네트워크·파일 쓰기를 하지 않는다.
 """
 import ast
+import fnmatch
 import re
 import unittest
 
@@ -35,8 +37,10 @@ FLOW = "AI 가 PR 작성 → 검사와 독립 검증 → 쉬운 병합 설명 �
 ANSWERS = ("앱을 닫아도 작성 중인 초안을 다시 열 수 있도록 저장 기능을 추가합니다.", "현재는 앱을 닫으면 초안이 사라집니다.", "저장 버튼과 저장된 초안 목록이 추가됩니다.",
            "저장 실패나 손상 가능성을 막기 위해 원자적 저장과 복구 시험을 수행했습니다.", "전체 검사와 독립 검증을 통과했고 기존 복사 기능에는 변화가 없습니다.",
            "문제가 발생하면 M075 병합만 되돌리면 이전 상태로 복구됩니다.")
+EXAMPLE_PATHS = ["src/chanceblog_desktop/content/drafts_store.py", "tests/test_drafts_store.py"]
 URL_RX = re.compile("https?" + ":" + "//")
 INVISIBLE = [chr(code) for code in list(range(0x200B, 0x2010)) + list(range(0x202A, 0x202F)) + list(range(0x2060, 0x2065)) + list(range(0x2066, 0x206A)) + [0xFEFF]]
+ATTRIBUTION = "총괄(AI)의 보수적 판단 D-347 — 운영자 확인 대기"
 
 
 def sections():
@@ -74,6 +78,10 @@ def table_rows(text):
 
 def bullets(text, indent=r""):
     return re.findall(r"(?m)^" + indent + r"- (.+)$", text)
+
+
+def example_classification():
+    return mp.classify_change("desktop", EXAMPLE_PATHS, "", dict.fromkeys(mp.DECLARED_REQUIRED, False))
 
 
 class DocShapeTest(unittest.TestCase):
@@ -174,14 +182,21 @@ class ListsMatchTest(unittest.TestCase):
                 self.assertIn("`" + word + "`", SECTIONS[7])
 
     def test_the_safety_and_external_connection_rules_are_documented_in_full(self):
-        """총괄의 보수적 판단(결함 D-347)으로 더한 두 표시의 규칙 낱말·모듈·스킴·예시 주소·문서 확장자가 §7-6 에 빠짐없이 있다."""
+        """총괄(AI)의 보수적 판단(결함 D-347)으로 더한 두 표시의 규칙 낱말·이름 목록·모듈·스킴·예시 주소·문서 확장자·도메인·셸 확장자가 §7-6 에 빠짐없이 있다."""
         section = subsection("7-6")
-        words = (mp.SAFETY_GUARD_WORDS + mp.SAFETY_GUARD_DOCS + mp.EXTERNAL_MODULES + mp.EXTERNAL_SCHEMES + mp.EXAMPLE_HOSTS + mp.DOC_SUFFIXES
-                 + tuple("." + name for name in mp.EXAMPLE_TOP_LEVELS))
+        words = (mp.SAFETY_GUARD_WORDS + mp.SAFETY_GUARD_DOCS + mp.SAFETY_GUARD_FILES + mp.SAFETY_GUARD_DIRS + mp.EXTERNAL_MODULES + mp.EXTERNAL_SCHEMES + mp.EXAMPLE_HOSTS + mp.DOC_SUFFIXES
+                 + mp.GENERIC_TLDS + mp.FILE_NAME_TLDS + mp.SHELL_SUFFIXES + tuple("." + name for name in mp.EXAMPLE_TOP_LEVELS))
         for word in words:
             with self.subTest(word=word):
                 self.assertIn("`" + word + "`", section)
         self.assertEqual(len(mp.EXTERNAL_MODULES), 51)
+
+    def test_the_site_default_deny_entries_are_documented_in_full(self):
+        section = subsection("7-8")
+        for name in mp.SITE_INTERNAL_ENTRIES:
+            with self.subTest(name=name):
+                self.assertIn("`" + name + "`", section)
+        self.assertIn("21개", section)
 
     def test_the_extra_flags_and_the_policy_files_are_named(self):
         for code in mp.EXTRA_CODES:
@@ -195,8 +210,16 @@ class ListsMatchTest(unittest.TestCase):
     def test_the_fact_keys_and_the_verification_keys_are_listed(self):
         rows = table_rows(SECTIONS[6][SECTIONS[6].index("확인에 쓰는 값"):])
         self.assertEqual(tuple(row[0].strip("`") for row in rows), mp.FACT_KEYS)
+        self.assertEqual(len(rows), 23)
         for key in mp.VERIFICATION_KEYS:
             self.assertIn("`" + key + "`", SECTIONS[6])
+
+    def test_each_fact_key_names_the_condition_that_uses_it(self):
+        owners = {"approved_number": 1, "approved_pr_number": 1, "pr_number": 1, "pr_title_label": 1, "consumed_numbers": 1, "approved_head_sha": 2, "current_head_sha": 2, "current_tree": 4,
+                  "approved_paths": 6, "current_paths": 6, "checks": 3, "independent_verification": 4, "has_conflict": 5, "classification": 6, "secret_findings": 7, "rollback_method": 8,
+                  "repo_kind": 6, "changed_text": 6, "head_sha_at_approval": 2, "required_checks": 3, "pr_state": 1, "pr_draft": 1, "previous_merge_main_check": 3}
+        rows = table_rows(SECTIONS[6][SECTIONS[6].index("확인에 쓰는 값"):])
+        self.assertEqual({row[0].strip("`"): int(row[2]) for row in rows}, owners)
 
     def test_the_merge_methods_are_listed(self):
         for word in (mp.ALLOWED_MERGE_METHOD,) + mp.FORBIDDEN_MERGE_METHODS:
@@ -210,48 +233,111 @@ class ListsMatchTest(unittest.TestCase):
         self.assertEqual(mp.APPROVAL_EXAMPLE, "M075 승인")
         self.assertIn(mp.AI_MERGE_OFF_NOTICE, DOC)
         self.assertIn(mp.AI_MERGE_ON_NOTICE, DOC)
+        self.assertIn(mp.APPROVAL_OFF_LINE, DOC)
         sentence = "병합 승인은 병합 번호와 함께 한 줄로 M075 승인 처럼 보내 주세요."
         self.assertIn(sentence, mp.check_approval_text("확인했습니다").guidance.replace("`", ""))
         self.assertIn(sentence, DOC.replace("`", ""))
+
+    def test_the_post_merge_states_and_actions_are_documented(self):
+        for state in mp.POST_MERGE_STATES:
+            self.assertIn("`" + state + "`", SECTIONS[9])
+        for name in ("evaluate_post_merge", "PostMergeDecision", "previous_merge_main_check"):
+            self.assertIn("`" + name + "`", SECTIONS[9])
+        for name in ("ApprovalRecord", "explained_head_sha", "head_sha_at_approval", "approved_head_sha"):
+            self.assertIn("`" + name + "`", subsection("5-4"))
 
 
 class OperatorStatementsPinnedTest(unittest.TestCase):
     """운영자 결정의 문장 단위 약속이 문서에서 빠지지 않았다 — 낱말만이 아니라 약속(누가·무엇을·언제)을 못박는다."""
 
     PINS = (
+        (1, "지금까지처럼 병합은 운영자만 합니다"),
         (2, "독자 판단 자동 병합이 아닙니다"),
         (2, "전문용어가 아니라 사용자가 체감할 변화 중심으로"),
+        (4, "항목마다 8자 이상의 한글 문장(한글 4자 이상)이어야 하고"),
+        (5, "이 절은 켜진 뒤의 동작이며 지금은 꺼져 있어 승인 글을 보내도 AI 는 병합하지 않습니다"),
+        (5, "앞뒤 공백과 줄 바꿈, 끝의 마침표 하나는 허용합니다"),
+        (5, "`m075 승인` 처럼 M 이 소문자여도 `M075` 로 읽습니다"),
         (5, "같은 승인으로 다른 PR 을 병합하거나"),
         (5, "새 커밋이 더해지거나 변경 파일 목록이 달라지거나 번호가 맞지 않으면 기존 승인은 **무효**"),
         (5, "새 설명과 새 승인을 받아야 합니다"),
+        (5, "**승인 때의 머리 커밋(`approved_head_sha`)은 쉬운 병합 설명을 보냈을 때의 머리 커밋**"),
+        (5, "옛 설명을 승인한 셈이라 그 승인은 **무효**"),
         (6, "빠진 값은 실패"),
         (6, "하나라도 실패하면 병합하지 않고"),
+        (6, "건너뜀·중립·취소는 통과가 아님"),
+        (6, "10자 이상의 구체적인 문장"),
+        (6, "넘겨받은 분류를 믿지 않고 지금 변경 파일과 바뀐 줄로 분류를 다시 계산해도 걸리지 않음"),
+        (6, "쉬운 설명을 보냈을 때·승인 글이 도착했을 때·지금의 머리 커밋(40자 해시) 셋이 모두 같음"),
+        (6, "필수 검사)의 이름 목록이 비어 있지 않고 모두 결과에 있으며 `success`"),
         (7, "12항목에 하나도 안 걸리고"),
+        (7, "하나라도 참이거나 미응답이면 운영자 전용"),
         (7, "선언이 거짓이어도 운영자 전용"),
+        (7, "**바뀐 줄의 글(`changed_text`)은 추가된 줄과 지운 줄을 둘 다** 넣습니다"),
         (7, "12항목 목록을 넓힌 것이 아니라 **12항목 밖의 표시**"),
-        (7, "운영자 결정 D-347 의 보수적 판단(총괄 11-15)"),
+        (7, "**이 목록은 저장소가 바뀔 때마다 유지가 필요하다.**"),
+        (7, "AI 가 읽고 따르는 규칙 문서 10개도 운영자 전용입니다"),
+        (7, "**문서 파일의 낱말 규칙(총괄(AI)의 판단 — 운영자 확인 대기)**"),
+        (7, "문서 파일(`.md`·`.rst`·`.txt`·`.adoc`)의 바뀐 줄에는 낱말 규칙(키·토큰·비밀번호 낱말·`secrets.` 참조·`Authorization` 헤더·`PIPELINE_PAUSE`·삭제 명령과 마이그레이션 낱말·접속 낱말)을 적용하지 않습니다"),
+        (7, "**강한 비밀 모양**"),
         (7, "**시험 폴더도 면제하지 않습니다.**"),
         (7, "**예시 주소는 걸리지 않습니다**"),
         (7, "바뀐 파일이 **모두** 시험·문서일 때만 건너뜁니다"),
         (7, "루프백(`localhost`)은 걸립니다"),
+        (7, "**AI 병합 가능 7종은 목록이 아니라 '12항목과 표시에 안 걸리면' 이라는 거절 목록으로 구현했습니다.**"),
+        (7, "이름은 대소문자까지 같아야 내부 항목입니다"),
+        (7, "- **가져오는 순간 실행되는 파일**(`conftest.py`·`sitecustomize.py`·`tests/_bootstrap.py`·`pipeline/__init__.py`)은 안전 장치 목록에 넣지 않았습니다"),
         (8, "운영자 PC 의 Git 자격 증명"),
-        (8, "강제 push"),
+        (8, "강제 push 도 금지입니다"),
+        (9, "아래 7가지를 반드시 담습니다"),
         (9, "추가 변경을 자동 병합하지 않습니다"),
         (9, "되돌리기 위한 요청과 쉬운 원인 설명을 **먼저**"),
+        (9, "되돌리는 PR 도 운영자가 병합합니다"),
         (10, "**즉시 중지 규칙:** 문제가 한 건이라도 발생하면 AI 병합을 **즉시 중지**하고"),
         (10, "기존 운영자 직접 병합 방식으로 돌아갑니다"),
+        (10, "위반은 없지만 3건 미만이거나, main 검사 결과를 아직 모름"),
         (11, "워크플로 파일(`.github/`)"),
+        (11, "**독립 검증 기록의 출처와 위조 방지**(켜기 전의 필수 조건)"),
+        (11, "`parse_explanation` 은 **지금 만들지 않았습니다**"),
+        (11, "**필수 검사의 이름 집합**(`required_checks`)"),
+        (11, "**이름을 바꾼 파일의 옛 경로와 새 경로를 모두**, **지운 파일**까지 넣습니다"),
+        (11, "**추가된 줄과 지운 줄을 둘 다** 넣습니다"),
+        (11, "**쉬운 설명을 보냈을 때의 것**(`approved_head_sha`)과 **승인 글이 도착했을 때의 것**(`head_sha_at_approval`)"),
+        (11, "**병합을 호출하기 직전마다** 병합 이력 전체로 `evaluate_trial` 을 돌려"),
         (12, "운영자 결정으로만"),
     )
 
-    def test_the_conservative_judgement_is_attributed_where_the_two_flags_are_introduced(self):
-        phrase = "운영자 결정 D-347 의 보수적 판단(총괄 11-15)"
-        self.assertGreaterEqual(SECTIONS[7].count(phrase), 3)
-        self.assertIn(phrase, subsection("7-6").split("\n")[0])
+    def test_the_conservative_judgement_is_attributed_to_the_ai_and_waits_for_the_operator(self):
+        """두 표시와 이 절의 규칙은 운영자 결정이 아니라 총괄(AI)의 판단이고 운영자 확인을 기다린다 — 운영자가 정한 것처럼 읽히는 표현이 없다."""
+        self.assertGreaterEqual(SECTIONS[7].count(ATTRIBUTION), 3)
+        self.assertIn(ATTRIBUTION, subsection("7-6").split("\n")[0])
         for code in ("safety_guard", "external_connection"):
             rows = [line for line in subsection("7-5").split("\n") if line.startswith("| `" + code + "`")]
             self.assertEqual(len(rows), 1, code)
-            self.assertIn(phrase, rows[0])
+            self.assertIn(ATTRIBUTION, rows[0])
+        for old in ("운영자 결정 " + "D-347", "총괄 " + "11-15", "운영자 결정의 " + "보수적"):                       # 이 시험 파일 자신이 낡은 표현을 담지 않게 이어 붙여 적는다
+            self.assertNotIn(old, DOC)
+        for old in ("총괄의 " + "보수적 판단", "운영자 결정 " + "D-347"):
+            self.assertNotIn(old, MODULE_SOURCE)
+            for path in TEST_PATHS:
+                self.assertNotIn(old, path.read_text(encoding="utf-8"), path.name)
+        self.assertIn("총괄(AI)의 보수적 판단", MODULE_SOURCE)
+        self.assertIn("운영자 확인 대기", MODULE_SOURCE)
+
+    def test_the_reading_guide_tells_the_operator_which_sections_to_read(self):
+        quote = DOC.split("\n## 1.")[0]
+        self.assertIn("**운영자가 읽을 곳:** §1·§4·§5-1에서 §5-3까지·§10 만 읽으시면 됩니다.", quote)
+        for label in ("5-1", "5-2", "5-3"):
+            self.assertIn("### " + label + ". ", DOC)
+
+    def test_section_five_says_first_that_it_is_the_behaviour_after_turning_it_on(self):
+        lines = SECTIONS[5].split("\n")
+        self.assertEqual(lines[0], "## 5. 승인 방식")
+        self.assertEqual(lines[2], "이 절은 켜진 뒤의 동작이며 지금은 꺼져 있어 승인 글을 보내도 AI 는 병합하지 않습니다.")
+
+    def test_the_first_tree_word_is_explained(self):
+        first = DOC.index("트리")
+        self.assertTrue(DOC[first:].startswith("트리 — 변경 내용 전체의 지문)"), DOC[first:first + 30])
 
     def test_each_promise_is_in_its_section(self):
         for number, phrase in self.PINS:
@@ -265,9 +351,16 @@ class OperatorStatementsPinnedTest(unittest.TestCase):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, memo)
 
+    def test_the_known_limits_name_what_the_rules_cannot_know(self):
+        limits = subsection("7-7")
+        for phrase in ("거절 목록으로 구현했습니다", "글의 **모양**만 봅니다", "`pipeline/profiles/`", "`conftest.py`", "`sitecustomize.py`", "`tests/_bootstrap.py`", "`pipeline/__init__.py`",
+                       "문자열을 쪼개 붙이거나", "선언 6항목은 사람이 정하는 값", "하나를 지워도 결과가 같습니다", "총괄(AI)의 판단 — 운영자 확인 대기"):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, limits)
+
 
 class ExamplesMatchCodeTest(unittest.TestCase):
-    EXPLANATION = mp.render_explanation("M075", 198, "a1b2c3d" + "0" * 33, ["src/chanceblog_desktop/content/drafts_store.py", "tests/test_drafts_store.py"], *ANSWERS)
+    EXPLANATION = mp.render_explanation("M075", 198, "a1b2c3d" + "0" * 33, EXAMPLE_PATHS, *ANSWERS, classification=example_classification())
     NOTICE = mp.render_completion_notice("M075", 198, "e4f5a6b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e", "저장 버튼과 저장된 초안 목록이 앱에 반영되었습니다.", "전체 통과", "이상 없음",
                                          "병합 커밋 한 개를 되돌리는 PR 을 만들어 운영자께 보냅니다.")
 
@@ -284,6 +377,7 @@ class ExamplesMatchCodeTest(unittest.TestCase):
             self.assertIn(answer, example)
         for label in OPERATOR_ONLY_12:
             self.assertIn("- " + label + ": 아니오", example)
+        self.assertIn(mp.APPROVAL_OFF_LINE + "\n", example)
 
     def test_the_notice_example_is_exactly_what_the_module_renders_and_passes_its_own_check(self):
         example = self.block(SECTIONS[9])
@@ -298,6 +392,42 @@ class ExamplesMatchCodeTest(unittest.TestCase):
         self.assertIn("승인 예: M075 승인", text)
         self.assertEqual(mp.parse_approval("M075 승인"), "M075")
 
+    def test_the_example_classification_is_the_real_one_for_the_example_files(self):
+        classification = example_classification()
+        self.assertEqual((classification.tier, classification.categories, classification.extra_flags), ("ai_ok", (), ()))
+        self.assertEqual(classification.paths, tuple(sorted(EXAMPLE_PATHS)))
+
+
+class PostMergeTableTest(unittest.TestCase):
+    """문서 §9 의 전이표가 evaluate_post_merge 의 실제 결과와 같다(S8)."""
+
+    def rows(self):
+        text = SECTIONS[9][SECTIONS[9].index("| 직전 병합의 main 검사 |"):]
+        return table_rows(text)
+
+    def test_the_table_has_one_row_per_state_and_one_for_everything_else(self):
+        rows = self.rows()
+        states = [re.match(r"`([a-z]+)`", row[0]) for row in rows[:4]]
+        self.assertTrue(all(states))
+        self.assertEqual({match.group(1) for match in states}, set(mp.POST_MERGE_STATES))
+        self.assertEqual(len(rows), 5)
+        self.assertEqual(rows[4][0], "그 밖의 값")
+
+    def test_each_row_says_what_the_function_does(self):
+        for row in self.rows():
+            state = re.match(r"`([a-z]+)`", row[0])
+            decision = mp.evaluate_post_merge(state.group(1) if state else "unknown value")
+            with self.subTest(state=row[0]):
+                self.assertEqual(row[1].startswith("가능"), decision.may_merge_next, row)
+                self.assertEqual(row[1].startswith("불가"), not decision.may_merge_next, row)
+                if decision.only_actions is None:
+                    self.assertEqual(row[2], "제한 없음")
+                elif decision.only_actions == ():
+                    self.assertTrue(row[2].startswith("없음"), row)
+                else:
+                    self.assertEqual(decision.only_actions, mp.POST_MERGE_REVERT_ACTIONS)
+                    self.assertIn("되돌리기 요청과 쉬운 원인 설명", row[2])
+
 
 class CorrespondenceTableTest(unittest.TestCase):
     def rows(self):
@@ -307,7 +437,7 @@ class CorrespondenceTableTest(unittest.TestCase):
     def test_every_name_in_the_table_exists(self):
         test_source = TEST_PATHS[0].read_text(encoding="utf-8")
         rows = self.rows()
-        self.assertEqual(len(rows), 12)
+        self.assertEqual(len(rows), 14)
         for policy, section, code, tests in rows:
             with self.subTest(policy=policy):
                 number = re.fullmatch(r"§(\d+)", section)
@@ -335,6 +465,142 @@ class CorrespondenceTableTest(unittest.TestCase):
         for name in sorted(public):
             with self.subTest(name=name):
                 self.assertIn("`" + name + "`", DOC)
+
+
+class SiteConfigMatchTest(unittest.TestCase):
+    """블로그 저장소의 기본 거부 목록(SITE_INTERNAL_ENTRIES)이 실제 사이트 설정과 어긋나지 않는다(M1) — `_config.yml` 과 `tests/test_site_cleanup.py` 를 읽기만 한다.
+    목록이 사이트로 내보내는 항목을 내부로 잘못 보면 공개 파일이 AI 병합으로 새므로, 설정의 exclude 와 정확히 같아야 한다(더 많아도 안 되고 더 적어도 안 된다)."""
+
+    CONFIG = (ROOT / "_config.yml").read_text(encoding="utf-8").replace("\r\n", "\n")
+    CLEANUP = (ROOT / "tests" / "test_site_cleanup.py").read_text(encoding="utf-8")
+    NAMES = ("PUBLIC_ROOT", "MUST_EXCLUDE", "STATIC_EXPOSED")
+
+    @classmethod
+    def exclude_entries(cls):
+        lines = cls.CONFIG.split("\n")
+        start = lines.index("exclude:")
+        found = []
+        for line in lines[start + 1:]:
+            match = re.match(r"^\s+-\s+(.+?)\s*$", line)
+            if match is None:
+                break
+            found.append(match.group(1).split(" #")[0].strip().strip("'" + chr(34)))
+        return found
+
+    @classmethod
+    def constants(cls):
+        found = {}
+        for node in ast.parse(cls.CLEANUP).body:
+            if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) and node.targets[0].id in cls.NAMES:
+                found[node.targets[0].id] = ast.literal_eval(node.value)
+        return found
+
+    @staticmethod
+    def jekyll_excluded(path, excluded):
+        """Jekyll 3.10 의 exclude 판정(사이트 정리 시험과 같은 규칙) + 점·밑줄·#·물결표로 시작하는 구간은 기본으로 내보내지 않는다."""
+        if any(part.startswith((".", "_", "#", chr(126))) for part in path.split("/")):
+            return True
+        return any(fnmatch.fnmatchcase(path, entry) or path.startswith(entry) for entry in excluded)
+
+    def exported_files(self):
+        excluded = self.exclude_entries()
+        files = []
+        for entry in sorted(ROOT.iterdir()):
+            if self.jekyll_excluded(entry.name, excluded):
+                continue
+            if entry.is_file():
+                files.append(entry.name)
+            elif entry.is_dir():
+                for path in sorted(entry.rglob("*")):
+                    if path.is_file():
+                        relative = path.relative_to(ROOT).as_posix()
+                        if not self.jekyll_excluded(relative, excluded):
+                            files.append(relative)
+                    if len(files) > 5000:                                                       # 추적하지 않는 큰 폴더가 있어도 오래 걸리지 않게 한다
+                        return files
+        return files
+
+    def test_the_internal_list_is_exactly_the_real_exclude_list(self):
+        excluded = self.exclude_entries()
+        self.assertGreaterEqual(len(excluded), 15)
+        self.assertEqual(len(set(excluded)), len(excluded))
+        self.assertEqual(set(mp.SITE_INTERNAL_ENTRIES), set(excluded), "사이트 설정의 exclude 와 병합 정책의 내부 항목 목록이 다릅니다 — 한 묶음으로 같이 고쳐야 합니다")
+        self.assertEqual(len(mp.SITE_INTERNAL_ENTRIES), len(set(mp.SITE_INTERNAL_ENTRIES)))
+
+    def test_the_site_cleanup_constants_are_covered_and_never_counted_as_internal(self):
+        constants = self.constants()
+        self.assertEqual(set(constants), set(self.NAMES))
+        internal = set(mp.SITE_INTERNAL_ENTRIES)
+        self.assertEqual(sorted(constants["MUST_EXCLUDE"] - internal), [], "사이트에 내보내면 안 되는 항목을 내부 목록이 덮지 못합니다")
+        self.assertEqual(sorted(constants["PUBLIC_ROOT"] & internal), [], "사이트가 쓰는 항목을 내부로 잘못 보고 있습니다")
+        self.assertEqual(sorted(constants["STATIC_EXPOSED"] & internal), [], "사이트에 열어 둔 정적 파일을 내부로 잘못 보고 있습니다")
+        self.assertIn("README.md", constants["STATIC_EXPOSED"])
+
+    def test_every_public_root_and_static_name_is_operator_only(self):
+        constants = self.constants()
+        for name in sorted(constants["PUBLIC_ROOT"] | constants["STATIC_EXPOSED"]):
+            path = name + "/x.svg" if "." not in name else name
+            with self.subTest(path=path):
+                result = mp.classify_change("blog", [path], "", dict.fromkeys(mp.DECLARED_REQUIRED, False))
+                self.assertEqual(result.tier, "operator_only", path)
+
+    def test_every_internal_entry_exists_so_a_typo_cannot_hide_a_public_file(self):
+        for name in mp.SITE_INTERNAL_ENTRIES:
+            with self.subTest(name=name):
+                self.assertTrue((ROOT / name).exists(), name)
+
+    def test_every_file_the_site_exports_is_operator_only(self):
+        """실제 저장소에서 사이트로 내보내지는 파일(예: README.md·index.html·about.md·assets/*)은 하나도 AI 병합 대상(ai_ok)이 아니다."""
+        files = self.exported_files()
+        self.assertGreaterEqual(len(files), 10)
+        self.assertIn("index.html", files)
+        self.assertIn("README.md", files)
+        declared = dict.fromkeys(mp.DECLARED_REQUIRED, False)
+        for path in files:
+            with self.subTest(path=path):
+                self.assertEqual(mp.classify_change("blog", [path], "", declared).tier, "operator_only", path)
+        for path, code in (("README.md", "public_content"), ("about.md", "public_content"), ("index.html", "ads"), ("robots.txt", "public_content"), ("assets/x.svg", "public_content")):
+            self.assertIn(code, mp.classify_change("blog", [path], "", declared).categories, path)
+
+    def test_every_post_and_draft_is_operator_only_too(self):
+        declared = dict.fromkeys(mp.DECLARED_REQUIRED, False)
+        checked = 0
+        for folder in ("_posts", "_blogger_drafts", "_blogger_ko_drafts", "_naver_drafts"):
+            for path in sorted((ROOT / folder).rglob("*")):
+                if path.is_file():
+                    relative = path.relative_to(ROOT).as_posix()
+                    checked += 1
+                    with self.subTest(path=relative):
+                        self.assertEqual(mp.classify_change("blog", [relative], "", declared).categories, ("public_content",), relative)
+        self.assertGreater(checked, 5)
+
+
+class NamedSafetyFilesExistTest(unittest.TestCase):
+    """이름으로 적은 안전 장치 목록의 파일·폴더가 실제로 있다 — 이름이 바뀌거나 지워지면 목록을 고치라고 실패한다(S1b)."""
+
+    def test_every_listed_file_exists(self):
+        for name in mp.SAFETY_GUARD_FILES + mp.SAFETY_GUARD_DOCS + mp.POLICY_SELF_FILES:
+            with self.subTest(name=name):
+                self.assertTrue((ROOT / name).is_file(), name)
+
+    def test_every_listed_folder_exists_and_holds_code(self):
+        for name in mp.SAFETY_GUARD_DIRS:
+            with self.subTest(name=name):
+                self.assertTrue((ROOT / name).is_dir(), name)
+                self.assertTrue(list((ROOT / name).glob("*.py")), name)
+
+    def test_the_names_that_do_not_exist_in_this_repository_are_not_listed(self):
+        for name in ("pipeline/generator.py", "pipeline/blogger_generator.py"):
+            self.assertNotIn(name, mp.SAFETY_GUARD_FILES)
+            self.assertFalse((ROOT / name).exists(), name)
+        for name in ("generator.py", "blogger_generator.py"):
+            self.assertIn(name, mp.SAFETY_GUARD_FILES)
+
+    def test_the_lists_have_no_duplicates_and_no_policy_file(self):
+        for names in (mp.SAFETY_GUARD_FILES, mp.SAFETY_GUARD_DOCS, mp.SAFETY_GUARD_DIRS, mp.SITE_INTERNAL_ENTRIES):
+            self.assertEqual(len(set(names)), len(names))
+        self.assertEqual(set(mp.SAFETY_GUARD_FILES) & set(mp.POLICY_SELF_FILES), set())
+        self.assertEqual(set(mp.SAFETY_GUARD_DOCS) & set(mp.POLICY_SELF_FILES), set())
 
 
 class ModulePurityTest(unittest.TestCase):
@@ -394,6 +660,8 @@ class NotWiredTest(unittest.TestCase):
     """지금은 꺼져 있다 — 아무도 이 모듈을 부르지 않는다. 켜는 변경이 연결을 더할 때 이 시험도 같이 고쳐야 하고, 그 변경은 운영자가 직접 병합한다."""
 
     ALLOWED = {"pipeline/merge_policy.py", "tests/test_merge_policy.py", "tests/test_merge_policy_docs.py"}
+    FUNCTION_NAMES = ("parse_approval", "check_approval_text", "check_preconditions", "classify_change", "evaluate_trial", "evaluate_post_merge", "merge_method_allowed", "ApprovalLedger",
+                      "ApprovalRecord", "render_explanation", "explanation_problems")
 
     def scan_targets(self):
         files = [path for pattern in ("*.py", "*.json", "*.yml", "*.yaml", "*.toml", "*.cfg") for path in ROOT.glob(pattern)]
@@ -408,15 +676,29 @@ class NotWiredTest(unittest.TestCase):
         self.assertEqual(sorted(set(named) - self.ALLOWED), [])
         self.assertEqual(set(named), self.ALLOWED)
 
-    def test_no_workflow_or_script_mentions_the_policy_modules_functions(self):
-        names = ("parse_approval", "check_preconditions", "classify_change", "evaluate_trial", "merge_method_allowed", "ApprovalLedger")
+    def test_no_workflow_or_script_imports_the_policy_modules_functions(self):
+        """다른 묶음이 같은 이름의 함수를 정의하거나 부르는 것은 괜찮다 — 이 모듈에서 가져오는 import 줄과 `merge_policy.` 참조만 막는다."""
+        names = "|".join(self.FUNCTION_NAMES)
+        imported = re.compile(r"(?m)^[ \t]*(?:from[ \t]+[A-Za-z_][A-Za-z0-9_.]*[ \t]+import[ \t]+|import[ \t]+)[^#\n]*(?<![A-Za-z0-9_])(?:" + names + r")(?![A-Za-z0-9_])")
+        referenced = re.compile(r"merge_policy[ \t]*\.")
         for path in self.scan_targets():
             rel = path.relative_to(ROOT).as_posix()
             if rel in self.ALLOWED:
                 continue
             text = path.read_text(encoding="utf-8", errors="replace")
             with self.subTest(path=rel):
-                self.assertFalse(any(name in text for name in names), rel)
+                self.assertIsNone(imported.search(text), rel)
+                self.assertIsNone(referenced.search(text), rel)
+
+    def test_the_name_scan_itself_catches_an_import_and_ignores_a_same_named_definition(self):
+        names = "|".join(self.FUNCTION_NAMES)
+        imported = re.compile(r"(?m)^[ \t]*(?:from[ \t]+[A-Za-z_][A-Za-z0-9_.]*[ \t]+import[ \t]+|import[ \t]+)[^#\n]*(?<![A-Za-z0-9_])(?:" + names + r")(?![A-Za-z0-9_])")
+        for line in ("from pipeline.x import classify_change", "    from y import a, evaluate_trial", "import check_preconditions", "from pipeline.other import (parse_approval)"):
+            with self.subTest(caught=line):
+                self.assertIsNotNone(imported.search(line + "\n"))
+        for line in ("def classify_change(items):", "result = classify_change(a, b)", "# from x import classify_change", "from pipeline.x import classify_changes", "from pipeline.x import my_parse_approval"):
+            with self.subTest(ignored=line):
+                self.assertIsNone(imported.search(line + "\n"))
 
     def test_the_policy_is_not_wired_to_the_operator_loop_or_the_validator(self):
         for rel in ("pipeline/operator_loop.py", "scripts/validate_repo.py", "pipeline/notify.py"):
@@ -424,33 +706,50 @@ class NotWiredTest(unittest.TestCase):
 
 
 class DefectRegisterTest(unittest.TestCase):
-    def rows(self):
-        return {match.group(1): match.group(0) for match in re.finditer(r"(?m)^\| \*\*(D-34[67])\*\* \|.*$", REGISTER)}
+    """공유 결함 대장의 두 행을 번호가 아니라 **제목 글**로 찾는다 — 다른 묶음과 번호가 겹쳐 번호를 고쳐도 이 시험은 그대로다."""
 
-    def test_the_two_rows_exist_with_six_columns(self):
+    TITLE_POLICY = "조건부 승인형 AI 병합 정책이 문서와 시험 가능한 코드로 없었다"
+    TITLE_CONSERVATIVE = "조건부 승인형 AI 병합 정책의 보수적 해석 7가지"
+
+    def rows(self):
+        found = {}
+        for key, title in (("policy", self.TITLE_POLICY), ("conservative", self.TITLE_CONSERVATIVE)):
+            matches = [match.group(0) for match in re.finditer(r"(?m)^\| \*\*(D-\d+)\*\* \|.*$", REGISTER) if title in match.group(0)]
+            self.assertEqual(len(matches), 1, title)
+            found[key] = matches[0]
+        return found
+
+    def test_the_two_rows_exist_with_six_columns_and_different_numbers(self):
         rows = self.rows()
-        self.assertEqual(sorted(rows), ["D-346", "D-347"])
+        numbers = {key: re.match(r"\| \*\*(D-\d+)\*\*", row).group(1) for key, row in rows.items()}
+        self.assertEqual(len(set(numbers.values())), 2)
         for name, row in rows.items():
             with self.subTest(row=name):
                 self.assertEqual(row.count("|"), 7)
 
-    def test_d346_records_the_policy_work_and_that_it_is_off(self):
-        row = self.rows()["D-346"]
+    def test_the_policy_row_records_the_policy_work_and_that_it_is_off(self):
+        row = self.rows()["policy"]
         for word in ("docs/AI_MERGE_POLICY.md", "pipeline/merge_policy.py", "tests/test_merge_policy.py", "tests/test_merge_policy_docs.py", "확인 016", "꺼져 있음", "별도 병합 요청", "운영자가 직접 병합",
                      "더 보수적으로", "**해결**"):
             self.assertIn(word, row)
         self.assertIn("main 직접 push 금지", row)
 
-    def test_d347_lists_the_seven_conservative_readings_and_records_the_conservative_judgement(self):
-        """처음에는 열림(운영자 판단 필요)이었고, 총괄의 보수적 판단(2026-11-15)으로 해결로 바뀌었다 — 승인 문구는 엄격하게 유지."""
-        row = self.rows()["D-347"]
+    def test_the_conservative_row_lists_the_seven_readings_and_attributes_the_judgement_to_the_ai(self):
+        """보수적 해석 7가지는 총괄(AI)의 판단이고 운영자 확인을 기다린다 — ⑦ 은 문서 파일의 낱말 규칙 면제와 규칙 문서의 안전 장치 편입으로 다시 썼다."""
+        row = self.rows()["conservative"]
         for mark in ("①", "②", "③", "④", "⑤", "⑥", "⑦"):
             self.assertIn(mark, row)
-        self.assertIn("**해결**(보수적 판단 — 총괄 2026-11-15", row)
+        self.assertIn("**해결**(총괄(AI)의 보수적 판단 2026-11-15 — 운영자 확인 대기", row)
         self.assertNotIn("**열림**", row)
+        for old in ("총괄 2026-11-15" + ":", "운영자 결정 " + "D-347"):
+            self.assertNotIn(old, row)
         for word in ("policy_self", "packaging_release", "invalid_input", "safety_guard", "external_connection", "승인 문구는 엄격하게 유지한다", "ClassifySafetyGuardTest",
-                     "ClassifyExternalConnectionTest", "§7-7"):
+                     "ClassifyExternalConnectionTest", "ClassifyDocumentTextTest", "ClassifySiteDefaultDenyTest", "§7-7", "문서 파일", "규칙 문서"):
             self.assertIn(word, row)
+        seventh = row[row.index("⑦"):row.index("|", row.index("⑦"))]
+        self.assertIn("낱말 규칙", seventh)
+        self.assertIn("(총괄(AI)의 판단 — 운영자 확인 대기)", seventh)
+        self.assertNotIn("문서 PR 도 운영자 전용이 된다", seventh.split("→")[-1])
 
 
 class NewTestsAreOfflineTest(unittest.TestCase):
