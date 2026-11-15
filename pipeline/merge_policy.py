@@ -745,7 +745,7 @@ def classify_change(repo_kind, changed_paths, changed_text=None, declared=None, 
             keyed = {normalize_repo_path(key) for key, _text in items if isinstance(key, str)}
             missing = sorted(path for path in paths if path not in keyed)
             if missing:
-                add_plain("invalid_input", "변경 파일 중 바뀐 줄의 글이 없는 파일이 있습니다(글이 없으면 빈 글을 넣어야 합니다): " + ", ".join(_shown(item) for item in missing[:3])
+                add_plain("invalid_input", "변경 파일 중 바뀐 줄의 글이 없는 파일이 있습니다(바뀐 줄이 정말 없는 파일은 빈 글, 읽지 못한 파일은 None 으로 넘기면 운영자 전용이 됩니다): " + ", ".join(_shown(item) for item in missing[:3])
                           + (" 외 " + str(len(missing) - 3) + "개" if len(missing) > 3 else ""))
         for key, text in items:
             for code, why in _text_findings(text, _doc_only_text(key, paths)):

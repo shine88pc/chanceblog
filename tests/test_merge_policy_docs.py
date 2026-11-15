@@ -320,7 +320,6 @@ class OperatorStatementsPinnedTest(unittest.TestCase):
         (11, "PR 작성자나 PR 쪽 파일이 채울 수 있으면 안 됩니다"),
         (12, "운영자 결정으로만"),
         # ---- 5차(WIP 10): P3 재검증 반영 — 읽지 못한 파일의 글·첫 3건의 범위·정직하게 고친 한계 ----
-        (4, "표준 양식 글을 만드는 `render_explanation` 에서는 사람이 손으로 `아니오` 를 적을 수 없고"),
         (4, "**다만 손으로 쓴 설명 글을 `explanation_problems` 로 점검하는 경로에서는**"),
         (4, "그 경로의 마지막 방어선은 독립 검증자입니다"),
         (5, "번호와 `승인` 사이는 공백(칸) 또는 탭 하나 이상입니다"),
@@ -348,18 +347,15 @@ class OperatorStatementsPinnedTest(unittest.TestCase):
         (7, "병합할 때 다른 묶음과 번호가 겹쳐 번호를 바꿔야 하면 정책 파일(운영자가 직접 병합하는 변경)도 함께 고쳐야 합니다"),
         (7, "이 파일은 줄이 아니라 **구문 트리**(코드를 문법 구조로 풀어 읽은 것)로 지킵니다"),
         (7, "정책 모듈과 같은 이름의 파일이 다른 폴더에 하나라도 있으면 실패합니다"),
-        (7, "`%`·`format`·`join` 으로 이은 글자와, 이미 불러온 모듈을 `sys.modules` 에서 찾는 식의 우회는 정적으로 못 막습니다"),
         (11, "변경 파일마다 키가 있어야 합니다. **읽지 못한 파일(너무 큰 diff·바이너리라 GitHub 가 내용을 주지 않는 파일 등)의 글은 `None` 으로 넘깁니다**"),
         (11, '**빈 글(`""`)은 바뀐 줄이 정말 없을 때만** 넣습니다'),
         (11, "**변경 파일 목록은 모든 페이지를 읽어 PR 의 변경 파일 수와 같을 때만 씁니다.**"),
         (11, "파일 수가 맞지 않거나 상한을 넘으면 운영자 전용으로 둡니다"),
         (11, "(확인 필요 — AI 가 GitHub 에 직접 접속해 확인하지 못했습니다)"),
         (11, "- **켜기 전 필수 결정**(운영자와 정할 것 — 정하기 전에는 켜지 않습니다):"),
-        (11, "첫 3건은 경로가 모두 `.py`·`.md`·`tests/` 인 변경으로 한정합니다"),
         (11, "이 한정은 코드가 확인하지 않으므로 켜는 변경이 지켜야 합니다"),
         (11, "**켜는 변경 전에 운영자와 정합니다**"),
         (11, "(검증자 P 의 권고는 운영자 전용)"),
-        (7, "코드가 입력 오류로 돌려주는 '글이 없으면 빈 글을 넣어야 합니다' 문구도 바뀐 줄이 정말 없는 파일을 뜻하며 읽지 못한 파일을 가리키지 않습니다"),
         (7, "정책 모듈과 그 시험 두 개 밖에는 이름을 쓰는 파일이 없게 합니다"),
         (7, "그런 시험을 AI 가 약하게 고친 채 병합될 수 있다는 뜻입니다"),
         (7, "이 빈틈을 닫을지는 켜기 전에 운영자와 정합니다"),
@@ -371,6 +367,34 @@ class OperatorStatementsPinnedTest(unittest.TestCase):
         (11, "코드도 문서도 아닌 파일(예: `pipeline/profiles/` 의 설정 파일)도 통과할 수 있고"),
         (11, "시험 기록(`evaluate_trial`)에도 PR 종류 칸이 없습니다"),
         (11, "정하지 않았으므로 지금은 §7-7 에 적은 대로 걸리지 않습니다"),
+        # ---- 6차(WIP 11): P4 재검증 반영 — 지어낸 분류 사전·오류 문구·좁게 둔 긴장·미연결 시험의 한계 부류·전각 글자·첫 3건 범위·켜는 변경의 지시서 ----
+        (4, "표준 양식 글을 만드는 `render_explanation` 은 점검표를 글로 받지 않고 넘겨받은 분류 사전에서 채우므로 사람이 점검표 글을 직접 적을 수는 없습니다"),
+        (4, "분류 안에 모순(`ai_ok` 인데 걸린 항목이 있거나 그 반대)이 없는지만 확인하고 `classify_change` 로 계산했는지는 모릅니다"),
+        (4, "일관되게 지어낸 분류 사전을 넘기면 점검표가 전부 `아니오` 인 글이 만들어지고 `explanation_problems` 도 문제를 찾지 못합니다"),
+        (4, "운영자가 읽는 설명 글의 점검표는 거짓일 수 있습니다"),
+        (4, "(사람이 하는 선언 6항목은 다시 계산하지 못합니다 — §7-3)"),
+        (7, "`render_explanation` 이 만든 글도 넘겨받은 분류 사전이 `classify_change` 로 계산한 것인지는 모르므로 같은 한계가 있습니다"),
+        (7, "코드가 입력 오류로 돌려주는 이유 문구도 같은 뜻으로 적혀 있습니다"),
+        (7, "함수 설명(독스트링)의 '글이 없는 파일은 빈 글' 은 바뀐 줄이 정말 없는 파일을 뜻합니다"),
+        (7, "이 셋을 AI 병합 대상으로 둔 지금의 상태는 §12 의 '모호하면 운영자 전용은 넓게' 와 반대로 좁게 둔 것이라서"),
+        (7, "이 점검은 실수와 무심한 변경을 잡는 장치이지 작정한 우회를 막는 장치가 아닙니다"),
+        (7, "정책 모듈 파일을 열어 구문도 읽습니다"),
+        (7, "상수만 든 단순 f-string"),
+        (7, "**못 잡는 것**: 글자를 이어 붙이는 방법 전반(`%`·`format`·`join`·뒤집기 슬라이스·`__add__`·`getattr` 같은 간접 접근은 접지 못합니다)"),
+        (7, "변환이나 서식 지정이 든 f-string"),
+        (7, "내장 이름을 글자로 찾아 부르는 방법(`globals()['__builtins__']['__import__']` 꼴)"),
+        (7, "이미 불러온 모듈을 `sys.modules` 에서 찾는 방법입니다"),
+        (7, "전각 글자로 쓴 이름과 글자를 쪼갠 동적 가져오기는 구문 트리 점검을 받는 예외 한 파일에서만 잡히고, 다른 파일은 일반 글자 검색뿐이라 놓칩니다"),
+        (7, "- **전각 글자로 쓴 이름은 글자 규칙과 '어디서도 쓰이지 않는다' 검사를 비켜 갑니다.**"),
+        (7, "파이썬은 코드의 이름(변수·함수·모듈 이름)을 모양만 다른 같은 글자로 접어서 읽습니다(NFKC)"),
+        (7, "외부 접속 모듈 이름·삭제 명령(`os.remove` 꼴)·동적 실행(`exec`·`__import__`)·키와 토큰 낱말·`PIPELINE_PAUSE` 를 이렇게 쓴 사례를 확인했고 모두 `ai_ok` 가 됩니다"),
+        (7, "지금은 꺼져 있어 영향이 없고, 켜기 전에 풀어야 할 항목입니다"),
+        (11, "첫 3건은 경로가 모두 `.py`·`.md`·`tests/` 인 변경으로 한정하는 것으로 읽었고 운영자 확인을 받습니다"),
+        (11, "**전각 글자 같은 모양만 다른 이름**"),
+        (11, "(가) 글을 NFKC 로 접은 뒤에 규칙을 적용합니다"),
+        (11, "가 코드 파일의 바뀐 줄에 있으면 `invalid_input` 으로 보아 운영자 전용으로 둡니다"),
+        (11, "**켜는 변경의 지시서는 이 목록을 그대로 넣습니다.**"),
+        (11, "정하지 못한 항목이 있으면 켜지 않습니다"),
     )
 
     def test_the_conservative_judgement_is_attributed_to_the_ai_and_waits_for_the_operator(self):
@@ -396,7 +420,21 @@ class OperatorStatementsPinnedTest(unittest.TestCase):
         self.assertIn("어디서도 쓰이지 않습니다. 예외는 하나뿐입니다:", quote)
         for rel in NAMED_ONLY_EXPECTED:
             self.assertIn("`" + rel + "`", quote)
-        self.assertIn("**글자로만** 적습니다(가져오지도 부르지도 않으며, 시험이 그 파일의 코드 구조를 읽어 지킵니다 — §7-7)", quote)
+        self.assertIn("허용 목록에 글자로 적고, 정책 모듈 파일을 열어 안의 글자와 코드 구조도 읽어 봅니다(가져오지도 부르지도 않으며, 그 파일은 시험이 코드 구조로 지킵니다 — §7-7)", quote)
+
+    def test_section_one_summarizes_the_decisions_before_turning_it_on_in_five_lines(self):
+        """P4-d(§1): §11-3 의 '켜기 전 필수 결정'을 비개발자용 5줄로 요약해 §1 에 둔다 — 줄마다 §11-3 의 항목과 같은 말을 쓴다."""
+        text = SECTIONS[1]
+        self.assertIn("**켜기 전에 운영자께 여쭐 것(요약)** — 아래 다섯 가지를 정하기 전에는 AI 병합을 켜지 않습니다(자세한 내용은 §11-3 의 '켜기 전 필수 결정').", text)
+        summary = text[text.index("**켜기 전에 운영자께 여쭐 것(요약)**"):]
+        items = re.findall(r"(?m)^(\d)\. (.+)$", summary)
+        self.assertEqual([number for number, _line in items], ["1", "2", "3", "4", "5"])
+        decisions = subsection("11-3")
+        for (number, line), (summary_word, section_word) in zip(items, (("첫 운영 3건", "첫 3건"), ("`pipeline/__init__.py`", "`pipeline/__init__.py`"), ("지키는 시험 파일", "전용 시험"),
+                                                                       ("`pipeline/drafts.py`", "`pipeline/drafts.py`"), ("전각 글자", "전각 글자"))):
+            with self.subTest(item=number):
+                self.assertIn(summary_word, line)
+                self.assertIn(section_word, decisions)
 
     def test_the_reading_guide_tells_the_operator_which_sections_to_read(self):
         quote = DOC.split("\n## 1.")[0]
@@ -728,6 +766,57 @@ class DocumentedBlindSpotsTest(unittest.TestCase):
         self.assertTrue(all(item.startswith("docs/") or "/" not in item for item in mp.SAFETY_GUARD_DOCS))
         self.assertEqual(len(mp.SAFETY_GUARD_DOCS), 18)
 
+    @staticmethod
+    def wide(name):
+        """이름(영문자)을 전각 글자로 바꾼다(숫자·밑줄은 그대로) — 키워드가 아니라 이름 부분에만 쓴다. 파이썬은 이름을 NFKC 로 접어 읽어 같은 코드로 본다."""
+        return "".join(chr(0xFF41 + ord(ch) - ord("a")) if "a" <= ch <= "z" else chr(0xFF21 + ord(ch) - ord("A")) if "A" <= ch <= "Z" else ch for ch in name)
+
+    def verdict_for_text(self, code):
+        return mp.classify_change("blog", ["pipeline/a.py"], code + "\n", dict(self.DECLARED))
+
+    def test_names_written_in_full_width_letters_are_ai_ok_today_though_python_reads_them_as_the_same_code(self):
+        """P4-1(§7-7·§11-3): 파이썬은 이름을 NFKC 로 접어 읽으므로 전각 글자로 쓴 같은 코드가 그대로 실행되는데, 글자 규칙은 접지 않아 ai_ok 로 본다 — 문서가 적은 대로. 켜기 전에 접어서 읽거나
+        invalid_input 으로 막으면 이 시험이 빨개져 문서(§7-7·§11-3·§1 요약)도 한 묶음으로 고치게 한다."""
+        wide = self.wide
+        cases = (("import requests", "import " + wide("requests")), ("import socket", "import " + wide("socket")), ("import secrets", "import " + wide("secrets")),
+                 ("os.remove(path)", "os." + wide("remove") + "(path)"), ("shutil.rmtree(path)", "shutil." + wide("rmtree") + "(path)"), ("path.unlink()", "path." + wide("unlink") + "()"),
+                 ("exec(code)", wide("exec") + "(code)"), ("__import__(name)", "__" + wide("import") + "__(name)"), ("token = 1", wide("token") + " = 1"),
+                 ("password = 1", wide("password") + " = 1"), ("if PIPELINE_PAUSE:\n    pass", "if " + wide("PIPELINE_PAUSE") + ":\n    pass"))
+        for ascii_code, wide_code in cases:
+            with self.subTest(code=ascii_code):
+                self.assertNotEqual(wide_code, ascii_code)
+                self.assertEqual(ast.dump(ast.parse(wide_code)), ast.dump(ast.parse(ascii_code)))                 # 파이썬은 둘을 같은 코드로 읽는다
+                self.assertEqual(self.verdict_for_text(ascii_code).tier, "operator_only")                          # 그대로 쓰면 걸린다
+                result = self.verdict_for_text(wide_code)
+                self.assertEqual((result.tier, result.categories, result.extra_flags), ("ai_ok", (), ()), result.reasons)
+
+    def test_render_explanation_accepts_a_consistent_forged_classification_as_the_document_says(self):
+        """P4-a(§4-2·§7-7): render_explanation 은 분류 사전의 모양·경로 일치·내부 모순만 확인하고 classify_change 로 계산했는지는 모른다 — 워크플로 경로인데 ai_ok·걸린 항목 없음으로 일관되게 지어낸 분류 사전도
+        받아 점검표가 전부 아니오인 글을 만들고 explanation_problems 도 통과시킨다(병합 직전 재확인이 경로·바뀐 줄 규칙으로 다시 계산해 막는다). 모순·경로 불일치·키 누락은 거절한다."""
+        path = ".github/workflows/x.yml"
+        real = mp.classify_change("blog", [path], {path: ""}, dict(self.DECLARED))
+        self.assertEqual((real.tier, real.categories), ("operator_only", ("workflow",)))
+        forged = {"tier": "ai_ok", "categories": [], "extra_flags": [], "reasons": [], "paths": [path]}
+        text = mp.render_explanation("M075", 198, "c" * 40, [path], *ANSWERS, classification=forged)
+        self.assertIn("- GitHub Actions Workflow: 아니오", text)
+        self.assertEqual(mp.explanation_problems(text, pr_title="[M075] 초안"), [])
+        for label, bad in (("모순: ai_ok 인데 걸린 항목", dict(forged, categories=["workflow"])), ("모순: 운영자 전용인데 걸린 항목 없음", dict(forged, tier="operator_only")),
+                           ("경로 불일치", dict(forged, paths=["other.py"])), ("키 누락", {"tier": "ai_ok"})):
+            with self.subTest(label=label):
+                with self.assertRaises(ValueError):
+                    mp.render_explanation("M075", 198, "c" * 40, [path], *ANSWERS, classification=bad)
+
+    def test_the_missing_text_reason_quoted_in_the_document_is_the_modules_reason(self):
+        """P4-3(§7-2): 키가 빠진 파일의 입력 오류 이유가 읽지 못한 파일에 빈 글을 넣으라는 말로 읽히지 않는다 — 문서가 인용한 문구와 모듈의 실제 이유가 글자 그대로 같고, 옛 문구는 없다."""
+        hint = "바뀐 줄이 정말 없는 파일은 빈 글, 읽지 못한 파일은 None 으로 넘기면 운영자 전용이 됩니다"
+        result = mp.classify_change("blog", ["pipeline/a.py", "tests/t.py"], {"tests/t.py": ""}, dict(self.DECLARED))
+        reasons = [reason for reason in result.reasons if "바뀐 줄의 글이 없는 파일이 있습니다" in reason]
+        self.assertEqual(len(reasons), 1)
+        self.assertIn("(" + hint + ")", reasons[0])
+        self.assertIn("`" + hint + "`", SECTIONS[7])
+        self.assertNotIn("글이 없으면 빈 글을 넣어야 합니다", reasons[0])
+        self.assertNotIn("글이 없으면 빈 글을 넣어야 합니다", DOC)
+
 
 class ModulePurityTest(unittest.TestCase):
     TREE = ast.parse(MODULE_SOURCE)
@@ -796,6 +885,11 @@ IMPORT_TOOLS = frozenset({"importlib", "runpy", "imp", "pkgutil", "zipimport"})
 DYNAMIC_NAMES = frozenset({"__import__", "import_module", "spec_from_file_location", "module_from_spec", "exec_module", "load_module", "run_path", "run_module", "exec", "eval", "builtins", "__builtins__"})
 DEFINITIONS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 IMPORTS = (ast.Import, ast.ImportFrom, ast.alias)
+
+
+def mentions_the_module(text):
+    """일반 글자 검색 — 정책 모듈 이름의 글자가 글에 그대로 있는가(NotWiredTest 의 맨 위·pipeline·scripts·tests·.github 검색이 쓴다). 쪼갠 글자·전각 글자로 쓴 이름은 못 본다(§7-7)."""
+    return NEEDLE in text
 
 
 def string_constants(tree):
@@ -906,7 +1000,7 @@ class NotWiredTest(unittest.TestCase):
     def test_nobody_outside_the_policy_files_names_the_module(self):
         targets = self.scan_targets()
         self.assertGreater(len(targets), 100)
-        named = [path.relative_to(ROOT).as_posix() for path in targets if "merge_policy" in path.read_text(encoding="utf-8", errors="replace")]
+        named = [path.relative_to(ROOT).as_posix() for path in targets if mentions_the_module(path.read_text(encoding="utf-8", errors="replace"))]
         self.assertEqual(sorted(set(named) - self.ALLOWED - self.NAMED_ONLY), [])
         self.assertEqual(set(named), self.ALLOWED | self.NAMED_ONLY)
 
@@ -974,6 +1068,9 @@ class NotWiredTest(unittest.TestCase):
             ("eval 호출", "eval('x')\n", {"dynamic"}),
             ("builtins 로 우회", "import builtins\nbuiltins.__import__('os')\n", {"dynamic"}),
             ("exec_module 호출", "spec.loader.exec_module(module)\n", {"dynamic"}),
+            ("전각 글자로 쓴 import", "from pipeline import " + chr(0xFF4D) + "erge_policy\n", {"import"}),
+            ("전각 글자로 쓴 exec", chr(0xFF45) + "xec('x = 1')\n", {"dynamic"}),
+            ("전각 글자로 쓴 __import__", "__" + chr(0xFF49) + "mport__('os')\n", {"dynamic"}),
         )
         for label, extra, kinds in cases:
             with self.subTest(label=label):
@@ -1000,6 +1097,31 @@ class NotWiredTest(unittest.TestCase):
         """같은 이름의 파일이 다른 폴더에 하나라도 있으면 실패한다 — 연결 격리 시험이 파일 이름만 보고 허용하던 틈(P3-M1 3·I9)을 정책 쪽에서도 막는다."""
         found = sorted(path.relative_to(ROOT).as_posix() for path in ROOT.rglob("merge_policy.py"))
         self.assertEqual(found, ["pipeline/merge_policy.py"])
+
+    def test_a_full_width_or_split_spelling_is_missed_by_the_text_search_and_caught_only_by_the_syntax_tree_check(self):
+        """P4-1·P4-2(§7-7): 일반 글자 검색(mentions_the_module)은 전각 글자로 쓴 이름과 글자를 쪼갠 동적 가져오기를 못 보고, 구문 트리 점검을 받는 예외 한 파일에서만 잡힌다 — 문서가 적은 대로.
+        글자 검색이 접어서 읽도록 고치면(§11-3 의 켜기 전 필수 결정) 이 시험이 빨개져 문서도 한 묶음으로 고치게 한다."""
+        base = "ALLOWED = {'merge_policy.py'}\ndef test_merge_policy_one(self):\n    pass\n"
+        wide = chr(0xFF4D) + "erge_policy"                                                     # 전각 m 으로 시작하는 이름 — 파이썬은 merge_policy 로 읽는다
+        cases = (("전각 글자로 쓴 import", "from pipeline import " + wide + "\n", {"import"}), ("전각 글자로 쓴 이름", wide + " = None\n", {"identifier"}),
+                 ("쪼갠 글자 동적 가져오기", "__import__('pipeline.merge_' + 'policy')\n", {"folded", "dynamic"}))
+        for label, text, kinds in cases:
+            with self.subTest(label=label):
+                self.assertFalse(mentions_the_module(text))                                      # 일반 글자 검색은 놓친다
+                found = {kind for kind, _detail in named_only_problems(base + text, ["merge_policy.py"], ["test_merge_policy_one"])}
+                self.assertTrue(kinds <= found, (kinds, found))                                  # 구문 트리 점검은 잡는다
+        self.assertTrue(mentions_the_module("from pipeline import merge_policy\n"))              # 대조: 그대로 쓴 이름은 일반 글자 검색도 잡는다
+
+    def test_the_syntax_tree_check_misses_what_the_document_says_it_misses(self):
+        """P4-2(§7-7): 이 점검은 실수와 무심한 변경을 잡는 장치이지 작정한 우회를 막는 장치가 아니다 — 문서가 부류로 적은 못 잡는 것(글자 이음 전반·변환이나 서식 지정이 든 f-string·내장 이름을 글자로 찾아 부르기·
+        sys.modules 조회·간접 접근)은 지금 통과한다. 점검을 넓히면 이 시험이 빨개져 문서도 한 묶음으로 고치게 한다."""
+        base = "ALLOWED = {'merge_policy.py'}\ndef test_merge_policy_one(self):\n    pass\n"
+        for label, extra in (("% 로 이음", "NAME = 'merge_%s' % 'policy'\n"), ("format 으로 이음", "NAME = 'merge_{}'.format('policy')\n"), ("join 으로 이음", "NAME = ''.join(['merge_', 'policy'])\n"),
+                             ("뒤집기 슬라이스", "NAME = 'ycilop_egrem'[::-1]\n"), ("__add__ 로 이음", "NAME = 'merge_'.__add__('policy')\n"), ("getattr 간접 접근", "value = getattr(os, 'sys')\n"),
+                             ("f-string 변환", "NAME = f\"merge_{'policy'!s}\"\n"), ("f-string 서식 지정", "NAME = f\"merge_{'policy':s}\"\n"),
+                             ("내장 이름을 글자로 찾아 부름", "globals()['__builtins__']['__import__']('os')\n"), ("sys.modules 조회", "module = sys.modules['pipeline.' + chr(109) + 'erge_policy']\n")):
+            with self.subTest(label=label):
+                self.assertEqual(named_only_problems(base + extra, ["merge_policy.py"], ["test_merge_policy_one"]), [])
 
     def test_the_name_scan_itself_catches_an_import_and_ignores_a_same_named_definition(self):
         names = "|".join(self.FUNCTION_NAMES)

@@ -882,6 +882,8 @@ class ClassifyInvalidInputTest(unittest.TestCase):
                 result = mp.classify_change("blog", paths, given, dict(DECLARED_OK))
                 self.assert_invalid(result)
                 self.assertTrue(any("바뀐 줄의 글이 없는 파일이 있습니다" in reason for reason in result.reasons), result.reasons)
+                self.assertTrue(any("바뀐 줄이 정말 없는 파일은 빈 글, 읽지 못한 파일은 None 으로 넘기면 운영자 전용이 됩니다" in reason for reason in result.reasons), result.reasons)
+                self.assertFalse(any("글이 없으면 빈 글을 넣어야 합니다" in reason for reason in result.reasons), result.reasons)                  # P4-3: 읽지 못한 파일에 빈 글을 넣으라는 말로 읽히지 않는다
         for label, given in (("글 전체가 빈 글", ""), ("파일마다 빈 글", {"pipeline/a.py": "", "tests/test_a.py": ""})):
             with self.subTest(label=label):
                 result = mp.classify_change("blog", paths, given, dict(DECLARED_OK))
