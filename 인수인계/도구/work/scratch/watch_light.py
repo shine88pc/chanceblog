@@ -19,14 +19,21 @@ UA = {"User-Agent": "Mozilla/5.0 (chanceblog-light-watch)"}
 
 
 def fetch(url, timeout=40):
+    """일시적인 GitHub 오류(5xx·시간 초과·연결 오류)는 15초 간격으로 5번까지 다시 시도한다(2026-11-05: 시작 때 504 로 감시가 죽던 문제)."""
     req = urllib.request.Request(url, headers=UA)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.read().decode("utf-8", errors="replace")
-    except urllib.error.HTTPError as exc:
-        if exc.code == 404:
-            return None
-        raise
+    for attempt in range(5):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.read().decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                return None
+            if exc.code < 500 or attempt == 4:
+                raise
+        except (urllib.error.URLError, TimeoutError, OSError):
+            if attempt == 4:
+                raise
+        time.sleep(15)
 
 
 def text_of(fragment):
@@ -95,13 +102,25 @@ def telegram_issues():
     return issues_of(f"is:issue is:open label:{TELEGRAM_LABEL}")
 
 
+def baseline(function):
+    """기준값을 읽다가 GitHub 가 일시적으로 거절(502·429 등)해도 감시가 죽지 않게 30초 간격으로 다시 시도한다(2026-11-05: 시작 때 502 로 감시가 죽음)."""
+    while True:
+        try:
+            return function()
+        except Exception as exc:  # noqa: BLE001
+            print(f"기준 읽기 일시 오류 {type(exc).__name__} — 30초 뒤 다시 시도", flush=True)
+            if time.time() > DEADLINE:
+                raise
+            time.sleep(30)
+
+
 print("감시 시작(웹 페이지·git 만 사용, API 한도 없음) — 켠 시각 이후 변화를 알립니다", flush=True)
-known_main, known_prs = ls_remote()
-known_commits = {c[0][:7] for c in main_commits()}
-known_failures = failure_ids()
-known_owner = owner_issues()
-known_telegram = telegram_issues()
-print(f"기준: main {str(known_main)[:7]} · PR {len(known_prs)}건 · 실행 목록 {run_count()}건 · 소유자 열린 이슈 {sorted(known_owner)} · 텔레그램수신 열린 이슈 {sorted(known_telegram)}", flush=True)
+known_main, known_prs = baseline(ls_remote)
+known_commits = {c[0][:7] for c in baseline(main_commits)}
+known_failures = baseline(failure_ids)
+known_owner = baseline(owner_issues)
+known_telegram = baseline(telegram_issues)
+print(f"기준: main {str(known_main)[:7]} · PR {len(known_prs)}건 · 실행 목록 {baseline(run_count)}건 · 소유자 열린 이슈 {sorted(known_owner)} · 텔레그램수신 열린 이슈 {sorted(known_telegram)}", flush=True)
 
 while time.time() < DEADLINE:
     time.sleep(min(INTERVAL, max(1, DEADLINE - time.time())))

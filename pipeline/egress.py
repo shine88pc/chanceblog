@@ -142,6 +142,12 @@ EGRESS_EXCEPTIONS = (
     EgressException("인수인계/도구/work/scratch/watch_desktop.py", "ls_remote", "운영 도구: 데스크톱 저장소 git ls-remote(공개 원격, 사람이 실행)", _G_TOOL, ("proc:",), 1),
     EgressException("인수인계/도구/work/scratch/watch_light.py", "fetch", "운영 도구: 블로그 저장소 공개 웹 페이지 읽기(사람이 실행)", _G_TOOL, ("net:",), 1),
     EgressException("인수인계/도구/work/scratch/watch_light.py", "ls_remote", "운영 도구: 블로그 저장소 git ls-remote(공개 원격, 사람이 실행)", _G_TOOL, ("proc:",), 1),
+    # -- 인수인계/도구 새 PC 이관 도구(HANDOFF2) — 모두 사람이 실행하는 운영 도구이고 워크플로·예약이 부르지 않는다 -----------------------------------------------------------
+    EgressException("인수인계/도구/work/make_merged_notice.py", "verify_with", "운영 도구: 병합완료 확인 요청 파일을 쓰기 전에 요청 가지 작업 폴더의 코드로 엄격하게 읽어 보는 별도 파이썬 프로세스(고정 글자 스크립트를 `-c` 로 실행 — 네트워크를 쓰지 않는다)", _G_TOOL, ("proc:",), 1),
+    EgressException("인수인계/도구/work/scratch/merge_guard.py", "git", "운영 도구: 병합 가지가 병합 후보 등급인지 판정만 하는 검사 전용 도구의 git 읽기 도우미(diff·log·rev-list 등 읽기 하위 명령 — 푸시·병합 기능 없음)", _G_TOOL, ("proc:",), 1),
+    EgressException("인수인계/도구/work/scratch/run_times.py", "<module>", "운영 도구: 블로그 저장소 워크플로의 최근 실행 시각을 공개 Actions 웹 페이지에서 읽기(자기 저장소, 사람이 실행)", _G_TOOL, ("net:",), 1),
+    EgressException("인수인계/도구/work/scratch/watch_issues.py", "fetch", "운영 도구: 블로그 저장소의 새 이슈를 GitHub 공개 REST 로 5분마다 읽는 감시(자기 저장소, ETag 조회, 사람이 실행)", _G_TOOL, ("net:",), 1),
+    EgressException("인수인계/도구/work/scratch/web_runs.py", "<module>", "운영 도구: 공개 Actions 웹 페이지의 실행 행 읽기(REST 한도가 바닥일 때, 자기 저장소, 사람이 실행)", _G_TOOL, ("net:",), 1),
 )
 
 # 호출 목록 시험이 '관문을 거침'으로 인정하는 호출 이름(같은 함수에서 같은 주소 식으로 앞서·지배하며 문장으로 불렀을 때만 — tests/egress_scan.py 머리말). `source_policy.egress_gate` 는
