@@ -211,7 +211,7 @@ def make(request, no, result, reason, folder, repo, created, code_root=None):
     """검사를 모두 통과하면 파일을 쓰고 (경로, 설명 줄들)을 돌려준다. 아니면 Refuse. code_root 가 있으면 파일을 쓰기 전에 그 작업 폴더의 코드로 엄격하게 읽어 본다(None 이면 건너뜀 —
     main() 은 기본으로 요청 가지 작업 폴더를 넘기고 `--no-verify` 일 때만 None 을 넘긴다)."""
     if NO_RE.fullmatch(no) is None:
-        raise Refuse(f"M 번호 모양이 아니다: {no!r} — 확인하는 병합 부탁의 알림 번호 `M050` 꼴(`M` + 세 자리 `001`~`999` 또는 네 자리 `1000`~`9999`, 앞에 0 을 더 붙인 `M0500` 은 번호가 아니다)")
+        raise Refuse(f"M 번호 모양이 아니다: {no!r} — 확인하는 병합 부탁의 알림 번호 `M050` 꼴(`M` + 세 자리 `001`–`999` 또는 네 자리 `1000`–`9999`, 앞에 0 을 더 붙인 `M0500` 은 번호가 아니다)")
     if result not in RESULTS:
         raise Refuse(f"결과는 `정상` 또는 `이상` 이어야 한다: {result!r}")
     if DATE_RE.fullmatch(created) is None:

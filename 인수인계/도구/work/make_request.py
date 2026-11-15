@@ -70,7 +70,7 @@ def check_draft(text, number, pending=(), folder=None, skip=""):
         sys.exit("채우지 않은 자리표시자: " + ", ".join(left))
     if re.search(r"https?://", text):
         sys.exit("요청 파일에 링크 주소(http…)를 쓰지 않는다(운영자 요청 2026-11-02): " + re.search(r"https?://\S+", text).group(0)[:80])
-    if "~" in text:   # 2026-11-09: 마크다운(GFM)이 물결표 한 쌍을 취소선으로 처리해 '15~20·30~40' 이 '1520·3040' 처럼 붙어 보였다(운영자 지적 — 확인 요청 006)
+    if "~" in text:   # 2026-11-09: 마크다운(GFM)이 물결표 한 쌍을 취소선으로 처리해 '15–20·30–40' 이 '1520·3040' 처럼 붙어 보였다(운영자 지적 — 확인 요청 006)
         sys.exit("요청 파일에 물결표(~)를 쓰지 않는다 — 마크다운이 두 개를 취소선으로 처리해 숫자가 붙어 보인다(2026-11-09 운영자 지적). 범위는 '–'(en dash)나 '에서'로 적는다: " + text[max(0, text.index("~") - 12): text.index("~") + 12].replace("\n", " "))
     fields = nt.read_front(text)
     if fields.get("id") and fields["id"] != number:

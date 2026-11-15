@@ -12,12 +12,14 @@ import contextlib
 import datetime
 import importlib.util
 import io
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import tokenize
 import types
 import unittest
 import urllib.error
@@ -25,6 +27,8 @@ from pathlib import Path
 from unittest import mock
 
 import _bootstrap
+from pipeline import egress
+from pipeline import operator_loop as ol
 
 ROOT = _bootstrap.ROOT
 TOOLS = ROOT / "인수인계" / "도구"
@@ -51,14 +55,17 @@ FAKE_PEM = "-----" + "BEGIN " + "PRIVATE KEY" + "-----"
 _loaded = [0]
 
 
-def load_tool(path):
-    """도구 파일을 시험마다 새로 읽는다 — 도구가 sys.path·sys.modules 에 끼워 넣은 것(자기 폴더의 이웃 모듈)은 시험이 끝나면 되돌린다."""
+def load_tool(path, extra_path=None):
+    """도구 파일을 시험마다 새로 읽는다 — 도구가 sys.path·sys.modules 에 끼워 넣은 것(자기 폴더의 이웃 모듈)은 시험이 끝나면 되돌린다.
+    extra_path: 도구가 `import 이웃모듈` 하는 폴더(읽는 동안만 import 경로 맨 앞에 올린다 — make_request·make_merged_notice 가 `work/` 의 이웃을 부른다)."""
     path = Path(path)
     _loaded[0] += 1
     name = f"handoff_tool_{path.stem}_{_loaded[0]}"
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     saved_path, saved_modules = list(sys.path), set(sys.modules)
+    if extra_path is not None:
+        sys.path.insert(0, str(extra_path))
     sys.modules[name] = module
     try:
         spec.loader.exec_module(module)
@@ -1055,6 +1062,28 @@ def git_env():
     return env
 
 
+def run_git(*args, cwd):
+    """진짜 git 을 한 번 부르고 출력(앞뒤 공백 제거)을 돌려준다 — 로컬 임시 저장소에서만 쓴다(원격·네트워크 없음)."""
+    return subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True, encoding="utf-8", env=git_env(), check=True).stdout.strip()
+
+
+def make_origin(folder, extra_branch=None):
+    """푸시를 받지 않는 로컬 '원격' 저장소 — main 에 커밋 하나(HEAD 는 main), extra_branch 가 있으면 그 가지에 요청함 안내 커밋 하나를 더 둔다."""
+    folder.mkdir(parents=True)
+    run_git("init", "-q", cwd=folder)
+    run_git("symbolic-ref", "HEAD", "refs/heads/main", cwd=folder)
+    (folder / "README.md").write_text("기준\n", encoding="utf-8", newline="\n")
+    run_git("add", "-A", cwd=folder)
+    run_git("commit", "-q", "-m", "기준", cwd=folder)
+    if extra_branch:
+        run_git("checkout", "-q", "-b", extra_branch, cwd=folder)
+        (folder / "인수인계" / "요청함").mkdir(parents=True)
+        (folder / "인수인계" / "요청함" / "README.md").write_text("요청함 안내\n", encoding="utf-8", newline="\n")
+        run_git("add", "-A", cwd=folder)
+        run_git("commit", "-q", "-m", "요청 가지의 첫 커밋", cwd=folder)
+        run_git("checkout", "-q", "main", cwd=folder)
+
+
 class SetupWorkspaceTest(unittest.TestCase):
     def setUp(self):
         self.setup = load_tool(SETUP)
@@ -1100,24 +1129,121 @@ class SetupWorkspaceTest(unittest.TestCase):
             self.assertFalse((target / "wt_r30").exists() or (target / "cd_repo").exists())
 
     def test_the_clone_path_uses_the_current_request_branch_and_never_pushes(self):
+        """방금 새로 clone 했을 때(clone 이 True)만 요청 가지로 전환한다 — fetch 뒤 checkout -B 순서이고 둘 다 블로그 clone 폴더 안에서 돈다."""
         setup = self.setup
         commands = []
         cloned = []
+
+        def fake_clone(url, folder):
+            cloned.append((url, folder.name))
+            return True                                                                       # 방금 새로 만들었다
+
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             target = Path(tmp) / "W"
             with mock.patch.object(setup, "run", side_effect=lambda *args, cwd=None: commands.append((args, cwd))), \
-                    mock.patch.object(setup, "clone", side_effect=lambda url, folder: cloned.append((url, folder.name))), \
+                    mock.patch.object(setup, "clone", side_effect=fake_clone), \
                     mock.patch.object(setup.shutil, "which", return_value="git"), mock.patch.object(sys, "argv", ["setup_workspace.py", str(target)]):
                 _result, out, _err = capture(setup.main)
+            blog_folder = target.resolve() / "wt_r30"
         self.assertEqual([name for _url, name in cloned], ["wt_r30", "cd_repo"])
         self.assertTrue(all(url.startswith("https://github.com/") and url.endswith(".git") and "@" not in url for url, _name in cloned))   # 비밀 없는 공개 주소
         git = [args for args, _cwd in commands]
-        self.assertIn(("git", "fetch", "origin"), git)
-        self.assertIn(("git", "checkout", "-B", setup.REQUEST_BRANCH, "origin/" + setup.REQUEST_BRANCH), git)
+        self.assertEqual(git, [("git", "fetch", "origin"), ("git", "checkout", "-B", setup.REQUEST_BRANCH, "origin/" + setup.REQUEST_BRANCH)])      # 이 둘뿐 — 순서도 fetch 가 먼저
+        self.assertEqual({Path(cwd) for _args, cwd in commands}, {blog_folder})
         self.assertFalse(any("push" in args for args in git))
+        self.assertIn("요청 가지로 전환", out)
+        self.assertNotIn("가지 전환 건너뜀", out)
         self.assertIn("다음:", out)
         for tool in ("scratch/resume_check.py", "cron_status_prompt_v3.txt", "watch_issues.py", "watch_heads2.sh"):
             self.assertIn(tool, out)
+
+    def test_an_existing_blog_clone_is_neither_fetched_nor_switched(self):
+        """필수-1(독립 검증): 이미 있는 wt_r30 에서 다시 돌리면 예전에는 `checkout -B` 가 요청 가지를 원격 머리로 되돌려 푸시 전 요청 커밋이 사라졌다 —
+        이미 있는 clone 이면 fetch·checkout·reset 어떤 git 명령도 부르지 않고 건너뛴다고 알린다(새로 받는 데스크톱 저장소와는 따로 본다)."""
+        setup = self.setup
+        commands, cloned = [], []
+
+        def fake_clone(url, folder):
+            cloned.append(folder.name)
+            return folder.name != "wt_r30"                                                    # 블로그 clone 은 이미 있고 데스크톱은 새로 받는다
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            target = Path(tmp) / "W"
+            with mock.patch.object(setup, "run", side_effect=lambda *args, cwd=None: commands.append((args, cwd))), \
+                    mock.patch.object(setup, "clone", side_effect=fake_clone), \
+                    mock.patch.object(setup.shutil, "which", return_value="git"), mock.patch.object(sys, "argv", ["setup_workspace.py", str(target)]):
+                _result, out, _err = capture(setup.main)
+        self.assertEqual(cloned, ["wt_r30", "cd_repo"])
+        self.assertEqual(commands, [], "이미 있는 clone 에는 어떤 git 명령도 부르지 않는다(fetch 도 checkout 도)")
+        self.assertIn("이미 있음 — 가지 전환 건너뜀", out)
+        self.assertNotIn("요청 가지로 전환", out)
+        self.assertIn("다음:", out)
+
+    def test_a_workspace_with_both_clones_already_there_is_left_exactly_as_it_is(self):
+        setup = self.setup
+        commands = []
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            target = Path(tmp) / "W"
+            with mock.patch.object(setup, "run", side_effect=lambda *args, cwd=None: commands.append((args, cwd))), \
+                    mock.patch.object(setup, "clone", return_value=False), \
+                    mock.patch.object(setup.shutil, "which", return_value="git"), mock.patch.object(sys, "argv", ["setup_workspace.py", str(target)]):
+                _result, out, _err = capture(setup.main)
+        self.assertEqual(commands, [])
+        self.assertEqual(out.count("가지 전환 건너뜀"), 1)
+
+    def test_rerunning_in_a_real_workspace_with_unpushed_work_keeps_the_commit_and_the_files(self):
+        """진짜 git(로컬 임시 저장소 둘 — 네트워크 없음)으로: 처음 실행은 clone·요청 가지 전환을 하고, 푸시 전 요청 커밋과 커밋 전 파일을 둔 뒤 다시 돌려도 그대로 남는다.
+        (고치기 전 코드는 두 번째 실행의 `checkout -B` 가 가지를 원격 머리로 되돌려 커밋은 reflog 에만 남고 요청 파일은 작업 폴더에서 사라졌다.)"""
+        setup = self.setup
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            tmp = Path(tmp)
+            blog, desktop, work = tmp / "blog-origin", tmp / "desktop-origin", tmp / "W"
+            make_origin(blog, setup.REQUEST_BRANCH)
+            make_origin(desktop)
+            wt = work / "wt_r30"
+
+            def run_setup():
+                with mock.patch.object(setup, "BLOG", str(blog)), mock.patch.object(setup, "DESKTOP", str(desktop)), mock.patch.dict(os.environ, git_env()), \
+                        mock.patch.object(sys, "argv", ["setup_workspace.py", str(work)]):
+                    return capture(setup.main)[1]
+
+            first = run_setup()
+            self.assertIn("요청 가지로 전환", first)
+            self.assertEqual(run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt), setup.REQUEST_BRANCH)
+            self.assertTrue((wt / "인수인계" / "요청함" / "README.md").is_file())               # 요청 가지의 내용이 나왔다(기본 가지 main 에는 없다)
+            self.assertTrue((work / "cd_repo" / ".git").exists())
+            request_file = wt / "인수인계" / "요청함" / "R-900_unpushed.md"
+            request_file.write_text("푸시 전 요청 파일\n", encoding="utf-8", newline="\n")
+            run_git("add", "-A", cwd=wt)
+            run_git("commit", "-q", "-m", "푸시 전 요청 커밋", cwd=wt)
+            (wt / "memo.txt").write_text("커밋 전 메모\n", encoding="utf-8", newline="\n")
+            before = run_git("rev-parse", "HEAD", cwd=wt)
+            second = run_setup()
+            self.assertEqual(run_git("rev-parse", "HEAD", cwd=wt), before, "다시 돌렸더니 푸시 전 커밋이 사라졌다")
+            self.assertEqual(run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt), setup.REQUEST_BRANCH)
+            self.assertEqual(request_file.read_text(encoding="utf-8"), "푸시 전 요청 파일\n")
+            self.assertEqual((wt / "memo.txt").read_text(encoding="utf-8"), "커밋 전 메모\n")
+            self.assertIn("이미 있음 — 가지 전환 건너뜀", second)
+            self.assertNotIn("요청 가지로 전환", second)
+
+    def test_the_documents_tell_the_truth_about_rerunning_in_an_existing_workspace(self):
+        doc = self.setup.__doc__
+        for needle in ("이미 clone 돼 있으면 clone 도 가지 전환도 하지 않고 그대로 둔다", "이미 만든 W 에서 다시 돌릴 때는 `--no-clone`", "푸시 전 요청 파일·커밋이 사라지지 않게"):
+            self.assertIn(needle, doc, needle)
+        self.assertNotIn("이미 clone 돼 있으면 건너뛴다", doc)                                    # 가지 전환까지 건너뛴다는 오해를 부르던 옛 문장
+        readme = read(README)
+        s8 = section(readme, 8)
+        prime = s8[s8.index("**②′ 번들 없이 시작할 때**"): s8.index("**③ 푸시 권한 점검**")]
+        for needle in ("이미 만든 `<W>` 에서 다시 돌릴 때는 `--no-clone` 으로만 다시 돌립니다", "이미 있음 — 가지 전환 건너뜀", "푸시 전 요청 파일·커밋이 사라지지 않게",
+                       "git -C <W>/wt_r30 status", "git -C <W>/wt_r30 pull --ff-only origin ai/claude/NO-MERGE-operator-requests"):
+            self.assertIn(needle, prime, needle)
+        last = s8[s8.index("**두 PC 를 동시에 가동하지 않습니다.**"):]
+        for needle in ("이미 만든 `<W>` 는 지우거나 다시 만들지 말고", "`--no-clone` 으로만 다시 돌립니다"):
+            self.assertIn(needle, last, needle)
+        self.assertNotIn("이 순서를 처음부터 따르되 이미 끝난 단계는 건너뜁니다.", readme)           # 마침표로 끝나던 옛 문장(재실행을 권하는 꼴)은 고쳤다
+        section_one = section(readme, 1)
+        self.assertIn("이미 만든 `W` 를 다시 돌릴 때", section_one)
+        self.assertIn("`--no-clone`", section_one)
 
     def test_main_without_the_folder_prints_the_usage_and_stops(self):
         with mock.patch.object(sys, "argv", ["setup_workspace.py"]):
@@ -1273,10 +1399,11 @@ class ReadmeFirstStartSectionTest(unittest.TestCase):
     def test_the_commands_are_the_ones_that_were_run_for_real(self):
         for needle in (
             "git clone --branch ai/claude/NO-MERGE-migration-bundle --single-branch <저장소 주소> <임시 폴더>",
-            "python bootstrap.py --work <W> --python <3.12 경로> --clone",
+            "py -3.12 -X utf8 bootstrap.py --work <W> --python <3.12 경로> --clone",
             "GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=false git -C <W>/wt_r30 push --dry-run --porcelain origin HEAD:refs/heads/ai/claude/preflight-test",
-            "python -X utf8 인수인계/도구/setup_workspace.py <W>",
-            "python -X utf8 <W>/scratch/resume_check.py --work <W>",
+            '$env:GIT_TERMINAL_PROMPT = "0"; $env:GCM_INTERACTIVE = "false"; git -C <W>/wt_r30 push --dry-run --porcelain origin HEAD:refs/heads/ai/claude/preflight-test; Remove-Item Env:GIT_TERMINAL_PROMPT, Env:GCM_INTERACTIVE',
+            "py -3.12 -X utf8 인수인계/도구/setup_workspace.py <W>",
+            "py -3.12 -X utf8 <W>/scratch/resume_check.py --work <W>",
             "`could not read Username`", "종료 코드가 128", "종료 코드 0", "`[new branch]`", "Git Credential Manager",
             "`NEW_PC_ACK.json`", "`STARTED`", "`TOOK_OVER`", "제목에 `이관 완료` 를 넣고", "`HANDED_OVER`",
             "`7 * * * *`", "<W>/cron_status_prompt_v3.txt", "watch_heads2.sh", "watch_issues.py", "watch_light.py", "watch_desktop.py", "`READY_TO_HAND_OVER`", "`PREPARING`",
@@ -1354,6 +1481,95 @@ class ReadmeFirstStartSectionTest(unittest.TestCase):
         for needle in ("110분", "열린 PR", "병합 부탁", "progress_draft_template.md"):
             self.assertIn(needle, v3, needle)
 
+    def test_every_command_is_given_for_a_shell_it_works_in(self):
+        """권고-3(a): `VAR=값 명령`·`$(date +%s)` 은 PowerShell 에서 '용어를 인식할 수 없다' 로 실패한다 — 쓰려면 'Git Bash 에서' 라고 밝히고 PowerShell 형을 병기한다. WATCH_SINCE 는 어느 스크립트도 읽지 않는다."""
+        self.assertNotIn("WATCH_SINCE", self.text)
+        self.assertNotIn("$(", self.s8)
+        bash_form = "GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=false git -C <W>/wt_r30 push --dry-run"
+        self.assertEqual(len(re.findall(r"(?m)^[A-Z][A-Z_]*=\S+ ", self.s8)), 1)                  # `VAR=값 명령` 줄은 이 한 곳뿐이고
+        self.assertEqual(re.findall(r"`[A-Z][A-Z_]*=\S+ [a-z]", self.s8), [])                      # 문장 속 코드로도 없다
+        self.assertIn("Git Bash 에서", self.s8[: self.s8.index(bash_form)][-120:])                  # 그 줄 바로 앞에 쉘 이름을 밝혔다
+        after = self.s8[self.s8.index(bash_form):]
+        self.assertIn("PowerShell 에서", after[:600])
+        self.assertIn('$env:GIT_TERMINAL_PROMPT = "0"; $env:GCM_INTERACTIVE = "false"; git -C <W>/wt_r30 push --dry-run', after[:900])
+        self.assertIn("Remove-Item Env:GIT_TERMINAL_PROMPT, Env:GCM_INTERACTIVE", after[:900])      # 같은 창의 다음 명령에 환경 변수가 남지 않게 되돌린다
+        self.assertIn("`$LASTEXITCODE`", self.s8)                                                    # PowerShell 의 종료 코드 보는 법
+        row = table_row(self.text, "watch_light.py")
+        self.assertNotIn("WATCH_SINCE", row)
+        self.assertNotIn("&&", row)                                                                  # PowerShell 5.1 은 `&&` 도 모른다
+        step = self.s8[self.s8.index("**⑤ 크론과 감시기 켜기**"):]
+        for needle in ("py -3.12 -X utf8 -u <W>/scratch/watch_issues.py", "py -3.12 -X utf8 -u <W>/scratch/watch_light.py", "py -3.12 -X utf8 -u <W>/scratch/watch_desktop.py", "bash <W>/scratch/watch_heads2.sh"):
+            self.assertIn(needle, step, needle)
+
+    def test_no_command_in_the_first_start_section_uses_a_bare_python_and_each_python_command_carries_utf8(self):
+        """권고-3(b)(f): 0단계가 '맨 python 은 쓰지 않는다' 고 하니 명령도 `py -3.12` 로 적고, 한글이 깨지지 않게 `-X utf8` 를 붙인다(파이프로 출력을 받을 때 특히)."""
+        self.assertEqual([line for line in self.s8.splitlines() if re.match(r"\s*python3?\s", line)], [])
+        self.assertEqual(re.findall(r"`(python3?\s[^`]*)`", self.s8), [])
+        commands = re.findall(r"py -3\.1[02] ((?!--version)[^`\n]*)", self.s8)
+        self.assertGreaterEqual(len(commands), 8)
+        for command in commands:
+            self.assertTrue(command.startswith("-X utf8"), command)
+        self.assertIn("py -3.12 -X utf8 bootstrap.py --work <W> --python <3.12 경로> --clone", self.s8)
+        self.assertIn("py -3.10 -X utf8 bootstrap.py", self.s8)                                      # 3.12 가 아직 없을 때의 길
+        top = self.text[: self.text.index("## 1. ")]
+        self.assertIn("맨 `python` 은 8절 0단계에서 확인한 3.12", top)                                   # 표의 `python` 이 무엇인지 첫머리에서 밝힌다
+
+    def test_the_first_signal_step_gives_the_exact_commit_command(self):
+        """권고-3(c): `--only` 가 없으면 commit_as_author.py 는 `git add -A` 라 임시 폴더의 모든 변경이 들어간다 — 정확한 명령을 적는다."""
+        step = self.s8[self.s8.index("1. **시작 신호**"): self.s8.index("2. **첫 보고**")]
+        self.assertIn("py -3.12 -X utf8 <W>/commit_as_author.py <임시 폴더> <메시지 파일 절대 경로> --only 인수인계/이관_번들/state/NEW_PC_ACK.json", step)
+        self.assertIn("`--only` 가 없으면 `git add -A`", step)
+        self.assertIn("git -C <임시 폴더> push origin ai/claude/NO-MERGE-migration-bundle", step)
+
+    def test_step_two_prime_names_where_the_clone_comes_from_and_that_it_is_the_main_way_once_the_bundle_is_gone(self):
+        """권고-3(g): ②′ 는 새 세션이 시작된 저장소 clone(main) 에서 돌린다 — 번들이 정리되면 이 길이 정본이다."""
+        head = self.s8[self.s8.index("**②′ 번들 없이 시작할 때**"):].splitlines()[0]
+        for needle in ("새 세션이 시작된 저장소 clone(main)", "번들이 정리되면 이 길이 정본"):
+            self.assertIn(needle, head, needle)
+
+    def test_section_six_records_the_tar_and_the_crlf_mutation_traps(self):
+        """권고-3(d): 윈도 `tar.exe` 는 한글 파일명을 못 풀고, CRLF 작업 폴더에서는 여러 줄 변이 도구가 SPEC INVALID 로 멈춘다 — 둘 다 함정 절에 한 줄씩."""
+        s6 = section(self.text, 6)
+        bullets = [line for line in s6.splitlines() if line.startswith("- ")]
+        tar = [line for line in bullets if "tar.exe" in line]
+        crlf = [line for line in bullets if "SPEC INVALID" in line]
+        self.assertEqual((len(tar), len(crlf)), (1, 1))
+        for needle in ("한글 파일명", "`git archive", "git -C <저장소> -c core.autocrlf=false worktree add --detach <새 폴더> <커밋>", "git worktree remove"):
+            self.assertIn(needle, tar[0], needle)
+        for needle in ("CRLF", "변이", "LF 로 체크아웃한 폴더", "`sha256`"):
+            self.assertIn(needle, crlf[0], needle)
+
+    def test_the_ci_web_row_does_not_contradict_the_web_runs_row(self):
+        """권고-3(e): ci_web.py 가 읽던 내장 JSON 은 2026-11-05 에 사라졌다 — 표의 두 행이 같은 말을 한다."""
+        ci_web = table_row(self.text, "ci_web.py")
+        for needle in ("옛 판", "내장 JSON", "2026-11-05", "사라져", "`내장 JSON 을 찾지 못했다`", "`web_runs.py`"):
+            self.assertIn(needle, ci_web, needle)
+        self.assertNotIn("내장 JSON 만 읽어", ci_web)
+        self.assertIn("2026-11-05", table_row(self.text, "web_runs.py"))
+
+    def test_the_make_request_row_names_the_one_gate_exemption(self):
+        """권고-2: 검사 관문의 면제는 자동 검사가 없는 루트 홈 저장소 한 곳뿐이다 — '초록이어야 파일이 만들어진다' 를 절대 규칙처럼 쓰지 않는다."""
+        row = table_row(self.text, "make_request.py")
+        for needle in ("예외 한 곳", "`shine88pc/shine88pc.github.io`", "루트 홈 저장소", "검사 실행이 하나도 없어도", "블로그·데스크톱 저장소는 예외가 없고", "실행이 하나라도 있으면 모두 초록",
+                       "사람이 요청 본문에 적고", "`W/root_repo`"):
+            self.assertIn(needle, row, needle)
+
+    def test_the_limits_the_verifier_found_are_written_in_the_tool_rows(self):
+        """정보-3·4·6: 고치지 않고 알려 두는 한계는 도구 표에 한 줄씩 적는다(코드는 바꾸지 않았다)."""
+        merge_guard = table_row(self.text, "merge_guard.py")
+        for needle in ("운영자 전용(C 등급) 경로 목록은 아직 정책 문서의 운영자 전용 목록과 같지 않다", "`privacy.md`", "`categories.md`", "`robots.txt`", "`posts.json`", "`pipeline/ai_processor_policy.json`",
+                       "`pipeline/ops_inbox_policy.json`", "`pipeline/egress.py`", "`scripts/validate_repo.py`", "켜는 변경 전에 정책 문서와 맞춘다"):
+            self.assertIn(needle, merge_guard, needle)
+        resume = table_row(self.text, "resume_check.py")
+        for needle in ("다음 알림 번호는 `git fetch` 전의 값일 수 있다", "낯선 작성자가 올린 이슈·PR 제목도 그대로 찍으니 데이터로만 읽고"):
+            self.assertIn(needle, resume, needle)
+        self.assertIn("네트워크가 실패해도 `아직 끝나지 않음: None`", table_row(self.text, "check_notify.py"))
+        self.assertIn("30분이 지나도 모자라면", table_row(self.text, "memfree.py"))
+        self.assertIn("종료 코드는 0", table_row(self.text, "memfree.py"))
+        for name in ("commit_as_author.py", "make_info_request.py"):
+            row = table_row(self.text, name)
+            self.assertIn("인자가 모자라면 사용법 글이 아니라 파이썬 오류", row, name)
+
     def test_the_readme_lists_the_forms_and_the_old_two_documents_keep_their_names(self):
         s7 = section(self.text, 7)
         quoted = "AI 병합 기능이 꺼져 있어 운영자께서 직접 병합해 주세요"
@@ -1362,6 +1578,769 @@ class ReadmeFirstStartSectionTest(unittest.TestCase):
         forms = {path.name: read(path) for path in FORMS.glob("*.md")}
         self.assertEqual(set(forms), EXPECTED_FORMS)
         self.assertIn(quoted, forms["merge_request_template_v2.md"].replace("**", ""))                                    # README 가 인용한 문구는 양식의 실제 문구다
+
+
+# ==== 12. make_merged_notice — 병합완료 확인 요청 파일 만들기의 동작(권고-1) ==================================
+MERGE_FILE = "R-264_merge-m050.md"
+MERGED_NAME = "R-265_merged-m050.md"
+MERGE_REQUEST = """---
+id: R-264
+kind: merge
+title: [M050] 병합 부탁 — 시험
+summary: 병합 부탁입니다
+created: 2026-11-12
+no: M050
+repo: shine88pc/chanceblog
+target: 시험용 병합
+pr_title: [M050] 시험용 병합 [대상: 공통]
+verify: 검사 3칸 초록
+---
+본문
+"""
+GOOD_PAIRING = "def merged_pairing_problems(entries):\n    return []\n"
+
+
+def fake_loop(labels='{"merged": "병합완료 확인", "merge": "병합 부탁"}', parse="    pass", pairing=GOOD_PAIRING, head=""):
+    """가짜 `pipeline/operator_loop.py` 글 — make_merged_notice.VERIFY_SCRIPT 가 쓰는 이름(notify.REQUEST_KIND_LABELS·parse_request·RequestError·problem_text·merged_pairing_problems)만 흉내 낸다."""
+    return head + (
+        "class RequestError(Exception):\n"
+        "    def __init__(self, code):\n"
+        "        super().__init__(code)\n"
+        "        self.code = code\n\n\n"
+        "class _Notify:\n"
+        f"    REQUEST_KIND_LABELS = {labels}\n\n\n"
+        "notify = _Notify()\n\n\n"
+        "class _Request:\n"
+        '    kind = "merged"\n'
+        '    no = "M050"\n'
+        '    fields = (("result", "정상"),)\n'
+        '    notice_error = ""\n\n\n'
+        "def problem_text(code):\n"
+        '    return "설명 " + code\n\n\n'
+        "def parse_request(name, text, strict=False):\n"
+        f"{parse}\n"
+        "    return _Request()\n\n\n"
+    ) + pairing
+
+
+class MakeMergedNoticePureTest(unittest.TestCase):
+    """순수 함수 — reason_problem(사유를 요청 파일·폰에 쓸 수 있는가)·decide_request_number(새 요청 번호)·build_text(파일 글)."""
+
+    def setUp(self):
+        self.mm = load_tool(WORK / "make_merged_notice.py", extra_path=WORK)
+
+    def test_reason_problem_names_each_unusable_reason_on_its_own(self):
+        problem = self.mm.reason_problem
+        cases = (
+            ("비어 있다", ("", "   ", None, 5)),
+            ("앞뒤에 공백이 있다", (" 앞공백", "뒤공백 ", chr(0xA0) + "x")),
+            ("U+000A", ("줄\n바꿈",)),
+            ("U+0009", ("탭\t문자",)),
+            ("U+200B", ("보이지" + chr(0x200B) + "않는 글자",)),
+            ("같은 따옴표", ("\"따옴표로 감쌈\"", "'따옴표로 감쌈'")),
+            ("물결표(~)가 있다", ("범위 3~5", "~", "앞~")),
+            ("링크 주소가 있다", ("http://x.invalid/a", "https://x.invalid", "HTTPS://X.INVALID", "ftp://x.invalid", "tg://resolve", "www.example.invalid")),
+            ("병합완료 확인", ("병합완료 확인 결과가 이상합니다", "병합완료확인", "병합 완료  확인", "[M050] 병합완료 확인 - 정상", "앞 병합완료" + chr(0xA0) + "확인 뒤")),
+            ("비밀(키·토큰)", (FAKE_GOOGLE_KEY, FAKE_KEY_VALUE, "앞 " + FAKE_PEM + " 뒤")),
+        )
+        for needle, texts in cases:
+            for text in texts:
+                with self.subTest(needle=needle, text=str(text)[:20]):
+                    found = problem(text, 100)
+                    self.assertTrue(found, text)
+                    self.assertIn(needle, found)
+
+    def test_reason_problem_accepts_plain_reasons_up_to_the_limit_and_names_the_overflow(self):
+        problem = self.mm.reason_problem
+        for text in ("main 검사가 빨강입니다", "정상", "병합완료 뒤 사이트 빌드가 실패했습니다", "병합 확인 중 실패", "tokenizer 설명", "http 라는 낱말", "범위 3–5", "따옴표 하나\"만"):
+            self.assertEqual(problem(text, 100), "", text)
+        self.assertEqual(problem("가" * 100, 100), "")
+        self.assertEqual(problem("가" * 60, 60), "")
+        self.assertEqual(problem("가" * 101, 100), "101자라 100자를 넘는다")
+        self.assertEqual(problem("가" * 61, 60), "61자라 60자를 넘는다")
+        self.assertEqual((self.mm.SUMMARY_LIMITS, self.mm.RESULTS), ({"정상": 60, "이상": 100}, ("정상", "이상")))
+
+    def test_decide_request_number_auto_takes_the_largest_of_the_folder_and_every_branch_plus_one(self):
+        decide = self.mm.decide_request_number
+        folder = [("R-250_merge-m050.md", ["merge"], ["M050"]), ("R-251_progress-p001.md", ["info"], ["P001"]), ("README.md", [], [])]
+        refs = [("R-299_merge-m060.md", "origin/ai/claude/x", ["merge"], ["M060"])]
+        self.assertEqual(decide("auto", folder, refs), ("R-300", "요청함 폴더와 모든 가지의 최댓값 R-299 + 1"))
+        self.assertEqual(decide("auto", folder, []), ("R-252", "요청함 폴더와 모든 가지의 최댓값 R-251 + 1"))                  # 번호 칸이 없는 README.md 는 세지 않는다
+        self.assertEqual(decide("auto", [], refs), ("R-300", "요청함 폴더와 모든 가지의 최댓값 R-299 + 1"))
+        self.assertEqual(decide("auto", [], []), ("R-001", "요청함 폴더와 모든 가지의 최댓값 R-000 + 1"))
+        self.assertEqual(decide("auto", [("R-998_x.md", [], [])], [])[0], "R-999")
+        with self.assertRaises(self.mm.Refuse) as caught:
+            decide("auto", [("R-999_x.md", [], [])], [])
+        self.assertIn("상한(R-999)", str(caught.exception))
+
+    def test_decide_request_number_checks_a_number_the_caller_gives(self):
+        decide = self.mm.decide_request_number
+        folder = [("R-250_merge-m050.md", ["merge"], ["M050"])]
+        refs = [("R-299_merge-m060.md", "origin/ai/claude/x", ["merge"], ["M060"])]
+        self.assertEqual(decide("R-300", folder, refs), ("R-300", "직접 준 번호(요청함 폴더와 모든 가지에 없음, 지금 최댓값 R-299)"))
+        self.assertEqual(decide("R-001", folder, refs)[0], "R-001")
+        for taken, where in (("R-250", "폴더"), ("R-299", "가지")):
+            with self.subTest(where=where), self.assertRaises(self.mm.Refuse) as caught:
+                decide(taken, folder, refs)
+            self.assertIn("쓸 수 없다", str(caught.exception))
+        for bad in ("R-30", "R-3000", "r-300", "300", "R-300 ", " R-300", "", "auto ", "AUTO", "R-3a0"):
+            with self.subTest(bad=bad), self.assertRaises(self.mm.Refuse) as caught:
+                decide(bad, folder, refs)
+            self.assertIn("꼴이 아니다", str(caught.exception))
+        with self.assertRaises(self.mm.Refuse) as caught:
+            decide("R-000", folder, refs)
+        self.assertIn("범위 밖", str(caught.exception))
+
+    def test_build_text_is_exactly_the_seven_field_file_and_the_real_strict_reader_accepts_it(self):
+        build = self.mm.build_text
+        self.assertEqual(build("R-266", "M050", "정상", "정상", "2026-11-15"),
+                         "---\nid: R-266\nkind: merged\ntitle: [M050] 병합완료 확인 - 정상\nsummary: 정상\ncreated: 2026-11-15\nno: M050\nresult: 정상\n---\n\n정상 — 병합이 제대로 됐습니다(폰에는 위 제목 한 줄만 갑니다).\n")
+        self.assertEqual(build("R-266", "M051", "이상", "main 검사가 빨강입니다", "2026-11-15"),
+                         "---\nid: R-266\nkind: merged\ntitle: [M051] 병합완료 확인 - 이상\nsummary: main 검사가 빨강입니다\ncreated: 2026-11-15\nno: M051\nresult: 이상\n---\n\n이상 — main 검사가 빨강입니다\n")
+        self.assertEqual(self.mm.title_of("M050", "정상"), "[M050] 병합완료 확인 - 정상")
+        for no, result, summary in (("M050", "정상", "정상"), ("M1234", "이상", "main 검사가 빨강입니다")):
+            text = build("R-266", no, result, summary, "2026-11-15")
+            self.assertNotIn("~", text)
+            self.assertNotIn("\r", text)
+            request = ol.parse_request(f"R-266_merged-{no.lower()}.md", text, strict=True)
+            self.assertEqual((request.kind, request.no, request.title, dict(request.fields)), ("merged", no, f"[{no}] 병합완료 확인 - {result}", {"result": result, "summary": summary}))
+            self.assertEqual(request.notice_error, "")
+
+    def test_the_number_shapes_are_the_standard_notice_numbers_of_a_merge_request(self):
+        for good in ("M001", "M050", "M999", "M1000", "M9999"):
+            self.assertIsNotNone(self.mm.NO_RE.fullmatch(good), good)
+        for bad in ("M50", "M0500", "M000", "M10000", "m050", "M 050", "P050", "050", "M-050", "M０５０"):
+            self.assertIsNone(self.mm.NO_RE.fullmatch(bad), bad)
+        self.assertEqual(self.mm.request_number("R-266_merged-m050.md"), 266)
+        self.assertEqual(self.mm.request_number("README.md"), 0)
+        self.assertEqual(self.mm.MAIN_FIRST, "요청 가지에 main 을 합치기 전입니다 — 먼저 합치세요")
+
+
+class MakeMergedNoticeTest(unittest.TestCase):
+    """make(...) — 검사를 모두 통과해야 파일을 쓴다. 거절하면 파일은 하나도 만들어지지 않는다(네트워크·git 없이 — repo=None, code_root=None)."""
+
+    def setUp(self):
+        self.mm = load_tool(WORK / "make_merged_notice.py", extra_path=WORK)
+        self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = Path(self._tmp.name)
+        self.folder = self.tmp / "요청함"
+        self.folder.mkdir()
+        (self.folder / MERGE_FILE).write_text(MERGE_REQUEST, encoding="utf-8", newline="\n")
+
+    def make(self, request="auto", no="M050", result="정상", reason=None, created="2026-11-15", code_root=None, repo=None, folder=None):
+        return self.mm.make(request, no, result, reason, folder or self.folder, repo, created, code_root)
+
+    def refuse(self, *args, **kwargs):
+        with self.assertRaises(self.mm.Refuse) as caught:
+            self.make(*args, **kwargs)
+        return str(caught.exception)
+
+    def names(self):
+        return sorted(path.name for path in self.folder.iterdir())
+
+    def test_a_normal_file_is_written_with_lf_and_the_run_is_described_line_by_line(self):
+        target, lines = self.make()
+        self.assertEqual(target, self.folder / MERGED_NAME)
+        raw = target.read_bytes()
+        self.assertNotIn(b"\r", raw)
+        self.assertEqual(raw.decode("utf-8"), self.mm.build_text("R-265", "M050", "정상", "정상", "2026-11-15"))
+        self.assertEqual(len(lines), 6)
+        self.assertEqual(lines[0], f"파일 {MERGED_NAME} | 줄 수 {raw.count(bytes([10]))} | summary 2자")
+        self.assertEqual(lines[1], f"짝 병합 부탁: {MERGE_FILE} (kind: merge, no: M050)")
+        self.assertEqual(lines[2], "요청 번호: R-265 (요청함 폴더와 모든 가지의 최댓값 R-264 + 1)")
+        self.assertEqual(lines[3], "제목: [M050] 병합완료 확인 - 정상")
+        self.assertEqual(lines[4], "엄격하게 읽기 건너뜀(--no-verify — 시험 전용)")
+        self.assertTrue(lines[5].startswith("다음: 이 파일만 따로 commit·push 한다"))
+        self.assertEqual(self.names(), [MERGE_FILE, MERGED_NAME])
+
+    def test_an_abnormal_file_carries_the_reason_and_a_given_request_number_is_used(self):
+        target, lines = self.make(request="R-300", result="이상", reason="main 검사가 빨강입니다")
+        self.assertEqual(target.name, "R-300_merged-m050.md")
+        self.assertEqual(target.read_text(encoding="utf-8"), self.mm.build_text("R-300", "M050", "이상", "main 검사가 빨강입니다", "2026-11-15"))
+        self.assertIn("직접 준 번호", lines[2])
+
+    def test_a_normal_result_may_carry_a_short_reason_but_not_a_long_one(self):
+        target, _lines = self.make(reason="가" * 60)
+        self.assertIn("summary: " + "가" * 60 + "\n", target.read_text(encoding="utf-8"))
+        folder = self.tmp / "요청함-둘째"
+        folder.mkdir()
+        (folder / MERGE_FILE).write_text(MERGE_REQUEST, encoding="utf-8", newline="\n")
+        message = self.refuse(reason="가" * 61, folder=folder)
+        self.assertIn("summary(사유) 를 쓸 수 없다", message)
+        self.assertIn("61자라 60자를 넘는다", message)
+        self.assertEqual(sorted(path.name for path in folder.iterdir()), [MERGE_FILE])
+
+    def test_every_bad_input_is_refused_with_its_reason_and_nothing_is_written(self):
+        cases = (
+            ("M 번호 모양이 아니다", dict(no="M50")), ("M 번호 모양이 아니다", dict(no="M0500")), ("M 번호 모양이 아니다", dict(no="m050")), ("M 번호 모양이 아니다", dict(no="")),
+            ("결과는 `정상` 또는 `이상` 이어야 한다", dict(result="OK")), ("결과는 `정상` 또는 `이상` 이어야 한다", dict(result="")),
+            ("날짜 모양이 아니다", dict(created="2026/11/15")), ("날짜 모양이 아니다", dict(created="20261115")), ("없는 날짜다", dict(created="2026-13-40")), ("없는 날짜다", dict(created="2026-02-30")),
+            ("사유 한 줄이 필요하다", dict(result="이상")), ("사유 한 줄이 필요하다", dict(result="이상", reason="   ")),
+            ("summary(사유) 를 쓸 수 없다", dict(result="이상", reason="범위 3~5 가 이상")),
+            ("물결표", dict(result="이상", reason="범위 3~5 가 이상")),
+            ("링크 주소", dict(result="이상", reason="http://x.invalid 이 이상")),
+            ("병합완료 확인", dict(result="이상", reason="병합완료 확인 결과 이상")),
+            ("비밀(키·토큰)", dict(result="이상", reason="값 " + FAKE_GOOGLE_KEY)),
+            ("꼴이 아니다", dict(request="R-26")), ("꼴이 아니다", dict(request="266")),
+            ("범위 밖", dict(request="R-000")),
+            ("쓸 수 없다", dict(request=MERGE_FILE[:5])),                                            # 요청함에 이미 있는 번호(R-264)
+        )
+        for needle, kwargs in cases:
+            with self.subTest(needle=needle, kwargs=str(kwargs)[:40]):
+                self.assertIn(needle, self.refuse(**kwargs))
+                self.assertEqual(self.names(), [MERGE_FILE])
+        message = self.refuse(folder=self.tmp / "없는폴더")
+        self.assertIn("요청함 폴더가 없다", message)
+
+    def test_a_file_is_made_only_when_exactly_one_pair_exists_and_no_twin_does(self):
+        message = self.refuse(no="M051")                                                       # M051 짝 병합 부탁이 폴더에 없다
+        self.assertIn("짝이 되는 병합 부탁(`kind: merge`, `no: M051`)이 요청함 폴더에 없다", message)
+        self.assertIn("짝 없는 병합완료 확인은 만들지 않는다", message)
+        self.assertEqual(self.names(), [MERGE_FILE])
+        (self.folder / "R-270_progress-p001.md").write_text(MERGE_REQUEST.replace("kind: merge", "kind: info").replace("no: M050", "no: P001"), encoding="utf-8", newline="\n")
+        self.assertIn("짝이 되는 병합 부탁", self.refuse(no="M051"))                                  # 종류가 다른 파일은 짝이 아니다
+        (self.folder / "R-271_merge-m050-again.md").write_text(MERGE_REQUEST, encoding="utf-8", newline="\n")
+        message = self.refuse()
+        self.assertIn("`no: M050` 인 병합 부탁이 요청함 폴더에 둘 이상이다", message)
+        self.assertIn(MERGE_FILE, message)
+        self.assertNotIn(MERGED_NAME, self.names())
+        (self.folder / "R-271_merge-m050-again.md").unlink()
+        (self.folder / "R-272_merged-m050.md").write_text(self.mm.build_text("R-272", "M050", "정상", "정상", "2026-11-15"), encoding="utf-8", newline="\n")
+        message = self.refuse()
+        self.assertIn("M050 의 병합완료 확인이 이미 있다(R-272_merged-m050.md)", message)
+        self.assertIn("둘째는 만들지 않는다", message)
+        self.assertNotIn(MERGED_NAME, self.names())
+
+    def test_a_file_that_cannot_be_read_as_a_request_does_not_count_and_does_not_crash(self):
+        (self.folder / "R-266_broken-bytes.md").write_bytes(bytes([0xFF, 0xFE, 0x00, 0x80]))
+        (self.folder / "README.md").write_text("안내\n", encoding="utf-8")
+        (self.folder / "R-267_nokind.md").write_text("앞머리가 없는 글\n", encoding="utf-8")
+        target, lines = self.make()
+        self.assertEqual(target.name, "R-268_merged-m050.md")                                     # 읽지 못한 R-266·앞머리 없는 R-267 의 번호도 요청 번호로는 센다
+        self.assertEqual(lines[1], f"짝 병합 부탁: {MERGE_FILE} (kind: merge, no: M050)")
+
+    def test_the_default_check_with_the_real_request_branch_code_reads_the_file_strictly(self):
+        for result, reason in (("정상", None), ("이상", "main 검사가 빨강입니다")):
+            folder = self.tmp / f"요청함-{result}"
+            folder.mkdir()
+            (folder / MERGE_FILE).write_text(MERGE_REQUEST, encoding="utf-8", newline="\n")
+            target, lines = self.make(result=result, reason=reason, code_root=ROOT, folder=folder)
+            self.assertEqual(lines[4], f"요청 가지 코드로 엄격하게 읽기({ROOT.name}): merged M050 {result} -")
+            self.assertTrue(target.is_file())
+
+    def test_a_code_folder_that_does_not_know_merged_stops_before_any_file_is_written(self):
+        code = self.tmp / "code"
+        (code / "pipeline").mkdir(parents=True)
+        (code / "pipeline" / "__init__.py").write_text("", encoding="utf-8")
+        (code / "pipeline" / "operator_loop.py").write_text(fake_loop(labels='{"merge": "병합 부탁"}'), encoding="utf-8", newline="\n")
+        message = self.refuse(code_root=code)
+        self.assertIn(self.mm.MAIN_FIRST, message)
+        self.assertEqual(self.names(), [MERGE_FILE])
+        (code / "pipeline" / "operator_loop.py").write_text(fake_loop(), encoding="utf-8", newline="\n")
+        target, lines = self.make(code_root=code)
+        self.assertEqual(lines[4], "요청 가지 코드로 엄격하게 읽기(code): merged M050 정상 -")
+        self.assertTrue(target.is_file())
+
+
+class VerifyWithTest(unittest.TestCase):
+    """verify_with — 요청 가지 작업 폴더의 코드를 별도 프로세스로 불러 방금 만든 파일을 엄격하게 읽어 본다. 가짜 코드 폴더(가짜 pipeline/operator_loop.py)로 분기를 하나씩 본다."""
+
+    def setUp(self):
+        self.mm = load_tool(WORK / "make_merged_notice.py", extra_path=WORK)
+        self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = Path(self._tmp.name)
+        self.folder = self.tmp / "요청함"
+        self.folder.mkdir()
+        (self.folder / MERGE_FILE).write_text(MERGE_REQUEST, encoding="utf-8", newline="\n")
+        self.text = self.mm.build_text("R-265", "M050", "정상", "정상", "2026-11-15")
+
+    def code_root(self, source=None):
+        root = self.tmp / "code"
+        (root / "pipeline").mkdir(parents=True, exist_ok=True)
+        (root / "pipeline" / "__init__.py").write_text("", encoding="utf-8")
+        if source is not None:
+            (root / "pipeline" / "operator_loop.py").write_text(source, encoding="utf-8", newline="\n")
+        return root
+
+    def verify(self, source):
+        return self.mm.verify_with(self.code_root(source), self.folder, MERGED_NAME, self.text)
+
+    def refusal(self, source):
+        with self.assertRaises(self.mm.Refuse) as caught:
+            self.verify(source)
+        return str(caught.exception)
+
+    def test_a_good_reading_returns_what_the_request_branch_code_made_of_the_file(self):
+        self.assertEqual(self.verify(fake_loop()), "merged M050 정상 -")
+
+    def test_a_code_folder_without_the_loop_module_is_refused_before_anything_runs(self):
+        with mock.patch.object(self.mm.subprocess, "run", side_effect=AssertionError("프로세스를 띄우면 안 된다")):
+            message = self.refusal(None)
+        self.assertIn("요청 가지 작업 폴더의 코드를 찾지 못했다", message)
+        self.assertIn("--verify-with", message)
+
+    def test_a_code_that_does_not_know_merged_stops_with_the_merge_main_first_message(self):
+        for label, source in (("종류 이름표에 merged 가 없음", fake_loop(labels='{"merge": "병합 부탁"}')), ("짝 규칙 함수가 없음", fake_loop(pairing="")), ("종류 이름표가 아예 없음", fake_loop(labels="{}"))):
+            message = self.refusal(source)
+            self.assertIn(self.mm.MAIN_FIRST, message, label)
+            self.assertIn("병합완료 확인 `kind: merged` 를 모른다", message, label)
+            self.assertIn("알림이 조용히 사라진다", message, label)
+
+    def test_a_file_the_strict_reader_refuses_stops_with_the_reason_code(self):
+        message = self.refusal(fake_loop(parse='    if "merged-m050" in name:\n        raise RequestError("fake_parse")'))
+        self.assertIn("엄격하게 읽지 못했다", message)
+        self.assertIn("PARSE fake_parse 설명 fake_parse", message)
+        self.assertNotIn(self.mm.MAIN_FIRST, message)
+
+    def test_a_pairing_problem_stops_with_the_reason_code(self):
+        message = self.refusal(fake_loop(pairing='def merged_pairing_problems(entries):\n    return [(name, "fake_pair") for name, _ in entries if "merged-m050" in name]\n'))
+        self.assertIn("엄격하게 읽지 못했다", message)
+        self.assertIn("PAIR fake_pair 설명 fake_pair", message)
+        self.assertNotIn(self.mm.MAIN_FIRST, message)
+
+    def test_problems_of_other_files_are_not_this_files_problems(self):
+        parse_other = '    if "merge-m050" in name:\n        raise RequestError("fake_other")'
+        pair_other = 'def merged_pairing_problems(entries):\n    return [(name, "fake_pair") for name, _ in entries if "merge-m050" in name]\n'
+        self.assertEqual(self.verify(fake_loop(parse=parse_other)), "merged M050 정상 -")
+        self.assertEqual(self.verify(fake_loop(pairing=pair_other)), "merged M050 정상 -")
+
+    def test_the_existing_request_files_are_handed_to_the_pairing_rule_together_with_the_new_one(self):
+        alone = 'def merged_pairing_problems(entries):\n    return [] if len(entries) == 2 else [(name, "fake_alone") for name, _ in entries]\n'
+        self.assertEqual(self.verify(fake_loop(pairing=alone)), "merged M050 정상 -")             # 기존 병합 부탁 + 새 파일 = 둘
+        (self.folder / MERGE_FILE).unlink()
+        self.assertIn("PAIR fake_alone", self.refusal(fake_loop(pairing=alone)))                  # 기존 파일이 없으면 새 파일 하나뿐
+
+    def test_an_unreadable_neighbour_and_a_non_request_file_are_skipped_not_fatal(self):
+        (self.folder / "R-266_broken-bytes.md").write_bytes(bytes([0xFF, 0xFE, 0x00, 0x80]))
+        (self.folder / "README.md").write_text("안내\n", encoding="utf-8")
+        self.assertEqual(self.verify(fake_loop()), "merged M050 정상 -")
+
+    def test_an_import_failure_in_the_code_is_a_refusal_with_the_error_not_a_crash(self):
+        message = self.refusal(fake_loop(head='raise ImportError("boom")\n'))
+        self.assertIn("엄격하게 읽지 못했다", message)
+        self.assertIn("IMPORT ImportError: boom", message)
+        self.assertNotIn(self.mm.MAIN_FIRST, message)
+
+    def test_a_process_that_cannot_start_or_takes_too_long_is_a_refusal(self):
+        for error in (OSError("없음"), subprocess.TimeoutExpired("x", 120)):
+            with self.subTest(error=type(error).__name__), mock.patch.object(self.mm.subprocess, "run", side_effect=error):
+                with self.assertRaises(self.mm.Refuse) as caught:
+                    self.mm.verify_with(self.code_root(fake_loop()), self.folder, MERGED_NAME, self.text)
+            self.assertIn(f"요청 가지 코드로 읽어 보지 못했다({type(error).__name__})", str(caught.exception))
+
+    def test_the_code_runs_in_its_own_process_without_a_shell_from_the_code_folder_with_the_files_on_stdin(self):
+        calls = []
+        real_run = subprocess.run
+
+        def spy(command, **kwargs):
+            calls.append((command, kwargs))
+            return real_run(command, **kwargs)
+
+        with mock.patch.object(self.mm.subprocess, "run", spy):
+            self.verify(fake_loop())
+        self.assertEqual(len(calls), 1)
+        command, kwargs = calls[0]
+        self.assertEqual(command[:4], [sys.executable, "-X", "utf8", "-B"])
+        self.assertNotIn("shell", kwargs)                                                         # 셸을 거치지 않는다
+        self.assertEqual(kwargs["cwd"], str(self.tmp / "code"))
+        self.assertEqual(kwargs["timeout"], 120)
+        payload = json.loads(kwargs["input"].decode("utf-8"))
+        self.assertEqual((payload["name"], payload["text"], sorted(payload["files"])), (MERGED_NAME, self.text, [MERGE_FILE]))
+
+
+class MakeMergedNoticeMainTest(unittest.TestCase):
+    """main — 명령 줄을 종료 코드(0 만들었다·1 만들지 않았다·2 사용법 오류)와 기본 폴더로 바꾼다."""
+
+    def setUp(self):
+        self.mm = load_tool(WORK / "make_merged_notice.py", extra_path=WORK)
+        self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = Path(self._tmp.name)
+        self.work = self.tmp / "W"
+        self.folder = self.work / "wt_r30" / "인수인계" / "요청함"
+        self.folder.mkdir(parents=True)
+        (self.folder / MERGE_FILE).write_text(MERGE_REQUEST, encoding="utf-8", newline="\n")
+        self.argv = ["auto", "M050", "정상", "--repo", "none", "--no-verify", "--date", "2026-11-15"]
+
+    def test_a_good_run_exits_zero_prints_the_lines_and_a_second_run_is_refused_on_stderr(self):
+        code, out, err = capture(self.mm.main, self.argv, workspace=self.work)
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual((self.folder / MERGED_NAME).read_text(encoding="utf-8"), self.mm.build_text("R-265", "M050", "정상", "정상", "2026-11-15"))
+        self.assertIn("엄격하게 읽기 건너뜀(--no-verify — 시험 전용)", out)
+        code, out, err = capture(self.mm.main, self.argv, workspace=self.work)
+        self.assertEqual((code, out), (1, ""))
+        self.assertTrue(err.startswith("만들지 않았다: "), err)
+        self.assertIn("이미 있다", err)
+
+    def test_usage_errors_exit_two_and_the_two_check_options_exclude_each_other(self):
+        for bad in ([], ["auto", "M050"], ["auto", "M050", "정상", "--no-verify", "--verify-with", "x"]):
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as stop:
+                self.mm.main(bad, workspace=self.work)
+            self.assertEqual(stop.exception.code, 2, bad)
+        self.assertEqual(sorted(path.name for path in self.folder.iterdir()), [MERGE_FILE])
+
+    def test_the_strict_reading_is_on_by_default_and_looks_for_the_code_in_the_request_branch_work_folder(self):
+        code, out, err = capture(self.mm.main, ["auto", "M050", "정상", "--repo", "none", "--date", "2026-11-15"], workspace=self.work)
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("요청 가지 작업 폴더의 코드를 찾지 못했다", err)
+        self.assertIn(str(self.work / "wt_r30"), err)                                              # 기본 코드 폴더는 W 아래 wt_r30
+        self.assertEqual(sorted(path.name for path in self.folder.iterdir()), [MERGE_FILE])
+
+    def test_options_choose_the_folder_the_repository_and_the_code_to_read_with(self):
+        other = self.tmp / "다른 요청함"
+        other.mkdir()
+        (other / MERGE_FILE).write_text(MERGE_REQUEST, encoding="utf-8", newline="\n")
+        code, _out, err = capture(self.mm.main, ["auto", "M050", "정상", "--folder", str(other), "--repo", "none", "--no-verify", "--date", "2026-11-15"], workspace=self.work)
+        self.assertEqual((code, err), (0, ""))
+        self.assertTrue((other / MERGED_NAME).is_file())
+        self.assertFalse((self.folder / MERGED_NAME).exists())
+        code, _out, err = capture(self.mm.main, ["auto", "M050", "정상", "--repo", str(self.tmp / "없는저장소"), "--no-verify"], workspace=self.work)
+        self.assertEqual(code, 1)
+        self.assertIn("git 저장소 폴더가 없다", err)
+        with mock.patch.dict(os.environ, {"GIT_CEILING_DIRECTORIES": str(self.tmp.parent)}):                                              # 위 폴더의 저장소를 찾아 올라가지 않게 한다
+            code, _out, err = capture(self.mm.main, ["auto", "M050", "정상", "--no-verify", "--date", "2026-11-15"], workspace=self.work)     # 기본 저장소 wt_r30 은 git 저장소가 아니다
+        self.assertEqual(code, 1)
+        self.assertIn("git 에서 가지의 요청 파일을 읽지 못했다", err)
+        fake = self.tmp / "code"
+        (fake / "pipeline").mkdir(parents=True)
+        (fake / "pipeline" / "__init__.py").write_text("", encoding="utf-8")
+        (fake / "pipeline" / "operator_loop.py").write_text(fake_loop(), encoding="utf-8", newline="\n")
+        code, out, err = capture(self.mm.main, ["R-300", "M050", "이상", "main 검사가 빨강입니다", "--repo", "none", "--verify-with", str(fake), "--date", "2026-11-15"], workspace=self.work)
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn("요청 가지 코드로 엄격하게 읽기(code): merged M050 정상 -", out)
+        self.assertTrue((self.folder / "R-300_merged-m050.md").is_file())
+
+
+class MakeMergedNoticeGitTest(unittest.TestCase):
+    """모든 가지의 요청함 파일을 읽는 부분(scan_refs)을 진짜 git(로컬 임시 저장소 — 네트워크 없음)으로 본다: 짝이 다른 가지에만 있을 때의 안내·다른 가지의 쌍둥이·가지를 넘는 번호.
+    이 PC 는 git 한 번이 0.5초 안팎이라 저장소는 클래스에서 한 번만 만든다(가지 둘: 로컬 lane 에 병합 부탁, 원격 모양 ref 에 같은 번호의 병합완료 확인)."""
+
+    REMOTE_REF = "refs/remotes/origin/ai/claude/NO-MERGE-operator-requests"
+    REMOTE_NAME = "origin/ai/claude/NO-MERGE-operator-requests"
+    TWIN_NAME = "R-270_merged-m050.md"
+
+    @classmethod
+    def setUpClass(cls):
+        cls._shared = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        cls.addClassCleanup(cls._shared.cleanup)
+        cls.repo = Path(cls._shared.name) / "repo"
+        make_origin(cls.repo)
+        twin_text = "---\nid: R-270\nkind: merged\ntitle: [M050] 병합완료 확인 - 정상\nsummary: 정상\ncreated: 2026-11-15\nno: M050\nresult: 정상\n---\n\n정상\n"
+        cls.commit_files("lane", {MERGE_FILE: MERGE_REQUEST})
+        cls.commit_files("other", {cls.TWIN_NAME: twin_text}, ref=cls.REMOTE_REF)
+
+    @classmethod
+    def commit_files(cls, branch, files, ref=None):
+        run_git("checkout", "-q", "-B", branch, "main", cwd=cls.repo)
+        for name, text in files.items():
+            path = cls.repo / "인수인계" / "요청함" / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8", newline="\n")
+        run_git("add", "-A", cwd=cls.repo)
+        run_git("commit", "-q", "-m", f"{branch} 의 요청 파일", cwd=cls.repo)
+        if ref:
+            run_git("update-ref", ref, "HEAD", cwd=cls.repo)
+        run_git("checkout", "-q", "main", cwd=cls.repo)
+
+    def setUp(self):
+        self.mm = load_tool(WORK / "make_merged_notice.py", extra_path=WORK)
+        self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(self._tmp.cleanup)
+        self.folder = Path(self._tmp.name) / "요청함"
+        self.folder.mkdir()
+
+    def make(self, request="auto", no="M050"):
+        return self.mm.make(request, no, "정상", None, self.folder, self.repo, "2026-11-15", None)
+
+    def test_scan_refs_lists_every_branchs_request_files_with_their_kind_and_number(self):
+        found = {(name, ref): (kinds, nos) for name, ref, kinds, nos in self.mm.scan_refs(self.repo)}
+        self.assertEqual(found, {(MERGE_FILE, "heads/lane"): (["merge"], ["M050"]), (self.TWIN_NAME, self.REMOTE_NAME): (["merged"], ["M050"])})
+
+    def test_a_pair_that_exists_only_on_another_branch_is_refused_with_a_hint_where_it_is(self):
+        with self.assertRaises(self.mm.Refuse) as caught:
+            self.make(no="M050")
+        message = str(caught.exception)
+        self.assertIn("짝이 되는 병합 부탁(`kind: merge`, `no: M050`)이 요청함 폴더에 없다", message)
+        self.assertIn(f"다른 가지에는 있다: {MERGE_FILE} @ heads/lane", message)
+        self.assertIn("요청 가지를 그 가지와 합친 뒤 다시 한다", message)
+        self.assertEqual(list(self.folder.iterdir()), [])
+        with self.assertRaises(self.mm.Refuse) as caught:
+            self.make(no="M051")                                                                   # 어느 가지에도 짝이 없으면 안내 없이 거절한다
+        self.assertNotIn("다른 가지에는 있다", str(caught.exception))
+
+    def test_a_twin_on_another_branch_blocks_a_second_confirmation(self):
+        (self.folder / MERGE_FILE).write_text(MERGE_REQUEST, encoding="utf-8", newline="\n")
+        with self.assertRaises(self.mm.Refuse) as caught:
+            self.make(no="M050")
+        self.assertIn(f"M050 의 병합완료 확인이 이미 있다({self.TWIN_NAME} @ {self.REMOTE_NAME})", str(caught.exception))
+        self.assertEqual(sorted(path.name for path in self.folder.iterdir()), [MERGE_FILE])
+
+    def test_the_request_number_is_chosen_over_every_branch(self):
+        (self.folder / "R-261_merge-m060.md").write_text(MERGE_REQUEST.replace("M050", "M060").replace("R-264", "R-261"), encoding="utf-8", newline="\n")
+        with self.assertRaises(self.mm.Refuse) as caught:
+            self.make(request="R-270", no="M060")                                                  # 다른 가지에 있는 요청 번호는 직접 줘도 못 쓴다
+        self.assertIn("R-270 를 쓸 수 없다", str(caught.exception))
+        self.assertEqual(sorted(path.name for path in self.folder.iterdir()), ["R-261_merge-m060.md"])
+        target, lines = self.make(no="M060")
+        self.assertEqual(target.name, "R-271_merged-m060.md")
+        self.assertEqual(lines[2], "요청 번호: R-271 (요청함 폴더와 모든 가지의 최댓값 R-270 + 1)")
+
+
+# ==== 13. make_request — 검사 관문의 면제(루트 홈 저장소 한 곳)와 물결표 거절(권고-2) ======================
+ROOT_HOME_REPO = "shine88pc/shine88pc.github.io"
+BLOG_REPO = "shine88pc/chanceblog"
+DESKTOP_REPO = "shine88pc/chanceblog-desktop"
+GATE_SHA = "c" * 40
+INFO_DRAFT_TEXT = """---
+id: R-198
+kind: info
+title: [R-198] 안내
+summary: 안내입니다
+urgency: 보통
+created: 2026-11-06
+---
+시험: @TESTS@
+"""
+
+
+def gate_run(ident, conclusion="success", status="completed", name="[공통] 저장소 규칙·테스트 자동 검사", timing="2m 36s"):
+    return {"id": ident, "name": name, "event": "push", "status": status, "conclusion": conclusion, "timing": timing}
+
+
+class MakeRequestGateExemptionTest(unittest.TestCase):
+    """검사 관문(default_gate)의 면제 집합은 자동 검사(워크플로)가 없는 루트 홈 저장소 한 곳뿐이다 — 블로그·데스크톱은 면제가 없고, 면제도 실행 목록이 비었을 때만이다."""
+
+    def setUp(self):
+        self.mr = load_tool(WORK / "make_request.py", extra_path=WORK)
+        self.wc = load_tool(SCRATCH / "wait_ci.py")
+
+    def gate(self, repo, runs=(), branch="main", remote=None, error=None):
+        """default_gate 를 가짜 `git ls-remote`(remote: 출력 글, 기본은 머리 해시 한 줄)와 가짜 실행 목록 읽기로 부른다 → (돌려준 값, 멈춤 글·None, 출력, 읽기 가짜)."""
+        remote = f"{GATE_SHA}\trefs/heads/{branch}\n" if remote is None else remote
+        reader = mock.Mock(side_effect=error) if error is not None else mock.Mock(return_value=list(runs))
+        out = io.StringIO()
+        with mock.patch.dict(sys.modules, {"wait_ci": self.wc}), mock.patch.object(sys, "path", list(sys.path)), mock.patch.object(self.wc, "runs_for", reader), \
+                mock.patch.object(self.mr.subprocess, "run", return_value=types.SimpleNamespace(stdout=remote, stderr="", returncode=0)), contextlib.redirect_stdout(out):
+            try:
+                result, message = self.mr.default_gate(f"{repo}:{branch}", WORK), None
+            except SystemExit as stop:
+                result, message = None, str(stop.code)
+        return result, message, out.getvalue(), reader
+
+    def test_the_exemption_set_is_exactly_the_root_home_repository(self):
+        self.assertEqual(set(self.mr.NO_CI_REPOS), {ROOT_HOME_REPO})
+        for repo in (BLOG_REPO, DESKTOP_REPO, "someone/else", "shine88pc/chanceblog-desktop-2"):
+            self.assertNotIn(repo, self.mr.NO_CI_REPOS, repo)
+
+    def test_the_root_home_repository_without_any_run_passes_with_an_empty_run_list(self):
+        result, message, out, reader = self.gate(ROOT_HOME_REPO, runs=[])
+        self.assertIsNone(message, message)
+        self.assertEqual(result, (GATE_SHA, []))
+        self.assertIn(f"검사 없는 저장소({ROOT_HOME_REPO}) — 자동 검사(워크플로)가 없어 관문을 면제한다: 가지 머리 {GATE_SHA[:8]}", out)
+        self.assertIn("증거는 요청 본문에 사람이 적는다", out)
+        reader.assert_called_once_with(ROOT_HOME_REPO, "main", GATE_SHA[:12])                      # 면제 전에 실행 목록을 읽어 본다
+        self.assertNotIn("검사 관문 통과", out)
+
+    def test_the_root_home_repository_whose_run_list_cannot_be_read_is_exempt_too(self):
+        result, message, out, _reader = self.gate(ROOT_HOME_REPO, error=RuntimeError("목록을 읽을 수 없다"))
+        self.assertIsNone(message, message)
+        self.assertEqual(result, (GATE_SHA, []))
+        self.assertIn("관문을 면제한다", out)
+
+    def test_the_blog_and_the_desktop_repositories_are_never_exempt(self):
+        for repo in (BLOG_REPO, DESKTOP_REPO):
+            for label, kwargs in (("실행 목록이 비었다", dict(runs=[])), ("실행 목록을 읽지 못했다", dict(error=RuntimeError("읽기 실패")))):
+                with self.subTest(repo=repo, label=label):
+                    result, message, out, _reader = self.gate(repo, **kwargs)
+                    self.assertIsNone(result)
+                    self.assertIn("의 자동 검사 실행이 목록에 없다", message)
+                    self.assertIn(GATE_SHA[:8], message)
+                    self.assertNotIn("면제", out)
+
+    def test_the_exemption_is_only_for_an_empty_list_so_real_runs_of_the_root_home_repository_still_have_to_be_green(self):
+        result, message, out, _reader = self.gate(ROOT_HOME_REPO, runs=[gate_run(7, conclusion="failure")])
+        self.assertIsNone(result)
+        self.assertIn("검사가 아직 끝나지 않았거나 초록이 아니다", message)
+        self.assertIn("7(completed/failure)", message)
+        self.assertNotIn("면제", out)
+        result, message, out, _reader = self.gate(ROOT_HOME_REPO, runs=[gate_run(8, status="in_progress", conclusion="")])
+        self.assertIsNone(result)
+        self.assertIn("8(in_progress/-)", message)
+        runs = [gate_run(9), gate_run(10, timing="9s")]
+        result, message, out, _reader = self.gate(ROOT_HOME_REPO, runs=runs)
+        self.assertIsNone(message, message)
+        self.assertEqual(result, (GATE_SHA, runs))
+        self.assertIn("검사 관문 통과", out)
+        self.assertNotIn("면제", out)
+
+    def test_a_missing_remote_branch_stops_even_for_the_root_home_repository(self):
+        result, message, _out, reader = self.gate(ROOT_HOME_REPO, remote="")
+        self.assertIsNone(result)
+        self.assertIn("원격에 브랜치가 없다", message)
+        reader.assert_not_called()
+
+    def test_each_repository_has_its_own_local_clone_folder_for_the_head_title(self):
+        nt_module = load_tool(WORK / "notice_tools.py", extra_path=WORK)
+        self.assertEqual(nt_module.repo_folder(ROOT_HOME_REPO), "root_repo")
+        self.assertEqual(nt_module.repo_folder(BLOG_REPO), "wt_r30")
+        self.assertEqual(nt_module.repo_folder(DESKTOP_REPO), "cd_repo")
+
+
+class MakeRequestTildeTest(unittest.TestCase):
+    """요청 파일에 물결표(~)를 쓰지 않는다 — 마크다운(GFM)이 물결표 한 쌍을 취소선으로 처리해 '15~20·30~40' 이 '1520·3040' 처럼 붙어 보인다(2026-11-09 운영자 지적)."""
+
+    def setUp(self):
+        self.mr = load_tool(WORK / "make_request.py", extra_path=WORK)
+        self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(self._tmp.cleanup)
+        self.work = Path(self._tmp.name) / "W"
+        self.folder = self.work / "wt_r30" / "인수인계" / "요청함"
+        self.folder.mkdir(parents=True)
+        (self.work / "draft.md").write_text(INFO_DRAFT_TEXT, encoding="utf-8", newline="\n")
+
+    def run_main(self, tests):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            try:
+                self.mr.main(["R-198", "note", "draft.md", tests, "", ""], workspace=self.work)
+                code = None
+            except SystemExit as stop:
+                code = stop.code
+        return code, out.getvalue()
+
+    def test_check_draft_refuses_a_tilde_and_names_the_place_and_passes_the_en_dash(self):
+        text = INFO_DRAFT_TEXT.replace("@TESTS@", "범위 15~20 입니다")
+        with self.assertRaises(SystemExit) as stop:
+            self.mr.check_draft(text, "R-198")
+        message = str(stop.exception.code)
+        self.assertIn("요청 파일에 물결표(~)를 쓰지 않는다", message)
+        self.assertIn("범위 15~20 입니다"[:8], message)                                             # 어디쯤인지 앞뒤 12자를 보인다
+        fields = self.mr.check_draft(INFO_DRAFT_TEXT.replace("@TESTS@", "범위 15–20 입니다"), "R-198")
+        self.assertEqual((fields["id"], fields["kind"]), ("R-198", "info"))
+
+    def test_a_tilde_anywhere_in_the_filled_draft_stops_the_run_and_no_file_is_made(self):
+        code, _out = self.run_main("범위 15~20")                                                    # 명령 줄 인자로 들어온 물결표도 채운 뒤에 걸린다
+        self.assertIsInstance(code, str)
+        self.assertIn("물결표(~)", code)
+        self.assertEqual(list(self.folder.iterdir()), [])
+        (self.work / "draft.md").write_text(INFO_DRAFT_TEXT.replace("summary: 안내입니다", "summary: 30~40 안내"), encoding="utf-8", newline="\n")
+        code, _out = self.run_main("시험 통과")
+        self.assertIn("물결표(~)", code)
+        self.assertEqual(list(self.folder.iterdir()), [])
+        (self.work / "draft.md").write_text(INFO_DRAFT_TEXT, encoding="utf-8", newline="\n")
+        code, out = self.run_main("범위 15–20")
+        self.assertIsNone(code, code)
+        self.assertEqual([path.name for path in self.folder.iterdir()], ["R-198_note.md"])
+        self.assertIn("파일 R-198_note.md", out)
+
+    def test_the_link_refusal_comes_before_the_tilde_one_and_both_are_plain_exits(self):
+        with self.assertRaises(SystemExit) as stop:
+            self.mr.check_draft(INFO_DRAFT_TEXT.replace("@TESTS@", "http://x.invalid ~"), "R-198")
+        self.assertIn("링크 주소", str(stop.exception.code))
+
+
+# ==== 14. 물결표 — 이 묶음이 새로 만든·고친 문서·프롬프트·양식·주석에 없다(권고-4) =========================
+TILDE_TEXT_FILES = [README, PROMPT_V3, *FORMS.glob("*.md"), SCRATCH / "watch_heads2.sh"]
+TILDE_PY_FILES = [WORK / "make_merged_notice.py", WORK / "make_request.py", SETUP, *SCRATCH.glob("*.py")]
+
+
+def python_tilde_lines(source):
+    """파이썬 소스에서 물결표가 있는 줄 번호 — 주석·독스트링은 모두 걸고, 그 밖의 글자 상수는 물결표를 '말하는' 것(`"~"` 비교·`물결표(~)` 설명)만 봐 준다."""
+    tree = ast.parse(source)
+    hits, docstrings = set(), set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.body and isinstance(node.body[0], ast.Expr) \
+                and isinstance(node.body[0].value, ast.Constant) and isinstance(node.body[0].value.value, str):
+            doc = node.body[0].value
+            docstrings.add(id(doc))
+            hits.update(doc.lineno + offset for offset, line in enumerate(doc.value.splitlines()) if "~" in line)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docstrings and "~" in node.value and node.value != "~" and "물결표(~)" not in node.value:
+            hits.add(node.lineno)
+    for token in tokenize.generate_tokens(io.StringIO(source).readline):
+        if token.type == tokenize.COMMENT and "~" in token.string:
+            hits.add(token.start[0])
+    return sorted(hits)
+
+
+class NoAsciiTildeTest(unittest.TestCase):
+    def test_the_new_documents_prompt_forms_and_script_have_no_ascii_tilde(self):
+        self.assertGreaterEqual(len(TILDE_TEXT_FILES), 5)
+        for path in TILDE_TEXT_FILES:
+            lines = [number for number, line in enumerate(read(path).splitlines(), 1) if "~" in line]
+            self.assertEqual(lines, [], f"{path.name}: 물결표가 있는 줄 — 범위는 en dash(–)로 쓴다")
+
+    def test_the_lines_this_work_added_to_the_two_old_documents_have_none(self):
+        for path in (PROMPT_OLD, MODEL_DOC):
+            self.assertNotIn("~", read(path).splitlines()[0], path.name)
+
+    def test_the_tool_sources_have_no_tilde_in_comments_or_docstrings_and_only_the_checks_name_it_in_strings(self):
+        self.assertGreaterEqual(len(TILDE_PY_FILES), 20)
+        for path in TILDE_PY_FILES:
+            self.assertEqual(python_tilde_lines(read(path)), [], f"{path.name}: 주석·독스트링·글자 상수의 물결표")
+
+    def test_the_two_prompt_numbers_that_had_tildes_use_the_en_dash(self):
+        text = read(PROMPT_V3)
+        self.assertIn("1–2분", text)
+        self.assertIn("8–11초", text)
+
+    def test_the_scanner_itself_catches_known_bad_samples_and_passes_the_checks_that_name_the_tilde(self):
+        tilde = chr(126)
+        bad = ("x = 1  # 범위 3" + tilde + "5\n", '"""독스트링 3' + tilde + '5"""\n', 'def f():\n    """둘째 줄에\n    3' + tilde + '5"""\n', 'message = "범위 3' + tilde + '5"\n', 'raise ValueError(f"`001`' + tilde + '`999` 꼴")\n')
+        for source in bad:
+            self.assertTrue(python_tilde_lines(source), source)
+        good = ('if "' + tilde + '" in text:\n    pass\n', 'return "물결표(' + tilde + ')가 있다 — 이렇게 쓴다"\n', "x = chr(126)\n", "# 범위 3" + chr(0x2013) + "5\n", 'y = text.index("' + tilde + '")\n')
+        for source in good:
+            self.assertEqual(python_tilde_lines(source), [], source)
+
+
+# ==== 15. egress 등록 이유 문장이 사실대로다(권고-5) ==============================================
+def egress_entry(file, function):
+    matches = [entry for entry in egress.EGRESS_EXCEPTIONS if (entry.file, entry.function) == (file, function)]
+    assert len(matches) == 1, (file, function, len(matches))
+    return matches[0]
+
+
+class EgressReasonsAreTruthfulTest(unittest.TestCase):
+    """등록 이유는 읽는 사람이 '이 지점이 무엇을 하는가' 를 믿고 넘어가는 문장이다 — 도구가 실제로 하는 일(불러 실행하는 코드·git 하위 명령·읽는 저장소)과 어긋나지 않게 못박는다. 항목의 개수·모양은 test_egress 와 정책 문서의 숫자가 지킨다."""
+
+    def test_verify_with_says_it_runs_the_code_of_the_folder_it_is_given(self):
+        reason = egress_entry("인수인계/도구/work/make_merged_notice.py", "verify_with").reason
+        for needle in ("저장소 코드", "pipeline/operator_loop.py", "불러 실행", "믿는 작업 폴더만", "--verify-with", "네트워크를 쓰지 않는다"):
+            self.assertIn(needle, reason, needle)
+
+    def test_resume_check_run_names_every_command_it_really_starts(self):
+        reason = egress_entry("인수인계/도구/work/scratch/resume_check.py", "run").reason
+        for needle in ("git ls-remote", "git log", "git status", "next_notice_no.py"):
+            self.assertIn(needle, reason, needle)
+        source = read(SCRATCH / "resume_check.py")
+        for command in ('"ls-remote"', '"log"', '"status"', "next_notice_no.py"):
+            self.assertIn(command, source, command)                                              # 이유가 말하는 명령이 도구에 정말 있다
+
+    def test_tools_that_take_a_repository_argument_say_which_one_is_the_default_and_that_other_public_repositories_can_be_read(self):
+        for file, function, default in (("인수인계/도구/work/scratch/run_times.py", "<module>", "기본은 자기 저장소"), ("인수인계/도구/work/scratch/web_runs.py", "<module>", "기본은 자기 저장소"),
+                                        ("인수인계/도구/work/scratch/wait_ci.py", "fetch", "첫 인자로 주며 보통 자기 저장소")):          # wait_ci 는 저장소 인자가 필수라 '기본' 이 없다
+            reason = egress_entry(file, function).reason
+            for needle in (default, "인자로 준 다른 공개 저장소도 읽는다", "사람이나 AI 세션이 실행"):
+                self.assertIn(needle, reason, f"{file}: {needle}")
+        for name in ("run_times.py", "web_runs.py", "wait_ci.py"):
+            self.assertIn("sys.argv", read(SCRATCH / name), name)                                # 저장소를 인자로 받는다는 사실이 코드에 있다
+        self.assertIn('"shine88pc/chanceblog"', read(SCRATCH / "run_times.py"))                  # 기본값이 자기 저장소라는 사실도 코드에 있다
+        self.assertIn('"shine88pc/chanceblog"', read(SCRATCH / "web_runs.py"))
+
+    def test_the_tool_gate_text_does_not_claim_that_nothing_calls_the_tools_but_people(self):
+        gate = egress._G_TOOL
+        for needle in ("사람이나 AI 세션이 직접 실행하는 도구", "저장소의 워크플로·예약이 부르지 않는다", "AI 세션 안의 크론 프롬프트는 일부를 부른다"):
+            self.assertIn(needle, gate, needle)
+        self.assertNotIn("사람이 실행하는 도구(워크플로·예약이 부르지 않는다)", gate)
+        tool_entries = [entry for entry in egress.EGRESS_EXCEPTIONS if entry.file.startswith("인수인계/도구/")]
+        self.assertGreaterEqual(len([entry for entry in tool_entries if entry.gate == gate]), 20)  # 도구 항목의 관문 칸은 이 문구를 쓴다
+        self.assertEqual([entry.function for entry in tool_entries if entry.gate.startswith("막는 장치 없음 — 사람") and entry.gate != gate], [])      # 옛 문구가 남은 항목이 없다
+        prompt = read(PROMPT_V3)
+        for name in ("web_runs.py", "run_times.py", "wait_ci.py"):
+            self.assertIn(name, prompt, name)                                                    # 문구가 말하는 '크론 프롬프트가 부르는 도구' 가 실제로 프롬프트에 있다
 
 
 if __name__ == "__main__":
