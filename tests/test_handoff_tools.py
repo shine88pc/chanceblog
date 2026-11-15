@@ -9,6 +9,7 @@
 """
 import ast
 import contextlib
+import datetime
 import importlib.util
 import io
 import os
@@ -406,8 +407,10 @@ class MergeGuardTest(unittest.TestCase):
 
     def test_every_condition_blocks_on_its_own(self):
         cases = (
-            ("가지 이름", dict(branch="ai/claude/docs-cleanup"), {}),
-            ("가지 이름", dict(branch="ai/claude/M73-x"), {}),
+            ("가지 이름이 ai/claude/M###-슬러그 규칙이 아님", dict(branch="ai/claude/docs-cleanup"), {}),
+            ("가지 이름이 ai/claude/M###-슬러그 규칙이 아님", dict(branch="ai/claude/M73-x"), {}),                  # 세 자리 미만 번호도 규칙 밖
+            ("가지 이름이 ai/claude/M###-슬러그 규칙이 아님", dict(branch="ai/claude/M12345-x"), {}),               # 다섯 자리도 규칙 밖
+            ("가지 이름이 ai/claude/M###-슬러그 규칙이 아님", dict(branch="ai/claude/M073_x"), {}),                 # 하이픈이 아닌 구분자
             ("한 커밋이 아님", {}, dict(ahead="2")),
             ("한 커밋이 아님", {}, dict(ahead="0")),
             ("한 커밋이 아님", {}, dict(rev_rc=1)),
@@ -760,6 +763,25 @@ class ResumeCheckTest(unittest.TestCase):
         self.assertEqual(self.rc.HERE.parent, SCRATCH.parent)
         self.assertEqual(self.rc.HERE, SCRATCH)
 
+    def test_main_without_a_work_option_reads_the_folders_next_to_the_scripts_folder(self):
+        rc = self.rc
+        seen = []
+
+        def fake_state(folder):
+            seen.append(Path(folder))
+            return "없음"
+
+        with mock.patch.object(rc, "head", return_value="abc1234"), mock.patch.object(rc, "api", return_value=[]), mock.patch.object(rc, "folder_state", fake_state):
+            code, _out, _err = capture(rc.main, [])
+            self.assertEqual(code, 0)
+            self.assertEqual(seen, [SCRATCH.parent / "wt_r30", SCRATCH.parent / "cd_repo"])      # 고정 폴더가 아니라 스크립트 위치 기준
+            seen.clear()
+            capture(rc.main, [], work="어딘가")                                                    # 불러 쓰는 쪽이 키워드로 W 를 줄 수도 있다
+            self.assertEqual(seen, [Path("어딘가") / "wt_r30", Path("어딘가") / "cd_repo"])
+            seen.clear()
+            capture(rc.main, ["--work", "다른곳"], work="어딘가")                                     # 명령줄 --work 가 이긴다
+            self.assertEqual(seen, [Path("다른곳") / "wt_r30", Path("다른곳") / "cd_repo"])
+
 
 # ==== 7. memfree — 기다림과 읽기 ==============================================================
 class MemfreeTest(unittest.TestCase):
@@ -964,6 +986,65 @@ class VerifyLiveCountsTest(unittest.TestCase):
         self.assertEqual(runs_for.call_args[0], (vlc.BLOG, "main", "abc1234"))
         self.assertEqual(git_calls[0], ("fetch", "-q", "origin", "main", "ai/claude/M073-x"))
         self.assertEqual({call[0] for call in git_calls}, {"fetch", "rev-parse", "log", "rev-list"})       # 푸시·병합·체크아웃 없이 읽기와 fetch 뿐
+
+
+# ==== 9-b. shadow_table(그림자 실행 결과 표)의 순수 함수와 watch_heads2.sh ===================
+class ShadowTableTest(unittest.TestCase):
+    def setUp(self):
+        self.st = load_tool(SCRATCH / "shadow_table.py")
+
+    def test_tables_reads_markdown_tables_and_skips_the_separator_row(self):
+        md = "머리 글\n\n| 날짜 | 값 |\n|---|---:|\n| 11월 14일 | 12 |\n| 11월 13일 | 7 |\n\n끝\n| 둘째 | 표 |\n|:---:|:---:|\n| a | b |\n"
+        self.assertEqual(self.st.tables(md), [[["날짜", "값"], ["11월 14일", "12"], ["11월 13일", "7"]], [["둘째", "표"], ["a", "b"]]])
+        self.assertEqual(self.st.tables("표가 없는 글\n"), [])
+
+    def test_num_reads_signed_numbers_with_the_unicode_minus_and_thousand_separators(self):
+        minus = chr(0x2212)
+        self.assertEqual(self.st.num("값 " + minus + "1,234.5 개"), -1234.5)
+        self.assertEqual(self.st.num("+2"), 2.0)
+        self.assertEqual(self.st.num("7"), 7.0)
+        self.assertIsNone(self.st.num("없음"))
+        self.assertEqual(self.st.MINUS, minus)
+
+    def test_dates_months_means_and_tolerances(self):
+        st = self.st
+        self.assertEqual(st.kdate("2026년 11월 14일 맑음"), datetime.date(2026, 11, 14))
+        self.assertIsNone(st.kdate("11월 14일"))
+        self.assertEqual(st.kmonth("2026년 11월 평균"), (2026, 11))
+        self.assertIsNone(st.kmonth("2026년 11월 14일"))                                       # 일까지 적힌 글은 월 표기가 아니다
+        self.assertEqual(st.mean([1, 2, 6]), 3.0)
+        self.assertAlmostEqual(st.tol("12.34"), 0.005, places=6)                               # 소수 둘째 자리까지 적힌 숫자는 반올림 오차 0.005
+        self.assertAlmostEqual(st.tol("12"), 0.5, places=6)
+        self.assertEqual(st.body_of("---\n제목: x\n---\n본문"), "본문")
+        self.assertEqual(st.body_of("머리 글 없음"), "머리 글 없음")
+
+    def test_the_summary_counts_matches_and_names_the_mismatches(self):
+        checks = self.st.Checks()
+        checks.add("원본", "a", True)
+        checks.add("원본", "b", False, "기대 3 / 4")
+        checks.add("내부", "c", True)
+        self.assertEqual(checks.summary(), "원본 재계산 1/2 · 글 안 계산식 1/1 — 불일치: b(기대 3 / 4)")
+        ok = self.st.Checks()
+        ok.add("원본", "a", True)
+        self.assertEqual(ok.summary(), "원본 재계산 1/1 — 모두 일치")
+
+
+class WatchHeadsShellTest(unittest.TestCase):
+    def test_the_script_ends_itself_and_only_reads_the_two_repositories_heads(self):
+        text = read(SCRATCH / "watch_heads2.sh")
+        self.assertTrue(text.startswith("#!/bin/bash"))
+        self.assertIn("END=$((SECONDS+1750))", text)                                           # 스스로 끝난다(고아가 되어 GitHub 를 계속 부르지 않게)
+        self.assertIn('while [ "$SECONDS" -lt "$END" ]', text)
+        self.assertEqual(text.count("sleep 60"), 1)
+        self.assertEqual(text.count("refs/heads/main"), 1)
+        self.assertEqual(len(re.findall("https://github[.]com/[A-Za-z0-9-]+/[A-Za-z0-9-]+[.]git", text)), 2)         # 블로그·데스크톱 두 저장소
+        self.assertNotIn("curl", text)
+        self.assertNotIn("api.github.com", text)
+
+    @unittest.skipUnless(os.name == "posix" and shutil.which("bash"), "리눅스·맥에서만 bash -n 으로 문법을 본다")
+    def test_the_script_has_no_shell_syntax_errors(self):
+        done = subprocess.run(["bash", "-n", str(SCRATCH / "watch_heads2.sh")], capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
 
 
 # ==== 10. 복사본이 작업 폴더 W 안에서 도는지 =================================================
@@ -1214,6 +1295,28 @@ class ReadmeFirstStartSectionTest(unittest.TestCase):
         self.assertIsNone(re.search("https?://", self.text))
         for mark in ("{{", "{%"):
             self.assertNotIn(mark, self.text)
+
+    def test_every_table_row_has_as_many_columns_as_its_header(self):
+        """GitHub 는 코드 안의 세로선도 칸을 가른다(이스케이프한 것만 예외) — 표 칸에 세로선을 쓰면 줄이 어긋나 렌더링이 깨진다."""
+        pipe = re.compile(r"(?<!\\)\|")
+        tables, block = 0, []
+
+        def check(rows):
+            nonlocal tables
+            if len(rows) >= 2:
+                tables += 1
+                header = len(pipe.findall(rows[0][1]))
+                for number, text in rows:
+                    self.assertEqual(len(pipe.findall(text)), header, f"README {number}줄: 표 칸 수가 머리 줄과 다르다 — {text[:50]}")
+
+        for number, text in enumerate(self.text.splitlines(), 1):
+            if text.startswith("|"):
+                block.append((number, text))
+            else:
+                check(block)
+                block = []
+        check(block)
+        self.assertGreaterEqual(tables, 4)                                                    # 1절·2절·3절·7절 표를 훑었다
 
     def test_the_new_tools_are_described_with_their_limits(self):
         merge_guard = table_row(self.text, "merge_guard.py")
