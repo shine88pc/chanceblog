@@ -313,6 +313,13 @@ class ApprovalParseTest(unittest.TestCase):
             with self.subTest(text=repr(text)):
                 self.assertIsNone(mp.parse_approval(text))
 
+    def test_other_punctuation_and_edge_spaces_are_not_an_approval(self):
+        """R5(T3 — AP01·AP03): 전각 마침표·전각 점·앞뒤 U+3000 공백처럼 겉모습만 비슷한 입력은 승인이 아니다 — 승인 인정은 좁게(끝의 마침표는 ASCII 하나, 앞뒤 공백은 ASCII 공백류만)."""
+        for text in ("M075 승인" + chr(0x3002), chr(0x3000) + "M075 승인", "M075 승인" + chr(0x3000), "M075 승인" + chr(0xFF0E), chr(0xA0) + "M075 승인" + chr(0xA0)):
+            with self.subTest(text=repr(text)):
+                self.assertIsNone(mp.parse_approval(text))
+                self.assertIsNone(mp.check_approval_text(text).number)
+
     def test_a_newline_inside_is_not_an_approval(self):
         for text in ("M075\n승인", "M075 \n승인", "M075\r\n승인", "\n\nM075\n\n승인"):
             with self.subTest(text=repr(text)):
@@ -557,6 +564,12 @@ class ClassifyAllowedTest(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(classify(kind, [path]).tier, "ai_ok", path)
 
+    def test_the_result_knows_whether_it_is_operator_only(self):
+        """I1(T3 — NW33): Classification.operator_only 는 tier 가 운영자 전용일 때만 참이다 — 호출하는 쪽이 이 속성으로 가른다."""
+        self.assertFalse(classify("blog", ["pipeline/a.py"], GOOD_TEXT).operator_only)
+        self.assertTrue(classify("blog", [".github/workflows/x.yml"], "").operator_only)
+        self.assertTrue(classify("blog", ["pipeline/a.py"], "adsbygoogle").operator_only)
+
     def test_the_result_is_deterministic_and_order_free(self):
         paths = ["pipeline/b.py", "pipeline/a.py", "tests/test_a.py"]
         first = classify("blog", paths, GOOD_TEXT)
@@ -611,6 +624,16 @@ class ClassifyOperatorOnlyTest(unittest.TestCase):
         expected = {"pipeline/blogs.json": {"publish_mode", "auto_publish", "ads"}, "pipeline/source_registry.json": {"provider_activation"},
                     "pipeline/ops_inbox_policy.json": {"pipeline_pause", "publish_mode"}}
         for path, codes in expected.items():
+            with self.subTest(path=path):
+                result = classify("blog", [path])
+                self.assertEqual(result.tier, "operator_only")
+                self.assertEqual(set(result.categories), codes)
+
+    def test_case_variants_of_the_publish_settings_files_are_still_operator_only(self):
+        """R4(T3 — DD02): 발행 설정 파일 이름의 대소문자 변형도 같은 항목들로 걸린다 — 접지 않은 경로로 찾으면 맨 위가 pipeline 이라 기본 거부도 안 걸려 ai_ok 가 된다."""
+        blogs, registry, inbox = {"publish_mode", "auto_publish", "ads"}, {"provider_activation"}, {"pipeline_pause", "publish_mode"}
+        for path, codes in (("pipeline/Blogs.json", blogs), ("Pipeline/Blogs.json", blogs), ("PIPELINE/BLOGS.JSON", blogs), ("pipeline/Source_Registry.json", registry),
+                            ("pipeline/OPS_INBOX_POLICY.JSON", inbox)):
             with self.subTest(path=path):
                 result = classify("blog", [path])
                 self.assertEqual(result.tier, "operator_only")
@@ -803,6 +826,22 @@ class ClassifyInvalidInputTest(unittest.TestCase):
         for paths in (None, [], "pipeline/a.py", ["a/../.github/x"], ["../a.py"], ["/etc/a.py"], ["C" + ":/a.py"], [None], [1], [""], ["a\x00b"], 5, ("a.py", None), ["a" + chr(127) + "b"]):
             with self.subTest(paths=paths):
                 self.assert_invalid(mp.classify_change("blog", paths, "", dict(DECLARED_OK)))
+
+    def test_a_drive_relative_path_is_not_ai_ok(self):
+        """I1(T3 — PA12): 드라이브 글자만 붙고 '/' 가 없는 경로(`C:x`)도 저장소 안의 경로가 아니다 — 입력 오류다(`C:/x` 만 거르던 시험의 틈)."""
+        for path in ("C:x", "c:foo/bar.py", "Z:a"):
+            with self.subTest(path=path):
+                self.assertIsNone(mp.normalize_repo_path(path))
+                self.assert_invalid(mp.classify_change("blog", [path], "", dict(DECLARED_OK)))
+                self.assert_invalid(mp.classify_change("desktop", ["pipeline/a.py", path], "", dict(DECLARED_OK)))
+
+    def test_a_tilde_is_an_ordinary_path_character_but_delete_is_a_control_character(self):
+        """I1(T3 — AU0048): 경로의 물결표(0x7e)는 평범한 글자라 거절하지 않고 DEL(0x7f)부터 제어 문자로 거절한다 — 제어 문자 범위의 아래쪽 끝."""
+        tilde, delete = chr(126), chr(127)
+        ok = mp.classify_change("blog", ["pipeline/a" + tilde + "b.py"], "", dict(DECLARED_OK))
+        self.assertEqual((ok.tier, ok.extra_flags), ("ai_ok", ()))
+        self.assertEqual(mp.normalize_repo_path("pipeline/a" + tilde + "b.py"), "pipeline/a" + tilde + "b.py")
+        self.assert_invalid(mp.classify_change("blog", ["pipeline/a" + delete + "b.py"], "", dict(DECLARED_OK)))
 
     def test_a_mapping_is_not_a_path_list(self):
         """사전을 경로 목록으로 넘기면 키만 읽혀 값이 숨는다 — 경로 목록으로 보지 않는다(Q13)."""
@@ -1001,6 +1040,14 @@ class ClassifySafetyGuardTest(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(classify("blog", [path]).tier, "ai_ok", path)
         self.assertEqual(classify("desktop", ["src/chanceblog_desktop/ui/pages/home.py"]).tier, "ai_ok")
+
+    def test_case_variants_of_the_safe_folder_are_still_flagged(self):
+        """R4 덤(T3 — SG04): 안전 장치 폴더(pipeline/publishers)의 대소문자 변형도 이름 목록의 폴더 규칙으로 걸린다 — 이름 비교는 대소문자를 가리지 않는다(문서 §7-6)."""
+        for path in ("pipeline/Publishers/x.py", "PIPELINE/PUBLISHERS/x.py", "pipeline/PUBLISHERS/deep/y.py"):
+            with self.subTest(path=path):
+                result = classify("blog", [path])
+                self.assertEqual(result.tier, "operator_only")
+                self.assertIn("safety_guard", result.extra_flags)
 
     def test_it_is_a_flag_outside_the_twelve_items(self):
         result = classify("blog", ["pipeline/egress.py"])
@@ -1316,6 +1363,16 @@ class PreconditionsTest(unittest.TestCase):
         facts["pr_state"], facts["pr_draft"] = "open", False
         self.assertTrue(mp.check_preconditions(facts).ok)
 
+    def test_condition_1_a_pr_number_that_is_an_int_subclass_fails_even_when_only_one_side_is(self):
+        """R3(T3 — AU0479·AU0480·AU0481): 승인 때 PR 번호와 지금 PR 번호 중 한쪽만 int 하위 형식이어도 실패한다 — 양쪽이 모두 그럴 때만 보던 시험의 틈."""
+        for key in ("approved_pr_number", "pr_number"):
+            with self.subTest(key=key):
+                facts = good_facts()
+                facts[key] = StrSubclassTest.EvilInt(5)
+                verdict = mp.check_preconditions(facts)
+                self.assertEqual(verdict.failed_codes, ("number_match",))
+                self.assertIn("양의 정수", verdict.failures[0].reason)
+
     def test_condition_1_a_used_approval_cannot_be_reused(self):
         facts = good_facts()
         facts["consumed_numbers"] = ("M070", "M075")
@@ -1395,6 +1452,14 @@ class PreconditionsTest(unittest.TestCase):
                 verdict = mp.check_preconditions(facts)
                 self.assertEqual(verdict.failed_codes, ("checks_pass",))
                 self.assertIn("(이름 없는 검사)", verdict.failures[0].reason)
+
+    def test_condition_3_a_check_name_with_extra_spaces_does_not_satisfy_a_required_check(self):
+        """R3(T3 — PC08): 앞뒤 공백이 붙은 검사 이름은 같은 이름의 필수 검사를 채우지 못한다 — 공백을 지워 맞춰 주지 않는다."""
+        for padded in (" 저장소 규칙 검사 ", "저장소 규칙 검사 ", " 저장소 규칙 검사", "\t저장소 규칙 검사", "저장소 규칙 검사\n"):
+            with self.subTest(name=repr(padded)):
+                facts = good_facts()
+                facts["checks"] = [{"name": padded, "conclusion": "success"}, {"name": "사이트 배포 미리 검사", "conclusion": "success"}]
+                self.assertEqual(self.failed(facts), ("checks_pass",))
 
     def test_condition_3_every_required_check_must_be_in_the_result_and_succeeded(self):
         """필수 검사의 이름 목록을 모르면 시작도 안 한 검사가 보이지 않는다 — 목록은 비어 있으면 안 되고 하나라도 결과에 없거나 success 가 아니면 실패다(S2c)."""
@@ -1486,6 +1551,23 @@ class PreconditionsTest(unittest.TestCase):
             facts = good_facts()
             facts["independent_verification"] = bad
             self.assertEqual(self.failed(facts), ("independent_verified",))
+
+    def test_condition_4_exactly_one_open_required_finding_fails(self):
+        """R3(T3 — PC13): 남은 필수 지적이 정확히 1건일 때도 실패한다 — 0 이 아니면 모두 실패이고 2건 이상만 막지 않는다."""
+        for count in (1, 2, 7):
+            with self.subTest(count=count):
+                facts = good_facts()
+                facts["independent_verification"] = dict(facts["independent_verification"], open_required_findings=count)
+                self.assertEqual(self.failed(facts), ("independent_verified",))
+
+    def test_condition_4_equal_but_malformed_tree_hashes_do_not_verify(self):
+        """R3(T3 — AU0620): 검증한 트리와 지금 트리가 둘 다 40자 해시가 아니면서 서로 같은 글자일 때도 실패한다 — 같기만 하면 통과로 읽지 않는다."""
+        for tree in ("unknown", "abc", "g" * 40, "1" * 39, "1" * 41):
+            with self.subTest(tree=tree):
+                facts = good_facts()
+                facts["current_tree"] = tree
+                facts["independent_verification"] = dict(facts["independent_verification"], verified_tree=tree)
+                self.assertEqual(self.failed(facts), ("independent_verified",))
 
     def test_condition_4_the_verified_content_must_be_the_content_being_merged(self):
         facts = good_facts()
@@ -1972,6 +2054,28 @@ class ExplanationTest(unittest.TestCase):
             mp.render_explanation("M075", 198, "c" * 40, ["pipeline/a.py"], *ANSWERS)                                         # 분류 없이는 만들지 않는다
         self.assertIn("병합 요청 M075", mp.render_explanation(**self.base(classification=classify("blog", ["pipeline/a.py"], GOOD_TEXT).to_dict())))     # 사전 모양은 받는다
 
+    def test_a_classification_with_an_unknown_tier_or_non_text_items_is_not_rendered(self):
+        """I1(T3 — AU0443·AU0445·AU0446·AU0450): 알 수 없는 tier 나 글자가 아닌 항목이 든 분류 사전으로는 설명을 만들지 않는다 — 점검표를 믿고 채울 수 없는 분류다."""
+        good = classify("blog", ["pipeline/a.py"], GOOD_TEXT).to_dict()
+        for patch in ({"tier": "maybe"}, {"tier": 5}, {"categories": [1]}, {"extra_flags": [None]}, {"paths": [3]}, {"reasons": [object()]}):
+            with self.subTest(patch=str(patch)):
+                with self.assertRaises(ValueError):
+                    mp.render_explanation(**self.base(classification=dict(good, **patch)))
+
+    def test_the_header_needs_a_space_between_the_words_and_the_number(self):
+        """I1(T3 — NW06): 첫 줄은 '병합 요청 M075' 처럼 낱말과 번호 사이에 공백이 있어야 한다 — '병합 요청M075' 는 모양이 다르다."""
+        message = "첫 줄이 '병합 요청 M075' 모양이 아닙니다(번호는 M 뒤에 세 자리 또는 네 자리 숫자)"
+        self.assertEqual(self.problems(make_text()), [])
+        self.assertIn(message, self.problems(replace_once(make_text(), "병합 요청 M075\n", "병합 요청M075\n")))
+
+    def test_star_and_dash_bullets_are_read_on_the_six_items(self):
+        """I1(T3 — NW21): 설명의 6항목 줄 앞의 목록 기호는 '- ' 와 '* ' 둘 다 읽는다(옛 시험은 기호를 읽는다는 이름뿐이었다)."""
+        text = make_text()
+        for bullet in ("- ", "* "):
+            with self.subTest(bullet=bullet):
+                lines = [bullet + line if line.startswith(EXPLANATION_6) else line for line in text.split("\n")]
+                self.assertEqual(self.problems("\n".join(lines)), [])
+
     def test_the_merge_way_line_is_required_and_must_be_one_of_the_two_sentences(self):
         text = make_text()
         self.assert_problem(self.problems(drop_line(text, "병합 방식:")), "병합 방식")
@@ -2124,6 +2228,13 @@ class CompletionNoticeTest(unittest.TestCase):
         self.assertEqual(mp.completion_notice_problems("\n".join("- " + line if ": " in line else line for line in text.split("\n"))), [])
         self.assertEqual(mp.completion_notice_problems(text.replace(": ", chr(0xFF1A) + " ")), [])
         self.assertEqual(mp.completion_notice_problems(text.replace("\n", "\r\n")), [])
+
+    def test_star_bullets_are_read_like_dash_bullets(self):
+        """I1(T3 — NW22): 완료 알림 항목 앞의 목록 기호는 '- ' 와 '* ' 둘 다 읽는다."""
+        text = make_notice()
+        for bullet in ("- ", "* "):
+            with self.subTest(bullet=bullet):
+                self.assertEqual(mp.completion_notice_problems("\n".join(bullet + line if ": " in line else line for line in text.split("\n"))), [])
 
     def test_invisible_characters_are_reported(self):
         self.assert_problem(mp.completion_notice_problems(make_notice().replace("이상 유무", "이상" + chr(0x200B) + " 유무", 1)), "보이지 않는 글자")
@@ -3066,6 +3177,22 @@ class StrSubclassTest(unittest.TestCase):
         for method in (self.Evil("push_main"), self.Evil("pr_merge"), self.Evil("force_push")):
             self.assertFalse(mp.merge_method_allowed(method))
         self.assertTrue(mp.merge_method_allowed("pr_merge"))
+
+    def test_the_pull_request_state_must_be_a_plain_str(self):
+        """R1(T3 — K38·TY06·AU0459): pr_state 는 정확히 str 만 받는다 — 비교를 바꿔치는 하위 형식(Evil)도 얌전한 하위 형식(Plain)도 열린 PR 로 통과하지 못한다(재확인 조건 1)."""
+        class Plain(str):
+            pass
+
+        for value in (self.Evil("closed"), self.Evil("open"), self.Evil("merged"), Plain("open"), Plain("closed")):
+            with self.subTest(value=str.__repr__(value)):
+                facts = good_facts()
+                facts["pr_state"] = value
+                verdict = mp.check_preconditions(facts)
+                self.assertEqual(verdict.failed_codes, ("number_match",))
+                self.assertIn("PR 상태를 알 수 없습니다", verdict.failures[0].reason)
+        facts = good_facts()
+        facts["pr_state"] = str(Plain("open"))                                                                       # 같은 글자를 정확한 str 로 바꾸면 통과한다
+        self.assertTrue(mp.check_preconditions(facts).ok)
 
     def test_numbers_and_heads_must_be_plain_strs(self):
         evil = self.Evil("M076")

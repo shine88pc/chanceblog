@@ -395,6 +395,31 @@ class OperatorStatementsPinnedTest(unittest.TestCase):
         (11, "가 코드 파일의 바뀐 줄에 있으면 `invalid_input` 으로 보아 운영자 전용으로 둡니다"),
         (11, "**켜는 변경의 지시서는 이 목록을 그대로 넣습니다.**"),
         (11, "정하지 못한 항목이 있으면 켜지 않습니다"),
+        # ---- 7차(WIP 12): T 렌즈 3차 반영 — 표·숫자 값 열과 문장(UN01–UN16·이전 T 문서 변이 P15·P18–P22·P24)·secret_findings 의 센 범위·글자 검색 범위 밖의 폴더 ----
+        (5, "번호는 M + 숫자 세 자리(M001–M999) 또는 네 자리(M1000–M9999)입니다"),
+        (8, "| `pr_merge` | 허용 |"),
+        (8, "| `push_main`·`direct_push`·`force_push` | 거절 |"),
+        (6, "충돌 여부가 정확히 거짓(모르면 실패)"),
+        (10, "서로 다른 번호의 기록이 3건 이상이고 모두 6가지를 충족"),
+        (11, "호출에는 `actions: write` 권한이 필요합니다."),
+        (11, "텔레그램 한도(3,800자)"),
+        (7, "이름이 정확히 같을 때만 해당하고 대소문자는 가리지 않습니다."),
+        (7, "경로 이름은 대소문자를 가리지 않고 비교하고"),
+        (3, "지금은 꺼져 있어서 4·5단계를 운영자가 직접 합니다"),
+        (1, "일반 코드 또는 문서 PR 3건으로 시험하고"),
+        (6, "검사 결과가 하나 이상이고 모두 `success`"),
+        (9, "없음 — 결과가 나올 때까지 기다림"),
+        (7, "4300자리가 넘는 아주 긴 숫자"),
+        (7, "- 맨 위 항목만 봅니다. 내부 폴더 안쪽의 이름(예: `docs/README.md`)은 보지 않습니다."),
+        (6, "직전 병합의 main 검사가 `success` 이거나 첫 병합(`none`)"),
+        (4, "점검표의 12항목은 **분류 결과에서 채워집니다**"),
+        (7, "바뀐 줄의 `PIPELINE_PAUSE`(코드 파일만)"),
+        (5, "일반 글자(`str`)만 받습니다. 비교를 바꿔치는 글자 하위 형식은 거절합니다."),
+        (7, "재확인은 경로·바뀐 줄 규칙만 다시 계산하고 선언은 넘겨받은 분류를 따릅니다."),
+        (11, "이 집합을 모르면 시작도 하지 않은 검사가 결과에 보이지 않아 통과로 읽힙니다."),
+        (11, "`secret_findings` 는 문서 파일을 포함한 모든 바뀐 파일에서 센 값이어야 합니다 — 이 함수는 넘겨받은 수가 0 인지만 확인하고 어디서 셌는지는 모르며, "
+              "분류 규칙은 강한 비밀 모양을 문서 파일에서도 운영자 전용으로 보기 때문입니다(§7-6)"),
+        (7, "`docs/`·`인수인계/` 등)에 있는 `.py` 파일은 아예 보지 않아, 거기서 정책 모듈을 가져와도 못 잡습니다"),
     )
 
     def test_the_conservative_judgement_is_attributed_to_the_ai_and_waits_for_the_operator(self):
@@ -435,6 +460,23 @@ class OperatorStatementsPinnedTest(unittest.TestCase):
             with self.subTest(item=number):
                 self.assertIn(summary_word, line)
                 self.assertIn(section_word, decisions)
+
+    def test_the_owner_account_named_in_the_design_memo_is_the_code_owner(self):
+        """I2(T3 — UN07): §11-2 4번이 '승인은 소유자 계정의 글에서만 읽는다' 며 적은 계정 이름이 저장소의 코드 소유자(.github/CODEOWNERS)와 같다 — 이름을 시험에 복사하지 않고 저장소 파일과 맞춰 본다."""
+        match = re.search(r"소유자\(`([A-Za-z0-9-]+)`\)", subsection("11-2"))
+        self.assertIsNotNone(match)
+        owners = (ROOT / ".github" / "CODEOWNERS").read_text(encoding="utf-8")
+        self.assertIn("@" + match.group(1), owners)
+
+    def test_the_secret_findings_count_covers_document_files_because_the_rules_do(self):
+        """R2(T3): §11-3 이 secret_findings 를 '문서 파일을 포함한 모든 바뀐 파일'에서 센 값이어야 한다고 적은 것은 분류 규칙이 강한 비밀 모양을 문서 파일에서도 운영자 전용으로 보기 때문이다 — 실제로 그런지 본다."""
+        secret = "AI" + "za" + "CANARY_" + "A" * 28                                                                  # 조립한 가짜 비밀(소스에 비밀 모양이 이어 붙어 있지 않다)
+        declared = dict.fromkeys(mp.DECLARED_REQUIRED, False)
+        for path in ("docs/note.md", "README.md", "docs/x.txt"):
+            with self.subTest(path=path):
+                result = mp.classify_change("blog", [path], {path: "키는 " + secret + " 입니다" + chr(10)}, declared)
+                self.assertEqual(result.tier, "operator_only")
+                self.assertIn("credentials", result.categories)
 
     def test_the_reading_guide_tells_the_operator_which_sections_to_read(self):
         quote = DOC.split("\n## 1.")[0]
@@ -1122,6 +1164,13 @@ class NotWiredTest(unittest.TestCase):
                              ("내장 이름을 글자로 찾아 부름", "globals()['__builtins__']['__import__']('os')\n"), ("sys.modules 조회", "module = sys.modules['pipeline.' + chr(109) + 'erge_policy']\n")):
             with self.subTest(label=label):
                 self.assertEqual(named_only_problems(base + extra, ["merge_policy.py"], ["test_merge_policy_one"]), [])
+
+    def test_the_text_search_does_not_look_in_the_docs_or_handover_folders(self):
+        """I3(T3): §7-7 이 적은 대로 글자 검색은 맨 위·pipeline·scripts·tests·.github 밖의 폴더(docs/·인수인계/ 등)의 .py 파일은 보지 않는다 — 검색 범위를 넓히면 이 시험이 빨개져 문서도 한 묶음으로 고치게 한다."""
+        relatives = [path.relative_to(ROOT).as_posix() for path in self.scan_targets()]
+        self.assertGreater(len(relatives), 100)
+        self.assertEqual([item for item in relatives if item.startswith(("docs/", "인수인계/"))], [])
+        self.assertTrue(all("/" not in item or item.split("/", 1)[0] in ("pipeline", "scripts", "tests", ".github") for item in relatives))
 
     def test_the_name_scan_itself_catches_an_import_and_ignores_a_same_named_definition(self):
         names = "|".join(self.FUNCTION_NAMES)
