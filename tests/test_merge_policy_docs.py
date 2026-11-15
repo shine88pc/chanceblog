@@ -1,7 +1,7 @@
 """조건부 승인형 AI 병합 정책의 문서·정적 시험 — `docs/AI_MERGE_POLICY.md` 와 `pipeline/merge_policy.py` 가 서로, 그리고 운영자 원문의 목록과 어긋나지 않는지.
 
 문서의 글이 옳은지는 시험이 알 수 없어 사람이 본다. 여기서는 낱말·번호·표·예시 글·이름을 코드와 대조하고(문서의 목록 = 시험에 글자 그대로 적어 둔 운영자 원문 = 모듈 상수), 문서 규칙(물결표·웹 주소·Liquid·
-로컬 경로 없음)과 모듈의 성질 — 표준 라이브러리 `re`·`dataclasses` 만, 네트워크·파일 쓰기·환경 변수·시간·난수 없음, 어디서도 import 되지 않음(지금은 꺼져 있음) — 을 정적으로 지킨다.
+로컬 경로 없음)과 모듈의 성질 — 표준 라이브러리 `re`·`dataclasses` 만, 네트워크·파일 쓰기·환경 변수·시간·난수 없음, 어디서도 import 되지 않음(지금은 꺼져 있음) — 을 정적으로 지킨다. 미연결은 파일 이름 글자 검색으로 지키고, 이름 글자만 허용된 한 파일(품질 Gate 연결 격리 시험)은 줄이 아니라 구문 트리(ast)로 지킨다.
 또 블로그 저장소의 기본 거부 목록(SITE_INTERNAL_ENTRIES)을 실제 `_config.yml` 의 exclude 와 사이트 정리 시험의 상수에 맞춰 보고(읽기만 한다), 사이트로 내보내지는 실제 파일이 하나도 AI 병합 대상이 아닌지 본다.
 이 시험은 네트워크·파일 쓰기를 하지 않는다.
 """
@@ -361,6 +361,16 @@ class OperatorStatementsPinnedTest(unittest.TestCase):
         (11, "(검증자 P 의 권고는 운영자 전용)"),
         (7, "코드가 입력 오류로 돌려주는 '글이 없으면 빈 글을 넣어야 합니다' 문구도 바뀐 줄이 정말 없는 파일을 뜻하며 읽지 못한 파일을 가리키지 않습니다"),
         (7, "정책 모듈과 그 시험 두 개 밖에는 이름을 쓰는 파일이 없게 합니다"),
+        (7, "그런 시험을 AI 가 약하게 고친 채 병합될 수 있다는 뜻입니다"),
+        (7, "이 빈틈을 닫을지는 켜기 전에 운영자와 정합니다"),
+        (7, "기본값을 어떻게 둘지는 켜기 전에 운영자와 정합니다"),
+        (7, "이 사실에 기대고 있습니다"),
+        (7, "영향은 설명 글의 병합 방식 문구뿐이고"),
+        (7, "손으로 쓴 글의 `아니오` 가 맞는지는 독립 검증자가 분류와 대조해야 합니다"),
+        (7, "코드는 빈 글을 '읽어 보니 바뀐 줄이 없다' 는 결과로만 믿습니다"),
+        (11, "코드도 문서도 아닌 파일(예: `pipeline/profiles/` 의 설정 파일)도 통과할 수 있고"),
+        (11, "시험 기록(`evaluate_trial`)에도 PR 종류 칸이 없습니다"),
+        (11, "정하지 않았으므로 지금은 §7-7 에 적은 대로 걸리지 않습니다"),
     )
 
     def test_the_conservative_judgement_is_attributed_to_the_ai_and_waits_for_the_operator(self):
@@ -918,7 +928,7 @@ class NotWiredTest(unittest.TestCase):
     def test_the_one_file_that_may_name_the_module_is_pinned_by_its_syntax_tree(self):
         """연결 격리 시험(test_generator_quality_gate)은 정책 모듈의 파일 이름을 글자로 적을 뿐이다 — 그 파일을 구문 트리로 읽어 (a) merge_policy 가 든 글자 상수의 정렬한 목록이 기대와 정확히 같고(언급이 하나라도 늘면
         같은 줄 덧붙임이라도 실패) (b) 이름에 든 정의가 기대한 한 개뿐이고 (c) 정책 모듈을 가져오는 import·가져오기 도구(importlib·runpy·imp·pkgutil) import 가 0 이고 (d) 이름 자리에 merge_policy 가 없고
-        `__import__`·`import_module`·`spec_from_file_location`·`module_from_spec`·`exec_module`·`load_module`·`run_path`·`run_module`·`exec`·`eval` 의 호출·참조가 0 이고 (e) 상수 글자를 `+` 로 쪼개 이어
+        `__import__`·`import_module`·`spec_from_file_location`·`module_from_spec`·`exec_module`·`load_module`·`run_path`·`run_module`·`exec`·`eval` 의 호출·참조가 0 이고 (e) 상수 글자를 `+` 나 f-string 으로 쪼개 이어
         merge_policy 가 되는 조합이 0 임을 지킨다. 줄 번호·줄 모양에는 기대지 않는다."""
         for rel, (constants, functions) in sorted(NAMED_ONLY_EXPECTED.items()):
             source = (ROOT / rel).read_text(encoding="utf-8")
