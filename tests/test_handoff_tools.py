@@ -1817,7 +1817,7 @@ class MakeMergedNoticeTest(unittest.TestCase):
         (self.folder / "README.md").write_text("안내\n", encoding="utf-8")
         (self.folder / "R-267_nokind.md").write_text("앞머리가 없는 글\n", encoding="utf-8")
         target, lines = self.make()
-        self.assertEqual(target.name, "R-268_merged-m050.md")                                     # 읽지 못한 R-266·앞머리 없는 R-267 의 번호도 요청 번호로는 센다
+        self.assertEqual(target.name, "R-268_merged-m050.md")                                     # 읽지 못한 R-266 은 예외 없이 건너뛰고, 앞머리가 없는 R-267 은 번호만 센다(최댓값 + 1)
         self.assertEqual(lines[1], f"짝 병합 부탁: {MERGE_FILE} (kind: merge, no: M050)")
 
     def test_the_default_check_with_the_real_request_branch_code_reads_the_file_strictly(self):
@@ -2189,7 +2189,7 @@ class MakeRequestGateExemptionTest(unittest.TestCase):
 
 
 class MakeRequestTildeTest(unittest.TestCase):
-    """요청 파일에 물결표(~)를 쓰지 않는다 — 마크다운(GFM)이 물결표 한 쌍을 취소선으로 처리해 '15~20·30~40' 이 '1520·3040' 처럼 붙어 보인다(2026-11-09 운영자 지적)."""
+    """요청 파일에 물결표를 쓰지 않는다 — 마크다운(GFM)이 물결표 한 쌍을 취소선으로 처리해 '15–20·30–40' 같은 범위가 '1520·3040' 처럼 붙어 보인다(2026-11-09 운영자 지적)."""
 
     def setUp(self):
         self.mr = load_tool(WORK / "make_request.py", extra_path=WORK)
@@ -2247,7 +2247,7 @@ TILDE_PY_FILES = [WORK / "make_merged_notice.py", WORK / "make_request.py", SETU
 
 
 def python_tilde_lines(source):
-    """파이썬 소스에서 물결표가 있는 줄 번호 — 주석·독스트링은 모두 걸고, 그 밖의 글자 상수는 물결표를 '말하는' 것(`"~"` 비교·`물결표(~)` 설명)만 봐 준다."""
+    """파이썬 소스에서 물결표가 있는 줄 번호 — 주석·독스트링은 모두 걸고, 그 밖의 글자 상수는 물결표를 '말하는' 것(물결표 한 글자만 든 비교 글자·`물결표(` 로 시작하는 설명 글)만 봐 준다."""
     tree = ast.parse(source)
     hits, docstrings = set(), set()
     for node in ast.walk(tree):
