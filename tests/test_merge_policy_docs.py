@@ -8,6 +8,8 @@
 import ast
 import fnmatch
 import re
+import sys
+import unicodedata
 import unittest
 
 import _bootstrap
@@ -366,7 +368,8 @@ class OperatorStatementsPinnedTest(unittest.TestCase):
         (7, "코드는 빈 글을 '읽어 보니 바뀐 줄이 없다' 는 결과로만 믿습니다"),
         (11, "코드도 문서도 아닌 파일(예: `pipeline/profiles/` 의 설정 파일)도 통과할 수 있고"),
         (11, "시험 기록(`evaluate_trial`)에도 PR 종류 칸이 없습니다"),
-        (11, "정하지 않았으므로 지금은 §7-7 에 적은 대로 걸리지 않습니다"),
+        (11, "**켜는 변경 전에 운영자와 정합니다**. 정하지 않았으므로 지금은 §7-7 에 적은 대로 걸리지 않습니다."),
+        (11, "정하지 않았으므로 지금은 §7-7 에 적은 대로 걸리지 않습니다(꺼져 있어 영향은 없습니다)."),
         # ---- 6차(WIP 11): P4 재검증 반영 — 지어낸 분류 사전·오류 문구·좁게 둔 긴장·미연결 시험의 한계 부류·전각 글자·첫 3건 범위·켜는 변경의 지시서 ----
         (4, "표준 양식 글을 만드는 `render_explanation` 은 점검표를 글로 받지 않고 넘겨받은 분류 사전에서 채우므로 사람이 점검표 글을 직접 적을 수는 없습니다"),
         (4, "분류 안에 모순(`ai_ok` 인데 걸린 항목이 있거나 그 반대)이 없는지만 확인하고 `classify_change` 로 계산했는지는 모릅니다"),
@@ -420,6 +423,25 @@ class OperatorStatementsPinnedTest(unittest.TestCase):
         (11, "`secret_findings` 는 문서 파일을 포함한 모든 바뀐 파일에서 센 값이어야 합니다 — 이 함수는 넘겨받은 수가 0 인지만 확인하고 어디서 셌는지는 모르며, "
               "분류 규칙은 강한 비밀 모양을 문서 파일에서도 운영자 전용으로 보기 때문입니다(§7-6)"),
         (7, "`docs/`·`인수인계/` 등)에 있는 `.py` 파일은 아예 보지 않아, 거기서 정책 모듈을 가져와도 못 잡습니다"),
+        # ---- 8차(WIP 13): P5 3차 델타 반영 — 해법 (나) 의 한계·접히는 글자 일반·문자열 속 이름·글자 검색의 파일 종류·§5-4 값 목록·§1 요약 ----
+        (11, "켜기 전에 막아 둘지를 운영자와 정합니다(막는 방법은 AI 가 정하고 독립 검증자가 확인합니다). 방법은 둘 중 하나입니다."),
+        (7, "전각 글자만이 아닙니다 — 위·아래첨자 글자(`ᵉˣᵉᶜ`)·긴 s(`ſ`)·로마 숫자·문자 기호처럼 NFKC 로 접히는 글자는 모두 같습니다."),
+        (7, '접히는 것은 코드의 이름(식별자)뿐이라, 문자열 안의 이름은 접히지 않아 그대로 걸립니다(`os.environ["PIPELINE_PAUSE"]` 꼴은 지금도 운영자 전용입니다).'),
+        (7, "또 글자 검색이 읽는 파일 종류는 정해져 있습니다 — 맨 위에서는 `.py`·`.json`·`.yml`·`.yaml`·`.toml`·`.cfg`, 네 폴더 안에서는 `.py`·`.yml`·`.yaml`·`.json`·`.sh`·`.toml`·`.txt`·`.cfg` 뿐이고 "
+              "`.ps1`·`.bat`·`.js` 같은 파일은 읽지 않습니다(지금 맨 위와 이 네 폴더에는 그런 파일이 없습니다)."),
+        (5, "같은 규칙이 PR 제목·변경 내용 전체의 해시(`verified_tree`·`current_tree`)·PR 상태(`pr_state`)·저장소 종류(`repo_kind`)·경로·main 검사 결과에도 적용되어 일반 글자(`str`)가 아니면 거절합니다."),
+        (5, "PR 번호와 센 수(비밀 발견 수·남은 필수 지적 수)는 정확히 정수(`int`)만 받습니다 — `True`·`False` 와 비교를 바꿔치는 정수 하위 형식은 거절합니다."),
+        (1, "시작 파일(`pipeline/__init__.py` 등)과 하위 폴더의 AI 규칙 문서(`AGENTS.md`·`CLAUDE.md`·`GEMINI.md`)를 운영자 전용으로 둘지"),
+        (1, "영문 글자를 모양만 다른 글자(예: 전각 글자)로 바꿔 써서 검사를 피하는 코드를 켜기 전에 막아 둘지(막는 방법은 AI 가 정하고 독립 검증자가 확인)"),
+        # ---- 9차(WIP 13 둘째 묶음): T 렌즈 4차 반영 — 해법 (나) 의 숫자·예·(가) 권고, 전각 항목 세부(범위·허용할 모듈·세 항목), 예외 한 파일의 접은 이름 ----
+        (11, "다만 이 두 구간은 파이썬이 영문·숫자·밑줄로 접어 읽는 식별자 글자 가운데 764자뿐이고 그 밖에 166자가 더 있어(파이썬 3.12 의 유니코드 표 기준, 3.10 은 162자) 못 잡습니다."),
+        (11, "위·아래첨자 글자 `ʳ`·`ᵉ`·`ₑ`, 서수 기호 `º`, 글자꼴 기호 `ℂ`·`ℍ`·`ℕ`, 겹글자 `ﬁ`, 긴 s `ſ`, 로마 숫자 같은 것이라 "
+              "`import ʳequests`·`import rₑquests` 도 `requests` 로 실행되는데 `ai_ok` 가 됩니다."),
+        (11, "그래서 (가) 를 권합니다. (나) 를 쓰려면 두 구간이 아니라 NFKC 로 접었을 때 글이 달라지는 비ASCII 글자 전부를 막아야 합니다."),
+        (11, "전각 영숫자(U+FF10–FF19·U+FF21–FF3A·U+FF41–FF5A)와 수학 영숫자(U+1D400–U+1D7FF)가 코드 파일의 바뀐 줄에 있으면"),
+        (11, "순수성 시험을 고쳐 `unicodedata` 를 허용해야 하고"),
+        (11, "이 세 항목(첫 3건의 범위·안전 장치 목록의 확장·전각 글자 같은 모양만 다른 이름)마다 운영자가 정한 결과를 지시서에 적고"),
+        (7, "(구문 트리 점검을 받는 예외 한 파일에서는 파이썬이 접은 이름으로 읽어 잡습니다)"),
     )
 
     def test_the_conservative_judgement_is_attributed_to_the_ai_and_waits_for_the_operator(self):
@@ -460,13 +482,31 @@ class OperatorStatementsPinnedTest(unittest.TestCase):
             with self.subTest(item=number):
                 self.assertIn(summary_word, line)
                 self.assertIn(section_word, decisions)
+        self.assertIn("시작 파일(`pipeline/__init__.py` 등)과 하위 폴더의 AI 규칙 문서(`AGENTS.md`·`CLAUDE.md`·`GEMINI.md`)를 운영자 전용으로 둘지", items[1][1])            # P5 정보 1: 요약에 빠졌던 구절
+        self.assertIn("하위 폴더의 `AGENTS.md`·`CLAUDE.md`·`GEMINI.md`", decisions)                                                                                   # §11-3 의 같은 말
+        self.assertIn("영문 글자를 모양만 다른 글자(예: 전각 글자)로 바꿔 써서 검사를 피하는 코드를 켜기 전에 막아 둘지(막는 방법은 AI 가 정하고 독립 검증자가 확인)", items[4][1])
+        self.assertIn("막는 방법은 AI 가 정하고 독립 검증자가 확인합니다", decisions)                                                                                       # §11-3 의 같은 말
+
+    def test_the_five_summary_lines_in_section_one_are_pinned_whole(self):
+        """R3(T4 — N01–N05): §1 의 '켜기 전에 운영자께 여쭐 것(요약)' 5줄은 운영자가 읽는 글이라 키워드 포함만 보지 않고 줄 전체를 못박는다 — 뜻을 뒤집는 한두 낱말의 바뀜(운영자 전용 → 일반 변경, tests/ → docs/ …)도 잡힌다.
+        §11-3 의 같은 항목과 같은 말인지 보는 시험(위)은 그대로 둔다."""
+        lines = ("1. 첫 운영 3건을 코드·문서·시험 변경으로만 한정할지(경로가 모두 `.py`·`.md`·`tests/` 인 변경)",
+                 "2. 파일을 불러오는 순간 저절로 실행되는 시작 파일(`pipeline/__init__.py` 등)과 하위 폴더의 AI 규칙 문서(`AGENTS.md`·`CLAUDE.md`·`GEMINI.md`)를 운영자 전용으로 둘지",
+                 "3. 안전 장치(발행 잠금·품질 검사·인증 확인 등)를 지키는 시험 파일을 운영자 전용으로 둘지",
+                 "4. 초안 승인 흐름(`pipeline/drafts.py`)과 그림자 실행(`pipeline/shadow_run.py`)을 운영자 전용으로 둘지",
+                 "5. 영문 글자를 모양만 다른 글자(예: 전각 글자)로 바꿔 써서 검사를 피하는 코드를 켜기 전에 막아 둘지(막는 방법은 AI 가 정하고 독립 검증자가 확인)")
+        for line in lines:
+            with self.subTest(line=line[:30]):
+                self.assertEqual(SECTIONS[1].count(chr(10) + line + chr(10)), 1)
+        summary = SECTIONS[1][SECTIONS[1].index("**켜기 전에 운영자께 여쭐 것(요약)**"):]
+        self.assertEqual(re.findall("(?m)^[0-9]+[.] .+$", summary), list(lines))                       # 요약의 번호 줄은 정확히 이 다섯 줄뿐이다(여섯째 줄을 더하거나 줄을 줄이면 빨개진다)
 
     def test_the_owner_account_named_in_the_design_memo_is_the_code_owner(self):
         """I2(T3 — UN07): §11-2 4번이 '승인은 소유자 계정의 글에서만 읽는다' 며 적은 계정 이름이 저장소의 코드 소유자(.github/CODEOWNERS)와 같다 — 이름을 시험에 복사하지 않고 저장소 파일과 맞춰 본다."""
         match = re.search(r"소유자\(`([A-Za-z0-9-]+)`\)", subsection("11-2"))
         self.assertIsNotNone(match)
         owners = (ROOT / ".github" / "CODEOWNERS").read_text(encoding="utf-8")
-        self.assertIn("@" + match.group(1), owners)
+        self.assertIsNotNone(re.search("(?m)(?<![A-Za-z0-9-])@" + re.escape(match.group(1)) + "(?![A-Za-z0-9-])", owners), "문서의 소유자 이름이 CODEOWNERS 의 한 계정 이름과 글자 그대로 같아야 한다")
 
     def test_the_secret_findings_count_covers_document_files_because_the_rules_do(self):
         """R2(T3): §11-3 이 secret_findings 를 '문서 파일을 포함한 모든 바뀐 파일'에서 센 값이어야 한다고 적은 것은 분류 규칙이 강한 비밀 모양을 문서 파일에서도 운영자 전용으로 보기 때문이다 — 실제로 그런지 본다."""
@@ -480,7 +520,10 @@ class OperatorStatementsPinnedTest(unittest.TestCase):
 
     def test_the_reading_guide_tells_the_operator_which_sections_to_read(self):
         quote = DOC.split("\n## 1.")[0]
-        self.assertIn("**운영자가 읽을 곳:** §1·§4·§5-1에서 §5-3까지·§7-5에서 §7-7까지(운영자 확인 대기 항목이 있는 곳)·§10·§11-3 의 '켜기 전 필수 결정' 만 읽으시면 됩니다.", quote)
+        self.assertIn("**운영자가 읽을 곳:** §1(특히 '켜기 전에 운영자께 여쭐 것(요약)')과 §11-3 의 '켜기 전 필수 결정' 만 읽으시면 됩니다(첫 운영 3건을 어떻게 시험하는지 궁금하면 §10 도). 나머지는 구현자와 독립 검증자를 위한 규칙입니다.", quote)
+        self.assertIn("**켜기 전에 운영자께 여쭐 것(요약)**", SECTIONS[1])                                  # P5 정보 1: 머리가 가리킨 요약·필수 결정·§10 이 실제로 있다
+        self.assertIn("- **켜기 전 필수 결정**(운영자와 정할 것", subsection("11-3"))
+        self.assertIn("## 10. 첫 운영 3건 시험과 즉시 중지", DOC)
         for label in ("5-1", "5-2", "5-3"):
             self.assertIn("### " + label + ". ", DOC)
 
@@ -832,6 +875,75 @@ class DocumentedBlindSpotsTest(unittest.TestCase):
                 result = self.verdict_for_text(wide_code)
                 self.assertEqual((result.tier, result.categories, result.extra_flags), ("ai_ok", (), ()), result.reasons)
 
+    FOLD_RANGES = ((0xFF10, 0xFF19), (0xFF21, 0xFF3A), (0xFF41, 0xFF5A), (0x1D400, 0x1D7FF))                # §11-3 해법 (나) 가 막는 두 구간(전각 영숫자·수학 영숫자)
+    FOLDING_LETTERS = {"e": 0x1D49, "x": 0x02E3, "c": 0x1D9C, "t": 0x1D57, "o": 0x00BA, "k": 0x1D4F, "n": 0x207F, "s": 0x017F, "r": 0x02B3}     # 위·아래첨자 글자·º·긴 s — 두 구간 밖
+
+    @classmethod
+    def folding(cls, name):
+        """이름(영문자)을 위·아래첨자 글자·º·긴 s 처럼 NFKC 로 접히는 글자로 바꾼다(표에 없는 글자는 그대로) — 전각·수학 영숫자 구간 밖의 글자만 쓴다."""
+        return "".join(chr(cls.FOLDING_LETTERS[ch]) if ch in cls.FOLDING_LETTERS else ch for ch in name)
+
+    @classmethod
+    def in_the_two_ranges(cls, ch):
+        return any(low <= ord(ch) <= high for low, high in cls.FOLD_RANGES)
+
+    def test_letters_python_folds_outside_the_two_ranges_are_ai_ok_today_too(self):
+        """P5-1(§7-7·§11-3): 해법 (나) 가 막는 전각·수학 영숫자 구간 밖에도 파이썬이 NFKC 로 접어 읽는 글자가 있다(위·아래첨자 글자·º·긴 s·로마 숫자·문자 기호 …) — 그런 글자로 쓴 같은 코드가
+        그대로 실행되는데 글자 규칙은 접지 않아 ai_ok 로 본다 — 문서가 적은 대로. (가) 로 접어서 읽도록 고치거나 (나) 를 NFKC 로 바뀌는 글자 전부로 넓히면 이 시험이 빨개져 문서도 한 묶음으로 고치게 한다."""
+        spell = self.folding
+        cases = (("exec(code)", spell("exec") + "(code)"), ("token = 1", spell("token") + " = 1"), ("import secrets", "import " + spell("secrets")),
+                 ("import requests", "import " + chr(0x02B3) + "equests"), ("import requests", "import r" + chr(0x2091) + "quests"))           # 위첨자 ʳ·아래첨자 ₑ(T 렌즈 4차 R2 의 예)
+        for ascii_code, folded_code in cases:
+            with self.subTest(code=ascii_code, spelling=[hex(ord(ch)) for ch in folded_code if ord(ch) > 127]):
+                self.assertNotEqual(folded_code, ascii_code)
+                outside = [ch for ch in folded_code if ord(ch) > 127]
+                self.assertTrue(outside)
+                self.assertEqual([ch for ch in outside if self.in_the_two_ranges(ch)], [])                       # 이 글자들은 해법 (나) 의 두 구간 밖이다
+                self.assertEqual(unicodedata.normalize("NFKC", folded_code), ascii_code)                        # 파이썬이 접어 읽는 글자다
+                self.assertEqual(ast.dump(ast.parse(folded_code)), ast.dump(ast.parse(ascii_code)))              # 파이썬은 둘을 같은 코드로 읽는다
+                self.assertEqual(self.verdict_for_text(ascii_code).tier, "operator_only")                        # 그대로 쓰면 걸린다
+                result = self.verdict_for_text(folded_code)
+                self.assertEqual((result.tier, result.categories, result.extra_flags), ("ai_ok", (), ()), result.reasons)
+
+    def test_the_document_counts_the_folded_letters_inside_and_outside_the_two_ranges(self):
+        """P5-1·R2(§11-3): 문서가 적은 숫자를 파이썬의 유니코드 표로 센다 — 이름 가운데에 쓸 수 있고(`a` 뒤에 붙여 식별자) NFKC 로 접으면 영문·숫자·밑줄뿐인 글이 되는 글자 중 해법 (나) 의 두 구간 안(764자)과 밖(3.12 는 166자, 3.10 은 162자).
+        유니코드 표가 새로워지면 밖의 글자가 늘 수 있어 이 시험은 3.12·3.10 에서만 정확한 수를 보고 그 밖의 파이썬에서는 문서의 수보다 적지 않음만 본다. 문서가 예로 든 글자도 모두 밖에서 접히는 글자인지 본다."""
+        inside = outside = 0
+        outside_chars = set()
+        for code in range(0x80, 0x30000):
+            ch = chr(code)
+            folded = unicodedata.normalize("NFKC", ch)
+            if folded != ch and folded and all(item.isascii() and (item.isalnum() or item == "_") for item in folded) and ("a" + ch).isidentifier():
+                if self.in_the_two_ranges(ch):
+                    inside += 1
+                else:
+                    outside += 1
+                    outside_chars.add(ch)
+        sentence = subsection("11-3")
+        match = re.search("두 구간은 파이썬이 영문·숫자·밑줄로 접어 읽는 식별자 글자 가운데 ([0-9]+)자뿐이고 그 밖에 ([0-9]+)자가 더 있어[(]파이썬 3[.]12 의 유니코드 표 기준, 3[.]10 은 ([0-9]+)자[)]", sentence)
+        self.assertIsNotNone(match)
+        claimed_inside, claimed_312, claimed_310 = (int(group) for group in match.groups())
+        self.assertEqual(inside, claimed_inside)                                                        # 두 구간 안의 글자 수는 파이썬 버전과 무관하다
+        exact = {(3, 12): claimed_312, (3, 10): claimed_310}.get(sys.version_info[:2])
+        if exact is not None:
+            self.assertEqual(outside, exact)
+        else:
+            self.assertGreaterEqual(outside, min(claimed_312, claimed_310))
+        for code in (0x02B3, 0x1D49, 0x2091, 0x00BA, 0x2102, 0x210D, 0x2115, 0xFB01, 0x017F):
+            with self.subTest(example=hex(code)):
+                self.assertIn(chr(code), outside_chars)                                                 # 문서가 예로 든 글자는 모두 두 구간 밖에서 접힌다
+                self.assertIn("`" + chr(code) + "`", sentence)                                           # 문서가 실제로 그 글자를 적었다
+
+    def test_a_name_inside_a_string_is_not_folded_so_it_is_still_caught(self):
+        """P5 정보 2(§7-7): 파이썬은 코드의 이름(식별자)만 접어 읽고 문자열 속 글자는 접지 않는다 — 그래서 문자열 안의 PIPELINE_PAUSE 는 그대로 걸린다(전각 글자로 쓴 문자열은 파이썬에게 다른 글자라 같은 이름이 아니다)."""
+        for code in ('os.environ["PIPELINE_PAUSE"]', "x = 'PIPELINE_PAUSE'", "if os.getenv('PIPELINE_PAUSE'):" + chr(10) + "    pass"):
+            with self.subTest(code=code):
+                result = self.verdict_for_text(code)
+                self.assertEqual((result.tier, result.categories), ("operator_only", ("pipeline_pause",)), result.reasons)
+        wide_name = self.wide("PIPELINE_PAUSE")
+        self.assertNotEqual(ast.dump(ast.parse('os.environ["' + wide_name + '"]')), ast.dump(ast.parse('os.environ["PIPELINE_PAUSE"]')))         # 문자열 속 전각 글자는 접히지 않는다
+        self.assertEqual(ast.dump(ast.parse("os.environ[" + wide_name + "]")), ast.dump(ast.parse("os.environ[PIPELINE_PAUSE]")))                # 대조: 이름 자리의 전각 글자는 접힌다
+
     def test_render_explanation_accepts_a_consistent_forged_classification_as_the_document_says(self):
         """P4-a(§4-2·§7-7): render_explanation 은 분류 사전의 모양·경로 일치·내부 모순만 확인하고 classify_change 로 계산했는지는 모른다 — 워크플로 경로인데 ai_ok·걸린 항목 없음으로 일관되게 지어낸 분류 사전도
         받아 점검표가 전부 아니오인 글을 만들고 explanation_problems 도 통과시킨다(병합 직전 재확인이 경로·바뀐 줄 규칙으로 다시 계산해 막는다). 모순·경로 불일치·키 누락은 거절한다."""
@@ -1171,6 +1283,27 @@ class NotWiredTest(unittest.TestCase):
         self.assertGreater(len(relatives), 100)
         self.assertEqual([item for item in relatives if item.startswith(("docs/", "인수인계/"))], [])
         self.assertTrue(all("/" not in item or item.split("/", 1)[0] in ("pipeline", "scripts", "tests", ".github") for item in relatives))
+
+    def test_the_text_search_reads_only_the_file_kinds_the_document_lists(self):
+        """P5 정보 3(§7-7): 글자 검색이 읽는 파일 종류가 문서가 적은 것과 같고(맨 위 6종·네 폴더 안 8종) `.ps1`·`.bat`·`.js` 같은 파일은 읽지 않으며, 지금 맨 위와 그 네 폴더에는 그런 파일이 없다.
+        검색 범위를 넓히거나 좁히면 이 시험이 빨개져 문서도 한 묶음으로 고치게 한다(범위의 글자 목록은 scan_targets 의 소스에서 읽는다)."""
+        match = re.search("맨 위에서는 ((?:`[.][a-z0-9]+`·?)+), 네 폴더 안에서는 ((?:`[.][a-z0-9]+`·?)+) 뿐이고 ((?:`[.][a-z0-9]+`·?)+) 같은 파일은 읽지 않습니다", SECTIONS[7])
+        self.assertIsNotNone(match)
+        top_doc, inner_doc, unseen_doc = (re.findall("`([.][a-z0-9]+)`", group) for group in match.groups())
+        self.assertEqual((len(top_doc), len(inner_doc), len(unseen_doc)), (6, 8, 3))
+        source = ast.parse(TEST_PATHS[1].read_text(encoding="utf-8"))
+        function = next(node for node in ast.walk(source) if isinstance(node, ast.FunctionDef) and node.name == "scan_targets")
+        tuples = sorted((node for node in ast.walk(function) if isinstance(node, ast.Tuple) and node.elts and all(isinstance(item, ast.Constant) and isinstance(item.value, str) for item in node.elts)),
+                        key=lambda node: (node.lineno, node.col_offset))
+        self.assertEqual(len(tuples), 3)                                                          # 맨 위 글자 모양 · 네 폴더 · 폴더 안 글자 모양
+        top_code, folders_code, inner_code = ([item.value for item in node.elts] for node in tuples)
+        self.assertEqual(sorted(pattern[1:] for pattern in top_code), sorted(top_doc))            # "*.py" 의 글자 모양에서 ".py" 를 뽑아 문서와 맞춘다
+        self.assertEqual(sorted(pattern[1:] for pattern in inner_code), sorted(inner_doc))
+        self.assertEqual(set(unseen_doc) & (set(top_doc) | set(inner_doc)), set())               # 안 읽는다고 적은 종류는 읽는 종류가 아니다
+        kinds = {path.suffix.lower() for path in ROOT.iterdir() if path.is_file()}
+        for folder in folders_code:
+            kinds |= {path.suffix.lower() for path in (ROOT / folder).rglob("*") if path.is_file()}
+        self.assertEqual(kinds & set(unseen_doc), set())                                          # 지금 맨 위와 네 폴더에는 읽지 않는 종류의 파일이 없다
 
     def test_the_name_scan_itself_catches_an_import_and_ignores_a_same_named_definition(self):
         names = "|".join(self.FUNCTION_NAMES)

@@ -512,6 +512,17 @@ class ApprovalLedgerTest(unittest.TestCase):
         self.assertFalse(ledger.consume("M072", 191).ok)
         self.assertTrue(ledger.consume("M072", 192).ok)
 
+    def test_consumed_numbers_are_sorted_whatever_the_order_they_were_given(self):
+        """I3(T4 — NW18): consumed_numbers 는 번호 순으로 정렬해 돌려준다 — 번호 12개를 거꾸로 넣어도 같다(번호 둘짜리 예시만으로는 해시 순서가 우연히 맞아 정렬을 지운 변이가 해시 시드에 따라 살아남는다)."""
+        numbers = ["M%03d" % (80 - 3 * step) for step in range(12)]                                  # M080, M077, ... M047 — 거꾸로
+        ledger = mp.ApprovalLedger([(number, 300 + index) for index, number in enumerate(numbers)])
+        self.assertEqual(ledger.consumed_numbers, tuple(sorted(numbers)))
+        ledger = mp.ApprovalLedger()
+        for index, number in enumerate(numbers):
+            self.assertTrue(ledger.consume(number, 300 + index).ok)
+        self.assertEqual(ledger.consumed_numbers, tuple(sorted(numbers)))
+        self.assertNotEqual(list(ledger.consumed_numbers), numbers)                                   # 넣은 순서와 다르다 = 정말 정렬해서 돌려준다
+
     def test_a_malformed_history_is_an_error_not_a_silent_start(self):
         for bad in ([("M75", 1)], [("M070", 0)], [("M070",)], [5], 5, [("M070", 190, 1)]):
             with self.subTest(bad=bad):
@@ -2075,6 +2086,8 @@ class ExplanationTest(unittest.TestCase):
             with self.subTest(bullet=bullet):
                 lines = [bullet + line if line.startswith(EXPLANATION_6) else line for line in text.split("\n")]
                 self.assertEqual(self.problems("\n".join(lines)), [])
+        spoof = text.rstrip(chr(10)) + chr(10) + "* 위험은 무엇인가요? 위험이 전혀 없습니다 아무 걱정 마세요" + chr(10)                       # I1(T4): '* ' 를 읽어야 같은 항목 줄을 한 줄 더 붙인 흉내도 중복으로 잡힌다(NW21 단독으로 빨강)
+        self.assertIn("항목이 두 번 이상 나옵니다: 위험은 무엇인가요?", self.problems(spoof))
 
     def test_the_merge_way_line_is_required_and_must_be_one_of_the_two_sentences(self):
         text = make_text()
@@ -2235,6 +2248,8 @@ class CompletionNoticeTest(unittest.TestCase):
         for bullet in ("- ", "* "):
             with self.subTest(bullet=bullet):
                 self.assertEqual(mp.completion_notice_problems("\n".join(bullet + line if ": " in line else line for line in text.split("\n"))), [])
+        spoof = text.rstrip(chr(10)) + chr(10) + "* 이상 유무: 이상 없음" + chr(10)                                                        # I1(T4): '* ' 를 읽어야 같은 항목 줄을 한 줄 더 붙인 흉내도 중복으로 잡힌다(NW22 단독으로 빨강)
+        self.assertIn("항목이 두 번 이상 나옵니다: 이상 유무", mp.completion_notice_problems(spoof))
 
     def test_invisible_characters_are_reported(self):
         self.assert_problem(mp.completion_notice_problems(make_notice().replace("이상 유무", "이상" + chr(0x200B) + " 유무", 1)), "보이지 않는 글자")
@@ -3193,6 +3208,32 @@ class StrSubclassTest(unittest.TestCase):
         facts = good_facts()
         facts["pr_state"] = str(Plain("open"))                                                                       # 같은 글자를 정확한 str 로 바꾸면 통과한다
         self.assertTrue(mp.check_preconditions(facts).ok)
+
+    def test_trees_paths_and_the_main_check_state_must_be_plain_strs(self):
+        """P5 정보 3(§5-4): 문서가 일반 글자(str)만 받는다고 적은 값 중 트리 해시·경로·main 검사 결과도 하위 형식(비교를 바꿔치는 것이든 얌전한 것이든)을 받지 않는다."""
+        class Plain(str):
+            pass
+
+        for tree in (self.Evil(TREE_A), Plain(TREE_A)):
+            with self.subTest(tree=str.__repr__(tree)):
+                facts = good_facts()
+                facts["current_tree"] = tree
+                self.assertEqual(mp.check_preconditions(facts).failed_codes, ("independent_verified",))
+                facts = good_facts()
+                facts["independent_verification"] = dict(facts["independent_verification"], verified_tree=tree)
+                self.assertEqual(mp.check_preconditions(facts).failed_codes, ("independent_verified",))
+        for state in (self.Evil("success"), Plain("success"), Plain("none")):
+            with self.subTest(state=str.__repr__(state)):
+                decision = mp.evaluate_post_merge(state)
+                self.assertEqual((decision.state, decision.may_merge_next), (None, False))
+                facts = good_facts()
+                facts["previous_merge_main_check"] = state
+                self.assertEqual(mp.check_preconditions(facts).failed_codes, ("checks_pass",))
+        self.assertTrue(mp.evaluate_post_merge(str(Plain("success"))).may_merge_next)                 # 같은 글자를 정확한 str 로 바꾸면 통과한다
+        for path in (self.Evil("pipeline/a.py"), Plain("pipeline/a.py")):
+            with self.subTest(path=str.__repr__(path)):
+                self.assertIsNone(mp.normalize_repo_path(path))
+        self.assertEqual(mp.normalize_repo_path(str(Plain("pipeline/a.py"))), "pipeline/a.py")
 
     def test_numbers_and_heads_must_be_plain_strs(self):
         evil = self.Evil("M076")
