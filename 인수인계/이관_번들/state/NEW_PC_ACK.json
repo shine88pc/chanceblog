@@ -1,11 +1,11 @@
 {
   "schema": 1,
   "writer": "NEW_PC",
-  "state": "STARTED",
+  "state": "TOOK_OVER",
   "state_choices": ["STARTED", "TOOK_OVER"],
-  "updated_at": "2026-11-15 14:52 (한국 시간)",
+  "updated_at": "2026-11-15 15:04 (한국 시간)",
   "read_old_status_sequence": 3,
   "push_permission": "ok",
-  "first_report": "아직 없음 — TOOK_OVER 로 바꿀 때 요청 번호를 적는다",
-  "note": "새 PC 의 AI 시작 — README 시작 순서 1–5번 끝, 푸시 점검 통과, 파이썬 3.12 가 없어 3.10 으로 임시 구성(비밀·키·개인 정보 없음)"
+  "first_report": "R-343",
+  "note": "첫 보고 R-343(P066, 제목에 '이관 완료')을 보내고 넘겨받음 — 알림 워크플로 성공, 푸시 권한 ok(비밀·키·개인 정보 없음)"
 }
