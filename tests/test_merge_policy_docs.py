@@ -264,6 +264,8 @@ class OperatorStatementsPinnedTest(unittest.TestCase):
         (5, "**승인 때의 머리 커밋(`approved_head_sha`)은 쉬운 병합 설명을 보냈을 때의 머리 커밋**"),
         (5, "옛 설명을 승인한 셈이라 그 승인은 **무효**"),
         (6, "빠진 값은 실패"),
+        (6, "이 함수가 스스로 다시 계산하는 것은 변경 분류와 머리 커밋 일치뿐이고 나머지 값은 모양만 확인합니다"),
+        (6, "그래서 값은 GitHub 에서 직접 읽는 신뢰할 수 있는 워크플로가 만든 것이어야 합니다(§11-3)"),
         (6, "하나라도 실패하면 병합하지 않고"),
         (6, "건너뜀·중립·취소는 통과가 아님"),
         (6, "10자 이상의 구체적인 문장"),
@@ -276,7 +278,15 @@ class OperatorStatementsPinnedTest(unittest.TestCase):
         (7, "**바뀐 줄의 글(`changed_text`)은 추가된 줄과 지운 줄을 둘 다** 넣습니다"),
         (7, "12항목 목록을 넓힌 것이 아니라 **12항목 밖의 표시**"),
         (7, "**이 목록은 저장소가 바뀔 때마다 유지가 필요하다.**"),
-        (7, "AI 가 읽고 따르는 규칙 문서 10개도 운영자 전용입니다"),
+        (7, "AI 가 읽고 따르는 규칙 문서 18개도 운영자 전용입니다"),
+        (7, "용어 사전(`docs/GLOSSARY.md`)은 규칙이 아니라 사전이라 넣지 않았습니다"),
+        (7, "- **운영자 확인 대기 항목**: 용어 사전 `docs/GLOSSARY.md` 를 규칙 문서 목록에 넣을지"),
+        (7, "`openssl s_client`·`socat`·`aria2c`·`npm publish`·`docker push`·`pip install` 같은 것도 따로 잡지 않습니다"),
+        (7, "'모름' 문구는 목록에 있는 문구와 **정확히 같을 때만** 거절합니다"),
+        (7, "**어느 구간이든 앞뒤에 공백(유니코드 공백 포함)이 있는 경로**"),
+        (7, "맨 앞의 공백 한 칸이 `docs` 같은 내부 폴더 이름처럼 보이게 하던 우회를 이렇게 막습니다"),
+        (7, "**키가 모두 변경 파일 목록에 있어야 하고 변경 파일마다 키가 있어야**"),
+        (7, "이름 안에 `requirements` 가 든 `dev-requirements.txt`·`pip-requirements.in` 도"),
         (7, "**문서 파일의 낱말 규칙(총괄(AI)의 판단 — 운영자 확인 대기)**"),
         (7, "문서 파일(`.md`·`.rst`·`.txt`·`.adoc`)의 바뀐 줄에는 낱말 규칙(키·토큰·비밀번호 낱말·`secrets.` 참조·`Authorization` 헤더·`PIPELINE_PAUSE`·삭제 명령과 마이그레이션 낱말·접속 낱말)을 적용하지 않습니다"),
         (7, "**강한 비밀 모양**"),
@@ -304,6 +314,10 @@ class OperatorStatementsPinnedTest(unittest.TestCase):
         (11, "**추가된 줄과 지운 줄을 둘 다** 넣습니다"),
         (11, "**쉬운 설명을 보냈을 때의 것**(`approved_head_sha`)과 **승인 글이 도착했을 때의 것**(`head_sha_at_approval`)"),
         (11, "**병합을 호출하기 직전마다** 병합 이력 전체로 `evaluate_trial` 을 돌려"),
+        (11, "- **값의 출처**(켜기 전의 필수 조건):"),
+        (11, "`repo_kind`·`changed_text`·`checks`·`required_checks`·`independent_verification`·`has_conflict`·`secret_findings`·`pr_state`·`pr_draft`·`previous_merge_main_check` 는 GitHub 에서 직접 읽는 신뢰할 수 있는 워크플로가 만든 값이어야 합니다"),
+        (11, "변경 파일마다 키가 있어야 합니다(글이 없는 파일은 빈 글)"),
+        (11, "PR 작성자나 PR 쪽 파일이 채울 수 있으면 안 됩니다"),
         (12, "운영자 결정으로만"),
     )
 
@@ -335,6 +349,16 @@ class OperatorStatementsPinnedTest(unittest.TestCase):
         self.assertEqual(lines[0], "## 5. 승인 방식")
         self.assertEqual(lines[2], "이 절은 켜진 뒤의 동작이며 지금은 꺼져 있어 승인 글을 보내도 AI 는 병합하지 않습니다.")
 
+    def test_sections_six_eight_nine_and_ten_say_first_that_they_describe_the_behaviour_after_turning_it_on(self):
+        """§5 처럼 §6·§8·§9·§10 도 머리에 '켜진 뒤의 동작이며 지금은 꺼져 있다' 한 줄을 둔다(I-N7)."""
+        for number, title in ((6, "병합 직전 재확인 8조건"), (8, "병합 방식 제한"), (9, "사후 처리"), (10, "첫 운영 3건 시험과 즉시 중지")):
+            with self.subTest(section=number):
+                lines = SECTIONS[number].split("\n")
+                self.assertEqual(lines[0], "## %d. %s" % (number, title))
+                self.assertEqual(lines[1], "")
+                self.assertTrue(lines[2].startswith("이 절은 켜진 뒤의 동작이며 지금은 꺼져 있습니다."), (number, lines[2]))
+        self.assertIn("main 에 직접 push 하지 않는다는 원칙은 꺼져 있는 지금도 그대로입니다", SECTIONS[8].split("\n")[2])
+
     def test_the_first_tree_word_is_explained(self):
         first = DOC.index("트리")
         self.assertTrue(DOC[first:].startswith("트리 — 변경 내용 전체의 지문)"), DOC[first:first + 30])
@@ -354,7 +378,8 @@ class OperatorStatementsPinnedTest(unittest.TestCase):
     def test_the_known_limits_name_what_the_rules_cannot_know(self):
         limits = subsection("7-7")
         for phrase in ("거절 목록으로 구현했습니다", "글의 **모양**만 봅니다", "`pipeline/profiles/`", "`conftest.py`", "`sitecustomize.py`", "`tests/_bootstrap.py`", "`pipeline/__init__.py`",
-                       "문자열을 쪼개 붙이거나", "선언 6항목은 사람이 정하는 값", "하나를 지워도 결과가 같습니다", "총괄(AI)의 판단 — 운영자 확인 대기"):
+                       "문자열을 쪼개 붙이거나", "선언 6항목은 사람이 정하는 값", "하나를 지워도 결과가 같습니다", "총괄(AI)의 판단 — 운영자 확인 대기", "`docs/GLOSSARY.md`", "`pipeline/shadow_run.py`",
+                       "`pipeline/drafts.py`", "`openssl s_client`", "`docker push`", "`'row.id'`", "`'pipeline.store'`", "정확히 같을 때만", "이름 없는 무작위 문자열 모양의 비밀"):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, limits)
 

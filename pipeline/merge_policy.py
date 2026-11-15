@@ -94,15 +94,17 @@ _EXTRA_LABELS = dict(EXTRA_FLAGS)
 POLICY_SELF_FILES = ("docs/AI_MERGE_POLICY.md", "pipeline/merge_policy.py", "tests/test_merge_policy.py", "tests/test_merge_policy_docs.py")
 
 # safety_guard — 안전 장치 파일: 검증기·비밀 패턴·가드레일·보안·외부 접속·정책 모듈과 그 시험. 경로의 어느 구간이든 아래 낱말이 있으면 해당하고(시험 폴더도 면제하지 않는다),
-# 문서(DOC_SUFFIXES)는 SAFETY_GUARD_DOCS 의 파일(AI 가 읽고 따르는 규칙 문서 — 총괄(AI)의 판단 R5)만 해당한다. 낱말로 알아낼 수 없는 안전 장치(발행 잠금·품질 Gate·인증 확인·발행기 따위)는
+# 문서(DOC_SUFFIXES)는 SAFETY_GUARD_DOCS 의 파일(AI 가 읽고 따르는 규칙 문서 — 총괄(AI)의 판단 R5. 용어 사전 GLOSSARY 는 제외)만 해당한다. 낱말로 알아낼 수 없는 안전 장치(발행 잠금·품질 Gate·인증 확인·발행기 따위)는
 # SAFETY_GUARD_FILES·SAFETY_GUARD_DIRS 에 이름으로 적는다 — **이 목록은 저장소가 바뀔 때마다 유지가 필요하다**(새 안전 장치가 생기면 목록과 시험을 함께 고친다. 시험이 목록의 파일이 실제로 있는지 지킨다).
 # 이 정책의 파일 4개(POLICY_SELF_FILES)는 policy_self 로만 표시한다.
 SAFETY_GUARD_WORDS = ("validate_repo", "guardrail", "guard", "security", "secret", "egress", "policy", "safety", "sandbox", "ai_flow")
 SAFETY_GUARD_DOCS = ("docs/SECURITY_GUARDRAILS.md", "AGENTS.md", "CLAUDE.md", "GEMINI.md", "AI_COLLAB.md", "HANDLER.md", "docs/CHARTER.md", "docs/ACTIONS_GUIDE.md", "docs/AGENT_RUNBOOK.md",
-                     "docs/SESSION_START.md")
+                     "docs/SESSION_START.md", "docs/ENGINEERING_GUIDE.md", "docs/AGENT_DELEGATION.md", "docs/COPILOT_GUIDE.md", "docs/AI_FLOW.md", "docs/AI_MODEL_GUIDE.md", "docs/SOURCE_POLICY.md",
+                     "docs/QUALITY_GATE.md", "docs/REQUEST_BRIEFING.md")
 SAFETY_GUARD_FILES = (
     "pipeline/publish_lock.py", "pipeline/quality_gate.py", "pipeline/gates.py", "pipeline/auth_check.py", "pipeline/registry.py", "pipeline/source_registry.py", "pipeline/health.py",
     "pipeline/draft_flow.py", "pipeline/edits/runner.py", "generator.py", "blogger_generator.py", "scripts/get_blogger_token.py", "scripts/watchdog.py", "tests/test_site_cleanup.py",
+    "pipeline/run.py", "pipeline/operator_loop.py", "pipeline/telegram_inbox.py",
 )
 SAFETY_GUARD_DIRS = ("pipeline/publishers",)
 DOC_SUFFIXES = (".md", ".rst", ".txt", ".adoc")
@@ -140,6 +142,7 @@ DOCUMENTED_RULE_WORDS = (
     ".env*", "secrets.", "PIPELINE_PAUSE", "VERSION",
     "README.md", "CNAME", ".nojekyll", "requirements*.in", "requirements/", "constraints*", "node_modules/", "pnpm-lock.yaml", ".gitmodules", "environment*.yml", "conda",
     "os.remove", "unlink(", "rm -rf", "DROP COLUMN", "DROP INDEX", "Authorization", "sk_live_", "sk_test_",
+    "deps.txt", "Dockerfile", "Makefile",
 )
 
 # ---- 병합 방식(§8) ---------------------------------------------------------------------------------------------------------------------------------------
@@ -210,11 +213,11 @@ def _standard_label(value):
 
 
 def _positive_int(value):
-    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+    return type(value) is int and value > 0                        # 정확히 int 만(bool 과 비교를 바꿔치는 int 하위 형식은 받지 않는다)
 
 
 def _non_negative_int(value):
-    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+    return type(value) is int and value >= 0
 
 
 _SHA_RE = re.compile(r"[0-9a-fA-F]{40}")
@@ -226,17 +229,18 @@ def _sha(value):
 
 
 def normalize_repo_path(raw):
-    """저장소 안 상대 경로를 '/' 로 통일해 돌려준다. 글자가 아니거나·비었거나·절대 경로(앞 '/'·드라이브 글자)이거나·제어 문자가 있거나·`..` 구간이 있으면 None(확인할 수 없는 입력)."""
-    if not isinstance(raw, str):
+    """저장소 안 상대 경로를 '/' 로 통일해 돌려준다. 줄 끝의 줄 바꿈(CR·LF)만 떼고 경로는 다듬지 않는다 — **어느 구간이든 앞뒤에 공백(유니코드 공백 포함)이 있거나 제어 문자(DEL·C1 포함)가 있으면 None**:
+    맨 앞의 공백이 구간 이름을 바꿔 내부 폴더(`docs`)처럼 보이게 하는 우회를 막는다. 글자(str)가 아니거나·비었거나·절대 경로(앞 '/'·드라이브 글자)이거나·`..` 구간이 있어도 None(확인할 수 없는 입력)."""
+    if type(raw) is not str:
         return None
-    text = raw.strip().replace("\\", "/")
-    if not text or text.startswith("/") or re.match(r"[A-Za-z]:", text) or any(ord(ch) < 32 or ord(ch) == 127 for ch in text):
+    text = raw.rstrip("\r\n").replace("\\", "/")
+    if not text or text.startswith("/") or re.match(r"[A-Za-z]:", text) or any(ord(ch) < 32 or 127 <= ord(ch) <= 159 for ch in text):
         return None
     parts = []
     for segment in text.split("/"):
         if segment in ("", "."):
             continue
-        if segment == "..":
+        if segment == ".." or segment != segment.strip():
             return None
         parts.append(segment)
     return "/".join(parts) if parts else None
@@ -389,8 +393,11 @@ class Classification:
 
 
 # 경로 규칙 — 이름은 모두 소문자로 접어(casefold) 비교한다. 규칙을 바꾸면 DOCUMENTED_RULE_WORDS 와 문서 §7 도 같이 고친다.
-_DEPENDENCY_BASE_RE = re.compile(r"requirements[^/]*\.(?:txt|in)|constraints[^/]*|package[^/]*\.json|pnpm-lock\.yaml|pyproject\.toml|setup\.py|setup\.cfg|pipfile[^/]*|gemfile[^/]*|[^/]*\.lock"
+_DEPENDENCY_BASE_RE = re.compile(r"constraints[^/]*|package[^/]*\.json|pnpm-lock\.yaml|pyproject\.toml|setup\.py|setup\.cfg|pipfile[^/]*|gemfile[^/]*|[^/]*\.lock"
                                  r"|\.gitmodules|environment[^/]*\.ya?ml|conda[^/]*")
+# 이름 안에 낱말이 들어 있으면 걸리는 의존성 이름 — 글자 찾기로 한다(정규식으로 쓰면 아주 긴 이름에서 시간이 제곱으로 늘 수 있다)
+_DEPENDENCY_LIST_WORDS = ("requirements", "deps", "dependencies")            # + 끝이 .txt 나 .in 일 때(dev-requirements.txt·deps.txt·pip-requirements.in)
+_DEPENDENCY_NAME_WORDS = ("dockerfile", "makefile")                          # 이름 안에 있기만 하면(Dockerfile·Makefile·prod.Dockerfile)
 _DEPENDENCY_DIRS = frozenset({"vendor", "node_modules", "requirements", "conda"})
 _CRED_SUFFIXES = (".pem", ".key", ".p12", ".pfx", ".jks", ".ppk", ".kdbx")                 # .keystore 는 이름 낱말(_CRED_WORDS 의 keystore)이 이미 잡는다
 _CRED_BASE_RE = re.compile(r"\.env.*|\.netrc|\.npmrc|\.pypirc|id_(?:rsa|dsa|ecdsa|ed25519).*|token[^/]*\.json|.*service[-_]?account.*")      # client_secret*.json 은 이름 낱말(secret)이 이미 잡는다
@@ -464,6 +471,12 @@ def _shown(path):
     return path if len(path) <= 80 else path[:77] + "..."
 
 
+def _is_dependency_name(base):
+    """의존성 목록·잠금·설치 파일 이름인가(소문자로 접은 파일 이름)."""
+    return (_DEPENDENCY_BASE_RE.fullmatch(base) is not None or (base.endswith((".txt", ".in")) and any(word in base for word in _DEPENDENCY_LIST_WORDS))
+            or any(word in base for word in _DEPENDENCY_NAME_WORDS))
+
+
 def _path_findings(repo_kind, path):
     """경로 한 개가 걸리는 규칙: [(코드, 쉬운 말 이유)] — 코드는 운영자 전용 12항목 코드 또는 EXTRA_CODES."""
     parts = path.split("/")
@@ -472,7 +485,7 @@ def _path_findings(repo_kind, path):
     found = []
     if ".github" in segments:
         found.append(("workflow", "GitHub Actions Workflow 폴더(.github)의 파일입니다"))
-    if any(part in _DEPENDENCY_DIRS for part in segments) or _DEPENDENCY_BASE_RE.fullmatch(base) is not None:
+    if any(part in _DEPENDENCY_DIRS for part in segments) or _is_dependency_name(base):
         found.append(("dependencies", "의존성 목록·잠금 파일이거나 vendor·requirements 같은 의존성 폴더의 파일입니다"))
     if base.endswith(_CRED_SUFFIXES) or _CRED_BASE_RE.fullmatch(base) is not None or "security" in segments or any(word in part for part in segments for word in _CRED_WORDS):
         found.append(("credentials", "키·비밀·자격 증명과 관련된 파일 이름입니다"))
@@ -690,7 +703,7 @@ def _listed_key(key, paths):
 def classify_change(repo_kind, changed_paths, changed_text=None, declared=None, *, added_text=None):
     """변경을 `ai_ok`(AI 병합 가능) 또는 `operator_only`(운영자 직접 병합)로 분류한다 — 운영자 전용 12항목에 하나도 안 걸리고 입력을 모두 확인할 수 있을 때만 ai_ok 다.
     repo_kind: `'blog'` 또는 `'desktop'`. changed_paths: 바뀐 경로 목록(이름 바꾸기는 옛 경로와 새 경로를 모두, 삭제도 포함). changed_text: **바뀐 줄 — 추가된 줄과 지운 줄 둘 다 — 의 글**(글자 하나 또는 {경로: 글}).
-    지운 줄에 광고 코드나 PIPELINE_PAUSE 가 있어도 운영자 전용이다(예전 이름 added_text 도 받지만 두 이름을 함께 쓰면 입력 오류다). 사전의 키는 모두 변경 파일 목록에 있어야 한다(없으면 입력 오류).
+    지운 줄에 광고 코드나 PIPELINE_PAUSE 가 있어도 운영자 전용이다(예전 이름 added_text 도 받지만 두 이름을 함께 쓰면 입력 오류다). 사전으로 받으면 키는 모두 변경 파일 목록에 있어야 하고 변경 파일마다 키가 있어야 한다(글이 없는 파일은 빈 글 — 없으면 입력 오류).
     declared: 사람이 선언하는 항목 {코드: 참/거짓/None}. DECLARED_REQUIRED 6항목은 거짓이어야 통과이고 참이거나 미응답(없음·None·해석할 수 없는 값)이면 운영자 전용이다.
     경로·내용 규칙에 걸린 항목은 declared 가 거짓이어도 운영자 전용이다. 12항목 밖의 표시(extra_flags)가 하나라도 있어도 operator_only 다 — 안전 장치 파일(safety_guard)과 새 외부 접속 코드(external_connection)는
     총괄(AI)의 판단이다(운영자 확인 대기). 문서 파일(DOC_SUFFIXES)의 바뀐 줄에는 낱말 규칙을 적용하지 않는다(강한 비밀 모양·광고 코드 낱말만) — 글자 하나로 받은 글은 바뀐 파일이 모두 문서일 때만 그렇다.
@@ -709,12 +722,12 @@ def classify_change(repo_kind, changed_paths, changed_text=None, declared=None, 
             add_plain("invalid_input", "바뀐 줄의 글을 두 이름(changed_text·added_text)으로 함께 받았습니다 — 하나만 쓰세요")
         else:
             changed_text = added_text
-    kind_ok = isinstance(repo_kind, str) and repo_kind in REPO_KINDS
+    kind_ok = type(repo_kind) is str and repo_kind in REPO_KINDS
     if not kind_ok:
         add_plain("invalid_input", "저장소 종류가 blog 나 desktop 이 아니라 분류할 수 없습니다")
     paths = _path_set(changed_paths)
     if paths is None:
-        add_plain("invalid_input", "변경 파일 목록의 모양이 올바르지 않습니다(글자 목록이어야 하고 .. 구간이 든 경로·절대 경로는 안 됩니다)")
+        add_plain("invalid_input", "변경 파일 목록의 모양이 올바르지 않습니다(글자 목록이어야 하고 .. 구간이 든 경로·절대 경로·구간 앞뒤에 공백이 있는 경로는 안 됩니다)")
         paths = frozenset()
     elif not paths:
         add_plain("invalid_input", "변경 파일 목록이 비어 있습니다")
@@ -726,8 +739,14 @@ def classify_change(repo_kind, changed_paths, changed_text=None, declared=None, 
     if items is None:
         add_plain("invalid_input", "바뀐 줄의 글을 읽을 수 없습니다(글자 하나 또는 {경로: 글} 이어야 합니다)")
     else:
-        if isinstance(changed_text, dict) and any(not _listed_key(key, paths) for key, _text in items):
-            add_plain("invalid_input", "바뀐 줄의 글이 변경 파일 목록에 없는 경로에 붙어 있습니다")
+        if isinstance(changed_text, dict):
+            if any(not _listed_key(key, paths) for key, _text in items):
+                add_plain("invalid_input", "바뀐 줄의 글이 변경 파일 목록에 없는 경로에 붙어 있습니다")
+            keyed = {normalize_repo_path(key) for key, _text in items if isinstance(key, str)}
+            missing = sorted(path for path in paths if path not in keyed)
+            if missing:
+                add_plain("invalid_input", "변경 파일 중 바뀐 줄의 글이 없는 파일이 있습니다(글이 없으면 빈 글을 넣어야 합니다): " + ", ".join(_shown(item) for item in missing[:3])
+                          + (" 외 " + str(len(missing) - 3) + "개" if len(missing) > 3 else ""))
         for key, text in items:
             for code, why in _text_findings(text, _doc_only_text(key, paths)):
                 add_plain(code, "바뀐 줄 — " + why)

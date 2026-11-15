@@ -162,6 +162,8 @@ AI 가 PR 작성 → 검사와 독립 검증 → 쉬운 병합 설명 발송 →
 
 ## 6. 병합 직전 재확인 8조건
 
+이 절은 켜진 뒤의 동작이며 지금은 꺼져 있습니다.
+
 승인을 받은 뒤에도 병합하기 직전에 아래 8가지를 다시 확인합니다. **모든 값이 있어야 하며 빠진 값은 실패입니다**(없다고 통과로 보지 않습니다). 하나라도 실패하면 병합하지 않고, 실패한 조건과 쉬운 말 이유를 알립니다(`check_preconditions`).
 
 | 번호 | 조건 | 어떻게 확인하나 |
@@ -175,7 +177,7 @@ AI 가 PR 작성 → 검사와 독립 검증 → 쉬운 병합 설명 발송 →
 | 7 | 비밀정보 노출 없음 | 비밀 모양 검사의 발견 수가 0(결과가 없으면 실패) |
 | 8 | 원복 방법 확인 | 되돌리는 방법이 10자 이상의 구체적인 문장(없음·미정·해당 사항이 없습니다 같은 말은 안 됨) |
 
-확인에 쓰는 값(`FACT_KEYS`)은 아래 23개입니다. 켜는 변경이 이 값들을 채워 넘깁니다. 다시 계산할 수 없는 값(선언 6항목)을 빼고는 넘겨받은 값을 믿지 않고 이 함수가 다시 확인합니다.
+확인에 쓰는 값(`FACT_KEYS`)은 아래 23개입니다. 켜는 변경이 이 값들을 채워 넘깁니다. 이 함수가 스스로 다시 계산하는 것은 변경 분류와 머리 커밋 일치뿐이고 나머지 값은 모양만 확인합니다 — 그래서 값은 GitHub 에서 직접 읽는 신뢰할 수 있는 워크플로가 만든 것이어야 합니다(§11-3).
 
 | 값 | 뜻 | 쓰는 조건 |
 |---|---|---|
@@ -230,15 +232,15 @@ AI 가 PR 작성 → 검사와 독립 검증 → 쉬운 병합 설명 발송 →
 | 5 | 발행 모드와 발행 재개 | 경로 `pipeline/blogs.json`·`pipeline/ops_inbox_policy.json`, 사람의 선언 |
 | 6 | Provider 활성화 | 경로 `pipeline/source_registry.json`, 사람의 선언 |
 | 7 | API Key·Secret·Credential | 경로 `.env*`·키와 인증서 파일·이름에 secret·credential·keystore·keyring 이 든 경로·`security` 폴더, 바뀐 줄의 비밀 모양 값(Stripe 형식 키 `sk_live_`·`sk_test_` 와 긴 Bearer 값 포함 — 문서 파일에서도)·`secrets.` 참조·키·토큰·비밀번호 낱말·`Authorization` Bearer 헤더(코드 파일만) |
-| 8 | 의존성 추가 | 경로 `requirements*.txt`·`requirements*.in`·`requirements/`·`constraints*`·`vendor/`·`node_modules/`·`package*.json`·`pnpm-lock.yaml`·`pyproject.toml`·`Pipfile*`·`*.lock`(`poetry.lock`·`uv.lock` 포함)·`.gitmodules`·`environment*.yml`·`conda`(그리고 `setup.py`·`setup.cfg`·`Gemfile*`) |
+| 8 | 의존성 추가 | 경로 `requirements*.txt`·`requirements*.in`(이름 안에 `requirements` 가 든 `dev-requirements.txt`·`pip-requirements.in` 도)·`deps.txt`(이름에 `deps`·`dependencies` 가 든 `.txt`·`.in` 파일)·`Dockerfile`·`Makefile`(이름 안에 있기만 하면)·`requirements/`·`constraints*`·`vendor/`·`node_modules/`·`package*.json`·`pnpm-lock.yaml`·`pyproject.toml`·`Pipfile*`·`*.lock`(`poetry.lock`·`uv.lock` 포함)·`.gitmodules`·`environment*.yml`·`conda`(그리고 `setup.py`·`setup.cfg`·`Gemfile*`) |
 | 9 | 데이터 삭제·Migration | 사람의 선언, 바뀐 줄의 삭제 명령(`DROP TABLE`·`DROP COLUMN`·`DROP INDEX`·`DELETE FROM`·`TRUNCATE TABLE`·`rmtree`·`os.remove`·`unlink(`·`rm -rf`)과 마이그레이션 낱말(코드 파일만) |
 | 10 | 자동 게시 활성화 | 경로 `pipeline/blogs.json`, 사람의 선언 |
 | 11 | 외부 비용 발생 기능 | 사람의 선언 |
 | 12 | Main Branch 보호 설정 | 사람의 선언(워크플로 파일은 1번에서 걸림) |
 
-경로 이름은 대소문자를 가리지 않고 비교하고(§7-8 의 내부 항목 목록만 대소문자까지 같아야 합니다), `normalize_repo_path` 가 경로를 `/` 로 통일합니다. 이름 바꾸기는 옛 경로와 새 경로를 모두, 삭제도 변경 파일에 넣어 분류합니다. `..` 구간이 든 경로·절대 경로·제어 문자(DEL 포함)가 든 경로·글자가 아닌 입력·**사전을 경로 목록으로 넘긴 입력**은 확인할 수 없는 입력이라 운영자 전용입니다.
+경로 이름은 대소문자를 가리지 않고 비교하고(§7-8 의 내부 항목 목록만 대소문자까지 같아야 합니다), `normalize_repo_path` 가 경로를 `/` 로 통일합니다(줄 끝의 줄 바꿈만 떼고 경로 자체는 다듬지 않습니다). 이름 바꾸기는 옛 경로와 새 경로를 모두, 삭제도 변경 파일에 넣어 분류합니다. `..` 구간이 든 경로·절대 경로·**어느 구간이든 앞뒤에 공백(유니코드 공백 포함)이 있는 경로**·제어 문자(DEL·C1 포함)가 든 경로·글자가 아닌 입력·사전을 경로 목록으로 넘긴 입력은 확인할 수 없는 입력이라 운영자 전용입니다. 맨 앞의 공백 한 칸이 `docs` 같은 내부 폴더 이름처럼 보이게 하던 우회를 이렇게 막습니다.
 
-**바뀐 줄의 글(`changed_text`)은 추가된 줄과 지운 줄을 둘 다** 넣습니다. 지운 줄에 광고 코드나 `PIPELINE_PAUSE` 가 있어도 운영자 전용입니다(예전 이름 `added_text` 도 받지만 두 이름을 함께 쓰면 입력 오류입니다). 경로마다 나눠 넘기는 사전의 키는 모두 변경 파일 목록에 있어야 하고, 없으면 입력 오류입니다(시험·문서 면제를 흉내 낼 수 없게).
+**바뀐 줄의 글(`changed_text`)은 추가된 줄과 지운 줄을 둘 다** 넣습니다. 지운 줄에 광고 코드나 `PIPELINE_PAUSE` 가 있어도 운영자 전용입니다(예전 이름 `added_text` 도 받지만 두 이름을 함께 쓰면 입력 오류입니다). 경로마다 나눠 넘기는 사전은 **키가 모두 변경 파일 목록에 있어야 하고 변경 파일마다 키가 있어야** 합니다. 글이 없는 파일은 빈 글을 넣고, 어긋나면 입력 오류입니다(시험·문서 면제를 흉내 내거나 코드 파일의 바뀐 줄을 숨길 수 없게).
 
 ### 7-3. 사람이 정해야 하는 항목은 점검표로 선언합니다
 
@@ -272,9 +274,9 @@ AI 가 PR 작성 → 검사와 독립 검증 → 쉬운 병합 설명 발송 →
 **안전 장치 파일(`safety_guard`)** — 승인해도 운영자가 직접 병합합니다.
 
 - 낱말로 알아내는 파일: 문서가 아닌 파일은 경로의 어느 구간에든 `validate_repo`·`guardrail`·`guard`·`security`·`secret`·`egress`·`policy`·`safety`·`sandbox`·`ai_flow` 가 있으면 해당합니다. 예: `scripts/validate_repo.py`·`pipeline/egress.py`·`pipeline/secret_patterns.py`·`pipeline/source_policy.py`·`pipeline/ai_guard.py`·`tests/test_guardrails.py`·`tests/test_security_settings.py`·`tests/test_egress.py`.
-- 이름으로 적은 파일(낱말로는 알 수 없는 발행 잠금·품질 Gate·인증 확인·발행기·생성기·토큰 발급·감시 도구와 사이트 정리 시험): `pipeline/publish_lock.py`·`pipeline/quality_gate.py`·`pipeline/gates.py`·`pipeline/auth_check.py`·`pipeline/registry.py`·`pipeline/source_registry.py`·`pipeline/health.py`·`pipeline/draft_flow.py`·`pipeline/edits/runner.py`·`generator.py`·`blogger_generator.py`·`scripts/get_blogger_token.py`·`scripts/watchdog.py`·`tests/test_site_cleanup.py`, 그리고 폴더 `pipeline/publishers` 의 모든 파일. 이름이 정확히 같을 때만 해당하고 대소문자는 가리지 않습니다.
+- 이름으로 적은 파일(낱말로는 알 수 없는 발행 잠금·품질 Gate·인증 확인·발행기·생성기·토큰 발급·감시 도구·발행 실행기·접수 판정과 사이트 정리 시험): `pipeline/publish_lock.py`·`pipeline/quality_gate.py`·`pipeline/gates.py`·`pipeline/auth_check.py`·`pipeline/registry.py`·`pipeline/source_registry.py`·`pipeline/health.py`·`pipeline/draft_flow.py`·`pipeline/edits/runner.py`·`generator.py`·`blogger_generator.py`·`scripts/get_blogger_token.py`·`scripts/watchdog.py`·`tests/test_site_cleanup.py`·`pipeline/run.py`·`pipeline/operator_loop.py`·`pipeline/telegram_inbox.py`, 그리고 폴더 `pipeline/publishers` 의 모든 파일. 이름이 정확히 같을 때만 해당하고 대소문자는 가리지 않습니다.
 - **이 목록은 저장소가 바뀔 때마다 유지가 필요하다.** 새 안전 장치가 생기거나 파일 이름이 바뀌면 이 목록과 시험을 한 묶음으로 고쳐야 하고(운영자가 직접 병합하는 변경), 시험이 목록의 파일이 실제로 있는지 지킵니다. 목록에 없는 파일은 걸리지 않습니다(§7-7). 위 두 목록은 처음 정할 때 실제 저장소에 없는 이름(`pipeline/generator.py`·`pipeline/blogger_generator.py`)을 빼고 실제 생성기 파일(`generator.py`·`blogger_generator.py`)로 바꿔 적었습니다.
-- AI 가 읽고 따르는 규칙 문서 10개도 운영자 전용입니다: `AGENTS.md`·`CLAUDE.md`·`GEMINI.md`·`AI_COLLAB.md`·`HANDLER.md`·`docs/CHARTER.md`·`docs/SECURITY_GUARDRAILS.md`·`docs/ACTIONS_GUIDE.md`·`docs/AGENT_RUNBOOK.md`·`docs/SESSION_START.md`. 이 문서를 AI 가 스스로 고쳐 자기 규칙을 바꾸는 길을 막기 위해서입니다. 이 정책의 문서·모듈·시험 4개는 `policy_self` 로만 표시합니다. 그 밖의 문서(`.md`·`.rst`·`.txt`·`.adoc`)는 이 규칙에 걸리지 않습니다.
+- AI 가 읽고 따르는 규칙 문서 18개도 운영자 전용입니다: `AGENTS.md`·`CLAUDE.md`·`GEMINI.md`·`AI_COLLAB.md`·`HANDLER.md`·`docs/CHARTER.md`·`docs/SECURITY_GUARDRAILS.md`·`docs/ACTIONS_GUIDE.md`·`docs/AGENT_RUNBOOK.md`·`docs/SESSION_START.md`·`docs/ENGINEERING_GUIDE.md`·`docs/AGENT_DELEGATION.md`·`docs/COPILOT_GUIDE.md`·`docs/AI_FLOW.md`·`docs/AI_MODEL_GUIDE.md`·`docs/SOURCE_POLICY.md`·`docs/QUALITY_GATE.md`·`docs/REQUEST_BRIEFING.md`. 이 문서를 AI 가 스스로 고쳐 자기 규칙을 바꾸는 길을 막기 위해서입니다. 용어 사전(`docs/GLOSSARY.md`)은 규칙이 아니라 사전이라 넣지 않았습니다(§7-7). 이 정책의 문서·모듈·시험 4개는 `policy_self` 로만 표시합니다. 그 밖의 문서(`.md`·`.rst`·`.txt`·`.adoc`)는 이 규칙에 걸리지 않습니다.
 - **시험 폴더도 면제하지 않습니다.** 안전 장치를 지키는 시험이 바로 이 파일들이라, 시험을 고쳐 장치를 약하게 만드는 길을 막습니다.
 
 **문서 파일의 낱말 규칙(총괄(AI)의 판단 — 운영자 확인 대기)** — 문서 파일(`.md`·`.rst`·`.txt`·`.adoc`)의 바뀐 줄에는 낱말 규칙(키·토큰·비밀번호 낱말·`secrets.` 참조·`Authorization` 헤더·`PIPELINE_PAUSE`·삭제 명령과 마이그레이션 낱말·접속 낱말)을 적용하지 않습니다. 문서가 그 낱말을 설명하는 것은 그 항목을 바꾸는 것이 아니기 때문입니다. 운영자 원문은 AI 병합 범위에 '문서'를 명시했고 첫 운영도 '일반 코드 또는 문서 PR 3건'이라고 했는데, 작업 기록 한 줄에 `PIPELINE_PAUSE` 나 토큰 이야기가 들어갔다고 운영자 전용이 되면 원문과 부딪히기 때문입니다. 아래는 문서에서도 그대로 적용합니다.
@@ -303,8 +305,11 @@ AI 가 PR 작성 → 검사와 독립 검증 → 쉬운 병합 설명 발송 →
 - **AI 병합 가능 7종은 목록이 아니라 '12항목과 표시에 안 걸리면' 이라는 거절 목록으로 구현했습니다.** 걸리지 않은 것은 7종 중 어느 것인지 확인하지 않고 통과합니다.
 - 코드는 글의 **모양**만 봅니다. 설명이 정말 쉬운지·변경 내용이 설명과 맞는지·되돌리는 방법이 정말 구체적인지·이상 유무가 사실인지는 사람(독립 검증자)이 읽고 확인합니다. 되돌리는 방법 칸에 열 자가 넘는 아무 말이나 적어도 코드는 통과시키고, 완료 알림에 `-` 같은 값이 있거나 main 검사 결과가 실패인데 이상 없음이라고 적은 모순도 알아내지 못합니다.
 - 이름에 안전 낱말이 없고 §7-6 의 이름 목록에도 없는 검사·정화 코드는 걸리지 않습니다(예: 콘텐츠 안전 프로필 `pipeline/profiles/`). 목록에 넣을지는 운영자가 정합니다.
+- **운영자 확인 대기 항목**: 용어 사전 `docs/GLOSSARY.md` 를 규칙 문서 목록에 넣을지, `pipeline/shadow_run.py`(그림자 실행)와 `pipeline/drafts.py`(초안 처리)를 안전 장치 목록에 넣을지는 정하지 않았습니다(`pipeline/drafts.py` 를 넣으면 초안만 다루는 일반 변경도 운영자 전용이 됩니다). 그래서 지금은 이 셋을 바꾸는 변경이 다른 규칙에 걸리지 않으면 AI 병합 대상입니다.
 - **가져오는 순간 실행되는 파일**(`conftest.py`·`sitecustomize.py`·`tests/_bootstrap.py`·`pipeline/__init__.py`)은 안전 장치 목록에 넣지 않았습니다. 이런 파일을 바꾸면 모든 시험과 실행에 영향을 주므로 독립 검증이 따로 봐야 합니다.
-- 새 외부 접속은 파일에 적힌 모양만 봅니다. 문자열을 쪼개 붙이거나 다른 파일에서 가져오는 접속, 따옴표 없는 비정형 주소, 무작위 문자열 모양의 비밀은 못 잡습니다.
+- 새 외부 접속은 파일에 적힌 모양만 봅니다. 문자열을 쪼개 붙이거나 다른 파일에서 가져오는 접속, 따옴표 없는 비정형 주소, 이름 없는 무작위 문자열 모양의 비밀은 못 잡습니다. 셸 명령 중 `openssl s_client`·`socat`·`aria2c`·`npm publish`·`docker push`·`pip install` 같은 것도 따로 잡지 않습니다. 파일 이름과 겹치는 국가 도메인(`evil.sh` 등)은 스킴이 없으면 못 잡습니다.
+- 도메인 이름처럼 생긴 따옴표 글(`'row.id'`·`'obj.is'`·`'a.to'`·`'config.dev'`·`'pipeline.store'`)은 새 호스트로 읽혀 걸립니다 — 운영자 전용 쪽으로 틀리는 오류입니다.
+- 되돌리는 방법 칸의 '모름' 문구는 목록에 있는 문구와 **정확히 같을 때만** 거절합니다. 조금 바꿔 쓰면 열 자가 넘는 한 통과합니다.
 - 바뀐 줄의 낱말 규칙은 코드 파일에서 일부러 넓습니다(예: `token`·`secret` 이 든 줄은 운영자 전용). 문서 파일에는 이 낱말 규칙을 적용하지 않으므로(§7-6) 문서 PR 은 비밀·키 이야기를 써도 AI 병합 대상이 될 수 있습니다.
 - 선언 6항목은 사람이 정하는 값이라 코드가 다시 계산할 수 없습니다. 병합 직전 재확인은 넘겨받은 분류를 믿지 않고 경로·바뀐 줄 규칙을 다시 계산하지만 선언은 넘겨받은 분류를 따릅니다.
 - 일부 규칙은 서로 겹쳐서 하나를 지워도 결과가 같습니다(방어를 겹쳐 둔 것이라 그대로 둡니다): `README.md`·`CNAME` 같은 명시 이름과 맨 위 `assets/`·초안 폴더의 명시 규칙이 §7-8 의 기본 거부와, 이름 낱말 `secret` 이 `client_secret` 이나 `.keystore` 같은 키 이름 규칙과, `secrets.` 참조가 키 낱말 규칙과, 검사 결과가 비어 있음이 필수 검사가 결과에 없음과 겹칩니다. 겹치는 것 중 시험으로 가려낼 수 없던 대안(`ls-remote`·`socket.create_connection` 같은 것)은 코드에서 지웠습니다.
@@ -320,6 +325,8 @@ AI 가 PR 작성 → 검사와 독립 검증 → 쉬운 병합 설명 발송 →
 
 ## 8. 병합 방식 제한
 
+이 절은 켜진 뒤의 동작이며 지금은 꺼져 있습니다. 다만 main 에 직접 push 하지 않는다는 원칙은 꺼져 있는 지금도 그대로입니다.
+
 - **main 직접 push 금지.** AI 가 운영자 PC 의 Git 자격 증명을 이용해 main 에 직접 push 하는 방식은 쓰지 않습니다.
 - 강제 push 도 금지입니다.
 - 병합은 **GitHub 의 PR 병합**으로만 합니다(`pr_merge`). 아래 값은 모두 거절입니다(`merge_method_allowed`).
@@ -331,6 +338,8 @@ AI 가 PR 작성 → 검사와 독립 검증 → 쉬운 병합 설명 발송 →
 | 그 밖의 값(`squash`·`merge`·`PR_MERGE`·빈 글·글자가 아닌 값 등) | 거절 — 모르는 값은 거절입니다 |
 
 ## 9. 사후 처리
+
+이 절은 켜진 뒤의 동작이며 지금은 꺼져 있습니다.
 
 1. 병합된 main 에서 검사를 다시 돌립니다(main 사후 검사).
 2. **병합 완료 알림**에 아래 7가지를 반드시 담습니다. 알림 글은 `render_completion_notice` 가 만들고 `completion_notice_problems` 가 빠진 곳을 찾습니다. 항목은 `이름: 값` 한 줄씩입니다.
@@ -368,6 +377,8 @@ main 검사 결과: 전체 통과
 | 그 밖의 값 | 불가 | 없음 — 운영자의 확인을 기다림 |
 
 ## 10. 첫 운영 3건 시험과 즉시 중지
+
+이 절은 켜진 뒤의 동작이며 지금은 꺼져 있습니다.
 
 첫 운영은 **일반 코드 또는 문서 PR 3건**으로 시험합니다. 3건 모두 아래 6가지를 만족하면 승인형 AI 병합을 계속 사용합니다.
 
@@ -414,10 +425,11 @@ AI 병합을 실제로 켜는 변경은 **별도 병합 요청**으로 보내고
 
 - 켜는 변경이 §6 의 23개 값을 모두 채워 `check_preconditions` 에 넘기는지(빠진 값이 있으면 병합하지 않음). 특히 아래는 빠뜨리기 쉽습니다.
   - 변경 파일 목록에는 **이름을 바꾼 파일의 옛 경로와 새 경로를 모두**, **지운 파일**까지 넣습니다.
-  - 바뀐 줄(`changed_text`)에는 **추가된 줄과 지운 줄을 둘 다** 넣습니다(지운 줄에 광고 코드나 `PIPELINE_PAUSE` 가 있을 수 있어서). 경로마다 나눠 넘기는 사전의 키는 모두 변경 파일 목록에 있어야 합니다.
+  - 바뀐 줄(`changed_text`)에는 **추가된 줄과 지운 줄을 둘 다** 넣습니다(지운 줄에 광고 코드나 `PIPELINE_PAUSE` 가 있을 수 있어서). 경로마다 나눠 넘기는 사전은 키가 모두 변경 파일 목록에 있어야 하고 변경 파일마다 키가 있어야 합니다(글이 없는 파일은 빈 글).
   - **필수 검사의 이름 집합**(`required_checks`)을 저장소 설정과 맞춰 넣습니다. 이 집합을 모르면 시작도 하지 않은 검사가 결과에 보이지 않아 통과로 읽힙니다.
   - 승인 때의 머리 SHA 는 **쉬운 설명을 보냈을 때의 것**(`approved_head_sha`)과 **승인 글이 도착했을 때의 것**(`head_sha_at_approval`)을 각각 넣습니다(`ApprovalRecord`). 둘이 다르면 승인은 무효입니다.
 - 12항목 분류 결과가 지금 변경 파일 목록으로 계산되는지(분류는 병합 직전에 이 함수가 다시 계산합니다)
+- **값의 출처**(켜기 전의 필수 조건): `repo_kind`·`changed_text`·`checks`·`required_checks`·`independent_verification`·`has_conflict`·`secret_findings`·`pr_state`·`pr_draft`·`previous_merge_main_check` 는 GitHub 에서 직접 읽는 신뢰할 수 있는 워크플로가 만든 값이어야 합니다. PR 작성자나 PR 쪽 파일이 채울 수 있으면 안 됩니다 — 이 함수는 이 값들의 모양만 확인하고 진짜인지는 알 수 없습니다.
 - 병합 설명을 보내기 전에 `explanation_problems` 로 점검하는지. 쉬운 설명 글에서 번호·머리 커밋·점검표를 되읽는 `parse_explanation` 은 **지금 만들지 않았습니다**. 켜는 변경이 설명 글을 구조화된 값으로 되읽어야 하면 그때 정하고, 설명과 실제 변경이 같은 값에서 나오게 하는 쪽을 먼저 봅니다.
 - **독립 검증 기록의 출처와 위조 방지**(켜기 전의 필수 조건): `independent_verification` 은 코드가 값의 모양만 봅니다. 그 기록이 정말 구현자와 다른 검증자가 남긴 것인지는 코드가 알 수 없으므로, 켜기 전에 기록을 쓸 수 있는 주체를 제한하고(소유자 계정의 이슈·댓글처럼 신뢰할 수 있는 곳에서만 읽고, 같은 PR 의 작성자나 PR 쪽 파일이 기록을 만들 수 없게 합니다) 기록이 어느 트리 해시에 대한 것인지 함께 남겨야 합니다.
 - 병합 직후 `workflow_dispatch` 로 후속 검사와 배포를 호출하고, 결과를 기다려 완료 알림을 보내는지
