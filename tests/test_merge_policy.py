@@ -866,6 +866,29 @@ class ClassifyInvalidInputTest(unittest.TestCase):
         self.assertEqual(mp.classify_change("blog", ["pipeline/a.py"], "", dict(DECLARED_OK)).tier, "ai_ok")
         self.assert_invalid(mp.classify_change("blog", ["pipeline/a.py"]))                                       # 글을 아예 안 주면 확인할 수 없는 입력이다
 
+    def test_a_file_whose_changed_lines_could_not_be_read_is_none_and_never_an_empty_text(self):
+        """R1(§7-2·§11-3): GitHub 가 너무 큰 diff·바이너리의 내용을 주지 않아 바뀐 줄을 읽지 못한 파일의 글은 빈 글이 아니라 None 으로 넘긴다 — None 도, 키가 없는 것도 입력 오류라 운영자 전용이다.
+        빈 글은 바뀐 줄이 정말 없을 때(이름만 바뀐 파일·빈 파일 등)만 통과한다. 코드는 빈 글을 '읽어 보니 바뀐 줄이 없다'는 결과로 믿으므로(읽지 못한 코드 파일을 빈 글로 넘기면 그 파일의 내용 규칙을 통째로
+        건너뛴다) 읽지 못한 파일을 None 으로 넘기는 약속은 호출자가 지킨다(문서 §11-3)."""
+        paths = ["pipeline/a.py", "tests/test_a.py"]
+        for label, given in (("한 파일만 None", {"pipeline/a.py": None, "tests/test_a.py": ""}), ("다른 파일만 None", {"pipeline/a.py": "", "tests/test_a.py": None}),
+                             ("모두 None", {"pipeline/a.py": None, "tests/test_a.py": None}), ("글 전체가 None", None)):
+            with self.subTest(label=label):
+                result = mp.classify_change("blog", paths, given, dict(DECLARED_OK))
+                self.assert_invalid(result)
+                self.assertTrue(any("바뀐 줄의 글을 읽을 수 없습니다" in reason for reason in result.reasons), result.reasons)
+        for label, given in (("읽지 못한 코드 파일의 키가 없음", {"tests/test_a.py": ""}), ("읽지 못한 시험 파일의 키가 없음", {"pipeline/a.py": ""}), ("키가 모두 없음", {})):
+            with self.subTest(label=label):
+                result = mp.classify_change("blog", paths, given, dict(DECLARED_OK))
+                self.assert_invalid(result)
+                self.assertTrue(any("바뀐 줄의 글이 없는 파일이 있습니다" in reason for reason in result.reasons), result.reasons)
+        for label, given in (("글 전체가 빈 글", ""), ("파일마다 빈 글", {"pipeline/a.py": "", "tests/test_a.py": ""})):
+            with self.subTest(label=label):
+                result = mp.classify_change("blog", paths, given, dict(DECLARED_OK))
+                self.assertEqual((result.tier, result.categories, result.extra_flags), ("ai_ok", (), ()))
+        result = mp.classify_change("blog", paths, {"pipeline/a.py": None, "tests/test_a.py": ""}, dict(DECLARED_OK))
+        self.assertEqual(result.tier, "operator_only")                                                         # 한 파일이라도 읽지 못했으면 나머지가 깨끗해도 통과하지 못한다
+
     def test_the_text_is_the_added_and_the_removed_lines_and_either_name_is_accepted(self):
         """바뀐 줄 전체(추가 + 지움)를 받는다 — 지운 줄에 들어 있던 광고 코드·PIPELINE_PAUSE·삭제 낱말도 걸린다. 예전 이름 added_text 도 받고 두 이름을 함께 쓰면 입력 오류다."""
         removed = "if PIPELINE_PAUSE:\n    return\n"                                                          # 이 줄을 지우는 변경의 지운 줄
@@ -1550,6 +1573,28 @@ class PreconditionsTest(unittest.TestCase):
                 verdict = mp.check_preconditions(facts)
                 self.assertEqual(verdict.failed_codes, ("scope_matches",))
                 self.assertIn("다시 계산하니", verdict.failures[0].reason)
+
+    def test_condition_6_an_unread_file_is_none_and_fails_while_a_truly_empty_text_passes(self):
+        """R1(§7-2·§11-3): 바뀐 줄을 읽지 못한 파일의 글이 None 이면(딕셔너리 값·키 없음·글 전체) 조건 6 이 실패하고, 바뀐 줄이 정말 없는 빈 글만 통과한다."""
+        for label, given in (("한 파일만 None", {GOOD_PATHS[0]: None, GOOD_PATHS[1]: ""}), ("모두 None", {path: None for path in GOOD_PATHS}), ("한 파일의 키가 없음", {GOOD_PATHS[0]: ""})):
+            with self.subTest(label=label):
+                facts = good_facts()
+                facts["changed_text"] = given
+                verdict = mp.check_preconditions(facts)
+                self.assertEqual(verdict.failed_codes, ("scope_matches",))
+                self.assertIn("다시 계산하니", verdict.failures[0].reason)
+                self.assertIn("입력을 확인할 수 없음", verdict.failures[0].reason)
+        facts = good_facts()
+        facts["changed_text"] = None
+        verdict = mp.check_preconditions(facts)
+        self.assertEqual(verdict.failed_codes, ("scope_matches",))
+        self.assertIn("필요한 값이 없습니다: changed_text", verdict.failures[0].reason)
+        for label, given in (("글 전체가 빈 글", ""), ("파일마다 빈 글", {path: "" for path in GOOD_PATHS})):
+            with self.subTest(label=label):
+                facts = good_facts()
+                facts["changed_text"] = given
+                verdict = mp.check_preconditions(facts)
+                self.assertTrue(verdict.ok, verdict.failures)
 
     def test_condition_6_the_declared_items_cannot_be_recomputed_so_the_callers_classification_is_followed(self):
         facts = good_facts()

@@ -317,9 +317,50 @@ class OperatorStatementsPinnedTest(unittest.TestCase):
         (11, "**병합을 호출하기 직전마다** 병합 이력 전체로 `evaluate_trial` 을 돌려"),
         (11, "- **값의 출처**(켜기 전의 필수 조건):"),
         (11, "`repo_kind`·`changed_text`·`checks`·`required_checks`·`independent_verification`·`has_conflict`·`secret_findings`·`pr_state`·`pr_draft`·`previous_merge_main_check` 는 GitHub 에서 직접 읽는 신뢰할 수 있는 워크플로가 만든 값이어야 합니다"),
-        (11, "변경 파일마다 키가 있어야 합니다(글이 없는 파일은 빈 글)"),
         (11, "PR 작성자나 PR 쪽 파일이 채울 수 있으면 안 됩니다"),
         (12, "운영자 결정으로만"),
+        # ---- 5차(WIP 10): P3 재검증 반영 — 읽지 못한 파일의 글·첫 3건의 범위·정직하게 고친 한계 ----
+        (4, "표준 양식 글을 만드는 `render_explanation` 에서는 사람이 손으로 `아니오` 를 적을 수 없고"),
+        (4, "**다만 손으로 쓴 설명 글을 `explanation_problems` 로 점검하는 경로에서는**"),
+        (4, "그 경로의 마지막 방어선은 독립 검증자입니다"),
+        (5, "번호와 `승인` 사이는 공백(칸) 또는 탭 하나 이상입니다"),
+        (7, "(§7-8 의 내부 항목 목록과 §7-6 의 `tests/` 면제만 대소문자까지 같아야 합니다)"),
+        (7, "**빈 글은 바뀐 줄이 정말 없는 파일(이름만 바뀐 파일·빈 파일 등)에만** 넣습니다"),
+        (7, "**바뀐 줄을 읽지 못한 파일**(diff 가 너무 커서 GitHub 가 내용을 주지 않는 파일·바이너리 파일 등)의 글은 빈 글이 아니라 **`None` 으로** 넘기고"),
+        (7, "`None` 이나 키가 없는 것은 입력 오류라 운영자 전용입니다"),
+        (7, "읽지 못한 코드 파일을 빈 글로 넘기면 그 파일의 내용 규칙"),
+        (7, "**낱말·이름 목록에 걸린 시험만 막습니다.**"),
+        (7, "목록의 장치를 지키는 전용 시험이라도 이름에 낱말이 없고 목록에도 없으면 걸리지 않습니다"),
+        (7, "특히 `pipeline/__init__.py` 는 pipeline 의 다른 모든 파일보다 먼저 실행되므로"),
+        (7, "하위 폴더의 `AGENTS.md`·`CLAUDE.md`·`GEMINI.md`(예: `pipeline/CLAUDE.md`·`tests/AGENTS.md`)도 지금은 걸리지 않습니다"),
+        (7, "검증자 P 의 권고는 `pipeline/drafts.py` 와 `pipeline/shadow_run.py` 를 운영자 전용으로 두는 쪽입니다"),
+        (7, "- **목록의 장치를 지키는 전용 시험은 걸리지 않습니다.**"),
+        (7, "이름 목록에 올라 있는 시험은 `tests/test_site_cleanup.py` 하나뿐이고"),
+        (7, "- `explanation_problems` 는 사람이 손으로 쓴 설명 글의 점검표가 실제 분류와 같은지 알지 못합니다."),
+        (7, "- 경로의 역슬래시는 `/` 로 바꿔 읽습니다."),
+        (7, "역슬래시가 든 경로를 입력 오류로 처리하는 편이 더 단단하다는 것이 검증자 P 의 의견입니다"),
+        (7, "`runpy.run_path`·`compile`·`subprocess`·`os.system`·`ctypes`·`pickle.loads`"),
+        (7, "`render_explanation` 은 `ai_merge_enabled` 가 정확히 참(`True`)이 아니어도"),
+        (7, "점검은 대문자 `M` 만 봅니다"),
+        (7, "`ValueError` 를 낼 수 있고"),
+        (7, "`RuntimeError` 를 내는 특이한 객체를 넘기면"),
+        (7, "결함 번호 `D-346`(문서 머리)과 `D-347` 이 이 문서·모듈 주석·시험 상수에 글자로 적혀 있습니다"),
+        (7, "병합할 때 다른 묶음과 번호가 겹쳐 번호를 바꿔야 하면 정책 파일(운영자가 직접 병합하는 변경)도 함께 고쳐야 합니다"),
+        (7, "이 파일은 줄이 아니라 **구문 트리**(코드를 문법 구조로 풀어 읽은 것)로 지킵니다"),
+        (7, "정책 모듈과 같은 이름의 파일이 다른 폴더에 하나라도 있으면 실패합니다"),
+        (7, "`%`·`format`·`join` 으로 이은 글자와, 이미 불러온 모듈을 `sys.modules` 에서 찾는 식의 우회는 정적으로 못 막습니다"),
+        (11, "변경 파일마다 키가 있어야 합니다. **읽지 못한 파일(너무 큰 diff·바이너리라 GitHub 가 내용을 주지 않는 파일 등)의 글은 `None` 으로 넘깁니다**"),
+        (11, '**빈 글(`""`)은 바뀐 줄이 정말 없을 때만** 넣습니다'),
+        (11, "**변경 파일 목록은 모든 페이지를 읽어 PR 의 변경 파일 수와 같을 때만 씁니다.**"),
+        (11, "파일 수가 맞지 않거나 상한을 넘으면 운영자 전용으로 둡니다"),
+        (11, "(확인 필요 — AI 가 GitHub 에 직접 접속해 확인하지 못했습니다)"),
+        (11, "- **켜기 전 필수 결정**(운영자와 정할 것 — 정하기 전에는 켜지 않습니다):"),
+        (11, "첫 3건은 경로가 모두 `.py`·`.md`·`tests/` 인 변경으로 한정합니다"),
+        (11, "이 한정은 코드가 확인하지 않으므로 켜는 변경이 지켜야 합니다"),
+        (11, "**켜는 변경 전에 운영자와 정합니다**"),
+        (11, "(검증자 P 의 권고는 운영자 전용)"),
+        (7, "코드가 입력 오류로 돌려주는 '글이 없으면 빈 글을 넣어야 합니다' 문구도 바뀐 줄이 정말 없는 파일을 뜻하며 읽지 못한 파일을 가리키지 않습니다"),
+        (7, "정책 모듈과 그 시험 두 개 밖에는 이름을 쓰는 파일이 없게 합니다"),
     )
 
     def test_the_conservative_judgement_is_attributed_to_the_ai_and_waits_for_the_operator(self):
@@ -339,9 +380,17 @@ class OperatorStatementsPinnedTest(unittest.TestCase):
         self.assertIn("총괄(AI)의 보수적 판단", MODULE_SOURCE)
         self.assertIn("운영자 확인 대기", MODULE_SOURCE)
 
+    def test_the_intro_names_the_one_test_file_that_may_name_the_module(self):
+        """머리 인용문의 '어디서도 쓰이지 않습니다'는 구문 트리 시험이 지키는 한 파일의 예외(품질 Gate 연결 격리 시험)를 숨기지 않고 적는다(I10)."""
+        quote = DOC.split("\n## 1.")[0]
+        self.assertIn("어디서도 쓰이지 않습니다. 예외는 하나뿐입니다:", quote)
+        for rel in NAMED_ONLY_EXPECTED:
+            self.assertIn("`" + rel + "`", quote)
+        self.assertIn("**글자로만** 적습니다(가져오지도 부르지도 않으며, 시험이 그 파일의 코드 구조를 읽어 지킵니다 — §7-7)", quote)
+
     def test_the_reading_guide_tells_the_operator_which_sections_to_read(self):
         quote = DOC.split("\n## 1.")[0]
-        self.assertIn("**운영자가 읽을 곳:** §1·§4·§5-1에서 §5-3까지·§10 만 읽으시면 됩니다.", quote)
+        self.assertIn("**운영자가 읽을 곳:** §1·§4·§5-1에서 §5-3까지·§7-5에서 §7-7까지(운영자 확인 대기 항목이 있는 곳)·§10·§11-3 의 '켜기 전 필수 결정' 만 읽으시면 됩니다.", quote)
         for label in ("5-1", "5-2", "5-3"):
             self.assertIn("### " + label + ". ", DOC)
 
@@ -380,7 +429,9 @@ class OperatorStatementsPinnedTest(unittest.TestCase):
         limits = subsection("7-7")
         for phrase in ("거절 목록으로 구현했습니다", "글의 **모양**만 봅니다", "`pipeline/profiles/`", "`conftest.py`", "`sitecustomize.py`", "`tests/_bootstrap.py`", "`pipeline/__init__.py`",
                        "문자열을 쪼개 붙이거나", "선언 6항목은 사람이 정하는 값", "하나를 지워도 결과가 같습니다", "총괄(AI)의 판단 — 운영자 확인 대기", "`docs/GLOSSARY.md`", "`pipeline/shadow_run.py`",
-                       "`pipeline/drafts.py`", "`openssl s_client`", "`docker push`", "`'row.id'`", "`'pipeline.store'`", "정확히 같을 때만", "이름 없는 무작위 문자열 모양의 비밀"):
+                       "`pipeline/drafts.py`", "`openssl s_client`", "`docker push`", "`'row.id'`", "`'pipeline.store'`", "정확히 같을 때만", "이름 없는 무작위 문자열 모양의 비밀",
+                       "`pipeline/usercustomize.py`", "하위 폴더의 `AGENTS.md`", "전용 시험은 걸리지 않습니다", "`tests/test_site_cleanup.py` 하나뿐", "역슬래시", "`runpy.run_path`", "`pickle.loads`",
+                       "`ai_merge_enabled`", "`m076 승인`", "`ValueError`", "`RuntimeError`", "`D-347`", "구문 트리", "`sys.modules`", "검증자 P 의 권고"):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, limits)
 
@@ -629,6 +680,45 @@ class NamedSafetyFilesExistTest(unittest.TestCase):
         self.assertEqual(set(mp.SAFETY_GUARD_DOCS) & set(mp.POLICY_SELF_FILES), set())
 
 
+class DocumentedBlindSpotsTest(unittest.TestCase):
+    """문서 §7-7·§11-3 이 '지금은 걸리지 않는다'고 적은 빈틈이 코드의 지금 동작과 같다(R2·R3·R4). 빈틈을 닫으려고 목록을 넓히면 이 시험이 빨개져 문서도 한 묶음으로 고치게 한다 — 운영자가 직접 병합하는 변경이다.
+    파일이 실제로 있는지는 보지 않는다(경로 글자만 분류한다) — 이름이 바뀌어도 이 시험이 무관한 변경을 막지 않게."""
+
+    DECLARED = dict.fromkeys(mp.DECLARED_REQUIRED, False)
+    RUNS_AT_IMPORT = ("pipeline/__init__.py", "tests/_bootstrap.py", "tests/conftest.py", "scripts/sitecustomize.py", "pipeline/usercustomize.py")
+    SUBFOLDER_RULE_DOCS = ("pipeline/CLAUDE.md", "tests/AGENTS.md", "docs/CLAUDE.md", "scripts/GEMINI.md")
+    DEDICATED_TESTS = ("tests/test_publish_lock.py", "tests/test_gates.py", "tests/test_quality_gate.py", "tests/test_auth_check.py", "tests/test_registry.py", "tests/test_health.py",
+                       "tests/test_draft_flow.py", "tests/test_publisher_blogger.py", "tests/test_generator_quality_gate.py", "tests/quality_gate_helpers.py", "tests/lock_helpers.py")
+    CONFIRMATION_WAITING = ("pipeline/drafts.py", "pipeline/shadow_run.py")
+
+    def verdict(self, path):
+        return mp.classify_change("blog", [path], {path: ""}, dict(self.DECLARED))
+
+    def test_the_files_the_document_says_are_not_caught_are_ai_ok_today(self):
+        for group in (self.RUNS_AT_IMPORT, self.SUBFOLDER_RULE_DOCS, self.DEDICATED_TESTS, self.CONFIRMATION_WAITING):
+            for path in group:
+                with self.subTest(path=path):
+                    result = self.verdict(path)
+                    self.assertEqual((result.tier, result.categories, result.extra_flags), ("ai_ok", (), ()), result.reasons)
+
+    def test_the_top_level_files_that_run_at_import_are_caught_by_the_default_deny(self):
+        for path in ("conftest.py", "sitecustomize.py"):
+            with self.subTest(path=path):
+                result = self.verdict(path)
+                self.assertEqual((result.tier, result.categories), ("operator_only", ("public_content",)))
+
+    def test_one_test_is_in_the_name_list_and_the_rule_documents_are_only_the_listed_paths(self):
+        self.assertEqual([name for name in mp.SAFETY_GUARD_FILES if name.startswith("tests/")], ["tests/test_site_cleanup.py"])
+        self.assertIn("pipeline/draft_flow.py", mp.SAFETY_GUARD_FILES)                                             # 같은 흐름의 실행부는 목록에 있고
+        for name in self.CONFIRMATION_WAITING:
+            self.assertNotIn(name, mp.SAFETY_GUARD_FILES)                                                         # 운영자 확인 대기 둘은 없다
+        for name in ("AGENTS.md", "CLAUDE.md", "GEMINI.md"):
+            self.assertIn(name, mp.SAFETY_GUARD_DOCS)                                                             # 맨 위의 것만 목록에 있다
+            self.assertEqual([item for item in mp.SAFETY_GUARD_DOCS if item.endswith("/" + name)], [])
+        self.assertTrue(all(item.startswith("docs/") or "/" not in item for item in mp.SAFETY_GUARD_DOCS))
+        self.assertEqual(len(mp.SAFETY_GUARD_DOCS), 18)
+
+
 class ModulePurityTest(unittest.TestCase):
     TREE = ast.parse(MODULE_SOURCE)
     BANNED_CALLS = frozenset({"open", "exec", "eval", "compile", "__import__", "getattr", "setattr", "delattr", "globals", "locals", "vars", "input", "print", "breakpoint", "exit", "quit"})
@@ -682,12 +772,118 @@ class ModulePurityTest(unittest.TestCase):
                 self.assertIsNone(re.search("[" + "".join(chr(code) for code in (0x08, 0x0B, 0x0C)) + "]", text))
 
 
+# ---- 이름 글자만 허용된 한 파일을 줄이 아니라 구문 트리로 지킨다 --------------------------------------------------------------------------------------------------
+# 품질 Gate 연결 격리 시험(tests/test_generator_quality_gate.py)은 허용 파일 목록·시험 이름·경로에 정책 모듈의 파일 이름을 글자로 적는다(연결이 아니다). 그 한 파일만 정책 모듈 이름의 글자 언급을 받는데,
+# 줄 안 부분 문자열로 지키면 같은 줄 덧붙임(`; import …`)과 글자 쪼개기를 놓친다(P3-M1). 그래서 그 파일을 구문 트리(ast)로 읽어 줄 번호·줄 모양이 아니라 내용으로 지킨다.
+NEEDLE = "merge_policy"
+# 기대값은 그 파일의 최종 내용에서 계산해 못박았다: 글자 상수 중 merge_policy 가 든 것 4개(허용 파일 목록의 이름 한 곳·이름 비교 한 곳·상대 경로 한 곳·정책 모듈을 읽는 시험의 경로 한 곳)와
+# 이름에 든 정의 1개(정책 모듈의 Gate 글자 시험). 다른 언급이 하나라도 늘면(같은 줄 덧붙임 포함) 다르다. 주석은 구문 트리에 없으므로 세지 않는다(실행되지 않는 글이다).
+NAMED_ONLY_EXPECTED = {
+    "tests/test_generator_quality_gate.py": (["merge_policy.py", "merge_policy.py", "merge_policy.py", "pipeline/merge_policy.py"],
+                                             ["test_merge_policy_names_the_gate_only_as_data_in_its_safety_list"]),
+}
+IMPORT_TOOLS = frozenset({"importlib", "runpy", "imp", "pkgutil", "zipimport"})
+DYNAMIC_NAMES = frozenset({"__import__", "import_module", "spec_from_file_location", "module_from_spec", "exec_module", "load_module", "run_path", "run_module", "exec", "eval", "builtins", "__builtins__"})
+DEFINITIONS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+IMPORTS = (ast.Import, ast.ImportFrom, ast.alias)
+
+
+def string_constants(tree):
+    """구문 트리의 모든 글자 상수(독스트링·f-string 의 글자 조각 포함, 바이트 글자는 latin-1 로 읽는다)."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, str):
+                yield node.value
+            elif isinstance(node.value, bytes):
+                yield node.value.decode("latin-1")
+
+
+def fold_text(node):
+    """상수 글자끼리의 `+` 이음(여러 번 이은 것 포함)과 상수만 든 f-string 을 접은 글. 접을 수 없으면 None."""
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, str):
+            return node.value
+        return node.value.decode("latin-1") if isinstance(node.value, bytes) else None
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left, right = fold_text(node.left), fold_text(node.right)
+        return None if left is None or right is None else left + right
+    if isinstance(node, ast.JoinedStr):
+        parts = []
+        for value in node.values:
+            if isinstance(value, ast.FormattedValue):
+                if value.conversion != -1 or value.format_spec is not None:
+                    return None
+                value = value.value
+            part = fold_text(value)
+            if part is None:
+                return None
+            parts.append(part)
+        return "".join(parts)
+    return None
+
+
+def name_strings(tree):
+    """구문 트리의 이름 자리(변수·속성·정의·인자·가져오기 이름 …)에 적힌 글 — 글자 상수는 뺀다. (노드, 글) 쌍."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant):
+            continue
+        for _field, value in ast.iter_fields(node):
+            if isinstance(value, str):
+                yield node, value
+            elif isinstance(value, list):
+                for item in value:
+                    if isinstance(item, str):
+                        yield node, item
+
+
+def named_only_problems(source, expected_constants, expected_functions):
+    """이름 글자만 허용된 한 파일의 문제 목록 [(종류, 내용)] — 없으면 빈 목록.
+    constants: 글자 상수 중 merge_policy(대소문자 무시)가 든 것의 정렬한 목록이 기대와 다름 · functions: 이름에 든 정의(함수·클래스)가 기대와 다름 · import: 정책 모듈을 가져옴 ·
+    import_tool: importlib·runpy·imp·pkgutil 같은 가져오기 도구를 가져옴 · identifier: 변수·속성 이름 자리에 merge_policy · dynamic: 동적 가져오기·코드 실행 이름의 사용(호출이든 참조든) ·
+    folded: 상수 글자를 `+` 나 f-string 으로 쪼개 이어 merge_policy 가 됨."""
+    tree = ast.parse(source)
+    problems = []
+
+    def add(kind, detail):
+        if (kind, detail) not in problems:
+            problems.append((kind, detail))
+
+    found = sorted(text for text in string_constants(tree) if NEEDLE in text.lower())
+    if found != sorted(expected_constants):
+        add("constants", found)
+    defined = sorted(node.name for node in ast.walk(tree) if isinstance(node, DEFINITIONS) and NEEDLE in node.name.lower())
+    if defined != sorted(expected_functions):
+        add("functions", defined)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules = [name for alias in node.names for name in (alias.name, alias.asname or "")]
+        elif isinstance(node, ast.ImportFrom):
+            modules = [node.module or ""] + [name for alias in node.names for name in (alias.name, alias.asname or "")]
+        else:
+            modules = []
+        for module in modules:
+            if NEEDLE in module.lower():
+                add("import", module)
+            if module.split(".")[0] in IMPORT_TOOLS:
+                add("import_tool", module)
+        if isinstance(node, (ast.BinOp, ast.JoinedStr)):
+            folded = fold_text(node)
+            if folded is not None and NEEDLE in folded.lower():
+                add("folded", folded)
+    for node, text in name_strings(tree):
+        if NEEDLE in text.lower() and not isinstance(node, DEFINITIONS + IMPORTS):
+            add("identifier", text)
+        if text in DYNAMIC_NAMES or text in IMPORT_TOOLS:
+            add("dynamic", text)
+    return problems
+
+
 class NotWiredTest(unittest.TestCase):
     """지금은 꺼져 있다 — 아무도 이 모듈을 부르지 않는다. 켜는 변경이 연결을 더할 때 이 시험도 같이 고쳐야 하고, 그 변경은 운영자가 직접 병합한다."""
 
     ALLOWED = {"pipeline/merge_policy.py", "tests/test_merge_policy.py", "tests/test_merge_policy_docs.py"}
-    # 이름 글자만 허용된 한 파일 — 품질 Gate 연결 격리 시험이 허용 파일 목록에 정책 모듈의 파일 이름을 글자로 적는다(연결이 아니다). 가져오기·호출·그 밖의 언급은 아래 전용 시험이 줄 단위로 막는다.
-    NAMED_ONLY = {"tests/test_generator_quality_gate.py"}
+    # 이름 글자만 허용된 한 파일 — 품질 Gate 연결 격리 시험이 허용 파일 목록에 정책 모듈의 파일 이름을 글자로 적는다(연결이 아니다). 이 파일은 줄이 아니라 구문 트리로 지킨다(위 NAMED_ONLY_EXPECTED·named_only_problems).
+    NAMED_ONLY = set(NAMED_ONLY_EXPECTED)
     FUNCTION_NAMES = ("parse_approval", "check_approval_text", "check_preconditions", "classify_change", "evaluate_trial", "evaluate_post_merge", "merge_method_allowed", "ApprovalLedger",
                       "ApprovalRecord", "render_explanation", "explanation_problems")
 
@@ -716,20 +912,84 @@ class NotWiredTest(unittest.TestCase):
             text = path.read_text(encoding="utf-8", errors="replace")
             with self.subTest(path=rel):
                 self.assertIsNone(imported.search(text), rel)
-                if rel not in self.NAMED_ONLY:               # 이름 글자만 허용된 한 파일은 아래 전용 시험이 줄 단위로 지킨다
+                if rel not in self.NAMED_ONLY:               # 이름 글자만 허용된 한 파일은 아래 구문 트리 시험이 지킨다
                     self.assertIsNone(referenced.search(text), rel)
 
-    def test_the_one_file_that_may_name_the_module_names_it_only_as_a_file_in_an_allow_list(self):
-        """연결 격리 시험(test_generator_quality_gate)은 허용 파일 목록·시험 이름·경로에 파일 이름 글자를 적을 뿐이다 — 가져오기·호출·동적 가져오기·그 밖의 언급이 생기면 실패한다."""
-        shapes = ('{"generator.py", "registry.py", "quality_gate.py", "shadow_run.py", "merge_policy.py"}',
-                  "def test_merge_policy_names_the_gate_only_as_data_in_its_safety_list(self):",
-                  '(ROOT / "pipeline" / "merge_policy.py")')
-        for rel in sorted(self.NAMED_ONLY):
-            lines = [line.strip() for line in (ROOT / rel).read_text(encoding="utf-8").splitlines() if "merge_policy" in line and not line.strip().startswith("#")]
+    def test_the_one_file_that_may_name_the_module_is_pinned_by_its_syntax_tree(self):
+        """연결 격리 시험(test_generator_quality_gate)은 정책 모듈의 파일 이름을 글자로 적을 뿐이다 — 그 파일을 구문 트리로 읽어 (a) merge_policy 가 든 글자 상수의 정렬한 목록이 기대와 정확히 같고(언급이 하나라도 늘면
+        같은 줄 덧붙임이라도 실패) (b) 이름에 든 정의가 기대한 한 개뿐이고 (c) 정책 모듈을 가져오는 import·가져오기 도구(importlib·runpy·imp·pkgutil) import 가 0 이고 (d) 이름 자리에 merge_policy 가 없고
+        `__import__`·`import_module`·`spec_from_file_location`·`module_from_spec`·`exec_module`·`load_module`·`run_path`·`run_module`·`exec`·`eval` 의 호출·참조가 0 이고 (e) 상수 글자를 `+` 로 쪼개 이어
+        merge_policy 가 되는 조합이 0 임을 지킨다. 줄 번호·줄 모양에는 기대지 않는다."""
+        for rel, (constants, functions) in sorted(NAMED_ONLY_EXPECTED.items()):
+            source = (ROOT / rel).read_text(encoding="utf-8")
             with self.subTest(path=rel):
-                self.assertEqual(len(lines), len(shapes), lines)
-                for line in lines:
-                    self.assertTrue(any(shape in line for shape in shapes), line)
+                self.assertEqual(named_only_problems(source, constants, functions), [])
+                self.assertEqual(len(constants), 4)
+                self.assertEqual(len(functions), 1)
+
+    def test_the_syntax_tree_check_catches_every_known_way_around_the_old_line_check(self):
+        """검증자 P3 가 옛 줄 단위 시험을 통과한 다섯 우회(같은 줄 덧붙임 from-import·import as·`__import__`, 글자를 쪼갠 `__import__`·`importlib.import_module`)와 같은 부류 — 모두 잡힌다."""
+        base = "ALLOWED = {'merge_policy.py'}\ndef test_merge_policy_one(self):\n    pass\n"
+        self.assertEqual(named_only_problems(base, ["merge_policy.py"], ["test_merge_policy_one"]), [])
+        cases = (
+            ("같은 줄 덧붙임 from-import", "x = 1; from pipeline.merge_policy import classify_change\n", {"import"}),
+            ("같은 줄 덧붙임 import as", "x = 1; import pipeline.merge_policy as _mp\n", {"import"}),
+            ("같은 줄 덧붙임 __import__", "x = 1; __import__('pipeline.merge_policy')\n", {"constants", "dynamic"}),
+            ("글자를 쪼갠 __import__", "__import__('pipeline.merge_' + 'policy')\n", {"folded", "dynamic"}),
+            ("글자를 쪼갠 importlib.import_module", "importlib.import_module('pipeline.merge_poli' + 'cy')\n", {"folded", "dynamic"}),
+            ("새 줄 from pipeline import merge_policy", "from pipeline import merge_policy\n", {"import"}),
+            ("새 줄 from-import", "from pipeline.merge_policy import classify_change\n", {"import"}),
+            ("새 줄 상대 import", "from . import merge_policy\n", {"import"}),
+            ("새 줄 상대 from-import", "from .merge_policy import classify_change\n", {"import"}),
+            ("새 줄 별표 import", "from pipeline.merge_policy import *\n", {"import"}),
+            ("새 줄 import", "import pipeline.merge_policy\n", {"import"}),
+            ("허용 언급 상수 하나 더", "NOTE = 'merge_policy.py'\n", {"constants"}),
+            ("대문자로 적은 상수", "NOTE = 'MERGE_POLICY'\n", {"constants"}),
+            ("글자 상수 두 조각을 붙여 쓴 것(파서가 하나로 합침)", "NOTE = 'merge_' 'policy'\n", {"constants"}),
+            ("바이트 글자", "NOTE = b'merge_policy'\n", {"constants"}),
+            ("세 조각 이음", "NOTE = 'a' + 'merge_' + 'policy'\n", {"folded"}),
+            ("f-string 으로 쪼갠 글자", "NOTE = f\"pipeline.merge_{'policy'}\"\n", {"folded"}),
+            ("속성으로 부름", "import pipeline\npipeline.merge_policy.classify_change({})\n", {"identifier"}),
+            ("이름으로 부름", "merge_policy = None\n", {"identifier"}),
+            ("getattr 로 찾음", "value = getattr(pipeline, 'merge_' + 'policy')\n", {"folded"}),
+            ("이름에 든 정의 하나 더", "def merge_policy_helper():\n    pass\n", {"functions"}),
+            ("이름에 든 클래스", "class merge_policy_box:\n    pass\n", {"functions"}),
+            ("importlib 가져오기", "import importlib\n", {"import_tool", "dynamic"}),
+            ("importlib 에서 함수 가져오기", "from importlib import import_module\n", {"import_tool", "dynamic"}),
+            ("importlib.util 에서 가져오기", "from importlib.util import spec_from_file_location\n", {"import_tool", "dynamic"}),
+            ("runpy 로 실행", "import runpy\nrunpy.run_path('x.py')\n", {"import_tool", "dynamic"}),
+            ("pkgutil 가져오기", "import pkgutil\n", {"import_tool", "dynamic"}),
+            ("imp 가져오기", "import imp\n", {"import_tool", "dynamic"}),
+            ("exec 호출", "exec('x = 1')\n", {"dynamic"}),
+            ("eval 호출", "eval('x')\n", {"dynamic"}),
+            ("builtins 로 우회", "import builtins\nbuiltins.__import__('os')\n", {"dynamic"}),
+            ("exec_module 호출", "spec.loader.exec_module(module)\n", {"dynamic"}),
+        )
+        for label, extra, kinds in cases:
+            with self.subTest(label=label):
+                found = {kind for kind, _detail in named_only_problems(base + extra, ["merge_policy.py"], ["test_merge_policy_one"])}
+                self.assertTrue(kinds <= found, (kinds, found))
+
+    def test_the_syntax_tree_check_accepts_the_expected_shape_and_ignores_comments(self):
+        """기대한 모양은 통과하고, 주석(실행되지 않는 글)과 정책 모듈과 무관한 가져오기·글자 이음은 문제로 세지 않는다 — 시험이 너무 넓게 걸려 쓸모없어지지 않게."""
+        base = "ALLOWED = {'merge_policy.py'}\ndef test_merge_policy_one(self):\n    pass\n"
+        for label, extra in (("아무것도 더하지 않음", ""), ("같은 줄 끝 주석의 언급", "x = 1  # merge_policy import classify_change\n"),
+                             ("주석 줄의 언급", "# from pipeline.merge_policy import classify_change\n"), ("무관한 가져오기", "import os\nfrom pathlib import Path\n"),
+                             ("무관한 글자 이음", "NAME = 'quality' + '_gate'\n"), ("무관한 f-string", "NAME = f'{1}-{2}'\n"),
+                             ("비슷하지만 다른 이름", "def merge_policies():\n    pass\npolicy = 1\nmerge = 2\n")):
+            with self.subTest(label=label):
+                self.assertEqual(named_only_problems(base + extra, ["merge_policy.py"], ["test_merge_policy_one"]), [])
+        kinds = {kind for kind, _detail in named_only_problems(base, ["merge_policy.py", "merge_policy.py"], ["test_merge_policy_one"])}
+        self.assertEqual(kinds, {"constants"})                                             # 기대한 상수가 빠져도(줄어도) 다르다 — 허용 목록을 몰래 줄이지 못한다
+        kinds = {kind for kind, _detail in named_only_problems(base, ["merge_policy.py"], [])}
+        self.assertEqual(kinds, {"functions"})
+        with self.assertRaises(SyntaxError):
+            named_only_problems("def broken(:\n", [], [])                                    # 읽을 수 없는 파일은 통과가 아니라 오류다
+
+    def test_there_is_exactly_one_file_named_like_the_module(self):
+        """같은 이름의 파일이 다른 폴더에 하나라도 있으면 실패한다 — 연결 격리 시험이 파일 이름만 보고 허용하던 틈(P3-M1 3·I9)을 정책 쪽에서도 막는다."""
+        found = sorted(path.relative_to(ROOT).as_posix() for path in ROOT.rglob("merge_policy.py"))
+        self.assertEqual(found, ["pipeline/merge_policy.py"])
 
     def test_the_name_scan_itself_catches_an_import_and_ignores_a_same_named_definition(self):
         names = "|".join(self.FUNCTION_NAMES)

@@ -427,13 +427,18 @@ class ConnectionIsolationTest(unittest.TestCase):
 
     def test_only_the_generator_and_the_registry_text_mention_the_gate(self):
         users = set()
+        policy_users = []
         for folder in (ROOT, ROOT / "pipeline", ROOT / "scripts", ROOT / "pipeline" / "publishers", ROOT / "pipeline" / "edits"):
             for path in folder.glob("*.py"):
                 if "quality_gate" in path.read_text(encoding="utf-8"):
                     users.add(path.name)
+                    if path.name == "merge_policy.py":
+                        policy_users.append(path.relative_to(ROOT).as_posix())
         # merge_policy.py(꺼진 승인형 병합 정책)는 안전 장치 파일 이름 목록에 Gate 파일 이름을 글자(데이터)로만 적는다 — 연결이 아니다. 이 한 파일만 허용하고,
         # 연결(가져오기·호출·이름 사용)이 없고 글자가 목록 한 곳뿐이라는 것은 아래 test_merge_policy_names_the_gate_only_as_data_in_its_safety_list 가 따로 못박는다.
         self.assertLessEqual(users, {"generator.py", "registry.py", "quality_gate.py", "shadow_run.py", "merge_policy.py"})
+        # 위 허용은 파일 이름만 본다 — 다섯 폴더의 같은 이름 파일이 모두 받아들여지지 않도록, 정책 모듈은 상대 경로 한 곳에서만 Gate 글자를 담을 수 있다.
+        self.assertEqual(policy_users, ["pipeline/merge_policy.py"])
         for name in ("pipeline/run.py", "blogger_generator.py", "pipeline/drafts.py", "pipeline/draft_flow.py", "pipeline/notify.py", "pipeline/operator_loop.py",
                      "pipeline/health.py", "pipeline/inbox.py", "pipeline/main_image.py"):
             self.assertNotIn("quality_gate", (ROOT / name).read_text(encoding="utf-8"), name)
