@@ -686,6 +686,8 @@ class NotWiredTest(unittest.TestCase):
     """지금은 꺼져 있다 — 아무도 이 모듈을 부르지 않는다. 켜는 변경이 연결을 더할 때 이 시험도 같이 고쳐야 하고, 그 변경은 운영자가 직접 병합한다."""
 
     ALLOWED = {"pipeline/merge_policy.py", "tests/test_merge_policy.py", "tests/test_merge_policy_docs.py"}
+    # 이름 글자만 허용된 한 파일 — 품질 Gate 연결 격리 시험이 허용 파일 목록에 정책 모듈의 파일 이름을 글자로 적는다(연결이 아니다). 가져오기·호출·그 밖의 언급은 아래 전용 시험이 줄 단위로 막는다.
+    NAMED_ONLY = {"tests/test_generator_quality_gate.py"}
     FUNCTION_NAMES = ("parse_approval", "check_approval_text", "check_preconditions", "classify_change", "evaluate_trial", "evaluate_post_merge", "merge_method_allowed", "ApprovalLedger",
                       "ApprovalRecord", "render_explanation", "explanation_problems")
 
@@ -699,8 +701,8 @@ class NotWiredTest(unittest.TestCase):
         targets = self.scan_targets()
         self.assertGreater(len(targets), 100)
         named = [path.relative_to(ROOT).as_posix() for path in targets if "merge_policy" in path.read_text(encoding="utf-8", errors="replace")]
-        self.assertEqual(sorted(set(named) - self.ALLOWED), [])
-        self.assertEqual(set(named), self.ALLOWED)
+        self.assertEqual(sorted(set(named) - self.ALLOWED - self.NAMED_ONLY), [])
+        self.assertEqual(set(named), self.ALLOWED | self.NAMED_ONLY)
 
     def test_no_workflow_or_script_imports_the_policy_modules_functions(self):
         """다른 묶음이 같은 이름의 함수를 정의하거나 부르는 것은 괜찮다 — 이 모듈에서 가져오는 import 줄과 `merge_policy.` 참조만 막는다."""
@@ -714,7 +716,20 @@ class NotWiredTest(unittest.TestCase):
             text = path.read_text(encoding="utf-8", errors="replace")
             with self.subTest(path=rel):
                 self.assertIsNone(imported.search(text), rel)
-                self.assertIsNone(referenced.search(text), rel)
+                if rel not in self.NAMED_ONLY:               # 이름 글자만 허용된 한 파일은 아래 전용 시험이 줄 단위로 지킨다
+                    self.assertIsNone(referenced.search(text), rel)
+
+    def test_the_one_file_that_may_name_the_module_names_it_only_as_a_file_in_an_allow_list(self):
+        """연결 격리 시험(test_generator_quality_gate)은 허용 파일 목록·시험 이름·경로에 파일 이름 글자를 적을 뿐이다 — 가져오기·호출·동적 가져오기·그 밖의 언급이 생기면 실패한다."""
+        shapes = ('{"generator.py", "registry.py", "quality_gate.py", "shadow_run.py", "merge_policy.py"}',
+                  "def test_merge_policy_names_the_gate_only_as_data_in_its_safety_list(self):",
+                  '(ROOT / "pipeline" / "merge_policy.py")')
+        for rel in sorted(self.NAMED_ONLY):
+            lines = [line.strip() for line in (ROOT / rel).read_text(encoding="utf-8").splitlines() if "merge_policy" in line and not line.strip().startswith("#")]
+            with self.subTest(path=rel):
+                self.assertEqual(len(lines), len(shapes), lines)
+                for line in lines:
+                    self.assertTrue(any(shape in line for shape in shapes), line)
 
     def test_the_name_scan_itself_catches_an_import_and_ignores_a_same_named_definition(self):
         names = "|".join(self.FUNCTION_NAMES)

@@ -431,10 +431,35 @@ class ConnectionIsolationTest(unittest.TestCase):
             for path in folder.glob("*.py"):
                 if "quality_gate" in path.read_text(encoding="utf-8"):
                     users.add(path.name)
-        self.assertLessEqual(users, {"generator.py", "registry.py", "quality_gate.py", "shadow_run.py"})
+        # merge_policy.py(꺼진 승인형 병합 정책)는 안전 장치 파일 이름 목록에 Gate 파일 이름을 글자(데이터)로만 적는다 — 연결이 아니다. 이 한 파일만 허용하고,
+        # 연결(가져오기·호출·이름 사용)이 없고 글자가 목록 한 곳뿐이라는 것은 아래 test_merge_policy_names_the_gate_only_as_data_in_its_safety_list 가 따로 못박는다.
+        self.assertLessEqual(users, {"generator.py", "registry.py", "quality_gate.py", "shadow_run.py", "merge_policy.py"})
         for name in ("pipeline/run.py", "blogger_generator.py", "pipeline/drafts.py", "pipeline/draft_flow.py", "pipeline/notify.py", "pipeline/operator_loop.py",
                      "pipeline/health.py", "pipeline/inbox.py", "pipeline/main_image.py"):
             self.assertNotIn("quality_gate", (ROOT / name).read_text(encoding="utf-8"), name)
+
+    def test_merge_policy_names_the_gate_only_as_data_in_its_safety_list(self):
+        """정책 모듈이 Gate 를 언급하는 것은 안전 장치 파일 이름 목록의 글자 한 곳뿐이다 — 가져오기·호출·이름 사용·주석 언급이 없다(허용은 연결이 아니라 이름 목록이라서다)."""
+        text = (ROOT / "pipeline" / "merge_policy.py").read_text(encoding="utf-8")
+        self.assertEqual(text.count("quality_gate"), 1)
+        tree = ast.parse(text)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    self.assertNotIn("quality_gate", alias.name)
+            elif isinstance(node, ast.ImportFrom):
+                self.assertNotIn("quality_gate", node.module or "")
+                for alias in node.names:
+                    self.assertNotIn("quality_gate", alias.name)
+            elif isinstance(node, ast.Name):
+                self.assertNotIn("quality_gate", node.id)
+            elif isinstance(node, ast.Attribute):
+                self.assertNotIn("quality_gate", node.attr)
+        literals = [node.value for node in ast.walk(tree) if isinstance(node, ast.Constant) and isinstance(node.value, str) and "quality_gate" in node.value]
+        self.assertEqual(literals, ["pipeline/quality_gate.py"])
+        listed = [constant.value for node in ast.walk(tree) if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "SAFETY_GUARD_FILES" for target in node.targets)
+                  for constant in ast.walk(node.value) if isinstance(constant, ast.Constant) and isinstance(constant.value, str)]
+        self.assertIn("pipeline/quality_gate.py", listed)
 
     def test_generator_calls_the_gate_in_exactly_two_places_the_feed_candidate_validation_and_the_fact_check(self):
         """S2b(D-234): 개정 전에는 '정확히 한 곳(피드 후보 검증)'이었다. 구조화 Fact 분기가 두 번째 한 곳(`fact_check_post` — 후보 글 한 편의 검사)에서 같은 Gate 를 부른다 — 두 곳 모두 정확히 한 줄이고 그 밖에는 없으며,
