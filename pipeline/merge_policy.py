@@ -6,6 +6,7 @@
 
 원칙: 모호하면 승인 인정은 좁게, 운영자 전용은 넓게. 빠진 값·알 수 없는 값·해석할 수 없는 값은 언제나 실패(무효·운영자 전용) 쪽이다 — 없다고 통과로 보지 않는다.
 이 파일을 바꾸는 변경은 그 자체로 운영자 전용이다(classify_change 의 policy_self) — 정책을 AI 가 스스로 느슨하게 만들 수 없게 한다.
+12항목 밖의 표시(extra_flags)는 policy_self·packaging_release·invalid_input 과, 총괄의 보수적 판단(2026-11-15, 결함 D-347)으로 더한 safety_guard(안전 장치 파일)·external_connection(새 외부 접속 코드)이다.
 
 흐름(docs/AI_MERGE_POLICY.md §3): AI 가 PR 작성 → 검사와 독립 검증 → 쉬운 병합 설명 발송 → 운영자가 병합 번호를 명시해 승인 → AI 가 승인된 PR 병합 → main 사후 검사 → 병합 완료 알림.
 이 모듈이 맡는 것: 승인 글 읽기(parse_approval·check_approval_text) · 승인의 유효성(approval_matches·approval_still_valid·ApprovalLedger) · 변경 분류(classify_change) ·
@@ -77,16 +78,37 @@ TRIAL_CRITERIA = (
 TRIAL_SIZE = 3
 TRIAL_CONTINUE, TRIAL_PENDING, TRIAL_STOP = "continue", "pending", "stop_immediately"
 
-# ---- 운영자 결정 원문에 없는, 보수적으로 더한 표시(운영자 판단 필요 — docs/AI_MERGE_POLICY.md §7) -----------------------------------------------------
-# policy_self: 이 정책의 파일 자체를 바꾸는 변경 · packaging_release: 데스크톱 앱의 VERSION·패키징 설정 · invalid_input: 입력을 확인할 수 없음
+# ---- 운영자 결정 원문에 없는, 보수적으로 더한 표시(docs/AI_MERGE_POLICY.md §7-5) ---------------------------------------------------------------------------
+# policy_self: 이 정책의 파일 자체를 바꾸는 변경 · packaging_release: 데스크톱 앱의 VERSION·패키징 설정 · invalid_input: 입력을 확인할 수 없음 ·
+# safety_guard·external_connection: 총괄의 보수적 판단(2026-11-15, 결함 D-347) — 안전 장치 파일과 새 외부 접속 코드. 12항목 목록 자체는 줄이거나 넓히지 않고 이 표시로만 더한다.
 EXTRA_FLAGS = (
     ("policy_self", "병합 정책 자체"),
     ("packaging_release", "데스크톱 앱 패키징·배포 설정"),
     ("invalid_input", "입력을 확인할 수 없음"),
+    ("safety_guard", "안전 장치 파일"),
+    ("external_connection", "새 외부 접속 코드"),
 )
 EXTRA_CODES = tuple(code for code, _label in EXTRA_FLAGS)
 _EXTRA_LABELS = dict(EXTRA_FLAGS)
 POLICY_SELF_FILES = ("docs/AI_MERGE_POLICY.md", "pipeline/merge_policy.py", "tests/test_merge_policy.py", "tests/test_merge_policy_docs.py")
+
+# safety_guard — 안전 장치 파일: 검증기·비밀 패턴·가드레일·보안·외부 접속·정책 모듈과 그 시험. 경로의 어느 구간이든 아래 낱말이 있으면 해당하고(시험 폴더도 면제하지 않는다),
+# 문서(DOC_SUFFIXES)는 SAFETY_GUARD_DOCS 의 파일만 해당한다. 이 정책의 파일 4개(POLICY_SELF_FILES)는 policy_self 로만 표시한다.
+SAFETY_GUARD_WORDS = ("validate_repo", "guardrail", "guard", "security", "secret", "egress", "policy", "safety", "sandbox", "ai_flow")
+SAFETY_GUARD_DOCS = ("docs/SECURITY_GUARDRAILS.md",)
+DOC_SUFFIXES = (".md", ".rst", ".txt", ".adoc")
+
+# external_connection — 새 외부 접속 코드: 시험(맨 위 tests/ 폴더)과 문서(DOC_SUFFIXES)가 아닌 파일의 추가된 줄에 네트워크·외부 서비스 모듈 import, 네트워크 호출 모양, 동적 import·코드 실행,
+# 새 호스트 주소, 네트워크 명령이 들어오면 해당한다. 외부 비용 발생 기능·API Key 항목으로 이어지는 입구라 따로 잡는다. 예시 주소(EXAMPLE_HOSTS·EXAMPLE_TOP_LEVELS)는 걸리지 않는다.
+NETWORK_MODULES = ("urllib.request", "urllib3", "requests", "httpx", "aiohttp", "http.client", "http.server", "socket", "socketserver", "ssl", "ftplib", "smtplib", "telnetlib",
+                   "poplib", "imaplib", "nntplib", "xmlrpc", "websockets", "websocket", "paramiko", "asyncssh", "pycurl", "httplib2", "feedparser", "webbrowser", "grpc")
+SERVICE_SDK_MODULES = ("google.genai", "google.generativeai", "google.cloud", "google.oauth2", "google.auth", "googleapiclient", "google_auth_oauthlib", "openai", "anthropic",
+                       "vertexai", "cohere", "mistralai", "litellm", "langchain", "huggingface_hub", "transformers", "ollama", "groq", "replicate", "boto3", "botocore", "tweepy",
+                       "slack_sdk", "telebot", "gspread")
+EXTERNAL_MODULES = NETWORK_MODULES + SERVICE_SDK_MODULES
+EXTERNAL_SCHEMES = ("http", "https", "ws", "wss", "ftp", "ftps", "sftp", "ssh", "git", "tg", "smtp", "smtps", "ldap", "ldaps", "redis", "rediss", "mqtt", "mqtts", "amqp", "amqps")
+EXAMPLE_HOSTS = ("example.com", "example.net", "example.org")
+EXAMPLE_TOP_LEVELS = ("example", "test", "invalid")
 
 # 문서 §7 의 규칙 표가 반드시 적어야 하는 경로·낱말(시험이 문서와 대조한다) — 아래 classify_change 의 규칙과 함께 고친다
 DOCUMENTED_RULE_WORDS = (
@@ -388,6 +410,8 @@ def _path_findings(repo_kind, path):
         found.append(("credentials", "키·비밀·자격 증명과 관련된 파일 이름입니다"))
     if path.casefold() in _POLICY_SELF_FOLDED:
         found.append(("policy_self", "병합 정책의 문서·모듈·시험 자체입니다(정책은 운영자 결정으로만 바뀝니다)"))
+    elif _is_safety_path(segments, base, path):
+        found.append(("safety_guard", "안전 장치 파일입니다(검증기·비밀 패턴·가드레일·보안·외부 접속·정책 모듈과 그 시험 — 총괄의 보수적 판단)"))
     if repo_kind == "blog":
         if base in _ADS_FILES or any(part in _ADS_DIRS for part in segments):
             found.append(("ads", "광고 표면 파일(index.html·_layouts/·_includes/·_config.yml·ads.txt)입니다"))
@@ -421,19 +445,156 @@ def _text_findings(text):
 
 
 def _added_text_value(value):
-    """added_text 는 글자 하나(빈 글 가능) 또는 {경로: 글} 사전이다. 그 밖이면 None(읽을 수 없음)."""
+    """added_text 는 글자 하나(빈 글 가능) 또는 {경로: 글} 사전이다 — 합친 글. 그 밖이면 None(읽을 수 없음). 읽는 규칙은 _added_text_items 한 곳에 있다."""
+    items = _added_text_items(value)
+    return None if items is None else "\n".join(text for _key, text in items)
+
+
+# ---- 안전 장치 파일 · 새 외부 접속 코드(12항목 밖 — 총괄 2026-11-15 보수적 판단, 결함 D-347) --------------------------------------------------------------------
+_SAFETY_DOC_FILES = frozenset(name.casefold() for name in SAFETY_GUARD_DOCS)
+
+
+def _is_safety_path(segments, base, path):
+    """안전 장치 파일인가 — 문서는 SAFETY_GUARD_DOCS 의 파일만, 그 밖의 파일은 경로의 어느 구간이든 SAFETY_GUARD_WORDS 의 낱말이 있으면 해당한다(시험 폴더도 면제하지 않는다)."""
+    if path.casefold() in _SAFETY_DOC_FILES:
+        return True
+    if base.endswith(DOC_SUFFIXES):
+        return False
+    return any(word in part for part in segments for word in SAFETY_GUARD_WORDS)
+
+
+# 정규식은 단어 경계(백슬래시 b) 대신 look-around 로 쓰고, 앞쪽에 되풀이 묶음을 두지 않아(긴 글에서도) 글 길이에 비례하는 시간에 끝난다.
+_IMPORT_STATEMENT_RE = re.compile(r"[ \t]*(?:from[ \t]+([A-Za-z_][A-Za-z0-9_.]*)[ \t]+import[ \t]+(.+)|import[ \t]+(.+))")
+_EXTERNAL_SCHEMES = "(?:" + "|".join(sorted(EXTERNAL_SCHEMES, key=len, reverse=True)) + ")"
+_URL_RE = re.compile(r"(?<![A-Za-z0-9_+.-])" + _EXTERNAL_SCHEMES + ":" + "//" + r"""([^\s'"<>(){}`/?#]*)""", re.I)
+_QUOTED_HOST_RE = re.compile(
+    r"""["'`]((?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+(?:com|net|org|io|ai|dev|app|co|kr|jp|cn|de|uk|fr|eu|gov|edu|info|me|tv|cloud|xyz|site|online|biz|int|mil))"""
+    r"""(?::[0-9]{1,5})?(?:/[^"'`\s]*)?["'`]""", re.I)
+_KNOWN_HOST_RE = re.compile(
+    r"(?<![A-Za-z0-9-])(?:googleapis\.com|googleusercontent\.com|telegram\.org|githubusercontent\.com|github\.com|unsplash\.com|openai\.com|anthropic\.com)(?![A-Za-z0-9-])", re.I)
+_NET_CALL_RE = re.compile(
+    r"(?<![A-Za-z0-9_])(?:urlopen|urlretrieve|create_connection|create_server|start_server|serve_forever|getaddrinfo|gethostbyname|gethostbyaddr|HTTPConnection|HTTPSConnection|"
+    r"HTTPServer|ThreadingHTTPServer|TCPServer|UDPServer|build_opener|install_opener|wrap_socket|open_connection|open_unix_connection|start_tls)[ \t]*\("
+    r"|(?<![A-Za-z0-9_])requests[ \t]*\.[ \t]*(?:get|post|put|delete|patch|head|options|request|Session|session)[ \t]*\("
+    r"|(?<![A-Za-z0-9_])(?:httpx|aiohttp)[ \t]*\.[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]*\("
+    r"|(?<![A-Za-z0-9_])socket[ \t]*\.[ \t]*(?:socket|create_connection|getaddrinfo|gethostbyname|gethostbyaddr)[ \t]*\(")
+_DYNAMIC_RE = re.compile(r"(?<![A-Za-z0-9_])(?:__import__|import_module)[ \t]*\(|(?<![A-Za-z0-9_.])(?:exec|eval)[ \t]*\(")      # exec·eval 은 메서드 호출(model.eval)과 literal_eval 을 뺀다
+_NET_CLI_RE = re.compile(
+    r"""["'`](?:curl|wget|nslookup|telnet|scp|sftp|rsync|ssh)(?:["'`]|[ \t])"""
+    r"""|["'`]gh(?:["'`]|[ \t])"""
+    r"""|["'`]git(?:["'`]|[ \t])[^\n]{0,80}?(?:push|pull|fetch|clone|ls-remote|submodule|remote)""")
+_JS_SUFFIXES = (".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".vue", ".html", ".htm")
+_JS_NET_RE = re.compile(r"(?<![A-Za-z0-9_.])(?:fetch|sendBeacon)[ \t]*\(|(?<![A-Za-z0-9_])XMLHttpRequest|(?<![A-Za-z0-9_])new[ \t]+(?:WebSocket|EventSource)|navigator[ \t]*\.[ \t]*sendBeacon")
+
+
+def _imported_modules(text):
+    """추가된 글의 import 문이 가져오는 모듈 이름들(`from a import b` 는 a 와 a.b 둘 다). 줄과 세미콜론으로 나누고 주석은 뗀다."""
+    found = []
+    for raw in re.split(r"[\n;]", text):
+        match = _IMPORT_STATEMENT_RE.fullmatch(raw.split("#", 1)[0].rstrip())
+        if match is None:
+            continue
+        base, names, plain = match.groups()
+        if plain is not None:
+            found += [item.split()[0] for item in plain.split(",") if item.strip()]
+        else:
+            found.append(base)
+            found += [base + "." + item.strip("() \t").split()[0] for item in names.split(",") if item.strip("() \t")]
+    return found
+
+
+def _is_external_module(name):
+    return any(name == module or name.startswith(module + ".") for module in EXTERNAL_MODULES)
+
+
+def _host_of(authority):
+    """주소의 권한 부분(`사용자:비밀@호스트:포트`)에서 호스트만 — 사용자 정보와 포트는 버린다."""
+    host = authority.rsplit("@", 1)[-1]
+    host = host[1:].split("]", 1)[0] if host.startswith("[") else host.split(":", 1)[0]
+    return host.strip(".").lower()
+
+
+def _is_example_host(host):
+    return host in EXAMPLE_HOSTS or host.endswith(tuple("." + name for name in EXAMPLE_HOSTS)) or host.rsplit(".", 1)[-1] in EXAMPLE_TOP_LEVELS
+
+
+def _external_hosts(text):
+    """추가된 글 속의 호스트 이름들 — 스킴이 붙은 주소·따옴표 안의 도메인 이름·널리 쓰는 서비스 도메인. 예시 주소와 빈 호스트(`스킴://` 만 적은 정규식 따위)는 뺀다."""
+    hosts = []
+    for match in _URL_RE.finditer(text):
+        host = _host_of(match.group(1))
+        if host and not _is_example_host(host):
+            hosts.append(host)
+    for match in _QUOTED_HOST_RE.finditer(text):
+        host = match.group(1).lower()
+        if not _is_example_host(host):
+            hosts.append(host)
+    hosts += [match.group(0).lower() for match in _KNOWN_HOST_RE.finditer(text)]
+    return sorted(set(hosts))
+
+
+def _external_shapes(text, hints):
+    """한 파일(또는 파일을 모르는 한 덩어리)의 추가된 글이 새 외부 접속 코드의 어떤 모양에 걸리는지 — 쉬운 말 이유 목록. 글 자체는 싣지 않고 모듈 이름·호스트 이름만 싣는다."""
+    found = []
+    modules = sorted({name for name in _imported_modules(text) if _is_external_module(name)})
+    if modules:
+        found.append("네트워크·외부 서비스 모듈을 가져옵니다(" + ", ".join(modules[:4]) + (" 외" if len(modules) > 4 else "") + ")")
+    if _NET_CALL_RE.search(text):
+        found.append("네트워크 호출 모양이 있습니다(urlopen·requests.get·socket.socket 등)")
+    if _DYNAMIC_RE.search(text):
+        found.append("동적 import·코드 실행이 있습니다(__import__·import_module·exec·eval)")
+    hosts = _external_hosts(text)
+    if hosts:
+        found.append("새 호스트 주소가 있습니다(" + ", ".join(_shown(host) for host in hosts[:3]) + (" 외" if len(hosts) > 3 else "") + ")")
+    if _NET_CLI_RE.search(text):
+        found.append("네트워크 명령이 있습니다(curl·wget·ssh·gh·git push 등)")
+    if any(hint.casefold().endswith(_JS_SUFFIXES) for hint in hints) and _JS_NET_RE.search(text):
+        found.append("자바스크립트 네트워크 호출이 있습니다(fetch·XMLHttpRequest·WebSocket 등)")
+    return found
+
+
+def _external_exempt(path):
+    """시험(맨 위 tests/ 폴더)이거나 문서(DOC_SUFFIXES)인 파일 — 새 외부 접속 규칙을 적용하지 않는다. 이름이 test_ 로 시작하는 코드 파일이나 안쪽 폴더의 tests/ 는 면제가 아니다."""
+    parts = path.split("/")
+    return (len(parts) > 1 and parts[0] == "tests") or parts[-1].casefold().endswith(DOC_SUFFIXES)       # 폴더 이름은 대소문자까지 같아야 면제(Tests/ 는 면제가 아니다)
+
+
+def _added_text_items(value):
+    """added_text → [(경로, 글)]. 글자 하나는 경로를 모르는 한 덩어리(경로 None), 사전은 파일마다(글자가 아닌 키는 빈 경로). 그 밖이면 None."""
     if isinstance(value, str):
-        return value
+        return [(None, value)]
     if isinstance(value, dict) and all(isinstance(item, str) for item in value.values()):
-        return "\n".join(value.values())
+        return [(key if isinstance(key, str) else "", text) for key, text in value.items()]
     return None
+
+
+def _external_findings(items, paths):
+    """새 외부 접속 코드의 이유 목록. 경로를 아는 글(사전)은 파일마다 시험·문서면 건너뛰고, 경로를 모르는 글(글자 하나)은 바뀐 파일이 모두 시험·문서일 때만 건너뛴다(하나라도 코드 파일이면 전체 글을 본다)."""
+    found = []
+    code_paths = [path for path in sorted(paths) if not _external_exempt(path)]
+    for key, text in items or ():
+        if key is None:
+            if paths and not code_paths:
+                continue
+            hints = code_paths
+        else:
+            normal = normalize_repo_path(key)
+            if normal is not None and _external_exempt(normal):
+                continue
+            hints = [normal] if normal is not None else []
+        for why in _external_shapes(text, hints):
+            if why not in found:
+                found.append(why)
+    return found
 
 
 def classify_change(repo_kind, changed_paths, added_text, declared=None):
     """변경을 `ai_ok`(AI 병합 가능) 또는 `operator_only`(운영자 직접 병합)로 분류한다 — 운영자 전용 12항목에 하나도 안 걸리고 입력을 모두 확인할 수 있을 때만 ai_ok 다.
     repo_kind: `'blog'` 또는 `'desktop'`. changed_paths: 바뀐 경로 목록(이름 바꾸기는 옛 경로와 새 경로를 모두, 삭제도 포함). added_text: 추가된 줄의 글(글자 하나 또는 {경로: 글}).
     declared: 사람이 선언하는 항목 {코드: 참/거짓/None}. DECLARED_REQUIRED 6항목은 거짓이어야 통과이고 참이거나 미응답(없음·None·해석할 수 없는 값)이면 운영자 전용이다.
-    경로·내용 규칙에 걸린 항목은 declared 가 거짓이어도 운영자 전용이다. 입력이 올바르지 않으면(저장소 종류·경로 목록·글·알 수 없는 선언 항목) 예외 없이 operator_only(invalid_input)로 돌려준다."""
+    경로·내용 규칙에 걸린 항목은 declared 가 거짓이어도 운영자 전용이다. 12항목 밖의 표시(extra_flags)가 하나라도 있어도 operator_only 다 — 안전 장치 파일(safety_guard)과 새 외부 접속 코드(external_connection)는
+    총괄의 보수적 판단이다(새 외부 접속 코드는 시험·문서 파일의 글을 보지 않고, 글자 하나로 받은 added_text 는 바뀐 파일이 모두 시험·문서일 때만 건너뛴다).
+    입력이 올바르지 않으면(저장소 종류·경로 목록·글·알 수 없는 선언 항목) 예외 없이 operator_only(invalid_input)로 돌려준다."""
     categories, extras = set(), set()
     notes = {}                       # (코드, 이유) -> 경로 목록(경로 규칙) — 같은 이유는 한 줄로 묶는다
     plain = []                       # (코드, 이유) — 내용·선언·입력 문제
@@ -462,6 +623,8 @@ def classify_change(repo_kind, changed_paths, added_text, declared=None):
     else:
         for code, why in _text_findings(text):
             add_plain(code, "추가된 줄 — " + why)
+        for why in _external_findings(_added_text_items(added_text), paths):
+            add_plain("external_connection", "추가된 줄 — " + why)
     given = {} if declared is None else declared
     if not isinstance(given, dict):
         add_plain("invalid_input", "선언 항목의 모양이 올바르지 않습니다(사전이어야 합니다)")

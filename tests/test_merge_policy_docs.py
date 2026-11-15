@@ -173,6 +173,16 @@ class ListsMatchTest(unittest.TestCase):
             with self.subTest(word=word):
                 self.assertIn("`" + word + "`", SECTIONS[7])
 
+    def test_the_safety_and_external_connection_rules_are_documented_in_full(self):
+        """총괄의 보수적 판단(결함 D-347)으로 더한 두 표시의 규칙 낱말·모듈·스킴·예시 주소·문서 확장자가 §7-6 에 빠짐없이 있다."""
+        section = subsection("7-6")
+        words = (mp.SAFETY_GUARD_WORDS + mp.SAFETY_GUARD_DOCS + mp.EXTERNAL_MODULES + mp.EXTERNAL_SCHEMES + mp.EXAMPLE_HOSTS + mp.DOC_SUFFIXES
+                 + tuple("." + name for name in mp.EXAMPLE_TOP_LEVELS))
+        for word in words:
+            with self.subTest(word=word):
+                self.assertIn("`" + word + "`", section)
+        self.assertEqual(len(mp.EXTERNAL_MODULES), 51)
+
     def test_the_extra_flags_and_the_policy_files_are_named(self):
         for code in mp.EXTRA_CODES:
             self.assertIn("`" + code + "`", SECTIONS[7])
@@ -218,6 +228,12 @@ class OperatorStatementsPinnedTest(unittest.TestCase):
         (6, "하나라도 실패하면 병합하지 않고"),
         (7, "12항목에 하나도 안 걸리고"),
         (7, "선언이 거짓이어도 운영자 전용"),
+        (7, "12항목 목록을 넓힌 것이 아니라 **12항목 밖의 표시**"),
+        (7, "운영자 결정 D-347 의 보수적 판단(총괄 11-15)"),
+        (7, "**시험 폴더도 면제하지 않습니다.**"),
+        (7, "**예시 주소는 걸리지 않습니다**"),
+        (7, "바뀐 파일이 **모두** 시험·문서일 때만 건너뜁니다"),
+        (7, "루프백(`localhost`)은 걸립니다"),
         (8, "운영자 PC 의 Git 자격 증명"),
         (8, "강제 push"),
         (9, "추가 변경을 자동 병합하지 않습니다"),
@@ -227,6 +243,15 @@ class OperatorStatementsPinnedTest(unittest.TestCase):
         (11, "워크플로 파일(`.github/`)"),
         (12, "운영자 결정으로만"),
     )
+
+    def test_the_conservative_judgement_is_attributed_where_the_two_flags_are_introduced(self):
+        phrase = "운영자 결정 D-347 의 보수적 판단(총괄 11-15)"
+        self.assertGreaterEqual(SECTIONS[7].count(phrase), 3)
+        self.assertIn(phrase, subsection("7-6").split("\n")[0])
+        for code in ("safety_guard", "external_connection"):
+            rows = [line for line in subsection("7-5").split("\n") if line.startswith("| `" + code + "`")]
+            self.assertEqual(len(rows), 1, code)
+            self.assertIn(phrase, rows[0])
 
     def test_each_promise_is_in_its_section(self):
         for number, phrase in self.PINS:
@@ -282,7 +307,7 @@ class CorrespondenceTableTest(unittest.TestCase):
     def test_every_name_in_the_table_exists(self):
         test_source = TEST_PATHS[0].read_text(encoding="utf-8")
         rows = self.rows()
-        self.assertEqual(len(rows), 11)
+        self.assertEqual(len(rows), 12)
         for policy, section, code, tests in rows:
             with self.subTest(policy=policy):
                 number = re.fullmatch(r"§(\d+)", section)
@@ -416,13 +441,15 @@ class DefectRegisterTest(unittest.TestCase):
             self.assertIn(word, row)
         self.assertIn("main 직접 push 금지", row)
 
-    def test_d347_lists_the_seven_conservative_readings_as_open(self):
+    def test_d347_lists_the_seven_conservative_readings_and_records_the_conservative_judgement(self):
+        """처음에는 열림(운영자 판단 필요)이었고, 총괄의 보수적 판단(2026-11-15)으로 해결로 바뀌었다 — 승인 문구는 엄격하게 유지."""
         row = self.rows()["D-347"]
         for mark in ("①", "②", "③", "④", "⑤", "⑥", "⑦"):
             self.assertIn(mark, row)
-        self.assertIn("**열림**", row)
-        self.assertIn("운영자 판단이 필요", row)
-        for word in ("policy_self", "packaging_release", "invalid_input"):
+        self.assertIn("**해결**(보수적 판단 — 총괄 2026-11-15", row)
+        self.assertNotIn("**열림**", row)
+        for word in ("policy_self", "packaging_release", "invalid_input", "safety_guard", "external_connection", "승인 문구는 엄격하게 유지한다", "ClassifySafetyGuardTest",
+                     "ClassifyExternalConnectionTest", "§7-7"):
             self.assertIn(word, row)
 
 

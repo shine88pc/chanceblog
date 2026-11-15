@@ -5,6 +5,7 @@
 이 시험은 네트워크·파일 쓰기를 하지 않는다(모듈이 순수 함수라서 가짜가 필요 없다).
 """
 import copy
+import time
 import unicodedata
 import unittest
 
@@ -53,6 +54,11 @@ GOOD_TEXT = "def add(a, b):\n    return a + b\n"
 
 def classify(kind, paths, text="", declared=None):
     return mp.classify_change(kind, list(paths), text, dict(DECLARED_OK) if declared is None else declared)
+
+
+def url(host, scheme="https"):
+    """주소 글을 런타임에 조립한다(소스에 웹 주소가 이어 붙어 있지 않게)."""
+    return scheme + ":" + "//" + host
 
 
 def good_facts():
@@ -119,12 +125,32 @@ class ConstantsPinTest(unittest.TestCase):
         self.assertEqual(len(mp.DECLARED_REQUIRED), 6)
         self.assertLessEqual(set(mp.DECLARED_REQUIRED), set(mp.OPERATOR_ONLY_CODES))
         self.assertEqual(set(mp.EXTRA_CODES) & set(mp.OPERATOR_ONLY_CODES), set())
-        self.assertEqual(mp.EXTRA_CODES, ("policy_self", "packaging_release", "invalid_input"))
+        self.assertEqual(mp.EXTRA_CODES, ("policy_self", "packaging_release", "invalid_input", "safety_guard", "external_connection"))
+        self.assertEqual(dict(mp.EXTRA_FLAGS)["safety_guard"], "안전 장치 파일")
+        self.assertEqual(dict(mp.EXTRA_FLAGS)["external_connection"], "새 외부 접속 코드")
 
     def test_the_fact_keys_and_verification_keys_are_pinned(self):
         self.assertEqual(mp.FACT_KEYS, FACT_KEYS_16)
         self.assertEqual(mp.VERIFICATION_KEYS, VERIFICATION_KEYS_5)
         self.assertEqual(set(good_facts()), set(FACT_KEYS_16))
+
+    def test_the_safety_and_external_connection_rule_lists_are_pinned(self):
+        """총괄의 보수적 판단(결함 D-347)으로 더한 두 표시의 규칙 목록을 글자 그대로 못박는다 — 낱말·모듈 하나를 지우면 빨개진다."""
+        self.assertEqual(mp.SAFETY_GUARD_WORDS, ("validate_repo", "guardrail", "guard", "security", "secret", "egress", "policy", "safety", "sandbox", "ai_flow"))
+        self.assertEqual(mp.SAFETY_GUARD_DOCS, ("docs/SECURITY_GUARDRAILS.md",))
+        self.assertEqual(mp.DOC_SUFFIXES, (".md", ".rst", ".txt", ".adoc"))
+        self.assertEqual(mp.NETWORK_MODULES, ("urllib.request", "urllib3", "requests", "httpx", "aiohttp", "http.client", "http.server", "socket", "socketserver", "ssl", "ftplib", "smtplib",
+                                              "telnetlib", "poplib", "imaplib", "nntplib", "xmlrpc", "websockets", "websocket", "paramiko", "asyncssh", "pycurl", "httplib2", "feedparser",
+                                              "webbrowser", "grpc"))
+        self.assertEqual(mp.SERVICE_SDK_MODULES, ("google.genai", "google.generativeai", "google.cloud", "google.oauth2", "google.auth", "googleapiclient", "google_auth_oauthlib", "openai",
+                                                  "anthropic", "vertexai", "cohere", "mistralai", "litellm", "langchain", "huggingface_hub", "transformers", "ollama", "groq", "replicate",
+                                                  "boto3", "botocore", "tweepy", "slack_sdk", "telebot", "gspread"))
+        self.assertEqual(mp.EXTERNAL_MODULES, mp.NETWORK_MODULES + mp.SERVICE_SDK_MODULES)
+        self.assertEqual(len(mp.EXTERNAL_MODULES), 51)
+        self.assertEqual(mp.EXTERNAL_SCHEMES, ("http", "https", "ws", "wss", "ftp", "ftps", "sftp", "ssh", "git", "tg", "smtp", "smtps", "ldap", "ldaps", "redis", "rediss", "mqtt", "mqtts", "amqp",
+                                               "amqps"))
+        self.assertEqual(mp.EXAMPLE_HOSTS, ("example.com", "example.net", "example.org"))
+        self.assertEqual(mp.EXAMPLE_TOP_LEVELS, ("example", "test", "invalid"))
 
     def test_the_merge_method_constants(self):
         self.assertEqual(mp.ALLOWED_MERGE_METHOD, "pr_merge")
@@ -417,7 +443,7 @@ class ClassifyAllowedTest(unittest.TestCase):
                 self.assertEqual(classify("blog", ["pipeline/topics.py"], text).tier, "ai_ok")
 
     def test_paths_that_only_look_like_the_watched_ones_stay_ai_ok(self):
-        for kind, path in (("blog", "docs/about.md"), ("blog", "tests/fixtures/page.html"), ("blog", "docs/assets/x.png"), ("blog", "pipeline/tokenizer.py"), ("blog", "docs/SECURITY_GUARDRAILS.md"),
+        for kind, path in (("blog", "docs/about.md"), ("blog", "tests/fixtures/page.html"), ("blog", "docs/assets/x.png"), ("blog", "pipeline/tokenizer.py"), ("blog", "docs/SOURCE_POLICY.md"),
                            ("blog", "인수인계/작업내용.md"), ("blog", "VERSION"), ("blog", "README.md"), ("desktop", "index.html"), ("desktop", "_posts/x.md"), ("desktop", "src/x/version.py"),
                            ("desktop", "docs/RELEASE.md"), ("blog", "pipeline/blogs.py"), ("blog", "tests/fixtures/_config.json")):
             with self.subTest(path=path):
@@ -632,7 +658,7 @@ class ClassifyDesktopTest(unittest.TestCase):
         for path, categories, extras in (
                 (".github/workflows/ci.yml", ("workflow",), ()), ("requirements.txt", ("dependencies",), ()), ("vendor/pipeline/console.py", ("dependencies",), ()),
                 ("VERSION", (), ("packaging_release",)), ("app.spec", (), ("packaging_release",)), ("installer/setup.iss", (), ("packaging_release",)), ("build/x.py", (), ("packaging_release",)),
-                ("packaging/a.py", (), ("packaging_release",)), ("src/chanceblog_desktop/security/mask.py", ("credentials",), ()), (".env.example", ("credentials",), ()),
+                ("packaging/a.py", (), ("packaging_release",)), ("src/chanceblog_desktop/security/mask.py", ("credentials",), ("safety_guard",)), (".env.example", ("credentials",), ()),
                 ("pyproject.toml", ("dependencies",), ())):
             with self.subTest(path=path):
                 result = classify("desktop", [path])
@@ -686,6 +712,299 @@ class ClassifyInvalidInputTest(unittest.TestCase):
                         self.assertIn(result.tier, ("ai_ok", "operator_only"))
                         if result.tier == "ai_ok":
                             self.assertEqual(result.categories + result.extra_flags, ())
+
+
+class ClassifySafetyGuardTest(unittest.TestCase):
+    """총괄의 보수적 판단(2026-11-15, 결함 D-347) — 안전 장치 파일은 승인해도 운영자 직접 병합이다(12항목 밖 표시 safety_guard). 문서는 이름이 정해진 한 파일만 걸린다."""
+
+    PATHS = ("scripts/validate_repo.py", "tests/test_validate_repo.py", "tests/test_guardrails.py", "tests/test_guardrails_precheck.py", "tests/test_security_settings.py",
+             "tests/test_egress.py", "tests/test_egress_budget.py", "tests/egress_scan.py", "tests/ai_flow_scan.py", "tests/test_ai_flow.py", "tests/test_ai_guard.py",
+             "tests/test_source_policy.py", "tests/test_secret_invisible.py", "tests/test_quality_shadow_guards.py", "tests/source_policy_scenarios.py", "pipeline/egress.py",
+             "pipeline/source_policy.py", "pipeline/inbox_policy.py", "pipeline/ai_guard.py", "pipeline/edits/safety.py", "pipeline/secret_patterns.py",
+             "pipeline/ai_processor_policy.json", "docs/SECURITY_GUARDRAILS.md", "src/chanceblog_desktop/security/mask.py", "src/chanceblog_desktop/security/shape.py")
+
+    def assert_guard(self, kind, path):
+        result = classify(kind, [path])
+        self.assertEqual(result.tier, "operator_only", path)
+        self.assertIn("safety_guard", result.extra_flags, path)
+        self.assertTrue(any("안전 장치 파일" in reason and path.split("/")[-1] in reason for reason in result.reasons), path)
+
+    def test_each_representative_safety_file_is_operator_only_in_both_repositories(self):
+        for kind in ("blog", "desktop"):
+            for path in self.PATHS:
+                with self.subTest(kind=kind, path=path):
+                    self.assert_guard(kind, path)
+
+    def test_every_safety_word_alone_is_enough(self):
+        for word in mp.SAFETY_GUARD_WORDS:
+            for template in ("pipeline/x_{}_y.py", "tests/test_{}.py", "src/{}/module.py", "scripts/{}.json"):
+                with self.subTest(word=word, template=template):
+                    self.assert_guard("blog", template.format(word))
+                    self.assert_guard("desktop", template.format(word))
+
+    def test_the_tests_folder_is_not_exempt(self):
+        for path in ("tests/test_guardrails.py", "tests/test_security_settings.py", "tests/test_egress.py", "tests/test_validate_repo.py", "tests/fixtures/security_cases.json",
+                     "tests/egress_scan.py", "tests/helpers/guard_helper.py"):
+            with self.subTest(path=path):
+                self.assert_guard("blog", path)
+
+    def test_documents_are_covered_only_when_they_are_the_named_file(self):
+        for path in ("docs/SECURITY_GUARDRAILS.md", "DOCS/security_guardrails.md", "./docs/SECURITY_GUARDRAILS.md", "docs\\SECURITY_GUARDRAILS.md"):
+            with self.subTest(path=path):
+                result = classify("blog", [path])
+                self.assertEqual((result.tier, result.categories, result.extra_flags), ("operator_only", (), ("safety_guard",)))
+        for kind, path in (("blog", "docs/SOURCE_POLICY.md"), ("blog", "docs/AI_FLOW.md"), ("blog", "docs/QUALITY_GATE.md"), ("blog", "docs/ARCHITECTURE.md"), ("blog", "docs/security_notes.md"),
+                           ("blog", "docs/egress_notes.rst"), ("blog", "docs/policy.txt"), ("blog", "notes/guard.adoc"), ("blog", "README.md"), ("blog", "인수인계/작업내용.md"),
+                           ("desktop", "docs/DECISIONS.md"), ("desktop", "docs/security_review.md")):
+            with self.subTest(path=path):
+                self.assertEqual(classify(kind, [path]).tier, "ai_ok", path)
+
+    def test_files_that_only_share_a_few_letters_are_not_flagged(self):
+        for path in ("pipeline/topics.py", "pipeline/regarding.py", "pipeline/regardless.py", "pipeline/guided_tour.py", "pipeline/safe_mode.py", "pipeline/secrecy.py", "pipeline/secure_mode.py",
+                     "pipeline/policing.py", "pipeline/sandy.py", "tests/test_topics.py", "tests/test_guides.py", "src/chanceblog_desktop/ui/pages/home.py"):
+            with self.subTest(path=path):
+                self.assertEqual(classify("blog", [path]).tier, "ai_ok", path)
+
+    def test_it_is_a_flag_outside_the_twelve_items(self):
+        result = classify("blog", ["pipeline/egress.py"])
+        self.assertEqual((result.categories, result.extra_flags), ((), ("safety_guard",)))
+
+    def test_the_policy_files_keep_only_their_own_flag(self):
+        for path in mp.POLICY_SELF_FILES:
+            with self.subTest(path=path):
+                self.assertEqual(classify("blog", [path]).extra_flags, ("policy_self",))
+
+    def test_flags_are_listed_in_the_declared_order(self):
+        result = classify("blog", ["scripts/validate_repo.py", "pipeline/merge_policy.py", "pipeline/fetcher.py"], "import requests\n")
+        self.assertEqual(result.extra_flags, ("policy_self", "safety_guard", "external_connection"))
+        self.assertEqual(list(result.extra_flags), [code for code in mp.EXTRA_CODES if code in result.extra_flags])
+
+    def test_a_safety_guard_change_fails_the_scope_condition_even_with_everything_declared_false(self):
+        paths = ["scripts/validate_repo.py", "tests/test_validate_repo.py"]
+        facts = good_facts()
+        facts["approved_paths"] = list(paths)
+        facts["current_paths"] = list(paths)
+        facts["classification"] = classify("blog", paths, GOOD_TEXT, {code: False for code in mp.OPERATOR_ONLY_CODES})
+        verdict = mp.check_preconditions(facts)
+        self.assertEqual(verdict.failed_codes, ("scope_matches",))
+        self.assertIn("안전 장치 파일", verdict.failures[0].reason)
+
+
+class ClassifyExternalConnectionTest(unittest.TestCase):
+    """총괄의 보수적 판단(2026-11-15, 결함 D-347) — 시험·문서가 아닌 파일의 추가된 줄에 새 외부 접속 코드(네트워크·외부 서비스 import, 호출 모양, 새 호스트 주소, 네트워크 명령)가
+    들어오면 운영자 직접 병합이다(12항목 밖 표시 external_connection). 시험·문서 안의 주소와 예시는 걸리지 않는다. 주소 글은 런타임에 조립한다."""
+
+    CODE = "pipeline/fetcher.py"
+    SAMPLE = "import requests\nu = '" + url("api.service.org") + "'\ncmd = ['curl', u]\n"
+    IMPORTS = ("import requests", "import urllib.request", "import urllib.request as ur", "from urllib.request import urlopen", "from urllib import request", "from urllib import parse, request",
+               "import socket", "import ssl", "import http.client", "from http import client", "from http.client import HTTPSConnection", "import http.server", "import socketserver",
+               "import aiohttp", "import httpx as hx", "import os, requests", "import json; import socket", "    import requests", "from requests.adapters import HTTPAdapter",
+               "import smtplib", "import ftplib", "import websockets", "import paramiko", "import urllib3", "import xmlrpc.client", "import webbrowser", "from google import genai",
+               "import google.generativeai as genai", "from google.cloud import storage", "import googleapiclient.discovery", "import openai", "import anthropic", "from openai import OpenAI",
+               "import boto3", "import transformers", "from langchain.llms import Model")
+    NOT_IMPORTS = ("import urllib.parse", "from urllib.parse import quote, urlparse", "from urllib import parse", "import urllib", "import json", "import re, os", "import requests_mock",
+                   "import socket_utils", "import sslutil", "import google", "from .requests import helper", "from . import requests", "from my.requests import helper", "import subprocess",
+                   "import transformers_local", "import asyncio")
+    CALLS = ("response = urlopen(address)", "urlretrieve(a, b)", "conn = HTTPSConnection(host)", "conn = HTTPConnection (host)", "requests.get(address)", "requests . post (address)",
+             "session = requests.Session()", "httpx.get(address)", "client = aiohttp.ClientSession()", "sock = socket.socket(socket.AF_INET)", "socket.create_connection((host, 1))",
+             "sock = create_connection(address)", "getaddrinfo(host, 80)", "server = HTTPServer(address, handler)", "server.serve_forever()", "importlib.import_module(name)",
+             "module = __import__('module_name')", "exec(code)", "result = eval(expression)")
+    NOT_CALLS = ("value = ast.literal_eval(text)", "model.eval()", "self.exec(command)", "cursor.execute(sql)", "executor.submit(job)", "def fetch_data(address):", "fetch(address)",
+                 "my_import_module(name)", "reimport_module(name)", "urlopener(address)", "create_connection_pool(size)", "start_server_time = 3", "result = evaluate(expression)")
+    NET_CALL_NAMES = ("urlopen", "urlretrieve", "create_connection", "create_server", "start_server", "serve_forever", "getaddrinfo", "gethostbyname", "gethostbyaddr", "HTTPConnection",
+                      "HTTPSConnection", "HTTPServer", "ThreadingHTTPServer", "TCPServer", "UDPServer", "build_opener", "install_opener", "wrap_socket", "open_connection",
+                      "open_unix_connection", "start_tls")
+    SCHEMES = ("https", "http", "wss", "ws", "ftp", "ftps", "sftp", "ssh", "git", "tg", "smtp", "smtps", "ldap", "ldaps", "redis", "rediss", "mqtt", "mqtts", "amqp", "amqps")
+    FLAGGED_ADDRESSES = (("api.service.org/v1", "https"), ("data.go.kr/x", "http"), ("stream.net/ws", "wss"), ("files.net/a", "ftp"), ("resolve?x=1", "tg"), ("git@host.org/repo.git", "ssh"),
+                         ("host.org/x", "git"), ("UPPER.ORG/x", "HTTPS"), ("[2001:db8::1]:8080/x", "http"), ("localhost:8080/x", "http"), ("127.0.0.1:5000/x", "http"),
+                         ("192.0.2.10/x", "https"), ("example.com.evil.org/x", "https"), ("notexample.com/x", "https"), ("evil.org/example.com", "https"), ("example.company/x", "https"))
+    EXAMPLE_ADDRESSES = ("example.com/x", "www.example.org", "a.b.example.net/x", "foo.example/x", "host.test/x", "x.invalid", "EXAMPLE.COM/x", "user:pw@example.com/x")
+    TLDS = ("com", "net", "org", "io", "ai", "dev", "app", "co", "kr", "jp", "cn", "de", "uk", "fr", "eu", "gov", "edu", "info", "me", "tv", "cloud", "xyz", "site", "online", "biz", "int", "mil")
+    KNOWN_HOSTS = ("googleapis.com", "googleusercontent.com", "telegram.org", "githubusercontent.com", "github.com", "unsplash.com", "openai.com", "anthropic.com")
+    QUOTED_FLAGGED = ("api." + "telegram.org", "data.nasa.gov", "images." + "unsplash.com/photo", "service.example-corp.io:8443/path", "svc.example.co")
+    QUOTED_CLEAN = ("pipeline.notify", "index.html", "setup.py", "file.name.txt", "a.b.c", "README.md", "module.attr", "x.com.py", "user@host.com", "www.example.com", "report.org.txt",
+                    "my.example", "a.test")
+    CLI_TOOLS = ("curl", "wget", "nslookup", "telnet", "scp", "sftp", "rsync", "ssh")
+    CLI_FLAGGED = ("cmd = ['curl', '-s', address]", "cmd = 'wget -q ' + address", "cmd = \"ssh host\"", "cmd = ['gh', 'api', 'x']", "cmd = ['git', 'push', 'origin']", "cmd = ['git', 'fetch']",
+                   "cmd = 'git pull --rebase'", "cmd = ['git', 'clone', address]", "cmd = ['git', 'ls-remote', address]", "cmd = 'scp a b'", "cmd = ['rsync', '-a']",
+                   "cmd = ['nslookup', host]", "cmd = ['telnet', host]")
+    CLI_CLEAN = ("cmd = ['git', 'status']", "cmd = ['git', 'log', '-1']", "# curl is not used", "curl_helper = 1", "name = 'curly'", "cmd = ['sshd']", "name = 'ghost'",
+                 "# git push is forbidden", "cmd = ['git', 'diff', '--stat']", "cmd = ['git', 'rev-parse', 'HEAD']")
+    JS_PATHS = ("src/ui/app.js", "src/ui/app.mjs", "src/ui/app.cjs", "src/ui/app.jsx", "src/ui/app.ts", "src/ui/app.tsx", "src/ui/app.vue", "src/ui/page.html", "src/ui/app.htm")
+    JS_FLAGGED = ("fetch(address)", "const r = await fetch (address)", "new WebSocket(address)", "var x = new XMLHttpRequest()", "navigator.sendBeacon(a, b)", "sendBeacon(a)", "new EventSource(address)")
+    JS_CLEAN = ("refetch(address)", "obj.fetch(address)", "prefetchData()", "const fetcher = 1", "socket.on('message', f)")
+    EXEMPT_PATHS = ("tests/test_fetcher.py", "tests/fixtures/data.json", "tests/helpers/net_stub.py", "docs/notes.md", "docs/notes.rst", "README.md", "notes.txt", "인수인계/작업내용.md",
+                    "docs/design.adoc", "NOTES.MD")
+    NOT_EXEMPT_PATHS = ("src/app/tests/test_fetcher.py", "pipeline/attestation.py", "pipeline/test_helper.py", "tests_extra/helper.py", "docs/tool.py", "notes.md.py", "Tests/helper.py",
+                        "TESTS/helper.py", "tests", "docs/notes.json")
+
+    def assert_external(self, text, path=None, kind="blog"):
+        result = classify(kind, [path or self.CODE], text)
+        self.assertEqual(result.tier, "operator_only", text)
+        self.assertIn("external_connection", result.extra_flags, text)
+        self.assertTrue(any(reason.startswith("[새 외부 접속 코드]") for reason in result.reasons), text)
+        return result
+
+    def assert_clean(self, text, path=None, kind="blog"):
+        result = classify(kind, [path or self.CODE], text)
+        self.assertEqual((result.tier, result.categories, result.extra_flags), ("ai_ok", (), ()), text)
+
+    def test_network_and_service_imports_are_flagged_in_both_repositories(self):
+        for line in self.IMPORTS:
+            for kind in ("blog", "desktop"):
+                with self.subTest(line=line, kind=kind):
+                    self.assert_external(line + "\n", kind=kind)
+
+    def test_every_listed_module_alone_is_enough(self):
+        for name in mp.EXTERNAL_MODULES:
+            with self.subTest(module=name):
+                self.assert_external("import " + name + "\n")
+                self.assert_external("from " + name + " import something\n")
+        for name in ("urllib.request", "http.client", "google.genai"):
+            base, _dot, last = name.rpartition(".")
+            self.assert_external("from " + base + " import " + last + "\n")
+
+    def test_imports_that_only_look_alike_are_not_flagged(self):
+        for line in self.NOT_IMPORTS:
+            with self.subTest(line=line):
+                self.assert_clean(line + "\n")
+
+    def test_call_shapes_are_flagged(self):
+        for line in self.CALLS:
+            with self.subTest(line=line):
+                self.assert_external(line + "\n")
+        for name in self.NET_CALL_NAMES:
+            with self.subTest(name=name):
+                self.assert_external("x = " + name + "(argument)\n")
+
+    def test_calls_that_only_look_alike_are_not_flagged(self):
+        for line in self.NOT_CALLS:
+            with self.subTest(line=line):
+                self.assert_clean(line + "\n")
+
+    def test_addresses_with_a_scheme_are_flagged_for_every_scheme(self):
+        self.assertEqual(set(self.SCHEMES), set(mp.EXTERNAL_SCHEMES))
+        for scheme in self.SCHEMES:
+            with self.subTest(scheme=scheme):
+                self.assert_external("u = '" + url("service.org/path", scheme) + "'\n")
+                self.assert_external("u = '" + url("service.org/path", scheme.upper()) + "'\n")
+        for host, scheme in self.FLAGGED_ADDRESSES:
+            with self.subTest(host=host, scheme=scheme):
+                self.assert_external("u = '" + url(host, scheme) + "'\n")
+                self.assert_external("# " + url(host, scheme) + "\n")
+
+    def test_example_addresses_and_empty_hosts_are_not_flagged(self):
+        for host in self.EXAMPLE_ADDRESSES:
+            with self.subTest(host=host):
+                self.assert_clean("u = '" + url(host) + "'\n")
+        self.assert_clean("import re\nrx = re.compile(r'https?" + ":" + "//')\n")
+        self.assert_clean("prefix = '" + url("") + "'\n")
+        self.assert_clean("template = '" + url("{host}/path") + "'\n")
+
+    def test_quoted_domain_names_are_flagged_for_every_top_level_domain(self):
+        for tld in self.TLDS:
+            with self.subTest(tld=tld):
+                self.assert_external("host = 'svc.provider." + tld + "'\n")
+                self.assert_external('host = "svc.provider.' + tld + ':8443/path"\n')
+        for host in self.QUOTED_FLAGGED:
+            with self.subTest(host=host):
+                self.assert_external("host = '" + host + "'\n")
+
+    def test_quoted_names_that_are_not_domains_are_not_flagged(self):
+        for name in self.QUOTED_CLEAN:
+            with self.subTest(name=name):
+                self.assert_clean("name = '" + name + "'\n")
+
+    def test_well_known_service_domains_are_flagged_even_without_quotes(self):
+        for host in self.KNOWN_HOSTS:
+            with self.subTest(host=host):
+                self.assert_external("see api." + host + " for details\n")
+                self.assert_external("remote: " + host + "\n")
+        for text in ("see notgithub.com for details", "see github.company for details", "see mygithub.com", "see telegram.organization"):
+            with self.subTest(text=text):
+                self.assert_clean(text + "\n")
+
+    def test_network_commands_are_flagged_when_quoted_as_commands(self):
+        for line in self.CLI_FLAGGED:
+            with self.subTest(line=line):
+                self.assert_external(line + "\n")
+        for tool in self.CLI_TOOLS:
+            with self.subTest(tool=tool):
+                self.assert_external("cmd = ['" + tool + "', 'x']\n")
+                self.assert_external("cmd = '" + tool + " x'\n")
+
+    def test_commands_that_only_look_alike_are_not_flagged(self):
+        for line in self.CLI_CLEAN:
+            with self.subTest(line=line):
+                self.assert_clean(line + "\n")
+
+    def test_javascript_network_calls_are_flagged_only_in_javascript_files(self):
+        for path in self.JS_PATHS:
+            for line in self.JS_FLAGGED:
+                with self.subTest(path=path, line=line):
+                    self.assert_external(line + "\n", path=path)
+            for line in self.JS_CLEAN:
+                with self.subTest(path=path, line=line):
+                    self.assert_clean(line + "\n", path=path)
+        for line in self.JS_FLAGGED:
+            with self.subTest(python_file=line):
+                self.assert_clean(line + "\n", path="pipeline/fetcher.py")
+        self.assert_external("fetch(address)\n", path="src/ui/app.js", kind="desktop")
+
+    def test_tests_and_documents_are_not_looked_at(self):
+        for path in self.EXEMPT_PATHS:
+            with self.subTest(path=path):
+                self.assert_clean(self.SAMPLE, path=path)
+                self.assert_clean(self.SAMPLE, path=path, kind="desktop")
+
+    def test_only_the_top_level_tests_folder_and_real_document_files_are_exempt(self):
+        for path in self.NOT_EXEMPT_PATHS:
+            with self.subTest(path=path):
+                self.assert_external(self.SAMPLE, path=path)
+
+    def test_a_plain_text_is_skipped_only_when_every_changed_file_is_a_test_or_a_document(self):
+        text = "import requests\n"
+        self.assertEqual(classify("blog", ["docs/a.md", "tests/test_a.py"], text).tier, "ai_ok")
+        self.assertIn("external_connection", classify("blog", ["docs/a.md", "tests/test_a.py", "pipeline/a.py"], text).extra_flags)
+        self.assertIn("external_connection", classify("blog", ["pipeline/a.py"], text).extra_flags)
+        self.assertIn("external_connection", classify("blog", ["tests/test_a.py", "docs/notes.json"], text).extra_flags)
+
+    def test_a_mapping_is_read_file_by_file(self):
+        paths = ["docs/a.md", "tests/test_a.py", "pipeline/a.py"]
+        clean = {"docs/a.md": self.SAMPLE, "tests/test_a.py": self.SAMPLE, "pipeline/a.py": "value = 1\n"}
+        self.assertEqual(classify("blog", paths, clean).tier, "ai_ok")
+        dirty = dict(clean, **{"pipeline/a.py": "import requests\n"})
+        self.assertIn("external_connection", classify("blog", paths, dirty).extra_flags)
+        self.assertIn("external_connection", classify("blog", ["docs/a.md"], {"pipeline/other.py": "import requests\n"}).extra_flags)
+        for key in ("", 1, "../x.md", "/abs.md", None):
+            with self.subTest(key=key):
+                self.assertIn("external_connection", classify("blog", ["docs/a.md"], {key: "import requests\n"}).extra_flags)
+
+    def test_the_reasons_name_modules_and_hosts_but_never_echo_the_line(self):
+        text = "import requests\nu = '" + url("user:CANARY_pw@host.org/x") + "'\n"
+        result = classify("blog", [self.CODE], text)
+        joined = " ".join(result.reasons)
+        for word in ("[새 외부 접속 코드]", "requests", "host.org"):
+            self.assertIn(word, joined)
+        for leak in ("CANARY", "user:", "pw@", "u = "):
+            self.assertNotIn(leak, joined)
+        self.assertEqual(result.categories, ())
+
+    def test_it_combines_with_the_twelve_items(self):
+        result = classify("blog", [self.CODE], "import requests\nTELEGRAM_BOT_TOKEN = 1\n")
+        self.assertEqual((result.tier, result.categories, result.extra_flags), ("operator_only", ("credentials",), ("external_connection",)))
+
+    def test_odd_inputs_never_raise_and_stay_conservative(self):
+        for added in ({1: "import requests"}, {"a.py": ""}, {}, "", "\n\n", "import", "from", "import ,", "from x import", "from x import (", "import a as", "import  \t "):
+            result = mp.classify_change("blog", ["pipeline/a.py"], added, dict(DECLARED_OK))
+            self.assertIn(result.tier, ("ai_ok", "operator_only"))
+
+    def test_long_adversarial_text_is_classified_in_linear_time(self):
+        started = time.monotonic()
+        for text in ("a." * 20000, "'" + "a" * 20000 + "'", "import " + "a," * 20000, url("a" * 20000), "'git " * 5000, "'" + "a." * 5000 + "x'", "from " + "a." * 5000 + " import b",
+                     "fetch(" * 5000, "https?" + ":" + "//" * 5000):
+            classify("blog", ["src/ui/app.js"], text)
+        self.assertLess(time.monotonic() - started, 5)
 
 
 class PreconditionsTest(unittest.TestCase):

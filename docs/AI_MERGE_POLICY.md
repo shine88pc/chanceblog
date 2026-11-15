@@ -15,7 +15,7 @@
 | 승인 방식 | 병합 번호와 함께 한 줄(`M075 승인`). `확인했습니다` 같은 말만으로는 승인이 아닙니다 |
 | 승인의 유효 범위 | 그 PR 한 건뿐. 다른 PR 이나 이후 변경에 다시 쓸 수 없고, 승인 뒤 새 커밋이 더해지면 무효입니다 |
 | AI 가 병합할 수 있는 것 | 일반 프로그램 코드·일반 UI·시험·문서·로컬 저장·조회·오류 수정·접근성·성능 개선 |
-| 승인해도 운영자가 직접 병합하는 것 | 12항목(§7) — 워크플로·광고·공개 글·발행 정지와 재개·키와 비밀·의존성·데이터 삭제·외부 비용·main 보호 설정 등 |
+| 승인해도 운영자가 직접 병합하는 것 | 12항목(§7) — 워크플로·광고·공개 글·발행 정지와 재개·키와 비밀·의존성·데이터 삭제·외부 비용·main 보호 설정 등. 그리고 안전 장치 파일·새 외부 접속 코드 같은 12항목 밖의 표시(§7-5) |
 | 병합 방식 | PR 병합 하나뿐. main 직접 push 금지 |
 | 첫 운영 | 일반 코드 또는 문서 PR 3건으로 시험하고, 한 건이라도 문제면 즉시 중지합니다 |
 | 켜는 방법 | 별도 병합 요청 — 그 변경은 운영자가 직접 병합합니다(§11) |
@@ -235,19 +235,43 @@ AI 가 PR 작성 → 검사와 독립 검증 → 쉬운 병합 설명 발송 →
 
 앱 저장소(`desktop`)는 `.github/`·`requirements*.txt`·`vendor/`·`VERSION`·패키징 설정·비밀 모양을 운영자 전용으로 봅니다. 위 12항목 중 워크플로(`.github/`)·의존성(`requirements*.txt`·`vendor/`)·키와 비밀(비밀 모양)은 같은 항목으로 걸립니다. 추가된 줄의 내용 규칙(광고 코드 낱말·`PIPELINE_PAUSE`·비밀 모양·삭제 명령)은 두 저장소에 똑같이 적용되고, 광고·공개 글·발행 설정 파일의 경로 규칙은 블로그 저장소에만 적용됩니다.
 
-### 7-5. 12항목 밖에서 보수적으로 더한 표시 (운영자 판단 필요)
+### 7-5. 12항목 밖에서 보수적으로 더한 표시
 
-운영자 결정 원문의 12항목은 줄이거나 넓히지 않았습니다. 그와 별개로, 아래 3가지는 결과의 `extra_flags` 에 따로 표시하고 운영자 전용으로 둡니다. 운영자가 바꾸라고 하면 따릅니다.
+운영자 결정 원문의 12항목은 줄이거나 넓히지 않았습니다. 그와 별개로, 아래 5가지는 결과의 `extra_flags` 에 따로 표시하고 운영자 전용으로 둡니다. 운영자가 바꾸라고 하면 따릅니다.
 
 | 표시 | 뜻 | 왜 보수적으로 두었나 |
 |---|---|---|
 | `policy_self` | 이 정책의 문서·모듈·시험 자체를 바꾸는 변경 | AI 가 스스로 규칙을 느슨하게 만든 뒤 그 규칙으로 병합하는 길을 막기 위해(§12) |
+| `safety_guard` | 안전 장치 파일(§7-6) | 운영자 결정 D-347 의 보수적 판단(총괄 11-15) — 검사·보안 장치를 AI 가 스스로 약하게 만든 뒤 그 장치로 병합하는 길을 막기 위해 |
+| `external_connection` | 새 외부 접속 코드(§7-6) | 운영자 결정 D-347 의 보수적 판단(총괄 11-15) — 외부 비용 발생 기능·API Key 항목으로 이어지는 입구라 코드의 추가된 줄에서 따로 잡습니다 |
 | `packaging_release` | 앱 저장소의 `VERSION`·패키징·배포 설정 | 설치 파일과 배포 상자를 바꾸는 변경이라 승인 설명만으로 보기 어렵습니다 |
 | `invalid_input` | 입력을 확인할 수 없음 | 저장소 종류·경로 목록·추가된 줄·선언의 모양이 올바르지 않으면 통과시키지 않습니다 |
 
-### 7-6. 이 규칙이 모르는 것
+### 7-6. 안전 장치 파일과 새 외부 접속 코드 (운영자 결정 D-347 의 보수적 판단(총괄 11-15))
 
-- 새 외부 접속(네트워크) 코드와, 검사·검증기·안전 장치 파일(예: 저장소 검증기·비밀 모양 패턴·가드레일 시험)의 변경은 12항목에 없어서 AI 병합 가능으로 분류될 수 있습니다. 이런 변경은 독립 검증의 점검표에서 따로 확인합니다. 12항목에 더할지는 운영자가 정합니다.
+위 두 표시(`safety_guard`·`external_connection`)는 12항목 목록을 넓힌 것이 아니라 **12항목 밖의 표시**입니다. 오탐을 줄이려고 시험·문서 안의 주소와 예시는 걸리지 않게 했고, 의심스러우면 운영자 전용 쪽으로 봅니다.
+
+**안전 장치 파일(`safety_guard`)** — 승인해도 운영자가 직접 병합합니다.
+
+- 문서는 `docs/SECURITY_GUARDRAILS.md` 한 파일만 해당합니다(이 정책의 문서·모듈·시험 4개는 `policy_self` 로만 표시합니다). 다른 문서(`.md`·`.rst`·`.txt`·`.adoc`)는 이 규칙에 걸리지 않습니다.
+- 그 밖의 파일은 경로의 어느 구간에든 `validate_repo`·`guardrail`·`guard`·`security`·`secret`·`egress`·`policy`·`safety`·`sandbox`·`ai_flow` 가 있으면 해당합니다. 예: `scripts/validate_repo.py`·`pipeline/egress.py`·`pipeline/secret_patterns.py`·`pipeline/source_policy.py`·`pipeline/ai_guard.py`·`tests/test_guardrails.py`·`tests/test_security_settings.py`·`tests/test_egress.py`.
+- **시험 폴더도 면제하지 않습니다.** 안전 장치를 지키는 시험이 바로 이 파일들이라, 시험을 고쳐 장치를 약하게 만드는 길을 막습니다.
+
+**새 외부 접속 코드(`external_connection`)** — 시험(맨 위 `tests/` 폴더)과 문서가 아닌 파일의 **추가된 줄**에 아래가 있으면 해당합니다. 외부 비용 발생 기능과 API Key 항목으로 이어지는 입구라서 따로 잡습니다.
+
+- 네트워크 모듈 import: `urllib.request`·`urllib3`·`requests`·`httpx`·`aiohttp`·`http.client`·`http.server`·`socket`·`socketserver`·`ssl`·`ftplib`·`smtplib`·`telnetlib`·`poplib`·`imaplib`·`nntplib`·`xmlrpc`·`websockets`·`websocket`·`paramiko`·`asyncssh`·`pycurl`·`httplib2`·`feedparser`·`webbrowser`·`grpc`
+- 외부 서비스 SDK import: `google.genai`·`google.generativeai`·`google.cloud`·`google.oauth2`·`google.auth`·`googleapiclient`·`google_auth_oauthlib`·`openai`·`anthropic`·`vertexai`·`cohere`·`mistralai`·`litellm`·`langchain`·`huggingface_hub`·`transformers`·`ollama`·`groq`·`replicate`·`boto3`·`botocore`·`tweepy`·`slack_sdk`·`telebot`·`gspread`
+- 네트워크 호출 모양(`urlopen(`·`requests.get(`·`socket.socket(`·`HTTPSConnection(` 등)과 동적 import·코드 실행(`__import__(`·`import_module(`·`exec(`·`eval(`)
+- 새 호스트 주소 — 아래 스킴으로 시작하는 주소: `http`·`https`·`ws`·`wss`·`ftp`·`ftps`·`sftp`·`ssh`·`git`·`tg`·`smtp`·`smtps`·`ldap`·`ldaps`·`redis`·`rediss`·`mqtt`·`mqtts`·`amqp`·`amqps`. 그리고 따옴표 안의 도메인 이름(`.com`·`.org`·`.io`·`.ai`·`.gov` 등으로 끝나는 것)과 널리 쓰는 서비스 도메인. **예시 주소는 걸리지 않습니다** — `example.com`·`example.net`·`example.org` 와 그 하위 주소, 끝이 `.example`·`.test`·`.invalid` 인 주소. 호스트가 비어 있는 경우(스킴만 적은 정규식 따위)도 걸리지 않습니다. 루프백(`localhost`)은 걸립니다(로컬 AI 서버 주소일 수 있어서).
+- 네트워크 명령 — 따옴표로 묶은 `curl`·`wget`·`ssh`·`gh`·`git push`·`git fetch` 등
+- 자바스크립트 파일(`.js`·`.ts`·`.vue`·`.html` 등)의 `fetch(`·`XMLHttpRequest`·`WebSocket`
+
+시험·문서를 면제하는 방법: 파일 경로를 알 때(사전)는 파일마다 따지고, 글자 하나로 받았을 때는 바뀐 파일이 **모두** 시험·문서일 때만 건너뜁니다(하나라도 코드 파일이면 전체 글을 봅니다). 맨 위 `tests/` 폴더만 면제이고 `Tests/`·안쪽 `tests/`·이름이 `test_` 로 시작하는 코드 파일은 면제가 아닙니다.
+
+### 7-7. 이 규칙이 모르는 것
+
+- 이름에 위 낱말이 없는 검사·정화 코드(예: `pipeline/gates.py` 의 품질 Gate)는 `safety_guard` 에 걸리지 않습니다. 12항목 또는 표시에 더할지는 운영자가 정합니다.
+- 새 외부 접속은 파일에 적힌 모양만 봅니다. 문자열을 쪼개 붙이거나 다른 파일에서 가져오는 접속은 못 잡습니다 — 독립 검증의 점검표가 마지막 방어선입니다.
 - 추가된 줄의 낱말 규칙은 일부러 넓습니다(예: `token`·`secret` 이 든 줄은 운영자 전용). 그래서 문서 PR 이라도 비밀·키 이야기를 쓰면 운영자 직접 병합으로 갈 수 있습니다.
 
 ## 8. 병합 방식 제한
@@ -357,6 +381,7 @@ AI 병합을 실제로 켜는 변경은 **별도 병합 요청**으로 보내고
 | 한 건에만 유효·무효 조건 | §5 | `approval_matches`·`approval_still_valid`·`ApprovalLedger` | `ApprovalValidityTest`·`ApprovalLedgerTest` |
 | AI 병합 가능 7종 | §7 | `AI_MERGE_SCOPES`·`classify_change` | `ClassifyAllowedTest` |
 | 운영자 전용 12항목 | §7 | `OPERATOR_ONLY_ITEMS`·`classify_change` | `ClassifyOperatorOnlyTest`·`ClassifyDesktopTest`·`ClassifyInvalidInputTest` |
+| 12항목 밖의 표시(안전 장치 파일·새 외부 접속 코드) | §7 | `EXTRA_FLAGS`·`SAFETY_GUARD_WORDS`·`EXTERNAL_MODULES` | `ClassifySafetyGuardTest`·`ClassifyExternalConnectionTest` |
 | 재확인 8조건 | §6 | `PRECONDITIONS`·`check_preconditions` | `PreconditionsTest` |
 | 병합 방식 | §8 | `merge_method_allowed` | `MergeMethodTest` |
 | 쉬운 설명 6항목 | §4 | `EXPLANATION_ITEMS`·`render_explanation`·`explanation_problems` | `ExplanationTest` |
