@@ -1513,6 +1513,9 @@ class ReadmeFirstStartSectionTest(unittest.TestCase):
         self.assertIn("py -3.10 -X utf8 bootstrap.py", self.s8)                                      # 3.12 가 아직 없을 때의 길
         top = self.text[: self.text.index("## 1. ")]
         self.assertIn("맨 `python` 은 8절 0단계에서 확인한 3.12", top)                                   # 표의 `python` 이 무엇인지 첫머리에서 밝힌다
+        one = section(self.text, 1)
+        self.assertIn("py -3.12 -X utf8 인수인계/도구/setup_workspace.py <작업 폴더 W>", one)             # 1절의 첫 명령도 맨 python 이 아니다
+        self.assertEqual([line for line in one.splitlines() if re.match(r"\s*python3?\s", line)], [])
 
     def test_the_first_signal_step_gives_the_exact_commit_command(self):
         """권고-3(c): `--only` 가 없으면 commit_as_author.py 는 `git add -A` 라 임시 폴더의 모든 변경이 들어간다 — 정확한 명령을 적는다."""
