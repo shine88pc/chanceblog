@@ -148,6 +148,14 @@ EGRESS_EXCEPTIONS = (
     EgressException("인수인계/도구/work/scratch/run_times.py", "<module>", "운영 도구: 블로그 저장소 워크플로의 최근 실행 시각을 공개 Actions 웹 페이지에서 읽기(자기 저장소, 사람이 실행)", _G_TOOL, ("net:",), 1),
     EgressException("인수인계/도구/work/scratch/watch_issues.py", "fetch", "운영 도구: 블로그 저장소의 새 이슈를 GitHub 공개 REST 로 5분마다 읽는 감시(자기 저장소, ETag 조회, 사람이 실행)", _G_TOOL, ("net:",), 1),
     EgressException("인수인계/도구/work/scratch/web_runs.py", "<module>", "운영 도구: 공개 Actions 웹 페이지의 실행 행 읽기(REST 한도가 바닥일 때, 자기 저장소, 사람이 실행)", _G_TOOL, ("net:",), 1),
+    EgressException("인수인계/도구/work/scratch/check_notify.py", "fetch", "운영 도구: 알림 워크플로 실행이 끝났는지 공개 Actions 웹 페이지에서 읽기(자기 저장소, REST 호출 0회, 사람이 실행)", _G_TOOL, ("net:",), 1),
+    EgressException("인수인계/도구/work/scratch/memfree.py", "<module>", "운영 도구: 여유 메모리를 읽는 도우미 — 윈도 메모리 상태 구조체를 위한 ctypes 가져오기뿐이고 네트워크에 닿지 않는다", _G_TOOL, ("lib:",), 1),
+    EgressException("인수인계/도구/work/scratch/mk_lane_merge.py", "git", "운영 도구: 작업 가지를 최신 main 위 한 커밋 병합 가지로 만드는 git 도우미(fetch 는 자기 저장소 origin, 푸시하지 않는다, 사람이 실행)", _G_TOOL, ("proc:",), 1),
+    EgressException("인수인계/도구/work/scratch/mk_lane_merge_desktop.py", "git", "운영 도구: 데스크톱 저장소의 작업 가지를 최신 main 위 한 커밋 병합 가지로 만드는 git 도우미(fetch 는 자기 저장소 origin, 푸시하지 않는다, 사람이 실행)", _G_TOOL, ("proc:",), 1),
+    EgressException("인수인계/도구/work/scratch/resume_check.py", "api", "운영 도구: 새 세션 첫 점검의 GitHub 공개 REST 읽기(열린 PR·최근 이슈 두 번, 자기 저장소, 사람이 실행)", _G_TOOL, ("net:",), 1),
+    EgressException("인수인계/도구/work/scratch/resume_check.py", "run", "운영 도구: 새 세션 첫 점검의 git ls-remote·git log 읽기 도우미(공개 원격과 작업 폴더 읽기뿐, 성공했을 때의 출력만 쓴다)", _G_TOOL, ("proc:",), 1),
+    EgressException("인수인계/도구/work/scratch/verify_live_counts.py", "get", "운영 도구: 병합 뒤 공개 사이트(홈·posts.json·sitemap·feed)의 숫자를 읽기(자기 Pages 사이트, 사람이 실행)", _G_TOOL, ("net:",), 1),
+    EgressException("인수인계/도구/work/scratch/verify_live_counts.py", "git", "운영 도구: 병합 뒤 확인용 git 읽기 도우미(자기 저장소 fetch·rev-parse·rev-list·log, 푸시하지 않는다, 사람이 실행)", _G_TOOL, ("proc:",), 1),
 )
 
 # 호출 목록 시험이 '관문을 거침'으로 인정하는 호출 이름(같은 함수에서 같은 주소 식으로 앞서·지배하며 문장으로 불렀을 때만 — tests/egress_scan.py 머리말). `source_policy.egress_gate` 는
