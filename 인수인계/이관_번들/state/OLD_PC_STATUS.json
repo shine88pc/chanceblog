@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "sequence": 3,
+  "writer": "OLD_PC",
+  "updated_at": "2026-11-15 14:4x (한국 시간) — 구현·검증 에이전트 결과 반영, 정리 시작 직전",
+  "state": "READY_TO_HAND_OVER",
+  "state_choices": [
+    "PREPARING",
+    "READY_TO_HAND_OVER",
+    "HANDED_OVER",
+    "CLOSED"
+  ],
+  "meaning": "PREPARING = 옛 PC 가 번들을 올리는 중이라 새 PC 의 AI 는 준비만 하고 기다린다 / READY_TO_HAND_OVER = 이전 준비 완료(번들·WIP 가지·도구가 원격에 올라가 확인됨) — 새 PC 의 AI 가 시작해도 된다 / HANDED_OVER = 새 PC 의 ACK 를 확인해 넘겨줌 — 옛 PC 는 알림·요청을 보내지 않는다 / CLOSED = 옛 PC 정리 끝(폴더 삭제·로그아웃) — 더 이상 쓰지 않는다.",
+  "old_pc_constraint": "공용 PC 라 운영자가 떠나면 이 세션은 다시 접속할 수 없고, 마무리 때 옛 PC 의 작업 폴더(KCY 등)는 삭제되고 GitHub 로그인은 로그아웃된다. 그 뒤 옛 PC 는 아무것도 올리지 못한다.",
+  "repo_heads_at_writing": {
+    "blog_main": "d8043d0 (M072, 11-15 10:42)",
+    "desktop_main": "41ce292",
+    "root_main": "2f699ba"
+  },
+  "wip_branches_on_origin": {
+    "blog": [
+      "ai/claude/NO-MERGE-mergepol1-wip (09299e3 = WIP 8 — 변이·3.10·모듈 재검증 미완)",
+      "ai/claude/NO-MERGE-handoff2-wip (18f8bb2 = WIP 3 — README 새 절·새 시험·전체 시험 미완)",
+      "ai/claude/NO-MERGE-migration-bundle (이 번들)"
+    ],
+    "desktop": [
+      "ai/claude/NO-MERGE-app15-wip (4692990 — 구현자 3차 수정 대기)"
+    ]
+  },
+  "in_flight_on_old_pc": [
+    "없음 — 옛 PC 의 에이전트는 모두 멈췄고 끝나지 못한 일은 state/COORDINATION.md 의 4절과 2절에 순서대로 적혀 있다"
+  ],
+  "next_for_new_pc": [
+    "README.md 의 AI 자율 운영 계약과 빈 PC 에서 시작하는 순서를 따른다",
+    "state/COORDINATION.md 를 끝까지 읽는다(특히 4절 — 마지막 갱신)",
+    "NEW_PC_ACK.json(STARTED → TOOK_OVER) 올리고 첫 보고(제목에 '이관 완료')",
+    "A MERGEPOL1(WIP 8 재검증·병합 가지) → B APP15(3차 수정·재검증·AP15→AP14) → C HANDOFF2(README 새 절·새 시험·병합 가지) 순서로 이어 간다"
+  ],
+  "autonomy": "운영자는 새 PC 에서 첫 프롬프트 뒤 그 PC 를 확인할 수 없다 — 새 PC 의 AI 는 README 의 'AI 자율 운영 계약'대로 질문 없이 스스로 판단해 진행한다."
+}

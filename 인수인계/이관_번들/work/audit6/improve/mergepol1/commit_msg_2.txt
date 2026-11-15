@@ -1,0 +1,8 @@
+[WIP][mergepol1 2] 정책 정본 문서·문서 시험·결함 대장 D-346·D-347 (꺼진 상태)
+
+- docs/AI_MERGE_POLICY.md: 12절 — 상태(꺼져 있음)·운영자 결정 요지·흐름 7단계·쉬운 병합 설명 양식·승인 방식·재확인 8조건·범위(7종과 12항목)·병합 방식·사후 처리·시험 3건과 즉시 중지·켜는 방법(설계 메모)·바꾸는 법
+- tests/test_merge_policy_docs.py: 문서의 낱말·표·예시 글을 코드와 대조, 모듈의 순수성과 미연결을 정적 검사
+- docs/DEFECT_REGISTER.md: D-346(해결) · D-347(열림, 운영자 판단 필요) 두 줄
+- 모듈: normalize_path 를 normalize_repo_path 로 이름 변경(pipeline/edits 의 같은 이름과 혼동 방지), 이미 쓴 승인 목록의 쓰레기 값은 실패, 시험 기록의 키 없음과 None 구별
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>

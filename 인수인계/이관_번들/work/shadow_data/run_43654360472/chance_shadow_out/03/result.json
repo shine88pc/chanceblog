@@ -1,0 +1,45 @@
+{
+  "attempt": 3,
+  "files": {
+    "ko": "2026-11-15-KR-084017.md"
+  },
+  "gate": {
+    "facts": {
+      "body_chars_ko": 1195,
+      "evidence_chars": 6730,
+      "source_text_chars": 0
+    },
+    "input": "validated"
+  },
+  "generated_at": "2026-11-15T08:40:15.755867+09:00",
+  "hold_codes": [],
+  "hold_reasons": [],
+  "lane": "facts",
+  "languages": [
+    "ko"
+  ],
+  "model": "rule",
+  "outcome": "PASSED",
+  "passed": true,
+  "published": "",
+  "schema": 1,
+  "source_domain": "services.swpc.noaa.gov",
+  "source_name": "NOAA GOES X선 플레어 목록",
+  "source_text_chars": 6730,
+  "source_url": "https://services.swpc.noaa.gov/json/goes/primary/xray-flares-7-day.json",
+  "thin": {
+    "c_units": 4,
+    "calc_claims": 2,
+    "date_marks": 3,
+    "evidence_chars": 6730,
+    "fixed_pct": 84,
+    "pure_units": 16,
+    "value_units": 8
+  },
+  "title_en": "",
+  "title_ko": "GOES X선 플레어 등급별 건수, 2026년 11월 14일 기준 — 숫자로 읽기",
+  "validation": {
+    "ok": true,
+    "reason": ""
+  }
+}

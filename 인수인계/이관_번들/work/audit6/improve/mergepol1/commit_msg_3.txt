@@ -1,0 +1,7 @@
+[WIP][mergepol1 3] 시험 보강 — 값 없음의 쉬운 이유·즉시 중지 규칙 문장·운영자 약속 문장 못박기, 문서 두 곳 다듬기
+
+- tests/test_merge_policy.py: 누락 값이 '값이 없음'이라는 이유와 값 이름을 대는지 단언, 제어 문자 제거 단언
+- tests/test_merge_policy_docs.py: OperatorStatementsPinnedTest(운영자 약속 16문장+즉시 중지 규칙 문장·설계 메모 원칙 9개)
+- docs/AI_MERGE_POLICY.md: 맨 위 HTML 표현 정리, 내용 규칙이 두 저장소에 같이 적용됨을 명시
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>

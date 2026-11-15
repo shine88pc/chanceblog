@@ -1,0 +1,36 @@
+{
+  "attempt": 3,
+  "files": {
+    "ko": "2026-11-13-KR-083924.md"
+  },
+  "gate": {
+    "facts": {
+      "body_chars_ko": 1534,
+      "evidence_chars": 1218,
+      "source_text_chars": 0
+    },
+    "input": "validated"
+  },
+  "generated_at": "2026-11-13T08:39:22.394508+09:00",
+  "hold_codes": [],
+  "hold_reasons": [],
+  "lane": "facts",
+  "languages": [
+    "ko"
+  ],
+  "model": "rule",
+  "outcome": "PASSED",
+  "passed": true,
+  "published": "",
+  "schema": 1,
+  "source_domain": "services.swpc.noaa.gov",
+  "source_name": "NOAA 우주기상 등급 현황",
+  "source_text_chars": 1218,
+  "source_url": "https://services.swpc.noaa.gov/products/noaa-scales.json",
+  "title_en": "",
+  "title_ko": "NOAA 우주기상 등급 현황과 예보, 2026년 11월 12일 기준 — 숫자로 읽기",
+  "validation": {
+    "ok": true,
+    "reason": ""
+  }
+}

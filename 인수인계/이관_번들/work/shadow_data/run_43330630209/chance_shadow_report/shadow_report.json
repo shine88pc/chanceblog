@@ -1,0 +1,664 @@
+{
+  "as_of": "2026-11-13",
+  "note": "게시와 무관한 측정 전용 보고서입니다. 생성·게시·초안 흐름에 연결돼 있지 않으며 판정이 아니라 사람이 먼저 볼 순서를 정하는 신호입니다.",
+  "options": {
+    "detail": false,
+    "own_domain_count": 0
+  },
+  "pairs": [],
+  "posts": [
+    {
+      "added_value": {
+        "comparison_markers": 3,
+        "distinct_domains": 1,
+        "distinct_official_domains": 1,
+        "null_reasons": {
+          "unsupported_addition_ratio": "원문 텍스트가 없어 원문에 없는 주장 비율을 낼 수 없다"
+        },
+        "own_calculation_markers": 3,
+        "own_work_signals_present": true,
+        "table_data_rows": 7,
+        "unsupported_addition_ratio": null
+      },
+      "body": {
+        "bullets": 11,
+        "headings": 4,
+        "long_lines_truncated": 0,
+        "main_chars_nospace": 1440,
+        "paragraphs": 7,
+        "table_data_rows": 7
+      },
+      "claims": {
+        "by_anchor": {
+          "date": 17,
+          "entity": 22,
+          "money": 0,
+          "number": 3,
+          "percent": 0
+        },
+        "claim_ratio": 0.571,
+        "entity_only": 5,
+        "null_reasons": {},
+        "numeric": 19,
+        "sentences_considered": 42,
+        "total": 24
+      },
+      "date": "2026-11-13",
+      "event_focus": {
+        "as_of": "2026-11-13",
+        "date_status": "upcoming",
+        "dates_after_as_of": [
+          "2026-11-20"
+        ],
+        "dates_after_post_date": [
+          "2026-11-20"
+        ],
+        "distinct_event_terms": 0,
+        "event_sentence_ratio": 0.0,
+        "event_sentences": 0,
+        "event_term_hits": 0,
+        "flag": false,
+        "null_reasons": {},
+        "reasons": [],
+        "sentences_considered": 42,
+        "title_event_terms": [],
+        "top_terms": []
+      },
+      "grounding": {
+        "approximate": true,
+        "basis": "근사치: 같은 문단에 공식 기관·연구기관 본문 링크가 붙은 주장 수(링크가 있다고 그 주장을 뒷받침하는 것은 아니다)",
+        "claims_checked": 24,
+        "linked_in_paragraph": 1,
+        "linked_in_sentence": 1,
+        "linked_official_in_paragraph": 1,
+        "mode": "inline_link_approx",
+        "null_reasons": {
+          "unsupported": "원문 텍스트가 없어 어긋남을 판정할 수 없다(근사 모드)",
+          "unverifiable": "원문 텍스트가 없어 어긋남을 판정할 수 없다(근사 모드)"
+        },
+        "supported": 1,
+        "supported_ratio": 0.042,
+        "unsupported": null,
+        "unsupported_examples": [],
+        "unverifiable": null
+      },
+      "health_risk": {
+        "advice_with_medical": [],
+        "assertive_with_medical": [],
+        "level": "none",
+        "medical_strong_terms": {},
+        "medical_weak_terms": {},
+        "null_reasons": {},
+        "profile": "blogger_practical_ko.json",
+        "profile_adds_signal": false,
+        "profile_banned_hits": [],
+        "profile_body_rule_hits": [],
+        "reasons": [],
+        "safety_adjacent_terms": {}
+      },
+      "kind": "KR",
+      "lang": "ko",
+      "null_reasons": {
+        "pair": "같은 날짜·같은 6자리 키의 국문·영문 짝이 없다"
+      },
+      "pair": null,
+      "pair_key": "083922",
+      "path": "01/2026-11-13-KR-083922.md",
+      "press_release_summary": {
+        "flag": false,
+        "kind": "none",
+        "null_reasons": {},
+        "press_format_tokens": [],
+        "primary_source_category": "public_agency",
+        "primary_source_domain": "noaa.gov",
+        "reasons": [
+          "첫째 근거 도메인 noaa.gov(public_agency: 미 해양대기청(공식 관측))",
+          "출처 도메인 1곳"
+        ],
+        "release_wording_in_source_name": false
+      },
+      "published": true,
+      "sources": {
+        "body_links": 1,
+        "body_links_unique": 1,
+        "categories": [
+          "public_agency"
+        ],
+        "citation_line": false,
+        "distinct_domains": 1,
+        "distinct_hosts": 1,
+        "domains": [
+          "noaa.gov"
+        ],
+        "front_matter_source_url": true,
+        "image_credit_links_excluded": 0,
+        "license_links_excluded": 0,
+        "null_reasons": {},
+        "official_domains": [
+          "noaa.gov"
+        ],
+        "own_site_links_excluded": 0,
+        "source_url_domain": "noaa.gov",
+        "source_url_in_text": true,
+        "sources_list_items": 2,
+        "sources_section_present": true
+      },
+      "title": "NOAA 추정 Kp 일별 최대값, 2026년 11월 5일부터 2026년 11월 11일까지 — 숫자로 읽기",
+      "topic_fit": {
+        "fit": "core",
+        "null_reasons": {},
+        "primary_source_category": "public_agency",
+        "primary_source_domain": "noaa.gov",
+        "reasons": [
+          "첫째 근거가 공식 출처(noaa.gov: 미 해양대기청(공식 관측))"
+        ]
+      }
+    },
+    {
+      "added_value": {
+        "comparison_markers": 0,
+        "distinct_domains": 1,
+        "distinct_official_domains": 1,
+        "null_reasons": {
+          "unsupported_addition_ratio": "원문 텍스트가 없어 원문에 없는 주장 비율을 낼 수 없다"
+        },
+        "own_calculation_markers": 3,
+        "own_work_signals_present": true,
+        "table_data_rows": 7,
+        "unsupported_addition_ratio": null
+      },
+      "body": {
+        "bullets": 11,
+        "headings": 4,
+        "long_lines_truncated": 0,
+        "main_chars_nospace": 1169,
+        "paragraphs": 7,
+        "table_data_rows": 7
+      },
+      "claims": {
+        "by_anchor": {
+          "date": 6,
+          "entity": 6,
+          "money": 0,
+          "number": 8,
+          "percent": 0
+        },
+        "claim_ratio": 0.3,
+        "entity_only": 2,
+        "null_reasons": {},
+        "numeric": 10,
+        "sentences_considered": 40,
+        "total": 12
+      },
+      "date": "2026-11-13",
+      "event_focus": {
+        "as_of": "2026-11-13",
+        "date_status": "no_event_dates",
+        "dates_after_as_of": [],
+        "dates_after_post_date": [],
+        "distinct_event_terms": 0,
+        "event_sentence_ratio": 0.0,
+        "event_sentences": 0,
+        "event_term_hits": 0,
+        "flag": false,
+        "null_reasons": {},
+        "reasons": [],
+        "sentences_considered": 34,
+        "title_event_terms": [],
+        "top_terms": []
+      },
+      "grounding": {
+        "approximate": true,
+        "basis": "근사치: 같은 문단에 공식 기관·연구기관 본문 링크가 붙은 주장 수(링크가 있다고 그 주장을 뒷받침하는 것은 아니다)",
+        "claims_checked": 12,
+        "linked_in_paragraph": 1,
+        "linked_in_sentence": 1,
+        "linked_official_in_paragraph": 1,
+        "mode": "inline_link_approx",
+        "null_reasons": {
+          "unsupported": "원문 텍스트가 없어 어긋남을 판정할 수 없다(근사 모드)",
+          "unverifiable": "원문 텍스트가 없어 어긋남을 판정할 수 없다(근사 모드)"
+        },
+        "supported": 1,
+        "supported_ratio": 0.083,
+        "unsupported": null,
+        "unsupported_examples": [],
+        "unverifiable": null
+      },
+      "health_risk": {
+        "advice_with_medical": [],
+        "assertive_with_medical": [],
+        "level": "none",
+        "medical_strong_terms": {},
+        "medical_weak_terms": {},
+        "null_reasons": {},
+        "profile": "blogger_practical_ko.json",
+        "profile_adds_signal": false,
+        "profile_banned_hits": [],
+        "profile_body_rule_hits": [],
+        "reasons": [],
+        "safety_adjacent_terms": {}
+      },
+      "kind": "KR",
+      "lang": "ko",
+      "null_reasons": {
+        "pair": "같은 날짜·같은 6자리 키의 국문·영문 짝이 없다"
+      },
+      "pair": null,
+      "pair_key": "083923",
+      "path": "02/2026-11-13-KR-083923.md",
+      "press_release_summary": {
+        "flag": false,
+        "kind": "none",
+        "null_reasons": {},
+        "press_format_tokens": [],
+        "primary_source_category": "public_agency",
+        "primary_source_domain": "noaa.gov",
+        "reasons": [
+          "첫째 근거 도메인 noaa.gov(public_agency: 미 해양대기청(공식 관측))",
+          "출처 도메인 1곳"
+        ],
+        "release_wording_in_source_name": false
+      },
+      "published": true,
+      "sources": {
+        "body_links": 1,
+        "body_links_unique": 1,
+        "categories": [
+          "public_agency"
+        ],
+        "citation_line": false,
+        "distinct_domains": 1,
+        "distinct_hosts": 1,
+        "domains": [
+          "noaa.gov"
+        ],
+        "front_matter_source_url": true,
+        "image_credit_links_excluded": 0,
+        "license_links_excluded": 0,
+        "null_reasons": {},
+        "official_domains": [
+          "noaa.gov"
+        ],
+        "own_site_links_excluded": 0,
+        "source_url_domain": "noaa.gov",
+        "source_url_in_text": true,
+        "sources_list_items": 2,
+        "sources_section_present": true
+      },
+      "title": "GOES X선 플레어 등급별 건수, 2026년 11월 12일 기준 — 숫자로 읽기",
+      "topic_fit": {
+        "fit": "core",
+        "null_reasons": {},
+        "primary_source_category": "public_agency",
+        "primary_source_domain": "noaa.gov",
+        "reasons": [
+          "첫째 근거가 공식 출처(noaa.gov: 미 해양대기청(공식 관측))"
+        ]
+      }
+    },
+    {
+      "added_value": {
+        "comparison_markers": 3,
+        "distinct_domains": 1,
+        "distinct_official_domains": 1,
+        "null_reasons": {
+          "unsupported_addition_ratio": "원문 텍스트가 없어 원문에 없는 주장 비율을 낼 수 없다"
+        },
+        "own_calculation_markers": 4,
+        "own_work_signals_present": true,
+        "table_data_rows": 5,
+        "unsupported_addition_ratio": null
+      },
+      "body": {
+        "bullets": 13,
+        "headings": 4,
+        "long_lines_truncated": 0,
+        "main_chars_nospace": 1396,
+        "paragraphs": 7,
+        "table_data_rows": 5
+      },
+      "claims": {
+        "by_anchor": {
+          "date": 9,
+          "entity": 9,
+          "money": 0,
+          "number": 10,
+          "percent": 10
+        },
+        "claim_ratio": 0.595,
+        "entity_only": 7,
+        "null_reasons": {},
+        "numeric": 18,
+        "sentences_considered": 42,
+        "total": 25
+      },
+      "date": "2026-11-13",
+      "event_focus": {
+        "as_of": "2026-11-13",
+        "date_status": "upcoming",
+        "dates_after_as_of": [
+          "2026-11-14"
+        ],
+        "dates_after_post_date": [
+          "2026-11-14"
+        ],
+        "distinct_event_terms": 0,
+        "event_sentence_ratio": 0.0,
+        "event_sentences": 0,
+        "event_term_hits": 0,
+        "flag": false,
+        "null_reasons": {},
+        "reasons": [],
+        "sentences_considered": 42,
+        "title_event_terms": [],
+        "top_terms": []
+      },
+      "grounding": {
+        "approximate": true,
+        "basis": "근사치: 같은 문단에 공식 기관·연구기관 본문 링크가 붙은 주장 수(링크가 있다고 그 주장을 뒷받침하는 것은 아니다)",
+        "claims_checked": 25,
+        "linked_in_paragraph": 1,
+        "linked_in_sentence": 1,
+        "linked_official_in_paragraph": 1,
+        "mode": "inline_link_approx",
+        "null_reasons": {
+          "unsupported": "원문 텍스트가 없어 어긋남을 판정할 수 없다(근사 모드)",
+          "unverifiable": "원문 텍스트가 없어 어긋남을 판정할 수 없다(근사 모드)"
+        },
+        "supported": 1,
+        "supported_ratio": 0.04,
+        "unsupported": null,
+        "unsupported_examples": [],
+        "unverifiable": null
+      },
+      "health_risk": {
+        "advice_with_medical": [],
+        "assertive_with_medical": [],
+        "level": "none",
+        "medical_strong_terms": {},
+        "medical_weak_terms": {},
+        "null_reasons": {},
+        "profile": "blogger_practical_ko.json",
+        "profile_adds_signal": false,
+        "profile_banned_hits": [],
+        "profile_body_rule_hits": [],
+        "reasons": [],
+        "safety_adjacent_terms": {}
+      },
+      "kind": "KR",
+      "lang": "ko",
+      "null_reasons": {
+        "pair": "같은 날짜·같은 6자리 키의 국문·영문 짝이 없다"
+      },
+      "pair": null,
+      "pair_key": "083924",
+      "path": "03/2026-11-13-KR-083924.md",
+      "press_release_summary": {
+        "flag": false,
+        "kind": "none",
+        "null_reasons": {},
+        "press_format_tokens": [],
+        "primary_source_category": "public_agency",
+        "primary_source_domain": "noaa.gov",
+        "reasons": [
+          "첫째 근거 도메인 noaa.gov(public_agency: 미 해양대기청(공식 관측))",
+          "출처 도메인 1곳"
+        ],
+        "release_wording_in_source_name": false
+      },
+      "published": true,
+      "sources": {
+        "body_links": 1,
+        "body_links_unique": 1,
+        "categories": [
+          "public_agency"
+        ],
+        "citation_line": false,
+        "distinct_domains": 1,
+        "distinct_hosts": 1,
+        "domains": [
+          "noaa.gov"
+        ],
+        "front_matter_source_url": true,
+        "image_credit_links_excluded": 0,
+        "license_links_excluded": 0,
+        "null_reasons": {},
+        "official_domains": [
+          "noaa.gov"
+        ],
+        "own_site_links_excluded": 0,
+        "source_url_domain": "noaa.gov",
+        "source_url_in_text": true,
+        "sources_list_items": 2,
+        "sources_section_present": true
+      },
+      "title": "NOAA 우주기상 등급 현황과 예보, 2026년 11월 12일 기준 — 숫자로 읽기",
+      "topic_fit": {
+        "fit": "core",
+        "null_reasons": {},
+        "primary_source_category": "public_agency",
+        "primary_source_domain": "noaa.gov",
+        "reasons": [
+          "첫째 근거가 공식 출처(noaa.gov: 미 해양대기청(공식 관측))"
+        ]
+      }
+    },
+    {
+      "added_value": {
+        "comparison_markers": 7,
+        "distinct_domains": 1,
+        "distinct_official_domains": 1,
+        "null_reasons": {
+          "unsupported_addition_ratio": "원문 텍스트가 없어 원문에 없는 주장 비율을 낼 수 없다"
+        },
+        "own_calculation_markers": 4,
+        "own_work_signals_present": true,
+        "table_data_rows": 12,
+        "unsupported_addition_ratio": null
+      },
+      "body": {
+        "bullets": 11,
+        "headings": 4,
+        "long_lines_truncated": 0,
+        "main_chars_nospace": 1677,
+        "paragraphs": 7,
+        "table_data_rows": 12
+      },
+      "claims": {
+        "by_anchor": {
+          "date": 21,
+          "entity": 4,
+          "money": 0,
+          "number": 20,
+          "percent": 14
+        },
+        "claim_ratio": 0.556,
+        "entity_only": 2,
+        "null_reasons": {},
+        "numeric": 23,
+        "sentences_considered": 45,
+        "total": 25
+      },
+      "date": "2026-11-13",
+      "event_focus": {
+        "as_of": "2026-11-13",
+        "date_status": "no_event_dates",
+        "dates_after_as_of": [],
+        "dates_after_post_date": [],
+        "distinct_event_terms": 0,
+        "event_sentence_ratio": 0.0,
+        "event_sentences": 0,
+        "event_term_hits": 0,
+        "flag": false,
+        "null_reasons": {},
+        "reasons": [],
+        "sentences_considered": 45,
+        "title_event_terms": [],
+        "top_terms": []
+      },
+      "grounding": {
+        "approximate": true,
+        "basis": "근사치: 같은 문단에 공식 기관·연구기관 본문 링크가 붙은 주장 수(링크가 있다고 그 주장을 뒷받침하는 것은 아니다)",
+        "claims_checked": 25,
+        "linked_in_paragraph": 1,
+        "linked_in_sentence": 1,
+        "linked_official_in_paragraph": 1,
+        "mode": "inline_link_approx",
+        "null_reasons": {
+          "unsupported": "원문 텍스트가 없어 어긋남을 판정할 수 없다(근사 모드)",
+          "unverifiable": "원문 텍스트가 없어 어긋남을 판정할 수 없다(근사 모드)"
+        },
+        "supported": 1,
+        "supported_ratio": 0.04,
+        "unsupported": null,
+        "unsupported_examples": [],
+        "unverifiable": null
+      },
+      "health_risk": {
+        "advice_with_medical": [],
+        "assertive_with_medical": [],
+        "level": "none",
+        "medical_strong_terms": {},
+        "medical_weak_terms": {},
+        "null_reasons": {},
+        "profile": "blogger_practical_ko.json",
+        "profile_adds_signal": false,
+        "profile_banned_hits": [],
+        "profile_body_rule_hits": [],
+        "reasons": [],
+        "safety_adjacent_terms": {}
+      },
+      "kind": "KR",
+      "lang": "ko",
+      "null_reasons": {
+        "pair": "같은 날짜·같은 6자리 키의 국문·영문 짝이 없다"
+      },
+      "pair": null,
+      "pair_key": "083925",
+      "path": "04/2026-11-13-KR-083925.md",
+      "press_release_summary": {
+        "flag": false,
+        "kind": "none",
+        "null_reasons": {},
+        "press_format_tokens": [],
+        "primary_source_category": "public_agency",
+        "primary_source_domain": "noaa.gov",
+        "reasons": [
+          "첫째 근거 도메인 noaa.gov(public_agency: 미 해양대기청(공식 관측))",
+          "출처 도메인 1곳"
+        ],
+        "release_wording_in_source_name": false
+      },
+      "published": true,
+      "sources": {
+        "body_links": 1,
+        "body_links_unique": 1,
+        "categories": [
+          "public_agency"
+        ],
+        "citation_line": false,
+        "distinct_domains": 1,
+        "distinct_hosts": 1,
+        "domains": [
+          "noaa.gov"
+        ],
+        "front_matter_source_url": true,
+        "image_credit_links_excluded": 0,
+        "license_links_excluded": 0,
+        "null_reasons": {},
+        "official_domains": [
+          "noaa.gov"
+        ],
+        "own_site_links_excluded": 0,
+        "source_url_domain": "noaa.gov",
+        "source_url_in_text": true,
+        "sources_list_items": 2,
+        "sources_section_present": true
+      },
+      "title": "SWPC 월평균 흑점수 추이, 2025년 11월부터 2026년 10월까지 — 숫자로 읽기",
+      "topic_fit": {
+        "fit": "core",
+        "null_reasons": {},
+        "primary_source_category": "public_agency",
+        "primary_source_domain": "noaa.gov",
+        "reasons": [
+          "첫째 근거가 공식 출처(noaa.gov: 미 해양대기청(공식 관측))"
+        ]
+      }
+    }
+  ],
+  "read_problems": [],
+  "schema_version": 1,
+  "summary": {
+    "all": {
+      "claims_numeric": 70,
+      "claims_total": 86,
+      "event_focus_flag": {
+        "False": 4
+      },
+      "health_level": {
+        "none": 4
+      },
+      "posts": 4,
+      "press_release_summary": {
+        "none": 4
+      },
+      "topic_fit": {
+        "core": 4
+      }
+    },
+    "null_counts": {
+      "added_value.unsupported_addition_ratio": 4,
+      "grounding.unsupported": 4,
+      "grounding.unverifiable": 4
+    },
+    "pairs": 0,
+    "pairs_both_published": 0,
+    "private": {
+      "claims_numeric": 0,
+      "claims_total": 0,
+      "event_focus_flag": {},
+      "health_level": {},
+      "posts": 0,
+      "press_release_summary": {},
+      "topic_fit": {}
+    },
+    "published": {
+      "claims_numeric": 70,
+      "claims_total": 86,
+      "event_focus_flag": {
+        "False": 4
+      },
+      "health_level": {
+        "none": 4
+      },
+      "posts": 4,
+      "press_release_summary": {
+        "none": 4
+      },
+      "topic_fit": {
+        "core": 4
+      }
+    },
+    "read_problems": 0,
+    "translation_clone_suspected": 0,
+    "translation_clone_suspected_both_published": 0,
+    "translation_clone_undetermined": 0,
+    "unpaired_posts": 4
+  },
+  "thresholds": {
+    "clone_length_ratio_band": [
+      1.2,
+      3.0
+    ],
+    "clone_number_jaccard_min": 0.5,
+    "clone_structure_tolerance": 1,
+    "event_distinct_terms_min": 3,
+    "event_sentence_ratio_min": 0.2,
+    "event_title_ratio_min": 0.15,
+    "health_caution_distinct_min": 2,
+    "small_integer_max": 31
+  },
+  "tool": "quality_shadow"
+}

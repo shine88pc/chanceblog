@@ -1,0 +1,6 @@
+[WIP][app15-AP14 3] 작은 로그 파일 — 스레드 동시 쓰기 시험이 느린 PC 에서 흔들리지 않게 잠금 기다림만 늘림 [대상: 데스크톱]
+
+tests/test_security_errorlog.py 의 test_two_threads_writing_at_once_never_mix_a_line 한 곳 — 잠금을 기다리다 줄을 버리는 규칙(LOCK_WAIT 1초)이 아주 느린 PC 에서 이 시험의 '여든 줄 모두' 단언을 흔들 수 있어 그 시험 안에서만 대기 시간을 60초로 늘렸다(버리는 규칙 자체는 다른 시험이 본다).
+소스·단언 개수는 그대로다.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>

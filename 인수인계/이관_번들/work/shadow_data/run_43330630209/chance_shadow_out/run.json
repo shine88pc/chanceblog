@@ -1,0 +1,48 @@
+{
+  "attempts": 4,
+  "attempts_summary": [
+    {
+      "attempt": 1,
+      "hold_codes": [],
+      "lane": "facts",
+      "outcome": "PASSED",
+      "passed": true
+    },
+    {
+      "attempt": 2,
+      "hold_codes": [],
+      "lane": "facts",
+      "outcome": "PASSED",
+      "passed": true
+    },
+    {
+      "attempt": 3,
+      "hold_codes": [],
+      "lane": "facts",
+      "outcome": "PASSED",
+      "passed": true
+    },
+    {
+      "attempt": 4,
+      "hold_codes": [],
+      "lane": "facts",
+      "outcome": "PASSED",
+      "passed": true
+    }
+  ],
+  "generated_at": "2026-11-13T08:39:22.394508+09:00",
+  "held_or_rejected": 0,
+  "lanes_tried": [
+    "구조화 공개 자료"
+  ],
+  "languages": [
+    "ko"
+  ],
+  "notes": [
+    "Fact 글감 sunspot_daily_monthly 건너뜀: ADAPTER:BAD_SHAPE"
+  ],
+  "outcome": "COMPLETED",
+  "passed": 4,
+  "requested": 5,
+  "schema": 1
+}

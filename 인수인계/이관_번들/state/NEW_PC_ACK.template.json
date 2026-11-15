@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "writer": "NEW_PC",
+  "state": "STARTED",
+  "state_choices": ["STARTED", "TOOK_OVER"],
+  "updated_at": "새 PC 의 AI 가 시각(한국 시간)을 적는다",
+  "read_old_status_sequence": 0,
+  "push_permission": "ok | none",
+  "first_report": "첫 보고(텔레그램 info)의 요청 번호 — TOOK_OVER 일 때 적는다, 예: R-345",
+  "note": "한 줄 메모(비밀·키·개인 정보 금지)"
+}

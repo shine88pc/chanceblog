@@ -1,0 +1,15 @@
+[WIP][mergepol1 6] 독립 검증 P·T 지적 반영 — 블로그 기본 거부·이름 안전 목록·재계산·문서 낱말 면제 (꺼진 채, 연결 0)
+
+검증자 P(필수 1·권고 8·정보 11)와 T(권고 6·정보 8)의 지적을 한 묶음으로 고쳤다. 고치는 방향은 모두 운영자 전용 쪽을 넓히는 것이고 풀리는 방향은 만들지 않았다.
+운영자 원문의 목록 크기(5·8·7·12·7·6)와 승인 형식은 그대로다. 순수 함수·꺼짐·연결 0·쓰기 0·네트워크 0.
+
+- M1 공개 사이트 파일이 ai_ok 로 새던 것: 블로그 저장소는 사이트로 내보내지 않는 맨 위 항목 21개(SITE_INTERNAL_ENTRIES — 실제 _config.yml exclude 와 같음) 밖의 모든 파일·폴더를 공개 파일로 본다(기본 거부, 이름은 대소문자까지 같아야 내부). README.md·CNAME·.nojekyll 등 명시 이름 추가. 시험이 실제 _config.yml·test_site_cleanup 상수와 대조하고 실제로 내보내지는 파일이 모두 operator_only 인지 본다.
+- S1 바뀐 줄은 추가+지운 줄(changed_text, 예전 이름 added_text 도 받음). 이름으로 적은 안전 장치 목록(발행 잠금·품질 Gate·인증 확인·발행기·생성기·토큰 발급·감시·사이트 정리 시험)과 존재 시험. 실제 없는 pipeline/generator.py·blogger_generator.py 는 뺐고 실제 생성기(generator.py·blogger_generator.py)로 적었다.
+- S2 병합 직전 재확인이 분류를 repo_kind·changed_text 로 다시 계산해 위조·낡은 분류를 막는다. 사전 키가 변경 파일에 없으면 입력 오류. 필수 검사 이름 집합(required_checks).
+- S3 의존성 이름(requirements/·requirements*.in·constraints*·.gitmodules·environment*.yml·conda). S4 점검표는 분류 결과에서 채우고 중복·알 수 없는 줄·빈 줄 뒤 줄을 문제로 알리며 병합 방식 줄은 정확한 문장만. S5 승인 기록 ApprovalRecord(설명 때·승인 때 머리 커밋이 다르면 무효)와 조건 2 확대. S6 셸 스크립트의 따옴표 없는 네트워크 명령·gopher·따옴표 안의 //호스트·국가 도메인 전체(파일 이름과 겹치는 10개 제외). S7 D-347 귀속을 총괄(AI)의 판단·운영자 확인 대기로. S8 evaluate_post_merge 와 previous_merge_main_check. 정보: 글자 하위 형식 거절·삭제 낱말·비밀 모양(Authorization Bearer·Stripe)·PR 열림/초안 확인·문서 머리말.
+- T R1 표 원소 시험(경로 이름·접미사·폴더·낱말·정규식 대안을 하나씩 단독으로), R2 입력 3개, R3 문서 문장 못박기 확대, R6 대장 행을 제목 글로 찾기, I2 이름 스캔을 import 줄로 좁힘, I3 시간 시험을 입력 8배 비율로, K25 모름 문구를 길이 규칙에 가려지지 않게.
+- R5(총괄의 판단·운영자 확인 대기) 문서 파일(.md .rst .txt .adoc)의 바뀐 줄에는 낱말 규칙을 적용하지 않는다(강한 비밀 모양·광고 낱말·경로 규칙·선언은 그대로). 대신 AI 가 읽는 규칙 문서 10개를 safety_guard 에 더했다.
+
+바꾼 파일은 pipeline/merge_policy.py, tests/test_merge_policy.py, tests/test_merge_policy_docs.py, docs/AI_MERGE_POLICY.md, docs/DEFECT_REGISTER.md 다섯 개뿐이다.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>

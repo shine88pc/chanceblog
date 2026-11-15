@@ -1,0 +1,241 @@
+"""3차(WIP 6) 변이 보강 — mutate.py 가 불러 쓴다. FIXED_SPECS: 코드가 바뀌어 옛 글이 안 맞는 기존 변이의 새 (옛 글, 새 글). NEW: 새 규칙마다 둘 이상의 변이와 표 원소 지우기(T 의 생존 유형) 변이."""
+MOD = "pipeline/merge_policy.py"
+DOC = "docs/AI_MERGE_POLICY.md"
+REG = "docs/DEFECT_REGISTER.md"
+
+
+def M(mid, area, what, old, new, path=MOD):
+    return {"id": mid, "area": area, "what": what, "path": path, "old": old, "new": new}
+
+
+def A(mid, area, what, path, text):
+    return {"id": mid, "area": area, "what": what, "path": path, "append": text}
+
+
+SAFE_LINE = "    if folded in _SAFETY_DOC_FILES or folded in _SAFETY_FILES or folded.startswith(_SAFETY_DIR_PREFIXES):"
+
+FIXED_SPECS = {
+    "C04": ("    if not doc_only and _CRED_WORD_RE.search(text):", "    if False:"),
+    "C06": ("    if any(part in _DEPENDENCY_DIRS for part in segments) or _DEPENDENCY_BASE_RE.fullmatch(base) is not None:", "    if False:"),
+    "C10": ('    segments = [part.casefold() for part in parts]', '    segments = [part for part in parts]'),
+    "C14": ("    if not doc_only and _PAUSE_TEXT_RE.search(text):", "    if False:"),
+    "C16": ("    if not doc_only and _DESTRUCTIVE_TEXT_RE.search(text):", "    if False:"),
+    "D10": ("    if len(body) < ROLLBACK_MIN_CHARS or body.casefold() in _ROLLBACK_PLACEHOLDER_SET:", "    if False:"),
+    "D20": ('    problem = _need(facts, "approved_paths", "current_paths", "classification", "repo_kind", "changed_text")\n    if problem:\n        return problem',
+            '    problem = _need(facts, "approved_paths", "current_paths", "classification", "repo_kind", "changed_text")\n    if problem:\n        return None'),
+    "D21": ('    problem = _need(facts, "checks", "required_checks", "previous_merge_main_check")\n    if problem:\n        return problem',
+            '    problem = _need(facts, "checks", "required_checks", "previous_merge_main_check")\n    if problem:\n        return None'),
+    "E01": ("    return type(method) is str and method == ALLOWED_MERGE_METHOD", '    return type(method) is str and method in (ALLOWED_MERGE_METHOD, "push_main")'),
+    "E02": ("    return type(method) is str and method == ALLOWED_MERGE_METHOD", "    return type(method) is str"),
+    "E03": ("    return type(method) is str and method == ALLOWED_MERGE_METHOD", "    return type(method) is str and method.strip().lower() == ALLOWED_MERGE_METHOD"),
+    "F10": ("    elif way_body not in (AI_MERGE_OFF_NOTICE, AI_MERGE_ON_NOTICE):", "    elif False:"),
+    "F12": ('            if name not in names:\n                problems.append("점검표에 빠진 항목: " + name)', '            if False:\n                problems.append("점검표에 빠진 항목: " + name)'),
+    "I06": ('"secret_findings", "rollback_method",\n    "repo_kind"', '"secret_findings",\n    "repo_kind"'),
+    "J05": ("승인 예: M075 승인\n지금은 꺼져", "승인 예: M076 승인\n지금은 꺼져"),
+    "J17": ("| `external_connection` | 새 외부 접속 코드(§7-6) | 총괄(AI)의 보수적 판단 D-347 — 운영자 확인 대기. ", "| `external_connection` | 새 외부 접속 코드(§7-6) | "),
+    "J19": ("**해결**(총괄(AI)의 보수적 판단 2026-11-15 — 운영자 확인 대기", "**열림**(총괄(AI)의 보수적 판단 2026-11-15 — 운영자 확인 대기"),
+    "S04": (SAFE_LINE, "    if folded in _SAFETY_FILES or folded.startswith(_SAFETY_DIR_PREFIXES):"),
+    "S08": (SAFE_LINE, "    if path in SAFETY_GUARD_DOCS or folded in _SAFETY_FILES or folded.startswith(_SAFETY_DIR_PREFIXES):"),
+    "S10": ('SAFETY_GUARD_DOCS = ("docs/SECURITY_GUARDRAILS.md", "AGENTS.md", "CLAUDE.md", "GEMINI.md", "AI_COLLAB.md", "HANDLER.md", "docs/CHARTER.md", "docs/ACTIONS_GUIDE.md", "docs/AGENT_RUNBOOK.md",\n                     "docs/SESSION_START.md")',
+            "SAFETY_GUARD_DOCS = ()"),
+    "X01": ('        for why in _external_findings(items, paths):', '        for why in ():'),
+    "X11": ("    for rx in (_QUOTED_HOST_RE, _QUOTED_RELATIVE_RE):", "    for rx in (_QUOTED_RELATIVE_RE,):"),
+    "X13": ('"biz", "gov", "edu"', '"biz", "edu"'),
+}
+
+NEW = [
+    # ---- M1 기본 거부(블로그 저장소의 새 맨 위 파일·폴더는 공개 파일)
+    M("N01", "기본거부", "기본 거부 규칙 제거(내부 목록 밖도 통과)", "        if not found and parts[0] not in SITE_INTERNAL_ENTRIES:", "        if False:"),
+    M("N02", "기본거부", "내부 항목 이름을 대소문자 무시로 비교(Docs/ 가 내부로 샘)", "        if not found and parts[0] not in SITE_INTERNAL_ENTRIES:",
+      "        if not found and parts[0].casefold() not in tuple(name.casefold() for name in SITE_INTERNAL_ENTRIES):"),
+    M("N03", "기본거부", "기본 거부를 맨 위 파일(한 구간)에만 적용(폴더 아래 새 파일이 샘)", "        if not found and parts[0] not in SITE_INTERNAL_ENTRIES:",
+      "        if not found and len(parts) == 1 and parts[0] not in SITE_INTERNAL_ENTRIES:"),
+    M("N04", "기본거부", "내부 목록에서 WORKLOG.md 삭제", '"HANDLER.md", "WORKLOG.md", "docs",', '"HANDLER.md", "docs",'),
+    M("N05", "기본거부", "내부 목록에 README.md 를 잘못 더함(공개 파일을 내부로)", '    "AGENTS.md", "AI_COLLAB.md", "CLAUDE.md", "GEMINI.md", "HANDLER.md", "WORKLOG.md", "docs",',
+      '    "AGENTS.md", "AI_COLLAB.md", "CLAUDE.md", "GEMINI.md", "HANDLER.md", "WORKLOG.md", "README.md", "docs",'),
+    M("N06", "기본거부", "기본 거부가 다른 항목 위에 공개 파일 표시를 또 얹음", "        if not found and parts[0] not in SITE_INTERNAL_ENTRIES:", "        if parts[0] not in SITE_INTERNAL_ENTRIES:"),
+    M("N07", "기본거부", "내부 목록에서 docs 삭제", '"WORKLOG.md", "docs", "인수인계"', '"WORKLOG.md", "인수인계"'),
+    M("N08", "기본거부", "내부 목록에서 pipeline 삭제", '"blogger_generator.py", "pipeline", "scripts", "tests",', '"blogger_generator.py", "scripts", "tests",'),
+    # ---- S1 명시 안전 목록
+    M("N10", "안전목록", "이름 목록에서 pipeline/gates.py 삭제", '"pipeline/quality_gate.py", "pipeline/gates.py", "pipeline/auth_check.py"', '"pipeline/quality_gate.py", "pipeline/auth_check.py"'),
+    M("N11", "안전목록", "폴더 목록을 비움(pipeline/publishers)", 'SAFETY_GUARD_DIRS = ("pipeline/publishers",)', "SAFETY_GUARD_DIRS = ()"),
+    M("N12", "안전목록", "폴더 규칙을 슬래시 없이 접두 일치로(publishers_x 도 걸림)", '_SAFETY_DIR_PREFIXES = tuple(name.casefold() + "/" for name in SAFETY_GUARD_DIRS)',
+      '_SAFETY_DIR_PREFIXES = tuple(name.casefold() for name in SAFETY_GUARD_DIRS)'),
+    M("N13", "안전목록", "이름 목록을 접두 일치로(gates2.py 도 걸림)", SAFE_LINE, "    if folded in _SAFETY_DOC_FILES or folded.startswith(tuple(_SAFETY_FILES)) or folded.startswith(_SAFETY_DIR_PREFIXES):"),
+    M("N14", "안전목록", "이름 목록을 대소문자 구분으로", SAFE_LINE, "    if folded in _SAFETY_DOC_FILES or path in SAFETY_GUARD_FILES or folded.startswith(_SAFETY_DIR_PREFIXES):"),
+    M("N15", "안전목록", "규칙 문서 목록에서 docs/ACTIONS_GUIDE.md 삭제", '"docs/CHARTER.md", "docs/ACTIONS_GUIDE.md", "docs/AGENT_RUNBOOK.md"', '"docs/CHARTER.md", "docs/AGENT_RUNBOOK.md"'),
+    M("N16", "안전목록", "규칙 문서 목록에서 AGENTS.md 삭제", 'SAFETY_GUARD_DOCS = ("docs/SECURITY_GUARDRAILS.md", "AGENTS.md", "CLAUDE.md",', 'SAFETY_GUARD_DOCS = ("docs/SECURITY_GUARDRAILS.md", "CLAUDE.md",'),
+    M("N17", "안전목록", "이름 목록에서 generator.py 삭제", '"pipeline/edits/runner.py", "generator.py", "blogger_generator.py",', '"pipeline/edits/runner.py", "blogger_generator.py",'),
+    M("N18", "안전목록", "이름 목록에서 tests/test_site_cleanup.py 삭제", ', "scripts/watchdog.py", "tests/test_site_cleanup.py",', ', "scripts/watchdog.py",'),
+    # ---- S1 바뀐 줄 계약
+    M("N20", "계약", "예전 이름 added_text 를 무시", "            changed_text = added_text", "            pass"),
+    M("N21", "계약", "두 이름을 함께 써도 입력 오류로 보지 않음", "        if changed_text is not None:", "        if False:"),
+    # ---- S2 다시 계산·사전 키·필수 검사
+    M("N30", "재계산", "다시 계산한 분류를 보지 않음", "    if again.tier != TIER_AI_OK:", "    if False:"),
+    M("N31", "재계산", "다시 계산에 선언을 넘기지 않음(미응답으로 늘 운영자 전용)", "sorted(current), facts[\"changed_text\"], dict.fromkeys(DECLARED_REQUIRED, False))", "sorted(current), facts[\"changed_text\"])"),
+    M("N32", "사전키", "사전의 키가 변경 파일 목록에 없어도 통과", "        if isinstance(changed_text, dict) and any(not _listed_key(key, paths) for key, _text in items):", "        if False:"),
+    M("N33", "사전키", "사전의 키를 정규화하지 않고 비교", '(정규화한 뒤 비교)."""\n    normal = normalize_repo_path(key) if isinstance(key, str) else None', '(정규화한 뒤 비교)."""\n    normal = key if isinstance(key, str) else None'),
+    M("N34", "필수검사", "필수 검사가 결과에 없어도 통과", "        missing = sorted(name for name in required if name not in passed)", "        missing = []"),
+    M("N35", "필수검사", "필수 검사 목록이 비어 있어도 통과", "(list, tuple, set, frozenset)) or not required or any(", "(list, tuple, set, frozenset)) or any("),
+    M("N36", "직전main", "직전 병합의 main 검사를 보지 않음", "    if not after.may_merge_next:", "    if False:"),
+    M("N37", "필수검사", "필수 검사 이름의 공백 이름을 허용", "or any(not isinstance(name, str) or not name.strip() for name in required):", "or any(not isinstance(name, str) for name in required):"),
+    # ---- S3 의존성 이름
+    M("N40", "의존성", ".gitmodules 규칙 삭제", r"|\.gitmodules|environment[^/]*\.ya?ml|conda[^/]*", r"|environment[^/]*\.ya?ml|conda[^/]*"),
+    M("N41", "의존성", "environment*.yml 규칙 삭제", r"|\.gitmodules|environment[^/]*\.ya?ml|conda[^/]*", r"|\.gitmodules|conda[^/]*"),
+    M("N42", "의존성", "requirements 폴더 규칙 삭제", '_DEPENDENCY_DIRS = frozenset({"vendor", "node_modules", "requirements", "conda"})', '_DEPENDENCY_DIRS = frozenset({"vendor", "node_modules", "conda"})'),
+    M("N43", "의존성", "constraints* 를 .txt 로만 좁힘", r"|constraints[^/]*|package[^/]*\.json", r"|constraints[^/]*\.txt|package[^/]*\.json"),
+    M("N44", "의존성", "conda 규칙 삭제", r"|\.gitmodules|environment[^/]*\.ya?ml|conda[^/]*", r"|\.gitmodules|environment[^/]*\.ya?ml"),
+    M("N45", "의존성", "requirements*.in 규칙 삭제", r'r"requirements[^/]*\.(?:txt|in)|constraints', r'r"requirements[^/]*\.txt|constraints'),
+    M("N46", "의존성", "conda 폴더 규칙 삭제", '_DEPENDENCY_DIRS = frozenset({"vendor", "node_modules", "requirements", "conda"})', '_DEPENDENCY_DIRS = frozenset({"vendor", "node_modules", "requirements"})'),
+    # ---- S4 설명 점검표·병합 방식·꺼짐 줄
+    M("N50", "설명", "점검표를 늘 아니오로(분류를 따르지 않음)", '("예" if code in classified.categories else "아니오")', '"아니오"'),
+    M("N51", "설명", "다른 파일 목록의 분류도 받아들임", "    if classified is None or frozenset(classified.paths) != paths:", "    if classified is None:"),
+    M("N52", "설명", "같은 점검표 항목이 두 번 나와도 통과", "            elif names.count(name) > 1:", "            elif False:"),
+    M("N53", "설명", "알 수 없는 점검표 줄을 무시", "            if name not in OPERATOR_ONLY_LABELS:", "            if False:"),
+    M("N54", "설명", "점검표 밖의 항목 줄을 무시", "            elif sum(1 for line in lines if _row_name(line) == name) > 1:", "            elif False:"),
+    M("N55", "설명", "병합 방식 줄을 포함 검사로 약화(덧붙은 말 허용)", "    elif way_body not in (AI_MERGE_OFF_NOTICE, AI_MERGE_ON_NOTICE):",
+      "    elif not (AI_MERGE_OFF_NOTICE in way_body or AI_MERGE_ON_NOTICE in way_body):"),
+    M("N56", "설명", "금지된 방식 낱말을 따로 알리지 않음", "        if any(word in way_body for word in _FORBIDDEN_WAY_WORDS):", "        if False:"),
+    M("N57", "설명", "꺼짐 줄이 승인 예 바로 다음에 없어도 통과", "        if len(off_lines) != 1 or len(beside) != 1 or off_lines[0] != beside[0] + 1:", "        if False:"),
+    M("N58", "설명", "켜짐 문장과 꺼짐 줄이 함께 있어도 통과", "    elif way_body == AI_MERGE_ON_NOTICE and off_lines:", "    elif False:"),
+    M("N59", "설명", "12항목 밖의 표시 줄을 문제로 알리지 않음", "    if flags:\n        problems.append", "    if False:\n        problems.append"),
+    M("N60", "설명", "12항목 밖의 표시를 설명에 적지 않음", "    if classified.extra_flags:\n        lines.append(_EXTRA_FLAGS_PREFIX", "    if False:\n        lines.append(_EXTRA_FLAGS_PREFIX"),
+    M("N61", "설명", "항목 걸림과 ai_ok 표시가 모순돼도 받아들임", "    if flagged != (classified.tier == TIER_OPERATOR_ONLY):", "    if False:"),
+    M("N62", "설명", "꺼져 있을 때 줄을 적지 않음", "    if not ai_merge_enabled:\n        lines.append(APPROVAL_OFF_LINE)", "    if False:\n        lines.append(APPROVAL_OFF_LINE)"),
+    # ---- S5 승인 기록
+    M("N70", "승인기록", "설명 때와 승인 때 머리 커밋이 달라도 기록을 유효로", "        elif explained != arrived:", "        elif False:"),
+    M("N71", "승인기록", "재확인 조건 2 가 승인 글이 도착했을 때의 머리 커밋을 보지 않음", "    if approved != arrived:", "    if False:"),
+    M("N72", "승인기록", "기록의 승인 번호 모양을 보지 않음", "        if _standard_label(self.number) is None:", "        if False:"),
+    # ---- S6 셸·gopher·//host·도메인
+    M("N80", "접속", "셸 스크립트의 따옴표 없는 명령 검사 삭제", " and _SHELL_NET_RE.search(text):", " and False:"),
+    M("N81", "접속", "셸 확장자에서 .ps1 삭제", 'SHELL_SUFFIXES = (".sh", ".bash", ".ps1", ".bat", ".cmd")', 'SHELL_SUFFIXES = (".sh", ".bash", ".bat", ".cmd")'),
+    M("N82", "접속", "gopher 스킴 삭제", '"amqps", "gopher")', '"amqps")'),
+    M("N83", "접속", "따옴표 안의 스킴 없는 주소 검사 삭제", "    for rx in (_QUOTED_HOST_RE, _QUOTED_RELATIVE_RE):", "    for rx in (_QUOTED_HOST_RE,):"),
+    M("N84", "접속", "최상위 도메인 확인을 건너뜀(파일 이름 run.py 도 호스트로)", "            if match.group(2).lower() in HOST_TLDS and not _is_example_host(host):", "            if not _is_example_host(host):"),
+    M("N85", "접속", "파일 이름과 겹치는 국가 도메인 제외 목록을 비움", 'FILE_NAME_TLDS = ("py", "sh", "md", "rs", "pl", "so", "cc", "ps", "pm", "ml")', "FILE_NAME_TLDS = ()"),
+    M("N86", "접속", "국가 도메인 ru 삭제", " pk pl pm pn pr ps pt pw py qa re ro rs ru rw sa ", " pk pl pm pn pr ps pt pw py qa re ro rs rw sa "),
+    M("N87", "접속", "셸 명령의 앞 글자 확인 삭제(pycurl 도 걸림)", "(?<![A-Za-z0-9_.-])(?:curl|wget|ssh|scp|sftp|rsync", "(?:curl|wget|ssh|scp|sftp|rsync"),
+    M("N88", "접속", "일반 도메인에서 tech 삭제", '"online", "tech", "store"', '"online", "store"'),
+    M("N89", "접속", "셸 명령 이름에서 nc 삭제", "|ssh|scp|sftp|rsync|nc|ncat|netcat|", "|ssh|scp|sftp|rsync|ncat|netcat|"),
+    # ---- S8 병합 뒤 main 검사
+    M("N90", "사후검사", "실패(failure)에도 다음 병합 허용", '    if state in ("success", "none"):', '    if state in ("success", "none", "failure"):'),
+    M("N91", "사후검사", "끝나지 않은 검사(pending)에도 다음 병합 허용", '    if state in ("success", "none"):', '    if state in ("success", "none", "pending"):'),
+    M("N92", "사후검사", "모르는 값을 통과로", "    return PostMergeDecision(None, False, (), ", "    return PostMergeDecision(None, True, None, "),
+    M("N93", "사후검사", "실패 때 할 수 있는 일에 다음 병합을 끼움", 'POST_MERGE_REVERT_ACTIONS = ("send_revert_request", "send_cause_explanation")', 'POST_MERGE_REVERT_ACTIONS = ("send_revert_request", "send_cause_explanation", "merge_next")'),
+    M("N94", "사후검사", "글자 형식 확인을 뺌(비교를 바꿔치는 값이 통과)", "    state = post_check_state if type(post_check_state) is str and post_check_state in POST_MERGE_STATES else None",
+      "    state = post_check_state if post_check_state in POST_MERGE_STATES else None"),
+    M("N95", "사후검사", "실패 때 할 수 있는 일에서 되돌리기 요청 삭제", 'POST_MERGE_REVERT_ACTIONS = ("send_revert_request", "send_cause_explanation")', 'POST_MERGE_REVERT_ACTIONS = ("send_cause_explanation",)'),
+    M("N96", "사후검사", "pending 때 할 수 있는 일을 비우지 않고 실패와 같게", '        return PostMergeDecision(state, False, (), "직전 병합의 main 검사가 아직 끝나지', '        return PostMergeDecision(state, False, POST_MERGE_REVERT_ACTIONS, "직전 병합의 main 검사가 아직 끝나지'),
+    # ---- I2 글자 형식(str 하위 형식)
+    M("N100", "글자형식", "승인 글에 str 하위 형식을 받음", "    if type(text) is not str or not text.strip(_ASCII_SPACE):", "    if not isinstance(text, str) or not text.strip(_ASCII_SPACE):"),
+    M("N101", "글자형식", "병합 방식에 str 하위 형식을 받음", "    return type(method) is str and method == ALLOWED_MERGE_METHOD", "    return isinstance(method, str) and method == ALLOWED_MERGE_METHOD"),
+    M("N102", "글자형식", "병합 번호에 str 하위 형식을 받음", "    return value if type(value) is str and MERGE_NUMBER_RE.fullmatch(value) is not None else None", "    return value if isinstance(value, str) and MERGE_NUMBER_RE.fullmatch(value) is not None else None"),
+    M("N103", "글자형식", "머리 커밋에 str 하위 형식을 받음", "    return value.lower() if type(value) is str and _SHA_RE.fullmatch(value) is not None else None", "    return value.lower() if isinstance(value, str) and _SHA_RE.fullmatch(value) is not None else None"),
+    M("N104", "글자형식", "PR 제목에 str 하위 형식을 받음", "    if type(title) is not str:", "    if not isinstance(title, str):"),
+    # ---- I3·I4 삭제 낱말·비밀 모양
+    M("N110", "낱말", "삭제 낱말에서 os.remove 삭제", "(?:remove|removedirs|rmdir)(?![A-Za-z0-9_])", "(?:removedirs|rmdir)(?![A-Za-z0-9_])"),
+    M("N111", "낱말", "삭제 낱말에서 unlink( 삭제", r"(?:unlink|rmdir)[ \t]*\(", r"(?:rmdir)[ \t]*\("),
+    M("N112", "낱말", "rm -rf 규칙을 깨뜨림(r 옵션 확인 삭제)", r"rm[ \t]+(?:-[a-z]+[ \t]+)*-[a-z]*r[a-z]*", r"rm[ \t]+(?:-[a-z]+[ \t]+)*-[a-z]*x[a-z]*"),
+    M("N113", "낱말", "삭제 낱말에서 drop column·index 삭제", "drop" + r"\s+(?:table|database|schema|column|index)", "drop" + r"\s+(?:table|database|schema)"),
+    M("N114", "낱말", "Authorization Bearer 헤더 규칙 삭제", "    if not doc_only and _AUTH_HEADER_RE.search(text):", "    if False:"),
+    M("N115", "낱말", "Stripe 형식 키 규칙을 사실상 끔(최소 길이 80)", r"[sr]k_(?:live|test)_[0-9A-Za-z]{8,}", r"[sr]k_(?:live|test)_[0-9A-Za-z]{80,}"),
+    M("N116", "낱말", "긴 Bearer 값 규칙을 사실상 끔(최소 길이 200)", r"[ \t]+[A-Za-z0-9._\x7e+/=-]{20,}", r"[ \t]+[A-Za-z0-9._\x7e+/=-]{200,}"),
+    M("N117", "낱말", "Authorization 헤더와 Bearer 사이 간격을 0 으로", r"[^\n]{0,24}?(?<![A-Za-z0-9_])bearer", r"[^\n]{0,0}?(?<![A-Za-z0-9_])bearer"),
+    # ---- I7 PR 상태
+    M("N120", "PR상태", "닫힌·병합된 PR 도 통과", '    if state != "open":', "    if False:"),
+    M("N121", "PR상태", "초안 PR 도 통과", "    if draft is not False:", "    if False:"),
+    M("N122", "PR상태", "모르는 PR 상태도 통과", "    if type(state) is not str or state not in PR_STATES:", "    if False:"),
+    # ---- R5(a) 문서 낱말 규칙 면제
+    M("N140", "문서면제", "문서의 낱말 규칙 면제를 끔", "            for code, why in _text_findings(text, _doc_only_text(key, paths)):", "            for code, why in _text_findings(text, False):"),
+    M("N141", "문서면제", "문서에서 강한 비밀 모양을 보지 않음", "    for label, rx in _SECRET_VALUE_RES:\n        if rx.search(text):", "    for label, rx in (() if doc_only else _SECRET_VALUE_RES):\n        if rx.search(text):"),
+    M("N142", "문서면제", "문서에서 광고 코드 낱말을 보지 않음", "    if _ADS_TEXT_RE.search(text):", "    if not doc_only and _ADS_TEXT_RE.search(text):"),
+    M("N143", "문서면제", "글자 하나로 받은 글을 문서가 하나라도 있으면 면제(모두여야 하는데)", "        return bool(paths) and all(_is_doc_path(path) for path in paths)", "        return bool(paths) and any(_is_doc_path(path) for path in paths)"),
+    M("N144", "문서면제", "문서 판정을 확장자가 아니라 경로 어디에든 .md 가 있으면로", '    return path.rsplit("/", 1)[-1].casefold().endswith(DOC_SUFFIXES)', '    return DOC_SUFFIXES[0] in path.casefold()'),
+    M("N145", "문서면제", "문서 면제를 목록에 없는 키까지 확대", "    return normal is not None and normal in paths and _is_doc_path(normal)", "    return normal is not None and _is_doc_path(normal)"),
+    M("N146", "문서면제", "문서 면제를 경로 목록에 없는 문서에도 확대(키가 목록에 없어도)", "    normal = normalize_repo_path(key) if isinstance(key, str) else None\n    return normal is not None and normal in paths and _is_doc_path(normal)",
+      "    normal = normalize_repo_path(key) if isinstance(key, str) else None\n    return normal is not None and _is_doc_path(normal)"),
+    # ---- R1 표 원소 지우기(T 의 생존 유형)
+    M("T01", "표원소", "키 파일 접미사에서 .ppk 삭제", '".jks", ".ppk", ".kdbx")', '".jks", ".kdbx")'),
+    M("T02", "표원소", "키 파일 접미사에서 .kdbx 삭제", '".jks", ".ppk", ".kdbx")', '".jks", ".ppk")'),
+    M("T03", "표원소", "개인 키 이름에서 id_dsa 삭제", r"id_(?:rsa|dsa|ecdsa|ed25519).*", r"id_(?:rsa|ecdsa|ed25519).*"),
+    M("T04", "표원소", "개인 키 이름에서 id_ecdsa 삭제", r"id_(?:rsa|dsa|ecdsa|ed25519).*", r"id_(?:rsa|dsa|ed25519).*"),
+    M("T05", "표원소", "경로 낱말에서 keystore 삭제", '_CRED_WORDS = ("secret", "credential", "keystore", "keyring")', '_CRED_WORDS = ("secret", "credential", "keyring")'),
+    M("T06", "표원소", "비밀 낱말에서 인증 토큰 삭제", "|접근 토큰|봇 토큰|인증 토큰|액세스 토큰", "|접근 토큰|봇 토큰|액세스 토큰"),
+    M("T07", "표원소", "비밀 낱말에서 비밀 번호(띄어쓰기) 삭제", "|비밀번호|비밀 번호|시크릿|", "|비밀번호|시크릿|"),
+    M("T08", "표원소", "비밀 낱말에서 자격증명(붙여쓰기) 삭제", "|자격 증명|자격증명|인증 정보|", "|자격 증명|인증 정보|"),
+    M("T09", "표원소", "비밀 낱말에서 인증정보(붙여쓰기) 삭제", "|인증 정보|인증정보|접근 키|", "|인증 정보|접근 키|"),
+    M("T10", "표원소", "비밀 낱말에서 접근 키 삭제", "|인증정보|접근 키|액세스 키|", "|인증정보|액세스 키|"),
+    M("T11", "표원소", "비밀 낱말에서 액세스 키 삭제", "|접근 키|액세스 키|접근 토큰|", "|접근 키|접근 토큰|"),
+    M("T12", "표원소", "비밀 낱말에서 API 키 삭제", "|비밀 키|API 키|자격 증명|", "|비밀 키|자격 증명|"),
+    M("T13", "표원소", "의존성 이름에서 pnpm-lock.yaml 삭제", r"|package[^/]*\.json|pnpm-lock\.yaml|pyproject", r"|package[^/]*\.json|pyproject"),
+    M("T14", "표원소", "공개 파일에서 blogger_ko_history.json 삭제", '"blogger_history.json", "blogger_ko_history.json", "naver_history.json",\n                                "readme.md"', '"blogger_history.json", "naver_history.json",\n                                "readme.md"'),
+    M("T15", "표원소", "공개 파일에서 pages.json 삭제", '"categories.md", "pages.json", "posts.json"', '"categories.md", "posts.json"'),
+    M("T16", "표원소", "패키징 접미사에서 .wixproj 삭제", '".wxs", ".wixproj", ".msix"', '".wxs", ".msix"'),
+    M("T17", "표원소", "패키징 접미사에서 .appxmanifest 삭제", '".msi", ".appxmanifest", ".manifest"', '".msi", ".manifest"'),
+    M("T18", "표원소", "패키징 폴더에서 pyinstaller 삭제", '"build", "pyinstaller", "nsis"', '"build", "nsis"'),
+    M("T19", "표원소", "패키징 폴더에서 installers 삭제", '"installer", "installers", "package"', '"installer", "package"'),
+    M("T20", "표원소", "패키징 파일에서 version.txt 삭제", '_PACKAGING_FILES = frozenset({"version", "version.txt", "manifest.in"})', '_PACKAGING_FILES = frozenset({"version", "manifest.in"})'),
+    M("T21", "표원소", "패키징 파일에서 manifest.in 삭제", '_PACKAGING_FILES = frozenset({"version", "version.txt", "manifest.in"})', '_PACKAGING_FILES = frozenset({"version", "version.txt"})'),
+    M("T22", "표원소", "삭제 낱말에서 drop schema 삭제", "drop" + r"\s+(?:table|database|schema|column|index)", "drop" + r"\s+(?:table|database|column|index)"),
+    M("T23", "표원소", "삭제 낱말에서 migrates 삭제", "migrat(?:e|es|ed|ing|ion|ions)", "migrat(?:e|ed|ing|ion|ions)"),
+    M("T24", "표원소", "삭제 낱말에서 migrations 삭제", "migrat(?:e|es|ed|ing|ion|ions)", "migrat(?:e|es|ed|ing|ion)"),
+    M("T25", "표원소", "requests 호출에서 options 삭제", "(?:get|post|put|delete|patch|head|options|request|Session|session)", "(?:get|post|put|delete|patch|head|request|Session|session)"),
+    M("T26", "표원소", "requests 호출에서 session 삭제", "|options|request|Session|session)", "|options|request|Session)"),
+    M("T27", "표원소", "requests 호출에서 put 삭제", "(?:get|post|put|delete|patch|head", "(?:get|post|delete|patch|head"),
+    M("T28", "표원소", "따옴표 명령의 git 하위 명령에서 submodule 삭제", '{0,80}?(?:push|pull|fetch|clone|submodule|remote)""")', '{0,80}?(?:push|pull|fetch|clone|remote)""")'),
+    M("T29", "표원소", "따옴표 명령의 git 하위 명령에서 remote 삭제", '{0,80}?(?:push|pull|fetch|clone|submodule|remote)""")', '{0,80}?(?:push|pull|fetch|clone|submodule)""")'),
+    M("T30", "표원소", "gh 명령 규칙 삭제", '    r"""|["\'`]gh(?:["\'`]|[ \\t])"""\n', ""),
+    M("T31", "표원소", "자바스크립트 호출에서 EventSource 삭제", "new[ \\t]+(?:WebSocket|EventSource)", "new[ \\t]+(?:WebSocket)"),
+    M("T32", "표원소", "셸 명령에서 telnet 삭제", "|rsync|nc|ncat|netcat|telnet|nslookup|gh|", "|rsync|nc|ncat|netcat|nslookup|gh|"),
+    M("T33", "표원소", "셸 git 하위 명령에서 submodule 삭제", r"git[ \t]+(?:push|pull|fetch|clone|submodule|remote)(?![A-Za-z0-9_-])", r"git[ \t]+(?:push|pull|fetch|clone|remote)(?![A-Za-z0-9_-])"),
+    M("T34", "표원소", "PowerShell 별칭 irm 삭제", "|iwr|irm|Invoke-WebRequest|", "|iwr|Invoke-WebRequest|"),
+    M("T35", "표원소", "광고 파일에서 app-ads.txt 삭제", '_ADS_FILES = frozenset({"ads.txt", "app-ads.txt", "index.html", "_config.yml"})', '_ADS_FILES = frozenset({"ads.txt", "index.html", "_config.yml"})'),
+    M("T36", "표원소", "공개 폴더에서 _naver_drafts 삭제", '"_blogger_ko_drafts", "_naver_drafts"})', '"_blogger_ko_drafts"})'),
+    # ---- 문서 문장 뒤집기(R3)와 새 문장
+    M("DS01", "문서문장", "§8 강제 push 를 허용으로 뒤집음", "- 강제 push 도 금지입니다.", "- 강제 push 도 허용합니다.", DOC),
+    M("DS02", "문서문장", "§1 병합은 운영자만을 AI 가 한다로 뒤집음", "지금까지처럼 병합은 운영자만 합니다.", "지금부터 병합은 AI 가 합니다.", DOC),
+    M("DS03", "문서문장", "§9 되돌리는 PR 을 AI 가 병합으로 뒤집음", "되돌리는 PR 도 운영자가 병합합니다.", "되돌리는 PR 은 AI 가 병합합니다.", DOC),
+    M("DS04", "문서문장", "§7-3 미응답을 통과로 뒤집음", "**하나라도 참이거나 미응답이면 운영자 전용**입니다(보수적).", "**하나라도 참이면 운영자 전용**입니다.", DOC),
+    M("DS05", "문서문장", "§5-1 끝의 마침표를 불허로 뒤집음", "끝의 마침표 하나는 허용합니다.", "끝의 마침표는 허용하지 않습니다.", DOC),
+    M("DS06", "문서문장", "§5-1 소문자 m 읽기를 뒤집음", "`m075 승인` 처럼 M 이 소문자여도 `M075` 로 읽습니다.", "`m075 승인` 은 읽지 않습니다.", DOC),
+    M("DS07", "문서문장", "§6 건너뜀·중립·취소를 통과로 뒤집음", "건너뜀·중립·취소는 통과가 아님", "건너뜀·중립·취소도 통과", DOC),
+    M("DS08", "문서문장", "§6 되돌리기 방법 10자 기준을 1자로", "되돌리는 방법이 10자 이상의 구체적인 문장", "되돌리는 방법이 1자 이상의 문장", DOC),
+    M("DS09", "문서문장", "§9 완료 알림 7가지를 3가지로", "아래 7가지를 반드시 담습니다", "아래 3가지를 반드시 담습니다", DOC),
+    M("DS10b", "문서문장", "§10 pending 설명을 뒤집음", "위반은 없지만 3건 미만이거나, main 검사 결과를 아직 모름", "위반이 없으면 언제나", DOC),
+    M("DS11", "문서문장", "§4-1 8자·한글 4자 기준을 지움", "항목마다 8자 이상의 한글 문장(한글 4자 이상)이어야 하고", "항목마다 문장이어야 하고", DOC),
+    M("DS12", "문서문장", "§5 머리말(꺼진 상태) 삭제", "이 절은 켜진 뒤의 동작이며 지금은 꺼져 있어 승인 글을 보내도 AI 는 병합하지 않습니다.\n\n", "", DOC),
+    M("DS13", "문서문장", "맨 위의 읽을 곳 안내 삭제", "> **운영자가 읽을 곳:** §1·§4·§5-1에서 §5-3까지·§10 만 읽으시면 됩니다. 나머지는 구현자와 독립 검증자를 위한 규칙입니다.\n", "", DOC),
+    M("DS14", "문서문장", "첫 트리 낱말의 풀이 삭제", "검증한 내용(트리 — 변경 내용 전체의 지문)이", "검증한 내용(트리)이", DOC),
+    M("DS15", "문서문장", "§7-6 규칙 문서 10개를 운영자 전용에서 빼는 문장으로 뒤집음", "AI 가 읽고 따르는 규칙 문서 10개도 운영자 전용입니다", "AI 가 읽고 따르는 규칙 문서 10개는 AI 가 병합할 수 있습니다", DOC),
+    M("DS16", "문서문장", "§7-6 문서 낱말 면제 문장을 뒤집음", "**문서 파일의 낱말 규칙(총괄(AI)의 판단 — 운영자 확인 대기)** — 문서 파일", "**문서 파일의 낱말 규칙(총괄(AI)의 판단 — 운영자 확인 대기)** — 코드 파일", DOC),
+    M("DS17", "문서문장", "§7-6 이름 목록 유지 문장 삭제", "**이 목록은 저장소가 바뀔 때마다 유지가 필요하다.**", "", DOC),
+    M("DS18", "문서문장", "§7-8 기본 거부 대소문자 문장 삭제", "- 이름은 대소문자까지 같아야 내부 항목입니다", "- 이름은 대소문자를 가리지 않습니다", DOC),
+    M("DS19", "문서문장", "§11-3 위조 방지 조건 삭제", "- **독립 검증 기록의 출처와 위조 방지**(켜기 전의 필수 조건):", "- 독립 검증 기록:", DOC),
+    M("DS20b", "문서문장", "§11-3 지금 만들지 않았다는 문장을 뒤집음", "`parse_explanation` 은 **지금 만들지 않았습니다**", "`parse_explanation` 은 **지금 만들었습니다**", DOC),
+    M("DS21b", "문서문장", "§9 전이표 failure 행의 할 수 있는 일을 뒤집음", "| `failure` | 불가 | 되돌리기 요청과 쉬운 원인 설명 보내기 둘뿐 |", "| `failure` | 가능 | 제한 없음 |", DOC),
+    M("DS22", "문서문장", "§9 전이표 pending 행을 뒤집음", "| `pending` | 불가 | 없음 — 결과가 나올 때까지 기다림 |", "| `pending` | 가능(다른 조건은 따로 모두 통과해야 함) | 제한 없음 |", DOC),
+    M("DS23", "문서문장", "대장 D-346 제목을 바꿔 행을 못 찾게", "**조건부 승인형 AI 병합 정책이 문서와 시험 가능한 코드로 없었다**", "**정책 문서가 없었다**", REG),
+    M("DS24", "문서문장", "대장 D-347 의 귀속을 운영자 결정으로 되돌림", "**해결**(총괄(AI)의 보수적 판단 2026-11-15 — 운영자 확인 대기", "**해결**(운영자 결정 D-347 의 보수적 판단", REG),
+    M("DS25", "문서문장", "문서 §7-5 safety_guard 행의 귀속 문구를 낡은 표현으로", "| `safety_guard` | 안전 장치 파일(§7-6) | 총괄(AI)의 보수적 판단 D-347 — 운영자 확인 대기.", "| `safety_guard` | 안전 장치 파일(§7-6) | 운영자 결정 D-347 의 보수적 판단(총괄 11-15) —", DOC),
+    M("DS26", "문서문장", "문서 §7-6 제목의 귀속 문구 삭제", "### 7-6. 안전 장치 파일과 새 외부 접속 코드 (총괄(AI)의 보수적 판단 D-347 — 운영자 확인 대기)", "### 7-6. 안전 장치 파일과 새 외부 접속 코드", DOC),
+    M("DS27", "문서문장", "문서 §7-7 알려진 한계의 가져오는 순간 실행되는 파일 항목 삭제", "- **가져오는 순간 실행되는 파일**", "- 가져오는 파일", DOC),
+    # ---- I2 이름 스캔(import 줄)
+    A("L06b", "정적", "워크플로 파일이 정책 함수를 가져옴(다른 모듈에서 가져오는 import 줄)", ".github/workflows/pages.yml", "\nfrom pipeline.other_module import parse_approval\n"),
+    A("L06c", "정적", "스크립트가 merge_policy. 참조를 씀", "scripts/validate_repo.py", "\nx = 1  # merge_policy .check_preconditions\n"),
+    # ---- T 의 생존 유형(R2): 조건 4·3 의 형 검사, 경로의 DEL, 모름 문구 집합
+    M("R201", "T생존", "조건 4 의 남은 필수 지적 수 형 검사를 뺌(False·0.0 허용)", "    if not _non_negative_int(open_findings):", "    if False:"),
+    M("R202", "T생존", "조건 3 의 이름 검사에서 공백뿐인 이름 허용", "        if not isinstance(name, str) or not name.strip():", "        if not isinstance(name, str):"),
+    M("R203", "T생존", "경로 제어 문자 검사에서 DEL(127) 제외", "any(ord(ch) < 32 or ord(ch) == 127 for ch in text)", "any(ord(ch) < 32 for ch in text)"),
+    M("R204", "T생존", "조건 8 의 모름 문구 집합을 비움", "_ROLLBACK_PLACEHOLDER_SET = frozenset(text.casefold() for text in ROLLBACK_PLACEHOLDERS)", "_ROLLBACK_PLACEHOLDER_SET = frozenset()"),
+]
+import mutants_wip7  # noqa: E402 — 4차(WIP 7): 깨진 명세 새로 쓰기와 새 변이(N-M1·S-N1·S-N2·S-N3·I-N1·I-N3·I-N7)
+FIXED_SPECS.update(mutants_wip7.FIXED7)
+NEW = NEW + mutants_wip7.NEW7
+NEW = [dict(entry, old=mutants_wip7.FIXED7[entry["id"]][0], new=mutants_wip7.FIXED7[entry["id"]][1]) if entry["id"] in mutants_wip7.FIXED7 else entry for entry in NEW]   # NEW 안의 변이도 새 명세로
+NEW = [entry for entry in NEW if entry.get("old") is not None or "append" in entry]
+
+# 빼는 변이와 그 까닭 — 동치(지워도 결과가 같음)이거나 규칙이 일부러 바뀌어 뜻이 없어진 것
+RETIRED = {
+    "L06": "정책 함수 이름만 적은 주석 줄은 더는 막지 않는다(T 의 I2: 다른 묶음이 같은 이름을 쓰면 오탐이라 import 줄·`merge_policy.` 참조만 막는다). 같은 뜻의 L06b·L06c 가 대신한다.",
+    "D15": "검사 결과가 비어 있음(`not checks`)은 필수 검사가 비지 않아야 하므로 '필수 검사가 결과에 없음'으로도 반드시 실패한다 — 겹쳐 둔 방어라 지워도 결과가 같다(문서 §7-7 에 겹침으로 적음).",
+}

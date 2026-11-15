@@ -1,0 +1,6 @@
+[WIP][mergepol1 1] 조건부 승인형 AI 병합 정책의 순수 함수 모듈과 시험 (꺼진 상태 — 어디서도 import 하지 않음)
+
+- pipeline/merge_policy.py: 승인 글 읽기(M075 승인)·승인 유효성·변경 분류(운영자 전용 12항목)·병합 직전 재확인 8조건·병합 방식 제한·쉬운 병합 설명·완료 알림·첫 운영 3건 시험
+- tests/test_merge_policy.py: 148개(운영자 원문 목록을 글자 그대로 따로 적어 대조, 경계·부정 사례 위주)
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>

@@ -1,0 +1,36 @@
+{
+  "attempt": 4,
+  "files": {
+    "ko": "2026-11-13-KR-083925.md"
+  },
+  "gate": {
+    "facts": {
+      "body_chars_ko": 1769,
+      "evidence_chars": 2037,
+      "source_text_chars": 0
+    },
+    "input": "validated"
+  },
+  "generated_at": "2026-11-13T08:39:22.394508+09:00",
+  "hold_codes": [],
+  "hold_reasons": [],
+  "lane": "facts",
+  "languages": [
+    "ko"
+  ],
+  "model": "rule",
+  "outcome": "PASSED",
+  "passed": true,
+  "published": "",
+  "schema": 1,
+  "source_domain": "services.swpc.noaa.gov",
+  "source_name": "NOAA SWPC 월별 태양주기 지수",
+  "source_text_chars": 2037,
+  "source_url": "https://services.swpc.noaa.gov/json/solar-cycle/observed-solar-cycle-indices.json",
+  "title_en": "",
+  "title_ko": "SWPC 월평균 흑점수 추이, 2025년 11월부터 2026년 10월까지 — 숫자로 읽기",
+  "validation": {
+    "ok": true,
+    "reason": ""
+  }
+}

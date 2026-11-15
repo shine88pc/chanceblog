@@ -1,0 +1,34 @@
+{
+  "not_stored": [],
+  "responses": [
+    {
+      "bytes": 512601,
+      "file": "raw_ssn_monthly.json",
+      "product": "ssn_monthly",
+      "sha256": "80420cb26de225fa7215a4650f3f3545994466a6620af5a5d390f932b11f9ff9"
+    },
+    {
+      "bytes": 4878,
+      "file": "raw_kp_estimated.json",
+      "product": "kp_estimated",
+      "sha256": "9dee51ca20374d045dfc8e7397704f909fe3b15c01eaedcf590c7d3608ed1320"
+    },
+    {
+      "bytes": 39949,
+      "file": "raw_xray_flares.json",
+      "product": "xray_flares",
+      "sha256": "0bb0b1b104f1ed5751a66a9336c134f207f16549d8e652c31ccfa29236c10eee"
+    },
+    {
+      "bytes": 478288,
+      "file": "raw_ssn_daily.json",
+      "product": "ssn_daily",
+      "sha256": "5423b8be0ec79a16082298f266771c6d2d1b158e2764b5815b34594d2aeeaa33"
+    }
+  ],
+  "retrieved_at": "2026-11-14T23:40:15Z",
+  "schema": 1,
+  "today_kst": "2026-11-15",
+  "total_bytes": 1035716,
+  "total_limit_bytes": 2097152
+}

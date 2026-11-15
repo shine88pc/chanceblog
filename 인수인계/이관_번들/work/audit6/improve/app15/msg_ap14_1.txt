@@ -1,0 +1,11 @@
+[WIP][app15-AP14 1] 처리하지 못한 오류의 이름과 코드 위치만 남기는 작은 로그 파일 — 256 KB 세 개 돌려쓰기, 첫 오류 때 처음 만듦 [대상: 데스크톱]
+
+확인 015 승인 9번(F034): 창 없는 실행 파일에는 표준 오류가 없어 처리하지 못한 오류가 어디에도 남지 않았다. 새 모듈 security/errorlog.py(표준 라이브러리와 mask 만 가져옴 — logging·traceback·faulthandler·print·표준 출력·오류 없음).
+- 한 줄 = 시각(UTC)·들어온 곳(main·thread·unraisable·slot·qt)·오류 클래스 이름·코드 위치(파일 이름:줄, 안쪽부터 최대 여섯). 오류 메시지 글은 읽지도 않는다(폴더 앞부분·값·경로·키·글 본문 없음 — 좁은 글자표를 통과한 이름만), 완성한 줄은 공통 가림 규칙(mask)을 한 번 더 거친다.
+- logs/errors.log + .1 + .2(256 KB 세 개, 쓰면 한도를 넘을 때 먼저 돌림 — 돌리기가 막히면 그 줄을 버림), 첫 오류가 날 때 처음 만들고 켜기만으로는 아무것도 읽거나 만들지 않는다. 쓰기·폴더 만들기·이름 바꾸기·폴더 해석 실패는 삼키고, 1분 30줄, 잠금은 재진입 가능·1초 뒤 포기.
+- 연결: security/boundary.py 의 훅 셋·Qt 핸들러(치명적 메시지의 종류·분류 이름만)와 ui/core/app_state.report_unexpected(표준 오류가 없어도 파일에 남김), 켜는 곳은 ui/launcher.main 하나(boundary.arm_error_log — 예시 화면·명령줄·시험은 안 켬, 경계를 되돌리면 꺼짐, 폴더는 Workspace.resolve 그대로).
+- 충돌 덤프(faulthandler·미니덤프)는 만들지 않는다. 백업의 담지 않는 것 목록의 '로그·디버그 기록 — 로그 파일을 만들지 않고' 를 'logs/ — …' 로 바꿨다(아홉 줄 그대로). 거짓이 된 문서 문장(SECURITY·TROUBLESHOOTING·UI_STATES·UI_DESIGN_SPEC·ARCHITECTURE·코드 주석 셋)을 사실에 맞게 고쳤다. UI_VISUAL_QA 15절.
+시험: tests/test_security_errorlog.py 65개(PySide6 없이 돈다). 기존 시험 한 줄 교체(강화): test_ui_core 가 문서의 낡은 문장('로그 파일은 설치 파일 묶음') 대신 새 사실(작은 오류 기록 파일·errors.log)을 지킨다.
+미완: 결정 D-488·변경 이력(다음 커밋), 변이 전체 재실행·최종 사슬.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>

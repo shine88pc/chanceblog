@@ -1,0 +1,14 @@
+[WIP][mergepol1 7] 재검증 P 지적 반영 — 경로 앞 공백 우회·안전 목록 확대·사전 키·신뢰 출처 문서 (꺼진 채, 연결 0)
+
+재검증 P(필수 1·권고 3·정보 9)의 지적을 한 묶음으로 고쳤다. 고치는 방향은 모두 운영자 전용 쪽을 넓히는 것이고 풀리는 방향은 만들지 않았다.
+운영자 원문의 목록 크기(5·8·7·12·7·6)와 승인 형식은 그대로다. 순수 함수·꺼짐·연결 0·쓰기 0·네트워크 0.
+
+- N-M1(필수) normalize_repo_path 가 strip() 으로 맨 앞 공백류를 지워 기본 거부를 우회하던 것: 줄 끝의 줄 바꿈(CR·LF)만 떼고, 어느 구간이든 앞뒤에 공백(유니코드 공백 포함)이 있거나 제어 문자(DEL·C1 포함)가 있거나 글자가 아닌 입력이면 None(입력 오류=운영자 전용)으로 한다. P 의 재현 10개와 모든 유니코드 공백·제어 코드를 앞·중간·끝에 놓고 시험한다.
+- S-N1(권고) 안전 장치 이름 목록에 pipeline/run.py·operator_loop.py·telegram_inbox.py, AI 가 읽는 규칙 문서 8개(ENGINEERING_GUIDE·AGENT_DELEGATION·COPILOT_GUIDE·AI_FLOW·AI_MODEL_GUIDE·SOURCE_POLICY·QUALITY_GATE·REQUEST_BRIEFING) 추가(규칙 문서 18개, 실재 시험). 용어 사전 GLOSSARY 와 pipeline/shadow_run.py·pipeline/drafts.py 는 운영자 확인 대기 항목으로 문서 §7-7 에만 적고 코드에는 넣지 않았다(각각 단독으로 ai_ok 임을 시험으로 못박음).
+- S-N2(권고) 사전으로 받은 changed_text 는 변경 파일마다 키가 있어야 한다(글이 없으면 빈 글, 없으면 입력 오류). 시험·문서 파일도 같게 요구해 지시보다 엄격하다.
+- S-N3(권고) 문서 §6 의 '넘겨받은 값을 다시 확인한다' 과장을 고쳐, 스스로 다시 계산하는 것은 변경 분류와 머리 커밋 일치뿐이고 나머지는 모양만 확인한다고 적었다. §11-3 에 repo_kind·changed_text·checks·required_checks·independent_verification·has_conflict·secret_findings·pr_state·pr_draft·previous_merge_main_check 는 GitHub 에서 직접 읽는 신뢰할 수 있는 워크플로가 만든 값이어야 한다고 적었다.
+- 정보 I-N1 의존성 이름: 이름 안에 requirements·deps·dependencies 가 든 .txt·.in 파일(dev-requirements.txt·deps.txt·pip-requirements.in)과 Dockerfile·Makefile(이름 안에 있기만 하면). I-N3 repo_kind 와 정수 값의 정확한 형 검사(하위 형식 거절). I-N7 문서 §6·§8·§9·§10 머리에 '켜진 뒤의 동작이며 지금은 꺼져 있다' 한 줄. 나머지 정보(I-N2·N4~N6·N8·N9)는 코드 변경 없이 §7-7 에 한 줄씩(셸 명령 이름 목록·이름 없는 무작위 비밀·되돌리는 문구는 정확히 같을 때만 거절 등).
+
+바꾼 파일은 pipeline/merge_policy.py, tests/test_merge_policy.py, tests/test_merge_policy_docs.py, docs/AI_MERGE_POLICY.md, docs/DEFECT_REGISTER.md 다섯 개뿐이다.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
