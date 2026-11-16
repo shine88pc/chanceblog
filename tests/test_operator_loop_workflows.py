@@ -29,13 +29,19 @@ import validate_repo as vr  # noqa: E402
 WORKFLOWS = ROOT / ".github" / "workflows"
 TEMPLATES = ROOT / ".github" / "ISSUE_TEMPLATE"
 AI_REQUEST, OPERATOR_REPLY = vr.AI_REQUEST_WORKFLOW, vr.OPERATOR_REPLY_WORKFLOW
-REPLY_FORM, ANSWER_FORM, TASK_FORM, CONFIG = vr.REPLY_FORM, vr.ANSWER_FORM, vr.TASK_FORM, vr.ISSUE_CONFIG
+ANSWER_FORM, TASK_FORM, CONFIG = vr.ANSWER_FORM, vr.TASK_FORM, vr.ISSUE_CONFIG
+OLD_REPLY_FORM = ".github/ISSUE_TEMPLATE/ai-reply.yml"          # 2026-11-16 확인 021 로 없앤 옛 `[답변]` 양식 — 다시 생기지 않는지만 본다
 TELEGRAM_ENV = {"TELEGRAM_BOT_TOKEN": "${{ secrets.TELEGRAM_BOT_TOKEN }}", "TELEGRAM_CHAT_ID": "${{ secrets.TELEGRAM_CHAT_ID }}"}
 OWNER = oh.OWNER
 
 
 def read(rel):
     return (ROOT / rel).read_text(encoding="utf-8")
+
+
+def ti_usage_text():
+    from pipeline import telegram_inbox
+    return telegram_inbox.USAGE_TEXT
 
 
 # ----------------------------------------------------------------------------
@@ -392,16 +398,16 @@ class NothingExistingReactsTest(unittest.TestCase):
     def test_the_sync_script_and_the_form_loader_do_not_touch_or_confuse_the_new_forms(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = make_edit_root(tmp)
-            for name in ("ai-reply.yml", "ai-answer.yml", "ai-task.yml", "config.yml"):
+            for name in ("ai-answer.yml", "ai-task.yml", "config.yml"):
                 shutil.copy(TEMPLATES / name, root / ".github" / "ISSUE_TEMPLATE" / name)
-            before = {name: (root / ".github" / "ISSUE_TEMPLATE" / name).read_bytes() for name in ("ai-reply.yml", "ai-answer.yml", "ai-task.yml", "config.yml")}
+            before = {name: (root / ".github" / "ISSUE_TEMPLATE" / name).read_bytes() for name in ("ai-answer.yml", "ai-task.yml", "config.yml")}
             spec = spec_mod.load_spec(root)
             forms.sync_page_form(root, spec, pages.load_registry(root), write=True)
             after = {name: (root / ".github" / "ISSUE_TEMPLATE" / name).read_bytes() for name in before}
             self.assertEqual(before, after)
             templates = forms.load_templates(root)
             by_file = {template["file"]: template for template in templates}
-            self.assertEqual(by_file["ai-reply.yml"]["labels"], [ol.LABEL_REPLY])
+            self.assertNotIn("ai-reply.yml", by_file)                                      # 옛 양식은 없다(확인 021)
             self.assertEqual(by_file["ai-answer.yml"]["labels"], [ol.LABEL_REPLY])
             self.assertEqual(by_file["ai-task.yml"]["labels"], [ol.LABEL_TASK])
             self.assertNotIn("config.yml", by_file)                                       # 본문이 없는 설정 파일은 양식이 아니다
@@ -418,7 +424,29 @@ class NothingExistingReactsTest(unittest.TestCase):
     def test_the_existing_forms_and_workflows_keep_their_triggers(self):
         self.assertEqual(load("issue-edit.yml")["on"]["issues"], {"types": ["opened"]})
         self.assertEqual(load("sync-issue-form.yml")["on"]["push"]["branches"], ["main"])
-        self.assertEqual(sorted(path.name for path in TEMPLATES.iterdir()), ["ai-answer.yml", "ai-reply.yml", "ai-task.yml", "blog_control.yml", "config.yml", "page-edit.yml"])
+        self.assertEqual(sorted(path.name for path in TEMPLATES.iterdir()), ["ai-answer.yml", "ai-task.yml", "blog_control.yml", "config.yml", "page-edit.yml"])
+
+    def test_the_old_answer_form_is_gone_and_nothing_in_the_checker_or_the_guidance_points_at_it(self):
+        """확인 021(2026-11-16, 운영자 승인 이슈 #217): 옛 `[답변]` 양식 `ai-reply.yml`(이전 R 번호용)을 없앴다 — 파일이 다시 생기지 않고, 검증기·접수 코드·새 양식·작업 요청 양식·사용법이 그 메뉴 이름을 가리키지 않는다.
+        접수 코드가 이미 올라온 옛 양식 이슈(`### 요청 번호`)를 읽는 부분은 남아 있다(정리는 다음 정비)."""
+        self.assertFalse((ROOT / OLD_REPLY_FORM).exists())
+        self.assertFalse(hasattr(vr, "REPLY_FORM"))
+        self.assertFalse(hasattr(ol, "REPLY_FORM_NAME"))
+        old_menu = "AI 요청에 답하기(결정·확인)"
+        for rel in ("pipeline/operator_loop.py", "pipeline/notify.py", "scripts/validate_repo.py", ".github/ISSUE_TEMPLATE/ai-answer.yml", ".github/ISSUE_TEMPLATE/ai-task.yml", ol.GUIDE_PATH):
+            text = read(rel)
+            self.assertNotIn(old_menu, text, rel)
+            self.assertNotIn("이전 R 번호용)", text.replace("옛 R 번호용 양식은", ""), rel)
+        # 목록 밖이라 일부러 안 고친 곳(운영자 승인 R-370·R-372 의 '바뀌는 곳' 에 없다 — 병합 요청에 공개하고 다음 확인 요청으로 묻는다): ① .github/workflows/operator-reply.yml 머리 주석은 옛 메뉴 이름
+        # `AI 요청에 답하기(결정·확인)` 를 그대로 둔다(주석뿐이라 동작은 같다) ② pipeline/telegram_inbox.py 의 USAGE_TEXT 는 '옛 요청은 r001 같은 번호' 를 그대로 둔다(양식 이름은 없다). 아래는 두 곳이 그 한 가지 말만 남기는지 못박는다 —
+        # 다른 낡은 말이 더 생기거나 누가 고치면(의도된 정리) 이 시험을 함께 고친다.
+        workflow = read(".github/workflows/operator-reply.yml")
+        self.assertEqual(workflow.count(old_menu), workflow.split(chr(10) + "on:")[0].count(old_menu))                   # 낡은 이름은 머리 주석에만 있다
+        self.assertNotIn("이전 R 번호용", workflow)
+        self.assertNotIn(old_menu, read("pipeline/telegram_inbox.py"))
+        self.assertIn("옛 요청은 r001 같은 번호", ti_usage_text())
+        old_issue = ol.parse_reply("[답변] ", oh.reply_body(request_id="R-042", answer="승인"), OWNER, "OWNER", OWNER)         # 이미 올라온 옛 양식 이슈는 예전처럼 읽힌다
+        self.assertEqual((old_issue.kind, old_issue.request_id, old_issue.answer), ("reply", "R-042", "승인"))
 
 
 # ----------------------------------------------------------------------------
@@ -453,30 +481,8 @@ class IssueFormTest(unittest.TestCase):
         self.assertTrue(all(isinstance(label, str) and label for label in data.get("labels", [])))
 
     def test_both_forms_follow_the_issue_form_schema(self):
-        for name in ("ai-reply.yml", "ai-answer.yml", "ai-task.yml"):
+        for name in ("ai-answer.yml", "ai-task.yml"):
             self.check_schema(form(name))
-
-    def test_the_answer_form_is_what_the_code_reads(self):
-        data = form("ai-reply.yml")
-        self.assertEqual((data["name"], data["title"], data["labels"]), (ol.REPLY_FORM_NAME, ol.REPLY_TITLE_PREFIX, [ol.LABEL_REPLY]))
-        fields = {item["id"]: item for item in data["body"][1:]}
-        self.assertEqual({field_id: item["attributes"]["label"] for field_id, item in fields.items()}, dict(ol.REPLY_FIELDS))
-        self.assertEqual({field_id: item["type"] for field_id, item in fields.items()}, ol.REPLY_FIELD_TYPES)
-        self.assertEqual({field_id for field_id, item in fields.items() if (item.get("validations") or {}).get("required")}, set(ol.REPLY_REQUIRED))
-        self.assertEqual(fields["answer"]["attributes"]["options"], [full for _, full in ol.ANSWER_OPTIONS])
-        self.assertEqual(list(fields), ["request_id", "answer", "choice", "memo"])
-
-    def test_the_answer_form_preselects_the_safe_choice_and_it_is_not_an_approval(self):
-        """필수 드롭다운이 첫 선택지를 미리 보여 주더라도(공식 문서가 적지 않는다) 요청 번호만 쓰고 올린 이슈가 `승인` 이 되지 않는다(독립 검증 N-3)."""
-        answer = {item["id"]: item for item in form("ai-reply.yml")["body"][1:]}["answer"]["attributes"]
-        self.assertEqual(answer["default"], ol.ANSWER_DEFAULT_INDEX)
-        self.assertEqual(ol.ANSWER_DEFAULT_INDEX, 0)
-        preselected = answer["options"][answer["default"]]
-        self.assertEqual(preselected, "보류 — 나중에 다시 물어 주세요")
-        self.assertEqual(ol.ANSWER_OPTIONS[ol.ANSWER_DEFAULT_INDEX][0], "보류")
-        self.assertEqual(answer["options"][0], preselected)                                          # default 가 없어도 첫 선택지가 안전하다
-        self.assertEqual([short for short, _ in ol.ANSWER_OPTIONS].index("승인"), 2)                 # 승인은 첫째도 미리 선택되는 것도 아니다
-        self.assertIn("반드시 직접 고르세요", answer["description"])
 
     def test_the_task_form_is_what_the_code_reads(self):
         data = form("ai-task.yml")
@@ -505,30 +511,29 @@ class IssueFormTest(unittest.TestCase):
         self.assertIn("T3(광고 표면·시크릿·계정·삭제·`mode` 변경·새 플랫폼 등)는 포함하지 않습니다", description)
 
     def test_neither_form_carries_the_blog_control_label_or_an_edit_title(self):
-        for name in ("ai-reply.yml", "ai-answer.yml", "ai-task.yml"):
+        for name in ("ai-answer.yml", "ai-task.yml"):
             data = form(name)
             self.assertNotIn("blog-control", data["labels"])
             self.assertFalse(any(label.startswith("edit:") for label in data["labels"]))
             self.assertFalse(data["title"].startswith(("[페이지 수정]", "[이미지 변경]")))
 
     def test_both_forms_open_with_the_secret_warning_and_the_owner_only_note(self):
-        for name in ("ai-reply.yml", "ai-task.yml"):
+        for name, extra in (("ai-answer.yml", ol.TARGET_SHORT_NOTICE), ("ai-task.yml", "T3")):
             notice = form(name)["body"][0]
             self.assertEqual(notice["type"], "markdown")
             value = notice["attributes"]["value"]
-            for needle in (ol.FORM_NOTICE, "공개", "저장소 소유자 계정", "T3"):
+            for needle in (ol.FORM_NOTICE, "공개", "저장소 소유자 계정", extra):
                 self.assertIn(needle, value, (name, needle))
-        self.assertIn(ol.ANSWER_DIRECT_NOTICE, form("ai-reply.yml")["body"][0]["attributes"]["value"])
 
     def test_the_rendered_body_of_every_option_is_read_back_by_the_parser(self):
         """양식 파일의 라벨·선택지로 GitHub 가 만드는 본문(`### 라벨` 아래에 값)을 그대로 지어 파서에 넣으면 값이 되돌아온다."""
-        data = form("ai-reply.yml")
+        data = form("ai-answer.yml")
         fields = {item["id"]: item for item in data["body"][1:]}
-        for option in fields["answer"]["attributes"]["options"]:
-            body = (f"### {fields['request_id']['attributes']['label']}\n\nR-123\n\n### {fields['answer']['attributes']['label']}\n\n{option}\n\n"
-                    f"### {fields['choice']['attributes']['label']}\n\n_No response_\n\n### {fields['memo']['attributes']['label']}\n\n_No response_")
+        for option in fields["choice"]["attributes"]["options"]:
+            body = (f"### {fields['target']['attributes']['label']}\n\n19\n\n### {fields['choice']['attributes']['label']}\n\n{option}\n\n"
+                    f"### {fields['memo']['attributes']['label']}\n\n_No response_")
             result = ol.parse_reply(data["title"] + "x", body, OWNER, "OWNER", OWNER)
-            self.assertEqual((result.kind, result.request_id, dict(ol.ANSWER_OPTIONS)[result.answer]), ("reply", "R-123", option))
+            self.assertEqual((result.kind, result.target, ol.CHOICE_OPTIONS[result.choice_no]), ("answer", "019", option))      # 짧게 쓴 19 도 019 로 되돌아온다(확인 022)
         task = form("ai-task.yml")
         fields = {item["id"]: item for item in task["body"][1:]}
         for urgency in fields["urgency"]["attributes"]["options"]:
@@ -562,7 +567,7 @@ class IssueFormTest(unittest.TestCase):
 def rule_root(tmp, mutate=None):
     """실제 운영자 요청함 파일(워크플로·양식·config)을 임시 폴더에 복사한다. mutate({상대 경로: 글})로 글을 바꿔 쓴다."""
     root = Path(tmp)
-    texts = {rel: (ROOT / rel).read_text(encoding="utf-8") for rel in (AI_REQUEST, OPERATOR_REPLY, REPLY_FORM, ANSWER_FORM, TASK_FORM, CONFIG)}
+    texts = {rel: (ROOT / rel).read_text(encoding="utf-8") for rel in (AI_REQUEST, OPERATOR_REPLY, ANSWER_FORM, TASK_FORM, CONFIG)}
     if mutate:
         mutate(texts)
     for rel, text in texts.items():
@@ -784,33 +789,7 @@ class FormRuleTest(unittest.TestCase):
         self.assertEqual(self.errors(), [])
 
     MUTATIONS = {
-        "답 양식 제목": (REPLY_FORM, 'title: "[답변] "', 'title: "[질문] "'),
-        "답 양식 라벨": (REPLY_FORM, 'labels: ["운영자응답"]', 'labels: ["운영자응답", "blog-control"]'),
-        "답 양식에 편집 라벨": (REPLY_FORM, 'labels: ["운영자응답"]', 'labels: ["blog-control", "edit:page"]'),
-        "답 양식 라벨 없음": (REPLY_FORM, 'labels: ["운영자응답"]\n', ""),
-        "요청 번호 필수 아님": (REPLY_FORM, "      placeholder: \"r001\"\n    validations:\n      required: true\n", "      placeholder: \"r001\"\n    validations:\n      required: false\n"),
-        "요청 번호 칸의 예시가 옛 R-001 로 되돌아감": (REPLY_FORM, 'placeholder: "r001"', 'placeholder: "R-001"'),
-        "요청 번호 칸 설명에서 r001 예시를 뺌": (REPLY_FORM, "(예: r001 — R-001·r-001 로 써도 됩니다)", "(예: 번호)"),
-        "답 양식 안내 글에서 r001 꼴 안내를 뺌": (REPLY_FORM, "텔레그램 메시지 맨 위의 `r001` 같은 번호", "텔레그램 메시지 맨 위의 번호"),
         "요청 양식 안내가 (R-번호) 로 되돌아감": (TASK_FORM, "(`r001` 같은 번호)", "(R-번호)"),
-        "메모를 필수로": (REPLY_FORM, "      description: \"AI 에게 전할 말(선택). 화면에 보인 문구는 적어도 되지만 비밀번호·토큰·키 값은 쓰지 마세요.\"\n    validations:\n      required: false\n",
-                    "      description: \"AI 에게 전할 말(선택). 화면에 보인 문구는 적어도 되지만 비밀번호·토큰·키 값은 쓰지 마세요.\"\n    validations:\n      required: true\n"),
-        "항목 제목 바꿈": (REPLY_FORM, 'label: "요청 번호"', 'label: "번호"'),
-        "항목 id 바꿈": (REPLY_FORM, "id: request_id", "id: req"),
-        "항목 id 겹침": (REPLY_FORM, "id: memo", "id: choice"),
-        "항목 종류 바꿈": (REPLY_FORM, "  - type: textarea\n    id: memo\n", "  - type: input\n    id: memo\n"),
-        "항목 하나 없음": (REPLY_FORM, "  - type: input\n    id: choice\n    attributes:\n      label: \"선택\"\n", "  - type: input\n    id: choice_x\n    attributes:\n      label: \"선택\"\n"),
-        "선택지 문구 바꿈": (REPLY_FORM, '- "승인 — 제안한 대로 진행해 주세요"', '- "승인 - 제안한 대로 진행해 주세요"'),
-        "선택지 추가": (REPLY_FORM, '        - "문제 — 아래 메모를 보세요"\n', '        - "문제 — 아래 메모를 보세요"\n        - "그냥 통과"\n'),
-        "선택지 순서(첫째가 거절)": (REPLY_FORM, '        - "보류 — 나중에 다시 물어 주세요"\n        - "거절 — 하지 마세요"\n', '        - "거절 — 하지 마세요"\n        - "보류 — 나중에 다시 물어 주세요"\n'),
-        "답변 미리 선택이 없음": (REPLY_FORM, "      default: 0\n", ""),
-        "답변 미리 선택이 승인": (REPLY_FORM, "      default: 0\n", "      default: 2\n"),
-        "답변 미리 선택이 거짓값(False == 0 이라 걸러야 한다)": (REPLY_FORM, "      default: 0\n", "      default: false\n"),
-        "답변 직접 고르라는 안내 뺌": (REPLY_FORM, "올리기 전에 반드시 직접 고르세요", "올려 주세요"),
-        "승인을 첫째로": (REPLY_FORM, '        - "보류 — 나중에 다시 물어 주세요"\n        - "거절 — 하지 마세요"\n        - "승인 — 제안한 대로 진행해 주세요"\n',
-                     '        - "승인 — 제안한 대로 진행해 주세요"\n        - "보류 — 나중에 다시 물어 주세요"\n        - "거절 — 하지 마세요"\n'),
-        "안내 글 문장 뺌": (REPLY_FORM, "**비밀번호·토큰·키 값은 절대 쓰지 마세요.**", "**비밀 값에 주의하세요.**"),
-        "안내 글 없음": (REPLY_FORM, "  - type: markdown\n    attributes:\n      value: |\n", "  - type: markdown\n    attributes:\n      x: |\n"),
         "요청 양식 제목": (TASK_FORM, 'title: "[요청] "', 'title: "[페이지 수정] "'),
         "요청 양식 라벨": (TASK_FORM, 'labels: ["운영자요청"]', 'labels: ["blog-control"]'),
         "진행 범위 필수 아님": (TASK_FORM, "      default: 0\n    validations:\n      required: true\n", "      default: 0\n    validations:\n      required: false\n"),
@@ -840,14 +819,16 @@ class FormRuleTest(unittest.TestCase):
 
     # 새 답변 양식(TG-STD)과 옛 양식 이름 표시의 변이 — 하나씩 망가뜨리면 FORM-1 이 잡아야 한다
     ANSWER_MUTATIONS = {
-        "옛 양식 이름에서 (이전 R 번호용) 표시를 뺌": (REPLY_FORM, 'name: "AI 요청에 답하기(결정·확인) (이전 R 번호용)"', 'name: "AI 요청에 답하기(결정·확인)"'),
         "새 양식 이름": (ANSWER_FORM, 'name: "AI 확인 요청에 답하기(대상번호)"', 'name: "AI 요청에 답하기"'),
         "새 양식 제목": (ANSWER_FORM, 'title: "[답변] "', 'title: "[질문] "'),
         "새 양식 라벨에 blog-control": (ANSWER_FORM, 'labels: ["운영자응답"]', 'labels: ["운영자응답", "blog-control"]'),
         "새 양식 라벨 없음": (ANSWER_FORM, 'labels: ["운영자응답"]\n', ""),
-        "대상번호 필수 아님": (ANSWER_FORM, '      placeholder: "001"\n    validations:\n      required: true\n', '      placeholder: "001"\n    validations:\n      required: false\n'),
-        "대상번호 예시가 바뀜": (ANSWER_FORM, 'placeholder: "001"', 'placeholder: "003"'),
-        "대상번호 설명에서 예시를 뺌": (ANSWER_FORM, "(예: 001)", "(예: 번호)"),
+        "대상번호 필수 아님": (ANSWER_FORM, '      placeholder: "019"\n    validations:\n      required: true\n', '      placeholder: "019"\n    validations:\n      required: false\n'),
+        "대상번호 예시가 바뀜": (ANSWER_FORM, 'placeholder: "019"', 'placeholder: "003"'),
+        "대상번호 예시가 옛 001 로 되돌아감": (ANSWER_FORM, 'placeholder: "019"', 'placeholder: "001"'),
+        "대상번호 설명에서 예시를 뺌": (ANSWER_FORM, "(예: 019 — 19 만 써도 019 로 읽습니다)", "(예: 번호)"),
+        "안내 글에서 19 만 써도 019 로 읽는다는 문장을 뺌": (ANSWER_FORM, "(`19` 만 써도 `019` 로 읽습니다 — 번호 하나당 이슈 하나)", "(번호 하나당 이슈 하나)"),
+        "안내 글이 19 만 써도 된다는 말을 옛 세 자리 안내로 되돌림": (ANSWER_FORM, "(`19` 만 써도 `019` 로 읽습니다 — 번호 하나당 이슈 하나)", "(숫자 세 자리만 — 번호 하나당 이슈 하나)"),
         "대상번호 칸 제목 바꿈": (ANSWER_FORM, 'label: "대상번호"', 'label: "번호"'),
         "항목 id 바꿈": (ANSWER_FORM, "id: target", "id: tgt"),
         "선택이 필수": (ANSWER_FORM, "      default: 0\n    validations:\n      required: false\n", "      default: 0\n    validations:\n      required: true\n"),
@@ -861,7 +842,7 @@ class FormRuleTest(unittest.TestCase):
         "항목 종류 바꿈": (ANSWER_FORM, "  - type: textarea\n    id: memo\n", "  - type: input\n    id: memo\n"),
         "안내 글에서 비밀 문장을 뺌": (ANSWER_FORM, "**비밀번호·토큰·키 값은 절대 쓰지 마세요.**", "**비밀 값에 주의하세요.**"),
         "안내 글에서 승인이 아니라는 문장을 뺌": (ANSWER_FORM, "**`선택 안 함` 이나 대상번호만 올린 답은 승인이 아닙니다**", "**선택 안 함 도 괜찮습니다**"),
-        "안내 글에서 번호 안내를 뺌": (ANSWER_FORM, "텔레그램 확인 요청 맨 위의 `001` 같은 숫자입니다", "확인 요청의 번호입니다"),
+        "안내 글에서 번호 안내를 뺌": (ANSWER_FORM, "텔레그램 확인 요청 맨 위의 `019` 같은 숫자입니다", "확인 요청의 번호입니다"),
     }
 
     def test_every_new_form_mutation_is_caught(self):
@@ -871,6 +852,22 @@ class FormRuleTest(unittest.TestCase):
                 self.assertTrue(found, f"FORM-1 이 잡지 못했다: {label}")
                 self.assertTrue(all(f.check == "FORM-1" and f.level == "ERROR" and f.path == rel for f in found), [f.line() for f in found])
 
+    def test_a_revived_old_answer_form_is_a_form_1_error_and_the_real_repository_has_none(self):
+        """확인 021: 옛 `ai-reply.yml` 이 다시 생기면 FORM-1 이 빨개진다(파일 안 내용과 무관) — 지금 저장소에는 없다."""
+        self.assertEqual(vr.OLD_REPLY_FORM, OLD_REPLY_FORM)
+        old_form_text = chr(10).join(['name: "AI 요청에 답하기(결정·확인) (이전 R 번호용)"', 'title: "[답변] "', 'labels: ["운영자응답"]', 'body: []', ''])
+        found = self.errors(lambda texts: texts.update({OLD_REPLY_FORM: old_form_text}))
+        self.assertEqual([(f.check, f.level, f.path) for f in found], [("FORM-1", "ERROR", OLD_REPLY_FORM)])
+        self.assertEqual(len(found[0].line().splitlines()), 1)
+        self.assertEqual([f.line() for f in vr.check_operator_forms(ROOT, vr.list_files(ROOT))], [])
+        saved = vr.yaml
+        vr.yaml = None
+        try:
+            self.assertEqual([f.path for f in vr.check_operator_forms(ROOT, [OLD_REPLY_FORM])], [OLD_REPLY_FORM])          # PyYAML 이 없어도 파일이 있는지는 본다
+            self.assertEqual(vr.check_operator_forms(ROOT, [ANSWER_FORM]), [])
+        finally:
+            vr.yaml = saved
+
     def test_the_real_new_form_is_checked_and_a_missing_one_is_skipped_like_the_others(self):
         with tempfile.TemporaryDirectory() as tmp:
             root, files = rule_root(tmp)
@@ -879,22 +876,22 @@ class FormRuleTest(unittest.TestCase):
             self.assertEqual(vr.check_operator_forms(root, [name for name in files if name != ANSWER_FORM]), [])
 
     def test_a_yaml_error_is_reported_and_missing_files_are_skipped(self):
-        found = self.errors(lambda texts: texts.update({REPLY_FORM: "name: [\n"}))
-        self.assertEqual([(f.check, f.path) for f in found], [("FORM-1", REPLY_FORM)])
+        found = self.errors(lambda texts: texts.update({ANSWER_FORM: "name: [\n"}))
+        self.assertEqual([(f.check, f.path) for f in found], [("FORM-1", ANSWER_FORM)])
         with tempfile.TemporaryDirectory() as tmp:
             root, files = rule_root(tmp)
-            self.assertEqual(vr.check_operator_forms(root, [name for name in files if name not in (REPLY_FORM, TASK_FORM, CONFIG)]), [])
+            self.assertEqual(vr.check_operator_forms(root, [name for name in files if name not in (ANSWER_FORM, TASK_FORM, CONFIG)]), [])
 
     def test_the_rule_does_not_apply_without_pyyaml(self):
         saved = vr.yaml
         vr.yaml = None
         try:
-            self.assertEqual(vr.check_operator_forms(ROOT, [REPLY_FORM]), [])
+            self.assertEqual(vr.check_operator_forms(ROOT, [ANSWER_FORM]), [])
         finally:
             vr.yaml = saved
 
     def test_messages_fold_values_from_the_file(self):
-        found = self.errors(lambda texts: swap(texts, REPLY_FORM, 'title: "[답변] "', 'title: "x\\n::error::forged"'))
+        found = self.errors(lambda texts: swap(texts, ANSWER_FORM, 'title: "[답변] "', 'title: "x\\n::error::forged"'))
         self.assertTrue(found)
         for finding in found:
             self.assertEqual(len(finding.line().splitlines()), 1)

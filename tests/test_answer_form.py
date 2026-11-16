@@ -54,28 +54,37 @@ def numberish(part):
 
 
 def standard_number(text):
-    """표준 표기의 번호 숫자 — 세 자리 `001`~`999`(0 채움) 또는 네 자리 `1000`~`9999`(앞에 0 이 더 붙으면 번호가 아니다)."""
-    return digits(text) and ((len(text) == 3 and int(text) >= 1) or (len(text) == 4 and int(text) >= 1000))
+    """표준 표기의 번호 숫자 — ASCII 숫자만인 글을 세 자리로 맞춘 값(확인 022): 1~3자리는 앞을 0 으로 채운다(`1`→`001`·`19`→`019`·`01`→`001`), 네 자리는 `1000`~`9999` 만 그대로(앞에 0 이 붙은 `0019` 는
+    번호가 아니다), 값이 0 이거나 다섯 자리 이상이면 번호가 아니다(빈 글). 글자를 직접 세어 정수로 바꾸므로 코드의 정규식·int() 와 따로다."""
+    if not digits(text) or len(text) > 4:
+        return ""
+    if len(text) == 4:
+        return text if text[0] != "0" else ""
+    value = 0
+    for char in text:
+        value = value * 10 + (ord(char) - ord("0"))
+    return ("0" * (3 - len(text)) + text) if value >= 1 else ""
 
 
 def oracle_target(raw):
     text = raw.strip()
     if not text:
         return "", "", "empty"
-    if standard_number(text):
-        return "ask", text, ""
+    if digits(text):
+        number = standard_number(text)
+        if number:
+            return "ask", number, ""
+        return "", "", ("zero" if all(char == "0" for char in text) else "format")
     if text[0] in tuple("PpMm"):
         rest = text[1:]
         rest = rest[1:] if rest[:1] in (" ", "-") else rest
-        if digits(rest) and 3 <= len(rest) <= 4:
+        if digits(rest) and 1 <= len(rest) <= 4:
             return "", "", "type"
     if text[0] in ("r", "R"):
         rest = text[1:]
         rest = rest[1:] if rest[:1] in (" ", "-") else rest
         if digits(rest) and len(rest) == 3:
             return "request", "R-" + rest, ""
-    if digits(text) and len(text) <= 2:
-        return "", "", "short"
     parts = []
     token = ""
     for char in text:
@@ -92,20 +101,88 @@ def oracle_target(raw):
     return "", "", "format"
 
 
+NBSP, IDEOGRAPHIC_SPACE, ZERO_WIDTH_SPACE = chr(0xA0), chr(0x3000), chr(0x200B)
+FULLWIDTH_19, ARABIC_INDIC_19 = chr(0xFF11) + chr(0xFF19), chr(0x661) + chr(0x669)
+ASK, REQUEST = "ask", "request"
+# 확인 022(2026-11-16): 입력 → (종류, 읽은 번호, 문제 코드) 표. 읽은 번호는 앞을 0 으로 채운 세 자리(1000 이상은 그대로)이고, 거절은 종류·번호가 빈 글이다.
+TARGET_TABLE = (
+    ("19", (ASK, "019", "")), ("019", (ASK, "019", "")), ("1", (ASK, "001", "")), ("001", (ASK, "001", "")), ("135", (ASK, "135", "")), ("999", (ASK, "999", "")),
+    ("1000", (ASK, "1000", "")), ("9999", (ASK, "9999", "")), ("10", (ASK, "010", "")), ("010", (ASK, "010", "")), ("01", (ASK, "001", "")), ("99", (ASK, "099", "")),
+    (" 19 ", (ASK, "019", "")), ("19\n", (ASK, "019", "")), ("\t19\r\n", (ASK, "019", "")), (NBSP + "19" + NBSP, (ASK, "019", "")), (IDEOGRAPHIC_SPACE + "19", (ASK, "019", "")),
+    ("0019", ("", "", "format")), ("00019", ("", "", "format")), ("0001", ("", "", "format")), ("10000", ("", "", "format")), ("12345", ("", "", "format")),
+    ("000", ("", "", "zero")), ("0", ("", "", "zero")), ("00", ("", "", "zero")), ("0000", ("", "", "zero")),
+    ("19.0", ("", "", "format")), ("19.", ("", "", "format")), ("+19", ("", "", "format")), ("-19", ("", "", "format")), ("1e2", ("", "", "format")), ("0x13", ("", "", "format")),
+    ("0b11", ("", "", "format")), ("19번", ("", "", "format")), ("#19", ("", "", "format")), ("1_9", ("", "", "format")), ("r19", ("", "", "format")),
+    (FULLWIDTH_19, ("", "", "format")), (ARABIC_INDIC_19, ("", "", "format")), ("19" + ZERO_WIDTH_SPACE, ("", "", "format")), (ZERO_WIDTH_SPACE + "19", ("", "", "format")),
+    ("19 20", ("", "", "two")), ("019,020", ("", "", "two")), ("19/20", ("", "", "two")), ("1 9", ("", "", "two")), ("1" + NBSP + "9", ("", "", "two")),
+    ("1" + IDEOGRAPHIC_SPACE + "9", ("", "", "two")), ("19\n20", ("", "", "two")),
+    ("P19", ("", "", "type")), ("M19", ("", "", "type")), ("p 19", ("", "", "type")), ("P019", ("", "", "type")), ("M1", ("", "", "type")),
+    ("", ("", "", "empty")), ("   ", ("", "", "empty")), ("\n", ("", "", "empty")),
+    ("9" * 40, ("", "", "format")), ("1" * 5000, ("", "", "format")), ("0" * 5000, ("", "", "zero")),
+    ("r149", (REQUEST, "R-149", "")), ("R-149", (REQUEST, "R-149", "")),
+)
+
+
 class ParseTargetTest(unittest.TestCase):
+    def test_the_reading_table_for_a_target_written_short_or_long(self):
+        for raw, expected in TARGET_TABLE:
+            self.assertEqual(ol.parse_target(raw), expected, repr(raw))
+        self.assertEqual(ol.parse_target(None), ("", "", "empty"))
+
     def test_a_confirmation_request_number_is_three_or_four_ascii_digits(self):
         for raw in ("001", " 001 ", "\t001\n", "003", "012", "999", "1000", "9999"):
             self.assertEqual(ol.parse_target(raw), ("ask", raw.strip(), ""), repr(raw))
 
-    def test_a_number_with_extra_leading_zeros_is_a_shape_problem_not_a_second_spelling_of_another_number(self):
-        """수정 1차(V2 M1): `0003`·`0012`·`0999` 같은 앞 0 네 자리는 `003`·`012`·`999` 와 같은 값이라 '같은 번호가 두 글자로' 적히므로 번호가 아니다 — 쉬운 '번호 모양' 안내로 거절한다."""
-        for raw in ("0001", "0003", "0012", "0100", "0999", " 0003 ", "0000", "00012"):
-            self.assertEqual(ol.parse_target(raw), ("", "", "format"), repr(raw))
+    def test_a_number_written_short_is_read_as_its_three_digit_standard_form_for_every_number(self):
+        """확인 022: 1~999 는 어느 꼴(`3`·`03`·`003`)로 써도 같은 번호 `003` 이고(앞의 0 은 자리 채움), 1000~9999 는 그대로 — 같은 번호를 두 가지로 읽는 길이 없다."""
         for number in range(1, 1000):
-            self.assertEqual(ol.parse_target(f"{number:03d}"), ("ask", f"{number:03d}", ""), number)
-            self.assertEqual(ol.parse_target(f"{number:04d}"), ("", "", "format"), number)
+            standard = f"{number:03d}"
+            spellings = {standard, str(number), f"{number:02d}"}
+            for raw in spellings:
+                self.assertEqual(ol.parse_target(raw), ("ask", standard, ""), (number, raw))
+            self.assertEqual(ol.parse_target(f"{number:04d}"), ("", "", "format"), number)         # 앞에 0 이 더 붙은 네 자리는 번호가 아니다
+            self.assertEqual(ol.parse_target(f"{number:05d}"), ("", "", "format"), number)
         for number in range(1000, 10000):
             self.assertEqual(ol.parse_target(str(number)), ("ask", str(number), ""), number)
+            self.assertEqual(ol.parse_target("0" + str(number)), ("", "", "format"), number)
+        for number in (10000, 99999, 123456):
+            self.assertEqual(ol.parse_target(str(number)), ("", "", "format"), number)
+
+    def test_the_standard_reading_is_a_fixed_point_and_is_the_notice_number_the_phone_shows(self):
+        for number in list(range(1, 1100)) + [9998, 9999]:
+            no = notify.notice_no_text("ask", number)
+            self.assertEqual(ol.parse_target(no), ("ask", no, ""), no)
+            self.assertEqual(ol.parse_target(str(number)), ("ask", no, ""), number)             # 짧게 쓴 글을 읽은 번호가 곧 알림의 번호 글자다
+            self.assertEqual(notify.notice_type(ol.parse_target(str(number))[1]), notify.NOTICE_ASK)
+
+    def test_a_target_of_zero_in_any_length_is_the_zero_problem_and_never_a_number(self):
+        for count in range(1, 12):
+            self.assertEqual(ol.parse_target("0" * count), ("", "", "zero"), count)
+        self.assertEqual(ol.standard_ask_number("0"), "")
+        self.assertEqual(ol.standard_ask_number("000"), "")
+
+    def test_only_ascii_digits_are_read_other_scripts_signs_and_marks_are_a_shape_problem(self):
+        for number in range(0, 10):
+            for offset in (0xFF10, 0x660, 0x6F0, 0x966, 0x9E6, 0x2080):          # 전각·아랍 인도·확장 아랍 인도·데바나가리·벵골·아래 첨자
+                char = chr(offset + number)
+                self.assertEqual(ol.parse_target(char * 2)[0:2], ("", ""), (hex(ord(char)), number))
+                self.assertEqual(ol.parse_target("1" + char)[0:2], ("", ""), (hex(ord(char)), number))
+        for raw in ("+1", "-1", "1+", "1-", "(19)", "[19]", "19)", "1,9", "1.9", "1'9", "٣", "三", "十九", "XIX", "nineteen"):
+            self.assertEqual(ol.parse_target(raw)[0:2], ("", ""), raw)
+
+    def test_a_huge_digit_string_is_refused_without_building_a_huge_integer(self):
+        for text in ("9" * 100000, "1" * 100000, "0" * 100000):
+            kind, value, problem = ol.parse_target(text)
+            self.assertEqual((kind, value), ("", ""))
+            self.assertIn(problem, ("format", "zero"))
+        self.assertEqual(ol.standard_ask_number("9" * 100000), "")
+
+    def test_a_number_with_extra_leading_zeros_is_a_shape_problem_not_a_second_spelling_of_another_number(self):
+        """수정 1차(V2 M1): `0003`·`0012`·`0999` 같은 앞 0 네 자리는 `003`·`012`·`999` 와 같은 값이라 '같은 번호가 두 글자로' 적히므로 번호가 아니다 — 쉬운 '번호 모양' 안내로 거절한다.
+        (확인 022 에서도 그대로 — 앞의 0 을 **더 붙이는** 것만 거절하고 짧게 쓰는 것은 받는다. `0000` 은 값이 0 이라 zero.)"""
+        for raw in ("0001", "0003", "0012", "0100", "0999", " 0003 ", "00012"):
+            self.assertEqual(ol.parse_target(raw), ("", "", "format"), repr(raw))
+        self.assertEqual(ol.parse_target("0000"), ("", "", "zero"))
         self.assertIn("앞에 0 을 더 붙이지", ol.TARGET_PROBLEMS["format"])                                  # 운영자에게 무엇을 고치면 되는지 말한다
         self.assertEqual(ol.parse_target("P0012"), ("", "", "type"))                                       # P·M 으로 시작하는 번호는 여전히 '답하는 번호가 아님' 안내
 
@@ -117,15 +194,17 @@ class ParseTargetTest(unittest.TestCase):
             self.assertEqual(value, ol.normalize_request_id(raw))
 
     def test_the_problem_classes(self):
-        table = {"empty": ["", "   ", None, "\n", "\t"], "short": ["1", "12", "0", "00", " 7 "],
-                 "type": ["P012", "M007", "p012", "m007", "P-012", "M 007", "P0012", "P000", "m1234"],
-                 "two": ["001 002", "001,002", "001/002", "001 · 002", "001\n002", "001 r149", "r149 r150", "1 2", "P012 M007", "001,r149"],
-                 "format": ["001 메모", "#001", "001.", "０１２", "P０１２", "①②③", "٠٠١", "12345", "00012", "000", "0000", "r1490", "r14", "r-14", "ｒ149", "R−149", "x001", "001a",
-                            "001\u200b", "0\u200b01", "\u200b001", "P", "-001", "r", "R-", "r--149", "r_149", "001-002x", "(001)", "[001]", "001번", "no.001", "P 012 메모", "0001", "0003", "0012", "0999"]}
+        table = {"empty": ["", "   ", None, "\n", "\t"], "zero": ["0", "00", "000", "0000", " 0 ", "00000000"],
+                 "type": ["P012", "M007", "p012", "m007", "P-012", "M 007", "P0012", "P000", "m1234", "P19", "M7", "p 19", "P1"],
+                 "two": ["001 002", "001,002", "001/002", "001 · 002", "001\n002", "001 r149", "r149 r150", "1 2", "P012 M007", "001,r149", "19 20", "019,020"],
+                 "format": ["001 메모", "#001", "001.", "０１２", "P０１２", "①②③", "٠٠١", "12345", "00012", "r1490", "r14", "r-14", "ｒ149", "R−149", "x001", "001a",
+                            "001\u200b", "0\u200b01", "\u200b001", "P", "-001", "r", "R-", "r--149", "r_149", "001-002x", "(001)", "[001]", "001번", "no.001", "P 012 메모", "0001", "0003", "0012", "0999",
+                            "+19", "-19", "19.0", "0x13", "r19", "１９"]}
         for problem, values in table.items():
             for raw in values:
                 self.assertEqual(ol.parse_target(raw), ("", "", problem), repr(raw))
         self.assertEqual(set(table), set(ol.TARGET_PROBLEMS))
+        self.assertNotIn("short", ol.TARGET_PROBLEMS)                                                      # 1~2자리는 이제 번호다 — 너무 짧다는 문제 코드는 없다
 
     def test_every_short_text_over_a_hostile_alphabet_matches_the_hand_written_oracle(self):
         alphabet = ["P", "M", "r", "R", "0", "1", "9", " ", "-", "\n", "１", "\u200b", ","]
@@ -137,14 +216,37 @@ class ParseTargetTest(unittest.TestCase):
                 checked += 1
         self.assertGreater(checked, 300000)
 
+    def test_every_text_over_a_digit_alphabet_up_to_six_characters_matches_the_oracle_digit_for_digit(self):
+        """숫자만으로 된 글(길이 1~6, 숫자 0·1·2·9)을 전부: 읽은 번호가 손으로 센 값과 같다 — 0 채움을 빼거나 `0019` 를 받아 주거나 `000` 을 받아 주면 여기서 빨개진다."""
+        checked = 0
+        for length in range(1, 7):
+            for chars in itertools.product("0129", repeat=length):
+                raw = "".join(chars)
+                self.assertEqual(ol.parse_target(raw), oracle_target(raw), raw)
+                checked += 1
+        self.assertEqual(checked, sum(4 ** length for length in range(1, 7)))
+
     def test_the_problem_sentences_are_fixed_one_liners_for_the_phone_and_the_comment(self):
         for code, text in ol.TARGET_PROBLEMS.items():
             self.assertTrue(text.strip() and "\n" not in text, code)
             self.assertIn("대상번호", text)
-        self.assertIn("예: 001", ol.TARGET_PROBLEMS["empty"])
-        self.assertIn("숫자 3자리", ol.TARGET_PROBLEMS["short"])
+            phone = notify.format_answer_error(145, text)                                                 # 폰 회신은 120자에서 잘리므로 문장은 그 안에 들어야 한다
+            self.assertNotIn("…", phone, code)
+        self.assertIn(f"예: {ol.TARGET_EXAMPLE}", ol.TARGET_PROBLEMS["empty"])
+        self.assertIn(f"{ol.TARGET_SHORT_EXAMPLE} 만 써도 됩니다", ol.TARGET_PROBLEMS["empty"])
+        self.assertIn("0 입니다", ol.TARGET_PROBLEMS["zero"])
         self.assertIn("하나만", ol.TARGET_PROBLEMS["two"])
         self.assertIn("P·M", ol.TARGET_PROBLEMS["type"])
+        self.assertIn(f"{ol.TARGET_EXAMPLE} 를 {ol.TARGET_SHORT_EXAMPLE} 로 써도 되지만", ol.TARGET_PROBLEMS["format"])
+        for text in ol.TARGET_PROBLEMS.values():
+            self.assertNotIn("숫자 3자리", text)                                                           # 옛 '세 자리로만' 안내가 남지 않는다
+            self.assertNotIn("세 자리 예", text)
+
+    def test_the_example_the_form_and_the_notice_use_is_the_short_form_pair(self):
+        self.assertEqual((ol.TARGET_EXAMPLE, ol.TARGET_SHORT_EXAMPLE), ("019", "19"))
+        self.assertEqual(ol.parse_target(ol.TARGET_SHORT_EXAMPLE), ("ask", ol.TARGET_EXAMPLE, ""))
+        self.assertEqual(ol.TARGET_SHORT_NOTICE, "`19` 만 써도 `019` 로 읽습니다")
+        self.assertEqual(ol.TARGET_NOTICE, "텔레그램 확인 요청 맨 위의 `019` 같은 숫자")
 
 
 class ParseChoiceTest(unittest.TestCase):
@@ -174,6 +276,13 @@ class ParseChoiceTest(unittest.TestCase):
 
 
 class ParseAnswerTest(unittest.TestCase):
+    def test_a_short_target_is_received_as_the_standard_number_and_marked_as_padded(self):
+        for raw, standard, padded in (("19", "019", True), ("019", "019", False), ("1", "001", True), ("01", "001", True), ("001", "001", False), ("135", "135", False), ("1000", "1000", False),
+                                      (" 19 ", "019", True), (" 019 ", "019", False)):
+            result = answer(body=answer_body(target_raw=raw, choice="②"))
+            self.assertEqual(result, ol.Submission("answer", "", "", "", False, 0, "", False, standard, 2, padded), raw)
+        self.assertEqual(answer(body=answer_body("19")).target, "019")
+
     def test_a_target_only_answer_has_no_choice_and_no_approval_word(self):
         result = answer()
         self.assertEqual(result, ol.Submission("answer", "", "", "", False, 0, "", False, "001", 0))
@@ -201,7 +310,7 @@ class ParseAnswerTest(unittest.TestCase):
             self.assertEqual((result.kind, result.target, result.choice_no, result.choice_invalid), ("answer", "003", 0, True), raw)
 
     def test_the_three_error_kinds_and_the_other_target_problems_are_shape_refusals_with_fixed_sentences(self):
-        for target_raw, code in (("", "empty"), ("０１２", "format"), ("001 002", "two"), ("P012", "type"), ("1", "short"), ("001 메모", "format")):
+        for target_raw, code in (("", "empty"), ("０１２", "format"), ("001 002", "two"), ("P012", "type"), ("0", "zero"), ("001 메모", "format"), ("0019", "format")):
             result = answer(body=answer_body(target_raw=target_raw, crlf=False) if target_raw else answer_body(target="", crlf=False))
             self.assertEqual(result, ol.Refusal("bad_shape", (ol.TARGET_PROBLEMS[code],)), (target_raw, code))
 
@@ -339,7 +448,7 @@ class AckAnswerTest(unittest.TestCase):
         self.assertIn(ol.OLD_TARGET_NOTE, comment)
         self.assertIn("옛 R 번호 요청에는 새 양식으로 승인할 수 없습니다", comment)
         self.assertEqual(net.bodies()[0]["text"],
-                         f"{notify.OK_MARK} 답변 접수 r149 → 선택 ②(이슈 #145) · 옛 R 번호 요청은 새 양식으로 승인되지 않습니다(승인은 이전 R 번호용 양식으로)")
+                         f"{notify.OK_MARK} 답변 접수 r149 → 선택 ②(이슈 #145) · 옛 R 번호 요청은 새 양식으로 승인되지 않습니다(옛 R 번호용 양식은 없어졌습니다 — AI 가 새 번호로 다시 묻습니다)")
         self.assertNotIn("R-149", comment + net.bodies()[0]["text"])
 
     def test_an_invalid_choice_is_received_without_the_choice_and_the_comment_says_so(self):
@@ -352,6 +461,84 @@ class AckAnswerTest(unittest.TestCase):
         code, lines, net, github = self.ack(telegram=False)
         self.assertEqual((code, net.calls, len(github.posted(145))), (0, 0, 1))
         self.assertIn(notify.SKIP_LINE, lines)
+
+    # ---- 짧게 쓴 대상번호(확인 022) ----
+    def test_a_short_number_is_read_as_the_standard_number_and_the_comment_and_the_phone_say_the_read_number(self):
+        code, lines, net, github = self.ack(nth.answer_event(body=answer_body("19", "②")))
+        self.assertEqual(code, 0)
+        comment = github.posted(145)[0]
+        self.assertTrue(comment.startswith(ol.ACK_MARK + "\n접수했습니다 — 확인 요청 **019** · 선택: **②**.\n\n"), comment[:100])
+        self.assertIn("- 입력한 대상번호를 **019** 로 읽었습니다(앞의 0 은 자리 채움입니다). 의도한 번호가 아니면 새 이슈로 다시 올려 주세요.", comment)
+        code, lines, net, github = self.ack(nth.answer_event(body=answer_body("3", "③")))
+        self.assertIn("- 입력한 대상번호를 **003** 으로 읽었습니다(앞의 0 은 자리 채움입니다).", github.posted(145)[0])      # 끝 숫자 3 은 받침이 있어 `으로`
+        code, lines, net, github = self.ack(nth.answer_event(body=answer_body("19", "②")))
+        self.assertNotIn("**19**", comment)                                                               # 입력한 글이 아니라 읽은 번호만 적는다
+        self.assertEqual(net.bodies()[0]["text"], f"{notify.OK_MARK} 답변 접수 019 → 선택 ②(이슈 #145)")        # 폰에는 정규화한 번호
+        self.assertIn("대상번호 019 의 답을 접수했습니다(선택 2)", self.summary.read_text(encoding="utf-8"))
+        self.assertEqual(self.sequence(github).count(("GET", "/issues")), 1)                               # 앞선 답 찾기도 그 번호로
+
+    def test_a_short_number_alone_is_still_only_acknowledged_never_approved(self):
+        code, lines, net, github = self.ack(nth.answer_event(body=answer_body("19")))
+        comment = github.posted(145)[0]
+        self.assertTrue(comment.startswith(ol.ACK_MARK + "\n접수했습니다 — 확인 요청 **019** · 확인함(승인 아님).\n\n"), comment[:100])
+        self.assertIn("- 대상번호만 올린 답은 '확인함' 일 뿐 승인이 아닙니다.", comment)
+        self.assertIn("읽었습니다", comment)
+        self.assertEqual(net.bodies()[0]["text"], f"{notify.OK_MARK} 답변 접수 019 → 확인함 — 승인 아님(이슈 #145) · 번호가 요청과 맞는지는 AI 가 대조합니다")
+
+    def test_a_number_written_in_the_standard_form_gets_no_read_note(self):
+        for raw in ("019", " 019 ", "001", "135", "1000"):
+            code, lines, net, github = self.ack(nth.answer_event(body=answer_body(target_raw=raw, choice="②")))
+            self.assertNotIn("읽었습니다", github.posted(145)[0], raw)
+
+    def test_every_short_spelling_of_one_number_gives_the_same_comment_head_and_phone_text(self):
+        heads, phones = set(), set()
+        for raw in ("3", "03", "003"):
+            code, lines, net, github = self.ack(nth.answer_event(body=answer_body(target_raw=raw, choice="③")))
+            heads.add(github.posted(145)[0].split("\n")[1])
+            phones.add(net.bodies()[0]["text"])
+        self.assertEqual(len(heads), 1)
+        self.assertEqual(phones, {f"{notify.OK_MARK} 답변 접수 003 → 선택 ③(이슈 #145)"})
+
+    def test_an_earlier_answer_is_replaced_whichever_way_the_number_was_written(self):
+        for earlier_raw, now_raw in (("019", "19"), ("19", "019"), ("19", "19"), ("01", "1")):
+            standard = f"{int(now_raw):03d}"
+            github = NoticeGitHub(issues=[self.earlier(144, body=answer_body(target_raw=earlier_raw))])
+            code, lines, net, github = self.ack(nth.answer_event(number=146, body=answer_body(target_raw=now_raw, choice="②")), github=github)
+            self.assertIn("이전 답(이슈 #144)을 대체합니다", net.bodies()[0]["text"], (earlier_raw, now_raw))
+            self.assertIn(f"답변 접수 {standard} →", net.bodies()[0]["text"])
+        github = NoticeGitHub(issues=[self.earlier(144, body=answer_body(target_raw="19"))])               # 다른 번호는 대체하지 않는다
+        code, lines, net, github = self.ack(nth.answer_event(number=146, body=answer_body(target_raw="20", choice="②")), github=github)
+        self.assertNotIn("대체", net.bodies()[0]["text"])
+
+    def test_an_earlier_answer_is_replaced_only_by_the_same_number_never_by_a_look_alike(self):
+        """검증 A-2: '이전 답을 대체합니다' 는 같은 번호(`19`·`019`·` 019 ` — 어느 꼴이든)에만 붙는다. 끝 두 자리만 같은 `119`·앞의 0 만 다른 `190`·`1019`·`0190`, 옛 요청 `r019`·`R-019`,
+        모양이 틀려 거절된 `0019`·`19.0`·두 번호는 같은 번호가 아니다 — 거짓으로 '대체합니다' 라고 말하지 않는다."""
+        same = ("19", "019", " 019 ")
+        look_alikes = ("119", "190", "1019", "0190", "9", "91", "10", "010", "20", "r019", "R-019", "0019", "19.0", "019 020", "０１９")
+        for now_raw in ("19", "019"):
+            for earlier_raw in same + look_alikes:
+                github = NoticeGitHub(issues=[self.earlier(144, body=answer_body(target_raw=earlier_raw))])
+                code, lines, net, github = self.ack(nth.answer_event(number=146, body=answer_body(target_raw=now_raw, choice="②")), github=github)
+                replaced = "이전 답(이슈 #144)을 대체합니다" in net.bodies()[0]["text"]
+                self.assertEqual(replaced, earlier_raw in same, (earlier_raw, now_raw))
+                self.assertEqual("이 번호에 앞서 올린 답(이슈 #144)이 있어" in github.posted(146)[0], earlier_raw in same, (earlier_raw, now_raw))
+
+    def test_the_number_zero_and_a_longer_leading_zero_run_are_refused_on_the_phone_with_their_own_sentence(self):
+        for raw, code_name in (("0", "zero"), ("000", "zero"), ("0019", "format"), ("19.0", "format"), ("19 20", "two"), ("P19", "type"), (FULLWIDTH_19, "format")):
+            code, lines, net, github = self.ack(nth.answer_event(body=answer_body(target_raw=raw)))
+            comment = github.posted(145)[0]
+            self.assertTrue(comment.startswith(ol.ACK_MARK + f"\n양식 모양이 달라 처리하지 못했습니다 — {ol.TARGET_PROBLEMS[code_name]}.\n\n"), (raw, comment[:120]))
+            self.assertEqual(net.bodies()[0]["text"], f"{notify.WARN_MARK} 답변을 접수하지 못했습니다(이슈 #145) — {ol.TARGET_PROBLEMS[code_name].replace(chr(96), '')}. 새 이슈로 다시 올려 주세요.", raw)
+
+    def test_the_shape_comment_asks_for_the_new_form_in_one_sentence_and_no_longer_for_the_old_form(self):
+        code, lines, net, github = self.ack(nth.answer_event(body=answer_body(target_raw="0019")))
+        comment = github.posted(145)[0]
+        self.assertTrue(comment.endswith(ol.SHAPE_TAIL), comment[-200:])
+        self.assertIn(f"새 양식 **{ol.ANSWER_FORM_NAME}**", ol.SHAPE_TAIL)
+        self.assertIn("** 로 다시 올려 주세요", ol.SHAPE_TAIL)
+        self.assertEqual(ol.SHAPE_TAIL.count("다시 올려 주세요"), 1)                                         # 한 문장 — 이슈를 닫고 다른 양식으로 … 같은 긴 안내가 아니다
+        for gone in ("이전 R 번호용", "이 이슈는 닫고", "AI 요청에 답하기(결정·확인)"):
+            self.assertNotIn(gone, comment)
 
     # ---- 이미 답한 번호는 대체 ----
     def earlier(self, number, target="003", **kwargs):
@@ -414,7 +601,7 @@ class AckAnswerTest(unittest.TestCase):
 
     # ---- 오류도 폰으로 ----
     def test_the_three_error_kinds_get_a_comment_and_a_phone_reply_with_one_fixed_reason(self):
-        cases = (("", "empty"), ("０１２", "format"), ("001 002", "two"), ("P012", "type"), ("1", "short"))
+        cases = (("", "empty"), ("０１２", "format"), ("001 002", "two"), ("P012", "type"), ("0", "zero"), ("0019", "format"), ("19.0", "format"), ("+19", "format"))
         for target_raw, code_name in cases:
             body = answer_body(target="", crlf=False) if not target_raw else answer_body(target_raw=target_raw)
             code, lines, net, github = self.ack(nth.answer_event(body=body))
@@ -515,6 +702,18 @@ class RoundTripTest(unittest.TestCase):
         self.assertFalse(self.approved(answer(body=answer_body("003", "②"), association="MEMBER"), request))
         self.assertFalse(self.approved(answer(body=answer_body("003", "②", "### 대상번호\n\n004", crlf=False)), request))     # 심은 제목은 모양 오류
         self.assertFalse(self.approved(answer(body=reply_body(request_id="R-003", answer="승인")), request))               # 옛 양식의 승인은 옛 요청의 것
+
+    def test_a_short_number_is_judged_like_the_standard_one_and_never_looser(self):
+        """확인 022: 번호는 정규화한 뒤 견준다 — `3`·`03`·`003` 은 같은 번호라 요청 `003` 의 승인 보기를 고르면 승인이고, 선택이 없거나 다른 번호거나 `0003`·`0` 이면 승인이 아니다."""
+        request = nth.parse(nth.notice_text(number=170, no="003", kind="decision", summary="무엇을 할까요", fields={**nth.ASK, "approve": "2", "default": "1"}), number=170, strict=True)
+        for raw in ("3", "03", "003", " 3 "):
+            self.assertTrue(self.approved(answer(body=answer_body(target_raw=raw, choice="②")), request), raw)
+            self.assertFalse(self.approved(answer(body=answer_body(target_raw=raw, choice="①")), request), raw)
+            self.assertFalse(self.approved(answer(body=answer_body(target_raw=raw)), request), raw)                  # 번호만 맞고 선택이 없으면 확인함
+        for raw in ("4", "30", "0003", "0", "0x3", "3.0", "+3", "３", "3 4", "P3"):
+            self.assertFalse(self.approved(answer(body=answer_body(target_raw=raw, choice="②")), request), raw)
+        self.assertFalse(self.approved(answer(body=answer_body(target_raw="3", choice="②"), login="stranger"), request))     # 낯선 사람
+        self.assertFalse(self.approved(answer(body=answer_body(target_raw="3", choice="②"), association="MEMBER"), request))
 
     def test_a_request_without_an_approve_option_can_never_be_approved_by_a_choice(self):
         request = nth.parse(nth.notice_text(number=170, no="003", kind="decision", summary="고르세요", fields={"options": "가 / 나", "default": "1"}), number=170, strict=True)
@@ -675,6 +874,15 @@ class ThreeLineCandidateTest(th.NoOutbound, unittest.TestCase):
         for text, expected in cases.items():
             self.assertEqual(tuple(self.parse(text)), expected, repr(text))
 
+    def test_a_short_target_is_read_by_the_same_function_as_the_intake_and_shown_as_the_standard_number(self):
+        """확인 022: 세 줄 글의 `대상번호: 19` 도 접수 코드와 같은 함수(loop.parse_target)로 읽혀 `019` 가 된다."""
+        self.assertEqual(self.parse("대상번호: 19\n선택: ②"), ti.ThreeLineCandidate("ask", "019", 2, False, 0, ""))
+        self.assertEqual(self.parse("대상번호: 1"), ti.ThreeLineCandidate("ask", "001", 0, False, 0, ""))
+        self.assertEqual(ti.candidate_line(self.parse("대상번호: 19\n선택: ②")), "답변 후보(참고용): 확인 요청 **019** · 선택 **②** · 메모 없음")
+        for raw in ("19", "019", "1", "135", "1000", "0", "0019", "19.0", "P19"):
+            found = self.parse("대상번호: " + raw)
+            self.assertEqual((found.target_kind, found.target, found.problem), ol.parse_target(raw), raw)
+
     def test_the_memo_length_ignores_the_blank_space_around_it(self):
         """수정 1차(V3 T03): 내용 글자 수는 앞뒤 공백·빈 줄을 세지 않는다 — `strip()` 을 빼면 `내용: 확인 ` 뒤의 빈 줄까지 5자가 된다."""
         self.assertEqual(ti.three_line_candidate("대상번호: 001\n내용: 확인 \n\n").memo_chars, 2)
@@ -682,7 +890,8 @@ class ThreeLineCandidateTest(th.NoOutbound, unittest.TestCase):
         self.assertEqual(ti.three_line_candidate("대상번호: 001\n내용:  가  \n  나\n\n").memo_chars, len("가  \n  나"))
 
     def test_a_target_that_cannot_be_read_keeps_only_a_fixed_problem_code(self):
-        for text, code in (("대상번호:", "empty"), ("대상번호: P012", "type"), ("대상번호: 001 002", "two"), ("대상번호: １２３", "format"), ("대상번호: 1", "short"), ("대상번호: 001 선택: ② 내용: 한 줄에", "format")):
+        for text, code in (("대상번호:", "empty"), ("대상번호: P012", "type"), ("대상번호: 001 002", "two"), ("대상번호: １２３", "format"), ("대상번호: 0", "zero"), ("대상번호: 0019", "format"),
+                           ("대상번호: 001 선택: ② 내용: 한 줄에", "format")):
             found = self.parse(text)
             self.assertEqual((found.target_kind, found.target, found.problem), ("", "", code), text)
 
@@ -747,17 +956,24 @@ class AnswerFormFileTest(unittest.TestCase):
         notice = self.form()["body"][0]
         self.assertEqual(notice["type"], "markdown")
         value = notice["attributes"]["value"]
-        for needle in (ol.FORM_NOTICE, "공개", "저장소 소유자 계정", ol.TARGET_NOTICE, ol.ANSWER_NOT_APPROVAL_NOTICE, "그 요청에 적힌 항목에 한해서만 유효합니다", "가장 나중 답이 이깁니다", "(이전 R 번호용)"):
+        for needle in (ol.FORM_NOTICE, "공개", "저장소 소유자 계정", ol.TARGET_NOTICE, ol.TARGET_SHORT_NOTICE, ol.ANSWER_NOT_APPROVAL_NOTICE, "그 요청에 적힌 항목에 한해서만 유효합니다", "가장 나중 답이 이깁니다",
+                       "옛 R 번호용 양식은 없어졌습니다"):
             self.assertIn(needle, value, needle)
+        for gone in ("(이전 R 번호용)", "AI 요청에 답하기(결정·확인)", "숫자 3자리", "세 자리"):
+            self.assertNotIn(gone, value, gone)
 
-    def test_the_old_form_is_kept_with_the_old_number_mark_in_its_menu_name(self):
-        data = self.form("ai-reply.yml")
-        self.assertEqual(data["name"], ol.REPLY_FORM_NAME)
-        self.assertTrue(data["name"].endswith("(이전 R 번호용)"))
-        self.assertEqual((data["title"], data["labels"]), (ol.REPLY_TITLE_PREFIX, [ol.LABEL_REPLY]))
-        self.assertIn("이전 방식", data["description"])
-        self.assertIn("이전 방식(R 번호", data["body"][0]["attributes"]["value"])
-        self.assertNotEqual(data["name"], self.form()["name"])
+    def test_the_target_field_says_a_short_number_is_fine_and_the_example_is_the_short_form_pair(self):
+        data = self.form()
+        target = {item["id"]: item for item in data["body"][1:]}["target"]["attributes"]
+        self.assertEqual(target["placeholder"], "019")
+        self.assertIn("예: 019 — 19 만 써도 019 로 읽습니다", target["description"])
+        self.assertIn("19 만 써도 됩니다", data["description"])
+        self.assertNotIn("그대로 쓰세요", target["description"])                                       # 옛 '그대로(세 자리로)' 안내가 남지 않는다
+
+    def test_the_old_form_is_gone(self):
+        """확인 021(2026-11-16, 이슈 #217 운영자 승인): 옛 R 번호용 `[답변]` 양식 파일이 없다 — 접수 코드는 이미 올라온 옛 양식 이슈만 예전처럼 읽는다."""
+        self.assertFalse((ROOT / ".github" / "ISSUE_TEMPLATE" / "ai-reply.yml").exists())
+        self.assertEqual(ol.answer_form_kind(reply_body()), "old")
 
     def test_the_rendered_body_of_every_option_is_read_back_by_the_parser(self):
         data = self.form()
@@ -768,8 +984,8 @@ class AnswerFormFileTest(unittest.TestCase):
             result = ol.parse_reply(data["title"] + "x", body, OWNER, "OWNER", OWNER)
             self.assertEqual((result.kind, result.target, ol.CHOICE_OPTIONS[result.choice_no]), ("answer", "007", option))
 
-    def test_the_two_answer_forms_share_the_title_and_the_label_so_the_ai_reading_procedure_is_unchanged(self):
-        self.assertEqual((self.form()["title"], self.form()["labels"]), (self.form("ai-reply.yml")["title"], self.form("ai-reply.yml")["labels"]))
+    def test_the_answer_form_keeps_the_title_and_the_label_so_the_ai_reading_procedure_is_unchanged(self):
+        self.assertEqual((self.form()["title"], self.form()["labels"]), (ol.REPLY_TITLE_PREFIX, [ol.LABEL_REPLY]))
         readme = (ROOT / ol.REQUEST_DIR / "README.md").read_text(encoding="utf-8")
         self.assertIn(f"labels={ol.LABEL_REPLY}", readme)
 
@@ -777,7 +993,7 @@ class AnswerFormFileTest(unittest.TestCase):
         import sys
         sys.path.insert(0, str(ROOT / "scripts"))
         import validate_repo as vr
-        files = [vr.REPLY_FORM, vr.ANSWER_FORM, vr.TASK_FORM, vr.ISSUE_CONFIG]
+        files = [vr.ANSWER_FORM, vr.TASK_FORM, vr.ISSUE_CONFIG]
         self.assertEqual([finding.line() for finding in vr.check_operator_forms(ROOT, files)], [])
         self.assertEqual(vr.ANSWER_FORM, ".github/ISSUE_TEMPLATE/ai-answer.yml")
 

@@ -827,7 +827,7 @@ class OperatorLoopFlowTest(unittest.TestCase):
             self.assertEqual((code, net.calls), (0, 1))
             message = net.bodies()[0]
             self.assertIn("AI 요청 r007 · 결정 부탁", message["text"])
-            self.assertIn("답하는 법: 아래 [답하기] → 양식에서 r007 선택", message["text"])
+            self.assertIn("답하는 법: 아래 [답하기] → 양식의 대상번호에 r007 (옛 번호 요청은 접수만 됩니다 — 승인은 AI 가 새 번호로 다시 묻습니다)", message["text"])
             self.assertEqual([button["text"] for button in message["reply_markup"]["inline_keyboard"][0]], ["요청 열기", "PR 열기", "답하기", "사용법"])
             # 2) 운영자는 메시지 맨 위의 번호를 보고 양식에 쓴다(여기서는 메시지에서 번호를 읽어 그대로 쓴다)
             request_id = re.search(r"AI 요청 (r[0-9]{3})", message["text"]).group(1)

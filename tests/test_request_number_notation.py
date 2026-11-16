@@ -329,9 +329,9 @@ class TelegramTextTest(unittest.TestCase):
     def test_the_how_to_answer_line_names_the_displayed_number(self):
         text = notify.format_ai_request("R-092", "decision", "표기 고르기", "A 또는 B", urgency="급함", pr=5, more=2)
         self.assertEqual(text, "\n".join([f"{BELL} <b>AI 요청 r092 · 결정 부탁</b> {SIREN} 급함", "표기 고르기", "A 또는 B", "관련 PR: #5", "",
-                                          "답하는 법: 아래 [답하기] → 양식에서 r092 선택", "", "… 외 2건 (저장소의 인수인계/요청함/ 폴더에서 확인하세요)"]))
+                                          "답하는 법: 아래 [답하기] → 양식의 대상번호에 r092 (옛 번호 요청은 접수만 됩니다 — 승인은 AI 가 새 번호로 다시 묻습니다)", "", "… 외 2건 (저장소의 인수인계/요청함/ 폴더에서 확인하세요)"]))
         confirm = notify.format_ai_request("R-007", "confirm", "t", "s")
-        self.assertEqual(confirm.splitlines()[-1], "답하는 법: 아래 [답하기] → 양식에서 r007 선택")
+        self.assertEqual(confirm.splitlines()[-1], "답하는 법: 아래 [답하기] → 양식의 대상번호에 r007 (옛 번호 요청은 접수만 됩니다 — 승인은 AI 가 새 번호로 다시 묻습니다)")
         for kind in ("merge", "run", "info"):
             self.assertNotIn("답하는 법", notify.format_ai_request("R-007", kind, "t", "s"))
 
@@ -505,7 +505,7 @@ class RealFlowTest(unittest.TestCase):
         lines, message = self.push()
         text = message["text"]
         self.assertEqual(text.splitlines()[0], f"{BELL} <b>AI 요청 r090 · 결정 부탁</b> {SIREN} 급함")
-        self.assertEqual(text.splitlines()[-1], "답하는 법: 아래 [답하기] → 양식에서 r090 선택")
+        self.assertEqual(text.splitlines()[-1], "답하는 법: 아래 [답하기] → 양식의 대상번호에 r090 (옛 번호 요청은 접수만 됩니다 — 승인은 AI 가 새 번호로 다시 묻습니다)")
         self.assertIsNone(re.search(r"R-\d", text), text)
         self.assertEqual([button["text"] for button in message["reply_markup"]["inline_keyboard"][0]], ["요청 열기", "PR 열기", "답하기", "사용법"])
         for button in message["reply_markup"]["inline_keyboard"][0]:
@@ -630,16 +630,14 @@ class FormAndDocsTest(unittest.TestCase):
     def form(self, name):
         return yaml.safe_load((ROOT / ".github" / "ISSUE_TEMPLATE" / name).read_text(encoding="utf-8"))
 
-    def test_the_reply_form_teaches_the_displayed_form(self):
-        data = self.form("ai-reply.yml")
-        field = {item["id"]: item for item in data["body"][1:]}["request_id"]["attributes"]
-        self.assertEqual(field["placeholder"], "r001")
-        self.assertEqual(field["label"], "요청 번호")
-        self.assertIn("r001", field["description"])
-        notice = data["body"][0]["attributes"]["value"]
-        self.assertIn("텔레그램 메시지 맨 위의 `r001` 같은 번호입니다", notice)
-        self.assertIn(ol.REQUEST_ID_NOTICE, notice)
-        self.assertIn("r001 같은 번호", data["description"])
+    def test_the_answer_form_teaches_the_displayed_example_and_the_old_request_number_form_is_gone(self):
+        """옛 R 번호 양식(요청 번호 칸 `r001`)은 없앴다(확인 021, 2026-11-16) — 새 양식의 대상번호 칸이 보이는 예시(`019`)를 가르치고 옛 `R-001` 꼴로 되돌아가지 않는다."""
+        self.assertFalse((ROOT / ".github" / "ISSUE_TEMPLATE" / "ai-reply.yml").exists())
+        data = self.form("ai-answer.yml")
+        field = {item["id"]: item for item in data["body"][1:]}["target"]["attributes"]
+        self.assertEqual(field["placeholder"], "019")
+        self.assertEqual(field["label"], "대상번호")
+        self.assertIn("019", field["description"])
         self.assertNotRegex(field["placeholder"], r"R-\d")
 
     def test_the_task_form_notice_uses_the_same_phrase_as_the_comment_and_the_guide(self):
@@ -669,7 +667,7 @@ class FormAndDocsTest(unittest.TestCase):
         self.assertIn("`🔔 AI 요청 r001 · 병합 부탁`", telegram_setup)
 
     def test_the_form_rule_FORM_1_checks_the_displayed_example(self):
-        files = [vr.REPLY_FORM, vr.TASK_FORM, vr.ISSUE_CONFIG]
+        files = [vr.ANSWER_FORM, vr.TASK_FORM, vr.ISSUE_CONFIG]
         self.assertEqual([finding.line() for finding in vr.check_operator_forms(ROOT, files)], [])
         self.assertEqual(ol.REQUEST_ID_EXAMPLE, "r001")
         self.assertEqual(json.dumps(ol.REQUEST_ID_NOTICE, ensure_ascii=False), '"텔레그램 메시지 맨 위의 `r001` 같은 번호"')

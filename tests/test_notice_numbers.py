@@ -440,7 +440,8 @@ class AnswerMessageTest(unittest.TestCase):
 
     def test_an_old_request_number_is_shown_in_the_phone_form_and_cannot_be_approved_here(self):
         text = notify.format_answer_received("R-149", 2, 146)
-        self.assertEqual(text, f"{notify.OK_MARK} 답변 접수 r149 → 선택 ②(이슈 #146) · 옛 R 번호 요청은 새 양식으로 승인되지 않습니다(승인은 이전 R 번호용 양식으로)")
+        self.assertEqual(text, f"{notify.OK_MARK} 답변 접수 r149 → 선택 ②(이슈 #146) · 옛 R 번호 요청은 새 양식으로 승인되지 않습니다(옛 R 번호용 양식은 없어졌습니다 — AI 가 새 번호로 다시 묻습니다)")
+        self.assertNotIn("이전 R 번호용 양식으로", text)
         self.assertNotIn("R-149", text)
 
     def test_bad_values_are_refused(self):
@@ -466,8 +467,8 @@ class AnswerMessageTest(unittest.TestCase):
         self.assertIn("r149", notify.format_answer_received("R-149", 2, 5))
 
     def test_the_error_reply_names_the_issue_and_one_fixed_reason(self):
-        text = notify.format_answer_error(145, "`대상번호`가 필요합니다(텔레그램 확인 요청 맨 위의 숫자 3자리, 예: 001)")
-        self.assertEqual(text, f"{notify.WARN_MARK} 답변을 접수하지 못했습니다(이슈 #145) — 대상번호가 필요합니다(텔레그램 확인 요청 맨 위의 숫자 3자리, 예: 001). 새 이슈로 다시 올려 주세요.")
+        text = notify.format_answer_error(145, "`대상번호`가 필요합니다(텔레그램 확인 요청 맨 위의 숫자, 예: 019 — 19 만 써도 됩니다)")
+        self.assertEqual(text, f"{notify.WARN_MARK} 답변을 접수하지 못했습니다(이슈 #145) — 대상번호가 필요합니다(텔레그램 확인 요청 맨 위의 숫자, 예: 019 — 19 만 써도 됩니다). 새 이슈로 다시 올려 주세요.")
         self.assertNotIn("`", text)
         for bad in ("", "   ", None, chr(0x200B)):
             with self.assertRaises(ValueError, msg=repr(bad)):

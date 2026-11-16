@@ -598,14 +598,15 @@ class DocsAgreeWithCodeTest(unittest.TestCase):
     def test_the_documents_name_the_new_rules_where_the_operator_and_the_ai_look(self):
         security = self.read("docs/SECURITY_GUARDRAILS.md")
         row = next(line for line in security.splitlines() if line.startswith("| G-S9 |"))
-        for needle in ("대상번호", "`approve`", "확인함", "`ai-answer.yml`", "폰으로도 회신"):
+        for needle in ("대상번호", "`approve`", "확인함", "`ai-answer.yml`", "폰으로도 회신", "정규화한 번호", "`19` → `019`", "`0019`"):         # 2026-11-16 확인 022: 대상번호는 앞 0 채움으로 정규화한 뒤 견준다
             self.assertIn(needle, row, needle)
         req = next(line for line in security.splitlines() if line.startswith("| REQ-1 |"))
         for needle in ("`no`", "`pr_title`", "같은 알림 번호의 파일이 둘이면 오류", "`NOTICE_NO_REQUIRED_FROM_R`", "`default`≠`approve`", "`P0012`"):
             self.assertIn(needle, req, needle)
         form = next(line for line in security.splitlines() if line.startswith("| FORM-1 |"))
-        for needle in ("`ai-answer.yml`", "(이전 R 번호용)", "`선택 안 함`"):
+        for needle in ("`ai-answer.yml`", "`ai-task.yml`", "`선택 안 함`", "`19` 만 써도 `019` 로 읽습니다", "2026-11-16 확인 021"):          # 옛 R 번호용 양식은 없앴고 FORM-1 은 둘(답변·작업 요청)과 config 를 본다
             self.assertIn(needle, form, needle)
+        self.assertNotIn("ai-reply", form)
         for rel in ("docs/AGENT_RUNBOOK.md", ol.REQUEST_DIR + "/README.md", "인수인계/도구/README.md"):
             self.assertIn("next_notice_no.py", self.read(rel), rel)
         self.assertIn("알림 번호(TG-STD", self.read("인수인계/작업내용.md"))
