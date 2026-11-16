@@ -34,6 +34,8 @@ def number_of(request_number):
 
 GATE_TARGET_MESSAGE ="병합 부탁에는 마지막 인자로 소유자/저장소:브랜치 가 필요하다(그 브랜치의 자동 검사가 끝나 초록인지 확인한다)"
 
+NO_CI_REPOS = {"shine88pc/shine88pc.github.io"}     # 자동 검사(워크플로)가 없는 저장소(루트 홈) — 이 저장소만 검사 관문을 면제한다(2026-11-09, 요청 본문에 사람이 증거를 적는다)
+
 
 def default_gate(gate_target, workspace):
     """병합 브랜치 머리 커밋의 자동 검사가 모두 끝나 초록인지 읽는다. 통과하면 (머리 커밋 전체 해시, 실행 목록)을 돌려주고, 아니면 이유를 말하며 멈춘다."""
@@ -44,7 +46,13 @@ def default_gate(gate_target, workspace):
     if not ls:
         sys.exit(f"원격에 브랜치가 없다: {gate_target}")
     head = ls[0]
-    runs = wait_ci.runs_for(gate_repo, gate_branch, head[:12])
+    try:
+        runs = wait_ci.runs_for(gate_repo, gate_branch, head[:12])
+    except Exception:       # noqa: BLE001 — 검사 없는 저장소는 실행 목록 읽기가 실패할 수 있다
+        runs = []
+    if not runs and gate_repo in NO_CI_REPOS:
+        print(f"검사 없는 저장소({gate_repo}) — 자동 검사(워크플로)가 없어 관문을 면제한다: 가지 머리 {head[:8]} (증거는 요청 본문에 사람이 적는다)")
+        return head, []
     if not runs:
         sys.exit(f"머리 커밋 {head[:8]} 의 자동 검사 실행이 목록에 없다 — 아직 시작 전이거나 검사가 안 도는 브랜치다. 검사가 끝나 초록인 것을 확인한 뒤에 다시 실행한다")
     bad = [r for r in runs if r["status"] != "completed" or not wait_ci.run_ok(r)]      # 봇 PR 의 알려진 '승인 대기' 실행(action_required)은 초록으로 센다(wait_ci.run_ok)
@@ -62,6 +70,8 @@ def check_draft(text, number, pending=(), folder=None, skip=""):
         sys.exit("채우지 않은 자리표시자: " + ", ".join(left))
     if re.search(r"https?://", text):
         sys.exit("요청 파일에 링크 주소(http…)를 쓰지 않는다(운영자 요청 2026-11-02): " + re.search(r"https?://\S+", text).group(0)[:80])
+    if "~" in text:   # 2026-11-09: 마크다운(GFM)이 물결표 한 쌍을 취소선으로 처리해, 물결표로 범위를 쓴 두 곳(15와 20 사이·30과 40 사이)이 '1520·3040' 처럼 숫자가 붙어 보였다(운영자 지적 — 확인 요청 006)
+        sys.exit("요청 파일에 물결표(~)를 쓰지 않는다 — 마크다운이 두 개를 취소선으로 처리해 숫자가 붙어 보인다(2026-11-09 운영자 지적). 범위는 '–'(en dash)나 '에서'로 적는다: " + text[max(0, text.index("~") - 12): text.index("~") + 12].replace("\n", " "))
     fields = nt.read_front(text)
     if fields.get("id") and fields["id"] != number:
         sys.exit(f"앞머리 id({fields['id']}) 가 파일 이름의 번호({number}) 와 다르다 — 초안을 고치거나 번호를 확인한다")

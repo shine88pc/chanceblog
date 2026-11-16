@@ -194,7 +194,7 @@ def main():
         if time.time() - started > limit_min * 60:
             print(f"{limit_min:g}분 안에 끝나지 않음", flush=True)
             return 2
-        time.sleep(45)
+        time.sleep(75)
 
 
 if __name__ == "__main__":

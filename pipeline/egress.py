@@ -68,7 +68,7 @@ _G_ALLOWLIST = "allowlist 에서는 막힘(source_policy.egress_gate → check_u
 _G_PHOTO = "막는 장치 없음 — allowlist 에서도 열려 있다. 외부 사진 경로이고 사진을 자동으로 쓸지는 운영자 결정 대기(공개 글 49편 사용 중)라 이 일이 끄지 않는다"
 _G_OPS = "막는 장치 없음(두 모드 모두 열림) — 운영 호스트(OPS_RULES)로만 가는 호출이라 check_url 에 연결하지 않았다. 호스트·경로는 OPS_RULES 가 문서로 정한 범위"
 _G_SDK = "막는 장치 없음(두 모드 모두 열림) — SDK 가 호스트를 정해 직접 연결해 관문을 지날 수 없다. allowlist 는 SDK 입력(프롬프트)에서 외부 본문을 뺀다(prompt_inputs)"
-_G_TOOL = "막는 장치 없음 — 사람이 실행하는 도구(워크플로·예약이 부르지 않는다)라 두 모드 모두 해당 없음"
+_G_TOOL = "막는 장치 없음 — 사람이나 AI 세션이 직접 실행하는 도구(저장소의 워크플로·예약이 부르지 않는다 — AI 세션 안의 크론 프롬프트는 일부를 부른다)라 두 모드 모두 해당 없음"
 _G_GIT = "막는 장치 없음 — git 이 자기 저장소 원격(origin)과 주고받는다. 일부는 로컬 읽기뿐. 하위 명령은 부르는 쪽이 정하고 이 시험은 보지 않는다"
 _G_SELF = "막는 장치 없음 — 이 관문 모듈이 검사된 opener 를 만드는 곳이다. 만들어진 opener 는 첫 요청과 모든 리다이렉트를 check_url 로 다시 판정한다"
 _G_LOCAL = "해당 없음 — 네트워크에 닿지 않는 동적 모양(이름으로 칸을 읽거나 저장소 안의 파일을 불러옴)을 사람이 확인해 등록했다"
@@ -136,12 +136,26 @@ EGRESS_EXCEPTIONS = (
     EgressException("인수인계/도구/work/scratch/run_annotations.py", "api", "운영 도구: GitHub 공개 REST 로 검사 주석 읽기(자기 저장소, 사람이 실행)", _G_TOOL, ("net:",), 1),
     EgressException("인수인계/도구/work/scratch/run_steps_times.py", "api", "운영 도구: GitHub 공개 REST 로 단계 시간 읽기(자기 저장소, 사람이 실행)", _G_TOOL, ("net:",), 1),
     EgressException("인수인계/도구/work/scratch/runs_by_sha.py", "<module>", "운영 도구: GitHub 공개 REST 로 실행 목록 읽기(자기 저장소, 사람이 실행)", _G_TOOL, ("net:",), 1),
-    EgressException("인수인계/도구/work/scratch/wait_ci.py", "fetch", "운영 도구: 검사 끝날 때까지 GitHub 공개 웹·REST 읽기(자기 저장소, 사람이 실행)", _G_TOOL, ("net:",), 1),
+    EgressException("인수인계/도구/work/scratch/wait_ci.py", "fetch", "운영 도구: 검사 끝날 때까지 GitHub 공개 웹·REST 읽기(저장소는 첫 인자로 주며 보통 자기 저장소 — 인자로 준 다른 공개 저장소도 읽는다, 사람이나 AI 세션이 실행)", _G_TOOL, ("net:",), 1),
     EgressException("인수인계/도구/work/scratch/wait_ci_multi.py", "<module>", "운영 도구: 여러 가지의 검사 상태를 GitHub 공개 REST 로 읽기(자기 저장소, 사람이 실행)", _G_TOOL, ("net:",), 1),
     EgressException("인수인계/도구/work/scratch/watch_desktop.py", "fetch", "운영 도구: 데스크톱 저장소 공개 웹 페이지 읽기(사람이 실행)", _G_TOOL, ("net:",), 1),
     EgressException("인수인계/도구/work/scratch/watch_desktop.py", "ls_remote", "운영 도구: 데스크톱 저장소 git ls-remote(공개 원격, 사람이 실행)", _G_TOOL, ("proc:",), 1),
     EgressException("인수인계/도구/work/scratch/watch_light.py", "fetch", "운영 도구: 블로그 저장소 공개 웹 페이지 읽기(사람이 실행)", _G_TOOL, ("net:",), 1),
     EgressException("인수인계/도구/work/scratch/watch_light.py", "ls_remote", "운영 도구: 블로그 저장소 git ls-remote(공개 원격, 사람이 실행)", _G_TOOL, ("proc:",), 1),
+    # -- 인수인계/도구 새 PC 이관 도구(HANDOFF2) — 모두 사람이나 AI 세션이 직접 실행하는 운영 도구이고 저장소의 워크플로·예약이 부르지 않는다 -----------------------------------------------------------
+    EgressException("인수인계/도구/work/make_merged_notice.py", "verify_with", "운영 도구: 병합완료 확인 요청 파일을 쓰기 전에 요청 가지 작업 폴더(또는 `--verify-with` 로 준 폴더)의 저장소 코드(`pipeline/operator_loop.py`)를 별도 파이썬 프로세스로 불러 실행해 파일을 엄격하게 읽어 본다(고정 글자 스크립트를 `-c` 로 실행 — 그 폴더의 코드가 그대로 실행되니 믿는 작업 폴더만 줄 것, 이 도구 자신은 네트워크를 쓰지 않는다)", _G_TOOL, ("proc:",), 1),
+    EgressException("인수인계/도구/work/scratch/merge_guard.py", "git", "운영 도구: 병합 가지가 병합 후보 등급인지 판정만 하는 검사 전용 도구의 git 읽기 도우미(diff·log·rev-list 등 읽기 하위 명령 — 푸시·병합 기능 없음)", _G_TOOL, ("proc:",), 1),
+    EgressException("인수인계/도구/work/scratch/run_times.py", "<module>", "운영 도구: 워크플로의 최근 실행 시각을 공개 Actions 웹 페이지에서 읽기(저장소는 첫 인자로 고르며 기본은 자기 저장소 — 인자로 준 다른 공개 저장소도 읽는다, 사람이나 AI 세션이 실행)", _G_TOOL, ("net:",), 1),
+    EgressException("인수인계/도구/work/scratch/watch_issues.py", "fetch", "운영 도구: 블로그 저장소의 새 이슈를 GitHub 공개 REST 로 5분마다 읽는 감시(자기 저장소, ETag 조회, 사람이 실행)", _G_TOOL, ("net:",), 1),
+    EgressException("인수인계/도구/work/scratch/web_runs.py", "<module>", "운영 도구: 공개 Actions 웹 페이지의 실행 행 읽기(REST 한도가 바닥일 때 — 저장소는 첫 인자로 고르며 기본은 자기 저장소, 인자로 준 다른 공개 저장소도 읽는다, 사람이나 AI 세션이 실행)", _G_TOOL, ("net:",), 1),
+    EgressException("인수인계/도구/work/scratch/check_notify.py", "fetch", "운영 도구: 알림 워크플로 실행이 끝났는지 공개 Actions 웹 페이지에서 읽기(자기 저장소, REST 호출 0회, 사람이 실행)", _G_TOOL, ("net:",), 1),
+    EgressException("인수인계/도구/work/scratch/memfree.py", "<module>", "운영 도구: 여유 메모리를 읽는 도우미 — 윈도 메모리 상태 구조체를 위한 ctypes 가져오기뿐이고 네트워크에 닿지 않는다", _G_TOOL, ("lib:",), 1),
+    EgressException("인수인계/도구/work/scratch/mk_lane_merge.py", "git", "운영 도구: 작업 가지를 최신 main 위 한 커밋 병합 가지로 만드는 git 도우미(fetch 는 자기 저장소 origin, 푸시하지 않는다, 사람이 실행)", _G_TOOL, ("proc:",), 1),
+    EgressException("인수인계/도구/work/scratch/mk_lane_merge_desktop.py", "git", "운영 도구: 데스크톱 저장소의 작업 가지를 최신 main 위 한 커밋 병합 가지로 만드는 git 도우미(fetch 는 자기 저장소 origin, 푸시하지 않는다, 사람이 실행)", _G_TOOL, ("proc:",), 1),
+    EgressException("인수인계/도구/work/scratch/resume_check.py", "api", "운영 도구: 새 세션 첫 점검의 GitHub 공개 REST 읽기(열린 PR·최근 이슈 두 번, 자기 저장소, 사람이 실행)", _G_TOOL, ("net:",), 1),
+    EgressException("인수인계/도구/work/scratch/resume_check.py", "run", "운영 도구: 새 세션 첫 점검의 하위 명령 도우미 — git ls-remote(공개 원격)·git log·git status(작업 폴더 읽기)와 같은 도구 폴더의 next_notice_no.py(다음 알림 번호 읽기) 실행뿐이고 성공했을 때의 출력만 쓴다(푸시·쓰기 없음)", _G_TOOL, ("proc:",), 1),
+    EgressException("인수인계/도구/work/scratch/verify_live_counts.py", "get", "운영 도구: 병합 뒤 공개 사이트(홈·posts.json·sitemap·feed)의 숫자를 읽기(자기 Pages 사이트, 사람이 실행)", _G_TOOL, ("net:",), 1),
+    EgressException("인수인계/도구/work/scratch/verify_live_counts.py", "git", "운영 도구: 병합 뒤 확인용 git 읽기 도우미(자기 저장소 fetch·rev-parse·rev-list·log, 푸시하지 않는다, 사람이 실행)", _G_TOOL, ("proc:",), 1),
 )
 
 # 호출 목록 시험이 '관문을 거침'으로 인정하는 호출 이름(같은 함수에서 같은 주소 식으로 앞서·지배하며 문장으로 불렀을 때만 — tests/egress_scan.py 머리말). `source_policy.egress_gate` 는

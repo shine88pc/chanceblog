@@ -7,6 +7,35 @@
 
 ---
 
+## [2026-11-15] Claude – HANDOFF2: AI 작업 도구와 새 PC 시작 안내의 정본을 저장소(`인수인계/도구/work/`)로 이관 + 새 시험 + 상태 문서 낡은 문장 고침 (T2 — 새 외부 접속 등록 13건 포함, 파이프라인은 이 도구를 부르지 않음)
+
+**작업자**: Claude (구현 에이전트 — 총괄 지시서 HANDOFF2 에 따라 이 PC 의 작업 폴더·가지 `ai/claude/NO-MERGE-handoff2-wip` 에서 체크포인트 커밋만 했다 — 구현자는 푸시·PR·병합 가지를 만들지 않았고, 병합 가지 `ai/claude/M076-handoff2`(한 커밋)는 총괄이 만들었다). 기준은 블로그 main 592c298([M075] 'AI 병합' 규칙을 설명 문서와 판정 코드·자동 시험으로 저장소에 넣음).
+**대상**: Chance 블로그 — `인수인계/도구/`(README·`setup_workspace.py`·정기 현황 알림 프롬프트 v3·본보기) 와 `인수인계/도구/work/`(요청 파일·병합 부탁·병합완료 확인·병합 가지 합성·검사 읽기·감시 도구와 양식 — 새 파일 18개·수정 11개 — 합쳐 29개 파일), 새 시험 `tests/test_handoff_tools.py`(156개), `pipeline/egress.py`(외부 접속 지점 장부에 새 도구 13건 등록 + 문구 정확화), `docs/SOURCE_POLICY.md` 숫자 줄과 한 낱말, 상태 문서 4곳(`인수인계/작업내용.md`·`docs/SESSION_START.md`·`인수인계/요청함/README.md`·`docs/AGENT_RUNBOOK.md`)의 낡은 문장 고침.
+**등급**: T2(새 외부 접속 등록 13건 때문에 T3 에 가까움 — 병합 부탁에서 숨기지 않고 밝혔다). 이 도구들은 사람이나 AI 세션이 직접 실행하고 저장소의 워크플로·예약이 부르지 않는다.
+**목적**: 11-15 새 PC 로 옮길 때 도구 사본이 최신이 아니어서 일부를 처음부터 다시 만들어야 했던 일(새 세션 모의 시험 '일부만 가능'의 원인 중 하나)이 없게, 도구의 정본을 저장소로 옮기고 새 PC 에서 처음 시작하는 순서(`setup_workspace.py` + 도구 README 8절)를 정리한다.
+
+### 변경 사항
+- **인수인계/도구/work/**: `make_request.py`·`notice_tools.py` 최신 판(요청 파일 물결표 거절·루트 홈 저장소의 검사 관문 면제 포함), 새 `make_merged_notice.py`(병합완료 확인), `scratch/` 의 검사·감시·병합 가지 합성 도구(`check_notify`·`memfree`·`merge_guard`·`mk_lane_merge(_desktop)`·`resume_check`·`run_times`·`shadow_check_1115`·`shadow_table`·`verify_live_counts`·`watch_heads2.sh`·`watch_issues.py`·`web_runs` 등)와 양식 둘(`양식/merge_request_template_v2.md`·`progress_draft_template.md`). 정기 현황 알림 프롬프트 v3 와 본보기.
+- **인수인계/도구/setup_workspace.py·README**: 새 PC 에서 작업 폴더를 만드는 순서. 이미 만든 작업 폴더에서 다시 돌려도 푸시 전 요청 파일·커밋이 사라지지 않게 고쳤다(검증자가 찾은 필수 지적 — 이미 있으면 가지를 바꾸지 않고, 현재 가지를 읽기 전용으로 알리며 요청 가지가 아니면 직접 옮기는 한 줄 명령을 안내한다). README 에 PowerShell 병기·`-X utf8`·함정(`tar` 한글 파일명·zip 대안)을 더했다.
+- **tests/test_handoff_tools.py**(새 시험 156개): 새 도구의 동작(순수 함수·가짜 코드 폴더·진짜 임시 git 저장소)과 README 의 명령·문장을 못박는다.
+- **pipeline/egress.py**: 새 도구가 GitHub 의 공개 주소를 읽거나 `git ls-remote` 를 부르는 13곳(도구 11개)을 '사람이나 AI 세션이 직접 실행하는 도구'로 등록(등록 항목 62→75, 호출 지점 72→85곳·37→48개 파일·도구 `urlopen` 9→15곳)하고 이유 문장을 사실대로 고쳤다. `docs/SOURCE_POLICY.md` 7절의 숫자 줄을 같은 값으로 맞췄다.
+- **상태 문서 고침(총괄, 병합 가지)**: '도구는 저장소 사본이 최신이 아니고 이 PC 에만 있다'·'요청 가지 이름 desktop-bootstrap-merge 는 옛 이름'·'크론 지시문은 W 에만 있다' 같은 낡은 문장 13곳을 지금 사실로 고쳤다(`인수인계/작업내용.md` 26·34·36·70·118·127·139 줄, `docs/SESSION_START.md` 62 줄, `인수인계/요청함/README.md` 184 줄, `docs/AGENT_RUNBOOK.md` 128 줄). 과거 기록(WORKLOG 이전 항목·작업내용 §5)은 고치지 않았다.
+
+### 검증 증거
+- 시험: 새 시험 파일 156개(3.12·3.10), 영향 18개 모듈 3.10 에서 합계 1,163개 초록(3.12 는 PyYAML 이 없어 같은 4개 모듈이 환경 때문에 실패 — 시작점에서도 같음), `scripts/validate_repo.py` 오류 0, 병합 가지의 저장소 검사(3.10·3.12)는 푸시 뒤 초록을 확인하고 병합 부탁을 보낸다.
+- 변이 시험: 구현자의 변이 63개(+이전 라운드 73개)와 검증자가 직접 만든 64개를 모두 시험이 잡았다(생존 0 — 검증자의 마지막 지적 B6·B7 은 시험 두 줄 보강으로 닫음).
+- 독립 검증(구현자와 다른 AI): 1차 fix_required(필수 2 — 작업 폴더 설정 도구가 다시 돌릴 때 푸시 전 커밋을 지울 수 있음·새 외부 접속 등록 13건을 숨기지 않고 알림)에서 시작해 2차·3차·4차 델타까지 확인해 최종 통과(필수 0).
+- 직접 확인: 도구 전체에 `shell=True`·`os.system`·`Popen`·푸시·`gh`·`curl`·HTTP 쓰기·자격증명 0, 범위 밖 파일 변경 0, 외부 접속 장부의 개수·숫자 줄(85곳·48개 파일·75개·도구 15곳)이 문서와 일치.
+
+### 남은 이슈 / 다음 AI 주의
+- **새 외부 접속 등록 13건은 `pipeline/egress.py` 한 파일만 되돌릴 수 없다**(도구·시험·숫자 줄이 함께 묶임). 병합 부탁에 이 말을 그대로 적었다.
+- 검사 관문 면제는 자동 검사가 없는 루트 홈 저장소 한 곳뿐(실행 목록이 없거나 읽기가 실패해도 통과 — 증거는 요청 본문에 사람이 적는다)이고 블로그·앱 저장소는 면제되지 않는다는 것을 시험이 지킨다. `W/root_repo` 는 어느 도구도 만들지 않으므로 그 저장소 복제본은 직접 받아 둔다.
+- `merge_guard.py` 는 병합 가지가 AI 병합 후보 등급인지 **판정만** 하는 검사 전용 도구이고 보호 경로 8곳(`privacy.md`·`categories.md`·`robots.txt`·`posts.json`·`pipeline/ai_processor_policy.json`·`pipeline/ops_inbox_policy.json`·`pipeline/egress.py`·`scripts/validate_repo.py`)을 아직 C 등급으로 보지 않는다 — AI 병합을 켜는 변경 전에 정책 문서(`docs/AI_MERGE_POLICY.md`)와 맞춘다(시험이 이 한계를 묶고 있어 목록이 바뀌면 시험이 알려 준다).
+- 장부(`egress.py`)의 기존 항목 5개(`runs_by_sha`·`run_annotations`·`run_steps_times`·`wait_ci_multi`·`ci_web`)는 저장소를 인자로 받는데 이유 글이 아직 '자기 저장소'이고 `egress.py:126` 의 옛 주석도 '사람이 실행하는' 이다(main 에 있던 줄이라 이번엔 안 건드림).
+- 이 PC 의 CRLF 작업 폴더에서 변이 도구가 'SPEC INVALID' 로 나오는 함정과 `tar.exe` 의 한글 파일명 실패는 도구 README 6절에 적었다(zip 대안 포함).
+
+---
+
 ## [2026-11-15] Claude – MERGEPOL1: 조건부 승인형 AI 병합 정책의 규칙 문서·판정 코드·시험(꺼진 채, 어디서도 호출 안 됨) + 상태 문서 낡은 문장 고침 (T2 — 코드는 새로 들어가지만 켜는 변경은 따로)
 
 **작업자**: Claude (구현 에이전트들 — 총괄 지시서 MERGEPOL1 에 따라 이 PC 의 작업 폴더·가지 `ai/claude/NO-MERGE-mergepol1-wip` 에서 체크포인트 커밋만 했다 — 구현자는 푸시·PR·병합 가지를 만들지 않았고, 9차 체크포인트의 시험 한 곳은 총괄이 직접 고쳤다. 병합 가지 `ai/claude/M075-mergepol1`(한 커밋)은 총괄이 만들었다). 기준은 블로그 main d8043d0([M072] 새 세션 이어받기 안내 정비).
