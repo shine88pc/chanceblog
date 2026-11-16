@@ -11,6 +11,7 @@ from pathlib import Path
 import yaml
 
 import _bootstrap
+import notice_helpers as nth
 import operator_loop_helpers as oh
 from pipeline import notify
 from pipeline import operator_loop as ol
@@ -67,9 +68,15 @@ class GuideMatchesFormsTest(unittest.TestCase):
     def setUp(self):
         self.guide = text_of(GUIDE)
 
-    def test_every_answer_the_reply_form_offers_is_quoted_word_for_word(self):
-        for _short, full in ol.ANSWER_OPTIONS:
-            self.assertIn(f"`{full}`", self.guide, full)
+    def test_the_choice_the_answer_form_offers_is_explained_as_the_code_reads_it(self):
+        """3장 `선택` 칸 설명이 접수 코드의 읽기와 같다: `선택 안 함` 이 미리 선택돼 있고 ①–⑤·`2`·`2번` 은 같은 보기다
+        (옛 R 번호용 답변 양식의 답변 다섯 개는 양식과 함께 2026-11-16 확인 021 로 없어졌다)."""
+        self.assertIn(f"`{ol.CHOICE_NONE}`", self.guide)
+        for symbol in ol.CHOICE_OPTIONS[1:4]:
+            self.assertIn(symbol, self.guide, symbol)
+        for raw in ("2", "2번", "②"):
+            self.assertEqual(ol.parse_choice(raw), (2, ""), raw)
+        self.assertIn("`2`·`2번` 처럼 숫자로 써도 같은 보기로 읽습니다", self.guide)
 
     def test_every_choice_of_the_task_form_is_quoted_word_for_word(self):
         for _short, full in ol.TASK_APPROVAL_OPTIONS:
@@ -77,14 +84,17 @@ class GuideMatchesFormsTest(unittest.TestCase):
         for option in ol.TASK_URGENCY_OPTIONS:
             self.assertIn(f"`{option}`", self.guide, option)
 
-    def test_the_guide_names_both_forms_exactly_as_the_menu_shows_them(self):
-        for file in ("ai-reply.yml", "ai-task.yml"):
+    def test_the_guide_names_both_forms_exactly_as_the_menu_shows_them_and_never_sends_the_operator_to_the_deleted_one(self):
+        for file in ("ai-answer.yml", "ai-task.yml"):
             self.assertIn(f"`{form_name(file)}`", self.guide, file)
+        self.assertFalse((TEMPLATES / "ai-reply.yml").exists())                    # 옛 R 번호용 답변 양식은 2026-11-16 확인 021 로 없앴다
+        for stale in ("AI 요청에 답하기(결정·확인)", "이전 R 번호용"):                  # 없는 메뉴로 운영자를 보내지 않는다
+            self.assertNotIn(stale, self.guide, stale)
 
     def test_the_field_names_the_guide_tells_the_operator_to_fill_are_the_forms_labels(self):
-        for label in ("요청 번호", "답변", "선택", "메모"):
+        for label in ("대상번호", "선택", "내용"):
             self.assertIn(f"**{label}**", self.guide, label)
-            self.assertIn(label, dict(ol.REPLY_FIELDS).values())
+            self.assertIn(label, dict(ol.ANSWER_FIELDS).values())
         for label in ("해 주었으면 하는 일", "끝났다고 볼 기준", "긴급도", "진행 범위"):
             self.assertIn(label, self.guide, label)
             self.assertIn(label, dict(ol.TASK_FIELDS).values())
@@ -110,9 +120,12 @@ class GuideMatchesFormsTest(unittest.TestCase):
         asking = notify.format_ai_request("R-001", "decision", "제목", "요약")
         self.assertIn("답하는 법: 아래 [답하기] → 양식에서 r001 선택", asking)
         self.assertIn("`답하는 법: 아래 [답하기] → 양식에서 r001 선택`", self.guide)
-        received = notify.format_reply_received("R-001", "승인", 12)
-        self.assertEqual(received, f"{notify.OK_MARK} 답변 접수 r001 → 승인(이슈 #12)")
+        received = notify.format_answer_received("003", 2, 12)
+        self.assertEqual(received, f"{notify.OK_MARK} 답변 접수 003 → 선택 ②(이슈 #12)")
         self.assertIn(received.replace("#12", "#N"), self.guide)
+        short = notify.format_answer_received("019", 0, 12)                           # 짧게 써서 정규화된 번호도 읽은 번호(019)로 적힌다 — 확인함 문구까지 사용법과 같다
+        self.assertIn(f"{notify.OK_MARK} 답변 접수 019 → 확인함 — 승인 아님", short)
+        self.assertIn("→ 확인함 — 승인 아님", self.guide)
         task = notify.format_task_received(13, "급함", True)
         self.assertTrue(task.startswith(f"{notify.OK_MARK} 새 일 요청 접수(이슈 #13)"))
         self.assertIn(f"`{notify.OK_MARK} 새 일 요청 접수(이슈 #N)`", self.guide)
@@ -129,31 +142,40 @@ class GuideMatchesFormsTest(unittest.TestCase):
 
     def test_the_comments_and_log_lines_the_guide_quotes_exist_in_the_code(self):
         source = text_of(ROOT / "pipeline" / "operator_loop.py")
-        for phrase in ("접수했습니다 — 요청", "접수했습니다 — 새 일 요청", "양식 모양이 달라 처리하지 못했습니다", "은 AI 가 자기가 보낸 요청과 대조해 처리합니다", "AI 요청 알림: {request.id} 을 알렸습니다"):
+        for phrase in ("접수했습니다 — 요청", "접수했습니다 — 확인 요청", "접수했습니다 — 새 일 요청", "양식 모양이 달라 처리하지 못했습니다", "은 AI 가 자기가 보낸 요청과 대조해 처리합니다",
+                       "이 번호가 AI 가 보낸 요청의 번호와 맞는지는 이 접수가 알 수 없습니다", "AI 요청 알림: {request.id} 을 알렸습니다"):
             self.assertIn(phrase, source, phrase)
-        for phrase in ("접수했습니다 — 새 일 요청", "양식 모양이 달라 처리하지 못했습니다", "요청 번호 r007 은 AI 가 자기가 보낸 요청과 대조해 처리합니다", "AI 요청 알림: R-… 을 알렸습니다",
-                       "다른 브랜치에도 있어 알리지 않은 요청 파일"):
+        for phrase in ("접수했습니다 — 확인 요청", "접수했습니다 — 새 일 요청", "양식 모양이 달라 처리하지 못했습니다", "이 번호가 AI 가 보낸 요청의 번호와 맞는지는 이 접수가 알 수 없습니다",
+                       "AI 요청 알림: R-… 을 알렸습니다", "다른 브랜치에도 있어 알리지 않은 요청 파일"):
             self.assertIn(phrase, self.guide, phrase)
         self.assertIn("다른 브랜치에도 있어 알리지 않은 요청 파일", ol.REQUESTS_SKIPPED_LINE)
 
-    def test_the_neutral_request_number_sentence_is_the_same_in_the_code_and_in_every_document_that_quotes_it(self):
-        """'알 수 없는 요청 번호 … 다시 확인하세요' 대신 중립 사실 진술(독립 검증 N-2)."""
+    def test_the_neutral_number_sentences_are_the_same_in_the_code_and_in_every_document_that_quotes_them(self):
+        """'알 수 없는 요청 번호 … 다시 확인하세요' 대신 중립 사실 진술(독립 검증 N-2). 옛 형식 이슈의 한 줄(접수 코드가 아직 읽는다)은 운영·구조 문서에,
+        새 양식의 한 줄(`NUMBER_CHECK_NOTE`)은 사용법에 같은 말로 있다(옛 R 번호용 양식을 없앤 2026-11-16 이후)."""
         sub = ol.Submission("reply", "R-007", "승인", "", False, 0, "", False)
         comment = ol.reply_comment(sub, False)
         sentence = "요청 번호 r007 은 AI 가 자기가 보낸 요청과 대조해 처리합니다"
         self.assertIn(sentence + "(요청 파일이 병합 전 브랜치에만 있으면 이 저장소 기본 브랜치에서는 보이지 않으며 정상일 수 있습니다).", comment)
-        for text in (self.guide, rel_text("docs/ACTIONS_GUIDE.md"), rel_text("docs/ARCHITECTURE.md")):
+        for text in (rel_text("docs/ACTIONS_GUIDE.md"), rel_text("docs/ARCHITECTURE.md")):
             self.assertIn(sentence, text)
+        note = ol.NUMBER_CHECK_NOTE
+        for phrase in ("맞는지는 이 접수가 알 수 없습니다", "AI 가 이슈를 읽을 때 대조하고", "번호가 틀렸으면 폰으로 알립니다"):
+            self.assertIn(phrase, note, phrase)
+            self.assertIn(phrase, self.guide, phrase)
         for alarming in ("알 수 없는", "다시 확인하세요"):
             self.assertNotIn(alarming, comment)
+            self.assertNotIn(alarming, note)
             self.assertNotIn(alarming, self.guide)
 
-    def test_the_guide_lists_the_answers_in_the_order_the_form_shows_them_and_tells_the_operator_to_choose_by_hand(self):
-        """`답변` 드롭다운은 안전한 `보류` 가 첫째이고 미리 선택돼 있다(독립 검증 N-3) — 사용법의 목록도 같은 순서이고 '직접 고르세요' 를 말한다."""
-        positions = [self.guide.index(f"`{full}`") for _short, full in ol.ANSWER_OPTIONS]
-        self.assertEqual(positions, sorted(positions))
-        self.assertIn("미리 `보류` 가 선택돼 있어도 반드시 직접 고르세요", self.guide)
-        self.assertEqual(ol.ANSWER_OPTIONS[ol.ANSWER_DEFAULT_INDEX][0], "보류")
+    def test_the_guide_says_the_safe_choice_is_preselected_and_a_target_only_answer_is_not_an_approval(self):
+        """`선택` 드롭다운은 안전한 `선택 안 함` 이 첫째이고 미리 선택돼 있다 — 사용법도 '그대로 올리면 확인함(승인 아님)' 이라고 말한다(독립 검증 N-3 의 새 양식 판)."""
+        form = yaml.safe_load(text_of(TEMPLATES / "ai-answer.yml"))
+        choice = {item["id"]: item for item in form["body"][1:]}["choice"]["attributes"]
+        self.assertEqual((choice["default"], choice["options"][choice["default"]]), (ol.CHOICE_DEFAULT_INDEX, ol.CHOICE_NONE))
+        self.assertEqual(ol.CHOICE_OPTIONS[ol.CHOICE_DEFAULT_INDEX], "선택 안 함")
+        self.assertIn("미리 `선택 안 함` 이 골라져 있고, 그대로 올리면 **확인함**(읽었다는 표시)입니다", self.guide)
+        self.assertIn("**대상번호만 올린 답은 '확인함'이고 승인이 아닙니다.**", self.guide)
 
     def test_the_guide_says_the_task_form_is_not_a_t3_approval_and_t3_goes_through_a_numbered_request(self):
         for needle in ("**T3 승인이 아닙니다**", "번호 있는 `결정 부탁`(`r001` 같은 번호)으로 따로 묻고", ol.TASK_FORM_NUMBERED_ASK, "**진행 범위**(필수)", "`[요청]`"):
@@ -178,10 +200,17 @@ class GuideMatchesFormsTest(unittest.TestCase):
             self.assertIn("한글·`+`·`@`·`#`", text)
 
     def test_the_acknowledgement_example_matches_what_the_code_writes(self):
-        sub = ol.parse_reply(ol.REPLY_TITLE_PREFIX + "x", oh.reply_body(request_id="R-001", answer=oh.ANSWER["승인"]), oh.OWNER, "OWNER", oh.OWNER)
-        comment = ol.reply_comment(sub, True)
-        self.assertIn("접수했습니다 — 요청 **r001** · 답: **승인**", comment)
-        self.assertIn("`접수했습니다 — 요청 r001 · 답: 승인`", self.guide)
+        title = ol.REPLY_TITLE_PREFIX + "x"
+        sub = ol.parse_reply(title, nth.answer_body("003", "②", crlf=False), oh.OWNER, "OWNER", oh.OWNER)
+        comment = ol.answer_comment(sub)
+        self.assertIn("접수했습니다 — 확인 요청 **003** · 선택: **②**", comment)
+        self.assertIn("`접수했습니다 — 확인 요청 003 · 선택: ②`", self.guide)
+        self.assertNotIn("읽었습니다", comment)                                        # 표준 모양(세 자리)으로 쓴 번호에는 '읽었습니다' 줄이 붙지 않는다
+        short = ol.parse_reply(title, nth.answer_body("19", "②", crlf=False), oh.OWNER, "OWNER", oh.OWNER)
+        self.assertEqual((short.kind, short.target), ("answer", "019"))
+        said = "입력한 대상번호를 019 로 읽었습니다(앞의 0 은 자리 채움입니다)"
+        self.assertIn(said, ol.answer_comment(short).replace("**", ""))                # 짧게 쓴 번호는 코멘트가 읽은 번호를 알린다(확인 022)
+        self.assertIn(f"`{said}`", self.guide)
 
     def test_the_labels_and_title_prefixes_the_guide_mentions_are_the_codes(self):
         for token in (ol.LABEL_REPLY, ol.LABEL_TASK, ol.REPLY_TITLE_PREFIX.strip(), ol.TASK_TITLE_PREFIX.strip()):
@@ -415,6 +444,55 @@ class OtherDocsAgreeTest(unittest.TestCase):
         for login, association in ((oh.OWNER, "MEMBER"), ("stranger", "OWNER"), ("stranger", "NONE")):
             self.assertIsInstance(ol.parse_reply("[답변] ", oh.reply_body(), login, association, oh.OWNER), ol.Refusal, (login, association))
 
+    def test_the_short_target_rule_the_documents_state_is_what_the_code_does(self):
+        """확인 022(2026-11-16): 대상번호는 ASCII 숫자만 읽고 1–3자리는 앞을 0 으로 채워 세 자리로 맞춘다 — 문서가 든 예(`19`→`019`·`1`→`001`)와 거절한다고 한 것(`0`·`000`·`0019`·전각·부호·소수점)이 접수 코드의 읽기와 같고,
+        문서마다 그 규칙(정규화한 뒤 견준다)이 있다. 승인 규칙은 그대로다 — 번호만 맞고 선택이 없으면 확인함이다."""
+        for raw, expected in (("19", "019"), ("1", "001"), ("019", "019"), ("135", "135"), ("1000", "1000"), (" 19 ", "019")):
+            self.assertEqual(ol.parse_target(raw), ("ask", expected, ""), raw)
+        for raw in ("0", "00", "000", "0019", "00019", "10000", chr(0xFF11) + chr(0xFF19), "+19", "-19", "19.0", "0x13", "19 20", "P19", "M19"):
+            kind, value, problem = ol.parse_target(raw)
+            self.assertEqual((kind, value), ("", ""), raw)
+            self.assertTrue(problem, raw)
+        needles = {
+            "AGENTS.md": ("`19` 만 써도 `019` 로 읽어 정규화한 번호로 견준다",),
+            "HANDLER.md": ("`19` 만 써도 `019` 로 읽는다",),
+            "docs/ACTIONS_GUIDE.md": ("`19` 만 써도 `019` 로 읽습니다", "그렇게 정규화한 번호를 AI 가 보낸 요청의 번호와 견줍니다"),
+            "docs/ARCHITECTURE.md": ("`19` 처럼 짧게 써도 앞을 0 으로 채워 `019` 로 읽고(`parse_target`) **그 정규화한 번호**를 요청의 `no` 와 견준다",),
+            "docs/SECURITY_GUARDRAILS.md": ("정규화한 번호", "`19` → `019`", "`0019`"),
+            "docs/AGENT_RUNBOOK.md": ("`parse_target`", "`19` → `019`", "정규화"),
+            "인수인계/요청함/README.md": ("`parse_target`", "`19` → `019`", "정규화한 대상번호"),
+            ol.GUIDE_PATH: ("`19` 처럼 앞의 0 을 빼고 써도 `019` 로 읽습니다", "`19` 처럼 짧게 써도 `019` 로 읽은 뒤 견줍니다"),
+        }
+        for rel, phrases in needles.items():
+            text = rel_text(rel)
+            for phrase in phrases:
+                self.assertIn(phrase, text, (rel, phrase))
+
+    CURRENT_DOCS = ("AGENTS.md", "HANDLER.md", "docs/ACTIONS_GUIDE.md", "docs/REQUEST_BRIEFING.md", "docs/TELEGRAM_INBOX.md", "docs/ISSUE_EDITS.md", "docs/AGENT_RUNBOOK.md",
+                    "docs/SECURITY_GUARDRAILS.md", "docs/GLOSSARY.md", "인수인계/요청함/README.md", ol.GUIDE_PATH, "인수인계/PR_병합_방법.md")
+
+    def test_the_documents_no_longer_send_the_operator_to_the_deleted_answer_form(self):
+        """확인 021(2026-11-16): 옛 R 번호용 답변 양식의 메뉴 이름·파일 이름은 현행 안내 어디에도 없다(과거 기록인 WORKLOG·작업내용 5장·결함 대장은 제외하고,
+        설계 결정 표(ARCHITECTURE)의 TS-10 한 줄만 그 양식의 역사를 말한다)."""
+        for rel in self.CURRENT_DOCS:
+            text = rel_text(rel)
+            for stale in ("AI 요청에 답하기(결정·확인)", "이전 R 번호용", "ai-reply"):
+                self.assertNotIn(stale, text, (rel, stale))
+        history = [line for line in rel_text("docs/ARCHITECTURE.md").splitlines() if "ai-reply" in line or "이전 R 번호용" in line]
+        self.assertEqual([line.split(" | ")[0] for line in history], ["| TS-10"])
+        self.assertIn("2026-11-16 확인 021", history[0])
+        self.assertFalse((TEMPLATES / "ai-reply.yml").exists())
+
+    def test_the_target_number_is_read_by_one_function_and_the_status_tool_only_prints_the_issue_text(self):
+        """문서(README·AGENT_RUNBOOK)는 `scripts/github_status.py` 가 이슈 본문을 그대로 보여 줄 뿐 대상번호를 읽지 않는다고 말하고, 텔레그램 수신은 접수 코드와 같은 함수로 읽는다고 한다 —
+        누가 상태 도구에 번호 읽기를 더하면(규칙이 둘이 되면) 이 시험이 알린다: 그때는 같은 함수(`operator_loop.parse_target`)를 쓰게 하고 시험·문서를 함께 고친다."""
+        status = text_of(ROOT / "scripts" / "github_status.py")
+        for word in ("대상번호", "parse_target", "parse_reply", "operator_loop"):
+            self.assertNotIn(word, status, word)
+        self.assertIn("loop.parse_target(", text_of(ROOT / "pipeline" / "telegram_inbox.py"))         # 두 번째로 대상번호를 읽는 곳은 접수 코드와 같은 함수를 부른다
+        for rel in ("인수인계/요청함/README.md", "docs/AGENT_RUNBOOK.md"):
+            self.assertIn("`scripts/github_status.py` 는 이슈 본문을 그대로 보여 줄 뿐 번호를 읽지 않으니", rel_text(rel), rel)
+
     def test_the_task_requests_readme_rule_for_the_request_form_names_the_scope_choices_and_says_it_is_not_an_approval(self):
         """작업요청 README 규칙 7(양식 `[요청]` 이슈를 어떻게 다루나)은 규칙 3 의 문장과 따로 한 번 더 `[요청]` 은 승인이 아니라고 적고, 진행 범위의 두 선택지(코드의 값)를 말한다."""
         rule = next(line for line in rel_text("인수인계/작업요청/README.md").splitlines() if line.startswith("7. 운영자가 양식"))
@@ -429,7 +507,7 @@ class OtherDocsAgreeTest(unittest.TestCase):
     def test_no_wording_that_made_the_request_form_look_like_a_t3_approval_remains(self):
         """독립 검증 B-1: `[요청]`·`승인 범위(T3 포함)` 를 승인으로 읽히게 하던 옛 문구가 이 작업이 소유한 파일 어디에도 없다(WORKLOG 의 역사는 제외)."""
         owned = (*APPROVAL_FILES, "docs/ARCHITECTURE.md", "docs/DEFECT_REGISTER.md", "docs/OPS_INBOX.md", "docs/ISSUE_EDITS.md", ".github/editorial/TELEGRAM_SETUP.md",
-                 ol.GUIDE_PATH, ".github/ISSUE_TEMPLATE/ai-task.yml", ".github/ISSUE_TEMPLATE/ai-reply.yml", "pipeline/operator_loop.py", "pipeline/notify.py")
+                 ol.GUIDE_PATH, ".github/ISSUE_TEMPLATE/ai-task.yml", ".github/ISSUE_TEMPLATE/ai-answer.yml", "pipeline/operator_loop.py", "pipeline/notify.py")
         old = ("T3 포함", "`승인 범위`", "### 승인 범위", "알 수 없는 요청 번호", "`[답변]`·`[요청]` 으로 올린 응답", "양식 `[답변]`·`[요청]` —", "(양식 `[답변]`·`[요청]`,", "'예'를 골라도")
         for rel in owned:
             text = rel_text(rel)

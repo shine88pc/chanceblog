@@ -19,7 +19,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import validate_repo as vr  # noqa: E402
 
 # 병합 기준 main(835ed22, R-106 의 요청 번호 표기가 반영된 판)의 G-S9 행·AGENTS.md 규칙 8의 sha256 — 텔레그램 수신은 승인 규칙을 바꾸지 않는다(G-S10). 이 값이 달라지면 승인 규칙 문구를 건드린 것이므로 의도한 변경인지(T3) 확인한다.
-G_S9_ROW_SHA256 = "3598b1089116d5bc2c72aa8a7b36df65de7dcfe43f6d7528682ca586664affc7"      # 2026-11-06 TG-STD(운영자 승인 R-165)로 G-S9 문구를 의도적으로 개정했다(새 양식 대상번호·선택·확인함). 이전 값 1161e244… — 이 값이 또 바뀌려면 새 승인이 필요하다
+G_S9_ROW_SHA256 = "8833cd37984084e47288d6950ece048d6edee971f3158838388052d3eeffac0b"      # 2026-11-16 확인 022(운영자 승인, 이슈 #218)로 G-S9 ②의 대상번호 읽기 서술(앞 0 채움 정규화·옛 R 번호용 양식 삭제 문구)을 의도적으로 개정했다. 이전 값 3598b108…(2026-11-06 TG-STD 개정 값, 그 전 1161e244…) — 이 값이 또 바뀌려면 새 승인이 필요하다
 AGENTS_RULE_8_SHA256 = "c2004fb876915771961d67c2329871696e129777dac2c2eb8ea1bf90a9e9b95b"      # 2026-11-06 TG-STD(운영자 승인 R-165): 8번 규칙 줄에 든 G-S9 한 문장을 새 양식에 맞게 개정했다. 이전 값 bffb9ab5…
 
 
@@ -319,7 +319,7 @@ class ArchitectureAndGuideTest(unittest.TestCase):
         self.assertEqual(load("operator-reply.yml")["on"], {"issues": {"types": ["opened"]}})
         self.assertEqual(ol.REPLY_TITLE_PREFIX, "[답변] ")
         self.assertEqual(ol.TASK_TITLE_PREFIX, "[요청] ")
-        self.assertEqual(vr.check_operator_forms(ROOT, [vr.REPLY_FORM, vr.TASK_FORM, vr.ISSUE_CONFIG]), [])
+        self.assertEqual(vr.check_operator_forms(ROOT, [vr.ANSWER_FORM, vr.TASK_FORM, vr.ISSUE_CONFIG]), [])
 
 
 if __name__ == "__main__":
