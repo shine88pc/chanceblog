@@ -20,7 +20,8 @@
   6. **알림 번호(TG-STD, 운영자 승인 2026-11-06 계획 R-165)**: 요청 파일 앞머리 `no`(진행 현황 `P001`·병합 요청 `M001`·확인 요청은 숫자만 `001`, 유형마다 따로 늘어남)가 있는 파일은 유형별 칸으로
      표준 메시지(notify.format_notice)가 가고, 없는 옛 파일(요청 번호가 아래 상수 NOTICE_NO_REQUIRED_FROM_R 보다 작은 것)은 옛 모양 그대로다. 요청 번호 `R-nnn`·파일 이름·`id` 는 작업 식별자로 그대로다. 운영자의 답은 새 양식(`ai-answer.yml`:
      대상번호·선택·내용)도 읽는다 — **대상번호만 올린 답은 '확인함'이고 승인이 아니다**(승인은 선택이 그 확인 요청의 `approve` 보기와 같을 때만, 그 요청 파일에 적힌 항목에 한해 — G-S9).
-     새 양식의 모양 오류는 폰으로도 회신한다(소유자 판정을 통과한 이슈에만). 옛 `[답변]` 양식(요청 번호)은 옛 R 번호 요청을 위해 함께 둔다.
+     새 양식의 모양 오류는 폰으로도 회신한다(소유자 판정을 통과한 이슈에만). 옛 `[답변]` 양식(요청 번호)의 메뉴(`ai-reply.yml`)는 2026-11-16 확인 021 로 없앴지만, 이미 올라온 옛 양식 이슈는 이 코드가
+     예전처럼 읽는다(읽는 코드의 정리는 다음 정비). 대상번호는 ASCII 숫자만 읽고 1~3자리는 앞을 0 으로 채워 세 자리로 맞춘다(`19` → `019`, 2026-11-16 확인 022) — 번호는 이렇게 정규화한 뒤 비교·표시한다.
 
 명령 줄: python -m pipeline.operator_loop <requests | ack>   (외부 값을 인자로 받지 않는다 — 값은 환경변수·git·이벤트 JSON 파일에서만 읽는다)
   requests  환경변수 BEFORE_SHA·AFTER_SHA·DEFAULT_BRANCH(워크플로가 env 로 넘김)·GITHUB_REF_NAME(러너)·TELEGRAM_BOT_TOKEN·TELEGRAM_CHAT_ID
@@ -606,7 +607,7 @@ ANSWER_OPTIONS = (("보류", "보류 — 나중에 다시 물어 주세요"), ("
                   ("했어요", "했어요 — 제가 직접 처리했습니다"), ("문제", "문제 — 아래 메모를 보세요"))
 ANSWER_DEFAULT_INDEX = 0
 ANSWER_DIRECT_NOTICE = "올리기 전에 반드시 직접 고르세요"   # `[답변]` 양식 맨 위 안내 글에 있어야 하는 문장(검증기 FORM-1)
-REPLY_FORM_NAME = "AI 요청에 답하기(결정·확인) (이전 R 번호용)"      # 옛 `[답변]` 양식의 메뉴 이름 — 새 알림은 새 양식만 안내한다(TG-STD). 옛 R 번호 요청을 위해 한동안 함께 둔다
+# (옛 `[답변]` 양식 `ai-reply.yml` 은 2026-11-16 확인 021 로 없앴고 그 메뉴 이름 상수 REPLY_FORM_NAME 도 지웠다. 위 REPLY_FIELDS·ANSWER_OPTIONS 등은 이미 올라온 옛 양식 이슈를 읽는 데 남아 있다)
 # 새 `[답변]` 양식 `ai-answer.yml`(TG-STD, 운영자 승인 2026-11-06 R-165) — 휴대폰에서 3칸으로 답한다: `대상번호: 001` / `선택: ②` / `내용: …`. 같은 제목 머리 `[답변] `·같은 라벨 `운영자응답` 이라 AI 의 읽기 절차가 그대로 동작한다.
 # 대상번호만 필수다. 대상번호만 올린 답은 '확인함'이고 **승인이 아니다** — 선택 칸은 `선택 안 함` 이 미리 선택돼 있고(안전값), 승인은 소유자 계정이 이 양식으로 올리고 대상번호가 AI 가 보낸
 # 확인 요청 번호와 같고 선택이 그 요청 파일의 `approve` 보기와 같을 때만 그 요청 파일에 적힌 항목에 한해 인정된다(docs/SECURITY_GUARDRAILS.md G-S9).
@@ -617,18 +618,20 @@ ANSWER_FIELD_TYPES = {"target": "input", "choice": "dropdown", "memo": "textarea
 CHOICE_NONE = "선택 안 함"
 CHOICE_OPTIONS = (CHOICE_NONE, *notify.CIRCLED_DIGITS)             # 선택 드롭다운의 선택지(양식과 글자 그대로 같아야 한다) — 첫째(`선택 안 함`)가 미리 선택된다
 CHOICE_DEFAULT_INDEX = 0
-TARGET_EXAMPLE = "001"                                            # 양식 `대상번호` 칸의 예시(placeholder)·설명의 번호(검증기 FORM-1)
+TARGET_EXAMPLE = "019"                                            # 양식 `대상번호` 칸의 예시(placeholder)·설명의 번호(검증기 FORM-1)
 TARGET_NOTICE = f"텔레그램 확인 요청 맨 위의 `{TARGET_EXAMPLE}` 같은 숫자"      # 새 양식 맨 위 안내 글에 있어야 하는 문구(검증기 FORM-1)
+TARGET_SHORT_EXAMPLE = str(int(TARGET_EXAMPLE))                   # 예시를 앞 0 없이 쓴 꼴 `19` (확인 022, 2026-11-16)
+TARGET_SHORT_NOTICE = f"`{TARGET_SHORT_EXAMPLE}` 만 써도 `{TARGET_EXAMPLE}` 로 읽습니다"      # 새 양식 맨 위 안내 글에 있어야 하는 문구(검증기 FORM-1) — 짧게 써도 앞을 0 으로 채워 읽는다
 ANSWER_NOT_APPROVAL_NOTICE = "`선택 안 함` 이나 대상번호만 올린 답은 승인이 아닙니다"   # 새 양식 맨 위 안내 글에 있어야 하는 문장(검증기 FORM-1)
 _CHOICE_SYMBOLS = {**{symbol: index + 1 for index, symbol in enumerate(notify.CIRCLED_DIGITS)},
                    **{chr(0x2776 + index): index + 1 for index in range(notify.OPTIONS_MAX)}}     # ①~⑤ 와 ❶~❺ — 원문자는 같은 숫자로 읽는다
 # 대상번호·선택을 읽다 틀렸을 때 폰·코멘트에 쓰는 고정 문장(이슈 글을 되풀이하지 않는다)
 TARGET_PROBLEMS = {
-    "empty": "`대상번호`가 필요합니다(텔레그램 확인 요청 맨 위의 숫자 3자리, 예: 001)",
-    "short": "`대상번호`는 숫자 3자리로 써 주세요(예: 001)",
+    "empty": f"`대상번호`가 필요합니다(텔레그램 확인 요청 맨 위의 숫자, 예: {TARGET_EXAMPLE} — {TARGET_SHORT_EXAMPLE} 만 써도 됩니다)",
+    "zero": "`대상번호`가 0 입니다(번호는 001 부터 있습니다 — 알림에 적힌 번호를 써 주세요)",
     "two": "`대상번호`에는 번호를 하나만 쓸 수 있습니다(번호 하나당 이슈 하나)",
     "type": "`대상번호`에는 숫자만인 확인 요청 번호를 써 주세요(P·M 으로 시작하는 번호는 답하는 번호가 아닙니다)",
-    "format": "`대상번호` 모양이 맞지 않습니다(알림에 적힌 번호 그대로 숫자만 — 세 자리 예: 001, 1000번부터는 네 자리. 앞에 0 을 더 붙이지 마세요)",
+    "format": f"`대상번호` 모양이 맞지 않습니다(알림에 적힌 번호의 숫자만 쓰세요 — {TARGET_EXAMPLE} 를 {TARGET_SHORT_EXAMPLE} 로 써도 되지만 앞에 0 을 더 붙이지 마세요. 전각 숫자·부호·소수점도 안 됩니다)",
 }
 FOREIGN_LABELS_PROBLEM = "새 양식에 없는 항목({labels})이 있습니다"
 MIXED_FORMS_PROBLEM = "두 양식의 항목(`요청 번호`와 `대상번호`)이 섞여 있습니다"
@@ -649,8 +652,9 @@ CHOICE_RE = re.compile(r"[A-Za-z0-9가-힣]{1,3}")
 _NO_RESPONSE = ("_no response_", "no response")
 MAX_EVENT_BYTES = 2_000_000
 
-# kind: reply(옛 `[답변]`) | task(`[요청]`) | answer(새 `[답변]` 양식 — target 은 확인 요청 번호 `003` 또는 옛 요청 번호 `R-149`, choice_no 는 선택 기호 1~5·없으면 0, answer·choice 는 비어 있다 — 새 양식은 승인 낱말이 없다)
-Submission = namedtuple("Submission", "kind request_id answer choice choice_invalid memo_chars urgency approval_yes target choice_no", defaults=("", 0))
+# kind: reply(옛 `[답변]`) | task(`[요청]`) | answer(새 `[답변]` 양식 — target 은 **정규화한** 확인 요청 번호 `003`(`3`·`03` 으로 써도 `003`) 또는 옛 요청 번호 `R-149`, choice_no 는 선택 기호 1~5·없으면 0, answer·choice 는 비어 있다 — 새 양식은 승인 낱말이 없다,
+# target_padded 는 번호를 표준 모양보다 짧게 써서 앞을 0 으로 채워 읽었는가 — 접수 코멘트가 '019 로 읽었습니다' 를 알린다)
+Submission = namedtuple("Submission", "kind request_id answer choice choice_invalid memo_chars urgency approval_yes target choice_no target_padded", defaults=("", 0, False))
 Refusal = namedtuple("Refusal", "code problems")
 # 거절 사유: no_owner 저장소 소유자를 모름 / not_owner 작성자가 소유자가 아님 / not_owner_association 작성자 권한이 OWNER 가 아님 / not_form 제목이 양식 이슈가 아님 / bad_shape 양식 모양이 다름
 REFUSAL_LINES = {
@@ -710,28 +714,42 @@ def normalize_request_id(raw):
     return text
 
 
-_TYPED_NO_RE = re.compile(r"[PpMm][ -]?[0-9]{3,4}")                  # 진행 현황·병합 요청 번호 — 답하는 번호가 아니다
+_TYPED_NO_RE = re.compile(r"[PpMm][ -]?[0-9]{1,4}")                  # 진행 현황·병합 요청 번호 — 답하는 번호가 아니다(`P19` 처럼 짧게 써도 같은 안내)
+_ASCII_DIGITS_RE = re.compile(r"[0-9]+")                           # ASCII 숫자만 — 숫자 문자류(\d)를 쓰지 않는다: 전각 `１９`·아랍 인도 숫자도 \d 에는 걸린다
 _NUMBERISH_RE = re.compile(r"(?:[PpMmRr][ -]?)?[0-9]{1,4}")
 _TARGET_SPLIT_RE = re.compile(r"[\s,/·]+")
 
 
+def standard_ask_number(text):
+    """ASCII 숫자만인 글(호출한 쪽이 `[0-9]+` 임을 이미 확인) → 표준 확인 요청 번호 글자, 번호가 아니면 빈 글. 1~3자리는 앞을 0 으로 채워 세 자리(`1`→`001`·`19`→`019`·`01`→`001`),
+    네 자리는 `1000`~`9999` 만 그대로(앞에 0 이 붙은 `0019` 는 번호가 아니다), 값이 0 인 글(`0`·`00`·`000`)과 다섯 자리 이상은 번호가 아니다. 길이를 먼저 거르므로 아주 긴 숫자에 int() 를 부르지 않는다."""
+    if len(text) > 4:
+        return ""
+    if len(text) == 4:
+        return text if text[0] != "0" else ""
+    number = int(text)
+    return f"{number:03d}" if number else ""
+
+
 def parse_target(raw):
-    """새 양식 `대상번호` 칸의 값을 읽는다 → (종류, 값, 문제 코드). 종류는 `ask`(확인 요청 번호 `001`, 표준 ASCII 숫자 `001`~`999`·`1000`~`9999` — `0003` 처럼 앞에 0 을 더 붙인 글자는 번호가 아니다) 또는 `request`(옛 요청 번호 — `r149`·`R-149` 등
-    normalize_request_id 와 같은 꼴, 값은 정본 `R-149`), 문제가 있으면 종류·값은 빈 글이고 코드는 TARGET_PROBLEMS 의 키다: empty(비었음)·short(1~2자리)·two(번호 둘 이상)·
-    type(`P012`·`M007` — 답하는 번호가 아님)·format(그 밖의 모든 모양: 전각·원문자·`#001`·`001.`·`001 메모`·자리 수 초과·`000`·앞 0 이 더 붙은 `0003`). 앞뒤 공백만 봐주고 번호는 ASCII 만 읽는다 —
-    잘못 읽어 엉뚱한 요청에 답이 붙는 것을 막는 옛 원칙(`r90`·전각 `ｒ` 거절)과 같다. 신뢰 판정(작성자·권한) 뒤에만 쓴다."""
+    """새 양식 `대상번호` 칸의 값을 읽는다 → (종류, 값, 문제 코드). 종류는 `ask`(확인 요청 번호 — **정규화한** 표준 ASCII 숫자 `001`~`999`·`1000`~`9999`: `19` 처럼 짧게 써도 앞을 0 으로 채워 `019` 로 읽는다(2026-11-16 확인 022),
+    `0003` 처럼 앞에 0 을 더 붙인 네 자리 이상은 번호가 아니다) 또는 `request`(옛 요청 번호 — `r149`·`R-149` 등 normalize_request_id 와 같은 꼴, 값은 정본 `R-149`), 문제가 있으면 종류·값은 빈 글이고
+    코드는 TARGET_PROBLEMS 의 키다: empty(비었음)·zero(`0`·`00`·`000`·`0000` — 번호는 1 부터)·two(번호 둘 이상)·type(`P012`·`P19`·`M007` — 답하는 번호가 아님)·format(그 밖의 모든 모양: 전각·원문자·`#001`·`001.`·`001 메모`·
+    `+19`·`19.0`·`0x13`·숫자 사이의 공백·다섯 자리 이상·앞 0 이 더 붙은 `0019`). 앞뒤 공백만 봐주고 번호는 ASCII 만 읽는다 — 잘못 읽어 엉뚱한 요청에 답이 붙는 것을 막는 옛 원칙(`r90`·전각 `ｒ` 거절)과 같다.
+    신뢰 판정(작성자·권한) 뒤에만 쓴다. 이 함수 하나가 접수 코드와 텔레그램 수신(참고용 후보)의 번호 읽기다."""
     text = str(raw or "").strip()
     if not text:
         return "", "", "empty"
-    if notify.notice_type(text) == notify.NOTICE_ASK:
-        return "ask", text, ""
+    if _ASCII_DIGITS_RE.fullmatch(text):
+        standard = standard_ask_number(text)
+        if standard and notify.notice_type(standard) == notify.NOTICE_ASK:
+            return "ask", standard, ""
+        return "", "", ("zero" if set(text) == {"0"} else "format")
     if _TYPED_NO_RE.fullmatch(text):
         return "", "", "type"
     found = REQUEST_INPUT_RE.fullmatch(text)
     if found:
         return "request", "R-" + found.group(1), ""
-    if re.fullmatch(r"[0-9]{1,2}", text):
-        return "", "", "short"
     parts = [part for part in _TARGET_SPLIT_RE.split(text) if part]
     if len(parts) >= 2 and all(_NUMBERISH_RE.fullmatch(part) for part in parts):
         return "", "", "two"
@@ -781,7 +799,8 @@ def _parse_answer(body):
         return Refusal("bad_shape", tuple(problems))
     raw_choice = values.get(label_of["choice"], "")
     choice_no, choice_problem = parse_choice(raw_choice)
-    return Submission("answer", target if target_kind == "request" else "", "", "", bool(choice_problem), len(values.get(label_of["memo"], "")), "", False, target, choice_no)
+    padded = target_kind == "ask" and values.get(label_of["target"], "").strip() != target          # 짧게 쓴 번호(`19`)는 앞을 0 으로 채워 읽었다고 코멘트가 알린다
+    return Submission("answer", target if target_kind == "request" else "", "", "", bool(choice_problem), len(values.get(label_of["memo"], "")), "", False, target, choice_no, padded)
 
 
 def parse_reply(title, body, login, association, owner):
@@ -877,21 +896,25 @@ def task_comment(sub):
     return _compose(head, notes)
 
 
-OLD_TARGET_NOTE = (f"- 옛 R 번호 요청에는 새 양식으로 승인할 수 없습니다 — 이 답은 접수만 합니다. 승인은 `{REPLY_FORM_NAME}` 양식으로 올려 주세요.")
+OLD_TARGET_NOTE = "- 옛 R 번호 요청에는 새 양식으로 승인할 수 없습니다 — 이 답은 접수만 합니다(옛 R 번호용 양식은 없어졌습니다). 승인이 필요하면 AI 가 새 번호의 확인 요청으로 다시 묻습니다."
+TARGET_READ_NOTE = "- 입력한 대상번호를 **{shown}** {to} 읽었습니다(앞의 0 은 자리 채움입니다). 의도한 번호가 아니면 새 이슈로 다시 올려 주세요."      # {to}: 번호 끝 숫자에 맞춘 조사 로·으로(0·3·6 은 받침이 있다)
 NUMBER_CHECK_NOTE = "- 이 번호가 AI 가 보낸 요청의 번호와 맞는지는 이 접수가 알 수 없습니다(접수 워크플로는 요청 파일이 없는 기본 브랜치만 봅니다) — AI 가 이슈를 읽을 때 대조하고, 번호가 틀렸으면 폰으로 알립니다."
-SHAPE_TAIL = (f"이 이슈는 닫고, Issues → New issue 에서 **{ANSWER_FORM_NAME}**(옛 R 번호 요청이면 **{REPLY_FORM_NAME}**, 새 일 맡기기면 **AI 에게 새 일 맡기기(작업 요청)**) "
-              "양식을 골라 다시 올려 주세요. 빈 이슈나 양식 밖의 글은 승인으로 보지 않습니다.")
+SHAPE_TAIL = (f"새 양식 **{ANSWER_FORM_NAME}** 로 다시 올려 주세요(새 일 맡기기는 **AI 에게 새 일 맡기기(작업 요청)** 양식). "
+              "빈 이슈나 양식 밖의 글은 승인으로 보지 않습니다.")
 
 
 def answer_comment(sub, replaced=None):
     """새 양식 `[답변]`(대상번호) 접수 코멘트(마크다운). 값은 모두 검증을 통과한 것이다 — 번호 모양·선택 기호(①~⑤)·이슈 번호·내용 글자 수. 내용 글은 되풀이하지 않는다.
-    선택이 없으면 '확인함(승인 아님)'이고, replaced(같은 번호에 앞서 올린 답의 이슈 번호)가 있으면 가장 나중 답이 이긴다는 말을 덧붙인다. 옛 R 번호(`R-149`)면 새 양식으로 승인할 수 없다고 적는다."""
+    선택이 없으면 '확인함(승인 아님)'이고, replaced(같은 번호에 앞서 올린 답의 이슈 번호)가 있으면 가장 나중 답이 이긴다는 말을 덧붙인다. 옛 R 번호(`R-149`)면 새 양식으로 승인할 수 없다고 적는다.
+    번호를 짧게 써서(`19`) 앞을 0 으로 채워 읽었으면(sub.target_padded) 읽은 번호만 적는다(`019 로 읽었습니다` — 입력 글은 되풀이하지 않는다)."""
     old = sub.target.startswith("R-")
     shown = notify.display_id(sub.target) if old else sub.target                 # 옛 번호는 운영자에게 `r149` 꼴
     head = (f"접수했습니다 — 요청 **{shown}**(이전 R 번호)" if old else f"접수했습니다 — 확인 요청 **{shown}**")
     head += (f" · 선택: **{notify.CIRCLED_DIGITS[sub.choice_no - 1]}**" if sub.choice_no else " · 확인함(승인 아님)")
     head += (f" · 내용: 있음({sub.memo_chars}자)" if sub.memo_chars else "") + "."
     notes = []
+    if sub.target_padded and not old:
+        notes.append(TARGET_READ_NOTE.format(shown=shown, to="으로" if shown[-1] in "036" else "로"))
     if replaced is not None:
         notes.append(f"- 이 번호에 앞서 올린 답(이슈 #{replaced})이 있어 이 답이 그것을 대체합니다 — 가장 나중 답이 이깁니다(앞 이슈는 지우지 않습니다).")
     if sub.memo_chars:

@@ -6,11 +6,12 @@ CORPUS 는 운영자 요청함의 실제 요청 파일(R-001 부터 R-267 까지
 """
 
 RECORDED_FROM = "main 299fda3"
+# 2026-11-16 확인 021 뒤 수정 1(B-2): 옛 모양 알림의 '답하는 법' 줄을 새 양식(대상번호) 안내로 일부러 바꿨다 — 그래서 DIGESTS 의 ai_request_messages·e2e 지문과 TEXT_GOLDENS 의 old-confirm·old-decision 글만 이 도구의 출력으로 갱신했다(나머지 지문·표본 수·글은 그대로 = 다른 종류의 알림·요청 판정은 안 바뀜).
 
 DIGESTS = {
-    "ai_request_messages": "fd0805a71a25b8b31528da7a32defd9776b0dc2c403307c4e5011a0ad750ea50",
+    "ai_request_messages": "422ec08ff358770012e536b07eb4877023f966445615dad5f5cb7600bccb04a1",
     "buttons": "5ab2533fe96b1b0e66c5bec6b4258e31d36944e6d02c26f6c869f1384db6c2bd",
-    "e2e": "d1434247e4737c94ff102e845d2b66b2ae47d3610ba5eee25a66ccca159b10ac",
+    "e2e": "2e4fa560c389a7b6e4f044a502d8c3b05df20a46650c1b934542b7f7f367ede3",
     "notice_messages": "715662078b09c5d948eae5532d7eb153ffcc49f650202e6db6e1aea7392368fc",
     "parse_verdicts": "34c55490c6b97b85ffe523c0df664eef23cd43dd668ce568e257f69747be9670",
 }
@@ -24,8 +25,8 @@ TEXT_GOLDENS = {
     'buttons-old-decision': '[["요청 열기", "https://github.com/shine88pc/chanceblog/blob/ai/claude/x/%EC%9D%B8%EC%88%98%EC%9D%B8%EA%B3%84/%EC%9A%94%EC%B2%AD%ED%95%A8/R-001_x.md"], ["답하기", "https://github.com/shine88pc/chanceblog/issues/new/choose"], ["사용법", "https://github.com/shine88pc/chanceblog/blob/main/%EC%9D%B8%EC%88%98%EC%9D%B8%EA%B3%84/%EC%9A%B4%EC%98%81%EC%9E%90_%EC%9A%94%EC%B2%AD%ED%95%A8_%EC%82%AC%EC%9A%A9%EB%B2%95.md"]]',
     'merge-blog': "🔀 <b>M008 · 병합 요청</b>\n관련 PR: #57\n병합 대상: 5채널 전략 P2b 후보 조립 부품\n저장소: shine88pc/chanceblog\nPR 제목: <code>[R-160] 5채널 전략 'P2b' — 후보 조립 순수 부품 [대상: 데스크톱]</code>\n검증 결과: 독립 검증 통과 · 검사 4칸 초록 · 변경 45개 파일\n상태: 병합 대기\n\n… 외 2건 (저장소의 인수인계/요청함/ 폴더에서 확인하세요)",
     'merge-desktop': "🔀 <b>M007 · 병합 요청</b>\n병합 대상: 5채널 전략 P2b 후보 조립 부품\n저장소: shine88pc/chanceblog-desktop\nPR 제목: <code>[R-160] 5채널 전략 'P2b' — 후보 조립 순수 부품 [대상: 데스크톱]</code>\n검증 결과: 독립 검증 통과 · 검사 4칸 초록 · 변경 45개 파일\n상태: 승인 대기",
-    'old-confirm': '🔔 <b>AI 요청 r001 · 확인 부탁</b> 🚨 급함\n제목\n요약\n관련 PR: #5\n\n답하는 법: 아래 [답하기] → 양식에서 r001 선택\n\n… 외 1건 (저장소의 인수인계/요청함/ 폴더에서 확인하세요)',
-    'old-decision': '🔔 <b>AI 요청 r001 · 결정 부탁</b> 🚨 급함\n제목\n요약\n관련 PR: #5\n\n답하는 법: 아래 [답하기] → 양식에서 r001 선택\n\n… 외 1건 (저장소의 인수인계/요청함/ 폴더에서 확인하세요)',
+    'old-confirm': '🔔 <b>AI 요청 r001 · 확인 부탁</b> 🚨 급함\n제목\n요약\n관련 PR: #5\n\n답하는 법: 아래 [답하기] → 양식의 대상번호에 r001 (옛 번호 요청은 접수만 됩니다 — 승인은 AI 가 새 번호로 다시 묻습니다)\n\n… 외 1건 (저장소의 인수인계/요청함/ 폴더에서 확인하세요)',
+    'old-decision': '🔔 <b>AI 요청 r001 · 결정 부탁</b> 🚨 급함\n제목\n요약\n관련 PR: #5\n\n답하는 법: 아래 [답하기] → 양식의 대상번호에 r001 (옛 번호 요청은 접수만 됩니다 — 승인은 AI 가 새 번호로 다시 묻습니다)\n\n… 외 1건 (저장소의 인수인계/요청함/ 폴더에서 확인하세요)',
     'old-info': '🔔 <b>AI 요청 r001 · 알림</b> 🚨 급함\n제목\n요약\n관련 PR: #5\n\n… 외 1건 (저장소의 인수인계/요청함/ 폴더에서 확인하세요)',
     'old-merge': '🔔 <b>AI 요청 r001 · 병합 부탁</b> 🚨 급함\n제목\n요약\n관련 PR: #5\n\n… 외 1건 (저장소의 인수인계/요청함/ 폴더에서 확인하세요)',
     'old-run': '🔔 <b>AI 요청 r001 · 실행 부탁</b> 🚨 급함\n제목\n요약\n관련 PR: #5\n\n… 외 1건 (저장소의 인수인계/요청함/ 폴더에서 확인하세요)',

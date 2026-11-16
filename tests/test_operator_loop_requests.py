@@ -542,10 +542,10 @@ class MessageTest(unittest.TestCase):
 
     def test_the_how_to_answer_line_is_only_for_kinds_that_need_an_answer(self):
         for kind in ("confirm", "decision"):
-            self.assertIn("답하는 법: 아래 [답하기] → 양식에서 r001 선택", self.fmt(kind=kind).splitlines(), kind)
+            self.assertIn("답하는 법: 아래 [답하기] → 양식의 대상번호에 r001 (옛 번호 요청은 접수만 됩니다 — 승인은 AI 가 새 번호로 다시 묻습니다)", self.fmt(kind=kind).splitlines(), kind)
         for kind in ("merge", "run", "info"):
             self.assertNotIn("답하는 법", self.fmt(kind=kind), kind)
-        self.assertIn("양식에서 r042 선택", self.fmt(kind="decision", request_id="R-042"))
+        self.assertIn("양식의 대상번호에 r042 (옛 번호 요청은 접수만 됩니다 — 승인은 AI 가 새 번호로 다시 묻습니다)", self.fmt(kind="decision", request_id="R-042"))
 
     def test_the_overflow_line_counts_the_requests_that_did_not_fit(self):
         self.assertIn("… 외 2건 (저장소의 인수인계/요청함/ 폴더에서 확인하세요)", self.fmt(more=2).splitlines())

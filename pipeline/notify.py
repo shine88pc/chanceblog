@@ -730,7 +730,7 @@ def format_ai_request(request_id, kind, title, summary, urgency="보통", pr=Non
     """AI 요청 알림의 HTML 글. 머리 `🔔 AI 요청 r001 · 병합 부탁`(급하면 `🚨 급함`, 번호는 운영자에게 보이는 꼴 display_id), 제목, 요약, 관련 PR 번호, 답해야 하는 종류(확인·결정)에는 '답하는 법' 한 줄,
     담지 못한 요청이 있으면 '… 외 N건'. 요청 번호(`R-` 세 자리)·종류(REQUEST_KIND_LABELS)·PR 번호(양의 정수)는 호출한 쪽이 이미 검증한 값이어야 하고 어긋나면 ValueError
     (이 함수는 외부 글을 믿지 않는다 — 제목·요약은 safe_text 로 소독하고 HTML 이스케이프한다). 제목·요약 속 `R-001` 도 보이는 글에서는 `r001` 로 바꾼다(display_text — 인용·`[R-001]` 제목 꼴은 그대로).
-    본문 상세는 싣지 않고 버튼으로 연다."""
+    본문 상세는 싣지 않고 버튼으로 연다. (확인·결정 종류의 '답하는 법' 줄은 옛 R 번호용 답변 양식이 없어진 2026-11-16 확인 021 뒤로 새 양식의 대상번호를 가리키고, 옛 번호 요청은 접수만 된다고 말한다 — 이 모양은 알림 칸이 틀린 요청 파일의 폴백으로만 간다.)"""
     shown = display_id(request_id)                  # 정본이 아니면 ValueError("request_id") — 운영자에게는 `r001` 꼴로 보인다
     if kind not in REQUEST_KIND_LABELS:
         raise ValueError("kind")
@@ -741,7 +741,7 @@ def format_ai_request(request_id, kind, title, summary, urgency="보통", pr=Non
     if pr is not None:
         lines.append(f"관련 PR: #{_positive_int(pr, 'pr')}")
     if kind in REQUEST_ANSWER_KINDS:
-        lines.extend(["", f"답하는 법: 아래 [답하기] → 양식에서 {shown} 선택"])
+        lines.extend(["", f"답하는 법: 아래 [답하기] → 양식의 대상번호에 {shown} (옛 번호 요청은 접수만 됩니다 — 승인은 AI 가 새 번호로 다시 묻습니다)"])
     if more:
         lines.extend(["", f"… 외 {_positive_int(more, 'more')}건 (저장소의 인수인계/요청함/ 폴더에서 확인하세요)"])
     return "\n".join(lines)
@@ -999,7 +999,7 @@ def format_merged_unreadable(request_id, more=0):
 
 def format_answer_received(target, choice_no, issue_number, replaced=None):
     """새 양식(`대상번호`) 답 접수 확인의 평문: `✅ 답변 접수 003 → 선택 ②(이슈 #145)`, 선택이 없으면 `→ 확인함 — 승인 아님(이슈 #145) · 번호가 요청과 맞는지는 AI 가 대조합니다`
-    (접수 워크플로는 요청 파일이 없는 기본 가지만 봐서 번호가 실제 요청인지 모른다 — 오탈자도 접수로 보이므로 AI 가 대조한다고 말한다), 앞서 같은 번호에 답한 이슈가 있으면
+    (접수 워크플로는 요청 파일이 없는 기본 가지만 봐서 번호가 실제 요청인지 모른다 — 오탈자도 접수로 보이므로 AI 가 대조한다고 말한다), 번호는 접수 코드가 **정규화한** 표준 모양(`19` 로 써도 `019`)으로 받는다, 앞서 같은 번호에 답한 이슈가 있으면
     ` · 이전 답(이슈 #144)을 대체합니다`(가장 나중 답이 이긴다). target 이 옛 요청 번호(`R-149`)면 `r149` 로 보이고 새 양식으로는 승인되지 않는다는 말을 붙인다.
     값은 코드가 검증한 것이다 — 번호 모양·선택 기호(0=없음, 1~5)·이슈 번호. 어긋나면 ValueError."""
     text = target if isinstance(target, str) else ""
@@ -1015,14 +1015,14 @@ def format_answer_received(target, choice_no, issue_number, replaced=None):
     if replaced is not None:
         line += f" · 이전 답(이슈 #{_positive_int(replaced, 'replaced')})을 대체합니다"
     if old:
-        line += " · 옛 R 번호 요청은 새 양식으로 승인되지 않습니다(승인은 이전 R 번호용 양식으로)"
+        line += " · 옛 R 번호 요청은 새 양식으로 승인되지 않습니다(옛 R 번호용 양식은 없어졌습니다 — AI 가 새 번호로 다시 묻습니다)"
     if not choice_no:
         line += " · 번호가 요청과 맞는지는 AI 가 대조합니다"
     return line
 
 
 def format_answer_error(issue_number, reason):
-    """소유자의 답 이슈를 접수하지 못했다는 폰 회신의 평문: `⚠️ 답변을 접수하지 못했습니다(이슈 #145) — 대상번호가 필요합니다(숫자 3자리, 예: 001). 새 이슈로 다시 올려 주세요.`
+    """소유자의 답 이슈를 접수하지 못했다는 폰 회신의 평문: `⚠️ 답변을 접수하지 못했습니다(이슈 #145) — 대상번호가 필요합니다(텔레그램 확인 요청 맨 위의 숫자, 예: 019 — 19 만 써도 됩니다). 새 이슈로 다시 올려 주세요.`
     reason 은 코드가 정한 고정 문장이다(이슈 글을 되풀이하지 않는다) — 여기서도 한 줄로 소독하고 백틱은 뺀다."""
     word = clean_text(reason, 120).replace("`", "")
     if not word:
