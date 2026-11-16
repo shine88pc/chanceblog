@@ -730,7 +730,7 @@ def format_ai_request(request_id, kind, title, summary, urgency="보통", pr=Non
     """AI 요청 알림의 HTML 글. 머리 `🔔 AI 요청 r001 · 병합 부탁`(급하면 `🚨 급함`, 번호는 운영자에게 보이는 꼴 display_id), 제목, 요약, 관련 PR 번호, 답해야 하는 종류(확인·결정)에는 '답하는 법' 한 줄,
     담지 못한 요청이 있으면 '… 외 N건'. 요청 번호(`R-` 세 자리)·종류(REQUEST_KIND_LABELS)·PR 번호(양의 정수)는 호출한 쪽이 이미 검증한 값이어야 하고 어긋나면 ValueError
     (이 함수는 외부 글을 믿지 않는다 — 제목·요약은 safe_text 로 소독하고 HTML 이스케이프한다). 제목·요약 속 `R-001` 도 보이는 글에서는 `r001` 로 바꾼다(display_text — 인용·`[R-001]` 제목 꼴은 그대로).
-    본문 상세는 싣지 않고 버튼으로 연다."""
+    본문 상세는 싣지 않고 버튼으로 연다. (확인·결정 종류의 '답하는 법' 줄은 옛 R 번호용 답변 양식이 없어진 2026-11-16 확인 021 뒤로 새 양식의 대상번호를 가리키고, 옛 번호 요청은 접수만 된다고 말한다 — 이 모양은 알림 칸이 틀린 요청 파일의 폴백으로만 간다.)"""
     shown = display_id(request_id)                  # 정본이 아니면 ValueError("request_id") — 운영자에게는 `r001` 꼴로 보인다
     if kind not in REQUEST_KIND_LABELS:
         raise ValueError("kind")
@@ -741,7 +741,7 @@ def format_ai_request(request_id, kind, title, summary, urgency="보통", pr=Non
     if pr is not None:
         lines.append(f"관련 PR: #{_positive_int(pr, 'pr')}")
     if kind in REQUEST_ANSWER_KINDS:
-        lines.extend(["", f"답하는 법: 아래 [답하기] → 양식에서 {shown} 선택"])
+        lines.extend(["", f"답하는 법: 아래 [답하기] → 양식의 대상번호에 {shown} (옛 번호 요청은 접수만 됩니다 — 승인은 AI 가 새 번호로 다시 묻습니다)"])
     if more:
         lines.extend(["", f"… 외 {_positive_int(more, 'more')}건 (저장소의 인수인계/요청함/ 폴더에서 확인하세요)"])
     return "\n".join(lines)

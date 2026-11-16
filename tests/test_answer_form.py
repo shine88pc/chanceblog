@@ -510,6 +510,19 @@ class AckAnswerTest(unittest.TestCase):
         code, lines, net, github = self.ack(nth.answer_event(number=146, body=answer_body(target_raw="20", choice="②")), github=github)
         self.assertNotIn("대체", net.bodies()[0]["text"])
 
+    def test_an_earlier_answer_is_replaced_only_by_the_same_number_never_by_a_look_alike(self):
+        """검증 A-2: '이전 답을 대체합니다' 는 같은 번호(`19`·`019`·` 019 ` — 어느 꼴이든)에만 붙는다. 끝 두 자리만 같은 `119`·앞의 0 만 다른 `190`·`1019`·`0190`, 옛 요청 `r019`·`R-019`,
+        모양이 틀려 거절된 `0019`·`19.0`·두 번호는 같은 번호가 아니다 — 거짓으로 '대체합니다' 라고 말하지 않는다."""
+        same = ("19", "019", " 019 ")
+        look_alikes = ("119", "190", "1019", "0190", "9", "91", "10", "010", "20", "r019", "R-019", "0019", "19.0", "019 020", "０１９")
+        for now_raw in ("19", "019"):
+            for earlier_raw in same + look_alikes:
+                github = NoticeGitHub(issues=[self.earlier(144, body=answer_body(target_raw=earlier_raw))])
+                code, lines, net, github = self.ack(nth.answer_event(number=146, body=answer_body(target_raw=now_raw, choice="②")), github=github)
+                replaced = "이전 답(이슈 #144)을 대체합니다" in net.bodies()[0]["text"]
+                self.assertEqual(replaced, earlier_raw in same, (earlier_raw, now_raw))
+                self.assertEqual("이 번호에 앞서 올린 답(이슈 #144)이 있어" in github.posted(146)[0], earlier_raw in same, (earlier_raw, now_raw))
+
     def test_the_number_zero_and_a_longer_leading_zero_run_are_refused_on_the_phone_with_their_own_sentence(self):
         for raw, code_name in (("0", "zero"), ("000", "zero"), ("0019", "format"), ("19.0", "format"), ("19 20", "two"), ("P19", "type"), (FULLWIDTH_19, "format")):
             code, lines, net, github = self.ack(nth.answer_event(body=answer_body(target_raw=raw)))

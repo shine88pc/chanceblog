@@ -104,6 +104,19 @@ class GuideMatchesFormsTest(unittest.TestCase):
         self.assertEqual([row[0] for row in rows], [notify.REQUEST_KIND_LABELS[kind] for kind in ("merge", "run", "confirm", "decision", "info", "merged")])
         self.assertEqual(set(row[0] for row in rows), set(notify.REQUEST_KIND_LABELS.values()))
 
+    def test_the_guide_step_for_the_target_number_keeps_the_short_form_and_the_dropped_digit_warning(self):
+        """B-5(검증 B)·A-4(검증 A): 사용법 3장 4번의 '대상번호' 줄 하나가 `19` 로 써도 된다는 말·숫자를 하나 빠뜨리면 다른 번호로 읽힐 수 있다는 정직한 경고·번호가 아닌 것의 목록을 **그 줄 안에서** 말한다 —
+        5행(한 줄 요약)에 같은 문장이 있어도 이 줄이 옛 세 자리 안내로 되돌아가면 빨개진다."""
+        lines = [line for line in self.guide.splitlines() if line.lstrip().startswith("- **대상번호**(필수):")]
+        self.assertEqual(len(lines), 1, lines)
+        line = lines[0]
+        for needle in ("`019` 처럼 텔레그램의 숫자를 쓰고 **번호 하나만** 씁니다", "`19` 처럼 앞의 0 을 빼고 써도 `019` 로 읽습니다(`1` 은 `001`, `135` 는 `135`, `1000` 이상은 그대로)",
+                       "숫자를 하나 빠뜨리면(예: `122` 를 `22` 로) 다른 요청의 번호 `022` 로 읽혀 접수될 수 있습니다", "승인이 되려면 선택도 그 요청의 승인 보기와 같아야 하고",
+                       "접수 답글이 `읽었습니다` 로 읽은 번호를 알려 주지만", "접수 답글에 적힌 읽은 번호가 쓰신 번호와 같은지 한 번 봐 주세요", "`0`·`000`·앞에 0 이 더 붙은 `0019`·`P012`·`M007`"):
+            self.assertIn(needle, line, needle)
+        for old in ("숫자 3자리", "세 자리로만", "세 자리로 쓰세요", "세 자리 숫자", "그대로 쓰세요"):
+            self.assertNotIn(old, line, old)
+
     def test_the_kinds_that_need_an_answer_are_the_ones_the_guide_says_get_the_how_to_answer_line(self):
         for kind in notify.REQUEST_ANSWER_KINDS:
             self.assertIn(notify.REQUEST_KIND_LABELS[kind], self.guide)
@@ -118,8 +131,8 @@ class GuideMatchesFormsTest(unittest.TestCase):
         self.assertTrue(urgent.endswith(f"{notify.SIREN_MARK} 급함"))
         self.assertIn(f"`{notify.SIREN_MARK} 급함`", self.guide)
         asking = notify.format_ai_request("R-001", "decision", "제목", "요약")
-        self.assertIn("답하는 법: 아래 [답하기] → 양식에서 r001 선택", asking)
-        self.assertIn("`답하는 법: 아래 [답하기] → 양식에서 r001 선택`", self.guide)
+        self.assertIn("답하는 법: 아래 [답하기] → 양식의 대상번호에 r001 (옛 번호 요청은 접수만 됩니다 — 승인은 AI 가 새 번호로 다시 묻습니다)", asking)
+        self.assertIn("`답하는 법: 아래 [답하기] → 양식의 대상번호에 r001 (옛 번호 요청은 접수만 됩니다 — 승인은 AI 가 새 번호로 다시 묻습니다)`", self.guide)
         received = notify.format_answer_received("003", 2, 12)
         self.assertEqual(received, f"{notify.OK_MARK} 답변 접수 003 → 선택 ②(이슈 #12)")
         self.assertIn(received.replace("#12", "#N"), self.guide)
@@ -482,6 +495,76 @@ class OtherDocsAgreeTest(unittest.TestCase):
         self.assertEqual([line.split(" | ")[0] for line in history], ["| TS-10"])
         self.assertIn("2026-11-16 확인 021", history[0])
         self.assertFalse((TEMPLATES / "ai-reply.yml").exists())
+
+    # ---- 검증 A-1: AI 가 읽는 문서의 개별 승인 문장·거절 목록 — 승인을 판정하는 코드가 저장소에 없고 AI 가 이 문장을 보고 판단하므로, 같은 줄 안의 문장이 약해지면 빨개져야 한다 ----
+    README_READING_PHRASES = (
+        "**대상번호만 올린 답은 '확인함' 이고 승인이 아닙니다**",
+        "(`pipeline/operator_loop.py` 의 `parse_target`",
+        "`0`·`000`·앞에 0 이 더 붙은 `0019`·전각 등 다른 문자의 숫자·부호·소수점·글자 사이의 공백·`P`·`M` 번호·두 번호는 번호가 아닙니다",
+        "승인은 **그렇게 정규화한 대상번호**가 **내가 보낸 확인 요청 번호**",
+        "`선택` 이 그 요청 파일의 `approve` 보기와 같을 때만, 그 요청 파일에 적힌 항목에 한해서 유효합니다",
+        "같은 번호(`19` 와 `019` 도 같은 번호입니다)에 여러 이슈가 오면 **번호가 가장 큰(가장 나중) 이슈의 답이 이깁니다**",
+        "옛 R 번호를 새 양식에 쓴 답(`r149`)은 **접수만** 되고 승인이 아닙니다",
+        "새 번호의 `decision` 요청으로 다시 묻습니다",
+    )
+    RUNBOOK_READING_PHRASES = (
+        "(`pipeline/operator_loop.py` 의 `parse_target`)으로 읽어 정규화합니다",
+        "`0`·`000`·앞에 0 이 더 붙은 `0019`·전각 등 다른 문자의 숫자·부호·소수점·글자 사이의 공백·`P`·`M` 번호·두 번호는 번호가 아닙니다",
+        "그렇게 정규화한 번호가 **내가 보낸 확인 요청의 알림 번호**",
+        "선택이 그 요청의 `approve` 보기와 같을 때만 승인으로 읽습니다",
+        "**대상번호만 올린 답은 '확인함'이고 승인이 아닙니다.**",
+        "같은 번호에 여러 이슈가 있으면 번호가 가장 큰 이슈의 답이 이깁니다",
+        "새 양식에 쓴 옛 번호 `r149` 는 접수만입니다",
+    )
+    WEAKENED_READING = ("대상번호만 올린 답은 승인", "대상번호만 올린 답도 승인", "번호가 같으면 승인", "번호만 맞으면 승인", "번호만 같으면 승인", "선택이 없어도 승인", "선택 없이도 승인",
+                        "같으면 승인으로 읽습니다", "`0019` 도 같은 번호", "`000` 도 같은 번호", "전각 숫자도 번호", "`r149` 는 승인", "`r149` 도 승인", "숫자 사이의 공백도 번호")
+
+    def test_the_ai_reading_rules_for_the_target_number_are_pinned_sentence_by_sentence(self):
+        """README 'AI 읽기' 3번 한 줄과 AGENT_RUNBOOK J2 2번 한 줄: 승인 조건(정규화한 번호 일치 + 선택이 `approve` 보기와 같을 때만 + 그 요청 파일에 적힌 항목에 한해서)·'대상번호만 올린 답은 확인함'·
+        '번호가 아닌 것' 목록·옛 R 번호는 접수만·같은 번호는 가장 나중 이슈 — 같은 파일 안의 다른 줄을 바꿔도 이 두 줄의 문장이 약해지면(예: '확인함' → '승인') 여기서 빨개진다."""
+        readme = [line for line in rel_text("인수인계/요청함/README.md").splitlines() if line.startswith("3. **새 양식 읽기")]
+        runbook = [line for line in rel_text("docs/AGENT_RUNBOOK.md").splitlines() if line.startswith("2. **`[답변]`**:")]
+        self.assertEqual((len(readme), len(runbook)), (1, 1))
+        for where, line, phrases in (("README 3번", readme[0], self.README_READING_PHRASES), ("AGENT_RUNBOOK J2 2번", runbook[0], self.RUNBOOK_READING_PHRASES)):
+            for phrase in phrases:
+                self.assertIn(phrase, line, (where, phrase))
+            for weakened in self.WEAKENED_READING:
+                self.assertNotIn(weakened, line, (where, weakened))
+
+    def test_the_glossary_row_for_the_request_number_teaches_the_target_number_and_not_the_deleted_field(self):
+        """검증 B-1: docs/ACTIONS_GUIDE.md 용어집의 '요청함·요청 번호' 행이 '답할 때 양식에 요청 번호를 그대로 쓴다' 고 가르치지 않는다 — 지금은 확인 요청 맨 위의 숫자 대상번호(`19` 로 써도 됨)를 쓰고 선택은 승인 보기 번호를 직접 고른다."""
+        rows = [line for line in rel_text("docs/ACTIONS_GUIDE.md").splitlines() if line.startswith("| 요청함·요청 번호 |")]
+        self.assertEqual(len(rows), 1)
+        for needle in ("옛 텔레그램 메시지에서는 `r001` 꼴", "확인 요청 맨 위의 숫자 **대상번호**(`019` — `19` 로 써도 됩니다)", "선택은 그 요청의 승인 보기 번호를 직접 고릅니다"):
+            self.assertIn(needle, rows[0], needle)
+        self.assertNotIn("답할 때 양식에 그대로 씁니다", rows[0])
+
+    # ---- 검증 B-5: 현행 문서 목록 밖의 어떤 파일에도 옛 메뉴 이름이 새로 생기지 않는다(저장소 훑기 + 기록 문서 허용 목록) ----
+    RECORD_FILES = {
+        "WORKLOG.md": "작업 기록 — 지난 항목은 고치지 않는다",
+        "인수인계/작업내용.md": "작업 현황·기록 — 5장 날짜 기록·4장 지난 사용자 몫",
+        "docs/DEFECT_REGISTER.md": "결함 대장 D-78(옛 양식을 만든 기록)",
+        "docs/ARCHITECTURE.md": "설계 결정 TS-10(옛 양식을 두었다가 없앤 기록 한 줄)",
+        ".github/workflows/operator-reply.yml": "머리 주석 — 승인 목록(R-370·R-372)에 없어 일부러 안 고친 곳(다음 확인 요청으로 묻는다)",
+    }
+
+    def test_the_old_menu_names_appear_in_no_file_but_the_records_and_the_known_leftover(self):
+        """확인 021: 옛 R 번호용 답변 양식의 메뉴 이름(`AI 요청에 답하기(결정·확인)`·`이전 R 번호용`)은 저장소 어느 파일에도 새로 생기지 않는다 — 허용 목록(RECORD_FILES)은 과거 기록과 알려 둔 남긴 곳뿐이고
+        시험 파일(tests/)과 요청함의 옛 요청 파일(R-nnn)은 그때의 기록이라 훑지 않는다. 허용 목록 밖에서 발견되면 그 파일을 고치거나, 정말 기록이면 이유를 적어 목록에 더한다."""
+        stale = ("AI 요청에 답하기(결정·확인)", "이전 R 번호용")
+        found = {}
+        for rel in vr.list_files(ROOT):
+            if rel.startswith("tests/") or rel.startswith("인수인계/요청함/R-"):
+                continue
+            text = vr.read_text(ROOT, rel)
+            if text is None:
+                continue
+            hits = [needle for needle in stale if needle in text]
+            if hits:
+                found[rel] = hits
+        self.assertLessEqual(set(found), set(self.RECORD_FILES), {rel: hits for rel, hits in found.items() if rel not in self.RECORD_FILES})
+        for rel in self.CURRENT_DOCS:
+            self.assertNotIn(rel, found, rel)                                  # 현행 안내는 허용 목록과 겹치지 않는다
 
     def test_the_target_number_is_read_by_one_function_and_the_status_tool_only_prints_the_issue_text(self):
         """문서(README·AGENT_RUNBOOK)는 `scripts/github_status.py` 가 이슈 본문을 그대로 보여 줄 뿐 대상번호를 읽지 않는다고 말하고, 텔레그램 수신은 접수 코드와 같은 함수로 읽는다고 한다 —

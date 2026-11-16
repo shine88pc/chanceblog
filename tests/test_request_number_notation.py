@@ -329,9 +329,9 @@ class TelegramTextTest(unittest.TestCase):
     def test_the_how_to_answer_line_names_the_displayed_number(self):
         text = notify.format_ai_request("R-092", "decision", "표기 고르기", "A 또는 B", urgency="급함", pr=5, more=2)
         self.assertEqual(text, "\n".join([f"{BELL} <b>AI 요청 r092 · 결정 부탁</b> {SIREN} 급함", "표기 고르기", "A 또는 B", "관련 PR: #5", "",
-                                          "답하는 법: 아래 [답하기] → 양식에서 r092 선택", "", "… 외 2건 (저장소의 인수인계/요청함/ 폴더에서 확인하세요)"]))
+                                          "답하는 법: 아래 [답하기] → 양식의 대상번호에 r092 (옛 번호 요청은 접수만 됩니다 — 승인은 AI 가 새 번호로 다시 묻습니다)", "", "… 외 2건 (저장소의 인수인계/요청함/ 폴더에서 확인하세요)"]))
         confirm = notify.format_ai_request("R-007", "confirm", "t", "s")
-        self.assertEqual(confirm.splitlines()[-1], "답하는 법: 아래 [답하기] → 양식에서 r007 선택")
+        self.assertEqual(confirm.splitlines()[-1], "답하는 법: 아래 [답하기] → 양식의 대상번호에 r007 (옛 번호 요청은 접수만 됩니다 — 승인은 AI 가 새 번호로 다시 묻습니다)")
         for kind in ("merge", "run", "info"):
             self.assertNotIn("답하는 법", notify.format_ai_request("R-007", kind, "t", "s"))
 
@@ -505,7 +505,7 @@ class RealFlowTest(unittest.TestCase):
         lines, message = self.push()
         text = message["text"]
         self.assertEqual(text.splitlines()[0], f"{BELL} <b>AI 요청 r090 · 결정 부탁</b> {SIREN} 급함")
-        self.assertEqual(text.splitlines()[-1], "답하는 법: 아래 [답하기] → 양식에서 r090 선택")
+        self.assertEqual(text.splitlines()[-1], "답하는 법: 아래 [답하기] → 양식의 대상번호에 r090 (옛 번호 요청은 접수만 됩니다 — 승인은 AI 가 새 번호로 다시 묻습니다)")
         self.assertIsNone(re.search(r"R-\d", text), text)
         self.assertEqual([button["text"] for button in message["reply_markup"]["inline_keyboard"][0]], ["요청 열기", "PR 열기", "답하기", "사용법"])
         for button in message["reply_markup"]["inline_keyboard"][0]:
