@@ -215,6 +215,8 @@ def notice_front_problem(fields, folder=None, skip=""):
 
 def repo_folder(repo_name):
     """저장소 이름(`소유자/저장소`) → 작업 폴더 W 아래의 저장소 폴더 이름: 이름이 `-desktop` 으로 끝나면 `cd_repo`(데스크톱), 아니면 `wt_r30`(블로그)."""
+    if repo_name == "shine88pc/shine88pc.github.io":      # 루트 홈 저장소(자동 검사 없음) — 로컬 복제 root_repo
+        return "root_repo"
     return "cd_repo" if repo_name.endswith("-desktop") else "wt_r30"
 
 
