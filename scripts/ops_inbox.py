@@ -242,6 +242,29 @@ def read_policy(root, today=None):
             f"[참고] 정책 파일을 읽지 못해 운영자 결정 없이 예전 규칙으로 표시합니다: {reason}")
 
 
+SOURCE_REGISTRY_FILE = "pipeline/source_registry.json"
+
+
+def read_source_terms(root, failures):
+    """허용 목록 파일(pipeline/source_registry.json)의 providers 배열 — 켜진 제공처의 약관 점검 기한을 보는 입력이다(L7, D-360). 저장소 파일을 읽을 뿐이라 API 호출은 0회다.
+    - 파일이 없다 → None(알릴 것 없음 — 예전과 같다. 정책 파일과 같은 방식이라 본문·로그 어디에도 새 글자가 없다).
+    - 읽지 못하거나 모양이 틀리다(JSON 오류·최상위가 객체가 아님·providers 가 배열이 아님) → None 을 돌려주고 ('source_terms', 사유)를 남긴다 — 모음에 '조회 실패' 확인 항목이 생겨
+      기한 경고가 조용히 빠지지 않는다. 실행 환경의 절대 경로와 파일 내용은 사유에 싣지 않는다."""
+    path = Path(root) / SOURCE_REGISTRY_FILE
+    try:
+        if not path.is_file():
+            return None
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError) as exc:               # UnicodeDecodeError·JSONDecodeError 는 ValueError 의 하위
+        failures.append(("source_terms", f"{SOURCE_REGISTRY_FILE}: {_read_error(exc)}"))
+        return None
+    providers = data.get("providers") if isinstance(data, dict) else None
+    if not isinstance(providers, list):
+        failures.append(("source_terms", f"{SOURCE_REGISTRY_FILE}: providers 가 배열이 아닙니다"))
+        return None
+    return providers
+
+
 def parse_feed_post_ids(text):
     """Blogger 공개 피드(alt=json)에 있는 글 번호 집합. 피드 모양이 아니면 ValueError(부른 쪽이 '읽지 못함'으로 처리한다). 공개 글이 하나도 없으면 빈 집합."""
     data = json.loads(text)
@@ -868,6 +891,7 @@ def run(environ=None, client=None, now=None, root=ROOT, out=print, sleep=time.sl
     # 게시 확인(블로그 공개 피드). feed_fetcher 가 없으면(시험·옛 호출) 확인하지 않고 이력만 센 대략치로 둔다 — main() 이 진짜 읽기 함수를 넘긴다
     published = fetch_published(blogs, histories, now, failures, feed_fetcher) if feed_fetcher is not None else None
     issues = fetch_issues(client, failures)
+    source_terms = read_source_terms(root, failures)           # 켜진 허용 목록 제공처의 약관 점검 기한(저장소 파일 — API 호출 0회)
     pulls = fetch_pulls(client, failures, notes, sleep)
     drafts = fetch_drafts(client, failures, notes)
     files = list_workflow_files(root)
@@ -880,7 +904,7 @@ def run(environ=None, client=None, now=None, root=ROOT, out=print, sleep=time.sl
     snapshot = inbox.Snapshot(
         now=now, repo=repo, issues=issues, pulls=pulls, runs=runs, approvals=approvals, annotations=annotations,
         paused=inbox.is_truthy(environ.get("PIPELINE_PAUSE")), blogs=blogs, histories=histories, failures=failures, notes=notes,
-        workflow_names=names, drafts=drafts, published=published, branch_prs=branch_prs, branch_pr_heads=branch_heads, policy=policy)
+        workflow_names=names, drafts=drafts, published=published, branch_prs=branch_prs, branch_pr_heads=branch_heads, policy=policy, source_terms=source_terms)
     items = inbox.build_items(snapshot)
     try:
         board = inbox.draft_board(snapshot)

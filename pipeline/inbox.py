@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
-from pipeline import draft_labels, inbox_policy
+from pipeline import draft_labels, inbox_policy, terms_deadline
 from pipeline.console import one_line
 from pipeline.llm import mask
 from pipeline.state import KST
@@ -109,11 +109,12 @@ SOURCE_LABELS = {
     "runs": "워크플로 실행 기록", "approvals": "승인 대기 실행", "annotations": "실행 경고(주석)",
     "history": "블로그 이력 파일", "registry": "블로그 레지스트리", "drafts": "열린 초안(이슈·PR) 목록",
     "published": "Blogger 게시 확인(블로그 공개 피드)", "approval_prs": "승인 대기 실행의 PR 상태(가지 이름으로 조회)",
+    "source_terms": "허용 목록(약관 점검 기한)",
 }
 SOURCE_PREFIXES = {
     "issues": ("watchdog:",), "issues_cap": ("watchdog:",), "pulls": ("pr:",), "pull_details": ("pr:",), "runs": ("run:",),
     "approvals": ("approve:",), "history": ("blogger:",), "registry": ("blogger:",), "drafts": ("draft:",), "published": ("blogger:",),
-    "approval_prs": ("approve:",),
+    "approval_prs": ("approve:",), "source_terms": ("terms:",),
 }
 
 # 플랫폼(GitHub)이 거의 모든 실행에 붙이는 안내성 주석 — 우리 스크립트가 남긴 것이 아니라서 check 로 올리지 않고 '참고' 한 줄로 합친다.
@@ -286,6 +287,7 @@ class Snapshot:
     branch_prs: dict = field(default_factory=dict)          # 승인 대기 실행의 head 가지 이름 → 그 가지 PR 의 상태('open'·'merged'·'closed'). scripts/ops_inbox.py 가 가지마다 한 번 조회해 넣는다. 키가 없으면(PR 을 못 찾음·조회 실패) 모르는 것이라 그 승인 대기는 숨기지 않는다
     branch_pr_heads: Optional[dict] = None                  # 가지 이름 → 그 가지의 병합됐거나 닫힌 PR 들의 head 커밋(40자 소문자 16진)의 집합. scripts/ops_inbox.py 가 넣는다 — 실행의 head_sha 가 이 집합에 있을 때만 그 승인 대기를 뺀다(같은 이름의 가지에 새 커밋이 오른 경우를 숨기지 않게, D2). None 이면 커밋을 안 보고 가지 이름만 본다(옛 호출·시험)
     policy: Optional[object] = None                         # inbox_policy.Policy(운영자 결정 데이터). None 이면 정책 파일이 없거나 올바르지 않은 것 — 예전 동작(의도된 정지·운영자 결정 없음)
+    source_terms: Optional[list] = None                     # 허용 목록 파일(pipeline/source_registry.json)의 providers 배열(JSON 을 읽은 값) — 켜진 제공처의 약관 점검 기한을 보는 입력(L7, D-360). None 이면 읽지 않았거나 파일이 없는 것(예전과 같다 — 읽지 못한 때는 failures 에 ('source_terms', 사유))
 
 
 # ----------------------------------------------------------------------------
@@ -306,9 +308,10 @@ def _watchdog_message(body):
     return ""
 
 
-def watchdog_items(issues, repo_url):
+def watchdog_items(issues, repo_url, hide_titles=()):
     """열린 `[Watchdog] …` 이슈 → 심각(critical)=action, 경고(warning)=check. 심각도를 읽지 못하면 action(놓치는 쪽이 더 위험하다).
-    제목만 같은 낯선 사람의 이슈는 걸러낸다(작성자가 github-actions 봇이거나 저장소 소유자·멤버·협업자일 때만)."""
+    제목만 같은 낯선 사람의 이슈는 걸러낸다(작성자가 github-actions 봇이거나 저장소 소유자·멤버·협업자일 때만).
+    hide_titles 에 든 제목의 워치독 이슈는 싣지 않는다 — 모음이 같은 사실을 직접 싣는 때(약관 점검 기한, terms_items)에 같은 일이 두 줄이 되지 않게(L7, D-360). 기본값은 아무것도 숨기지 않는다."""
     out = []
     for issue in issues:
         if not isinstance(issue, dict) or "pull_request" in issue:
@@ -316,6 +319,8 @@ def watchdog_items(issues, repo_url):
         title = str(issue.get("title") or "")
         number = _as_int(issue.get("number"))
         if not title.startswith(WATCHDOG_PREFIX) or number is None or not trusted_author(issue):
+            continue
+        if title in hide_titles:
             continue
         match = _SEVERITY_RE.search(str(issue.get("body") or ""))
         severity = match.group(1).lower() if match else "critical"
@@ -327,6 +332,38 @@ def watchdog_items(issues, repo_url):
             title=f"워치독 알림 — {ext(title[len(WATCHDOG_PREFIX):].strip(), 80)}",
             detail=detail, url=f"{repo_url}/issues/{number}", since=parse_time(issue.get("created_at")),
             hint="이슈를 열어 내용을 확인하세요. 문제가 해소되면 워치독이 이슈를 자동으로 닫고 이 목록에서도 사라집니다."))
+    return out
+
+
+TERMS_DOC = "docs/SOURCE_POLICY.md"
+TERMS_HINT = ("약관을 다시 읽어 허용 목록(pipeline/source_registry.json)의 점검 기한(snapshot.expires_at)을 갱신해야 합니다 — 약관 판독은 사람이 하고 그 변경은 운영자 승인이 필요하니 AI 에게 요청하세요. "
+              "갱신하면 이 항목은 자동으로 사라집니다.")
+
+
+def terms_items(source_terms, today, repo_url):
+    """켜진 허용 목록 제공처의 약관 점검 기한 → 항목(L7, D-360). 순수 계산은 pipeline/terms_deadline.py 가 한다(오늘은 값으로 받는다).
+    기한이 14일 안으로 다가온 것(기한 당일 포함)은 check — 미리 알리는 경고라 알림(코멘트·텔레그램)은 가지 않는다. 이미 지났거나 기한이 없는 것은 action — 그 제공처는 이미 ACTIVE 가 아니라
+    자동 글감에서 빠졌고(구조화 글이 만들어지지 않는다) 사람이 약관을 다시 읽어야 풀린다. id 가 상태마다 달라 '다가옴 → 지남' 으로 바뀌면 새 알림이 간다.
+    source_terms 가 None(읽지 않았거나 파일이 없음)이면 아무것도 싣지 않는다. 제공처 이름은 파일의 글이라 ext() 로 한 줄로 접는다."""
+    if source_terms is None:
+        return []
+    out = []
+    url = f"{repo_url}/blob/main/{TERMS_DOC}"
+    for notice in terms_deadline.notices(source_terms, today):
+        who = ext(notice.name or notice.provider_id, 60)
+        if notice.state == terms_deadline.EXPIRING:
+            when = "오늘이 마지막 날입니다(당일까지 유효)" if notice.days_left == 0 else f"{notice.days_left}일 남았습니다"
+            out.append(Item(
+                id=f"terms:{notice.provider_id}:soon", level=LEVEL_CHECK, title=f"약관 점검 기한이 다가옵니다 — {who}",
+                detail=f"점검 기한 {notice.expires_at} — {when}. 기한이 지나면 이 제공처는 자동 글감에서 빠져 구조화 글이 만들어지지 않습니다.", url=url, hint=TERMS_HINT))
+        elif notice.state == terms_deadline.EXPIRED:
+            out.append(Item(
+                id=f"terms:{notice.provider_id}:expired", level=LEVEL_ACTION, title=f"약관 점검 기한이 지났습니다 — {who}",
+                detail=f"점검 기한 {notice.expires_at} 이 {-notice.days_left}일 지나 이 제공처는 지금 자동 글감에서 빠져 있습니다(구조화 글이 만들어지지 않습니다).", url=url, hint=TERMS_HINT))
+        else:
+            out.append(Item(
+                id=f"terms:{notice.provider_id}:missing", level=LEVEL_ACTION, title=f"약관 점검 기한을 읽을 수 없습니다 — {who}",
+                detail="켜진 제공처인데 점검 기한(snapshot.expires_at)이 없거나 날짜로 읽을 수 없어 ACTIVE 가 될 수 없고, 지금 자동 글감에서 빠져 있습니다.", url=url, hint=TERMS_HINT))
     return out
 
 
@@ -1457,7 +1494,9 @@ def build_items(snap):
     today = now.astimezone(KST).date()
     ctx = DraftContext(paused=paused, stopped=_stopped_channels(snap.blogs), policy=policy)
     pulls, pull_states = _split_draft_pulls(pull_items(snap.pulls, now, repo_url), snap.drafts)
-    items = (watchdog_items(snap.issues, repo_url) + pulls
+    terms = terms_items(snap.source_terms, today, repo_url)         # 켜진 허용 목록 제공처의 약관 점검 기한(L7, D-360) — source_terms 가 없으면(None) 비어 있어 예전과 글자 하나 다르지 않다
+    hidden = tuple(f"{WATCHDOG_PREFIX} {terms_deadline.FINDING_BLOG}: {code}" for code in terms_deadline.FINDING_CODES) if terms else ()   # 모음이 직접 싣는 사실의 워치독 이슈는 한 줄만 싣는다
+    items = (watchdog_items(snap.issues, repo_url, hidden) + terms + pulls
              + run_items(snap.runs, snap.annotations, now, repo_url, names=snap.workflow_names)
              + approval_items(snap.approvals, repo_url, names=snap.workflow_names, branch_states=snap.branch_prs, branch_heads=snap.branch_pr_heads)
              + pause_items(snap.paused, repo_url, policy, today) + blog_items(snap.blogs, snap.histories, now, repo_url, snap.published, paused, policy)

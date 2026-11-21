@@ -30,6 +30,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from pipeline import terms_deadline  # noqa: E402
 from pipeline.console import safe_output  # noqa: E402
 from pipeline.health import REAL_POST_STATUSES, Finding, entry_time, evaluate  # noqa: E402
 from pipeline.publish_lock import (CHANCE_KEY, WEEK_WINDOW_DAYS, lock_active, lock_errors,  # noqa: E402
@@ -303,6 +304,47 @@ def chance_weekly_cap(reg):
     return weekly_posts_limit(reg)
 
 
+SOURCE_REGISTRY_PATH = Path("pipeline") / "source_registry.json"
+TERMS_SHOWN = 5              # 알림 문구에 이름을 싣는 제공처의 수(나머지는 '외 N개')
+TERMS_ACTION = "약관을 다시 읽어 pipeline/source_registry.json 의 snapshot.expires_at 을 갱신하는 변경(운영자 승인 필요)을 AI 에게 요청하세요."
+
+
+def _terms_list(notices):
+    shown = [f"{n.provider_id}({n.expires_at}, {terms_deadline.left_text(n)})" if n.expires_at else f"{n.provider_id}(기한 없음)" for n in notices[:TERMS_SHOWN]]
+    return ", ".join(shown) + (f" 외 {len(notices) - TERMS_SHOWN}개" if len(notices) > TERMS_SHOWN else "")
+
+
+def terms_findings(root, now):
+    """켜진 허용 목록 제공처의 약관 점검 기한 알림(L7, D-360): 14일 안으로 다가왔으면 SOURCE_TERMS_EXPIRING(경고), 이미 지났거나 기한이 없으면 SOURCE_TERMS_EXPIRED(심각 — 그 제공처는 이미 자동 글감에서 빠져
+    생성 실행이 초록으로 끝나도 구조화 글이 만들어지지 않는다). 계산은 pipeline/terms_deadline.py(순수 — 오늘은 now 의 한국 날짜), 허용 목록 파일은 읽기만 한다. 블로그가 아니라 공통이라 블로그 자리에 '공통'을 쓴다.
+    파일이 없으면 아무것도 하지 않고(시험용 임시 폴더), 읽지 못하면 ::warning:: 한 줄을 남긴다 — 검사가 꺼진 채로 초록이 이어지지 않게. 정지(PIPELINE_PAUSE) 중에는 main() 이 알림 자체를 만들지 않는다."""
+    path = Path(root) / SOURCE_REGISTRY_PATH
+    try:
+        if not path.is_file():
+            return []
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError) as exc:    # 읽기 오류·JSON 오류·UTF-8 오류(ValueError 의 하위)
+        print(f"::warning::허용 목록({SOURCE_REGISTRY_PATH.as_posix()})을 읽지 못해 약관 점검 기한을 확인하지 못했습니다({type(exc).__name__}).")
+        return []
+    providers = data.get("providers") if isinstance(data, dict) else None
+    if not isinstance(providers, list):
+        print(f"::warning::허용 목록({SOURCE_REGISTRY_PATH.as_posix()})의 providers 가 배열이 아니어서 약관 점검 기한을 확인하지 못했습니다.")
+        return []
+    notices = terms_deadline.notices(providers, now.astimezone(KST).date())
+    soon = [n for n in notices if n.state == terms_deadline.EXPIRING]
+    lapsed = [n for n in notices if n.state != terms_deadline.EXPIRING]
+    found = []
+    if lapsed:
+        found.append(Finding(terms_deadline.FINDING_BLOG, terms_deadline.FINDING_CODES[1], "critical",
+                             f"켜진 허용 목록 제공처의 약관 점검 기한이 지났거나 없습니다: {_terms_list(lapsed)}. 그 제공처는 지금 자동 글감에서 빠져 구조화 글이 만들어지지 않습니다"
+                             f"(생성 실행은 FACT_NOT_READY 로 초록으로 끝납니다). {TERMS_ACTION}"))
+    if soon:
+        found.append(Finding(terms_deadline.FINDING_BLOG, terms_deadline.FINDING_CODES[0], "warning",
+                             f"켜진 허용 목록 제공처의 약관 점검 기한이 {terms_deadline.WARN_DAYS}일 안으로 다가왔습니다: {_terms_list(soon)}. 기한이 지나면 그 제공처는 자동 글감에서 빠져 "
+                             f"구조화 글이 만들어지지 않습니다. {TERMS_ACTION}"))
+    return found
+
+
 def collect(reg, root, now, client=None):
     """(문제 목록, 블로그별 현황). 현황은 실행 요약 표에 쓴다(마지막 글 시각, 최근 7일 글 수)."""
     findings, stats = [], []
@@ -363,6 +405,7 @@ def collect(reg, root, now, client=None):
         findings.extend(blog_findings)
         stats.append({"key": blog["key"], "mode": blog.get("mode"), "last_post": last_post, "posts_7d": posts_7d,
                       "codes": [f.code for f in blog_findings]})
+    findings.extend(terms_findings(root, now))         # 켜진 허용 목록 제공처의 약관 점검 기한(L7, D-360) — 허용 목록 파일이 없는 폴더(시험)에서는 아무것도 더하지 않는다
     return findings, stats
 
 
