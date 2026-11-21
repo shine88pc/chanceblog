@@ -11,8 +11,8 @@ Chance 두 워크플로의 배포 요청(`gh workflow run pages.yml --ref "${GIT
 5) 안내 문서(절차서의 pages.yml 행·결함 표·관측 체크리스트)가 이 동작을 적었다.
 
 식 해석기는 tests/test_workflow_names.py 의 것을 그대로 쓴다. 한계(그 파일 해석기의 머리 주석): 문자열끼리의 비교는 대소문자를 구분하지 않고(GitHub 도 같다),
-종류가 다른 값끼리의 형 변환은 구현돼 있지 않다. 그래서 아래 표에는 '문자열 대 문자열'과 '문자열 대 없음'만 넣었고, GitHub 와 해석기가 갈릴 수 있는
-'둘 다 없음·빈 문자열 대 없음' 조합은 일부러 넣지 않았다(실제 이벤트에는 ref_name 과 기본 가지가 항상 있다).
+종류가 다른 값끼리의 형 변환은 구현돼 있지 않다. 그래서 아래 표에는 '문자열 대 문자열'과 '문자열 대 없음'만 넣었다. 일부러 넣지 않은 조합: '빈 문자열 대 없음'(GitHub 는 둘을
+숫자 0 으로 바꿔 참, 해석기는 거짓)과 '둘 다 없음'(둘 다 참이지만 닫힌 쪽이 아니다). 실제 이벤트에는 ref_name 과 기본 가지가 항상 있어 두 조합은 일어나지 않는다.
 """
 import re
 import unittest
@@ -65,6 +65,8 @@ SCENARIOS = (
     ("태그에서 수동 실행(ref_name 이 태그 이름)", "v1.0", "main", True, False, False),
     ("main 으로 시작하기만 하는 가지(main-fix)", "main-fix", "main", True, False, False),
     ("main 으로 시작하기만 하는 가지(main/fix)", "main/fix", "main", True, False, False),
+    ("흔한 다른 가지 이름 dev 는 특별 취급하지 않는다", "dev", "main", True, False, False),
+    ("흔한 옛 기본 가지 이름 master 도 특별 취급하지 않는다", "master", "main", True, False, False),
 )
 
 
