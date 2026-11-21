@@ -268,8 +268,8 @@ class RemoteCase(TmpCase):
         return self.repo.git("rev-list", "--parents", "-n", "1", rev).split()[1:]
 
     def names_between(self, base):
-        """검증기가 '바뀐 파일'로 읽는 것 — `git diff --name-only <base>..HEAD`."""
-        return self.repo.git("diff", "--name-only", f"{base}..HEAD").split()
+        """검증기가 '바뀐 파일'로 읽는 것 — 검증기의 읽기(`_changed_paths`: 이름 바꿈 감지 끔·NUL 구분·따옴표 없음, D-350)를 그대로 쓴다."""
+        return vr._changed_paths(self.repo.root, base)
 
 
 # ----------------------------------------------------------------------------

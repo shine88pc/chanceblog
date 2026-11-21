@@ -15,7 +15,9 @@ import unittest
 from pathlib import Path
 
 import _bootstrap  # noqa: F401
-from edits_helpers import ABOUT, issue, page_body, write
+import test_edits_runner
+from edits_helpers import ABOUT, image_body, img, issue, page_body, post_text, write
+from pipeline import secret_patterns
 from pipeline.edits import checks, safety
 from pipeline.secret_patterns import find_secrets, scan_copy
 from test_edits_runner import RunnerBase
@@ -92,6 +94,14 @@ class ScanCopyTest(unittest.TestCase):
             once = scan_copy(sample)
             self.assertEqual(scan_copy(once), once, repr(sample))
             self.assertFalse(any(unicodedata.category(ch) in ("Cf", "Mn", "Me", "Cs") for ch in once), repr(sample))
+
+    def test_the_ascii_shortcut_gives_exactly_the_result_of_the_full_path(self):
+        rng = random.Random(7)
+        for _ in range(300):
+            sample = "".join(chr(rng.randint(0x20, 0x7E)) for _ in range(rng.randint(0, 60)))
+            self.assertEqual(scan_copy(sample), unicodedata.normalize("NFKD", sample).translate(secret_patterns._SCAN_TABLE), repr(sample))
+        self.assertEqual(scan_copy("a\x1bb"), "ab")                                            # 제어 글자가 든 ASCII 는 지름길을 타지 않는다
+        self.assertEqual(scan_copy("a\nb\tc"), "a\nb\tc")
 
     def test_a_large_text_is_folded_quickly(self):
         text = ("가나다 abc 123 " + chr(0x200B) + "ＡＢＣ " + chr(0x0301)) * 20000                  # 약 36만 자
@@ -255,6 +265,33 @@ class IssueEditFlowTest(RunnerBase):
         res, spy = self.run_layout(after="둘째 문단 아래에" + chr(0x200B) + " 강조 문장을 넣어 주세요 ＡＢＣ")
         self.assertEqual(res.status, "ok", res.reasons)
         self.assertEqual(len(spy.calls), 1)
+
+
+class ImagePathTest(RunnerBase):
+    URL = test_edits_runner.ImageEditTest.URL
+
+    def run_image(self, target, prompt, picker, llm=None):
+        return self.go(issue(image_body(target, prompt), labels=("blog-control", "edit:image"), title="[이미지 변경] x"), image_picker=picker, llm=llm)
+
+    def test_a_split_key_in_the_image_description_reaches_neither_the_ai_nor_the_image_search(self):
+        for label, key in KEYS.items():
+            with self.subTest(label=label):
+                picker, llm = Spy(), Spy({"image_queries": ["a", "b", "c"]})
+                res = self.run_image(self.URL, "소방관 " + split_often(key, 0x200B), picker, llm)
+                self.assertEqual(res.status, "rejected")
+                self.assertEqual((picker.calls, llm.calls), ([], []))
+                self.assertNotIn("CANARY", repr(res))
+                self.assertIn("원하는 이미지 설명", res.comment)
+
+    def test_a_split_key_in_the_tags_that_go_into_the_prompt_is_checked(self):
+        write(self.root, "_posts/2026-10-21-KR-800001.md",
+              post_text("키가 든 태그 글", img("801")).replace("tags: ['a', 'b']", "tags: ['" + fullwidth(GOOGLE_KEY) + "']"))
+        picker = Spy()
+        res = self.run_image("키가 든 태그 글", "소방관", picker)
+        self.assertEqual(res.status, "rejected")
+        self.assertEqual(picker.calls, [])
+        self.assertIn("태그", res.comment)
+        self.assertNotIn("CANARY", repr(res))
 
 
 class NewSecretInAiChangeTest(unittest.TestCase):

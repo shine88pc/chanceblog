@@ -6,6 +6,7 @@
 4. 위험한 마크업(script·iframe·이벤트 속성·javascript: 등)이 늘어나지 않는다
 5. front matter 는 방식별로 허용된 범위만 바뀐다
 6. 새 비밀 값이 들어가지 않는다, 새 http:// 링크가 들어가지 않는다
+7. AI 가 쓴 변경은 원문에 없던 외부 링크(주소 단위: `//host`·같은 호스트의 새 경로·참조식 정의·srcset 포함)를 넣지 못한다(D-353)
 """
 import difflib
 import html

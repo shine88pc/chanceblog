@@ -3,6 +3,7 @@
 저장소 검증기(scripts/validate_repo.py), 이슈 수정 사후 검증(pipeline/edits/checks.py),
 이슈 수정의 로그 정제·외부 전송 전 점검(pipeline/edits/safety.py),
 로그·이력 마스킹(pipeline/llm.py 의 mask())이 함께 쓴다. 패턴을 추가·수정하면 모두에 적용된다.
+`find_secrets` 와 검증기는 원문과 함께 검사용 사본(`scan_copy`: 전각·보이지 않는 글자·결합 글자를 접은 것)도 본다 — 키를 그런 글자로 쪼개도 걸린다(D-352).
 (소비처 목록은 tests/test_security_settings.py 가 실제 import 와 대조한다.)
 """
 import re
@@ -59,7 +60,10 @@ _SCAN_TABLE = _ScanTable()
 
 def scan_copy(text):
     """비밀 모양을 찾기 위한 검사용 사본(위 설명). 원문은 그대로 두고 새 문자열을 돌려준다. None 은 빈 문자열."""
-    return unicodedata.normalize("NFKD", "" if text is None else str(text)).translate(_SCAN_TABLE)
+    text = "" if text is None else str(text)
+    if text.isascii() and text.isprintable():       # 보이는 ASCII 뿐이면 풀고 지울 것이 없다(결과가 같다) — 저장소 전체를 줄마다 훑는 검증기가 느려지지 않게 바로 돌려준다
+        return text
+    return unicodedata.normalize("NFKD", text).translate(_SCAN_TABLE)
 
 
 def find_secrets(text):

@@ -7,7 +7,6 @@
 """
 import sys
 import tempfile
-import textwrap
 import unittest
 from pathlib import Path
 
@@ -41,7 +40,7 @@ SAFE = (
     "github.sha", "github.repository", "github.repository_owner", "github.run_id", "github.run_number", "github.event_name", "github.actor", "github.ref_protected",
     "github.ref_type", "github.event.repository.default_branch", "github.event.before", "github.event.after", "github.event.number", "github.workflow", "github.token",
     "matrix.python-version", "steps.build.outputs.value", "needs.plan.outputs.matrix", "runner.os", "env.PLAIN", "secrets.SOME_SECRET", "inputs.dry_run",
-    "format('{0}-{1}', github.run_id, github.sha)", "needs.github.outputs.value", "steps.github.outputs.ref",
+    "format('{0}-{1}', github.run_id, github.sha)", "needs.github.outputs.value", "steps.github.outputs.ref", "matrix.github.ref_name", "needs.github.event.issue.title",     # 다른 컨텍스트의 키가 github 일 뿐
     "github.event.issuer", "github.event.labelled", "github.references", "github.refs_note",     # 낱말 경계: 목록의 낱말로 시작할 뿐 다른 이름이다
 )
 

@@ -6,6 +6,7 @@
 소유자가 직접 쓴 교체(`ai_patch=False`)는 옛 그대로다.
 """
 import json
+import time
 import unittest
 
 import _bootstrap  # noqa: F401
@@ -51,6 +52,13 @@ BLOCKED = {
     "그림": "![x](//evil.example/a.png)",
     "꺾쇠 자동 링크": "<https://evil.example/a>",
     "글 속의 주소": "참고: https://evil.example/a 를 보세요",
+    "글 속의 ftp 주소": "내려받기: ftp://evil.example/a 에서",
+    "글 속의 슬래시 하나 주소": "참고: http:/evil.example/a 를 보세요",
+    "탭으로 쪼갠 스킴(마크다운 링크)": "[x](ht&#9;tps://evil.example/a)",
+    "줄바꿈으로 쪼갠 스킴(마크다운 링크)": "[x](ht&#10;tps://evil.example/a)",
+    "탭으로 쪼갠 프로토콜 상대 주소(마크다운 링크)": "[x](/&#9;/evil.example/a)",
+    "탭으로 쪼갠 스킴(따옴표 없는 속성)": "<a href=ht&#9;tps://evil.example/a>x</a>",
+    "탭으로 쪼갠 스킴(참조식 정의)": "[x][1]\n\n[1]: ht&#9;tps://evil.example/a",
     "탭으로 쪼갠 스킴(문자 참조)": '<a href="ht&#9;tps://evil.example/a">x</a>',
     "탭으로 쪼갠 스킴(16진 문자 참조)": '<a href="ht&#x9;tps://evil.example/a">x</a>',
     "줄바꿈으로 쪼갠 스킴": '<a href="ht&#10;tps://evil.example/a">x</a>',
@@ -123,6 +131,9 @@ class ExternalLinksFunctionTest(unittest.TestCase):
         self.assertEqual(checks.external_links("<a href=//Evil.Example/A>x</a>"), {"//evil.example/A"})
         self.assertEqual(checks.external_links("[x](http:Evil.example/a)"), {"http://evil.example/a"})
         self.assertEqual(checks.external_links('<a href = "  //evil.example/a  ">x</a>'), {"//evil.example/a"})
+        self.assertEqual(checks.external_links("[x](https:" + "\\" * 2 + "Evil.example/a)"), {"https://evil.example/a"})        # 역슬래시는 슬래시로(브라우저가 그렇게 읽는다)
+        self.assertEqual(checks.external_links("[x](" + "\\" * 2 + "evil.example/a)"), {"//evil.example/a"})
+        self.assertEqual(checks.external_links("[x](ht&#9;tps://Evil.example/a) <a href=//e.example/&#10;b>y</a>"), {"https://evil.example/a", "//e.example/b"})
 
     def test_the_userinfo_stays_inside_the_authority_so_it_cannot_hide_the_target(self):
         self.assertEqual(checks.external_links("[x](https://github.com:80@Evil.example/a)"), {"https://github.com:80@evil.example/a"})
@@ -145,8 +156,7 @@ class ExternalLinksFunctionTest(unittest.TestCase):
         self.assertEqual(checks.external_links("그냥 글입니다. 링크가 없습니다."), set())
 
     def test_a_long_unterminated_attribute_list_is_read_in_reasonable_time(self):
-        import time
-        text = 'href="x ' * 9000                                                                  # 닫는 따옴표가 없는 속성이 아주 많다(약 7만 자)
+        text = 'href="x ' * 9000                                                                 # 닫는 따옴표가 없는 속성이 아주 많다(약 7만 자)
         started = time.monotonic()
         checks.external_links(text)
         self.assertLess(time.monotonic() - started, 20.0)                                         # 느린 PC·병렬 실행에서도 안 흔들리는 넉넉한 상한
