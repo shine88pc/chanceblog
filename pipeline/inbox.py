@@ -105,13 +105,13 @@ _CI_LABELS = {"pass": "통과", "fail": "실패", "pending": "진행 중", "none
 
 # 조회 실패 기록의 소스 이름 → 화면 문구 / 그 소스가 만드는 action 항목 id 접두(조회 실패 때 '해소된 것'으로 오해하지 않으려고 쓴다)
 SOURCE_LABELS = {
-    "issues": "열린 이슈 목록", "pulls": "열린 PR 목록", "pull_details": "PR 검사·병합 상태",
+    "issues": "열린 이슈 목록", "issues_cap": "열린 이슈 목록(일부만 읽음)", "pulls": "열린 PR 목록", "pull_details": "PR 검사·병합 상태",
     "runs": "워크플로 실행 기록", "approvals": "승인 대기 실행", "annotations": "실행 경고(주석)",
     "history": "블로그 이력 파일", "registry": "블로그 레지스트리", "drafts": "열린 초안(이슈·PR) 목록",
     "published": "Blogger 게시 확인(블로그 공개 피드)", "approval_prs": "승인 대기 실행의 PR 상태(가지 이름으로 조회)",
 }
 SOURCE_PREFIXES = {
-    "issues": ("watchdog:",), "pulls": ("pr:",), "pull_details": ("pr:",), "runs": ("run:",),
+    "issues": ("watchdog:",), "issues_cap": ("watchdog:",), "pulls": ("pr:",), "pull_details": ("pr:",), "runs": ("run:",),
     "approvals": ("approve:",), "history": ("blogger:",), "registry": ("blogger:",), "drafts": ("draft:",), "published": ("blogger:",),
     "approval_prs": ("approve:",),
 }

@@ -41,6 +41,8 @@ LABEL = "watchdog"
 TITLE_PREFIX = "[Watchdog]"
 RENOTIFY_HOURS = 48          # 심각 건이 이만큼 지나도 열려 있으면 코멘트로 다시 알린다
 MAX_NEW_ISSUES_PER_RUN = 5   # 한 번에 이슈가 쏟아지는 것을 막는다(나머지는 다음 실행에서)
+PAGE_SIZE = 100              # 열린 이슈·PR 목록은 한 쪽 100건씩 읽는다(L7, D-361 — 예전에는 한 쪽만 읽어 이슈는 50건·PR 은 100건 뒤가 경고 없이 잘렸다)
+MAX_PAGES = 5                # 최대 5쪽(500건)까지 읽고, 가득 차 있으면 더 있을 수 있어 ::warning:: 을 남긴다
 PAGES_WORKFLOW = "pages.yml"
 PAGES_BRANCH = "main"        # 다른 ref 에서 workflow_dispatch 로 돌린 성공 실행은 '사이트 배포됨'이 아니다
 _NOTIFIED_RX = re.compile(r"<!--\s*watchdog:notified=(\S+?)\s*-->")
@@ -66,8 +68,8 @@ def _same_text(text):
 
 
 class GitHubClient:
-    def __init__(self, token, repo, opener=urllib.request.urlopen):
-        self.token, self.repo, self._open = token, repo, opener
+    def __init__(self, token, repo, opener=urllib.request.urlopen, out=print):
+        self.token, self.repo, self._open, self._out = token, repo, opener, out
 
     def _request(self, method, path, payload=None):
         data = json.dumps(payload).encode("utf-8") if payload is not None else None
@@ -80,8 +82,22 @@ class GitHubClient:
             body = resp.read().decode("utf-8")
         return json.loads(body) if body else None
 
+    def _list_all(self, path, what):
+        """GET path(이미 ?질의가 있다)를 한 쪽 PAGE_SIZE 건씩 끝까지(최대 MAX_PAGES 쪽) 읽어 항목 목록으로 돌려준다. 짧은 쪽이 나오면 거기가 끝이다.
+        가득 찬 쪽이 MAX_PAGES 까지 이어지면 더 있을 수 있어 조용히 자르지 않고 ::warning:: 한 줄을 남긴다(목록 일부만 본 채 '이상 없음'이 되지 않게). HTTP 오류는 그대로 올려 실행을 빨갛게 한다."""
+        found = []
+        for page in range(1, MAX_PAGES + 1):
+            items = self._request("GET", f"{path}&per_page={PAGE_SIZE}&page={page}")
+            items = items if isinstance(items, list) else []
+            found += items
+            if len(items) < PAGE_SIZE:
+                return found
+        limit = MAX_PAGES * PAGE_SIZE
+        self._out(f"::warning::열린 {what} 목록이 {limit}건 이상이라 처음 {limit}건만 읽었습니다 — 그 뒤에 있는 것은 이번 점검에서 보이지 않습니다.")
+        return found
+
     def list_open_issues(self):
-        items = self._request("GET", f"/repos/{self.repo}/issues?labels={LABEL}&state=open&per_page=50") or []
+        items = self._list_all(f"/repos/{self.repo}/issues?labels={LABEL}&state=open", "[Watchdog] 이슈")
         return [i for i in items if "pull_request" not in i]
 
     def create_issue(self, title, body, assignees=None):
@@ -102,7 +118,7 @@ class GitHubClient:
     def list_open_draft_pulls(self):
         """승인 흐름(publish_flow: pr)에서 열려 있는 초안 PR(이 저장소의 ai/draft/… 브랜치에서 연 것): [{'number', 'created_at'}, ...].
         포크의 PR 은 뺀다. 읽기 전용(권한 pull-requests: read)."""
-        items = self._request("GET", f"/repos/{self.repo}/pulls?state=open&per_page=100") or []
+        items = self._list_all(f"/repos/{self.repo}/pulls?state=open", "PR")
         found = []
         for pr in items:
             head = pr.get("head") if isinstance(pr, dict) and isinstance(pr.get("head"), dict) else {}

@@ -28,6 +28,10 @@ Blogger 초안 게시 확인: 최근 초안함에 올린 기록이 있는 Blogge
 가지의 승인 대기를 모음에서 뺀다(모르면 예전처럼 싣는다). 운영자 결정 데이터(pipeline/ops_inbox_policy.json)를 읽어 분류에 쓴다 — 파일이 없으면 예전 규칙 그대로이고, 있는데 올바르지 않으면
 예전 규칙으로 표시하고 모음 맨 위에 안내 한 줄을 더한다. 이 스크립트가 쓰는 것은 여전히 이슈·코멘트·라벨뿐이다(새 읽기 호출만 늘었다).
 종료 코드: 0 정상(조회 일부 실패 포함) / 1 이슈·코멘트 쓰기 실패 / 2 설정 오류
+
+운영 알림이 조용히 사라지지 않게(2026-11-22, L7 · D-360·D-361·D-362, docs/OPS_INBOX.md §11): 열린 이슈는 한 쪽 100건씩 최대 3쪽(300건)까지 읽고 가득 차 있으면 '일부만 읽음' 조회 실패 항목으로 알린다
+(예전에는 한 쪽만 읽어 101번째부터 경고 없이 잘렸다). 켜진 허용 목록 제공처의 약관 점검 기한이 14일 안으로 다가오면 '확인하면 좋은 것'(지났으면 '지금 해야 할 일')으로 미리 알린다 —
+기한은 저장소의 pipeline/source_registry.json 에서 읽는다(API 호출 0회, 읽지 못하면 '조회 실패' 항목).
 """
 import http.client
 import json
@@ -63,6 +67,8 @@ ERROR_ISSUE_FAILED = "::error::이슈를 읽거나 쓰지 못했습니다. 이�
 MAX_PULLS = 8            # PR 은 상세·검사 조회에 호출이 둘씩 들어가므로 처음 8건까지만 본다
 MAX_DRAFT_PAGES = 3      # 열린 `초안` 이슈·PR 은 한 쪽 100건씩 최대 3쪽(300건)까지 읽는다(그보다 많으면 참고 항목으로 알린다)
 DRAFTS_PER_PAGE = 100
+MAX_ISSUE_PAGES = 3      # 열린 이슈(PR 도 함께 온다)는 한 쪽 100건씩 최대 3쪽(300건)까지 읽는다 — 가득 차 있으면 더 있을 수 있어 '조회 실패' 항목으로 알린다(L7, D-361)
+ISSUES_PER_PAGE = 100
 MAX_LABEL_CREATES = 10   # 초안 모델 라벨을 한 번의 점검에서 새로 만드는 수의 상한(초안·폐기 + 채널 라벨 — 채널 라벨 종류가 6개라 모두 있어도 8개). 목록 읽기 1회와 합해 라벨에 쓰는 호출은 11회 이하
 MAX_JOBS_PER_RUN = 6
 MAX_APPROVAL_LOOKUPS = 10   # 승인 대기 실행의 가지 PR 상태를 한 번의 점검에서 읽는 가지의 수(가지마다 호출 1회). 넘는 가지는 모르는 것이라 예전처럼 싣는다
@@ -377,12 +383,27 @@ def read_workflow_names(root, files):
 # 읽기 2: GitHub(소스마다 실패를 따로 처리한다)
 # ----------------------------------------------------------------------------
 def fetch_issues(client, failures):
-    try:
-        data = client.get("/issues", state="open", per_page=100)
-    except ApiError as exc:
-        failures.append(("issues", str(exc)))
-        return []
-    return [i for i in data if isinstance(i, dict) and "pull_request" not in i] if isinstance(data, list) else []
+    """열린 이슈(워치독 알림을 찾는 유일한 입력)를 한 쪽 100건씩 끝까지(최대 MAX_ISSUE_PAGES 쪽) 읽는다(L7, D-361). 예전에는 한 쪽만 읽어 101번째부터는 경고 없이 잘렸다.
+    - 가득 찬 쪽이 MAX_ISSUE_PAGES 까지 이어지면 더 있을 수 있어 ('issues_cap', 사유)를 남긴다 — 모음에 '조회 실패' 확인 항목이 생기고 그 뒤의 워치독 알림 id 는 표식에 남는다.
+    - 중간 쪽을 읽지 못하면(오류·목록이 아닌 응답·호출 상한) 그때까지 읽은 이슈는 그대로 쓰고 ('issues', 사유)를 남긴다 — 읽은 워치독 알림은 실제 알림이다.
+    - 목록이 아닌 응답은 예전에는 아무 말 없이 빈 목록이었다 — 이제 읽지 못한 것으로 남긴다."""
+    found = []
+    for page in range(1, MAX_ISSUE_PAGES + 1):
+        try:
+            data = client.get("/issues", state="open", per_page=ISSUES_PER_PAGE, **({"page": page} if page > 1 else {}))       # 첫 쪽 요청은 예전과 글자까지 같다(page 는 기본값 1)
+        except ApiError as exc:
+            failures.append(("issues", str(exc)))
+            break
+        if not isinstance(data, list):
+            failures.append(("issues", "응답이 목록이 아닙니다"))
+            break
+        found += data
+        if len(data) < ISSUES_PER_PAGE:
+            break
+    else:
+        total = MAX_ISSUE_PAGES * ISSUES_PER_PAGE
+        failures.append(("issues_cap", f"열린 이슈·PR 이 {total}건을 넘을 수 있어 처음 {total}건만 읽었습니다 — 그 뒤에 있는 워치독 알림은 이번 점검에서 보이지 않을 수 있습니다"))
+    return [i for i in found if isinstance(i, dict) and "pull_request" not in i]
 
 
 def fetch_drafts(client, failures, notes):
