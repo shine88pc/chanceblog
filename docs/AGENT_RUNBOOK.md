@@ -213,7 +213,7 @@ $o = foreach ($b in @('origin/main') + @(git for-each-ref --format='%(refname:sh
 | `ops-inbox.yml` | `[공통] 확인 필요 모음` | 2시간마다 + 이슈·PR 변경 | 사람이 해야 할 일을 이슈 하나로 모으고, 새 '지금 해야 할 일'(승인 대기 포함)은 텔레그램으로도 알림. 실제로는 몇 시간 늦을 수 있음([`OPS_INBOX.md`](./OPS_INBOX.md)) |
 | `guardrails.yml` | `[공통] 저장소 규칙·테스트 자동 검사` | push(어느 브랜치든, PR 로는 돌지 않음)·수동 | 검증기·전체 시험·actionlint(main 이 아닌 브랜치는 `origin/main` 시험 병합 뒤의 트리). 브랜치 push 의 사전 검사는 병합 부탁(J3·J4)을 보내기 전에 결과를 보려는 것이고, 실패 알림(텔레그램)은 main 에서만 갑니다 |
 | `pr-scope-check.yml` | `[공통] PR 변경 범위 검사` | PR 이벤트 + 수동 | 이슈 양식 요청 PR 이 요청 범위를 지켰는지 코멘트(AI 브랜치 `ai/claude/` 의 PR 은 job 이 건너뜀) |
-| `pages.yml` | `[공통] 사이트 자동 배포` | main push·수동 | Jekyll 빌드·배포·공개 반영 확인(`scripts/verify_pages_deploy.py`) |
+| `pages.yml` | `[공통] 사이트 자동 배포` | main push·수동 | Jekyll 빌드·배포·공개 반영 확인(`scripts/verify_pages_deploy.py`). 기본 가지가 아닌 가지에서 수동 실행하면 빌드만 돌고 게시·반영 확인은 건너뜀(D-375) |
 | `sync-issue-form.yml` | `[공통] 이슈 양식 페이지 목록 갱신` | main push(루트 `*.md`·`*.html`·`pages.json`·편집 명세·페이지 수정 양식이 바뀔 때만)·수동 | 이슈 양식의 페이지 목록을 사이트 구조와 맞춤 |
 | `operator-reply.yml` | `[공통] 운영자 응답 접수` | 이슈가 열릴 때 | `[답변]`·`[요청]` 이슈에 접수 코멘트·텔레그램 알림 |
 | `ai-request.yml` | `[공통] AI 요청 텔레그램 알림` | `ai/claude/**` push | 새 요청 파일의 제목·요약을 운영자 텔레그램으로 보냄(J3) |

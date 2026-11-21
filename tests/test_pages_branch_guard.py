@@ -52,7 +52,7 @@ def jobs_that_run(workflow, ref_name, default_branch):
     return ran
 
 
-# (설명, ref_name, 기본 가지, 빌드, 게시, 반영 확인)
+# (설명, ref_name, 기본 가지, 빌드, 게시, 반영 확인) — 빌드는 어느 가지에서나 돈다(건너뛰는 것은 게시와 반영 확인뿐이라 다른 가지의 빌드가 깨지는지 보는 데도 쓸모가 있다)
 SCENARIOS = (
     ("기본 가지(main)의 push 나 수동 실행", "main", "main", True, True, True),
     ("다른 가지에서 수동 실행(이 변경이 막으려는 경우)", "ai/claude/NO-MERGE-example", "main", True, False, False),
@@ -115,14 +115,6 @@ class GuardEvaluationTest(unittest.TestCase):
         for label, ref_name, default_branch, build, deploy, verify in SCENARIOS:
             with self.subTest(label):
                 self.assertEqual(jobs_that_run(self.workflow, ref_name, default_branch), {"build": build, "deploy": deploy, "verify": verify})
-
-    def test_every_non_default_scenario_still_builds(self):
-        """다른 가지에서도 사이트 빌드는 돈다(건너뛰는 것은 게시와 반영 확인뿐 — 가지의 빌드가 깨지는지 보는 데는 쓸모가 있다)."""
-        for label, ref_name, default_branch, build, _deploy, _verify in SCENARIOS:
-            with self.subTest(label):
-                self.assertTrue(build)
-                self.assertTrue(jobs_that_run(self.workflow, ref_name, default_branch)["build"])
-
 
 class HarnessSelfTest(unittest.TestCase):
     """위 평가기가 '항상 참'이나 '항상 거짓'으로 시험을 헛되게 통과시키지 않는지."""
