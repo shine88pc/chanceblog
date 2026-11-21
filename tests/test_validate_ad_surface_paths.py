@@ -5,6 +5,7 @@
 이 시험은 임시 저장소의 로컬 설정을 CI 기본값으로 고정해(이 PC 의 전역 설정에 기대지 않는다) 두 길이 모두 닫혔는지 본다. 가짜 비밀은 쓰지 않는다.
 """
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -26,8 +27,12 @@ NEWLINE_NAME = "_includes/a\nb.html"
 class Repo:
     """진짜 git 의 임시 저장소. 이름 바꿈 감지·경로 따옴표 설정은 리눅스 CI 의 기본값(켜짐·켜짐)으로 저장소 안에 고정한다."""
 
-    def __init__(self, root):
+    def __init__(self, root, template=None):
         self.root = Path(root)
+        if template is not None:        # 진짜 git 은 이 PC 에서 한 번 부르는 데 수 초가 걸려, 시험마다 처음부터 만들지 않고 한 번 만든 저장소를 폴더째 복사한다
+            shutil.copytree(template.root, self.root, dirs_exist_ok=True)
+            self.base = template.base
+            return
         self.git("init", "-q")
         self.git("config", "core.quotepath", "true")
         self.git("config", "diff.renames", "true")
@@ -64,10 +69,16 @@ class Repo:
 
 
 class AdSurfacePathReadingTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls._template_tmp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls._template_tmp.cleanup)
+        cls.template = Repo(cls._template_tmp.name)
+
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.repo = Repo(self._tmp.name)
+        self.repo = Repo(self._tmp.name, template=self.template)
 
     def findings(self, check="AD-1"):
         return [f for f in vr.check_ad_surface(self.repo.root, self.repo.base) if f.check == check]

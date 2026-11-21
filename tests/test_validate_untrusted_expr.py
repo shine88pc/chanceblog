@@ -29,6 +29,8 @@ ADDED = (
     "github.event.release.name", "github.event.release.body", "github.event.release.tag_name", "github.event.client_payload.value", "github.event.check_run.name",
     "github.event.check_suite.head_branch", "github.event.deployment.payload.value", "github.event.deployment_status.description", "github.event.milestone.title",
     "github.event.project_card.note", "github.event.project_column.name", "github.event.project.name", "github.event.changes.title.from",
+    "github.event.workflow_job.head_branch", "github.event.merge_group.head_ref", "github.event.merge_group.head_commit.message",
+    "github.event.description", "github.event.context", "github.event.branches[0].name", "github.event.commit.message", "github.event.target_url",
 )
 HIDDEN = (
     "GitHub.Head_Ref", "GITHUB.EVENT.ISSUE.TITLE", "github['head_ref']", "github['event']['pull_request']['head']['ref']", "github.event['issue']['title']",
@@ -92,6 +94,16 @@ class UntrustedContextListTest(WorkflowCase):
         text = workflow("echo ${{ github.sha }} and ${{ runner.os }} then ${{ github.ref_name }}")
         self.assertEqual(len(self.injection(text)), 1)
 
+    def test_a_closing_brace_pair_inside_a_string_literal_does_not_end_the_expression(self):
+        """리터럴 안의 `}}` 를 식의 끝으로 읽으면 그 뒤의 이름이 식 밖 글자로 보여 검사를 지나갔다."""
+        for expression in ("format('}}{0}', github.head_ref)", "format('{0}}}', github.ref_name)", "'}}' && github.event.issue.title",
+                           "format('it''s }}{0}', github.event.label.name)", "'a}}b' || github.ref"):
+            with self.subTest(expression=expression):
+                self.assertEqual(len(self.injection(workflow("echo ${{ " + expression + " }}"))), 1)
+
+    def test_an_expression_that_is_never_closed_is_read_to_the_end(self):
+        self.assertEqual(len(self.injection(workflow("echo ${{ github.head_ref"))), 1)
+
     def test_an_expression_spread_over_several_lines_is_found_and_reported_on_one_line(self):
         found = self.injection(workflow("echo ${{\n  github.head_ref\n}}"))
         self.assertEqual(len(found), 1)
@@ -107,7 +119,7 @@ class NoFalsePositiveTest(WorkflowCase):
                 self.assertEqual(self.injection(workflow(f"echo ${{{{ {name} }}}}")), [])
 
     def test_a_name_inside_a_string_literal_is_text_not_a_context(self):
-        for expression in ("format('{0}', 'github.head_ref')", "contains('github.ref_name', 'x')", "'github.event.issue.title'"):
+        for expression in ("format('{0}', 'github.head_ref')", "contains('github.ref_name', 'x')", "'github.event.issue.title'", "'}}'", "format('}}{0}', github.sha)"):
             with self.subTest(expression=expression):
                 self.assertEqual(self.injection(workflow(f"echo ${{{{ {expression} }}}}")), [])
 
@@ -134,6 +146,14 @@ class ExpressionNamesTest(unittest.TestCase):
 
     def test_string_literals_are_emptied_including_doubled_quotes(self):
         self.assertEqual(vr._expression_names("format('a.b', 'it''s github.ref')"), "format('', '')")
+
+    def test_the_expression_blocks_end_only_at_a_closing_pair_outside_a_literal(self):
+        self.assertEqual(list(vr._expression_blocks("a ${{ x }} b ${{ format('}}', y) }} c")),
+                         [("${{ x }}", " x "), ("${{ format('}}', y) }}", " format('}}', y) ")])
+        self.assertEqual(list(vr._expression_blocks("no expression")), [])
+        self.assertEqual(list(vr._expression_blocks("${{ never closed")), [("${{ never closed", " never closed")])
+        self.assertEqual(list(vr._expression_blocks("${{ a }}${{ b }}")), [("${{ a }}", " a "), ("${{ b }}", " b ")])
+        self.assertEqual(vr._untrusted_expression("echo ${{ format('}}', github.ref_name) }}"), "${{ format('}}', github.ref_name) }}")
 
     def test_the_untrusted_expression_helper_returns_the_first_one_folded_to_one_line(self):
         self.assertIsNone(vr._untrusted_expression("echo ${{ github.sha }} ${{ runner.os }}"))

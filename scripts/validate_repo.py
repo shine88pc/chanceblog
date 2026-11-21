@@ -146,11 +146,11 @@ def check_secret_patterns(root, files):
 _UNTRUSTED_GITHUB = ("head_ref", "base_ref", "ref_name", "ref", "workflow_ref")
 _UNTRUSTED_EVENT = ("issue", "comment", "pull_request", "review", "review_comment", "discussion", "head_commit", "commits", "pages", "workflow_run",
                     "release", "label", "client_payload", "check_run", "check_suite", "deployment", "deployment_status", "milestone",
-                    "project", "project_card", "project_column", "changes", "ref", "base_ref")
+                    "project", "project_card", "project_column", "changes", "ref", "base_ref", "workflow_job", "merge_group",
+                    "description", "context", "branches", "commit", "target_url")      # 뒤 다섯은 status 이벤트의 최상위 칸(커밋 상태의 설명·맥락·브랜치·커밋 글)
 _UNTRUSTED_NAME = re.compile(
     r"(?<![\w.\-])github\.(?:(?:" + "|".join(_UNTRUSTED_GITHUB) + r")(?!\w)|event\.(?:" + "|".join(_UNTRUSTED_EVENT) + r")(?!\w))")
 _WHOLE_CONTEXT = re.compile(r"(?<![\w.\-])github(?:\.event)?(?![\w.])")      # 컨텍스트 통째(`github`·`github.event`) — toJSON 으로 문자열이 되면 제목·본문이 모두 들어간다
-_EXPR_BLOCK = re.compile(r"\$\{\{(.*?)\}\}", re.S)
 _INDEX_NAME = re.compile(r"\[\s*(?:'([^']*)'|(\d+|\*))\s*\]")
 _STRING_LITERAL = re.compile(r"'(?:[^']|'')*'")
 
@@ -161,12 +161,31 @@ def _expression_names(body):
     return _STRING_LITERAL.sub("''", re.sub(r"\s*\.\s*", ".", text))
 
 
+def _expression_blocks(run):
+    """run 문자열 안의 `${{ … }}` 식을 (식 전체 글, 본문)으로 차례로 낸다. 식의 끝 `}}` 는 문자열 리터럴 **밖**에서만 센다 — 리터럴 안의 `}}`(`format('}}{0}', github.head_ref)`)를
+    식의 끝으로 읽으면 그 뒤의 이름이 식 밖 글자로 보여 검사를 지나간다. 끝을 못 찾으면 글의 끝까지를 본문으로 본다(안전한 쪽)."""
+    position = 0
+    while True:
+        start = run.find("${{", position)
+        if start < 0:
+            return
+        index, quoted = start + 3, False
+        while index < len(run):
+            if run[index] == "'":                                    # 리터럴 안의 따옴표 두 개(`''`)는 붙어 있어 두 번 뒤집혀 그대로다
+                quoted = not quoted
+            elif not quoted and run.startswith("}}", index):
+                break
+            index += 1
+        yield run[start:index + 2], run[start + 3:index]
+        position = index + 2
+
+
 def _untrusted_expression(run):
     """run 문자열 안의 `${{ … }}` 식 중 신뢰할 수 없는 입력을 담은 첫 식(한 줄로 접은 글)을 돌려준다. 없으면 None."""
-    for match in _EXPR_BLOCK.finditer(run):
-        names = _expression_names(match.group(1))
+    for block, body in _expression_blocks(run):
+        names = _expression_names(body)
         if _UNTRUSTED_NAME.search(names) or ("tojson(" in names and _WHOLE_CONTEXT.search(names)):
-            return re.sub(r"\s+", " ", match.group(0))
+            return re.sub(r"\s+", " ", block)
     return None
 
 
