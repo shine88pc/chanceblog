@@ -36,12 +36,13 @@ from pipeline import source_policy  # 소스 정책(레지스트리 chance.sourc
 from pipeline import egress  # 외부 호출 관문(허용 목록 밖 호스트 거부)·호출 예산 — 구조화 Fact 경로의 연결 코드(fact_opener)가 주입되는 opener 를 감쌀 때만 쓴다
 from pipeline import fact_supply  # 구조화 Fact 경로(레지스트리 chance.content_source: facts)의 후보 공급 — 생성기가 Fact 모듈을 부르는 유일한 연결 한 줄이다(시험 NoConnectionTest). 그 분기는 AI 를 부르지 않는다(docs/AI_FLOW.md §12)
 from pipeline.llm import CALL_TIMEOUT_SECONDS, CallLog, _run_with_timeout, failure_code, failure_status, scrub  # Gemini 요청 기록·시크릿 가리기·호출 시간 상한은 Blogger·이슈 수정과 같은 코드를 쓴다(D-52·D-83)
+from pipeline.console import clean_secret  # 시크릿 값의 앞뒤 공백·줄바꿈·보이지 않는 글자를 지우는 함수 — Blogger·알림과 같은 코드. 이 파일에서는 Unsplash 키에만 쓴다(Gemini 키는 그대로, D-371)
 
 # ============================================================
 # 환경 설정
 # ============================================================
 API_KEY = os.environ.get("GEMINI_API_KEY")
-UNSPLASH_KEY = os.environ.get("UNSPLASH_ACCESS_KEY")
+UNSPLASH_KEY = clean_secret(os.environ.get("UNSPLASH_ACCESS_KEY"))  # 끝 줄바꿈·보이지 않는 글자가 낀 키가 요청 머리글 오류 문구(= 로그)에 실리지 않게 정리한다(D-370). 정리하고 비면 STUB_UNSPLASH 가 켜진다
 
 
 def _flag(name):
