@@ -344,6 +344,7 @@ def terms_items(source_terms, today, repo_url):
     """켜진 허용 목록 제공처의 약관 점검 기한 → 항목(L7, D-360). 순수 계산은 pipeline/terms_deadline.py 가 한다(오늘은 값으로 받는다).
     기한이 14일 안으로 다가온 것(기한 당일 포함)은 check — 미리 알리는 경고라 알림(코멘트·텔레그램)은 가지 않는다. 이미 지났거나 기한이 없는 것은 action — 그 제공처는 이미 ACTIVE 가 아니라
     자동 글감에서 빠졌고(구조화 글이 만들어지지 않는다) 사람이 약관을 다시 읽어야 풀린다. id 가 상태마다 달라 '다가옴 → 지남' 으로 바뀌면 새 알림이 간다.
+    항목 글에는 남은·지난 날 수를 넣지 않는다(기한 날짜만) — 같은 상태의 본문이 날마다 바뀌지 않게 하는 이 모듈의 원칙(시각·경과 시간을 넣지 않는다)이다. 마지막 날만 따로 말한다.
     source_terms 가 None(읽지 않았거나 파일이 없음)이면 아무것도 싣지 않는다. 제공처 이름은 파일의 글이라 ext() 로 한 줄로 접는다."""
     if source_terms is None:
         return []
@@ -352,14 +353,14 @@ def terms_items(source_terms, today, repo_url):
     for notice in terms_deadline.notices(source_terms, today):
         who = ext(notice.name or notice.provider_id, 60)
         if notice.state == terms_deadline.EXPIRING:
-            when = "오늘이 마지막 날입니다(당일까지 유효)" if notice.days_left == 0 else f"{notice.days_left}일 남았습니다"
+            when = "오늘이 마지막 날입니다(당일까지 유효)" if notice.days_left == 0 else "당일까지 유효합니다"
             out.append(Item(
                 id=f"terms:{notice.provider_id}:soon", level=LEVEL_CHECK, title=f"약관 점검 기한이 다가옵니다 — {who}",
                 detail=f"점검 기한 {notice.expires_at} — {when}. 기한이 지나면 이 제공처는 자동 글감에서 빠져 구조화 글이 만들어지지 않습니다.", url=url, hint=TERMS_HINT))
         elif notice.state == terms_deadline.EXPIRED:
             out.append(Item(
                 id=f"terms:{notice.provider_id}:expired", level=LEVEL_ACTION, title=f"약관 점검 기한이 지났습니다 — {who}",
-                detail=f"점검 기한 {notice.expires_at} 이 {-notice.days_left}일 지나 이 제공처는 지금 자동 글감에서 빠져 있습니다(구조화 글이 만들어지지 않습니다).", url=url, hint=TERMS_HINT))
+                detail=f"점검 기한 {notice.expires_at} 이 지나 이 제공처는 지금 자동 글감에서 빠져 있습니다(구조화 글이 만들어지지 않습니다).", url=url, hint=TERMS_HINT))
         else:
             out.append(Item(
                 id=f"terms:{notice.provider_id}:missing", level=LEVEL_ACTION, title=f"약관 점검 기한을 읽을 수 없습니다 — {who}",

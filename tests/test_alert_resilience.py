@@ -545,13 +545,14 @@ class TermsInboxItemsTest(unittest.TestCase):
     def items(self, providers, today=datetime.date(2027, 1, 30)):
         return inbox.terms_items(providers, today, h.REPO_URL)
 
-    def test_an_expiring_provider_is_one_check_item_that_names_the_date_and_days(self):
+    def test_an_expiring_provider_is_one_check_item_that_names_the_date(self):
         (item,) = self.items([prov()])
         self.assertEqual((item.id, item.level), ("terms:noaa_swpc_json:soon", "check"))
         self.assertIn("다가옵니다", item.title)
         self.assertIn("NOAA SWPC JSON", item.title)
-        self.assertIn("2027-02-08", item.detail)
-        self.assertIn("9일 남았습니다", item.detail)
+        self.assertIn("점검 기한 2027-02-08", item.detail)
+        self.assertIn("당일까지 유효합니다", item.detail)
+        self.assertNotIn("9일", item.detail)                                         # 남은 날 수는 글에 넣지 않는다(본문이 날마다 바뀌지 않게)
         self.assertEqual(item.url, f"{h.REPO_URL}/blob/main/docs/SOURCE_POLICY.md")
         self.assertIn("snapshot.expires_at", item.hint)
         self.assertIn("운영자 승인", item.hint)
@@ -565,13 +566,27 @@ class TermsInboxItemsTest(unittest.TestCase):
         (item,) = self.items([prov()], datetime.date(2027, 2, 9))
         self.assertEqual((item.id, item.level), ("terms:noaa_swpc_json:expired", "action"))
         self.assertIn("지났습니다", item.title)
-        self.assertIn("1일 지나", item.detail)
+        self.assertIn("점검 기한 2027-02-08 이 지나", item.detail)
         self.assertIn("자동 글감에서 빠져", item.detail)
+        self.assertNotIn("1일", item.detail)
 
     def test_an_enabled_provider_without_a_readable_expiry_is_an_action_item(self):
         (item,) = self.items([prov(expires=None)])
         self.assertEqual((item.id, item.level), ("terms:noaa_swpc_json:missing", "action"))
         self.assertIn("읽을 수 없습니다", item.title)
+
+    def test_the_text_does_not_change_from_day_to_day_within_a_state_so_the_inbox_body_is_not_rewritten_daily(self):
+        """이 모듈의 원칙(시각·경과 시간을 넣지 않는다): 같은 상태의 본문은 날마다 같다. 바뀌는 때는 상태가 바뀔 때와 마지막 날뿐이다."""
+        def shown(day):
+            items = self.items([prov()], day)
+            return [(i.id, i.level, i.title, i.detail, i.url, i.hint) for i in items], inbox.render(items, h.REPO_URL)
+        start = datetime.date(2027, 1, 25)
+        soon = [shown(start + datetime.timedelta(days=n)) for n in range(14)]                  # 남은 날 14 … 1
+        self.assertEqual(len({text for _, text in soon}), 1)
+        self.assertEqual(len({str(rows) for rows, _ in soon}), 1)
+        last, after_1, after_40 = shown(datetime.date(2027, 2, 8)), shown(datetime.date(2027, 2, 9)), shown(datetime.date(2027, 3, 20))
+        self.assertNotEqual(last[1], soon[0][1])                                               # 마지막 날은 따로 말한다
+        self.assertEqual(after_1, after_40)                                                    # 지난 뒤 며칠이 지나도 같은 글
 
     def test_far_expiry_disabled_providers_and_no_data_add_nothing(self):
         self.assertEqual(self.items([prov(expires="2027-06-01")]), [])
@@ -687,7 +702,7 @@ class TermsReadAndRunTest(unittest.TestCase):
         code, text = self.run_inbox(root, kst(2027, 1, 30))
         self.assertEqual(code, 0)
         self.assertIn("약관 점검 기한이 다가옵니다 — NOAA SWPC JSON", text)
-        self.assertIn("9일 남았습니다", text)
+        self.assertIn("점검 기한 2027-02-08", text)
         self.assertNotIn("off_one", text)
         self.assertIn("확인하면 좋은 것 1건", text)
         self.assertIn("지금 해야 할 일 0건", text)
