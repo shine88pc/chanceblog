@@ -45,7 +45,7 @@ SPLITTERS = {
 
 def fullwidth(text):
     """ASCII 글자·숫자·기호를 전각으로(웹·문서에서 복사한 값 흉내). 소스에 전각 글자를 직접 쓰지 않는다."""
-    return "".join(chr(ord(ch) - 0x21 + 0xFF01) if "!" <= ch <= "~" else ch for ch in text)
+    return "".join(chr(ord(ch) - 0x21 + 0xFF01) if "!" <= ch <= chr(0x7E) else ch for ch in text)
 
 
 def split_once(key, code):
