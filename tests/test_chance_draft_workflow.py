@@ -234,6 +234,14 @@ class WorkflowGlobalsTest(unittest.TestCase):
         self.assertEqual(list(wf["jobs"]), ["build", "deploy", "verify"])
         text = (Path(_bootstrap.ROOT) / ".github" / "workflows" / "pages.yml").read_text(encoding="utf-8")
         self.assertNotIn("draft", text)
+        # 강화(D-375, 확인 015 의 AP6 F113): 승인 흐름은 배포를 건드리지 않았고, 게시 잡에 기본 가지 가드 한 줄이 더해졌을 뿐 트리거·동시성·권한·잡 연결은 그대로다.
+        # 가드의 식 자체는 tests/test_pages_branch_guard.py 가 못박는다. 여기서는 조건이 게시 잡 한 곳에만 있고 나머지 값이 그대로임을 본다.
+        self.assertEqual(sorted(wf["on"]), ["push", "workflow_dispatch"])
+        self.assertIsNone(wf["on"]["workflow_dispatch"])                                                      # 수동 실행에 입력이 없다
+        self.assertEqual(wf["concurrency"], {"group": "github-pages", "cancel-in-progress": True})
+        self.assertEqual([name for name, job in wf["jobs"].items() if "if" in job], ["deploy"])             # 빌드·반영 확인 잡에는 조건이 없다
+        self.assertEqual(wf["jobs"]["deploy"]["permissions"], {"pages": "write", "id-token": "write"})
+        self.assertEqual((wf["jobs"]["deploy"]["needs"], wf["jobs"]["verify"]["needs"]), ("build", "deploy"))
 
     def test_the_steps_that_call_the_registry_never_use_untrusted_expressions(self):
         for step in steps_of():
