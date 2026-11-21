@@ -21,7 +21,8 @@
   5. 재시도(L7, D-362 — 예전에는 종류마다 한 번): 일시 오류(429·네트워크 오류·시간 초과·5xx)는 한 통에 최대 3번 다시 보낸다(429 는 retry_after 1–10초, 네트워크 오류·5xx 는 2 → 4 → 8초 간격).
      한 실행 전체의 재시도는 6번까지(MAX_RETRIES_PER_RUN — 텔레그램이 통째로 막혀 있어도 워크플로 제한 안에 끝난다). HTML 알림이 400(엔티티 해석 실패)이면 서식 없이 한 번 더,
      버튼이 거부되면(400 BUTTON…) 버튼 없이 한 번 더. **영구 오류(400·401·403·404 와 그 밖의 4xx)는 다시 시도하지 않고** 실패(Result)로 돌려줘 호출한 쪽이 로그·::warning:: 으로 남긴다.
-     이미 보낸 통은 다시 보내지 않는다(다시 보내는 것은 실패한 그 통뿐). 한계: 응답이 오다 끊긴 시간 초과는 텔레그램이 이미 받았을 수 있어 같은 통이 한 번 더 갈 수 있다 — 알림을 놓치는 쪽보다 낫다.
+     이미 보낸 통은 다시 보내지 않는다(다시 보내는 것은 실패한 그 통뿐). 한계: 응답이 오다 끊긴 시간 초과는 텔레그램이 이미 받았을 수 있어(요청을 다 보낸 뒤 응답이 끊긴 경우 — Reply.lost) 그런 실패는 한 번만 다시 보낸다(UNSURE_RETRIES) — 같은 통이 두 번 가는 일을 예전보다 늘리지 않는다.
+     연결·전송 단계의 실패(연결 거부·이름 풀이·핸드셰이크)와 429·5xx 는 받지 못한 것이라 3번까지 다시 보낸다. 텔레그램에는 중복을 가리는 표식이 없어 한 번의 중복은 놓치는 것보다 낫다고 정했다.
 
 명령 줄: python -m pipeline.notify <chance-published [--commit HEAD] | main-check-failed | test | status>
   외부 값(제목·토큰)을 명령 줄 인자로 받지 않는다 — 글은 git 커밋의 파일에서, 토큰·커밋·올린 사람·실행 번호는 환경변수에서만 읽는다(main-check-failed 는 Actions 가 주는 값만).
@@ -60,7 +61,8 @@ NETWORK_RETRY_WAIT = 2          # 네트워크 오류·5xx 뒤 다시 시도하�
 TRANSIENT_RETRIES = 3           # 일시 오류(429·네트워크 오류·시간 초과·5xx)로 실패한 한 통을 다시 보내는 최대 횟수(L7, D-362 — 예전에는 종류마다 한 번이라 2초 안에 안 풀리는 장애에 통이 사라졌다)
 RETRY_BACKOFF = (NETWORK_RETRY_WAIT, 4, 8)      # 네트워크 오류·5xx 의 대기(초)를 2 → 4 → 8 로 늘린다(429 는 텔레그램이 알려 준 retry_after, 1–RETRY_AFTER_MAX 초)
 MAX_RETRIES_PER_RUN = 6         # 한 실행(프로세스) 전체의 재시도 상한 — 텔레그램이 통째로 막혀 있어도 여러 통이 차례로 오래 붙들려 워크플로 제한(5분)을 넘기지 않게 한다
-TEXT_LIMIT = 3800              # 본문 길이 상한(UTF-16 단위). 텔레그램의 한도는 4,096(엔티티 해석 뒤 길이)이라 여유를 둔다
+UNSURE_RETRIES = 1              # 텔레그램이 받았는지 모르는 실패(요청을 다 보낸 뒤 응답이 끊김 — Reply.lost)를 다시 보내는 횟수 상한. 같은 통이 두 번 가는 일을 예전(한 번)보다 늘리지 않는다
+TEXT_LIMIT = 3800               # 본문 길이 상한(UTF-16 단위). 텔레그램의 한도는 4,096(엔티티 해석 뒤 길이)이라 여유를 둔다
 MAX_MESSAGES = 5                # 한 실행(프로세스)에서 보내는 통 수 상한
 SEND_GAP_SECONDS = 1.1          # 통 사이 간격(같은 채팅에는 초당 1통이 안전하다)
 MAX_RESPONSE_BYTES = 65536      # 응답 본문은 이만큼만 읽는다
@@ -272,7 +274,7 @@ def reset_budget():
     _DEFAULT_BUDGET.reset()
 
 
-Reply = namedtuple("Reply", "kind status body headers")     # kind: ok | http | timeout | network
+Reply = namedtuple("Reply", "kind status body headers lost", defaults=(False,))     # kind: ok | http | timeout | network / lost: 요청을 다 보낸 뒤 응답이 끊겨 텔레그램이 받았는지 모르는 실패(L7, D-362)
 
 
 class Notifier:
@@ -410,12 +412,12 @@ class Notifier:
                 pass
             return Reply("http", status if isinstance(status, int) else None, body, headers)
         except (socket.timeout, TimeoutError):
-            return Reply("timeout", None, None, None)
-        except urllib.error.URLError as exc:
+            return Reply("timeout", None, None, None, True)       # 응답을 기다리다 끊겼다 — 요청은 이미 갔으니 텔레그램이 받았을 수 있다(lost)
+        except urllib.error.URLError as exc:                       # 연결·전송 단계의 실패(연결 거부·이름 풀이·핸드셰이크·보내다 시간 초과) — 받지 못했다
             reason = getattr(exc, "reason", None)
             return Reply("timeout" if isinstance(reason, (socket.timeout, TimeoutError)) else "network", None, None, None)
         except Exception:  # noqa: BLE001 - OSError·http.client 오류·잘못된 주소(ValueError) 등: 문구에 요청 주소가 들어 있을 수 있어 버린다
-            return Reply("network", None, None, None)
+            return Reply("network", None, None, None, True)       # URLError 로 감싸지 않은 실패는 응답을 읽다 끊긴 것(ConnectionResetError·RemoteDisconnected …)이라 받았는지 모른다(lost)
         try:
             status = getattr(response, "status", None)
             if status is None:
@@ -423,7 +425,7 @@ class Notifier:
             body = self._read_json(response)
             headers = getattr(response, "headers", None)
         except Exception:  # noqa: BLE001
-            return Reply("network", None, None, None)
+            return Reply("network", None, None, None, True)       # 응답은 왔는데 읽다 실패했다 — 받았는지 모른다(lost)
         finally:
             try:
                 response.close()
@@ -490,17 +492,20 @@ class Notifier:
     def _deliver(self, payload):
         """요청을 보내고 재시도·대체 전송을 한다(L7, D-362). 일시 오류(429·네트워크 오류·시간 초과·5xx)는 한 통에 최대 TRANSIENT_RETRIES(3)번 다시 보낸다 — 429 는 알려 준 retry_after(1–10초),
         네트워크 오류·5xx 는 2 → 4 → 8초를 기다린다. 한 실행 전체의 재시도는 budget.retries_left(MAX_RETRIES_PER_RUN)로 묶어, 텔레그램이 통째로 막혀 있어도 통마다 오래 붙들리지 않게 한다.
+        텔레그램이 받았는지 모르는 실패(요청을 다 보낸 뒤 응답이 끊김 — Reply.lost)는 그 가운데서도 UNSURE_RETRIES(1)번만 다시 보내 같은 통이 두 번 가는 일을 예전보다 늘리지 않는다.
         서식 해석 실패(400)와 버튼 거부(400)는 각각 한 번 더 보낸다. **영구 오류(400·401·403·404 와 그 밖의 4xx)는 다시 보내지 않는다** — 같은 요청은 같은 답이고, 토큰·채팅 설정은 사람이 고쳐야 한다.
         요청은 한 통에 최대 6번(처음 1 + 일시 오류 3 + 서식 없이 1 + 버튼 없이 1). 이미 보낸 통(SENT)은 거기서 끝나 다시 보내지 않고, 다시 보내는 것은 실패한 그 통뿐이다(여러 통 중 하나가 실패해도 앞의 통은 그대로)."""
         used = {"parse": False, "button": False}
-        retries = waits = 0                  # retries: 이 통의 일시 오류 재시도 횟수 / waits: 그 가운데 네트워크·5xx 대기 횟수(대기를 2 → 4 → 8 로 늘리는 순번 — 429 의 대기는 텔레그램이 정한다)
+        retries = waits = unsure = 0         # retries: 이 통의 일시 오류 재시도 횟수 / waits: 그 가운데 네트워크·5xx 대기 횟수(대기를 2 → 4 → 8 로 늘리는 순번 — 429 의 대기는 텔레그램이 정한다) / unsure: 받았는지 모르는 실패 뒤의 재시도 횟수
         while True:
             reply = self._post(payload)
             reason, description = self._classify(reply)
             if reason == SENT:
                 return self._result(True, True, reply.status, SENT)
-            if reason in TRANSIENT_REASONS and retries < TRANSIENT_RETRIES and self.budget.retries_left > 0:
+            if (reason in TRANSIENT_REASONS and retries < TRANSIENT_RETRIES and self.budget.retries_left > 0
+                    and not (reply.lost and unsure >= UNSURE_RETRIES)):
                 retries += 1
+                unsure += 1 if reply.lost else 0
                 self.budget.retries_left -= 1
                 if reason == RATE_LIMITED:
                     self._pause(self._retry_after(reply))

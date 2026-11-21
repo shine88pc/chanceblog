@@ -245,18 +245,20 @@ class ClassificationTest(unittest.TestCase):
         result, net, clock = self.run_one(http_error(502, "Bad Gateway"))
         self.assertEqual((result.reason, result.status, net.calls, clock.sleeps), ("server_error", 502, 4, [2, 4, 8]))
 
-    def test_connection_level_failures_are_network_after_three_retries(self):      # L7 D-362: 예전에는 'after_one_retry'
+    def test_connection_level_failures_are_network_after_retries(self):      # L7 D-362: 예전에는 'after_one_retry' — 연결 단계 실패(URLError)는 3번, 응답을 읽다 끊긴 것(텔레그램이 받았는지 모름)은 예전처럼 한 번만 다시 보낸다
         for exc in (urllib.error.URLError("x"), ConnectionResetError("x"), OSError("x"), http.client.RemoteDisconnected("x"), http.client.IncompleteRead(b"x"),
                     ValueError("x"), RuntimeError("x")):
             with self.subTest(exc=type(exc).__name__):
                 result, net, clock = self.run_one(exc)
-                self.assertEqual((result.ok, result.sent, result.status, result.reason, net.calls, clock.sleeps), (False, False, None, "network", 4, [2, 4, 8]))
+                expected = (4, [2, 4, 8]) if isinstance(exc, urllib.error.URLError) else (2, [2])
+                self.assertEqual((result.ok, result.sent, result.status, result.reason, net.calls, clock.sleeps), (False, False, None, "network", *expected))
 
-    def test_timeouts_are_timeout_after_three_retries(self):      # L7 D-362: 예전에는 'after_one_retry'
+    def test_timeouts_are_timeout_after_retries(self):      # L7 D-362: 예전에는 'after_one_retry' — 연결·전송 중 시간 초과(URLError)는 3번, 응답을 기다리다 시간 초과(받았을 수 있음)는 예전처럼 한 번만 다시 보낸다
         for exc in (socket.timeout("x"), TimeoutError("x"), urllib.error.URLError(socket.timeout("x")), urllib.error.URLError(TimeoutError("x"))):
             with self.subTest(exc=repr(exc)[:30]):
                 result, net, clock = self.run_one(exc)
-                self.assertEqual((result.reason, net.calls, clock.sleeps), ("timeout", 4, [2, 4, 8]))
+                expected = (4, [2, 4, 8]) if isinstance(exc, urllib.error.URLError) else (2, [2])
+                self.assertEqual((result.reason, net.calls, clock.sleeps), ("timeout", *expected))
 
     def test_keyboard_interrupt_is_not_swallowed(self):
         notifier, _, _ = make_notifier(net=FakeNet(KeyboardInterrupt()))
@@ -1266,7 +1268,7 @@ class LoopbackTest(unittest.TestCase):
         notifier, clock = self.notifier()
         with mock.patch.object(notify, "TIMEOUT_SECONDS", 0.3):
             result = notifier.send_message("안녕")
-        self.assertEqual((result.sent, result.reason, result.status, clock.sleeps), (False, "timeout", None, [2, 4, 8]))      # L7 D-362: 예전에는 [2]
+        self.assertEqual((result.sent, result.reason, result.status, clock.sleeps), (False, "timeout", None, [2]))      # 응답을 기다리다 시간 초과 — 받았는지 모르니 예전처럼 한 번만 다시 보낸다(L7 D-362)
         self.assertEqual(leaks(repr(result)), [])
 
     def test_a_refused_connection_is_a_network_failure_without_the_address(self):

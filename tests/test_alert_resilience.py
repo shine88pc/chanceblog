@@ -6,6 +6,7 @@
 import ast
 import contextlib
 import datetime
+import http.client
 import io
 import json
 import pathlib
@@ -263,12 +264,57 @@ class TelegramRetryTest(unittest.TestCase):
 
     def test_after_the_third_retry_it_gives_up_and_the_failure_is_in_the_result(self):
         for outcome, reason, status in ((http_error(502, "Bad Gateway"), "server_error", 502), (urllib.error.URLError("x"), "network", None),
-                                        (socket.timeout("x"), "timeout", None)):
+                                        (urllib.error.URLError(socket.timeout("x")), "timeout", None)):
             with self.subTest(reason=reason):
                 notifier, net, clock = make_notifier(net=FakeNet(outcome))
                 result = notifier.send_message("안녕")
                 self.assertEqual((result.ok, result.sent, result.reason, result.status), (False, False, reason, status))
                 self.assertEqual((net.calls, clock.sleeps), (4, [2, 4, 8]))
+
+    def test_a_failure_after_the_request_went_out_is_resent_at_most_once_so_a_delivered_message_is_not_tripled(self):
+        """응답을 기다리다·읽다 끊긴 실패는 텔레그램이 이미 받았을 수 있다 — 같은 통이 여러 번 가지 않게 예전처럼 한 번만 다시 보낸다."""
+        for exc in (socket.timeout("x"), TimeoutError("x"), ConnectionResetError("x"), http.client.RemoteDisconnected("x"), http.client.IncompleteRead(b"x"), OSError("x")):
+            with self.subTest(exc=type(exc).__name__):
+                notifier, net, clock = make_notifier(net=FakeNet(exc))
+                result = notifier.send_message("안녕")
+                self.assertEqual((result.sent, result.status, net.calls, clock.sleeps), (False, None, 2, [2]))
+                self.assertIn(result.reason, ("timeout", "network"))
+        self.assertEqual(notify.UNSURE_RETRIES, 1)
+
+    def test_a_response_that_cannot_be_read_back_is_also_resent_at_most_once(self):
+        class Unreadable:
+            headers = {}
+
+            def getcode(self):
+                raise OSError("boom")
+
+            def read(self, n=-1):
+                return b"{}"
+
+            def close(self):
+                pass
+        notifier, net, clock = make_notifier(net=FakeNet(Unreadable()))
+        result = notifier.send_message("안녕")
+        self.assertEqual((result.sent, result.reason, net.calls, clock.sleeps), (False, "network", 2, [2]))
+
+    def test_a_failure_before_the_request_went_out_or_an_answer_that_says_not_delivered_gets_all_three_retries(self):
+        sure = (urllib.error.URLError("x"), urllib.error.URLError(socket.timeout("x")), urllib.error.URLError(ConnectionRefusedError("x")), http_error(500, "Internal Server Error"),
+                http_error(503, "Service Unavailable"))
+        for outcome in sure:
+            with self.subTest(outcome=type(outcome).__name__ + str(getattr(outcome, "code", ""))):
+                notifier, net, clock = make_notifier(net=FakeNet(outcome))
+                self.assertFalse(notifier.send_message("안녕").sent)
+                self.assertEqual((net.calls, clock.sleeps), (4, [2, 4, 8]))
+
+    def test_one_unsure_failure_among_sure_ones_does_not_block_the_others_but_a_second_one_stops_the_resending(self):
+        net = FakeNet(urllib.error.URLError("x"), socket.timeout("x"), urllib.error.URLError("x"), ok_reply())
+        notifier, net, clock = make_notifier(net=net)
+        self.assertTrue(notifier.send_message("안녕").sent)
+        self.assertEqual((net.calls, clock.sleeps), (4, [2, 4, 8]))
+        net = FakeNet(socket.timeout("x"), socket.timeout("x"), ok_reply())
+        notifier, net, clock = make_notifier(net=net)
+        result = notifier.send_message("안녕")
+        self.assertEqual((result.sent, result.reason, net.calls), (False, "timeout", 2))             # 두 번째 '모르는 실패' 뒤에는 보내지 않는다(성공이 기다리고 있어도)
 
     def test_every_429_waits_what_telegram_asked_up_to_ten_seconds(self):
         net = FakeNet(http_error(429, retry_after=3), http_error(429, retry_after=5), http_error(429, retry_after=300), ok_reply())
@@ -355,7 +401,7 @@ class TelegramRetryTest(unittest.TestCase):
                 lines = []
                 notify.log_result(result, lines.append)
                 self.assertEqual(leaks(repr(result), str(result), notify.describe(result), result.detail, *lines), [])
-                self.assertEqual(net.calls, 4)
+                self.assertEqual(net.calls, 2 if isinstance(shape, (ConnectionResetError, socket.timeout)) else 4)       # 응답이 끊긴 실패는 한 번만 다시 보낸다
 
     def test_the_first_try_succeeds_without_any_wait_or_retry(self):
         notifier, net, clock = make_notifier()
