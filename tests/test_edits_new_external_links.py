@@ -51,6 +51,9 @@ BLOCKED = {
     "srcset": '<img srcset="/a.png 1x, //evil.example/a.png 2x" src="/a.png">',
     "그림": "![x](//evil.example/a.png)",
     "꺾쇠 자동 링크": "<https://evil.example/a>",
+    "인라인 style 의 url(프로토콜 상대)": '<div style="background:url(//evil.example/p.png)">x</div>',
+    "인라인 style 의 url(따옴표)": "<div style=\"background: url('//evil.example/p.png') no-repeat\">x</div>",
+    "인라인 style 의 url(같은 호스트의 새 경로)": '<div style="background:url(https://github.com/attacker/p.png)">x</div>',
     "글 속의 주소": "참고: https://evil.example/a 를 보세요",
     "글 속의 ftp 주소": "내려받기: ftp://evil.example/a 에서",
     "글 속의 슬래시 하나 주소": "참고: http:/evil.example/a 를 보세요",
@@ -66,7 +69,22 @@ BLOCKED = {
     "겹쳐 쓴 문자 참조": '<a href="ht&amp;#9;tps://evil.example/a">x</a>',
     "진짜 탭": '<a href="ht\ttps://evil.example/a">x</a>',
     "문자 참조로 쓴 스킴 글자": '<a href="&#104;ttps://evil.example/a">x</a>',
+    "문자 참조로 쓴 스킴 글자(같은 호스트의 새 경로)": "[x](&#104;ttps://github.com/attacker/phish)",
+    "16진 문자 참조로 쓴 스킴 글자(같은 호스트의 새 경로)": "[x](&#x68;ttps://github.com/attacker/phish)",
+    "문자 참조로 쓴 경로 글자(같은 호스트의 새 경로)": "[x](https://github.com/owner/&#100;ev)",
     "속성 이름 대문자와 공백": '<A HREF = " //evil.example/a ">x</A>',
+    "속성 이름과 등호 사이 줄바꿈": '<a href\n=\n"//evil.example/a">x</a>',
+    "문자 참조로 쓴 속성 이름": '<a &#104;ref="//evil.example/a">x</a>',
+    "문자 참조로 쓴 슬래시(16진)": '<a href="&#x2F;&#x2F;evil.example/a">x</a>',
+    "이름 있는 문자 참조 슬래시": '<a href="&sol;&sol;evil.example/a">x</a>',
+    "슬래시와 역슬래시": "[x](/" + "\\" + "evil.example/a)",
+    "역슬래시와 슬래시": "[x](" + "\\" + "/evil.example/a)",
+    "마크다운으로 이스케이프한 첫 슬래시": "[x](" + "\\" + "//evil.example/a)",
+    "꺾쇠 목적지": "[x](<//evil.example/a>)",
+    "괄호 안 공백": "[x]( //evil.example/a )",
+    "원문 링크에 조각만 붙임": "[GitHub](https://github.com/owner/repo#x)",
+    "object data": '<object data="//evil.example/a.swf"></object>',
+    "각주 정의": "[^1]: //evil.example/a",
 }
 
 ALLOWED = {
@@ -81,6 +99,9 @@ ALLOWED = {
     "글 속의 슬래시 둘": BASE + "경로 A//B 와 `// 주석` 은 링크가 아니다\n",
     "스킴 이름만 쓴 글": BASE + "http: 라고만 쓰고 주소는 없다. https: 도 마찬가지. 주소는 https:// 로 시작한다.\n",
     "시각·비율·윈도 경로": BASE + "회의는 10:30 에 시작, 비율 3:2, 경로 C:" + "\\" + "Users 는 링크가 아니다\n",
+    "퍼센트 인코딩한 슬래시(브라우저가 상대 경로로 읽는다)": BASE + '<a href="%2F%2Fnot-a-host.example">x</a>\n',
+    "사이트 안 그림을 부르는 url": BASE + '<div style="background:url(/assets/a.png)">x</div> <p style="background:url(\'a.png\')">y</p>\n',
+    "글 속의 url 낱말": BASE + "CSS 의 url 함수는 url(주소) 꼴로 쓴다\n",
 }
 
 
@@ -135,6 +156,13 @@ class ExternalLinksFunctionTest(unittest.TestCase):
         self.assertEqual(checks.external_links("[x](" + "\\" * 2 + "evil.example/a)"), {"//evil.example/a"})
         self.assertEqual(checks.external_links("[x](ht&#9;tps://Evil.example/a) <a href=//e.example/&#10;b>y</a>"), {"https://evil.example/a", "//e.example/b"})
 
+    def test_character_references_that_only_start_like_a_tab_or_newline_are_decoded_whole(self):
+        """`&#104;`(h)·`&#100;`(d)·`&#xA9;` 는 탭·줄바꿈 참조(`&#9;`·`&#10;`·`&#13;`)와 앞자리만 같다 — 앞부분만 지우면 글자가 깨져 주소를 놓친다."""
+        self.assertEqual(checks.external_links("[x](&#104;ttps://Evil.example/&#100;)"), {"https://evil.example/d"})
+        self.assertEqual(checks.external_links("[x](&#x68;ttps://evil.example/&#x64;)"), {"https://evil.example/d"})
+        self.assertEqual(checks.external_links("[x](https://evil.example/a&#xA9;b) [y](https://evil.example/&#130;)"), {"https://evil.example/a" + chr(0xA9) + "b", "https://evil.example/" + chr(0x201A)})
+        self.assertEqual(checks.external_links("[x](https://evil.example/a&#9;b&#x0A;c&#013;d&Tab;e&NewLine;f)"), {"https://evil.example/abcdef"})
+
     def test_the_userinfo_stays_inside_the_authority_so_it_cannot_hide_the_target(self):
         self.assertEqual(checks.external_links("[x](https://github.com:80@Evil.example/a)"), {"https://github.com:80@evil.example/a"})
 
@@ -144,9 +172,10 @@ class ExternalLinksFunctionTest(unittest.TestCase):
 
     def test_every_place_a_link_can_be_written_is_read(self):
         text = ("[inline](//a.example/1) ![img](//b.example/2.png)\n\n[ref]: //c.example/3\n"
-                '<a href="//d.example/4">x</a> <img src=\'//e.example/5.png\'> <img srcset="/x.png 1x, //f.example/6.png 2x"> <https://g.example/7> plain https://h.example/8 end')
+                '<a href="//d.example/4">x</a> <img src=\'//e.example/5.png\'> <img srcset="/x.png 1x, //f.example/6.png 2x"> <https://g.example/7> plain https://h.example/8 end '
+                '<i style="background:url( \'//i.example/9.png\' )">z</i>')
         self.assertEqual(checks.external_links(text), {"//a.example/1", "//b.example/2.png", "//c.example/3", "//d.example/4", "//e.example/5.png", "//f.example/6.png",
-                                                       "https://g.example/7", "https://h.example/8"})
+                                                       "https://g.example/7", "https://h.example/8", "//i.example/9.png"})
 
     def test_the_same_address_written_twice_is_one_address(self):
         self.assertEqual(checks.external_links("[a](https://x.example/1) [b](HTTPS://X.example/1) https://x.example/1"), {"https://x.example/1"})

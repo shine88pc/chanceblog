@@ -82,13 +82,15 @@ def _hosts(text):
 # 외부 주소 = 스킴이 있는 주소와 `//host`. mailto·tel 은 연락 수단이라 뺀다(전과 같다). javascript·data·vbscript 는 위험 마크업 규칙이 따로 막는다.
 _NOT_EXTERNAL_SCHEMES = frozenset({"mailto", "tel", "javascript", "vbscript", "data"})
 _SCHEME = re.compile(r"(?i)([a-z][a-z0-9+.\-]*):")
-_ENTITY_BLANK = re.compile(r"(?i)&(?:#0*(?:9|10|13)|#x0*[9ad]|tab|newline);?")     # 탭·줄바꿈·CR 을 뜻하는 문자 참조(브라우저가 주소 안에서 지운다)
+# 탭·줄바꿈·CR 을 뜻하는 문자 참조(브라우저가 주소 안에서 지운다). 숫자 참조는 그 숫자로 **끝날 때만** 맞춘다 — 그렇지 않으면 `&#104;`(h)·`&#100;`(d)·`&#xA9;` 의 앞부분이 잘려 나간다.
+_ENTITY_BLANK = re.compile(r"(?i)&(?:#0*(?:9|10|13)(?![0-9]);?|#x0*[9ad](?![0-9a-f]);?|(?:tab|newline);)")
 _TARGET_PATTERNS = (
     re.compile(r"\]\(\s*<?\s*([^)\s>]*)"),                                          # 마크다운 [글](주소 "제목") · ![그림](주소)
     re.compile(r"(?m)^[ \t]{0,3}\[[^\]\n]+\]:[ \t]*<?([^\s>]+)"),                   # 참조식 정의 [이름]: 주소
     re.compile(r"""(?i)(?<![\w:-])(?:href|src|action|formaction|poster|cite|background|data|ping|xlink:href|longdesc|manifest|codebase|usemap)"""
                r"""\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'<>`=]+))"""),                # HTML 속성(따옴표 없는 값 포함)
     re.compile(r"(?i)<\s*([a-z][a-z0-9+.\-]*:[^\s<>]*)\s*>"),                       # 꺾쇠 자동 링크(스킴이 붙은 주소)
+    re.compile(r"""(?i)\burl\(\s*['"]?([^)'"\s]*)"""),                              # 인라인 style 의 url(…) — 그림·글꼴을 밖에서 불러온다
 )
 _SRCSET = re.compile(r"""(?i)(?<![\w:-])srcset\s*=\s*(?:"([^"]*)"|'([^']*)')""")
 _BARE_URL = re.compile(r"""(?i)(?<![a-z0-9+.\-])(?:https?|ftps?|wss?|sftp|file):[/\\]*[^\s<>"'`)\]/\\][^\s<>"'`)\]]*""")   # 글 속의 주소(슬래시가 모자라거나 역슬래시여도)
