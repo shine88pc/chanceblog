@@ -10,6 +10,7 @@
 import difflib
 import html
 import re
+import unicodedata
 
 from pipeline import unsplash_credit
 from pipeline.edits import frontmatter, safety, spec as spec_mod
@@ -69,6 +70,62 @@ def _ad_blocks(text):
 
 def _hosts(text):
     return {h.lower() for h in _EXTERNAL_HOST.findall(_decode(text))}
+
+
+# ----------------------------------------------------------------------------
+# AI 가 더한 외부 링크(D-353)
+# ----------------------------------------------------------------------------
+# 옛 검사(`_hosts`)는 `http`·`https` 스킴 주소의 호스트 집합만 견줬다. 그래서 프로토콜 상대 주소(`//host`)·같은 호스트의 새 경로·`host:80@evil` 처럼 ':' 에서 호스트가 끊겨 읽히는 주소·참조식 정의·srcset·
+# 탭·줄바꿈으로 쪼갠 스킴(`ht&#9;tps://…` — 브라우저는 주소 안의 탭·줄바꿈을 지우고 읽는다)이 지나갔다. 여기서는 링크 '대상' 을 모아 정규화한 주소(스킴·호스트는 소문자, 나머지는 그대로)를 견준다:
+# AI 수정으로 원문에 없던 외부 주소가 하나라도 생기면 거절하고, 원문에 이미 있던 주소는 위치를 옮기거나 되풀이해도 괜찮다(허용 목록 = 원문의 링크).
+# 외부 주소 = 스킴이 있는 주소와 `//host`. mailto·tel 은 연락 수단이라 뺀다(전과 같다). javascript·data·vbscript 는 위험 마크업 규칙이 따로 막는다.
+_NOT_EXTERNAL_SCHEMES = frozenset({"mailto", "tel", "javascript", "vbscript", "data"})
+_SCHEME = re.compile(r"(?i)([a-z][a-z0-9+.\-]*):")
+_ENTITY_BLANK = re.compile(r"(?i)&(?:#0*(?:9|10|13)|#x0*[9ad]|tab|newline);?")     # 탭·줄바꿈·CR 을 뜻하는 문자 참조(브라우저가 주소 안에서 지운다)
+_TARGET_PATTERNS = (
+    re.compile(r"\]\(\s*<?\s*([^)\s>]*)"),                                          # 마크다운 [글](주소 "제목") · ![그림](주소)
+    re.compile(r"(?m)^[ \t]{0,3}\[[^\]\n]+\]:[ \t]*<?([^\s>]+)"),                   # 참조식 정의 [이름]: 주소
+    re.compile(r"""(?i)(?<![\w:-])(?:href|src|action|formaction|poster|cite|background|data|ping|xlink:href|longdesc|manifest|codebase|usemap)"""
+               r"""\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'<>`=]+))"""),                # HTML 속성(따옴표 없는 값 포함)
+    re.compile(r"(?i)<\s*([a-z][a-z0-9+.\-]*:[^\s<>]*)\s*>"),                       # 꺾쇠 자동 링크(스킴이 붙은 주소)
+)
+_SRCSET = re.compile(r"""(?i)(?<![\w:-])srcset\s*=\s*(?:"([^"]*)"|'([^']*)')""")
+_BARE_URL = re.compile(r"""(?i)(?<![a-z0-9+.\-])(?:https?|ftps?|wss?|sftp|file):[/\\]*[^\s<>"'`)\]/\\][^\s<>"'`)\]]*""")   # 글 속의 주소(슬래시가 모자라거나 역슬래시여도)
+
+
+def _external_key(raw):
+    """링크 대상 하나를 정규화한다. 사이트 밖으로 나가는 주소면 `스킴://호스트…`(또는 `//호스트…`, 스킴·호스트는 소문자), 아니면 None."""
+    target = "".join(ch for ch in raw if not ch.isspace() and unicodedata.category(ch) not in ("Cc", "Cf")).replace("\\", "/")
+    scheme = _SCHEME.match(target)
+    if scheme:
+        if scheme.group(1).lower() in _NOT_EXTERNAL_SCHEMES:
+            return None
+        prefix, rest = scheme.group(1).lower() + "://", target[scheme.end():].lstrip("/")
+    elif target.startswith("//"):
+        prefix, rest = "//", target.lstrip("/")
+    else:
+        return None                                                                 # 사이트 안 경로·#앵커·?질의
+    authority, tail = re.match(r"([^/?#]*)(.*)", rest, re.S).groups()
+    return prefix + authority.lower() + tail
+
+
+def external_links(text):
+    """text 안의 외부 링크 주소(정규화한 꼴)의 집합 — 마크다운 링크·그림·참조식 정의·HTML 속성(href·src·srcset 등)·자동 링크·글 속의 주소."""
+    text = str(text)
+    for _ in range(3):                                                              # 문자 참조를 반복해서 푼다(&amp;#9; 처럼 겹쳐 쓴 것까지)
+        step = html.unescape(_ENTITY_BLANK.sub("", text))
+        if step == text:
+            break
+        text = step
+    raws = []
+    for rx in _TARGET_PATTERNS:
+        for match in rx.finditer(text):
+            raws.extend(group for group in match.groups() if group)
+    for match in _SRCSET.finditer(text):
+        for value in match.groups():
+            raws.extend(part.split()[0] for part in (value or "").split(",") if part.split())
+    raws.extend(match.group(0) for match in _BARE_URL.finditer(text))
+    return {key for key in map(_external_key, raws) if key}
 
 
 def changed_line_count(before, after):
@@ -203,6 +260,10 @@ def verify_changes(changes, allowed_patterns, limits, mode="body", only_fields=N
             new_hosts = _hosts(after) - _hosts(before)
             if new_hosts:
                 reasons.append(f"{path}: AI 수정은 새 외부 링크를 넣을 수 없습니다({safety.code(sorted(new_hosts)[0], 80)}).")
+            else:     # 호스트는 그대로라도 원문에 없던 주소(같은 호스트의 새 경로·`//host`·참조식 정의·srcset·탭으로 쪼갠 스킴 …)가 생기면 같은 거절이다(D-353)
+                new_links = external_links(after) - external_links(before)
+                if new_links:
+                    reasons.append(f"{path}: AI 수정은 새 외부 링크를 넣을 수 없습니다({safety.code(sorted(new_links)[0], 100)}).")
         for rx in AD_PATTERNS:
             if len(rx.findall(before)) != len(rx.findall(after)):
                 reasons.append(f"{path}: 광고 코드({rx.pattern})가 추가되거나 삭제됩니다. 광고 표면은 이 경로로 바꿀 수 없습니다.")

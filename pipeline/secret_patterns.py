@@ -6,6 +6,7 @@
 (소비처 목록은 tests/test_security_settings.py 가 실제 import 와 대조한다.)
 """
 import re
+import unicodedata
 
 SECRET_PATTERNS = [
     ("Google API 키", re.compile(r"AIza[0-9A-Za-z_\-]{35}")),
@@ -33,11 +34,43 @@ SECRET_PATTERNS = [
 ]
 
 
+# 검사용 사본(D-352): 키를 보이지 않는 글자·전각 글자·결합 글자로 쪼개 붙여 넣어도 같은 키로 읽는다. **원문은 바꾸지 않고** 검사에만 쓴다.
+#  ① NFKD 로 푼다 — 전각 글자(`ｇｈｐ＿`)·호환 글자는 ASCII 꼴이 되고, 악센트가 붙은 글자는 '글자 + 결합 글자' 로 나뉜다(NFKC 는 다시 한 글자로 합쳐 악센트가 남는다).
+#  ② 서식 글자(Cf: 제로폭 공백·결합자·방향 표시·소프트 하이픈·BOM·태그 글자 …)·결합 글자(Mn·Me: 악센트·결합 문자 연결자·변이 선택자 …)·제어 글자(Cc, 줄바꿈·탭은 남긴다)·
+#     짝 없는 서로게이트(Cs)와, 종류로는 못 잡는 눈에 안 보이는 글자(한글 채움 글자·점자 빈칸)를 지운다.
+# 못 막는 것(한계): 모양만 닮은 다른 문자(키릴 문자 'а' 로 쓴 'a' 등), 공백·줄바꿈·보이는 기호로 나눈 키.
+_SCAN_DROP_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Mn", "Me"})
+_SCAN_KEEP = frozenset("\t\n\r")
+_SCAN_DROP_EXTRA = frozenset(chr(code) for code in (0x115F, 0x1160, 0x3164, 0xFFA0, 0x2800, 0x180E, 0x17B4, 0x17B5))
+
+
+class _ScanTable(dict):
+    """`str.translate` 용 표: 처음 보는 글자만 파이썬으로 판정해 기억하고, 그 뒤로는 C 속도로 지나간다(저장소 전체를 줄마다 훑는 검증기에서도 느려지지 않게)."""
+
+    def __missing__(self, codepoint):
+        char = chr(codepoint)
+        drop = char in _SCAN_DROP_EXTRA or (unicodedata.category(char) in _SCAN_DROP_CATEGORIES and char not in _SCAN_KEEP)
+        self[codepoint] = None if drop else codepoint
+        return self[codepoint]
+
+
+_SCAN_TABLE = _ScanTable()
+
+
+def scan_copy(text):
+    """비밀 모양을 찾기 위한 검사용 사본(위 설명). 원문은 그대로 두고 새 문자열을 돌려준다. None 은 빈 문자열."""
+    return unicodedata.normalize("NFKD", "" if text is None else str(text)).translate(_SCAN_TABLE)
+
+
 def find_secrets(text):
-    """text 안에서 비밀로 보이는 값의 (라벨, 마스킹된 미리보기) 목록. 값 전체는 돌려주지 않는다."""
+    """text 안에서 비밀로 보이는 값의 (라벨, 마스킹된 미리보기) 목록. 값 전체는 돌려주지 않는다.
+
+    원문과 검사용 사본(`scan_copy`) 둘 다 본다 — 보이지 않는 글자·전각 글자·결합 글자로 쪼갠 키도 같은 라벨로 걸린다."""
+    text = text or ""
+    folded = scan_copy(text)
     found = []
     for label, rx in SECRET_PATTERNS:
-        match = rx.search(text or "")
+        match = rx.search(text) or (rx.search(folded) if folded != text else None)
         if match:
             found.append((label, match.group(0)[:4] + "***"))
     return found
