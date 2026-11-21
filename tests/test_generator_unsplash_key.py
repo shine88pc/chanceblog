@@ -6,7 +6,7 @@
 
 구성: ① 서브프로세스 — import 때 읽으므로 사례마다 generator 를 새로 가져온다. 가짜 키는 `CANARY_` 로 시작하는 조립 문자열(소스에 완성된 키 모양을 두지 않는다)이고 줄바꿈·폭 없는 공백·앞뒤 공백을 섞어
 환경 변수로 준다. 소켓은 모두 막혀 있고, 연결 단계에서 OSError 를 내는 가짜 연결 클래스를 써서 '요청 머리글 검사(연결 전에 ValueError 가 나는 곳)'까지만 진짜 코드가 돈다 — 네트워크는 없다.
-자식 프로세스는 불리언과 개수만 돌려주고 키 글자는 출력하지 않는다. ② generator.py 소스(AST) — 이 환경 변수를 읽는 식은 모두 `clean_secret(` 안에 있다.
+자식 프로세스는 불리언·개수와 키 글자를 `<KEY>` 로 바꾼 로그만 돌려주고 키 글자는 어디에도 출력하지 않는다. ② generator.py 소스(AST) — 이 환경 변수를 읽는 식은 모두 `clean_secret(` 안에 있다.
 """
 import ast
 import json
@@ -141,7 +141,7 @@ DROPPED_ENV = (ENV_NAME, "GEMINI_API_KEY", "PIPELINE_PAUSE", "DRY_RUN", "FIX_IMA
 
 
 def run_child(cases):
-    """사례마다 generator 를 새로 가져와 결과(불리언·개수)를 모은다. 자식이 실패하면 표준 출력·오류의 끝을 담아 시험을 실패시킨다."""
+    """사례마다 generator 를 새로 가져와 결과(불리언·개수·키를 가린 로그)를 모은다. 자식이 실패하면 표준 출력·오류의 끝을 담아 시험을 실패시킨다."""
     env = {k: v for k, v in os.environ.items() if k not in DROPPED_ENV and not k.startswith("PIPELINE_SECRET_")}
     env.update(PYTHONUTF8="1", PYTHONIOENCODING="utf-8", PYTHONDONTWRITEBYTECODE="1")
     payload = json.dumps([{"name": name, "value": value, "expect": expect} for name, value, expect in cases])
