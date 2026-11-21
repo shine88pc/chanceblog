@@ -171,17 +171,24 @@ class DocumentationTest(unittest.TestCase):
             self.assertIn(needle, row, needle)
         self.assertEqual(row.count("|"), 5, "표의 네 칸 — 칸 안에 세로선이 없다")
 
-    def test_the_register_rows_d375_and_d376_exist_once_with_six_cells(self):
+    def test_the_register_rows_d375_and_d376_exist_once_with_six_cells_that_each_say_their_part(self):
+        """낱말은 칸별로 본다 — 행 전체에서 찾으면 다른 칸에 같은 낱말이 있어 한 칸에서 지워도 통과한다(변이 D4 가 살아남아 보강)."""
         ids = re.findall(r"(?m)^\| \*\*(D-\d+)\*\* \|", self.REGISTER_TEXT)
         self.assertEqual(len(ids), len(set(ids)))
         rows = self.register_rows()
-        needles = {"D-375": ("pages.yml", "workflow_dispatch", "default_branch", "확인 015", "F113", "해결"),
-                   "D-376": ("concurrency", "github-pages", "취소", "열림")}
-        for row_id, words in needles.items():
+        # 칸: 0 ID · 1 심각도 · 2 결함 · 3 근거 · 4 상태 · 5 해결 계획
+        needles = {"D-375": {2: ("pages.yml", "workflow_dispatch", "가지"), 3: ("확인 015", "F113", "tests/test_pages_branch_guard.py"),
+                             4: ("해결",), 5: ("default_branch", "건너뜀", "관측 체크리스트")},
+                   "D-376": {2: ("concurrency", "github-pages", "cancel-in-progress", "취소"), 3: ("pages.yml", "ACTIONS_GUIDE"),
+                             4: ("열림",), 5: ("별도 승인",)}}
+        for row_id, by_cell in needles.items():
             self.assertEqual(ids.count(row_id), 1, row_id)
             self.assertEqual(rows[row_id].count("|"), 7, row_id)         # 표의 여섯 칸 — 칸 안에 세로선이 없다
-            for word in words:
-                self.assertIn(word, rows[row_id], f"{row_id}: {word}")
+            cells = [cell.strip() for cell in rows[row_id].strip().strip("|").split("|")]
+            self.assertEqual(len(cells), 6, row_id)
+            for index, words in by_cell.items():
+                for word in words:
+                    self.assertIn(word, cells[index], f"{row_id} 의 {index}번 칸: {word}")
 
     def test_the_observation_checklist_has_the_after_merge_check(self):
         rows = [line for line in self.REGISTER_TEXT.splitlines() if line.startswith("| pages.yml 가지 가드(D-375)")]
