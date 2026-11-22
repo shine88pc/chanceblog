@@ -147,13 +147,18 @@ class TableStyleTest(unittest.TestCase):
         self.assertNotEqual(hex_color(HEAD_CELL, "background").lower(), hex_color(CARD, "background").lower())
 
     def test_each_table_selector_beats_the_theme_selector_it_replaces(self):
-        """테마(minima)의 표 선택자: table · table tr:nth-child(even) · table th · table td. 우리 규칙이 순서와 상관없이 이기려면 명시도가 더 커야 한다."""
-        theme = {TABLE: "table", EVEN_ROW: "table tr:nth-child(even)", HEAD_CELL: "table th", CELLS[1]: "table td"}
+        """테마(minima)의 표 선택자는 table · table tr:nth-child(even) · table th · table td(기억으로 적은 값 — 이 PC 에 테마가 없다).
+        우리 규칙이 글 안의 위치(순서)와 상관없이 이기려면 레이아웃 파일에 실제로 적힌 선택자의 명시도가 그보다 커야 한다."""
+        theme = {"table": "table", "tr:nth-child(even)": "table tr:nth-child(even)", "th": "table th", "td": "table td"}
         self.assertEqual(specificity("table tr:nth-child(even)"), (0, 1, 2))      # 계산기 자체 점검
         self.assertEqual(specificity(EVEN_ROW), (0, 3, 1))
-        for ours, theirs in theme.items():
-            with self.subTest(ours=ours):
-                self.assertGreater(specificity(ours), specificity(theirs))
+        written = [selector for group, _ in css_rules() for selector in group]
+        for ending, theirs in theme.items():
+            ours = [selector for selector in written if selector.endswith(" " + ending)]
+            with self.subTest(ending=ending):
+                self.assertTrue(ours, f"레이아웃에 {ending} 로 끝나는 표 규칙이 없다")
+                for selector in ours:
+                    self.assertGreater(specificity(selector), specificity(theirs), selector)
 
     def test_specificity_helper_reads_simple_selectors(self):
         self.assertEqual(specificity(".a .b c"), (0, 2, 1))
