@@ -16,6 +16,9 @@
 
 글 커밋 시각은 git 이력에서 읽으므로 워크플로의 checkout 은 fetch-depth: 0 이어야 한다. 얕은 복제면 가장 위 커밋이
 모든 파일을 '새로 추가'한 것처럼 보이므로, ::warning:: 을 내고 git 기반 판정은 건너뛴다(이력 파일 기반 판정만 한다).
+
+운영 알림이 조용히 사라지지 않게(2026-11-22, L7, docs/OPS_INBOX.md §11): 열린 [Watchdog] 이슈·열린 PR 은 100건씩 최대 5쪽까지 읽고 가득 차 있으면 ::warning:: 을 남긴다(예전에는 한 쪽만 읽어 조용히 잘렸다).
+켜진 허용 목록 제공처의 약관 점검 기한이 14일 안으로 다가오면 경고(SOURCE_TERMS_EXPIRING), 지났거나 기한이 없으면 심각(SOURCE_TERMS_EXPIRED)을 더한다 — 블로그가 아닌 공통 항목이라 블로그 자리에 '공통'을 쓴다.
 """
 import json
 import os
@@ -30,6 +33,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from pipeline import terms_deadline  # noqa: E402
 from pipeline.console import safe_output  # noqa: E402
 from pipeline.health import REAL_POST_STATUSES, Finding, entry_time, evaluate  # noqa: E402
 from pipeline.publish_lock import (CHANCE_KEY, WEEK_WINDOW_DAYS, lock_active, lock_errors,  # noqa: E402
@@ -41,6 +45,8 @@ LABEL = "watchdog"
 TITLE_PREFIX = "[Watchdog]"
 RENOTIFY_HOURS = 48          # 심각 건이 이만큼 지나도 열려 있으면 코멘트로 다시 알린다
 MAX_NEW_ISSUES_PER_RUN = 5   # 한 번에 이슈가 쏟아지는 것을 막는다(나머지는 다음 실행에서)
+PAGE_SIZE = 100              # 열린 이슈·PR 목록은 한 쪽 100건씩 읽는다(L7, D-361 — 예전에는 한 쪽만 읽어 이슈는 50건·PR 은 100건 뒤가 경고 없이 잘렸다)
+MAX_PAGES = 5                # 최대 5쪽(500건)까지 읽고, 가득 차 있으면 더 있을 수 있어 ::warning:: 을 남긴다
 PAGES_WORKFLOW = "pages.yml"
 PAGES_BRANCH = "main"        # 다른 ref 에서 workflow_dispatch 로 돌린 성공 실행은 '사이트 배포됨'이 아니다
 _NOTIFIED_RX = re.compile(r"<!--\s*watchdog:notified=(\S+?)\s*-->")
@@ -66,8 +72,8 @@ def _same_text(text):
 
 
 class GitHubClient:
-    def __init__(self, token, repo, opener=urllib.request.urlopen):
-        self.token, self.repo, self._open = token, repo, opener
+    def __init__(self, token, repo, opener=urllib.request.urlopen, out=print):
+        self.token, self.repo, self._open, self._out = token, repo, opener, out
 
     def _request(self, method, path, payload=None):
         data = json.dumps(payload).encode("utf-8") if payload is not None else None
@@ -80,8 +86,22 @@ class GitHubClient:
             body = resp.read().decode("utf-8")
         return json.loads(body) if body else None
 
+    def _list_all(self, path, what):
+        """GET path(이미 ?질의가 있다)를 한 쪽 PAGE_SIZE 건씩 끝까지(최대 MAX_PAGES 쪽) 읽어 항목 목록으로 돌려준다. 짧은 쪽이 나오면 거기가 끝이다.
+        가득 찬 쪽이 MAX_PAGES 까지 이어지면 더 있을 수 있어 조용히 자르지 않고 ::warning:: 한 줄을 남긴다(목록 일부만 본 채 '이상 없음'이 되지 않게). HTTP 오류는 그대로 올려 실행을 빨갛게 한다."""
+        found = []
+        for page in range(1, MAX_PAGES + 1):
+            items = self._request("GET", f"{path}&per_page={PAGE_SIZE}&page={page}")
+            items = items if isinstance(items, list) else []
+            found += items
+            if len(items) < PAGE_SIZE:
+                return found
+        limit = MAX_PAGES * PAGE_SIZE
+        self._out(f"::warning::열린 {what} 목록이 {limit}건 이상이라 처음 {limit}건만 읽었습니다 — 그 뒤에 있는 것은 이번 점검에서 보이지 않습니다.")
+        return found
+
     def list_open_issues(self):
-        items = self._request("GET", f"/repos/{self.repo}/issues?labels={LABEL}&state=open&per_page=50") or []
+        items = self._list_all(f"/repos/{self.repo}/issues?labels={LABEL}&state=open", "[Watchdog] 이슈")
         return [i for i in items if "pull_request" not in i]
 
     def create_issue(self, title, body, assignees=None):
@@ -102,7 +122,7 @@ class GitHubClient:
     def list_open_draft_pulls(self):
         """승인 흐름(publish_flow: pr)에서 열려 있는 초안 PR(이 저장소의 ai/draft/… 브랜치에서 연 것): [{'number', 'created_at'}, ...].
         포크의 PR 은 뺀다. 읽기 전용(권한 pull-requests: read)."""
-        items = self._request("GET", f"/repos/{self.repo}/pulls?state=open&per_page=100") or []
+        items = self._list_all(f"/repos/{self.repo}/pulls?state=open", "PR")
         found = []
         for pr in items:
             head = pr.get("head") if isinstance(pr, dict) and isinstance(pr.get("head"), dict) else {}
@@ -287,6 +307,47 @@ def chance_weekly_cap(reg):
     return weekly_posts_limit(reg)
 
 
+SOURCE_REGISTRY_PATH = Path("pipeline") / "source_registry.json"
+TERMS_SHOWN = 5              # 알림 문구에 이름을 싣는 제공처의 수(나머지는 '외 N개')
+TERMS_ACTION = "약관을 다시 읽어 pipeline/source_registry.json 의 snapshot.expires_at 을 갱신하는 변경(운영자 승인 필요)을 AI 에게 요청하세요."
+
+
+def _terms_list(notices):
+    shown = [f"{n.provider_id}({n.expires_at}, {terms_deadline.left_text(n)})" if n.expires_at else f"{n.provider_id}(기한 없음)" for n in notices[:TERMS_SHOWN]]
+    return ", ".join(shown) + (f" 외 {len(notices) - TERMS_SHOWN}개" if len(notices) > TERMS_SHOWN else "")
+
+
+def terms_findings(root, now):
+    """켜진 허용 목록 제공처의 약관 점검 기한 알림(L7, D-360): 14일 안으로 다가왔으면 SOURCE_TERMS_EXPIRING(경고), 이미 지났거나 기한이 없으면 SOURCE_TERMS_EXPIRED(심각 — 그 제공처는 이미 자동 글감에서 빠져
+    생성 실행이 초록으로 끝나도 구조화 글이 만들어지지 않는다). 계산은 pipeline/terms_deadline.py(순수 — 오늘은 now 의 한국 날짜), 허용 목록 파일은 읽기만 한다. 블로그가 아니라 공통이라 블로그 자리에 '공통'을 쓴다.
+    파일이 없으면 아무것도 하지 않고(시험용 임시 폴더), 읽지 못하면 ::warning:: 한 줄을 남긴다 — 검사가 꺼진 채로 초록이 이어지지 않게. 정지(PIPELINE_PAUSE) 중에는 main() 이 알림 자체를 만들지 않는다."""
+    path = Path(root) / SOURCE_REGISTRY_PATH
+    try:
+        if not path.is_file():
+            return []
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError) as exc:    # 읽기 오류·JSON 오류·UTF-8 오류(ValueError 의 하위)
+        print(f"::warning::허용 목록({SOURCE_REGISTRY_PATH.as_posix()})을 읽지 못해 약관 점검 기한을 확인하지 못했습니다({type(exc).__name__}).")
+        return []
+    providers = data.get("providers") if isinstance(data, dict) else None
+    if not isinstance(providers, list):
+        print(f"::warning::허용 목록({SOURCE_REGISTRY_PATH.as_posix()})의 providers 가 배열이 아니어서 약관 점검 기한을 확인하지 못했습니다.")
+        return []
+    notices = terms_deadline.notices(providers, now.astimezone(KST).date())
+    soon = [n for n in notices if n.state == terms_deadline.EXPIRING]
+    lapsed = [n for n in notices if n.state != terms_deadline.EXPIRING]
+    found = []
+    if lapsed:
+        found.append(Finding(terms_deadline.FINDING_BLOG, terms_deadline.FINDING_CODES[1], "critical",
+                             f"켜진 허용 목록 제공처의 약관 점검 기한이 지났거나 없습니다: {_terms_list(lapsed)}. 그 제공처는 지금 자동 글감에서 빠져 구조화 글이 만들어지지 않습니다"
+                             f"(생성 실행은 FACT_NOT_READY 로 초록으로 끝납니다). {TERMS_ACTION}"))
+    if soon:
+        found.append(Finding(terms_deadline.FINDING_BLOG, terms_deadline.FINDING_CODES[0], "warning",
+                             f"켜진 허용 목록 제공처의 약관 점검 기한이 {terms_deadline.WARN_DAYS}일 안으로 다가왔습니다: {_terms_list(soon)}. 기한이 지나면 그 제공처는 자동 글감에서 빠져 "
+                             f"구조화 글이 만들어지지 않습니다. {TERMS_ACTION}"))
+    return found
+
+
 def collect(reg, root, now, client=None):
     """(문제 목록, 블로그별 현황). 현황은 실행 요약 표에 쓴다(마지막 글 시각, 최근 7일 글 수)."""
     findings, stats = [], []
@@ -347,6 +408,7 @@ def collect(reg, root, now, client=None):
         findings.extend(blog_findings)
         stats.append({"key": blog["key"], "mode": blog.get("mode"), "last_post": last_post, "posts_7d": posts_7d,
                       "codes": [f.code for f in blog_findings]})
+    findings.extend(terms_findings(root, now))         # 켜진 허용 목록 제공처의 약관 점검 기한(L7, D-360) — 허용 목록 파일이 없는 폴더(시험)에서는 아무것도 더하지 않는다
     return findings, stats
 
 
