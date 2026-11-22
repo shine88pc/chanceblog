@@ -5,7 +5,7 @@
 
 ## 작업 폴더·기반
 - `git -C W\cd_repo fetch origin` 뒤 **절대 경로**로 `git -C W\cd_repo worktree add -b ai/claude/p1-topic-core-1 W\cd_wt_p1 origin/main`(기준 main 이 움직였으면 새 main). **다른 `W\cd_wt_*`·`W\cd_repo` 의 작업 트리·브랜치는 건드리지 않는다**(`worktree add` 만; `W\cd_repo` 자체는 옛 브랜치가 체크아웃돼 있어 읽기에도 쓰지 말고 `W\cd_wt_p1` 에서 일한다).
-- 끝에 **로컬 WIP 커밋 하나**(`[WIP] P1 …`, 작성자 `강병수 <shine88pc@gmail.com>` — `python -X utf8 W\commit_as_author.py <작업 폴더 절대 경로> <UTF-8 메시지 파일 절대 경로>`: 이 도구는 `git -C` 로 돌아 **상대 경로 메시지 파일이 안 먹는다**)까지만. **push·병합 가지·PR 만들지 않는다**(내가 한다).
+- 끝에 **로컬 WIP 커밋 하나**(`[WIP] P1 …`, 작성자는 운영자 계정(도구가 고정) — `python -X utf8 W\commit_as_author.py <작업 폴더 절대 경로> <UTF-8 메시지 파일 절대 경로>`: 이 도구는 `git -C` 로 돌아 **상대 경로 메시지 파일이 안 먹는다**)까지만. **push·병합 가지·PR 만들지 않는다**(내가 한다).
 
 ## 먼저 읽을 것
 `AGENTS.md`, `docs/ARCHITECTURE.md` §5·§9, `docs/DECISIONS.md` D-29(점수 '모름≠0' 규칙)·끝 번호, `src/chanceblog_desktop/content/status.py`(`PLATFORMS` 5키·`PLATFORM_FAMILY`), `content/candidates.py`(후보 모양·검증 헬퍼 — `forbidden_claim`·`keyword_key`·한 줄 규칙·`LABELS`)·`content/suggest_score.py`(`combine`·`clamp`·`level_of` — **재사용하거나 같은 규칙을 따라라**), `tests/test_service_safety.py`(서비스 계층 금지 규칙 — `topics/` 는 같은 정신으로 시험으로 못박는다), `tests/test_repo_layout.py`(문서 규칙), 조사 보고서 A §2.6~2.8(후보 모양·구간·상대지수)·§7(재사용 지도), B §1.5(채널 이름 대응)·§5.4.

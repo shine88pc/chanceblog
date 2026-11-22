@@ -11,7 +11,7 @@
 
 ## 작업 폴더·기반
 - `git -C W\cd_repo fetch origin` 뒤 **절대 경로**로 `git -C W\cd_repo worktree add -b ai/claude/naver-hub-safety-1 W\cd_wt_nv origin/main`(기준 main 은 R-120 병합 `4250c7e` 이후일 것 — 움직였으면 새 main). **다른 `W\cd_wt_*`·`W\cd_repo` 의 작업 트리·브랜치는 건드리지 않는다**(`worktree add` 만).
-- 끝에 **로컬 WIP 커밋 하나**(`[WIP] N1 …`, 작성자 `강병수 <shine88pc@gmail.com>` — `python -X utf8 W\commit_as_author.py <작업 폴더 절대 경로> <UTF-8 메시지 파일 절대 경로>`: 이 도구는 `git -C` 로 돌아 **상대 경로 메시지 파일이 안 먹는다**)까지만. **push·병합 가지·PR 만들지 않는다**(내가 한다).
+- 끝에 **로컬 WIP 커밋 하나**(`[WIP] N1 …`, 작성자는 운영자 계정(도구가 고정) — `python -X utf8 W\commit_as_author.py <작업 폴더 절대 경로> <UTF-8 메시지 파일 절대 경로>`: 이 도구는 `git -C` 로 돌아 **상대 경로 메시지 파일이 안 먹는다**)까지만. **push·병합 가지·PR 만들지 않는다**(내가 한다).
 
 ## 먼저 읽을 것
 `AGENTS.md`(규칙·변경 등급), `docs/SECURITY.md` §7(연결 설정·키 보관), `docs/DECISIONS.md` D-30·D-31(한도 안전장치 설계)·끝 번호 확인(새 결정은 그 다음 번호), `docs/ARCHITECTURE.md`(연결 설정 표·알려 둔 한계), `src/chanceblog_desktop/service/connections.py`(용도 레지스트리 `PURPOSES`·`Field`·`Window`·`Provider`·`Purpose`·`MAX_ENTRIES_PER_PURPOSE`·상태 문구), `service/quota.py`(**전부** — `QuotaGuard`·창 계산 `_used_of`·`_record`·`_next_reset`·`_assume_half`·`acquire`·`report`·`usage`·`purpose_status`), `security/keystore.py`·`security/shape.py`·`security/mask.py`, `service/cli.py` 의 `keys` 부분과 `service/format.py` 의 사용량 표, 관련 시험(`tests/` 에서 `connections`·`quota`·`keys`·`keystore`·`shape` 이름이 든 모듈 전부), `service/doctor.py`(점검이 용도를 어떻게 읽나).
