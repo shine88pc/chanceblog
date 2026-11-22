@@ -5,7 +5,7 @@
 
 ## 작업 폴더·기반
 - `git -C W\cd_repo fetch origin` 뒤 **절대 경로**로 `git -C W\cd_repo worktree add -b ai/claude/p0-topic-protect-1 W\cd_wt_p0 origin/main`(기준 main 은 `3b1294b`(R-128 병합) 이후일 것 — 움직였으면 새 main). **다른 `W\cd_wt_*`·`W\cd_repo` 의 작업 트리·브랜치는 건드리지 않는다**(`W\cd_wt_nv` 는 'NAVER API HUB 안전 틀' 구현자가 쓰는 중, `W\cd_wt_ts` 는 읽기 전용 조사용). `W\cd_repo` 자체는 옛 브랜치가 체크아웃돼 있으니 읽는 용도로도 쓰지 말고 `W\cd_wt_p0` 에서 일한다.
-- 끝에 **로컬 WIP 커밋 하나**(`[WIP] P0 …`, 작성자 `강병수 <shine88pc@gmail.com>` — `python -X utf8 W\commit_as_author.py <작업 폴더 절대 경로> <UTF-8 메시지 파일 절대 경로>`: 이 도구는 `git -C` 로 돌아 **상대 경로 메시지 파일이 안 먹는다**)까지만. **push·병합 가지·PR 만들지 않는다**(내가 한다).
+- 끝에 **로컬 WIP 커밋 하나**(`[WIP] P0 …`, 작성자는 운영자 계정(도구가 고정) — `python -X utf8 W\commit_as_author.py <작업 폴더 절대 경로> <UTF-8 메시지 파일 절대 경로>`: 이 도구는 `git -C` 로 돌아 **상대 경로 메시지 파일이 안 먹는다**)까지만. **push·병합 가지·PR 만들지 않는다**(내가 한다).
 
 ## 먼저 읽을 것
 - 조사 보고서 셋(이미 있음, 사실·`파일:줄`·추정 구분이 되어 있다): `W\an_a_candidates.md`(후보·제안·보관함·프로필 — §2.6~2.8·§3.4~3.5 실측·§4·§5.3~5.4·§6.4), `W\an_b_channels.md`(채널 모델·초안·서비스·연결·이관 — §1.3~1.4·§3.4·§5), `W\an_c_ui_tests_docs.md`(UI·시험·CI·문서 — §1.3·§2.1·**§3.4 보호가 얇은 곳 10가지**·§5.3).

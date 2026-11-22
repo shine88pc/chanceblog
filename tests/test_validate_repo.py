@@ -925,7 +925,7 @@ class AdSurfaceTest(TmpCase):
             self.assertTrue(vr._is_agent_commit((name, email, "", "", "")), (name, email))
         # 낱말 경계: 뒤에 글자가 붙은 것(Copilotson·copilots)과 앞에 글자가 붙은 것(NotCopilot·mycopilot)은 사람이다
         for name, email in (("Copilotson", "a@example.com"), ("copilots", "b@example.com"), ("NotCopilot", "n@example.com"), ("mycopilot", "m@example.com"),
-                            ("강병수", "shine88pc@gmail.com"), ("t", "t@example.com")):
+                            ("Human Author", "human@example.com"), ("t", "t@example.com")):
             self.assertFalse(vr._is_agent_commit((name, email, "", "", "")), (name, email))
 
     def test_a_marker_without_the_colon_is_not_an_approval(self):

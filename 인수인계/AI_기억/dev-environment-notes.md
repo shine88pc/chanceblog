@@ -9,7 +9,7 @@ metadata:
 ---
 
 - 시스템 `core.autocrlf=true`다. **끄지 않는다**(끄면 모든 파일이 수정됨으로 보인다). 작업 사본이 CRLF인 건 정상.
-- 커밋 작성자는 저장소 로컬 설정으로만 둔다(강병수 / shine88pc@gmail.com). 전역 설정은 건드리지 않는다.
+- 커밋 작성자는 저장소 로컬 설정으로만, 사람이 만든 커밋의 작성자와 같게 둔다. 전역 설정은 건드리지 않는다.
 - 한글 커밋 메시지는 UTF-8 파일로 쓰고 `git commit -F`로 넘긴다(셸 인자로 넘기면 인코딩이 깨질 수 있다).
 - push는 GCM(Git Credential Manager)의 브라우저 로그인 자격 증명을 쓴다. 비대화형 push가 인증 오류로 막히면 사용자의 터미널 탭에서 한 번 로그인해야 한다. 이 환경에서는 `GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=false`로 대기를 막는다.
 - Python 검증: `python scripts/validate_repo.py`, `python -m unittest discover -s tests`(개별 모듈 지정은 `_bootstrap` 임포트 오류가 난다). actionlint·vermin·pyflakes는 scratchpad의 venv에 설치해 쓴다.
