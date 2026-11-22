@@ -242,6 +242,12 @@ class WorkflowGlobalsTest(unittest.TestCase):
         self.assertEqual([name for name, job in wf["jobs"].items() if "if" in job], ["deploy"])             # 빌드·반영 확인 잡에는 조건이 없다
         self.assertEqual(wf["jobs"]["deploy"]["permissions"], {"pages": "write", "id-token": "write"})
         self.assertEqual((wf["jobs"]["deploy"]["needs"], wf["jobs"]["verify"]["needs"]), ("build", "deploy"))
+        # 강화 2(검증 SP-2): push 트리거는 가지 하나뿐(paths·tags 같은 다른 키가 없다), 게시 잡은 실패를 가리지 않고(continue-on-error 없음) github-pages 환경에 묶여 있으며
+        # 세 잡의 이름은 안내 문서(절차서·결함 표의 관측 줄)가 부르는 이름과 같다. 이 키들은 이번 변경 이전부터 고정돼 있지 않았다.
+        self.assertEqual(wf["on"]["push"], {"branches": ["main"]})
+        self.assertNotIn("continue-on-error", wf["jobs"]["deploy"])
+        self.assertEqual(wf["jobs"]["deploy"]["environment"], {"name": "github-pages", "url": "${{ steps.deployment.outputs.page_url }}"})
+        self.assertEqual([job["name"] for job in wf["jobs"].values()], ["사이트 빌드", "사이트 게시", "사이트 반영 확인"])
 
     def test_the_steps_that_call_the_registry_never_use_untrusted_expressions(self):
         for step in steps_of():
