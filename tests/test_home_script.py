@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from collections import Counter
 from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
@@ -270,6 +271,93 @@ class HomeRefreshStaticTest(unittest.TestCase):
         text = home()
         self.assertIn("indexUrl.searchParams.set('_monitor', String(Date.now()));", text)
         self.assertIn("await fetch(indexUrl, { cache: 'no-store' });", text)
+
+
+# ---------------------------------------------------------------- 정적 보강(독립 검증 Q QP-3·QP-4·QP-9, S SP-4·SP-5·SP-6 반영)
+# 위의 정적 시험은 renderPosts() 구간의 '꺾쇠가 든 백틱 템플릿' 풀이만 읽는다. 템플릿이 아닌 직접 대입(title.innerHTML = post.title)·꺾쇠 없는 템플릿·구간 밖의 새 함수·
+# Node 가 없는 환경에서만 새는 곳(g 깃발·이중 감쌈)은 그 밖이므로, 스크립트 전체의 HTML 대입 지점과 도우미 사용을 못박는다. 새 대입이 생기면 이유를 적고 이 목록에 더한다(그것이 검토다).
+SINK_RE = re.compile(r"\.(?:innerHTML|outerHTML)\s*\+?=(?!=)\s*(?P<right>[^;\n]*)")
+EXPECTED_SINK_FORMS = Counter({"''": 4, "`": 2, "visiblePosts.map(": 1, "post.tags.map(": 1, "post.content": 1, "marked.parse(": 1})        # 지금 HTML 대입 열 곳
+OTHER_SINKS = re.compile(r"insertAdjacentHTML|document\.write|\beval\(|new Function|createContextualFragment|\.srcdoc|DOMParser|\bsetHTML")
+
+
+def sink_forms(script):
+    """innerHTML·outerHTML 대입(+= 포함)의 오른쪽 첫 모양을 센다: '' · 백틱 템플릿 · 이름.메서드( · 이름.속성."""
+    forms = Counter()
+    for match in SINK_RE.finditer(script):
+        right = match.group("right").strip()
+        token = re.match(r"''|\"\"|`|[A-Za-z_$][\w$.]*\(?", right)
+        forms[token.group(0) if token else right[:20]] += 1
+    return forms
+
+
+class WholeScriptSinkTest(unittest.TestCase):
+    def test_every_html_looking_template_in_the_whole_script_is_escaped_or_allowed(self):
+        """위의 같은 이름의 시험은 renderPosts() 부터 closePostModal() 앞까지만 읽는다 — 구간 밖에 새 템플릿 함수가 생겨도 못 본다. 스크립트 전체를 읽는다."""
+        expressions = html_expressions(app_script())
+        self.assertGreaterEqual(len(expressions), 26)
+        for expression in expressions:
+            with self.subTest(expression=expression):
+                allowed = any(pattern.fullmatch(expression) for pattern, _ in ALLOWED_RAW)
+                self.assertTrue(is_escape_call(expression) or allowed, f"이스케이프 없이 HTML 에 들어가는 풀이: {expression}")
+
+    def test_the_html_assignments_are_the_known_ten_forms(self):
+        """모달 제목을 innerText 에서 innerHTML 로 바꾸는 흔한 실수(title.innerHTML = post.title)나 꺾쇠 없는 템플릿은 템플릿 스캐너가 HTML 로 안 본다 — 대입 지점을 못박는다."""
+        script = app_script()
+        forms = sink_forms(script)
+        self.assertEqual(forms, EXPECTED_SINK_FORMS)
+        self.assertEqual(len(re.findall(r"\.(?:innerHTML|outerHTML)\b", script)), sum(forms.values()), "대입이 아닌 innerHTML 사용이 있다 — 읽는 정규식을 맞춘다")
+
+    def test_there_is_no_other_way_to_put_html_into_the_page(self):
+        self.assertEqual(OTHER_SINKS.findall(app_script()), [])
+
+    def test_the_sink_reader_reads_direct_assignments_templates_and_plus_equals(self):
+        """도우미 자체 점검 — 직접 대입·이어 붙이기·템플릿·메서드 결과를 읽고 비교(==)는 세지 않는다."""
+        sample = "a.innerHTML = '';\nb.innerHTML = `x`;\nc.innerHTML += d.map(x => 1);\ne.innerHTML = f + g;\nh.innerHTML = post.title;\nif (i.innerHTML == j) {}"
+        self.assertEqual(sink_forms(sample), Counter({"''": 1, "`": 1, "d.map(": 1, "f": 1, "post.title": 1}))
+        self.assertEqual(OTHER_SINKS.findall("x.insertAdjacentHTML(a, b); document.write(c); eval(d)"), ["insertAdjacentHTML", "document.write", "eval("])
+
+    def test_each_attribute_is_filled_from_its_own_field(self):
+        """Node 가 없으면 감싸기는 있는데 필드가 틀린 변경(href 에 title 등)을 정적 시험이 못 본다 — 속성과 필드의 짝을 읽는다."""
+        region = render_region()
+        for attribute, field in (("href", "url"), ("src", "image"), ("alt", "title")):
+            values = re.findall(attribute + r'="\$\{escapeHtml\(([^)]*)\)\}"', region)
+            self.assertGreaterEqual(len(values), 2, attribute)
+            for value in values:
+                with self.subTest(attribute=attribute, value=value):
+                    self.assertTrue(value.endswith("." + field), f"{attribute} 속성이 {value} 로 채워진다 — {field} 필드여야 한다")
+        labels = re.findall(r'aria-label="[^"]*\$\{escapeHtml\(([^)]*)\)\}[^"]*"', region)
+        self.assertEqual(len(labels), 2)
+        for value in labels:
+            self.assertTrue(value.endswith(".title"), value)
+
+
+class EscapeHelperUseTest(unittest.TestCase):
+    def test_the_helper_replaces_every_match_and_is_never_applied_twice(self):
+        """Node 가 없는 환경에서 정적 시험이 못 잡던 셋 — g 깃발 삭제(첫 글자 하나만 바뀜)·이중 감쌈(&amp;amp;)·선언 뒤 재대입(아무것도 안 바꾸는 함수로 바꿔치기)."""
+        script = app_script()
+        start = script.index("function escapeHtml(")
+        body = script[start:script.index("function ", start + 10)]
+        self.assertIn("""/[&<>"']/g""", body)
+        self.assertNotIn("escapeHtml(escapeHtml(", script)
+        self.assertEqual(re.findall(r"\bescapeHtml\s*=(?!=)", script), [])
+
+
+class RefreshWiringTest(unittest.TestCase):
+    def test_the_timer_callback_is_exactly_the_guarded_refresh(self):
+        """주기 안에 다른 요청(가드 없는 목록 받기 등)을 몰래 더하지 못하게 — 콜백은 '보이는 탭일 때만 갱신' 한 줄뿐이다."""
+        body, _ = interval_minutes()
+        self.assertEqual(" ".join(body.split()), REFRESH_ON_VISIBLE)
+
+    def test_the_refresh_function_is_wired_to_exactly_the_three_known_triggers(self):
+        """F098 은 요청을 줄이는 것이다 — 갱신 함수를 부르는 계기(단추·주기·탭 복귀)가 말없이 늘어나지 않게 낱말 개수를 못박는다(정의 1 + 연결 3)."""
+        self.assertEqual(home().count("refreshDailyPublishingStats"), 4)
+
+    def test_both_list_requests_skip_the_cache(self):
+        """첫 로드의 받기와 새로고침의 받기 둘 다 no-store 다. 위의 assertIn 은 한쪽만 남아도 통과하므로 개수로 본다."""
+        text = home()
+        self.assertEqual(text.count("await fetch(indexUrl, { cache: 'no-store' });"), 2)
+        self.assertEqual(text.count("indexUrl.searchParams.set('_monitor', String(Date.now()));"), 1)
 
 
 # ---------------------------------------------------------------- 실행 시험(Node)

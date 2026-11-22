@@ -174,6 +174,87 @@ class TableStyleTest(unittest.TestCase):
         self.assertEqual(declared(".site-title", "font-size"), "1.1rem")
 
 
+# ---------------------------------------------------------------- 표 규칙을 덮어쓰는 길 막기(독립 검증 Q QP-2·S SP-1 반영)
+# 위의 대비 시험은 '선언된 값' 을 선택자 정확 일치로 읽는다. 나중에 더해지는 더 센 규칙·다른 속성(흰 바탕·opacity)·범용 선택자가
+# 칸 글자색이나 바탕을 바꾸면 계산 밖으로 빠지므로, 표 부분에 닿는 선택자와 '칠하거나 가리는' 속성이 선언되는 자리를 못박는다.
+# 새 규칙이 정말 필요하면 이 목록과 위의 대비 계산을 같이 고친다(그것이 검토다).
+TABLE_PART_WORDS = re.compile(r"\b(?:table|thead|tbody|tfoot|caption|colgroup|col|tr|th|td)\b")
+PAINT_PROPS = ("background", "background-color", "background-image", "opacity", "visibility", "filter", "mix-blend-mode", "display")
+EXPECTED_PAINT = {(TABLE, "display"), (HEAD_CELL, "background"), (EVEN_ROW, "background")}
+STATE_PSEUDOS = re.compile(r":(?:hover|focus|focus-visible|focus-within|active|visited)")
+
+
+def all_selectors():
+    return [selector for group, _ in css_rules() for selector in group]
+
+
+def subject_of(selector):
+    """선택자의 마지막 조각(= 실제로 칠해지는 요소). 결합자(공백·>·+)로 나눈 끝 조각에서 상태 가상 클래스를 뗀다."""
+    pieces = [piece for piece in re.split(r"[\s>+]+", selector.strip()) if piece]
+    return STATE_PSEUDOS.sub("", pieces[-1]) if pieces else ""
+
+
+def paints_behind_the_table(selector):
+    """표가 놓이는 바탕(글 카드 article 과 본문 칸 div)에 닿을 수 있는 선택자인가 — 범용(*)·div·article·본문 칸·카드 클래스."""
+    subject = subject_of(selector)
+    return subject in ("*", "div", "article") or bool(re.search(r"\.(?:post-content|chance-post)(?![\w-])", subject))
+
+
+class TableOverrideTest(unittest.TestCase):
+    def test_only_the_known_selectors_touch_table_parts(self):
+        """표 부분(table·thead·tbody·tfoot·tr·th·td 등)에 닿는 선택자는 정확히 이 다섯 줄(table · th·td 한 줄의 둘 · th · 짝수 줄)뿐이다 —
+        더 센 선택자(table td 등)나 같은 선택자의 뒤 규칙이 칸 글자색을 덮어쓰는 편집을 막는다."""
+        self.assertEqual(sorted(s for s in all_selectors() if TABLE_PART_WORDS.search(s)),
+                         sorted([TABLE, CELLS[0], CELLS[1], HEAD_CELL, EVEN_ROW]))
+
+    def test_no_universal_selector_exists_in_the_layout_style(self):
+        """.chance-post .post-content * 같은 범용 선택자는 모든 칸의 글자색·바탕을 직접 덮어쓸 수 있다."""
+        self.assertEqual([s for s in all_selectors() if "*" in s], [])
+
+    def test_only_the_expected_table_rules_paint_hide_or_fade_anything(self):
+        """표 범위의 규칙이 바탕·투명도·보임·필터·display 를 선언하는 자리는 이 셋(표 display · 머리 칸 바탕 · 짝수 줄 바탕)뿐이다 —
+        옛 증상(흰 바탕 위 옅은 글자)이 다른 선언으로 되살아나도 대비 계산은 모른다."""
+        found = set()
+        for selectors, declarations in css_rules():
+            for selector in selectors:
+                if selector.startswith(SCOPE + " ") and TABLE_PART_WORDS.search(selector):
+                    found.update((selector, prop) for prop in PAINT_PROPS if prop in declarations)
+        self.assertEqual(found, EXPECTED_PAINT)
+
+    def test_nothing_but_the_card_paints_behind_the_table(self):
+        """표 뒤의 바탕(카드·본문 칸)은 카드 규칙의 단색 바탕 하나뿐이다. 본문 칸·div·article·범용 선택자가 바탕을 칠하거나 숨기거나 흐리면
+        '홀수 줄 = 카드 바탕' 이라는 대비 계산의 가정이 깨진다."""
+        for selectors, declarations in css_rules():
+            for selector in selectors:
+                if paints_behind_the_table(selector):
+                    leaked = [prop for prop in PAINT_PROPS if prop in declarations and not (selector == CARD and prop == "background")]
+                    with self.subTest(selector=selector):
+                        self.assertEqual(leaked, [], f"{selector} 가 {leaked} 를 선언한다 — 표 뒤 바탕이 바뀐다")
+        self.assertIsNotNone(declared(CARD, "background"))
+
+    def test_links_in_the_post_body_take_their_color_from_the_one_rule_the_contrast_test_reads(self):
+        """표 안 링크 대비는 .chance-post a 의 색 하나로 잰다. 본문 칸에 닿는 다른 링크 규칙(.post-content a 등)이 생기면 그 계산 밖이다."""
+        link_rules = [s for s in all_selectors() if subject_of(s) == "a"]
+        self.assertIn(LINK, link_rules)
+        self.assertEqual([s for s in link_rules if "post-content" in s], [])
+
+    def test_the_selector_helpers_read_simple_selectors(self):
+        """도우미 자체 점검 — 끝 조각·상태 가상 클래스·표 부분 낱말·'표 뒤 바탕' 판정."""
+        self.assertEqual(subject_of(".chance-post .post-content > table td:hover"), "td")
+        self.assertEqual(subject_of(".chance-post .reading-tools a:hover"), "a")
+        self.assertEqual(subject_of("body"), "body")
+        self.assertTrue(paints_behind_the_table(".chance-post"))
+        self.assertTrue(paints_behind_the_table(".chance-post .post-content"))
+        self.assertTrue(paints_behind_the_table(".chance-post div"))
+        self.assertTrue(paints_behind_the_table(".chance-post *"))
+        self.assertFalse(paints_behind_the_table(".chance-post .post-content table"))
+        self.assertFalse(paints_behind_the_table(".chance-post .related-posts"))
+        self.assertFalse(paints_behind_the_table(".chance-reading-progress"))
+        self.assertTrue(TABLE_PART_WORDS.search(".chance-post .post-content tr:nth-child(even)"))
+        self.assertFalse(TABLE_PART_WORDS.search(".chance-post .post-tags a"))
+        self.assertFalse(TABLE_PART_WORDS.search(".chance-post .reading-tools button"))
+
+
 # ---------------------------------------------------------------- Liquid 사슬 읽기
 ASSIGN_RE = re.compile(r"\{%-?\s*assign\s+post_body\s*=\s*content\s*((?:\|[^%]*?)?)\s*-?%\}")
 OUTPUT_RE = re.compile(r"\{\{-?\s*post_body\s*-?\}\}")
@@ -237,6 +318,44 @@ def body_filters():
     return parse_filters(found[0])
 
 
+# Liquid 블록 태그 읽기(독립 검증 Q QP-1·S SP-2 반영): 블록(주석·raw·조건·반복·case·capture) 안에 갇힌 assign·출력은 Jekyll 이 실행하지 않거나 찍지 않아
+# 모든 글의 본문이 빈다. 글자 위치만 비교하는 위의 시험은 이를 못 보므로, 그 자리에서 열려 있는 블록이 없는지를 순서대로 읽어 본다.
+# else·elsif·when 은 블록을 열지 않는다. 이 PC 에도 CI 에도 Liquid 실행기가 없어 실제 실행은 병합 전 임시 가지 빌드 비교가 본다.
+BLOCK_TAG_RE = re.compile(r"\{%-?\s*(end)?(comment|raw|if|unless|for|case|capture)\b[^%]*?-?%\}")
+
+
+def block_events(text):
+    return [(match.start(), match.group(2), bool(match.group(1))) for match in BLOCK_TAG_RE.finditer(text)]
+
+
+def open_blocks_at(text, position):
+    """글 위치 position 에서 열려 있는 블록 이름들(바깥부터). 맞지 않는 닫기는 건너뛴다."""
+    stack = []
+    for start, name, closing in block_events(text):
+        if start >= position:
+            break
+        if not closing:
+            stack.append(name)
+        elif stack and stack[-1] == name:
+            stack.pop()
+    return stack
+
+
+def block_problems(text):
+    """짝 없는 닫기·엉뚱한 블록을 닫는 닫기·끝까지 안 닫힌 블록을 글로 돌려준다(없으면 빈 목록)."""
+    stack, problems = [], []
+    for _, name, closing in block_events(text):
+        if not closing:
+            stack.append(name)
+        elif not stack:
+            problems.append(f"짝 없는 end{name}")
+        elif stack[-1] != name:
+            problems.append(f"end{name} 가 {stack[-1]} 의 닫기 자리에 있다")
+        else:
+            stack.pop()
+    return problems + [f"닫히지 않은 {name}" for name in stack]
+
+
 SAMPLE = "\n".join([
     "<p>소개 문단</p>",
     '<p><img src="/img/a.jpg?auto=format&amp;fit=crop" alt="A &amp; B" /></p>',
@@ -285,6 +404,13 @@ class LazyPhotoTest(unittest.TestCase):
         plain = "<p>사진이 없는 글</p>\n<table><tr><td>x</td></tr></table>"
         self.assertEqual(run_filters(body_filters(), plain), plain)
 
+    def test_tags_that_only_start_like_img_are_left_alone(self):
+        """찾는 글 '<img ' 의 끝 공백이 <image>(SVG)·<imgx>·<img-b> 같은 닮은 낱말을 지킨다(독립 검증 S SP-3). 공백을 빼면 '<img loading="lazy"age …>' 처럼 망가진다."""
+        text = '<svg><image href="a.png"/></svg><imgx a="1"><img-b></img-b><p><img src="a.png" alt="x"></p>'
+        result = run_filters(body_filters(), text)
+        self.assertEqual(result.count('loading="lazy"'), 1)
+        self.assertEqual(result.replace('loading="lazy" ', ""), text)
+
     def test_the_chain_reader_runs_replace_first_and_refuses_what_it_cannot_run(self):
         """계산기 자체 점검 — 사슬에 replace_first 가 끼면 첫 사진만 되돌려져 시험이 잡아야 하고, 모르는 필터는 조용히 넘기지 않는다."""
         self.assertEqual(run_filters(parse_filters("| replace: 'a', 'b' | replace_first: 'b', 'c'"), "aa"), "cb")
@@ -297,6 +423,37 @@ class LazyPhotoTest(unittest.TestCase):
     def test_the_layout_never_names_the_post_image_variable(self):
         """tests/test_fact_docs.py 가 레이아웃에 그 글자가 없다고 못박는다(대표 사진은 레이아웃이 쓰지 않는다) — 새 줄이 그 글자를 만들지 않게."""
         self.assertNotIn("post." + "image", layout())
+
+
+class LiquidExecutionTest(unittest.TestCase):
+    def test_the_assign_and_the_output_sit_outside_every_comment_raw_and_condition(self):
+        """assign 이 주석 안이거나 거짓 조건 안이면 post_body 가 비어 모든 글의 본문이 사라진다(출력도 같다). 글자 위치만 비교하는 위의 시험은 이를 못 본다."""
+        text = layout()
+        assign, output = ASSIGN_RE.search(text), OUTPUT_RE.search(text)
+        self.assertIsNotNone(assign, "post_body 를 정하는 줄이 없다")
+        self.assertIsNotNone(output, "post_body 를 찍는 줄이 없다")
+        self.assertEqual(open_blocks_at(text, assign.start()), [], "post_body 를 정하는 줄이 주석·조건·반복 안에 있으면 실행되지 않아 본문이 빈다")
+        self.assertEqual(open_blocks_at(text, output.start()), [], "post_body 를 찍는 줄이 주석·조건·반복 안에 있으면 본문이 나오지 않는다")
+
+    def test_every_block_in_the_layout_closes_in_order(self):
+        """열고 닫는 개수만 세는 시험(LayoutLiquidTest)이 못 보는 순서 — 엉뚱한 블록을 닫거나 짝이 없는 닫기는 빌드를 깬다."""
+        self.assertEqual(block_problems(layout()), [])
+
+    def test_the_block_reader_sees_comment_if_and_raw(self):
+        """도우미 자체 점검."""
+        sample = "{% comment %}a{% endcomment %}x{% if y %}{% assign z = 1 %}{% else %}{% endif %}{% raw %}r"
+        self.assertEqual(open_blocks_at(sample, sample.index("x")), [])
+        self.assertEqual(open_blocks_at(sample, sample.index("{% assign")), ["if"])
+        self.assertEqual(open_blocks_at(sample, sample.index("{% else")), ["if"])
+        self.assertEqual(open_blocks_at(sample, len(sample)), ["raw"])
+        self.assertEqual(open_blocks_at("{%- if a -%}{% for b in c %}t", 99), ["if", "for"])
+
+    def test_the_problem_finder_names_stray_wrong_and_unclosed_blocks(self):
+        """도우미 자체 점검 — 맞는 글은 문제 없음, 짝 없는 닫기·엉뚱한 닫기·안 닫힌 블록은 글로 나온다."""
+        self.assertEqual(block_problems("{% if a %}{% for b in c %}{% endfor %}{% elsif d %}{% endif %}"), [])
+        self.assertEqual(block_problems("{% endif %}"), ["짝 없는 endif"])
+        self.assertEqual(block_problems("{% if a %}{% endfor %}"), ["endfor 가 if 의 닫기 자리에 있다", "닫히지 않은 if"])
+        self.assertEqual(block_problems("{% comment %}x"), ["닫히지 않은 comment"])
 
 
 class LayoutLiquidTest(unittest.TestCase):
