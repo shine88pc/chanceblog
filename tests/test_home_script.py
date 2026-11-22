@@ -133,7 +133,7 @@ def is_escape_call(expression):
 ALLOWED_RAW = (
     (re.compile(r"defaultThumbnails\[0\]"), "코드 안의 고정 사진 주소(글에서 온 글자가 아니다)"),
     (re.compile(r"idx \+ \(featuredPost \? 1 : 0\)"), "카드 번호 계산(숫자)"),
-    (re.compile(r"(?:featuredPost|post)\.previewText\b.*"), "previewText 는 Jekyll 이 이미 엔티티로 바꾼 글이라 다시 바꾸면 이중 변환된다"),
+    (re.compile(r"(?:featuredPost|post)\.previewText(?: \|\| '[^']*')?"), "previewText 는 Jekyll 이 이미 엔티티로 바꾼 글이라 다시 바꾸면 이중 변환된다(기본 문구를 잇는 모양까지만 허용)"),
 )
 
 

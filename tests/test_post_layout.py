@@ -239,7 +239,7 @@ def body_filters():
 
 SAMPLE = "\n".join([
     "<p>소개 문단</p>",
-    '<p><img src="https://img.example/a.jpg?auto=format&amp;fit=crop" alt="A &amp; B" /></p>',
+    '<p><img src="/img/a.jpg?auto=format&amp;fit=crop" alt="A &amp; B" /></p>',
     "<pre><code>&lt;img src=&quot;x.png&quot;&gt; 와 &lt;img alt=&quot;y&quot;&gt; 는 글자로 보이는 코드다</code></pre>",
     '<p>속성 순서가 다른 사진 <img alt="C" src="c.png" title="t"> 도 있다</p>',
     '<table><thead><tr><th>머리</th></tr></thead><tbody><tr><td>칸</td></tr></tbody></table>',
