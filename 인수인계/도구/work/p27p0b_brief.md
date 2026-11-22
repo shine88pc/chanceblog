@@ -5,7 +5,7 @@
 
 ## 작업 폴더·기반
 - 기준은 **P0 병합 가지**: `git -C W\cd_repo fetch origin` 뒤 `origin/ai/claude/r135-p0-topic-protect-1`(P0 — N1 `r134` 위에 쌓인 한 커밋 가지)을 기준으로 **절대 경로**로 `git -C W\cd_repo worktree add -b ai/claude/p0b-season-token-1 W\cd_wt_p0b origin/ai/claude/r135-p0-topic-protect-1`. **만약 `origin/main` 에 이미 P0(`docs/TOPIC_ENGINE_PLAN.md` 와 `tests/test_topic_protect_suggest.py` 가 있음)가 병합돼 있으면 `origin/main` 을 기준으로** 한다. 다른 `W\cd_wt_*`·`W\cd_repo` 의 작업 트리·브랜치는 건드리지 않는다(`W\cd_repo` 자체는 옛 브랜치가 체크아웃돼 있어 읽기에도 쓰지 말고 `W\cd_wt_p0b` 에서 일한다).
-- 끝에 **로컬 WIP 커밋 하나**(`[WIP] P0b …`, 작성자 `강병수 <shine88pc@gmail.com>` — `python -X utf8 W\commit_as_author.py <작업 폴더 절대 경로> <UTF-8 메시지 파일 절대 경로>`: 이 도구는 `git -C` 로 돌아 **상대 경로 메시지 파일이 안 먹는다**)까지만. **push·병합 가지·PR 만들지 않는다**(내가 한다).
+- 끝에 **로컬 WIP 커밋 하나**(`[WIP] P0b …`, 작성자는 운영자 계정(도구가 고정) — `python -X utf8 W\commit_as_author.py <작업 폴더 절대 경로> <UTF-8 메시지 파일 절대 경로>`: 이 도구는 `git -C` 로 돌아 **상대 경로 메시지 파일이 안 먹는다**)까지만. **push·병합 가지·PR 만들지 않는다**(내가 한다).
 
 ## 먼저 읽을 것
 `AGENTS.md`, `docs/TOPIC_ENGINE_PLAN.md`(P0 계획 — P0b 절·열린 항목 4), `docs/DECISIONS.md` D-29(제안 점수 규칙)·끝 번호(**새 결정은 D-39 다음 번호**), `src/chanceblog_desktop/content/suggest_score.py`(`season_fit`·`related_items`·`_is_related`·`SeasonItem` 쓰임)·`suggest_data.py`(월 표 `SEASONS` — 항목의 시기 낱말·이어지는 낱말), `suggest.py`(시기 틀이 이어지는 씨앗에만 붙는 곳), `tests/test_topic_protect_suggest.py`(P0 의 특성 시험 — **`SeasonFitCardTest`·`GraphicsCardTopSuggestionTest`·`DeterminismAndSnapshotTest`**), `tests/test_suggest_score.py`·`test_suggest_data.py`(월 표 규칙·약 5만 조합 전수 시험 — 시간 주의)·`test_suggest.py`, 조사 `W\an_a_candidates.md` §3.2~3.5·§7.
