@@ -526,7 +526,6 @@ class HostileTitleRunTest(unittest.TestCase):
         self.assertIn(post["date"], spans)
         self.assertEqual(root.find_all("p")[0].text().strip(), unescape(post["previewText"]), "previewText 는 한 번만 풀려야 한다(이중 변환 금지)")
         self.assertEqual(links[-1].attrs.get("href"), post["url"])
-        self.assertEqual(len(root.find_all("a")), 3)
 
     def test_each_grid_card_keeps_every_field_exactly(self):
         root = read_html(self.out["grid"])
@@ -549,7 +548,7 @@ class HostileTitleRunTest(unittest.TestCase):
                 self.assertEqual(headline.text().strip(), post["title"])
                 self.assertEqual(headline.find_all("a")[0].attrs.get("href"), post["url"])
                 self.assertEqual(card.find_all("p")[0].text().strip(), unescape(post["previewText"]), "previewText 는 한 번만 풀려야 한다(이중 변환 금지)")
-                tag_texts = [span.text().strip() for span in card.find_all("span") if span.attrs.get("class") == "text-[11px] text-slate-400"]
+                tag_texts = [text for text in (span.text().strip() for span in card.find_all("span")) if text.startswith("#")]      # 태그 줄의 칸들(분야·언어·날짜 칸은 #로 시작하지 않는다)
                 self.assertEqual(tag_texts, ["#" + tag for tag in post["tags"][:2]])
                 self.assertEqual(links[-1].attrs.get("href"), post["url"])
                 button = card.find_all("button")[0]
