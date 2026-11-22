@@ -42,6 +42,10 @@ HIDDEN = (
     # 이름을 눈으로 못 읽는 접근(검증자 S 의 SP-2): 객체 필터 `*` 와 문자열 리터럴이 아닌 색인
     "join(github.event.*.title, ',')", "toJSON(github.event.*)", "toJSON(github.*)", "github[format('{0}', 'head_ref')]", "github.event[format('i{0}', 'ssue')].title",
     "github['event'][env.K].title", """github[join(fromJSON('["head","ref"]'), '_')]""", "github  .  event\n  .*",
+    # 공백을 끼워 숨기기(검증자 S 의 SP-13): `[` 앞과 함수 이름·`(` 사이의 공백·개행·탭. 러너가 `toJSON (…)`·`github [...]` 꼴을 받는지는 추측이라 받는다고 보고 막는다
+    "toJSON (github)", "toJSON\n(github.event)", "toJSON\t(github.event)", "fromJSON(toJSON (github.event)).issue.title", "toJSON  \n  (  github  )",
+    "format('{0}', toJSON (github))", "github [format('{0}', 'head_ref')]", "github\n[env.K]", "github.event [env.K].title", "github\t[env.K]", "github  [  env.K  ]",
+    "github ['event'] [env.K].title", "github.event\n  [format('i{0}', 'ssue')]  .  title",
 )
 SAFE = (
     "github.sha", "github.repository", "github.repository_owner", "github.run_id", "github.run_number", "github.event_name", "github.actor", "github.ref_protected",
@@ -54,6 +58,9 @@ SAFE = (
     "secrets[matrix.secret_name]", "steps[matrix.id].outputs.value", "needs[matrix.job].outputs.x",
     # 동적 색인·객체 필터 검사도 낱말 경계를 지킨다 — github 라는 이름의 단계·작업·행렬 칸을 동적으로 읽는 식은 github 컨텍스트가 아니다
     "steps.github.outputs[matrix.k]", "matrix.x-github[matrix.k]", "mygithub[matrix.k]", "needs.github.outputs.*", "toJSON(matrix.x-github)",
+    # 공백을 끼워도 안전한 식은 그대로 안전하다(SP-13): 다른 컨텍스트의 동적 색인·낱말 경계·toJSON 의 대상이 github 가 아닌 것·github 의 안전한 칸을 함수에 넘김
+    "secrets [matrix.n]", "matrix.github [x]", "steps.github.outputs [matrix.k]", "toJSON (matrix)", "toJSON (github.sha)", "toJSON\n(needs)", "toJSON (matrix.x-github)",
+    "format ('{0}', github.sha)", "contains (github.event.repository.name, 'x')",
 )
 
 
@@ -173,6 +180,15 @@ class ExpressionNamesTest(unittest.TestCase):
     def test_runs_of_any_whitespace_are_folded_before_the_dots_are_joined(self):
         self.assertEqual(vr._expression_names("github \t\n .  event\n\n.   issue"), "github.event.issue")
         self.assertEqual(vr._expression_names("a    b"), "a b")
+
+    def test_spaces_before_an_opening_paren_or_bracket_are_dropped_so_a_call_or_an_index_cannot_hide_behind_them(self):
+        """함수 이름과 `(` 사이·컨텍스트 이름과 `[` 사이의 공백은 이름 읽기에서 지운다(검증자 S 의 SP-13)."""
+        self.assertEqual(vr._expression_names("toJSON (github)"), "tojson(github)")
+        self.assertEqual(vr._expression_names("toJSON \n\t (github.event)"), "tojson(github.event)")
+        self.assertEqual(vr._expression_names("github [format('{0}', 'x')]"), "github[format('', '')]")
+        self.assertEqual(vr._expression_names("github  .event  [env.K]"), "github.event[env.k]")
+        self.assertEqual(vr._expression_names("a (b) [c]"), "a(b)[c]")
+        self.assertEqual(vr._expression_names(" a  b "), " a b ")                                  # 괄호·대괄호 앞이 아니면 공백 하나는 그대로
 
     def test_string_literals_are_emptied_including_doubled_quotes(self):
         self.assertEqual(vr._expression_names("format('a.b', 'it''s github.ref')"), "format('', '')")

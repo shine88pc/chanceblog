@@ -114,6 +114,14 @@ class ScanCopyTest(unittest.TestCase):
                 self.assertEqual(len(scan_copy(text)), len(text))
         self.assertEqual(scan_copy("한글" + chr(0x200B) + "비밀" + chr(0x0301)), "한글비밀")           # 지울 글자만 지우고 한글은 그대로
 
+    def test_hangul_that_arrives_already_decomposed_is_put_back_together_inside_a_chunk(self):
+        """풀린 채(자모로 분해되어) 들어온 한글도 한 조각 안에서는 다시 음절로 합쳐진다. 조각을 한 글자로 줄이면 합치기가 깨지는데, 음절째 들어온 한글만 보는 위 시험은 그것을 못 잡았다(검증자 S 의 SP-16)."""
+        for text in ("한글 비밀번호", "각 닭 읊 삶 값", "여기에 입력"):
+            with self.subTest(text=text):
+                decomposed = unicodedata.normalize("NFD", text)
+                self.assertGreater(len(decomposed), len(text))
+                self.assertEqual(scan_copy(decomposed), text)
+
     def test_a_key_that_straddles_a_chunk_boundary_is_still_found_and_long_hangul_is_unchanged(self):
         edge = min(secret_patterns._SCAN_CHUNK, 8192)          # 조각 크기를 무한으로 키운 변이에서도 시험이 기가바이트 글을 만들지 않게 상한을 둔다(그 변이는 아래 시간 시험이 잡는다)
         key = split_once(GITHUB_TOKEN, 0x200B)
