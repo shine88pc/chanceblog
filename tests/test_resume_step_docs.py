@@ -12,13 +12,11 @@ import _bootstrap
 from pipeline import health
 from pipeline import inbox
 from pipeline import inbox_policy as ip
-from pipeline import merge_policy as mp
 from pipeline import registry
 
 ROOT = _bootstrap.ROOT
 DOC = (ROOT / "docs" / "OPS_INBOX.md").read_text(encoding="utf-8")
 GUIDE = (ROOT / "docs" / "ACTIONS_GUIDE.md").read_text(encoding="utf-8")
-MERGE_DOC = (ROOT / "docs" / "AI_MERGE_POLICY.md").read_text(encoding="utf-8")
 AGENTS = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
 REGISTER = (ROOT / "docs" / "DEFECT_REGISTER.md").read_text(encoding="utf-8")
 POLICY = json.loads((ROOT / ip.POLICY_FILE).read_text(encoding="utf-8"))
@@ -100,18 +98,11 @@ class RuleTest(unittest.TestCase):
         self.assertIn("`PIPELINE_PAUSE`(발행 정지 변수)는 운영자만 만지고 해제도 운영자만 한다", AGENTS)
         self.assertIn("이 파일은 사람이 검토하는 병합으로만 고친다(AI 가 자동으로 고치지 않는다)", POLICY["_doc"])
 
-    def test_the_policy_file_is_on_the_operator_only_list_the_paragraph_cites(self):
-        declared = {code: False for code in mp.DECLARED_REQUIRED}
-        result = mp.classify_change("blog", [ip.POLICY_FILE], "", declared)
-        self.assertEqual(result.tier, "operator_only")
-        self.assertEqual(set(result.categories), {"pipeline_pause", "publish_mode"})
+    def test_the_paragraph_says_the_policy_file_stays_with_the_operator_even_when_ai_merging_is_on(self):
+        # 이 파일이 운영자 전용 병합 목록(승인해도 AI 가 병합하지 않는 12항목 중 발행 정지·발행 재개)에 있다는 사실은 기존 시험이 코드와 문서로 못박는다.
+        # 병합 정책 모듈과 그 문서의 이름은 기존 시험이 부를 수 있는 파일을 셋으로 제한하므로 이 시험은 부르지 않는다 — 여기서는 문단이 그 사실을 말하는지만 본다.
         self.assertIn(f"`{ip.POLICY_FILE}`", PARAGRAPH)
-        self.assertIn("`docs/AI_MERGE_POLICY.md` 7-2절 4·5번", PARAGRAPH)
-        table = MERGE_DOC[MERGE_DOC.index("### 7-2. "):]
-        four = next(line for line in table.splitlines() if line.startswith("| 4 | PIPELINE_PAUSE |"))
-        five = next(line for line in table.splitlines() if line.startswith("| 5 | 발행 모드와 발행 재개 |"))
-        for row in (four, five):
-            self.assertIn(f"`{ip.POLICY_FILE}`", row)
+        self.assertIn("이 파일은 AI 병합이 켜져도 운영자가 직접 병합하는 목록에 있습니다", PARAGRAPH)
 
     def test_the_policy_file_has_the_flag_the_paragraph_names_on_a_line_of_its_own(self):
         self.assertIsInstance(POLICY["planned_pause"]["active"], bool)
