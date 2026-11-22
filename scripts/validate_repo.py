@@ -31,7 +31,7 @@ sys.path.insert(0, str(ROOT))
 from pipeline import operator_loop as loop_mod  # noqa: E402
 from pipeline import registry as reg_mod  # noqa: E402
 from pipeline.console import one_line, safe_output  # noqa: E402
-from pipeline.secret_patterns import SECRET_PATTERNS  # noqa: E402
+from pipeline.secret_patterns import SECRET_PATTERNS, scan_copy  # noqa: E402
 
 TEXT_EXT = {".md", ".py", ".yml", ".yaml", ".json", ".html", ".htm", ".js", ".css", ".txt", ".xml",
             ".bat", ".sh", ".toml", ".cfg", ".ini", ".csv", ".svg", ".gitignore"}
@@ -127,8 +127,9 @@ def check_secret_patterns(root, files):
         for lineno, line in enumerate(text.splitlines(), 1):
             if ALLOW_MARKER in line:
                 continue
+            folded = scan_copy(line)       # 검사용 사본(D-352): 보이지 않는 글자·전각 글자·결합 글자로 쪼갠 키도 같은 라벨로 걸린다(원문은 그대로)
             for label, rx in SECRET_PATTERNS:
-                match = rx.search(line)
+                match = rx.search(line) or (rx.search(folded) if folded != line else None)
                 if match:
                     shown = match.group(0)[:4] + "***"
                     out.append(err("SEC-2", f"{label}로 보이는 값이 있습니다({shown}). 즉시 폐기·교체 대상입니다 (G-S5)",
@@ -139,9 +140,59 @@ def check_secret_patterns(root, files):
 # ----------------------------------------------------------------------------
 # 2. 워크플로 (G-A*)
 # ----------------------------------------------------------------------------
-_UNTRUSTED_EXPR = re.compile(
-    r"\$\{\{\s*(?:github\.event\.(?:issue|comment|pull_request|review|review_comment|discussion|head_commit|"
-    r"commits|pages|workflow_run)\b[^}]*|github\.head_ref)\s*\}\}")
+# 신뢰할 수 없는 입력(G-A2, D-351): `${{ … }}` 식 안 **어디에든** 아래 컨텍스트가 나오면 run 에 직접 보간한 것으로 본다. 브랜치·태그·라벨·릴리스 이름과 이슈·PR·댓글·커밋의
+# 제목·본문은 누구나 정할 수 있고 셸 메타문자(`$(…)`·`;`·`|`·백틱)를 담을 수 있다 — 반드시 env 로 넘기고 셸에서 "$이름" 으로 쓴다. 컨텍스트 이름은 대소문자를 가리지 않아 소문자로 맞춰 보고,
+# `github['event']['issue']` 같은 대괄호 표기와 점 둘레 공백도 같은 이름으로 본다. 식의 시작에 있을 때만이 아니라 `format(…)`·`||`·`!`·괄호 안에 숨어 있어도 잡는다.
+_UNTRUSTED_GITHUB = ("head_ref", "base_ref", "ref_name", "ref", "workflow_ref")
+_UNTRUSTED_EVENT = ("issue", "comment", "pull_request", "review", "review_comment", "discussion", "head_commit", "commits", "pages", "workflow_run",
+                    "release", "label", "client_payload", "check_run", "check_suite", "deployment", "deployment_status", "milestone",
+                    "project", "project_card", "project_column", "changes", "ref", "base_ref", "workflow_job", "merge_group",
+                    "description", "context", "branches", "commit", "target_url",      # 뒤 다섯은 status 이벤트의 최상위 칸(커밋 상태의 설명·맥락·브랜치·커밋 글)
+                    "forkee", "team")                                                 # fork 이벤트의 포크 설명(포크한 사람이 정함)·조직 팀 이름
+_UNTRUSTED_NAME = re.compile(
+    r"(?<![\w.\-])github\.(?:(?:" + "|".join(_UNTRUSTED_GITHUB) + r")(?!\w)|event\.(?:" + "|".join(_UNTRUSTED_EVENT) + r")(?!\w))")
+_WHOLE_CONTEXT = re.compile(r"(?<![\w.\-])github(?:\.event)?(?![\w.])")      # 컨텍스트 통째(`github`·`github.event`) — toJSON 으로 문자열이 되면 제목·본문이 모두 들어간다
+# 이름을 눈으로 못 읽는 접근: 객체 필터(`github.event.*`·`github.*` — join·toJSON 안에서 칸마다 풀린다)와 문자열 리터럴이 아닌 색인(`github[format(…)]`·`github.event[env.K]`).
+# 리터럴 색인(`github['event']`)은 위에서 점 표기로 바뀌므로 남아 있는 `[` 는 비리터럴 색인이다 — 이름을 알 수 없으니 오류로 본다(검증자 S 의 SP-2). 다른 컨텍스트의 동적 색인(`secrets[matrix.name]`)은 해당 없다.
+_DYNAMIC_GITHUB = re.compile(r"(?<![\w.\-])github(?:\.\w+)*(?:\[|\.\*)")
+_INDEX_NAME = re.compile(r"\[\s*(?:'([^']*)'|(\d+|\*))\s*\]")
+_STRING_LITERAL = re.compile(r"'(?:[^']|'')*'")
+
+
+def _expression_names(body):
+    """`${{ … }}` 식 본문을 이름만 비교하기 좋게 접는다: 소문자, 대괄호 표기 → 점 표기, 점 둘레 공백 제거, 문자열 리터럴 비움."""
+    text = _INDEX_NAME.sub(lambda m: "." + (m.group(1) if m.group(1) is not None else m.group(2)), body.lower())
+    return _STRING_LITERAL.sub("''", re.sub(r" ?\. ?", ".", re.sub(r"\s+", " ", text)))      # 공백을 먼저 하나로 접는다 — 긴 공백에서 `\s*\.\s*` 는 제곱 시간이었다(검증자 Q 의 QP-7)
+
+
+def _expression_blocks(run):
+    """run 문자열 안의 `${{ … }}` 식을 (식 전체 글, 본문)으로 차례로 낸다. 식의 끝 `}}` 는 문자열 리터럴 **밖**에서만 센다 — 리터럴 안의 `}}`(`format('}}{0}', github.head_ref)`)를
+    식의 끝으로 읽으면 그 뒤의 이름이 식 밖 글자로 보여 검사를 지나간다. 끝을 못 찾으면 글의 끝까지를 본문으로 본다(안전한 쪽)."""
+    position = 0
+    while True:
+        start = run.find("${{", position)
+        if start < 0:
+            return
+        index, quoted = start + 3, False
+        while index < len(run):
+            if run[index] == "'":                                    # 리터럴 안의 따옴표 두 개(`''`)는 붙어 있어 두 번 뒤집혀 그대로다
+                quoted = not quoted
+            elif not quoted and run.startswith("}}", index):
+                break
+            index += 1
+        yield run[start:index + 2], run[start + 3:index]
+        position = index + 2
+
+
+def _untrusted_expression(run):
+    """run 문자열 안의 `${{ … }}` 식 중 신뢰할 수 없는 입력을 담은 첫 식(한 줄로 접은 글)을 돌려준다. 없으면 None."""
+    for block, body in _expression_blocks(run):
+        names = _expression_names(body)
+        if _UNTRUSTED_NAME.search(names) or _DYNAMIC_GITHUB.search(names) or ("tojson(" in names and _WHOLE_CONTEXT.search(names)):
+            return re.sub(r"\s+", " ", block)
+    return None
+
+
 _INPUT_EXPR = re.compile(r"\$\{\{\s*(?:github\.event\.inputs\.|inputs\.)[^}]*\}\}")
 _USES_RX = re.compile(r"^([\w.\-]+)/([\w./\-]+)@(.+)$")
 _SHA_RX = re.compile(r"^[0-9a-f]{40}$")
@@ -215,9 +266,10 @@ def check_workflows(root, files):
                     continue
                 run = step.get("run")
                 if isinstance(run, str):
-                    if _UNTRUSTED_EXPR.search(run):
+                    untrusted = _untrusted_expression(run)
+                    if untrusted:
                         out.append(err("WF-4", f"run 안에서 신뢰할 수 없는 입력을 직접 보간합니다 — env 로 넘기세요 (G-A2): "
-                                               f"{_UNTRUSTED_EXPR.search(run).group(0)[:60]}", rel))
+                                               f"{untrusted[:60]}", rel))
                     if _INPUT_EXPR.search(run):
                         out.append(warn("WF-4", "run 안에서 inputs 를 직접 보간합니다 — env 로 넘기는 편이 안전합니다 (G-A2)", rel))
                     if re.search(r"\|\|\s*true\b", run):
@@ -1217,13 +1269,24 @@ def _protected_paths(reg):
     return paths
 
 
+def _changed_paths(root, base):
+    """`base..HEAD` 에서 바뀐 모든 경로(D-350). 광고 표면 검사가 '바뀐 파일' 로 읽는 목록이다.
+
+    - `--no-renames`: 이름 바꿈 감지를 끈다. 감지가 켜져 있으면 옮겨 간 파일은 새 경로 하나만 나와서, 보호 파일(예: ads.txt)을 다른 이름·폴더로 옮겨 치우는 변경이
+      보호 경로에 걸리지 않았다 — 끄면 옛 경로가 '지워짐' 으로 따로 나온다.
+    - `-z` 와 `core.quotepath=false`: 경로를 NUL 로 나누고 따옴표·8진수 이스케이프 없이 그대로 읽는다. 기본값(리눅스 CI)에서 한글 같은 비 ASCII 이름은 `"_includes/\\355…"` 꼴로
+      나와서 `_includes/` 로 시작하는지 비교가 틀렸다. 줄바꿈이 든 이름도 줄 단위로 쪼개지지 않는다."""
+    out = _git(root, "-c", "core.quotepath=false", "diff", "--no-renames", "--name-only", "-z", f"{base}..HEAD")
+    return [p for p in out.split("\0") if p]
+
+
 def check_ad_surface(root, base):
     if not base or re.fullmatch(r"0+", base):
         return []
     path = Path(root) / "pipeline" / "blogs.json"
     try:
         reg = reg_mod.load_registry(path)
-        changed = [p for p in _git(root, "diff", "--name-only", f"{base}..HEAD").splitlines() if p]
+        changed = _changed_paths(root, base)
         raw_log = _git(root, "log", "--format=%an%x00%ae%x00%cn%x00%ce%x00%B%x00", f"{base}..HEAD")
         commit_count = int(_git(root, "rev-list", "--count", f"{base}..HEAD").strip() or 0)
     except (reg_mod.RegistryError, OSError, subprocess.SubprocessError, ValueError):
@@ -1251,6 +1314,7 @@ def check_ad_surface(root, base):
     dropped = sorted(base_paths - head_paths)
     if dropped:     # 보호 목록에서 경로를 빼는 것 자체가 광고 표면의 보호를 푸는 일이다
         hits.append("pipeline/blogs.json(보호 목록에서 뺀 경로: " + ", ".join(dropped) + ")")
+    hits = [one_line(hit, 200) for hit in hits]      # 경로는 저장소 안의 글자다(-z 로 읽으면 줄바꿈·'::' 도 그대로 온다) — 오류 줄이 여러 줄이 되거나 워크플로 명령으로 읽히지 않게 한 줄로 접는다(G-L2)
     # 승인은 사람만 한다: Copilot 이 쓴 커밋 안의 승인 표시는 있어도 없는 것으로 본다(에이전트가 스스로 써 넣어 AD-1 을 통과하는 길을 닫는다)
     agent_text = "\n".join(record[4] for record in records if _is_agent_commit(record))
     human_text = "\n".join(record[4] for record in records if not _is_agent_commit(record))

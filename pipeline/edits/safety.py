@@ -8,10 +8,9 @@
 이 모듈은 pipeline/edits 의 다른 모듈에서만 가져다 쓰고, 다른 pipeline/edits 모듈을 import 하지 않는다(순환 방지).
 """
 import re
-import unicodedata
 
 from pipeline.llm import mask
-from pipeline.secret_patterns import SECRET_PATTERNS, find_secrets
+from pipeline.secret_patterns import SECRET_PATTERNS, find_secrets, scan_copy, scan_copy_spaced
 
 # ----------------------------------------------------------------------------
 # 외부 AI(Gemini)·이미지 검색(Unsplash)으로 보내기 전 점검
@@ -36,8 +35,6 @@ _DIGIT_RUN = re.compile(rf"(?<![0-9])(?<!pub-)[0-9]+(?:{_SEPARATOR}[0-9]+)*")
 _CARD_SHAPES = frozenset({(4, 4, 4, 4), (4, 4, 4, 4, 1), (4, 4, 4, 4, 2), (4, 4, 4, 4, 3), (4, 6, 5), (4, 4, 4, 3), (4, 6, 4), (4, 4, 4, 2), (4, 4, 4, 1)})
 _CARD_PREFIX = {13: re.compile(r"4"), 14: re.compile(r"3[0689]")}     # 짧은 길이는 실제 쓰이는 카드사로 좁힌다(Visa · Diners)
 _CARD_PREFIX_DEFAULT = re.compile(r"2[2-7]|[3-9]")                    # 15~19자리: 0·1·20·21·28·29 로 시작하는 값(시각값·일련번호 등)은 카드가 아니다
-# 보이지 않는 서식 문자(제로폭 공백·방향 표시·단어 결합자·소프트 하이픈·BOM). 소스에 문자를 직접 쓰지 않고 코드 값으로 만든다.
-_INVISIBLE = re.compile("[" + "".join(chr(c) for c in (*range(0x200B, 0x2010), *range(0x202A, 0x202F), *range(0x2060, 0x2065), 0x00AD, 0xFEFF)) + "]")
 # 프롬프트 구분자: `<<<REQUEST`·`REQUEST>>>` 처럼 대문자 이름에 붙은 꺾쇠 세 개(요청문이 구분자를 흉내 내 블록을 닫지 못하게 지운다).
 # 닫는 쪽의 앞 앵커 `(?<![A-Z_])`: 대문자·밑줄이 이어진 덩어리의 시작에서만 이름 후보를 시도한다. 덩어리 한가운데의 글자마다 다시 시도하면
 # 대문자만 길게 이어진 입력에서 제곱 시간이 걸린다(5000자 0.25초, 10000자 1.0초). 덩어리 앞의 밑줄(`_REQUEST>>>`)은 이름이 아니라 남기고(keep 그룹)
@@ -134,18 +131,29 @@ def _card_like(text):
 
 
 def _fold(text):
-    """전각 숫자·NBSP·U+2011 같은 호환 문자를 ASCII 꼴로 접고 보이지 않는 서식 문자를 지운다 — 웹·PDF 에서 복사한 번호가 그 꼴로 붙어도 같게 본다."""
-    return _INVISIBLE.sub("", unicodedata.normalize("NFKC", text))
+    """전각 숫자·NBSP·U+2011 같은 호환 문자를 ASCII 꼴로 접고 보이지 않는 글자(제로폭 공백·결합자·방향 표시·소프트 하이픈·BOM·결합 글자 …)를 지운다 — 웹·PDF 에서 복사한 번호가
+    그 꼴로 붙어도 같게 본다. 검사용 사본이고 원문은 바꾸지 않는다. 비밀 모양 검사도 같은 사본을 쓴다(`secret_patterns.scan_copy`, D-352)."""
+    return scan_copy(text)
+
+
+def _number_copies(text):
+    """번호(주민등록번호·카드번호) 점검이 보는 사본들: 지울 글자를 지운 사본과 그 자리를 공백으로 바꾼 사본. 숫자 묶음 바로 앞뒤에 지울 글자와 숫자가 붙은 입력은 지운 사본에서
+    숫자가 이어 붙어 번호 모양이 깨지므로(옛 접기는 그 글자를 경계로 남겨 잡았다 — 검증자 S 의 SP-6) 공백으로 바꾼 사본도 함께 본다. 둘이 같으면 하나만 돌려준다."""
+    folded, spaced = _fold(text), scan_copy_spaced(text)
+    return (folded,) if folded == spaced else (folded, spaced)
 
 
 def sensitive_kinds(text):
-    """text 안의 비밀·민감 식별자 종류(라벨)만 돌려준다 — 값은 돌려주지 않는다. 이메일·전화번호는 대상이 아니다."""
+    """text 안의 비밀·민감 식별자 종류(라벨)만 돌려준다 — 값은 돌려주지 않는다. 이메일·전화번호는 대상이 아니다.
+
+    키·토큰 모양은 원문과 검사용 사본을 둘 다 본다(`find_secrets`): 보이지 않는 글자·전각 글자·결합 글자로 쪼갠 키도 걸려 기존 거절 길(`outbound_refusal`)로 간다(D-352).
+    번호 모양은 지운 사본과 공백으로 바꾼 사본을 둘 다 본다(`_number_copies`)."""
     text = text or ""
     kinds = [label for label, _preview in find_secrets(text)]
-    folded = _fold(text)
-    if _RRN.search(folded):
+    copies = _number_copies(text)
+    if any(_RRN.search(copy) for copy in copies):
         kinds.append(KIND_RRN)
-    if _card_like(folded):
+    if any(_card_like(copy) for copy in copies):
         kinds.append(KIND_CARD)
     return kinds
 
