@@ -7,6 +7,30 @@
 
 ---
 
+## [2026-11-22] Claude – AP6b: 사이트 게시 가지 가드 — `pages.yml` 게시(deploy) 잡에 `if: github.ref_name == github.event.repository.default_branch` 한 줄 (T3 — `.github` 워크플로 한 줄, 확인 015 의 AP6 F113 한 항목)
+
+**작업자**: Claude (구현 에이전트 — 총괄 지시서에 따라 이 PC 의 작업 폴더·가지 `ai/claude/NO-MERGE-ap6b-wip` 에서 WIP 커밋만 했다. 구현자는 푸시·PR·병합 가지를 만들지 않았고 병합 가지는 총괄이 한 커밋으로 합쳤다)
+**대상**: Chance 블로그 — `.github/workflows/pages.yml`(게시 잡 `if:` 한 줄), 새 시험 `tests/test_pages_branch_guard.py`, 기존 시험 `tests/test_chance_draft_workflow.py` 한 곳(단언 더하기), 문서 3곳(`docs/AGENT_RUNBOOK.md` pages.yml 행·`docs/DEFECT_REGISTER.md` D-375·D-376)
+**등급**: T3 — 승인 근거는 운영자의 확인 015(2026-11-13, 이슈 #195)에서 추천대로 승인한 열두 가지 중 AP6 의 F113 한 항목이다. 빌드 잡·권한·트리거·동시성·시크릿·액션 고정값·다른 워크플로·저장소 설정 변경 0.
+**목적**: `pages.yml` 은 push 트리거만 `main` 으로 제한돼 있어서 수동 실행(`workflow_dispatch`)과 Chance 두 워크플로의 배포 요청(`gh workflow run pages.yml --ref`)은 어느 가지에서든 빌드하고 공개 사이트에 게시할 수 있었다 — 기본 가지가 아니면 게시하지 않게 한다.
+
+### 변경 사항
+- `pages.yml`: 게시(deploy) 잡에 `if: github.ref_name == github.event.repository.default_branch` 한 줄. 기본 가지가 아닌 가지의 수동 실행은 빌드만 돌고 게시·반영 확인은 건너뛴다. main push 의 정상 배포는 그대로.
+- 시험: 새 `test_pages_branch_guard.py` 16개(워크플로를 읽어 가드 존재·식이 기본 가지 비교·평가기로 여러 입력 확인·문서 문장 고정), 기존 `test_pages_deploy_is_untouched` 에 단언 10개를 더함(약화 0).
+- 문서: 절차서 pages.yml 행에 '기본 가지가 아닌 가지의 수동 실행은 빌드만(D-375)'과 병합 뒤 점검 방법, `docs/DEFECT_REGISTER.md` D-375(해결)·D-376(열림 — 다른 가지의 수동 실행이 진행 중인 main 게시를 `concurrency` 로 취소할 수 있음).
+
+### 검증 증거
+- 구현자: 새 시험 고치기 전 코드에서 빨강(첫 판 23개 중 17개)·변이 32개 중 31개 빨강(생존 1은 같은 뜻의 변형)·3.10 7개 모듈 362개·3.12 8개 모듈 681개 통과·`validate_repo.py` 오류 0.
+- 독립 검증(구현자와 다른 AI 한 명이 안전·시험 두 관점): **pass(필수 0·권고 4·참고 10)** — 변경이 `if:` 한 줄과 새 시험·문서뿐임을 직접 확인, 거짓 건너뜀(false skip) 위험은 낮음(push 경로는 `auto-pr.yml` 이 같은 `default_branch` 속성으로 PR #148 을 실제로 만든 기록이 근거, `workflow_dispatch` 경로만 저장소 안 관측 증거가 없음), 구현자 변이 29개와 강화 시험 단독 변이 12개 전부 죽음. 권고 네 가지(병합 뒤 dispatch 경로 관측·건너뜀 때 되돌리는 방법·문서 시험의 뜻 뒤집기 틈·강화 시험 틈)를 모두 반영한 뒤 변경분을 다시 확인(문서 시험 16개·`test_agent_docs` 33개 통과).
+- 직접 확인: `.github/` 변경은 `pages.yml` 한 줄뿐, 다른 워크플로·권한·시크릿·액션 고정값 변경 0, 새 외부 접속 코드 0.
+
+### 남은 이슈 / 다음 AI 주의
+- **병합 뒤 반드시 확인**: 첫 main push 의 세 잡(빌드·게시·반영 확인)이 모두 초록이고 건너뜀이 아닌지, 그리고 main 에서 수동 실행(`Run workflow`)을 한 번 눌러 `사이트 게시` 가 건너뜀이 아닌지(`python scripts/github_status.py jobs <실행 번호>` — `main` 모드는 실행 결론만 세서 건너뜀을 못 알아챈다). 가드가 main 에서 거짓이면 게시가 조용히 멈추고 워치독도 못 본다 — 그때의 복구 길은 이 병합을 되돌리는 PR 하나뿐이다.
+- D-376(열림): `pages.yml` 의 `concurrency`(그룹 `github-pages`, `cancel-in-progress: true`)는 가지를 가리지 않아 다른 가지의 수동 실행이 진행 중인 main 게시를 취소할 수 있다 — 승인 밖이라 이번에 안 고쳤다.
+- `main` 글자가 흩어져 있는 다른 곳(`scripts/watchdog.py:45`·`guardrails.yml`·`sync-issue-form.yml`)은 바꾸지 않았다.
+
+---
+
 ## [2026-11-22] Claude – AP6a: Unsplash 키 읽기 정리 — `generator.py` 의 `UNSPLASH_ACCESS_KEY` 를 `clean_secret` 으로 읽어 줄바꿈·보이지 않는 글자가 낀 키가 오류 로그에 실리는 길 막기 (T3 — 시크릿 처리, 확인 015 의 AP6 F072 한 항목)
 
 **작업자**: Claude (구현 에이전트 — 총괄 지시서에 따라 이 PC 의 작업 폴더·가지 `ai/claude/NO-MERGE-ap6a-wip` 에서 WIP 커밋만 했다. 구현자는 푸시·PR·병합 가지를 만들지 않았고 병합 가지는 총괄이 한 커밋으로 합쳤다)
