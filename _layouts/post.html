@@ -23,6 +23,10 @@ layout: default
   .chance-post .reading-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; margin: 1.25rem 0 2rem; padding-bottom: 1rem; border-bottom: 1px solid #1e293b; }
   .chance-post .reading-tools a, .chance-post .reading-tools button { border: 1px solid #334155; border-radius: .6rem; padding: .5rem .75rem; background: #0f172a; color: #cbd5e1; text-decoration: none; font: inherit; cursor: pointer; }
   .chance-post .reading-tools a:hover, .chance-post .reading-tools button:hover { border-color: #3b82f6; color: #fff; }
+  .chance-post .post-content table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; border: 0; margin: 1.25rem 0; color: #e2e8f0; }
+  .chance-post .post-content th, .chance-post .post-content td { padding: .6rem .8rem; border: 1px solid #334155; text-align: left; vertical-align: top; line-height: 1.6; }
+  .chance-post .post-content th { background: #1e293b; color: #f8fafc; }
+  .chance-post .post-content tr:nth-child(even) { background: #162033; }
   @media (max-width: 600px) { .site-title { font-size: 1.1rem; } }
 </style>
 
@@ -68,7 +72,7 @@ layout: default
   </nav>
 
   <div class="post-content">
-    {{ content }}
+    {% comment %}본문 사진은 화면 가까이 올 때 받는다(F099, 시험 tests/test_post_layout.py). 코드 글자 속의 이스케이프된 img 는 걸리지 않는다.{% endcomment %}{% assign post_body = content | replace: '<img ', '<img loading="lazy" ' %}{{ post_body }}
   </div>
 
   {% if page.source_url %}
