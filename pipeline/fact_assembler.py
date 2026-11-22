@@ -550,6 +550,8 @@ def _assemble(recipe, facts, today, *, records, source, params=None):
     link = f"[공식 자료]({source.url})"
     rendered = rendered.replace(R.SOURCE_LINK_TOKEN, link)
     source_lines = [f"- [{source.name}]({source.url}) — 열람 {F.format_period_ko(latest_record.retrieved_at[:10])}"]
+    if R.is_data_file_url(source.url):                       # 링크가 읽을 화면이 아니라 원자료 파일이면 그 사실을 링크 바로 아래 한 줄로 알린다(F106) — 시험용 주소 같은 확장자 없는 주소는 한 글자도 달라지지 않는다
+        source_lines.append(R.SOURCE_FILE_NOTE)
     if attribution:
         source_lines.append(ATTRIBUTION_PREFIX + attribution)
     notice = F.render(R.NOTICE_TEMPLATE, pool, context=context)

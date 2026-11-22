@@ -141,6 +141,16 @@ def caution_common(words=None):
 NOTICE_TEMPLATE = ("*이 글은 사람이 쓴 글이 아니라, 공개된 구조화 통계를 정해진 규칙으로 자동 정리해 만든 글입니다. "
                    "일반 정보이며 어떤 결정의 근거로 쓰도록 만든 글이 아닙니다. 최신 값은 위 출처에서 직접 확인해 주세요.*")
 READER_NOTE_PREFIX = "- 제공처 안내: "      # Provider 의 `reader_notes`(독자용으로 승인된 문장)만 이 줄이 된다 — SRC 의 `exceptions`(감사 메모)는 읽지 않는다
+# 출처 링크가 읽을 화면이 아니라 제공처의 원자료 파일(`.json`)을 가리킬 때만 출처 목록에 한 줄을 더한다(F106, 확인 015 항목 2). 숫자·영문·금지어 없는 쉬운 말 — 조립기의 글 모양 점검이 이 줄도 검사한다
+SOURCE_FILE_NOTE = "- 위 링크는 읽을 수 있는 화면이 아니라 제공처가 내려 주는 원자료 파일입니다."
+SOURCE_FILE_SUFFIXES = (".json",)
+
+
+def is_data_file_url(url):
+    """출처 주소가 원자료 파일인가: 물음표·꼬리표(`#`) 앞의 경로가 접미사로 끝나는지(대소문자 무시). 글이 아니거나 비면 거짓."""
+    path = url.split("?", 1)[0].split("#", 1)[0].lower() if isinstance(url, str) else ""
+    return path.endswith(SOURCE_FILE_SUFFIXES)
+
 MISSING_CELL = "자료 없음"      # 값이 없는(모름) 칸 — 0 으로 채우지 않는다
 NA_CELL = "해당 없음"           # 비교할 값이 없어 계산하지 않은 칸
 
