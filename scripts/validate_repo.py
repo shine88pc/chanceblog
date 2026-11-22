@@ -160,9 +160,12 @@ _STRING_LITERAL = re.compile(r"'(?:[^']|'')*'")
 
 
 def _expression_names(body):
-    """`${{ … }}` 식 본문을 이름만 비교하기 좋게 접는다: 소문자, 대괄호 표기 → 점 표기, 점 둘레 공백 제거, 문자열 리터럴 비움."""
+    """`${{ … }}` 식 본문을 이름만 비교하기 좋게 접는다: 소문자, 대괄호 표기 → 점 표기, 점 둘레 공백 제거, `(`·`[` 앞 공백 제거, 문자열 리터럴 비움."""
     text = _INDEX_NAME.sub(lambda m: "." + (m.group(1) if m.group(1) is not None else m.group(2)), body.lower())
-    return _STRING_LITERAL.sub("''", re.sub(r" ?\. ?", ".", re.sub(r"\s+", " ", text)))      # 공백을 먼저 하나로 접는다 — 긴 공백에서 `\s*\.\s*` 는 제곱 시간이었다(검증자 Q 의 QP-7)
+    text = re.sub(r" ?\. ?", ".", re.sub(r"\s+", " ", text))      # 공백을 먼저 하나로 접는다 — 긴 공백에서 `\s*\.\s*` 는 제곱 시간이었다(검증자 Q 의 QP-7)
+    # `[`·`(` 앞의 공백도 지운다: `github [format(…)]`·`toJSON (github)` 처럼 공백을 끼워 이름을 숨기는 길을 막는다(검증자 S 의 SP-13).
+    # 식 안의 토큰 사이 공백을 러너가 받는지는 확인하지 못했다(추측) — 받는다고 보고 막는다. 공백 하나를 지우는 선형 치환이다.
+    return _STRING_LITERAL.sub("''", re.sub(r" ([(\[])", r"\1", text))
 
 
 def _expression_blocks(run):

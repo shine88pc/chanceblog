@@ -84,30 +84,134 @@ _NOT_EXTERNAL_SCHEMES = frozenset({"mailto", "tel", "javascript", "vbscript", "d
 # 슬래시 없이 `스킴:낱말` 만으로도 밖으로 나가는 스킴 — 브라우저가 호스트로 읽는 것(http·https·ftp·ftps·ws·wss)과 다른 프로그램을 여는 것. 그 밖의 `낱말:`(영문 각주·정의의 `IMF:`·`Source:` 같은 글머리)은
 # 뒤에 `//` 가 따를 때만 주소로 본다 — 그러지 않으면 정상 수정이 `imf://` 같은 없는 주소로 거절된다(검증자 S 의 SP-4).
 _OPEN_SCHEMES = frozenset({"http", "https", "ftp", "ftps", "ws", "wss", "skype", "sip", "sips", "xmpp", "magnet", "sms", "facetime", "callto", "view-source"})
+# 슬래시 없이 `스킴:값` 으로 쓰는 앱·결제·처리기 스킴(검증자 S 의 SP-12·Q 의 QR2-1). 위 15개 밖의 `낱말:` 은 `//` 가 따를 때만 주소로 보므로(영문 각주 오탐을 피하려고 좁혔다) 지갑 결제
+# (`bitcoin:`)·메신저 딥링크(`tg:`)·윈도 프로토콜 처리기(`ms-msdt:`)처럼 `//` 없이 쓰는 링크가 같이 풀렸다. 아래 스킴은 **눌리는 링크 자리**(링크 대상·꺾쇠 대상·HTML 속성·참조식 정의·자동 링크·url()·srcset·image-set)에서
+# 값이 있으면(`tg:resolve?x=1`) 주소로 읽는다 — 콜론 뒤 공백·줄바꿈 뒤의 값도(`[x](tg: resolve)`·`[r]: <tg: …>`, 아래 `_SPACED_TARGET_PATTERNS`), `News:` 처럼 값이 없는 글머리는 아니다. 글에 가까운 두 자리는 읽지 않는다:
+# 각주 정의의 본문(`[^1]: Market:KOSPI` — 라벨이 kramdown 각주 ID 꼴 `[^낱말]` 일 때만; `[^]`·`[^.]`·`[^a b]`·`[^각주]` 는 각주가 아니라 참조식 정의라 읽는다)과 `cite` 속성(인용 출처 메모라 눌리지 않는다).
+# 그 자리에는 영문 글머리(`News: …`·`Market:KOSPI`·`About:me`)가 흔하다. 접두사 `ms-`(윈도 처리기)와 `web+`(웹 사용자 정의 처리기)는 이름을 다 셀 수 없어 접두사로 본다.
+# 한계: 목록 밖의 처리기는 여전히 `//` 가 따를 때만 주소로 본다(전부 막으려면 영문 정의의 오탐을 감수해야 한다).
+_APP_SCHEMES = frozenset({
+    "bitcoin", "bitcoincash", "litecoin", "ethereum", "monero", "dogecoin", "dash", "zcash", "lightning", "nostr", "solana", "tron", "stellar",                # 결제·지갑
+    "tg", "whatsapp", "viber", "weixin", "wechat", "line", "signal", "sgnl", "threema", "zalo", "slack", "discord", "msteams", "zoommtg", "zoomus", "webex",
+    "smsto", "mmsto", "mms", "imessage", "facetime-audio",                                                                                                 # 메신저·통화·화상회의
+    "steam", "spotify", "market", "itms", "itms-apps", "itms-services", "intent", "maps", "geo", "vscode", "vscode-insiders", "obsidian", "notion",             # 앱·상점·지도
+    "ssh", "sftp", "git", "svn", "irc", "ircs", "telnet", "rdp", "vnc", "smb", "nfs", "afp", "ldap", "ldaps", "gopher", "news", "snews", "nntp", "tftp", "rtsp", "rtmp",
+    "webcal", "webcals", "feed", "dict", "rsync",                                                                                                          # 원격 접속·옛 프로토콜·구독
+    "search", "search-ms", "about", "chrome", "chrome-extension", "edge", "blob",                                                                          # 브라우저·윈도 검색
+})
+_APP_SCHEME_PREFIXES = ("ms-", "web+")
 _SCHEME = re.compile(r"(?i)([a-z][a-z0-9+.\-]*):")
+# 끝 문장부호·강조 기호 떼기는 **글 속 맨주소에만** 쓴다. 링크 대상·HTML 속성·꺾쇠 자동 링크는 눌리는 링크라 끝 글자까지 그대로 견준다(`alice` 에 `alice_` 를 덧붙인 링크는 새 주소로 거절).
+# 글 속 맨주소의 끝 밑줄·물결표까지 떼는 것은 GFM 자동 링크 규칙과 같고, 이 사이트는 GitHub Pages 기본 설정(kramdown)이라 글 속 맨주소를 링크로 만들지 않는 것으로 보인다(이 PC 에 렌더러가 없어
+# 직접 확인하지는 못했다) — 그렇다면 눌리지 않는 글이다. 이 떼기 목록은 기존 시험(`test_trailing_punctuation_and_emphasis_are_not_part_of_a_prose_address`)이 못박은 동작이라 바꾸지 않는다 —
+# 검증자 S 의 SP-15(끝 밑줄·물결표를 떼기 목록에서 빼자는 제안)는 그래서 고치지 않기로 했다(D-368). 밑줄로 감싸는 정상 수정이 통과하는 것은 이 목록 덕이고, 밑줄을 벗기는 정상 수정이 거절되는 것은 호스트 검사 `_hosts` 쪽 사정이다(이 묶음 밖 — 2차 검증 SQ-4).
 _TRAILING_PUNCTUATION = ".,:;!?*_" + chr(0x7E)       # 글 속 주소 뒤에 붙는 문장부호·강조 기호(끝 마침표·쉼표·굵게 표시 등) — 주소가 아니다
 # 탭·줄바꿈·CR 을 뜻하는 문자 참조(브라우저가 주소 안에서 지운다). 숫자 참조는 그 숫자로 **끝날 때만** 맞춘다 — 그렇지 않으면 `&#104;`(h)·`&#100;`(d)·`&#xA9;` 의 앞부분이 잘려 나간다.
 _ENTITY_BLANK = re.compile(r"(?i)&(?:#0*(?:9|10|13)(?![0-9]);?|#x0*[9ad](?![0-9a-f]);?|(?:tab|newline);)")
+# kramdown 의 각주 ID: 영문·숫자·밑줄로 시작하고 영문·숫자·밑줄·하이픈이 이어지는 낱말(`\w[\w-]*`, ASCII). 라벨이 `^` + 이 꼴일 때만 각주 정의(글에 가까운 자리)다. 그 밖의 `[^…]`(`[^]`·`[^.]`·`[^a b]`·`[^각주]`)는 각주가 아니라
+# 참조식 정의라서 `[눌러][^.]` 가 눌리는 링크가 된다 — 그런 라벨까지 각주로 보면 시작점이 막던 `[^]: //host` 가 지나가고 앱 스킴도 지나간다(2차 검증 S 의 S-1·R-2, Q 의 SQ-1).
+_FOOTNOTE_ID = r"\^[A-Za-z0-9_][A-Za-z0-9_-]*"
 _TARGET_PATTERNS = (
     re.compile(r"\]\(\s*<?\s*([^)\s>]*)"),                                          # 마크다운 [글](주소 "제목") · ![그림](주소)
-    re.compile(r"(?m)^[ \t>*+\-0-9.)]*\[[^\]\n]+\]:\s*<?([^\s>]+)"),                 # 참조식 정의 [이름]: 주소 (인용문·목록 표시 안에서도, 주소가 다음 줄이어도)
-    re.compile(r"""(?i)(?<![\w:-])(?:href|src|action|formaction|poster|cite|background|data|ping|xlink:href|longdesc|manifest|codebase|usemap)"""
+    re.compile(r"(?m)^[ \t>*+\-0-9.)]*\[(?!" + _FOOTNOTE_ID + r"\])[^\]\n]+\]:\s*<?([^\s>]+)"),                 # 참조식 정의 [이름]: 주소 (인용문·목록 표시 안에서도, 주소가 다음 줄이어도) — 라벨이 각주 ID 꼴인 각주 정의는 아래 글에 가까운 자리
+    re.compile(r"""(?i)(?<![\w:-])(?:href|src|action|formaction|poster|background|data|ping|xlink:href|longdesc|manifest|codebase|usemap)"""
                r"""\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'<>`=]+))"""),                # HTML 속성(따옴표 없는 값 포함)
     re.compile(r"(?i)<\s*([a-z][a-z0-9+.\-]*:[^\s<>]*)\s*>"),                       # 꺾쇠 자동 링크(스킴이 붙은 주소)
     re.compile(r"""(?i)\burl\(\s*['"]?([^)'"\s]*)"""),                              # 인라인 style 의 url(…) — 그림·글꼴을 밖에서 불러온다
 )
+# 글에 가까운 자리: 슬래시 없는 앱 스킴(`News:값`)은 읽지 않고 `//`·알려진 스킴만 주소로 본다 — 각주 정의의 본문, cite 속성(위 설명)
+_TEXT_LIKE_PATTERNS = (
+    re.compile(r"(?m)^[ \t>*+\-0-9.)]*\[" + _FOOTNOTE_ID + r"\]:\s*<?([^\s>]+)"),
+    re.compile(r"""(?i)(?<![\w:-])cite\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'<>`=]+))"""),
+)
+# 눌리는 링크 자리에서 콜론 뒤에 공백·탭·줄바꿈이 오고 값이 이어지는 꼴 — `[x](tg: resolve?…)`·`[x](<tg: …>)`·`[r]: <tg: …>`·`[r]: tg: …`(2차 검증 R-1). kramdown 은 링크 대상과 정의의 주소에 공백을 받는다(소스 기억 — 막는 쪽으로).
+# 스킴과 값 첫 마디를 이어 붙여 읽는다. 공백 길이에 상한을 두지 않는다(공백 정규식이 한 곳씩만 변하는 꼴이라 선형이다). 값이 없거나 제목(따옴표)이면 아니다.
+_SPACED_TARGET_PATTERNS = (
+    re.compile(r"""\]\(\s*(?:<\s*)?([A-Za-z][A-Za-z0-9+.\-]*:)\s+([^)\s>"']+)"""),
+    re.compile(r"""(?m)^[ \t>*+\-0-9.)]*\[(?!""" + _FOOTNOTE_ID + r"""\])[^\]\n]+\]:\s*(?:<\s*)?([A-Za-z][A-Za-z0-9+.\-]*:)\s+([^\s>"']+)"""),
+)
 _SRCSET = re.compile(r"""(?i)(?<![\w:-])srcset\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'<>`=]+))""")                  # 따옴표 없는 값도(`<img srcset=//host/a.png>`)
-_IMAGE_SET = re.compile(r"(?i)\bimage-set\(([^)]*)\)")                                                          # CSS image-set('//host/a.png' 1x, …) 의 문자열 주소들
+# CSS image-set('//host/a.png' 1x, '//host/b.png' 2x) 의 문자열 주소들. 따옴표 안의 `)` 는 함수의 끝이 아니다(검증자 S 의 SP-14: 정규식 `[^)]*` 가 거기서 끊겨 못 읽었다). 또 닫는 괄호 없는
+# `image-set(` 이 되풀이되면 시작마다 글 끝까지 훑어 제곱 시간이었다(8만 자에 3.5초) — 정규식 대신 글을 한 번만 훑는 상태기계로 읽는다(`_image_set_strings`).
+_IMAGE_SET_START = re.compile(r"(?i)(?<!\w)image-set\(")
+_IMAGE_SET_TOKEN = re.compile(r"""(?i)(?<!\w)image-set\(|['"()]|\\(?!image-set\()[\s\S]""")                       # 상태가 바뀌는 곳만: 시작·따옴표·괄호·이스케이프(바로 뒤가 `image-set(` 인 역슬래시는 함수 이름 앞 글자 — CSS 는 `\i` 를 i 로 읽는다)
+_IMAGE_SET_MAX_DEPTH = 6                                                                                        # 괄호 깊이 상한 — 넘는 중첩은 닫히는 곳을 모른다고 보고 계속 읽는다(안전한 쪽)
+_IMAGE_SET_UNTERMINATED_LIMIT = 300                                                                             # 글 끝까지 안 닫힌 따옴표는 CSS 가 글 끝에서 닫듯 거기까지(최대 300자)를 문자열로 읽는다
 _BARE_URL = re.compile(r"""(?i)(?<![a-z0-9+.\-])(?:(?:https?|ftps?|wss?):[/\\]*|(?:sftp|file):[/\\]{2,})[^\s<>"'`)\]/\\][^\s<>"'`)\]]*""")   # 글 속의 주소(슬래시가 모자라거나 역슬래시여도 — sftp·file 은 `//` 가 있을 때만)
 
 
-def _external_key(raw):
-    """링크 대상 하나를 정규화한다. 사이트 밖으로 나가는 주소면 `스킴://호스트…`(또는 `//호스트…`, 스킴·호스트는 소문자), 아니면 None."""
+def _app_address(name, after):
+    """`_APP_SCHEMES`·접두사의 스킴이고 값이 있나 — `News:` 처럼 값이 없는 글머리는 아니다. after 는 공백을 뺀 콜론 뒤 글."""
+    return bool(after) and (name in _APP_SCHEMES or name.startswith(_APP_SCHEME_PREFIXES))
+
+
+def _unterminated_address(rest):
+    """글 끝까지 안 닫힌 따옴표 뒤의 글에서 주소 부분만 낸다: 브라우저가 지우는 공백·제어·서식 글자를 먼저 지우고(아주 긴 공백으로 주소를 밀어내도 읽도록) 속성·함수를 닫는 글자(`)"'<>`)에서 자르고 300자까지.
+    뒤따르는 글 전체를 키에 넣지 않으므로 깨진 CSS 가 원문에 있어도 그 뒤 문장을 고치는 정상 수정이 새 주소로 거절되지 않는다."""
+    cleaned = "".join(ch for ch in rest if not ch.isspace() and unicodedata.category(ch) not in ("Cc", "Cf"))
+    return re.split(r"""[)"'<>]""", cleaned, 1)[0][:_IMAGE_SET_UNTERMINATED_LIMIT]
+
+
+
+def _image_set_strings(text):
+    """text 안의 모든 `image-set(` 안에서 따옴표로 묶인 문자열(따옴표는 뺀다)의 목록.
+
+    `image-set(` 마다 따로 앞에서부터 읽는 것과 같은 결과를 글을 한 번만 훑어 낸다(시험이 느린 기준 구현과 견준다): 토큰(`image-set(`·따옴표·괄호·이스케이프)마다 읽기들의 상태 (따옴표 상태, 괄호 깊이)를
+    옮긴다. 같은 상태의 읽기는 하나로 합쳐지므로 읽기는 (따옴표 상태 3 × 깊이 6)개를 넘지 않고, 시간은 글 길이에 비례한다. 앞에 짝 없는 따옴표가 있어 따옴표 짝이 어긋나도 `image-set(` 마다 새 읽기가 시작해 놓치지 않는다.
+    안에 든 괄호 함수(`url(…)`)는 깊이로 세어 그 닫는 괄호에서 끝내지 않는다. 읽기는 자기 `image-set(` 이 닫히면(깊이 1 에서 `)`) 끝난다."""
+    first = _IMAGE_SET_START.search(text)
+    if not first:
+        return []
+    found, live, last = [], set(), {"'": 0, '"': 0}      # live: 읽기들의 상태 (따옴표 상태: 0 밖·1 홑따옴표 안·2 큰따옴표 안, 괄호 깊이) · last: 마지막 따옴표 위치
+    for token in _IMAGE_SET_TOKEN.finditer(text, first.start()):
+        piece = token.group()
+        if piece[0] == "\\":
+            continue                                                  # 이스케이프한 글자(`\'`·`\)`)는 따옴표·괄호가 아니다
+        if len(piece) > 1:                                            # `image-set(` — 읽고 있던 읽기에게는 여는 괄호 하나이고, 새 읽기가 하나 시작한다
+            live = {(state, min(depth + 1, _IMAGE_SET_MAX_DEPTH) if state == 0 else depth) for state, depth in live}
+            live.add((0, 1))
+        elif piece in ("'", '"'):
+            kind, moved, closing = (1 if piece == "'" else 2), set(), False
+            for state, depth in live:
+                if state == 0:
+                    moved.add((kind, depth))                          # 따옴표 밖의 읽기는 문자열을 연다
+                elif state == kind:
+                    moved.add((0, depth))                             # 같은 따옴표 안의 읽기는 문자열을 닫는다
+                    closing = True
+                else:
+                    moved.add((state, depth))                         # 다른 따옴표 안의 따옴표는 글자다
+            if closing:
+                found.append(text[last[piece] + 1:token.start()])
+            last[piece], live = token.start(), moved
+        elif piece == "(":
+            live = {(state, min(depth + 1, _IMAGE_SET_MAX_DEPTH) if state == 0 else depth) for state, depth in live}
+        else:                                                         # ")" — 따옴표 밖 읽기는 깊이가 1 이면 끝나고, 아니면 한 단계 얕아진다(상한에 닿은 읽기는 닫히는 곳을 몰라 그대로 둔다)
+            live = {(state, depth if state or depth >= _IMAGE_SET_MAX_DEPTH else depth - 1) for state, depth in live if state or depth > 1}
+    for state, _depth in live:
+        if state:                                                     # 글 끝까지 안 닫힌 문자열
+            found.append(_unterminated_address(text[last["'" if state == 1 else '"'] + 1:]))
+    return found
+
+
+def _spaced_targets(text):
+    """눌리는 링크 자리의 `스킴: 값`(콜론 뒤 공백·줄바꿈 — 위 설명)에서 스킴과 값 첫 마디를 이어 붙인 주소들. 알려진 스킴(열린 스킴·앱 스킴·접두사)만 낸다 — 목록 밖 낱말은 옛대로 둔다."""
+    for rx in _SPACED_TARGET_PATTERNS:
+        for match in rx.finditer(text):
+            scheme, value = match.groups()
+            name = scheme[:-1].lower()
+            if name in _OPEN_SCHEMES or name in _APP_SCHEMES or name.startswith(_APP_SCHEME_PREFIXES):
+                yield scheme + value
+
+
+
+def _external_key(raw, text_like=False):
+    """링크 대상 하나를 정규화한다. 사이트 밖으로 나가는 주소면 `스킴://호스트…`(또는 `//호스트…`, 스킴·호스트는 소문자), 아니면 None. text_like 는 글에 가까운 자리(각주 정의의 본문·cite)라 슬래시 없는 앱 스킴은 안 읽는다."""
     target = "".join(ch for ch in raw if not ch.isspace() and unicodedata.category(ch) not in ("Cc", "Cf")).replace("\\", "/")
     scheme = _SCHEME.match(target)
     if scheme:
         name, after = scheme.group(1).lower(), target[scheme.end():]
-        if name in _NOT_EXTERNAL_SCHEMES or (name not in _OPEN_SCHEMES and not after.startswith("//")):
+        app = not text_like and _app_address(name, after)
+        if name in _NOT_EXTERNAL_SCHEMES or (name not in _OPEN_SCHEMES and not after.startswith("//") and not app):
             return None
         prefix, rest = name + "://", after.lstrip("/")
     elif target.startswith("//"):
@@ -130,13 +234,17 @@ def external_links(text):
     for rx in _TARGET_PATTERNS:
         for match in rx.finditer(text):
             raws.extend(group for group in match.groups() if group)
+    raws.extend(_spaced_targets(text))
+    text_raws = []                                                                  # 글에 가까운 자리(각주 정의의 본문·cite) — 슬래시 없는 앱 스킴은 안 읽는다
+    for rx in _TEXT_LIKE_PATTERNS:
+        for match in rx.finditer(text):
+            text_raws.extend(group for group in match.groups() if group)
     for match in _SRCSET.finditer(text):
         for value in match.groups():
             raws.extend(part.split()[0] for part in (value or "").split(",") if part.split())
-    for match in _IMAGE_SET.finditer(text):
-        raws.extend(re.findall(r"""['"]([^'"]*)['"]""", match.group(1)))
+    raws.extend(_image_set_strings(text))
     raws.extend(match.group(0).rstrip(_TRAILING_PUNCTUATION) for match in _BARE_URL.finditer(text))
-    return {key for key in map(_external_key, raws) if key}
+    return {key for key in map(_external_key, raws) if key} | {key for key in (_external_key(raw, True) for raw in text_raws) if key}
 
 
 def changed_line_count(before, after):
