@@ -110,6 +110,9 @@ SAFETY_GUARD_FILES = (
     # (sync_issue_form·build_pages_registry)가 이름 목록에 없어 AI 병합 가능으로 나왔다 — 더 막는 쪽으로만 더했다(운영자 확인 대기 항목 D-347 의 목록을 줄이거나 바꾸지 않는다).
     "pipeline/llm.py", "pipeline/console.py", "pipeline/notify.py", "pipeline/plan.py", "pipeline/inbox.py",
     "scripts/ops_inbox.py", "scripts/github_status.py", "scripts/sync_issue_form.py", "scripts/build_pages_registry.py",
+    # 검증자 S 의 V5(2차): 수정 흐름 최종 관문(pipeline/edits/)이 import 해서 쓰는 두 모듈 — 그림 출처 줄의 면제 규칙(unsplash_credit)과 페이지 원문을 AI 로 보내도 되는지의 판정(provenance). 이 규칙·판정을 넓히는 PR 이
+    # 운영자 전용이 아니면 관문 파일을 건드리지 않고 같은 효과를 낸다. draft_labels·terms_deadline·state 는 신뢰 필터의 입력이지만 운영자 확인 대기 항목(D-347)이라 여기서 정하지 않는다.
+    "pipeline/unsplash_credit.py", "pipeline/provenance.py",
 )
 SAFETY_GUARD_DIRS = ("pipeline/publishers", "pipeline/edits")        # 코드 폴더 — 안의 모든 파일(새 파일 포함)이 해당한다. pipeline/edits 는 수정 흐름의 최종 관문(검사 규칙·경로 허용·작업 목록)이라 폴더째 막는다(D-407)
 SAFETY_GUARD_TREES = ("인수인계/AI_기억", "인수인계/도구", "인수인계/요청함")   # AI 가 읽고 따르는 기억 사본·도구·요청 파일 폴더 — 코드가 아닌 문서도 안의 모든 파일이 해당한다(D-407). 같은 `인수인계/` 의 다른 문서(작업내용 등)는 문서라 해당하지 않는다
@@ -126,6 +129,7 @@ SAFETY_GUARD_PREFIXES = (
     "tests/test_console", "tests/test_llm",                                  # 비밀 가리기(pipeline/console.py·pipeline/llm.py)
     "tests/test_plan",                                                       # 시크릿 이름을 넘기는 곳(pipeline/plan.py)
     "tests/test_handoff_tools",                                              # 인수인계/도구/
+    "tests/test_unsplash_credit", "tests/test_provenance",                   # 수정 흐름 관문이 쓰는 두 모듈의 시험(2차 V5)
 )
 DOC_SUFFIXES = (".md", ".rst", ".txt", ".adoc")
 
@@ -248,6 +252,9 @@ def _sha(value):
     return value.lower() if type(value) is str and _SHA_RE.fullmatch(value) is not None else None
 
 
+_SHORT_NAME = re.compile(chr(126) + "[0-9]")        # 윈도 8.3 짧은 이름(`GITHUB` 다음 물결표와 숫자) — 같은 파일을 다른 이름으로 부르는 별칭
+
+
 def normalize_repo_path(raw):
     """저장소 안 상대 경로를 '/' 로 통일해 돌려준다. 줄 끝의 줄 바꿈(CR·LF)만 떼고 경로는 다듬지 않는다 — **어느 구간이든 앞뒤에 공백(유니코드 공백 포함)이 있거나 제어 문자(DEL·C1 포함)가 있으면 None**:
     맨 앞의 공백이 구간 이름을 바꿔 내부 폴더(`docs`)처럼 보이게 하는 우회를 막는다. 글자(str)가 아니거나·비었거나·절대 경로(앞 '/'·드라이브 글자)이거나·`..` 구간이 있어도 None(확인할 수 없는 입력)."""
@@ -261,6 +268,8 @@ def normalize_repo_path(raw):
         if segment in ("", "."):
             continue
         if segment == ".." or segment != segment.strip():
+            return None
+        if segment.endswith(".") or ":" in segment or _SHORT_NAME.search(segment):        # 윈도 별칭(검증자 S 의 V6): 끝 점(`llm.py.`·`edits./x`)·NTFS 스트림(`llm.py::$DATA`·`llm.py:s`)·8.3 짧은 이름은 같은 파일로 접힌다 — 확인할 수 없는 입력
             return None
         parts.append(segment)
     return "/".join(parts) if parts else None

@@ -177,7 +177,7 @@ class ConstantsPinTest(unittest.TestCase):
                                                  "pipeline/source_registry.py", "pipeline/health.py", "pipeline/draft_flow.py", "pipeline/edits/runner.py", "generator.py", "blogger_generator.py",
                                                  "scripts/get_blogger_token.py", "scripts/watchdog.py", "tests/test_site_cleanup.py", "pipeline/run.py", "pipeline/operator_loop.py",
                                                  "pipeline/telegram_inbox.py", "pipeline/llm.py", "pipeline/console.py", "pipeline/notify.py", "pipeline/plan.py", "pipeline/inbox.py",
-                                                 "scripts/ops_inbox.py", "scripts/github_status.py", "scripts/sync_issue_form.py", "scripts/build_pages_registry.py"))
+                                                 "scripts/ops_inbox.py", "scripts/github_status.py", "scripts/sync_issue_form.py", "scripts/build_pages_registry.py", "pipeline/unsplash_credit.py", "pipeline/provenance.py"))
         self.assertEqual(mp.SAFETY_GUARD_DIRS, ("pipeline/publishers", "pipeline/edits"))
         self.assertEqual(mp.SAFETY_GUARD_TREES, ("인수인계/AI_기억", "인수인계/도구", "인수인계/요청함"))
 
@@ -2577,7 +2577,7 @@ class ClassifyNamedSafetyFilesTest(unittest.TestCase):
              "pipeline/draft_flow.py", "pipeline/edits/runner.py", "generator.py", "blogger_generator.py", "scripts/get_blogger_token.py", "scripts/watchdog.py", "tests/test_site_cleanup.py",
              "pipeline/run.py", "pipeline/operator_loop.py", "pipeline/telegram_inbox.py",
              "pipeline/llm.py", "pipeline/console.py", "pipeline/notify.py", "pipeline/plan.py", "pipeline/inbox.py",
-             "scripts/ops_inbox.py", "scripts/github_status.py", "scripts/sync_issue_form.py", "scripts/build_pages_registry.py")
+             "scripts/ops_inbox.py", "scripts/github_status.py", "scripts/sync_issue_form.py", "scripts/build_pages_registry.py", "pipeline/unsplash_credit.py", "pipeline/provenance.py")
     PUBLISHERS = ("pipeline/publishers/__init__.py", "pipeline/publishers/base.py", "pipeline/publishers/blogger.py", "pipeline/publishers/issue_package.py", "pipeline/publishers/new_publisher.py",
                   "pipeline/publishers/sub/deep/x.py", "pipeline/publishers/notes.txt")
     RULE_DOCS = ("AGENTS.md", "CLAUDE.md", "GEMINI.md", "AI_COLLAB.md", "HANDLER.md", "docs/CHARTER.md", "docs/SECURITY_GUARDRAILS.md", "docs/ACTIONS_GUIDE.md", "docs/AGENT_RUNBOOK.md",
@@ -3330,12 +3330,12 @@ class ClassifyAuditSafetyTreesTest(unittest.TestCase):
     운영자 확인 대기 항목 D-347 의 목록을 줄이거나 바꾸지 않는다. 이 모듈은 어디서도 import 되지 않아 꺼져 있다."""
 
     NEW_FILES = ("pipeline/llm.py", "pipeline/console.py", "pipeline/notify.py", "pipeline/plan.py", "pipeline/inbox.py",
-                 "scripts/ops_inbox.py", "scripts/github_status.py", "scripts/sync_issue_form.py", "scripts/build_pages_registry.py")
+                 "scripts/ops_inbox.py", "scripts/github_status.py", "scripts/sync_issue_form.py", "scripts/build_pages_registry.py", "pipeline/unsplash_credit.py", "pipeline/provenance.py")
     NEW_DIRS = ("pipeline/edits",)
     TREES = ("인수인계/AI_기억", "인수인계/도구", "인수인계/요청함")
     PREFIXES = ("tests/test_edits", "tests/edits_helpers", "tests/test_operator_loop", "tests/operator_loop_helpers", "tests/test_telegram_inbox", "tests/telegram_inbox_helpers",
                 "tests/test_answer_form", "tests/test_auto_pr", "tests/test_publish_paths", "tests/test_ops_inbox", "tests/ops_inbox_", "tests/test_github_status",
-                "tests/test_notify", "tests/notify_helpers", "tests/test_console", "tests/test_llm", "tests/test_plan", "tests/test_handoff_tools")
+                "tests/test_notify", "tests/notify_helpers", "tests/test_console", "tests/test_llm", "tests/test_plan", "tests/test_handoff_tools", "tests/test_unsplash_credit", "tests/test_provenance")
     # 감사 탐침 probe_merge_policy3 의 경로 32개 — 고친 뒤 기대하는 분류(앞에서 ai_ok 로 나온 것 22개 중 `pipeline/drafts.py`·`pipeline/state.py`·`docs/DEFECT_REGISTER.md` 셋은 이 묶음 밖이라 그대로 ai_ok)
     AUDIT_OPERATOR_ONLY = ("pipeline/edits/checks.py", "pipeline/edits/spec.py", "pipeline/edits/safety.py", "pipeline/edits/ops.py", "pipeline/notify.py", "pipeline/secret_patterns.py",
                            "pipeline/llm.py", "pipeline/inbox.py", "pipeline/operator_loop.py", "scripts/ops_inbox.py", "scripts/github_status.py", "scripts/sync_issue_form.py",
@@ -3449,6 +3449,118 @@ class ClassifyAuditSafetyTreesTest(unittest.TestCase):
             with self.subTest(path=path):
                 result = mp.classify_change("blog", [path], {path: GOOD_TEXT}, {code: False for code in mp.DECLARED_REQUIRED})
                 self.assertEqual((result.tier, result.extra_flags), ("operator_only", ("safety_guard",)), path)
+
+    # ---- 2차(검증자 S 의 V5) 수정 흐름 최종 관문이 import 해서 쓰는 두 모듈 ----
+    OLD_FILES_17 = ("pipeline/publish_lock.py", "pipeline/quality_gate.py", "pipeline/gates.py", "pipeline/auth_check.py", "pipeline/registry.py", "pipeline/source_registry.py", "pipeline/health.py",
+                    "pipeline/draft_flow.py", "pipeline/edits/runner.py", "generator.py", "blogger_generator.py", "scripts/get_blogger_token.py", "scripts/watchdog.py", "tests/test_site_cleanup.py",
+                    "pipeline/run.py", "pipeline/operator_loop.py", "pipeline/telegram_inbox.py")
+    V5_FILES = ("pipeline/unsplash_credit.py", "pipeline/provenance.py")
+    V5_PREFIXES = ("tests/test_unsplash_credit", "tests/test_provenance")
+    DECISION_PENDING = ("pipeline/draft_labels.py", "pipeline/terms_deadline.py", "pipeline/state.py")          # 신뢰 필터의 입력 — 운영자 확인 대기 항목 D-347 이라 이번에도 정하지 않는다
+
+    def test_the_two_modules_the_edit_gate_imports_and_their_tests_are_operator_only_in_both_repositories(self):
+        for path in self.V5_FILES + ("tests/test_unsplash_credit.py", "tests/test_provenance.py", "tests/test_unsplash_credit_more.py", "tests/test_provenance_x.py", "tests/test_unsplash_credit_helpers.py"):
+            for kind in ("blog", "desktop"):
+                with self.subTest(path=path, kind=kind):
+                    result = classify(kind, [path])
+                    self.assertEqual((result.tier, result.extra_flags), ("operator_only", ("safety_guard",)), path)
+
+    def test_near_misses_of_the_two_modules_and_their_test_prefixes_are_not_swept_in(self):
+        for path in ("pipeline/unsplash_credit2.py", "pipeline/provenance_x.py", "pipeline/unsplash.py", "tests/sub/test_provenance.py", "tests/test_unsplash.py", "tests/test_credit.py",
+                     "sub/pipeline/provenance.py", "docs/provenance.py"):
+            with self.subTest(path=path):
+                result = classify("blog", [path])
+                self.assertNotIn("safety_guard", result.extra_flags, path)
+
+    def test_the_three_pending_modules_are_left_alone_until_the_operator_decides(self):
+        """draft_labels·terms_deadline·state 는 신뢰 필터(inbox·ops_inbox)의 입력이지만 D-347 결정 대기 항목이라 목록에 없다 — 운영자가 정하면 이 시험과 문서를 함께 고친다."""
+        for path in self.DECISION_PENDING:
+            with self.subTest(path=path):
+                self.assertNotIn(path, mp.SAFETY_GUARD_FILES)
+                self.assertEqual(classify("blog", [path]).tier, "ai_ok", path)
+
+    def test_the_lists_only_grew_by_exactly_the_two_modules_and_their_two_prefixes(self):
+        """더 막는 쪽뿐: 이전 목록(옛 17개 + BA-S1-2 의 9개)은 모두 그대로 있고 새로 늘어난 것은 정확히 두 모듈과 두 접두사다."""
+        before_files = set(self.OLD_FILES_17 + self.NEW_FILES[:9])
+        before_prefixes = set(self.PREFIXES[:18])
+        self.assertTrue(before_files < set(mp.SAFETY_GUARD_FILES))
+        self.assertTrue(before_prefixes < set(mp.SAFETY_GUARD_PREFIXES))
+        self.assertEqual(set(mp.SAFETY_GUARD_FILES) - before_files, set(self.V5_FILES))
+        self.assertEqual(set(mp.SAFETY_GUARD_PREFIXES) - before_prefixes, set(self.V5_PREFIXES))
+        self.assertEqual(mp.SAFETY_GUARD_FILES[:len(before_files)], self.OLD_FILES_17 + self.NEW_FILES[:9])             # 이름 순서도 그대로(끝에만 덧붙임)
+        self.assertEqual(mp.SAFETY_GUARD_PREFIXES[:18], self.PREFIXES[:18])
+
+    # ---- 2차(검증자 S 의 V6) 윈도 별칭: 끝 점·NTFS 스트림은 같은 파일로 접힌다 ----
+    def alias_variants(self, target):
+        """감사 검증자의 탐침(경로 정규화 우회 33변형)을 옮긴 표 — 같은 파일을 다른 글자로 부르는 방법."""
+        import unicodedata
+        bs, parts = chr(92), target.split("/")
+        yield "plain", target
+        yield "UPPER", "/".join(part.upper() for part in parts)
+        yield "backslash", target.replace("/", bs)
+        yield "dot-slash prefix", "./" + target
+        yield "double slash", target.replace("/", "//")
+        yield "inner dot dir", target.replace("/", "/./", 1)
+        yield "dotdot", parts[0] + "/x/../" + "/".join(parts[1:])
+        yield "absolute", "/" + target
+        yield "drive", "C:/r/" + target
+        yield "drive relative", "C:" + target
+        yield "trailing slash", target + "/"
+        yield "trailing dot dir", parts[0] + "./" + "/".join(parts[1:]) if len(parts) > 2 else parts[0] + "./" + parts[1]
+        yield "trailing dot second dir", "/".join(parts[:-1]) + "./" + parts[-1] if len(parts) > 2 else target
+        yield "trailing space dir", parts[0] + " /" + "/".join(parts[1:])
+        yield "file trailing dot", target + "."
+        yield "file trailing space", target + " "
+        yield "leading space", " " + target
+        yield "double quoted", chr(34) + target + chr(34)
+        yield "single quoted", chr(39) + target + chr(39)
+        yield "ntfs data stream", target + "::$DATA"
+        yield "ntfs named stream", target + ":s"
+        yield "url encoded slash", target.replace("/", "%2F")
+        yield "nfd", unicodedata.normalize("NFD", target)
+        yield "fullwidth first", chr(0xFF50) + target[1:]
+        yield "cyrillic e", target.replace("e", chr(0x435), 1) if "e" in target else target
+        yield "zero width inside", target[:3] + chr(0x200B) + target[3:]
+        yield "nbsp inside", target[:3] + chr(0xA0) + target[3:]
+        yield "kelvin", target.replace("k", chr(0x212A), 1) if "k" in target else target
+        yield "dot slash dot", "./" + target
+        yield "short name 8.3", "/".join((part[:6].upper() + chr(126) + "1") if len(part) > 8 else part for part in parts)
+        yield "tab inside", target[:3] + chr(9) + target[3:]
+        yield "nul inside", target[:3] + chr(0) + target[3:]
+        yield "crlf end", target + chr(13) + chr(10)
+
+    ALIAS_TARGETS = ("pipeline/edits/checks.py", "pipeline/llm.py", "tests/test_edits_core.py", "인수인계/AI_기억/README.md", "인수인계/도구/work/commit_as_author.py", "scripts/github_status.py")
+
+    def test_every_alias_spelling_of_a_guarded_file_is_operator_only_or_an_input_error(self):
+        """198개(6개 파일 × 33가지 표기): 끝 점·NTFS 스트림(`llm.py.`·`llm.py::$DATA`·`llm.py:s`)처럼 윈도에서 같은 파일로 접히는 표기가 AI 병합 가능(ai_ok)으로 나오지 않는다."""
+        checked = 0
+        for target in self.ALIAS_TARGETS:
+            for label, path in self.alias_variants(target):
+                with self.subTest(target=target, label=label):
+                    result = mp.classify_change("blog", [path], {path: "x = 1" + chr(10)}, {code: False for code in mp.DECLARED_REQUIRED})
+                    self.assertEqual(result.tier, "operator_only", (target, label, path))
+                checked += 1
+        self.assertEqual(checked, 6 * 33)
+
+    def test_a_segment_that_ends_with_a_dot_or_has_a_colon_is_an_input_error(self):
+        for path in ("pipeline/llm.py.", "pipeline/llm.py::$DATA", "pipeline/llm.py:s", "pipeline/edits./checks.py", "인수인계/AI_기억./README.md", "docs/a../b.md", "docs/...", "docs/x:y.md", "a:b/c.md", "pipeline./x.py"):
+            with self.subTest(path=path):
+                self.assertIsNone(mp.normalize_repo_path(path))
+
+    def test_a_dos_short_name_is_an_input_error_but_a_lone_tilde_is_not(self):
+        tilde = chr(126)
+        for path in ("scripts/GITHUB" + tilde + "1", "tests/TEST_E" + tilde + "1/x.py", "pipeline/EDITS" + tilde + "2/checks.py", "docs/A" + tilde + "9.MD", "x" + tilde + "0"):
+            with self.subTest(path=path):
+                self.assertIsNone(mp.normalize_repo_path(path))
+        for path in ("docs/a" + tilde + "b.md", "docs/" + tilde + "notes.md", "docs/a" + tilde):
+            with self.subTest(path=path):
+                self.assertEqual(mp.normalize_repo_path(path), path)
+
+    def test_ordinary_names_with_dots_are_unchanged(self):
+        for path in ("docs/a.b.c.md", ".github/workflows/x.yml", "docs/.hidden", "docs/x.tar.gz", "pipeline/a-b_c.py", "a/b/.gitkeep", "docs/v1.2/notes.md", "한글/파일.v2.md"):
+            with self.subTest(path=path):
+                self.assertEqual(mp.normalize_repo_path(path), path)
+        self.assertEqual(mp.normalize_repo_path("./docs//x.md"), "docs/x.md")                                    # `.` 구간과 빈 구간은 여전히 건너뛴다
 
 
 if __name__ == "__main__":

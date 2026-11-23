@@ -264,9 +264,9 @@ class MatrixTest(WorkflowCase):
             with self.subTest(strategy=strategy):
                 self.assertEqual(self.of(workflow(job(self.RUN, strategy=strategy)), "WF-4"), [])
 
-    def test_a_computed_matrix_or_a_value_with_an_expression_is_a_warning(self):
+    def test_a_computed_matrix_or_a_value_with_an_expression_is_a_warning(self):          # 식이 있되 출처가 신뢰할 수 없는 입력은 아닌 값(`github.sha`) — 직접 적은 신뢰할 수 없는 식은 이제 오류(MatrixDirectValueTest)
         for strategy in ("strategy:\n  matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}", "strategy:\n  matrix:\n    k: ${{ fromJSON(needs.plan.outputs.k) }}",
-                         "strategy:\n  matrix:\n    k: [a, '${{ github.event.issue.title }}']", "strategy:\n  matrix:\n    include:\n      - k: ${{ needs.plan.outputs.k }}"):
+                         "strategy:\n  matrix:\n    k: [a, '${{ github.sha }}']", "strategy:\n  matrix:\n    include:\n      - k: ${{ needs.plan.outputs.k }}"):
             with self.subTest(strategy=strategy):
                 found = self.of(workflow(job(self.RUN, strategy=strategy)), "WF-4")
                 self.assertEqual([level for level, _ in found], ["WARN"])
@@ -434,6 +434,167 @@ class RealRepositoryTest(unittest.TestCase):
         findings = vr.run_checks(REAL)
         self.assertEqual([f.line() for f in findings if f.level == "ERROR"], [])
         self.assertEqual([f.line() for f in findings if f.check in ("WF-1", "WF-3", "WF-4")], [])
+
+
+TAINTED_STEP = '- id: a\n  env:\n    X: ' + TITLE + '\n  run: echo "t=$X" >> "$GITHUB_OUTPUT"\n'          # 신뢰할 수 없는 입력을 받아 출력 파일에 쓰는 단계
+
+
+@NEEDS_YAML
+class WholeContextReadTest(WorkflowCase):
+    """검증자 S 의 V4(a) — 맵 통째 읽기(`toJSON(env)`·`join(env.*, ',')`·`toJSON(steps)`·`toJSON(needs)`·`toJSON(matrix)`): github 컨텍스트는 `_WHOLE_CONTEXT`·`.*` 로 막는데
+    env·steps·needs·matrix 는 같은 처리가 없어 오염된 항목이 든 맵을 통째로 읽어도 지적이 0 이었다. 오염된 항목이 하나라도 있으면 오류, 없어도 통째 읽기는 항목을 하나씩 알 수 없어 경고."""
+
+    def levels_of(self, text):
+        return self.levels(text)
+
+    def test_a_whole_env_read_with_a_tainted_entry_is_an_error_in_every_spelling(self):
+        for expression in ("toJSON(env)", "join(env.*, ',')", "format('{0}', env)", "toJSON( env )", "fromJSON(toJSON(env)).A", "ENV.*"):
+            with self.subTest(expression=expression):
+                text = workflow(job("- run: echo ${{ " + expression + " }}\n", env=f"env:\n  A: {TITLE}\n  B: fixed"))
+                self.assertEqual(self.levels_of(text), ["ERROR"])
+
+    def test_a_whole_env_read_without_a_tainted_entry_is_a_warning_not_silence(self):
+        for env in ("", "env:\n  A: fixed", "env:\n  A: ${{ github.sha }}"):
+            with self.subTest(env=env):
+                self.assertEqual(self.levels_of(workflow(job("- run: echo ${{ toJSON(env) }}\n", env=env))), ["WARN"])
+
+    def test_a_whole_steps_read_after_a_tainted_step_is_an_error_and_a_single_step_object_too(self):
+        for expression in ("toJSON(steps)", "toJSON(steps.a)", "join(steps.*.outputs, ',')", "toJSON(steps.a.outputs)"):
+            with self.subTest(expression=expression):
+                text = workflow(job(TAINTED_STEP + "- run: echo ${{ " + expression + " }}\n"))
+                self.assertEqual(self.levels_of(text), ["ERROR"])
+
+    def test_a_whole_steps_read_without_a_tainted_step_is_a_warning(self):
+        text = workflow(job('- id: a\n  run: echo "t=1" >> "$GITHUB_OUTPUT"\n- run: echo ${{ toJSON(steps) }}\n'))
+        self.assertEqual(self.levels_of(text), ["WARN"])
+        self.assertEqual(self.levels_of(workflow(job("- run: echo ${{ steps.a.outcome }}\n"))), [])                          # 속성이 고정된 값(outcome)은 통째 읽기가 아니다
+
+    def two_jobs(self, consumer_run, output=TITLE):
+        return workflow(job("- run: echo hi\n", name="a", outputs="outputs:\n  t: " + output),
+                        job("- run: " + consumer_run + "\n", name="b", needs="needs: a"))
+
+    def test_a_whole_needs_read_with_a_tainted_job_output_is_an_error(self):
+        for expression in ("toJSON(needs)", "toJSON(needs.a)", "join(needs.*.outputs, ',')", "toJSON(needs.a.outputs)"):
+            with self.subTest(expression=expression):
+                self.assertEqual(self.levels_of(self.two_jobs("echo ${{ " + expression + " }}")), ["ERROR"])
+
+    def test_a_whole_needs_read_without_a_tainted_output_is_a_warning(self):
+        self.assertEqual(self.levels_of(self.two_jobs("echo ${{ toJSON(needs) }}", output="fixed")), ["WARN"])
+        self.assertEqual(self.levels_of(self.two_jobs("echo ${{ needs.a.result }}", output="fixed")), [])                      # 고정된 값(result)
+
+    def test_a_whole_matrix_read_with_a_tainted_value_is_an_error_and_otherwise_a_warning(self):
+        tainted = job("- run: echo ${{ toJSON(matrix) }}\n", strategy="strategy:\n  matrix:\n    x: ['" + TITLE + "']")
+        fixed = job("- run: echo ${{ toJSON(matrix) }}\n", strategy="strategy:\n  matrix:\n    x: [a, b]")
+        self.assertEqual(self.levels_of(workflow(tainted)), ["ERROR"])
+        self.assertEqual(self.levels_of(workflow(fixed)), ["WARN"])
+
+    def test_single_entries_and_literal_indexes_keep_their_old_verdicts(self):
+        env = f"env:\n  A: {TITLE}\n  B: fixed"
+        self.assertEqual(self.levels_of(workflow(job("- run: echo ${{ env.B }}\n", env=env))), [])
+        self.assertEqual(self.levels_of(workflow(job("- run: echo ${{ env['B'] }}\n", env=env))), [])
+        self.assertEqual(self.levels_of(workflow(job("- run: echo ${{ env.A }}\n", env=env))), ["ERROR"])
+        self.assertEqual(self.levels_of(workflow(job("- run: echo ${{ environment.x }}\n", env=env))), [])                       # env 로 시작하는 다른 이름은 컨텍스트가 아니다
+
+    def test_the_same_reads_in_github_script_are_found_too(self):
+        text = workflow(job("- uses: actions/github-script@v7\n  with:\n    script: core.info(`${{ toJSON(env) }}`)\n", env=f"env:\n  A: {TITLE}"))
+        self.assertEqual(self.levels_of(text), ["ERROR"])
+
+
+@NEEDS_YAML
+class MatrixDirectValueTest(WorkflowCase):
+    """검증자 S 의 V4(b) — matrix 값에 신뢰할 수 없는 식을 직접 적은 경우는 출처를 아니 경고가 아니라 오류다."""
+
+    def test_an_untrusted_expression_written_into_the_matrix_is_an_error(self):
+        for strategy in ("strategy:\n  matrix:\n    x: ['" + TITLE + "']",
+                         "strategy:\n  matrix:\n    include:\n      - x: '" + TITLE + "'",
+                         "strategy:\n  matrix:\n    x: [a]\n    include:\n      - x: '${{ github.head_ref }}'",
+                         "strategy:\n  matrix:\n    x:\n      - '${{ github.event.comment.body }}'"):
+            with self.subTest(strategy=strategy):
+                self.assertEqual(self.levels(workflow(job("- run: echo ${{ matrix.x }}\n", strategy=strategy))), ["ERROR"])
+
+    def test_fixed_and_computed_values_keep_their_old_verdicts(self):
+        self.assertEqual(self.levels(workflow(job("- run: echo ${{ matrix.x }}\n", strategy="strategy:\n  matrix:\n    x: [a, b]"))), [])
+        self.assertEqual(self.levels(workflow(job("- run: echo ${{ matrix.x }}\n", strategy="strategy:\n  matrix: ${{ fromJSON(needs.a.outputs.m) }}"))), ["WARN"])
+        self.assertEqual(self.levels(workflow(job("- run: echo ${{ matrix.x }}\n", strategy="strategy:\n  matrix:\n    x: ['${{ github.sha }}']"))), ["WARN"])      # 식이 있지만 신뢰할 수 없는 입력은 아니다
+
+    def test_another_key_with_an_untrusted_value_does_not_taint_this_key(self):
+        strategy = "strategy:\n  matrix:\n    x: [a]\n    y: ['" + TITLE + "']"
+        self.assertEqual(self.levels(workflow(job("- run: echo ${{ matrix.x }}\n", strategy=strategy))), [])
+        self.assertEqual(self.levels(workflow(job("- run: echo ${{ matrix.y }}\n", strategy=strategy))), ["ERROR"])
+
+
+@NEEDS_YAML
+class InputsThroughEnvTest(WorkflowCase):
+    """검증자 S 의 V4(c) — `env: T: ${{ inputs.x }}` 를 거친 `${{ env.T }}` 도 경고 이상이다(직접 `${{ inputs.x }}` 가 경고인 것과 일관)."""
+
+    def test_an_env_that_holds_inputs_is_a_warning_when_interpolated(self):
+        for value in ("${{ inputs.x }}", "${{ github.event.inputs.x }}", "${{ format('{0}', inputs.x) }}", "pre-${{ inputs['x'] }}", "${{ toJSON(inputs) }}"):
+            with self.subTest(value=value):
+                text = workflow(job('- run: echo "${{ env.T }}"\n', env=f"env:\n  T: {value}"))
+                self.assertEqual(self.levels(text), ["WARN"])
+
+    def test_a_chain_ending_in_inputs_is_a_warning_and_a_tainted_end_still_wins(self):
+        self.assertEqual(self.levels(workflow(job('- run: echo "${{ env.A }}"\n', env="env:\n  A: ${{ env.B }}\n  B: ${{ inputs.x }}"))), ["WARN"])
+        self.assertEqual(self.levels(workflow(job('- run: echo "${{ env.A }}"\n', env=f"env:\n  A: ${{{{ env.B }}}}\n  B: ${{{{ inputs.x }}}}-{TITLE}"))), ["ERROR"])
+
+    def test_passing_inputs_through_env_and_reading_them_in_the_shell_stays_clean(self):
+        text = workflow(job('- run: echo "$T"\n', env="env:\n  T: ${{ inputs.x }}"))
+        self.assertEqual([f for f in self.check(text) if f.check == "WF-4"], [])
+
+
+@NEEDS_YAML
+class BrokenShapesTest(WorkflowCase):
+    """검증자 S 의 V3 — 깨진 워크플로에서 검증기가 죽지 않는다: `jobs` 가 객체가 아니면 WF-0 오류로 알리고(시작점부터 AttributeError 둘), matrix 의 include·exclude 가 목록이 아니어도
+    순회하지 않는다(이번 묶음이 만든 TypeError 하나)."""
+
+    def test_jobs_that_is_a_list_a_string_or_a_number_is_a_wf0_error_not_a_crash(self):
+        for jobs in ("\n  - a\n  - b\n", " hello\n", " 5\n", " true\n"):
+            with self.subTest(jobs=jobs):
+                text = f'name: t\non: workflow_dispatch\npermissions:\n  contents: read\njobs:{jobs}'
+                found = self.check(text)
+                self.assertEqual([(f.check, f.level) for f in found], [("WF-0", "ERROR")])
+                self.assertIn("jobs", found[0].message)
+
+    def test_empty_jobs_is_not_an_error(self):
+        for jobs in (" null\n", " {}\n", " []\n"):
+            with self.subTest(jobs=jobs):
+                text = f'name: t\non: workflow_dispatch\npermissions:\n  contents: read\njobs:{jobs}'
+                self.assertEqual([f for f in self.check(text) if f.check == "WF-0"], [])
+
+    def test_matrix_include_and_exclude_that_are_not_lists_do_not_crash(self):
+        for strategy in ("strategy:\n  matrix:\n    include: 5", "strategy:\n  matrix:\n    include: hello", "strategy:\n  matrix:\n    include: ${{ fromJSON(x) }}",
+                         "strategy:\n  matrix:\n    x: [a]\n    exclude: 5", "strategy:\n  matrix:\n    x: [a]\n    include: {y: 1}", "strategy:\n  matrix: hello", "strategy: hello",
+                         "strategy:\n  matrix:\n    include:\n      - 5\n      - hello"):
+            with self.subTest(strategy=strategy):
+                found = self.check(workflow(job("- run: echo ${{ matrix.x }}\n", strategy=strategy)))
+                self.assertEqual([f for f in found if f.level == "ERROR"], [])
+
+    def test_a_computed_include_is_not_a_fixed_value(self):
+        text = workflow(job("- run: echo ${{ matrix.x }}\n", strategy="strategy:\n  matrix:\n    include: ${{ fromJSON(needs.a.outputs.m) }}"))
+        self.assertEqual(self.levels(text), ["WARN"])
+
+    def test_the_whole_validator_survives_a_broken_workflow(self):
+        for jobs in ("\n  - a\n", " hello\n"):
+            with self.subTest(jobs=jobs):
+                self.write(f'name: t\non: workflow_dispatch\npermissions:\n  contents: read\njobs:{jobs}', "broken.yml")
+                findings = vr.run_checks(self.root)
+                self.assertIn(("WF-0", "ERROR"), [(f.check, f.level) for f in findings])
+
+
+@NEEDS_YAML
+class DiscussionTriggerTest(WorkflowCase):
+    """검증자 S 의 V10 — 낯선 사람이 쓴 글이 실행을 일으키는 `discussion`·`discussion_comment` 도 허용 목록(지금은 빔)이다."""
+
+    def test_the_discussion_triggers_are_errors_in_every_notation(self):
+        for on in ("discussion", "discussion_comment", "[discussion]", "[push, discussion_comment]", "\n  discussion:\n    types: [created]", "\n  discussion_comment:\n    types: [created]", "Discussion_Comment"):
+            with self.subTest(on=on):
+                found = [(f.level, f.message) for f in self.check(workflow(job("- run: echo hi\n"), on=on)) if f.check == "WF-3"]
+                self.assertEqual([level for level, _ in found], ["ERROR"])
+                self.assertIn("허용 목록", found[0][1])
+
+    def test_the_allow_list_names_all_five_and_stays_empty(self):
+        self.assertEqual(sorted(vr.WF3_UNTRUSTED_TRIGGERS), ["discussion", "discussion_comment", "issue_comment", "pull_request_review", "pull_request_review_comment"])
+        self.assertTrue(all(value == () for value in vr.WF3_UNTRUSTED_TRIGGERS.values()))
 
 
 if __name__ == "__main__":
