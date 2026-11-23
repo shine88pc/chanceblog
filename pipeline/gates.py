@@ -359,8 +359,30 @@ def body_risk_hit(text, profile):
     return None, None
 
 
+OVERSIZE_FACTOR = 2     # 본문이 프로필 length.max_chars 의 이 배수를 넘으면 check_post 는 정규식·유사도 검사를 돌리지 않고 곧바로 탈락시킨다(BP-S1-5, D-415)
+
+
+def _title_len_reason(title, t_cfg):
+    """제목 길이가 허용 범위 밖이면 [TITLE_LEN] 사유 문장, 아니면 None(정상 경로와 길이 초과 조기 반환이 같은 문장을 쓴다)."""
+    if not t_cfg.get("min_chars", 1) <= len(title) <= t_cfg.get("max_chars", 200):
+        return f"[TITLE_LEN] 제목 길이 {len(title)}자 (허용 {t_cfg.get('min_chars')}~{t_cfg.get('max_chars')}자)"
+    return None
+
+
+def _len_long_reason(n, l_cfg):
+    return f"[LEN_LONG] 본문 {n}자 (최대 {l_cfg['max_chars']}자)"
+
+
+def _sanitized_warnings(sanitize_stats):
+    removed = {k: v for k, v in (sanitize_stats or {}).items() if v}
+    return [f"[SANITIZED] HTML 정화로 제거됨: {removed}"] if removed else []
+
+
 def check_post(post, profile, recent_titles=(), other_titles=(), sanitize_stats=None):
-    """정화된 post({title, labels, content})를 프로필 기준으로 검사한다."""
+    """정화된 post({title, labels, content})를 프로필 기준으로 검사한다.
+
+    본문이 길이 한도(length.max_chars)의 두 배(OVERSIZE_FACTOR)를 넘으면 어차피 탈락이므로 [LEN_LONG](제목 길이가 틀렸으면 [TITLE_LEN] 이 앞에)만 쌓고 금지 표현 정규식·유사도 검사는 돌리지 않는다 —
+    정규식은 같은 종류 글자가 길게 이어지면 글 길이의 제곱으로 느려진다(감사 BP-S1-5: 숫자 20,000자 48초). 한도 이하·두 배 이하의 글은 이전과 같은 전체 검사를 받는다."""
     reasons, warnings = [], []
     title = post.get("title", "")
     content = post.get("content", "")
@@ -369,8 +391,18 @@ def check_post(post, profile, recent_titles=(), other_titles=(), sanitize_stats=
     n = text_length(text)
 
     t_cfg = profile.get("title", {})
-    if not t_cfg.get("min_chars", 1) <= len(title) <= t_cfg.get("max_chars", 200):
-        reasons.append(f"[TITLE_LEN] 제목 길이 {len(title)}자 (허용 {t_cfg.get('min_chars')}~{t_cfg.get('max_chars')}자)")
+    l_cfg = profile.get("length", {})
+    max_len = l_cfg.get("max_chars")
+    if isinstance(max_len, (int, float)) and n > max_len * OVERSIZE_FACTOR:
+        reason = _title_len_reason(title, t_cfg)
+        if reason:
+            reasons.append(reason)
+        reasons.append(_len_long_reason(n, l_cfg))
+        return GateResult(ok=False, reasons=reasons, warnings=_sanitized_warnings(sanitize_stats))
+
+    reason = _title_len_reason(title, t_cfg)
+    if reason:
+        reasons.append(reason)
     hit = matches_any(profile.get("title_banned_patterns"), title)
     if hit:
         reasons.append(f"[TITLE_BANNED] 자극적/금지 제목 표현: {hit}")
@@ -379,11 +411,10 @@ def check_post(post, profile, recent_titles=(), other_titles=(), sanitize_stats=
         reasons.append("[TITLE_TOPIC] 제목에 금지 주제 낱말(질병·치료·약·보충제·진단·임신·영유아·체중 감량 등)이 있음: "
                        f"'{one_line(word, 40)}'")
 
-    l_cfg = profile.get("length", {})
     if n < l_cfg.get("min_chars", 0):
         reasons.append(f"[LEN_SHORT] 본문 {n}자 (최소 {l_cfg['min_chars']}자)")
     if n > l_cfg.get("max_chars", 10 ** 9):
-        reasons.append(f"[LEN_LONG] 본문 {n}자 (최대 {l_cfg['max_chars']}자)")
+        reasons.append(_len_long_reason(n, l_cfg))
 
     if profile.get("language") == "ko":
         letters = re.findall(r"[A-Za-z가-힣]", text)
@@ -439,10 +470,7 @@ def check_post(post, profile, recent_titles=(), other_titles=(), sanitize_stats=
     if score >= sim.get("other_blogs", 1.1):
         reasons.append(f"[DUP_OTHER] 다른 블로그 글과 제목이 비슷함({score:.2f}): {one_line(other, 100)}")
 
-    if sanitize_stats:
-        removed = {k: v for k, v in sanitize_stats.items() if v}
-        if removed:
-            warnings.append(f"[SANITIZED] HTML 정화로 제거됨: {removed}")
+    warnings.extend(_sanitized_warnings(sanitize_stats))
     return GateResult(ok=not reasons, reasons=reasons, warnings=warnings)
 
 
