@@ -76,6 +76,21 @@ class ResumeConditions34ValuesTest(unittest.TestCase):
         self.assertNotIn("~", section)                                  # 문서 규칙: ASCII 물결표 금지(숫자 범위는 en dash)
         self.assertIsNone(re.search(r"https?://", section))             # 문서 규칙: 링크 금지
 
+    def test_each_row_of_the_four_values_says_the_lock_does_not_pin_it(self):
+        """H2·H3·H4 행(품질 관문·AI 미사용·국문 단독)마다 '잠금이 보증하지 않는다' 와 값을 못박는 시험이 적혀 있다 — 한 행의 말이 바뀌어도 다른 행의 같은 말에 가려지지 않게 행마다 본다."""
+        text = (ROOT / "docs" / "OPS_INBOX.md").read_text(encoding="utf-8")
+        rows = {line.split("|")[1].strip().split(" ")[0]: line for line in checklist_body(text).splitlines() if line.startswith("| H")}
+        self.assertEqual(sorted(rows, key=lambda key: int(key[1:])), [f"H{n}" for n in range(1, 11)])
+        for key, value_name in (("H2", "`chance.quality_gate`"), ("H3", "`chance.content_source`"), ("H4", "`chance.languages`")):
+            with self.subTest(row=key):
+                self.assertIn(value_name, rows[key])
+                self.assertIn("잠금이 보증하지 않", rows[key])
+                self.assertTrue("tests/test_resume_conditions_3_4.py" in rows[key] or "같은 시험이 못박습니다" in rows[key], rows[key])
+        self.assertEqual(rows["H3"].count("`chance."), 2)               # content_source 와 source_policy 를 한 행에서 같이 본다
+        self.assertIn("`chance.source_policy`", rows["H3"])
+        self.assertNotIn("잠금이 보증하지 않", rows["H1"])               # 1·2 는 코드가 지킨다(L1–L8) — 보증한다고 적는다
+        self.assertIn("코드로 지킨다", rows["H1"])
+
     def test_the_checklist_never_gives_the_ai_a_way_to_release(self):
         text = (ROOT / "docs" / "OPS_INBOX.md").read_text(encoding="utf-8")
         section = checklist_body(text)
