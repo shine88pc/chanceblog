@@ -9,7 +9,9 @@ import ast
 import contextlib
 import io
 import itertools
+import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -31,6 +33,15 @@ from pipeline.edits import runner  # noqa: E402
 from test_run import make_root  # noqa: E402
 
 ROOT = _bootstrap.ROOT
+
+
+def blogger_key():
+    """임시 저장소(make_root)가 mode 를 꺼 두는 Blogger 블로그의 키 — 레지스트리의 첫 blogger 항목(실제 이름을 이 파일에 적지 않는다)."""
+    data = json.loads((ROOT / "pipeline" / "blogs.json").read_text(encoding="utf-8"))
+    return next(blog["key"] for blog in data["blogs"] if blog["platform"] == "blogger")
+
+
+BLOGGER_KEY = blogger_key()
 
 # 감사 탐침(BP-S1 probe_pause_budget)의 값 20개 — 켜짐 7·꺼짐 3·알 수 없음 10
 PROBE_VALUES = ["true", "TRUE", " true ", "1", "yes", "on", "On", "enabled", "paused", "pause", "stop", "y", "Y", "t", "false", "0", "", "ture", "truee", "2"]
@@ -108,8 +119,8 @@ class ValueTableTest(unittest.TestCase):
         self.assertNotIn("\n", line)
         for word in ("1·true·yes·on", "0·false·no·off"):
             self.assertIn(word, line)
-        tagged = pause.error_line("[blogger_macat] ")
-        self.assertTrue(tagged.startswith("::error::[blogger_macat] "))
+        tagged = pause.error_line("[tag] ")
+        self.assertTrue(tagged.startswith("::error::[tag] "))
         self.assertEqual(tagged.count("::"), line.count("::"))       # 머리를 붙여도 '::' 가 늘지 않는다
         self.assertEqual(pause.SENTENCE, line[len("::error::"):])
 
@@ -183,8 +194,10 @@ class ReaderBase(unittest.TestCase):
     # 2) Blogger 러너 — 정지가 아니면 mode off 건너뜀(다음 줄)에 닿는다
     def read_blogger(self, value):
         root = make_root(self.tmpdir() / "blogger", mode="off")
+        temp_registry = json.loads((root / "pipeline" / "blogs.json").read_text(encoding="utf-8"))
+        self.assertEqual(next(blog["mode"] for blog in temp_registry["blogs"] if blog["key"] == BLOGGER_KEY), "off")      # 임시 저장소가 이 블로그를 꺼 두었는지(정지가 아니면 mode off 건너뜀에 닿는다)
         lines = []
-        code = run_mod.run(["--blog", "blogger_macat", "--root", str(root)], environ={"PIPELINE_PAUSE": value}, out=lines.append)
+        code = run_mod.run(["--blog", BLOGGER_KEY, "--root", str(root)], environ={"PIPELINE_PAUSE": value}, out=lines.append)
         text = "\n".join(lines)
         self.assertEqual(code, 0, text)
         paused = "code=PAUSED" in text
@@ -319,7 +332,7 @@ class ReadersAgreeTest(ReaderBase):
         self.assertIn("[일시정지] PIPELINE_PAUSE 가 켜져 있어 실행하지 않습니다.", out)
         self.assertIn("::notice::PIPELINE_PAUSE 가 켜져 있어 Chance_Blog 실행을 건너뛰었습니다.", out)
         paused, out = self.read_blogger("true")
-        self.assertIn("::notice::[blogger_macat] 저장소 변수 PIPELINE_PAUSE 가 켜져 있어 이번 실행을 건너뜁니다.", out)
+        self.assertIn(f"::notice::[{BLOGGER_KEY}] 저장소 변수 PIPELINE_PAUSE 가 켜져 있어 이번 실행을 건너뜁니다.", out)
         paused, out = self.read_draft_flow("true")
         self.assertIn("[일시정지] PIPELINE_PAUSE 가 켜져 있어 초안 올리기·정리를 하지 않습니다.", out)
         paused, out = self.read_watchdog("true")
@@ -365,6 +378,19 @@ class StructureTest(unittest.TestCase):
         self.assertTrue(runner.pause_on({"PIPELINE_PAUSE": "ture"}))
         self.assertFalse(runner.pause_on({"PIPELINE_PAUSE": None}))
         self.assertFalse(runner.pause_on({}))
+
+    def test_the_guardrail_row_and_the_publish_paths_item_describe_the_rule(self):
+        guard = (ROOT / "docs" / "SECURITY_GUARDRAILS.md").read_text(encoding="utf-8")
+        row = next(line for line in guard.splitlines() if line.startswith("| G-O9 |"))
+        for needle in ("pipeline/pause.py", "`1`·`true`·`yes`·`on`", "`0`·`false`·`no`·`off`", "정지로 읽고", "::error::", "tests/test_pause_fail_closed.py", "운영자만"):
+            self.assertIn(needle, row, needle)
+        paths = (ROOT / "docs" / "PUBLISH_PATHS.md").read_text(encoding="utf-8")
+        item = next(line for line in paths.splitlines() if line.startswith("23. **발행 정지 변수의 값은 알 수 없는 값을 정지로 읽는다**"))
+        for needle in ("pipeline/pause.py", "D-412", "BP-S1-3", "`disabled`", "정지로 읽힌다"):
+            self.assertIn(needle, item, needle)
+        for text in (row, item):
+            self.assertNotIn(chr(126), text)                                     # 문서 규칙: ASCII 물결표 금지
+            self.assertIsNone(re.search(r"https?://", text))                     # 문서 규칙: 링크 금지
 
     def test_pause_py_imports_nothing(self):
         tree = ast.parse((ROOT / "pipeline" / "pause.py").read_text(encoding="utf-8"))
