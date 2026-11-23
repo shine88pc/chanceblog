@@ -5,6 +5,7 @@
 기존 허용 경로는 전부 그대로 통과한다(레지스트리의 모든 허용 경로 대조).
 """
 import datetime
+import re
 import unittest
 
 import _bootstrap  # noqa: F401
@@ -44,9 +45,58 @@ class PathMatchesFilePrefixTest(unittest.TestCase):
         self.assertTrue(sr.path_matches("/feed/a", prefixes))
 
 
+class FileExtensionLimitTest(unittest.TestCase):
+    """2차 검증 필수-2(변이 Q25): '파일 경로' 판정의 확장자 길이 한도를 현재 값으로 못박는다 — 점 뒤가 글자로 시작하는 영문·숫자 1–8자는 파일이고 9자부터는 파일이 아니다.
+    왜 8인가(근거): 8 은 이 일을 할 때 정한 휴리스틱 한도다 — 흔한 파일 확장자(do·xml·jsp·atom·json·html·shtml·geojson 7자·markdown 8자)가 모두 들고, 점 뒤가 그보다 긴 영문·숫자 꼬리는
+    확장자라기보다 이름의 일부(슬래시 없이 끝나는 `/api/v1.release9` 같은 버전·꼬리 이름)로 보는 편이 낫다고 보았다. 레지스트리의 실제 확장자는 2–4자라 지금은 한도에 닿지 않는다(아래 시험이 확인).
+    틀리는 방향은 둘 다 안전한 쪽이 아니다: 한도보다 긴 '확장자'는 파일로 읽히지 않아 옛 규칙(하위 경로 허용)이 그대로 남고, 한도 안의 꼬리 이름은 파일로 읽혀 하위 경로가 거부된다.
+    그래서 한도를 바꾸려면(예: 9자 이상 확장자를 가진 접두어를 허용 목록에 넣는 날) 이 시험과 근거를 함께 고친다 — 근거가 없는 값 변경은 하지 않고 현재 값을 못박기만 한다."""
+    LIMIT = 8
+
+    def test_an_extension_of_one_to_eight_characters_is_a_file_and_nine_or_more_is_not(self):
+        for length in range(1, self.LIMIT + 1):
+            prefix = "/data/name." + "a" * length
+            with self.subTest(length=length):
+                self.assertTrue(sr.path_matches(prefix, (prefix,)))
+                self.assertFalse(sr.path_matches(prefix + "/child", (prefix,)), prefix)           # 파일 — 뒤 조각 거부
+        for length in (self.LIMIT + 1, self.LIMIT + 2, 20):
+            prefix = "/data/name." + "a" * length
+            with self.subTest(length=length):
+                self.assertTrue(sr.path_matches(prefix, (prefix,)))
+                self.assertTrue(sr.path_matches(prefix + "/child", (prefix,)), prefix)            # 파일이 아님 — 옛 접두 규칙(하위 경로 허용)
+
+    def test_digits_count_toward_the_limit_but_the_first_character_must_be_a_letter(self):
+        self.assertFalse(sr.path_matches("/d/x.a1b2c3d4/child", ("/d/x.a1b2c3d4",)))              # 글자 + 숫자 7 = 8자: 파일
+        self.assertTrue(sr.path_matches("/d/x.a1b2c3d4e/child", ("/d/x.a1b2c3d4e",)))             # 9자: 파일 아님
+        self.assertTrue(sr.path_matches("/d/x.1abc/child", ("/d/x.1abc",)))                       # 숫자로 시작: 파일 아님(버전 조각)
+
+    def test_common_real_world_extensions_up_to_eight_characters_are_files(self):
+        for extension in ("do", "xml", "jsp", "atom", "json", "html", "shtml", "jsonld", "geojson", "markdown", "torrent"):
+            prefix = f"/files/report.{extension}"
+            with self.subTest(extension=extension):
+                self.assertTrue(sr.path_matches(prefix, (prefix,)))
+                self.assertFalse(sr.path_matches(prefix + "/anything", (prefix,)), prefix)
+
+
 class RegistryPathsTest(unittest.TestCase):
     def setUp(self):
         self.registry = sr.load_registry(today=TODAY)
+
+    def test_every_file_extension_in_the_real_registry_is_inside_the_limit(self):
+        """레지스트리의 실제 허용 경로 확장자(.json·.xml·.atom·.html·.jsp·.do …)는 모두 한도 안이고 파일로 읽힌다 — 9자 이상 확장자가 들어오면 이 시험이 알려 한도·근거를 다시 보게 한다."""
+        lengths = set()
+        for provider in self.registry.providers():
+            for access in provider.access:
+                for prefix in access.paths:
+                    found = re.search(r"\.([A-Za-z][A-Za-z0-9]*)$", prefix.rsplit("/", 1)[-1])
+                    if prefix.endswith("/") or not found:
+                        continue
+                    with self.subTest(provider=provider.provider_id, prefix=prefix):
+                        lengths.add(len(found.group(1)))
+                        self.assertLessEqual(len(found.group(1)), FileExtensionLimitTest.LIMIT, prefix)
+                        self.assertTrue(sr._FILE_LIKE_PREFIX.search(prefix), prefix)
+        self.assertIn(4, lengths)                                                                     # .json·.atom·.html — 빈 그릇이 아니다
+        self.assertLessEqual(max(lengths), FileExtensionLimitTest.LIMIT)
 
     def all_prefixes(self):
         found = []

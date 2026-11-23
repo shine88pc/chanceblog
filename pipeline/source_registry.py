@@ -267,7 +267,7 @@ def valid_path_prefix(path):
     return all(seg not in (".", "..") for seg in path.split("/"))
 
 
-_FILE_LIKE_PREFIX = re.compile(r"/[^/]*\.[A-Za-z][A-Za-z0-9]{0,7}$")      # 마지막 조각이 `이름.확장자` 꼴(확장자는 글자로 시작 — `/v1.0` 같은 버전 조각은 파일이 아니다)
+_FILE_LIKE_PREFIX = re.compile(r"/[^/]*\.[A-Za-z][A-Za-z0-9]{0,7}$")      # 마지막 조각이 `이름.확장자` 꼴(확장자는 글자로 시작하는 영문·숫자 1–8자 — `/v1.0` 같은 버전 조각은 파일이 아니다. 8자 한도는 구현 때 정한 휴리스틱이고 근거·경계 시험은 tests/test_source_registry_paths.py 의 FileExtensionLimitTest)
 
 
 def path_matches(path, prefixes):
