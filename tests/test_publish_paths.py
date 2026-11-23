@@ -143,6 +143,8 @@ ALLOWED = {
     "guardrails.yml": entry(py={"pipeline.notify", "scripts/validate_repo.py"}),
     "issue-edit.yml": entry({"actions:write", "contents:write", "issues:write", "pull-requests:write"},
                             {"gh issue", "gh label", "gh pr create", "gh workflow run", "git commit", "git push"}, {"pipeline.edits.runner"}),
+    "merge-confirm-notice.yml": entry(py={"pipeline.auto_notice"}),      # 병합 알림 둘(2026-11-23, 확인 031): 쓰기 권한·쓰기 명령 없음 — 읽기 권한만으로 GitHub 를 읽고 텔레그램 평문 한 통(꺼진 채 병합)
+    "merge-ready-notice.yml": entry(py={"pipeline.auto_notice"}),
     "naver.yml": entry({"contents:write", "issues:write"}, {"git commit", "git push"}, {"pipeline.plan", "pipeline.run"}),
     "operator-reply.yml": entry({"issues:write"}, py={"pipeline.operator_loop"}),
     "ops-inbox.yml": entry({"issues:write"}, py={"scripts/ops_inbox.py"}),
@@ -167,6 +169,8 @@ COUNTS = {
     "chanceblog.yml": {"git push": 1, "git commit": 1, "gh workflow run": 1},
     "guardrails.yml": {},
     "issue-edit.yml": {"git push": 1, "git commit": 1, "gh pr create": 1, "gh issue": 2, "gh label": 4, "gh workflow run": 1},
+    "merge-confirm-notice.yml": {},
+    "merge-ready-notice.yml": {},
     "naver.yml": {"git push": 1, "git commit": 1},
     "operator-reply.yml": {},
     "ops-inbox.yml": {},

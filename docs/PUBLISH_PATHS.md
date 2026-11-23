@@ -73,6 +73,7 @@
 | `pr-scope-check.yml` | — | PR 에 범위 검사 코멘트 | PR | pull-requests 쓰기, `gh pr comment` | — | 아니오 |
 | `ops-inbox.yml`, `watchdog.yml`, `operator-reply.yml`, `telegram-inbox.yml` | — | 이슈·코멘트·라벨만 쓴다(파일·브랜치 없음) | 정기·이슈·수동 | issues 쓰기 | — | 아니오 |
 | `guardrails.yml`, `ai-request.yml`, `telegram-test.yml` | — | 읽기 전용(검사·알림) | push·수동 | 없음 | — | 아니오 |
+| `merge-ready-notice.yml`, `merge-confirm-notice.yml` | — | 읽기 전용 알림 둘: 병합 부탁 PR 의 검사 결과(병합 전)와 main 병합 결과(병합 후)를 읽고 텔레그램 평문 한 통만 보낸다. 켬 상태 파일 `pipeline/auto_notice.json` 이 `off` 면 아무것도 읽지도 보내지도 않는다(기본값). 가지 코드는 내려받지도 실행하지도 않는다 | `workflow_run`(자동 PR 만들기·main 규칙 검사가 끝난 뒤) | **없음**(`contents`·`pull-requests`·`actions` 읽기만, `gh pr merge` 없음) | — | 아니오 |
 | `chance-shadow.yml` | — | **그림자 실행**: 후보 글을 읽기 전용으로 만들어 평가만 한다(§5 — 그림자 실행 코드(GATE 묶음)가 먼저 병합된 뒤에만 안전하다) | 수동 전용 | **없음**(`contents: read`) | — | 아니오 |
 
 `contents: write` 를 가진 워크플로는 정확히 아홉 개(`blogger-en.yml`·`blogger-ko.yml`·`blogger.yml`·`chance-fix-images.yml`·`chanceblog.yml`·`issue-edit.yml`·`naver.yml`·`sync-issue-form.yml`·`tistory.yml`)이고, 글 전체를 커밋하는 `git add -A` 는 P1·P2 의 두 파일에만 있으며,
