@@ -27,6 +27,7 @@ AI_BRANCH = "ai/claude/wf-pr-ready-1"
 DEFAULT_PULL_REQUEST_TYPES = ["opened", "synchronize", "reopened"]          # `types` 를 적지 않은 pull_request 의 기본 이벤트 종류(GitHub 규칙)
 SCOPE = "pr-scope-check.yml"
 INBOX = "ops-inbox.yml"
+WORKFLOW_RUN_NOTICES = ("merge-ready-notice.yml", "merge-confirm-notice.yml")      # `workflow_run` 을 쓰는 유일한 워크플로 둘(병합 알림 자동화, 2026-11-23) — 검증기 WF-16 의 허용 목록과 같다
 
 
 def load(name):
@@ -89,7 +90,13 @@ class PullRequestScreenTest(unittest.TestCase):
         self.assertNotIn("pull_request", vr._triggers(self.workflows["guardrails.yml"]))       # 가드레일 검사는 push 때 이미 끝난다
         for name, data in self.workflows.items():
             self.assertNotIn("pull_request_target", vr._triggers(data), name)
-            self.assertNotIn("workflow_run", vr._triggers(data), name)                         # 다른 워크플로의 끝에 기대어 PR 화면에 줄을 더하지 않는다
+            if name in WORKFLOW_RUN_NOTICES:
+                # 병합 알림 둘(2026-11-23, G-A13·G-A14)만 예외다 — `workflow_run` 하나뿐인 트리거라 PR 이벤트로는 돌지 않고, `workflow_run` 의 실행은 PR 머리 커밋이 아니라 기본 가지의
+                # 최신 커밋에 붙어 PR 화면의 검사 줄을 더하지 않는다(검증기 WF-16 이 이 둘 말고는 `workflow_run` 을 오류로 막는다).
+                self.assertEqual(set(vr._triggers(data)), {"workflow_run"}, name)
+            else:
+                self.assertNotIn("workflow_run", vr._triggers(data), name)                     # 다른 워크플로의 끝에 기대어 PR 화면에 줄을 더하지 않는다
+        self.assertEqual(sorted(name for name, data in self.workflows.items() if "workflow_run" in vr._triggers(data)), sorted(WORKFLOW_RUN_NOTICES))
 
     def test_opening_updating_or_reopening_an_ai_branch_pull_request_starts_no_running_job(self):
         for action in ("opened", "reopened", "synchronize", "ready_for_review"):
