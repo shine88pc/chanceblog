@@ -292,7 +292,10 @@ def compose_ready(number, title, body):
     rest = clean_inline(title[found.end():])
     if line_problem(rest) or line_problem(title.translate(_TILDE_CHARS)):
         raise Skip("title_problem")
-    head = f"[{number}] {READY_LABEL}{TITLE_SEPARATOR}{shorten(rest, READY_TITLE_LIMIT)}"
+    shown = shorten(rest, READY_TITLE_LIMIT)
+    if line_problem(shown):                                  # 자르다가 새로 생긴 모양(꼬리가 끊겨 도메인·비밀 꼴이 되는 것)도 거른다 — 요점 줄과 같은 '거른 뒤 자른 뒤에도 한 번 더'
+        raise Skip("title_problem")
+    head = f"[{number}] {READY_LABEL}{TITLE_SEPARATOR}{shown}"
     chosen = []
     for point in point_lines(body):
         if len(_ready_text(head, chosen + [point], number)) > MESSAGE_LIMIT:

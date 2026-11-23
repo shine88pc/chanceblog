@@ -530,6 +530,21 @@ class ComposeReadyTest(unittest.TestCase):
                     an.compose_ready(NUMBER, title, BODY)
                 self.assertEqual(caught.exception.code, "title_problem")
 
+    def test_a_shape_made_by_cutting_the_title_stops_the_message_too(self):
+        """제목을 80자로 자르다가 꼬리가 끊겨 새로 생긴 도메인 꼴·비밀 꼴도 거른다(자르기 전 제목 전체에는 없던 모양) — 요점 줄의 '자른 뒤에도 한 번 더' 와 같은 규칙. 퍼징(씨앗 777)이 찾은 꼴이다."""
+        for label, tail in (("address", "node" + DOT + "js" + "x" * 40), ("aws key", AWS_KEY_SHAPE[:4] + "C" * 40)):
+            pad = "가" * (50 if label == "address" else 58) + ("" if label == "address" else " ")
+            title = "[M105] " + pad + tail
+            rest = title[len("[M105] "):]
+            with self.subTest(label):
+                self.assertEqual(an.line_problem(rest), "")                                           # 전제: 자르기 전 제목 전체에는 그 모양이 없다(영문 꼬리가 24자·16자를 넘는다)
+                self.assertNotEqual(an.line_problem(an.shorten(rest, an.READY_TITLE_LIMIT)), "")      # 전제: 자른 뒤에는 그 모양이 된다
+                with self.assertRaises(an.Skip) as caught:
+                    an.compose_ready(NUMBER, title, BODY)
+                self.assertEqual(caught.exception.code, "title_problem")
+        ok = "[M105] " + "가" * 50 + "node" + DOT + "js 로 정리"                                           # 대조: 자르지 않아도 되는 정상 제목
+        self.assertEqual(an.message_problem(an.compose_ready(NUMBER, ok, BODY)), "")
+
     def test_a_title_of_200_characters_is_allowed_and_201_is_not(self):
         self.assertEqual(an.message_problem(an.compose_ready(NUMBER, "[M105] " + "가" * 193, "")), "")
         with self.assertRaises(an.Skip):
