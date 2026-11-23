@@ -598,6 +598,17 @@ class OtherDocsAgreeTest(unittest.TestCase):
             for word in ("접수 코멘트(봇)가 되풀이한 대상번호·선택과 지금 본문을 읽은 값이 같을 때만", "접수 대조", "결함 D-408"):
                 self.assertIn(word, text, (rel, word))
 
+    def test_the_forgery_and_known_limit_sentences_of_the_status_tool_output_are_in_the_security_row_and_the_runbook(self):
+        """검증자 S 의 V2·V7·V8(결함 D-408): 본문·코멘트 줄의 `| ` 표지와 기계가 읽는 한 줄 `접수대조=…`, '같음도 승인이 아니다', '쓰기 권한자는 같은 login 의 워크플로로 봇 코멘트도 만들 수 있다' 가
+        규칙 행(G-S9a)과 런북 J2 7번에 적혀 있다."""
+        row = next(line for line in rel_text("docs/SECURITY_GUARDRAILS.md").splitlines() if line.startswith("| G-S9a |"))
+        item = next(line for line in rel_text("docs/AGENT_RUNBOOK.md").splitlines() if line.startswith("7. **열린 뒤에 고쳐진 이슈**"))
+        for label, text in (("G-S9a", row), ("RUNBOOK 7", item)):
+            for needle in ("표지가 붙", "`접수대조=", "표지 없는 도구 줄과", "위조일 수 있", "같음도 승인이 아니", "쓰기 권한자는 같은 login"):
+                self.assertIn(needle, text, (label, needle))
+        self.assertIn("`" + chr(92) + "| ` 표지", row)             # 표 안이라 세로줄은 백슬래시로 가려 적는다
+        self.assertIn("`| ` 표지", item)
+
     def test_the_task_requests_readme_rule_for_the_request_form_names_the_scope_choices_and_says_it_is_not_an_approval(self):
         """작업요청 README 규칙 7(양식 `[요청]` 이슈를 어떻게 다루나)은 규칙 3 의 문장과 따로 한 번 더 `[요청]` 은 승인이 아니라고 적고, 진행 범위의 두 선택지(코드의 값)를 말한다."""
         rule = next(line for line in rel_text("인수인계/작업요청/README.md").splitlines() if line.startswith("7. 운영자가 양식"))

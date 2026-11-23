@@ -42,6 +42,7 @@ API = "https://api.github.com"
 KST = datetime.timezone(datetime.timedelta(hours=9))
 LONG_STEP_SECONDS = 8      # 이 길이 이상 걸린 단계는 목록에 보인다(짧은 단계는 줄인다)
 TIMEOUT = 30
+BODY_MARK = "| "          # 본문·코멘트 줄 머리에 붙는 표지 — 도구 줄에는 절대 없다(검증자 S 의 V2: 본문에 심은 가짜 '접수 대조' 줄이 도구 줄과 같은 모양으로 찍히던 틈)
 BODY_LINES = 60            # 이슈 본문·코멘트에서 화면에 보이는 최대 줄 수
 # 요청 주소에 들어가는 값은 모양을 먼저 거른다: fullmatch(끝의 개행도 거부)이고 첫 글자는 영문·숫자라 `.`·`..` 구간(경로 이동)이 못 들어온다
 _REPO_RX = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.\-]*/[A-Za-z0-9][A-Za-z0-9_.\-]*")
@@ -251,7 +252,7 @@ def cmd_issues(client, args):
 def _body_lines(text, indent="  "):
     lines = [safe(line, 300) for line in str(text or "").splitlines()]
     lines = [line for line in lines if line]
-    shown = [indent + line for line in lines[:BODY_LINES]]
+    shown = [indent + BODY_MARK + line for line in lines[:BODY_LINES]]
     if len(lines) > BODY_LINES:
         shown.append(indent + f"… (이후 {len(lines) - BODY_LINES}줄 생략)")
     return shown
@@ -273,6 +274,8 @@ _ACK_SHAPE_ERROR = "양식 모양이 달라 처리하지 못했습니다"       
 SHAPE_ERROR_VALUE = "양식 모양 오류(접수하지 못함)"
 FORM_PREFIXES = (loop.REPLY_TITLE_PREFIX.rstrip(), loop.TASK_TITLE_PREFIX.rstrip())          # `[답변]`·`[요청]` — 접수 대상 이슈의 제목 머리(접수 코드와 같은 값)
 NOT_OWNER_CODES = ("no_owner", "not_owner", "not_owner_association")
+# 본문 앞에 한 번 더 내는 기계가 읽는 한 줄 `접수대조=<낱말>` 의 낱말(status → 낱말). 읽는 쪽은 표지 없는 도구 줄과 이 줄만 믿는다 — 본문·코멘트의 줄에는 BODY_MARK 가 붙어 이 모양이 될 수 없다.
+MACHINE_WORDS = {"same": "same", "differs": "differs", "no_ack": "no_ack", "ack_unreadable": "unreadable", "not_owner": "not_owner"}
 
 
 def ack_head(text):
@@ -344,7 +347,7 @@ def ack_check(issue, comments, owner):
                 "lines": ["  ⚠ 접수 대조: 접수 코멘트의 값을 읽지 못했습니다(형식이 다릅니다). 승인으로 읽지 말고 운영자에게 번호 있는 확인 요청으로 다시 묻습니다."]}
     if acked == now:
         return {"status": "same", "ack": acked, "current": now,
-                "lines": [f"  접수 대조: 같음 — 접수 코멘트가 되풀이한 값과 지금 본문을 읽은 값이 같습니다({safe(acked, 120)})."]}
+                "lines": [f"  접수 대조: 같음 — 접수 코멘트가 되풀이한 값과 지금 본문을 읽은 값이 같습니다({safe(acked, 120)}) (승인은 선택이 요청 파일의 approve 와 같을 때만)."]}
     return {"status": "differs", "ack": acked, "current": now,
             "lines": [f"  ⚠ 접수 대조: 다름 — 접수 코멘트({safe(acked, 120)}) ≠ 지금 본문({safe(now if now is not None else '읽지 못함', 120)}). 본문이 접수 뒤에 바뀐 것으로 보입니다 — "
                       "승인으로 읽지 말고 운영자에게 번호 있는 확인 요청으로 다시 묻습니다."]}
@@ -360,6 +363,7 @@ def cmd_issue(client, args):
     check = ack_check(issue, comments, client.repo.split("/")[0])
     if check:
         lines += check["lines"]
+        lines.append("접수대조=" + MACHINE_WORDS[check["status"]])        # 본문 앞의 기계가 읽는 한 줄 — 본문·코멘트 줄은 `| ` 표지가 붙어 이 모양이 될 수 없다
     lines += _body_lines(issue.get("body"))
     for number, comment in enumerate(comments, 1):
         lines.append(f"  [코멘트 {number}] {safe((comment.get('user') or {}).get('login'), 30)}({safe(comment.get('author_association'), 14)}) {kst(comment.get('created_at'))}")
