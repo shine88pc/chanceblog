@@ -186,7 +186,8 @@ class ListsMatchTest(unittest.TestCase):
     def test_the_safety_and_external_connection_rules_are_documented_in_full(self):
         """총괄(AI)의 보수적 판단(결함 D-347)으로 더한 두 표시의 규칙 낱말·이름 목록·모듈·스킴·예시 주소·문서 확장자·도메인·셸 확장자가 §7-6 에 빠짐없이 있다."""
         section = subsection("7-6")
-        words = (mp.SAFETY_GUARD_WORDS + mp.SAFETY_GUARD_DOCS + mp.SAFETY_GUARD_FILES + mp.SAFETY_GUARD_DIRS + mp.EXTERNAL_MODULES + mp.EXTERNAL_SCHEMES + mp.EXAMPLE_HOSTS + mp.DOC_SUFFIXES
+        words = (mp.SAFETY_GUARD_WORDS + mp.SAFETY_GUARD_DOCS + mp.SAFETY_GUARD_FILES + mp.SAFETY_GUARD_DIRS + mp.SAFETY_GUARD_TREES + mp.SAFETY_GUARD_PREFIXES
+                 + mp.EXTERNAL_MODULES + mp.EXTERNAL_SCHEMES + mp.EXAMPLE_HOSTS + mp.DOC_SUFFIXES
                  + mp.GENERIC_TLDS + mp.FILE_NAME_TLDS + mp.SHELL_SUFFIXES + tuple("." + name for name in mp.EXAMPLE_TOP_LEVELS))
         for word in words:
             with self.subTest(word=word):
@@ -799,6 +800,17 @@ class NamedSafetyFilesExistTest(unittest.TestCase):
                 self.assertTrue((ROOT / name).is_dir(), name)
                 self.assertTrue(list((ROOT / name).glob("*.py")), name)
 
+    def test_every_listed_tree_exists_and_every_test_prefix_matches_a_real_file(self):
+        """폴더·접두사 단위 규칙(결함 D-407)도 이름이 바뀌거나 지워지면 목록을 고치라고 실패한다 — 폴더에는 파일이 있고, 접두사는 실제 시험 파일에 맞는다."""
+        for name in mp.SAFETY_GUARD_TREES:
+            with self.subTest(tree=name):
+                self.assertTrue((ROOT / name).is_dir(), name)
+                self.assertTrue([path for path in (ROOT / name).rglob("*") if path.is_file()], name)
+        tests = sorted(path.relative_to(ROOT).as_posix() for path in (ROOT / "tests").glob("*") if path.is_file())
+        for prefix in mp.SAFETY_GUARD_PREFIXES:
+            with self.subTest(prefix=prefix):
+                self.assertTrue([rel for rel in tests if rel.startswith(prefix)], prefix)
+
     def test_the_names_that_do_not_exist_in_this_repository_are_not_listed(self):
         for name in ("pipeline/generator.py", "pipeline/blogger_generator.py"):
             self.assertNotIn(name, mp.SAFETY_GUARD_FILES)
@@ -807,7 +819,7 @@ class NamedSafetyFilesExistTest(unittest.TestCase):
             self.assertIn(name, mp.SAFETY_GUARD_FILES)
 
     def test_the_lists_have_no_duplicates_and_no_policy_file(self):
-        for names in (mp.SAFETY_GUARD_FILES, mp.SAFETY_GUARD_DOCS, mp.SAFETY_GUARD_DIRS, mp.SITE_INTERNAL_ENTRIES):
+        for names in (mp.SAFETY_GUARD_FILES, mp.SAFETY_GUARD_DOCS, mp.SAFETY_GUARD_DIRS, mp.SAFETY_GUARD_TREES, mp.SAFETY_GUARD_PREFIXES, mp.SITE_INTERNAL_ENTRIES):
             self.assertEqual(len(set(names)), len(names))
         self.assertEqual(set(mp.SAFETY_GUARD_FILES) & set(mp.POLICY_SELF_FILES), set())
         self.assertEqual(set(mp.SAFETY_GUARD_DOCS) & set(mp.POLICY_SELF_FILES), set())

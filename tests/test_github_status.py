@@ -396,9 +396,9 @@ class HostileTextTest(unittest.TestCase):
         routes = {f"{P}/issues/73": {"number": 73, "state": "open", "title": "t", "user": {"login": "u"}, "author_association": "OWNER", "created_at": "2026-10-29T00:00:00Z", "labels": [], "body": body},
                   f"{P}/issues/73/comments?per_page=50": []}
         lines = run_cli(["issue", "73"], routes)[1]
-        body_lines = [line for line in lines if line.startswith("  가")]
+        body_lines = [line for line in lines if line.startswith("  | 가")]            # 본문 줄은 `  | ` 표지가 붙는다(2차, 검증자 S 의 V2 — 도구 줄과 구분)
         self.assertEqual(len(body_lines), gs.BODY_LINES)
-        self.assertLessEqual(max(len(line) for line in body_lines), 2 + 300)
+        self.assertLessEqual(max(len(line) for line in body_lines), 2 + 2 + 300)
         self.assertTrue(any("이후 40줄 생략" in line for line in lines))
 
 

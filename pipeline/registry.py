@@ -90,6 +90,9 @@ PACKAGE_PLATFORMS = {"tistory": "티스토리", "naver": "네이버"}
 PACKAGE_MODES = ("off", "package")       # 이 채널에서 쓸 수 있는 mode(draft·auto 는 올릴 곳이 없다)
 # 시크릿 이름에 이 낱말이 들면 막는다(실수 방지용 보조 — 포함 검사라 우회 철자는 통과한다. 구조적 보장은 역할 제한이다). 대문자 환경변수 이름 기준이다.
 ACCOUNT_SECRET_WORDS = ("PASSWORD", "PASSWD", "PWD", "COOKIE", "SESSION", "LOGIN", "CREDENTIAL")
+# 이 채널의 `llm_api_key` 시크릿 이름(독립 감사 BA-S1-5, 결함 D-410): 그 값은 Gemini 호출의 키로 구글에 전송되므로 `TELEGRAM_BOT_TOKEN`·`GITHUB_TOKEN` 같은 다른 서비스의 이름이면 안 된다 — 이름에 `GEMINI` 가 든 대문자 이름이거나,
+# 여러 블로그가 같이 쓰는 LLM 키로 shared_secrets 에 적힌 이름이어야 한다(shared_secrets 의 이름이라도 다른 블로그가 llm_api_key 가 아닌 역할 — 예: unsplash_key — 로 쓰는 이름은 LLM 키가 아니다).
+_GEMINI_NAME_RE = re.compile(r"[A-Z0-9_]*GEMINI[A-Z0-9_]*")           # fullmatch 로 쓴다(끝의 개행을 허용하지 않는다)
 
 _KEY_RE = re.compile(r"^[a-z][a-z0-9_]{1,30}$")
 _ENV_RE = re.compile(r"^[A-Z][A-Z0-9_]{2,63}$")
@@ -302,7 +305,14 @@ def _ads_errors(blog, label):
     return errors
 
 
-def _package_errors(raw, blog, label, secrets):
+def _llm_key_name_ok(env_name, shared, roles_by_name):
+    """package 채널의 llm_api_key 이름이 허용되나(위 설명): GEMINI 가 든 대문자 이름이거나, shared_secrets 의 이름이면서 llm_api_key 가 아닌 역할로는 쓰이지 않는 것."""
+    if _GEMINI_NAME_RE.fullmatch(env_name):
+        return True
+    return env_name in shared and not (roles_by_name.get(env_name, set()) - {"llm_api_key"})
+
+
+def _package_errors(raw, blog, label, secrets, shared=frozenset(), roles_by_name=None):
     """초안 패키지 채널(platform tistory·naver)의 규칙. 공식 자동 게시 수단이 없어 글을 이슈로 보여 주기만 하고, 계정 정보는 저장·처리하지 않는다
     (docs/SECURITY_GUARDRAILS.md G-S7). ① mode 는 off·package 만 ② channel.label 은 그 채널의 라벨(티스토리·네이버) ③ secrets 는 llm_api_key 만
     ④ 시크릿 이름에 PASSWORD·COOKIE·SESSION·LOGIN 같은 계정 정보 낱말이 없어야 한다. '계정 정보를 다루지 않는다'는 원칙의 구조적 보장은 ③(역할 제한)이고,
@@ -330,6 +340,10 @@ def _package_errors(raw, blog, label, secrets):
         if found:
             errors.append(f"{label}: secrets.{role}의 이름 {env_name}에 계정 정보를 뜻하는 낱말({found})이 있습니다 — "
                           "이 채널은 비밀번호·쿠키·세션·로그인 정보를 저장하거나 처리하지 않습니다.")
+    llm_name = secrets.get("llm_api_key")
+    if isinstance(llm_name, str) and _ENV_RE.match(llm_name) and not _llm_key_name_ok(llm_name, shared, roles_by_name or {}):
+        errors.append(f"{label}: secrets.llm_api_key의 이름 {llm_name}은(는) Gemini 키 이름이 아닙니다 — 이 채널의 llm_api_key 값은 Gemini 호출의 키로 구글에 전송되므로 이름에 GEMINI 가 들어 있어야 합니다"
+                      "(예: GEMINI_API_KEY). 여러 블로그가 같이 쓰는 LLM 키라면 shared_secrets 에 적고(다른 역할로 쓰이는 이름은 안 됩니다) 운영자가 정합니다.")
     return errors
 
 
@@ -465,6 +479,12 @@ def validate_registry(reg, root=None):
     for name in shared:
         if not isinstance(name, str) or not _ENV_RE.match(name):
             errors.append(f"shared_secrets 항목이 올바른 이름이 아닙니다: {name!r}")
+    roles_by_name = {}                       # 시크릿 이름 -> 레지스트리 어딘가에서 그 이름을 쓰는 역할들(package 채널의 llm_api_key 이름 검사가 쓴다)
+    for raw in blogs:
+        used = merged_blog(reg, raw).get("secrets") if isinstance(raw, dict) else None
+        for role, env_name in (used.items() if isinstance(used, dict) else ()):
+            if isinstance(env_name, str):
+                roles_by_name.setdefault(env_name, set()).add(role)
     seen_keys = set()
     secret_owner = {}
     seen_channel_labels, seen_channel_keys = {}, {}
@@ -589,7 +609,7 @@ def validate_registry(reg, root=None):
                     f"{label}: 시크릿 이름 {env_name}을(를) 블로그 '{owner}'도 쓰고 있습니다. "
                     "블로그마다 고유 이름을 쓰거나 shared_secrets에 명시하세요.")
         if platform in PACKAGE_PLATFORMS:
-            errors.extend(_package_errors(raw, blog, label, secrets))
+            errors.extend(_package_errors(raw, blog, label, secrets, shared, roles_by_name))
 
         if not isinstance(blog.get("ad_surface"), bool):
             errors.append(f"{label}: ad_surface는 true/false여야 합니다.")

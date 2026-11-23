@@ -219,6 +219,355 @@ def _is_alert_step(step):
             and isinstance(timeout, (int, float)) and not isinstance(timeout, bool) and timeout > 0)
 
 
+# ----------------------------------------------------------------------------
+# WF-3·WF-4 확장과 쓰기 권한 허용 표 (독립 감사 BA-S1-4, 결함 D-409)
+# ----------------------------------------------------------------------------
+# WF-3 확장: 낯선 사람이 쓴 글(코멘트·리뷰)이 시크릿·쓰기 토큰이 있는 실행을 일으키는 트리거 — `{트리거: (허용하는 워크플로 파일 이름, …)}` 허용 목록에 적힌 것만 쓴다. 지금 쓰는 곳은 없다(빈 목록).
+# 새로 쓰려면 이 목록에 파일 이름을 더하는 변경을 운영자가 직접 병합한다(검증기는 안전 장치 파일이라 AI 병합 대상이 아니다). `workflow_run` 은 이 목록이 아니라 따로 다룬다.
+WF3_UNTRUSTED_TRIGGERS = {"issue_comment": (), "pull_request_review": (), "pull_request_review_comment": (), "discussion": (), "discussion_comment": ()}
+
+
+def _trigger_findings(rel, triggers):
+    out = []
+    name = Path(rel).name
+    for trigger in triggers:
+        key = str(trigger).lower()
+        if key in WF3_UNTRUSTED_TRIGGERS and name not in WF3_UNTRUSTED_TRIGGERS[key]:
+            out.append(err("WF-3", f"{_shown(key)} 트리거는 허용 목록(WF3_UNTRUSTED_TRIGGERS)에 없습니다 — 낯선 사람이 쓴 코멘트·리뷰가 시크릿·쓰기 토큰이 있는 실행을 일으킵니다. "
+                                   "꼭 필요하면 검증기의 허용 목록에 이 파일 이름을 더하는 변경을 운영자가 직접 병합합니다 (G-A3)", rel))
+    return out
+
+
+# WF-4 확장: 식 치환(`${{ … }}`)은 셸이나 스크립트가 읽기 **전에** 글자로 들어간다. 그래서 `github.*` 의 신뢰할 수 없는 값뿐 아니라 그 값이 거쳐 오는 길 — env(`env: T: ${{ github.event.issue.title }}` 뒤 run 의 `${{ env.T }}`)·
+# 단계 출력(`steps.<id>.outputs`)·job 출력(`needs.<job>.outputs`)·matrix — 을 run 과 actions/github-script 의 script 에 `${{ }}` 로 넣는 것도 막는다. 값이 신뢰할 수 없는 곳에서 왔다고 알 수 있으면 오류,
+# 알 수 없으면 경고다: env 는 정의를 찾아(단계 → job → 워크플로) 신뢰할 수 없는 식이 들었으면 오류·글자 그대로의 값이면 통과·정의를 못 찾거나 다른 식이면 경고, 단계·job 출력은 신뢰할 수 없는 입력을 받은 단계에서
+# 나왔으면 오류·그 밖에는 경고, matrix 는 같은 파일의 고정된 목록이면 통과·`fromJSON` 같은 계산된 값이면 경고다. 고치는 방법은 하나다 — 값을 env 로 넘기고 셸에서 "$이름"(스크립트는 process.env)으로 읽는다.
+# 한계: 한 파일 안의 길만 따라간다(다른 워크플로·재사용 워크플로의 출력·`$GITHUB_ENV` 로 만든 값은 경고로만 알린다).
+_ENV_REF = re.compile(r"(?<![\w.\-])env\.([\w\-]+)")
+_STEPS_REF = re.compile(r"(?<![\w.\-])steps\.([\w\-]+)\.outputs(?![\w\-])")
+_NEEDS_REF = re.compile(r"(?<![\w.\-])needs\.([\w\-]+)\.outputs(?:\.([\w\-]+))?")
+_MATRIX_REF = re.compile(r"(?<![\w.\-])matrix\.([\w\-]+)")
+_DYNAMIC_REF = re.compile(r"(?<![\w.\-])(?:env|steps|needs|matrix)\[")        # 색인이 문자열 리터럴이 아닌 접근(리터럴 색인은 `_expression_names` 가 점 표기로 바꾼다)
+_STEPS_BARE = re.compile(r"(?<![\w.\-])steps\.([\w\-]+)(?![\w\-.])")                 # `steps.<id>` 뒤에 속성이 없는 꼴 — 단계 객체 통째(outputs 가 든다)
+_NEEDS_BARE = re.compile(r"(?<![\w.\-])needs\.([\w\-]+)(?![\w\-.])")                 # `needs.<job>` 뒤에 속성이 없는 꼴 — job 객체 통째(outputs 가 든다)
+_WHOLE_MAP = re.compile(r"(?<![\w.\-])(env|steps|needs|matrix)(?:\.\*|(?![\w.\[\-]))")   # 맵 통째: `toJSON(env)`(뒤에 속성이 없는 이름)·`env.*`·`join(steps.*.outputs, ',')`
+_INPUTS_NAME = re.compile(r"(?<![\w.\-])(?:github\.event\.)?inputs(?![\w])")           # 워크플로 입력(`inputs.x`·`github.event.inputs.x`·`toJSON(inputs)`)
+_ENV_DEPTH = 4                                                                  # env 가 다른 env 를 가리키는 사슬을 따라가는 깊이 상한
+
+
+def _context_refs(text):
+    """글 안의 `${{ }}` 식에서 env·단계 출력·job 출력·matrix 를 읽는 곳 → 나온 순서의 [(종류, 이름)] (같은 것은 한 번). 이름은 소문자로 접은 것이다."""
+    refs = []
+    for _block, body in _expression_blocks(text):
+        names = _expression_names(body)
+        for kind, rx in (("env", _ENV_REF), ("steps", _STEPS_REF), ("matrix", _MATRIX_REF)):
+            refs += [(kind, found.group(1)) for found in rx.finditer(names)]
+        refs += [("needs", found.group(1) + "." + (found.group(2) or "")) for found in _NEEDS_REF.finditer(names)]          # `job.출력` — 출력 이름을 모르는 꼴(`needs.job.outputs` 통째)은 `job.`
+        refs += [("steps", found.group(1)) for found in _STEPS_BARE.finditer(names)]                       # `toJSON(steps.a)` — 단계 하나를 통째로(출력이 든다)
+        refs += [("needs", found.group(1) + ".") for found in _NEEDS_BARE.finditer(names)]                  # `toJSON(needs.a)` — job 하나를 통째로(출력이 든다)
+        refs += [(found.group(1) + "_all", "") for found in _WHOLE_MAP.finditer(names)]                      # `toJSON(env)`·`env.*` — 맵 통째 읽기(검증자 S 의 V4(a))
+        if _DYNAMIC_REF.search(names):
+            refs.append(("dynamic", ""))
+    return list(dict.fromkeys(refs))
+
+
+def _has_expression(node):
+    """값(글자·목록·사전) 안에 `${{` 식이 있나."""
+    if isinstance(node, str):
+        return "${{" in node
+    if isinstance(node, dict):
+        return any(_has_expression(key) or _has_expression(value) for key, value in node.items())
+    if isinstance(node, list):
+        return any(_has_expression(value) for value in node)
+    return False
+
+
+def _env_values(node):
+    env = node.get("env") if isinstance(node, dict) else None
+    return {str(key): value for key, value in env.items()} if isinstance(env, dict) else {}
+
+
+def _step_env(data, job, step):
+    """단계에서 보이는 env: {소문자 이름: (원래 이름, 값)} — 워크플로 → job → 단계 순으로 덮어쓴다(안쪽이 이긴다)."""
+    merged = {}
+    for scope in (data, job, step):
+        for name, value in _env_values(scope).items():
+            merged[name.lower()] = (name, value)
+    return merged
+
+
+def _tainted_env_names(data, job, step):
+    """단계에서 보이는 env 중 신뢰할 수 없는 입력이 든 식으로 정해지는 것의 원래 이름들."""
+    return [name for name, value in _step_env(data, job, step).values() if isinstance(value, str) and _untrusted_expression(value)]
+
+
+def _tainted_step_ids(data, job):
+    """job 안에서 신뢰할 수 없는 입력을 받은 단계의 id(소문자). 입력을 받았다 = 단계의 run·env·with 에 신뢰할 수 없는 식이 있거나, run 이 신뢰할 수 없는 식으로 정해진 env 를 셸 변수로 읽으며
+    출력 파일(`GITHUB_OUTPUT`·`set-output`)에 쓴다. 그런 단계의 출력은 입력이 거쳐 오는 길이라 뒤 단계가 `${{ steps.<id>.outputs.… }}` 로 run 에 넣으면 주입이다."""
+    tainted = set()
+    for step in job.get("steps") or []:
+        if not isinstance(step, dict) or not isinstance(step.get("id"), str):
+            continue
+        texts = [step.get("run")] + list(_env_values(step).values()) + (list(step["with"].values()) if isinstance(step.get("with"), dict) else [])
+        direct = any(isinstance(text, str) and _untrusted_expression(text) for text in texts)
+        run = step.get("run") if isinstance(step.get("run"), str) else ""
+        via_shell = bool(run) and ("GITHUB_OUTPUT" in run or "set-output" in run) and any(
+            re.search(r"\$\{?" + re.escape(name) + r"(?![\w])", run) for name in _tainted_env_names(data, job, step))
+        if direct or via_shell:
+            tainted.add(step["id"].lower())
+    return tainted
+
+
+def _job_output_tainted(data, job_name, output):
+    """`needs.<job>.outputs.<이름>` 이 신뢰할 수 없는 입력이 거쳐 오는 값인가 — job 의 outputs 식이 신뢰할 수 없는 식이거나 그런 단계의 출력을 가리킨다(출력 이름이 빈 글이면 그 job 의 출력 어느 것이든).
+    job 이나 출력을 못 찾으면 거짓(그 경우는 경고로만 알린다)."""
+    jobs = data.get("jobs") if isinstance(data.get("jobs"), dict) else {}
+    job = next((value for key, value in jobs.items() if str(key).lower() == job_name and isinstance(value, dict)), None)
+    outputs = job.get("outputs") if isinstance(job, dict) and isinstance(job.get("outputs"), dict) else {}
+    tainted_steps = _tainted_step_ids(data, job) if isinstance(job, dict) else set()
+    for key, value in outputs.items():
+        if output and str(key).lower() != output:
+            continue
+        if isinstance(value, str) and (_untrusted_expression(value) or any(kind == "steps" and name in tainted_steps for kind, name in _context_refs(value))):
+            return True
+    return False
+
+
+def _matrix_static(job, key):
+    """`matrix.<키>` 가 같은 파일에 적힌 고정 값인가(식 없는 목록·include 항목). 계산된 matrix(`fromJSON(…)`)나 못 찾으면 거짓."""
+    strategy = job.get("strategy") if isinstance(job, dict) else None
+    matrix = strategy.get("matrix") if isinstance(strategy, dict) else None
+    if not isinstance(matrix, dict):
+        return False
+    key_folded = key.lower()
+    found = False
+    for name, value in matrix.items():
+        if str(name).lower() == key_folded and str(name).lower() not in ("include", "exclude"):
+            found = True
+            if _has_expression(value):
+                return False
+    include = matrix.get("include")
+    if include is not None and not isinstance(include, list):
+        if _has_expression(include):
+            return False                      # 계산된 include(`${{ fromJSON(…) }}`) — 고정 값이 아니다
+        include = []                          # 깨진 모양(숫자·글) — 읽을 항목이 없다(순회하지 않는다 — 검증자 S 의 V3)
+    for entry in include or []:
+        if isinstance(entry, dict):
+            for name, value in entry.items():
+                if str(name).lower() == key_folded:
+                    found = True
+                    if _has_expression(value):
+                        return False
+    return found and not _has_expression(matrix.get("exclude"))
+
+
+def _matrix_tainted(job, key=None):
+    """matrix 값(목록·include 항목)에 신뢰할 수 없는 입력을 직접 적은 식이 있나(검증자 S 의 V4(b) — 출처를 아니 경고가 아니라 오류). key 가 있으면 그 키의 값만, 없으면 모든 키(통째 읽기)."""
+    strategy = job.get("strategy") if isinstance(job, dict) else None
+    matrix = strategy.get("matrix") if isinstance(strategy, dict) else None
+    if not isinstance(matrix, dict):
+        return False
+    folded = key.lower() if key else None
+
+    def tainted(node):
+        if isinstance(node, str):
+            return _untrusted_expression(node) is not None
+        if isinstance(node, dict):
+            return any(tainted(item) for pair in node.items() for item in pair)
+        if isinstance(node, list):
+            return any(tainted(item) for item in node)
+        return False
+
+    for name, value in matrix.items():
+        lowered = str(name).lower()
+        if lowered not in ("include", "exclude") and (folded is None or lowered == folded) and tainted(value):
+            return True
+    include = matrix.get("include")
+    for entry in include if isinstance(include, list) else ():
+        if isinstance(entry, dict):
+            for name, value in entry.items():
+                if (folded is None or str(name).lower() == folded) and tainted(value):
+                    return True
+    return False
+
+
+def _has_inputs(text):
+    """글 안의 `${{ … }}` 식이 워크플로 입력(inputs)을 읽나(검증자 S 의 V4(c) — env 가 받은 inputs 도 직접 보간과 같은 수준의 경고)."""
+    return any(_INPUTS_NAME.search(_expression_names(body)) for _block, body in _expression_blocks(text))
+
+
+def _classify_whole(kind, data, job, step, depth=0):
+    """맵 통째 읽기(`toJSON(env)`·`env.*`·`join(steps.*.outputs, ',')` …)의 위험(검증자 S 의 V4(a)): 들어 있는 항목 중 신뢰할 수 없는 입력이 거쳐 온 것이 하나라도 있으면 'error',
+    없어도 통째로 읽으면 항목을 하나씩 알 수 없어 'warn'. github 컨텍스트의 `_WHOLE_CONTEXT` 처리와 같은 결이다. 겹겹이 통째로 읽는 깊은 사슬은 따라가지 않고 경고로 둔다."""
+    if depth >= 2:
+        return "warn"
+    if kind == "env_all":
+        if any(_classify_ref("env", lowered, data, job, step, depth + 1) == "error" for lowered in _step_env(data, job, step)):
+            return "error"
+    elif kind == "steps_all":
+        if _tainted_step_ids(data, job):
+            return "error"
+    elif kind == "needs_all":
+        jobs = data.get("jobs") if isinstance(data.get("jobs"), dict) else {}
+        wanted = job.get("needs") if isinstance(job, dict) else None
+        names = [str(item) for item in wanted] if isinstance(wanted, list) else [str(wanted)] if isinstance(wanted, str) else [str(key) for key in jobs]
+        if any(_job_output_tainted(data, name.lower(), "") for name in names):
+            return "error"
+    elif kind == "matrix_all":
+        if _matrix_tainted(job):
+            return "error"
+    return "warn"
+
+
+def _classify_ref(kind, name, data, job, step, depth=0):
+    """식 치환으로 들어가는 env·출력·matrix 한 곳의 위험: 'error'(신뢰할 수 없는 입력이 거쳐 옴) · 'warn'(출처를 알 수 없음) · None(고정 값)."""
+    if kind == "dynamic":
+        return "warn"
+    if kind.endswith("_all"):
+        return _classify_whole(kind, data, job, step, depth)
+    if kind == "matrix":
+        if _matrix_tainted(job, name):
+            return "error"
+        return None if _matrix_static(job, name) else "warn"
+    if kind == "steps":
+        return "error" if name in _tainted_step_ids(data, job) else "warn"
+    if kind == "needs":
+        job_name, _, output = name.partition(".")
+        return "error" if _job_output_tainted(data, job_name, output) else "warn"
+    entry = _step_env(data, job, step).get(name)                                  # env
+    if entry is None:
+        return "warn"
+    value = entry[1]
+    if not _has_expression(value):
+        return None
+    if isinstance(value, str) and _untrusted_expression(value):
+        return "error"
+    worst = "warn" if isinstance(value, str) and _has_inputs(value) else None          # inputs 를 env 로 받은 값 — 직접 `${{ inputs.x }}` 보간이 경고인 것과 같은 수준(검증자 S 의 V4(c))
+    if depth < _ENV_DEPTH and isinstance(value, str):
+        for inner_kind, inner_name in _context_refs(value):
+            found = _classify_ref(inner_kind, inner_name, data, job, step, depth + 1)
+            if found == "error":
+                return "error"
+            worst = worst or found
+    return worst
+
+
+def _ref_label(kind, name):
+    """오류 문구에 쓰는 이름: env.이름 · steps.id.outputs · needs.job.outputs[.이름] · matrix.키 · 색인으로 읽는 컨텍스트."""
+    if kind == "needs":
+        job, _, output = name.partition(".")
+        return f"needs.{job}.outputs" + (f".{output}" if output else "")
+    if kind == "steps":
+        return f"steps.{name}.outputs"
+    return f"{kind}.{name}" if name else kind.replace("_all", "")
+
+
+_SINK_WORDS = {"run": "run", "script": "github-script 의 script"}
+_REF_HINT = {"env": "env", "steps": "단계 출력", "needs": "job 출력", "matrix": "matrix", "dynamic": "색인으로 읽는 컨텍스트",
+              "env_all": "env 통째 읽기", "steps_all": "단계 출력 통째 읽기", "needs_all": "job 출력 통째 읽기", "matrix_all": "matrix 통째 읽기"}
+
+
+def _sink_findings(rel, data, job, step):
+    """run 과 actions/github-script 의 script 에 들어가는 식 치환의 WF-4 확장 결과(위 설명). run 의 `github.*` 직접 보간·inputs 경고는 check_workflows 가 그대로 맡는다 — 여기서는 env·출력·matrix 와 script 의 직접 보간."""
+    out = []
+    sinks = []
+    if isinstance(step.get("run"), str):
+        sinks.append(("run", step["run"], False))
+    uses = step.get("uses")
+    with_ = step.get("with") if isinstance(step.get("with"), dict) else {}
+    if isinstance(uses, str) and uses.split("@", 1)[0].lower() == "actions/github-script" and isinstance(with_.get("script"), str):
+        sinks.append(("script", with_["script"], True))
+    for where, text, direct in sinks:
+        label = _SINK_WORDS[where]
+        if direct:
+            untrusted = _untrusted_expression(text)
+            if untrusted:
+                out.append(err("WF-4", f"{label} 안에서 신뢰할 수 없는 입력을 직접 보간합니다 — env 로 넘기고 process.env 로 읽으세요 (G-A2): {untrusted[:60]}", rel))
+            if _INPUT_EXPR.search(text):
+                out.append(warn("WF-4", f"{label} 안에서 inputs 를 직접 보간합니다 — env 로 넘기는 편이 안전합니다 (G-A2)", rel))
+        for kind, name in _context_refs(text):
+            level = _classify_ref(kind, name, data, job, step)
+            if level is None:
+                continue
+            shown = _ref_label(kind, name)
+            hint = _REF_HINT[kind]
+            if level == "error":
+                out.append(err("WF-4", f"{label} 안에서 신뢰할 수 없는 입력이 거쳐 오는 {hint} `{_shown(shown)}` 를 식 치환(달러 기호와 이중 중괄호)으로 직접 보간합니다 — "
+                                       "값은 env 로 넘기고 셸에서 \"$이름\" 으로 읽으세요 (G-A2)", rel))
+            else:
+                out.append(warn("WF-4", f"{label} 안에서 {hint} `{_shown(shown)}` 를 식 치환으로 직접 보간합니다 — 값의 출처를 알 수 없습니다(고정 값이 아닙니다). "
+                                        "env 로 넘기고 셸에서 \"$이름\" 으로 읽는 편이 안전합니다 (G-A2)", rel))
+    return out
+
+
+# 쓰기 권한 허용 표(WF-1 의 한 갈래): 워크플로가 어느 범위(`*` = 최상위, 그 밖 = job 이름)에 어떤 `write` 권한을 두는지 지금 파일 기준으로 적었다. 표에 없는 쓰기 권한이 생기면(새 워크플로·새 job·더 넓은 범위·권한 추가) 오류다 —
+# 새 워크플로가 들어오거나 권한을 늘리면 이 표를 함께 고친다(운영자가 직접 병합하는 변경). `permissions: write-all` 은 어디서든 오류다. 읽기 권한은 표에 없다.
+_CHANCE_WORKFLOW = "chance" + "blog.yml"        # Chance 블로그의 워크플로 파일 이름 — 이어 붙여 적었다(새 줄에서 실제 블로그 이름 글자를 찾는 금지어 점검에 걸리지 않게)
+WORKFLOW_WRITE_PERMISSIONS = {
+    ("auto-pr.yml", "*"): ("pull-requests",),
+    ("blogger-en.yml", "blogger"): ("contents",),
+    ("blogger-ko.yml", "blogger"): ("contents",),
+    ("blogger.yml", "generate"): ("contents",),
+    ("chance-fix-images.yml", "*"): ("actions", "contents"),
+    (_CHANCE_WORKFLOW, "*"): ("actions", "contents", "pull-requests"),
+    ("issue-edit.yml", "edit"): ("actions", "contents", "issues", "pull-requests"),
+    ("naver.yml", "generate"): ("contents", "issues"),
+    ("operator-reply.yml", "*"): ("issues",),
+    ("ops-inbox.yml", "*"): ("issues",),
+    ("pages.yml", "deploy"): ("id-token", "pages"),
+    ("pr-scope-check.yml", "scope"): ("pull-requests",),
+    ("sync-issue-form.yml", "*"): ("contents",),
+    ("telegram-inbox.yml", "*"): ("issues",),
+    ("tistory.yml", "generate"): ("contents", "issues"),
+    ("watchdog.yml", "*"): ("issues",),
+}
+
+
+def write_permissions(data):
+    """워크플로의 쓰기 권한 → {범위: 정렬한 이름 튜플}. 범위 `*` 는 최상위, 그 밖은 job 이름. `permissions: write-all` 은 이름 `write-all` 하나로 센다."""
+    found = {}
+
+    def collect(scope, perms):
+        if perms == "write-all":
+            found[scope] = ("write-all",)
+        elif isinstance(perms, dict):
+            names = tuple(sorted(str(key) for key, value in perms.items() if str(value).lower() == "write" or value == "write-all"))
+            if names:
+                found[scope] = names
+
+    if isinstance(data, dict):
+        collect("*", data.get("permissions"))
+        jobs = data.get("jobs")
+        if isinstance(jobs, dict):        # 깨진 워크플로(jobs 가 목록·글)는 WF-0 몫 — 여기서는 건너뛴다
+            for job_name, job in jobs.items():
+                if isinstance(job, dict):
+                    collect(str(job_name), job.get("permissions"))
+    return found
+
+
+def check_workflow_write_permissions(root, files):
+    """WF-1(쓰기 권한 허용 표): 워크플로의 쓰기 권한이 WORKFLOW_WRITE_PERMISSIONS 의 허용 범위 안인가. 새 워크플로·새 job·더 넓은 범위·권한 추가는 오류이고, job 수준 `permissions: write-all` 도 오류다."""
+    if yaml is None:
+        return []        # PyYAML 이 없다는 경고는 WF-0(check_workflows)이 이미 낸다
+    out = []
+    for rel in _workflow_files(files):
+        try:
+            data = _load_yaml(read_text(root, rel) or "")
+        except yaml.YAMLError:
+            continue     # WF-0
+        name = Path(rel).name
+        for scope, names in write_permissions(data).items():
+            allowed = WORKFLOW_WRITE_PERMISSIONS.get((name, scope), ())
+            extra = [item for item in names if item not in allowed]
+            if "write-all" in names:
+                if scope != "*":          # 최상위 write-all 은 check_workflows 의 WF-1 이 이미 오류로 낸다(같은 오류를 두 번 내지 않는다) — 여기서는 job 수준만
+                    out.append(err("WF-1", f"job {_shown(scope)} 의 permissions: write-all 은 금지입니다 (G-A1)", rel))
+            elif extra:
+                out.append(err("WF-1", f"{'최상위' if scope == '*' else 'job ' + _shown(scope)} 의 쓰기 권한 {one_line(', '.join(extra), 120)} 가 허용 표(WORKFLOW_WRITE_PERMISSIONS)에 없습니다 — "
+                                       "새 워크플로·새 job·더 넓은 범위·권한 추가는 이 표를 함께 고치는 변경을 운영자가 직접 병합합니다 (G-A1)", rel))
+    return out
+
+
 if yaml is not None:
     class _UniqueKeyLoader(yaml.SafeLoader):
         """SafeLoader 와 같되 한 표 안에서 같은 키가 두 번 나오면 오류(YAMLError)다. PyYAML 은 중복 키를 조용히 '마지막 값' 으로 받는데 GitHub 가 어떻게 읽는지는 알 수 없어서,
@@ -297,9 +646,13 @@ def check_workflows(root, files):
         triggers = _triggers(data)
         if "pull_request_target" in triggers:
             out.append(err("WF-3", "pull_request_target 은 금지입니다(포크 코드 + 시크릿 노출 위험) (G-A3)", rel))
+        out += _trigger_findings(rel, triggers)
         if "workflow_run" in triggers:
             out.extend(_workflow_run_findings(rel, data))           # WF-16: 허용 목록 + 모양(아래 정의, G-A13)
         jobs = data.get("jobs") or {}
+        if not isinstance(jobs, dict):
+            out.append(err("WF-0", "jobs 가 객체(job 이름: 내용)가 아닙니다", rel))
+            continue
         scheduled = "schedule" in triggers
         has_concurrency = "concurrency" in data or any(isinstance(j, dict) and "concurrency" in j for j in jobs.values())
         if scheduled and not has_concurrency:
@@ -324,6 +677,7 @@ def check_workflows(root, files):
                         out.append(warn("WF-6", "'|| true' 로 오류를 숨기고 있습니다 (G-O2: 조용한 실패 금지)", rel))
                     if re.search(r"echo\b[^\n]*\$\{\{\s*secrets\.", run):
                         out.append(err("WF-9", "시크릿을 echo 로 출력합니다 (G-S3)", rel))
+                out += _sink_findings(rel, data, job, step)
                 if step.get("continue-on-error") is True and not _is_alert_step(step):
                     out.append(warn("WF-6", "continue-on-error: true 로 실패를 숨기고 있습니다 (G-O2)", rel))
                 uses = step.get("uses")
@@ -1602,6 +1956,7 @@ def run_checks(root, base=None):
     findings += check_forbidden_files(files)
     findings += check_secret_patterns(root, files)
     findings += check_workflows(root, files)
+    findings += check_workflow_write_permissions(root, files)
     findings += check_telegram_secrets(root, files)
     findings += check_workflow_names(root, files)
     findings += check_workflow_prefixes(root, files)
