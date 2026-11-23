@@ -27,7 +27,11 @@ DANGEROUS = [
     ("<style/<link/<base/<meta", re.compile(r"<\s*(?:style|link|base|meta)\b", re.I)),
     ("<svg/<math/<frame", re.compile(r"<\s*(?:svg|math|frame|frameset)\b", re.I)),
     ("javascript:", re.compile(r"javascript\s*:", re.I)),
-    # 이벤트 핸들러: 속성 이름의 일부가 아닌 모든 글자 뒤의 `on…=` 를 센다(D-406). 옛 규칙은 앞 글자가 공백·따옴표·슬래시일 때만 잡아서 kramdown 속성 목록 `글{:onclick="…"}` 를 놓쳤다 —
+    # 이벤트 핸들러 규칙은 둘이고 각각 따로 개수를 비교한다(D-406, 검증자 S 의 V1). ① 옛 규칙 — 시작점 그대로(앞 글자가 공백·따옴표·슬래시인 `on…=`). 지우거나 아래 새 규칙과 합치지 않는다:
+    # 새 규칙은 옛 규칙이 센 것을 모두 세지만 더 많이 세므로 하나로 대체하면, 앞글에 새 규칙만 세는 꼴(`?online=1`)이 있을 때 같은 수정이 그 꼴을 지우며 진짜 핸들러(` onclick=`)를 넣어도 개수가 늘지 않아 통과한다.
+    # 두 규칙의 이름이 같아 거절 문구는 한 번만 나온다(verify_changes). 옛 규칙이 막던 것은 항상 막히고 새 규칙은 더 막기만 한다.
+    ("이벤트 핸들러 속성(on…=)", re.compile(r"""[\s"'/]on[a-z]{3,}\s*=""", re.I)),
+    # ② 새 규칙: 속성 이름의 일부가 아닌 모든 글자 뒤의 `on…=` 를 센다(D-406). 옛 규칙은 앞 글자가 공백·따옴표·슬래시일 때만 잡아서 kramdown 속성 목록 `글{:onclick="…"}` 를 놓쳤다 —
     # 속성 목록은 `{:` 바로 뒤, 정의형 `{:이름:onclick="…"}` 은 이름 뒤 콜론 바로 뒤에서 속성이 시작한다(속성 읽기가 문자열 처음과 공백을 구분자로 받는다 — 소스 기억 기준, 이 PC 에 Ruby 가 없어 렌더는 확인하지 못했다).
     # 영숫자·밑줄·하이픈 바로 뒤는 더 긴 이름(`data-onclick`·`monitor=`)이라 뺀다. 추정에 기대 보수적으로 막으므로 질의 문자열 `?online=1` 도 새로 넣으면 거절한다(개수가 늘 때만 막는다).
     ("이벤트 핸들러 속성(on…=)", re.compile(r"(?<![A-Za-z0-9_-])on[a-z]{3,}\s*=", re.I)),
@@ -425,8 +429,10 @@ def verify_changes(changes, allowed_patterns, limits, mode="body", only_fields=N
         if len(LIQUID.findall(after)) > len(LIQUID.findall(before)):
             reasons.append(f"{path}: Liquid 태그({{% … %}}·{{{{ … }}}})가 새로 들어갑니다. 템플릿 코드는 이 경로로 넣을 수 없습니다.")
         dec_before, dec_after = _decode(before), _decode(after)
+        flagged = set()        # 같은 이름의 규칙이 둘 이상이어도(이벤트 핸들러: 옛 규칙 + 새 규칙) 거절 문구는 한 번만 — 규칙마다 따로 개수를 비교한다
         for name, rx in DANGEROUS:
-            if len(rx.findall(dec_after)) > len(rx.findall(dec_before)):
+            if name not in flagged and len(rx.findall(dec_after)) > len(rx.findall(dec_before)):
+                flagged.add(name)
                 reasons.append(f"{path}: 위험한 마크업({name})이 새로 들어갑니다.")
         cmp_before, cmp_after = _compact(before), _compact(after)
         for name, rx in COMPACT_DANGEROUS:

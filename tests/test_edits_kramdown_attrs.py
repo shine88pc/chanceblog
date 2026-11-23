@@ -7,6 +7,8 @@ kramdown(이 사이트의 마크다운 변환기)의 인라인 속성 목록 `�
 그 대가로 `?online=1` 같은 질의 문자열·`f(online=1)` 같은 코드 조각을 새로 넣는 수정도 거절한다(아래 시험이 이 한계를 적어 둔다). 개수가 늘 때만 막으므로 원문에 이미 있는 것은 그대로 둘 수 있다.
 가짜 값만 쓴다.
 """
+import itertools
+import re
 import tempfile
 import unittest
 
@@ -27,6 +29,10 @@ NL, TAB = chr(10), chr(9)
 LIMITS = {"max_changed_files": 1, "max_changed_lines": 80, "max_file_chars": 80000}
 BASE = "안녕하세요. 소개 문장입니다." + NL + "둘째 문장입니다." + NL
 AI_AND_PLAIN = (True, False)           # AI 패치와 문구 그대로 바꾸기(AI 가 아닌 교체)
+
+# 이벤트 핸들러 규칙 둘의 기준 복사본 — 시험이 직접 적은 것이라 코드가 바뀌어도 기준이 같이 움직이지 않는다(2차, 검증자 S 의 V1).
+OLD_HANDLER_RULE = re.compile(r"""[\s"'/]on[a-z]{3,}\s*=""", re.I)                  # 시작점의 규칙 그대로 — 앞 글자가 공백·따옴표·슬래시
+NEW_HANDLER_RULE = re.compile(r"(?<![A-Za-z0-9_-])on[a-z]{3,}\s*=", re.I)           # D-406 의 새 규칙 — 앞 글자가 속성 이름의 일부가 아니면
 
 
 def verify(before, after, ai):
@@ -208,6 +214,92 @@ class NoNewRejectionsTest(unittest.TestCase):
     def test_removing_a_handler_is_allowed(self):
         before = BASE + 'old{:onclick="x"}' + NL
         self.assertEqual(handler_reasons(verify(before, BASE, False)), [])
+
+
+# 새 규칙만 세는 꼴(앞 글자가 공백·따옴표·슬래시가 아닌 `on…=`): 질의 문자열·코드 조각·속성 이름 같은 글 — 앞글에 이것이 있으면 같은 수정이 그것을 지우고 진짜 핸들러를 넣어 개수를 맞출 수 있었다
+NEW_RULE_ONLY = ("/status?online=1", "f(online=1)", "?ongoing=2&x=1", "a.onboard=3", "[online=1]", "x;oncall=1", "&onready=1", "/p?ONLINE=1", "id=x,online=1", "{:onfoo=1}")
+# 옛 규칙이 막던 진짜 핸들러(앞 글자가 공백·따옴표·슬래시)
+OLD_RULE_HANDLERS = ("<b onclick=alert(1)>y</b>", "<img src=x onerror=alert(1)>", '<a href="#"onclick=alert(1)>x</a>', "<a/onfocus=x>", "<p ONCLICK=alert(1)>t</p>",
+                     "<i" + TAB + "onmouseover=a>t</i>", "<b onclick = alert(1)>y</b>")
+FRAGMENTS = (" <b onclick=alert(1)>y</b>", "/status?online=1", "(online=1)", "x{:onclick=alert(1)}", ' title="t"', '<a href="#"onfocus=z>', "?ongoing=2", " ONCLICK=1", "ordinary text")
+
+
+class CountMaskingTest(unittest.TestCase):
+    """검증자 S 의 V1(결함 D-406) — 개수 비교와 '바꿔 쓰기'. 새 규칙은 옛 규칙이 센 것을 모두 세지만 더 많이 센다: 옛 규칙을 새 규칙 하나로 대체하면 앞글에 새 규칙만 세는 꼴(`/status?online=1`)이 있을 때
+    같은 수정이 그 꼴을 지우며 진짜 핸들러(` onclick=`)를 넣어도 개수가 늘지 않아 통과했다(옛 규칙에서는 앞글이 0 개라 막혔다 — '더 막는 쪽뿐' 이 사실이 아니었다).
+    두 규칙을 따로 두고 각각 개수를 비교하면 옛 규칙이 막던 것은 항상 막히고 새 규칙은 더 막기만 한다."""
+
+    @staticmethod
+    def swap(budget, handler, ai, repeat=1):
+        before = BASE + "참고 링크: " + " | ".join([budget] * repeat) + " 입니다." + NL
+        after = BASE + "참고 링크: " + " | ".join([handler] * repeat) + " 입니다." + NL          # 새 규칙만 세던 꼴을 지우고 진짜 핸들러를 넣는다
+        return verify(before, after, ai)
+
+    def test_replacing_a_query_string_or_code_fragment_with_a_real_handler_is_blocked(self):
+        for budget in NEW_RULE_ONLY:
+            for handler in OLD_RULE_HANDLERS:
+                for ai in AI_AND_PLAIN:
+                    with self.subTest(budget=budget, handler=handler, ai=ai):
+                        self.assertTrue(handler_reasons(self.swap(budget, handler, ai)))
+
+    def test_several_budget_items_swapped_for_several_handlers_are_blocked(self):
+        for budget in NEW_RULE_ONLY:
+            for ai in AI_AND_PLAIN:
+                with self.subTest(budget=budget, ai=ai):
+                    self.assertTrue(handler_reasons(self.swap(budget, "<b onclick=alert(1)>y</b>", ai, repeat=3)))
+
+    def test_the_verifiers_example_m02_is_blocked_for_ai_patches_and_plain_replacements(self):
+        before = BASE + "참고 링크: /status?online=1 입니다." + NL
+        after = before.replace("/status?online=1", "/status?x=1 <b onclick=alert(1)>y</b>")
+        for ai in AI_AND_PLAIN:
+            with self.subTest(ai=ai):
+                self.assertTrue(handler_reasons(verify(before, after, ai)))
+
+    def test_adding_a_handler_next_to_the_query_string_and_removing_the_query_string_are_both_decided_by_the_old_rule(self):
+        before = BASE + "참고 링크: /status?online=1 입니다." + NL
+        for ai in AI_AND_PLAIN:
+            with self.subTest(ai=ai):
+                self.assertTrue(handler_reasons(verify(before, before + "<b onclick=alert(1)>y</b>" + NL, ai)))            # 같은 줄이 아니라 덧붙임(m01)
+                self.assertEqual(handler_reasons(verify(before, BASE, ai)), [])                                           # 지우기만 하면 막지 않는다
+
+    def test_the_two_rules_are_kept_apart_and_the_old_one_is_exactly_the_original(self):
+        rules = [rx for name, rx in checks.DANGEROUS if "이벤트 핸들러" in name]
+        self.assertEqual(len(rules), 2)
+        old = [rx for rx in rules if rx.pattern == OLD_HANDLER_RULE.pattern and rx.flags == OLD_HANDLER_RULE.flags]
+        new = [rx for rx in rules if rx.pattern == NEW_HANDLER_RULE.pattern and rx.flags == NEW_HANDLER_RULE.flags]
+        self.assertEqual((len(old), len(new)), (1, 1))
+
+    def test_one_reason_even_when_both_rules_count_the_same_text(self):
+        for payload in (" <b onclick=alert(1)>y</b>", "x{:onclick=alert(1)}", "/status?online=1", ' <a href="#"onfocus=z>'):
+            for ai in AI_AND_PLAIN:
+                with self.subTest(payload=payload, ai=ai):
+                    self.assertEqual(len(handler_reasons(verify(BASE, BASE + payload + NL, ai))), 1)
+
+    def test_the_verdict_equals_the_two_rules_counted_separately_for_every_pair_of_small_edits(self):
+        """앞글과 뒤글을 조각 0–2개의 모든 조합으로 만들어(2116쌍 × 두 경로) '막힘 ⇔ 옛 규칙이나 새 규칙 중 하나라도 개수가 는다' 를 확인한다 — 옛 규칙이 막던 것은 하나도 빠지지 않고(단조),
+        새 규칙은 따로 센다. 기준은 위의 기준 복사본이고 엔티티 풀기는 코드의 것을 쓴다."""
+        subsets = [()] + [(part,) for part in FRAGMENTS] + list(itertools.combinations(FRAGMENTS, 2))
+        self.assertEqual(len(subsets), 46)
+
+        def text(parts):
+            return BASE + "".join("줄 " + part + NL for part in parts)
+
+        old_rises_seen = new_only_seen = 0
+        for before_parts in subsets:
+            before = text(before_parts)
+            decoded_before = checks._decode(before)
+            for after_parts in subsets:
+                after = text(after_parts)
+                decoded_after = checks._decode(after)
+                old_rises = len(OLD_HANDLER_RULE.findall(decoded_after)) > len(OLD_HANDLER_RULE.findall(decoded_before))
+                new_rises = len(NEW_HANDLER_RULE.findall(decoded_after)) > len(NEW_HANDLER_RULE.findall(decoded_before))
+                old_rises_seen += old_rises
+                new_only_seen += new_rises and not old_rises
+                for ai in AI_AND_PLAIN:
+                    got = bool(handler_reasons(verify(before, after, ai)))
+                    self.assertEqual(got, old_rises or new_rises, (before_parts, after_parts, ai, "old" if old_rises else "new" if new_rises else "none"))
+        self.assertGreater(old_rises_seen, 300)            # 시험이 비어 있지 않다: 옛 규칙이 막는 쌍도, 새 규칙만 막는 쌍도 충분히 있다
+        self.assertGreater(new_only_seen, 50)
 
 
 @NEEDS_YAML
