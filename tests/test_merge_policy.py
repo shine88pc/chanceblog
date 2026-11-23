@@ -176,8 +176,10 @@ class ConstantsPinTest(unittest.TestCase):
         self.assertEqual(mp.SAFETY_GUARD_FILES, ("pipeline/publish_lock.py", "pipeline/quality_gate.py", "pipeline/gates.py", "pipeline/auth_check.py", "pipeline/registry.py",
                                                  "pipeline/source_registry.py", "pipeline/health.py", "pipeline/draft_flow.py", "pipeline/edits/runner.py", "generator.py", "blogger_generator.py",
                                                  "scripts/get_blogger_token.py", "scripts/watchdog.py", "tests/test_site_cleanup.py", "pipeline/run.py", "pipeline/operator_loop.py",
-                                                 "pipeline/telegram_inbox.py"))
-        self.assertEqual(mp.SAFETY_GUARD_DIRS, ("pipeline/publishers",))
+                                                 "pipeline/telegram_inbox.py", "pipeline/llm.py", "pipeline/console.py", "pipeline/notify.py", "pipeline/plan.py", "pipeline/inbox.py",
+                                                 "scripts/ops_inbox.py", "scripts/github_status.py", "scripts/sync_issue_form.py", "scripts/build_pages_registry.py"))
+        self.assertEqual(mp.SAFETY_GUARD_DIRS, ("pipeline/publishers", "pipeline/edits"))
+        self.assertEqual(mp.SAFETY_GUARD_TREES, ("인수인계/AI_기억", "인수인계/도구", "인수인계/요청함"))
 
     def test_the_host_domain_and_shell_lists_are_pinned(self):
         self.assertEqual(mp.FILE_NAME_TLDS, ("py", "sh", "md", "rs", "pl", "so", "cc", "ps", "pm", "ml"))
@@ -2573,7 +2575,9 @@ class ClassifyNamedSafetyFilesTest(unittest.TestCase):
 
     FILES = ("pipeline/publish_lock.py", "pipeline/quality_gate.py", "pipeline/gates.py", "pipeline/auth_check.py", "pipeline/registry.py", "pipeline/source_registry.py", "pipeline/health.py",
              "pipeline/draft_flow.py", "pipeline/edits/runner.py", "generator.py", "blogger_generator.py", "scripts/get_blogger_token.py", "scripts/watchdog.py", "tests/test_site_cleanup.py",
-             "pipeline/run.py", "pipeline/operator_loop.py", "pipeline/telegram_inbox.py")
+             "pipeline/run.py", "pipeline/operator_loop.py", "pipeline/telegram_inbox.py",
+             "pipeline/llm.py", "pipeline/console.py", "pipeline/notify.py", "pipeline/plan.py", "pipeline/inbox.py",
+             "scripts/ops_inbox.py", "scripts/github_status.py", "scripts/sync_issue_form.py", "scripts/build_pages_registry.py")
     PUBLISHERS = ("pipeline/publishers/__init__.py", "pipeline/publishers/base.py", "pipeline/publishers/blogger.py", "pipeline/publishers/issue_package.py", "pipeline/publishers/new_publisher.py",
                   "pipeline/publishers/sub/deep/x.py", "pipeline/publishers/notes.txt")
     RULE_DOCS = ("AGENTS.md", "CLAUDE.md", "GEMINI.md", "AI_COLLAB.md", "HANDLER.md", "docs/CHARTER.md", "docs/SECURITY_GUARDRAILS.md", "docs/ACTIONS_GUIDE.md", "docs/AGENT_RUNBOOK.md",
@@ -2582,7 +2586,7 @@ class ClassifyNamedSafetyFilesTest(unittest.TestCase):
     CONFIRM_ITEMS = ("pipeline/shadow_run.py", "pipeline/drafts.py", "docs/GLOSSARY.md", "pipeline/profiles/blogger_practical_en.json", "tests/_bootstrap.py", "pipeline/__init__.py")
     NEAR_MISSES = ("pipeline/gate.py", "pipeline/gates2.py", "pipeline/health_check.py", "pipeline/registry_x.py", "pipeline/publish_lock_x.py", "pipeline/quality_gates.py", "pipeline/auth.py",
                    "scripts/watchdog2.py", "scripts/get_blogger_token2.py", "scripts/watchdog/a.py", "pipeline/publishers_x/a.py", "pipeline/publisher/a.py", "pipeline/publishers.py",
-                   "sub/generator.py", "pipeline/generator.py", "pipeline/blogger_generator.py", "docs/generator.py", "pipeline/edits/runner2.py", "pipeline/edits/a.py", "tests/test_site_cleanup_x.py",
+                   "sub/generator.py", "pipeline/generator.py", "pipeline/blogger_generator.py", "docs/generator.py", "pipeline/edits2/runner.py", "pipeline/edit/a.py", "tests/test_site_cleanup_x.py",
                    "pipeline/draft_flow2.py", "pipeline/drafts.py", "pipeline/run_helper.py", "pipeline/runs.py", "pipeline/operator_loop_x.py", "pipeline/telegram_inbox2.py", "pipeline/shadow_run.py",
                    "scripts/run.py", "sub/pipeline/run.py", "docs/pipeline/run.py")
     NEAR_DOCS = ("docs/CHARTER_NOTES.md", "docs/SESSION_START_NOTES.md", "docs/GLOSSARY.md", "docs/AGENTS_NOTES.md", "docs/AGENTS.md", "docs/CLAUDE.md", "인수인계/CLAUDE.md", "docs/ACTIONS.md",
@@ -2602,7 +2606,7 @@ class ClassifyNamedSafetyFilesTest(unittest.TestCase):
                     self.assert_guard(path, kind)
 
     def test_everything_under_the_publishers_folder_is_operator_only(self):
-        self.assertEqual(mp.SAFETY_GUARD_DIRS, ("pipeline/publishers",))
+        self.assertEqual(mp.SAFETY_GUARD_DIRS, ("pipeline/publishers", "pipeline/edits"))          # pipeline/edits 는 결함 D-407 이 더한 폴더 — 아래 ClassifyAuditSafetyTreesTest 가 따로 못박는다
         for path in self.PUBLISHERS:
             with self.subTest(path=path):
                 self.assert_guard(path)
@@ -3318,6 +3322,133 @@ class PolicyStoryTest(unittest.TestCase):
         facts = good_facts()
         facts["consumed_numbers"] = list(ledger.consumed_numbers)
         self.assertFalse(mp.check_preconditions(facts).ok)
+
+
+class ClassifyAuditSafetyTreesTest(unittest.TestCase):
+    """독립 감사 BA-S1-2(결함 D-407, 2026-11-23) — 감사 탐침이 AI 병합 가능(ai_ok)으로 본 안전 장치 경로를 운영자 전용으로 못박는 표. 수정 흐름의 최종 관문(`pipeline/edits/`)·비밀 가리기·신뢰 필터와 읽기 도구·봇 커밋 생성기·
+    AI 가 읽는 기억·도구·요청 폴더와 그 관문을 못박는 시험이 이름 몇 개와 낱말 매칭에서 빠져 있었다. 폴더·접두사 단위로 막으므로 목록에 없는 새 파일도 운영자 전용이다(모르면 막는다). 더 막는 쪽뿐이다 —
+    운영자 확인 대기 항목 D-347 의 목록을 줄이거나 바꾸지 않는다. 이 모듈은 어디서도 import 되지 않아 꺼져 있다."""
+
+    NEW_FILES = ("pipeline/llm.py", "pipeline/console.py", "pipeline/notify.py", "pipeline/plan.py", "pipeline/inbox.py",
+                 "scripts/ops_inbox.py", "scripts/github_status.py", "scripts/sync_issue_form.py", "scripts/build_pages_registry.py")
+    NEW_DIRS = ("pipeline/edits",)
+    TREES = ("인수인계/AI_기억", "인수인계/도구", "인수인계/요청함")
+    PREFIXES = ("tests/test_edits", "tests/edits_helpers", "tests/test_operator_loop", "tests/operator_loop_helpers", "tests/test_telegram_inbox", "tests/telegram_inbox_helpers",
+                "tests/test_answer_form", "tests/test_auto_pr", "tests/test_publish_paths", "tests/test_ops_inbox", "tests/ops_inbox_", "tests/test_github_status",
+                "tests/test_notify", "tests/notify_helpers", "tests/test_console", "tests/test_llm", "tests/test_plan", "tests/test_handoff_tools")
+    # 감사 탐침 probe_merge_policy3 의 경로 32개 — 고친 뒤 기대하는 분류(앞에서 ai_ok 로 나온 것 22개 중 `pipeline/drafts.py`·`pipeline/state.py`·`docs/DEFECT_REGISTER.md` 셋은 이 묶음 밖이라 그대로 ai_ok)
+    AUDIT_OPERATOR_ONLY = ("pipeline/edits/checks.py", "pipeline/edits/spec.py", "pipeline/edits/safety.py", "pipeline/edits/ops.py", "pipeline/notify.py", "pipeline/secret_patterns.py",
+                           "pipeline/llm.py", "pipeline/inbox.py", "pipeline/operator_loop.py", "scripts/ops_inbox.py", "scripts/github_status.py", "scripts/sync_issue_form.py",
+                           "scripts/build_pages_registry.py", "pipeline/console.py", "pipeline/egress.py", "pipeline/registry.py", "pipeline/source_policy.py", "pipeline/gates.py",
+                           "pipeline/quality_gate.py", "pipeline/health.py", "pipeline/plan.py", "pipeline/auth_check.py", "pipeline/publishers/blogger.py", "pipeline/publishers/issue_package.py",
+                           "pipeline/telegram_inbox.py", "인수인계/요청함/R-999_x.md", "인수인계/도구/work/commit_as_author.py", "인수인계/AI_기억/README.md", "tests/test_edits_checks.py")
+    AUDIT_STILL_AI_OK = ("pipeline/drafts.py", "pipeline/state.py", "docs/DEFECT_REGISTER.md")
+    EDITS_FOLDER = ("pipeline/edits/checks.py", "pipeline/edits/spec.py", "pipeline/edits/ops.py", "pipeline/edits/runner.py", "pipeline/edits/safety.py", "pipeline/edits/scope_check.py",
+                    "pipeline/edits/forms.py", "pipeline/edits/frontmatter.py", "pipeline/edits/pages.py", "pipeline/edits/targets.py", "pipeline/edits/__init__.py", "pipeline/edits/new_gate.py",
+                    "pipeline/edits/sub/deep/x.py", "pipeline/edits/notes.md", "pipeline/edits/data.json", "Pipeline/Edits/x.py", "PIPELINE/EDITS/X.PY")
+    TREE_FILES = ("인수인계/AI_기억/README.md", "인수인계/AI_기억/api-key-accounts-policy.md", "인수인계/AI_기억/new_memory.md", "인수인계/도구/README.md", "인수인계/도구/setup_workspace.py",
+                  "인수인계/도구/work/commit_as_author.py", "인수인계/도구/work/scratch/mk_lane_merge.py", "인수인계/요청함/README.md", "인수인계/요청함/R-999_x.md", "인수인계/요청함/sub/x.md",
+                  "인수인계/요청함/R-999_x.MD", "인수인계/AI_기억/x.txt")
+    PREFIXED_TESTS = ("tests/test_edits_core.py", "tests/test_operator_loop_reply.py", "tests/test_operator_loop_workflows.py", "tests/test_auto_pr_workflow.py", "tests/test_telegram_inbox.py",
+                      "tests/test_answer_form.py", "tests/test_publish_paths.py", "tests/edits_helpers.py", "tests/operator_loop_helpers.py", "tests/telegram_inbox_helpers.py",
+                      "tests/test_ops_inbox_script.py", "tests/ops_inbox_helpers.py", "tests/test_github_status.py", "tests/test_notify_cli.py", "tests/notify_helpers.py", "tests/test_console.py",
+                      "tests/test_llm_timeout.py", "tests/test_plan_and_watchdog.py", "tests/test_handoff_tools.py", "Tests/Test_Edits_Core.py")
+    NEAR_MISSES = ("pipeline/edits.py", "pipeline/edits2/runner.py", "pipeline/edit/a.py", "pipeline/editsx.py", "sub/pipeline/edits/a.py", "docs/pipeline/edits/a.py",
+                   "pipeline/llm2.py", "pipeline/console_x.py", "pipeline/notify2.py", "pipeline/plans.py", "pipeline/inbox2.py", "scripts/ops_inbox2.py", "scripts/github_status2.py",
+                   "scripts/sync_issue_form2.py", "scripts/build_pages_registry2.py", "sub/pipeline/llm.py", "scripts/sub/ops_inbox.py",
+                   "인수인계/도구2/x.md", "인수인계/요청함2/x.md", "인수인계/AI_기억2/x.md", "인수인계/작업내용.md", "인수인계/작업요청/README.md", "인수인계/운영자_요청함_사용법.md",
+                   "docs/인수인계/도구/x.md", "sub/인수인계/요청함/x.md",
+                   "tests/test_edit.py", "tests/tests_edits.py", "test_edits_core.py", "sub/tests/test_edits_core.py", "tests/sub/test_edits_core.py", "tests/test_topics.py", "tests/test_guides.py",
+                   "tests/test_operator.py", "tests/test_telegram.py", "tests/test_notice_tools.py", "tests/test_pub.py")
+
+    def assert_guard(self, path, kind="blog"):
+        result = classify(kind, [path])
+        self.assertEqual(result.tier, "operator_only", path)
+        self.assertIn("safety_guard", result.extra_flags, path)
+        self.assertTrue(any("안전 장치 파일" in reason for reason in result.reasons), (path, result.reasons))
+
+    def test_the_new_lists_are_pinned_and_nothing_was_removed_from_the_old_ones(self):
+        self.assertEqual(mp.SAFETY_GUARD_TREES, self.TREES)
+        self.assertEqual(mp.SAFETY_GUARD_PREFIXES, self.PREFIXES)
+        self.assertEqual(mp.SAFETY_GUARD_DIRS, ("pipeline/publishers",) + self.NEW_DIRS)
+        self.assertEqual(mp.SAFETY_GUARD_FILES[-len(self.NEW_FILES):], self.NEW_FILES)                      # 새 이름은 옛 17개 뒤에만 붙었다
+        self.assertEqual(len(mp.SAFETY_GUARD_FILES), 17 + len(self.NEW_FILES))
+        for names in (mp.SAFETY_GUARD_TREES, mp.SAFETY_GUARD_PREFIXES):
+            self.assertEqual(len(set(names)), len(names))
+        self.assertTrue(all(prefix.startswith("tests/") for prefix in mp.SAFETY_GUARD_PREFIXES))             # 맨 위 tests/ 폴더의 파일 이름 접두사뿐이다
+        self.assertEqual(mp.SAFETY_GUARD_WORDS, ("validate_repo", "guardrail", "guard", "security", "secret", "egress", "policy", "safety", "sandbox", "ai_flow"))
+
+    def test_every_path_the_audit_probe_saw_as_ai_ok_is_now_operator_only_in_both_repositories(self):
+        for path in self.AUDIT_OPERATOR_ONLY:
+            for kind in ("blog", "desktop"):
+                with self.subTest(path=path, kind=kind):
+                    self.assert_guard(path, kind)
+
+    def test_the_audit_paths_outside_this_change_are_unchanged(self):
+        """`pipeline/drafts.py`(운영자 확인 대기)·`pipeline/state.py`·결함 대장 문서는 이 묶음 밖이다 — 그대로 AI 병합 가능."""
+        for path in self.AUDIT_STILL_AI_OK:
+            with self.subTest(path=path):
+                self.assertEqual(classify("blog", [path]).tier, "ai_ok", path)
+
+    def test_every_new_named_file_is_operator_only(self):
+        for path in self.NEW_FILES:
+            for kind in ("blog", "desktop"):
+                with self.subTest(path=path, kind=kind):
+                    self.assert_guard(path, kind)
+                    self.assertEqual(classify(kind, [path]).categories, (), path)
+
+    def test_everything_under_the_edits_folder_is_operator_only_including_new_files(self):
+        for path in self.EDITS_FOLDER:
+            for kind in ("blog", "desktop"):
+                with self.subTest(path=path, kind=kind):
+                    self.assert_guard(path, kind)
+
+    def test_the_handoff_trees_are_operator_only_for_documents_and_tools_alike(self):
+        for path in self.TREE_FILES:
+            with self.subTest(path=path):
+                self.assert_guard(path)
+
+    def test_test_files_with_a_listed_prefix_are_operator_only_even_when_they_are_new(self):
+        for prefix in self.PREFIXES:
+            for path in (prefix + ".py", prefix + "_brand_new_file.py", prefix + "X/deep/y.json"):
+                with self.subTest(path=path):
+                    self.assert_guard(path)
+        for path in self.PREFIXED_TESTS:
+            with self.subTest(path=path):
+                self.assert_guard(path)
+
+    def test_a_change_that_touches_one_of_them_among_ordinary_files_is_operator_only_as_a_whole(self):
+        ordinary = ["pipeline/topics.py", "tests/test_topics.py", "docs/GLOSSARY.md"]
+        for path in (*self.NEW_FILES, "pipeline/edits/new_gate.py", "인수인계/요청함/R-999_x.md", "인수인계/AI_기억/README.md", "인수인계/도구/README.md", "tests/test_edits_core.py", "tests/edits_helpers.py"):
+            with self.subTest(path=path):
+                result = classify("blog", ordinary + [path], GOOD_TEXT)
+                self.assertEqual((result.tier, result.extra_flags), ("operator_only", ("safety_guard",)), path)
+
+    def test_similar_names_outside_the_rules_stay_ai_ok(self):
+        """규칙이 넓어도 이름이 다른 것은 걸리지 않는다 — 폴더는 맨 위 경로의 그 폴더뿐이고, 접두사는 맨 위 tests/ 의 파일 이름 접두사뿐이며, 파일은 이름이 정확히 같을 때만이다."""
+        for path in self.NEAR_MISSES:
+            with self.subTest(path=path):
+                self.assertEqual(classify("desktop", [path]).tier, "ai_ok", path)
+        for path in ("인수인계/작업내용.md", "인수인계/작업요청/README.md", "docs/인수인계/도구/x.md"):
+            with self.subTest(doc=path):
+                self.assertEqual(classify("blog", [path]).tier, "ai_ok", path)
+
+    def test_the_rule_documents_and_the_publisher_folder_still_work_next_to_the_new_ones(self):
+        for path in ("docs/SECURITY_GUARDRAILS.md", "AGENTS.md", "pipeline/publishers/new_publisher.py", "pipeline/operator_loop.py", "scripts/validate_repo.py"):
+            with self.subTest(path=path):
+                self.assert_guard(path)
+
+    def test_the_policy_files_keep_only_their_own_flag(self):
+        for path in mp.POLICY_SELF_FILES:
+            with self.subTest(path=path):
+                self.assertEqual(classify("blog", [path]).extra_flags, ("policy_self",))                      # tests/test_merge_policy.py 도 접두사 목록의 어느 것에도 안 걸린다
+
+    def test_the_declared_items_cannot_open_the_door_for_these_paths(self):
+        """사람이 선언하는 6항목을 모두 거짓으로 줘도 안전 장치 경로는 운영자 전용이다(선언은 경로 규칙을 풀지 못한다)."""
+        for path in ("pipeline/edits/checks.py", "pipeline/llm.py", "scripts/github_status.py", "인수인계/AI_기억/README.md", "tests/test_edits_core.py"):
+            with self.subTest(path=path):
+                result = mp.classify_change("blog", [path], {path: GOOD_TEXT}, {code: False for code in mp.DECLARED_REQUIRED})
+                self.assertEqual((result.tier, result.extra_flags), ("operator_only", ("safety_guard",)), path)
 
 
 if __name__ == "__main__":

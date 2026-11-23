@@ -96,6 +96,7 @@ POLICY_SELF_FILES = ("docs/AI_MERGE_POLICY.md", "pipeline/merge_policy.py", "tes
 # safety_guard — 안전 장치 파일: 검증기·비밀 패턴·가드레일·보안·외부 접속·정책 모듈과 그 시험. 경로의 어느 구간이든 아래 낱말이 있으면 해당하고(시험 폴더도 면제하지 않는다),
 # 문서(DOC_SUFFIXES)는 SAFETY_GUARD_DOCS 의 파일(AI 가 읽고 따르는 규칙 문서 — 총괄(AI)의 판단 R5. 용어 사전 GLOSSARY 는 제외)만 해당한다. 낱말로 알아낼 수 없는 안전 장치(발행 잠금·품질 Gate·인증 확인·발행기 따위)는
 # SAFETY_GUARD_FILES·SAFETY_GUARD_DIRS 에 이름으로 적는다 — **이 목록은 저장소가 바뀔 때마다 유지가 필요하다**(새 안전 장치가 생기면 목록과 시험을 함께 고친다. 시험이 목록의 파일이 실제로 있는지 지킨다).
+# 폴더·접두사 단위(SAFETY_GUARD_DIRS·SAFETY_GUARD_TREES·SAFETY_GUARD_PREFIXES)는 목록에 없는 새 파일도 막는다 — 수정 흐름처럼 '신뢰·비밀·승인을 판단하는' 곳은 이름 하나씩이 아니라 폴더째 막는 쪽이 이 모듈의 원칙(모르면 막는다)과 맞다(D-407).
 # 이 정책의 파일 4개(POLICY_SELF_FILES)는 policy_self 로만 표시한다.
 SAFETY_GUARD_WORDS = ("validate_repo", "guardrail", "guard", "security", "secret", "egress", "policy", "safety", "sandbox", "ai_flow")
 SAFETY_GUARD_DOCS = ("docs/SECURITY_GUARDRAILS.md", "AGENTS.md", "CLAUDE.md", "GEMINI.md", "AI_COLLAB.md", "HANDLER.md", "docs/CHARTER.md", "docs/ACTIONS_GUIDE.md", "docs/AGENT_RUNBOOK.md",
@@ -105,8 +106,27 @@ SAFETY_GUARD_FILES = (
     "pipeline/publish_lock.py", "pipeline/quality_gate.py", "pipeline/gates.py", "pipeline/auth_check.py", "pipeline/registry.py", "pipeline/source_registry.py", "pipeline/health.py",
     "pipeline/draft_flow.py", "pipeline/edits/runner.py", "generator.py", "blogger_generator.py", "scripts/get_blogger_token.py", "scripts/watchdog.py", "tests/test_site_cleanup.py",
     "pipeline/run.py", "pipeline/operator_loop.py", "pipeline/telegram_inbox.py",
+    # 독립 감사 BA-S1-2(결함 D-407, 2026-11-23): 비밀 가리기·소독(llm·console·notify)·시크릿 이름을 워크플로로 넘기는 곳(plan)·신뢰 필터와 읽기 도구(inbox·ops_inbox·github_status)·봇이 main 에 커밋하는 파일을 만드는 생성기
+    # (sync_issue_form·build_pages_registry)가 이름 목록에 없어 AI 병합 가능으로 나왔다 — 더 막는 쪽으로만 더했다(운영자 확인 대기 항목 D-347 의 목록을 줄이거나 바꾸지 않는다).
+    "pipeline/llm.py", "pipeline/console.py", "pipeline/notify.py", "pipeline/plan.py", "pipeline/inbox.py",
+    "scripts/ops_inbox.py", "scripts/github_status.py", "scripts/sync_issue_form.py", "scripts/build_pages_registry.py",
 )
-SAFETY_GUARD_DIRS = ("pipeline/publishers",)
+SAFETY_GUARD_DIRS = ("pipeline/publishers", "pipeline/edits")        # 코드 폴더 — 안의 모든 파일(새 파일 포함)이 해당한다. pipeline/edits 는 수정 흐름의 최종 관문(검사 규칙·경로 허용·작업 목록)이라 폴더째 막는다(D-407)
+SAFETY_GUARD_TREES = ("인수인계/AI_기억", "인수인계/도구", "인수인계/요청함")   # AI 가 읽고 따르는 기억 사본·도구·요청 파일 폴더 — 코드가 아닌 문서도 안의 모든 파일이 해당한다(D-407). 같은 `인수인계/` 의 다른 문서(작업내용 등)는 문서라 해당하지 않는다
+# 안전 장치를 못박는 시험: 이름이 아래로 시작하는 맨 위 tests/ 의 파일(접두사 — 새 시험 파일도 같은 접두사면 해당한다, D-407). 낱말·이름 목록으로는 못 잡는 수정 흐름·접수·읽기 도구·비밀 가리기의 시험과 도우미다.
+# 검사 규칙과 그 시험을 같은 PR 에서 함께 느슨하게 만들면 CI 는 초록이므로 시험도 같이 막는다.
+SAFETY_GUARD_PREFIXES = (
+    "tests/test_edits", "tests/edits_helpers",                               # 수정 흐름의 최종 관문(pipeline/edits/)
+    "tests/test_operator_loop", "tests/operator_loop_helpers",               # 운영자 응답 접수(pipeline/operator_loop.py)
+    "tests/test_telegram_inbox", "tests/telegram_inbox_helpers",             # 텔레그램 수신(pipeline/telegram_inbox.py)
+    "tests/test_answer_form", "tests/test_auto_pr", "tests/test_publish_paths",
+    "tests/test_ops_inbox", "tests/ops_inbox_",                              # 확인 필요 모음과 신뢰 필터(scripts/ops_inbox.py·pipeline/inbox.py)
+    "tests/test_github_status",                                              # 읽기 도구(scripts/github_status.py)
+    "tests/test_notify", "tests/notify_helpers",                             # 알림·텔레그램 토큰 가리기(pipeline/notify.py)
+    "tests/test_console", "tests/test_llm",                                  # 비밀 가리기(pipeline/console.py·pipeline/llm.py)
+    "tests/test_plan",                                                       # 시크릿 이름을 넘기는 곳(pipeline/plan.py)
+    "tests/test_handoff_tools",                                              # 인수인계/도구/
+)
 DOC_SUFFIXES = (".md", ".rst", ".txt", ".adoc")
 
 # external_connection — 새 외부 접속 코드: 시험(맨 위 tests/ 폴더)과 문서(DOC_SUFFIXES)가 아닌 파일의 바뀐 줄(추가된 줄과 지운 줄)에 네트워크·외부 서비스 모듈 import, 네트워크 호출 모양, 동적 import·코드 실행,
@@ -546,14 +566,15 @@ def _doc_only_text(key, paths):
 # ---- 안전 장치 파일 · 새 외부 접속 코드(12항목 밖 — 총괄(AI)의 보수적 판단 2026-11-15, 결함 D-347, 운영자 확인 대기) --------------------------------------------------------------
 _SAFETY_DOC_FILES = frozenset(name.casefold() for name in SAFETY_GUARD_DOCS)
 _SAFETY_FILES = frozenset(name.casefold() for name in SAFETY_GUARD_FILES)
-_SAFETY_DIR_PREFIXES = tuple(name.casefold() + "/" for name in SAFETY_GUARD_DIRS)
+_SAFETY_DIR_PREFIXES = tuple(name.casefold() + "/" for name in SAFETY_GUARD_DIRS + SAFETY_GUARD_TREES)
+_SAFETY_NAME_PREFIXES = tuple(name.casefold() for name in SAFETY_GUARD_PREFIXES)
 
 
 def _is_safety_path(segments, base, path):
-    """안전 장치 파일인가 — 이름으로 적은 파일·폴더(SAFETY_GUARD_FILES·SAFETY_GUARD_DIRS)와 규칙 문서(SAFETY_GUARD_DOCS)는 해당하고, 그 밖의 문서는 해당하지 않으며,
-    나머지 파일은 경로의 어느 구간이든 SAFETY_GUARD_WORDS 의 낱말이 있으면 해당한다(시험 폴더도 면제하지 않는다)."""
+    """안전 장치 파일인가 — 이름으로 적은 파일·폴더(SAFETY_GUARD_FILES·SAFETY_GUARD_DIRS·SAFETY_GUARD_TREES)·시험 접두사(SAFETY_GUARD_PREFIXES)와 규칙 문서(SAFETY_GUARD_DOCS)는 해당하고(폴더·접두사는 안의
+    문서도 해당한다), 그 밖의 문서는 해당하지 않으며, 나머지 파일은 경로의 어느 구간이든 SAFETY_GUARD_WORDS 의 낱말이 있으면 해당한다(시험 폴더도 면제하지 않는다)."""
     folded = path.casefold()
-    if folded in _SAFETY_DOC_FILES or folded in _SAFETY_FILES or folded.startswith(_SAFETY_DIR_PREFIXES):
+    if folded in _SAFETY_DOC_FILES or folded in _SAFETY_FILES or folded.startswith(_SAFETY_DIR_PREFIXES) or folded.startswith(_SAFETY_NAME_PREFIXES):
         return True
     if base.endswith(DOC_SUFFIXES):
         return False
