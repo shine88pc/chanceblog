@@ -1,7 +1,7 @@
 """비밀 값으로 보이는 문자열 패턴(단일 원천).
 
 저장소 검증기(scripts/validate_repo.py), 이슈 수정 사후 검증(pipeline/edits/checks.py),
-이슈 수정의 로그 정제·외부 전송 전 점검(pipeline/edits/safety.py),
+이슈 수정의 로그 정제·외부 전송 전 점검(pipeline/edits/safety.py), 병합 알림 자동화의 보낼 글 거르기(pipeline/auto_notice.py),
 로그·이력 마스킹(pipeline/llm.py 의 mask())이 함께 쓴다. 패턴을 추가·수정하면 모두에 적용된다.
 `find_secrets` 와 검증기는 원문과 함께 검사용 사본(`scan_copy`: 전각·보이지 않는 글자·결합 글자를 접은 것)도 본다 — 키를 그런 글자로 쪼개도 걸린다(D-352).
 (소비처 목록은 tests/test_security_settings.py 가 실제 import 와 대조한다.)

@@ -202,7 +202,8 @@ _SHA_RX = re.compile(r"^[0-9a-f]{40}$")
 
 
 def _workflow_files(files):
-    return [f for f in files if re.match(r"^\.github/workflows/[^/]+\.ya?ml$", f)]
+    # 확장자는 대소문자를 가리지 않는다(`x.YML` 도 워크플로 후보 — GitHub 가 받는지 이 검증기는 모르므로 모두 검사해 우회 길을 두지 않는다. 폴더 `.github/workflows` 는 정확히)
+    return [f for f in files if re.match(r"^\.github/workflows/[^/]+\.(?i:ya?ml)$", f)]
 
 
 # 알림 단계(pipeline/notify.py)의 모양: run 이 정확히 `python -m pipeline.notify <이벤트> [--commit HEAD|해시]` 한 줄. 이 모양의 단계만 continue-on-error 를 써도
@@ -218,17 +219,59 @@ def _is_alert_step(step):
             and isinstance(timeout, (int, float)) and not isinstance(timeout, bool) and timeout > 0)
 
 
-def _load_yaml(text):
-    return yaml.safe_load(text) if yaml else None
+if yaml is not None:
+    class _UniqueKeyLoader(yaml.SafeLoader):
+        """SafeLoader 와 같되 한 표 안에서 같은 키가 두 번 나오면 오류(YAMLError)다. PyYAML 은 중복 키를 조용히 '마지막 값' 으로 받는데 GitHub 가 어떻게 읽는지는 알 수 없어서,
+        검증기가 본 값과 실제 값이 달라질 수 있다(`permissions` 를 `write` 로 먼저 쓰고 `read` 로 다시 쓰는 식). 합병 키 `<<` 로 덮어쓰는 것은 중복이 아니다."""
+
+    _MERGE_TAG = yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG.rsplit(":", 1)[0] + ":merge"      # 합병 키 `<<` 의 태그 — PyYAML 의 기본 표 태그와 같은 접두에 붙여 만든다(시험이 실제 태그와 같은지 못박는다)
+
+    def _construct_unique_mapping(loader, node, deep=False):
+        if isinstance(node, yaml.MappingNode):
+            seen = set()
+            for key_node, _value_node in node.value:
+                if key_node.tag == _MERGE_TAG:
+                    continue                                 # 합병 키는 한 표에 여러 번 와도 중복이 아니다(PyYAML 은 모두 합친다)
+                key = loader.construct_object(key_node, deep=True)
+                try:
+                    hash(key)
+                except TypeError:
+                    continue                                 # 풀 수 없는 키는 SafeLoader 가 따로 오류로 낸다
+                if key in seen:
+                    raise yaml.constructor.ConstructorError("YAML 중복 키(같은 표에 같은 키가 둘 — 파서마다 읽는 값이 다르다)", node.start_mark, f"키 {key!r} 가 두 번 나옵니다", key_node.start_mark)
+                seen.add(key)
+        return yaml.SafeLoader.construct_mapping(loader, node, deep)
+
+    _UniqueKeyLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_unique_mapping)
+else:  # pragma: no cover - PyYAML 이 없는 환경
+    _UniqueKeyLoader = None
+
+
+def _load_yaml(text, strict=True):
+    """YAML 글을 읽는다. strict(기본)면 중복 키를 오류(yaml.YAMLError — 워크플로는 WF-0)로 낸다. 워크플로가 아닌 설정 파일 둘(`_config.yml`·편집 명세)은 예전 읽기 그대로(strict=False)."""
+    if not yaml:
+        return None
+    if not strict:
+        return yaml.safe_load(text)
+    # `yaml.load(text, Loader=…)` 가 속으로 하는 일(로더를 만들어 한 문서를 읽고 치움)을 그대로 한다 — 외부 접속 스캐너(tests/egress_scan.py)가 `yaml.load` 라는 이름을 '안전하지 않은 읽기'
+    # 모양으로 표시하기 때문이다. 이 로더는 SafeLoader 하위 클래스라 파이썬 태그로 코드를 되살리지 않는다(tests/test_validator_loader.py 가 파이썬 태그를 거절하는 것을 못박는다).
+    loader = _UniqueKeyLoader(text)
+    try:
+        return loader.get_single_data()
+    finally:
+        loader.dispose()
 
 
 def _triggers(data):
+    """워크플로의 `on` 을 {이벤트 이름: 설정} 로 읽는다. 이벤트 이름은 소문자로 접는다 — `Workflow_Run`·`WORKFLOW_RUN` 도 같은 이벤트로 보아 허용 목록·금지 규칙(WF-3·WF-16)을 우회하지 못한다."""
     raw = data.get("on", data.get(True)) if isinstance(data, dict) else None  # YAML 1.1: on -> True
     if isinstance(raw, str):
-        return {raw: None}
+        return {raw.lower(): None}
     if isinstance(raw, list):
-        return {k: None for k in raw}
-    return raw if isinstance(raw, dict) else {}
+        return {(k.lower() if isinstance(k, str) else k): None for k in raw}
+    if isinstance(raw, dict):
+        return {(k.lower() if isinstance(k, str) else k): v for k, v in raw.items()}
+    return {}
 
 
 def check_workflows(root, files):
@@ -254,6 +297,8 @@ def check_workflows(root, files):
         triggers = _triggers(data)
         if "pull_request_target" in triggers:
             out.append(err("WF-3", "pull_request_target 은 금지입니다(포크 코드 + 시크릿 노출 위험) (G-A3)", rel))
+        if "workflow_run" in triggers:
+            out.extend(_workflow_run_findings(rel, data))           # WF-16: 허용 목록 + 모양(아래 정의, G-A13)
         jobs = data.get("jobs") or {}
         scheduled = "schedule" in triggers
         has_concurrency = "concurrency" in data or any(isinstance(j, dict) and "concurrency" in j for j in jobs.values())
@@ -850,6 +895,223 @@ def check_telegram_inbox_workflow(root, files):
     return out
 
 
+# ----------------------------------------------------------------------------
+# workflow_run 워크플로(WF-16, 2026-11-23, 감사 BA-S1-4 의 탐침 D): 기본 가지의 파일로, 시크릿을 쥔 채 도는 위험한 트리거의 허용 목록
+# ----------------------------------------------------------------------------
+MERGE_READY_WORKFLOW = ".github/workflows/merge-ready-notice.yml"
+MERGE_CONFIRM_WORKFLOW = ".github/workflows/merge-confirm-notice.yml"
+_AUTO_NOTICE_RUN = "python -m pipeline.auto_notice "
+# `workflow_run` 을 쓸 수 있는 워크플로는 이 둘뿐이다(운영자 확인 031 의 보기 2 로 승인 — docs/SECURITY_GUARDRAILS.md G-A13·G-A14). 값: 따라 도는 워크플로 이름·가지 필터·
+# 판정 단계(맨 끝 앞의 run 단계)와 발송 단계(맨 끝, 텔레그램 시크릿이 있는 유일한 단계)의 run 명령 — 단계 위치별로 글자 그대로여야 한다.
+WORKFLOW_RUN_ALLOWED = {
+    MERGE_READY_WORKFLOW: {"workflows": ["[공통] 병합 부탁 PR 자동 만들기"],
+                           "branches": ["ai/claude/M[0-9][0-9][0-9]-*", "ai/claude/M[0-9][0-9][0-9][0-9]-*"],
+                           "decide": _AUTO_NOTICE_RUN + "merge-ready", "send": _AUTO_NOTICE_RUN + "send"},
+    MERGE_CONFIRM_WORKFLOW: {"workflows": ["[공통] 저장소 규칙·테스트 자동 검사"],
+                             "branches": ["main"],
+                             "decide": _AUTO_NOTICE_RUN + "merge-confirm", "send": _AUTO_NOTICE_RUN + "send"},
+}
+_WORKFLOW_RUN_ACTIONS = frozenset({"actions/checkout", "actions/setup-python"})          # 외부 액션은 이 저장소의 다른 워크플로가 이미 쓰는 두 가지뿐(github-script 같은 `script:` 입력이 있는 액션은 없다)
+_WORKFLOW_RUN_REFS = frozenset({"${{ github.event.repository.default_branch }}", "main"})  # 체크아웃 ref — 기본 가지뿐(가지·PR 머리의 값이 아니다)
+_WORKFLOW_RUN_CHECKOUT_WITH = frozenset({"ref", "persist-credentials", "fetch-depth"})
+_WORKFLOW_RUN_FETCH = re.compile(r"\bgit\s+(?:checkout|fetch|clone|pull|switch|merge|am|apply|cherry-pick|submodule|worktree)\b|\bgh\s+(?:pr\s+checkout|repo\s+clone|run|workflow)\b|\b(?:curl|wget|eval|source)\b|\bbash\s+-c\b|\bsh\s+-c\b")
+_SECRET_REF = re.compile(r"(?<![A-Za-z0-9_.-])secrets\s*[.\[]", re.IGNORECASE)
+_SECRET_WORD = re.compile(r"(?<![A-Za-z0-9_.-])secrets(?![A-Za-z0-9_-])", re.IGNORECASE)   # 식 안의 낱말 `secrets` — toJSON(secrets)·format(…, secrets) 처럼 이름 없이 시크릿 통째를 쓰는 길(점·대괄호가 없어 위 정규식이 못 본다)
+_EXPRESSION_BODY = re.compile(r"\$\{\{(.*?)\}\}", re.S)
+DECIDE_JOB, SEND_JOB = "decide", "send"                                       # 허용 목록 파일의 job 둘 — 판정(읽기 권한만·시크릿 없음)과 발송(시크릿은 여기에만, needs: decide)
+_DECIDE_OUTPUTS = {"send": "${{ steps.decide.outputs.send }}", "message": "${{ steps.decide.outputs.message }}"}      # 판정 job 이 발송 job 에 넘기는 출력 둘(정확히 이것뿐)
+_SEND_IF = "needs.decide.outputs.send == 'yes'"                              # 발송 job 은 판정 job 이 yes 를 냈을 때만 시작한다(off·dry 에서는 시작도 안 해 시크릿이 어떤 러너에도 안 간다)
+_SEND_ENV_NAMES = frozenset({"NOTICE_MESSAGE_B64", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"})        # 발송 단계 env 의 이름 전부(PYTHONPATH·LD_PRELOAD 같은 것을 시크릿이 있는 단계에 못 들인다)
+_SEND_MESSAGE_VALUE = "${{ needs.decide.outputs.message }}"
+_WORKFLOW_RUN_JOB_FORBIDDEN = ("permissions", "env", "defaults", "uses", "secrets", "strategy", "container", "services", "environment", "continue-on-error")   # `outputs` 는 허용 목록 파일의 판정 job 만(아래에서 정확히 고정)
+_WORKFLOW_RUN_JOB_KEYS = {DECIDE_JOB: frozenset({"name", "runs-on", "timeout-minutes", "outputs", "steps"}),
+                          SEND_JOB: frozenset({"name", "needs", "if", "runs-on", "timeout-minutes", "steps"})}          # 허용 목록의 파일이 job 별로 가질 수 있는 키 전부
+_WORKFLOW_RUN_STEP_KEYS = frozenset({"name", "id", "uses", "with", "env", "run", "if"})      # 허용 목록의 파일이 단계에 가질 수 있는 키 전부(shell·working-directory·continue-on-error 같은 것은 없다)
+
+
+def _squash(value):
+    """식·조건 비교용: 문자열이면 공백을 하나로 접는다(YAML 줄 나눔·들여쓰기 차이를 무시), 아니면 그대로."""
+    return " ".join(value.split()) if isinstance(value, str) else value
+
+
+def _step_kind(step):
+    uses = step.get("uses")
+    if isinstance(uses, str):
+        return {"actions/checkout": "checkout", "actions/setup-python": "setup-python"}.get(uses.split("@", 1)[0], "uses")
+    return "run" if isinstance(step.get("run"), str) else "?"
+
+
+def _workflow_run_problems(data, spec):
+    """`on: workflow_run` 워크플로가 지킬 것의 위반 문구 목록(WF-16). spec 이 있으면(허용 목록에 있는 파일) 따라 도는 워크플로·가지 필터·run 명령·job 구조가 정해진 값과 같아야 하고, 없으면 그 짝 맞추기는
+    건너뛴다(허용 목록 밖 파일은 호출한 쪽이 따로 오류를 낸다 — 아래 모양 규칙은 모든 workflow_run 워크플로에 같다).
+
+    이 트리거는 가지·PR 의 글(`github.event.workflow_run.head_branch`·`head_commit.message`·`display_title`·`pull_requests`)이 시크릿을 쥔 기본 가지의 파일 안으로 들어오는 길이라, 모양을 한 줄씩 잠근다:
+    ① 트리거는 workflow_run 하나(types: completed·workflows·branches 필터) ② 권한은 모두 read 이고 job 에 따로 달지 않는다 ③ 워크플로·job 수준 env·defaults 가 없다(값은 단계 env 로만) ④ 외부 액션은
+    actions/checkout·actions/setup-python 뿐이고 체크아웃은 기본 가지 ref·persist-credentials false·repository/token 없음 ⑤ run·script 에는 `${{ }}` 가 하나도 없다(env 를 거친 `${{ env.X }}`·steps 출력
+    포함 — 값은 env 로 넘기고 `"$이름"` 으로 읽는다) ⑥ 가지 코드를 내려받는 명령(git checkout·fetch·gh pr checkout …)과 셸이 글을 해석하는 길(eval·bash -c·curl)이 없다 ⑦ 시크릿은 허용 목록 파일에서
+    발송 job(`send`)의 마지막 단계 env 에만 있고 텔레그램 둘뿐이다(판정 job 에는 시크릿이 하나도 없다 — 이름의 위치는 WF-13 이 따로 본다. `toJSON(secrets)` 처럼 이름 없이 시크릿을 쓰는 식도 시크릿으로 본다)
+    ⑧ 허용 목록의 파일은 job 이 정확히 `decide`·`send` 둘이다: decide 는 name·runs-on·timeout-minutes·outputs·steps 만 가지며 outputs 가 정확히 send·message 둘(`steps.decide.outputs.*`)이고, send 는
+    name·needs·if·runs-on·timeout-minutes·steps 만 가지며 `needs: decide`·`if: needs.decide.outputs.send == 'yes'` 이고 마지막 단계 env 의 이름이 정확히 NOTICE_MESSAGE_B64(`needs.decide.outputs.message`)·텔레그램 둘이다.
+    두 job 모두 단계가 정확히 셋(checkout·setup-python·run 하나, run 은 정해진 명령 그대로)이고 단계 키가 name·id·uses·with·env·run·if 뿐이며 runs-on 이 ubuntu-latest 다(container·services·environment·shell·
+    continue-on-error 등이 없다)."""
+    problems = []
+    triggers = _triggers(data)
+    extra = sorted(str(name) for name in triggers if name != "workflow_run")
+    if extra:
+        problems.append(f"트리거는 workflow_run 하나뿐이어야 합니다(다른 트리거: {_shown(', '.join(extra))}) — issue_comment·pull_request_target·push·schedule·workflow_dispatch 를 함께 걸면 낯선 사람이나 가지가 같은 시크릿에 닿습니다")
+    config = triggers.get("workflow_run")
+    if not isinstance(config, dict):
+        problems.append("on.workflow_run 은 types·workflows·branches 를 가진 표여야 합니다")
+        config = {}
+    if config.get("types") != ["completed"]:
+        problems.append(f"workflow_run 의 types 는 정확히 [completed] 여야 합니다(지금 {_shown(config.get('types'))})")
+    branches = config.get("branches")
+    if not (isinstance(branches, list) and branches and all(isinstance(item, str) and item.strip() for item in branches)) or "branches-ignore" in config:
+        problems.append("workflow_run 에는 가지 필터 `branches`(비어 있지 않은 목록)가 있어야 하고 `branches-ignore` 는 쓰지 않습니다 — 필터가 없으면 모든 가지의 실행이 이 워크플로를 깨웁니다")
+    workflows = config.get("workflows")
+    if not (isinstance(workflows, list) and workflows and all(isinstance(item, str) and item.strip() for item in workflows)):
+        problems.append("workflow_run 의 workflows 는 따라 도는 워크플로 이름의 비어 있지 않은 목록이어야 합니다")
+    if spec is not None:
+        if workflows != spec["workflows"]:
+            problems.append(f"따라 도는 워크플로(workflows)는 정확히 {spec['workflows']} 여야 합니다(지금 {_shown(workflows)})")
+        if branches != spec["branches"]:
+            problems.append(f"가지 필터(branches)는 정확히 {spec['branches']} 여야 합니다(지금 {_shown(branches)})")
+    permissions = data.get("permissions")
+    if not isinstance(permissions, dict) or not permissions:
+        problems.append("최상위 permissions 는 read 권한만 적은 표여야 합니다(없거나 read-all·write-all 같은 글자값이면 안 됩니다)")
+    else:
+        bad = sorted(f"{key}: {value}" for key, value in permissions.items() if value not in ("read", "none"))
+        if bad:
+            problems.append(f"쓰기 권한이 있습니다({_shown(', '.join(bad))}) — contents·actions·issues·pull-requests 를 포함해 모든 권한은 read 뿐이어야 합니다(이 워크플로는 아무것도 쓰지 않습니다)")
+    if "env" in data or "defaults" in data:
+        problems.append("워크플로 수준 env·defaults 를 두지 않습니다(값은 단계의 env 로만 넘깁니다)")
+    jobs = data.get("jobs")
+    if not isinstance(jobs, dict) or not jobs or not all(isinstance(job, dict) for job in jobs.values()):
+        return problems + ["jobs 는 job 표여야 합니다"]
+    if spec is not None and set(jobs) != {DECIDE_JOB, SEND_JOB}:
+        problems.append(f"job 은 정확히 `{DECIDE_JOB}`(판정 — 시크릿 없음)와 `{SEND_JOB}`(발송 — 시크릿은 여기에만) 둘이어야 합니다(지금 {_shown(', '.join(str(name) for name in jobs))})")
+    last_steps = {}                     # job 이름 → 마지막 단계의 번호(시크릿이 허용되는 단 하나의 자리)
+    for job_id, job in jobs.items():
+        shown = _shown(job_id)
+        for key in _WORKFLOW_RUN_JOB_FORBIDDEN:
+            if key in job:
+                problems.append(f"job '{shown}' 에 `{key}` 가 있습니다 — job 수준 permissions·env·defaults·재사용 워크플로 호출(uses·secrets)·strategy 를 두지 않습니다(권한·값은 최상위와 단계 env 로만)")
+        if "outputs" in job and (spec is None or job_id != DECIDE_JOB):
+            problems.append(f"job '{shown}' 에 `outputs` 가 있습니다 — 출력은 허용 목록 파일의 판정 job(`{DECIDE_JOB}`)만 정해진 둘을 냅니다")
+        steps = job.get("steps")
+        if not isinstance(steps, list) or not steps or not all(isinstance(step, dict) for step in steps):
+            problems.append(f"job '{shown}' 의 steps 가 단계 목록이 아닙니다")
+            continue
+        last_steps[job_id] = len(steps) - 1
+        if spec is not None:
+            stray_job = sorted(str(key) for key in set(job) - _WORKFLOW_RUN_JOB_KEYS.get(job_id, frozenset()))
+            if stray_job:
+                problems.append(f"job '{shown}' 에 허용되지 않은 키가 있습니다({_shown(', '.join(stray_job))}) — `{DECIDE_JOB}` 는 name·runs-on·timeout-minutes·outputs·steps, `{SEND_JOB}` 는 name·needs·if·runs-on·timeout-minutes·steps 만 가집니다")
+            if job.get("runs-on") != "ubuntu-latest":
+                problems.append(f"job '{shown}' 의 runs-on 은 ubuntu-latest 여야 합니다(지금 {_shown(job.get('runs-on'))}) — 자체 호스팅 러너에서 시크릿을 쓰지 않습니다")
+            if job_id == DECIDE_JOB:
+                outputs = job.get("outputs")
+                if not isinstance(outputs, dict) or {str(key): _squash(value) for key, value in outputs.items()} != _DECIDE_OUTPUTS:
+                    problems.append(f"판정 job `{DECIDE_JOB}` 의 outputs 는 정확히 send·message 둘(`steps.decide.outputs.send`·`steps.decide.outputs.message`)이어야 합니다(지금 {_shown(outputs)})")
+            elif job_id == SEND_JOB:
+                if job.get("needs") not in (DECIDE_JOB, [DECIDE_JOB]):
+                    problems.append(f"발송 job `{SEND_JOB}` 의 needs 는 정확히 `{DECIDE_JOB}` 여야 합니다(지금 {_shown(job.get('needs', '없음'))}) — 판정 job 이 끝나야 시작합니다")
+                if _squash(job.get("if")) != _SEND_IF:
+                    problems.append(f"발송 job `{SEND_JOB}` 의 if 는 정확히 `{_SEND_IF}` 여야 합니다(지금 {_shown(job.get('if', '없음'))}) — 켬 상태가 on 이고 문장이 만들어졌을 때만 시작하고, off·dry 에서는 시작도 하지 않습니다")
+            kinds = [_step_kind(step) for step in steps]
+            if kinds != ["checkout", "setup-python", "run"]:
+                problems.append(f"job '{shown}' 의 단계는 정확히 셋(actions/checkout·actions/setup-python·run 하나)이어야 합니다(지금 {_shown(', '.join(kinds))})")
+            for number, one in enumerate(steps, 1):
+                stray_step = sorted(str(key) for key in set(one) - _WORKFLOW_RUN_STEP_KEYS)
+                if stray_step:
+                    problems.append(f"job '{shown}' 의 {number}번째 단계에 허용되지 않은 키가 있습니다({_shown(', '.join(stray_step))}) — shell·working-directory·continue-on-error 같은 것을 두지 않습니다")
+        for index, step in enumerate(steps):
+            uses, run = step.get("uses"), step.get("run")
+            where = f"job '{shown}' 의 {index + 1}번째 단계"
+            if isinstance(uses, str):
+                action = uses.split("@", 1)[0]
+                if action not in _WORKFLOW_RUN_ACTIONS:
+                    problems.append(f"{where}: 외부 액션은 actions/checkout·actions/setup-python 뿐입니다(지금 {_shown(action)}) — `script:` 를 받는 액션(github-script)이나 제3자 액션을 시크릿이 도는 이 워크플로에 들이지 않습니다")
+                if action == "actions/checkout":
+                    with_ = step.get("with") if isinstance(step.get("with"), dict) else {}
+                    ref = " ".join(str(with_.get("ref", "")).split())
+                    if ref not in _WORKFLOW_RUN_REFS:
+                        problems.append(f"{where}: 체크아웃의 ref 는 기본 가지(`${{{{ github.event.repository.default_branch }}}}` 또는 main)로 명시해야 합니다(지금 {_shown(with_.get('ref', '없음'))}) — 가지·PR 머리의 코드를 내려받아 시크릿과 함께 돌리지 않습니다")
+                    if with_.get("persist-credentials") is not False:
+                        problems.append(f"{where}: 체크아웃은 persist-credentials: false 여야 합니다")
+                    stray = sorted(str(item) for item in set(with_) - _WORKFLOW_RUN_CHECKOUT_WITH)
+                    if stray:
+                        problems.append(f"{where}: 체크아웃의 with 에 허용되지 않은 항목이 있습니다({_shown(', '.join(stray))}) — repository·token·ssh-key·submodules 로 다른 코드를 내려받지 않습니다")
+                elif action == "actions/setup-python":
+                    with_ = step.get("with") if isinstance(step.get("with"), dict) else {}
+                    if set(with_) - {"python-version"}:
+                        problems.append(f"{where}: setup-python 의 with 는 python-version 뿐이어야 합니다")
+            if isinstance(run, str):
+                if "${{" in run:
+                    problems.append(f"{where}: run 에 `${{{{ }}}}` 를 쓰지 않습니다 — `github.event.workflow_run.*`(가지 이름·커밋 제목·PR 제목처럼 AI·사람이 쓴 글)이나 env·steps 출력을 셸 명령에 끼우면 주입이 됩니다. 값은 단계의 env 로 넘기고 파이썬이 읽습니다 (G-A13)")
+                if _WORKFLOW_RUN_FETCH.search(run):
+                    problems.append(f"{where}: 가지 코드를 내려받거나 셸이 글을 해석하는 명령(git checkout·fetch·gh pr checkout·eval·bash -c·curl …)이 있습니다")
+                if spec is not None:
+                    wanted = spec["send"] if job_id == SEND_JOB else spec["decide"]
+                    if run.strip() != wanted:
+                        problems.append(f"{where}: run 은 정확히 `{wanted}` 여야 합니다(지금 {_shown(run.strip())}) — "
+                                        + ("발송 job 은 발송 명령만 돌립니다" if job_id == SEND_JOB else "판정 job 은 판정 명령만 돌리고 시크릿은 이 job 에 없습니다"))
+                    if job_id == DECIDE_JOB and step.get("id") != "decide":
+                        problems.append(f"{where}: 판정 단계의 id 는 정확히 `decide` 여야 합니다(job 의 outputs 가 `steps.decide.outputs.*` 를 가리킵니다)")
+                    if job_id == SEND_JOB:
+                        env = step.get("env") if isinstance(step.get("env"), dict) else {}
+                        if set(env) != _SEND_ENV_NAMES:
+                            problems.append(f"{where}: 발송 단계 env 의 이름은 정확히 {sorted(_SEND_ENV_NAMES)} 여야 합니다(지금 {_shown(', '.join(sorted(str(name) for name in env)))}) — 시크릿이 있는 단계에 다른 환경변수를 들이지 않습니다")
+                        elif _squash(env.get("NOTICE_MESSAGE_B64")) != _SEND_MESSAGE_VALUE:
+                            problems.append(f"{where}: NOTICE_MESSAGE_B64 는 정확히 `{_SEND_MESSAGE_VALUE}`(판정 job 의 출력)여야 합니다 — 이벤트 값 같은 다른 글을 문장으로 받지 않습니다")
+            elif spec is not None and not isinstance(uses, str):
+                problems.append(f"{where}: 실행할 것이 없는 단계입니다(uses 도 run 도 아님)")
+            with_ = step.get("with") if isinstance(step.get("with"), dict) else {}
+            if isinstance(with_.get("script"), str):
+                problems.append(f"{where}: with.script 를 쓰지 않습니다(github-script 같은 액션에 글을 끼우면 코드 주입이 됩니다)")
+        if spec is not None and not isinstance(steps[-1].get("run"), str):
+            problems.append(f"job '{shown}' 의 맨 끝 단계는 run 단계(`{spec['send'] if job_id == SEND_JOB else spec['decide']}`)여야 합니다")
+    # 시크릿 위치: `secrets.` 가 나오는 모든 글은 (jobs.<발송 job>.steps.<맨 끝>.env.<텔레그램 이름>) 자리의 `${{ secrets.그 이름 }}` 뿐이다(허용 목록 파일은 발송 job 만 — 판정 job 에는 하나도 없다. 이름의 모양은 WF-13 이 따로 본다)
+    for path, value in _walk_strings(data):
+        if not (_SECRET_REF.search(value) or any(_SECRET_WORD.search(body) for body in _EXPRESSION_BODY.findall(value))):
+            continue
+        allowed = (len(path) == 6 and path[0] == "jobs" and path[2] == "steps" and path[4] == "env" and path[5] in TELEGRAM_SECRETS
+                   and last_steps.get(path[1]) == path[3] and (spec is None or path[1] == SEND_JOB) and value.strip() == "${{ secrets." + str(path[5]) + " }}")
+        if not allowed:
+            problems.append(f"시크릿(secrets.*)이 허용되지 않은 자리({_shown('.'.join(str(part) for part in path))})에 있습니다 — 텔레그램 시크릿 둘은 발송 job 의 맨 끝 단계 env 에만 같은 이름으로 넣습니다(판정 job 에는 시크릿이 없습니다)")
+    return problems
+
+
+def _workflow_run_findings(rel, data):
+    """파일 하나(파싱한 data)의 WF-16 결과 목록 — 허용 목록에 없으면 그 오류 하나, 그리고 모양 위반마다 하나. check_workflows 의 파일 반복과 check_workflow_run_workflows 가 함께 쓴다."""
+    spec = WORKFLOW_RUN_ALLOWED.get(rel)
+    found = []
+    if spec is None:
+        allowed = ", ".join(sorted(Path(item).name for item in WORKFLOW_RUN_ALLOWED))
+        found.append(err("WF-16", f"허용 목록에 없는 workflow_run 워크플로입니다 — 이 트리거는 가지·PR 의 글이 시크릿을 쥔 기본 가지의 파일로 들어오는 길이라 {allowed} 둘에만 허용합니다. "
+                                "새로 필요하면 운영자 승인(T3)을 받아 허용 목록(scripts/validate_repo.py 의 WORKFLOW_RUN_ALLOWED)과 규칙(docs/SECURITY_GUARDRAILS.md G-A13)을 함께 고칩니다", rel))
+    found.extend(err("WF-16", message, rel) for message in _workflow_run_problems(data, spec))
+    return found
+
+
+def check_workflow_run_workflows(root, files):
+    """WF-16: `on: workflow_run` 워크플로의 허용 목록 — 이 트리거는 가지·PR 의 글이 시크릿을 쥔 기본 가지의 파일로 들어오는 길이라 `WORKFLOW_RUN_ALLOWED`(병합 알림 둘)에 없는 워크플로는 오류이고,
+    허용된 것도 `_workflow_run_problems` 의 모양(가지 코드 체크아웃 금지·쓰기 권한 0·시크릿은 발송 단계 env 뿐·run 에 식 금지)을 지켜야 한다. docs/SECURITY_GUARDRAILS.md G-A13.
+    허용 목록의 파일이 없으면 꺼진 것이라 문제 아니다. 한계: `workflow_run` 을 키 이름으로만 읽는다(`on` 이 문자열·목록·표 어느 모양이어도 같게 읽는다) — 반복 사용(`uses: ./…` 재사용 워크플로) 안에서 도는 것은 보지 않는다."""
+    if yaml is None:
+        return []  # PyYAML 이 없다는 경고는 WF-0(check_workflows)이 이미 낸다
+    out = []
+    for rel in _workflow_files(files):
+        try:
+            data = _load_yaml(read_text(root, rel) or "")
+        except yaml.YAMLError:
+            continue  # WF-0
+        if not isinstance(data, dict) or "workflow_run" not in _triggers(data):
+            continue
+        out.extend(_workflow_run_findings(rel, data))
+    return out
+
+
 def check_request_files(root, files):
     """REQ-1: `인수인계/요청함/` 의 요청 파일(`R-001_짧은-영문-설명.md`)이 정해진 모양인지 — 파일 이름·앞머리(id·kind·title·summary·urgency·pr·created)·id 와 이름의 일치·
     제목 80자·요약 300자·중복 id 없음. 이 모양을 지킨 파일만 push 때 텔레그램으로 알려진다(pipeline/operator_loop.py). README.md 는 설명 문서라 건너뛴다.
@@ -1154,7 +1416,7 @@ def check_briefing(root, files):
     spec_path = ".github/editorial/edit-spec.yml"
     if yaml is not None and spec_path in files:
         try:
-            spec = _load_yaml(read_text(root, spec_path) or "") or {}
+            spec = _load_yaml(read_text(root, spec_path) or "", strict=False) or {}
             expected += [("수정 항목", k) for k in (spec.get("edit_types") or {})] if isinstance(spec, dict) else []
         except yaml.YAMLError:
             pass  # 명세 오류는 SPEC-1 이 알린다
@@ -1184,7 +1446,7 @@ def check_exposure(root, files):
     if yaml is None or "_config.yml" not in files:
         return []
     try:
-        cfg = _load_yaml(read_text(root, "_config.yml") or "") or {}
+        cfg = _load_yaml(read_text(root, "_config.yml") or "", strict=False) or {}
     except yaml.YAMLError:
         return []
     excluded = cfg.get("exclude") or []
