@@ -1507,6 +1507,17 @@ class TransportTest(unittest.TestCase):
             self.assertEqual(an.decode_message(longer), "")                                    # 길이 한도를 넘는 값은 풀어 보지도 않는다
         self.assertEqual(an.decode_message("a" * 5000), "")                                    # 한도를 넘는 엉터리 값도 마찬가지
 
+    def test_values_with_characters_outside_the_alphabet_are_refused_before_any_decoding(self):
+        """글자 모양(영문·숫자·`+/=` 뿐, `=` 는 끝에 둘까지)은 풀어 보기 전에 거른다 — 디코더를 부르지도 않으므로 디코더의 오류 처리나 버전별 엄격함에 기대지 않는다."""
+        valid = an.encode_message("[M105] 병합완료 확인 - 정상")
+        for value in (valid + " ", " " + valid, valid + "\n", valid[:8] + "\n" + valid[8:], valid[:8] + "-" + valid[9:], valid[:8] + "_" + valid[9:], "====", "ＡＢＣＤ", "AAAA=AAAA", "=" + valid, valid + "===", "A" * 40 + "\r"):
+            with self.subTest(repr(value)[:30]):
+                with mock.patch.object(an.base64, "b64decode", side_effect=AssertionError("풀어 보면 안 된다")):
+                    self.assertEqual(an.decode_message(value), "")
+        with mock.patch.object(an.base64, "b64decode", wraps=base64.b64decode) as spy:
+            self.assertEqual(an.decode_message(valid), "[M105] 병합완료 확인 - 정상")                    # 대조: 올바른 값은 디코더를 한 번 부른다
+            self.assertEqual(spy.call_count, 1)
+
     def test_malformed_values_decode_to_nothing(self):
         valid = an.encode_message("[M105] 병합완료 확인 - 정상")
         self.assertEqual(an.decode_message(valid), "[M105] 병합완료 확인 - 정상")
