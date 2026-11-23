@@ -15,6 +15,9 @@ import json
 import tempfile
 import time
 import unittest
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from unittest import mock
 
@@ -1239,6 +1242,132 @@ class CommandLineTest(unittest.TestCase):
         self.assertNotIn("비밀 문구", joined)
         self.assertEqual(nh.leaks(joined), [])
         self.assertTrue(any(line.startswith("::warning::") for line in out))
+
+
+# ----------------------------------------------------------------------------
+# 실제 GitHub 클라이언트와의 이음매 — 네트워크 대신 가짜 urlopen
+# ----------------------------------------------------------------------------
+class RoutedUrlopen:
+    """기존 클라이언트(operator_loop.GitHub)의 urlopen 자리에 끼우는 가짜. 요청 주소를 경로·쪽으로 풀어 routes(FakeApi 와 같은 표 — 값은 JSON 값·Exception·Seq)에서 응답을 골라 돌려준다.
+    없는 경로는 HTTP 404. 받은 요청(메서드·주소·머리·본문)을 모두 기록한다."""
+
+    def __init__(self, routes):
+        self.routes, self.requests = routes, []
+
+    def __call__(self, request, timeout=None):
+        self.requests.append(request)
+        parts = urllib.parse.urlsplit(request.full_url)
+        prefix = f"/repos/{REPO}"
+        path = parts.path[len(prefix):] if parts.path.startswith(prefix) else parts.path
+        query = urllib.parse.parse_qs(parts.query)
+        keyed = (path, int(query["page"][0]) if "page" in query else None)
+        if keyed in self.routes:
+            value = self.routes[keyed]
+        elif path in self.routes:
+            value = self.routes[path]
+        else:
+            raise urllib.error.HTTPError(request.full_url, 404, "Not Found", {}, io.BytesIO(b'{"message": "Not Found"}'))
+        if isinstance(value, Seq):
+            value = value.next()
+        if isinstance(value, Exception):
+            raise value
+        return io.BytesIO(json.dumps(value).encode("utf-8"))
+
+
+class RealClientGlueTest(unittest.TestCase):
+    """판정 단계가 실제로 쓰는 길 — 가짜 API 대신 기존 클라이언트(operator_loop.GitHub)를 그대로 쓰고 urlopen 만 가짜로 바꿔, 보내는 요청의 모양(메서드·주소·쿼리·머리)과 오류 매핑을 본다.
+    (GitHub 를 실제로 부르지 않고 확인할 수 있는 이음매는 여기까지다 — 응답 모양은 GitHub 문서의 모양을 가정한 것이고 첫 관측은 dry 로 한다.)"""
+
+    TOKEN = "CANARY_read_token"
+
+    def run_real(self, kind, env, routes, mode="on"):
+        spy, out = RoutedUrlopen(routes), []
+        with tempfile.TemporaryDirectory() as tmp:
+            temp = Path(tmp)
+            state = temp / "state.json"
+            state.write_text(json.dumps({"mode": mode}), encoding="utf-8")
+            environ = dict(env, RUNNER_TEMP=tmp, GITHUB_OUTPUT=str(temp / "output.txt"), GITHUB_STEP_SUMMARY=str(temp / "summary.md"))
+            with mock.patch.object(urllib.request, "urlopen", spy):
+                code = an.main([kind], environ=environ, out=out.append, state_file=state, sleep=no_sleep)
+            files = {name: (temp / name).read_text(encoding="utf-8") if (temp / name).is_file() else None for name in ("output.txt", "summary.md", an.MESSAGE_FILE)}
+        return code, out, files, spy
+
+    @staticmethod
+    def requests_of(spy):
+        found = []
+        for request in spy.requests:
+            parts = urllib.parse.urlsplit(request.full_url)
+            found.append((request.get_method(), parts.path, urllib.parse.parse_qs(parts.query)))
+        return found
+
+    def test_the_ready_path_sends_two_get_requests_with_the_expected_questions_and_the_read_token_only(self):
+        code, out, files, spy = self.run_real(an.READY, ready_env(), ready_routes())
+        self.assertEqual(code, 0)
+        self.assertEqual(self.requests_of(spy), [
+            ("GET", f"/repos/{REPO}/pulls", {"state": ["open"], "head": ["octo:" + BRANCH], "base": ["main"], "per_page": ["5"]}),
+            ("GET", f"/repos/{REPO}/actions/runs", {"branch": [BRANCH], "head_sha": [SHA], "event": ["push"], "per_page": ["100"]})])
+        for request in spy.requests:
+            self.assertTrue(request.full_url.startswith(ol.API_ROOT + "/repos/" + REPO + "/"))
+            self.assertIsNone(request.data)                                                         # 본문이 없다 — 읽기뿐
+            self.assertEqual(request.get_header("Authorization"), "Bearer " + self.TOKEN)
+            self.assertEqual(request.get_header("Accept"), "application/vnd.github+json")
+        self.assertEqual(files["output.txt"], "send=yes\n")
+        self.assertEqual(an.message_problem(files[an.MESSAGE_FILE]), "")
+        self.assertTrue(files[an.MESSAGE_FILE].startswith("[M105] 병합 부탁 — "))
+        self.assertNotIn(self.TOKEN, files["summary.md"] + "\n".join(out))
+
+    def test_the_confirm_path_sends_four_get_requests_and_writes_a_normal_confirmation(self):
+        code, out, files, spy = self.run_real(an.CONFIRM, confirm_env(), confirm_routes())
+        self.assertEqual(code, 0)
+        self.assertEqual(self.requests_of(spy), [
+            ("GET", f"/repos/{REPO}/commits/{SHA}", {}),
+            ("GET", f"/repos/{REPO}/commits/{SHA}/pulls", {"per_page": ["10"]}),
+            ("GET", f"/repos/{REPO}/pulls/{PR_NUMBER}", {}),
+            ("GET", f"/repos/{REPO}/commits/{HEAD_SHA}", {})])
+        self.assertTrue(all(request.data is None for request in spy.requests))
+        self.assertEqual(files["output.txt"], "send=yes\n")
+        self.assertEqual(files[an.MESSAGE_FILE], notify.merged_title("M105", an.CONFIRM_OK))
+
+    def test_an_unknown_route_is_http_404_and_ends_quietly_with_the_fixed_sentence_and_no_token_in_the_output(self):
+        code, out, files, spy = self.run_real(an.READY, ready_env(), {})
+        self.assertEqual(code, 0)
+        self.assertEqual(len(spy.requests), 1)                                                      # 404 는 일시 오류가 아니라 다시 부르지 않는다
+        self.assertIn(an.REASONS["api_error"][0], files["summary.md"])
+        self.assertIsNone(files["output.txt"])
+        self.assertIsNone(files[an.MESSAGE_FILE])
+        self.assertNotIn(self.TOKEN, "\n".join(out) + files["summary.md"])
+        self.assertTrue(any(line.startswith("::warning::") for line in out))                      # api_error 는 눈에 띄게(경고) 남는다
+
+    def test_a_transient_server_error_is_retried_once_by_the_existing_client_and_other_errors_are_not_retried(self):
+        bad = urllib.error.HTTPError("x", 502, "Bad Gateway", {}, io.BytesIO(b"{}"))
+        spy = RoutedUrlopen({"/pulls": Seq(bad, [pr_item()])})
+        reader = an.Reader(ol.GitHub(REPO, self.TOKEN, opener=spy, sleep=no_sleep))
+        self.assertEqual(reader.get("/pulls", state="open"), [pr_item()])
+        self.assertEqual(len(spy.requests), 2)
+        missing = RoutedUrlopen({})
+        with self.assertRaises(an.Skip) as caught:
+            an.Reader(ol.GitHub(REPO, self.TOKEN, opener=missing, sleep=no_sleep)).get("/pulls")
+        self.assertEqual((caught.exception.code, len(missing.requests)), ("api_error", 1))
+
+    def test_dry_reads_with_the_real_client_but_leaves_no_output_line_or_message_file_and_off_never_calls_it(self):
+        code, out, files, spy = self.run_real(an.READY, ready_env(), ready_routes(), mode="dry")
+        self.assertEqual((code, len(spy.requests)), (0, 2))
+        self.assertIsNone(files["output.txt"])
+        self.assertIsNone(files[an.MESSAGE_FILE])
+        self.assertIn("보낼 문장", files["summary.md"])
+        code, out, files, spy = self.run_real(an.READY, ready_env(), ready_routes(), mode="off")
+        self.assertEqual((code, spy.requests, files["output.txt"], files[an.MESSAGE_FILE]), (0, [], None, None))
+
+    def test_the_default_reader_wraps_the_existing_client_with_the_repository_and_the_read_token(self):
+        reader = an._build_reader({"GITHUB_TOKEN": self.TOKEN, "GITHUB_REPOSITORY": REPO})
+        self.assertIsInstance(reader, an.Reader)
+        self.assertIsInstance(reader._api, ol.GitHub)
+        self.assertEqual(reader._api.repo, REPO)
+        for env in ({}, {"GITHUB_TOKEN": ""}, {"GITHUB_TOKEN": "   "}):
+            with self.subTest(env):
+                with self.assertRaises(an.Skip) as caught:
+                    an._build_reader(env)
+                self.assertEqual(caught.exception.code, "api_error")
 
 
 # ----------------------------------------------------------------------------
