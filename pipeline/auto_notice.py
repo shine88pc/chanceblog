@@ -6,17 +6,18 @@
 설명: docs/SECURITY_GUARDRAILS.md G-A13·G-A14, docs/ARCHITECTURE.md §4-6-4, 운영자용 안내 인수인계/운영자_요청함_사용법.md.
 
 켬 상태 `pipeline/auto_notice.json` — `{"mode": "off"}` 한 줄이고 값은 셋뿐이다.
-  off  기본. 워크플로는 곧바로 끝난다(GitHub 를 부르지 않고 텔레그램 시크릿도 읽지 않는다).
-  dry  모든 계산을 하고 보낼 문장을 실행 요약(`$GITHUB_STEP_SUMMARY`)에만 남긴다. 텔레그램 호출 0, 시크릿 읽기 0.
-  on   보낼 문장을 만들고 발송 단계가 텔레그램으로 보낸다.
+  off  기본. 판정 job 이 곧바로 끝나고 발송 job 은 시작도 하지 않는다(GitHub 를 부르지 않고 텔레그램 시크릿도 어떤 러너에도 내려가지 않는다).
+  dry  모든 계산을 하고 보낼 문장을 실행 요약(`$GITHUB_STEP_SUMMARY`)에만 남긴다. 출력이 없어 발송 job 이 시작도 하지 않는다 — 텔레그램 호출 0, 시크릿 읽기 0.
+  on   보낼 문장을 만들고(판정 job) 발송 job 이 텔레그램으로 보낸다.
 파일이 없거나 읽지 못하거나 값이 셋 밖이거나 다른 키가 있으면 off 다(안전한 쪽). dry→on 으로 바꾸는 것은 별도 병합 부탁(T3)이다.
 
 명령 줄: python -m pipeline.auto_notice <merge-ready | merge-confirm | send>   (값은 명령 줄이 아니라 환경변수로만 받는다)
-  merge-ready    워크플로 `workflow_run`(병합 부탁 PR 자동 만들기가 끝남)의 값으로 '열린 PR 이 있고 머리 커밋이 같고 검사가 모두 초록' 일 때 병합 부탁 문장을 만든다.
-  merge-confirm  워크플로 `workflow_run`(main 의 가드레일 검사가 끝남)의 값으로 `[M번호]` 병합 커밋을 확인해 정상·이상 문장을 만든다.
-  send           앞 단계가 만든 문장 파일을 다시 검사한 뒤 텔레그램으로 보낸다(시크릿은 이 단계의 env 에만 있다).
-  환경변수: GITHUB_REPOSITORY·RUNNER_TEMP·GITHUB_STEP_SUMMARY·GITHUB_OUTPUT(러너), GITHUB_TOKEN(읽기 권한), NOTICE_RUN_ID·NOTICE_RUN_BRANCH·NOTICE_RUN_SHA·NOTICE_RUN_EVENT·
-  NOTICE_RUN_CONCLUSION·NOTICE_RUN_REPO·NOTICE_DEFAULT_BRANCH(워크플로가 `github.event.workflow_run.*` 에서 env 로 넘긴 값), TELEGRAM_BOT_TOKEN·TELEGRAM_CHAT_ID(send 만).
+  merge-ready    워크플로 `workflow_run`(병합 부탁 PR 자동 만들기가 끝남)의 값으로 '열린 PR 이 있고 머리 커밋이 같고 검사가 모두 초록' 일 때 병합 부탁 문장을 만든다(판정 job).
+  merge-confirm  워크플로 `workflow_run`(main 의 가드레일 검사가 끝남)의 값으로 `[M번호]` 병합 커밋을 확인해 정상·이상 문장을 만든다(판정 job).
+  send           판정 job 이 넘긴 문장(base64 한 줄)을 풀어 다시 검사한 뒤 텔레그램으로 보낸다(발송 job — 시크릿은 이 job 의 env 에만 있다. off·dry 에서는 이 job 이 시작도 하지 않는다).
+  환경변수: GITHUB_REPOSITORY·GITHUB_STEP_SUMMARY·GITHUB_OUTPUT(러너), GITHUB_TOKEN(읽기 권한), NOTICE_RUN_ID·NOTICE_RUN_BRANCH·NOTICE_RUN_SHA·NOTICE_RUN_EVENT·
+  NOTICE_RUN_CONCLUSION·NOTICE_RUN_REPO·NOTICE_DEFAULT_BRANCH(판정 job 의 단계 env — 워크플로가 `github.event.workflow_run.*` 에서 넘긴 값), NOTICE_MESSAGE_B64(발송 job 의 env — 판정 job 의 출력),
+  TELEGRAM_BOT_TOKEN·TELEGRAM_CHAT_ID(send 만).
 
 원칙
   1. **가지 이름·PR 제목·본문·커밋 제목은 AI 가 쓴 글이다.** 값은 env 로만 받고 여기서 모양을 거른다(가지 `ai/claude/M번호-영문`·커밋 40자리 소문자 16진수·제목 `[M번호] ` 머리·200자·제어 문자·`@`·주소·비밀 모양).
@@ -24,11 +25,17 @@
   2. **가지(PR 머리)의 코드는 내려받지도 실행하지도 않는다.** 이 모듈은 기본 가지(main)의 것이다. GitHub 는 읽기(GET)만, 기존 클라이언트(operator_loop.GitHub — 외부 접속 등록은 거기 한 곳)로 부른다.
   3. 텔레그램은 pipeline/notify.py 의 규칙을 그대로 쓴다(토큰 비노출·재시도·통 수 상한). 새 HTTP 코드를 만들지 않는다. 본문은 평문이다.
   4. 알림은 보조다. 읽기 실패·모양 불일치·전송 실패는 경고 한 줄 뒤 종료 코드 0 이다(알림이 안 가는 쪽이 이상한 알림이 가는 쪽보다 낫다 — AI 의 요청 파일 알림이 아직 병행한다).
+  5. 두 job 사이로 가는 것은 `send=yes` 와 `message=<base64 한 줄>` 두 출력뿐이다. base64 는 영문·숫자·`+/=` 만이라 줄 바꿈·따옴표·`::` 명령 머리가 끼어들 수 없고, 발송 job 이 풀어서
+     message_problem 으로 다시 검사한다(문장 모양이 판정 job 이 만드는 것과 같아야 통과). 이 모듈은 문장을 로그에 찍지 않는다(dry 요약만 예외).
+  6. PR 은 `workflow_run.pull_requests`(포크·일부 이벤트에서 비는 배열)에 기대지 않고 `GET /pulls?head=소유자:가지` 로 찾는다 — 나중에 `pull_requests[0]` 으로 단순화하지 않는다.
 """
 import argparse
+import base64
+import binascii
 import json
 import os
 import re
+import stat
 import sys
 import time
 import unicodedata
@@ -48,13 +55,17 @@ MODE_OFF, MODE_DRY, MODE_ON = "off", "dry", "on"
 MODES = (MODE_OFF, MODE_DRY, MODE_ON)
 
 READY, CONFIRM, SEND = "merge-ready", "merge-confirm", "send"
-MESSAGE_FILE = "auto-notice-message.txt"          # 판정 단계가 `$RUNNER_TEMP` 에 쓰고 발송 단계가 읽는다
-OUTPUT_KEY, OUTPUT_YES = "send", "yes"            # 판정 단계가 `$GITHUB_OUTPUT` 에 쓰는 것은 이 고정 한 줄뿐이다
+OUTPUT_KEY, OUTPUT_YES = "send", "yes"            # 판정 job 이 `$GITHUB_OUTPUT` 에 쓰는 첫째 줄(고정) — 발송 job 은 이 값이 yes 일 때만 시작한다
+MESSAGE_KEY = "message"                           # 판정 job 이 `$GITHUB_OUTPUT` 에 쓰는 둘째 줄: 문장을 base64 한 줄로(영문·숫자·`+/=` 뿐 — 줄 바꿈·따옴표·`::` 가 끼어들 수 없다)
+MESSAGE_ENV = "NOTICE_MESSAGE_B64"                # 발송 job 이 그 출력을 env 로 받는 이름
 
 MESSAGE_LIMIT = 800                               # 한 통의 글자 수 상한(텔레그램 한도 4,096 에 한참 못 미친다 — 휴대폰에서 한눈에 읽는 길이)
+MESSAGE_BYTES_LIMIT = MESSAGE_LIMIT * 4           # 800자가 UTF-8 로 가질 수 있는 최대 바이트(한 글자 최대 4바이트) — 풀어 본 문장이 이보다 크면 보내지 않는다
+MESSAGE_B64_LIMIT = (MESSAGE_BYTES_LIMIT + 2) // 3 * 4   # 그 바이트가 base64 로 가질 수 있는 최대 길이 — 발송 job 이 받는 값이 이보다 길면 풀어 보지도 않는다
 READY_TITLE_LIMIT = 80                            # 병합 부탁 제목 줄의 PR 제목 부분(`[M번호] ` 뺀 것)
 POINT_LINES = 5                                   # 병합 부탁 본문의 요점 줄 수 상한
 POINT_LIMIT = 120                                 # 요점 줄 하나의 글자 수 상한
+POINT_CHECK_CHARS = 600                           # 요점 줄을 자르기 전에 거르는 앞쪽 글자 수 — 자르는 길이(120)보다 한참 길어 경계에 걸친 비밀·주소 머리도 줄 전체로 보고, 한 줄이 아무리 길어도 일이 늘지 않는다
 POINT_SCAN_LINES = 400                            # 요점 줄을 고르려고 본문에서 읽는 줄 수의 상한 — 앞쪽에서 고르므로 이만 읽으면 되고, 아주 긴 본문이 일을 늘리지 못한다
 PR_TITLE_LIMIT = 200                              # PR 제목 전체 상한(auto-pr.yml 과 같다)
 REASON_LIMIT = 100                                # 병합완료 확인 이상의 사유 한 줄
@@ -77,15 +88,21 @@ TITLE_HEAD_RE = re.compile(r"\[(M[0-9]{3,4})\] ")          # 제목 맨 앞 `[M�
 CONCLUSION_WORDS = frozenset({"success", "failure", "cancelled", "skipped", "timed_out", "action_required", "neutral", "stale", "startup_failure"})
 
 # 글자 규칙(알림 표준 TG-STD): 링크 주소·물결표·`@멘션` 이 없다. 아래 정규식은 검사용이고 글을 바꾸지 않는다(물결표만 줄표로 바꿔 싣는다).
-_WEB_TLDS = ("com", "net", "org", "io", "dev", "app", "co", "kr", "me", "ly", "gg", "xyz", "info", "biz", "edu", "gov", "ai", "to", "cc", "tv", "us", "uk", "de", "jp", "cn", "ru", "fm", "site",
-             "online", "top", "shop", "link", "click", "page", "cloud", "tech", "store")
+# 주소는 '목록' 이 아니라 '구조' 로 본다: `낱말(글자·숫자) 점 영문 2–24자` 꼴이면 도메인 모양이다(단축 주소와 새 최상위 도메인까지 — 텔레그램은 알려진 최상위 도메인이면 평문도 링크로 그린다).
+# 예외는 이 저장소 PR 글에 흔한 파일 확장자뿐이다(`README.md`·`validate_repo.py`·`a.yml`). 점 뒤에 숫자가 오는 것(`3.12`·`v1.2`)과 한 글자 꼬리(`e.g.`)·밑줄이 붙는 꼬리(`a.b_c`)는 도메인이 아니다.
+# 알려진 과잉 거절: `notify.Notifier`·`os.path` 같은 점 있는 코드 이름도 이 꼴이라 주소로 본다(그 줄만 빠지고, 제목이면 알림이 안 간다 — 안전한 쪽). `.sh`·`.zip` 은 도메인이므로 예외가 아니다.
+_FILE_EXTENSIONS = ("md", "py", "yml", "yaml", "json", "txt", "js", "ts", "css", "html", "htm", "toml", "cfg", "ini", "csv", "log", "png", "jpg", "jpeg", "gif", "svg", "pdf", "lock", "rst", "xml",
+                    "jsx", "tsx", "mjs", "cjs", "tsv", "jsonl", "conf", "env", "sql", "ipynb", "whl", "gz", "tar", "tgz")
+_NAME_END = r"(?![A-Za-z0-9_-])"
 _ADDRESS_RE = re.compile(
-    r"[A-Za-z][A-Za-z0-9+.-]*://"                                           # 주소 머리(웹·텔레그램·ftp …)
+    r"(?<=[A-Za-z0-9+.-])://"                                               # 주소 머리(웹·텔레그램·ftp …) — 앞에 머리 글자가 있는 `://` (줄 전체를 한 번만 훑는 꼴)
     r"|(?<![A-Za-z0-9])www\."
     r"|(?<![A-Za-z0-9])(?:mailto|tel|tg|sms|file|data|javascript|ftp|ssh|git):(?=\S)"      # 공백 없이 이어지는 것만(영문 '파일: x' 같은 머리글은 주소가 아니다)
     r"|(?<![0-9])[0-9]{1,3}(?:\.[0-9]{1,3}){3}(?![0-9])"                    # IPv4
-    r"|(?<![A-Za-z0-9_-])[A-Za-z0-9][A-Za-z0-9-]*(?:\.[A-Za-z0-9-]+)*\.(?:" + "|".join(_WEB_TLDS) + r")(?![A-Za-z0-9-])",
+    r"|[^\W_]\.(?:xn--[a-z0-9-]{2,59}" + _NAME_END                         # 낱말 점 꼬리: 퓨니코드 꼬리이거나
+    + r"|(?!(?:" + "|".join(_FILE_EXTENSIONS) + r")" + _NAME_END + r")[a-z]{2,24}" + _NAME_END + r")",   # 파일 확장자가 아닌 영문 2–24자 꼬리
     re.IGNORECASE)
+_DOT_LIKE = {0x3002: ".", 0xFF61: ".", 0x2024: ".", 0xFE52: ".", 0xFF0E: "."}       # 점처럼 읽히는 글자 다섯(표의 마침표·반각 표의 마침표·한 점 줄임표·작은 마침표·전각 마침표) → 접은 사본에서 점으로
 _TILDE_CHARS = {ord(chr(0x7E)): chr(0x2013), 0xFF5E: chr(0x2013), 0x301C: chr(0x2013), 0x223C: chr(0x2013)}      # 물결표 넷(ASCII·전각·파동 줄표·틸드 연산자) → 줄표
 _TRAILER_RE = re.compile(r"(?i)^(?:co-authored-by|signed-off-by|reviewed-by|acked-by|tested-by|reported-by|ad-surface-approved|change-id)\s*:")
 _LIST_MARK_RE = re.compile(r"^(?:[-*+•]\s+|[0-9]{1,3}[.)]\s+)+")
@@ -95,6 +112,32 @@ TITLE_SEPARATOR = " — "
 READY_LABEL = "병합 부탁"
 CHECK_LINE = "검사: 초록"
 CONFIRM_OK, CONFIRM_BAD = "정상", "이상"
+
+# 병합완료 확인 문장의 둘째 줄부터에 들어갈 수 있는 글은 이 목록뿐이다 — 문장을 만드는 쪽(evaluate_confirm·compose_confirm)과 발송 job 의 모양 검사(message_problem)가 같은 상수를 쓴다.
+# `{}` 는 코드가 채우는 수·결론 낱말 자리다. 정상 문장은 둘째 줄이 없거나 NOTE 를 이 순서로 하나·둘, 이상 문장은 사유 한 줄(첫 문제 + 선택으로 ` (외 N건)`)이다.
+NOTE_TWO_PARENTS = "참고: 병합 커밋의 부모가 2개입니다(병합 커밋 방식)"
+NOTE_NO_CONTENT = "참고: 트리가 달라 변경 파일의 이름만 비교했습니다(내용 비교 생략)"
+CONFIRM_NOTES = (NOTE_TWO_PARENTS, NOTE_NO_CONTENT)
+REASON_CONCLUSION = "main 검사(가드레일)가 성공으로 끝나지 않았습니다(결론: {})"
+REASON_PARENTS = "병합 커밋의 부모가 {}개입니다(1개 또는 2개여야 합니다)"
+REASON_MERGE_COMMIT = "PR 의 병합 커밋이 이 커밋과 다릅니다"
+REASON_BASE = "병합된 PR 의 대상 가지가 기본 가지가 아닙니다"
+REASON_NUMBER = "커밋 제목과 PR 제목의 번호가 다릅니다"
+REASON_FILES = "변경 파일이 PR 과 다릅니다(PR {}개, 병합 {}개)"
+UNKNOWN_CONCLUSION = "알 수 없음"
+
+
+def _template_regex(template, *slots):
+    """`{}` 자리가 있는 고정 문장 → 그 자리에 slots 를 차례로 끼운 정규식 글(나머지는 글자 그대로)."""
+    pieces = re.escape(template).split(re.escape("{}"))
+    return "".join(piece + (slots[index] if index < len(slots) else "") for index, piece in enumerate(pieces))
+
+
+_CONCLUSION_SLOT = "(?:" + "|".join(re.escape(word) for word in sorted(CONCLUSION_WORDS | {UNKNOWN_CONCLUSION})) + ")"
+_COUNT_SLOT = r"[0-9]{1,6}"
+_REASON_RE = re.compile("(?:" + "|".join([
+    _template_regex(REASON_CONCLUSION, _CONCLUSION_SLOT), _template_regex(REASON_PARENTS, _COUNT_SLOT), re.escape(REASON_MERGE_COMMIT), re.escape(REASON_BASE), re.escape(REASON_NUMBER),
+    _template_regex(REASON_FILES, _COUNT_SLOT, _COUNT_SLOT)]) + r")(?: \(외 [0-9]{1,2}건\))?")
 
 # 보내지 않은 이유(고정 문장 — 요약·로그에는 이것과 번호·정수만 쓴다). 두 번째 값은 경고(::warning::)로 드러낼 만한 이상 상황인가.
 REASONS = {
@@ -146,10 +189,12 @@ def _no_duplicate_keys(pairs):
 
 
 def read_mode(path=None):
-    """켬 상태 파일을 읽어 `off`·`dry`·`on` 중 하나를 돌려준다. 파일이 없거나 크거나 JSON 이 아니거나 키가 `mode` 하나가 아니거나 값이 셋 밖(대소문자·공백 포함)이면 `off`(안전한 쪽)."""
+    """켬 상태 파일을 읽어 `off`·`dry`·`on` 중 하나를 돌려준다. 파일이 없거나 보통 파일이 아니거나(심볼릭 링크·폴더·장치) 크거나 JSON 이 아니거나 키가 `mode` 하나가 아니거나
+    값이 셋 밖(대소문자·공백 포함)이면 `off`(안전한 쪽). 링크는 diff 에 대상 경로만 보여 눈으로 놓치기 쉬워 따라가지 않는다."""
     target = STATE_FILE if path is None else Path(path)
     try:
-        if target.stat().st_size > STATE_MAX_BYTES:
+        info = target.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_size > STATE_MAX_BYTES:
             return MODE_OFF
         data = json.loads(target.read_text(encoding="utf-8"), object_pairs_hook=_no_duplicate_keys)
     except (OSError, ValueError, RecursionError):
@@ -161,8 +206,8 @@ def read_mode(path=None):
 
 # ---- 글 거르기 -----------------------------------------------------------------------------------------
 def _folded(text):
-    """검사용 사본(NFKC — 전각 골뱅이·전각 주소 머리·전각 물결표도 ASCII 꼴로). 글을 바꾸지 않고 검사에만 쓴다."""
-    return unicodedata.normalize("NFKC", text)
+    """검사용 사본(NFKC — 전각 골뱅이·전각 주소 머리·전각 물결표도 ASCII 꼴로, 점처럼 읽히는 글자 다섯도 `.` 으로). 글을 바꾸지 않고 검사에만 쓴다."""
+    return unicodedata.normalize("NFKC", text).translate(_DOT_LIKE)
 
 
 def line_problem(text):
@@ -198,7 +243,9 @@ def shorten(text, limit):
 
 def point_lines(body, limit_lines=POINT_LINES, limit_chars=POINT_LIMIT):
     """PR 본문(커밋 본문)의 앞쪽 요점 줄 — 빈 줄·제목 줄(`#`)·구분선·'Co-authored-by:' 같은 꼬리표를 건너뛰고, 글머리 기호·강조를 걷고, 줄마다 limit_chars 로 줄인다.
-    보낼 수 없는 줄(제어·비밀·멘션·주소)은 그 줄만 버린다(본문 전체를 버리지 않는다). 최대 limit_lines 줄이고, 본문은 앞 POINT_SCAN_LINES(400)줄만 읽는다."""
+    보낼 수 없는 줄(제어·비밀·멘션·주소)은 그 줄만 버린다(본문 전체를 버리지 않는다). 최대 limit_lines 줄이고, 본문은 앞 POINT_SCAN_LINES(400)줄만 읽는다.
+    거르기는 제목과 같게 '거른 뒤 자름' 이다: 자르기 전에 줄 앞쪽 POINT_CHECK_CHARS(600)자를 먼저 거르고(자르는 길이 120 에 걸친 비밀·주소 머리의 앞부분이 실리지 않게), 자른 뒤에도 한 번 더 거른다
+    (자르다가 새로 생긴 모양). 앞쪽 600자만 보므로 한 줄이 아무리 길어도 일이 늘지 않는다."""
     text = body if isinstance(body, str) else ""
     points = []
     for raw in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")[:POINT_SCAN_LINES]:
@@ -207,6 +254,8 @@ def point_lines(body, limit_lines=POINT_LINES, limit_chars=POINT_LIMIT):
             continue
         line = clean_inline(_LIST_MARK_RE.sub("", _QUOTE_MARK_RE.sub("", stripped)))
         if not any(char.isalnum() for char in line):
+            continue
+        if line_problem(line[:POINT_CHECK_CHARS]):
             continue
         line = shorten(line, limit_chars)
         if line_problem(line):
@@ -252,33 +301,38 @@ def compose_ready(number, title, body):
     return _ready_text(head, chosen, number)
 
 
-def compose_confirm(number, problems, extra=""):
-    """병합완료 확인 문장: 정상이면 제목 한 줄(`[M번호] 병합완료 확인 - 정상`, 참고할 일이 있으면 한 줄 더), 이상이면 제목 + 사유 한 줄(첫 문제 + 나머지 개수, 100자 안).
-    problems 는 코드가 정한 고정 문장 목록이다."""
+def compose_confirm(number, problems, extra=()):
+    """병합완료 확인 문장: 정상이면 제목 한 줄(`[M번호] 병합완료 확인 - 정상`, 참고할 일이 있으면 CONFIRM_NOTES 의 고정 글을 한 줄씩 더), 이상이면 제목 + 사유 한 줄(첫 문제 + 나머지 개수, 100자 안).
+    problems 는 코드가 정한 고정 문장(REASON_*) 목록이고 extra 는 NOTE_* 글 하나(문자열)나 그 목록이다."""
     result = CONFIRM_BAD if problems else CONFIRM_OK
     lines = [notify.merged_title(number, result)]
     if problems:
         reason = problems[0] + (f" (외 {len(problems) - 1}건)" if len(problems) > 1 else "")
         lines.append(shorten(reason, REASON_LIMIT))
-    elif extra:
-        lines.append(shorten(extra, REASON_LIMIT))
+    else:
+        notes = [extra] if isinstance(extra, str) else list(extra)
+        lines.extend(shorten(note, REASON_LIMIT) for note in notes if note)
     return "\n".join(lines)
 
 
 def message_problem(text):
-    """보낼 문장이 규칙에 맞는가 — 맞으면 빈 문자열, 아니면 이유 코드. 판정 단계가 만든 직후와 발송 단계가 보내기 직전에 같은 함수를 부른다.
-    검사: 비지 않음·800자 이하·모든 줄이 line_problem 통과(빈 줄 제외)·첫 줄이 정해진 두 모양 중 하나(번호는 병합 요청 번호)이고 그 모양의 나머지 줄 구조(병합 부탁은 `검사: 초록` 한 줄과 고정 꼬리가 맨 끝,
-    병합완료 확인은 최대 한 줄 더)가 맞음."""
+    """보낼 문장이 '이 모듈이 만드는 문장과 같은 모양' 인가 — 맞으면 빈 문자열, 아니면 이유 코드. 판정 job 이 만든 직후와 발송 job 이 보내기 직전에 같은 함수를 부른다(발송 job 의 재검사가
+    판정 job 의 버그·변조를 막는 유일한 관문이라, 글자 규칙뿐 아니라 문장 모양을 코드가 만드는 것에 맞춘다).
+    글자: 비지 않음·800자 이하·백틱·`**` 없음·모든 줄이 line_problem 통과(빈 줄 제외)·모든 줄의 공백이 하나로 정리돼 있음. 모양: 첫 줄이 정해진 두 모양 중 하나(번호는 병합 요청 번호)이고
+    병합 부탁은 제목 부분 80자 이하·`검사: 초록` 한 줄과 고정 꼬리가 맨 끝·요점 줄은 `- ` 로 시작해 5줄·120자 이하, 병합완료 확인은 정상이면 둘째 줄부터 CONFIRM_NOTES 의 고정 글을 이 순서로
+    없거나 하나·둘, 이상이면 둘째 줄이 REASON_* 고정 사유(+ 선택으로 ` (외 N건)`) 한 줄뿐."""
     if not isinstance(text, str) or not text.strip():
         return "empty"
     if len(text) > MESSAGE_LIMIT:
         return "too_long"
+    if "`" in text or "**" in text:
+        return "shape"
     lines = text.split("\n")
     for line in lines:
-        if line and line_problem(line):
+        if line and (line_problem(line) or line != " ".join(line.split())):
             return "line"
     first = lines[0]
-    ready = re.fullmatch(r"\[(M[0-9]{3,4})\] " + READY_LABEL + TITLE_SEPARATOR + r".+", first)
+    ready = re.fullmatch(r"\[(M[0-9]{3,4})\] " + READY_LABEL + TITLE_SEPARATOR + r".{1,%d}" % READY_TITLE_LIMIT, first)
     confirm = re.fullmatch(r"\[(M[0-9]{3,4})\] 병합완료 확인 - (?:정상|이상)", first)
     found = ready or confirm
     if found is None or notify.notice_type(found.group(1)) != notify.NOTICE_MERGE:
@@ -292,11 +346,11 @@ def message_problem(text):
         if len(points) > POINT_LINES or not all(line.startswith("- ") and 2 < len(line) <= POINT_LIMIT + 2 for line in points):
             return "shape"
         return ""
-    if len(lines) > 2 or (len(lines) == 2 and not lines[1]):
-        return "shape"
-    if first.endswith(CONFIRM_BAD) and len(lines) != 2:
-        return "shape"
-    return ""
+    rest = lines[1:]
+    if first.endswith(CONFIRM_BAD):
+        return "" if len(rest) == 1 and _REASON_RE.fullmatch(rest[0]) else "shape"
+    allowed = ([], [NOTE_TWO_PARENTS], [NOTE_NO_CONTENT], [NOTE_TWO_PARENTS, NOTE_NO_CONTENT])
+    return "" if rest in allowed else "shape"
 
 
 # ---- 입력(env) ------------------------------------------------------------------------------------------
@@ -386,7 +440,8 @@ def runs_state(runs, run_id):
 
 def evaluate_ready(inputs, reader, sleep=time.sleep):
     """병합 부탁: 이 가지의 열린 PR 이 하나이고(머리 커밋 = 이 실행의 커밋·작성 가지·대상 = 기본 가지·같은 저장소·초안 아님·제목이 가지 번호로 시작) 그 커밋의 push 검사가 모두 끝나 초록일 때만
-    문장을 만든다. 아니면 Skip. 끝나지 않은 검사만 남았으면 CHECK_WAIT 초 간격으로 CHECK_RETRIES 번 더 본다."""
+    문장을 만든다. 아니면 Skip. 끝나지 않은 검사만 남았으면 CHECK_WAIT 초 간격으로 CHECK_RETRIES 번 더 본다.
+    PR 은 이벤트의 `workflow_run.pull_requests` 배열(포크·일부 이벤트에서 비어 오는 값)에 기대지 않고 `GET /pulls?head=소유자:가지` 로 찾는다 — `pull_requests[0]` 으로 단순화하지 말 것(G-A14)."""
     if inputs.conclusion != "success":
         raise Skip("run_not_success")
     number = BRANCH_RE.fullmatch(inputs.branch).group(1)
@@ -428,24 +483,30 @@ def _tree(commit, shape_code="api_shape"):
     return tree
 
 
-def _names(entries):
-    names = set()
+def _blobs(entries):
+    """변경 파일 목록(`files`) → {파일 이름: blob 해시}. 항목 모양이나 이름이 틀리면 Skip(api_shape). blob 해시(`sha`)가 40자리 소문자 16진수가 아니거나 없으면 None —
+    그 파일은 내용(blob)을 견줄 수 없어 이름만 본다(문장에 '내용 비교 생략' 을 적는다)."""
+    found = {}
     for entry in _need(_list(entries)):
-        name = _text(_need(_obj(entry)).get("filename"))
+        item = _need(_obj(entry))
+        name = _text(item.get("filename"))
         if not name:
             raise Skip("api_shape")
-        names.add(name)
-    return names
+        blob = _text(item.get("sha"))
+        found[name] = blob if SHA_RE.fullmatch(blob) else None
+    return found
 
 
 def _confirm_words(conclusion):
-    return conclusion if conclusion in CONCLUSION_WORDS else "알 수 없음"
+    return conclusion if conclusion in CONCLUSION_WORDS else UNKNOWN_CONCLUSION
 
 
 def evaluate_confirm(inputs, reader):
     """병합완료 확인: main 의 가드레일 검사가 끝난 커밋의 제목이 `[M번호] ` 로 시작하고 그 커밋에 연결된 병합된 PR 이 정확히 하나일 때만 문장을 만든다(아니면 Skip).
-    확인 ① 병합 커밋의 부모 수(squash 는 1, 병합 커밋 방식 2 도 허용 — 2 면 문장에 한 줄 적음) ② 병합 커밋의 트리가 PR 머리 커밋의 트리와 같은지 — 같으면 '트리 일치', 다르면(main 이 앞서가면 생김)
-    트리 비교를 빼고 변경 파일 수·이름 집합이 PR 과 같은지로 대신 확인 ③ 이 main 커밋의 가드레일 결론이 success. 문제가 없으면 정상, 있으면 이상 + 사유 한 줄. 검사가 취소·건너뜀이면 판정을 미룬다."""
+    확인 ① 병합 커밋의 부모 수(squash 는 1, 병합 커밋 방식 2 도 허용 — 2 면 문장에 NOTE_TWO_PARENTS 한 줄) ② 병합 커밋의 트리가 PR 머리 커밋의 트리와 같은지 — 같으면 '트리 일치', 다르면(main 이 앞서가면 생김)
+    트리 비교를 빼고 변경 파일 수·이름 집합이 PR 과 같은지로 대신 확인하고, 두 응답의 파일마다 blob 해시(`files[].sha`)가 모두 있으면 파일별 내용(blob)도 견준다: 전부 같으면 내용까지 같음, 일부만 다르면(main 이
+    같은 파일을 건드린 것으로 보임)·해시가 없거나 모양이 다르면 이름만 확인하고 문장에 NOTE_NO_CONTENT('내용 비교 생략') 한 줄 ③ 이 main 커밋의 가드레일 결론이 success. 문제가 없으면 정상, 있으면 이상 + 사유 한 줄.
+    검사가 취소·건너뜀이면 판정을 미룬다."""
     if inputs.conclusion in ("cancelled", "skipped"):
         raise Skip("run_cancelled")
     commit = _need(_obj(reader.get(f"/commits/{inputs.sha}")))
@@ -466,22 +527,23 @@ def evaluate_confirm(inputs, reader):
     if count < 1:
         raise Skip("api_shape")
     detail = _need(_obj(reader.get(f"/pulls/{count}")))
-    problems, notes, extra = [], [f"병합된 PR #{count} 하나가 이 커밋에 연결됨"], ""
+    problems, notes, sentence_notes = [], [f"병합된 PR #{count} 하나가 이 커밋에 연결됨"], []
     if inputs.conclusion != "success":
-        problems.append(f"main 검사(가드레일)가 성공으로 끝나지 않았습니다(결론: {_confirm_words(inputs.conclusion)})")
+        problems.append(REASON_CONCLUSION.format(_confirm_words(inputs.conclusion)))
     notes.append("main 가드레일 결론: " + _confirm_words(inputs.conclusion))
     if len(parents) not in (1, 2):
-        problems.append(f"병합 커밋의 부모가 {len(parents)}개입니다(1개 또는 2개여야 합니다)")
+        problems.append(REASON_PARENTS.format(len(parents)))
     else:
         notes.append(f"병합 커밋의 부모 {len(parents)}개" + ("(squash)" if len(parents) == 1 else "(병합 커밋 방식)"))
-        extra = "참고: 병합 커밋의 부모가 2개입니다(병합 커밋 방식)" if len(parents) == 2 else ""
+        if len(parents) == 2:
+            sentence_notes.append(NOTE_TWO_PARENTS)
     if detail.get("merged") is not True or detail.get("merge_commit_sha") != inputs.sha:
-        problems.append("PR 의 병합 커밋이 이 커밋과 다릅니다")
+        problems.append(REASON_MERGE_COMMIT)
     if _text(_need(_obj(detail.get("base"))).get("ref")) != inputs.default_branch:
-        problems.append("병합된 PR 의 대상 가지가 기본 가지가 아닙니다")
+        problems.append(REASON_BASE)
     pr_found = TITLE_HEAD_RE.match(_text(detail.get("title")))
     if pr_found is None or pr_found.group(1) != number:
-        problems.append("커밋 제목과 PR 제목의 번호가 다릅니다")
+        problems.append(REASON_NUMBER)
     head_sha = _text(_need(_obj(detail.get("head"))).get("sha"))
     if SHA_RE.fullmatch(head_sha) is None:
         raise Skip("api_shape")
@@ -493,25 +555,30 @@ def evaluate_confirm(inputs, reader):
         changed = _need(_int(detail.get("changed_files")))
         if changed < 1 or changed > FILES_CAP:
             raise Skip("too_large")
-        merged_names = _names(commit.get("files"))
-        pr_names = set()
+        merged_blobs = _blobs(commit.get("files"))
+        pr_blobs = {}
         for page in range(1, FILE_PAGES_MAX + 1):
             entries = _need(_list(reader.get(f"/pulls/{count}/files", per_page=PER_PAGE, page=page)))
-            pr_names |= _names(entries)
+            pr_blobs.update(_blobs(entries))
             if len(entries) < PER_PAGE:
                 break
-        if len(pr_names) != changed:
+        if len(pr_blobs) != changed:
             raise Skip("api_shape")                    # PR 이 알려 준 변경 파일 수와 목록이 어긋나면 비교할 수 없다
-        if pr_names != merged_names:
-            problems.append(f"변경 파일이 PR 과 다릅니다(PR {len(pr_names)}개, 병합 {len(merged_names)}개)")
+        if set(pr_blobs) != set(merged_blobs):
+            problems.append(REASON_FILES.format(len(pr_blobs), len(merged_blobs)))
         else:
-            notes.append(f"트리 비교 생략(main 이 앞섬) — 변경 파일 {len(pr_names)}개의 이름 집합이 PR 과 같음")
-    return Verdict(compose_confirm(number, problems, extra), notes)
+            same = sum(1 for name, blob in pr_blobs.items() if blob is not None and blob == merged_blobs[name])
+            if same == len(pr_blobs):
+                notes.append(f"트리 비교 생략(main 이 앞섬) — 변경 파일 {len(pr_blobs)}개의 이름과 내용(blob)이 PR 과 같음")
+            else:
+                notes.append(f"트리 비교 생략(main 이 앞섬) — 변경 파일 {len(pr_blobs)}개의 이름 집합이 PR 과 같고 내용(blob)까지 같은 것은 {same}개, 나머지 {len(pr_blobs) - same}개는 내용 비교 생략")
+                sentence_notes.append(NOTE_NO_CONTENT)
+    return Verdict(compose_confirm(number, problems, sentence_notes), notes)
 
 
-# ---- 실행 요약·출력·문장 파일 -----------------------------------------------------------------------------
+# ---- 실행 요약·출력(두 job 사이의 전달) ---------------------------------------------------------------------
 def append_lines(path, lines):
-    """파일 끝에 줄들을 덧붙인다(요약·출력 파일). 경로가 비었거나 쓸 수 없으면 조용히 건너뛴다 — 알림은 보조다."""
+    """파일 끝에 줄들을 덧붙인다(요약 파일). 경로가 비었거나 쓸 수 없으면 조용히 건너뛴다 — 알림은 보조다."""
     if not path:
         return
     try:
@@ -521,20 +588,33 @@ def append_lines(path, lines):
         pass
 
 
-def message_path(environ):
-    """문장 파일의 경로(`$RUNNER_TEMP/auto-notice-message.txt`) — RUNNER_TEMP 가 없으면 None(파일을 쓰지도 읽지도 않는다)."""
-    temp = str(environ.get("RUNNER_TEMP") or "")
-    return Path(temp) / MESSAGE_FILE if temp else None
+def encode_message(text):
+    """보낼 문장 → `$GITHUB_OUTPUT` 한 줄의 값(base64: 영문·숫자·`+/=` 뿐이라 줄 바꿈·따옴표·`::` 명령 머리·`${{ }}` 가 끼어들 수 없다)."""
+    return base64.b64encode(text.encode("utf-8")).decode("ascii")
 
 
-def clear_message(environ):
-    """지난 실행·앞 단계의 낡은 문장 파일이 남아 발송되지 않게 판정 단계가 먼저 지운다."""
-    target = message_path(environ)
+def decode_message(raw):
+    """발송 job 이 env 로 받은 값(base64 한 줄) → 문장. 모양이 어긋나면(비었거나·MESSAGE_B64_LIMIT 초과·영문·숫자·`+/=` 밖의 글자(줄 바꿈·공백 포함)·패딩 오류·MESSAGE_BYTES_LIMIT 초과·UTF-8 아님) 빈 문자열."""
+    value = raw if isinstance(raw, str) else ""
+    if not value or len(value) > MESSAGE_B64_LIMIT or re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", value) is None:
+        return ""
     try:
-        if target is not None:
-            target.unlink()
+        data = base64.b64decode(value, validate=True)
+        return data.decode("utf-8") if len(data) <= MESSAGE_BYTES_LIMIT else ""
+    except (binascii.Error, ValueError, UnicodeDecodeError):
+        return ""
+
+
+def write_outputs(path, pairs):
+    """`$GITHUB_OUTPUT` 에 `이름=값` 줄들을 한 번에 덧붙인다. 경로가 비었거나 쓸 수 없으면(또는 값에 줄 바꿈이 있으면) 쓰지 않고 False — 알림은 보조다."""
+    if not path or any("\n" in value or "\r" in value for _key, value in pairs):
+        return False
+    try:
+        with open(path, "a", encoding="utf-8", newline="\n") as handle:
+            handle.write("".join(f"{key}={value}\n" for key, value in pairs))
     except OSError:
-        pass
+        return False
+    return True
 
 
 def fence(text):
@@ -550,7 +630,8 @@ def _build_reader(environ):
 
 
 def run_decide(kind, environ, out, reader=None, sleep=time.sleep, state_file=None):
-    """판정 단계(시크릿 없음): 켬 상태가 off 면 곧바로 끝, 아니면 값을 거르고 GitHub 를 읽어 문장을 만든다. dry 는 문장을 요약에만, on 은 문장 파일과 출력 `send=yes` 를 남긴다."""
+    """판정 job(시크릿 없음): 켬 상태가 off 면 곧바로 끝, 아니면 값을 거르고 GitHub 를 읽어 문장을 만든다. dry 는 문장을 요약에만(출력 없음 — 발송 job 이 시작도 하지 않는다),
+    on 은 출력 두 줄만 남긴다: `send=yes` 와 `message=<문장의 base64 한 줄>`. off·dry 에서는 출력 파일에 아무것도 쓰지 않는다."""
     mode = read_mode(state_file)
     heading = READY_HEADING if kind == READY else CONFIRM_HEADING
     summary_path = environ.get("GITHUB_STEP_SUMMARY")
@@ -559,7 +640,6 @@ def run_decide(kind, environ, out, reader=None, sleep=time.sleep, state_file=Non
         out(MODE_OFF_LINE)
         append_lines(summary_path, lines + ["- 결과: 꺼져 있어 아무것도 하지 않았습니다"])
         return 0
-    clear_message(environ)
     try:
         inputs = read_inputs(environ, kind)
         lines.append(f"- 번호: {BRANCH_RE.fullmatch(inputs.branch).group(1)}" if kind == READY else f"- 대상: {inputs.default_branch} 의 검사 결과")
@@ -579,38 +659,29 @@ def run_decide(kind, environ, out, reader=None, sleep=time.sleep, state_file=Non
         out("병합 알림 자동: dry — 보낼 문장을 만들었고 실행 요약에만 남깁니다(텔레그램은 부르지 않습니다)")
         append_lines(summary_path, lines + ["- 결과: 보낼 문장을 만들었습니다(dry 라 보내지 않음). 보낼 문장(거른 뒤의 값):", "", *fence(verdict.text)])
         return 0
-    target = message_path(environ)
-    try:
-        if target is None:
-            raise OSError("RUNNER_TEMP")
-        target.write_text(verdict.text, encoding="utf-8", newline="\n")
-    except OSError:
-        out("병합 알림 자동: 문장을 파일로 남기지 못해 보내지 않습니다")
-        out("::warning::병합 알림 자동: 문장 파일을 쓰지 못해 알리지 않았습니다.")
-        append_lines(summary_path, lines + ["- 결과: 문장 파일을 쓰지 못해 보내지 않았습니다"])
+    if not write_outputs(environ.get("GITHUB_OUTPUT"), [(OUTPUT_KEY, OUTPUT_YES), (MESSAGE_KEY, encode_message(verdict.text))]):
+        out("병합 알림 자동: 출력 파일에 문장을 남기지 못해 보내지 않습니다")
+        out("::warning::병합 알림 자동: 출력 파일을 쓰지 못해 알리지 않았습니다.")
+        append_lines(summary_path, lines + ["- 결과: 출력 파일을 쓰지 못해 보내지 않았습니다"])
         return 0
-    append_lines(environ.get("GITHUB_OUTPUT"), [f"{OUTPUT_KEY}={OUTPUT_YES}"])
-    out("병합 알림 자동: 보낼 문장을 만들었습니다(발송 단계가 보냅니다)")
-    append_lines(summary_path, lines + ["- 결과: 보낼 문장을 만들었습니다(on — 발송 단계가 텔레그램으로 보냅니다)"])
+    out("병합 알림 자동: 보낼 문장을 만들었습니다(발송 job 이 보냅니다)")
+    append_lines(summary_path, lines + ["- 결과: 보낼 문장을 만들었습니다(on — 발송 job 이 텔레그램으로 보냅니다)"])
     return 0
 
 
 def run_send(environ, out, notifier=None, state_file=None):
-    """발송 단계(텔레그램 시크릿은 이 단계의 env 에만): 켬 상태가 on 일 때만, 앞 단계의 문장 파일을 message_problem 으로 다시 검사한 뒤 평문으로 한 통 보낸다. 실패는 경고뿐(종료 0)."""
+    """발송 job(텔레그램 시크릿은 이 job 의 env 에만): 켬 상태가 on 일 때만, 판정 job 이 넘긴 문장(NOTICE_MESSAGE_B64 — base64 한 줄)을 풀어 message_problem 으로 다시 검사한 뒤
+    평문으로 한 통 보낸다. 풀 수 없거나 모양이 어긋나면 보내지 않는다. 실패는 경고뿐(종료 0)."""
     summary_path = environ.get("GITHUB_STEP_SUMMARY")
     if read_mode(state_file) != MODE_ON:
         out("병합 알림 자동: 켬 상태가 on 이 아니라 보내지 않습니다")
         append_lines(summary_path, ["- 발송: 켬 상태가 on 이 아니라 보내지 않았습니다"])
         return 0
-    target = message_path(environ)
-    try:
-        if target is None or target.stat().st_size > MESSAGE_LIMIT * 4:
-            raise OSError("message file")
-        text = target.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        out("병합 알림 자동: 보낼 문장 파일을 읽지 못해 보내지 않습니다")
-        out("::warning::병합 알림 자동: 문장 파일을 읽지 못해 알리지 않았습니다.")
-        append_lines(summary_path, ["- 발송: 문장 파일을 읽지 못해 보내지 않았습니다"])
+    text = decode_message(str(environ.get(MESSAGE_ENV) or ""))
+    if not text:
+        out("병합 알림 자동: 넘겨받은 문장을 읽지 못해 보내지 않습니다")
+        out("::warning::병합 알림 자동: 넘겨받은 문장을 읽지 못해 알리지 않았습니다.")
+        append_lines(summary_path, ["- 발송: 넘겨받은 문장을 읽지 못해 보내지 않았습니다"])
         return 0
     if message_problem(text):
         out("병합 알림 자동: 문장이 보내기 규칙에 맞지 않아 보내지 않습니다")

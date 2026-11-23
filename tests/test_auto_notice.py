@@ -8,10 +8,14 @@ GitHub 와 텔레그램은 한 번도 부르지 않는다: GitHub 는 `request(m
  4. 판정: 병합 부탁은 열린 PR·머리 커밋·검사 모두 초록일 때만, 병합완료 확인은 [M번호] 병합 커밋·연결된 PR 하나·부모 수·트리 일치/파일 집합·main 검사 결론.
 """
 import ast
+import base64
 import contextlib
 import copy
 import io
 import json
+import os
+import re
+import stat
 import tempfile
 import time
 import unittest
@@ -50,6 +54,23 @@ BODY = ("앞서 병합된 묶음의 다음 단계다. 변경 등급 T3 — 켬 �
         "Co-authored-by: Claude Sonnet 5.5 <noreply" + AT + "anthropic" + DOT + "com>\n")       # 꼬리표 줄 — 메일 모양은 조립해서 쓴다
 SCHEME = "ht" + "tps://"                                  # 주소 모양 글은 조립해서 쓴다(새 글에 웹 주소를 두지 않는다)
 GITHUB_TOKEN_SHAPE = "gh" + "p_" + "A" * 36
+SLACK_TOKEN_SHAPE = "xo" + "xb-" + "1" * 12                  # 비밀 모양 가짜 값도 조립한다(토큰 셋·키 셋 — 모두 find_secrets 가 비밀로 본다)
+GOOGLE_KEY_SHAPE = "AI" + "za" + "B" * 35
+AWS_KEY_SHAPE = "AK" + "IA" + "C" * 16
+SK_KEY_SHAPE = "s" + "k-" + "D" * 40
+TOKEN_SHAPES = (GITHUB_TOKEN_SHAPE, SLACK_TOKEN_SHAPE, nh.TOKEN)
+KEY_SHAPES = (GOOGLE_KEY_SHAPE, AWS_KEY_SHAPE, SK_KEY_SHAPE)
+DOT_LIKE = (chr(0x3002), chr(0xFF61), chr(0x2024), chr(0xFE52), chr(0xFF0E))      # 점처럼 읽히는 글자 다섯
+SHORT_ADDRESSES = (("goo", "gl"), ("youtu", "be"), ("is", "gd"), ("lnkd", "in"), ("rb", "gy"), ("s", "id"), ("shorturl", "at"), ("bit", "ly"), ("t", "co"), ("tinyurl", "com"),
+                   ("ow", "ly"), ("buff", "ly"), ("cutt", "ly"), ("tiny", "cc"), ("v", "gd"), ("t", "ly"), ("t", "me"), ("evil", "sh"), ("evil", "zip"), ("evil", "xyz"))   # 단축 주소·새 최상위 도메인 20개
+
+
+def address(pair, suffix=""):
+    return pair[0] + DOT + pair[1] + suffix
+
+
+def b64(text):
+    return an.encode_message(text)
 
 
 # ----------------------------------------------------------------------------
@@ -126,10 +147,15 @@ def confirm_env(**over):
     return ready_env(NOTICE_RUN_BRANCH="main", **over)
 
 
+def file_items(files):
+    """파일 이름 목록 → GitHub `files` 항목 목록. 항목이 (이름, blob 해시) 쌍이면 `sha` 도 싣는다(이름만이면 blob 해시가 없는 응답 모양)."""
+    return [({"filename": item[0], "sha": item[1]} if isinstance(item, tuple) else {"filename": item}) for item in files]
+
+
 def commit_obj(sha=SHA, message="[M105] 병합 알림 자동화 — 워크플로 둘과 파이썬 보조 [대상: 공통] (#248)\n\n본문", parents=(OTHER_SHA,), tree=TREE, files=("a.py", "b.md")):
     item = {"sha": sha, "commit": {"message": message, "tree": {"sha": tree}}, "parents": [{"sha": parent} for parent in parents]}
     if files is not None:
-        item["files"] = [{"filename": name} for name in files]
+        item["files"] = file_items(files)
     return item
 
 
@@ -216,6 +242,35 @@ class ModeFileTest(unittest.TestCase):
     def test_the_path_defaults_to_the_repository_file_not_the_working_directory(self):
         self.assertEqual(an.STATE_FILE, ROOT / "pipeline" / "auto_notice.json")
 
+    def test_a_symbolic_link_is_never_followed_even_to_a_valid_on_file(self):
+        """AN1-S-3: 링크는 diff 에 대상 경로만 보여 눈으로 놓치기 쉽다 — 링크면 가리키는 값이 on 이어도 off."""
+        with tempfile.TemporaryDirectory() as tmp:
+            real = Path(tmp) / "real.json"
+            real.write_text('{"mode": "on"}', encoding="utf-8")
+            link, broken = Path(tmp) / "link.json", Path(tmp) / "broken.json"
+            try:
+                link.symlink_to(real)
+                broken.symlink_to(Path(tmp) / "gone.json")
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"이 환경에서는 심볼릭 링크를 만들 수 없다({type(exc).__name__}) — 아래 가짜 stat 시험이 같은 길을 본다")
+            self.assertEqual(an.read_mode(real), "on")
+            self.assertEqual(an.read_mode(link), "off")
+            self.assertEqual(an.read_mode(broken), "off")
+
+    def test_anything_that_is_not_a_regular_file_is_off_without_reading_it(self):
+        """링크를 만들 수 없는 PC 에서도 도는 시험: lstat 이 '링크·폴더·장치·파이프·소켓' 이라고 답하면 내용을 읽지 않고 off."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "on.json"
+            path.write_text('{"mode": "on"}', encoding="utf-8")
+            self.assertEqual(an.read_mode(path), "on")
+            for kind in (stat.S_IFLNK, stat.S_IFDIR, stat.S_IFCHR, stat.S_IFBLK, stat.S_IFIFO, stat.S_IFSOCK):
+                fake = os.stat_result((kind | 0o644, 0, 0, 1, 0, 0, 20, 0, 0, 0))
+                with mock.patch.object(Path, "lstat", return_value=fake), mock.patch.object(Path, "read_text", side_effect=AssertionError("읽으면 안 된다")):
+                    self.assertEqual(an.read_mode(path), "off", hex(kind))
+            fake = os.stat_result((stat.S_IFREG | 0o644, 0, 0, 1, 0, 0, 20, 0, 0, 0))                # 보통 파일이면 읽는다(대조)
+            with mock.patch.object(Path, "lstat", return_value=fake):
+                self.assertEqual(an.read_mode(path), "on")
+
 
 # ----------------------------------------------------------------------------
 # 글 거르기
@@ -239,6 +294,55 @@ class LineProblemTest(unittest.TestCase):
         for text, code in cases:
             with self.subTest(text[:30]):
                 self.assertEqual(an.line_problem(text), code)
+
+    def test_twenty_short_addresses_and_new_top_level_domains_are_addresses_in_every_common_form(self):
+        """AN1-S-2: 주소는 목록이 아니라 구조(`낱말 점 영문 2–24자`)로 본다 — 단축 주소·새 최상위 도메인이 모두 거절된다."""
+        self.assertEqual(len(SHORT_ADDRESSES), 20)
+        for pair in SHORT_ADDRESSES:
+            for form in (address(pair), address(pair, "/x"), "see " + address(pair, "요"), address(pair).upper(), "(" + address(pair) + ")", address(pair, ".") + " 끝", "앞 " + address(pair) + "/a/b?c=d"):
+                with self.subTest(form):
+                    self.assertEqual(an.line_problem(form), "address")
+
+    def test_dots_that_look_like_dots_are_folded_before_the_address_check(self):
+        """점처럼 읽히는 글자 다섯(U+3002·U+FF61·U+2024·U+FE52·U+FF0E)과 전각 글자로 쓴 주소도 거절된다."""
+        for dot in DOT_LIKE:
+            for pair in (("evil", "com"), ("goo", "gl"), ("evil", "zip")):
+                with self.subTest((hex(ord(dot)), pair)):
+                    self.assertEqual(an.line_problem(pair[0] + dot + pair[1]), "address")
+                    self.assertEqual(an.line_problem("보기 " + pair[0] + dot + pair[1] + "/x"), "address")
+        self.assertEqual(an.line_problem("".join(chr(ord(char) + 0xFEE0) for char in "goo") + chr(0xFF0E) + "".join(chr(ord(char) + 0xFEE0) for char in "gl")), "address")      # 전각 글자와 전각 점
+        self.assertEqual(an._folded("a" + chr(0x3002) + "b" + chr(0xFF61) + "c"), "a.b.c")
+
+    def test_file_names_versions_and_numbers_in_a_normal_body_are_not_addresses(self):
+        """AN1-S-2: 새로 거절되면 안 되는 정상 본문 표본 — 파일 이름·번호·버전·숫자·약어(PR 본문·커밋 본문 흉내)."""
+        samples = ("docs/ARCHITECTURE.md 에 절을 더했다", "tests/test_auto_notice.py 와 validate_repo.py 를 고쳤다", ".github/workflows/merge-ready-notice.yml 두 파일", "pipeline/auto_notice.json 은 off 로 낸다",
+                   "WORKLOG.md 와 AGENTS.md 는 그대로", "README.md 를 읽는다", "requirements-dev.txt 에 한 줄", "_config.yml 의 exclude", "pages.json 두 파일", "node.js 와 next.js 는 쓰지 않는다",
+                   "결함 D-398 부터 D-405 까지", "G-A13·G-A14 와 WF-16", "Python 3.12 와 3.10 둘 다 통과", "v1.2 에서 v1.2.3 으로", "3.12", "9,829개 중 10.5% 가 늘었다", "0.5초 안에 12.5MB 를 읽는다",
+                   "1.5배 빠르다", "예: e.g. 이런 것, i.e. 이것, etc. 등등", "M105 병합 부탁 [M105]", "T3 변경 등급", "문장 끝이다. 다음 문장도 있다.", "끝.다음", "Co-authored-by 같은 꼬리표",
+                   "pipeline/notify.py 의 Notifier 를 쓴다", "scripts/validate_repo.py 의 WF-16 규칙", "a.yaml b.toml c.cfg d.ini e.csv f.log g.png h.jpg i.svg j.pdf k.lock l.rst m.xml", "main.ts index.html style.css app.js",
+                   "ci.yml 두 줄", "시험 122개 → 128개", "약 10" + chr(0x2013) + "20초", "Fig.1 과 No.5", "값 5.0rc1 과 py3.12 와 ps1")
+        for sample in samples:
+            with self.subTest(sample):
+                self.assertEqual(an.line_problem(sample), "")
+
+    def test_dotted_code_names_are_known_to_be_over_rejected_as_addresses(self):
+        """알려진 과잉 거절(문서의 한계): 점 있는 코드 이름은 `낱말 점 영문` 꼴이라 주소로 본다 — 그 줄만 빠지고 제목이면 알림이 안 간다(안전한 쪽). 밑줄이 꼬리에 붙으면(`a.b_c`) 도메인이 아니다."""
+        for text in ("notify.Notifier 를 쓴다", "os.path", "operator_loop.GitHub 클라이언트", "pipeline.notify 모듈", "github.event.workflow_run.head_branch 값"):
+            with self.subTest(text):
+                self.assertEqual(an.line_problem(text), "address")
+        for text in ("pipeline.auto_notice 모듈", "a.bc_d", "x.event_name 값", "operator_loop.run_decide 함수"):
+            with self.subTest(text):
+                self.assertEqual(an.line_problem(text), "")
+
+    def test_every_extension_in_the_allow_list_passes_and_the_domains_that_look_like_files_do_not(self):
+        for extension in an._FILE_EXTENSIONS:
+            self.assertEqual(an.line_problem("파일 이름" + DOT + extension), "", extension)
+            self.assertEqual(an.line_problem("FILE" + DOT + extension.upper() + " 열기"), "", extension)
+        self.assertNotIn("sh", an._FILE_EXTENSIONS)                         # 도메인이다 — 예외가 아니다
+        self.assertNotIn("zip", an._FILE_EXTENSIONS)
+        self.assertEqual(an.line_problem("evil" + DOT + "md" + DOT + "evil" + DOT + "com"), "address")      # 확장자 뒤에 도메인이 이어지면 도메인이다
+        self.assertEqual(an.line_problem("파일" + DOT + "mdx"), "address")                                  # 목록에 없는 꼬리는 주소 모양(확장자 일부만 맞는 것은 예외가 아니다)
+        self.assertEqual(an.line_problem("evil" + DOT + "xn--p1ai"), "address")                            # 퓨니코드 꼬리
 
     def test_a_secret_split_by_invisible_characters_is_caught_not_as_a_clean_line(self):
         split = nh.TOKEN[:8] + chr(0x200B) + nh.TOKEN[8:]
@@ -277,6 +381,47 @@ class CleanAndPointsTest(unittest.TestCase):
     def test_a_bad_line_is_dropped_alone_and_the_rest_is_kept(self):
         body = "\n".join(["- 좋은 줄 하나", "- 담당 " + AT + "someone", "- 주소 " + SCHEME + "evil.example", "- 비밀 " + nh.TOKEN, "- 제어" + chr(0x200B) + "문자", "- 좋은 줄 둘"])
         self.assertEqual(an.point_lines(body), ["좋은 줄 하나", "좋은 줄 둘"])
+
+    def test_a_secret_or_address_head_straddling_the_cut_drops_the_whole_line(self):
+        """AN1-S-1: 요점 줄도 제목처럼 '거른 뒤 자름' — 120자 경계에 걸친 비밀·주소 머리의 앞부분이 알림에 실리지 않는다(토큰 셋·키 셋·주소 머리 셋 × 여러 경계)."""
+        heads = ([("token", item) for item in TOKEN_SHAPES] + [("key", item) for item in KEY_SHAPES]
+                 + [("address", SCHEME + "evil"), ("address", "www" + DOT + "evil" + DOT + "example"), ("address", address(("goo", "gl"), "/x"))])
+        for kind, head in heads:
+            for pad in (60, 90, 100, 105, 110, 115, 118, 119, 120, 121):
+                line = "가" * pad + " " + head
+                with self.subTest((kind, head[:6], pad)):
+                    self.assertNotEqual(an.line_problem(line), "")                                       # 전제: 줄 전체는 걸린다
+                    self.assertEqual(an.point_lines("- " + line), [])
+                    self.assertEqual(an.point_lines("- 앞 줄\n- " + line + "\n- 뒷 줄"), ["앞 줄", "뒷 줄"])         # 그 줄만 빠진다
+                    if head in (GITHUB_TOKEN_SHAPE, GOOGLE_KEY_SHAPE) and pad in (100, 105):
+                        self.assertEqual(an.line_problem(an.shorten(line, an.POINT_LIMIT)), "")           # 전제: 자른 토막만 보면 통과했을 경계다(옛 동작은 이 토막의 앞 18자·13자를 알림에 실었다)
+                    self.assertEqual(len(an.point_lines("- " + "가" * pad + " 끝")), 1)                   # 대조: 같은 길이의 깨끗한 줄은 남는다
+
+    def test_a_line_longer_than_the_check_window_is_judged_by_its_first_600_characters_and_a_secret_beyond_is_never_shown(self):
+        token = GITHUB_TOKEN_SHAPE
+        self.assertEqual(an.POINT_CHECK_CHARS, 600)
+        inside = "가" * (an.POINT_CHECK_CHARS - len(token) - 1) + " " + token                                       # 토큰이 600자 안에서 끝난다 → 전체가 보여 걸린다
+        self.assertEqual((len(inside), an.point_lines("- " + inside)), (600, []))
+        outside = "가" * (an.POINT_CHECK_CHARS - len(token)) + " " + token                                  # 토큰이 한 글자 밖에서 끝난다 → 앞 600자만 보면 토큰이 모자라 안 걸리고, 보이는 것은 앞 120자뿐이다
+        self.assertEqual(an.point_lines("- " + outside), ["가" * (an.POINT_LIMIT - 1) + chr(0x2026)])
+        far = "가" * 650 + " " + token
+        self.assertEqual(an.point_lines("- " + far), ["가" * (an.POINT_LIMIT - 1) + chr(0x2026)])         # 보이는 글에는 비밀 글자가 없다
+
+    def test_a_shape_made_by_the_cut_itself_is_dropped_too(self):
+        """자른 뒤에도 한 번 더 거른다 — 자르기 전에는 깨끗했는데 자른 토막에 새로 생긴 모양(비밀 앞머리 같은 것)은 그 줄을 뺀다."""
+        pad = "가" * 80
+        line = pad + " " + GITHUB_TOKEN_SHAPE[:30] + "-" * 5 + "나" * 100                                  # 자르기 전 줄 전체에는 비밀 모양이 없다
+        self.assertEqual(an.line_problem(line), "")
+        original = an.shorten
+        with mock.patch.object(an, "shorten", lambda text, limit: original(text, limit)[:90] + " " + GITHUB_TOKEN_SHAPE):      # 자른 결과에 비밀 모양이 생기는 경우를 흉내
+            self.assertEqual(an.point_lines("- " + line), [])
+
+    def test_very_long_lines_are_handled_in_bounded_time(self):
+        """한 줄이 65,000자(GitHub PR 본문의 최대치)여도 앞 600자만 보므로 일이 늘지 않는다 — 점·하이픈·스킴 반복처럼 정규식을 괴롭히는 글 포함."""
+        for text in ("a." * 32000, "a" * 65000, "a-" * 30000 + DOT + "co" + "m", "-" * 65000, "1." * 32000, "http" * 16000, "@" * 65000, ("가" * 300 + DOT) * 200, SCHEME * 8000, "x" * 64000 + "://"):
+            started = time.monotonic()
+            an.point_lines("- " + text)
+            self.assertLess(time.monotonic() - started, 5, text[:12])
 
     def test_points_never_contain_tildes_or_markup(self):
         body = "- **굵게** 약 10" + TILDE + "20 `코드`\n- 다른 " + chr(0xFF5E) + " 줄"
@@ -431,15 +576,39 @@ class ComposeConfirmTest(unittest.TestCase):
         text = an.compose_confirm(NUMBER, [], "참고: 병합 커밋의 부모가 2개입니다(병합 커밋 방식)")
         self.assertEqual(text.split("\n"), ["[M105] 병합완료 확인 - 정상", "참고: 병합 커밋의 부모가 2개입니다(병합 커밋 방식)"])
         self.assertEqual(an.message_problem(text), "")
+        self.assertEqual(an.compose_confirm(NUMBER, [], an.NOTE_TWO_PARENTS), text)                      # 문자열 하나도, 목록도 받는다
+
+    def test_ok_with_both_notes_has_one_line_per_note_in_the_fixed_order(self):
+        text = an.compose_confirm(NUMBER, [], [an.NOTE_TWO_PARENTS, an.NOTE_NO_CONTENT])
+        self.assertEqual(text.split("\n"), ["[M105] 병합완료 확인 - 정상", an.NOTE_TWO_PARENTS, an.NOTE_NO_CONTENT])
+        self.assertEqual(an.message_problem(text), "")
+        self.assertEqual(an.CONFIRM_NOTES, (an.NOTE_TWO_PARENTS, an.NOTE_NO_CONTENT))
+        for note in an.CONFIRM_NOTES:
+            self.assertIn("참고", note)
+            self.assertEqual(an.line_problem(note), "")
+            self.assertLessEqual(len(note), an.REASON_LIMIT)
 
     def test_bad_is_the_title_plus_one_reason_line_within_100_characters(self):
+        """compose_confirm 은 받은 사유 글을 그대로 한 줄에 싣는다(고정 문장인지는 message_problem 이 본다 — 아래 시험)."""
         text = an.compose_confirm(NUMBER, ["이유 하나"])
         self.assertEqual(text, "[M105] 병합완료 확인 - 이상\n이유 하나")
         many = an.compose_confirm(NUMBER, ["첫 이유", "둘째", "셋째"])
         self.assertEqual(many.split("\n")[1], "첫 이유 (외 2건)")
         long = an.compose_confirm(NUMBER, ["가" * 300, "x"])
         self.assertEqual(len(long.split("\n")[1]), an.REASON_LIMIT)
-        self.assertEqual(an.message_problem(long), "")
+        self.assertNotEqual(an.message_problem(long), "")                                              # 고정 사유가 아닌 글은 보낼 수 없다
+
+    def test_every_fixed_reason_fits_in_one_line_with_the_longest_suffix_and_is_a_valid_message(self):
+        reasons = [an.REASON_CONCLUSION.format(word) for word in sorted(an.CONCLUSION_WORDS) + [an.UNKNOWN_CONCLUSION]] + [an.REASON_PARENTS.format(count) for count in (0, 3, 999999)] + [
+            an.REASON_MERGE_COMMIT, an.REASON_BASE, an.REASON_NUMBER, an.REASON_FILES.format(0, 0), an.REASON_FILES.format(300, 300), an.REASON_FILES.format(123456, 654321)]
+        for reason in reasons:
+            for suffix in ("", " (외 1건)", " (외 5건)", " (외 99건)"):
+                with self.subTest(reason + suffix):
+                    line = reason + suffix
+                    self.assertLessEqual(len(line), an.REASON_LIMIT)                                     # 줄여지지 않으니 고정 사유가 그대로 실린다
+                    text = an.compose_confirm(NUMBER, [reason] + ["x"] * (int(suffix[4:-2]) if suffix else 0))
+                    self.assertEqual(text.split("\n")[1], line)
+                    self.assertEqual(an.message_problem(text), "")
 
     def test_a_bad_number_is_refused(self):
         for number in ("M000", "P105", "105", "M0105", "", None):
@@ -450,8 +619,52 @@ class ComposeConfirmTest(unittest.TestCase):
 
 class MessageProblemTest(unittest.TestCase):
     def test_valid_messages_pass(self):
-        for text in (an.compose_ready(NUMBER, TITLE, BODY), an.compose_ready("M1234", "[M1234] 제목", ""), an.compose_confirm(NUMBER, []), an.compose_confirm(NUMBER, ["이유"])):
+        for text in (an.compose_ready(NUMBER, TITLE, BODY), an.compose_ready("M1234", "[M1234] 제목", ""), an.compose_confirm(NUMBER, []), an.compose_confirm(NUMBER, [an.REASON_BASE]),
+                     an.compose_confirm(NUMBER, [], [an.NOTE_TWO_PARENTS]), an.compose_confirm(NUMBER, [], [an.NOTE_NO_CONTENT]), an.compose_confirm(NUMBER, [], list(an.CONFIRM_NOTES)),
+                     an.compose_confirm(NUMBER, [an.REASON_FILES.format(2, 3), an.REASON_NUMBER, an.REASON_MERGE_COMMIT])):
             self.assertEqual(an.message_problem(text), "", text)
+
+    def test_the_message_must_have_the_shape_the_code_makes_not_only_clean_characters(self):
+        """AN1-S-5: 발송 job 의 재검사는 '글자가 깨끗한가' 에 더해 '문장 모양이 코드가 만드는 것과 같은가' 를 본다 — 깨끗한 글자로 된 임의 문장도 통과하지 못한다."""
+        ok = "[M105] 병합완료 확인 - 정상"
+        bad = "[M105] 병합완료 확인 - 이상"
+        shapes = {
+            "ok + free second line": ok + "\n임의 문장 승인했습니다",
+            "ok + both notes in the wrong order": ok + "\n" + an.NOTE_NO_CONTENT + "\n" + an.NOTE_TWO_PARENTS,
+            "ok + the same note twice": ok + "\n" + an.NOTE_TWO_PARENTS + "\n" + an.NOTE_TWO_PARENTS,
+            "ok + note + free line": ok + "\n" + an.NOTE_TWO_PARENTS + "\n임의",
+            "ok + note with a changed digit": ok + "\n" + an.NOTE_TWO_PARENTS.replace("2개", "3개"),
+            "ok + a reason line": ok + "\n" + an.REASON_BASE,
+            "bad + free reason": bad + "\n임의 사유 — 안전합니다",
+            "bad + a note instead of a reason": bad + "\n" + an.NOTE_TWO_PARENTS,
+            "bad + reason + extra line": bad + "\n" + an.REASON_BASE + "\n추가",
+            "bad + two reasons": bad + "\n" + an.REASON_BASE + "\n" + an.REASON_NUMBER,
+            "bad + reason with an unknown conclusion": bad + "\n" + an.REASON_CONCLUSION.format("great"),
+            "bad + reason with a non-number": bad + "\n" + an.REASON_PARENTS.format("many"),
+            "bad + reason with a 7-digit number": bad + "\n" + an.REASON_PARENTS.format(1234567),
+            "bad + reason + malformed count": bad + "\n" + an.REASON_BASE + " (외 건)",
+            "bad + reason + 3-digit count": bad + "\n" + an.REASON_BASE + " (외 100건)",
+            "bad + reason + trailing text": bad + "\n" + an.REASON_BASE + " 괜찮습니다",
+            "bad + reason cut short": bad + "\n" + an.REASON_BASE[:-3],
+        }
+        for label, text in shapes.items():
+            with self.subTest(label):
+                self.assertEqual(an.message_problem(text), "shape", text)
+
+    def test_the_ready_message_is_rechecked_for_the_title_length_markup_and_spacing(self):
+        """병합 부탁은 제목 부분 80자 상한·요점 줄의 백틱·`**`·정리되지 않은 공백도 발송 job 이 다시 거른다(compose 만 지키던 규칙)."""
+        good = an.compose_ready(NUMBER, TITLE, BODY)
+        self.assertEqual(an.message_problem(good), "")
+        head = "[M105] 병합 부탁 — "
+        lines = good.split("\n")
+        self.assertEqual(an.message_problem("\n".join([head + "가" * 80] + lines[1:])), "")
+        self.assertEqual(an.message_problem("\n".join([head + "가" * 81] + lines[1:])), "shape")
+        for label, text in {"backtick in a point": good.replace("시험: 새 시험을", "시험: `새` 시험을"), "bold in a point": good.replace("시험: 새 시험을", "시험: **새** 시험을"),
+                            "backtick in the title": good.replace("워크플로 둘", "`워크플로` 둘", 1), "double space in a point": good.replace("시험: 새", "시험:  새"),
+                            "trailing space in a point": good.replace("새 시험을 더했다", "새 시험을 더했다 "), "leading space in the title": good.replace(head, head + " ", 1),
+                            "tab in a point": good.replace("시험: 새", "시험:\t새")}.items():
+            with self.subTest(label):
+                self.assertNotEqual(an.message_problem(text), "", label)
 
     def test_every_broken_variant_is_refused(self):
         ready = an.compose_ready(NUMBER, TITLE, BODY)
@@ -810,8 +1023,8 @@ class EvaluateConfirmTest(unittest.TestCase):
         routes = confirm_routes({f"/commits/{HEAD_SHA}": commit_obj(HEAD_SHA, "x", (OTHER_SHA,), OTHER_TREE),
                                    (f"/pulls/{PR_NUMBER}/files", 1): [{"filename": "a.py"}, {"filename": "b.md"}]})
         verdict, api = self.evaluate(routes)
-        self.assertEqual(verdict.text, "[M105] 병합완료 확인 - 정상")
-        self.assertTrue(any("트리 비교 생략(main 이 앞섬)" in note for note in verdict.notes))
+        self.assertEqual(verdict.text.split("\n"), ["[M105] 병합완료 확인 - 정상", an.NOTE_NO_CONTENT])               # blob 해시가 없는 응답 — 이름만 견주고 '내용 비교 생략' 을 적는다
+        self.assertTrue(any("트리 비교 생략(main 이 앞섬)" in note and "내용 비교 생략" in note for note in verdict.notes))
         self.assertEqual(api.methods(), {"GET"})
         self.assertIn(f"/pulls/{PR_NUMBER}/files", api.paths())
 
@@ -834,8 +1047,65 @@ class EvaluateConfirmTest(unittest.TestCase):
                                    (f"/pulls/{PR_NUMBER}/files", 1): [{"filename": n} for n in names[:100]], (f"/pulls/{PR_NUMBER}/files", 2): [{"filename": n} for n in names[100:200]],
                                    (f"/pulls/{PR_NUMBER}/files", 3): [{"filename": n} for n in names[200:]]})
         verdict, api = self.evaluate(routes)
-        self.assertEqual(verdict.text, "[M105] 병합완료 확인 - 정상")
+        self.assertEqual(verdict.text.split("\n"), ["[M105] 병합완료 확인 - 정상", an.NOTE_NO_CONTENT])
         self.assertEqual([call[2].get("page") for call in api.calls if call[1].endswith("/files")], [1, 2, 3])
+        blobs = {name: f"{index:040x}" for index, name in enumerate(names)}                                       # 같은 곳에 blob 해시를 실으면 세 쪽 모두 견주고 내용까지 같음
+        with_blobs = confirm_routes({f"/commits/{SHA}": commit_obj(files=tuple((n, blobs[n]) for n in names)), f"/pulls/{PR_NUMBER}": pr_detail(changed_files=250),
+                                       f"/commits/{HEAD_SHA}": commit_obj(HEAD_SHA, "x", (OTHER_SHA,), OTHER_TREE),
+                                       (f"/pulls/{PR_NUMBER}/files", 1): file_items((n, blobs[n]) for n in names[:100]), (f"/pulls/{PR_NUMBER}/files", 2): file_items((n, blobs[n]) for n in names[100:200]),
+                                       (f"/pulls/{PR_NUMBER}/files", 3): file_items((n, blobs[n]) for n in names[200:])})
+        verdict, _ = self.evaluate(with_blobs)
+        self.assertEqual(verdict.text, "[M105] 병합완료 확인 - 정상")
+        self.assertTrue(any("250개의 이름과 내용(blob)이 PR 과 같음" in note for note in verdict.notes))
+
+    def blob_routes(self, merged, pr, **detail):
+        """트리가 다른 병합(main 이 앞섬)에서 두 쪽의 파일 목록을 (이름, blob) 쌍으로 만든 경로 표. 쌍이 아니라 글자만 주면 blob 해시가 없는 항목이다."""
+        return confirm_routes({f"/commits/{SHA}": commit_obj(files=merged), f"/commits/{HEAD_SHA}": commit_obj(HEAD_SHA, "x", (OTHER_SHA,), OTHER_TREE),
+                               f"/pulls/{PR_NUMBER}": pr_detail(**detail), (f"/pulls/{PR_NUMBER}/files", 1): file_items(pr)})
+
+    def test_blobs_that_are_all_equal_say_the_content_matches_and_add_no_note(self):
+        """AN1-S-10: 두 응답의 파일마다 blob 해시가 모두 있고 같으면 이름뿐 아니라 내용까지 같다 — 문장에 '내용 비교 생략' 이 없다."""
+        a, b = "a" * 40, "b" * 40
+        verdict, api = self.evaluate(self.blob_routes((("a.py", a), ("b.md", b)), (("a.py", a), ("b.md", b))))
+        self.assertEqual(verdict.text, "[M105] 병합완료 확인 - 정상")
+        self.assertTrue(any("2개의 이름과 내용(blob)이 PR 과 같음" in note for note in verdict.notes))
+        self.assertEqual(api.methods(), {"GET"})
+
+    def test_a_differing_blob_keeps_ok_by_name_and_adds_the_content_note(self):
+        """내용(blob)이 다른 파일은 main 이 같은 파일을 건드린 것으로 보고 이름만 확인한다 — 정상이되 문장에 '내용 비교 생략'(몇 개인지는 요약 줄에)."""
+        a, b, c = "a" * 40, "b" * 40, "c" * 40
+        verdict, _ = self.evaluate(self.blob_routes((("a.py", a), ("b.md", c)), (("a.py", a), ("b.md", b))))
+        self.assertEqual(verdict.text.split("\n"), ["[M105] 병합완료 확인 - 정상", an.NOTE_NO_CONTENT])
+        self.assertTrue(any("내용(blob)까지 같은 것은 1개, 나머지 1개는 내용 비교 생략" in note for note in verdict.notes))
+        both = self.evaluate(confirm_routes({f"/commits/{SHA}": commit_obj(parents=(OTHER_SHA, HEAD_SHA), files=(("a.py", a), ("b.md", c))),
+                                             f"/commits/{HEAD_SHA}": commit_obj(HEAD_SHA, "x", (OTHER_SHA,), OTHER_TREE), (f"/pulls/{PR_NUMBER}/files", 1): file_items((("a.py", a), ("b.md", b)))}))[0]
+        self.assertEqual(both.text.split("\n"), ["[M105] 병합완료 확인 - 정상", an.NOTE_TWO_PARENTS, an.NOTE_NO_CONTENT])         # 부모 둘 참고가 먼저
+
+    def test_a_missing_or_malformed_blob_on_either_side_falls_back_to_names_and_adds_the_content_note(self):
+        a, b = "a" * 40, "b" * 40
+        weird = ("nope", "A" * 40, "a" * 39, "a" * 41, 5, None, "", ["a" * 40], " " + "a" * 39)
+        cases = {"missing on the merge side": ((("a.py", a), "b.md"), (("a.py", a), ("b.md", b))), "missing on the pull side": ((("a.py", a), ("b.md", b)), (("a.py", a), "b.md")),
+                 "missing on both": (("a.py", "b.md"), ("a.py", "b.md"))}
+        for value in weird:
+            cases[f"malformed {value!r} on the merge side"] = ((("a.py", a), ("b.md", value)), (("a.py", a), ("b.md", b)))
+            cases[f"malformed {value!r} on the pull side"] = ((("a.py", a), ("b.md", b)), (("a.py", a), ("b.md", value)))
+        for label, (merged, pr) in cases.items():
+            with self.subTest(label):
+                verdict, _ = self.evaluate(self.blob_routes(merged, pr))
+                self.assertEqual(verdict.text.split("\n"), ["[M105] 병합완료 확인 - 정상", an.NOTE_NO_CONTENT])
+                self.assertTrue(any("내용 비교 생략" in note for note in verdict.notes))
+
+    def test_different_names_are_bad_whatever_the_blobs_say(self):
+        a = "a" * 40
+        verdict, _ = self.evaluate(self.blob_routes((("a.py", a), ("c.md", a)), (("a.py", a), ("b.md", a))))
+        self.assertEqual(verdict.text.split("\n"), ["[M105] 병합완료 확인 - 이상", "변경 파일이 PR 과 다릅니다(PR 2개, 병합 2개)"])
+        self.assertEqual(an.message_problem(verdict.text), "")
+
+    def test_equal_trees_ignore_the_blobs_and_every_verdict_text_is_a_valid_message(self):
+        for text in (self.evaluate()[0].text, self.evaluate(NOTICE_RUN_CONCLUSION="failure")[0].text,
+                     self.evaluate(confirm_routes({f"/commits/{SHA}": commit_obj(parents=(OTHER_SHA, HEAD_SHA))}))[0].text,
+                     self.evaluate(self.blob_routes((("a.py", "a" * 40), ("b.md", "b" * 40)), (("a.py", "a" * 40), ("b.md", "c" * 40))))[0].text):
+            self.assertEqual(an.message_problem(text), "", text)
 
     def test_more_than_300_changed_files_cannot_be_compared(self):
         routes = confirm_routes({f"/pulls/{PR_NUMBER}": pr_detail(changed_files=301), f"/commits/{HEAD_SHA}": commit_obj(HEAD_SHA, "x", (OTHER_SHA,), OTHER_TREE)})
@@ -879,15 +1149,13 @@ class EvaluateConfirmTest(unittest.TestCase):
 
 
 # ----------------------------------------------------------------------------
-# 판정 단계 / 발송 단계
+# 판정 job / 발송 job
 # ----------------------------------------------------------------------------
 class StepTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.dir = Path(self._tmp.name)
-        self.temp = self.dir / "runner"
-        self.temp.mkdir()
         self.summary, self.output = self.dir / "summary.md", self.dir / "output.txt"
         self.state = self.dir / "state.json"
         self.out = []
@@ -897,7 +1165,7 @@ class StepTest(unittest.TestCase):
 
     def env(self, base=None, **over):
         env = SpyEnv(ready_env() if base is None else base)
-        env.update({"RUNNER_TEMP": str(self.temp), "GITHUB_STEP_SUMMARY": str(self.summary), "GITHUB_OUTPUT": str(self.output)})
+        env.update({"GITHUB_STEP_SUMMARY": str(self.summary), "GITHUB_OUTPUT": str(self.output)})
         env.update(over)
         return env
 
@@ -909,8 +1177,9 @@ class StepTest(unittest.TestCase):
     def text(self, path):
         return path.read_text(encoding="utf-8") if path.exists() else ""
 
-    def message_file(self):
-        return self.temp / an.MESSAGE_FILE
+    def outputs(self):
+        """출력 파일의 `이름=값` 줄들 → [(이름, 값), …]"""
+        return [tuple(line.split("=", 1)) for line in self.text(self.output).splitlines()]
 
     # ---- off ----------------------------------------------------------------------------
     def test_off_ends_at_once_without_reading_secrets_github_or_the_token(self):
@@ -920,7 +1189,7 @@ class StepTest(unittest.TestCase):
         self.assertEqual((code, self.out, api.calls), (0, [an.MODE_OFF_LINE], []))
         self.assertEqual(set(env.reads), {"GITHUB_STEP_SUMMARY"})                 # 시크릿·토큰·이벤트 값 어느 것도 읽지 않았다
         self.assertIn("꺼져", self.text(self.summary))
-        self.assertEqual((self.text(self.output), self.message_file().exists()), ("", False))
+        self.assertEqual(self.text(self.output), "")
 
     def test_a_missing_or_odd_state_file_is_off_for_both_kinds(self):
         for kind in (an.READY, an.CONFIRM):
@@ -935,12 +1204,11 @@ class StepTest(unittest.TestCase):
                     code, api = self.decide(kind)
                     self.assertEqual((code, self.out, api.calls), (0, [an.MODE_OFF_LINE], []))
 
-    def test_off_removes_nothing_and_writes_no_output_even_if_a_stale_file_exists(self):
+    def test_off_writes_nothing_to_the_output_even_if_the_output_file_already_has_lines(self):
         self.mode("off")
-        self.message_file().write_text("낡은 문장", encoding="utf-8")
+        self.output.write_text("old=1\n", encoding="utf-8")
         self.decide()
-        self.assertEqual(self.text(self.output), "")
-        self.assertTrue(self.message_file().exists())                              # 꺼져 있으면 아무것도 건드리지 않는다
+        self.assertEqual(self.text(self.output), "old=1\n")                       # 꺼져 있으면 아무것도 건드리지 않는다
 
     # ---- dry ----------------------------------------------------------------------------
     def test_dry_writes_the_message_to_the_summary_only(self):
@@ -951,7 +1219,7 @@ class StepTest(unittest.TestCase):
         summary = self.text(self.summary)
         self.assertIn(text, summary)
         self.assertIn("```text", summary)
-        self.assertEqual((self.text(self.output), self.message_file().exists()), ("", False))
+        self.assertEqual(self.text(self.output), "")                              # 출력이 없어 발송 job 은 시작도 하지 않는다
         self.assertEqual(api.methods(), {"GET"})
         joined = "\n".join(self.out)
         for needle in ("워크플로 둘", "병합 알림 자동화", BODY[:10], "Co-authored"):
@@ -975,41 +1243,46 @@ class StepTest(unittest.TestCase):
         self.assertNotIn("```", self.text(self.summary))
 
     # ---- on -----------------------------------------------------------------------------
-    def test_on_writes_the_message_file_and_one_fixed_output_line(self):
+    def test_on_writes_exactly_two_output_lines_the_fixed_send_line_and_the_message_as_one_base64_line(self):
         self.mode("on")
         code, api = self.decide()
         self.assertEqual(code, 0)
-        self.assertEqual(self.message_file().read_text(encoding="utf-8"), an.compose_ready(NUMBER, TITLE, BODY))
-        self.assertEqual(self.text(self.output), "send=yes\n")
-        self.assertNotIn("워크플로 둘", self.text(self.summary))                    # 요약에는 제목·본문을 싣지 않는다(고정 문장만)
-        self.assertNotIn("워크플로 둘", "\n".join(self.out))
+        text = an.compose_ready(NUMBER, TITLE, BODY)
+        encoded = an.encode_message(text)
+        self.assertEqual(self.text(self.output), f"send=yes\nmessage={encoded}\n")
+        self.assertIsNotNone(re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", encoded))
+        self.assertEqual(an.decode_message(encoded), text)
+        shown = "\n".join(self.out) + self.text(self.summary)
+        for needle in ("워크플로 둘", encoded, encoded[:24]):
+            self.assertNotIn(needle, shown)                                        # 로그·요약에는 문장도 그 base64 도 없다(고정 문장만)
         self.assertEqual(api.methods(), {"GET"})
 
     def test_on_confirm_makes_the_confirmation_message(self):
         self.mode("on")
         code, _ = self.decide(an.CONFIRM, env=self.env(confirm_env()))
         self.assertEqual(code, 0)
-        self.assertEqual(self.message_file().read_text(encoding="utf-8"), "[M105] 병합완료 확인 - 정상")
-        self.assertEqual(self.text(self.output), "send=yes\n")
+        self.assertEqual(self.outputs(), [("send", "yes"), ("message", an.encode_message("[M105] 병합완료 확인 - 정상"))])
 
-    def test_a_stale_message_file_is_removed_before_deciding(self):
+    def test_nothing_is_written_to_the_output_when_there_is_nothing_to_send(self):
         for mode in ("dry", "on"):
             with self.subTest(mode):
                 self.mode(mode)
-                self.message_file().write_text("낡은 문장", encoding="utf-8")
                 self.output.write_text("", encoding="utf-8")
                 self.decide(routes=ready_routes(prs=[]))                              # 알릴 것이 없다
-                self.assertFalse(self.message_file().exists())
                 self.assertEqual(self.text(self.output), "")
 
-    def test_on_without_a_place_for_the_file_does_not_send_and_warns(self):
+    def test_on_without_a_usable_output_file_does_not_send_and_warns(self):
         self.mode("on")
-        env = self.env()
-        del env["RUNNER_TEMP"]
-        code, _ = self.decide(env=env)
-        self.assertEqual(code, 0)
+        no_path = self.env()
+        del no_path["GITHUB_OUTPUT"]
+        for label, env in (("no path", no_path), ("unwritable", self.env(GITHUB_OUTPUT=str(self.dir / "missing-dir" / "output.txt")))):
+            with self.subTest(label):
+                self.out.clear()
+                code, _ = self.decide(env=env)
+                self.assertEqual(code, 0)
+                self.assertTrue(any(line.startswith("::warning::") for line in self.out))
+                self.assertIn("출력 파일을 쓰지 못해", self.text(self.summary))
         self.assertEqual(self.text(self.output), "")
-        self.assertTrue(any(line.startswith("::warning::") for line in self.out))
 
     def test_every_skip_has_a_fixed_sentence_in_log_and_summary_and_loud_ones_warn(self):
         self.mode("dry")
@@ -1061,19 +1334,20 @@ class StepTest(unittest.TestCase):
         code, _ = self.decide(env=env)
         self.assertEqual(code, 0)
 
-    # ---- 발송 단계 ----------------------------------------------------------------------------
+    # ---- 발송 job -----------------------------------------------------------------------------
     def make_notifier(self):
         net = nh.FakeNet()
         clock = nh.Clock()
         return notify.Notifier(dict(nh.ENV), opener=net, sleep=clock.sleep, clock=clock.clock, budget=notify.Budget()), net
 
-    def write_message(self, text):
-        self.message_file().write_text(text, encoding="utf-8", newline="\n")
+    def send_env(self, text, **over):
+        """발송 job 의 환경: 판정 job 의 출력이 env 로 온 것(base64 한 줄) + 덮어쓸 값."""
+        return self.env(**{an.MESSAGE_ENV: an.encode_message(text), **over})
 
     def send(self, env=None, notifier=None):
         return an.run_send(env if env is not None else self.env(), self.out.append, notifier=notifier, state_file=self.state)
 
-    def test_send_is_refused_unless_the_mode_is_on_and_reads_no_secrets_then(self):
+    def test_send_is_refused_unless_the_mode_is_on_and_reads_neither_secrets_nor_the_message_then(self):
         class Boom:
             def send_message(self, *args, **kwargs):
                 raise AssertionError("보내면 안 된다")
@@ -1081,21 +1355,19 @@ class StepTest(unittest.TestCase):
         for mode in ("off", "dry"):
             with self.subTest(mode):
                 self.mode(mode)
-                self.write_message(an.compose_ready(NUMBER, TITLE, BODY))
-                env = self.env(TELEGRAM_BOT_TOKEN=nh.TOKEN, TELEGRAM_CHAT_ID=nh.CHAT)
+                env = self.send_env(an.compose_ready(NUMBER, TITLE, BODY), TELEGRAM_BOT_TOKEN=nh.TOKEN, TELEGRAM_CHAT_ID=nh.CHAT)
                 self.assertEqual(self.send(env, Boom()), 0)
                 self.assertNotIn("TELEGRAM_BOT_TOKEN", env.reads)
                 self.assertNotIn("TELEGRAM_CHAT_ID", env.reads)
-                self.assertNotIn("RUNNER_TEMP", env.reads)
+                self.assertNotIn(an.MESSAGE_ENV, env.reads)
         self.state.unlink()
-        self.assertEqual(self.send(self.env(), Boom()), 0)                         # 파일이 없으면 off
+        self.assertEqual(self.send(self.send_env("[M105] 병합완료 확인 - 정상"), Boom()), 0)      # 켬 상태 파일이 없으면 off
 
     def test_send_sends_the_checked_message_as_plain_text_once(self):
         self.mode("on")
         text = an.compose_ready(NUMBER, TITLE, BODY)
-        self.write_message(text)
         notifier, net = self.make_notifier()
-        self.assertEqual(self.send(notifier=notifier), 0)
+        self.assertEqual(self.send(self.send_env(text), notifier), 0)
         self.assertEqual(net.calls, 1)
         body = net.bodies()[0]
         self.assertEqual(body["text"], text)
@@ -1104,65 +1376,73 @@ class StepTest(unittest.TestCase):
         self.assertEqual(body["link_preview_options"], {"is_disabled": True})
         self.assertIn("텔레그램으로 보냈습니다", "\n".join(self.out))
         self.assertEqual(nh.leaks("\n".join(self.out), self.text(self.summary)), [])
+        self.assertNotIn(an.encode_message(text), "\n".join(self.out) + self.text(self.summary))      # 받은 값(base64)도 로그에 되풀이하지 않는다
 
     def test_send_confirmation_messages_too(self):
         self.mode("on")
-        for text in ("[M105] 병합완료 확인 - 정상", "[M105] 병합완료 확인 - 이상\n변경 파일이 PR 과 다릅니다(PR 2개, 병합 3개)"):
+        texts = ("[M105] 병합완료 확인 - 정상", "[M105] 병합완료 확인 - 정상\n" + an.NOTE_NO_CONTENT, an.compose_confirm(NUMBER, [], list(an.CONFIRM_NOTES)),
+                 "[M105] 병합완료 확인 - 이상\n변경 파일이 PR 과 다릅니다(PR 2개, 병합 3개)", an.compose_confirm(NUMBER, [an.REASON_BASE, an.REASON_NUMBER]))
+        for text in texts:
             with self.subTest(text[:20]):
-                self.write_message(text)
                 notifier, net = self.make_notifier()
-                self.assertEqual(self.send(notifier=notifier), 0)
+                self.assertEqual(self.send(self.send_env(text), notifier), 0)
                 self.assertEqual([body["text"] for body in net.bodies()], [text])
 
     def test_send_checks_the_message_again_and_refuses_what_decide_would_not_make(self):
         self.mode("on")
         good = an.compose_ready(NUMBER, TITLE, BODY)
+        ok, bad = "[M105] 병합완료 확인 - 정상", "[M105] 병합완료 확인 - 이상"
         broken = {"extra line": good + "\n추가", "mention": good.replace("시험:", "시험: " + AT + "x"), "address": good.replace("시험:", "시험: " + SCHEME + "x.example"),
                   "secret": good.replace("시험:", "시험: " + nh.TOKEN), "plain": "그냥 글", "empty": "", "too long": good + "가" * 900, "tilde": good.replace("시험:", "시험: " + TILDE),
-                  "other first line": "[M105] 병합 요청 — 제목", "confirm without reason": "[M105] 병합완료 확인 - 이상"}
+                  "other first line": "[M105] 병합 요청 — 제목", "confirm without reason": bad,
+                  # 변조 — 글자는 깨끗하지만 코드가 만드는 모양이 아니다(AN1-S-5, 안전 검증의 probe_e2e 입력)
+                  "confirm ok + free second line": ok + "\n임의 문장 승인했습니다", "confirm ok + address line": ok + "\nsee " + address(("example", "com")),
+                  "confirm bad + free reason": bad + "\n임의 사유 — 안전합니다", "confirm ok + note + free line": ok + "\n" + an.NOTE_TWO_PARENTS + "\n임의",
+                  "huge": "a" * 5000, "ready with a backtick": good.replace("시험: 새 시험을", "시험: `새` 시험을"), "ready with a long title": good.replace("병합 부탁 — ", "병합 부탁 — " + "가" * 90, 1)}
         for label, text in broken.items():
             with self.subTest(label):
                 self.out.clear()
-                self.write_message(text)
                 notifier, net = self.make_notifier()
-                self.assertEqual(self.send(notifier=notifier), 0)
+                self.assertEqual(self.send(self.send_env(text), notifier), 0)
                 self.assertEqual(net.calls, 0)
                 self.assertTrue(any(line.startswith("::warning::") for line in self.out))
 
-    def test_send_with_a_missing_oversized_or_binary_file_sends_nothing(self):
+    def test_send_with_a_missing_oversized_or_malformed_value_sends_nothing(self):
         self.mode("on")
-        notifier, net = self.make_notifier()
-        self.assertEqual(self.send(notifier=notifier), 0)                           # 파일이 없다
-        self.message_file().write_bytes(b"x" * 5000)
-        self.assertEqual(self.send(notifier=notifier), 0)                           # 너무 크다
-        self.message_file().write_bytes(b"\xff\xfe\x00\x01")
-        self.assertEqual(self.send(notifier=notifier), 0)                           # UTF-8 이 아니다
-        env = self.env()
-        del env["RUNNER_TEMP"]
-        self.assertEqual(self.send(env, notifier), 0)                               # 둘 곳이 없다
-        self.assertEqual(net.calls, 0)
+        valid = an.encode_message("[M105] 병합완료 확인 - 정상")
+        values = {"missing": None, "empty": "", "space inside": valid[:8] + " " + valid[8:], "trailing newline": valid + "\n", "newline inside": valid[:8] + "\n" + valid[8:], "not base64": "###" + valid,
+                  "wrong padding": valid[:-1], "padding first": "====" + valid, "url-safe alphabet": valid[:8] + "-_" + valid[10:], "oversized": an.encode_message("a" * 5000),
+                  "binary": base64.b64encode(b"\xff\xfe\x00\x01").decode("ascii"), "valid head then bad utf-8": base64.b64encode("[M105] 병합완료 확인 - 정상".encode("utf-8") + b"\xff").decode("ascii"),
+                  "text that decodes but is not a message": base64.b64encode(b"hello").decode("ascii")}
+        for label, value in values.items():
+            with self.subTest(label):
+                self.out.clear()
+                env = self.env()
+                if value is not None:
+                    env[an.MESSAGE_ENV] = value
+                notifier, net = self.make_notifier()
+                self.assertEqual(self.send(env, notifier), 0)
+                self.assertEqual(net.calls, 0)
+                self.assertTrue(any(line.startswith("::warning::") for line in self.out))
 
     def test_a_failed_send_is_a_warning_and_a_zero_exit_without_leaking_the_secrets(self):
         self.mode("on")
-        self.write_message(an.compose_ready(NUMBER, TITLE, BODY))
         net = nh.FakeNet(nh.http_error(401, "Unauthorized"))
         clock = nh.Clock()
         notifier = notify.Notifier(dict(nh.ENV), opener=net, sleep=clock.sleep, clock=clock.clock, budget=notify.Budget())
-        self.assertEqual(self.send(notifier=notifier), 0)
+        self.assertEqual(self.send(self.send_env(an.compose_ready(NUMBER, TITLE, BODY)), notifier), 0)
         self.assertTrue(any(line.startswith("::warning::") for line in self.out))
         self.assertEqual(nh.leaks("\n".join(self.out), self.text(self.summary)), [])
         self.assertNotIn("워크플로 둘", "\n".join(self.out))
 
     def test_without_the_secrets_the_send_is_a_warning_not_a_crash(self):
         self.mode("on")
-        self.write_message(an.compose_ready(NUMBER, TITLE, BODY))
         notifier = notify.Notifier({}, opener=nh.FakeNet(), budget=notify.Budget())
-        self.assertEqual(self.send(notifier=notifier), 0)
+        self.assertEqual(self.send(self.send_env(an.compose_ready(NUMBER, TITLE, BODY)), notifier), 0)
         self.assertTrue(any(line.startswith("::warning::") for line in self.out))
 
     def test_the_send_step_builds_the_real_notifier_from_the_environment_when_none_is_given(self):
         self.mode("on")
-        self.write_message("[M105] 병합완료 확인 - 정상")
         calls = []
         original = notify.Notifier
 
@@ -1171,26 +1451,88 @@ class StepTest(unittest.TestCase):
                 calls.append(environ)
                 super().__init__(environ, opener=nh.FakeNet(), sleep=lambda s: None, clock=nh.Clock().clock, budget=notify.Budget())
 
-        env = self.env(TELEGRAM_BOT_TOKEN=nh.TOKEN, TELEGRAM_CHAT_ID=nh.CHAT)
+        env = self.send_env("[M105] 병합완료 확인 - 정상", TELEGRAM_BOT_TOKEN=nh.TOKEN, TELEGRAM_CHAT_ID=nh.CHAT)
         with mock.patch.object(notify, "Notifier", Recording):
             self.assertEqual(self.send(env), 0)
         self.assertEqual(len(calls), 1)
-        self.assertIs(calls[0], env)                                                # 환경을 그대로 넘긴다 — 시크릿은 이 단계의 env 에서만 읽는다
+        self.assertIs(calls[0], env)                                                # 환경을 그대로 넘긴다 — 시크릿은 이 job 의 env 에서만 읽는다
         self.assertIn("텔레그램으로 보냈습니다", "\n".join(self.out))
 
-    # ---- 두 단계의 이어짐 ---------------------------------------------------------------------
+    # ---- 두 job 의 이어짐 ---------------------------------------------------------------------
     def test_what_decide_writes_in_on_mode_is_exactly_what_send_accepts(self):
         self.mode("on")
         for kind, routes, env in ((an.READY, ready_routes(), self.env()), (an.CONFIRM, confirm_routes(), self.env(confirm_env()))):
             with self.subTest(kind):
                 self.output.write_text("", encoding="utf-8")
                 self.decide(kind, routes=routes, env=env)
-                self.assertEqual(self.text(self.output), "send=yes\n")
+                written = self.outputs()
+                self.assertEqual([key for key, _value in written], ["send", "message"])
+                self.assertEqual(written[0], ("send", "yes"))
                 notifier, net = self.make_notifier()
                 self.out.clear()
-                self.assertEqual(self.send(notifier=notifier), 0)
+                self.assertEqual(self.send(self.env(**{an.MESSAGE_ENV: written[1][1]}), notifier), 0)
                 self.assertEqual(net.calls, 1)
-                self.assertEqual(net.bodies()[0]["text"], self.message_file().read_text(encoding="utf-8"))
+                self.assertEqual(net.bodies()[0]["text"], an.decode_message(written[1][1]))
+
+    def test_there_is_no_message_file_any_more_and_no_runner_temp_is_read(self):
+        """두 job 은 러너가 다르다 — 파일이 아니라 출력(base64 한 줄)으로만 문장을 넘긴다."""
+        self.assertFalse(hasattr(an, "MESSAGE_FILE"))
+        self.assertFalse(hasattr(an, "message_path"))
+        self.assertNotIn("RUNNER_TEMP", MODULE.read_text(encoding="utf-8"))
+
+
+class TransportTest(unittest.TestCase):
+    """AN1-S-4·S-13: 두 job 사이로 가는 문장은 base64 한 줄이다 — 줄 바꿈·따옴표·`::` 명령 머리·식이 끼어들 수 없고, 풀 때 모양과 크기를 엄격히 본다."""
+
+    def test_the_encoded_value_is_one_line_of_the_safe_alphabet_for_every_kind_of_text(self):
+        texts = ["[M105] 병합완료 확인 - 정상", an.compose_ready(NUMBER, TITLE, BODY), "한 줄\n두 줄\n\n네 줄", "따옴표 \" ' 와 ::error::x 와 ${{ secrets.X }} 와 %0A 와 \\n 와 `백틱`", "\x00\x1b[31m", "😀" * 50, "a"]
+        for text in texts:
+            with self.subTest(text[:12]):
+                value = an.encode_message(text)
+                self.assertIsNotNone(re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", value))
+                for char in ("\n", "\r", '"', "'", ":", "$", "{", "}", "%", " ", "\\", "`", "#", "<", ">"):
+                    self.assertNotIn(char, value)
+                self.assertEqual(an.decode_message(value), text)
+
+    def test_the_boundaries_of_the_size_caps(self):
+        self.assertEqual(an.MESSAGE_BYTES_LIMIT, 3200)
+        self.assertEqual(an.MESSAGE_B64_LIMIT, 4268)
+        at, over = "a" * an.MESSAGE_BYTES_LIMIT, "a" * (an.MESSAGE_BYTES_LIMIT + 1)
+        self.assertEqual(an.decode_message(an.encode_message(at)), at)                         # 바이트 상한 정확히는 푼다
+        self.assertEqual(len(an.encode_message(over)), an.MESSAGE_B64_LIMIT)                    # 길이는 한도 안인데
+        self.assertEqual(an.decode_message(an.encode_message(over)), "")                       # 풀어 본 바이트 수가 한 바이트 넘어 거절
+        longer = an.encode_message("a" * (an.MESSAGE_BYTES_LIMIT + 4))
+        self.assertGreater(len(longer), an.MESSAGE_B64_LIMIT)
+        with mock.patch.object(an.base64, "b64decode", side_effect=AssertionError("풀어 보면 안 된다")):
+            self.assertEqual(an.decode_message(longer), "")                                    # 길이 한도를 넘는 값은 풀어 보지도 않는다
+        self.assertEqual(an.decode_message("a" * 5000), "")                                    # 한도를 넘는 엉터리 값도 마찬가지
+
+    def test_malformed_values_decode_to_nothing(self):
+        valid = an.encode_message("[M105] 병합완료 확인 - 정상")
+        self.assertEqual(an.decode_message(valid), "[M105] 병합완료 확인 - 정상")
+        for value in (None, 5, [], b"abcd", "", " ", valid + " ", " " + valid, valid + "\n", "\n" + valid, valid[:-1], valid[:-2], "====", "!!!!", "A", "AAAAA", "ＡＢＣＤ", valid[:8] + "\n" + valid[8:], valid + "AAAA="):
+            with self.subTest(repr(value)[:30]):
+                self.assertEqual(an.decode_message(value), "")
+        self.assertEqual(an.decode_message(base64.b64encode(b"\xff\xfe").decode("ascii")), "")      # UTF-8 이 아니다
+
+    def test_write_outputs_appends_lines_and_refuses_values_with_line_breaks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "out.txt"
+            path.write_text("old=1\n", encoding="utf-8")
+            self.assertTrue(an.write_outputs(str(path), [("send", "yes"), ("message", "QUJD")]))
+            self.assertEqual(path.read_text(encoding="utf-8"), "old=1\nsend=yes\nmessage=QUJD\n")
+            for pairs in ([("x", "a\nb")], [("x", "a\rb")], [("send", "yes"), ("x", "a\nb=c")]):
+                self.assertFalse(an.write_outputs(str(path), pairs))
+            self.assertEqual(path.read_text(encoding="utf-8"), "old=1\nsend=yes\nmessage=QUJD\n")      # 거절한 것은 아무것도 쓰지 않았다
+            self.assertFalse(an.write_outputs("", [("a", "b")]))
+            self.assertFalse(an.write_outputs(None, [("a", "b")]))
+            self.assertFalse(an.write_outputs(str(Path(tmp) / "no-dir" / "o.txt"), [("a", "b")]))
+
+    def test_the_message_is_never_printed_by_the_module(self):
+        """로그에 문장이 그대로 찍히는 일이 없다 — 판정 job 은 출력 파일에만, 발송 job 은 텔레그램으로만 낸다(출력 줄은 고정 문장뿐: 정적 시험 StaticPropertiesTest 가 out( 인자를 본다)."""
+        source = MODULE.read_text(encoding="utf-8")
+        self.assertEqual(source.count("encode_message("), 2)                                    # 정의 한 곳과 판정 job 의 출력 한 곳
+        self.assertNotRegex(source, r"out\([^)]*(?:verdict|text|encoded|raw)\b")
 
 
 # ----------------------------------------------------------------------------
@@ -1275,7 +1617,7 @@ class RoutedUrlopen:
 
 
 class RealClientGlueTest(unittest.TestCase):
-    """판정 단계가 실제로 쓰는 길 — 가짜 API 대신 기존 클라이언트(operator_loop.GitHub)를 그대로 쓰고 urlopen 만 가짜로 바꿔, 보내는 요청의 모양(메서드·주소·쿼리·머리)과 오류 매핑을 본다.
+    """판정 job 이 실제로 쓰는 길 — 가짜 API 대신 기존 클라이언트(operator_loop.GitHub)를 그대로 쓰고 urlopen 만 가짜로 바꿔, 보내는 요청의 모양(메서드·주소·쿼리·머리)과 오류 매핑을 본다.
     (GitHub 를 실제로 부르지 않고 확인할 수 있는 이음매는 여기까지다 — 응답 모양은 GitHub 문서의 모양을 가정한 것이고 첫 관측은 dry 로 한다.)"""
 
     TOKEN = "CANARY_read_token"
@@ -1286,10 +1628,10 @@ class RealClientGlueTest(unittest.TestCase):
             temp = Path(tmp)
             state = temp / "state.json"
             state.write_text(json.dumps({"mode": mode}), encoding="utf-8")
-            environ = dict(env, RUNNER_TEMP=tmp, GITHUB_OUTPUT=str(temp / "output.txt"), GITHUB_STEP_SUMMARY=str(temp / "summary.md"))
+            environ = dict(env, GITHUB_OUTPUT=str(temp / "output.txt"), GITHUB_STEP_SUMMARY=str(temp / "summary.md"))
             with mock.patch.object(urllib.request, "urlopen", spy):
                 code = an.main([kind], environ=environ, out=out.append, state_file=state, sleep=no_sleep)
-            files = {name: (temp / name).read_text(encoding="utf-8") if (temp / name).is_file() else None for name in ("output.txt", "summary.md", an.MESSAGE_FILE)}
+            files = {name: (temp / name).read_text(encoding="utf-8") if (temp / name).is_file() else None for name in ("output.txt", "summary.md")}
         return code, out, files, spy
 
     @staticmethod
@@ -1311,10 +1653,13 @@ class RealClientGlueTest(unittest.TestCase):
             self.assertIsNone(request.data)                                                         # 본문이 없다 — 읽기뿐
             self.assertEqual(request.get_header("Authorization"), "Bearer " + self.TOKEN)
             self.assertEqual(request.get_header("Accept"), "application/vnd.github+json")
-        self.assertEqual(files["output.txt"], "send=yes\n")
-        self.assertEqual(an.message_problem(files[an.MESSAGE_FILE]), "")
-        self.assertTrue(files[an.MESSAGE_FILE].startswith("[M105] 병합 부탁 — "))
+        lines = files["output.txt"].splitlines()                                                    # 출력은 두 줄뿐: send=yes 와 message=<base64 한 줄>
+        self.assertEqual((len(lines), lines[0], lines[1][:8]), (2, "send=yes", "message="))
+        text = an.decode_message(lines[1][len("message="):])
+        self.assertEqual(an.message_problem(text), "")
+        self.assertTrue(text.startswith("[M105] 병합 부탁 — "))
         self.assertNotIn(self.TOKEN, files["summary.md"] + "\n".join(out))
+        self.assertNotIn(lines[1][len("message="):], files["summary.md"] + "\n".join(out))
 
     def test_the_confirm_path_sends_four_get_requests_and_writes_a_normal_confirmation(self):
         code, out, files, spy = self.run_real(an.CONFIRM, confirm_env(), confirm_routes())
@@ -1325,8 +1670,7 @@ class RealClientGlueTest(unittest.TestCase):
             ("GET", f"/repos/{REPO}/pulls/{PR_NUMBER}", {}),
             ("GET", f"/repos/{REPO}/commits/{HEAD_SHA}", {})])
         self.assertTrue(all(request.data is None for request in spy.requests))
-        self.assertEqual(files["output.txt"], "send=yes\n")
-        self.assertEqual(files[an.MESSAGE_FILE], notify.merged_title("M105", an.CONFIRM_OK))
+        self.assertEqual(files["output.txt"], "send=yes\nmessage=" + an.encode_message(notify.merged_title("M105", an.CONFIRM_OK)) + "\n")
 
     def test_an_unknown_route_is_http_404_and_ends_quietly_with_the_fixed_sentence_and_no_token_in_the_output(self):
         code, out, files, spy = self.run_real(an.READY, ready_env(), {})
@@ -1334,7 +1678,6 @@ class RealClientGlueTest(unittest.TestCase):
         self.assertEqual(len(spy.requests), 1)                                                      # 404 는 일시 오류가 아니라 다시 부르지 않는다
         self.assertIn(an.REASONS["api_error"][0], files["summary.md"])
         self.assertIsNone(files["output.txt"])
-        self.assertIsNone(files[an.MESSAGE_FILE])
         self.assertNotIn(self.TOKEN, "\n".join(out) + files["summary.md"])
         self.assertTrue(any(line.startswith("::warning::") for line in out))                      # api_error 는 눈에 띄게(경고) 남는다
 
@@ -1349,14 +1692,13 @@ class RealClientGlueTest(unittest.TestCase):
             an.Reader(ol.GitHub(REPO, self.TOKEN, opener=missing, sleep=no_sleep)).get("/pulls")
         self.assertEqual((caught.exception.code, len(missing.requests)), ("api_error", 1))
 
-    def test_dry_reads_with_the_real_client_but_leaves_no_output_line_or_message_file_and_off_never_calls_it(self):
+    def test_dry_reads_with_the_real_client_but_leaves_no_output_and_off_never_calls_it(self):
         code, out, files, spy = self.run_real(an.READY, ready_env(), ready_routes(), mode="dry")
         self.assertEqual((code, len(spy.requests)), (0, 2))
         self.assertIsNone(files["output.txt"])
-        self.assertIsNone(files[an.MESSAGE_FILE])
         self.assertIn("보낼 문장", files["summary.md"])
         code, out, files, spy = self.run_real(an.READY, ready_env(), ready_routes(), mode="off")
-        self.assertEqual((code, spy.requests, files["output.txt"], files[an.MESSAGE_FILE]), (0, [], None, None))
+        self.assertEqual((code, spy.requests, files["output.txt"]), (0, [], None))
 
     def test_the_default_reader_wraps_the_existing_client_with_the_repository_and_the_read_token(self):
         reader = an._build_reader({"GITHUB_TOKEN": self.TOKEN, "GITHUB_REPOSITORY": REPO})
@@ -1385,7 +1727,7 @@ class StaticPropertiesTest(unittest.TestCase):
                 names |= {alias.name for alias in node.names}
             elif isinstance(node, ast.ImportFrom):
                 names.add(node.module or "")
-        self.assertEqual(names, {"argparse", "json", "os", "re", "sys", "time", "unicodedata", "collections", "pathlib", "pipeline", "pipeline.console", "pipeline.llm", "pipeline.secret_patterns"})
+        self.assertEqual(names, {"argparse", "base64", "binascii", "json", "os", "re", "stat", "sys", "time", "unicodedata", "collections", "pathlib", "pipeline", "pipeline.console", "pipeline.llm", "pipeline.secret_patterns"})
 
     def test_no_network_process_or_file_deletion_shapes_of_its_own(self):
         for needle in ("urllib", "http.client", "socket", "subprocess", "urlopen", "os.system", "os.popen", "shutil", "eval(", "exec(", "__import__", "importlib", "getattr(", "os.remove", ".rmdir", "unlink(missing"):
