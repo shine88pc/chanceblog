@@ -36,7 +36,12 @@ OpsRule = namedtuple("OpsRule", "host purposes paths basis")
 OPS_RULES = (
     # GitHub REST — 자기 저장소의 이슈·라벨·PR·커밋 검사·Actions 와 한도 조회. 코드가 부르는 경로 머리: /repos/{저장소}/issues·labels·pulls·commits(…/check-runs)·actions·check-runs 와 /rate_limit
     # (C-17 issue_package.py·C-18 drafts.py·C-20 watchdog.py·C-21 ops_inbox.py·C-22 operator_loop.py·C-23 github_status.py 의 모든 호출을 grep 으로 확인). 저장소는 own_repo 로 넘긴 것만 — 남의 저장소(예: /repos/다른소유자/다른저장소/readme)는 거부.
-    OpsRule("api.github.com", ("ops_repo",), (r"/repos/{repo}/(?:issues|labels|pulls|commits|actions|check-runs)(?:/[^/]+)*", r"/rate_limit"), "pipeline/drafts.py"),
+    # 경로는 호출부(drafts·operator_loop·issue_package·github_status·ops_inbox·watchdog)가 실제로 만드는 꼴만 연다(BP-S1-7, D-417): 이슈(목록·만들기·상세·댓글·라벨)·라벨·PR(목록·만들기·상세)·커밋 상세와 검사 실행·Actions 실행 조회·
+    # 워크플로 dispatches 하나·검사 실행 주석·한도 조회. 병합(pulls/N/merge)·변수(actions/variables)·시크릿(actions/secrets)·실행 취소·재실행·워크플로 켜고 끄기 같은 쓰기 경로는 코드가 부르지 않으므로 열지 않는다
+    # (이 표는 아직 호출 지점에 연결돼 있지 않지만, 누가 허용 목록으로 연결해도 그 길이 허용 안에 들어 있지 않게 좁혀 둔다). 방식(GET·PATCH)은 판정에 쓰지 않는다.
+    OpsRule("api.github.com", ("ops_repo",), (r"/repos/{repo}/issues(?:/[0-9]+(?:/(?:comments|labels))?)?", r"/repos/{repo}/labels(?:/[^/]+)?", r"/repos/{repo}/pulls(?:/[0-9]+)?",
+                                              r"/repos/{repo}/commits/[^/]+(?:/check-runs)?", r"/repos/{repo}/actions/runs(?:/[0-9]+/jobs)?", r"/repos/{repo}/actions/workflows/[^/]+/(?:runs|dispatches)",
+                                              r"/repos/{repo}/check-runs/[0-9]+/annotations", r"/rate_limit"), "pipeline/drafts.py"),
     # Telegram Bot API — 알림 sendMessage 와 수신 getUpdates 만(C-27–C-34 notify.py·telegram_inbox.py). 경로에 봇 토큰이 들어가므로 모양만 본다.
     OpsRule("api.telegram.org", ("ops_notify",), (r"/bot[0-9]+:[A-Za-z0-9_-]+/(?:sendMessage|getUpdates)",), "pipeline/notify.py"),
     # Google OAuth 토큰 갱신(C-11 publishers/blogger.py TOKEN_URI) — /token 하나.

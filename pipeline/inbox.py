@@ -292,6 +292,7 @@ class Snapshot:
     branch_pr_heads: Optional[dict] = None                  # 가지 이름 → 그 가지의 병합됐거나 닫힌 PR 들의 head 커밋(40자 소문자 16진)의 집합. scripts/ops_inbox.py 가 넣는다 — 실행의 head_sha 가 이 집합에 있을 때만 그 승인 대기를 뺀다(같은 이름의 가지에 새 커밋이 오른 경우를 숨기지 않게, D2). None 이면 커밋을 안 보고 가지 이름만 본다(옛 호출·시험)
     policy: Optional[object] = None                         # inbox_policy.Policy(운영자 결정 데이터). None 이면 정책 파일이 없거나 올바르지 않은 것 — 예전 동작(의도된 정지·운영자 결정 없음)
     source_terms: Optional[list] = None                     # 허용 목록 파일(pipeline/source_registry.json)의 providers 배열(JSON 을 읽은 값) — 켜진 제공처의 약관 점검 기한을 보는 입력(L7, D-360). None 이면 읽지 않았거나 파일이 없는 것(예전과 같다 — 읽지 못한 때는 failures 에 ('source_terms', 사유))
+    pause_unknown: bool = False                             # PIPELINE_PAUSE 의 값이 켜짐·꺼짐 어느 쪽도 아니라 정지로 읽고 있다(pipeline/pause.py UNKNOWN — 2차 검증 BP2S-2). True 이면 paused 도 True 여야 하고 확인 항목 `pause:unknown` 이 하나 더 붙는다
 
 
 # ----------------------------------------------------------------------------
@@ -729,14 +730,35 @@ def _pause_days(since, today):
         return None
 
 
-def pause_items(paused, repo_url, policy=None, today=None):
+PAUSE_UNKNOWN_TITLE = "변수 PIPELINE_PAUSE 의 값을 알 수 없어 정지로 읽고 있습니다 — 값을 고치거나 지우세요"
+
+
+def pause_items(paused, repo_url, policy=None, today=None, unknown=False):
     """일시정지 변수가 켜져 있으면 항목 하나. 정책 파일(policy)에 '의도된 정지'(이유·재개 조건·결정 근거)가 있으면 지금 해야 할 일이 아니라 참고(`pause:planned`)로 보여 주고 해제를
     '바로 하기'로 권하지 않는다. 재개 Gate 통과가 적혀 있을 때만(`resume_gate_passed`) 별도의 '재개 승인'(`pause:resume_approval`, action)을 만든다.
     정책이 없거나(None) 의도된 정지로 선언되지 않았으면 예전 안내(`pause`, action)다.
 
     의도된 정지를 점검하는 확인 항목(check — 알림 없음, 표시만이고 변수·초안·설정을 바꾸지 않는다)이 둘 더 있다(D10): ① 정지가 켜져 있고 today(한국 날짜)를 받았으며 시작일(since)부터
     PLANNED_PAUSE_LONG_DAYS 일을 넘었으면 `pause:long`('정지가 길어졌어요 — 재개 조건을 점검하세요') ② 정책은 의도된 정지를 선언했는데 변수가 꺼져 있으면 `pause:unset`('실수로 해제했나요?').
-    정책이 없거나 선언이 아니면 둘 다 없다(예전과 글자 하나 다르지 않다). 문구에는 경과 일수를 넣지 않는다(같은 항목은 항상 같은 글자 — 날마다 본문을 다시 쓰지 않게)."""
+    정책이 없거나 선언이 아니면 둘 다 없다(예전과 글자 하나 다르지 않다). 문구에는 경과 일수를 넣지 않는다(같은 항목은 항상 같은 글자 — 날마다 본문을 다시 쓰지 않게).
+
+    unknown(2차 검증 BP2S-2, D-423): 변수 값이 켜짐도 꺼짐도 아니라 정지로 읽고 있으면(pipeline/pause.py 의 UNKNOWN — 오타 하나로도 발행이 멈춘다) 확인 항목(check — 알림 없음) `pause:unknown`
+    '변수 PIPELINE_PAUSE 의 값을 알 수 없어 정지로 읽고 있습니다 — 값을 고치거나 지우세요' 가 위 항목들에 더해 정확히 하나 붙는다. 받은 값은 어디에도 싣지 않는다(비밀이 잘못 들어갔을 수 있다).
+    변수가 켜져 있을 때(paused)만 붙고 기본값(False)이면 예전과 글자 하나 다르지 않다 — 방향(정지)·위 항목들·알림 개수는 바꾸지 않는다(워치독은 이 경우에도 일부러 조용하다)."""
+    items = _pause_items(paused, repo_url, policy, today)
+    if paused and unknown:
+        items.append(Item(
+            id="pause:unknown", level=LEVEL_CHECK, title=PAUSE_UNKNOWN_TITLE,
+            detail=("저장소 변수 PIPELINE_PAUSE 의 값이 켜짐(1·true·yes·on)도 꺼짐(0·false·no·off·비움)도 아니라서, 안전한 쪽인 정지로 읽고 자동 발행을 멈추고 있습니다. "
+                    "오타일 수 있습니다. 받은 값은 이 모음에 싣지 않습니다."),
+            url=f"{repo_url}/settings/variables/actions",
+            hint=("일부러 멈춘 것이라면 값을 true 로 고치세요. 다시 발행하려면 변수를 삭제(또는 false 로 변경)하세요. "
+                  "이 모음은 변수를 바꾸지 않습니다.")))
+    return items
+
+
+def _pause_items(paused, repo_url, policy=None, today=None):
+    """pause_items 의 본체 — 변수가 켜졌는지(paused)와 정책 파일의 선언만 본다(알 수 없는 값 항목은 붙이지 않는다)."""
     plan = getattr(policy, "planned_pause", None) if policy is not None else None
     declared = plan is not None and plan.declared
     if not paused:
@@ -1505,7 +1527,7 @@ def build_items(snap):
     items = (watchdog_items(snap.issues, repo_url, hidden) + terms + pulls
              + run_items(snap.runs, snap.annotations, now, repo_url, names=snap.workflow_names)
              + approval_items(snap.approvals, repo_url, names=snap.workflow_names, branch_states=snap.branch_prs, branch_heads=snap.branch_pr_heads)
-             + pause_items(snap.paused, repo_url, policy, today) + blog_items(snap.blogs, snap.histories, now, repo_url, snap.published, paused, policy)
+             + pause_items(snap.paused, repo_url, policy, today, bool(getattr(snap, "pause_unknown", False))) + blog_items(snap.blogs, snap.histories, now, repo_url, snap.published, paused, policy)
              + stats_items(snap.blogs, snap.histories, now) + draft_items(snap.drafts, now, repo_url, pull_states, ctx)
              + failure_items(snap.failures, repo_url) + note_items(snap.notes))
     unique, seen = [], set()

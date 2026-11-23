@@ -676,8 +676,7 @@ class IssuePackagePublisher:
         if not _REPO_RX.match(self.repo):
             raise _failure("저장소 이름(GITHUB_REPOSITORY)이 `소유자/이름` 모양이 아닙니다", "auth_failed")
         url = f"{API_ROOT}/repos/{self.repo}{path}" + (("?" + urllib.parse.urlencode(params)) if params else "")
-        headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28",
-                   "User-Agent": "chanceblog-package", "Authorization": f"Bearer {self._token}"}
+        headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "chanceblog-package"}
         data = None
         if payload is not None:
             data = json.dumps(payload).encode("utf-8")
@@ -686,6 +685,7 @@ class IssuePackagePublisher:
         for attempt in range(attempts + 1):
             self.calls += 1
             request = urllib.request.Request(url, data=data, method=method, headers=headers)
+            request.add_unredirected_header("Authorization", f"Bearer {self._token}")      # 리다이렉트가 토큰을 다른 호스트로 복사하지 않게(BP-S1-8)
             try:
                 with self._open(request, timeout=20) as resp:
                     body = resp.read().decode("utf-8")

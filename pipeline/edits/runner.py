@@ -31,7 +31,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from pipeline import registry as registry_mod
-from pipeline import unsplash_credit
+from pipeline import pause, unsplash_credit
 from pipeline.console import md_cell, safe_output
 from pipeline.edits import checks, forms, frontmatter, ops, pages, safety, spec as spec_mod, targets
 from pipeline.llm import CallLog, call_line
@@ -258,22 +258,33 @@ def _ignored(issue):
     return None
 
 
-PAUSE_VALUES = {"1", "true", "yes", "on"}   # Blogger 러너(pipeline/run.py)·Chance(generator.py)의 PIPELINE_PAUSE 와 같은 값 집합
+PAUSE_VALUES = pause.ON_VALUES   # 켜짐 값 집합(옛 이름 유지) — Blogger 러너·Chance 와 같은 한 곳(pipeline/pause.py)의 것이다
 
 
 def pause_on(env):
-    """킬 스위치(저장소 변수 PIPELINE_PAUSE)가 켜져 있는가. 다른 파이프라인과 같은 규칙(1/true/yes/on, 대소문자·앞뒤 공백 무시)."""
-    return str(env.get("PIPELINE_PAUSE", "")).strip().lower() in PAUSE_VALUES
+    """킬 스위치(저장소 변수 PIPELINE_PAUSE)가 정지로 읽히는가. 다른 파이프라인과 같은 읽기(pipeline/pause.py): 켜짐 1/true/yes/on, 꺼짐 0/false/no/off·비움(대소문자·앞뒤 공백 무시),
+    그 밖의 값(오타 등)은 정지로 읽는다(fail closed)."""
+    return pause.is_paused(env)
 
 
-def _paused(req):
-    """정지 스위치가 켜졌을 때의 결과: AI·이미지 검색을 부르지 않고 파일·PR 도 만들지 않으며 이슈 코멘트로만 알린다(종료 코드 0)."""
-    comment = ("⏸️ **일시정지 중입니다.**\n\n저장소 변수 `PIPELINE_PAUSE` 가 켜져 있어 이 요청을 처리하지 않았습니다"
-               "(AI·이미지 검색도 부르지 않았고 저장소는 변경되지 않았습니다).\n\n"
-               "변수를 지운 뒤 Actions 의 `[Chance] 이슈 수정 요청 처리(수정안 PR 만들기)` 에서 이 이슈 번호로, `연습 실행` 체크를 풀고 다시 실행해 주세요.")
-    note = ("저장소 변수 PIPELINE_PAUSE 가 켜져 있어 이슈 수정 요청을 처리하지 않았습니다. 계속 멈춰 둘 것이 아니라면 "
-            "Settings > Secrets and variables > Actions > Variables 에서 PIPELINE_PAUSE 를 지우세요.")
-    return Result("paused", message="PIPELINE_PAUSE 가 켜져 있어 처리하지 않았습니다.", comment=comment, notes=[note],
+def _paused(req, unknown=False):
+    """정지 스위치가 정지로 읽혔을 때의 결과: AI·이미지 검색을 부르지 않고 파일·PR 도 만들지 않으며 이슈 코멘트로만 알린다(종료 코드 0).
+    unknown 이 참이면 값을 알 수 없어 정지로 읽은 경우다 — 문장만 다르고 결과·종료 코드는 같다(받은 값은 싣지 않는다. 이 러너는 `::` 줄을 내지 않으므로 알림은 코멘트와 참고 줄이다)."""
+    if unknown:
+        comment = ("⏸️ **일시정지 중입니다.**\n\n저장소 변수 `PIPELINE_PAUSE` 의 값을 알 수 없어 정지로 읽고 이 요청을 처리하지 않았습니다"
+                   "(AI·이미지 검색도 부르지 않았고 저장소는 변경되지 않았습니다). 켜짐은 1·true·yes·on, 꺼짐은 0·false·no·off 또는 비움입니다.\n\n"
+                   "변수 값을 고치거나 지운 뒤 Actions 의 `[Chance] 이슈 수정 요청 처리(수정안 PR 만들기)` 에서 이 이슈 번호로, `연습 실행` 체크를 풀고 다시 실행해 주세요.")
+        note = ("저장소 변수 PIPELINE_PAUSE 의 값을 알 수 없어 정지로 읽고 이슈 수정 요청을 처리하지 않았습니다(켜짐 1·true·yes·on, 꺼짐 0·false·no·off 또는 비움). "
+                "Settings > Secrets and variables > Actions > Variables 에서 PIPELINE_PAUSE 값을 고치거나 지우세요.")
+        message = "PIPELINE_PAUSE 의 값을 알 수 없어 정지로 읽고 처리하지 않았습니다."
+    else:
+        comment = ("⏸️ **일시정지 중입니다.**\n\n저장소 변수 `PIPELINE_PAUSE` 가 켜져 있어 이 요청을 처리하지 않았습니다"
+                   "(AI·이미지 검색도 부르지 않았고 저장소는 변경되지 않았습니다).\n\n"
+                   "변수를 지운 뒤 Actions 의 `[Chance] 이슈 수정 요청 처리(수정안 PR 만들기)` 에서 이 이슈 번호로, `연습 실행` 체크를 풀고 다시 실행해 주세요.")
+        note = ("저장소 변수 PIPELINE_PAUSE 가 켜져 있어 이슈 수정 요청을 처리하지 않았습니다. 계속 멈춰 둘 것이 아니라면 "
+                "Settings > Secrets and variables > Actions > Variables 에서 PIPELINE_PAUSE 를 지우세요.")
+        message = "PIPELINE_PAUSE 가 켜져 있어 처리하지 않았습니다."
+    return Result("paused", message=message, comment=comment, notes=[note],
                   edit_type=req.edit_key, target=req.target["path"])
 
 
@@ -476,7 +487,7 @@ def _process(issue, root, env, llm, image_picker, dry_run, search_notes, calls=N
     if isinstance(req, Result):
         return req
     if pause_on(env):   # 정지 스위치: 요청이 유효해도 AI·이미지 검색·파일 수정 없이 알리기만 한다(resolve_request 는 파일을 읽기만 한다)
-        return _paused(req)
+        return _paused(req, unknown=pause.is_unrecognized(env))
     cfg, fields, target, path = req.cfg, req.fields, req.target, req.target["path"]
     limits = req.spec["limits"]
 

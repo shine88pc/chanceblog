@@ -665,7 +665,8 @@ class ReviewFollowUpTest(unittest.TestCase):
 
     def test_switch_values_ignore_case_and_surrounding_spaces(self):
         on = ("1", "true", "True", "TRUE", "yes", "YES", "on", "On", " true ", "\tTrue\n")
-        off = ("0", "false", "no", "off", "", "  ", "maybe", "2", "truee")
+        off = ("0", "false", "no", "off", "", "  ")
+        unknown = ("maybe", "2", "truee")     # DRY_RUN 은 '연습 아님'으로 읽고, 정지 변수는 알 수 없는 값을 정지로 읽는다(BP-S1-3·D-412 — 예전에는 둘 다 꺼짐으로 읽어 킬 스위치가 오타 하나로 꺼졌다)
         for value in on:
             with self.subTest(switch="DRY_RUN", value=value):
                 res = self.r.run("draft", {**ALL_ENV, "DRY_RUN": value}, factory=must_not_be_called)
@@ -679,6 +680,14 @@ class ReviewFollowUpTest(unittest.TestCase):
                 with self.subTest(switch=switch, value=value):
                     res = self.r.run("draft", {**ALL_ENV, switch: value}, FakePublisher())
                     self.assertEqual((res.code, res.last["status"]), (0, "draft_uploaded"))
+        for value in unknown:
+            with self.subTest(switch="DRY_RUN", value=value):
+                res = self.r.run("draft", {**ALL_ENV, "DRY_RUN": value}, FakePublisher())
+                self.assertEqual((res.code, res.last["status"]), (0, "draft_uploaded"))
+            with self.subTest(switch="PIPELINE_PAUSE", value=value):
+                res = self.r.run("draft", {**ALL_ENV, "PIPELINE_PAUSE": value}, factory=must_not_be_called)
+                self.assertEqual((res.code, res.skips), (0, ["PAUSED"]))
+                self.assertEqual(res.history, [])
 
     def test_the_stale_publish_checkbox_wording_is_gone_from_the_operator_docs(self):
         stale = {"HANDLER.md": ("`publish`를 체크하지 말고", "L3 초안 1건(`publish` 끔)", "결정 — **A(풀오토 API 게시)**로 진행"),

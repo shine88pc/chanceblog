@@ -840,6 +840,18 @@ class InterfaceTest(ShadowRunBase):
                 result = self.run_shadow(env={"PIPELINE_PAUSE": pause, "SHADOW_COUNT": "1"})
                 self.assertEqual(notice in result.out, expected)
 
+    def test_an_unknown_pause_value_is_read_as_paused_gets_the_notice_and_one_error_line_and_the_shadow_run_still_goes_on(self):
+        """BP-S1-3·D-412: 알 수 없는 값(오타 등)도 다른 실행처럼 정지로 읽는다 — 안내 줄이 나가고 ::error:: 한 줄이 더해지지만, 이 모드는 읽기 전용이라 건너뛰지 않고 그대로 돈다."""
+        notice = "PIPELINE_PAUSE 가 켜져 있지만 그림자 실행은 읽기 전용이라 건너뛰지 않습니다"
+        for pause, unknown in (("enabled", True), ("paused", True), ("y", True), ("ture", True), ("2", True), ("true", False), ("false", False), ("0", False), ("", False)):
+            with self.subTest(pause=pause):
+                shutil.rmtree(self.out_root, ignore_errors=True)
+                result = self.run_shadow(env={"PIPELINE_PAUSE": pause, "SHADOW_COUNT": "1"})
+                errors = [line for line in result.out.splitlines() if line.startswith("::error::") and "PIPELINE_PAUSE" in line]
+                self.assertEqual(len(errors), 1 if unknown else 0, result.out)
+                self.assertEqual(notice in result.out, unknown or pause == "true")
+                self.assertIn("SHADOW_DONE attempts=1", result.out)
+
     def test_the_output_format_is_what_the_docs_define(self):
         self.run_shadow()
         for number in ("01", "02", "03"):

@@ -135,9 +135,9 @@ class Client:
     def get(self, path):
         headers = {"User-Agent": "chanceblog-github-status", "Accept": "application/vnd.github+json",
                    "X-GitHub-Api-Version": "2022-11-28"}
-        if self.token:
-            headers["Authorization"] = "Bearer " + self.token
         request = urllib.request.Request(API + path, headers=headers)
+        if self.token:
+            request.add_unredirected_header("Authorization", "Bearer " + self.token)      # 리다이렉트가 토큰을 다른 호스트로 복사하지 않게(BP-S1-8)
         try:
             with self.opener(request, timeout=TIMEOUT) as response:
                 return json.loads(response.read().decode("utf-8"))

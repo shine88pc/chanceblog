@@ -33,7 +33,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from pipeline import terms_deadline  # noqa: E402
+from pipeline import pause, terms_deadline  # noqa: E402
 from pipeline.console import safe_output  # noqa: E402
 from pipeline.health import REAL_POST_STATUSES, Finding, entry_time, evaluate  # noqa: E402
 from pipeline.publish_lock import (CHANCE_KEY, WEEK_WINDOW_DAYS, lock_active, lock_errors,  # noqa: E402
@@ -79,9 +79,10 @@ class GitHubClient:
         data = json.dumps(payload).encode("utf-8") if payload is not None else None
         req = urllib.request.Request(
             f"https://api.github.com{path}", data=data, method=method,
-            headers={"Authorization": f"Bearer {self.token}", "Accept": "application/vnd.github+json",
+            headers={"Accept": "application/vnd.github+json",
                      "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "chanceblog-watchdog",
                      "Content-Type": "application/json"})
+        req.add_unredirected_header("Authorization", f"Bearer {self.token}")      # 리다이렉트가 토큰을 다른 호스트로 복사하지 않게(BP-S1-8)
         with self._open(req, timeout=20) as resp:
             body = resp.read().decode("utf-8")
         return json.loads(body) if body else None
@@ -461,9 +462,13 @@ def main():
     if errors:
         print("[오류] 레지스트리 검증 실패:\n  - " + "\n  - ".join(_oneline(e) for e in errors))
         return 1
-    if os.environ.get("PIPELINE_PAUSE", "").strip().lower() in ("1", "true", "yes", "on"):
+    if pause.is_paused(os.environ):      # 알 수 없는 값(오타 등)도 정지로 읽는다(fail closed, pipeline/pause.py) — 다른 실행과 같은 판정
         print("[일시정지] PIPELINE_PAUSE 가 켜져 있어 점검 알림을 만들지 않습니다.")
-        _write_summary("### 워치독 점검 결과\n- **일시정지** — 저장소 변수 PIPELINE_PAUSE 가 켜져 있어 알림을 만들지 않았습니다.")
+        unknown = pause.is_unrecognized(os.environ)
+        if unknown:
+            print(pause.error_line())
+        _write_summary("### 워치독 점검 결과\n- **일시정지** — "
+                       + ("저장소 변수 PIPELINE_PAUSE 의 값을 알 수 없어 정지로 읽었고 알림을 만들지 않았습니다." if unknown else "저장소 변수 PIPELINE_PAUSE 가 켜져 있어 알림을 만들지 않았습니다."))
         return 0
     token, repo = os.environ.get("GITHUB_TOKEN"), os.environ.get("GITHUB_REPOSITORY")
     dry = os.environ.get("WATCHDOG_DRY_RUN", "").lower() in ("1", "true", "yes") or not (token and repo)
