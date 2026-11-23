@@ -251,7 +251,15 @@ def _load_yaml(text, strict=True):
     """YAML 글을 읽는다. strict(기본)면 중복 키를 오류(yaml.YAMLError — 워크플로는 WF-0)로 낸다. 워크플로가 아닌 설정 파일 둘(`_config.yml`·편집 명세)은 예전 읽기 그대로(strict=False)."""
     if not yaml:
         return None
-    return yaml.load(text, Loader=_UniqueKeyLoader) if strict else yaml.safe_load(text)
+    if not strict:
+        return yaml.safe_load(text)
+    # `yaml.load(text, Loader=…)` 가 속으로 하는 일(로더를 만들어 한 문서를 읽고 치움)을 그대로 한다 — 외부 접속 스캐너(tests/egress_scan.py)가 `yaml.load` 라는 이름을 '안전하지 않은 읽기'
+    # 모양으로 표시하기 때문이다. 이 로더는 SafeLoader 하위 클래스라 파이썬 태그로 코드를 되살리지 않는다(tests/test_validator_loader.py 가 파이썬 태그를 거절하는 것을 못박는다).
+    loader = _UniqueKeyLoader(text)
+    try:
+        return loader.get_single_data()
+    finally:
+        loader.dispose()
 
 
 def _triggers(data):

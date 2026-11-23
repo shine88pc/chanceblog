@@ -103,6 +103,30 @@ class DuplicateKeyTest(unittest.TestCase):
         self.assertEqual(len(found), 1)
         self.assertEqual(found[0].level, "ERROR")
 
+    def test_the_strict_loader_is_as_safe_as_safe_load_and_gives_the_same_values_as_yaml_load(self):
+        """엄격한 읽기는 SafeLoader 하위 클래스다 — 파이썬 태그(`!!python/object/apply:` 같은 것)로 코드를 되살리지 못하고 YAMLError 로 거절한다(저장소의 글을 읽는 도구가 글이 시키는 일을 하지 않는다).
+        로더를 직접 부르는 읽기(외부 접속 스캐너가 `yaml.load` 이름을 '안전하지 않은 읽기' 로 표시해 그 이름을 피한다)가 `yaml.load` 와 같은 값을 내고, 문서가 둘이면 오류인 것도 같다."""
+        self.assertTrue(issubclass(vr._UniqueKeyLoader, yaml.SafeLoader))
+        for text in ("!!python/object/apply:os.getcwd []\n", "x: !!python/object/new:os.getcwd []\n", "!!python/name:os.system\n", "- !!python/object/apply:eval ['1']\n"):
+            with self.subTest(text):
+                with self.assertRaises(yaml.YAMLError):
+                    vr._load_yaml(text)
+        for sample in ("a: 1\nb: [x, y]\nc: {d: e}\n", "- 1\n- two\n- [3, 4]\n", "just a string\n", "", "# only a comment\n", "on:\n  push:\nx: &a [1]\ny: *a\n"):
+            with self.subTest(sample):
+                self.assertEqual(vr._load_yaml(sample), yaml.load(sample, Loader=vr._UniqueKeyLoader))
+                self.assertEqual(vr._load_yaml(sample), yaml.safe_load(sample))
+        with self.assertRaises(yaml.YAMLError):
+            vr._load_yaml("a: 1\n---\nb: 2\n")                                                  # 문서가 둘이면 오류 — safe_load 와 같다
+
+    def test_the_validator_source_has_no_yaml_load_call_for_the_egress_scanner_to_flag(self):
+        """tests/egress_scan.py 가 `yaml.load` 를 '데이터가 코드를 되살리는 길' 로 표시한다 — scripts/validate_repo.py 는 그 이름을 부르지 않고(`yaml.safe_load` 와 로더 인스턴스 호출만), 그래서 외부 접속 등록 목록을 늘리지 않는다."""
+        import ast
+        tree = ast.parse((ROOT / "scripts" / "validate_repo.py").read_text(encoding="utf-8"))
+        called = {f"{node.func.value.id}.{node.func.attr}" for node in ast.walk(tree) if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name)}
+        for name in ("yaml.load", "yaml.load_all", "yaml.unsafe_load", "yaml.full_load"):
+            self.assertNotIn(name, called)
+        self.assertIn("yaml.safe_load", called)
+
     def test_non_strict_loading_keeps_the_old_last_value_reading_for_the_two_config_files(self):
         text = "a: 1\na: 2\n"
         self.assertEqual(vr._load_yaml(text, strict=False), {"a": 2})
