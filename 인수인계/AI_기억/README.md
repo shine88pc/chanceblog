@@ -35,13 +35,13 @@
 
 ## A-2. 2026-11-16 이후 새로 쌓인 상시 지시 — 2026-11-23 사본
 
-위 A 표는 2026-11-04 사본이고 이 표의 9개는 그 뒤(2026-11-16–23)에 쌓인 운영자 상시 지시·정책의 사본입니다(2026-11-23 새 PC 이어받기 보강 MIG1 이 옛 PC 의 AI 기억 폴더에서 개인 정보를 가려 옮김 — 윈도 계정 이름·메일·세션 번호·회사 계정 세부는 일반 말로 바꿨고, ASCII 물결표 두 곳은 en dash 로, 확인 021 로 없앤 옛 답변 양식의 메뉴 이름 한 곳은 풀어 쓴 말로 고침 — 시험이 옛 메뉴 이름이 새로 생기는 것을 막는다). 이 표의 파일 안 `C:/work/ai` 는 옛 PC 의 작업 폴더 W 의 이름이고 `scratch/…` 는 W 아래 도구입니다(도구 README 9-2). 정본이 아니고 정본은 `인수인계/작업내용.md` §0-2 와 `docs/AGENT_RUNBOOK.md` §8 입니다.
+위 A 표는 2026-11-04 사본이고 이 표의 9개는 그 뒤(2026-11-16–23)에 쌓인 운영자 상시 지시·정책의 사본입니다(2026-11-23 새 PC 이어받기 보강 MIG1 이 옛 PC 의 AI 기억 폴더에서 개인 정보를 가려 옮김 — 윈도 계정 이름·메일·세션 번호·회사 계정 세부는 일반 말로 바꿨고, ASCII 물결표 두 곳은 en dash 로, 확인 021 로 없앤 옛 답변 양식의 메뉴 이름 한 곳은 풀어 쓴 말로, 계정 사용량 비율 수치 둘은 '한도의 상당 부분' 으로, 운영자가 삭제한 공개 사진 가지의 이름과 커밋 해시 셋은 말로 고침 — 시험이 옛 메뉴 이름이 새로 생기는 것을 막는다). 이 표의 파일 안 `C:/work/ai` 는 옛 PC 의 작업 폴더 W 의 이름이고 `scratch/…` 는 W 아래 도구입니다(도구 README 9-2). 정본이 아니고 정본은 `인수인계/작업내용.md` §0-2 와 `docs/AGENT_RUNBOOK.md` §8 입니다.
 
 | 파일 | 한 줄 |
 |---|---|
 | [approval-answers-need-valid-form.md](./approval-answers-need-valid-form.md) | 확인 요청 답은 새 양식(대상번호+선택)·채팅 번호 답만 승인 — 이슈에 접수 봇의 거절 답글이 있으면 승인이 아님(2026-11-16 확인 019·020 사건: 승인으로 읽기 전에 봇 답글 확인) |
 | [blog-slots-limit-on-hold.md](./blog-slots-limit-on-hold.md) | 블로그 연결 수 한도(확인 025)는 운영자가 ④ 보류 — 다시 묻지 않고 기다림, 설계서는 보관 |
-| [low-ai-cost-operations.md](./low-ai-cost-operations.md) | AI 사용량 점검 결론과 확인 031(R-463)·운영자 채팅 승인(새 알림 워크플로 둘)·경제 모드는 프로그램 완성을 운영자가 확인한 뒤 시작 — `docs/AGENT_RUNBOOK.md` §8 의 근거 |
+| [low-ai-cost-operations.md](./low-ai-cost-operations.md) | AI 사용량 점검 결론과 확인 031(R-463)·운영자 채팅 승인(새 알림 워크플로 둘)·경제 모드는 '완료된 시점부터'(운영자 말 — 사본 안의 '운영자가 확인한 뒤' 는 쓴 시점의 읽기) — `docs/AGENT_RUNBOOK.md` §8 의 근거 |
 | [operator-merges-on-pr-open.md](./operator-merges-on-pr-open.md) | 운영자는 `[M###]` PR 이 열리면 병합 부탁 알림 전에도 몇 분 안에 병합하기도 한다(M070·M084) — 알림에 다가올 M 번호를 쓰지 말고 CI 초록 직후 부탁을 보낸다 |
 | [operator-reports-via-messages-not-chat.md](./operator-reports-via-messages-not-chat.md) | 알릴 것은 세션 채팅이 아니라 텔레그램 알림(요청 파일)으로(2026-11-16 23시 지시) |
 | [operator-wants-fewer-confirmations.md](./operator-wants-fewer-confirmations.md) | 요청은 '방향'이고 세부·기본값은 추천안으로 알아서 진행, 번호 있는 확인은 방향 이탈·대규모·T3 일 때만(2026-11-16 22:59 지시) |

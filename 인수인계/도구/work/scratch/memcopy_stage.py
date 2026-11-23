@@ -30,10 +30,14 @@ MAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:[.][A-Za-z0-9-]+)+")
 TOKENS = re.compile(r"ghp_|github_pat|Bearer |sk-[A-Za-z0-9]{10}")
 
 
+def extra_words():
+    """환경 변수 STAGE_FORBID(쉼표 구분)의 낱말 — 계정 이름 말고 회사·개인을 알아볼 수 있는 낱말."""
+    return [word.strip() for word in os.environ.get("STAGE_FORBID", "").split(",") if word.strip()]
+
+
 def forbidden_words():
     """그 PC 의 계정 이름과 환경 변수 STAGE_FORBID 의 낱말 — 남아 있으면 실패로 센다."""
-    words = [Path.home().name] + [word.strip() for word in os.environ.get("STAGE_FORBID", "").split(",")]
-    return [word for word in words if word]
+    return [word for word in [Path.home().name] + extra_words() if word]
 
 
 def clean(text):
@@ -57,6 +61,8 @@ def main(argv):
     src = Path(argv[0])
     names = argv[1:] or INCLUDE
     words = forbidden_words()
+    if not extra_words():
+        print("!!! 경고: STAGE_FORBID 가 비어 있다 — 계정 이름·메일 모양·토큰 모양만 걸러진다. 회사·개인을 알아볼 수 있는 낱말(요금제·회사 이름 등)은 걸러지지 않으니 사본을 눈으로 한 번 더 훑고, 공개할 글이면 STAGE_FORBID=낱말,낱말 로 다시 돌린다.", file=sys.stderr)
     OUT.mkdir(parents=True, exist_ok=True)
     bad = 0
     for name in names:
@@ -64,7 +70,8 @@ def main(argv):
         text, sessions = clean(raw)
         hits = leftovers(text, words)
         if hits:
-            print(f"[실패] {name}: 금지 글 {len(hits)}곳 남음 — 사본을 쓰지 않는다(손으로 말을 바꾼 뒤 다시)")
+            (OUT / name).unlink(missing_ok=True)                                # 앞선 실행이 쓴 같은 이름의 사본이 남아 쓰이지 않게 지운다
+            print(f"[실패] {name}: 금지 글 {len(hits)}곳 남음 — 사본을 쓰지 않고 앞선 사본도 지웠다(손으로 말을 바꾼 뒤 다시)")
             bad += 1
             continue
         (OUT / name).write_bytes(text.encode("utf-8"))

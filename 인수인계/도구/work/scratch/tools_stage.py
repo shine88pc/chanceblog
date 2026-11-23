@@ -41,10 +41,14 @@ def author_mail():
     return {found.group(1)} if found else set()
 
 
+def extra_words():
+    """환경 변수 STAGE_FORBID(쉼표 구분)의 낱말 — 계정 이름 말고 회사·개인을 알아볼 수 있는 낱말."""
+    return [word.strip() for word in os.environ.get("STAGE_FORBID", "").split(",") if word.strip()]
+
+
 def forbidden(extra_allowed):
     """(금지 낱말 정규식, 허용 메일 집합) — 계정 이름·계정 폴더 경로·AppData·환경 변수 STAGE_FORBID 의 낱말."""
-    words = [Path.home().name, "AppData"] + [word.strip() for word in os.environ.get("STAGE_FORBID", "").split(",")]
-    words = [re.escape(word) for word in words if word]
+    words = [re.escape(word) for word in [Path.home().name, "AppData"] + extra_words() if word]
     return re.compile("|".join(words + [USERS]), re.I), STANDARD_MAILS | extra_allowed
 
 
@@ -57,9 +61,11 @@ def stage(src, rel, bad, rx, allowed):
     hits += [m.group(0) for m in MAIL.finditer(text) if m.group(0) not in allowed]
     dst = OUT / rel
     dst.parent.mkdir(parents=True, exist_ok=True)
-    dst.write_bytes(text.encode("utf-8"))
     if hits:
+        dst.unlink(missing_ok=True)                                              # 금지 글이 남은 파일은 쓰지 않는다(같은 이름의 앞선 사본이 있어도 지운다)
         bad.append((rel, hits[:3]))
+    else:
+        dst.write_bytes(text.encode("utf-8"))
     return len(raw.encode("utf-8")), len(text.encode("utf-8")), len(hits)
 
 
@@ -67,6 +73,8 @@ def main():
     if OUT.exists():
         assert OUT.name == "work" and OUT.parent.name == "도구" and "mig1_stage" in OUT.parts   # 안전 장치: 스테이징 폴더 밖은 지우지 않는다
         shutil.rmtree(OUT)
+    if not extra_words():
+        print("!!! 경고: STAGE_FORBID 가 비어 있다 — 계정 이름·AppData·메일 모양·토큰 모양만 걸러진다. 회사·개인을 알아볼 수 있는 낱말(요금제·회사 이름 등)은 걸러지지 않으니 사본을 눈으로 한 번 더 훑고, 공개할 글이면 STAGE_FORBID=낱말,낱말 로 다시 돌린다.", file=sys.stderr)
     rx, allowed = forbidden(author_mail())
     bad, rows = [], []
     for name in ROOT_TOOLS:

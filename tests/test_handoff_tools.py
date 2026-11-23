@@ -2696,13 +2696,16 @@ class StageScriptsTest(unittest.TestCase):
             (src / "word.md").write_text("회사 ACMEWORD 이름이 남음\n", encoding="utf-8")
             (src / "mail.md").write_text("연락 " + "x" + "@" + "example.com 입니다\n", encoding="utf-8")
             (src / "token.md").write_text("키 " + "gh" + "p_" + "CANARY" + "\n", encoding="utf-8")
+            mod.OUT.mkdir(parents=True)
+            for name in ("word.md", "mail.md", "token.md"):
+                (mod.OUT / name).write_text("앞선 실행이 쓴 옛 사본\n", encoding="utf-8")        # 같은 이름의 앞선 사본이 남아 쓰이면 안 된다
             with mock.patch.dict(os.environ, {"STAGE_FORBID": "ACMEWORD"}):
                 code, out, _err = capture(mod.main, [str(src), "good.md", "word.md", "mail.md", "token.md"])
             self.assertEqual(code, 1)
             self.assertTrue((mod.OUT / "good.md").is_file())
             self.assertIn("(세션 번호)", (mod.OUT / "good.md").read_text(encoding="utf-8"))
             for name in ("word.md", "mail.md", "token.md"):
-                self.assertFalse((mod.OUT / name).exists(), name)                              # 금지 글이 남은 파일은 쓰지 않는다
+                self.assertFalse((mod.OUT / name).exists(), name)                              # 금지 글이 남은 파일은 쓰지 않고 앞선 사본도 지운다
             self.assertEqual(out.count("[실패]"), 3)
             self.assertNotIn("ACMEWORD", out)                                                  # 실패 글에 금지 낱말 값을 싣지 않는다
             self.assertEqual(mod.OUT.resolve(), (Path(tmp) / "W" / "scratch" / "memcopy_stage").resolve())
@@ -2734,11 +2737,45 @@ class StageScriptsTest(unittest.TestCase):
             staged = (work / "scratch" / "mig1_stage" / "인수인계" / "도구" / "work")
             self.assertEqual((staged / "a.py").read_text(encoding="utf-8"), "PY = 'py -3.12'\n")
             self.assertTrue((staged / "r.md").is_file())
+            self.assertFalse((staged / "scratch" / "s.sh").exists())                             # 금지 글이 남은 파일은 사본을 쓰지 않는다
             (work / "scratch" / "s.sh").write_text("echo ok\n", encoding="utf-8")
             with mock.patch.object(mod, "ROOT_TOOLS", ["a.py"]), mock.patch.object(mod, "RULE_DOCS", [("r.md", "r.md")]), mock.patch.object(mod, "SCRATCH_TOOLS", ["s.sh"]):
                 code, out, _err = capture(mod.main)
             self.assertEqual(code, 0, out)
             self.assertIn("금지 글 남은 파일 0개", out)
+
+    def test_tools_stage_removes_an_earlier_copy_of_a_file_that_now_fails(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            mod = load_tool(self.copy_into_work_folder(tmp, "tools_stage.py"))
+            source = Path(tmp) / "W" / "s.sh"
+            source.write_text("# 메일 " + "o" + "ther" + "@" + "example.com 은 허용 목록 밖\n", encoding="utf-8")
+            rx, allowed = mod.forbidden(set())
+            stale = mod.OUT / "scratch" / "s.sh"
+            stale.parent.mkdir(parents=True)
+            stale.write_text("앞선 실행이 쓴 옛 사본\n", encoding="utf-8")
+            bad = []
+            mod.stage(source, "scratch/s.sh", bad, rx, allowed)
+            self.assertEqual([rel for rel, _hits in bad], ["scratch/s.sh"])
+            self.assertFalse(stale.exists())                                                     # 옛 사본이 남아 쓰이지 않는다
+
+    def test_both_stage_scripts_warn_on_stderr_when_stage_forbid_is_empty_and_keep_their_exit_codes(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            memcopy = load_tool(self.copy_into_work_folder(tmp, "memcopy_stage.py"))
+            tools = load_tool(self.copy_into_work_folder(tmp, "tools_stage.py"))
+            src = Path(tmp) / "memory"
+            src.mkdir()
+            (src / "good.md").write_text("운영자 지시 한 줄\n", encoding="utf-8")
+            (Path(tmp) / "W" / "a.py").write_text("X = 1\n", encoding="utf-8")
+            for value, warned in (("", True), ("ACMEWORD", False)):
+                with mock.patch.dict(os.environ, {"STAGE_FORBID": value}):
+                    code, _out, err = capture(memcopy.main, [str(src), "good.md"])
+                self.assertEqual(code, 0, value)                                                 # 종료 코드는 그대로 — 경고만 더한다
+                self.assertEqual("STAGE_FORBID" in err and "경고" in err, warned, value)
+                with mock.patch.dict(os.environ, {"STAGE_FORBID": value}), mock.patch.object(tools, "ROOT_TOOLS", ["a.py"]), \
+                        mock.patch.object(tools, "RULE_DOCS", []), mock.patch.object(tools, "SCRATCH_TOOLS", []):
+                    code, _out, err = capture(tools.main)
+                self.assertEqual(code, 0, value)
+                self.assertEqual("STAGE_FORBID" in err and "경고" in err, warned, value)
 
     def test_the_stage_scripts_derive_the_work_folder_from_their_own_location(self):
         for name in ("tools_stage.py", "memcopy_stage.py"):
