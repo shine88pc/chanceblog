@@ -28,7 +28,7 @@ SUBS = [
     (re.compile(USERS + "[^/\\s`'\"]+/AppData/Local/Programs/Python/Python312/python[.]exe"), "py -3.12"),
     (re.compile(USERS + "[^/\\s`'\"]+/[.]claude[^\\s`'\"]*"), "<AI 세션 기록 폴더>"),
 ]
-TOKENS = re.compile(r"ghp_|github_pat|Bearer [A-Za-z0-9]|sk-[A-Za-z0-9]{10}")
+TOKENS = re.compile(r"ghp_|github_pat_[0-9A-Za-z_]{20,}|Bearer [A-Za-z0-9]|sk-[A-Za-z0-9]{10}")   # 비밀 검사기 소스의 정규식 글(github_pat_[…])은 토큰이 아니다
 MAIL = re.compile(r"[A-Za-z0-9._-]+@[A-Za-z0-9.-]+[.](?:com|net|kr)\b")
 AUTHOR_MAIL = re.compile(r'GIT_AUTHOR_EMAIL="([^"]+)"')
 STANDARD_MAILS = {"noreply" + chr(64) + "anthropic.com"}   # 표준 공동 작성 줄의 보낸이 전용 주소(소스에 메일 모양을 그대로 두지 않는다)
@@ -48,7 +48,8 @@ def extra_words():
 
 def forbidden(extra_allowed):
     """(금지 낱말 정규식, 허용 메일 집합) — 계정 이름·계정 폴더 경로·AppData·환경 변수 STAGE_FORBID 의 낱말."""
-    words = [re.escape(word) for word in [Path.home().name, "AppData"] + extra_words() if word]
+    words = [re.escape(word) for word in [Path.home().name] + extra_words() if word]
+    words.append(r"(?<![A-Za-z])AppData(?![A-Za-z])")   # LOCALAPPDATA 같은 환경 변수 이름은 걸리지 않게 앞뒤가 글자가 아닐 때만
     return re.compile("|".join(words + [USERS]), re.I), STANDARD_MAILS | extra_allowed
 
 
