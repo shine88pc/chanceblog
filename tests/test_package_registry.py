@@ -201,8 +201,11 @@ class SecretRulesTest(PackageRegistryBase):
             self.assertHas(errors, f"이름 {name}에 계정 정보를 뜻하는 낱말({word})")
 
     def test_a_plain_gemini_key_name_is_fine_even_if_it_is_not_the_shared_one(self):
-        for name in ("GEMINI_API_KEY", "TISTORY_GEMINI_KEY", "NAVER_LLM_API_KEY"):
+        for name in ("GEMINI_API_KEY", "TISTORY_GEMINI_KEY", "NAVER_GEMINI_KEY"):
             self.assertEqual(self.errors(with_entry(lambda blog, n=name: blog["secrets"].update(llm_api_key=n))), [], name)
+        # 독립 감사 BA-S1-5(결함 D-410)의 좁힘: 이름에 GEMINI 가 없고 shared_secrets 에도 없는 이름은 이제 거절이다(옛 시험은 NAVER_LLM_API_KEY 를 통과로 적었다) — 자세한 표는 tests/test_registry_secret_names.py
+        errors = self.errors(with_entry(lambda blog: blog["secrets"].update(llm_api_key="NAVER_LLM_API_KEY")))
+        self.assertHas(errors, "Gemini 키 이름이 아닙니다")
 
     def test_the_llm_key_is_required(self):
         self.assertHas(self.errors(with_entry(lambda blog: blog["secrets"].clear())), "platform tistory에 필요한 secrets 역할 누락: llm_api_key")
