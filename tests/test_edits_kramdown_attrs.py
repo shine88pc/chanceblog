@@ -37,7 +37,7 @@ AI_AND_PLAIN = (True, False)           # AI 패치와 문구 그대로 바꾸기
 # 이벤트 핸들러 규칙 둘의 기준 복사본 — 시험이 직접 적은 것이라 코드가 바뀌어도 기준이 같이 움직이지 않는다(2차, 검증자 S 의 V1).
 OLD_HANDLER_RULE = re.compile(r"""[\s"'/]on[a-z]{3,}\s*=""", re.I)                  # 시작점의 규칙 그대로 — 앞 글자가 공백·따옴표·슬래시
 NEW_HANDLER_RULE = re.compile(r"(?<![A-Za-z0-9_-])on[a-z]{3,}\s*=", re.I)           # D-406 의 새 규칙 — 앞 글자가 속성 이름의 일부가 아니면
-IAL_HANDLER_RULE = re.compile(r"\{:[^}]{0,400}?(?<![A-Za-z0-9_-])on[a-z]{3,}\s*=", re.I)             # 3차(Q F1·S W1)의 세 번째 규칙 — 속성 목록 `{: … }` 안만 따로 센다(질의 문자열이 가릴 수 없게)
+IAL_HANDLER_RULE = re.compile(r"\{:(?:[\w-]*:)?[^}]{0,400}?(?<![A-Za-z0-9_-])on[a-z]{3,}\s*=", re.I)             # 3차(Q F1·S W1)의 세 번째 규칙 — 속성 목록 `{: … }` 안만 따로 센다(질의 문자열이 가릴 수 없게)
 
 
 def verify(before, after, ai):
@@ -314,6 +314,15 @@ class CountMaskingTest(unittest.TestCase):
         for ai in AI_AND_PLAIN:
             with self.subTest(ai=ai):
                 self.assertTrue(handler_reasons(verify(before, BASE + "참고 링크: " + padded + " 입니다." + NL, ai)))
+
+    def test_a_handler_after_a_very_long_definition_name_is_blocked_even_with_a_budget(self):
+        """3차 뒤(S 의 X1): 정의형 `{:이름:핸들러="…"}` 의 이름이 400자를 넘으면 속성 목록 규칙의 400자 창이 이름에서 끝나 핸들러를 못 본다 — 그 핸들러는 앞이 콜론이라 옛 규칙도 안 세고
+        새 넓은 규칙만 세므로 앞글에 질의 문자열(`?online=1`) 같은 개수 예산이 있으면 바꿔 쓰기로 통과했다. 정의형 이름 부분(`[\w-]*:`)을 건너뛰고 읽도록 규칙을 고쳤다."""
+        before = BASE + "참고 링크: /status?online=1 입니다." + NL
+        long_definition = "{:" + "a" * 450 + ':onclick="x"}'
+        for ai in AI_AND_PLAIN:
+            with self.subTest(ai=ai):
+                self.assertTrue(handler_reasons(verify(before, BASE + "참고 링크: /status?x=1 " + long_definition + " 입니다." + NL, ai)))
 
     def test_many_unclosed_attribute_list_starts_are_not_slow(self):
         """`{:` 만 만 번 되풀이한 글(닫는 `}` 없음)에서 속성 목록 규칙이 제곱 시간으로 느려지지 않는다(안쪽 탐색에 400자 상한)."""
