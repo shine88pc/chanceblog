@@ -9,7 +9,9 @@
 """
 import copy
 import re
+import shutil
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -48,11 +50,11 @@ READY_FILTERS = ["ai/claude/M[0-9][0-9][0-9]-*", "ai/claude/M[0-9][0-9][0-9][0-9
 
 SPECS = {
     "merge-ready-notice.yml": {
-        "name": "[공통] 병합 부탁 알림 자동 보내기", "target": "[공통] 병합 부탁 PR 자동 만들기", "branches": READY_FILTERS,
+        "name": "[공통] 병합 부탁 알림 자동 보내기", "target": "[공통] 병합 부탁 PR 자동 만들기", "pattern": "*병합 부탁 PR 자동 만들기", "target_basename": "auto-pr.yml", "branches": READY_FILTERS,
         "group": "merge-ready-notice-${{ github.event.workflow_run.head_sha }}", "decide_job_name": "병합 부탁 알림 판정(시크릿 없음)", "send_job_name": "병합 부탁 알림 발송(시크릿은 이 job 에만)",
         "decide_name": "병합 부탁 문장 만들기(켬 상태가 꺼짐이면 곧바로 끝)", "decide_run": "python -m pipeline.auto_notice merge-ready"},
     "merge-confirm-notice.yml": {
-        "name": "[공통] 병합완료 확인 알림 자동 보내기", "target": "[공통] 저장소 규칙·테스트 자동 검사", "branches": ["main"],
+        "name": "[공통] 병합완료 확인 알림 자동 보내기", "target": "[공통] 저장소 규칙·테스트 자동 검사", "pattern": "*저장소 규칙·테스트 자동 검사", "target_basename": "guardrails.yml", "branches": ["main"],
         "group": "merge-confirm-notice-${{ github.event.workflow_run.head_sha }}", "decide_job_name": "병합완료 확인 판정(시크릿 없음)", "send_job_name": "병합완료 확인 알림 발송(시크릿은 이 job 에만)",
         "decide_name": "병합완료 확인 문장 만들기(켬 상태가 꺼짐이면 곧바로 끝)", "decide_run": "python -m pipeline.auto_notice merge-confirm"},
 }
@@ -98,7 +100,7 @@ def static_problems(text, spec):
     if not isinstance(data, dict):
         return ["워크플로 최상위가 표가 아님"]
     triggers = vr._triggers(data)
-    wanted = {"workflow_run": {"workflows": [spec["target"]], "types": ["completed"], "branches": spec["branches"]}}
+    wanted = {"workflow_run": {"workflows": [spec["pattern"]], "types": ["completed"], "branches": spec["branches"]}}
     if triggers != wanted:
         problems.append(f"트리거가 정해진 모양이 아님: {triggers}")
     if data.get("permissions") != PERMISSIONS:
@@ -224,10 +226,10 @@ class WorkflowShapeTest(unittest.TestCase):
         for name, spec in SPECS.items():
             with self.subTest(name):
                 data = load_data(name)
-                self.assertEqual(vr._triggers(data), {"workflow_run": {"workflows": [spec["target"]], "types": ["completed"], "branches": spec["branches"]}})
+                self.assertEqual(vr._triggers(data), {"workflow_run": {"workflows": [spec["pattern"]], "types": ["completed"], "branches": spec["branches"]}})
                 head = load_text(name).split("\npermissions:")[0]
                 on_block = [line for line in head.split("\non:\n")[1].splitlines() if line.strip() and not line.strip().startswith("#")]
-                self.assertEqual(on_block[:4], ["  workflow_run:", f'    workflows: ["{spec["target"]}"]', "    types: [completed]", "    branches:"])
+                self.assertEqual(on_block[:4], ["  workflow_run:", f'    workflows: ["{spec["pattern"]}"]', "    types: [completed]", "    branches:"])
 
     def test_the_target_names_are_the_real_names_of_the_workflows_they_follow(self):
         self.assertEqual(SPECS["merge-ready-notice.yml"]["target"], load_data("auto-pr.yml")["name"])
@@ -451,6 +453,159 @@ class MutationTest(unittest.TestCase):
                         path.write_text(dump(mutated), encoding="utf-8", newline="\n")
                         findings = vr.check_workflows(Path(tmp), [rel]) + vr.check_telegram_secrets(Path(tmp), [rel])
                         self.assertTrue([f for f in findings if f.level == "ERROR"], f"검증기가 놓친 변이: {label}")
+
+
+class WorkflowNamePatternTest(unittest.TestCase):
+    """결함 D-428 — `workflow_run.workflows` 는 이름이 아니라 GitHub 필터 패턴이다. 처음 병합본은 이름 그대로 `[공통] …` 을 적어 GitHub 가 시작 단계에서 거절했다(startup_failure)."""
+
+    @staticmethod
+    def real_names():
+        return {path.name: yaml.safe_load(path.read_text(encoding="utf-8"))["name"] for path in sorted(WORKFLOWS.glob("*.yml"))}
+
+    def test_no_workflow_run_pattern_in_the_repo_has_a_bracket_or_another_special_character(self):
+        for path in sorted(WORKFLOWS.glob("*.yml")):
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+            config = vr._triggers(data).get("workflow_run")
+            if not isinstance(config, dict):
+                continue
+            for item in config["workflows"]:
+                with self.subTest(file=path.name, pattern=item):
+                    self.assertIsNone(vr.workflow_name_pattern_problem(item))
+                    self.assertFalse(set("[]?+\\!") & set(item))
+
+    def test_each_pattern_matches_exactly_the_one_workflow_it_follows_and_no_other(self):
+        names = self.real_names()
+        for name, spec in SPECS.items():
+            with self.subTest(name):
+                matched = sorted(file for file, real in names.items() if vr.workflow_name_matches(spec["pattern"], real))
+                self.assertEqual(matched, [spec["target_basename"]])
+                self.assertEqual(names[spec["target_basename"]], spec["target"])                       # 진짜 이름은 그대로 — 패턴만 바뀌었다
+
+    def test_the_old_literal_names_are_the_shape_github_rejected_and_the_validator_now_refuses_it(self):
+        for name, spec in SPECS.items():
+            with self.subTest(name):
+                self.assertIn("[", spec["target"])                                                 # 이름 그대로는 대괄호 묶음 — 시작 단계 거절의 원인
+                self.assertIsNotNone(vr.workflow_name_pattern_problem(spec["target"]))
+                broken = copy.deepcopy(load_data(name))
+                broken[True if True in broken else "on"]["workflow_run"]["workflows"] = [spec["target"]]
+                allowed = vr.WORKFLOW_RUN_ALLOWED[f".github/workflows/{name}"]
+                problems = vr._workflow_run_problems(broken, allowed, {f".github/workflows/{spec['target_basename']}": spec["target"]})
+                self.assertTrue(any("D-428" in problem and "특수 글자" in problem for problem in problems), problems)
+
+    def test_the_pattern_shape_accepts_a_literal_name_and_one_star_and_refuses_the_rest(self):
+        for good in ("Run Tests", "*저장소 규칙·테스트 자동 검사", "공통 저장소*"):
+            with self.subTest(good=good):
+                self.assertIsNone(vr.workflow_name_pattern_problem(good))
+        for bad in ("[공통] 저장소 규칙·테스트 자동 검사", "[abc]x", "a?b", "a+b", "\\[공통\\] 저장소", "!부정", "*앞*뒤", "**", "*", "", "   ", " 앞공백*", "뒤공백* ", "a[b", "a]b", "a" + chr(92) + "b", "a?", "a+", "!", None, 7):
+            with self.subTest(bad=bad):
+                self.assertIsNotNone(vr.workflow_name_pattern_problem(bad))
+
+    def test_the_matcher_follows_the_star_rule_of_github_and_never_crosses_a_slash(self):
+        self.assertTrue(vr.workflow_name_matches("*검사", "[공통] 저장소 검사"))
+        self.assertTrue(vr.workflow_name_matches("검사*", "검사"))
+        self.assertTrue(vr.workflow_name_matches("정확히 이것", "정확히 이것"))
+        self.assertFalse(vr.workflow_name_matches("정확히 이것", "정확히 이것 아님"))
+        self.assertFalse(vr.workflow_name_matches("*검사", "a/b 검사"))                             # `*` 는 `/` 를 못 넘는다
+        self.assertFalse(vr.workflow_name_matches("*검사", "검사 뒤에 글"))
+
+    def test_the_matcher_treats_regex_characters_as_plain_letters(self):
+        """`re.escape` 를 빼면 `.`·`|`·`(` 가 정규식 뜻을 가져 엉뚱한 이름에 맞는다(시험 렌즈 Q-3)."""
+        self.assertTrue(vr.workflow_name_matches("a.b(c)|d*", "a.b(c)|d 끝"))
+        self.assertFalse(vr.workflow_name_matches("a.b*", "axb 끝"))             # `.` 은 아무 글자가 아니다
+        self.assertFalse(vr.workflow_name_matches("a|b*", "a"))                  # `|` 는 '또는' 이 아니다
+        self.assertFalse(vr.workflow_name_matches("(a)*", "a"))                  # 괄호는 묶음이 아니다
+
+    def test_a_pattern_that_follows_nothing_or_too_many_workflows_is_a_validator_error(self):
+        names = self.real_names()
+        by_path = {f".github/workflows/{file}": real for file, real in names.items()}
+        for name, spec in SPECS.items():
+            allowed = vr.WORKFLOW_RUN_ALLOWED[f".github/workflows/{name}"]
+            for label, pattern in (("아무것에도 안 맞음", "*없는 워크플로 이름"), ("너무 넓음", "*검사"), ("다른 워크플로", "*사이트 자동 배포")):
+                with self.subTest(name=name, label=label):
+                    data = copy.deepcopy(load_data(name))
+                    data[True if True in data else "on"]["workflow_run"]["workflows"] = [pattern]
+                    problems = vr._workflow_run_problems(data, allowed, by_path)
+                    self.assertTrue(any("정확히" in problem and spec["target_basename"] in problem for problem in problems), problems)
+
+    def test_the_real_workflow_files_pass_the_validator_with_the_pattern_check_on(self):
+        files = [f".github/workflows/{path.name}" for path in sorted(WORKFLOWS.glob("*.yml"))]
+        findings = [finding for finding in vr.check_workflows(ROOT, files) + vr.check_workflow_run_workflows(ROOT, files) if "WF-16" in finding.line()]
+        self.assertEqual([finding.line() for finding in findings], [])
+
+    def test_the_decision_and_the_defect_are_written_down(self):
+        register = (ROOT / "docs" / "DEFECT_REGISTER.md").read_text(encoding="utf-8")
+        row = [line for line in register.splitlines() if line.startswith("| **D-428**")]
+        self.assertEqual(len(row), 1)
+        for needle in ("startup_failure", "필터 패턴", "대괄호", "*저장소 규칙·테스트 자동 검사"):
+            self.assertIn(needle, row[0])
+        guard = (ROOT / "docs" / "SECURITY_GUARDRAILS.md").read_text(encoding="utf-8")
+        self.assertIn("D-428", guard)
+
+
+class PatternWiringTest(unittest.TestCase):
+    """시험 렌즈 Q-1 — 패턴 대조(② 정확히 의도한 워크플로 하나에만 맞음)가 진짜 입구(`check_workflows`·`check_workflow_run_workflows`)로 이어지는지를 진짜 워크플로 사본 위에서 지킨다.
+    이 시험이 없으면 이름 지도를 비우거나 `names` 를 넘기지 않아도 다른 시험이 모두 초록이었다(변이 M7·M10b·M11a·M11b·M19a·M19b)."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.root = Path(self.tmp)
+        shutil.copytree(WORKFLOWS, self.root / ".github" / "workflows")
+        self.workflows = self.root / ".github" / "workflows"
+
+    def files(self):
+        return [f".github/workflows/{path.name}" for path in sorted(self.workflows.glob("*.yml"))]
+
+    def wf16(self, entry):
+        return [finding.line() for finding in entry(self.root, self.files()) if "WF-16" in finding.line()]
+
+    def both_entries(self):
+        return {"check_workflows": self.wf16(vr.check_workflows), "check_workflow_run_workflows": self.wf16(vr.check_workflow_run_workflows)}
+
+    def rename(self, file, old, new):
+        path = self.workflows / file
+        text = path.read_text(encoding="utf-8")
+        self.assertIn(old, text)
+        path.write_text(text.replace(old, new, 1), encoding="utf-8", newline="\n")
+
+    def test_an_untouched_copy_is_clean_in_both_entry_points(self):
+        for entry, found in self.both_entries().items():
+            self.assertEqual(found, [], entry)
+
+    def test_a_renamed_follow_target_is_an_error_in_both_entry_points(self):
+        self.rename("guardrails.yml", 'name: "[공통] 저장소 규칙·테스트 자동 검사"', 'name: "[공통] 저장소 검사"')              # 병합완료 확인 알림이 영영 안 깨어난다
+        for entry, found in self.both_entries().items():
+            self.assertTrue(any("guardrails.yml" in line and "하나여야" in line for line in found), (entry, found))
+
+    def test_the_ready_notice_target_rename_is_caught_too(self):
+        self.rename("auto-pr.yml", 'name: "[공통] 병합 부탁 PR 자동 만들기"', 'name: "[공통] 병합 부탁 PR 만들기"')
+        for entry, found in self.both_entries().items():
+            self.assertTrue(any("auto-pr.yml" in line and "하나여야" in line for line in found), (entry, found))
+
+    def test_a_second_workflow_with_a_matching_name_is_an_error_and_the_message_names_it(self):
+        extra = (self.workflows / "telegram-test.yml").read_text(encoding="utf-8")
+        old = [line for line in extra.splitlines() if line.startswith("name:")][0]
+        (self.workflows / "zz-extra.yml").write_text(extra.replace(old, 'name: "[Chance] 저장소 규칙·테스트 자동 검사"', 1), encoding="utf-8", newline="\n")
+        for entry, found in self.both_entries().items():
+            hit = [line for line in found if "guardrails.yml" in line and "하나여야" in line]
+            self.assertTrue(hit, (entry, found))
+            self.assertIn("zz-extra.yml", hit[0], entry)                                           # 함께 맞은 파일이 문구에 보인다(Q-7)
+
+    def test_more_than_six_matching_workflows_are_summarized_in_the_message(self):
+        source = (self.workflows / "telegram-test.yml").read_text(encoding="utf-8")
+        old = [line for line in source.splitlines() if line.startswith("name:")][0]
+        for number in range(1, 8):
+            (self.workflows / f"zz-extra-{number}.yml").write_text(source.replace(old, f'name: "[Chance{number}] 저장소 규칙·테스트 자동 검사"', 1), encoding="utf-8", newline="\n")
+        for entry, found in self.both_entries().items():
+            hit = [line for line in found if "guardrails.yml" in line and "하나여야" in line]
+            self.assertTrue(hit, (entry, found))
+            self.assertIn(" 외 2개", hit[0], entry)                                                # 모두 여덟(진짜 하나 + 사본 일곱) — 여섯을 보이고 나머지는 개수로
+            self.assertEqual(hit[0].count("zz-extra-"), 5, entry)                                   # 이름순으로 guardrails.yml 다음 다섯만 보인다
+
+    def test_the_name_map_reads_every_real_workflow(self):
+        names = vr._workflow_name_map(self.root, self.files())
+        self.assertEqual(len(names), len(self.files()))
+        self.assertEqual(names[".github/workflows/guardrails.yml"], "[공통] 저장소 규칙·테스트 자동 검사")
 
 
 class StateFileTest(unittest.TestCase):
