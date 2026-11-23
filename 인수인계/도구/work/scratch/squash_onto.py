@@ -16,8 +16,12 @@ import tempfile
 W = "C:/work/ai"
 
 
-ENV = dict(os.environ, GIT_AUTHOR_NAME="강병수", GIT_AUTHOR_EMAIL="shine88pc@gmail.com",
-           GIT_COMMITTER_NAME="강병수", GIT_COMMITTER_EMAIL="shine88pc@gmail.com")   # 되돌린 병합이 아닌 실제 3방향 병합은 신원이 있어야 돈다(없으면 'unable to auto-detect email address')
+import re as _re
+from pathlib import Path as _Path
+
+_AUTHOR = (_Path(__file__).resolve().parent.parent / "commit_as_author.py").read_text(encoding="utf-8")     # 고정 작성자는 commit_as_author.py 의 상수 하나만 쓴다(2026-11-23 MIG1 — 이 사본에 개인 값을 따로 두지 않는다)
+_NAME, _MAIL = (_re.search("GIT_AUTHOR_" + _key + '="([^"]+)"', _AUTHOR).group(1) for _key in ("NAME", "EMAIL"))
+ENV = dict(os.environ, GIT_AUTHOR_NAME=_NAME, GIT_AUTHOR_EMAIL=_MAIL, GIT_COMMITTER_NAME=_NAME, GIT_COMMITTER_EMAIL=_MAIL)   # 되돌린 병합이 아닌 실제 3방향 병합은 신원이 있어야 돈다(없으면 'unable to auto-detect email address')
 
 
 def git(wt, *args, check=True, binary=False):

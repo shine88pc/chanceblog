@@ -2650,6 +2650,21 @@ class MigrationCopiesTest(unittest.TestCase):
         self.assertIn("낮은 우선순위", table_row(text, "lowprio.py"))
         self.assertIn("종료 코드 75", table_row(text, "qt_lock.py"))
 
+    def test_the_three_merge_tools_read_the_fixed_author_from_commit_as_author_and_carry_none_themselves(self):
+        author = read(WORK / "commit_as_author.py")
+        name, mail = (re.search("GIT_AUTHOR_" + key + '="([^"]+)"', author).group(1) for key in ("NAME", "EMAIL"))
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            work = Path(tmp) / "W"
+            (work / "scratch").mkdir(parents=True)
+            shutil.copy2(WORK / "commit_as_author.py", work / "commit_as_author.py")
+            for tool in ("build_blog_merge.py", "combine_lanes_desktop.py", "squash_onto.py"):
+                source = read(SCRATCH / tool)
+                self.assertNotIn(name, source, tool)                                          # 이름·메일 값이 사본에 없다
+                self.assertNotIn(mail, source, tool)
+                shutil.copy2(SCRATCH / tool, work / "scratch" / tool)
+                module = load_tool(work / "scratch" / tool)
+                self.assertEqual({module.ENV["GIT_AUTHOR_NAME"], module.ENV["GIT_COMMITTER_NAME"]}, {name}, tool)
+                self.assertEqual({module.ENV["GIT_AUTHOR_EMAIL"], module.ENV["GIT_COMMITTER_EMAIL"]}, {mail}, tool)
 
 class StageScriptsTest(unittest.TestCase):
     """tools_stage.py·memcopy_stage.py — 옛 PC 판을 고쳐 넣은 스테이징 도구: 계정 이름이 든 경로·낱말 목록을 코드에 두지 않고 인자·환경 변수로 받으며,
