@@ -123,6 +123,8 @@ Actions 왼쪽 목록의 이름은 **이름만 보고 어느 채널의 것인지
 | `source_policy` | (선택, `jekyll-git`만, 지금은 Chance) 외부 콘텐츠를 읽는 방식. `legacy`(기본 — 필드가 없어도 같다, 옛 동작이고 출력이 바이트까지 같다) · `allowlist`(허용 목록(Source Registry)의 ACTIVE Provider 만 읽는다: 피드·기사 페이지 발췌·구글 뉴스 해석기 호출 0, 외부 제목·요약·태그가 프롬프트·이력·로그에 들어가지 않고, ACTIVE 콘텐츠 Provider 가 0 이면 초록 결과 코드 `SOURCE_POLICY_NO_ACTIVE_PROVIDER`). 값이 틀리거나 읽지 못하면 느슨한 쪽(legacy)으로 떨어지지 않고 멈춘다. 설명 [`SOURCE_POLICY.md`](./SOURCE_POLICY.md). **`allowlist` 로 바꾸는 것은 T3**(정책) |
 | `content_source` | (선택, `jekyll-git`만, 지금은 Chance) 글감의 출처. `feed`(기본 — 필드가 없어도 같다, 옛 동작이고 출력이 바이트까지 같다) · `facts`(구조화 Fact 경로: 허용 목록의 제공처가 준 구조화 자료를 규칙 기반 조립기가 글로 만든다 — AI 를 부르지 않는다). **`facts` 는 `source_policy: allowlist`·`languages: ["ko"]`·`publish_flow: pr` 위에서만** 받는다(검증이 어기면 거절). 값이 틀리면 조용히 `feed` 로 떨어지지 않고 멈춘다. 지금 `blogs.json` 의 Chance 항목에는 `facts` 가 적혀 있다. 설명 [`FACT_PATH.md`](./FACT_PATH.md) §15. **`facts` 로 바꾸는 것은 T3** |
 
+`schedule.slots_kst` 는 **표시용**입니다(감사 BP-S1-9, 결함 D-419) — 코드가 읽지 않는 값이라 고쳐도 게시 시각이 바뀌지 않습니다. 게시 시각은 `generator.py` 의 `POST_HOURS_KST`(환경 변수, 기본 `9,18`)가 정하고 워크플로는 이 변수를 넘기지 않습니다. 시험 `tests/test_schedule_slots_display_only.py` 가 레지스트리의 값과 코드의 기본값이 같은지 대조합니다(어긋나면 빨강). 일정을 바꾸려면 코드(또는 워크플로 환경 변수)와 이 값을 함께 고칩니다.
+
 시크릿 이름은 블로그마다 고유해야 하고(`shared_secrets` 예외), 값 전달은 [§6](#6-시크릿-전달-방식)을 따른다.
 
 ### 광고 선언(`ads`)과 신규 채널의 광고 원칙

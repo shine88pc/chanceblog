@@ -35,6 +35,7 @@ from pipeline import unsplash_credit  # Unsplash 사진의 ixid 유지·작가 �
 from pipeline import source_policy  # 소스 정책(레지스트리 chance.source_policy: legacy 가 기본 — 이전과 같다 / allowlist 는 허용 목록 밖 외부 읽기와 외부 텍스트의 프롬프트·이력·로그 유입을 막는다). legacy 에서는 값을 읽는 것 말고 아무 일도 하지 않는다
 from pipeline import egress  # 외부 호출 관문(허용 목록 밖 호스트 거부)·호출 예산 — 구조화 Fact 경로의 연결 코드(fact_opener)가 주입되는 opener 를 감쌀 때만 쓴다
 from pipeline import fact_supply  # 구조화 Fact 경로(레지스트리 chance.content_source: facts)의 후보 공급 — 생성기가 Fact 모듈을 부르는 유일한 연결 한 줄이다(시험 NoConnectionTest). 그 분기는 AI 를 부르지 않는다(docs/AI_FLOW.md §12)
+from pipeline import pause  # 발행 정지 변수(PIPELINE_PAUSE)를 읽는 곳 하나 — 알 수 없는 값은 정지로 읽는다(fail closed, docs/PUBLISH_PATHS.md)
 from pipeline.llm import CALL_TIMEOUT_SECONDS, CallLog, _run_with_timeout, failure_code, failure_status, scrub  # Gemini 요청 기록·시크릿 가리기·호출 시간 상한은 Blogger·이슈 수정과 같은 코드를 쓴다(D-52·D-83)
 from pipeline.console import clean_secret  # 시크릿 값의 앞뒤 공백·줄바꿈·보이지 않는 글자를 지우는 함수 — Blogger·알림과 같은 코드. 이 파일에서는 Unsplash 키에만 쓴다(Gemini 키는 그대로, D-371)
 
@@ -922,11 +923,12 @@ def shadow_run_unrecognized():
 
 
 def _pause_on():
-    """킬 스위치. Blogger 러너(pipeline/run.py)와 같은 값 집합(1/true/yes/on)을 쓴다.
+    """킬 스위치. 다른 읽는 곳(Blogger 러너·초안 올리기·이슈 수정 처리기·워치독·확인 필요 모음)과 같은 읽기(pipeline/pause.py)를 쓴다: 켜짐 1/true/yes/on, 꺼짐 0/false/no/off·비움,
+    그 밖의 값(오타 등)은 정지로 읽는다(fail closed — main() 이 ::error:: 한 줄로 알린다).
     그림자 실행(SHADOW_RUN=1)은 읽기 전용이라 이 검사를 건너뛴다 — 정지 변수는 건드리지 않고, 건너뛰는 것은 이 모드 안에서만이다(main() 이 곧바로 읽기 전용 경로로 넘긴다)."""
     if shadow_run_on():
         return False
-    return os.environ.get("PIPELINE_PAUSE", "").strip().lower() in {"1", "true", "yes", "on"}
+    return pause.is_paused(os.environ)
 
 
 def run_shadow():
@@ -3219,9 +3221,10 @@ def main():
     if _pause_on():
         print(skip_line("PAUSED", var="PIPELINE_PAUSE"))
         print("[일시정지] PIPELINE_PAUSE 가 켜져 있어 실행하지 않습니다.")
-        print("::notice::PIPELINE_PAUSE 가 켜져 있어 Chance_Blog 실행을 건너뛰었습니다.")
+        unknown = pause.is_unrecognized(os.environ)      # 알 수 없는 값(오타 등)은 정지로 읽고 ::error:: 한 줄로 알린다(받은 값은 싣지 않는다). 켜짐 값의 줄은 이전과 같다
+        print(pause.error_line() if unknown else "::notice::PIPELINE_PAUSE 가 켜져 있어 Chance_Blog 실행을 건너뛰었습니다.")
         write_step_summary("### Chance_Blog 실행 요약\n- 결과: **일시정지** — "
-                           "저장소 변수 PIPELINE_PAUSE 가 켜져 있습니다.")
+                           + ("저장소 변수 PIPELINE_PAUSE 의 값을 알 수 없어 정지로 읽었습니다." if unknown else "저장소 변수 PIPELINE_PAUSE 가 켜져 있습니다."))
         return
     # 병합 순서(제한 재개 잠금의 가드 호출 guard_start 와 같은 자리): 이 그림자 분기가 잠금 가드보다 **앞**에 있어야 한다. 그림자 실행은 읽기 전용이라 잠금 대상이 아니고, 가드가 앞서면
     # 레지스트리 규칙 위반·하루 상한이 그림자 실행까지 멈춘다(docs/QUALITY_GATE.md §6).

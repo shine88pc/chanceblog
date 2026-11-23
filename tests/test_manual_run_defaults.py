@@ -664,13 +664,17 @@ class IssueEditPauseTest(unittest.TestCase):
         self.assertEqual(len(self.llm_calls), 1)
 
     def test_every_truthy_value_the_other_pipelines_accept_pauses_and_the_falsy_ones_do_not(self):
+        """이름은 옛 그대로지만 지금은 '알 수 없는 값(pause·2 등)도 정지로 읽는다' 까지 본다(BP-S1-3·D-412, 2차 검증 참고-2) — 꺼짐은 0·false·no·off·비움뿐이다."""
         for value in sorted(run_mod._TRUE) + [" TRUE ", "On", "YES", "1 "]:
             with self.subTest(value=value):
                 self.assertEqual(self.go(self.literal_issue(), pause=value).status, "paused")
-        for value in ("", "0", "false", "no", "off", "  ", "pause", "2"):
+        for value in ("", "0", "false", "no", "off", "  "):
             with self.subTest(value=value):
                 self.assertEqual(self.go(self.literal_issue(), pause=value).status, "ok")
                 (self.root / "about.md").write_bytes(ABOUT.encode("utf-8"))                # 다음 값을 위해 되돌린다
+        for value in ("pause", "2"):                                                        # 알 수 없는 값은 정지로 읽는다(BP-S1-3·D-412 — 예전에는 '정지 아님'으로 읽었다)
+            with self.subTest(value=value):
+                self.assertEqual(self.go(self.literal_issue(), pause=value).status, "paused")
 
     def test_the_value_set_is_the_same_as_the_blogger_runner_and_chance(self):
         self.assertEqual(runner.PAUSE_VALUES, run_mod._TRUE)

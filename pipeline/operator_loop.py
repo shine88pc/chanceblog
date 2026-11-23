@@ -976,8 +976,7 @@ class GitHub:
         if not _REPO_RE.fullmatch(self.repo):
             raise GitHubError("저장소 이름(GITHUB_REPOSITORY)이 `소유자/이름` 모양이 아닙니다")
         url = f"{API_ROOT}/repos/{self.repo}{path}" + (("?" + urllib.parse.urlencode(params)) if params else "")
-        headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "chanceblog-operator-loop",
-                   "Authorization": f"Bearer {self._token}"}
+        headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "chanceblog-operator-loop"}
         data = None
         if payload is not None:
             data = json.dumps(payload).encode("utf-8")
@@ -985,8 +984,10 @@ class GitHub:
         attempts = 2 if retry else 1
         for attempt in range(attempts):
             self.calls += 1
+            request = urllib.request.Request(url, data=data, method=method, headers=headers)
+            request.add_unredirected_header("Authorization", f"Bearer {self._token}")      # 리다이렉트가 토큰을 다른 호스트로 복사하지 않게(BP-S1-8)
             try:
-                with self._open(urllib.request.Request(url, data=data, method=method, headers=headers), timeout=API_TIMEOUT) as resp:
+                with self._open(request, timeout=API_TIMEOUT) as resp:
                     raw = resp.read(MAX_API_BYTES + 1)
             except urllib.error.HTTPError as exc:
                 status, detail = exc.code, self._detail(exc)

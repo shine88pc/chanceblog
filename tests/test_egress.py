@@ -657,6 +657,7 @@ class OpsRulesTest(unittest.TestCase):
         "api.github.com": ["/repos/owner1/repo1/issues", "/repos/owner1/repo1/issues/12/comments", "/repos/owner1/repo1/issues/12/labels", "/repos/owner1/repo1/labels", "/repos/owner1/repo1/labels/x",
                            "/repos/owner1/repo1/pulls", "/repos/owner1/repo1/pulls/12", "/repos/owner1/repo1/commits/main", "/repos/owner1/repo1/commits/abc123/check-runs",
                            "/repos/owner1/repo1/actions/runs", "/repos/owner1/repo1/actions/runs/9/jobs", "/repos/owner1/repo1/actions/workflows/a.yml/runs", "/repos/owner1/repo1/check-runs/5/annotations",
+                           "/repos/owner1/repo1/actions/workflows/a.yml/dispatches",
                            "/rate_limit"],
         "api.telegram.org": ["/bot123456:ABC-def_GHI/sendMessage", "/bot123456:ABC-def_GHI/getUpdates"],
         "oauth2.googleapis.com": ["/token"],
@@ -666,7 +667,14 @@ class OpsRulesTest(unittest.TestCase):
     DENIED_PATHS = {
         "api.github.com": ["/", "/user", "/orgs/x", "/repos/torvalds/linux/readme", "/repos/torvalds/linux/issues", "/repos/owner1/repo1", "/repos/owner1/repo1/readme", "/repos/owner1/repo1/contents/x",
                            "/repos/owner1/repo1/git/refs", "/repos/owner1/repo2/issues", "/repos/owner1/repo1x/issues", "/repos/owner1/repo1/issuesx", "/repos/owner1/repo1/issues/../../../../user",
-                           "/repos/owner1/repo1/issues/%2e%2e/x", "/repos/owner1/repo1//issues", "/repos/Owner1/Repo1/issues", "/search/code", "/gists"],
+                           "/repos/owner1/repo1/issues/%2e%2e/x", "/repos/owner1/repo1//issues", "/repos/Owner1/Repo1/issues", "/search/code", "/gists",
+                           # BP-S1-7(D-417): 코드가 부르지 않는 쓰기 경로 — 병합·리뷰·변수·시크릿·실행 취소/재실행/로그·워크플로 켜고 끄기·담당자·잠금·댓글 직접 고치기·커밋 댓글·검사 실행 직접 고치기
+                           "/repos/owner1/repo1/pulls/12/merge", "/repos/owner1/repo1/pulls/12/reviews", "/repos/owner1/repo1/pulls/12/requested_reviewers", "/repos/owner1/repo1/pulls/12/update-branch",
+                           "/repos/owner1/repo1/actions/variables", "/repos/owner1/repo1/actions/variables/PIPELINE_PAUSE", "/repos/owner1/repo1/actions/secrets", "/repos/owner1/repo1/actions/secrets/X",
+                           "/repos/owner1/repo1/actions/runs/9/cancel", "/repos/owner1/repo1/actions/runs/9/rerun", "/repos/owner1/repo1/actions/runs/9/logs", "/repos/owner1/repo1/actions/workflows/a.yml",
+                           "/repos/owner1/repo1/actions/workflows/a.yml/disable", "/repos/owner1/repo1/actions/workflows/a.yml/enable", "/repos/owner1/repo1/actions/artifacts", "/repos/owner1/repo1/actions/runners",
+                           "/repos/owner1/repo1/issues/12/assignees", "/repos/owner1/repo1/issues/12/lock", "/repos/owner1/repo1/issues/comments/5", "/repos/owner1/repo1/commits/abc/comments",
+                           "/repos/owner1/repo1/labels/x/y", "/repos/owner1/repo1/check-runs/5", "/repos/owner1/repo1/issues/x/comments", "/repos/owner1/repo1/pulls/x"],
         "api.telegram.org": ["/", "/bot123456:ABC/deleteWebhook", "/bot123456:ABC/sendMessage/x", "/file/bot123456:ABC/x", "/botx/sendMessage", "/bot123456:AB C/sendMessage", "/bot123456/sendMessage"],
         "oauth2.googleapis.com": ["/", "/token/x", "/revoke", "/tokeninfo", "/o/oauth2/auth"],
         "generativelanguage.googleapis.com": ["/", "/v2/models/x", "/v1beta/files", "/v1beta/models/a/b", "/upload/v1beta/files", "/v1beta/modelsx"],

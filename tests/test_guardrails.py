@@ -420,7 +420,7 @@ class TitleAndLabelGuardTest(unittest.TestCase):
         """맞은 낱말은 모델 출력에서 온다. 사유는 로그·요약·재작성 프롬프트에 들어가므로 한 줄·40자 이내로만 넣는다."""
         profile = copy.deepcopy(EN)
         profile["banned_topic_patterns"] = [r"(?s)evil.{0,200}word"]
-        title = "evil\n::error::boom\r##[x] " + "z" * 100 + " word, a calm routine"
+        title = "evil\n::error::boom\r##[x] " + "z" * 60 + " word, a calm routine"      # 제목이 한도(영문 70자)의 두 배(140자)를 넘으면 조기 탈락해 [TITLE_TOPIC] 이 안 만들어진다(BP2S-1) — 한도 안(106자)에서도 맞은 낱말(약 90자)은 40자로 줄고 한 줄이 된다
         reason = [r for r in check(profile, {"title": title}).reasons if r.startswith("[TITLE_TOPIC]")][0]
         self.assertEqual(reason.splitlines(), [reason])
         self.assertNotIn("::", reason)

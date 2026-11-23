@@ -1667,10 +1667,14 @@ class WorkflowFileTest(unittest.TestCase):
         self.assertEqual(env["DEFAULT_BRANCH"], "${{ github.event.repository.default_branch }}")
         source = (_bootstrap.ROOT / "scripts" / "ops_inbox.py").read_text(encoding="utf-8")
         notify_source = (_bootstrap.ROOT / "pipeline" / "notify.py").read_text(encoding="utf-8")
+        pause_source = (_bootstrap.ROOT / "pipeline" / "pause.py").read_text(encoding="utf-8")
         for name in env:                                                  # 따옴표 모양(큰·작은)과 무관하게 스크립트가 그 이름을 읽는지
-            # 텔레그램 시크릿 두 개는 스크립트가 environ 째로 pipeline/notify.py 에 넘기고 그쪽이 읽는다(그 밖의 이름은 스크립트가 직접 읽는다)
-            reader = notify_source if name in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID") else source
+            # 텔레그램 시크릿 두 개는 스크립트가 environ 째로 pipeline/notify.py 에 넘기고 그쪽이 읽는다. 정지 변수도 같다: environ 째로 pipeline/pause.py 에 넘기고(아래에서 확인) 그쪽이 읽는다(BP-S1-3·D-412).
+            # 그 밖의 이름은 스크립트가 직접 읽는다
+            reader = notify_source if name in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID") else pause_source if name == "PIPELINE_PAUSE" else source
             self.assertRegex(reader, "[\"']" + name + "[\"']", f"스크립트가 읽지 않는 환경변수 {name}")
+        self.assertIn("pause.is_paused(environ)", source)                 # 스크립트는 정지 변수를 environ 째로 넘긴다(이름을 따로 읽는 곳이 없다)
+        self.assertIn("pause.is_unrecognized(environ)", source)
         self.assertEqual(env["TELEGRAM_BOT_TOKEN"], "${{ secrets.TELEGRAM_BOT_TOKEN }}")
         self.assertEqual(env["TELEGRAM_CHAT_ID"], "${{ secrets.TELEGRAM_CHAT_ID }}")
 
