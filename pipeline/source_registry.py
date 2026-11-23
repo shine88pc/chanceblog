@@ -267,15 +267,20 @@ def valid_path_prefix(path):
     return all(seg not in (".", "..") for seg in path.split("/"))
 
 
+_FILE_LIKE_PREFIX = re.compile(r"/[^/]*\.[A-Za-z][A-Za-z0-9]{0,7}$")      # 마지막 조각이 `이름.확장자` 꼴(확장자는 글자로 시작 — `/v1.0` 같은 버전 조각은 파일이 아니다)
+
+
 def path_matches(path, prefixes):
-    """경로가 접두어 중 하나에 경계를 지켜 맞는가(접두어가 없으면 True). `/api/` 는 `/api/x` 와 `/api` 에, `/feed` 는 `/feed`·`/feed/x` 에 맞고 `/feedback` 에는 맞지 않는다."""
+    """경로가 접두어 중 하나에 경계를 지켜 맞는가(접두어가 없으면 True). `/api/` 는 `/api/x` 와 `/api` 에, `/feed` 는 `/feed`·`/feed/x` 에 맞고 `/feedback` 에는 맞지 않는다.
+    **확장자가 있는 파일 경로 접두어**(`/products/noaa-scales.json`·`/en/rss.xml`)는 완전 일치만 받는다 — 그 뒤에 조각을 붙인 `/products/noaa-scales.json/anything` 은 맞지 않는다(BP-S1-12, D-420).
+    파일 이름 뒤에 경로가 이어질 수는 없고, 접두어 경계 규칙을 그대로 두면 파일 경로 하나를 허용한 것이 그 아래 모든 조각을 허용한 것이 된다."""
     if not prefixes:
         return True
     for prefix in prefixes:
         if prefix.endswith("/"):
             if path.startswith(prefix) or path == prefix.rstrip("/"):
                 return True
-        elif path == prefix or path.startswith(prefix + "/"):
+        elif path == prefix or (path.startswith(prefix + "/") and not _FILE_LIKE_PREFIX.search(prefix)):
             return True
     return False
 

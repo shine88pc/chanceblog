@@ -455,13 +455,13 @@ class GitHubClient:
 
     def request(self, method, path, payload=None, params=None):
         url = f"{API_ROOT}/repos/{self.repo}{path}" + (("?" + urllib.parse.urlencode(params)) if params else "")
-        headers = {"Authorization": f"Bearer {self._token}", "Accept": "application/vnd.github+json",
-                   "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "chanceblog-draft-flow"}
+        headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "chanceblog-draft-flow"}
         data = None
         if payload is not None:
             data = json.dumps(payload).encode("utf-8")
             headers["Content-Type"] = "application/json"
         request = urllib.request.Request(url, data=data, method=method, headers=headers)
+        request.add_unredirected_header("Authorization", f"Bearer {self._token}")      # 리다이렉트가 토큰을 다른 호스트로 복사하지 않게(BP-S1-8)
         try:
             with self._open(request, timeout=self._timeout) as resp:
                 body = resp.read().decode("utf-8")

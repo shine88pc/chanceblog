@@ -660,7 +660,9 @@ class GitHubClientTest(unittest.TestCase):
         request, timeout = self.opener.requests[0]
         self.assertEqual(request.get_method(), "POST")
         self.assertEqual(request.full_url, f"https://api.github.com/repos/{REPO}/pulls")
-        self.assertEqual(request.headers["Authorization"], f"Bearer {TOKEN}")
+        self.assertEqual(request.get_header("Authorization"), f"Bearer {TOKEN}")                # 보낼 때는 실린다
+        self.assertNotIn("Authorization", request.headers)                                      # 리다이렉트가 복사하는 칸에는 없다(BP-S1-8)
+        self.assertEqual(request.unredirected_hdrs["Authorization"], f"Bearer {TOKEN}")         # 복사하지 않는 칸에만 있다
         self.assertEqual(request.headers["Accept"], "application/vnd.github+json")
         self.assertEqual(request.headers["X-github-api-version"], "2022-11-28")
         self.assertEqual(json.loads(request.data.decode("utf-8")), {"title": "제목", "head": "ai/draft/2026-10-28-s9", "base": "main", "body": "본문"})
