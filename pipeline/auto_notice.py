@@ -55,6 +55,7 @@ MESSAGE_LIMIT = 800                               # 한 통의 글자 수 상한
 READY_TITLE_LIMIT = 80                            # 병합 부탁 제목 줄의 PR 제목 부분(`[M번호] ` 뺀 것)
 POINT_LINES = 5                                   # 병합 부탁 본문의 요점 줄 수 상한
 POINT_LIMIT = 120                                 # 요점 줄 하나의 글자 수 상한
+POINT_SCAN_LINES = 400                            # 요점 줄을 고르려고 본문에서 읽는 줄 수의 상한 — 앞쪽에서 고르므로 이만 읽으면 되고, 아주 긴 본문이 일을 늘리지 못한다
 PR_TITLE_LIMIT = 200                              # PR 제목 전체 상한(auto-pr.yml 과 같다)
 REASON_LIMIT = 100                                # 병합완료 확인 이상의 사유 한 줄
 PER_PAGE = 100
@@ -197,10 +198,10 @@ def shorten(text, limit):
 
 def point_lines(body, limit_lines=POINT_LINES, limit_chars=POINT_LIMIT):
     """PR 본문(커밋 본문)의 앞쪽 요점 줄 — 빈 줄·제목 줄(`#`)·구분선·'Co-authored-by:' 같은 꼬리표를 건너뛰고, 글머리 기호·강조를 걷고, 줄마다 limit_chars 로 줄인다.
-    보낼 수 없는 줄(제어·비밀·멘션·주소)은 그 줄만 버린다(본문 전체를 버리지 않는다). 최대 limit_lines 줄."""
+    보낼 수 없는 줄(제어·비밀·멘션·주소)은 그 줄만 버린다(본문 전체를 버리지 않는다). 최대 limit_lines 줄이고, 본문은 앞 POINT_SCAN_LINES(400)줄만 읽는다."""
     text = body if isinstance(body, str) else ""
     points = []
-    for raw in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+    for raw in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")[:POINT_SCAN_LINES]:
         stripped = raw.strip()
         if not stripped or stripped.startswith("#") or _TRAILER_RE.match(stripped):
             continue

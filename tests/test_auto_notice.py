@@ -13,6 +13,7 @@ import copy
 import io
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -280,6 +281,23 @@ class CleanAndPointsTest(unittest.TestCase):
             self.assertNotRegex(point, r"[`*]")
             self.assertNotIn(TILDE, point)
             self.assertNotIn(chr(0xFF5E), point)
+
+    def test_only_the_first_400_lines_are_read_so_a_huge_body_cannot_add_work(self):
+        """요점은 앞쪽 줄에서 고르므로 본문은 앞 400줄만 읽는다 — 앞 399줄이 모두 걸러져도 400째 줄은 읽고, 401째 줄은 읽지 않는다. 아주 긴 본문(6만 줄)도 일이 늘지 않는다."""
+        bad = "@" + "x"
+        self.assertEqual(an.POINT_SCAN_LINES, 400)
+        self.assertEqual(an.point_lines("\n".join([bad] * 399 + ["- 좋은 줄"])), ["좋은 줄"])
+        self.assertEqual(an.point_lines("\n".join([bad] * 400 + ["- 좋은 줄"])), [])
+        huge = ("@x\n" * 60000) + "- 좋은 줄\n"
+        started = time.monotonic()
+        self.assertEqual(an.point_lines(huge), [])
+        self.assertLess(time.monotonic() - started, 20)                              # 아주 넉넉한 상한 — 병목이 생기는 변경만 잡는다
+
+    def test_adversarial_long_lines_are_checked_in_bounded_time(self):
+        for text in ("a." * 60, "a" * 120, "-" * 120, "a-" * 60 + ".com", "1" * 120, ("a." * 40) + "z" * 40, "http" * 30, "@" * 120):
+            started = time.monotonic()
+            an.line_problem(text)
+            self.assertLess(time.monotonic() - started, 5, text[:20])
 
     def test_crlf_cr_and_odd_bodies(self):
         self.assertEqual(an.point_lines("- 하나\r\n- 둘\r\n"), ["하나", "둘"])
