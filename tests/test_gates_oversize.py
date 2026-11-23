@@ -14,6 +14,7 @@ labels.max_chars 의 두 배를 넘어도 같은 식으로 곧바로 탈락한�
 한도 키: 프로필 넷 모두 labels.max_chars 가 있다(20·20·20·30). 키가 없는 프로필은 정상 경로가 쓰는 기본값 20 을 조기 반환도 그대로 쓴다 — 본문 한도로 갈음하면 조기 반환이 정상 경로의 판정보다 느슨해져
 41–6,400자 라벨이 전체 검사를 받으므로(제곱 비례로 어림하면 숫자 6,400자 약 2초 — 재지는 않았다) 같은 값을 쓰는 것이 합리적이다(프로필 JSON 값은 고치지 않았다).
 """
+import copy
 import time
 import unittest
 from unittest import mock
@@ -392,6 +393,24 @@ class OversizeLabelNoScanTest(unittest.TestCase):
                             patcher.stop()
                     self.assertTrue(all(spy.call_count > 0 for spy in spies.values()), {scanner: spy.call_count for scanner, spy in spies.items()})
                     self.assertIn(LABELS_TOO_LONG, result.reasons)                         # 전체 검사에서도 같은 길이 사유가 나온다
+
+    def test_a_profile_without_labels_max_chars_uses_the_normal_paths_default_of_20_for_the_early_return_too(self):
+        """2차 검증 Q 권고-2(변이 N16): `_labels_len_reason` 의 기본값 20 을 못박는다 — 프로필에 labels.max_chars 키가 없으면 정상 경로(너무 긴 라벨)와 조기 반환이 같은 기본값 20 을 쓴다.
+        기본값을 30 으로 바꾸면 41자 라벨이 조기 반환되지 않아 이 시험이 빨개진다(프로필 넷에는 모두 키가 있어 지금 영향은 없다)."""
+        name = "blogger_ai_tools_ko"
+        profile = copy.deepcopy(registry.load_profile(name))
+        profile["labels"].pop("max_chars", None)
+
+        def run(size):
+            post = post_for(name, normal_body(name), labels=[filler(name) * size, "b"])
+            return gates.check_post(post, profile, recent_titles=("x",), other_titles=("y",), sanitize_stats=None)
+
+        with boom_scanner("matches_any"), boom_scanner("first_match"), boom_scanner("body_risk_hit"), boom_scanner("most_similar"), boom_scanner("topic_allowed"):
+            early = run(41)                       # 기본값 20 의 두 배(40) + 1 — 조기 반환
+        self.assertEqual(early.reasons, [LABELS_TOO_LONG])
+        full = run(40)                            # 정확히 두 배 — 조기 반환이 아니라 전체 검사
+        self.assertFalse(full.ok)
+        self.assertIn(LABELS_TOO_LONG, full.reasons)
 
 
 class OversizeLabelShapeTest(unittest.TestCase):
