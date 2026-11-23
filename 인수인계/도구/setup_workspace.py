@@ -4,7 +4,8 @@
 
 하는 일:
   1. 이 폴더의 `work/*.py`·`work/*.md`(도구·지시서·보고서·병합 부탁 초안)와 `work/양식/*.md`(병합 부탁·진행 현황 양식)를 W 로,
-     `work/scratch/*.py`·`work/scratch/*.sh`(검사·감시 읽기 도구)를 W/scratch 로, 정기 현황 알림 프롬프트(`정기_현황_알림_프롬프트_v3.txt`)를 W/cron_status_prompt_v3.txt 로 복사한다.
+     `work/scratch/*.py`·`work/scratch/*.sh`(검사·감시·병합 가지 도구)를 W/scratch 로, `work/audit6/improve/*.md`(갈래 지시서가 가리키는 공통 규칙)를 W/audit6/improve 로,
+     정기 현황 알림 프롬프트(`정기_현황_알림_프롬프트_v3.txt`)를 W/cron_status_prompt_v3.txt 로 복사한다.
      같은 이름이 W 에 이미 있으면 저장소 것으로 덮어쓴다(저장소가 진실이다 — W 의 도구는 상태를 갖지 않는다).
   2. W/wt_r30  <- 블로그 저장소(chanceblog)를 clone 하고 요청 가지 `ai/claude/NO-MERGE-operator-requests`(요청 파일을 쌓는 병합 금지 가지)로 전환한다.
      **이미 clone 돼 있으면 clone 도 가지 전환도 하지 않고 그대로 둔다** — 푸시 전 요청 파일·커밋이 사라지지 않게 하려는 것이다(가지를 원격 머리로 되돌리는 `checkout -B` 는 방금 새로 clone 했을 때만 한다).
@@ -43,6 +44,7 @@ def plan_copy():
     pairs = [(path, Path(path.name)) for pattern in ("*.py", "*.md") for path in sorted(work.glob(pattern))]
     pairs += [(path, Path("scratch") / path.name) for pattern in ("*.py", "*.sh") for path in sorted((work / "scratch").glob(pattern))]
     pairs += [(path, Path(path.name)) for path in sorted((work / "양식").glob("*.md"))]
+    pairs += [(path, Path("audit6") / "improve" / path.name) for path in sorted((work / "audit6" / "improve").glob("*.md"))]
     prompt = HERE / PROMPT_SOURCE
     if prompt.is_file():
         pairs.append((prompt, Path(PROMPT_TARGET)))
@@ -56,11 +58,13 @@ def copy_tools(target):
         sys.exit("work/ 폴더에 도구가 없다 — 저장소를 제대로 받았는지 확인한다")
     (target / "scratch").mkdir(parents=True, exist_ok=True)
     for source, rel in pairs:
+        (target / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target / rel)
     tools = sum(1 for _, rel in pairs if rel.parent == Path(".") and rel.suffix == ".py")
     documents = sum(1 for _, rel in pairs if rel.parent == Path(".") and rel.suffix in (".md", ".txt"))
     scratch = sum(1 for _, rel in pairs if rel.parent == Path("scratch"))
-    print(f"도구·문서·양식 복사: {tools}개 도구 + {documents}개 문서·양식·프롬프트 -> {target}, {scratch}개 검사·감시 도구 -> {target / 'scratch'}")
+    rules = sum(1 for _, rel in pairs if rel.parent == Path("audit6") / "improve")
+    print(f"도구·문서·양식 복사: {tools}개 도구 + {documents}개 문서·양식·프롬프트 -> {target}, {scratch}개 검사·감시·병합 도구 -> {target / 'scratch'}, {rules}개 갈래 공통 규칙 -> {target / 'audit6' / 'improve'}")
     return pairs
 
 

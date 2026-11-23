@@ -16,12 +16,15 @@ REPO = "shine88pc/chanceblog"
 URL = f"https://api.github.com/repos/{REPO}/issues?state=open&sort=created&direction=desc&per_page=15"
 OPERATOR = "shine88pc"
 LABELS = ("텔레그램수신", "운영자응답")
-INTERVAL = 300
+INTERVAL = 600
 KST = timezone(timedelta(hours=9))
 
 
-def fetch(etag):
-    req = urllib.request.Request(URL, headers={"Accept": "application/vnd.github+json", "User-Agent": "chanceblog-watch"})
+COMMENTS_URL = f"https://api.github.com/repos/{REPO}/issues/comments?sort=created&direction=desc&per_page=15"
+
+
+def fetch(etag, url=URL):
+    req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "chanceblog-watch"})
     if etag:
         req.add_header("If-None-Match", etag)
     try:
@@ -47,8 +50,15 @@ def line(item):
     return f"[새 이슈] #{item['number']} {title} | 작성 {(item.get('user') or {}).get('login', '?')} | 라벨 {names} | {when} KST"
 
 
+def comment_line(comment):
+    number = (comment.get("issue_url") or "").rstrip("/").rsplit("/", 1)[-1]
+    when = datetime.fromisoformat(comment["created_at"].replace("Z", "+00:00")).astimezone(KST).strftime("%m-%d %H:%M")
+    return f"[새 코멘트] #{number} | 작성 {(comment.get('user') or {}).get('login', '?')} | {when} KST (본문은 싣지 않음 — 이슈를 직접 읽는다)"
+
+
 def main():
     etag, seen, warned = None, None, False
+    c_etag, c_seen = None, None
     while True:
         try:
             etag, items = fetch(etag)
@@ -77,6 +87,27 @@ def main():
             if seen is None and not warned:
                 warned = True
                 print(f"이슈 감시: 첫 조회 실패({type(err).__name__}) — 다시 시도합니다", flush=True)
+        try:  # 운영자가 새 이슈 대신 이슈 코멘트로 답한 경우(2026-11-17 추가 — 본문은 싣지 않고 번호·시각만)
+            c_etag, comments = fetch(c_etag, COMMENTS_URL)
+            if comments is not None:
+                top_id = max([c["id"] for c in comments] or [0])
+                if c_seen is None:
+                    c_seen = top_id
+                else:
+                    for comment in sorted(comments, key=lambda c: c["id"]):
+                        if comment["id"] > c_seen and (comment.get("user") or {}).get("login") == OPERATOR:
+                            print(comment_line(comment), flush=True)
+                    c_seen = max(c_seen, top_id)
+        except urllib.error.HTTPError as err:
+            if err.code in (403, 429):
+                try:
+                    wait = max(60, min(900, int(err.headers.get('X-RateLimit-Reset', '0')) - int(time.time())))
+                except Exception:
+                    wait = 300
+                time.sleep(wait)
+                continue
+        except Exception:
+            pass
         time.sleep(INTERVAL)
 
 

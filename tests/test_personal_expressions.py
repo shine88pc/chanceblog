@@ -37,6 +37,9 @@ EXEMPT_UNTIL_AP18 = {
     "인수인계/도구/work/mk_merge_branch.py": ("이름", "메일"),
     "인수인계/도구/work/scratch/mk_lane_merge.py": ("이름", "메일"),
     "인수인계/도구/work/scratch/mk_lane_merge_desktop.py": ("이름", "메일"),
+    "인수인계/도구/work/scratch/build_blog_merge.py": ("이름", "메일"),             # 2026-11-23 MIG1 이 옮긴 이 PC 현행판 사본 — 같은 고정 작성자 상수(AP18 에서 함께 정한다)
+    "인수인계/도구/work/scratch/combine_lanes_desktop.py": ("이름", "메일"),
+    "인수인계/도구/work/scratch/squash_onto.py": ("이름", "메일"),
     "tests/test_handoff_tools.py": ("이름",),                      # 고정 작성자를 기대하는 시험(도구와 한 쌍) — 이름만, 메일은 안 된다
     "_config.yml": ("메일",),                                      # 공개 사이트 연락처(F078 후보 — 광고 표면·공개 설정이라 이번 승인 밖) — 그것도 email 키 한 줄에만
 }
