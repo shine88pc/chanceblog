@@ -15,6 +15,14 @@ from edits_helpers import ABOUT, issue, make_edit_root, page_body
 from pipeline.edits import checks
 from test_edits_runner import OLD_SENTENCE, NEW_SENTENCE, RunnerBase, Snapshot, llm_returning
 
+try:
+    import yaml
+except ImportError:  # pragma: no cover - CI 에는 항상 있다
+    yaml = None
+
+# 수정 흐름(러너·PR 범위 검사)은 PyYAML 이 있어야 돈다(PyYAML 이 필요합니다 오류) — 없는 환경에서는 끝에서 끝 시험만 건너뛴다. 규칙 시험(checks)은 어디서나 돈다.
+NEEDS_YAML = unittest.skipUnless(yaml is not None, "수정 흐름은 PyYAML 이 있어야 돕니다(requirements-dev.txt — CI 에서는 항상 실행됩니다)")
+
 NL, TAB = chr(10), chr(9)
 LIMITS = {"max_changed_files": 1, "max_changed_lines": 80, "max_file_chars": 80000}
 BASE = "안녕하세요. 소개 문장입니다." + NL + "둘째 문장입니다." + NL
@@ -202,6 +210,7 @@ class NoNewRejectionsTest(unittest.TestCase):
         self.assertEqual(handler_reasons(verify(before, BASE, False)), [])
 
 
+@NEEDS_YAML
 class RunnerEndToEndTest(RunnerBase):
     """실제 수정 흐름(문구 그대로 바꾸기·AI 패치)이 속성 목록 핸들러를 파일에 쓰지 않는다."""
     LAYOUT = "layout | 섹션/레이아웃 변경 (해당 페이지 안에서만)"
@@ -228,6 +237,7 @@ class RunnerEndToEndTest(RunnerBase):
         self.assertIn("{: .lead}", self.read("about.md"))
 
 
+@NEEDS_YAML
 class ScopeCheckEndToEndTest(unittest.TestCase):
     """PR 범위 검사(같은 함수)도 속성 목록 핸들러가 든 변경을 '통과' 로 읽지 않는다."""
 
