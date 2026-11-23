@@ -186,7 +186,8 @@ class ReaderBase(unittest.TestCase):
     def read_generator(self, value):
         reached = RuntimeError("잠금 가드까지 왔다")
         buffer = io.StringIO()
-        with mock.patch.dict(os.environ, {"PIPELINE_PAUSE": value, "SHADOW_RUN": ""}), mock.patch("pipeline.publish_lock.guard_start", side_effect=reached), contextlib.redirect_stdout(buffer):
+        summary = self.tmpdir() / "summary.md"
+        with mock.patch.dict(os.environ, {"PIPELINE_PAUSE": value, "SHADOW_RUN": "", "GITHUB_STEP_SUMMARY": str(summary)}), mock.patch("pipeline.publish_lock.guard_start", side_effect=reached), contextlib.redirect_stdout(buffer):
             try:
                 g.main()
                 paused = True
@@ -194,6 +195,7 @@ class ReaderBase(unittest.TestCase):
                 if exc is not reached:
                     raise
                 paused = False
+        self.last_summary = summary.read_text(encoding="utf-8") if summary.exists() else ""      # 실행 요약 칸에 쓴 글(2차 검증 필수-1: 요약 문장도 못박는다)
         return paused, buffer.getvalue()
 
     # 2) Blogger 러너 — 정지가 아니면 mode off 건너뜀(다음 줄)에 닿는다
@@ -202,7 +204,9 @@ class ReaderBase(unittest.TestCase):
         temp_registry = json.loads((root / "pipeline" / "blogs.json").read_text(encoding="utf-8"))
         self.assertEqual(next(blog["mode"] for blog in temp_registry["blogs"] if blog["key"] == BLOGGER_KEY), "off")      # 임시 저장소가 이 블로그를 꺼 두었는지(정지가 아니면 mode off 건너뜀에 닿는다)
         lines = []
-        code = run_mod.run(["--blog", BLOGGER_KEY, "--root", str(root)], environ={"PIPELINE_PAUSE": value}, out=lines.append)
+        summary = self.tmpdir() / "summary.md"
+        code = run_mod.run(["--blog", BLOGGER_KEY, "--root", str(root)], environ={"PIPELINE_PAUSE": value, "GITHUB_STEP_SUMMARY": str(summary)}, out=lines.append)
+        self.last_summary = summary.read_text(encoding="utf-8") if summary.exists() else ""
         text = "\n".join(lines)
         self.assertEqual(code, 0, text)
         paused = "code=PAUSED" in text
@@ -234,17 +238,21 @@ class ReaderBase(unittest.TestCase):
         self.assertIn(res.status, ("paused", "ok"), res.message)
         if paused:
             self.assertEqual(calls, [])
+        self.last_message = res.message                  # 결과의 한 줄 문장(2차 검증 필수-1: 코멘트·참고 줄과 따로 못박는다)
         return paused, "\n".join([res.message, res.comment, *res.notes])
 
     # 5) 워치독 — 정지면 알림을 만들지 않고 '[일시정지]' 한 줄, 아니면 점검을 이어 간다
     def read_watchdog(self, value):
         env = {"PIPELINE_PAUSE": value, "WATCHDOG_DRY_RUN": "1"}
         buffer = io.StringIO()
+        summary = self.tmpdir() / "summary.md"
         with mock.patch.dict(os.environ, env), mock.patch.object(watchdog, "load_registry", return_value={"blogs": []}), mock.patch.object(watchdog, "validate_registry", return_value=[]), \
                 mock.patch.object(watchdog, "collect", return_value=([], [])), contextlib.redirect_stdout(buffer):
             for name in ("GITHUB_TOKEN", "GITHUB_REPOSITORY", "GITHUB_STEP_SUMMARY"):
                 os.environ.pop(name, None)
+            os.environ["GITHUB_STEP_SUMMARY"] = str(summary)      # 요약 칸 파일(위에서 지운 뒤 우리 것만 둔다 — patch.dict 가 끝나면 원래대로)
             code = watchdog.main()
+        self.last_summary = summary.read_text(encoding="utf-8") if summary.exists() else ""
         text = buffer.getvalue()
         self.assertEqual(code, 0, text)
         paused = "[일시정지]" in text
@@ -308,6 +316,43 @@ class ReadersAgreeTest(ReaderBase):
             for value in PROBE_ON + PROBE_OFF:
                 with self.subTest(reader=reader, value=value):
                     self.assertEqual(pause_error_lines(self.read(reader, value)[1]), [])
+
+    def test_the_step_summary_says_the_value_was_unknown_only_for_an_unknown_value(self):
+        """2차 검증 필수-1(변이 Q32·Q33·Q34): 실행 요약은 운영자가 Actions 화면에서 오타로 걸린 정지를 알아보는 길이다. 문장 전체가 아니라 핵심 낱말만 본다 —
+        알 수 없는 값은 '알 수 없'·'정지로 읽'(그리고 '켜져 있' 이 아님), 켜짐 값은 '켜져 있'(그리고 '알 수 없' 이 아님). 요약을 쓰는 세 곳: 생성기·Blogger 러너·워치독."""
+        for reader in ("generator", "blogger", "watchdog"):
+            for value in PROBE_UNKNOWN:
+                with self.subTest(reader=reader, value=value):
+                    paused, _out = self.read(reader, value)
+                    self.assertTrue(paused)
+                    for needle in ("PIPELINE_PAUSE", "알 수 없", "정지로 읽"):
+                        self.assertIn(needle, self.last_summary, f"{reader} {value!r}: {self.last_summary!r}")
+                    self.assertNotIn("켜져 있", self.last_summary, f"{reader} {value!r}")
+            for value in PROBE_ON:
+                with self.subTest(reader=reader, value=value):
+                    paused, _out = self.read(reader, value)
+                    self.assertTrue(paused)
+                    self.assertIn("PIPELINE_PAUSE", self.last_summary, f"{reader} {value!r}: {self.last_summary!r}")
+                    self.assertIn("켜져 있", self.last_summary, f"{reader} {value!r}")
+                    self.assertNotIn("알 수 없", self.last_summary, f"{reader} {value!r}")
+
+    @unittest.skipUnless(yaml is not None, "PyYAML(requirements-dev.txt)이 필요합니다 — 이슈 수정 처리기가 명세 파일(edit-spec.yml)을 읽는다(CI 에서는 항상 실행됩니다)")
+    def test_the_edit_runner_result_message_says_unknown_only_for_an_unknown_value(self):
+        """2차 검증 필수-1(변이 Q35): 이슈 수정 처리기의 결과 한 줄(message)을 코멘트·참고 줄과 따로 못박는다 — 합친 글에서는 코멘트가 같은 낱말을 가지고 있어 message 만 퇴보해도 가려졌다."""
+        for value in PROBE_UNKNOWN:
+            with self.subTest(value=value):
+                paused, _text = self.read_issue_edit(value)
+                self.assertTrue(paused)
+                for needle in ("PIPELINE_PAUSE", "알 수 없", "정지로 읽"):
+                    self.assertIn(needle, self.last_message, self.last_message)
+                self.assertNotIn("켜져 있", self.last_message)
+        for value in PROBE_ON:
+            with self.subTest(value=value):
+                paused, _text = self.read_issue_edit(value)
+                self.assertTrue(paused)
+                self.assertIn("PIPELINE_PAUSE", self.last_message)
+                self.assertIn("켜져 있", self.last_message)
+                self.assertNotIn("알 수 없", self.last_message)
 
     @unittest.skipUnless(yaml is not None, "PyYAML(requirements-dev.txt)이 필요합니다 — 이슈 수정 처리기가 명세 파일(edit-spec.yml)을 읽는다(CI 에서는 항상 실행됩니다)")
     def test_the_issue_edit_runner_says_so_in_its_notes_and_comment_without_a_workflow_line(self):
