@@ -27,7 +27,10 @@ DANGEROUS = [
     ("<style/<link/<base/<meta", re.compile(r"<\s*(?:style|link|base|meta)\b", re.I)),
     ("<svg/<math/<frame", re.compile(r"<\s*(?:svg|math|frame|frameset)\b", re.I)),
     ("javascript:", re.compile(r"javascript\s*:", re.I)),
-    ("이벤트 핸들러 속성(on…=)", re.compile(r"""[\s"'/]on[a-z]{3,}\s*=""", re.I)),
+    # 이벤트 핸들러: 속성 이름의 일부가 아닌 모든 글자 뒤의 `on…=` 를 센다(D-406). 옛 규칙은 앞 글자가 공백·따옴표·슬래시일 때만 잡아서 kramdown 속성 목록 `글{:onclick="…"}` 를 놓쳤다 —
+    # 속성 목록은 `{:` 바로 뒤, 정의형 `{:이름:onclick="…"}` 은 이름 뒤 콜론 바로 뒤에서 속성이 시작한다(속성 읽기가 문자열 처음과 공백을 구분자로 받는다 — 소스 기억 기준, 이 PC 에 Ruby 가 없어 렌더는 확인하지 못했다).
+    # 영숫자·밑줄·하이픈 바로 뒤는 더 긴 이름(`data-onclick`·`monitor=`)이라 뺀다. 추정에 기대 보수적으로 막으므로 질의 문자열 `?online=1` 도 새로 넣으면 거절한다(개수가 늘 때만 막는다).
+    ("이벤트 핸들러 속성(on…=)", re.compile(r"(?<![A-Za-z0-9_-])on[a-z]{3,}\s*=", re.I)),
 ]
 # 공백까지 지운 소문자 텍스트에서 센다(java<개행>script: 같은 분할 표기)
 COMPACT_DANGEROUS = [
