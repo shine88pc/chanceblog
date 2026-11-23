@@ -79,7 +79,7 @@ class NumbersAndNamesTest(unittest.TestCase):
             self.assertTrue(label in text or label.replace(" 통과", "") in text, label)
 
     def test_every_item_id_family_the_code_makes_is_in_the_guide(self):
-        for word in ("pause:planned", "pause:resume_approval", "draft:<번호>:paused", "draft:<번호>:season", "draft:<번호>:keep", "draft:<번호>:discard", "approval_prs", "approve:<커밋 7자>"):
+        for word in ("pause:planned", "pause:resume_approval", "pause:unknown", "draft:<번호>:paused", "draft:<번호>:season", "draft:<번호>:keep", "draft:<번호>:discard", "approval_prs", "approve:<커밋 7자>"):
             self.assertIn(word, DOC, word)
         policy = ip.parse_policy_text((ROOT / ip.POLICY_FILE).read_text(encoding="utf-8"))
         now = datetime(2026, 11, 11, 2, 16, tzinfo=timezone.utc)
@@ -89,6 +89,8 @@ class NumbersAndNamesTest(unittest.TestCase):
         blogs = [h.channel_blog("naver_x", "네이버", "naver", "off"), h.channel_blog("tistory_x", "티스토리", "tistory", "package")]
         made = {i.id for i in inbox.build_items(inbox.Snapshot(now=now, repo=h.REPO, blogs=blogs, drafts=drafts, paused=True, policy=policy))}
         self.assertTrue({"pause:planned", "draft:88:discard", "draft:103:discard", "draft:89:paused"} <= made, made)
+        made = {i.id for i in inbox.build_items(inbox.Snapshot(now=now, repo=h.REPO, paused=True, pause_unknown=True))}          # 2차 검증 BP2S-2: 알 수 없는 정지 값이면 확인 항목 하나가 더 붙는다(안내서에 있는 id 계열)
+        self.assertTrue({"pause", "pause:unknown"} <= made, made)
         made = {i.id for i in inbox.build_items(inbox.Snapshot(now=now, repo=h.REPO, blogs=blogs, drafts=drafts[:1] + drafts[1:2]))}
         self.assertTrue({"draft:88:season", "draft:89:wait"} <= made, made)
 

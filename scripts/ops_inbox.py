@@ -906,7 +906,8 @@ def run(environ=None, client=None, now=None, root=ROOT, out=print, sleep=time.sl
     snapshot = inbox.Snapshot(
         now=now, repo=repo, issues=issues, pulls=pulls, runs=runs, approvals=approvals, annotations=annotations,
         paused=pause.is_paused(environ), blogs=blogs, histories=histories, failures=failures, notes=notes,
-        workflow_names=names, drafts=drafts, published=published, branch_prs=branch_prs, branch_pr_heads=branch_heads, policy=policy, source_terms=source_terms)
+        workflow_names=names, drafts=drafts, published=published, branch_prs=branch_prs, branch_pr_heads=branch_heads, policy=policy, source_terms=source_terms,
+        pause_unknown=pause.is_unrecognized(environ))
     items = inbox.build_items(snapshot)
     try:
         board = inbox.draft_board(snapshot)
