@@ -33,7 +33,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from pipeline import terms_deadline  # noqa: E402
+from pipeline import pause, terms_deadline  # noqa: E402
 from pipeline.console import safe_output  # noqa: E402
 from pipeline.health import REAL_POST_STATUSES, Finding, entry_time, evaluate  # noqa: E402
 from pipeline.publish_lock import (CHANCE_KEY, WEEK_WINDOW_DAYS, lock_active, lock_errors,  # noqa: E402
@@ -461,9 +461,13 @@ def main():
     if errors:
         print("[오류] 레지스트리 검증 실패:\n  - " + "\n  - ".join(_oneline(e) for e in errors))
         return 1
-    if os.environ.get("PIPELINE_PAUSE", "").strip().lower() in ("1", "true", "yes", "on"):
+    if pause.is_paused(os.environ):      # 알 수 없는 값(오타 등)도 정지로 읽는다(fail closed, pipeline/pause.py) — 다른 실행과 같은 판정
         print("[일시정지] PIPELINE_PAUSE 가 켜져 있어 점검 알림을 만들지 않습니다.")
-        _write_summary("### 워치독 점검 결과\n- **일시정지** — 저장소 변수 PIPELINE_PAUSE 가 켜져 있어 알림을 만들지 않았습니다.")
+        unknown = pause.is_unrecognized(os.environ)
+        if unknown:
+            print(pause.error_line())
+        _write_summary("### 워치독 점검 결과\n- **일시정지** — "
+                       + ("저장소 변수 PIPELINE_PAUSE 의 값을 알 수 없어 정지로 읽었고 알림을 만들지 않았습니다." if unknown else "저장소 변수 PIPELINE_PAUSE 가 켜져 있어 알림을 만들지 않았습니다."))
         return 0
     token, repo = os.environ.get("GITHUB_TOKEN"), os.environ.get("GITHUB_REPOSITORY")
     dry = os.environ.get("WATCHDOG_DRY_RUN", "").lower() in ("1", "true", "yes") or not (token and repo)

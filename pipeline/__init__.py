@@ -13,6 +13,7 @@
 - drafts     : Chance 승인 흐름(publish_flow: pr)의 이름·판정·PR 본문 소독 규칙과 GitHub REST 클라이언트
 - draft_flow : 승인 흐름의 실행부(초안 브랜치 올리기·PR 열기·정리, python -m pipeline.draft_flow)
 - publish_lock : 제한 재개 잠금(레지스트리 resume_lock) — 사람 승인 없는 공개 경로를 코드로 막는 규칙·실행 시작 가드(기본 꺼짐)
+- pause : 발행 정지 변수 PIPELINE_PAUSE 를 읽는 곳 하나(켜짐·꺼짐 값 집합, 알 수 없는 값은 정지로 읽는다 — fail closed)
 
 설명: docs/ARCHITECTURE.md, docs/ENGINEERING_GUIDE.md
 """

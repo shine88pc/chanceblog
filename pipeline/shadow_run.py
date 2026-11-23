@@ -37,7 +37,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from pipeline import quality_gate, registry, source_policy
+from pipeline import pause, quality_gate, registry, source_policy
 
 SCHEMA = 1
 DEFAULT_COUNT = 3
@@ -661,8 +661,10 @@ def run(g, environ=None, out=print):
     count, notes = resolve_count(environ)
     for note in notes:
         out(f"::notice::{note}")
-    if str(environ.get("PIPELINE_PAUSE", "")).strip().lower() in {"1", "true", "yes", "on"}:
+    if pause.is_paused(environ):
         out("::notice::PIPELINE_PAUSE 가 켜져 있지만 그림자 실행은 읽기 전용이라 건너뛰지 않습니다(정지 변수는 그대로 둡니다).")
+        if pause.is_unrecognized(environ):      # 알 수 없는 값(오타 등)도 다른 실행처럼 정지로 읽는다 — 이 모드는 건너뛰어 돌지만 값이 틀렸다는 것은 알린다
+            out(pause.error_line())
     facts_mode = facts_branch_on()
     if g.STUB_GEMINI and not g.DRY_RUN and not facts_mode:
         raise RuntimeError("GEMINI_API_KEY 환경 변수가 없습니다. 그림자 실행은 실제 모델로 후보 글을 만듭니다.")

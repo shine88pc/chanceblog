@@ -35,7 +35,7 @@ from collections import namedtuple
 from datetime import datetime
 from pathlib import Path
 
-from pipeline import draft_labels, drafts
+from pipeline import draft_labels, drafts, pause
 from pipeline.console import one_line, safe_output
 from pipeline.llm import scrub
 from pipeline.state import KST, StateError, read_json_list
@@ -457,8 +457,10 @@ def request_inbox_refresh_safely(git, client, env, out=print):
 def run(env=None, git=None, client=None, out=print, sleep=time.sleep, now=None):
     """deliver 의 전체 순서. 돌려주는 값: 종료 코드."""
     env = os.environ if env is None else env
-    if str(env.get("PIPELINE_PAUSE", "")).strip().lower() in {"1", "true", "yes", "on"}:
+    if pause.is_paused(env):      # 알 수 없는 값(오타 등)도 정지로 읽는다(fail closed, pipeline/pause.py)
         out("[일시정지] PIPELINE_PAUSE 가 켜져 있어 초안 올리기·정리를 하지 않습니다.")
+        if pause.is_unrecognized(env):
+            out(pause.error_line())
         return 0
     flow = drafts.chance_flow()
     if flow != drafts.FLOW_PR:

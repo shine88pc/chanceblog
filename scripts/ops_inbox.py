@@ -10,7 +10,7 @@
 필요 환경변수: GITHUB_REPOSITORY(소유자/저장소)
 쓰기에 필요: GITHUB_TOKEN (권한: contents:read, actions:read, checks:read, pull-requests:read, issues:write)
 옵션: INBOX_DRY_RUN=true    이슈·코멘트·라벨을 쓰지 않는다(읽기만 하고 할 일을 출력)
-      PIPELINE_PAUSE        워크플로가 저장소 변수를 넘긴다(1/true/yes/on 이면 '일시정지' 항목을 만든다)
+      PIPELINE_PAUSE        워크플로가 저장소 변수를 넘긴다(1/true/yes/on 이거나 알 수 없는 값이면 '일시정지' 항목을 만든다 — pipeline/pause.py)
       DEFAULT_BRANCH        실행 기록을 볼 브랜치(기본 main)
       GITHUB_REPOSITORY_OWNER  담당자·@멘션 대상(기본: 저장소 이름의 소유자)
       INBOX_MAX_API_CALLS   GitHub API 호출 상한(기본: 토큰이 있으면 150, 없으면 25. 24~1000 사이의 숫자만 받고 그 밖의 값은 기본값을 쓴다)
@@ -47,7 +47,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from pipeline import inbox, inbox_policy, notify  # noqa: E402
+from pipeline import inbox, inbox_policy, notify, pause  # noqa: E402
 from pipeline.console import safe_output  # noqa: E402
 from pipeline.registry import ROOT, RegistryError, load_registry, merged_blog  # noqa: E402
 from pipeline.state import StateError, read_json_list  # noqa: E402
@@ -901,9 +901,11 @@ def run(environ=None, client=None, now=None, root=ROOT, out=print, sleep=time.sl
     branch_heads = {}
     branch_prs = fetch_approval_prs(client, approvals, repo, failures, heads=branch_heads)      # 승인 대기가 없으면 호출 0회. 주석 읽기보다 먼저 한다(주석은 남는 호출만 쓴다)
     annotations = fetch_annotations(client, runs, now, failures, notes)
+    if pause.is_unrecognized(environ):      # 정지 변수의 값이 켜짐·꺼짐 어느 쪽도 아니다(오타 등) — 모든 실행이 정지로 읽으므로 이 모음도 '일시정지'로 보이고, 값이 틀렸다는 것은 로그에 한 줄 남긴다
+        out(pause.error_line())
     snapshot = inbox.Snapshot(
         now=now, repo=repo, issues=issues, pulls=pulls, runs=runs, approvals=approvals, annotations=annotations,
-        paused=inbox.is_truthy(environ.get("PIPELINE_PAUSE")), blogs=blogs, histories=histories, failures=failures, notes=notes,
+        paused=pause.is_paused(environ), blogs=blogs, histories=histories, failures=failures, notes=notes,
         workflow_names=names, drafts=drafts, published=published, branch_prs=branch_prs, branch_pr_heads=branch_heads, policy=policy, source_terms=source_terms)
     items = inbox.build_items(snapshot)
     try:
