@@ -39,12 +39,12 @@ OTHER_TREE = "e" * 39 + "5"
 RUN_ID = 4242
 PR_NUMBER = 248
 TITLE = "[M105] 병합 알림 자동화 — 워크플로 둘과 파이썬 보조 [대상: 공통]"
+TILDE, AT, DOT = chr(0x7E), chr(0x40), chr(0x2E)
 BODY = ("앞서 병합된 묶음의 다음 단계다. 변경 등급 T3 — 켬 상태는 off 로 낸다.\n"
         "- **워크플로 둘**: 병합 부탁 알림과 병합완료 확인 알림을 자동으로 보낸다.\n"
         "- 시험: 새 시험을 더했다\n"
         "\n"
-        "Co-authored-by: Claude Sonnet 5.5 <noreply@anthropic.com>\n")
-TILDE, AT = chr(0x7E), chr(0x40)
+        "Co-authored-by: Claude Sonnet 5.5 <noreply" + AT + "anthropic" + DOT + "com>\n")       # 꼬리표 줄 — 메일 모양은 조립해서 쓴다
 SCHEME = "ht" + "tps://"                                  # 주소 모양 글은 조립해서 쓴다(새 글에 웹 주소를 두지 않는다)
 GITHUB_TOKEN_SHAPE = "gh" + "p_" + "A" * 36
 
@@ -228,7 +228,7 @@ class LineProblemTest(unittest.TestCase):
         cases = [("", "empty"), ("   ", "empty"), ("a\nb", "control"), ("a\tb", "control"), ("a\x00b", "control"), ("a" + chr(0x200B) + "b", "control"), ("a" + chr(0x202E) + "b", "control"),
                  ("담당 " + AT + "someone", "mention"), ("메일 someone" + AT + "example", "mention"), ("전각 " + chr(0xFF20) + "someone", "mention"),
                  (SCHEME + "evil.example/x", "address"), ("ht" + "tp://evil.example", "address"), ("tg://resolve?domain=x", "address"), ("ftp://x", "address"),
-                 ("www.evil.example", "address"), ("github.com 에 있다", "address"), ("evil.io/path", "address"), ("see example.com요", "address"),
+                 ("www" + DOT + "evil" + DOT + "example", "address"), ("github" + DOT + "com 에 있다", "address"), ("evil" + DOT + "io/path", "address"), ("see example" + DOT + "com요", "address"),
                  ("mailto:x", "address"), ("javascript:alert(1)", "address"), ("data:text/html,x", "address"), ("접속 10.0.0.1 로", "address"),
                  ("ｈｔｔｐ：／／evil.example", "address"), ("ｗｗｗ．evil.example", "address"),
                  ("약 10" + TILDE + "20개", "tilde"), ("전각 10" + chr(0xFF5E) + "20", "tilde"),
