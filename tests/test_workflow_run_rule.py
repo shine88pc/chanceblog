@@ -1,11 +1,12 @@
-"""검증기 규칙 WF-16 시험 — `on: workflow_run` 워크플로의 허용 목록과 모양(감사 BA-S1-4 의 탐침 D, 2026-11-23).
+"""검증기 규칙 WF-16 시험 — `on: workflow_run` 워크플로의 허용 목록과 모양(감사 BA-S1-4 의 탐침 D, 2026-11-23. 2차: 판정 job·발송 job 둘로 나눔 — 안전 검증 S 의 AN1-S-4).
 
 `workflow_run` 은 가지·PR 의 글(`github.event.workflow_run.head_branch`·`head_commit.message`·`display_title`)이 시크릿을 쥔 기본 가지의 파일 안으로 들어오는 길이다. 이 시험은
  1. 허용 목록(`scripts/validate_repo.py` 의 `WORKFLOW_RUN_ALLOWED`)이 병합 알림 워크플로 둘뿐이고 진짜 파일 둘과 저장소의 다른 워크플로 전부가 규칙을 통과하는지,
  2. 허용 목록 밖의 `workflow_run`(탐침 D 꼴 포함)이 오류인지,
- 3. 허용된 파일도 한 군데씩 망가뜨리면(쓰기 권한·가지 코드 체크아웃·run·script 의 `${{ }}`·시크릿 위치·외부 액션 …) 모두 오류가 되는지(탐침 A·B 꼴을 `workflow_run` 으로 바꾼 것 포함)
- 를 가짜 워크플로로 확인한다. 검증기가 못 보는 것은 마지막 절에 '못 잡는다'고 단언해 둔다.
+ 3. 허용된 파일도 한 군데씩 망가뜨리면(쓰기 권한·가지 코드 체크아웃·run·script 의 `${{ }}`·시크릿 위치·외부 액션·job 구조(decide·send)·needs·if·outputs …) 모두 오류가 되는지(탐침 A·B 꼴을 `workflow_run` 으로 바꾼 것 포함)
+ 를 가짜 워크플로로 확인한다. 변이는 YAML 을 읽은 값에서 한 군데씩 고쳐 다시 쓴 사본이고, job 마다(decide·send) 따로 적용한다. 검증기가 못 보는 것은 마지막 절에 '못 잡는다'고 단언해 둔다.
 """
+import copy
 import re
 import sys
 import tempfile
@@ -24,10 +25,21 @@ READY = ".github/workflows/merge-ready-notice.yml"
 CONFIRM = ".github/workflows/merge-confirm-notice.yml"
 BOTH = (READY, CONFIRM)
 READY_NAME = "[공통] 병합 부탁 PR 자동 만들기"
+JOBS = ("decide", "send")
+DECIDE_CMDS = {READY: "python -m pipeline.auto_notice merge-ready", CONFIRM: "python -m pipeline.auto_notice merge-confirm"}
+SEND_CMD = "python -m pipeline.auto_notice send"
 
 
 def real(rel):
     return (ROOT / rel).read_text(encoding="utf-8").replace("\r\n", "\n")
+
+
+def real_data(rel):
+    return yaml.safe_load(real(rel))
+
+
+def dump(data):
+    return yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=1_000_000)
 
 
 def check(files):
@@ -43,28 +55,180 @@ def check(files):
         return vr.check_workflow_run_workflows(root, rels)
 
 
-def swap(text, old, new, count=1):
-    assert old in text, f"바꿀 글을 찾지 못했다: {old[:50]!r}"
-    return text.replace(old, new, count)
-
-
-SEND_STEP = "      - name: 텔레그램으로 보내기(켬 상태가 on 일 때만)\n"
-DECIDE_RUN_READY = "        run: python -m pipeline.auto_notice merge-ready\n"
-DECIDE_RUN_CONFIRM = "        run: python -m pipeline.auto_notice merge-confirm\n"
-CHECKOUT_REF = "          ref: ${{ github.event.repository.default_branch }}\n"
-PERSIST = "          persist-credentials: false\n"
-
-
-def decide_run(rel):
-    return DECIDE_RUN_READY if rel == READY else DECIDE_RUN_CONFIRM
-
-
 def codes(findings):
     return {finding.check for finding in findings}
 
 
 def messages(findings):
     return "\n".join(finding.message for finding in findings)
+
+
+def on_of(data):
+    return data[True] if True in data else data["on"]
+
+
+def step_of(data, job, index):
+    return data["jobs"][job]["steps"][index]
+
+
+def move_secrets(data):
+    """발송 단계의 텔레그램 시크릿 둘을 판정 단계 env 로 옮긴다(발송 job 에서는 뺀다) — '시크릿은 마지막 단계 env 에' 라는 자리만 보면 놓칠 수 있는 변형."""
+    send_env = step_of(data, "send", 2)["env"]
+    moved = {key: send_env.pop(key) for key in list(send_env) if key.startswith("TELEGRAM_")}
+    step_of(data, "decide", 2)["env"].update(moved)
+
+
+def catalog(rel):
+    """(이름, 사본을 고치는 함수, 오류 문구에 있어야 할 글) 목록 — 진짜 파일을 한 군데씩 망가뜨린다."""
+    out = []
+
+    def add(label, fn, needle):
+        out.append((label, fn, needle))
+
+    secret = "${{ secrets.TELEGRAM_BOT_TOKEN }}"
+    # ---- 최상위: 권한·env·트리거·필터 ----
+    for key in ("contents", "pull-requests", "actions"):
+        add(f"{key} 쓰기", lambda d, key=key: d["permissions"].__setitem__(key, "write"), "쓰기 권한")
+    for key in ("issues", "id-token", "checks", "packages", "statuses", "deployments", "discussions", "security-events"):
+        add(f"{key} 쓰기 추가", lambda d, key=key: d["permissions"].__setitem__(key, "write"), "쓰기 권한")
+    add("permissions 를 write-all 글자로", lambda d: d.__setitem__("permissions", "write-all"), "permissions")
+    add("permissions 를 read-all 글자로", lambda d: d.__setitem__("permissions", "read-all"), "permissions")
+    add("permissions 삭제", lambda d: d.pop("permissions"), "permissions")
+    add("permissions 를 빈 표로", lambda d: d.__setitem__("permissions", {}), "permissions")
+    add("워크플로 수준 env", lambda d: d.__setitem__("env", {"X": "y"}), "env")
+    add("워크플로 수준 defaults", lambda d: d.__setitem__("defaults", {"run": {"shell": "bash"}}), "defaults")
+    for trigger, value in (("workflow_dispatch", None), ("push", None), ("issue_comment", {"types": ["created"]}), ("schedule", [{"cron": "0 * * * *"}]), ("pull_request", None),
+                           ("pull_request_target", None), ("issues", {"types": ["opened"]}), ("repository_dispatch", None), ("release", None)):
+        add(f"{trigger} 트리거 추가", lambda d, trigger=trigger, value=value: on_of(d).__setitem__(trigger, value), "트리거")
+    add("types 에 requested 추가", lambda d: on_of(d)["workflow_run"].__setitem__("types", ["completed", "requested"]), "types")
+    add("types 삭제", lambda d: on_of(d)["workflow_run"].pop("types"), "types")
+    add("가지 필터 삭제", lambda d: on_of(d)["workflow_run"].pop("branches"), "branches")
+    add("branches-ignore 로 바꿈", lambda d: on_of(d)["workflow_run"].__setitem__("branches-ignore", on_of(d)["workflow_run"].pop("branches")), "branches")
+    add("가지 필터를 모든 가지로", lambda d: on_of(d)["workflow_run"].__setitem__("branches", ["**"]), "가지 필터")
+    add("가지 필터를 비운 목록으로", lambda d: on_of(d)["workflow_run"].__setitem__("branches", []), "branches")
+    add("따라 도는 워크플로를 다른 것으로", lambda d: on_of(d)["workflow_run"].__setitem__("workflows", ["다른 워크플로"]), "workflows")
+    add("따라 도는 워크플로를 하나 더", lambda d: on_of(d)["workflow_run"]["workflows"].append("다른 워크플로"), "workflows")
+    # ---- job 구조 ----
+    add("job 하나 더", lambda d: d["jobs"].__setitem__("third", {"name": "셋째", "runs-on": "ubuntu-latest", "timeout-minutes": 5, "steps": [{"run": "echo hi"}]}), "정확히 `decide`")
+    add("판정 job 삭제", lambda d: d["jobs"].pop("decide"), "정확히 `decide`")
+    add("발송 job 삭제", lambda d: d["jobs"].pop("send"), "정확히 `decide`")
+    add("발송 job 이름을 notify 로", lambda d: d["jobs"].__setitem__("notify", d["jobs"].pop("send")), "정확히 `decide`")
+    add("두 job 을 하나로 합침(옛 구조)", lambda d: (d["jobs"]["decide"]["steps"].append(d["jobs"].pop("send")["steps"][2]), d["jobs"]["decide"].pop("outputs")), "정확히 `decide`")
+    # ---- 판정 job 의 출력 ----
+    add("decide: outputs 삭제", lambda d: d["jobs"]["decide"].pop("outputs"), "outputs")
+    add("decide: outputs 의 message 삭제", lambda d: d["jobs"]["decide"]["outputs"].pop("message"), "outputs")
+    add("decide: outputs 의 send 삭제", lambda d: d["jobs"]["decide"]["outputs"].pop("send"), "outputs")
+    add("decide: outputs 에 셋째 출력", lambda d: d["jobs"]["decide"]["outputs"].__setitem__("extra", "${{ steps.decide.outputs.extra }}"), "outputs")
+    add("decide: outputs 가 다른 단계를 가리킴", lambda d: d["jobs"]["decide"]["outputs"].__setitem__("message", "${{ steps.other.outputs.message }}"), "outputs")
+    add("decide: outputs 에 이벤트 값", lambda d: d["jobs"]["decide"]["outputs"].__setitem__("message", "${{ github.event.workflow_run.head_commit.message }}"), "outputs")
+    add("decide: outputs 에 시크릿", lambda d: d["jobs"]["decide"]["outputs"].__setitem__("leak", secret), "시크릿")
+    add("decide: outputs 가 표가 아님", lambda d: d["jobs"]["decide"].__setitem__("outputs", "x"), "outputs")
+    add("decide: 판정 단계 id 를 바꿈", lambda d: step_of(d, "decide", 2).__setitem__("id", "other"), "id")
+    add("decide: 판정 단계 id 삭제", lambda d: step_of(d, "decide", 2).pop("id"), "id")
+    # ---- 발송 job 의 needs·if·env ----
+    add("send: needs 삭제", lambda d: d["jobs"]["send"].pop("needs"), "needs")
+    add("send: needs 를 다른 job 으로", lambda d: d["jobs"]["send"].__setitem__("needs", "other"), "needs")
+    add("send: needs 에 job 을 더함", lambda d: d["jobs"]["send"].__setitem__("needs", ["decide", "other"]), "needs")
+    add("send: needs 를 빈 목록으로", lambda d: d["jobs"]["send"].__setitem__("needs", []), "needs")
+    add("send: if 삭제", lambda d: d["jobs"]["send"].pop("if"), "if")
+    add("send: if 를 항상 참으로", lambda d: d["jobs"]["send"].__setitem__("if", "always()"), "if")
+    add("send: if 를 true 로", lambda d: d["jobs"]["send"].__setitem__("if", "true"), "if")
+    add("send: if 에 조건 추가", lambda d: d["jobs"]["send"].__setitem__("if", "needs.decide.outputs.send == 'yes' || true"), "if")
+    add("send: if 가 이벤트 값을 봄", lambda d: d["jobs"]["send"].__setitem__("if", "github.event.workflow_run.head_branch != 'x'"), "if")
+    add("send: if 가 다른 출력을 봄", lambda d: d["jobs"]["send"].__setitem__("if", "needs.decide.outputs.message != ''"), "if")
+    add("send: if 에 시크릿", lambda d: d["jobs"]["send"].__setitem__("if", "secrets.TELEGRAM_BOT_TOKEN != ''"), "시크릿")
+    add("send: outputs 를 가짐", lambda d: d["jobs"]["send"].__setitem__("outputs", {"x": "y"}), "outputs")
+    add("send: 발송 env 에 PYTHONPATH", lambda d: step_of(d, "send", 2)["env"].__setitem__("PYTHONPATH", "/tmp/x"), "이름은 정확히")
+    add("send: 발송 env 에 LD_PRELOAD", lambda d: step_of(d, "send", 2)["env"].__setitem__("LD_PRELOAD", "/tmp/x.so"), "이름은 정확히")
+    add("send: 발송 env 에서 문장 삭제", lambda d: step_of(d, "send", 2)["env"].pop("NOTICE_MESSAGE_B64"), "이름은 정확히")
+    add("send: 발송 env 에서 chat id 삭제", lambda d: step_of(d, "send", 2)["env"].pop("TELEGRAM_CHAT_ID"), "이름은 정확히")
+    add("send: 문장이 이벤트 값", lambda d: step_of(d, "send", 2)["env"].__setitem__("NOTICE_MESSAGE_B64", "${{ github.event.workflow_run.head_commit.message }}"), "NOTICE_MESSAGE_B64")
+    add("send: 문장이 다른 출력", lambda d: step_of(d, "send", 2)["env"].__setitem__("NOTICE_MESSAGE_B64", "${{ needs.decide.outputs.send }}"), "NOTICE_MESSAGE_B64")
+    add("send: 문장이 글자 그대로", lambda d: step_of(d, "send", 2)["env"].__setitem__("NOTICE_MESSAGE_B64", "QUJD"), "NOTICE_MESSAGE_B64")
+    # ---- job 마다(decide·send) ----
+    for job in JOBS:
+        def put(key, value, job=job):
+            return lambda d: d["jobs"][job].__setitem__(key, value)
+
+        for key, value in (("permissions", {"contents": "write"}), ("env", {"X": "y"}), ("defaults", {"run": {"shell": "bash"}}), ("strategy", {"matrix": {"k": ["a"]}}), ("container", "evil/image"),
+                           ("services", {"x": {"image": "y"}}), ("environment", "prod"), ("continue-on-error", True), ("secrets", "inherit"), ("uses", "./.github/workflows/x.yml")):
+            add(f"{job}: job 에 {key}", put(key, value), f"`{key}` 가 있습니다")
+        add(f"{job}: job 에 허용되지 않은 키(concurrency)", put("concurrency", "x"), "허용되지 않은 키")
+        add(f"{job}: runs-on 을 self-hosted 로", put("runs-on", "self-hosted"), "ubuntu-latest")
+        add(f"{job}: runs-on 을 목록으로", put("runs-on", ["self-hosted", "linux"]), "ubuntu-latest")
+        add(f"{job}: runs-on 삭제", lambda d, job=job: d["jobs"][job].pop("runs-on"), "ubuntu-latest")
+        add(f"{job}: 단계 하나 더", lambda d, job=job: d["jobs"][job]["steps"].append({"run": "echo hi"}), "정확히 셋")
+        add(f"{job}: 단계 하나 더(이름만 있는 빈 단계)", lambda d, job=job: d["jobs"][job]["steps"].insert(1, {"name": "빈 단계"}), "실행할 것이 없는")
+        add(f"{job}: 단계 순서를 거꾸로", lambda d, job=job: d["jobs"][job]["steps"].reverse(), "정확히 셋")
+        add(f"{job}: setup-python 삭제", lambda d, job=job: d["jobs"][job]["steps"].pop(1), "정확히 셋")
+        add(f"{job}: 체크아웃 삭제", lambda d, job=job: d["jobs"][job]["steps"].pop(0), "정확히 셋")
+        add(f"{job}: run 단계 삭제", lambda d, job=job: d["jobs"][job]["steps"].pop(2), "정확히 셋")
+        # 체크아웃
+        for label, fn, needle in (("ref 삭제", lambda w: w.pop("ref"), "ref"),
+                                  ("ref 를 실행의 커밋으로", lambda w: w.__setitem__("ref", "${{ github.event.workflow_run.head_sha }}"), "ref"),
+                                  ("ref 를 실행의 가지로", lambda w: w.__setitem__("ref", "${{ github.event.workflow_run.head_branch }}"), "ref"),
+                                  ("ref 를 PR 병합 참조로", lambda w: w.__setitem__("ref", "refs/pull/1/merge"), "ref"),
+                                  ("ref 를 github.head_ref 로", lambda w: w.__setitem__("ref", "${{ github.head_ref }}"), "ref"),
+                                  ("ref 를 다른 가지로", lambda w: w.__setitem__("ref", "develop"), "ref"),
+                                  ("다른 저장소", lambda w: w.__setitem__("repository", "evil/other"), "허용되지 않은 항목"),
+                                  ("token", lambda w: w.__setitem__("token", "x"), "허용되지 않은 항목"),
+                                  ("submodules", lambda w: w.__setitem__("submodules", True), "허용되지 않은 항목"),
+                                  ("ssh-key", lambda w: w.__setitem__("ssh-key", "x"), "허용되지 않은 항목"),
+                                  ("persist-credentials 삭제", lambda w: w.pop("persist-credentials"), "persist-credentials"),
+                                  ("persist-credentials true", lambda w: w.__setitem__("persist-credentials", True), "persist-credentials"),
+                                  ("시크릿을 with 에", lambda w: w.__setitem__("token", secret), "시크릿")):
+            add(f"{job}: 체크아웃 {label}", lambda d, job=job, fn=fn: fn(step_of(d, job, 0)["with"]), needle)
+        add(f"{job}: setup-python 에 다른 입력", lambda d, job=job: step_of(d, job, 1)["with"].__setitem__("cache", "pip"), "setup-python")
+        # 외부 액션(setup-python 자리에)
+        for label, replacement, needle in (("github-script 단계(탐침 B 꼴)", {"uses": "actions/github-script@v7", "with": {"script": "console.log('x')"}}, "외부 액션"),
+                                           ("github-script 의 script 에 식(탐침 B)", {"uses": "actions/github-script@v7", "with": {"script": 'console.log("${{ github.event.workflow_run.head_commit.message }}")'}}, "script"),
+                                           ("제3자 액션", {"uses": "peter-evans/create-pull-request@v6"}, "외부 액션"), ("로컬 액션", {"uses": "./.github/actions/x"}, "외부 액션")):
+            add(f"{job}: {label}", lambda d, job=job, replacement=replacement: d["jobs"][job]["steps"].__setitem__(1, copy.deepcopy(replacement)), needle)
+        # 단계 키
+        for key, value in (("shell", "python"), ("continue-on-error", True), ("working-directory", "/tmp"), ("timeout-minutes", 1)):
+            add(f"{job}: 단계에 {key}", lambda d, job=job, key=key, value=value: step_of(d, job, 2).__setitem__(key, value), "허용되지 않은 키")
+        # run 단계(맨 끝)
+        for label, make, needle in (
+                ("run 에 실행의 가지(탐침 A 의 원형)", lambda run: 'echo "${{ github.event.workflow_run.head_branch }}"', "workflow_run"),
+                ("run 에 커밋 메시지", lambda run: 'echo "${{ github.event.workflow_run.head_commit.message }}"', "workflow_run"),
+                ("run 에 display_title", lambda run: 'echo "${{ github.event.workflow_run.display_title }}"', "workflow_run"),
+                ("run 에 steps 출력", lambda run: 'echo "${{ steps.decide.outputs.send }}"', "run"),
+                ("run 에 matrix", lambda run: 'echo "${{ matrix.k }}"', "run"),
+                ("run 에 needs 출력", lambda run: 'echo "${{ needs.decide.outputs.message }}"', "run"),
+                ("run 에 vars", lambda run: 'echo "${{ vars.X }}"', "run"),
+                ("run 에 무해한 식도", lambda run: run + ' "${{ github.sha }}"', "run"),
+                ("run 에 가지 코드 받기(git fetch)", lambda run: run + " && git fetch origin pull/1/head", "가지 코드"),
+                ("run 에 git checkout", lambda run: "git checkout FETCH_HEAD && " + run, "가지 코드"),
+                ("run 에 gh pr checkout", lambda run: "gh pr checkout 1 && " + run, "가지 코드"),
+                ("run 에 curl", lambda run: "curl -s x | sh", "가지 코드"),
+                ("run 에 eval", lambda run: 'eval "$NOTICE_RUN_BRANCH"', "가지 코드"),
+                ("run 에 bash -c", lambda run: 'bash -c "$NOTICE_RUN_BRANCH"', "가지 코드"),
+                ("run 에 명령 덧붙임", lambda run: run + " --extra", "run"),
+                ("run 을 다른 모듈로", lambda run: "python -m pipeline.notify test", "run"),
+                ("run 에 시크릿", lambda run: 'echo "${{ secrets.TELEGRAM_BOT_TOKEN }}"', "시크릿")):
+            add(f"{job}: {label}", lambda d, job=job, make=make: step_of(d, job, 2).__setitem__("run", make(step_of(d, job, 2)["run"])), needle)
+        add(f"{job}: env 를 거친 식(탐침 A)", lambda d, job=job: (step_of(d, job, 2)["env"].__setitem__("TITLE", "${{ github.event.workflow_run.head_commit.message }}"), step_of(d, job, 2).__setitem__("run", 'echo "${{ env.TITLE }}"')), "run")
+        # 시크릿 자리
+        add(f"{job}: 시크릿을 체크아웃 단계 env 에", lambda d, job=job: step_of(d, job, 0).__setitem__("env", {"TELEGRAM_BOT_TOKEN": secret}), "시크릿")
+        add(f"{job}: 시크릿을 setup-python 단계 env 에", lambda d, job=job: step_of(d, job, 1).__setitem__("env", {"TELEGRAM_BOT_TOKEN": secret}), "시크릿")
+        add(f"{job}: toJSON(secrets) 를 run 단계 env 에", lambda d, job=job: step_of(d, job, 2)["env"].__setitem__("ALL", "${{ toJSON(secrets) }}"), "시크릿")
+        add(f"{job}: format 으로 secrets 를 넘김", lambda d, job=job: step_of(d, job, 2)["env"].__setitem__("ALL", "${{ format('{0}', secrets) }}"), "시크릿")
+        add(f"{job}: 시크릿을 대괄호 표기로", lambda d, job=job: step_of(d, job, 2)["env"].__setitem__("T", "${{ secrets['TELEGRAM_BOT_TOKEN'] }}"), "시크릿")
+        add(f"{job}: 다른 시크릿을 run 단계 env 에", lambda d, job=job: step_of(d, job, 2)["env"].__setitem__("OTHER", "${{ secrets.OTHER_KEY }}"), "시크릿")
+        add(f"{job}: GITHUB_TOKEN 시크릿 표기를 run 단계 env 에", lambda d, job=job: step_of(d, job, 2)["env"].__setitem__("GITHUB_TOKEN", "${{ secrets.GITHUB_TOKEN }}"), "시크릿")
+        add(f"{job}: 시크릿 이름이 소문자", lambda d, job=job: step_of(d, job, 2)["env"].__setitem__("TELEGRAM_BOT_TOKEN", "${{ secrets.telegram_bot_token }}"), "시크릿")
+        add(f"{job}: 시크릿을 job env 에", lambda d, job=job: d["jobs"][job].__setitem__("env", {"TELEGRAM_CHAT_ID": "${{ secrets.TELEGRAM_CHAT_ID }}"}), "시크릿")
+    # 판정 job 에 시크릿(발송 job 에서만 허용되는 자리인 '마지막 단계 env' 라도 판정 job 이면 오류)
+    add("decide: 텔레그램 시크릿을 판정 단계 env 에", lambda d: step_of(d, "decide", 2)["env"].__setitem__("TELEGRAM_BOT_TOKEN", secret), "시크릿")
+    add("decide: 텔레그램 시크릿 둘을 판정 단계 env 로 옮김", move_secrets, "시크릿")
+    add("send: 다른 시크릿을 발송 단계에", lambda d: step_of(d, "send", 2)["env"].__setitem__("OTHER", "${{ secrets.OTHER_KEY }}"), "시크릿")
+    add("send: 발송 단계가 맨 끝이 아님", lambda d: d["jobs"]["send"]["steps"].append({"name": "뒤 단계", "run": SEND_CMD}), "시크릿")
+    add("send: 시크릿을 워크플로 env 에", lambda d: d.__setitem__("env", {"TELEGRAM_BOT_TOKEN": secret}), "시크릿")
+    # 두 job 의 run 명령을 서로 바꿈
+    add("decide: 판정 job 이 발송 명령을 돌림", lambda d: step_of(d, "decide", 2).__setitem__("run", SEND_CMD), "정확히")
+    add("send: 발송 job 이 판정 명령을 돌림", lambda d, rel=rel: step_of(d, "send", 2).__setitem__("run", DECIDE_CMDS[rel]), "정확히")
+    add("send: 발송 job 의 run 을 다른 모듈로", lambda d: step_of(d, "send", 2).__setitem__("run", "python -m pipeline.notify test"), "정확히")
+    return out
 
 
 class AllowListTest(unittest.TestCase):
@@ -75,11 +239,12 @@ class AllowListTest(unittest.TestCase):
         self.assertEqual(vr.WORKFLOW_RUN_ALLOWED[CONFIRM]["workflows"], ["[공통] 저장소 규칙·테스트 자동 검사"])
         self.assertEqual(vr.WORKFLOW_RUN_ALLOWED[CONFIRM]["branches"], ["main"])
         for rel, spec in vr.WORKFLOW_RUN_ALLOWED.items():
-            self.assertEqual(spec["send"], "python -m pipeline.auto_notice send", rel)           # 맨 끝(발송 단계)은 두 파일이 같은 명령
+            self.assertEqual(spec["send"], SEND_CMD, rel)                                         # 발송 job 의 명령은 두 파일이 같다
             self.assertTrue(spec["decide"].startswith("python -m pipeline.auto_notice merge-"), rel)
             self.assertEqual(set(spec), {"workflows", "branches", "decide", "send"}, rel)
-        self.assertEqual(vr.WORKFLOW_RUN_ALLOWED[READY]["decide"], "python -m pipeline.auto_notice merge-ready")
-        self.assertEqual(vr.WORKFLOW_RUN_ALLOWED[CONFIRM]["decide"], "python -m pipeline.auto_notice merge-confirm")
+        self.assertEqual(vr.WORKFLOW_RUN_ALLOWED[READY]["decide"], DECIDE_CMDS[READY])
+        self.assertEqual(vr.WORKFLOW_RUN_ALLOWED[CONFIRM]["decide"], DECIDE_CMDS[CONFIRM])
+        self.assertEqual((vr.DECIDE_JOB, vr.SEND_JOB), ("decide", "send"))
 
     def test_only_the_two_real_files_use_workflow_run_and_they_pass(self):
         files = vr.list_files(ROOT)
@@ -97,6 +262,15 @@ class AllowListTest(unittest.TestCase):
         for check_name in ("check_workflows", "check_telegram_secrets", "check_workflow_names", "check_workflow_prefixes", "check_workflow_run_workflows"):
             self.assertEqual([finding.line() for finding in getattr(vr, check_name)(ROOT, files)], [], check_name)
 
+    def test_the_real_files_have_two_jobs_with_the_secrets_only_in_the_send_job(self):
+        for rel in BOTH:
+            data = real_data(rel)
+            self.assertEqual(list(data["jobs"]), ["decide", "send"], rel)
+            self.assertNotIn("secrets", str(data["jobs"]["decide"]), rel)                          # 판정 job 에는 시크릿이 하나도 없다
+            self.assertEqual(str(data["jobs"]["send"]).count("secrets."), 2, rel)
+            self.assertEqual(data["jobs"]["send"]["needs"], "decide")
+            self.assertEqual(data["jobs"]["send"]["if"], "needs.decide.outputs.send == 'yes'")
+
     def test_the_rule_is_wired_into_check_workflows_so_every_entry_point_that_calls_it_sees_it(self):
         """감사의 탐침 스크립트처럼 `check_workflows` 만 부르는 곳에서도 workflow_run 이 잡히려고 규칙을 그 함수의 파일 반복 안(WF-3 바로 뒤)에서 부른다.
         `run_checks` 에는 따로 등록하지 않는다 — 같은 오류가 두 번 나오지 않게(`check_workflow_run_workflows` 는 시험·도구가 따로 부르는 같은 규칙의 입구다)."""
@@ -111,7 +285,8 @@ class AllowListTest(unittest.TestCase):
 
     def test_check_workflows_and_the_standalone_entry_report_the_same_findings_once_each(self):
         for rel in BOTH:
-            broken = swap(real(rel), "  contents: read\n", "  contents: write\n")
+            broken = real(rel).replace("  contents: read\n", "  contents: write\n", 1)
+            self.assertNotEqual(broken, real(rel))
             with tempfile.TemporaryDirectory() as tmp:
                 path = Path(tmp) / rel
                 path.parent.mkdir(parents=True)
@@ -129,11 +304,12 @@ class AllowListTest(unittest.TestCase):
                 self.assertEqual(codes(found), {"WF-16"})
                 self.assertIn("허용 목록에 없는 workflow_run", messages(found))
                 self.assertTrue(all(finding.level == "ERROR" for finding in found))
-                self.assertEqual(len(found), 1)                                              # 모양은 멀쩡하니 허용 목록 오류 하나뿐
+                self.assertEqual(len(found), 2)                                              # 모양은 멀쩡하니 허용 목록 오류 하나 + 허용 목록 밖 파일의 판정 job 출력(`outputs`)뿐 — 출력은 허용된 파일의 판정 job 만 낼 수 있다
+                self.assertIn("job 'decide' 에 `outputs` 가 있습니다", messages(found))
 
     def test_the_names_must_match_exactly_a_renamed_copy_or_a_directory_trick_is_not_allowed(self):
         text = real(READY)
-        for name in ("merge-ready-notice.yaml", "Merge-Ready-Notice.yml", "merge-ready-notice.yml.bak.yml", "merge-ready-notice2.yml", "merge-confirm-notice.yaml"):
+        for name in ("merge-ready-notice.yaml", "Merge-Ready-Notice.yml", "merge-ready-notice.yml.bak.yml", "merge-ready-notice2.yml", "merge-confirm-notice.yaml", "MERGE-READY-NOTICE.YML"):
             with self.subTest(name):
                 found = check({name: text})
                 self.assertIn("허용 목록에 없는 workflow_run", messages(found))
@@ -192,134 +368,64 @@ jobs:
 class MutationTest(unittest.TestCase):
     """진짜 워크플로 둘을 한 군데씩 망가뜨린 사본이 모두 WF-16 오류가 된다. 살아남는 변이가 있으면 그 줄은 규칙이 못 지킨다."""
 
-    def mutations(self, rel):
-        text = real(rel)
-        decide = decide_run(rel)
-        run_line = decide.strip()[len("run: "):]
-        yield "contents 쓰기", swap(text, "  contents: read\n", "  contents: write\n"), "쓰기 권한"
-        yield "pull-requests 쓰기", swap(text, "  pull-requests: read\n", "  pull-requests: write\n"), "쓰기 권한"
-        yield "actions 쓰기", swap(text, "  actions: read\n", "  actions: write\n"), "쓰기 권한"
-        yield "issues 쓰기 추가", swap(text, "  actions: read\n", "  actions: read\n  issues: write\n"), "쓰기 권한"
-        yield "id-token 쓰기 추가", swap(text, "  actions: read\n", "  actions: read\n  id-token: write\n"), "쓰기 권한"
-        yield "checks 쓰기 추가", swap(text, "  actions: read\n", "  actions: read\n  checks: write\n"), "쓰기 권한"
-        yield "permissions 를 write-all 글자로", swap(text, "permissions:\n  contents: read\n  pull-requests: read\n  actions: read\n", "permissions: write-all\n"), "permissions"
-        yield "permissions 를 read-all 글자로", swap(text, "permissions:\n  contents: read\n  pull-requests: read\n  actions: read\n", "permissions: read-all\n"), "permissions"
-        yield "permissions 삭제", swap(text, "permissions:\n  contents: read\n  pull-requests: read\n  actions: read\n", ""), "permissions"
-        yield "job 수준 permissions", swap(text, "    timeout-minutes: 10\n", "    timeout-minutes: 10\n    permissions:\n      contents: write\n"), "permissions"
-        yield "워크플로 수준 env", swap(text, "concurrency:\n", "env:\n  X: y\nconcurrency:\n"), "env"
-        yield "워크플로 수준 defaults", swap(text, "concurrency:\n", "defaults:\n  run:\n    shell: bash\nconcurrency:\n"), "defaults"
-        yield "job 수준 env", swap(text, "    timeout-minutes: 10\n", "    timeout-minutes: 10\n    env:\n      X: y\n"), "env"
-        yield "workflow_dispatch 트리거 추가", swap(text, "on:\n  workflow_run:\n", "on:\n  workflow_dispatch:\n  workflow_run:\n"), "트리거"
-        yield "push 트리거 추가", swap(text, "on:\n  workflow_run:\n", "on:\n  push:\n  workflow_run:\n"), "트리거"
-        yield "issue_comment 트리거 추가", swap(text, "on:\n  workflow_run:\n", "on:\n  issue_comment:\n  workflow_run:\n"), "트리거"
-        yield "schedule 트리거 추가", swap(text, "on:\n  workflow_run:\n", "on:\n  schedule:\n    - cron: '0 * * * *'\n  workflow_run:\n"), "트리거"
-        yield "pull_request 트리거 추가", swap(text, "on:\n  workflow_run:\n", "on:\n  pull_request:\n  workflow_run:\n"), "트리거"
-        yield "types 에 requested 추가", swap(text, "    types: [completed]\n", "    types: [completed, requested]\n"), "types"
-        yield "types 삭제", swap(text, "    types: [completed]\n", ""), "types"
-        yield "가지 필터 삭제", re.sub(r"    branches:\n(?:      - .*\n)+", "", text, count=1), "branches"
-        yield "branches-ignore 로 바꿈", re.sub(r"    branches:\n", "    branches-ignore:\n", text, count=1), "branches"
-        yield "가지 필터를 모든 가지로", re.sub(r"    branches:\n(?:      - .*\n)+", "    branches:\n      - '**'\n", text, count=1), "가지 필터"
-        yield "따라 도는 워크플로를 다른 것으로", re.sub(r'    workflows: \[".*"\]\n', '    workflows: ["다른 워크플로"]\n', text, count=1), "workflows"
-        yield "체크아웃 ref 삭제", swap(text, CHECKOUT_REF, ""), "ref"
-        yield "체크아웃 ref 를 실행의 커밋으로", swap(text, CHECKOUT_REF, "          ref: ${{ github.event.workflow_run.head_sha }}\n"), "ref"
-        yield "체크아웃 ref 를 실행의 가지로", swap(text, CHECKOUT_REF, "          ref: ${{ github.event.workflow_run.head_branch }}\n"), "ref"
-        yield "체크아웃 ref 를 PR 병합 참조로", swap(text, CHECKOUT_REF, "          ref: refs/pull/1/merge\n"), "ref"
-        yield "체크아웃 ref 를 github.head_ref 로", swap(text, CHECKOUT_REF, "          ref: ${{ github.head_ref }}\n"), "ref"
-        yield "체크아웃 ref 를 다른 가지로", swap(text, CHECKOUT_REF, "          ref: develop\n"), "ref"
-        yield "체크아웃에 다른 저장소", swap(text, PERSIST, PERSIST + "          repository: evil/other\n"), "허용되지 않은 항목"
-        yield "체크아웃에 token", swap(text, PERSIST, PERSIST + "          token: x\n"), "허용되지 않은 항목"
-        yield "체크아웃에 submodules", swap(text, PERSIST, PERSIST + "          submodules: true\n"), "허용되지 않은 항목"
-        yield "persist-credentials 삭제", swap(text, PERSIST, ""), "persist-credentials"
-        yield "persist-credentials true", swap(text, PERSIST, "          persist-credentials: true\n"), "persist-credentials"
-        yield "github-script 단계(탐침 B 꼴)", swap(text, "      - uses: actions/setup-python@v6\n", "      - uses: actions/github-script@v7\n        with:\n          script: |\n            console.log('x')\n      - uses: actions/setup-python@v6\n"), "외부 액션"
-        yield "github-script 의 script 에 식(탐침 B)", swap(text, "      - uses: actions/setup-python@v6\n", "      - uses: actions/github-script@v7\n        with:\n          script: |\n            console.log(\"${{ github.event.workflow_run.head_commit.message }}\")\n      - uses: actions/setup-python@v6\n"), "script"
-        yield "제3자 액션", swap(text, "      - uses: actions/setup-python@v6\n", "      - uses: peter-evans/create-pull-request@v6\n      - uses: actions/setup-python@v6\n"), "외부 액션"
-        yield "로컬 액션", swap(text, "      - uses: actions/setup-python@v6\n", "      - uses: ./.github/actions/x\n      - uses: actions/setup-python@v6\n"), "외부 액션"
-        yield "setup-python 에 다른 입력", swap(text, "          python-version: '3.12'\n", "          python-version: '3.12'\n          cache: pip\n"), "setup-python"
-        yield "run 에 실행의 가지(탐침 A 의 원형)", text.replace(run_line, 'echo "${{ github.event.workflow_run.head_branch }}"', 1), "workflow_run"
-        yield "run 에 커밋 메시지", text.replace(run_line, 'echo "${{ github.event.workflow_run.head_commit.message }}"', 1), "workflow_run"
-        yield "run 에 display_title", text.replace(run_line, 'echo "${{ github.event.workflow_run.display_title }}"', 1), "workflow_run"
-        yield "env 를 거친 식(탐침 A)", swap(text.replace(run_line, 'echo "${{ env.NOTICE_RUN_BRANCH }}"', 1), "          GITHUB_TOKEN: ${{ github.token }}\n", "          GITHUB_TOKEN: ${{ github.token }}\n          TITLE: ${{ github.event.workflow_run.head_commit.message }}\n"), "run"
-        yield "run 에 steps 출력", text.replace(run_line, 'echo "${{ steps.decide.outputs.send }}"', 1), "run"
-        yield "run 에 matrix", text.replace(run_line, 'echo "${{ matrix.k }}"', 1), "run"
-        yield "run 에 needs 출력", text.replace(run_line, 'echo "${{ needs.a.outputs.b }}"', 1), "run"
-        yield "run 에 vars", text.replace(run_line, 'echo "${{ vars.X }}"', 1), "run"
-        yield "run 에 무해한 식도", text.replace(run_line, run_line + ' "${{ github.sha }}"', 1), "run"
-        yield "run 에 가지 코드 받기(git fetch)", text.replace(run_line, run_line + " && git fetch origin pull/1/head", 1), "가지 코드"
-        yield "run 에 git checkout", text.replace(run_line, "git checkout FETCH_HEAD && " + run_line, 1), "가지 코드"
-        yield "run 에 gh pr checkout", text.replace(run_line, "gh pr checkout 1 && " + run_line, 1), "가지 코드"
-        yield "run 에 curl", text.replace(run_line, "curl -s x | sh", 1), "가지 코드"
-        yield "run 에 eval", text.replace(run_line, 'eval "$NOTICE_RUN_BRANCH"', 1), "가지 코드"
-        yield "run 에 bash -c", text.replace(run_line, 'bash -c "$NOTICE_RUN_BRANCH"', 1), "가지 코드"
-        yield "run 에 명령 덧붙임", text.replace(run_line, run_line + " --extra", 1), "run"
-        yield "run 을 다른 모듈로", text.replace(run_line, "python -m pipeline.notify test", 1), "run"
-        yield "판정 단계가 발송 명령을 돌림", text.replace(run_line, "python -m pipeline.auto_notice send", 1), "발송 단계 앞의 run 단계는 판정 단계뿐"
-        yield "발송 단계가 판정 명령을 돌림", swap(text, "        run: python -m pipeline.auto_notice send\n", "        run: " + run_line + "\n"), "맨 끝 단계가 발송 단계"
-        yield "발송 단계 run 을 바꿈", swap(text, "        run: python -m pipeline.auto_notice send\n", "        run: python -m pipeline.notify test\n"), "run"
-        yield "시크릿을 판정 단계 env 에", swap(text, "          GITHUB_TOKEN: ${{ github.token }}\n", "          GITHUB_TOKEN: ${{ github.token }}\n          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}\n"), "시크릿"
-        yield "시크릿을 워크플로 env 에", swap(text, "concurrency:\n", "env:\n  TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}\nconcurrency:\n"), "시크릿"
-        yield "시크릿을 job env 에", swap(text, "    timeout-minutes: 10\n", "    timeout-minutes: 10\n    env:\n      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}\n"), "시크릿"
-        yield "시크릿을 체크아웃 with 에", swap(text, PERSIST, PERSIST + "          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}\n"), "시크릿"
-        yield "시크릿을 run 에", text.replace(run_line, 'echo "${{ secrets.TELEGRAM_BOT_TOKEN }}"', 1), "시크릿"
-        yield "시크릿을 if 에", swap(text, "        if: steps.decide.outputs.send == 'yes'\n", "        if: secrets.TELEGRAM_BOT_TOKEN != ''\n"), "시크릿"
-        yield "다른 시크릿을 발송 단계에", swap(text, "          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}\n", "          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}\n          OTHER: ${{ secrets.OTHER_KEY }}\n"), "시크릿"
-        yield "GITHUB_TOKEN 시크릿 표기를 발송 단계에", swap(text, "          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}\n", "          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}\n          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n"), "시크릿"
-        yield "시크릿을 첫 단계에", swap(text, "      - uses: actions/checkout@v6\n", "      - uses: actions/checkout@v6\n        env:\n          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}\n"), "시크릿"
-        yield "발송 단계가 맨 끝이 아님", text.rstrip("\n") + "\n\n      - name: 뒤 단계\n        run: python -m pipeline.auto_notice send\n", "시크릿"
-        yield "시크릿 이름이 소문자", swap(text, "TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}", "TELEGRAM_BOT_TOKEN: ${{ secrets.telegram_bot_token }}"), "시크릿"
-        yield "재사용 워크플로 호출 job", swap(text, "    runs-on: ubuntu-latest\n", "    uses: ./.github/workflows/x.yml\n    secrets: inherit\n    runs-on: ubuntu-latest\n"), "uses"
-        yield "strategy 추가", swap(text, "    timeout-minutes: 10\n", "    timeout-minutes: 10\n    strategy:\n      matrix:\n        k: [a]\n"), "strategy"
-        yield "실행할 것이 없는 단계", swap(text, "      - uses: actions/setup-python@v6\n", "      - name: 빈 단계\n      - uses: actions/setup-python@v6\n"), "실행할 것이 없는"
-        yield "job 에 container", swap(text, "    timeout-minutes: 10\n", "    timeout-minutes: 10\n    container: evil/image\n"), "container"
-        yield "job 에 services", swap(text, "    timeout-minutes: 10\n", "    timeout-minutes: 10\n    services:\n      x:\n        image: y\n"), "services"
-        yield "job 에 environment", swap(text, "    timeout-minutes: 10\n", "    timeout-minutes: 10\n    environment: prod\n"), "environment"
-        yield "job 에 outputs", swap(text, "    timeout-minutes: 10\n", "    timeout-minutes: 10\n    outputs:\n      x: y\n"), "outputs"
-        yield "job 에 continue-on-error", swap(text, "    timeout-minutes: 10\n", "    timeout-minutes: 10\n    continue-on-error: true\n"), "continue-on-error"
-        yield "runs-on 을 self-hosted 로", swap(text, "    runs-on: ubuntu-latest\n", "    runs-on: self-hosted\n"), "ubuntu-latest"
-        yield "runs-on 을 목록으로", swap(text, "    runs-on: ubuntu-latest\n", "    runs-on: [self-hosted, linux]\n"), "ubuntu-latest"
-        yield "job 하나 더", text.rstrip("\n") + "\n  second:\n    name: 둘째\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    steps:\n      - run: echo hi\n", "정확히 하나"
-        yield "단계에 shell", swap(text, "        id: decide\n", "        id: decide\n        shell: python\n"), "허용되지 않은 키"
-        yield "단계에 continue-on-error", swap(text, "        id: decide\n", "        id: decide\n        continue-on-error: true\n"), "허용되지 않은 키"
-        yield "단계에 working-directory", swap(text, "        id: decide\n", "        id: decide\n        working-directory: /tmp\n"), "허용되지 않은 키"
-        yield "단계에 timeout-minutes", swap(text, "        id: decide\n", "        id: decide\n        timeout-minutes: 1\n"), "허용되지 않은 키"
-        yield "toJSON(secrets) 를 판정 단계 env 에", swap(text, "          GITHUB_TOKEN: ${{ github.token }}\n", "          GITHUB_TOKEN: ${{ github.token }}\n          ALL: ${{ toJSON(secrets) }}\n"), "시크릿"
-        yield "toJSON(secrets) 를 발송 단계 env 에도", swap(text, "          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}\n", "          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}\n          ALL: ${{ toJSON(secrets) }}\n"), "시크릿"
-        yield "format 으로 secrets 를 넘김", swap(text, "          GITHUB_TOKEN: ${{ github.token }}\n", "          GITHUB_TOKEN: ${{ github.token }}\n          ALL: ${{ format('{0}', secrets) }}\n"), "시크릿"
-        yield "시크릿을 대괄호 표기로", swap(text, "          GITHUB_TOKEN: ${{ github.token }}\n", "          GITHUB_TOKEN: ${{ github.token }}\n          T: ${{ secrets['TELEGRAM_BOT_TOKEN'] }}\n"), "시크릿"
+    def test_the_catalog_is_big_and_every_label_is_unique_per_file(self):
+        for rel in BOTH:
+            labels = [label for label, _fn, _needle in catalog(rel)]
+            self.assertEqual(len(labels), len(set(labels)), rel)
+            self.assertGreaterEqual(len(labels), 200, rel)
+
+    def test_the_real_files_pass_even_after_a_dump_and_reload_the_baseline_of_every_mutation(self):
+        for rel in BOTH:
+            self.assertEqual(check({rel: dump(real_data(rel))}), [], rel)
 
     def test_every_mutation_of_both_real_workflows_is_caught_by_wf16(self):
         count = 0
         for rel in BOTH:
-            original = real(rel)
-            self.assertEqual(check({rel: original}), [], rel)
-            for label, mutated, needle in self.mutations(rel):
+            original = real_data(rel)
+            for label, fn, needle in catalog(rel):
+                mutated = copy.deepcopy(original)
+                fn(mutated)
+                self.assertNotEqual(mutated, original, f"변이가 글을 바꾸지 못했다: {label}")
                 count += 1
                 with self.subTest(f"{Path(rel).name}: {label}"):
-                    self.assertNotEqual(mutated, original, f"변이가 글을 바꾸지 못했다: {label}")
-                    found = [finding for finding in check({rel: mutated}) if finding.check == "WF-16"]
+                    found = [finding for finding in check({rel: dump(mutated)}) if finding.check == "WF-16"]
                     self.assertTrue(found, f"살아남은 변이: {label}")
                     self.assertTrue(all(finding.level == "ERROR" for finding in found))
                     self.assertIn(needle, messages(found), f"{label}: 기대한 문구 '{needle}' 가 없다")
-        self.assertGreaterEqual(count, 2 * 70)
+        self.assertGreaterEqual(count, 2 * 200)
 
     def test_harmless_edits_still_pass(self):
-        """규칙이 지나치게 넓어 정상 편집까지 막지 않는지: 단계 이름·주석·env 순서·ref 를 main 글자로·fetch-depth 추가·시간 제한 변경은 통과한다."""
+        """규칙이 지나치게 넓어 정상 편집까지 막지 않는지: 이름·주석·ref 를 main 글자로·fetch-depth 추가·시간 제한 변경·판정 단계 env 값 추가·단계 조건은 통과한다."""
+        harmless = {
+            "발송 단계 이름": lambda d: step_of(d, "send", 2).__setitem__("name", "다른 이름"),
+            "판정 단계 이름": lambda d: step_of(d, "decide", 2).__setitem__("name", "다른 이름"),
+            "job 이름": lambda d: d["jobs"]["send"].__setitem__("name", "다른 job 이름"),
+            "판정 job 이름": lambda d: d["jobs"]["decide"].__setitem__("name", "다른 job 이름"),
+            "판정 job 의 ref 를 main 글자로": lambda d: step_of(d, "decide", 0)["with"].__setitem__("ref", "main"),
+            "발송 job 의 ref 를 main 글자로": lambda d: step_of(d, "send", 0)["with"].__setitem__("ref", "main"),
+            "fetch-depth 추가": lambda d: step_of(d, "send", 0)["with"].__setitem__("fetch-depth", 1),
+            "시간 제한 변경": lambda d: d["jobs"]["send"].__setitem__("timeout-minutes", 7),
+            "판정 job 시간 제한 변경": lambda d: d["jobs"]["decide"].__setitem__("timeout-minutes", 7),
+            "python 버전 변경": lambda d: step_of(d, "send", 1)["with"].__setitem__("python-version", "3.10"),
+            "concurrency 이름 변경": lambda d: d["concurrency"].__setitem__("group", d["concurrency"]["group"].replace("merge-", "merged-")),
+            "판정 단계 env 에 값 추가": lambda d: step_of(d, "decide", 2)["env"].__setitem__("NOTICE_EXTRA", "${{ github.run_id }}"),
+            "판정 단계에 조건": lambda d: step_of(d, "decide", 2).__setitem__("if", "github.event.workflow_run.head_branch != 'x'"),
+            "발송 job 의 needs 를 목록 하나로": lambda d: d["jobs"]["send"].__setitem__("needs", ["decide"]),
+        }
         for rel in BOTH:
-            text = real(rel)
-            harmless = {
-                "단계 이름": swap(text, "name: 텔레그램으로 보내기(켬 상태가 on 일 때만)", "name: 다른 이름"),
-                "주석 추가": "# 새 주석\n" + text,
-                "ref 를 main 글자로": swap(text, CHECKOUT_REF, "          ref: main\n"),
-                "fetch-depth 추가": swap(text, PERSIST, PERSIST + "          fetch-depth: 1\n"),
-                "시간 제한 변경": swap(text, "timeout-minutes: 10", "timeout-minutes: 7"),
-                "python 버전 변경": swap(text, "python-version: '3.12'", "python-version: '3.10'"),
-                "concurrency 이름 변경": swap(text, "group: merge-", "group: merged-"),
-                "단계 env 에 값 추가": swap(text, "          NOTICE_RUN_ID:", "          NOTICE_EXTRA: ${{ github.run_id }}\n          NOTICE_RUN_ID:"),
-            }
-            for label, mutated in harmless.items():
+            for label, fn in harmless.items():
+                data = real_data(rel)
+                fn(data)
                 with self.subTest(f"{Path(rel).name}: {label}"):
-                    self.assertNotEqual(mutated, text)
-                    self.assertEqual([finding.line() for finding in check({rel: mutated})], [])
+                    self.assertNotEqual(data, real_data(rel))
+                    self.assertEqual([finding.line() for finding in check({rel: dump(data)})], [])
+            with self.subTest(f"{Path(rel).name}: 주석 추가"):
+                self.assertEqual([finding.line() for finding in check({rel: "# 새 주석\n" + real(rel)})], [])
+
+    def test_the_text_of_the_real_files_is_checked_not_only_the_reloaded_data(self):
+        """YAML 글자 모양(들여쓰기·앵커·접은 문자열)이 검사를 피하지 못한다 — 진짜 글을 그대로 읽은 결과가 다시 쓴 사본과 같다."""
+        for rel in BOTH:
+            self.assertEqual(yaml.safe_load(real(rel)), yaml.safe_load(dump(real_data(rel))))
 
 
 class ProbeShapesTest(unittest.TestCase):
@@ -351,7 +457,7 @@ class ProbeShapesTest(unittest.TestCase):
         for key, value in (("container", "evil/image"), ("services", "{x: {image: y}}"), ("environment", "prod"), ("outputs", "{x: y}"), ("continue-on-error", "true"),
                            ("strategy", "{matrix: {k: [a]}}"), ("permissions", "{contents: write}"), ("env", "{X: y}"), ("defaults", "{run: {shell: bash}}")):
             with self.subTest(key):
-                text = self.HEAD + self.JOB + f"    {key}: {value}\n    steps:\n      - run: echo hi\n"
+                text = self.HEAD + self.JOB.replace("    steps:\n", f"    {key}: {value}\n    steps:\n") + "      - run: echo hi\n"
                 found = check({"x.yml": text})
                 self.assertIn(f"`{key}` 가 있습니다", messages(found))
 
@@ -368,6 +474,15 @@ class ProbeShapesTest(unittest.TestCase):
         self.assertNotIn("head_commit", joined)                 # 오류 문구가 저장소 글(식)을 되풀이하지 않는다 — 워크플로 명령 줄이 될 수 없다
         self.assertIn("주입", joined)
 
+    def test_an_unknown_file_with_two_jobs_gets_the_same_generic_rules_per_job(self):
+        """허용 목록 밖 파일이 job 을 둘 이상 가져도 일반 규칙(시크릿 위치·권한·run 식)은 job 마다 돈다 — 시크릿은 어느 job 이든 마지막 단계 env 의 텔레그램 이름이 아니면 오류."""
+        two = (self.HEAD + "jobs:\n  a:\n    name: 가\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    steps:\n      - run: echo hi\n"
+               "  b:\n    name: 나\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    needs: a\n    steps:\n      - run: echo hi\n        env:\n          X: ${{ secrets.OTHER }}\n")
+        found = check({"x.yml": two})
+        self.assertIn("시크릿(secrets.*)이 허용되지 않은 자리", messages(found))
+        ok = two.replace("          X: ${{ secrets.OTHER }}\n", "          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}\n")
+        self.assertNotIn("시크릿(secrets.*)", messages(check({"x.yml": ok})))                # 마지막 단계의 텔레그램 이름은 허용 목록 밖 파일에서는 자리만 본다(허용 목록 오류는 따로 난다)
+
 
 class LimitsOfTheRuleTest(unittest.TestCase):
     """이 규칙이 못 잡는 것 — 문서(G-A13)에 한계로 적은 것과 같다. 못 잡는 채로 두는 것이 맞는지(다른 규칙·사람 검토가 잡는지) 눈에 보이게 단언한다."""
@@ -377,15 +492,22 @@ class LimitsOfTheRuleTest(unittest.TestCase):
                 '    steps:\n      - run: echo hi\n')
         self.assertEqual(check({"x.yml": text}), [])
 
-    def test_an_if_condition_that_only_compares_a_workflow_run_value_is_not_blocked(self):
-        """`if:` 는 식을 평가할 뿐 글을 명령에 끼우지 않는다 — 막지 않는다(막으면 정상 조건까지 막는다). 위험한 것은 run·script 로 들어가는 치환이다."""
-        text = swap(real(READY), "        if: steps.decide.outputs.send == 'yes'\n", "        if: steps.decide.outputs.send == 'yes' && github.event.workflow_run.head_branch != 'x'\n")
-        self.assertEqual(check({READY: text}), [])
+    def test_a_step_condition_that_only_compares_a_workflow_run_value_is_not_blocked(self):
+        """단계의 `if:` 는 식을 평가할 뿐 글을 명령에 끼우지 않는다 — 막지 않는다(막으면 정상 조건까지 막는다). 위험한 것은 run·script 로 들어가는 치환이다. (발송 job 의 `if` 는 정해진 값 하나로 고정돼 있다.)"""
+        data = real_data(READY)
+        step_of(data, "decide", 2)["if"] = "github.event.workflow_run.head_branch != 'x'"
+        self.assertEqual(check({READY: dump(data)}), [])
 
     def test_the_rule_reads_the_target_names_only_from_its_own_table(self):
         """따라 도는 워크플로 이름이 그 파일의 실제 `name` 과 같은지는 이 규칙이 아니라 tests/test_merge_notice_workflows.py 가 대조한다(이 규칙은 자기 표와만 견준다)."""
         self.assertEqual(vr.WORKFLOW_RUN_ALLOWED[READY]["workflows"], [yaml.safe_load(real(".github/workflows/auto-pr.yml"))["name"]])
         self.assertEqual(vr.WORKFLOW_RUN_ALLOWED[CONFIRM]["workflows"], [yaml.safe_load(real(".github/workflows/guardrails.yml"))["name"]])
+
+    def test_the_decide_step_env_names_are_not_pinned_by_the_rule(self):
+        """판정 단계 env 의 이름 집합은 이 규칙이 고정하지 않는다(알려진 한계 — 판정 job 에는 시크릿이 없고 tests/test_merge_notice_workflows.py 가 정확한 집합을 고정한다)."""
+        data = real_data(CONFIRM)
+        step_of(data, "decide", 2)["env"]["PYTHONPATH"] = "/tmp/x"
+        self.assertEqual(check({CONFIRM: dump(data)}), [])
 
 
 if __name__ == "__main__":
