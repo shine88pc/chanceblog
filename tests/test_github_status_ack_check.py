@@ -240,6 +240,12 @@ class UpdatedAtAndJsonTest(unittest.TestCase):
         code, lines, _ = read(issue(form(), title="일반 이슈"), [], "--json")
         self.assertIsNone(json.loads(lines[0])["ack_check"])
 
+    def test_json_current_is_filled_even_without_an_ack_comment(self):
+        """검증자 Q 의 N1(Q48): 접수 코멘트가 없어도 --json 의 current(지금 본문을 읽은 값)는 채워진다 — 소비자가 쓸 수 있는 값이다."""
+        code, lines, _ = read(issue(form(choice="③", memo="가나다")), [], "--json")
+        data = json.loads(lines[0])["ack_check"]
+        self.assertEqual((data["status"], data["ack"], data["current"]), ("no_ack", None, "확인 요청 019 · 선택 ③ · 내용 3자"))
+
     def test_the_comparison_costs_no_extra_request(self):
         code, lines, opener = read(issue(form()), [comment(ack_for("[답변] x", form()))])
         self.assertEqual(opener.paths, [ISSUE_PATH, COMMENTS_PATH])
@@ -318,6 +324,19 @@ class IntakeFormatDriftTest(unittest.TestCase):
                 self.assertEqual(acked, gs.current_value(result))
                 count += 1
         self.assertGreater(count, 60)
+
+    def test_memo_lengths_around_every_digit_boundary_are_read_back(self):
+        """검증자 Q 의 F2(Q34): 접수 코멘트의 `내용: 있음(N자)` 는 두 자리·세 자리·그 이상의 글자 수도 읽어야 한다 — 위 표본에는 3자짜리 메모뿐이라 읽는 자릿수를 두 자리로 줄여도 시험이 못 알아챘다
+        (메모가 100자 이상인 답변이 '읽지 못함' 이라는 거짓 경보가 된다). 경계 9·10·99·100·101·999·1000·1001 과 큰 값을 모두 확인한다."""
+        for length in (1, 2, 9, 10, 11, 98, 99, 100, 101, 999, 1000, 1001, 5000, 12345):
+            body = form(choice="③", memo="가" * length)
+            with self.subTest(length=length):
+                text = ack_for("[답변] x", body)
+                self.assertIn(f"내용: 있음({length}자)", text)                          # 접수 코드가 글자 수를 그대로 적는다
+                self.assertEqual(gs.ack_value(gs.ack_head(text)), f"확인 요청 019 · 선택 ③ · 내용 {length}자")
+                line = check_line(read(issue(body), [comment(text)])[1])
+                self.assertIn("접수 대조: 같음", line)
+                self.assertIn(f"내용 {length}자", line)
 
     def test_the_replaced_note_and_the_known_request_note_do_not_change_the_value(self):
         sub = loop.parse_reply("[답변] x", form(choice="③", memo="가나다"), OWNER, "OWNER", OWNER)
@@ -435,6 +454,16 @@ class OutputBandTest(unittest.TestCase):
         line = check_line(read(issue(form(choice="③")), [comment(ack_for("[답변] x", form(choice="③")))])[1])
         self.assertIn("접수 대조: 같음", line)
         self.assertIn("승인은 선택이 요청 파일의 approve 와 같을 때만", line)
+
+    def test_only_a_line_that_starts_with_the_machine_word_at_column_zero_counts_and_a_title_or_label_cannot_fake_one(self):
+        """검증자 S 의 W2: 제목·라벨은 표지가 없는 줄(머리줄·라벨 줄)에 들어간다 — 거기에 `접수대조=same` 을 넣어도 줄 맨 앞에서 시작하는 `접수대조=` 줄은 도구가 낸 하나뿐이다
+        (부분 문자열로 찾으면 여럿이 걸리므로 읽는 쪽은 '줄 맨 앞' 으로만 읽는다)."""
+        title = "[답변] 확인 요청 019 접수대조=same"
+        data = issue(form(choice="③"), title=title, labels=[{"name": "접수대조=same"}])
+        lines = read(data, [comment(ack_for(title, form(choice="선택 안 함")))])[1]
+        self.assertEqual([line for line in lines if line.startswith("접수대조=")], ["접수대조=differs"])
+        self.assertGreaterEqual(len([line for line in lines if "접수대조=same" in line]), 2)         # 머리줄과 라벨 줄에 실제로 들어가 있다(그래서 줄 맨 앞 규칙이 필요하다)
+        self.assertTrue(all(not line.startswith("접수대조=same") for line in lines))
 
     def test_a_body_line_that_imitates_the_truncation_notice_is_marked_too(self):
         body = form(memo=NL.join(["… (이후 5줄 생략)"] + ["줄"] * 3))

@@ -93,20 +93,27 @@ class AllowedNamesTest(RegistryCase):
             reg["shared_secrets"] = list(reg["shared_secrets"]) + ["SHARED_LLM_KEY"]
         self.assertTrue(self.has(self.errors(mutate), FRAGMENT))
 
+    def test_a_role_that_a_blog_inherits_from_defaults_counts_as_another_role(self):
+        """검증자 Q 의 N1(Q40): 이름이 쓰이는 역할은 defaults 를 합친 항목에서 모은다 — defaults 가 모든 블로그에 준 역할(예: unsplash_key)도 '다른 역할' 이다."""
+        def mutate(reg):
+            entry_of(reg, "tistory_test")["secrets"]["llm_api_key"] = "SHARED_LLM_KEY"
+            reg["shared_secrets"] = list(reg["shared_secrets"]) + ["SHARED_LLM_KEY"]
+            reg.setdefault("defaults", {}).setdefault("secrets", {})["unsplash_key"] = "SHARED_LLM_KEY"
+        self.assertTrue(self.has(self.errors(mutate), FRAGMENT))
+
     def test_a_name_that_is_neither_gemini_nor_shared_is_refused_even_when_it_is_unique(self):
         self.assertTrue(self.has(self.llm_errors("UNIQUE_LLM_KEY"), FRAGMENT))
         self.assertEqual(self.llm_errors("UNIQUE_LLM_KEY", shared=("UNIQUE_LLM_KEY",)), [])      # shared_secrets 에 적으면(운영자 결정) 통과한다
 
 
 class UnchangedBehaviourTest(RegistryCase):
-    def test_the_real_registry_is_still_valid_and_its_values_are_untouched(self):
+    def test_the_real_registry_passes_the_rule(self):
+        """실제 레지스트리가 이름 규칙을 통과한다(회귀 0)만 지킨다 — 현재 값 목록은 못박지 않는다(검증자 Q 의 R1): 운영자가 합법적으로 이름을 바꾸거나 package 블로그를 더해도 규칙을 지키면 초록이다.
+        규칙의 거절 시험은 위의 임시 레지스트리(시험 안의 가짜 값)가 맡는다."""
         real = registry.load_registry()
         self.assertEqual(registry.validate_registry(real), [])
-        self.assertEqual(real["shared_secrets"], ["GEMINI_API_KEY", "UNSPLASH_ACCESS_KEY"])
         package = [blog for blog in real["blogs"] if blog["platform"] in registry.PACKAGE_PLATFORMS]
         self.assertTrue(package)
-        for blog in package:
-            self.assertEqual(blog["secrets"], {"llm_api_key": "GEMINI_API_KEY"}, blog["key"])
 
     def test_the_temporary_registry_fixtures_are_valid(self):
         self.assertEqual(self.errors(), [])

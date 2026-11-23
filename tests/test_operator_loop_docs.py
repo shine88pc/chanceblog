@@ -574,6 +574,8 @@ class OtherDocsAgreeTest(unittest.TestCase):
         self.assertIn("loop.parse_reply(", status)
         for own in ("def parse_target", "def parse_choice", "def parse_reply", "normalize_request_id", "REQUEST_INPUT_RE", "_TARGET_SPLIT_RE"):
             self.assertNotIn(own, status, own)                                                       # 상태 도구는 번호 읽기 규칙을 따로 만들지 않는다
+        for heading in ("### 대상번호", "### 선택", "### 요청 번호", "### 답변"):                      # 3차(검증자 Q 의 N2): 다른 이름으로 자기 양식 읽기를 새로 만들면 양식 제목 글자가 필요하다 — 상태 도구 소스에는 없다
+            self.assertNotIn(heading, status, heading)
         self.assertIn("loop.parse_target(", text_of(ROOT / "pipeline" / "telegram_inbox.py"))         # 두 번째로 대상번호를 읽는 곳은 접수 코드와 같은 함수를 부른다
         for rel in ("인수인계/요청함/README.md", "docs/AGENT_RUNBOOK.md"):
             self.assertIn("`scripts/github_status.py issue` 는 이슈 본문을 그대로 보여 주고 번호·선택은 접수 코드와 같은 함수(`parse_reply`)로 읽어 접수 코멘트와 견주니", rel_text(rel), rel)
@@ -604,7 +606,7 @@ class OtherDocsAgreeTest(unittest.TestCase):
         row = next(line for line in rel_text("docs/SECURITY_GUARDRAILS.md").splitlines() if line.startswith("| G-S9a |"))
         item = next(line for line in rel_text("docs/AGENT_RUNBOOK.md").splitlines() if line.startswith("7. **열린 뒤에 고쳐진 이슈**"))
         for label, text in (("G-S9a", row), ("RUNBOOK 7", item)):
-            for needle in ("표지가 붙", "`접수대조=", "표지 없는 도구 줄과", "위조일 수 있", "같음도 승인이 아니", "쓰기 권한자는 같은 login"):
+            for needle in ("표지가 붙", "`접수대조=", "표지 없는 도구 줄과", "위조일 수 있", "같음도 승인이 아니", "쓰기 권한자는 같은 login", "줄 맨 앞(0칸)에서 시작하는"):
                 self.assertIn(needle, text, (label, needle))
         self.assertIn("`" + chr(92) + "| ` 표지", row)             # 표 안이라 세로줄은 백슬래시로 가려 적는다
         self.assertIn("`| ` 표지", item)

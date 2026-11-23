@@ -5,11 +5,15 @@ kramdown(이 사이트의 마크다운 변환기)의 인라인 속성 목록 `�
 그 입력들이 AI 패치와 문구 그대로 바꾸기 모두에서 검사를 통과했다. 정의형 `{:이름:onclick="x"}`·`{::options …}` 꼴도 같다.
 고침: 앞 글자 조건을 '속성 이름의 일부가 아닌 모든 글자'(영숫자·밑줄·하이픈이 아닌 것)로 넓혔다. 이 PC 에 Ruby 가 없어 kramdown 의 실제 출력은 확인하지 못했다 — 추정에 기대 보수적으로 막는다.
 그 대가로 `?online=1` 같은 질의 문자열·`f(online=1)` 같은 코드 조각을 새로 넣는 수정도 거절한다(아래 시험이 이 한계를 적어 둔다). 개수가 늘 때만 막으므로 원문에 이미 있는 것은 그대로 둘 수 있다.
+3차(검증자 Q 의 F1·N3, S 의 W1): 규칙이 셋이 되었다 — 속성 목록 `{: … }` 안만 따로 세는 규칙. 질의 문자열이 가린 바꿔 쓰기(앞글의 `?online=1` 을 지우며 `x{:onclick=…}` 를 넣기)는 이제 막힌다(옛 정답은 '통과' 였고 의도해서 뒤집었다).
+따옴표 없는 값 꼴(`text{:OnClick=alert(1)}`·`{::options onclick="x" /}`)을 '막힘' 으로 단언한 곳은 kramdown 이 그 꼴을 속성으로 읽는지 렌더로 확인하지 못한(Ruby 없음) 과차단 쪽 단언이다 —
+근거가 되는 한 줄 확인(`**x**{:onclick="y"}` 와 `x{:onclick=y}` 의 렌더 출력)은 렌더러가 있는 곳에서 해야 한다.
 가짜 값만 쓴다.
 """
 import itertools
 import re
 import tempfile
+import time
 import unittest
 
 import _bootstrap  # noqa: F401
@@ -33,6 +37,7 @@ AI_AND_PLAIN = (True, False)           # AI 패치와 문구 그대로 바꾸기
 # 이벤트 핸들러 규칙 둘의 기준 복사본 — 시험이 직접 적은 것이라 코드가 바뀌어도 기준이 같이 움직이지 않는다(2차, 검증자 S 의 V1).
 OLD_HANDLER_RULE = re.compile(r"""[\s"'/]on[a-z]{3,}\s*=""", re.I)                  # 시작점의 규칙 그대로 — 앞 글자가 공백·따옴표·슬래시
 NEW_HANDLER_RULE = re.compile(r"(?<![A-Za-z0-9_-])on[a-z]{3,}\s*=", re.I)           # D-406 의 새 규칙 — 앞 글자가 속성 이름의 일부가 아니면
+IAL_HANDLER_RULE = re.compile(r"\{:[^}]{0,400}?(?<![A-Za-z0-9_-])on[a-z]{3,}\s*=", re.I)             # 3차(Q F1·S W1)의 세 번째 규칙 — 속성 목록 `{: … }` 안만 따로 센다(질의 문자열이 가릴 수 없게)
 
 
 def verify(before, after, ai):
@@ -262,12 +267,71 @@ class CountMaskingTest(unittest.TestCase):
                 self.assertTrue(handler_reasons(verify(before, before + "<b onclick=alert(1)>y</b>" + NL, ai)))            # 같은 줄이 아니라 덧붙임(m01)
                 self.assertEqual(handler_reasons(verify(before, BASE, ai)), [])                                           # 지우기만 하면 막지 않는다
 
-    def test_the_two_rules_are_kept_apart_and_the_old_one_is_exactly_the_original(self):
+    BUDGETS_OUTSIDE_LISTS = tuple(budget for budget in NEW_RULE_ONLY if not budget.startswith("{:"))          # 속성 목록 밖의 꼴(질의 문자열·코드 조각 …) — 속성 목록 안의 `{:onfoo=1}` 은 속성 목록 규칙의 예산이기도 하다
+    IAL_HANDLERS = ("x{:onclick=alert(1)}", '**x**{:onclick="alert(1)"}', "text{:onmouseover='a'}", '{:ref:onclick="x"}', '{:ref: onclick="x"}', 'x{:ONCLICK="a"}',
+                    'x{:o&#110;click="a"}', "x{:" + NL + 'onclick="a"}', "x{::options onclick=" + chr(34) + "x" + chr(34) + " /}")
+
+    def test_replacing_a_query_string_with_an_attribute_list_handler_is_blocked(self):
+        """3차(Q F1·S W1): 새 규칙은 질의 문자열(`?online=1`)과 속성 목록 핸들러(`{:onclick=…}`)를 한 숫자로 세므로 앞글의 질의 문자열을 지우며 속성 목록 핸들러를 넣으면 개수가 같아 통과했다
+        (V1 과 같은 구조 — 시작점 대비 약화는 아니지만 속성 목록은 이 묶음이 새로 막는 꼴이다). 속성 목록 `{: … }` 안만 따로 세는 규칙이 더해져 이제 막힌다. 이 시험(과 아래 모델 시험)의 옛 정답은 '통과' 였고
+        의도해서 '거절' 로 뒤집었다."""
+        self.assertEqual(len(self.BUDGETS_OUTSIDE_LISTS), len(NEW_RULE_ONLY) - 1)
+        for budget in self.BUDGETS_OUTSIDE_LISTS:
+            for handler in self.IAL_HANDLERS:
+                for ai in AI_AND_PLAIN:
+                    with self.subTest(budget=budget, handler=handler, ai=ai):
+                        self.assertTrue(handler_reasons(self.swap(budget, handler, ai)))
+
+    def test_several_budget_items_swapped_for_several_attribute_list_handlers_are_blocked(self):
+        for budget in self.BUDGETS_OUTSIDE_LISTS:
+            for ai in AI_AND_PLAIN:
+                with self.subTest(budget=budget, ai=ai):
+                    self.assertTrue(handler_reasons(self.swap(budget, "x{:onclick=alert(1)}", ai, repeat=3)))
+
+    def test_the_verifiers_b2_and_b3_examples_are_blocked_for_ai_patches_and_plain_replacements(self):
+        b2_before = BASE + "참고 링크: /status?online=1 입니다." + NL
+        b2_after = BASE + "참고 링크: /status?x=1 x{:onclick=alert(1)} 입니다." + NL
+        b3_before = BASE + "a /s?online=1 b /t?ongoing=2 c (onboard=3) d" + NL
+        b3_after = BASE + "a /s?x=1 x{:onclick=1} b /t?y=2 y{:onfocus=2} c (z=3) z{:onmouseover=3} d" + NL
+        for ai in AI_AND_PLAIN:
+            with self.subTest(ai=ai):
+                self.assertTrue(handler_reasons(verify(b2_before, b2_after, ai)))
+                self.assertTrue(handler_reasons(verify(b3_before, b3_after, ai)))
+
+    def test_plain_edits_around_the_query_string_are_still_fine(self):
+        before = BASE + "참고 링크: /status?online=1 입니다." + NL
+        for ai in AI_AND_PLAIN:
+            with self.subTest(ai=ai):
+                self.assertEqual(handler_reasons(verify(before, BASE + "참고 링크 없음" + NL, ai)), [])                      # 지우기만(B9)
+                self.assertEqual(handler_reasons(verify(before, before + "새 문장입니다." + NL, ai)), [])                    # 그대로 두고 문장을 더함(B10)
+                self.assertEqual(handler_reasons(verify(before, before.replace("입니다", "입니다요"), ai)), [])              # 질의 문자열 바깥만 고침
+                self.assertEqual(handler_reasons(verify(before, before + "{: .lead}" + NL, ai)), [])                        # 핸들러 없는 속성 목록
+
+    def test_a_handler_far_inside_a_long_attribute_list_is_still_blocked_by_the_old_rule_even_with_a_budget(self):
+        """속성 목록 안 판정은 `{:` 에서 400자까지만 본다(`{:` 만 잔뜩인 글에서 느려지지 않게). 그 뒤의 핸들러는 앞이 공백이라 옛 규칙이 센다 — 400자 너머로 숨겨도 막힌다."""
+        padded = "{:" + " .c" * 200 + ' onclick="x"}'
+        before = BASE + "참고 링크: /status?online=1 입니다." + NL
+        for ai in AI_AND_PLAIN:
+            with self.subTest(ai=ai):
+                self.assertTrue(handler_reasons(verify(before, BASE + "참고 링크: " + padded + " 입니다." + NL, ai)))
+
+    def test_many_unclosed_attribute_list_starts_are_not_slow(self):
+        """`{:` 만 만 번 되풀이한 글(닫는 `}` 없음)에서 속성 목록 규칙이 제곱 시간으로 느려지지 않는다(안쪽 탐색에 400자 상한)."""
+        text = "{:" * 10000
+        started = time.perf_counter()
+        IAL_HANDLER_RULE.findall(text)
+        for rx in (rx for name, rx in checks.DANGEROUS if "이벤트 핸들러" in name):
+            rx.findall(text)
+        self.assertLess(time.perf_counter() - started, 5)
+
+    def test_the_three_rules_are_kept_apart_and_the_old_one_is_exactly_the_original(self):
+        """3차: 규칙이 둘에서 셋으로 — 옛 규칙(시작점 그대로)·새 규칙(넓게 셈)·속성 목록 안만 따로 세는 규칙. 각 항목이 따로 개수를 비교한다."""
         rules = [rx for name, rx in checks.DANGEROUS if "이벤트 핸들러" in name]
-        self.assertEqual(len(rules), 2)
+        self.assertEqual(len(rules), 3)
         old = [rx for rx in rules if rx.pattern == OLD_HANDLER_RULE.pattern and rx.flags == OLD_HANDLER_RULE.flags]
         new = [rx for rx in rules if rx.pattern == NEW_HANDLER_RULE.pattern and rx.flags == NEW_HANDLER_RULE.flags]
-        self.assertEqual((len(old), len(new)), (1, 1))
+        ial = [rx for rx in rules if rx.pattern == IAL_HANDLER_RULE.pattern and rx.flags == IAL_HANDLER_RULE.flags]
+        self.assertEqual((len(old), len(new), len(ial)), (1, 1, 1))
 
     def test_one_reason_even_when_both_rules_count_the_same_text(self):
         for payload in (" <b onclick=alert(1)>y</b>", "x{:onclick=alert(1)}", "/status?online=1", ' <a href="#"onfocus=z>'):
@@ -275,16 +339,17 @@ class CountMaskingTest(unittest.TestCase):
                 with self.subTest(payload=payload, ai=ai):
                     self.assertEqual(len(handler_reasons(verify(BASE, BASE + payload + NL, ai))), 1)
 
-    def test_the_verdict_equals_the_two_rules_counted_separately_for_every_pair_of_small_edits(self):
-        """앞글과 뒤글을 조각 0–2개의 모든 조합으로 만들어(2116쌍 × 두 경로) '막힘 ⇔ 옛 규칙이나 새 규칙 중 하나라도 개수가 는다' 를 확인한다 — 옛 규칙이 막던 것은 하나도 빠지지 않고(단조),
-        새 규칙은 따로 센다. 기준은 위의 기준 복사본이고 엔티티 풀기는 코드의 것을 쓴다."""
+    def test_the_verdict_equals_the_three_rules_counted_separately_for_every_pair_of_small_edits(self):
+        """앞글과 뒤글을 조각 0–2개의 모든 조합으로 만들어(2116쌍 × 두 경로) '막힘 ⇔ 옛 규칙·새 규칙·속성 목록 규칙 중 하나라도 개수가 는다' 를 확인한다 — 옛 규칙이 막던 것은 하나도 빠지지 않고(단조),
+        새 규칙과 속성 목록 규칙은 따로 센다. **3차에 기대값이 의도해서 뒤집혔다**: 앞글의 `/status?online=1` 을 지우며 `x{:onclick=alert(1)}` 를 넣는 쌍은 새 규칙의 개수가 같아 옛 정답이 '통과' 였고
+        (Q F1·S W1 이 이것을 정답으로 못박았다고 지적), 지금은 속성 목록 규칙이 늘어 '막힘' 이다. 기준은 위의 기준 복사본이고 엔티티 풀기는 코드의 것을 쓴다."""
         subsets = [()] + [(part,) for part in FRAGMENTS] + list(itertools.combinations(FRAGMENTS, 2))
         self.assertEqual(len(subsets), 46)
 
         def text(parts):
             return BASE + "".join("줄 " + part + NL for part in parts)
 
-        old_rises_seen = new_only_seen = 0
+        old_rises_seen = new_only_seen = masked_seen = 0
         for before_parts in subsets:
             before = text(before_parts)
             decoded_before = checks._decode(before)
@@ -293,13 +358,17 @@ class CountMaskingTest(unittest.TestCase):
                 decoded_after = checks._decode(after)
                 old_rises = len(OLD_HANDLER_RULE.findall(decoded_after)) > len(OLD_HANDLER_RULE.findall(decoded_before))
                 new_rises = len(NEW_HANDLER_RULE.findall(decoded_after)) > len(NEW_HANDLER_RULE.findall(decoded_before))
+                ial_rises = len(IAL_HANDLER_RULE.findall(decoded_after)) > len(IAL_HANDLER_RULE.findall(decoded_before))
                 old_rises_seen += old_rises
                 new_only_seen += new_rises and not old_rises
+                masked_seen += ial_rises and not old_rises and not new_rises          # 속성 목록만 늘고 넓은 규칙의 개수는 그대로(앞글의 질의 문자열이 가린 것) — 옛 정답은 '통과'
                 for ai in AI_AND_PLAIN:
                     got = bool(handler_reasons(verify(before, after, ai)))
-                    self.assertEqual(got, old_rises or new_rises, (before_parts, after_parts, ai, "old" if old_rises else "new" if new_rises else "none"))
-        self.assertGreater(old_rises_seen, 300)            # 시험이 비어 있지 않다: 옛 규칙이 막는 쌍도, 새 규칙만 막는 쌍도 충분히 있다
+                    which = "old" if old_rises else "new" if new_rises else "ial" if ial_rises else "none"
+                    self.assertEqual(got, old_rises or new_rises or ial_rises, (before_parts, after_parts, ai, which))
+        self.assertGreater(old_rises_seen, 300)            # 시험이 비어 있지 않다: 옛 규칙이 막는 쌍도, 새 규칙만 막는 쌍도, 속성 목록 규칙만 막는 쌍(뒤집힌 것)도 충분히 있다
         self.assertGreater(new_only_seen, 50)
+        self.assertGreater(masked_seen, 10)
 
 
 @NEEDS_YAML

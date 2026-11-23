@@ -501,6 +501,25 @@ class WholeContextReadTest(WorkflowCase):
 
 
 @NEEDS_YAML
+class SetOutputAndMatrixNameTest(WorkflowCase):
+    """검증자 Q 의 F2·N1(Q31·Q32): 새 코드에 시험이 못박지 않은 갈래 둘."""
+
+    def test_the_old_set_output_command_makes_a_step_output_like_github_output(self):
+        """옛 출력 명령 `::set-output name=t::$X` 도 `$GITHUB_OUTPUT` 과 같이 단계 출력을 만든다 — job·워크플로 env 의 신뢰할 수 없는 값을 셸 변수로 읽어 내보내는 단계는 입력을 받은 단계다."""
+        run = '- id: a\n  run: echo "::set-output name=t::$X"\n- run: echo ${{ steps.a.outputs.t }}\n'
+        self.assertEqual(self.levels(workflow(job(run, env="env:\n  X: " + TITLE))), ["ERROR"])                      # job env
+        self.assertEqual(self.levels(workflow(job(run), top="env:\n  X: " + TITLE + "\n")), ["ERROR"])               # 워크플로 env
+        self.assertEqual(self.levels(workflow(job(run, env="env:\n  X: fixed"))), ["WARN"])                        # 고정 값을 내보내면 출처를 알 수 없는 출력일 뿐 — 경고
+        quiet = '- id: a\n  run: echo "hi"\n- run: echo ${{ steps.a.outputs.t }}\n'
+        self.assertEqual(self.levels(workflow(job(quiet, env="env:\n  X: " + TITLE))), ["WARN"])                    # 출력 명령이 없으면 입력을 받은 단계가 아니다
+
+    def test_a_matrix_key_named_env_is_not_the_env_context(self):
+        """`matrix.env.name` 의 `env.name` 은 env 컨텍스트가 아니라 matrix 키 `env` 의 값이다 — 점 뒤의 env 는 컨텍스트가 아니라 지적이 없다."""
+        strategy = "strategy:\n  matrix:\n    env:\n      - {name: a}\n      - {name: b}"
+        self.assertEqual(self.levels(workflow(job("- run: echo ${{ matrix.env.name }}\n", strategy=strategy))), [])
+
+
+@NEEDS_YAML
 class MatrixDirectValueTest(WorkflowCase):
     """검증자 S 의 V4(b) — matrix 값에 신뢰할 수 없는 식을 직접 적은 경우는 출처를 아니 경고가 아니라 오류다."""
 
