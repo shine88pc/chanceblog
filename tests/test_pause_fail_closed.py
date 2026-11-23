@@ -45,7 +45,7 @@ NBSP_TRUE = chr(0xA0) + "true" + chr(0xA0)                                      
 EXTRA_ON = ("TrUe", " YES ", "\ton\n", "ON", "1 ", NBSP_TRUE, "\r\ntrue\r\n")
 EXTRA_OFF = ("False", " no ", "OFF", "\n", "  ", "\t", "0 ", " Off\r\n")
 EXTRA_UNKNOWN = ("disabled", "none", "null", "maybe", "on1", "1 1", "-1", "0.0", "yes please", "enable", "n", "f", "2.0", "01", "tru", "truee ", "paused ", FULLWIDTH_TRUE, ZERO_WIDTH_TRUE, BOM_TRUE,
-                 "true,false", "true;", "'true'", '"true"', "off off", "true" + chr(0) + "x")
+                 "true,false", "true;", "'true'", '"true"', "off off")      # NUL 글자가 든 값은 환경 변수에 넣을 수 없는 플랫폼(리눅스)이 있어 읽는 곳 시험이 아니라 classify 시험에서만 본다
 ALL_ON = PROBE_ON + EXTRA_ON
 ALL_OFF = PROBE_OFF + EXTRA_OFF
 ALL_UNKNOWN = PROBE_UNKNOWN + EXTRA_UNKNOWN
@@ -88,6 +88,13 @@ class ValueTableTest(unittest.TestCase):
         self.assertEqual(pause.state({pause.VAR: None}), pause.OFF)
         self.assertFalse(pause.is_paused({}))
         self.assertFalse(pause.is_paused({pause.VAR: None}))
+
+    def test_a_value_with_an_embedded_nul_is_unknown_and_pauses(self):
+        """환경 변수에는 넣을 수 없는 값이지만(리눅스) 함수는 사전 값을 받으므로 정지로 읽는다."""
+        for value in ("true" + chr(0) + "x", chr(0), "on" + chr(0), chr(0) + "off"):
+            with self.subTest(value=value):
+                self.assertEqual(pause.classify(value), pause.UNKNOWN)
+                self.assertTrue(pause.is_paused({pause.VAR: value}))
 
     def test_non_string_values_follow_their_text(self):
         for value, expected in ((1, pause.ON), (True, pause.ON), (0, pause.OFF), (False, pause.OFF), (2, pause.UNKNOWN), (1.5, pause.UNKNOWN)):
