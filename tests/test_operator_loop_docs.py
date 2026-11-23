@@ -566,15 +566,50 @@ class OtherDocsAgreeTest(unittest.TestCase):
         for rel in self.CURRENT_DOCS:
             self.assertNotIn(rel, found, rel)                                  # 현행 안내는 허용 목록과 겹치지 않는다
 
-    def test_the_target_number_is_read_by_one_function_and_the_status_tool_only_prints_the_issue_text(self):
-        """문서(README·AGENT_RUNBOOK)는 `scripts/github_status.py` 가 이슈 본문을 그대로 보여 줄 뿐 대상번호를 읽지 않는다고 말하고, 텔레그램 수신은 접수 코드와 같은 함수로 읽는다고 한다 —
-        누가 상태 도구에 번호 읽기를 더하면(규칙이 둘이 되면) 이 시험이 알린다: 그때는 같은 함수(`operator_loop.parse_target`)를 쓰게 하고 시험·문서를 함께 고친다."""
+    def test_the_target_number_is_read_by_one_function_and_the_status_tool_uses_that_same_function(self):
+        """문서(README·AGENT_RUNBOOK)는 `scripts/github_status.py issue` 가 번호·선택을 접수 코드와 같은 함수(`parse_reply`)로 읽어 접수 코멘트와 견준다고 말하고, 텔레그램 수신도 같은 함수(`parse_target`)로 읽는다 —
+        번호 읽기 규칙은 하나뿐이다. 이 시험은 처음에는 상태 도구가 번호를 읽지 않는 것을 지켰고 '더하는 사람은 같은 함수를 쓰고 시험·문서를 함께 고친다' 고 적었다 —
+        독립 감사 BA-S1-3(결함 D-408)이 접수 대조를 더하며 그 절차를 따랐다(상태 도구는 규칙을 따로 만들지 않고 접수 코드의 함수를 부른다)."""
         status = text_of(ROOT / "scripts" / "github_status.py")
-        for word in ("대상번호", "parse_target", "parse_reply", "operator_loop"):
-            self.assertNotIn(word, status, word)
+        self.assertIn("loop.parse_reply(", status)
+        for own in ("def parse_target", "def parse_choice", "def parse_reply", "normalize_request_id", "REQUEST_INPUT_RE", "_TARGET_SPLIT_RE"):
+            self.assertNotIn(own, status, own)                                                       # 상태 도구는 번호 읽기 규칙을 따로 만들지 않는다
+        for heading in ("### 대상번호", "### 선택", "### 요청 번호", "### 답변"):                      # 3차(검증자 Q 의 N2): 다른 이름으로 자기 양식 읽기를 새로 만들면 양식 제목 글자가 필요하다 — 상태 도구 소스에는 없다
+            self.assertNotIn(heading, status, heading)
         self.assertIn("loop.parse_target(", text_of(ROOT / "pipeline" / "telegram_inbox.py"))         # 두 번째로 대상번호를 읽는 곳은 접수 코드와 같은 함수를 부른다
         for rel in ("인수인계/요청함/README.md", "docs/AGENT_RUNBOOK.md"):
-            self.assertIn("`scripts/github_status.py` 는 이슈 본문을 그대로 보여 줄 뿐 번호를 읽지 않으니", rel_text(rel), rel)
+            self.assertIn("`scripts/github_status.py issue` 는 이슈 본문을 그대로 보여 주고 번호·선택은 접수 코드와 같은 함수(`parse_reply`)로 읽어 접수 코멘트와 견주니", rel_text(rel), rel)
+            self.assertNotIn("번호를 읽지 않으니", rel_text(rel), rel)
+
+    def test_the_edit_after_the_ack_limit_and_its_compensating_rule_are_in_the_four_places_the_ai_reads(self):
+        """독립 감사 BA-S1-3(결함 D-408): 접수 알림이 휴대폰에 가므로 위조를 알아챈다는 G-S9 ③ 의 약속은 이슈를 '여는' 때에만 걸린다 — 한계와 보완 통제(접수 코멘트가 되풀이한 값과 지금 본문이 같을 때만 승인)가
+        규칙 문서의 보충 행 G-S9a(G-S9 행은 해시로 못박혀 있어 고치지 않는다 — 시험 test_telegram_inbox_docs)와 AI 가 읽는 세 곳(AGENTS.md·AGENT_RUNBOOK J2·요청함 README)에 모두 적혀 있다.
+        `edited` 트리거는 제안일 뿐이다(워크플로의 트리거는 WF-14 와 시험이 따로 못박는다)."""
+        security = rel_text("docs/SECURITY_GUARDRAILS.md")
+        row = next(line for line in security.splitlines() if line.startswith("| G-S9a |"))
+        for needle in ("이슈를 '여는' 때에만 성립한다", "나중에 고쳐지면", "접수 코멘트(봇)가 되풀이한 대상번호·선택과 지금 본문을 읽은 값이 같을 때만 승인으로 읽고",
+                       "scripts/github_status.py issue", "`updated_at`", "`edited`", "트리거를 `opened` 하나로 못박고 있어", "G-S9 행은 해시로 못박혀 있어"):
+            self.assertIn(needle, row, needle)
+        self.assertLess(row.index("위조 이슈가 열려도"), row.index("이슈를 '여는' 때에만 성립한다"))          # 약속을 먼저 옮겨 적고 그 한계를 말한다
+        self.assertEqual(len([line for line in security.splitlines() if line.startswith("| G-S9a |")]), 1)
+        self.assertLess(security.index("\n| G-S9 |"), security.index("\n| G-S9a |"))                         # 보충 행은 G-S9 바로 뒤쪽에 있다
+        self.assertLess(security.index("\n| G-S9a |"), security.index("\n| G-S10 |"))
+        for rel, needle in (("AGENTS.md", "**열린 뒤에 고쳐진 소유자 이슈**"), ("docs/AGENT_RUNBOOK.md", "7. **열린 뒤에 고쳐진 이슈**"), ("인수인계/요청함/README.md", "7. **열린 뒤에 고쳐진 이슈**")):
+            text = rel_text(rel)
+            self.assertEqual(text.count(needle), 1, (rel, needle))
+            for word in ("접수 코멘트(봇)가 되풀이한 대상번호·선택과 지금 본문을 읽은 값이 같을 때만", "접수 대조", "결함 D-408"):
+                self.assertIn(word, text, (rel, word))
+
+    def test_the_forgery_and_known_limit_sentences_of_the_status_tool_output_are_in_the_security_row_and_the_runbook(self):
+        """검증자 S 의 V2·V7·V8(결함 D-408): 본문·코멘트 줄의 `| ` 표지와 기계가 읽는 한 줄 `접수대조=…`, '같음도 승인이 아니다', '쓰기 권한자는 같은 login 의 워크플로로 봇 코멘트도 만들 수 있다' 가
+        규칙 행(G-S9a)과 런북 J2 7번에 적혀 있다."""
+        row = next(line for line in rel_text("docs/SECURITY_GUARDRAILS.md").splitlines() if line.startswith("| G-S9a |"))
+        item = next(line for line in rel_text("docs/AGENT_RUNBOOK.md").splitlines() if line.startswith("7. **열린 뒤에 고쳐진 이슈**"))
+        for label, text in (("G-S9a", row), ("RUNBOOK 7", item)):
+            for needle in ("표지가 붙", "`접수대조=", "표지 없는 도구 줄과", "위조일 수 있", "같음도 승인이 아니", "쓰기 권한자는 같은 login", "줄 맨 앞(0칸)에서 시작하는"):
+                self.assertIn(needle, text, (label, needle))
+        self.assertIn("`" + chr(92) + "| ` 표지", row)             # 표 안이라 세로줄은 백슬래시로 가려 적는다
+        self.assertIn("`| ` 표지", item)
 
     def test_the_task_requests_readme_rule_for_the_request_form_names_the_scope_choices_and_says_it_is_not_an_approval(self):
         """작업요청 README 규칙 7(양식 `[요청]` 이슈를 어떻게 다루나)은 규칙 3 의 문장과 따로 한 번 더 `[요청]` 은 승인이 아니라고 적고, 진행 범위의 두 선택지(코드의 값)를 말한다."""

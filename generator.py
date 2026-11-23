@@ -236,8 +236,9 @@ CALL_LOG = CallLog(label="chance", purpose="post", out=print, secrets=(API_KEY,)
 
 
 def _scrub(text):
-    """로그·예외 문구에 쓰기 전에 비밀을 가린다: 비밀 패턴(mask) + 프로젝트 번호 + 이 실행의 Gemini 키(글자 그대로)."""
-    return scrub(text, (API_KEY,))
+    """로그·예외 문구에 쓰기 전에 비밀을 가린다: 비밀 패턴(mask) + 프로젝트 번호 + 이 실행의 Gemini 키·Unsplash 키(글자 그대로 — 6자 이상일 때만, scrub 의 규칙). Unsplash 접근 키는 접두사가 없어 모양 패턴이 없으므로
+    정확값이 유일한 방어선이다(독립 감사 BA-S1-10, 결함 D-411)."""
+    return scrub(text, (API_KEY, UNSPLASH_KEY))
 
 
 def _accepts_config(generate):
@@ -460,7 +461,7 @@ def search_unsplash(query, per_page=15):
               "- 403/429면 시간당 호출 한도 초과일 수 있습니다.")
         return []
     except Exception as exc:
-        print(f"Unsplash 호출 실패 (query={query!r}): {_one_line(exc, 200)}")
+        print(f"Unsplash 호출 실패 (query={query!r}): {_one_line(_scrub(exc), 200)}")
         return []
     _note_unsplash_rate(headers)
 
@@ -515,7 +516,7 @@ def fetch_pool_photo(pool_url):
         print(f"Unsplash API 오류 {exc.code} (사진 조회) - 403/429면 시간당 호출 한도 초과일 수 있습니다.")
         return None
     except Exception as exc:
-        print(f"Unsplash 호출 실패 (사진 조회): {_one_line(exc, 200)}")
+        print(f"Unsplash 호출 실패 (사진 조회): {_one_line(_scrub(exc), 200)}")
         return None
     _note_unsplash_rate(headers)
     skipped = {}

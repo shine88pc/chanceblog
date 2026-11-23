@@ -230,10 +230,9 @@ class EngineeringGuideAndRegisterTest(unittest.TestCase):
 
     def test_the_defect_rows_use_only_the_numbers_this_bundle_may_use(self):
         text = doc("docs/DEFECT_REGISTER.md")
-        numbers = sorted({int(number) for number in re.findall(r"^\| \*\*D-([0-9]{3})\*\* \|", text, re.M) if int(number) >= 398})
-        self.assertEqual(numbers[0], 398)
-        self.assertTrue(all(398 <= number <= 405 for number in numbers), numbers)               # 이 묶음의 번호 구간은 D-398–D-405 (D-406 부터는 다른 묶음)
-        self.assertEqual(numbers, list(range(398, 398 + len(numbers))))                         # 빠진 번호가 없다
+        # 이 묶음의 번호 구간은 D-398–D-405 — D-406 부터는 다른 묶음(BA1 등)이 쓴다. 통합 뒤에도 이 묶음의 여덟 행이 빠짐없이 있고 형식이 맞는지만 본다(구간 밖 번호는 이 시험이 보지 않는다).
+        numbers = sorted({int(number) for number in re.findall(r"^\| \*\*D-([0-9]{3})\*\* \|", text, re.M) if 398 <= int(number) <= 405})
+        self.assertEqual(numbers, list(range(398, 406)))                                        # 여덟 행 모두 있고 빠진 번호가 없다
         for number in numbers:
             line = row(text, f"| **D-{number}** |")
             self.assertEqual(line.count("|"), 7, number)
