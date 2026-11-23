@@ -664,6 +664,7 @@ class IssueEditPauseTest(unittest.TestCase):
         self.assertEqual(len(self.llm_calls), 1)
 
     def test_every_truthy_value_the_other_pipelines_accept_pauses_and_the_falsy_ones_do_not(self):
+        """이름은 옛 그대로지만 지금은 '알 수 없는 값(pause·2 등)도 정지로 읽는다' 까지 본다(BP-S1-3·D-412, 2차 검증 참고-2) — 꺼짐은 0·false·no·off·비움뿐이다."""
         for value in sorted(run_mod._TRUE) + [" TRUE ", "On", "YES", "1 "]:
             with self.subTest(value=value):
                 self.assertEqual(self.go(self.literal_issue(), pause=value).status, "paused")

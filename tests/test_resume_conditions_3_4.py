@@ -73,7 +73,7 @@ class ResumeConditions34ValuesTest(unittest.TestCase):
         for needle in ("`chance.quality_gate`", "`hold`", "`chance.content_source`", "`facts`", "`chance.source_policy`", "`allowlist`", "`chance.languages`", '`["ko"]`',
                        "잠금이 보증하지 않", "tests/test_resume_conditions_3_4.py", "운영자만", "`PIPELINE_PAUSE`"):
             self.assertIn(needle, section, needle)
-        self.assertNotIn("~", section)                                  # 문서 규칙: ASCII 물결표 금지(숫자 범위는 en dash)
+        self.assertNotIn(chr(126), section)                                  # 문서 규칙: ASCII 물결표 금지(숫자 범위는 en dash)
         self.assertIsNone(re.search(r"https?://", section))             # 문서 규칙: 링크 금지
 
     def test_each_row_of_the_four_values_says_the_lock_does_not_pin_it(self):
