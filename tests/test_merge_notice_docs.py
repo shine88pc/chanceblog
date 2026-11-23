@@ -222,6 +222,31 @@ class EngineeringGuideAndRegisterTest(unittest.TestCase):
         self.assertIn("WF-16", row(text, "| **D-400** |"))
 
 
+class PublishPathsTableTest(unittest.TestCase):
+    """공개 경로 문서의 워크플로 전수표(docs/PUBLISH_PATHS.md §3)에 두 워크플로가 읽기 전용 한 줄로 올라 있다 — 쓰기 길 검토표(tests/test_publish_paths.py ALLOWED)와 같은 말."""
+
+    PREFIX = "| `merge-ready-notice.yml`, `merge-confirm-notice.yml` |"
+
+    def test_the_two_workflows_have_one_read_only_row_in_the_workflow_table(self):
+        text = doc("docs/PUBLISH_PATHS.md")
+        line = row(text, self.PREFIX)
+        self.assertEqual(text.count(self.PREFIX), 1)
+        self.assertEqual(line.count("|"), 8)                                                    # 일곱 칸(파일·경로 번호·무엇을·트리거·쓰기·승인·공개) — 칸 안의 세로선은 쓰지 않는다
+        for needle in ("읽기 전용", "pipeline/auto_notice.json", "`off`", "`workflow_run`", "**없음**", "`gh pr merge` 없음", "내려받지도 실행하지도 않는다", "| 아니오 |"):
+            self.assertIn(needle, line, needle)
+        self.assertNotIn(TILDE, line)
+        self.assertNotIn("{{", line)
+        self.assertLess(text.index("| `guardrails.yml`, `ai-request.yml`, `telegram-test.yml` |"), text.index(self.PREFIX))
+        self.assertLess(text.index(self.PREFIX), text.index("| `chance-shadow.yml` |"))
+
+    def test_the_review_table_of_the_write_paths_knows_both_files_with_the_one_python_entry_and_no_write_signal(self):
+        import test_publish_paths as table                                                      # 쓰기 길 검토표 — 두 워크플로는 파이썬 진입점 하나뿐이고 쓰기 신호가 하나도 없다
+        for name in ("merge-ready-notice.yml", "merge-confirm-notice.yml"):
+            self.assertEqual(table.ALLOWED[name], table.entry(py={"pipeline.auto_notice"}), name)
+            self.assertEqual(table.COUNTS[name], {}, name)
+            self.assertEqual(table.signature(table.read(name)), table.ALLOWED[name], name)
+
+
 class ModuleAndWorkflowTextTest(unittest.TestCase):
     def test_the_module_docstring_states_the_rules_the_tests_hold(self):
         text = an.__doc__
