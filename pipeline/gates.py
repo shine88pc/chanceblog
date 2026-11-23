@@ -359,7 +359,7 @@ def body_risk_hit(text, profile):
     return None, None
 
 
-OVERSIZE_FACTOR = 2     # 본문이 프로필 length.max_chars 의, 또는 제목이 title.max_chars 의 이 배수를 넘으면 check_post 는 정규식·유사도 검사를 돌리지 않고 곧바로 탈락시킨다(BP-S1-5·BP2S-1, D-415·D-422)
+OVERSIZE_FACTOR = 2     # 본문이 프로필 length.max_chars 의, 제목이 title.max_chars 의, 라벨 하나가 labels.max_chars 의 이 배수를 넘으면 check_post 는 정규식·유사도 검사를 돌리지 않고 곧바로 탈락시킨다(BP-S1-5·BP2S-1·3차, D-415·D-422·D-425)
 
 
 def _title_len_reason(title, t_cfg):
@@ -373,6 +373,15 @@ def _len_long_reason(n, l_cfg):
     return f"[LEN_LONG] 본문 {n}자 (최대 {l_cfg['max_chars']}자)"
 
 
+def _labels_len_reason(labels, lab_cfg):
+    """라벨 개수·길이 사유 문장(정상 경로와 길이 초과 조기 반환이 같은 문장을 쓴다), 허용이면 None. 개수가 틀리면 개수 사유 하나이고 길이 사유는 그 뒤에 붙지 않는다(옛 elif 그대로)."""
+    if not lab_cfg.get("min", 1) <= len(labels) <= lab_cfg.get("max", 5):
+        return f"[LABELS] 라벨 {len(labels)}개 (허용 {lab_cfg.get('min', 1)}~{lab_cfg.get('max', 5)}개)"
+    if any(len(x) > lab_cfg.get("max_chars", 20) for x in labels):
+        return "[LABELS] 너무 긴 라벨이 있음"
+    return None
+
+
 def _sanitized_warnings(sanitize_stats):
     removed = {k: v for k, v in (sanitize_stats or {}).items() if v}
     return [f"[SANITIZED] HTML 정화로 제거됨: {removed}"] if removed else []
@@ -384,7 +393,9 @@ def check_post(post, profile, recent_titles=(), other_titles=(), sanitize_stats=
     본문이 길이 한도(length.max_chars)의 두 배(OVERSIZE_FACTOR)를 넘으면 어차피 탈락이므로 [LEN_LONG](제목 길이가 틀렸으면 [TITLE_LEN] 이 앞에)만 쌓고 금지 표현 정규식·유사도 검사는 돌리지 않는다 —
     정규식은 같은 종류 글자가 길게 이어지면 글 길이의 제곱으로 느려진다(감사 BP-S1-5: 숫자 20,000자 48초). 한도 이하·두 배 이하의 글은 이전과 같은 전체 검사를 받는다.
     제목도 같다(2차 검증 BP2S-1): 제목이 title.max_chars 의 두 배를 넘으면 [TITLE_LEN] 하나(본문도 두 배를 넘었으면 그 뒤에 [LEN_LONG])만 쌓고 같은 검사를 건너뛴다 —
-    제목 전용 정규식과 제목 + 본문에 거는 정규식이 제목 쪽의 긴 같은 글자 연속에서도 제곱으로 느려지기 때문이다(제목 숫자 20,000자 53.8초). 두 배 이하의 제목은 이전과 같은 전체 검사를 받는다."""
+    제목 전용 정규식과 제목 + 본문에 거는 정규식이 제목 쪽의 긴 같은 글자 연속에서도 제곱으로 느려지기 때문이다(제목 숫자 20,000자 53.8초). 두 배 이하의 제목은 이전과 같은 전체 검사를 받는다.
+    라벨도 같다(3차): 라벨 하나가 labels.max_chars 의 두 배를 넘으면 그 길이 사유 한 줄([LABELS], 개수가 틀렸으면 개수 사유)을 마지막에 쌓고 같은 검사를 건너뛴다 — 라벨 금지 주제 정규식(topic_allowed)이
+    같은 종류 글자의 긴 연속에서 제곱으로 느려지기 때문이다(한국어 프로필 숫자 3만 자 라벨 49–51초). 한도 키가 없으면 정상 경로와 같은 기본값 20 을 쓴다. 두 배 이하의 라벨은 이전과 같은 전체 검사를 받는다."""
     reasons, warnings = [], []
     title = post.get("title", "")
     content = post.get("content", "")
@@ -394,16 +405,22 @@ def check_post(post, profile, recent_titles=(), other_titles=(), sanitize_stats=
 
     t_cfg = profile.get("title", {})
     l_cfg = profile.get("length", {})
+    lab_cfg = profile.get("labels", {})
     max_len = l_cfg.get("max_chars")
     max_title = t_cfg.get("max_chars", 200)
+    max_label = lab_cfg.get("max_chars", 20)
     body_oversize = isinstance(max_len, (int, float)) and n > max_len * OVERSIZE_FACTOR
     title_oversize = isinstance(max_title, (int, float)) and len(title) > max_title * OVERSIZE_FACTOR
-    if body_oversize or title_oversize:
+    label_oversize = (isinstance(max_label, (int, float)) and isinstance(labels, (list, tuple))
+                      and any(isinstance(x, str) and len(x) > max_label * OVERSIZE_FACTOR for x in labels))
+    if body_oversize or title_oversize or label_oversize:
         reason = _title_len_reason(title, t_cfg)
         if reason:
             reasons.append(reason)
         if body_oversize:
             reasons.append(_len_long_reason(n, l_cfg))
+        if label_oversize:
+            reasons.append(_labels_len_reason(labels, lab_cfg))
         return GateResult(ok=False, reasons=reasons, warnings=_sanitized_warnings(sanitize_stats))
 
     reason = _title_len_reason(title, t_cfg)
@@ -457,11 +474,9 @@ def check_post(post, profile, recent_titles=(), other_titles=(), sanitize_stats=
         reasons.append("[BODY_TOPIC] 본문에 질병·치료·약·보충제·진단·임신·영유아·체중 감량 관련 표현이 있음: "
                        f"'{one_line(word, 40)}' — 그 문장을 빼고 일상 습관 팁만 쓴다(전문가 상담 안내 문장은 괜찮다)")
 
-    lab_cfg = profile.get("labels", {})
-    if not lab_cfg.get("min", 1) <= len(labels) <= lab_cfg.get("max", 5):
-        reasons.append(f"[LABELS] 라벨 {len(labels)}개 (허용 {lab_cfg.get('min', 1)}~{lab_cfg.get('max', 5)}개)")
-    elif any(len(x) > lab_cfg.get("max_chars", 20) for x in labels):
-        reasons.append("[LABELS] 너무 긴 라벨이 있음")
+    reason = _labels_len_reason(labels, lab_cfg)
+    if reason:
+        reasons.append(reason)
     banned_label = next((x for x in labels if not topic_allowed(x, profile)), None)
     if banned_label is not None:  # 주제 가드레일 (b): 라벨. 어떤 라벨이 걸렸는지 알려 줘야 모델이 그 라벨만 바꾼다
         reasons.append(f"[LABELS] 금지 주제 라벨이 있음: '{one_line(banned_label, 30)}'")
