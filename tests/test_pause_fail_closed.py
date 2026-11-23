@@ -34,6 +34,11 @@ from test_run import make_root  # noqa: E402
 
 ROOT = _bootstrap.ROOT
 
+try:
+    import yaml
+except ImportError:      # PyYAML 이 없는 환경(CI 모양의 로컬)에서는 이슈 수정 처리기 읽는 곳 시험을 건너뛴다 — 처리기가 명세 파일(edit-spec.yml)을 PyYAML 로 읽는다
+    yaml = None
+
 
 def blogger_key():
     """임시 저장소(make_root)가 mode 를 꺼 두는 Blogger 블로그의 키 — 레지스트리의 첫 blogger 항목(실제 이름을 이 파일에 적지 않는다)."""
@@ -265,7 +270,7 @@ class ReaderBase(unittest.TestCase):
         self.assertIn("paused", seen)
         return seen["paused"], "\n".join(lines)
 
-    READERS = ("generator", "blogger", "draft_flow", "issue_edit", "watchdog", "ops_inbox")
+    READERS = ("generator", "blogger", "draft_flow", "issue_edit", "watchdog", "ops_inbox") if yaml is not None else ("generator", "blogger", "draft_flow", "watchdog", "ops_inbox")
 
     def read(self, reader, value):
         return getattr(self, "read_" + reader)(value)
@@ -304,6 +309,7 @@ class ReadersAgreeTest(ReaderBase):
                 with self.subTest(reader=reader, value=value):
                     self.assertEqual(pause_error_lines(self.read(reader, value)[1]), [])
 
+    @unittest.skipUnless(yaml is not None, "PyYAML(requirements-dev.txt)이 필요합니다 — 이슈 수정 처리기가 명세 파일(edit-spec.yml)을 읽는다(CI 에서는 항상 실행됩니다)")
     def test_the_issue_edit_runner_says_so_in_its_notes_and_comment_without_a_workflow_line(self):
         for value in PROBE_UNKNOWN:
             with self.subTest(value=value):
