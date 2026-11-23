@@ -1,7 +1,7 @@
 """AI 수정의 새 외부 링크 검사(D-353)에 독립 검증이 남긴 틈 닫기(결함 D-365·D-367, 검증자 S 의 SP-12·SP-14–SP-16, Q 의 QR2-1·QR2-2).
 
 1. 슬래시 없는 앱 스킴(SP-12): `bitcoin:`·`tg:`·`ms-word:` 처럼 `//` 없이 `스킴:값` 으로 쓰는 링크는 알려진 15개 밖이면 주소로 안 읽혀 지나갔다. 이제 앱·결제·처리기 스킴 목록과 접두사(`ms-`·`web+`)를
-   **눌리는 링크 자리**(링크 대상·꺾쇠 대상·HTML 속성·참조식 정의·자동 링크 …)에서 값이 있을 때 읽는다 — 콜론 뒤 공백·탭·줄바꿈 뒤의 값도(`[x](tg: resolve)`). 글에 가까운 두 자리 — 각주 정의(라벨이 kramdown 각주 ID 꼴 `[^낱말]`
+   **눌리는 링크 자리**(링크 대상·꺾쇠 대상·HTML 속성·참조식 정의·자동 링크 …)에서 값이 있을 때 읽는다 — 콜론 뒤 공백·탭·줄바꿈 뒤의 값도(`[x](tg: resolve)`) 읽되 꺾쇠 없는 정의의 같은 줄은 값이 주소 모양일 때만 읽는다(D-393, 새 시험 파일 test_edits_definition_lines). 글에 가까운 두 자리 — 각주 정의(라벨이 kramdown 각주 ID 꼴 `[^낱말]`
    일 때)의 본문과 `cite` 속성 — 에서는 읽지 않는다: 거기에는 영문 글머리(`News: …`·`Market:KOSPI`)가 흔하다(SP-4 오탐이 되살아나지 않게). `[^]`·`[^.]`·`[^a b]`·`[^각주]` 같은 라벨은 각주가 아니라 참조식 정의라 읽는다.
    값이 없는 글머리(`News:`)는 어느 자리에서도 주소가 아니다.
 2. image-set(SP-14): 따옴표 주소 안에 `)` 가 있으면 지나갔고, 닫는 괄호 없는 `image-set(` 을 되풀이하면 제곱 시간이었다. 이제 따옴표·괄호를 세는 상태기계 하나가 한 번에 읽는다(선형, 상한 없음).
@@ -68,7 +68,7 @@ NOT_FOOTNOTE_LABELS = ("^", "^.", "^ ", "^!x", "^-x", "^,", "^a b", "^1.", "^각
 FOOTNOTE_LABELS = ("^1", "^note", "^note-2", "^a_b", "^A1", "^_x", "^9-9")
 LABEL_PAYLOADS_ALWAYS_READ = ("//evil.example/a", "tg://evil.example/a", "ssh://evil.example/a", "foo://evil.example/a", "skype:evil.example")
 LABEL_PAYLOADS_APP = ("bitcoin:1BoatSLRHtKNngkdXEeobR76b53LETtpyT", "tg:resolve?domain=evil", "ms-msdt:/id", "Market:KOSPI", "News:연합뉴스", "About:me")
-# 눌리는 링크 자리에서 콜론 뒤에 공백·탭·줄바꿈이 오고 값이 이어지는 꼴(2차 검증 R-1) — `{s}` 는 스킴. 값 첫 마디는 `resolve?x=1`.
+# 눌리는 링크 자리에서 콜론 뒤에 공백·탭·줄바꿈이 오고 값이 이어지는 꼴(2차 검증 R-1) — `{s}` 는 스킴. 값 첫 마디는 `resolve?x=1`. 꺾쇠 없는 정의의 같은 줄 공백 뒤 값은 주소 모양(`resolve?x=1`)일 때만 읽힌다 — 아래 세 행이 M103 그대로이고 값이 낱말이면 글이다(D-393 — test_edits_definition_lines 가 갈래를 못박는다).
 SPACED_FORMS = (
     ("마크다운 링크의 콜론 뒤 공백", "[x]({s}: resolve?x=1)"),
     ("그림", "![x]({s}: resolve?x=1)"),
@@ -77,9 +77,12 @@ SPACED_FORMS = (
     ("콜론 뒤 줄바꿈", "[x]({s}:\nresolve?x=1)"),
     ("콜론 뒤 여러 공백", "[x]({s}:   resolve?x=1)"),
     ("참조식 정의의 콜론 뒤 공백", "[x][r]\n\n[r]: {s}: resolve?x=1"),
-    ("꺾쇠 정의", "[x][r]\n\n[r]: <{s}: resolve?x=1>"),
     ("인용문 안 정의", "[x][r]\n\n> [r]: {s}: resolve?x=1"),
     ("제목이 붙은 정의", "[x][r]\n\n[r]: {s}: resolve?x=1 \"제목\""),
+    ("주소 토큰이 줄 끝인 정의", "[x][r]\n\n[r]: {s}:\nresolve?x=1"),
+    ("꺾쇠 정의", "[x][r]\n\n[r]: <{s}: resolve?x=1>"),
+    ("인용문 안 꺾쇠 정의", "[x][r]\n\n> [r]: <{s}: resolve?x=1>"),
+    ("제목이 붙은 꺾쇠 정의", "[x][r]\n\n[r]: <{s}: resolve?x=1> \"제목\""),
 )
 
 
@@ -149,7 +152,7 @@ class SlashlessAppSchemeTest(unittest.TestCase):
                     self.assertTrue(blocked(f"[x][{label}]\n\n[{label}]: {payload}"))
 
     def test_a_space_or_a_line_break_after_the_colon_does_not_hide_an_app_link_in_a_link_target_or_a_definition(self):
-        """kramdown 은 링크 대상과 정의의 주소에 공백을 받는다 — `[x](tg: resolve…)`·`[x](<tg: …>)`·`[r]: <tg: …>` 는 링크다(2차 검증 R-1: 첫 L6 머리는 거절했고 시작점은 통과시켰다)."""
+        """링크 대상·꺾쇠 정의, 주소 토큰이 줄 끝인 정의는 콜론 뒤 공백·줄바꿈 뒤 값을 읽는다 — `[x](tg: resolve…)`·`[x](<tg: …>)`·`[r]: <tg: …>`(2차 검증 R-1: 첫 L6 머리는 거절했고 시작점은 통과시켰다). 꺾쇠 없는 정의의 같은 줄은 값이 주소 모양일 때만 읽는다(D-393)."""
         for scheme in ALL_APP_SCHEMES:
             for place, template in SPACED_FORMS:
                 with self.subTest(scheme=scheme, place=place):
@@ -159,10 +162,10 @@ class SlashlessAppSchemeTest(unittest.TestCase):
         self.assertTrue(blocked("[x][r]\n\n[r]: <bitcoin: 1BoatSLRHtKNngkdXEeobR76b53LETtpyT>"))
 
     def test_a_listed_word_followed_by_a_colon_and_a_space_is_read_in_a_link_target_and_in_a_definition(self):
-        """`[x](News: 글)`·`[News]: News: 글` 은 kramdown 이 링크(정의)로 만드는 꼴이라 읽는다 — 그런 글은 실제 글에 없다(저장소 글에서 `](` 바로 뒤의 스킴은 https·mailto 뿐). 각주·cite 의 같은 글머리는 위 시험처럼 글이다."""
+        """`[x](News: 글)`·`[News]: <News: 글>`·`[News]: News:` + 다음 줄 값은 링크 자리라 읽는다 — 그런 글은 실제 글에 없다(저장소 글에서 `](` 바로 뒤의 스킴은 https·mailto 뿐). 꺾쇠 없는 정의의 같은 줄 `[News]: News: 글` 은 값이 낱말이면 영문 글머리라 읽지 않는다(D-393). 각주·cite 의 같은 글머리도 위 시험처럼 글이다."""
         for scheme in ("news", "market", "line", "search", "about", "tg"):
             word = scheme.capitalize()
-            for text in (f"[x]({word}: some text)", f"[{word}]: {word}: Some note", f"[x](<{word}: some text>)"):
+            for text in (f"[x]({word}: some text)", f"[{word}]: <{word}: some text>", f"[{word}]: {word}:\nsome text", f"[x](<{word}: some text>)"):
                 with self.subTest(text=text):
                     self.assertEqual(checks.external_links(text), {f"{scheme}://some"})
 
@@ -195,7 +198,8 @@ class SlashlessAppSchemeTest(unittest.TestCase):
     def test_normal_edits_of_a_page_with_english_footnotes_are_still_accepted(self):
         before = BASE + "문장입니다[^1]\n\n[^1]: IMF: World Economic Outlook\n"
         for after in (before.replace("문장입니다", "문장 입니다"), before + "추가 문장[^2]\n\n[^2]: News: BBC 2020\n", before + "[^3]: Market: KOSPI 지수\n",
-                      before + '<q cite="Search: 2020">y</q>\n', before + "[Update]: Fixed: yes\n", before + "[x](Source: BBC)\n", before + "[^note]: Market:KOSPI 지수\n"):
+                      before + '<q cite="Search: 2020">y</q>\n', before + "[Update]: Fixed: yes\n", before + "[x](Source: BBC)\n", before + "[^note]: Market:KOSPI 지수\n",
+                      before + "[Update]: Line: 12\n", before + "[1]: News: BBC 2020\n"):
             with self.subTest(after=after[-40:]):
                 self.assertEqual(verify(before, after), [])
 
