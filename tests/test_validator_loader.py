@@ -81,6 +81,28 @@ class DuplicateKeyTest(unittest.TestCase):
         self.assertEqual(vr._load_yaml(""), None)
         self.assertEqual(vr._load_yaml("- a\n- b\n"), ["a", "b"])
 
+    def test_several_merge_keys_in_one_table_are_not_duplicates_but_a_plain_duplicate_next_to_them_is(self):
+        """합병 키 `<<` 는 한 표에 여러 번 쓸 수 있고(PyYAML 은 모두 합친다) 중복 키가 아니다 — 같은 표의 보통 키 중복은 합병 키가 있어도 그대로 오류다. 건너뛰는 태그는 PyYAML 이 `<<` 에 붙이는 실제 태그다."""
+        base = "a: &a\n  x: 1\nb: &b\n  y: 2\n"
+        both = base + "use:\n  <<: *a\n  <<: *b\n  z: 3\n"
+        self.assertEqual(yaml.safe_load(both)["use"], {"x": 1, "y": 2, "z": 3})                  # 대조: 예전 읽기도 두 합병을 모두 합친다
+        self.assertEqual(vr._load_yaml(both)["use"], {"x": 1, "y": 2, "z": 3})
+        with self.assertRaises(yaml.YAMLError):
+            vr._load_yaml(base + "use:\n  <<: *a\n  <<: *b\n  z: 3\n  z: 4\n")
+        self.assertEqual(yaml.compose("<<: {a: 1}\n").value[0][0].tag, vr._MERGE_TAG)             # 상수가 PyYAML 이 실제로 붙이는 합병 태그와 같다
+
+    def test_malformed_table_nodes_are_yaml_errors_and_never_crash_the_validator(self):
+        """표 키가 목록·표처럼 해시할 수 없는 글은 중복 검사에서 건너뛰고 PyYAML 이 YAMLError(unhashable key)로 낸다. 표가 아닌 값에 표 태그(`!!map`)를 붙인 글도 마찬가지 — 중복 검사 자체가
+        TypeError·ValueError 로 죽으면 검증기가 이 글에서 통째로 멎는다(표 노드가 아니면 검사를 건너뛰고 PyYAML 의 오류에 맡긴다)."""
+        for label, text in {"list key": "? [a, b]\n: 1\n", "table key": "? {a: 1}\n: 2\n", "list key after a normal one": "x: 1\n? [a]\n: 2\n",
+                            "map tag on a list": "!!map [a, b]\n", "map tag on a word": "!!map word\n", "map tag on a nested list": "k: !!map [a, b]\n"}.items():
+            with self.subTest(label):
+                with self.assertRaises(yaml.YAMLError):
+                    vr._load_yaml(text)
+        found = wf0(findings_of({".github/workflows/x.yml": 'name: "[공통] x"\n? [a, b]\n: 1\n'}))
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0].level, "ERROR")
+
     def test_non_strict_loading_keeps_the_old_last_value_reading_for_the_two_config_files(self):
         text = "a: 1\na: 2\n"
         self.assertEqual(vr._load_yaml(text, strict=False), {"a": 2})

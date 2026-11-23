@@ -484,6 +484,93 @@ class ProbeShapesTest(unittest.TestCase):
         self.assertNotIn("시크릿(secrets.*)", messages(check({"x.yml": ok})))                # 마지막 단계의 텔레그램 이름은 허용 목록 밖 파일에서는 자리만 본다(허용 목록 오류는 따로 난다)
 
 
+class GenericRulesTest(unittest.TestCase):
+    """허용 목록 밖 파일(이름이 다른 사본)에도 모양 규칙이 같이 돈다 — 허용 목록 오류 하나가 다른 위반을 덮지 않는다(허용 목록은 '이 파일을 쓸 수 있는가' 이고, 모양 규칙은 '이 트리거의 파일이 지킬 것' 이라 따로다).
+    진짜 파일의 변이 목록을 다른 이름의 사본에 그대로 적용해서, 허용 목록과 무관한 일반 규칙의 몫인 변이는 같은 문구가 나와야 한다(job 구조·needs·if·발송 env 이름처럼 허용 목록의 파일에만 묻는 규칙은 뺀다)."""
+
+    OTHER = "other-notice.yml"
+    # 일반 규칙의 오류 문구에 들어 있는 낱말 — 변이 목록의 '있어야 할 글' 이 이 안에 있으면 허용 목록과 무관한 규칙이다
+    GENERIC_NEEDLES = {"쓰기 권한", "permissions", "env", "defaults", "트리거", "types", "branches", "시크릿", "ref", "허용되지 않은 항목", "persist-credentials", "setup-python", "외부 액션", "script", "가지 코드",
+                       "`permissions` 가 있습니다", "`env` 가 있습니다", "`defaults` 가 있습니다", "`strategy` 가 있습니다", "`container` 가 있습니다", "`services` 가 있습니다",
+                       "`environment` 가 있습니다", "`continue-on-error` 가 있습니다", "`secrets` 가 있습니다", "`uses` 가 있습니다", "workflow_run", "run"}
+
+    def test_the_catalog_of_both_real_files_is_reported_by_the_generic_rules_too(self):
+        checked = 0
+        for rel in BOTH:
+            base = real_data(rel)
+            baseline = messages(check({self.OTHER: dump(base)}))
+            self.assertIn("허용 목록에 없는 workflow_run", baseline)
+            for label, fn, needle in catalog(rel):
+                if needle not in self.GENERIC_NEEDLES or needle in baseline:
+                    continue                                    # 허용 목록의 파일에만 묻는 규칙이거나, 사본 자체가 이미 그 낱말의 오류를 내서 변이의 몫을 가릴 수 없는 것
+                data = copy.deepcopy(base)
+                fn(data)
+                with self.subTest((rel, label)):
+                    self.assertIn(needle, messages(check({self.OTHER: dump(data)})))
+                checked += 1
+        self.assertGreaterEqual(checked, 140)
+
+    def test_the_step_numbers_in_the_messages_count_from_one(self):
+        """오류 문구의 'N번째 단계' 는 1 부터 센다(첫 단계가 1번째) — 운영자가 파일을 열어 찾는 번호다."""
+        data = real_data(READY)
+        step_of(data, "send", 1)["shell"] = "bash"                                  # 둘째 단계
+        self.assertIn("job 'send' 의 2번째 단계에 허용되지 않은 키가 있습니다", messages(check({READY: dump(data)})))
+        step_of(data, "send", 1).pop("shell")
+        step_of(data, "send", 0)["continue-on-error"] = True                       # 첫째 단계
+        found = messages(check({READY: dump(data)}))
+        self.assertIn("job 'send' 의 1번째 단계에 허용되지 않은 키가 있습니다", found)
+        self.assertNotIn("job 'send' 의 0번째", found)
+        data = real_data(READY)
+        step_of(data, "decide", 1)["uses"] = "evil/action@v1"                      # 둘째 단계의 외부 액션
+        self.assertIn("job 'decide' 의 2번째 단계: 외부 액션은", messages(check({READY: dump(data)})))
+        data = real_data(READY)
+        step_of(data, "decide", 2)["run"] = 'echo "${{ github.event.workflow_run.head_branch }}"'      # 셋째 단계의 run 식
+        self.assertIn("job 'decide' 의 3번째 단계: run 에", messages(check({READY: dump(data)})))
+
+    def test_a_wrong_run_command_says_which_job_may_run_which_command(self):
+        """정해진 명령이 아닌 run 은 job 에 맞는 설명을 붙여 말한다 — 발송 job 은 발송 명령만, 판정 job 은 판정 명령만(시크릿은 판정 job 에 없다)."""
+        for job, wanted in (("send", "발송 job 은 발송 명령만 돌립니다"), ("decide", "판정 job 은 판정 명령만 돌리고 시크릿은 이 job 에 없습니다")):
+            data = real_data(READY)
+            step_of(data, job, 2)["run"] = "python -m pipeline.other"
+            with self.subTest(job):
+                found = messages(check({READY: dump(data)}))
+                self.assertIn(wanted, found)
+                self.assertIn(f"job '{job}' 의 3번째 단계: run 은 정확히", found)
+                other = "판정 job 은 판정 명령만" if job == "send" else "발송 job 은 발송 명령만"
+                self.assertNotIn(other, found)
+
+    def test_each_generic_rule_has_its_own_message_for_a_minimal_fake_file(self):
+        """모양 규칙마다 하나씩, 그 규칙만 어긴 가짜 파일이 그 규칙의 문구를 낸다(허용 목록 오류 말고도)."""
+        head = ProbeShapesTest.HEAD
+        job = ProbeShapesTest.JOB
+        cases = {
+            "on is not a table": (head.replace("on:\n  workflow_run:\n    workflows: [\"[공통] 병합 부탁 PR 자동 만들기\"]\n    types: [completed]\n    branches: [main]\n", "on: workflow_run\n") + job + "      - run: echo hi\n",
+                                  "on.workflow_run 은 types·workflows·branches 를 가진 표여야 합니다"),
+            "types missing": (head.replace("    types: [completed]\n", "") + job + "      - run: echo hi\n", "types 는 정확히 [completed]"),
+            "branches missing": (head.replace("    branches: [main]\n", "") + job + "      - run: echo hi\n", "가지 필터 `branches`"),
+            "branches empty": (head.replace("branches: [main]", "branches: []") + job + "      - run: echo hi\n", "가지 필터 `branches`"),
+            "branches not strings": (head.replace("branches: [main]", "branches: [1]") + job + "      - run: echo hi\n", "가지 필터 `branches`"),
+            "branches blank string": (head.replace("branches: [main]", "branches: [' ']") + job + "      - run: echo hi\n", "가지 필터 `branches`"),
+            "branches-ignore": (head.replace("branches: [main]", "branches: [main]\n    branches-ignore: [x]") + job + "      - run: echo hi\n", "branches-ignore"),
+            "workflows missing": (head.replace("    workflows: [\"[공통] 병합 부탁 PR 자동 만들기\"]\n", "") + job + "      - run: echo hi\n", "workflows 는 따라 도는 워크플로 이름"),
+            "workflows empty": (head.replace("workflows: [\"[공통] 병합 부탁 PR 자동 만들기\"]", "workflows: []") + job + "      - run: echo hi\n", "workflows 는 따라 도는 워크플로 이름"),
+            "workflows not strings": (head.replace("workflows: [\"[공통] 병합 부탁 PR 자동 만들기\"]", "workflows: [3]") + job + "      - run: echo hi\n", "workflows 는 따라 도는 워크플로 이름"),
+            "jobs not a table": (head + "jobs: x\n", "jobs 는 job 표여야 합니다"),
+            "jobs empty": (head + "jobs: {}\n", "jobs 는 job 표여야 합니다"),
+            "a job that is not a table": (head + "jobs:\n  a: x\n", "jobs 는 job 표여야 합니다"),
+            "steps not a list": (head + job.replace("    steps:\n", "    steps: x\n"), "steps 가 단계 목록이 아닙니다"),
+            "steps a number": (head + job.replace("    steps:\n", "    steps: 5\n"), "steps 가 단계 목록이 아닙니다"),
+            "steps empty": (head + job.replace("    steps:\n", "    steps: []\n"), "steps 가 단계 목록이 아닙니다"),
+            "steps missing": (head + job.replace("    steps:\n", ""), "steps 가 단계 목록이 아닙니다"),
+            "step is not a table": (head + job + "      - echo\n", "steps 가 단계 목록이 아닙니다"),
+        }
+        for label, (text, needle) in cases.items():
+            with self.subTest(label):
+                found = messages(check({"x.yml": text}))
+                self.assertIn("허용 목록에 없는 workflow_run", found)
+                self.assertIn(needle, found)
+
+
 class LimitsOfTheRuleTest(unittest.TestCase):
     """이 규칙이 못 잡는 것 — 문서(G-A13)에 한계로 적은 것과 같다. 못 잡는 채로 두는 것이 맞는지(다른 규칙·사람 검토가 잡는지) 눈에 보이게 단언한다."""
 

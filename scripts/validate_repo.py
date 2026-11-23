@@ -224,12 +224,14 @@ if yaml is not None:
         """SafeLoader 와 같되 한 표 안에서 같은 키가 두 번 나오면 오류(YAMLError)다. PyYAML 은 중복 키를 조용히 '마지막 값' 으로 받는데 GitHub 가 어떻게 읽는지는 알 수 없어서,
         검증기가 본 값과 실제 값이 달라질 수 있다(`permissions` 를 `write` 로 먼저 쓰고 `read` 로 다시 쓰는 식). 합병 키 `<<` 로 덮어쓰는 것은 중복이 아니다."""
 
+    _MERGE_TAG = yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG.rsplit(":", 1)[0] + ":merge"      # 합병 키 `<<` 의 태그 — PyYAML 의 기본 표 태그와 같은 접두에 붙여 만든다(시험이 실제 태그와 같은지 못박는다)
+
     def _construct_unique_mapping(loader, node, deep=False):
         if isinstance(node, yaml.MappingNode):
             seen = set()
             for key_node, _value_node in node.value:
-                if key_node.tag == "tag:yaml.org,2002:merge":
-                    continue
+                if key_node.tag == _MERGE_TAG:
+                    continue                                 # 합병 키는 한 표에 여러 번 와도 중복이 아니다(PyYAML 은 모두 합친다)
                 key = loader.construct_object(key_node, deep=True)
                 try:
                     hash(key)

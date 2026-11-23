@@ -44,7 +44,6 @@ from pathlib import Path
 
 from pipeline import notify, operator_loop
 from pipeline.console import safe_output
-from pipeline.llm import mask
 from pipeline.secret_patterns import find_secrets
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -102,7 +101,7 @@ _ADDRESS_RE = re.compile(
     r"|[^\W_]\.(?:xn--[a-z0-9-]{2,59}" + _NAME_END                         # 낱말 점 꼬리: 퓨니코드 꼬리이거나
     + r"|(?!(?:" + "|".join(_FILE_EXTENSIONS) + r")" + _NAME_END + r")[a-z]{2,24}" + _NAME_END + r")",   # 파일 확장자가 아닌 영문 2–24자 꼬리
     re.IGNORECASE)
-_DOT_LIKE = {0x3002: ".", 0xFF61: ".", 0x2024: ".", 0xFE52: ".", 0xFF0E: "."}       # 점처럼 읽히는 글자 다섯(표의 마침표·반각 표의 마침표·한 점 줄임표·작은 마침표·전각 마침표) → 접은 사본에서 점으로
+_DOT_LIKE = {0x3002: "."}       # 점처럼 읽히는 글자 다섯(표의 마침표 U+3002·반각 U+FF61·한 점 줄임표 U+2024·작은 마침표 U+FE52·전각 U+FF0E) 중 NFKC 가 접지 않는 하나 — 나머지 넷은 NFKC 가 이미 접는다(U+FF61 → U+3002, 셋은 `.`; 시험이 못박는다)
 _TILDE_CHARS = {ord(chr(0x7E)): chr(0x2013), 0xFF5E: chr(0x2013), 0x301C: chr(0x2013), 0x223C: chr(0x2013)}      # 물결표 넷(ASCII·전각·파동 줄표·틸드 연산자) → 줄표
 _TRAILER_RE = re.compile(r"(?i)^(?:co-authored-by|signed-off-by|reviewed-by|acked-by|tested-by|reported-by|ad-surface-approved|change-id)\s*:")
 _LIST_MARK_RE = re.compile(r"^(?:[-*+•]\s+|[0-9]{1,3}[.)]\s+)+")
@@ -214,17 +213,17 @@ def line_problem(text):
     """한 줄을 알림에 글자 그대로 싣을 수 있는가 — 비었으면 빈 문자열, 아니면 이유 코드: empty·control(제어·서식·보이지 않는 글자)·secret(비밀 모양)·mention(`@`)·address(주소 모양)·tilde(물결표).
     제목·요점 줄·전체 문장이 같은 규칙을 쓴다. 줄 바꿈이 든 글은 control 이다(줄마다 따로 부른다)."""
     value = text if isinstance(text, str) else ""
-    problem = notify.pr_title_problem(value)
+    problem = notify.pr_title_problem(value)                 # empty·control·secret — secret 은 로그용 가리개(llm.mask)가 글을 바꾸는지로 가린다(`key=`·`token=`·짧은 구글 키 꼴까지)
     if problem in ("empty", "control"):
         return problem
-    if problem or find_secrets(value) or mask(value) != value:
+    if problem or find_secrets(value):                        # find_secrets 는 전각·결합 글자로 쪼갠 키까지 보는 검사용 사본을 더한다
         return "secret"
-    folded = _folded(value)
-    if "@" in value or "@" in folded:
+    folded = _folded(value)                                   # NFKC 사본 — ASCII 골뱅이와 물결표는 그대로라 원문의 두 글자도 이 사본에 모두 있다(전각 꼴은 여기서 ASCII 가 된다)
+    if "@" in folded:
         return "mention"
     if _ADDRESS_RE.search(value) or _ADDRESS_RE.search(folded):
         return "address"
-    if chr(0x7E) in value or chr(0x7E) in folded:
+    if chr(0x7E) in folded:
         return "tilde"
     return ""
 
@@ -346,7 +345,7 @@ def message_problem(text):
         if len(lines) < 5 or lines[1] != "" or lines[-4] != "" or lines[-3] != CHECK_LINE or lines[-2] != "" or lines[-1] != ready_tail(number):
             return "shape"
         points = lines[2:-4]
-        if len(points) > POINT_LINES or not all(line.startswith("- ") and 2 < len(line) <= POINT_LIMIT + 2 for line in points):
+        if len(points) > POINT_LINES or not all(line.startswith("- ") and len(line) <= POINT_LIMIT + 2 for line in points):
             return "shape"
         return ""
     rest = lines[1:]
