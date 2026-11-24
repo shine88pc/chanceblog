@@ -6,10 +6,14 @@ CI 의 `python -m unittest discover -s tests -v` 는 시험 모듈 약 200개를
 동작
  1. 부모가 CI 와 같은 방식(`tests` 폴더가 곧 최상위 폴더 — `unittest` 의 `discover`)으로 **모든 시험을 먼저 모은다**. 시험 줄에 찍히는 이름(`str(시험)`)을 모듈별로 적어 둔다.
     불러오기에 실패한 모듈(`_FailedTest`)이 하나라도 있으면 아무 시험도 돌리지 않고 그대로 실패로 보고하고 끝낸다(조용히 빼지 않는다). 시험이 하나도 없어도 실패다.
+    모듈 최상위에서 스스로 `SkipTest` 를 던진 모듈(`discover` 가 `unittest.loader.ModuleSkipped.<모듈>` 시험 하나로 바꿔 돌려주는 것)은 알림에 적고 옛 직렬 흐름처럼 시험 하나·건너뜀 하나로 센다.
+    그 밖에 불러오기 기록에도 불러오기 실패·모듈 건너뜀에도 없는 알 수 없는 시험이 있으면 아무것도 돌리지 않고 실패한다.
  2. 모듈을 N개 묶음으로 나눈다. 무거운 모듈부터 가장 가벼운 묶음에 넣고(같은 입력이면 늘 같은 나누기), 한 모듈의 시험은 쪼개지 않는다(클래스·모듈 준비가 깨지지 않게).
     무게는 `--weights`(모듈→초 JSON)의 값, 표에 없는 새 모듈은 표 값의 중앙값, 표가 없으면 시험 개수다. `--serial` 로 적은 모듈은 늘 같은 묶음(같은 프로세스)에서 돈다.
- 3. 묶음마다 자식 프로세스 `python -m unittest -v 모듈…`(시험 폴더는 PYTHONPATH 맨 앞 — `discover` 가 import 경로 맨 앞에 넣는 것과 같다)를 띄워 병렬로 돌리고,
-    출력은 자식별로 모아 두었다가 묶음이 끝나는 대로(앞 묶음이 다 찍힌 뒤에) `===== 묶음 i/N =====` 머리글과 함께 한 덩어리씩 번호 순서로 찍는다(도는 동안은 몇 초마다 진행 줄만 찍는다).
+ 3. 묶음마다 자식 프로세스 `python -m unittest -v 모듈…` 를 띄워 병렬로 돌린다. 시험 폴더는 PYTHONPATH 로 준다 — 그런데 `python -m` 은 현재 폴더(저장소 루트)를 import 경로 맨 앞에 두므로
+    자식의 순서는 저장소 루트, 시험 폴더, 표준 라이브러리다. `discover -s tests` 는 시험 폴더가 저장소 루트보다 앞이므로 두 순서는 **같지 않다**. 두 폴더에 같은 이름이 없으면 결과가 같고,
+    그것은 시험(`ImportOrderTest`)이 지킨다. 출력은 자식별로 모아 두었다가 묶음이 끝나는 대로(앞 묶음이 다 찍힌 뒤에) `===== 묶음 i/N =====` 머리글과 함께 한 덩어리씩 번호 순서로 찍는다
+    (도는 동안은 몇 초마다 진행 줄만 찍는다. 진행 줄의 시험 이름은 도는 시험이 아니라 마지막으로 읽은 시험 줄이다).
  4. 끝나면 자식 출력의 시험 줄에서 **실제로 돈 시험 이름의 모음**을 읽어 처음에 모은 것과 **정확히 같은지**(빠짐·중복·개수 합) 확인한다(시험 줄 이름과 시험 id 가 일대일인 것은 돌리기 전에 확인한다). 묶음 나누기 자체(모든 모듈이 정확히 한 묶음)도
     돌리기 전에 한 번, 돌린 뒤에 한 번 더 본다. 하나라도 어긋나면 시험이 모두 통과했어도 실패다. 건너뜀(skip)은 지금과 똑같이 합쳐 센다.
 
@@ -42,9 +46,12 @@ BAR = "-" * 70
 # ---------------------------------------------------------------------------
 # 1. 모으기 — CI 의 discover 와 같은 방식
 # ---------------------------------------------------------------------------
-Collected = collections.namedtuple("Collected", "tests failed")
-# tests : {모듈 이름: [(시험 줄 이름, 시험 id), ...]}  — 모듈마다 discover 가 낸 순서, 시험이 없는 모듈은 빈 목록
-# failed: [(시험 id, 오류 글), ...]               — 불러오기에 실패한 모듈(_FailedTest)
+Collected = collections.namedtuple("Collected", "tests failed skipped unknown", defaults=((), ()))
+ModuleSkip = collections.namedtuple("ModuleSkip", "module reason")
+# tests  : {모듈 이름: [(시험 줄 이름, 시험 id), ...]}  — 모듈마다 discover 가 낸 순서, 시험이 없는 모듈은 빈 목록
+# failed : [(시험 id, 오류 글), ...]               — 불러오기에 실패한 모듈(_FailedTest)
+# skipped: [ModuleSkip(모듈, 이유), ...]            — 불러올 때 모듈 최상위에서 스스로 SkipTest 를 던진 모듈(discover 가 시험 하나로 바꿔 돌려준다)
+# unknown: [시험 id, ...]                         — 어느 모듈의 불러오기 기록에도 없는데 불러오기 실패도 모듈 건너뜀도 아닌 시험(알 수 없는 것은 조용히 빼지 않는다)
 
 
 def iter_tests(suite):
@@ -58,6 +65,17 @@ def iter_tests(suite):
 
 def is_failed_import(test):
     return type(test).__name__ == "_FailedTest"
+
+
+def is_module_skip(test):
+    """모듈을 불러오다 `SkipTest` 가 나서 discover 가 그 모듈 대신 돌려준 시험(`unittest.loader.ModuleSkipped.<모듈>`)인가."""
+    method = getattr(test, getattr(test, "_testMethodName", ""), None)
+    return type(test).__name__ == "ModuleSkipped" and bool(getattr(method, "__unittest_skip__", False))
+
+
+def module_skip_of(test):
+    method = getattr(test, test._testMethodName)
+    return ModuleSkip(test._testMethodName, " ".join(str(getattr(method, "__unittest_skip_why__", "") or "").split())[:120])
 
 
 class RecordingLoader(unittest.TestLoader):
@@ -78,6 +96,7 @@ def collect_tests(root, start_dir="tests", pattern="test*.py"):
 
     시작 폴더가 곧 최상위 폴더라 import 경로 맨 앞에 들어가고 모듈은 파일 이름(test_x)으로 불린다. 끝나면 import 경로와 이 폴더에서 불러온 모듈을 되돌려
     부모 프로세스가 가벼운 채로(시험 모듈을 들고 있지 않게) 남는다.
+    discover 가 돌려준 시험 중 모듈별 기록(RecordingLoader)에 없는 것은 둘로 가른다 — 모듈 불러오기 중 스스로 건너뛴 모듈(skipped)과 그 밖의 알 수 없는 것(unknown).
     """
     tests_dir = Path(root, start_dir).resolve()
     importlib.invalidate_caches()                          # 같은 폴더를 고쳐 가며 다시 모을 때 낡은 목록을 보지 않게
@@ -87,10 +106,16 @@ def collect_tests(root, start_dir="tests", pattern="test*.py"):
     os.chdir(str(root))
     try:
         suite = loader.discover(str(tests_dir), pattern=pattern)
-        failed = []
+        recorded = {id(test) for items in loader.loaded.values() for test in items}
+        failed, skipped, unknown = [], [], []
         for test in iter_tests(suite):
             if is_failed_import(test):
                 failed.append((test.id(), str(getattr(test, "_exception", "") or "")))
+            elif id(test) not in recorded:                 # 어느 모듈의 loadTestsFromModule 도 거치지 않은 시험: 불러올 때 스스로 건너뛴 모듈이거나, 알 수 없는 것
+                if is_module_skip(test):
+                    skipped.append(module_skip_of(test))
+                else:
+                    unknown.append(test.id())
         tests = {}
         for module, items in loader.loaded.items():
             tests[module] = [(str(test), test.id()) for test in items if not is_failed_import(test)]
@@ -98,7 +123,7 @@ def collect_tests(root, start_dir="tests", pattern="test*.py"):
         os.chdir(old_cwd)
         sys.path[:] = before_path
         _forget_modules_under(tests_dir)
-    return Collected(tests, failed)
+    return Collected(tests, failed, skipped, unknown)
 
 
 def _forget_modules_under(folder):
@@ -189,11 +214,13 @@ def check_plan(plan, tests):
 # 3. 읽기 — 자식 출력의 시험 줄과 요약
 # ---------------------------------------------------------------------------
 Summary = collections.namedtuple("Summary", "ran seconds status counts")
-Parsed = collections.namedtuple("Parsed", "executed summary failures")
+Parsed = collections.namedtuple("Parsed", "executed summary failures last")
+# last: 마지막으로 읽은 시험 줄의 이름(없으면 None) — 자식이 요약 없이 끝났을 때 어느 시험 근처에서 끊겼는지 알려 준다
 
 _RAN = re.compile(r"^Ran (\d+) tests? in (\d+(?:\.\d+)?)s\s*$")
 _RESULT = re.compile(r"^(OK|FAILED|NO TESTS RAN)(?: \((.*)\))?\s*$")
 _FAILURE_HEADER = re.compile(r"^(?:FAIL|ERROR): ")
+_SETUP_SKIPPED = re.compile(r"^(?:(?:setUpClass|setUpModule) \(.+?\) \.\.\. )?skipped ['\"]")      # 클래스·모듈 준비에서 건너뛴 줄 — 3.12: `setUpClass (모듈.클래스) ... skipped '이유'`, 3.10: 이름 없이 `skipped '이유'` 한 줄만
 COUNT_ORDER = ("failures", "errors", "skipped", "expected failures", "unexpected successes")
 
 
@@ -225,18 +252,37 @@ def parse_summary(texts):
     return None
 
 
+def texts_of(lines):
+    """자식 출력(줄 목록: 글 또는 (초, 글))의 글만."""
+    return [line[1] if isinstance(line, tuple) else line for line in lines]
+
+
 def parse_child(lines, labels):
-    """자식 출력(줄 목록: 글 또는 (초, 글))에서 실제로 시작된 시험 이름의 모음·요약·실패 머리글을 읽는다."""
-    texts = [line[1] if isinstance(line, tuple) else line for line in lines]
+    """자식 출력(줄 목록: 글 또는 (초, 글))에서 실제로 시작된 시험 이름의 모음·요약·실패 머리글·마지막 시험 줄을 읽는다."""
+    texts = texts_of(lines)
     executed = collections.Counter()
     failures = []
+    last = None
     for text in texts:
         label = label_of(text, labels)
         if label is not None:
             executed[label] += 1
+            last = label
         elif _FAILURE_HEADER.match(text):
             failures.append(text)
-    return Parsed(executed, parse_summary(texts), failures)
+    return Parsed(executed, parse_summary(texts), failures, last)
+
+
+def missing_hint(missing, texts):
+    """돌아야 할 시험이 출력에 없을 때, 옛 직렬 흐름과 읽는 방식이 달라 생기는 알려진 경우를 짚는 글(없으면 빈 글자). 실패는 그대로 실패다 — 원인을 찾기 쉽게 글만 더한다."""
+    notes = []
+    setups = list(dict.fromkeys(text.strip()[:100] for text in texts if _SETUP_SKIPPED.match(text)))
+    if setups:
+        notes.append("자식 출력에 클래스·모듈 준비에서 건너뛴 줄이 있습니다: " + " / ".join(setups[:3]) + " — 그 시험들은 시험 줄이 찍히지 않아 이 실행기는 빠짐으로 읽습니다(옛 직렬 흐름은 건너뜀으로 셉니다. 알려진 차이)")
+    glued = [label for label in sorted(missing)[:5] if any(label in text and not text.startswith(label) for text in texts)]
+    if glued:
+        notes.append("출력에 시험 줄 앞에 다른 글이 붙은 줄이 있습니다: " + ", ".join(glued[:3]) + " — 줄바꿈 없는 출력이 시험 줄 앞에 붙으면 시험 줄로 읽지 못합니다(알려진 차이)")
+    return "".join(f" [{note}]" for note in notes)
 
 
 # ---------------------------------------------------------------------------
@@ -257,8 +303,10 @@ def interpreter_flags():
 
 
 def child_env(tests_dir):
-    """`discover -s tests` 가 시험 폴더를 import 경로 맨 앞에 넣는 것과 같게, 자식이 시험 모듈을 이름(test_x)으로 불러오도록 PYTHONPATH 맨 앞에 시험 폴더를 둔다.
-    (시험 폴더의 파일 이름이 표준 라이브러리·설치된 패키지 이름과 겹치지 않아 시험이 띄우는 손자 프로세스가 물려받아도 달라지는 것이 없다 — 시험 폴더 이름 점검은 DESIGN 문서)"""
+    """자식이 시험 모듈을 이름(test_x)으로 불러오도록 PYTHONPATH 맨 앞에 시험 폴더를 둔다.
+    `discover -s tests` 처럼 시험 폴더가 import 경로 맨 앞에 오는 것은 **아니다**: `python -m unittest` 는 현재 폴더(저장소 루트)를 경로 맨 앞에 두고 PYTHONPATH 는 그 다음이라
+    자식의 순서는 저장소 루트, 시험 폴더, 표준 라이브러리다(옛 흐름은 시험 폴더, 저장소 루트). 시험 폴더의 파일·폴더 이름이 저장소 루트의 이름·표준 라이브러리 이름과 겹치지 않으면
+    순서가 달라도 같은 모듈을 불러오고, 그것은 시험(ImportOrderTest)이 지킨다. 시험이 띄우는 손자 프로세스도 이 값을 물려받는다."""
     env = dict(os.environ)
     earlier = env.get("PYTHONPATH")
     env["PYTHONPATH"] = str(tests_dir) + (os.pathsep + earlier if earlier else "")
@@ -267,6 +315,7 @@ def child_env(tests_dir):
 
 class Child:
     GRACE = 5.0           # 자식이 끝난 뒤에도 출력 줄기가 안 닫히면(시험이 남긴 손자 프로세스가 붙들고 있을 때) 이만큼만 더 기다린다
+    JOIN_SECONDS = 5.0    # run_plan 이 마칠 때 출력을 읽는 스레드를 기다리는 최대 시간(줄기를 붙든 손자가 남아 있으면 이만큼 기다리고 넘어간다)
 
     def __init__(self, index, modules, root, tests_dir, labels):
         if not modules:
@@ -282,6 +331,7 @@ class Child:
         self.thread.start()
 
     def _pump(self):
+        # count·last 는 지금까지 읽은 시험 줄의 수와 마지막 줄이다. 한 줄 모양의 시험은 끝나야(줄바꿈이 와야) 읽히므로 도는 시험이 아니라 마지막으로 끝난 시험이다.
         for raw in iter(self.proc.stdout.readline, b""):
             text = raw.decode("utf-8", "replace").rstrip("\r\n")
             self.lines.append((time.monotonic() - self.started, text))
@@ -336,7 +386,7 @@ def run_plan(plan, root, tests_dir, labels, heartbeat=HEARTBEAT_SECONDS, out=Non
                 ready += 1
             if running and heartbeat > 0 and time.monotonic() >= next_beat:
                 next_beat += heartbeat
-                parts = [f"묶음 {child.index}: " + (f"{child.count}개째 {child.last[:60]}" if child.count else "첫 시험 도는 중") for child in running]
+                parts = [f"묶음 {child.index}: " + (f"시험 줄 {child.count}개 읽음, 마지막 읽은 줄 {child.last[:60]}" if child.count else "아직 읽은 시험 줄 없음") for child in running]   # 도는 시험의 이름이 아니라 마지막으로 읽은(끝난) 시험 줄이다
                 out(f"[진행 {time.monotonic() - began:.0f}초] " + " | ".join(parts))
         return [child.result() for child in children]
     finally:
@@ -344,7 +394,7 @@ def run_plan(plan, root, tests_dir, labels, heartbeat=HEARTBEAT_SECONDS, out=Non
             child.kill()
         for child in children:
             child.proc.wait()
-            child.thread.join(timeout=5)
+            child.thread.join(timeout=Child.JOIN_SECONDS)
 
 
 # ---------------------------------------------------------------------------
@@ -389,12 +439,13 @@ def verify_run(tests, plan, results):
         all_executed.update(parsed.executed)
         missing, extra = want - parsed.executed, parsed.executed - want
         if missing:
-            problems.append(f"묶음 {number}: 돌아야 할 시험 {sum(missing.values())}개가 출력에 없습니다 — {_preview(missing, label_ids)}")
+            problems.append(f"묶음 {number}: 돌아야 할 시험 {sum(missing.values())}개가 출력에 없습니다 — {_preview(missing, label_ids)}{missing_hint(missing, texts_of(result.lines))}")
         if extra:
             problems.append(f"묶음 {number}: 기대보다 더 돈 시험 {sum(extra.values())}개(중복 또는 다른 묶음의 시험) — {_preview(extra, label_ids)}")
         summary = parsed.summary
         if summary is None:
-            problems.append(f"묶음 {number}: 자식 출력에 `Ran N tests` 요약이 없습니다(자식이 중간에 끝났을 수 있습니다, 종료 코드 {result.returncode})")
+            where = f"마지막으로 읽은 시험 줄: {label_ids.get(parsed.last, parsed.last)}" if parsed.last else "시험 줄을 하나도 읽지 못했습니다"
+            problems.append(f"묶음 {number}: 자식 출력에 `Ran N tests` 요약이 없습니다(자식이 중간에 끝났을 수 있습니다, 종료 코드 {result.returncode}) — {where}")
         else:
             ran_total += summary.ran
             counts.update(summary.counts)
@@ -476,7 +527,9 @@ def format_block(number, total, modules, expected, planned_load, result):
     return head + [text for _, text in result.lines] + [f"----- 묶음 {number}/{total} 끝 -----"]
 
 
-def format_summary(verdict, seconds, loads=(), partial=False):
+def format_summary(verdict, seconds, loads=(), partial=False, module_skips=()):
+    """module_skips: 불러올 때 스스로 건너뛴 모듈(ModuleSkip 목록) — 옛 직렬 흐름처럼 시험 수와 건너뜀 수에 하나씩 더한다(자식이 돌린 시험이 아니라 부모가 모을 때 본 것이다)."""
+    skips = list(module_skips)
     lines = ["", "===== 병렬 실행 요약 ====="]
     for report in verdict.reports:
         state = "통과" if report.returncode == 0 else f"실패(종료 코드 {report.returncode})"
@@ -487,6 +540,8 @@ def format_summary(verdict, seconds, loads=(), partial=False):
         lines.append(f"시험 id 대조: 처음 모은 {expected}개 = 실제로 돈 {executed}개(빠짐 0 · 중복 0), 자식 요약의 시험 수 합 {verdict.ran_total}")
     else:
         lines.append(f"시험 id 대조 실패: 처음 모은 {expected}개 · 실제로 돈 {executed}개 · 자식 요약의 시험 수 합 {verdict.ran_total}")
+    if skips:
+        lines.append(f"불러올 때 스스로 건너뛴 모듈 {len(skips)}개: 옛 직렬 흐름처럼 시험 수와 건너뜀 수에 하나씩 더했습니다 — " + ", ".join(item.module for item in skips))
     if verdict.problems:
         lines.append("대조 문제:")
         lines.extend(f"  - {text}" for text in verdict.problems)
@@ -495,14 +550,16 @@ def format_summary(verdict, seconds, loads=(), partial=False):
         lines.extend(f"  {text}" for text in verdict.failures[:100])
         if len(verdict.failures) > 100:
             lines.append(f"  … 외 {len(verdict.failures) - 100}개(묶음 출력을 보세요)")
-    infos = [f"{key}={verdict.counts[key]}" for key in COUNT_ORDER if verdict.counts.get(key)]
+    counts = collections.Counter(verdict.counts)
+    counts["skipped"] += len(skips)
+    infos = [f"{key}={counts[key]}" for key in COUNT_ORDER if counts.get(key)]
     if verdict.problems:
         infos.insert(0, f"대조 문제={len(verdict.problems)}")
     if partial:
         lines.append("부분 실행(--only): 고른 모듈의 시험만 돌았습니다 — 전체가 통과했다는 뜻이 아닙니다")
         infos.insert(0, "부분 실행")
     ok = not verdict.problems and not verdict.failed_bins
-    lines += ["", BAR, f"Ran {verdict.ran_total} tests in {seconds:.3f}s", "", ("OK" if ok else "FAILED") + (f" ({', '.join(infos)})" if infos else "")]
+    lines += ["", BAR, f"Ran {verdict.ran_total + len(skips)} tests in {seconds:.3f}s", "", ("OK" if ok else "FAILED") + (f" ({', '.join(infos)})" if infos else "")]
     return lines
 
 
@@ -523,7 +580,7 @@ def build_parser():
     parser.add_argument("--only", nargs="+", action="append", default=[], metavar="MODULE", help="이 모듈만 돈다(부분 실행 — 실험용. 대조도 이 모듈에 대해서만 한다. CI 는 쓰지 않는다)")
     parser.add_argument("--root", default=None, help="저장소 루트(기본: 이 파일의 두 단계 위)")
     parser.add_argument("--start-dir", default="tests", help="시험 폴더(루트 기준, 기본 tests)")
-    parser.add_argument("--pattern", default="test*.py", help="시험 파일 이름 패턴(기본 test*.py)")
+    parser.add_argument("--pattern", default="test*.py", help="시험 파일 이름 패턴(기본 test*.py — `unittest discover` 의 기본값이라 CI 의 옛 명령 `discover -s tests` 와 같은 범위를 모은다)")
     parser.add_argument("--heartbeat", type=float, default=HEARTBEAT_SECONDS, help=f"도는 동안 진행 줄을 찍는 간격(초, 0 이면 끝난 묶음만 알림). 기본 {HEARTBEAT_SECONDS:.0f}")
     parser.add_argument("--timings-out", metavar="FILE", help="이번 실행에서 어림한 모듈별 초를 JSON 으로 쓴다(--weights 에 그대로 쓸 수 있다)")
     return parser
@@ -574,6 +631,10 @@ def _run(args, jobs, root):
             emit(message.rstrip())
         emit(f"{BAR}\nFAILED (불러오기 실패={len(collected.failed)})")
         return 1
+    if collected.unknown:                                   # 알 수 없는 시험은 조용히 빼지 않는다(예: 파이썬이 _FailedTest 의 이름을 바꿔 불러오기 실패를 못 알아보게 된 경우)
+        emit(f"실패: 모은 시험 중 알 수 없는 종류가 {len(collected.unknown)}개 있습니다 — 모듈 불러오기 기록에도 불러오기 실패·모듈 건너뜀에도 없어 아무것도 돌리지 않고 끝냅니다: {', '.join(collected.unknown[:5])}")
+        emit(f"{BAR}\nFAILED (알 수 없는 시험={len(collected.unknown)})")
+        return 1
     with_tests = {module: items for module, items in tests.items() if items}
     total = sum(len(items) for items in with_tests.values())
     if total == 0:
@@ -613,6 +674,11 @@ def _run(args, jobs, root):
     empty = sorted(module for module, items in tests.items() if not items)
     if empty:
         emit(f"알림: 시험이 없는 모듈 {len(empty)}개는 돌릴 것이 없어 나누기에서 뺐습니다: {', '.join(empty)}")
+    skipped_modules = [] if args.only else list(collected.skipped)          # 부분 실행(--only)은 고른 모듈의 시험만 세므로 모듈 건너뜀은 알리기만 한다
+    if collected.skipped:
+        names = ", ".join(f"{item.module}(이유: {item.reason})" for item in collected.skipped)
+        how = "부분 실행(--only)이라 세지 않습니다" if args.only else "옛 직렬 흐름처럼 시험 수와 건너뜀 수에 하나씩 더합니다"
+        emit(f"알림: 불러올 때 스스로 건너뛴 모듈 {len(collected.skipped)}개 — {how}: {names}")
     problems = check_plan(plan, with_tests)
     if problems:
         emit("실패: 나누기 검사에 걸렸습니다 — 시험을 돌리지 않습니다")
@@ -634,7 +700,7 @@ def _run(args, jobs, root):
     results = run_plan(plan, root, tests_dir, labels, heartbeat=args.heartbeat, on_ready=show)
     seconds = time.monotonic() - began
     verdict = verify_run(with_tests, plan, results)
-    for line in format_summary(verdict, seconds, loads, partial=bool(args.only)):
+    for line in format_summary(verdict, seconds, loads, partial=bool(args.only), module_skips=skipped_modules):
         emit(line)
     if args.timings_out:
         Path(args.timings_out).write_text(json.dumps(module_seconds(with_tests, plan, results), ensure_ascii=False, indent=0, sort_keys=True) + "\n", encoding="utf-8")

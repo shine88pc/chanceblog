@@ -13,6 +13,7 @@ import inspect
 import io
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -174,6 +175,40 @@ class QuitTest(unittest.TestCase):
     def test_c_would_run_after_it(self):
         mark(self)
 '''
+MODSKIP = '''import unittest
+
+raise unittest.SkipTest("the optional dependency is not installed")
+'''
+CLASS_SETUP_SKIP = '''import unittest
+
+
+class NeedsThingTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        raise unittest.SkipTest("the optional thing is missing")
+
+    def test_one(self):
+        pass
+
+    def test_two(self):
+        pass
+'''
+PARTIAL_LINE = '''import sys
+import unittest
+
+
+class PartialLineTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        sys.stderr.write("noise without a newline ")
+        sys.stderr.flush()
+
+    def test_first(self):
+        pass
+
+    def test_second(self):
+        pass
+'''
 SHARED_BASE = '''import unittest
 
 from fake_support import mark
@@ -198,6 +233,19 @@ class OwnATest(unittest.TestCase):
 SHARED_B = SHARED_A.replace("OwnATest", "OwnBTest").replace("test_own_a", "test_own_b")
 SHARED_C = '''from fake_shared import SharedCases  # noqa: F401
 from fake_shared import SharedCases as SharedCasesAgain  # noqa: F401  (같은 클래스를 이름 둘로 가져온다 — 한 모듈 안에서 같은 시험 줄이 두 번 나온다)
+'''
+HOLDS_PIPE = '''import os
+import subprocess
+import sys
+import unittest
+from pathlib import Path
+
+
+class HoldsPipeTest(unittest.TestCase):
+    def test_leaves_a_grandchild_that_holds_the_output_pipe(self):
+        """시험이 끝난 뒤에도 표준 출력·오류를 물려받아 붙들고 남는 손자 프로세스를 만든다(PID 를 파일에 적어 부모 시험이 치운다)."""
+        grandchild = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        Path(os.environ["FAKE_PID_FILE"]).write_text(str(grandchild.pid))
 '''
 EXTRA_MATCHING = '''import unittest
 
@@ -1116,6 +1164,11 @@ class ExitCodeTest(unittest.TestCase):
         self.assertIn("test_fake_quit.QuitTest.test_b_quits_the_whole_process_with_exit_code_zero", found, "그 시험까지는 돌았다(독립 증거)")
         self.assertNotIn("test_fake_quit.QuitTest.test_c_would_run_after_it", found, "뒤 시험은 정말 돌지 않았다(독립 증거)")
 
+    def test_the_no_summary_message_names_the_last_test_line_that_was_read(self):
+        """진단 문구(Q 권고 R7): 요약 없이 끝난 자식이 어느 시험에서 끊겼는지 문제 글이 이름으로 말한다 — 끊긴 시험은 결과 없이 끝난 마지막 시험 줄이다."""
+        code, out = self.run_with(dict(FAKE_FILES, **{"test_fake_quit.py": QUIT}), "-j", "5")
+        self.assertEqual(code, 1, out)
+        self.assertIn("마지막으로 읽은 시험 줄: test_fake_quit.QuitTest.test_b_quits_the_whole_process_with_exit_code_zero", out)
 
     def test_a_comparison_problem_alone_makes_the_exit_code_one_and_the_last_line_failed(self):
         """대조 문제만 있고 실패한 묶음이 없는 판정을 main 에 먹인다(변이 Q01: 종료 코드에서 문제 항을 뺌, Q02: 맨 끝 줄의 OK/FAILED 에서 뺌)."""
@@ -1169,6 +1222,55 @@ class DefaultsTest(unittest.TestCase):
         self.assertNotIn("check_other", out, "넓힌 패턴이면 시험이 든 다른 이름 파일까지 모은다")
 
 
+class ModuleSkipTest(unittest.TestCase):
+    """불러올 때 스스로 건너뛴 모듈(검증 S-3): discover 는 그 모듈을 `unittest.loader.ModuleSkipped.<모듈>` 시험 하나로 바꿔 돌려주고 옛 직렬 흐름은 그것을 시험 하나·건너뜀 하나로 센다.
+    실행기는 이것을 조용히 잃지 않는다 — 알리고 같게 센다. 모르는 종류의 시험은 아무것도 돌리지 않고 실패한다."""
+
+    def make(self):
+        root = make_root(dict(FAKE_FILES, **{"test_fake_modskip.py": MODSKIP}))
+        self.addCleanup(shutil.rmtree, root, True)
+        return root
+
+    def test_the_run_counts_and_announces_a_module_that_skipped_itself_while_loading_exactly_like_the_serial_flow(self):
+        root = self.make()
+        serial = rup.parse_summary(plain_discover(root))
+        self.assertEqual((serial.ran, serial.status, serial.counts), (10, "OK", {"skipped": 2}), "이 시험의 전제: 옛 직렬 흐름은 모듈 건너뜀을 시험 하나·건너뜀 하나로 센다")
+        code, out = run_main("--root", str(root), "-j", "2")
+        self.assertEqual(code, 0, out)
+        ours = rup.parse_summary(out.splitlines())
+        self.assertEqual((ours.ran, ours.status, ours.counts), (serial.ran, serial.status, serial.counts))
+        self.assertIn("알림: 불러올 때 스스로 건너뛴 모듈 1개", out)
+        self.assertIn("test_fake_modskip(이유: the optional dependency is not installed)", out)
+        self.assertTrue(out.rstrip().endswith("OK (skipped=2)"), out[-200:])
+
+    def test_collecting_lists_the_skipped_module_with_its_reason_and_keeps_it_out_of_the_tests(self):
+        collected = rup.collect_tests(self.make())
+        self.assertEqual([tuple(item) for item in collected.skipped], [("test_fake_modskip", "the optional dependency is not installed")])
+        self.assertNotIn("test_fake_modskip", collected.tests)
+        self.assertEqual((collected.failed, collected.unknown), ([], []))
+
+    def test_a_partial_run_announces_a_skipped_module_but_does_not_count_it(self):
+        code, out = run_main("--root", str(self.make()), "-j", "2", "--only", "test_fake_gamma")
+        self.assertEqual(code, 0, out)
+        self.assertIn("불러올 때 스스로 건너뛴 모듈 1개 — 부분 실행(--only)이라 세지 않습니다", out)
+        self.assertIn("Ran 3 tests in", out)
+        self.assertTrue(out.rstrip().endswith("OK (부분 실행)"), out[-200:])
+
+    def test_a_collected_test_of_an_unknown_kind_stops_the_run_instead_of_vanishing(self):
+        """파이썬이 불러오기 실패 시험의 클래스 이름을 바꾸면 그 시험은 어디에도 안 잡힌다 — 조용히 빼지 않고 아무것도 돌리지 않는다."""
+        root = make_root(dict(FAKE_FILES, **{"test_fake_broken.py": BROKEN}))
+        self.addCleanup(shutil.rmtree, root, True)
+        run_dir = Path(tempfile.mkdtemp(prefix="rup_run_"))
+        self.addCleanup(shutil.rmtree, run_dir, True)
+        with mock.patch.object(rup, "is_failed_import", return_value=False), mock.patch.dict(os.environ, {"FAKE_RUN_DIR": str(run_dir)}):
+            code, out = run_main("--root", str(root), "-j", "2")
+        self.assertEqual(code, 1, out)
+        self.assertIn("알 수 없는 종류가 1개", out)
+        self.assertIn("test_fake_broken", out)
+        self.assertIn("FAILED (알 수 없는 시험=1)", out)
+        self.assertEqual(list(run_dir.iterdir()), [], "알 수 없는 것이 있으면 아무 시험도 돌리지 않는다")
+
+
 class OutputShapeTest(unittest.TestCase):
     """출력 줄 모양에 기댄 대조가 옛 직렬 흐름과 다르게 반응하는 길(Q 권고 R6) — 거짓 경보는 안전한 방향이라 고치지 않고, 알려진 차이로 못박고 진단 글을 붙였다. 시험 없는 모듈 하나는 정상 통과한다."""
 
@@ -1177,6 +1279,25 @@ class OutputShapeTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, root, True)
         return run_main("--root", str(root), *args)
 
+    def test_a_class_that_skips_in_its_setup_is_a_known_difference_and_the_message_says_so(self):
+        """(a) setUpClass 에서 SkipTest: 옛 흐름은 건너뜀으로 세지만 그 클래스의 시험 줄은 안 찍혀 실행기는 빠짐으로 읽고 실패한다(안전한 방향). 문제 글이 이유를 말한다."""
+        code, out = self.run_with(dict(FAKE_FILES, **{"test_fake_clsskip.py": CLASS_SETUP_SKIP}), "-j", "5")
+        self.assertEqual(code, 1, out)
+        self.assertIn("돌아야 할 시험 2개가 출력에 없습니다", out)
+        marker = "자식 출력에 클래스·모듈 준비에서 건너뛴 줄이 있습니다: "
+        self.assertIn(marker, out)
+        hint = out.split(marker, 1)[1].split(" — 그 시험들은", 1)[0]
+        self.assertIn("skipped 'the optional thing is missing'", hint, "힌트가 그 건너뜀 줄을 보여 준다(3.12 는 클래스 이름이 함께, 3.10 은 이름 없이 이유만 찍힌다)")
+        self.assertIn("옛 직렬 흐름은 건너뜀으로 셉니다. 알려진 차이", out)
+
+    def test_text_glued_to_the_front_of_a_test_line_is_a_known_difference_and_the_message_says_so(self):
+        """(c) 줄바꿈 없는 글이 시험 줄 앞에 붙으면 시험 줄로 읽지 못한다 — 실패하고, 문제 글이 이유를 말한다."""
+        code, out = self.run_with(dict(FAKE_FILES, **{"test_fake_partial.py": PARTIAL_LINE}), "-j", "5")
+        self.assertEqual(code, 1, out)
+        self.assertIn("noise without a newline test_first", out, "이 시험의 전제: 줄바꿈 없는 글이 시험 줄 앞에 실제로 붙었다")
+        self.assertIn("돌아야 할 시험 1개가 출력에 없습니다", out)
+        self.assertIn("출력에 시험 줄 앞에 다른 글이 붙은 줄이 있습니다", out)
+        self.assertIn("알려진 차이", out)
 
     def test_a_module_without_tests_is_left_out_of_the_plan_and_the_run_passes(self):
         """(d) 변이 Q20: 시험 없는 모듈을 나누기에 그대로 둠 → 나누기 검사가 '목록에 없는 모듈'로 거짓 빨강을 낸다."""
@@ -1185,6 +1306,25 @@ class OutputShapeTest(unittest.TestCase):
         self.assertIn("알림: 시험이 없는 모듈 1개는 돌릴 것이 없어 나누기에서 뺐습니다: test_fake_empty", out)
         self.assertIn("나누기 검사 통과: 시험이 있는 모듈 4개가 정확히 한 묶음에 한 번씩 들어 있습니다", out)
         self.assertIn("시험 id 대조: 처음 모은 9개 = 실제로 돈 9개", out)
+
+    def test_the_progress_line_names_the_last_test_line_that_was_read_not_the_running_test(self):
+        """(R7) 진행 줄의 시험 이름은 도는 시험이 아니라 마지막으로 읽은(끝난) 시험 줄이다 — 글이 그렇게 말한다."""
+        root = make_root({"test_fake_wait.py": WAIT_FOR_GO, "test_fake_gamma.py": GAMMA, "fake_support.py": SUPPORT})
+        self.addCleanup(shutil.rmtree, root, True)
+        go = root / "go.signal"
+        labels = {label: test_id for items in rup.collect_tests(root).tests.values() for label, test_id in items}
+        lines = []
+
+        def out(text):
+            lines.append(text)
+            if text.startswith("[진행") and "묶음 1:" in text:
+                go.write_text("go")
+
+        with mock.patch.dict(os.environ, {"FAKE_GO_FILE": str(go)}):
+            rup.run_plan([["test_fake_wait"], ["test_fake_gamma"]], root, Path(root, "tests").resolve(), labels, heartbeat=0.25, out=out)
+        first = next(line for line in lines if line.startswith("[진행") and "묶음 1:" in line)
+        self.assertIn("묶음 1: 아직 읽은 시험 줄 없음", first)
+        self.assertNotIn("도는 중", first)
 
 
 class SharedBaseTest(unittest.TestCase):
@@ -1297,6 +1437,36 @@ class FinishedLogicTest(unittest.TestCase):
 
     def test_an_exited_process_whose_reader_has_ended_is_finished_at_once(self):
         self.assertTrue(self.child(0, alive=False).finished())
+
+    def test_the_waits_are_bounded_numbers_of_seconds(self):
+        self.assertTrue(0 < rup.Child.GRACE <= 30, rup.Child.GRACE)
+        self.assertTrue(0 < rup.Child.JOIN_SECONDS <= 30, rup.Child.JOIN_SECONDS)
+
+
+class PipeHeldOpenTest(unittest.TestCase):
+    """실제 손자 프로세스가 출력 줄기를 붙들고 남는 장면(검증 Q 장면 S07): 실행기는 말미(GRACE) 안에 끝난다 — 손자가 60초를 자도 기다리지 않는다."""
+
+    def test_a_grandchild_that_holds_the_output_pipe_does_not_stall_the_run(self):
+        root = make_root(dict(FAKE_FILES, **{"test_fake_holds.py": HOLDS_PIPE}))
+        pid_file = root / "grandchild.pid"
+
+        def kill_grandchild():                                              # 이 시험이 띄운 손자만 PID 로 끝낸다
+            try:
+                os.kill(int(pid_file.read_text()), signal.SIGTERM)
+            except (OSError, ValueError):
+                pass
+
+        self.addCleanup(shutil.rmtree, root, True)
+        self.addCleanup(kill_grandchild)
+        with mock.patch.dict(os.environ, {"FAKE_PID_FILE": str(pid_file)}), mock.patch.object(rup.Child, "GRACE", 1.0), mock.patch.object(rup.Child, "JOIN_SECONDS", 1.0):
+            began = time.monotonic()
+            code, out = run_main("--root", str(root), "-j", "5")
+            elapsed = time.monotonic() - began
+        self.assertEqual(code, 0, out)
+        self.assertIn("시험 id 대조: 처음 모은 10개 = 실제로 돈 10개", out)
+        self.assertTrue(pid_file.exists(), "손자가 실제로 만들어졌다")
+        self.assertGreaterEqual(elapsed, 1.0, "손자가 줄기를 붙들고 있었다 — 말미(1초)를 기다렸다(이 시험의 전제를 스스로 확인한다)")
+        self.assertLess(elapsed, 40, "손자는 60초를 자지만 실행기는 말미가 지나면 넘어간다")
 
 
 class FlushTest(unittest.TestCase):
