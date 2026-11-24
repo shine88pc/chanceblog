@@ -1,8 +1,9 @@
-"""설치 버전 묶기(constraints) — 검증기 DEP-3 과 새 파일 `constraints-py310.txt`·`constraints-py312.txt`(결함 D-461–D-465, 문서 docs/DEPENDENCY_PINNING.md).
+"""설치 버전 묶기(constraints) — 검증기 DEP-3 과 새 파일 `constraints-py310.txt`·`constraints-py312.txt`(결함 D-461–D-465·D-481–D-484, 문서 docs/DEPENDENCY_PINNING.md).
 
 요구 파일 셋(`requirements-dev/edits/pipeline.txt`)은 범위 표기(`>=2,<3`)를 그대로 두고, 워크플로의 모든 `pip install` 이 파이썬 버전별 constraints 파일로 설치 버전을 묶는다.
 이 시험은 (1) 진짜 파일 — constraints 두 파일의 모양과 요구 파일과의 짝, 워크플로 열 곳의 설치 줄, (2) 검증기 DEP-3 이 진짜 저장소에서 오류 0 이고
-(3) 진짜 파일을 임시 폴더로 복사해 한 곳씩 틀리게 하면(변이) 모두 검증기 오류로 잡히는지, (4) 범위 비교·줄 읽기·셸 줄 읽기의 작은 규칙, (5) 문서가 코드와 같은 말을 하는지를 본다.
+(3) 진짜 파일을 임시 폴더로 복사해 한 곳씩 틀리게 하면(변이) 모두 검증기 오류로 잡히는지, (4) 범위 비교·줄 읽기·셸 줄 읽기(pip 하위 명령·붙여 쓴 -mpip)의 작은 규칙,
+(5) 숨은 설치 읽기가 옛 정규식과 같은 판정을 긴 반복 입력에도 글 길이에 비례하는 시간에 내는지(결함 D-481·D-482), (6) 문서가 코드와 같은 말을 하는지(한계 문단이 말한 모양이 정말 그렇게 읽히는지 포함)를 본다.
 워크플로를 읽는 시험은 PyYAML 이 있어야 돈다(없는 환경에서는 건너뜀 — requirements-dev.txt 가 CI 에 설치한다)."""
 import itertools
 import random
@@ -1026,29 +1027,29 @@ class PathologicalInputTest(unittest.TestCase):
         """옛 구현은 이 입력들에서 CPU 6–19초였다. 지금은 0.1–0.3초 — 한도 2초는 바쁜 PC 의 흔들림을 덮고도 옛 제곱 시간을 잡는다."""
         for label, make in self.SHAPES:
             with self.subTest(label=label):
-                self.assertLess(best_seconds(vr._dep3_pip_installs, make(16000), runs=2), 2.0)
+                self.assertLess(best_seconds(vr._dep3_pip_installs, make(16000), runs=1), 2.0)
 
     def test_eight_times_the_input_takes_about_eight_times_as_long(self):
         for label, make in self.SHAPES[:2]:
             with self.subTest(label=label):
-                small = best_seconds(vr._dep3_pip_installs, make(8000))
+                small = best_seconds(vr._dep3_pip_installs, make(8000), runs=2)
                 self.assertLess(small, 2.0)
-                large = best_seconds(vr._dep3_pip_installs, make(64000), runs=2)
+                large = best_seconds(vr._dep3_pip_installs, make(64000), runs=1)
                 self.assertLess(large, 24 * max(small, 0.05), (small, large))               # 선형이면 8배 안팎, 제곱이면 64배(CPU 시간은 0.016초 단위로 읽혀 바닥을 0.05초로 둔다)
 
     def test_the_scan_alone_handles_a_very_long_text(self):
-        self.assertLess(best_seconds(vr._dep3_hides_pip_install, "foo " + "pip x " * 100000, runs=2), 2.0)
+        self.assertLess(best_seconds(vr._dep3_hides_pip_install, "foo " + "pip x " * 100000, runs=1), 2.0)
         self.assertFalse(vr._dep3_hides_pip_install("foo " + "pip x " * 100000))
         self.assertTrue(vr._dep3_hides_pip_install("foo " + "pip x " * 100000 + "install"))
 
     def test_hundreds_of_thousands_of_leading_assignments_are_skipped_by_position(self):
-        self.assertLess(best_seconds(vr._dep3_command_words, ["a=1"] * 200000 + ["pip", "install", "x"], runs=2), 2.0)
+        self.assertLess(best_seconds(vr._dep3_command_words, ["a=1"] * 200000 + ["pip", "install", "x"], runs=1), 2.0)
         self.assertEqual(vr._dep3_command_words(["if"] * 200000 + ["pip", "install", "x"]), ["pip", "install", "x"])
 
     def test_leading_assignments_in_a_real_command_line_take_linear_time(self):
-        small = best_seconds(vr._dep3_pip_installs, "a=1 " * 20000 + "pip install -r b.txt")
+        small = best_seconds(vr._dep3_pip_installs, "a=1 " * 20000 + "pip install -r b.txt", runs=2)
         self.assertLess(small, 2.0)
-        large = best_seconds(vr._dep3_pip_installs, "a=1 " * 160000 + "pip install -r b.txt", runs=2, limit=6.0)
+        large = best_seconds(vr._dep3_pip_installs, "a=1 " * 160000 + "pip install -r b.txt", runs=1, limit=6.0)
         self.assertLess(large, 20 * max(small, 0.05), (small, large))                   # 선형이면 8배 안팎(낱말 쪼개기), 앞에서 하나씩 빼면 40배
         found, unreadable = vr._dep3_pip_installs("a=1 " * 20 + "pip install -r b.txt")
         self.assertEqual(([item["requirements"] for item in found], unreadable), ([["b.txt"]], []))
