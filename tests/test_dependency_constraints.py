@@ -694,6 +694,13 @@ class LineReadingTest(unittest.TestCase):
         pins, problems = vr._dep3_read_constraints("a==1\nA==2\nb_c==1\nb-c==1\n")
         self.assertEqual([number for number, _ in problems], [2, 4])
 
+    def test_a_leading_byte_order_mark_is_skipped_like_pip_does(self):
+        bom = chr(0xFEFF)
+        pins, problems = vr._dep3_read_constraints(bom + "# head\nx==1.0\n")
+        self.assertEqual((problems, sorted(pins)), ([], ["x"]))
+        entries, problems = vr._dep3_read_requirements(bom + "# head\nx>=1,<2\n")
+        self.assertEqual((problems, [entry[1] for entry in entries]), ([], ["x"]))
+
     def test_a_very_long_line_is_refused_before_any_regex_runs_on_it(self):
         pins, problems = vr._dep3_read_constraints("a==" + "1" * 100000 + "\n")
         self.assertEqual((pins, len(problems)), ({}, 1))
