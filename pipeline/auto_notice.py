@@ -491,6 +491,8 @@ def evaluate_ready(inputs, reader, sleep=time.sleep):
     if pr.get("draft") is True:
         raise Skip("pr_draft")
     paths = read_pr_paths(reader, count)
+    if not paths:
+        raise Skip("api_shape")      # 읽기는 됐는데 변경 파일이 0건 — 바뀐 파일 없는 열린 PR 은 모양이 이상하다. 없음을 '검사 정의가 바뀐 PR: 아니오' 로 읽어 보내지 않는다(닫힌 쪽, 독립 시험 검증 Q)
     definition_changed = touches_check_definition(paths)
     text = compose_ready(number, _text(pr.get("title")), pr.get("body"), inputs.sha, definition_changed)
     for attempt in range(CHECK_RETRIES + 1):

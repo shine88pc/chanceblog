@@ -616,8 +616,6 @@ class OtherDocsAgreeTest(unittest.TestCase):
             self.assertTrue(following.startswith("   - 접수 코멘트(봇) 자체가 고쳐졌으면(`접수대조=ack_edited`"), (rel, following[:60]))
             for needle in ("`updated_at` 이 `created_at` 과 다름", "결함 D-466", "승인이 아니고", "`decision` 요청"):
                 self.assertIn(needle, following, (rel, needle))
-        for rel in ("AGENTS.md",):                                                              # 8번 줄·보충 문단은 이 변경이 고치지 않는다
-            self.assertNotIn("ack_edited", rel_text(rel), rel)
 
     def test_the_forgery_and_known_limit_sentences_of_the_status_tool_output_are_in_the_security_row_and_the_runbook(self):
         """검증자 S 의 V2·V7·V8(결함 D-408): 본문·코멘트 줄의 `| ` 표지와 기계가 읽는 한 줄 `접수대조=…`, '같음도 승인이 아니다', '쓰기 권한자는 같은 login 의 워크플로로 봇 코멘트도 만들 수 있다' 가

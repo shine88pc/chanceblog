@@ -1090,6 +1090,12 @@ class EvaluateReadyTest(unittest.TestCase):
         self.assertEqual(self.skipped(no_files), "api_error")                                    # 변경 파일 목록을 못 읽으면(404) 알리지 않는다
         self.assertEqual(self.skipped({**ready_routes(), f"/pulls/{PR_NUMBER}/files": ol.GitHubError("HTTP 500", 500)}), "api_error")
 
+    def test_an_empty_list_of_changed_files_is_not_read_as_no_definition_change(self):
+        """독립 시험 검증 Q: 읽기는 성공했는데 변경 파일이 0건이면 '검사 정의가 바뀐 PR: 아니오' 로 읽어 보내지 않는다 — 바뀐 파일 없는 열린 PR 은 모양이 이상하므로 알리지 않는다(api_shape, 닫힌 쪽)."""
+        self.assertEqual(self.skipped(ready_routes(files=[])), "api_shape")
+        verdict, _ = self.evaluate(ready_routes(files=["docs/a.md"]))                         # 대조: 파일이 하나라도 있으면 알린다
+        self.assertEqual(verdict.text, an.compose_ready(NUMBER, TITLE, BODY, SHA))
+
     def test_wrongly_shaped_answers_are_shape_problems(self):
         shapes = [({"/pulls": {"x": 1}, "/actions/runs": {}}, "api_shape"), ({"/pulls": None, "/actions/runs": {}}, "api_shape"), ({"/pulls": ["x"], "/actions/runs": {}}, "api_shape"),
                   ({"/pulls": [{"number": PR_NUMBER}], "/actions/runs": {}}, "api_shape"), ({"/pulls": [pr_item(number="x")], "/actions/runs": {}}, "api_shape"),

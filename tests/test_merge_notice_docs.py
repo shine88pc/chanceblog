@@ -322,6 +322,9 @@ class ModuleAndWorkflowTextTest(unittest.TestCase):
 class DefinitionLineDocsTest(unittest.TestCase):
     """독립 감사 BA-S2 R2·N6(결함 D-467): 병합 부탁 문장의 새 두 줄(검사 정의가 바뀐 PR 의 경고·머리 커밋 7자리)과 변경 파일 읽기가 구조 절·런북·운영자 사용법에 적혀 있고, 적힌 글이 코드의 상수와 같다."""
 
+    HONEST = "자동 알림이 켜진 뒤에는 자동으로, 그 전에는 AI 가 요청 파일 `verify` 칸에 직접 적습니다(빠질 수 있으니 PR 화면의 변경 파일을 한 번 보세요)"      # 두 표기를 누가 붙이는지의 정직한 문장 — 사용법·구조 절·런북이 같은 글을 쓴다(독립 검증 BFIX1-S R4)
+    ROW_HONEST = "자동 알림이 켜진 뒤에만 자동으로 붙는다 — 켜지기 전 AI 가 요청 파일로 보내는 병합 부탁에는 AI 가 `verify` 칸에 직접 적으며 빠질 수 있다"
+
     def test_the_architecture_section_describes_the_new_lines_with_the_exact_constants(self):
         section_text = section(doc("docs/ARCHITECTURE.md"), "## 4-6-4.")
         for needle in ("**병합 부탁 문장의 검사 정의 표시와 머리 커밋**", "결함 D-467", "`GET /pulls/{번호}/files`", "병합완료 확인과 같은 읽기", "`.github/` 는 바뀌지 않았다", "옛 이름까지 센다",
@@ -329,6 +332,9 @@ class DefinitionLineDocsTest(unittest.TestCase):
             self.assertIn(needle, section_text, needle)
         self.assertIn(f"`{an.DEFINITION_LINE}`", section_text)
         self.assertIn(an.HEAD_LINE.format("a1b2c3d"), section_text)
+        self.assertIn(self.HONEST, section_text)
+        self.assertIn("변경 파일이 하나도 없는 것으로 오면 모양이 이상한 것으로 보아 `api_shape` 로 알리지 않는다", section_text)
+        self.assertNotIn("머리 커밋 7자리는 모든 병합 부탁에 붙는다", section_text)                  # 알림 문장 이야기일 뿐 AI 요청 파일까지 그렇다는 말이 아니다
         for path in an.CHECK_DEFINITION_FILES + an.CHECK_DEFINITION_DIRS:
             self.assertIn(f"`{path}`", section_text, path)
 
@@ -340,12 +346,22 @@ class DefinitionLineDocsTest(unittest.TestCase):
             self.assertIn(needle, item, needle)
         for path in an.CHECK_DEFINITION_FILES + an.CHECK_DEFINITION_DIRS:
             self.assertIn(f"`{path}`", item, path)
+        self.assertIn(self.HONEST, item)
         self.assertLessEqual(len("독립 검증 통과 · 검사 4칸 초록 · 머리 a1b2c3d · " + an.DEFINITION_LINE), 120)         # 예로 든 verify 한 줄이 칸 상한 안이다
         guide = doc("인수인계/운영자_요청함_사용법.md")
         paragraph = guide[guide.index("**검사 정의가 바뀐 병합 부탁에는 경고 한 줄이 붙습니다**"):]
         paragraph = paragraph[:paragraph.index("\n")]
-        for needle in (f"`{an.DEFINITION_LINE}`", "머리 커밋 a1b2c3d", "PR 화면의 해시와 같은지", "AI 가 요청 파일로 보내는 병합 부탁에도 같은 표기"):
+        for needle in (f"`{an.DEFINITION_LINE}`", "머리 커밋 a1b2c3d", "PR 화면의 해시와 같은지", self.HONEST):
             self.assertIn(needle, paragraph, needle)
+        for stale in ("모든 병합 부탁에는", "같은 표기를 씁니다"):
+            self.assertNotIn(stale, paragraph, stale)                                      # 자동 알림이 꺼져 있는 동안은 AI 가 직접 적는 관습일 뿐이다 — 일반 사실처럼 쓰지 않는다
+
+    def test_the_security_row_says_the_two_marks_are_automatic_only_once_the_notices_are_on(self):
+        text = doc("docs/SECURITY_GUARDRAILS.md")
+        start = text.index("머리 커밋 줄(`머리 커밋 <7자리>")
+        tail = text[start:text.index(chr(10), start)]
+        self.assertIn(self.ROW_HONEST, tail)
+        self.assertNotIn("모든 병합 부탁에 붙는다", tail)
 
     def test_the_new_text_has_no_tilde_no_double_braces_and_no_address(self):
         """이 변경이 새로 쓴 글만 본다(문서 전체에는 옛 글의 물결표가 있을 수 있다)."""

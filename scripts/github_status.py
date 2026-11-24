@@ -344,7 +344,7 @@ def ack_check(issue, comments, owner):
     """`[답변]`·`[요청]` 제목 이슈의 접수 대조 → {status, ack, current, lines}. 제목이 양식 이슈가 아니면 None.
     status: same(접수 코멘트가 되풀이한 값 = 지금 본문을 읽은 값) · differs(다름 — 본문이 접수 뒤에 바뀐 것) · no_ack(접수 코멘트 없음) · ack_unreadable(접수 코멘트의 값을 읽지 못함) ·
     ack_edited(접수 코멘트 자체가 접수 뒤에 고쳐짐 — 값이 같아 보여도 믿지 않는다) · not_owner(소유자가 올린 이슈가 아님 — 접수·승인 대상이 아니다). 승인으로 읽어도 되는 것은 same 뿐이다(그 요청 파일과 대조는 따로 한다).
-    판정 순서: not_owner → no_ack → ack_edited → ack_unreadable → same·differs(고쳐진 코멘트는 읽을 수 있든 없든 먼저 고쳐진 것으로 알린다)."""
+    판정 순서: not_owner → no_ack → ack_edited → ack_unreadable → same·differs(고쳐진 코멘트는 읽을 수 있든 없든 먼저 고쳐진 것으로 알린다). ack_edited 는 코멘트에서 읽은 값을 싣지 않는다(ack 는 None — ack_unreadable 처럼)."""
     title = str(issue.get("title") or "")
     if not title.startswith(FORM_PREFIXES):
         return None
@@ -359,7 +359,7 @@ def ack_check(issue, comments, owner):
                 "lines": ["  접수 대조: 접수 코멘트(봇)가 없습니다 — 아직 접수 전이거나 접수되지 않은 이슈입니다. 승인으로 읽지 않습니다(접수 코멘트가 되풀이한 값과 지금 본문이 같을 때만 승인)."]}
     acked, now = ack_value(ack_head(ack.get("body"))), current_value(result)
     if ack_was_edited(ack):
-        return {"status": "ack_edited", "ack": acked, "current": now,
+        return {"status": "ack_edited", "ack": None, "current": now,        # 고쳐진 코멘트에서 읽은 값은 싣지 않는다(ack_unreadable 처럼 None) — 상태를 안 보고 ack 와 current 를 견주는 소비자가 위조된 값을 같음으로 읽지 못하게(독립 검증 BFIX1-S N3)
                 "lines": [f"  ⚠ 접수 대조: 접수 코멘트(봇)가 접수 뒤에 고쳐졌습니다(만든 {kst(ack.get('created_at'))} · 고친 {kst(ack.get('updated_at'))}) — 코멘트의 값을 믿을 수 없어 "
                           "본문과 값이 같아 보여도 승인으로 읽지 말고 운영자에게 번호 있는 확인 요청으로 다시 묻습니다."]}
     if acked is None:

@@ -303,13 +303,15 @@ class AckCommentEditedTest(unittest.TestCase):
         self.assertEqual(self.machine(lines), ["접수대조=same"])
         self.assertIn("접수 대조: 같음", check_line(lines))
 
-    def test_the_values_are_equal_and_still_not_the_same_json_carries_both(self):
-        """JSON 은 접수 코멘트에서 읽은 값과 지금 본문의 값을 그대로 담는다 — 두 값이 같은데도 상태가 `ack_edited` 인 것이 이 빈틈의 증거다."""
+    def test_the_json_of_an_edited_comment_carries_no_ack_value_only_the_current_one(self):
+        """고쳐진 접수 코멘트에서 읽은 값은 JSON 이 싣지 않는다(`ack` 는 None — `ack_unreadable` 과 같다): 코멘트의 값이 본문과 같아 보이는 것이 이 위조의 모양이라,
+        상태를 안 보고 `ack` 와 `current` 를 견주는 소비자가 '같음' 으로 읽지 못하게 한다(독립 검증 BFIX1-S N3). 지금 본문의 값(`current`)은 그대로 싣는다."""
         code, lines, _ = self.read_data([self.forged()], None, "--json")
         data = json.loads(lines[0])["ack_check"]
         self.assertEqual(data["status"], "ack_edited")
-        self.assertEqual(data["ack"], data["current"])
-        self.assertEqual(data["ack"], "확인 요청 019 · 선택 ③")
+        self.assertIsNone(data["ack"])
+        self.assertEqual(data["current"], "확인 요청 019 · 선택 ③")
+        self.assertNotEqual(data["ack"], data["current"])                                  # 견주는 소비자가 있어도 같음으로 읽지 않는다
 
     def test_any_difference_between_the_two_times_counts_even_an_earlier_or_a_differently_written_one(self):
         for updated in ("2026-11-16T10:00:21Z", "2026-11-16T10:00:19Z", "2026-11-16T10:00:20.000Z", "2026-11-16T19:00:20+09:00", "2026-11-17T00:00:00Z", "2026-11-16T10:00:20z"):

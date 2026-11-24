@@ -46,12 +46,15 @@ API_KEY = os.environ.get("GEMINI_API_KEY")
 UNSPLASH_KEY = clean_secret(os.environ.get("UNSPLASH_ACCESS_KEY"))  # 끝 줄바꿈·보이지 않는 글자가 낀 키가 요청 머리글 오류 문구(= 로그)에 실리지 않게 정리한다(D-370). 정리하고 비면 STUB_UNSPLASH 가 켜진다
 
 
-def _flag(name):
-    return os.environ.get(name, "0").strip().lower() in pause.ON_VALUES      # 켜짐 값은 정지 변수·Blogger 러너·초안 올리기와 같은 한 곳의 집합이다(1·true·yes·on — 감사 BP-S2 N4)
+FIX_IMAGES_ON_VALUES = frozenset({"1", "true", "yes"})      # 쓰는 쪽 스위치(기존 글의 이미지를 직접 커밋으로 바꾸는 FIX_IMAGES)는 옛 켜짐 값 집합 그대로다 — on 으로 넓히지 않는다(독립 검증 BFIX1-S R2, 결함 D-473)
+
+
+def _flag(name, on_values=pause.ON_VALUES):
+    return os.environ.get(name, "0").strip().lower() in on_values      # 기본 켜짐 값은 정지 변수·Blogger 러너·초안 올리기와 같은 한 곳의 집합이다(1·true·yes·on — 감사 BP-S2 N4). 덜 올리는 쪽인 연습 실행(DRY_RUN)만 이 기본을 쓴다
 
 
 DRY_RUN = _flag("DRY_RUN")
-FIX_IMAGES = _flag("FIX_IMAGES")
+FIX_IMAGES = _flag("FIX_IMAGES", FIX_IMAGES_ON_VALUES)
 EVENT_NAME = os.environ.get("EVENT_NAME", "").strip().lower()
 
 STUB_GEMINI = not API_KEY

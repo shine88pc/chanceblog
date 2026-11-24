@@ -209,5 +209,24 @@ class RegisterRowsTest(unittest.TestCase):
         self.assertLess(text.index("| **D-468** |"), order[0])                              # D-468(워크플로 줄 시험) 다음에 이어 붙었다
 
 
+class RollbackTableTest(unittest.TestCase):
+    """공학 안내서 10절 롤백 표의 '블로그 한 곳을 멈춤' 줄도 같은 말을 한다 — Chance 는 제외(독립 검증 BFIX1-S R1)."""
+
+    def row(self):
+        return line_starting(doc("docs/ENGINEERING_GUIDE.md"), "| 블로그 한 곳을 멈춤 |")
+
+    def test_the_row_names_the_blogs_it_fits_and_excludes_chance(self):
+        row = self.row()
+        for needle in ('`mode: "off"`', "Blogger·네이버·티스토리에만 맞고", "**Chance 는 제외**", "`PIPELINE_PAUSE` 만 멈춤 수단", "`mode: off` 는 검증이 거절해 매 실행 빨강", "(T3 아님, 안전 방향)"):
+            self.assertIn(needle, row, needle)
+        self.assertNotIn(TILDE, row)
+        self.assertNotIn("{" + "{", row)
+
+    def test_the_row_is_still_a_two_cell_table_row(self):
+        cells = [cell.strip() for cell in self.row().strip().strip("|").split("|")]
+        self.assertEqual(len(cells), 2, cells)
+        self.assertEqual(cells[0], "블로그 한 곳을 멈춤")
+
+
 if __name__ == "__main__":
     unittest.main()
