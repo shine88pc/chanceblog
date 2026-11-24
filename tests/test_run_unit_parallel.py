@@ -9,6 +9,7 @@ import ast
 import contextlib
 import copy
 import hashlib
+import inspect
 import io
 import os
 import shutil
@@ -16,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
 import unittest
 from collections import Counter
 from pathlib import Path
@@ -127,13 +129,22 @@ class SameNameCase(unittest.TestCase):
     def test_second(self):
         mark(self)
 '''
-SLOW = '''import time
+WAIT_FOR_GO = '''import os
+import time
 import unittest
+from pathlib import Path
 
 
-class SlowTest(unittest.TestCase):
-    def test_slow(self):
-        time.sleep(1.0)
+class WaitTest(unittest.TestCase):
+    def test_waits_for_the_go_file(self):
+        # 부모 시험이 필요한 일(진행 줄 찍기·앞 묶음 넘기기·오류 뒤 정리)을 마치고 신호 파일을 만들 때까지 기다린다 — 시계에 기대지 않는다. 신호가 안 오면 25초 뒤 스스로 실패한다.
+        # 설명 문장(docstring)을 일부러 쓰지 않는다: 그러면 시험 이름 줄이 시작하자마자 한 줄로 읽혀 '아직 읽은 시험 줄 없음' 이 시간에 따라 달라진다 — 없으면 이름 줄은 끝나야 읽힌다.
+        go = Path(os.environ["FAKE_GO_FILE"])
+        deadline = time.monotonic() + 25
+        while not go.exists():
+            if time.monotonic() > deadline:
+                self.fail("the go file never appeared")
+            time.sleep(0.02)
 '''
 BROKEN = "import fake_module_that_does_not_exist_zzz\n"
 
@@ -144,6 +155,66 @@ GAMMA_IDS = ["test_fake_gamma.GammaTest.test_g1", "test_fake_gamma.GammaTest.tes
 DELTA_IDS = ["test_fake_delta.DeltaTest.test_d1"]
 ALL_IDS = sorted(ALPHA_IDS + BETA_IDS + GAMMA_IDS + DELTA_IDS)
 SKIPPED_IDS = {"test_fake_alpha.AlphaTest.test_skipped"}                # 돌지 않으므로 증거 파일도 남기지 않는다
+
+# 재작업(독립 검증 S·Q 지적)에서 더한 가짜 시험 모듈들 — 모두 FAKE_FILES 에 더해 쓴다(FAKE_FILES 자체와 위의 개수는 그대로)
+QUIT = '''import os
+import unittest
+
+from fake_support import mark
+
+
+class QuitTest(unittest.TestCase):
+    def test_a_first(self):
+        mark(self)
+
+    def test_b_quits_the_whole_process_with_exit_code_zero(self):
+        mark(self)
+        os._exit(0)
+
+    def test_c_would_run_after_it(self):
+        mark(self)
+'''
+SHARED_BASE = '''import unittest
+
+from fake_support import mark
+
+
+class SharedCases(unittest.TestCase):
+    def test_shared_one(self):
+        mark(self)
+
+    def test_shared_two(self):
+        mark(self)
+'''
+SHARED_A = '''import unittest
+
+from fake_shared import SharedCases  # noqa: F401  (부모 시험 클래스를 가져온다 — 두 모듈에서 같은 시험 줄이 나온다)
+
+
+class OwnATest(unittest.TestCase):
+    def test_own_a(self):
+        pass
+'''
+SHARED_B = SHARED_A.replace("OwnATest", "OwnBTest").replace("test_own_a", "test_own_b")
+SHARED_C = '''from fake_shared import SharedCases  # noqa: F401
+from fake_shared import SharedCases as SharedCasesAgain  # noqa: F401  (같은 클래스를 이름 둘로 가져온다 — 한 모듈 안에서 같은 시험 줄이 두 번 나온다)
+'''
+EXTRA_MATCHING = '''import unittest
+
+from fake_support import mark
+
+
+class ExtraTest(unittest.TestCase):
+    def test_extra(self):
+        mark(self)
+'''                                                                         # 파일 이름이 test* 로 시작하지만 test_ 는 아니다(testing_extra.py) — 좁힌 패턴은 놓친다
+OTHER_NOT_MATCHING = '''import unittest
+
+
+class OtherTest(unittest.TestCase):
+    def test_other(self):
+        pass
+'''                                                                         # 시험이 들어 있지만 이름이 test* 가 아니다(check_other.py) — 넓힌 패턴은 모은다
 
 
 def make_root(files=None):
@@ -687,33 +758,60 @@ class FailureReportTest(unittest.TestCase):
 
 
 class HeartbeatTest(unittest.TestCase):
-    def test_a_progress_line_is_printed_while_a_child_is_still_running(self):
-        root = make_root({"test_fake_slow.py": SLOW, "test_fake_gamma.py": GAMMA, "fake_support.py": SUPPORT})
+    """진행 줄과 묶음 넘기기 — 시계에 기대지 않는다. 기다리는 시험(WAIT_FOR_GO)이 부모가 할 일을 마치고 신호 파일을 만들 때까지 기다리게 해 순서를 강제한다
+    (일이 안 되면 그 시험이 25초 뒤 스스로 실패해 시험이 빨개지고, 되면 시계와 상관없이 늘 통과한다)."""
+
+    def prepare(self, files):
+        root = make_root(files)
         self.addCleanup(shutil.rmtree, root, True)
         collected = rup.collect_tests(root)
         tests = {module: items for module, items in collected.tests.items() if items}
         labels = {label: test_id for items in tests.values() for label, test_id in items}
-        plan = [["test_fake_slow"], ["test_fake_gamma"]]
+        return root, tests, labels, Path(root, "tests").resolve()
+
+    def test_a_progress_line_is_printed_while_a_child_is_still_running(self):
+        root, tests, labels, tests_dir = self.prepare({"test_fake_wait.py": WAIT_FOR_GO, "test_fake_gamma.py": GAMMA, "fake_support.py": SUPPORT})
+        go = root / "go.signal"
+        plan = [["test_fake_wait"], ["test_fake_gamma"]]
         lines = []
-        results = rup.run_plan(plan, root, Path(root, "tests").resolve(), labels, heartbeat=0.25, out=lines.append)
+
+        def out(text):
+            lines.append(text)
+            if text.startswith("[진행") and "묶음 1:" in text:                    # 첫 묶음이 도는 동안 진행 줄이 찍혔다 — 이제 기다리던 시험을 놓아 준다
+                go.write_text("go")
+
+        with mock.patch.dict(os.environ, {"FAKE_GO_FILE": str(go)}):
+            results = rup.run_plan(plan, root, tests_dir, labels, heartbeat=0.25, out=out)
         self.assertTrue(any(line.startswith("[진행") and "묶음 1:" in line for line in lines), lines)
         self.assertTrue(any("묶음 2/2 끝" in line for line in lines), lines)
+        self.assertEqual([result.returncode for result in results], [0, 0], "기다리던 시험이 신호를 받고 통과했다 = 진행 줄은 그 시험이 도는 동안 찍혔다")
         self.assertEqual(rup.verify_run(tests, plan, results).problems, [])
 
     def test_a_finished_bin_is_handed_over_as_soon_as_the_bins_before_it_are_done_and_always_in_order(self):
-        root = make_root({"test_fake_slow.py": SLOW, "test_fake_gamma.py": GAMMA, "fake_support.py": SUPPORT})
-        self.addCleanup(shutil.rmtree, root, True)
-        collected = rup.collect_tests(root)
-        labels = {label: test_id for items in collected.tests.values() for label, test_id in items}
-        tests_dir = Path(root, "tests").resolve()
-        for plan, early in ((([["test_fake_gamma"], ["test_fake_slow"]]), True), (([["test_fake_slow"], ["test_fake_gamma"]]), False)):
-            with self.subTest(plan=plan):
-                stamps = []
-                began = time.monotonic()
-                rup.run_plan(plan, root, tests_dir, labels, heartbeat=0, out=lambda text: None, on_ready=lambda index, result: stamps.append((index, time.monotonic() - began)))
-                self.assertEqual([index for index, _ in stamps], [0, 1], "묶음 번호 순서로 넘어온다")
-                if early:
-                    self.assertLess(stamps[0][1] + 0.3, stamps[1][1], stamps)           # 빠른 첫 묶음은 느린 둘째 묶음이 끝나기 전에 이미 넘어왔다(한 묶음이 멈춰도 앞 묶음의 출력은 로그에 있다)
+        root, tests, labels, tests_dir = self.prepare({"test_fake_wait.py": WAIT_FOR_GO, "test_fake_gamma.py": GAMMA, "fake_support.py": SUPPORT})
+        with self.subTest(case="빠른 묶음이 앞"):
+            early_go = root / "early.signal"
+            order = []
+
+            def handed(index, result):
+                order.append((index, result.returncode))
+                if index == 0:                                                      # 앞 묶음이 넘어오는 순간 뒤 묶음(기다리는 시험)을 놓아 준다
+                    early_go.write_text("go")
+
+            with mock.patch.dict(os.environ, {"FAKE_GO_FILE": str(early_go)}):
+                rup.run_plan([["test_fake_gamma"], ["test_fake_wait"]], root, tests_dir, labels, heartbeat=0, out=lambda text: None, on_ready=handed)
+            self.assertEqual(order, [(0, 0), (1, 0)], "묶음 번호 순서로 넘어오고, 뒤 묶음이 끝나기 전에 앞 묶음이 이미 넘어왔다(뒤 묶음의 종료 코드 0 = 신호를 받았다)")
+        with self.subTest(case="빠른 묶음이 뒤"):
+            late_go = root / "late.signal"
+            order = []
+
+            def out(text):
+                if "묶음 2/2 끝" in text:                                            # 뒤 묶음이 먼저 끝났다 — 이제 앞 묶음(기다리는 시험)을 놓아 준다
+                    late_go.write_text("go")
+
+            with mock.patch.dict(os.environ, {"FAKE_GO_FILE": str(late_go)}):
+                rup.run_plan([["test_fake_wait"], ["test_fake_gamma"]], root, tests_dir, labels, heartbeat=0, out=out, on_ready=lambda index, result: order.append((index, result.returncode)))
+            self.assertEqual(order, [(0, 0), (1, 0)], "뒤 묶음이 먼저 끝나도 앞 묶음 다음에 넘어온다")
 
     def test_a_bin_without_modules_is_refused_because_unittest_would_then_search_the_current_folder(self):
         with self.assertRaises(ValueError):
@@ -850,6 +948,14 @@ class CompletenessMutationTest(unittest.TestCase):
         self.assertIn("종료 코드는 1 인데 요약은 OK 입니다", self.texts(verdict))
         self.assertEqual(verdict.failed_bins, [1])
 
+    def test_every_exit_code_that_is_not_zero_marks_the_bin_as_failed(self):
+        """변이 Q38(종료 코드 5 = 시험 0개를 통과로 셈)·Q39(신호로 죽은 자식의 음수 종료 코드를 무시)."""
+        for code in (1, 2, 5, 130, -9, -15):
+            with self.subTest(returncode=code):
+                results = copy.deepcopy(self.results)
+                results[0] = results[0]._replace(returncode=code)
+                self.assertEqual(self.verdict(results=results).failed_bins, [1])
+
     def test_mutation_too_few_child_results_for_the_plan_is_caught(self):
         verdict = self.verdict(results=copy.deepcopy(self.results)[:-1])
         self.assertTrue(any("자식 결과가" in text for text in verdict.problems), verdict.problems)
@@ -957,6 +1063,321 @@ class ContractTest(unittest.TestCase):
         self.assertIn("--weights", words)
         self.assertTrue((_bootstrap.ROOT / words[words.index("--weights") + 1]).is_file())
         self.assertNotIn("--plan-only", words, "계획만 보이고 끝내는 인자로는 시험이 돌지 않는다")
+        for flag in ("--only", "--pattern", "--start-dir", "--root"):
+            self.assertNotIn(flag, words, f"{flag} 는 일부만 돌리거나 모으는 범위를 바꾼다 — 부분 실행은 CI 줄에 쓰지 않는다")
+
+
+# ----------------------------------------------------------------------------
+# 7. 재작업 — 독립 검증(안전 S·시험 Q)의 지적을 시험으로: 종료 코드·기본값·모듈 건너뜀·출력 읽기·자식 환경·붙들린 줄기·진행 줄·정리·import 순서
+#    (아래 시험은 변이 표의 살아남은 변이를 그대로 단언으로 옮긴 것이다 — 각 시험 설명에 어느 변이를 잡는지 적었다)
+# ----------------------------------------------------------------------------
+def plain_discover(root):
+    """CI 의 옛 명령(`python -m unittest discover -s tests -v`)이 이 가짜 저장소에서 내는 출력 줄(다른 프로세스에서 — 실행기를 거치지 않는다)."""
+    done = subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"], cwd=str(root), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+    return done.stdout.decode("utf-8", "replace").splitlines()
+
+
+def plain_discover_modules(root):
+    """실행기를 거치지 않는 평범한 discover 가 모으는 시험 모듈 이름들(시험이 든 모듈만)."""
+    code = ("import unittest\n"
+            "def flat(suite):\n"
+            "    for item in suite:\n"
+            "        if isinstance(item, unittest.TestSuite):\n"
+            "            yield from flat(item)\n"
+            "        else:\n"
+            "            yield item\n"
+            "print('\\n'.join(sorted(test.id() for test in flat(unittest.TestLoader().discover('tests')))))\n")
+    done = subprocess.run([sys.executable, "-c", code], cwd=str(root), stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+    return sorted({test_id.split(".")[0] for test_id in done.stdout.decode("utf-8", "replace").split()})
+
+
+class ExitCodeTest(unittest.TestCase):
+    """종료 코드의 마지막 연결(변이 Q01·Q02·Q04): 자식이 모두 종료 코드 0 이어도 대조가 어긋나면 1 이고, 중단은 통과가 아니다. 옛 직렬 실행은 같은 일을 아무 글 없이 초록으로 두었다."""
+
+    def setUp(self):
+        self.run_dir = Path(tempfile.mkdtemp(prefix="rup_run_"))
+        self.addCleanup(shutil.rmtree, self.run_dir, True)
+
+    def run_with(self, files, *args):
+        root = make_root(files)
+        self.addCleanup(shutil.rmtree, root, True)
+        with mock.patch.dict(os.environ, {"FAKE_RUN_DIR": str(self.run_dir)}):
+            return run_main("--root", str(root), *args)
+
+    def test_a_test_that_ends_the_whole_process_with_exit_code_zero_still_fails_the_run(self):
+        """중간에 os._exit(0) 하는 시험: 그 자식의 종료 코드는 0 이고 요약만 없다(= 실패한 묶음은 없고 대조 문제만 있다). 그래도 1 이어야 한다."""
+        code, out = self.run_with(dict(FAKE_FILES, **{"test_fake_quit.py": QUIT}), "-j", "5")
+        self.assertNotIn("실패(종료 코드", out, "모든 자식이 종료 코드 0 으로 끝났다 — 실패한 묶음은 없다")
+        self.assertEqual(code, 1, out)
+        self.assertIn("자식 출력에 `Ran N tests` 요약이 없습니다", out)
+        self.assertIn("돌아야 할 시험 1개가 출력에 없습니다 — test_fake_quit.QuitTest.test_c_would_run_after_it", out)
+        self.assertTrue(out.rstrip().splitlines()[-1].startswith("FAILED"), out[-300:])
+        found = evidence(self.run_dir)
+        self.assertIn("test_fake_quit.QuitTest.test_b_quits_the_whole_process_with_exit_code_zero", found, "그 시험까지는 돌았다(독립 증거)")
+        self.assertNotIn("test_fake_quit.QuitTest.test_c_would_run_after_it", found, "뒤 시험은 정말 돌지 않았다(독립 증거)")
+
+
+    def test_a_comparison_problem_alone_makes_the_exit_code_one_and_the_last_line_failed(self):
+        """대조 문제만 있고 실패한 묶음이 없는 판정을 main 에 먹인다(변이 Q01: 종료 코드에서 문제 항을 뺌, Q02: 맨 끝 줄의 OK/FAILED 에서 뺌)."""
+        root = make_root()
+        self.addCleanup(shutil.rmtree, root, True)
+        only_problems = rup.Verdict(["묶음 1: 돌아야 할 시험 1개가 출력에 없습니다"], [], 9, 8, 9, Counter(), [], [])           # failed_bins 가 비어 있다 = 자식은 모두 통과
+        with mock.patch.object(rup, "verify_run", return_value=only_problems):
+            code, out = run_main("--root", str(root), "-j", "2")
+        self.assertEqual(code, 1, out)
+        self.assertTrue(out.rstrip().splitlines()[-1].startswith("FAILED"), out[-300:])
+        self.assertIn("대조 문제:", out)
+
+    def test_a_clean_verdict_is_exit_code_zero_and_an_ok_last_line(self):
+        root = make_root()
+        self.addCleanup(shutil.rmtree, root, True)
+        clean = rup.Verdict([], [], 9, 9, 9, Counter(), [], [])
+        with mock.patch.object(rup, "verify_run", return_value=clean):
+            code, out = run_main("--root", str(root), "-j", "2")
+        self.assertEqual(code, 0, out)
+        self.assertTrue(out.rstrip().splitlines()[-1].startswith("OK"), out[-300:])
+
+    def test_an_interrupt_is_never_reported_as_a_pass(self):
+        """변이 Q04: 중단(KeyboardInterrupt)의 종료 코드를 0 으로 바꿈."""
+        with mock.patch.object(rup, "_run", side_effect=KeyboardInterrupt):
+            code, out = run_main("--plan-only")
+        self.assertEqual(code, 130, out)
+        self.assertIn("통과로 세지 않습니다", out)
+
+
+class DefaultsTest(unittest.TestCase):
+    """모으는 범위의 기본값(변이 Q22 — 패턴을 좁힘): 아무 인자 없이 부르면 CI 의 옛 명령 `discover -s tests` 와 같은 범위를 모은다."""
+
+    def test_the_command_line_defaults_cover_the_whole_suite_like_the_ci_discover_command(self):
+        args = rup.build_parser().parse_args([])
+        self.assertEqual((args.start_dir, args.pattern, args.only, args.serial, args.plan_only), ("tests", "test*.py", [], [], False))
+        self.assertEqual(args.pattern, inspect.signature(unittest.TestLoader.discover).parameters["pattern"].default, "unittest discover 의 기본 패턴과 같다")
+        self.assertEqual(inspect.signature(rup.collect_tests).parameters["pattern"].default, args.pattern)
+        self.assertEqual(inspect.signature(rup.collect_tests).parameters["start_dir"].default, args.start_dir)
+
+    def test_with_no_pattern_argument_the_run_collects_exactly_the_modules_the_ci_discover_command_collects(self):
+        root = make_root(dict(FAKE_FILES, **{"testing_extra.py": EXTRA_MATCHING, "check_other.py": OTHER_NOT_MATCHING}))
+        self.addCleanup(shutil.rmtree, root, True)
+        theirs = plain_discover_modules(root)
+        self.assertIn("testing_extra", theirs, "이 시험의 전제: test_ 로 시작하지 않아도 test 로 시작하는 파일은 CI 의 명령이 모은다")
+        self.assertNotIn("check_other", theirs, "이 시험의 전제: test 로 시작하지 않는 파일은 CI 의 명령이 모으지 않는다")
+        code, out = run_main("--root", str(root), "-j", "2", "--plan-only")                     # 범위를 바꾸는 인자를 하나도 주지 않는다
+        self.assertEqual(code, 0, out)
+        self.assertIn(f"나누기 검사 통과: 시험이 있는 모듈 {len(theirs)}개가 정확히 한 묶음에 한 번씩 들어 있습니다", out)
+        for module in theirs:
+            self.assertIn(module, out)
+        self.assertNotIn("check_other", out, "넓힌 패턴이면 시험이 든 다른 이름 파일까지 모은다")
+
+
+class OutputShapeTest(unittest.TestCase):
+    """출력 줄 모양에 기댄 대조가 옛 직렬 흐름과 다르게 반응하는 길(Q 권고 R6) — 거짓 경보는 안전한 방향이라 고치지 않고, 알려진 차이로 못박고 진단 글을 붙였다. 시험 없는 모듈 하나는 정상 통과한다."""
+
+    def run_with(self, files, *args):
+        root = make_root(files)
+        self.addCleanup(shutil.rmtree, root, True)
+        return run_main("--root", str(root), *args)
+
+
+    def test_a_module_without_tests_is_left_out_of_the_plan_and_the_run_passes(self):
+        """(d) 변이 Q20: 시험 없는 모듈을 나누기에 그대로 둠 → 나누기 검사가 '목록에 없는 모듈'로 거짓 빨강을 낸다."""
+        code, out = self.run_with(dict(FAKE_FILES, **{"test_fake_empty.py": "import unittest\n\nVALUE = 1\n"}), "-j", "2")
+        self.assertEqual(code, 0, out)
+        self.assertIn("알림: 시험이 없는 모듈 1개는 돌릴 것이 없어 나누기에서 뺐습니다: test_fake_empty", out)
+        self.assertIn("나누기 검사 통과: 시험이 있는 모듈 4개가 정확히 한 묶음에 한 번씩 들어 있습니다", out)
+        self.assertIn("시험 id 대조: 처음 모은 9개 = 실제로 돈 9개", out)
+
+
+class SharedBaseTest(unittest.TestCase):
+    """같은 시험 줄이 여러 번 나올 때(검증 Q 권고 R3, 변이 Q12): 부모 시험 클래스를 가져온 모듈 둘(모듈마다 한 번씩)과, 같은 클래스를 이름 둘로 가져온 모듈 하나(한 모듈 안에서 두 번)가 있어도
+    옛 직렬 흐름과 같은 횟수를 기대한다 — 묶음 하나에 몰려도, 묶음마다 나뉘어도."""
+
+    FILES = {"fake_support.py": SUPPORT, "fake_shared.py": SHARED_BASE, "test_fake_shared_a.py": SHARED_A, "test_fake_shared_b.py": SHARED_B, "test_fake_shared_c.py": SHARED_C}
+
+    def test_the_counts_agree_with_the_serial_flow_for_one_bin_and_for_separate_bins(self):
+        root = make_root(self.FILES)
+        self.addCleanup(shutil.rmtree, root, True)
+        serial = rup.parse_summary(plain_discover(root))
+        self.assertEqual((serial.ran, serial.status), (10, "OK"), "이 시험의 전제: 옛 직렬 흐름은 가져온 부모 시험 클래스의 시험을 모듈 a·b 에서 한 번씩, 모듈 c 에서 두 번씩 — 모두 열 번 돈다")
+        for jobs in ("1", "2", "3"):
+            with self.subTest(jobs=jobs):
+                code, out = run_main("--root", str(root), "-j", jobs)
+                self.assertEqual(code, 0, out)
+                self.assertIn("시험 id 대조: 처음 모은 10개 = 실제로 돈 10개(빠짐 0 · 중복 0)", out)
+                self.assertIn("Ran 10 tests in", out)
+
+
+class ChildShapeTest(unittest.TestCase):
+    """자식 프로세스가 옛 모양과 같게 뜨는지(검증 Q 권고 R8, 변이 Q28–Q31): 가짜 Popen 으로 인자·작업 폴더·환경·표준 입출력을 받아 단언한다."""
+
+    def spawn(self, modules=("test_x",)):
+        captured = {}
+
+        def fake_popen(command, **kwargs):
+            captured["command"], captured["kwargs"] = command, kwargs
+            return types.SimpleNamespace(stdout=io.BytesIO(b""), poll=lambda: 0, returncode=0, wait=lambda: 0, kill=lambda: None)
+
+        root, tests_dir = Path(tempfile.gettempdir(), "rup_shape_root"), Path(tempfile.gettempdir(), "rup_shape_root", "tests")
+        with mock.patch.object(rup.subprocess, "Popen", side_effect=fake_popen):
+            child = rup.Child(1, list(modules), root, tests_dir, {})
+        child.thread.join(5)
+        return captured["command"], captured["kwargs"], root, tests_dir
+
+    def test_the_command_is_python_unbuffered_dash_m_unittest_verbose_and_the_modules(self):
+        command, kwargs, root, tests_dir = self.spawn(("test_x", "test_y"))
+        self.assertEqual(command[0], sys.executable)
+        self.assertEqual(command[-5:], ["-m", "unittest", "-v", "test_x", "test_y"])
+        self.assertIn("-u", command[1:command.index("-m")], "줄이 만들어지는 대로 보내게 한다(변이 Q29)")
+        self.assertNotIn("shell", kwargs)
+        self.assertNotIn("-c", command)
+
+    def test_the_child_starts_in_the_repository_root_like_the_serial_run(self):
+        _, kwargs, root, _ = self.spawn()
+        self.assertEqual(kwargs["cwd"], str(root), "변이 Q28")
+
+    def test_the_tests_folder_is_first_on_pythonpath_and_an_earlier_value_is_kept_after_it(self):
+        with mock.patch.dict(os.environ, {"PYTHONPATH": "/opt/extra"}):
+            _, kwargs, _, tests_dir = self.spawn()
+        self.assertEqual(kwargs["env"]["PYTHONPATH"].split(os.pathsep), [str(tests_dir), "/opt/extra"], "변이 Q30")
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("PYTHONPATH", None)
+            _, kwargs, _, tests_dir = self.spawn()
+        self.assertEqual(kwargs["env"]["PYTHONPATH"], str(tests_dir))
+
+    def test_the_child_cannot_read_the_parents_standard_input_and_its_output_is_one_piped_stream(self):
+        _, kwargs, _, _ = self.spawn()
+        self.assertIs(kwargs.get("stdin"), subprocess.DEVNULL, "변이 Q31")
+        self.assertIs(kwargs["stdout"], subprocess.PIPE)
+        self.assertIs(kwargs["stderr"], subprocess.STDOUT)
+
+    def test_the_interpreter_flags_follow_the_parents_utf8_and_bytecode_settings(self):
+        shaped = {"utf8": (1, True, ["-u", "-X", "utf8", "-B"]), "plain": (0, False, ["-u"])}
+        for name, (utf8_mode, no_bytecode, expected) in shaped.items():
+            with self.subTest(name), mock.patch.object(rup, "sys", types.SimpleNamespace(flags=types.SimpleNamespace(utf8_mode=utf8_mode), dont_write_bytecode=no_bytecode)):
+                self.assertEqual(rup.interpreter_flags(), expected)
+
+
+class FinishedLogicTest(unittest.TestCase):
+    """자식 출력을 끝까지 읽는 논리(검증 Q 권고 R4, 변이 Q26·Q32): 자식이 끝나도 읽는 스레드가 남은 줄을 다 읽을 때까지 기다리되, 손자가 줄기를 붙들면 GRACE 만큼만 기다린다.
+    가짜 프로세스·가짜 스레드·제어하는 시계로 본다(시간에 기대지 않는다)."""
+
+    class Proc:
+        def __init__(self, returncode):
+            self.returncode = returncode
+
+        def poll(self):
+            return self.returncode
+
+    class Thread:
+        def __init__(self, alive):
+            self.alive = alive
+
+        def is_alive(self):
+            return self.alive
+
+    def child(self, returncode, alive):
+        child = rup.Child.__new__(rup.Child)
+        child.proc, child.thread = self.Proc(returncode), self.Thread(alive)
+        child.exited_at = child.ended = None
+        return child
+
+    def test_a_process_that_is_still_running_is_not_finished(self):
+        self.assertFalse(self.child(None, alive=True).finished())
+        self.assertFalse(self.child(None, alive=False).finished())
+
+    def test_an_exited_process_whose_reader_is_still_alive_is_finished_only_after_the_grace(self):
+        clock = [1000.0]
+        fake_time = types.SimpleNamespace(monotonic=lambda: clock[0], sleep=time.sleep)
+        with mock.patch.object(rup, "time", fake_time):
+            child = self.child(0, alive=True)
+            self.assertFalse(child.finished(), "끝난 순간에는 읽는 스레드가 남은 줄을 읽을 때까지 기다린다(변이 Q32: 곧바로 True)")
+            clock[0] += rup.Child.GRACE - 0.5
+            self.assertFalse(child.finished())
+            clock[0] += 1.0
+            self.assertTrue(child.finished(), "말미가 지나면 줄기를 붙든 손자를 더는 기다리지 않는다(변이 Q26: 말미가 사실상 무한)")
+
+    def test_an_exited_process_whose_reader_has_ended_is_finished_at_once(self):
+        self.assertTrue(self.child(0, alive=False).finished())
+
+
+class FlushTest(unittest.TestCase):
+    """출력 비우기(검증 Q 권고 R5, 변이 Q27): 표준 출력이 진짜 파이프(CI 처럼)일 때 진행 줄이 시험이 도는 동안 바로 도착한다 — 안 비우면 끝난 뒤에야 한꺼번에 온다.
+    시계에 기대지 않는다: 도는 시험이 부모 시험이 '진행 줄을 받았다'는 신호 파일을 만들 때까지 기다린다(줄이 안 오면 그 시험이 25초 뒤 스스로 실패한다)."""
+
+    def test_the_progress_line_reaches_a_reader_of_the_pipe_while_a_test_is_still_running(self):
+        root = make_root({"fake_support.py": SUPPORT, "test_fake_wait.py": WAIT_FOR_GO})
+        self.addCleanup(shutil.rmtree, root, True)
+        go = root / "go.signal"
+        env = {key: value for key, value in os.environ.items() if key != "PYTHONUNBUFFERED"}          # 버퍼를 풀어 두는 환경이면 이 시험이 아무것도 못 보인다
+        env["FAKE_GO_FILE"] = str(go)
+        proc = subprocess.Popen([sys.executable, str(RUNNER), "--root", str(root), "-j", "1", "--heartbeat", "0.3"], cwd=str(root), env=env,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        self.addCleanup(lambda: proc.poll() is None and proc.kill())
+        seen = []
+        for raw in iter(proc.stdout.readline, b""):
+            text = raw.decode("utf-8", "replace").rstrip("\r\n")
+            seen.append(text)
+            if text.startswith("[진행") and "묶음 1" in text and not go.exists():
+                go.write_text("go")                                               # 진행 줄이 시험이 끝나기 전에 도착했다
+        proc.stdout.close()
+        proc.wait(timeout=60)
+        self.assertEqual(proc.returncode, 0, "\n".join(seen[-30:]))
+        self.assertTrue(go.exists())
+
+
+class CleanupTest(unittest.TestCase):
+    """오류 뒤 정리(검증 Q 참고 I2, 변이 Q33): 넘기는 쪽 호출이 실패해도 아직 도는 자식은 끝내고 기다리지 않는다."""
+
+    def test_children_that_are_still_running_are_killed_when_the_hand_over_fails(self):
+        root = make_root({"fake_support.py": SUPPORT, "test_fake_gamma.py": GAMMA, "test_fake_wait.py": WAIT_FOR_GO})
+        self.addCleanup(shutil.rmtree, root, True)
+        labels = {label: test_id for items in rup.collect_tests(root).tests.values() for label, test_id in items}
+
+        def boom(index, result):
+            raise RuntimeError("the hand-over callback failed")
+
+        never = root / "never.signal"                                         # 만들지 않는다 — 기다리는 시험은 25초 뒤에야 스스로 끝난다
+        with mock.patch.dict(os.environ, {"FAKE_GO_FILE": str(never)}):
+            began = time.monotonic()
+            with self.assertRaises(RuntimeError):
+                rup.run_plan([["test_fake_gamma"], ["test_fake_wait"]], root, Path(root, "tests").resolve(), labels, heartbeat=0, out=lambda text: None, on_ready=boom)
+            elapsed = time.monotonic() - began
+        self.assertLess(elapsed, 18, "남은 자식을 끝내고 나왔다(안 끝냈다면 기다리는 시험이 스스로 실패하는 25초를 기다린다)")
+
+
+class ImportOrderTest(unittest.TestCase):
+    """import 경로 순서(검증 S-4): 자식은 `python -m unittest` 라 저장소 루트, 시험 폴더, 표준 라이브러리 순서이고 옛 흐름(discover -s tests)은 시험 폴더, 저장소 루트 순서다.
+    두 폴더에 같은 이름의 모듈·패키지가 없으면 어느 순서든 같은 것을 불러온다 — 이 시험이 그것을 지킨다(시험 폴더에 저장소 루트와 같은 이름의 파일을 두면 실행기만 엉뚱한 모듈로 시험하게 된다)."""
+
+    @staticmethod
+    def importable_names(folder):
+        """폴더 바로 아래에서 최상위 이름으로 불릴 수 있는 것: `이름.py` 의 이름과 하위 폴더 이름(숨김·바이트코드 캐시 폴더는 뺀다)."""
+        names = set()
+        for path in Path(folder).iterdir():
+            if path.name.startswith(".") or path.name == "__pycache__":
+                continue
+            if path.is_file() and path.suffix == ".py":
+                names.add(path.stem)
+            elif path.is_dir():
+                names.add(path.name)
+        return names
+
+    def test_no_name_in_the_tests_folder_is_also_in_the_repository_root_or_the_standard_library(self):
+        tests_names = self.importable_names(_bootstrap.ROOT / "tests")
+        self.assertGreater(len(tests_names), 1)
+        self.assertEqual(sorted(tests_names & self.importable_names(_bootstrap.ROOT)), [], "저장소 루트와 같은 이름 — 자식은 루트를 시험 폴더보다 먼저 본다")
+        self.assertEqual(sorted(tests_names & set(sys.stdlib_module_names)), [], "표준 라이브러리와 같은 이름")
+
+    def test_the_check_does_find_a_clash_when_there_is_one(self):
+        """음성 대조: 같은 이름이 있으면 위 비교가 실제로 비어 있지 않게 나온다(시험이 아무것도 못 잡는 껍데기가 아니다)."""
+        folder = Path(tempfile.mkdtemp(prefix="rup_order_"))
+        self.addCleanup(shutil.rmtree, folder, True)
+        (folder / "tests").mkdir()
+        (folder / "helper.py").write_text("WHERE = 'ROOT'\n", encoding="utf-8")
+        (folder / "tests" / "helper.py").write_text("WHERE = 'TESTS'\n", encoding="utf-8")
+        (folder / "tests" / "json.py").write_text("WHERE = 'TESTS'\n", encoding="utf-8")
+        tests_names = self.importable_names(folder / "tests")
+        self.assertEqual(sorted(tests_names & self.importable_names(folder)), ["helper"])
+        self.assertEqual(sorted(tests_names & set(sys.stdlib_module_names)), ["json"])
 
 
 if __name__ == "__main__":
