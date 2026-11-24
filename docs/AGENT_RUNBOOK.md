@@ -247,6 +247,7 @@ $o = foreach ($b in @('origin/main') + @(git for-each-ref --format='%(refname:sh
 | [`scripts/sync_issue_form.py`](../scripts/sync_issue_form.py)·[`scripts/build_pages_registry.py`](../scripts/build_pages_registry.py) | 이슈 양식의 페이지 목록·`pages.json` 자동 생성(`--check` 로 최신 여부만 검사, 손으로 고치지 않음) |
 | [`scripts/get_blogger_token.py`](../scripts/get_blogger_token.py) | Blogger API refresh token 1회 발급(운영자 PC 에서만 — 나온 값은 GitHub 시크릿으로만 등록하고 채팅·문서에 붙이지 않음) |
 | [`인수인계/도구/`](../인수인계/도구/README.md) | AI 가 쓰는 반복 작업 스크립트 모음(요청 파일 만들기·한 커밋 병합 가지·커밋 작성자 고정·안전 설치·검사 읽기·감시·작업 폴더를 만드는 `setup_workspace.py`)과 정기 현황 알림 크론 프롬프트·지시서·병합 부탁 초안 — 표준 라이브러리만, 비밀·개인 경로 없음 |
+| [`scripts/run_unit_parallel.py`](../scripts/run_unit_parallel.py) | 단위 테스트 병렬 실행기(CI 의 '단위 테스트' 단계가 부른다): 시험 모듈을 여러 프로세스로 나눠 돌리고, 돈 시험이 처음 모은 시험과 정확히 같은지 대조한다. `--plan-only` 나누기만 보기 · `--only 모듈…` 일부만 · `-j N` 프로세스 수 · `--weights 표` 모듈별 예상 초. 표준 라이브러리만 |
 
 도구가 없는 환경(예: Copilot 의 방화벽 안)에서는 같은 정보를 GitHub 화면·API 도구로 읽고, 읽은 것과 **읽지 못한 것**을 구분해 적습니다.
 
