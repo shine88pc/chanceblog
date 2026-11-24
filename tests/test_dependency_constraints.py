@@ -855,7 +855,7 @@ class ShellReadingTest(unittest.TestCase):
     PIP_COMMAND_WORDS = ("install", "download", "uninstall", "freeze", "inspect", "list", "show", "check", "config", "search", "cache", "index", "wheel", "hash", "completion", "debug", "help", "lock")
 
     def test_the_value_of_a_global_option_is_never_the_subcommand(self):
-        """값을 받는 전역 옵션의 값이 pip 하위 명령 낱말이어도 그 뒤의 진짜 하위 명령을 읽는다 — 모든 값 옵션 × 모든 하위 명령 낱말 × 두 호출 꼴(결함 D-481, 안전 검증 S 의 R1)."""
+        """값을 받는 전역 옵션의 값이 pip 하위 명령 낱말이어도 그 뒤의 진짜 하위 명령을 읽는다 — 모든 값 옵션 × 모든 하위 명령 낱말 × 세 호출 꼴(pip·python -m pip·python -mpip — 결함 D-481, 안전 검증 S 의 R1)."""
         wrong = []
         for option in self.GLOBAL_VALUE_OPTIONS:
             for word in self.PIP_COMMAND_WORDS:
@@ -1019,7 +1019,8 @@ class PathologicalInputTest(unittest.TestCase):
               ("pip 와 낱말 교대", lambda tokens: "foo " + "pip x " * (tokens // 2)),
               ("pip 꼴 세 가지 섞기", lambda tokens: "foo " + "pip3.12 pip.exe pip " * (tokens // 3)),
               ("끝에 install 닮은 낱말", lambda tokens: "foo " + "pip " * tokens + "installx"),
-              ("줄마다 반복", lambda tokens: "\n".join("foo pip pip" for _ in range(tokens // 4))))
+              ("줄마다 반복", lambda tokens: "\n".join("foo pip pip" for _ in range(tokens // 4))),
+              ("줄임말 값 옵션 반복", lambda tokens: "pip " + "--cache cache " * (tokens // 2) + "install -r b.txt"))
 
     def test_sixteen_thousand_words_are_read_in_seconds_not_in_tens_of_seconds(self):
         """옛 구현은 이 입력들에서 CPU 6–19초였다. 지금은 0.1–0.3초 — 한도 2초는 바쁜 PC 의 흔들림을 덮고도 옛 제곱 시간을 잡는다."""
