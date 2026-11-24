@@ -129,6 +129,11 @@ class RegistryRuleTest(unittest.TestCase):
         self.assertEqual(chance_after.pop("limits"), {"max_posts_per_day": 1, "max_open_drafts": 3, "max_posts_per_week": 2})     # 켜는 값 다섯째: 주간 상한(L8)
         self.assertEqual(chance_before.pop("limits"), {"max_posts_per_day": 2})
         self.assertEqual(chance_before.pop("publish_flow"), "direct")
+        # 재개 조건 3·4(규칙 L9·L10)의 값과 facts 가 요구하는 허용 목록 모드 — 진짜 레지스트리에 이미 있는 값이고 켜기 전 표본에는 없거나 다르다
+        values = ("quality_gate", "content_source", "source_policy")
+        self.assertEqual({key: chance_after.pop(key) for key in values}, {"quality_gate": "hold", "content_source": "facts", "source_policy": "allowlist"})
+        self.assertEqual({key: chance_before.pop(key, None) for key in values}, {"quality_gate": None, "content_source": None, "source_policy": None})
+        self.assertEqual((chance_before.pop("languages"), chance_after.pop("languages")), (["ko", "en"], ["ko"]))
         self.assertEqual(before, after)                                  # 나머지(Blogger 둘·네이버 모드, 광고 선언 등)는 그대로 규칙을 이미 지킨다
 
     def test_every_rule_has_a_violation_that_only_it_and_its_known_partners_report(self):
@@ -155,7 +160,7 @@ class RegistryRuleTest(unittest.TestCase):
                         self.assertEqual(publish_lock.registry_errors(reg), [])
 
     def test_an_explicit_false_is_the_same_as_no_key(self):
-        reg = mutated(lambda r: set_in(r, CHANCE, publish_flow="direct"))
+        reg = mutated(lambda r: set_in(r, CHANCE, publish_flow="direct", content_source="feed", source_policy="legacy"))      # 피드 글감 + 직접 게시 — 켜진 잠금이면 L1·L3·L10 이 거절하는 모양(facts 이면 검증기가 publish_flow pr 을 따로 요구하므로 피드로 둔다)
         reg["resume_lock"] = False
         self.assertEqual(publish_lock.registry_errors(reg), [])
         self.assertEqual(registry.validate_registry(reg), [])

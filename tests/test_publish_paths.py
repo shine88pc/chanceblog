@@ -731,26 +731,30 @@ class WeeklyCapDocumentTest(unittest.TestCase):
         for needle in ("`chance.limits.max_posts_per_week`", "레지스트리 값 다섯", "'재개 시 주 1–2편'", "(G-C14)"):
             self.assertIn(needle, line, needle)
         guard_row = self.row(self.GUARDRAILS_TEXT, "| G-C14 |")
-        for needle in ("규칙 L0–L8", "`chance.limits.max_posts_per_week`", "'재개 시 주 1–2편'", "달력 주와 다르고 닫은 초안도 창 안에서는 센다"):
+        for needle in ("규칙 L0–L10", "`chance.limits.max_posts_per_week`", "'재개 시 주 1–2편'", "달력 주와 다르고 닫은 초안도 창 안에서는 센다"):
             self.assertIn(needle, guard_row, needle)
         self.assertNotIn("규칙 L0–L7", guard_row)
+        self.assertNotIn("규칙 L0–L8", guard_row)                                                     # 규칙이 L10 까지 늘었다(BP3) — 옛 범위가 되살아나면 빨강
         reg_row = self.row(self.GUARDRAILS_TEXT, "| REG-1(제한 재개 잠금)")
-        for needle in ("규칙 L0–L8", "`max_posts_per_week` 없음·2 초과"):
+        for needle in ("규칙 L0–L10", "`max_posts_per_week` 없음·2 초과", "`quality_gate` 가 `hold` 아님", "`content_source` 가 `facts` 아님"):
             self.assertIn(needle, reg_row, needle)
+        self.assertNotIn("규칙 L0–L8", reg_row)
 
     def test_the_operator_guide_lists_the_five_values_the_new_code_and_the_new_rule_range(self):
         for needle in ("`resume_lock: true`", "`chance.publish_flow: pr`", "`chance.limits.max_posts_per_day: 1`", "`max_open_drafts: 3`", "`max_posts_per_week: 2`", "값 **다섯**", "`LOCK_WEEKLY_CAP`",
-                       "L1–L8", "일주일에 만드는 글", "(운영자 조건 '재개 시 주 1–2편')", "워치독은 켠 뒤 Chance 만 주 단위 기준으로 점검합니다", "D-169"):
+                       "L1–L10", "일주일에 만드는 글", "(운영자 조건 '재개 시 주 1–2편')", "워치독은 켠 뒤 Chance 만 주 단위 기준으로 점검합니다", "D-169"):
             self.assertIn(needle, self.GUIDE_SECTION, needle)
         self.assertNotIn("L1–L7", self.GUIDE_SECTION)
+        self.assertNotIn("L1–L8", self.GUIDE_SECTION)                                                # 규칙이 L10 까지 늘었다(BP3)
         values = lock_ready()
         limits = blog_of(values, CHANCE)["limits"]
         self.assertEqual({key: limits[key] for key in ("max_posts_per_day", "max_open_drafts", "max_posts_per_week")}, {"max_posts_per_day": 1, "max_open_drafts": 3, "max_posts_per_week": 2})       # 위 값과 같다
 
     def test_the_architecture_doc_has_the_limit_row_the_code_row_and_the_new_rule_range(self):
-        for needle in ("| `limits.max_posts_per_week` |", "| `LOCK_WEEKLY_CAP` |", "L0–L8", "**주간 상한**(`chance.limits.max_posts_per_week`", "`tests/test_publish_lock_weekly.py`", "하루 → 열린 초안 → 주간"):
+        for needle in ("| `limits.max_posts_per_week` |", "| `LOCK_WEEKLY_CAP` |", "L0–L10", "**주간 상한**(`chance.limits.max_posts_per_week`", "`tests/test_publish_lock_weekly.py`", "하루 → 열린 초안 → 주간"):
             self.assertIn(needle, self.ARCH_TEXT, needle)
         self.assertNotIn("규칙 L0–L7 을 어기면", self.ARCH_TEXT)
+        self.assertNotIn("규칙 L0–L8 을 어기면", self.ARCH_TEXT)                                      # 규칙이 L10 까지 늘었다(BP3)
         row = self.row(self.ARCH_TEXT, "| `limits.max_posts_per_week` |")
         for needle in ("1–14 정수", "불리언 아님", "읽는 곳은 제한 재개 잠금뿐이다", "1 이상 2 이하(L8)"):
             self.assertIn(needle, row, needle)

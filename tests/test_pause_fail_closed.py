@@ -241,7 +241,8 @@ class ReaderBase(unittest.TestCase):
         self.last_message = res.message                  # 결과의 한 줄 문장(2차 검증 필수-1: 코멘트·참고 줄과 따로 못박는다)
         return paused, "\n".join([res.message, res.comment, *res.notes])
 
-    # 5) 워치독 — 정지면 알림을 만들지 않고 '[일시정지]' 한 줄, 아니면 점검을 이어 간다
+    # 5) 워치독 — 켜짐 값이면 알림을 만들지 않고 '[일시정지]' 한 줄, 아니면 점검을 이어 간다. 알 수 없는 값은 조용히 있지 않고 점검을 이어 가며 공통 알림 PAUSE_UNKNOWN 을 더한다
+    #    (BP3·D-432 — 그 동작은 test_watchdog_pause_unknown 이 따로 본다). 여기서 '정지로 읽는다' 는 판정은 두 경우를 함께 센다.
     def read_watchdog(self, value):
         env = {"PIPELINE_PAUSE": value, "WATCHDOG_DRY_RUN": "1"}
         buffer = io.StringIO()
@@ -255,7 +256,7 @@ class ReaderBase(unittest.TestCase):
         self.last_summary = summary.read_text(encoding="utf-8") if summary.exists() else ""
         text = buffer.getvalue()
         self.assertEqual(code, 0, text)
-        paused = "[일시정지]" in text
+        paused = "[일시정지]" in text or "PAUSE_UNKNOWN" in text      # 켜짐 값은 '[일시정지]' 한 줄, 알 수 없는 값은 공통 알림(PAUSE_UNKNOWN) — 둘 다 '정지로 읽었다' 는 표시다
         self.assertTrue(paused or "이상 없음" in text, text)
         return paused, text
 

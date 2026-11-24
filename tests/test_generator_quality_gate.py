@@ -428,20 +428,43 @@ class ConnectionIsolationTest(unittest.TestCase):
     def test_only_the_generator_and_the_registry_text_mention_the_gate(self):
         users = set()
         policy_users = []
+        lock_users = []
         for folder in (ROOT, ROOT / "pipeline", ROOT / "scripts", ROOT / "pipeline" / "publishers", ROOT / "pipeline" / "edits"):
             for path in folder.glob("*.py"):
                 if "quality_gate" in path.read_text(encoding="utf-8"):
                     users.add(path.name)
                     if path.name == "merge_policy.py":
                         policy_users.append(path.relative_to(ROOT).as_posix())
+                    if path.name == "publish_lock.py":
+                        lock_users.append(path.relative_to(ROOT).as_posix())
         # merge_policy.py(꺼진 승인형 병합 정책)는 안전 장치 파일 이름 목록에 Gate 파일 이름을 글자(데이터)로만 적는다 — 연결이 아니다. 이 한 파일만 허용하고,
         # 연결(가져오기·호출·이름 사용)이 없고 글자가 목록 한 곳뿐이라는 것은 아래 test_merge_policy_names_the_gate_only_as_data_in_its_safety_list 가 따로 못박는다.
-        self.assertLessEqual(users, {"generator.py", "registry.py", "quality_gate.py", "shadow_run.py", "merge_policy.py"})
+        # publish_lock.py(제한 재개 잠금)는 레지스트리 값 chance.quality_gate 가 hold 인지 '읽어' 거절 규칙(L9 — BP3·D-429)을 낼 뿐이다 — 연결(가져오기·호출·이름 사용)이 아니라 설정 키 글자와 안내 문장이다.
+        # 이 한 파일만 허용하고, 연결이 없다는 것은 아래 test_publish_lock_names_the_gate_only_as_a_registry_key_and_message_text 가 따로 못박는다.
+        self.assertLessEqual(users, {"generator.py", "registry.py", "quality_gate.py", "shadow_run.py", "merge_policy.py", "publish_lock.py"})
         # 위 허용은 파일 이름만 본다 — 다섯 폴더의 같은 이름 파일이 모두 받아들여지지 않도록, 정책 모듈은 상대 경로 한 곳에서만 Gate 글자를 담을 수 있다.
         self.assertEqual(policy_users, ["pipeline/merge_policy.py"])
+        self.assertEqual(lock_users, ["pipeline/publish_lock.py"])
         for name in ("pipeline/run.py", "blogger_generator.py", "pipeline/drafts.py", "pipeline/draft_flow.py", "pipeline/notify.py", "pipeline/operator_loop.py",
                      "pipeline/health.py", "pipeline/inbox.py", "pipeline/main_image.py"):
             self.assertNotIn("quality_gate", (ROOT / name).read_text(encoding="utf-8"), name)
+
+    def test_publish_lock_names_the_gate_only_as_a_registry_key_and_message_text(self):
+        """제한 재개 잠금이 Gate 를 언급하는 것은 레지스트리 값 chance.quality_gate 를 읽는 키 글자와 안내 문장뿐이다 — 가져오기·호출·이름 사용이 없다(규칙 L9 는 값이 hold 인지 볼 뿐 Gate 를 부르지 않는다)."""
+        text = (ROOT / "pipeline" / "publish_lock.py").read_text(encoding="utf-8")
+        self.assertIn("quality_gate", text)
+        for node in ast.walk(ast.parse(text)):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    self.assertNotIn("quality_gate", alias.name)
+            elif isinstance(node, ast.ImportFrom):
+                self.assertNotIn("quality_gate", node.module or "")
+                for alias in node.names:
+                    self.assertNotIn("quality_gate", alias.name)
+            elif isinstance(node, ast.Name):
+                self.assertNotIn("quality_gate", node.id)
+            elif isinstance(node, ast.Attribute):
+                self.assertNotIn("quality_gate", node.attr)
 
     def test_merge_policy_names_the_gate_only_as_data_in_its_safety_list(self):
         """정책 모듈이 Gate 를 언급하는 것은 안전 장치 파일 이름 목록의 글자 한 곳뿐이다 — 가져오기·호출·이름 사용·주석 언급이 없다(허용은 연결이 아니라 이름 목록이라서다)."""

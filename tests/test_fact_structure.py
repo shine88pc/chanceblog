@@ -191,7 +191,10 @@ class NoConnectionTest(unittest.TestCase):
         reader = re.compile(r"""\.get\(\s*["']content_source["']|\[\s*["']content_source["']\s*\]""")
         files = [ROOT / "generator.py", ROOT / "blogger_generator.py"] + sorted((ROOT / "pipeline").rglob("*.py")) + sorted((ROOT / "scripts").glob("*.py"))
         readers = {path.relative_to(ROOT).as_posix() for path in files if reader.search(path.read_text(encoding="utf-8"))}
-        self.assertEqual(readers, {"pipeline/source_policy.py", "pipeline/fact_candidates.py"})
+        # publish_lock.py(제한 재개 잠금 — BP3·D-429)는 런타임 읽기가 아니라, 잠금이 검증하는 레지스트리 객체에서 chance.content_source 가 facts 인지 읽어 규칙 L10 으로 거절하는 검증기다
+        # (런타임이 읽는 것과 같은 순서 — 항목 → defaults → feed). 글을 만드는 쪽에서 값을 읽는 코드는 여전히 source_policy 와 fact_candidates 둘뿐이다.
+        self.assertEqual(readers, {"pipeline/source_policy.py", "pipeline/fact_candidates.py", "pipeline/publish_lock.py"})
+        self.assertEqual(readers - {"pipeline/publish_lock.py"}, {"pipeline/source_policy.py", "pipeline/fact_candidates.py"})
 
     def test_the_new_tests_are_offline(self):
         for rel in NEW_TESTS:

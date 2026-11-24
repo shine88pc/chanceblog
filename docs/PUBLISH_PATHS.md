@@ -89,7 +89,7 @@
 
 ### 4-1. 레지스트리 규칙 (검증기: `python -m pipeline.registry`·`pipeline.plan`·`pipeline.run`·`validate_repo` REG-1)
 
-**L0–L8 은 잠금이 켜져 있을 때만** 적용된다(꺼져 있으면 값 모양 검사 두 가지뿐 — L5·L8 의 둘째 줄). 모르는 값은 켜진 것으로 읽는다(fail closed). **K1·K2 는 잠금과 무관하게 항상** 적용된다 — 잠금 키가 없거나 맨 위에 올바르게 적힌 레지스트리는 켜기 전·후 모두 그대로 통과한다.
+**L0–L10 은 잠금이 켜져 있을 때만** 적용된다(꺼져 있으면 값 모양 검사 두 가지뿐 — L5·L8 의 둘째 줄). 모르는 값은 켜진 것으로 읽는다(fail closed). **K1·K2 는 잠금과 무관하게 항상** 적용된다 — 잠금 키가 없거나 맨 위에 올바르게 적힌 레지스트리는 켜기 전·후 모두 그대로 통과한다.
 
 | 규칙 | 내용 | 막는 길 |
 |------|------|---------|
@@ -102,6 +102,8 @@
 | **L6** | `chance.languages` 가 있으면 `ko` 를 포함하고 `ko`·`en` 만 겹침 없이(`["ko"]` 또는 `["ko", "en"]`) — 국문 우선 방향 | 번역 복제 |
 | **L7** | Chance 밖의 모든 블로그의 `limits.max_posts_per_day` 도 1 (이 일이 더한 확장 규칙 — 운영자 조건 '하루 최대 1편'을 모든 블로그로 넓힘. 지금 값은 이미 1) | 하루 상한 |
 | **L8** | `chance.limits.max_posts_per_week`(주간 상한 — 굴러가는 7일에 만드는 글 수)가 **있어야** 하고(없으면 오류 — fail closed) 1 이상 2 이하 정수(`MAX_POSTS_PER_WEEK` = 2, 불리언 아님). `defaults.limits` 에서 물려받은 값도 같다. 잠금이 꺼져 있어도 값이 적혀 있으면 1 이상 정수여야 한다(L5 와 같은 방식 — 잘못 적은 값이 조용히 '주간 상한 없음'이 되지 않게). **Chance 밖의 블로그(Blogger·네이버 초안 패키지)에는 주간 상한을 강제하지 않는다**: 그것들은 운영자가 직접 게시하는 초안 흐름이고 하루 1편 상한(L7)이 그대로 있다. 세는 방법은 §4-4(운영자 조건 '재개 시 편수 제한 주 1–2편', 확인 요청 007 답) | 주간 상한 |
+| **L9** | `chance.quality_gate` 는 `hold`(재개 조건 3 — 새 글은 최소 품질 Gate 를 지난다). **적지 않으면 기본값 `off` 로 읽혀 거절한다**(항목에 값이 없으면 `defaults` 의 값을 읽는다 — 런타임이 읽는 방식과 같다). 값은 `publish_lock.REQUIRED_QUALITY_GATE` 하나가 정하고, `tests/test_resume_conditions_3_4.py` 가 레지스트리의 현재 값을 따로 못박는다(규칙과 값 못박기가 겹쳐 지킨다). 잠금이 꺼져 있으면 보지 않는다 | 품질 관문 없는 글 |
+| **L10** | `chance.content_source` 는 `facts`(재개 조건 4 — 계산이 값을 더하는 글만·AI 미사용). 적지 않으면 기본값 `feed`(AI 가 기사를 보고 쓰는 글)로 읽혀 거절한다. 그리고 `facts` 일 때 `chance.languages` 는 정확히 `["ko"]`(국문 단독) — 적지 않으면 기본값 ko·en 한 쌍으로 읽혀 거절하고, L6 이 허용하는 한 쌍(`["ko", "en"]`·`["en", "ko"]`)도 이 규칙이 거절한다. 값은 `REQUIRED_CONTENT_SOURCE`·`REQUIRED_LANGUAGES` 가 정한다. `facts` 이면 `source_policy: allowlist`·`publish_flow: pr` 는 레지스트리 검증기(`pipeline/registry.py`)가 따로 요구한다 | AI 글·영문 복제 |
 | **K1** | 레지스트리 **최상위에는 알려진 키만** 둔다: `_doc`·`schema_version`·`shared_secrets`·`defaults`·`blogs`·`resume_lock`(`pipeline/publish_lock.py` 의 `KNOWN_TOP_LEVEL_KEYS` — 새 키는 이 목록과 시험(`KeyTypoTest`)을 함께 고쳐 의도적으로 더한다). 모르는 키는 오류('알 수 없는 최상위 키')이고, 줄인 이름(전각·호환 글자를 보통 글자로 풀고 소문자로 바꾼 뒤 `_`·`-`·공백을 뺀 것 — 전각으로 쓴 이름도 같다)이 `resumelock` 을 품거나 `resumelock` 과 **편집 거리 2 이내**(글자 하나의 삽입·삭제·바꿈을 1 로 센다)이면 'resume_lock 오타로 보입니다' 라고 알려 준다(`resume_lok`·`Resume_Lock`·`resume-lock`·`resume_lock `(뒤 공백)·`resumlok`·`resume_lock_v2` 등 — `block`·`clock`·`unlock`·`locked`·`resumed`·`blocklist`·`resume_after` 같은 평범한 모르는 키는 오타로 보지 않는다. 독립 재검증 D2) | 키 이름 오타로 잠금이 꺼진 채 통과하는 것 |
 | **K2** | `resume_lock`(과 K1 이 오타로 보는 이름)은 **최상위에만** 둔다 — 최상위 밖 **어느 깊이든**(`defaults`·블로그 항목과 그 안의 `limits`·`schedule`·`state`·`health` 같은 사전, 목록 안의 사전까지) 있으면 오류('최상위에 두어야 한다'). 레지스트리 전체를 반복문으로 사전·목록마다 한 번씩만 훑고(순환·같은 하위 구조도 한 번), 깊이 상한은 `MAX_KEY_SCAN_DEPTH`(16 — 정상 레지스트리는 4)이며 그보다 깊으면 '구조가 너무 깊다' 오류로 멈춘다(fail closed). 예전에는 직속 키만 봐서 `chance.limits` 안의 `resume_lock` 이 통과했다(독립 재검증 D1) | 잘못된 위치로 잠금이 꺼진 채 통과하는 것 |
 
@@ -202,9 +204,14 @@ K1·K2 는 잠금 키가 없거나 맨 위에 올바르게 적힌 레지스트�
 | `chance.mode` | `auto` | 그대로(`pr` 은 `auto` 일 때만 허용) | L3 |
 | `blogger_macat.mode`·`blogger_kcyoon.mode` | `draft` | 그대로 | L2 |
 | `naver_life_tips.mode` | `off` | 그대로(`package` 도 허용) | L2 |
-| `chance.languages` | `["ko", "en"]` | 그대로(국문만 시작하려면 `["ko"]`) | L6 |
+| `chance.languages` | `["ko", "en"]` | `["ko"]`(국문 단독 — `content_source` 가 `facts` 이면 L10 이 요구) | L6·L10 |
+| `chance.quality_gate` | 없음(`off` 로 읽힘) | `hold` | L9 |
+| `chance.content_source` | 없음(`feed` 로 읽힘) | `facts` | L10 |
+| `chance.source_policy` | 없음(`legacy` 로 읽힘) | `allowlist` | 레지스트리 검증기(`facts` 이면 필요) |
 | Blogger·네이버 `limits.max_posts_per_day` | `1` | 그대로 | L7 |
 | `PIPELINE_PAUSE`(저장소 변수) | 켜짐 | **이 일은 건드리지 않는다** — 잠금·최소 품질 Gate·그림자 검증이 끝난 뒤 운영자가 해제 | — |
+
+**재개 조건 3·4 의 값 셋**(`chance.quality_gate` 는 `hold`·`chance.content_source` 는 `facts`·`chance.languages` 는 `["ko"]`, 그리고 `facts` 가 요구하는 `chance.source_policy` 는 `allowlist`)은 켜는 다섯 값과 달리 지금 레지스트리에 이미 적혀 있다 — 켜진 잠금은 규칙 L9·L10 으로 이 값이 바뀐 레지스트리를 거절한다(검증기 REG-1·생성기 가드·`chance_flow`·Blogger 러너가 같은 규칙을 읽는다). 그래서 피드 경로를 다시 켜는 변경(`content_source` 를 `feed` 로 되돌리기)이나 품질 관문을 끄는 변경은 잠금을 끄는 것과 같은 크기의 T3 변경이다 — 규칙·해제 점검표(`docs/OPS_INBOX.md` §10-11 끝)·시험을 한 변경으로 함께 고친다(감사 BP-S1-2, 결함 D-429).
 
 같은 변경에서 함께 고쳐야 하는 시험의 고정값(켜는 변경이 일부러 깨뜨리는 표지판): 이 문서 §9 의 목록.
 **잠금을 끄는 것**(`resume_lock` 을 지우거나 `false`)과 규칙을 줄이는 것도 T3 다 — 승인 없는 공개 경로를 다시 여는 변경이다(`SECURITY_GUARDRAILS.md` §3).
@@ -237,7 +244,7 @@ K1·K2 는 잠금 키가 없거나 맨 위에 올바르게 적힌 레지스트�
     - 고르지 않은 대안 (가) 설정값 `max_gap_hours` 만 204 로 올림: 켜는 변경과 한 묶음이어야 하는 설정 변경(T3)이고 잠금을 끄면 다시 되돌려야 해서 두 곳이 어긋나기 쉽다. 하루 단위 `NO_POSTS_DAY` 는 그대로 울린다.
     - 고르지 않은 대안 (나) 경보를 그대로 두고 운영자가 무시: 정상 운영 중에도 거짓 경보(확인 요청 수준 알림)가 쌓여 진짜 경보를 못 알아본다.
     - 한계: 주 단위 모드의 `STALE` 은 마지막 활동 뒤 204시간(8.5일)에야 울린다 — 그 사이에 글 만들기가 빨갛게 실패하거나 탈락이 이어지면 `FAIL_STREAK`·`REJECT_STREAK`·`RUN_FAIL_STREAK` 이 먼저 울리지만, 초록으로 조용히 건너뛰는 중단은 이전 기준(36시간)보다 7일 늦게 드러난다. 승인이 평소보다 밀려 마지막 병합 뒤 204시간을 넘기면 `DRAFT_WAITING`(경고)이 울리고 열린 초안이 3일(72시간) 이상 기다리면 `STALE` 경고도 함께 남는다 — 의도한 승인 대기 신호이고, 켠 직후 첫 주에 켜기 전 글이 늦게 병합되면 한 번 울릴 수 있다(평소 늘 같은 만큼 늦게 승인하면 병합 사이가 7일이라 조용하다 — `WeeklySimulationTest`). 켠 뒤 실제 Actions 에서의 동작은 미관측이다. '마지막 활동'은 글·초안 기록과 글 커밋뿐이고 워크플로 실행 기록은 세지 않는다 — 그래서 실행이 아예 돌지 않거나(예약 실행이 꺼짐) 초록으로 건너뛰기만 해도 204시간(8.5일, 점검 간격까지 최대 약 9일)에야 `STALE` 이 울린다. 켠 뒤 첫 두 주는 4-1 의 매일 1분 점검에서 '마지막 글'과 열린 초안 수를 눈으로 확인한다.
-23. **발행 정지 변수의 값은 알 수 없는 값을 정지로 읽는다**(감사 BP-S1-3, 결함 D-412): 저장소 변수 `PIPELINE_PAUSE` 는 켜짐 `1`·`true`·`yes`·`on`, 꺼짐 `0`·`false`·`no`·`off`·비움(앞뒤 공백·대소문자 무시)이고 **그 밖의 값은 정지로 읽는다** — 읽는 곳(생성기·Blogger 러너·초안 올리기·이슈 수정 처리기·워치독·확인 필요 모음)이 모두 `pipeline/pause.py` 의 같은 함수를 부르고, 알 수 없는 값은 실행 로그에 `::error::` 한 줄(받은 값은 싣지 않음)이 남는다. 해제는 변수를 지우거나 꺼짐 값으로 바꾸는 것이다 — `disabled`·`none`·`resume` 같은 말은 꺼짐이 아니라 정지로 읽힌다. 알 수 없는 값일 때 워치독이 알림을 만들지 않는 것은 일부러 멈춘 것과 같은 판정이다(소음 방지 규칙 그대로). 켜짐 값의 동작과 문장은 이전과 같고 워크플로·변수 값은 바꾸지 않았다.
+23. **발행 정지 변수의 값은 알 수 없는 값을 정지로 읽는다**(감사 BP-S1-3, 결함 D-412): 저장소 변수 `PIPELINE_PAUSE` 는 켜짐 `1`·`true`·`yes`·`on`, 꺼짐 `0`·`false`·`no`·`off`·비움(앞뒤 공백·대소문자 무시)이고 **그 밖의 값은 정지로 읽는다** — 읽는 곳(생성기·Blogger 러너·초안 올리기·이슈 수정 처리기·워치독·확인 필요 모음)이 모두 `pipeline/pause.py` 의 같은 함수를 부르고, 알 수 없는 값은 실행 로그에 `::error::` 한 줄(받은 값은 싣지 않음)이 남는다. 해제는 변수를 지우거나 꺼짐 값으로 바꾸는 것이다 — `disabled`·`none`·`resume` 같은 말은 꺼짐이 아니라 정지로 읽힌다. 워치독은 알려진 켜짐 값일 때만 조용하다(일부러 멈춘 동안의 소음 방지 — 그대로). 값을 알 수 없으면 일부러 멈춘 것으로 보지 않고 점검을 이어 가며 `[Watchdog] 공통: PAUSE_UNKNOWN`(심각) 알림을 하나 더 만든다(받은 값은 싣지 않는다 — BP3, 결함 D-432). 켜짐 값의 동작과 문장은 이전과 같고 워크플로·변수 값은 바꾸지 않았다.
 
 ## 8. 설계 결정
 
@@ -275,6 +282,7 @@ K1·K2 는 잠금 키가 없거나 맨 위에 올바르게 적힌 레지스트�
 | `tests/draft_helpers.py` `REAL_PUBLISH_FLOW` | `"direct"` | `"pr"` | `test_drafts`(`ChanceFlowTest.test_the_real_registry_has_the_pinned_flow`·`ChanceFlowTest.test_the_cli_flow_command_prints_the_value_or_fails`·`PublishFlowRegistryTest.test_the_real_registry_writes_direct_for_chance_and_is_valid`)·`test_generator_drafts`(`FlowLookupTest.test_the_engine_enters_the_draft_flow_exactly_when_the_real_registry_says_pr`)·`test_batch2_integration`(`RegistryCombinationTest.test_the_real_registry_is_unchanged_by_the_merge`)·`test_ops_inbox_drafts`(`RunWithDraftsTest.test_the_real_registry_gives_chance_blogger_and_package_rows_with_nothing_pending`) |
 | `tests/test_registry.py` `RealRegistryTest.test_defaults_are_merged` | Chance 하루 상한 `2` | `1` | 그 시험 한 개 |
 | `tests/test_publish_lock.py` `LockStateTest.test_the_real_registry_has_the_lock_off_today` | `resume_lock` 키가 없고 레지스트리가 `today_registry()` 와 같다 | `resume_lock` 이 `True` 이고 `lock_ready()` 와 같다(시험 이름도 바꾼다) | 그 시험 한 개 |
+| `tests/lock_helpers.py` `lock_ready()` | 켜는 값 다섯 | 재개 조건 3·4 의 값(`quality_gate` `hold`·`content_source` `facts`·`source_policy` `allowlist`·`languages` `["ko"]`)도 얹는다 — 규칙 L9·L10 이 켠 레지스트리에 이 값을 요구한다 | `lock_ready()` 를 쓰는 시험(`test_publish_lock`·`test_publish_lock_weekly`·`test_publish_lock_git`·`test_publish_paths`·`test_watchdog_weekly`) |
 
 **다른 가지의 새 시험 12개(켜는 변경이 같은 변경에서 고친다 — 독립 재검증 D7)**: 두 묶음(GATE 는 2026-11-10 에 병합돼 그 시험 1개는 이미 main 에 있고, 다른 묶음은 병합 전)의 새 시험이 진짜 레지스트리로 `generator.main()`·`run_cli()` 를 돌려서, 켠 뒤에는 켜진 가드가 열린 초안 확인(`git ls-remote`)·하루 상한에 걸려 `SystemExit(0)`·`[잠금] … 켜짐` 줄·글 0개로 끝나 기대와 달라진다. 꺼진 상태에서는 모두 통과하므로 병합을 막지 않고, 켜는 변경이 합쳐질 때 같이 고친다.
 
@@ -290,6 +298,7 @@ K1·K2 는 잠금 키가 없거나 맨 위에 올바르게 적힌 레지스트�
 - 실제 레지스트리를 복사해 Blogger 를 `auto` 로 두는 임시 저장소·사본(`test_run.make_root`·`test_plan_and_watchdog.registry_all_auto`·`test_drafts.real_registry`)은 `resume_lock` 키를 뺀다 — 그 시험들은 잠금이 꺼진 설정의 흐름을 보고, 잠금 규칙은 `test_publish_lock` 이 본다.
 - 수동 실행의 하루 상한 경고 시험(`test_manual_run_defaults.ManualOverCapTest`)은 상한 2 를 읽는 '잠금 꺼짐' 레지스트리 사본으로 고정한다.
 - 이 일의 시험은 '꺼짐' 기준에 진짜 레지스트리 대신 `today_registry()`(진짜 값을 오늘의 값으로 맞춘 사본)를 쓴다. 진짜 값에 묶인 것은 위 표의 `test_publish_lock` 한 시험뿐이다.
+- 가드를 거치는 틱 시험(`run_tick(..., guarded=True)` — `test_publish_lock*`)이 읽는 켠 레지스트리는 규칙 L9·L10 때문에 facts·국문 단독·Gate hold 값이지만 그 시험이 돌리는 것은 피드 경로(가짜 소스·가짜 Gemini)다. 그래서 `run_tick` 이 생성기 쪽 값 읽기(콘텐츠 출처·허용 목록 모드·Gate·언어)만 피드 값으로 고정한다(`tests/test_generator_drafts.py`) — 가드가 읽는 레지스트리 파일은 그대로라 가드의 판정은 켠 값 그대로 본다. 그대로 두면 틱이 facts 경로로 가 외부 자료를 읽으려 한다.
 
 **표지판 시험은 고치되 지우지 않는다**: `LockStateTest.test_the_real_registry_has_the_lock_off_today` 는 켠 뒤 `resume_lock is True` 이고 `reg == lock_ready()` 인지 확인하는 시험으로 **바뀐다**(위 `flip.patch` 가 그렇게 고친다). 이 시험을 지우면 레지스트리의 잠금 줄을 지우는 변경(키가 없으면 꺼짐)을 아무도 못 잡는다 — K1·K2 는 오타와 잘못된 위치를 잡지만 줄을 통째로 지운 것은 이 시험만 잡는다.
 **워치독의 '글이 안 나옴' 알림(결함 D-169 — 해결)**: 이 묶음이 워치독을 주 단위 기준으로 맞췄다(§7-22, D-220–D-224). 켜는 변경이 따로 할 일은 없다 — 레지스트리 값 다섯을 적으면 코드가 잠금·상한에서 스스로 파생해 Chance 의 `STALE` 은 마지막 글 204시간 뒤에 울리고 `NO_POSTS_DAY` 는 울리지 않는다(`health.max_gap_hours` 값은 그대로).

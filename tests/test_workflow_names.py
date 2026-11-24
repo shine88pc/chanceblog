@@ -498,6 +498,8 @@ class ChanceSplitTest(unittest.TestCase):
         env = step.get("env")
         if isinstance(env, dict) and isinstance(env.get("GEMINI_API_KEY"), str):      # AF7: 글 작성 워크플로의 키 식에만 닫힌 쪽 조건 한 조각이 더해졌다(test_manual_run_defaults 가 두 식을 글자 그대로 못박는다)
             step["env"] = dict(env, GEMINI_API_KEY=env["GEMINI_API_KEY"].replace(" && steps.source.outputs.content_source == 'feed'", ""))
+            if isinstance(env.get("UNSPLASH_ACCESS_KEY"), str):      # BP3(D-430): Unsplash 키 식에도 같은 닫힌 쪽 조건이 글 작성 워크플로에만 더해졌다(앞 조건·뒤 빈 글 — test_manual_run_defaults·test_unsplash_key_feed_only 가 글자 그대로 못박는다)
+                step["env"]["UNSPLASH_ACCESS_KEY"] = env["UNSPLASH_ACCESS_KEY"].replace("steps.source.outputs.content_source == 'feed' && ", "").replace(" || ''", "")
         return step
 
     def chance_direct_steps(self):
