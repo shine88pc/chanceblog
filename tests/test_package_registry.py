@@ -16,6 +16,7 @@ from unittest import mock
 
 import _bootstrap  # noqa: F401
 from package_helpers import REAL, entry_of, make_package_root, registry_of, with_entry
+from real_repo_helpers import run_checks_once
 from pipeline import plan, registry
 
 sys.path.insert(0, str(_bootstrap.ROOT / "scripts"))
@@ -319,7 +320,7 @@ class ValidatorTest(PackageRegistryBase):
             self.assertEqual([f.line() for f in check(self.root, files) if f.path in wf], [], check.__name__)
 
     def test_the_real_repository_has_the_two_new_workflows_and_no_workflow_error(self):
-        findings = vr.run_checks(REAL)
+        findings = run_checks_once(REAL)                                    # 진짜 저장소의 결과는 한 프로세스 안에서 한 번만 계산해 나눠 쓴다(tests/real_repo_helpers.py)
         self.assertEqual([f.line() for f in findings if f.level == "ERROR"], [])
         files = vr.list_files(REAL)
         for name in ("tistory.yml", "naver.yml"):

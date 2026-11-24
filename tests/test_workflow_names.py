@@ -34,6 +34,22 @@ def load(name):
     return data
 
 
+_LOADED = {}
+
+
+def load_shared(name):
+    """`load` 와 같은 데이터를 프로세스 안에서 한 번만 읽어 나눠 준다(YAML 읽기는 파이썬 구현이라 느리다) — 조합마다 수백 번 부르며 **꺼내 보기만 하는** 계산 도우미(`blogger_workflow_helpers`)용이다.
+    돌려주는 것은 나눠 쓰는 원본이라 고치면 안 된다: 고치거나 밖으로 내주는 곳은 `load`(부를 때마다 새로 읽는다)를 쓴다. 열쇠가 파일 글이라 파일이 바뀌면 새로 읽는다."""
+    text = (WORKFLOWS / name).read_text(encoding="utf-8")
+    data = _LOADED.get((name, text))
+    if data is None:
+        data = yaml.safe_load(text)
+        if True in data and "on" not in data:  # YAML 1.1 은 키 on 을 True 로 읽는다
+            data["on"] = data.pop(True)
+        _LOADED[(name, text)] = data
+    return data
+
+
 # ----------------------------------------------------------------------------
 # 옛 영문 워크플로 이름 검색(안내 문서·워크플로·이슈 양식·코드)
 # ----------------------------------------------------------------------------

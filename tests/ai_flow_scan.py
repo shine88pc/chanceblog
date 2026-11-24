@@ -433,10 +433,9 @@ def _scan_source(rel, text):
                 tree = ast.parse(text, filename=rel)
                 scan = _Scan(module_name(rel), rel, text)
                 scan.visit(tree)
-                scan.tree = tree
                 walker = _ImportWalker(scan.module, rel)
                 walker.visit(tree)
-                scan.import_records = walker.records
+                scan.import_records = walker.records          # 구문 트리는 여기서 버린다(스캔 결과가 다시 읽는 일이 없다) — 캐시가 트리 수백 개를 쥐고 있으면 쓰레기 수거가 매번 그 트리를 훑는다
             except SyntaxError as exc:
                 found = (None, (exc.lineno or 0, f"문법 오류: {exc.msg}"))
             except (RecursionError, MemoryError, ValueError, SystemError) as exc:
@@ -450,10 +449,17 @@ def _scan_source(rel, text):
     return found
 
 
+def _sources_key(sources):
+    """소스 글자 사전의 내용 열쇠 — (경로, 글) 쌍 전체. 분석이 어느 소스로 만든 것인지 가리는 데 쓴다."""
+    return frozenset(sources.items())
+
+
 class Analysis:
-    """read_tree 결과(소스 글자 사전)를 한 번 분석한 것: scans(모듈→_Scan)·direct(AI 를 직접 하는 함수)·capable(AI 를 부를 수 있는 함수)·edges(호출 간선)·errors(파싱 실패)."""
+    """read_tree 결과(소스 글자 사전)를 한 번 분석한 것: scans(모듈→_Scan)·direct(AI 를 직접 하는 함수)·capable(AI 를 부를 수 있는 함수)·edges(호출 간선)·errors(파싱 실패).
+    sources_key 는 이 분석을 만든 소스의 내용 열쇠다 — `check`·`inventory` 가 넘겨받은 분석이 같은 소스로 만든 것인지 가리는 데 쓴다."""
 
     def __init__(self, sources):
+        self.sources_key = _sources_key(sources)
         self.scans, self.errors = {}, []
         for rel, text in sorted(sources.items()):
             scan, error = _scan_source(rel, text)
@@ -466,6 +472,7 @@ class Analysis:
             for qual in scan.funcs:
                 if qual != "<module>":
                     self.index[qual.split(".")[-1]].append((module, qual))
+        self._resolved, self._modules_for = {}, {}      # 같은 호출·같은 가져온 이름은 이 분석 안에서 한 번만 푼다(결과는 이 분석의 색인과 모듈 집합으로만 정해진다)
         self.edges = collections.defaultdict(set)
         self.reverse = collections.defaultdict(set)
         for module, scan in self.scans.items():
@@ -494,6 +501,22 @@ class Analysis:
         return self.scans[node[0]].funcs[node[1]]
 
     def _resolve(self, scan, callee, full):
+        """호출 하나가 가리킬 수 있는 ((모듈, qual) 의 목록, 이름만 같아서 닿은 것인가). 같은 (모듈, 이름, 전체 이름)은 이 분석 안에서 한 번만 푼다(읽기 전용 튜플) — 푸는 규칙은 `_resolve_uncached`."""
+        key = (scan.module, callee, full)
+        found = self._resolved.get(key)
+        if found is None:
+            targets, fuzzy = self._resolve_uncached(scan, callee, full)
+            found = self._resolved[key] = (tuple(targets), fuzzy)
+        return found
+
+    def _modules_named(self, target):
+        """가져온 이름 target 이 가리키는 트리 안 모듈 집합(같은 이름이거나 한쪽이 다른 쪽의 점 뒷부분). 분석마다 한 번씩만 센다 — 모듈마다 두 번의 endswith 를 호출마다 되풀이하지 않는다."""
+        found = self._modules_for.get(target)
+        if found is None:
+            found = self._modules_for[target] = frozenset(m for m in self.scans if m == target or m.endswith("." + target) or target.endswith("." + m))
+        return found
+
+    def _resolve_uncached(self, scan, callee, full):
         """호출 하나가 가리킬 수 있는 ([(모듈, qual)], 이름만 같아서 닿은 것인가). 과대 추정이다 — 놓치지 않는 쪽으로 틀린다."""
         parts = full.split(".") if full else [callee]
         same = [(m, q) for m, q in self.index.get(callee, []) if m == scan.module]
@@ -509,7 +532,7 @@ class Analysis:
             return same, False
         if parts[0] in scan.imports:
             target = scan.imports[parts[0]].lstrip(".")
-            in_tree = [m for m in self.scans if m == target or m.endswith("." + target) or target.endswith("." + m)]
+            in_tree = self._modules_named(target)
             return ([(m, q) for m, q in self.index.get(callee, []) if m in in_tree], False) if in_tree else ([], False)
         if same:
             return same, False
@@ -644,9 +667,33 @@ def _chain(analysis, parent, node):
 # ----------------------------------------------------------------------------
 # 규칙
 # ----------------------------------------------------------------------------
-def check(sources, config=DEFAULT_CONFIG):
-    """소스 글자 사전({상대 경로: 글})과 설정으로 모든 규칙을 돌려 Violation 목록을 낸다(정렬됨). 순수 함수."""
-    analysis = Analysis(sources)
+_SHARED_ANALYSES = {}
+
+
+def analysis_for(sources):
+    """같은 내용의 소스 글자 사전에는 분석(`Analysis`)을 프로세스 안에서 한 번만 만들어 나눠 준다 — 읽기만 하는 시험(진짜 트리의 등록 대조처럼 설정만 바꿔 여러 번 `check` 를 부르는 것)을 위한 도우미다.
+    열쇠는 사전의 (경로, 글) 쌍 전체라 글 한 줄이라도 다르면 따로 만든다. `check`·`inventory` 는 분석을 읽기만 한다. 순수 함수 성질·시간 한계를 보는 시험은 이것을 쓰지 않고 `check(sources)` 를 직접 불러 매번 새로 분석한다."""
+    key = _sources_key(sources)
+    found = _SHARED_ANALYSES.get(key)
+    if found is None:
+        if len(_SHARED_ANALYSES) >= 8:
+            _SHARED_ANALYSES.clear()
+        found = _SHARED_ANALYSES[key] = Analysis(sources)
+    return found
+
+
+def _analysis_of(sources, analysis):
+    """analysis 가 없으면 새로 분석하고, 있으면 같은 sources 로 만든 것인지 열쇠로 확인한다 — 다른 소스로 만든 분석을 넘기면 조용히 틀린 결과가 나오므로 거절한다."""
+    if analysis is None:
+        return Analysis(sources)
+    if analysis.sources_key != _sources_key(sources):
+        raise ValueError("넘겨받은 analysis 가 이 sources 로 만든 것이 아니다 — analysis_for(sources) 로 얻는다")
+    return analysis
+
+
+def check(sources, config=DEFAULT_CONFIG, analysis=None):
+    """소스 글자 사전({상대 경로: 글})과 설정으로 모든 규칙을 돌려 Violation 목록을 낸다(정렬됨). 순수 함수. analysis 를 주면(같은 sources 로 만든 것이어야 한다 — `analysis_for(sources)`, 아니면 ValueError) 다시 분석하지 않는다."""
+    analysis = _analysis_of(sources, analysis)
     out = [Violation("AF0 PARSE", rel, line, f"{message} — 확인하지 못한 파일은 위반이다(알 수 없으면 막는다)") for rel, line, message in analysis.errors]
     scans = analysis.scans
 
@@ -749,9 +796,9 @@ def check(sources, config=DEFAULT_CONFIG):
     return sorted(set(out), key=lambda v: (v.rule, v.where, v.line, v.message))
 
 
-def inventory(sources, config=DEFAULT_CONFIG):
-    """등록 목록이 지금 코드와 맞는지 보는 사실표(시험이 쓴다): 실제로 AI 를 직접 하는 함수·llm 호출 함수·호출 객체 만드는 함수·이름별 호출 지점·`_posts` 읽는 함수."""
-    analysis = Analysis(sources)
+def inventory(sources, config=DEFAULT_CONFIG, analysis=None):
+    """등록 목록이 지금 코드와 맞는지 보는 사실표(시험이 쓴다): 실제로 AI 를 직접 하는 함수·llm 호출 함수·호출 객체 만드는 함수·이름별 호출 지점·`_posts` 읽는 함수. analysis 를 주면(같은 sources 로 만든 것, 아니면 ValueError) 다시 분석하지 않는다."""
+    analysis = _analysis_of(sources, analysis)
     scans = analysis.scans
     found = {"primitives": set(), "consumers": set(), "factories": set(), "call_sites": {name: set() for name in config.ai_call_sites}, "readers": set(),
              "filtered_calls": set(), "capable": {(analysis.rel(n), n[1]) for n in analysis.capable}, "parse_errors": [e[0] for e in analysis.errors],

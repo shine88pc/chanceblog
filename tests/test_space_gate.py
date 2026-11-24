@@ -1,6 +1,7 @@
 """S2AFIX D2: 현재 main 의 품질 관문(Gate, `pipeline/quality_gate.py`)이 모든 틀(R01–R06)의 골든 글과 무작위 글을 QG1(숫자 일치)·QG4(건강 단정)·QG6(제목·본문 일치)에서 보류하지 않는 시험.
 흑점수 두 틀의 제목어 `추이` 가 본문에 없어 무작위 글 720편 가운데 흑점수 240편이 모두 QG6-TITLE-WORD 로 보류되던 일(S2a 검증 D2)을 막는다. 관문을 켜지는 않는다 — `check_candidate` 함수만
 부르고 네트워크·시계가 없다. 대조군(일부러 결함을 넣은 글)이 실제로 걸리는지도 본다 — 관문을 부르는 줄이 빠지거나 규칙이 느슨해지면 이 시험이 알려 준다. 난수는 고정 시드로만."""
+import dataclasses
 import datetime
 import random
 import unittest
@@ -38,11 +39,20 @@ def held(report):
     return sorted(code for code in report.codes() if code.startswith(CHECKED))
 
 
+_NOAA_POSTS = {}
+
+
 def noaa_post(recipe_id, product_id, payload, key):
-    """실제 NOAA 이름·주소와 보고서 B안 출처 문구로 글을 만든다(출처 도메인 검사 QG5 도 지나게)."""
-    record, facts = H.parse_value(product_id, payload)
-    provider = H.provider(attribution_template=H.B_TEMPLATE)
-    return A.assemble(RN.NOREGION_RECIPES[recipe_id], list(facts), H.TODAY, records=[record], source=H.source_info(product_id, provider), params={"key": key} if key else None)
+    """실제 NOAA 이름·주소와 보고서 B안 출처 문구로 글을 만든다(출처 도메인 검사 QG5 도 지나게). 같은 입력(응답을 글자로 본 것·글감 키)은 같은 글이라 한 번만 조립해 나눠 쓴다 —
+    조립 결과는 바뀌지 않는 값이다(`AssembledPost` 는 frozen, `Insufficient` 는 읽기만 한다). 이 모듈과 test_quality_gate_fact·test_source_file_note 가 같은 고정 시드 입력을 되풀이해 조립하던 것이다."""
+    cache_key = (recipe_id, product_id, H.dumps(payload), key)
+    post = _NOAA_POSTS.get(cache_key)
+    if post is None:
+        record, facts = H.parse_value(product_id, payload)
+        provider = H.provider(attribution_template=H.B_TEMPLATE)
+        post = _NOAA_POSTS[cache_key] = A.assemble(RN.NOREGION_RECIPES[recipe_id], list(facts), H.TODAY, records=[record], source=H.source_info(product_id, provider),
+                                                    params={"key": key} if key else None)
+    return post
 
 
 def day_text(back, last="2026-11-09"):
@@ -179,6 +189,47 @@ class GateStillBitesTest(unittest.TestCase):
 
     def test_an_empty_evidence_text_is_held(self):
         self.assertTrue(any(code.startswith("QG1") for code in report_of(self.post, evidence="").codes()))
+
+
+class SharedPostTest(unittest.TestCase):
+    """속도를 위해 나눠 쓰는 `noaa_post` 가 매번 새로 조립한 것과 같은 글을 내고, 받는 쪽이 바꿀 수 없고, 입력이 다르면 따로 조립한다."""
+
+    @staticmethod
+    def fresh(recipe_id, product_id, payload, key):
+        """나눠 쓰기 전의 `noaa_post` 그대로(매번 읽고 조립한다)."""
+        record, facts = H.parse_value(product_id, payload)
+        provider = H.provider(attribution_template=H.B_TEMPLATE)
+        return A.assemble(RN.NOREGION_RECIPES[recipe_id], list(facts), H.TODAY, records=[record], source=H.source_info(product_id, provider), params={"key": key} if key else None)
+
+    def test_the_shared_post_equals_a_fresh_assembly_and_is_the_same_object_each_time(self):
+        for name in ("r04_kp", "r05_flares", "r06_scales"):
+            recipe_id, product_id, rows, params = TR.golden_cases()[name]
+            shared = noaa_post(recipe_id, product_id, rows, params.get("key"))
+            self.assertIsInstance(shared, A.AssembledPost, name)
+            self.assertEqual(shared, self.fresh(recipe_id, product_id, rows, params.get("key")), name)
+            self.assertIs(noaa_post(recipe_id, product_id, rows, params.get("key")), shared, name)
+
+    def test_a_refused_assembly_is_shared_too_and_a_changed_input_is_assembled_again(self):
+        short = H.kp_rows("2026-11-09", 1)                                              # 하루뿐이라 R04 가 글을 만들지 않는다
+        refused = noaa_post("R04_NOREGION_SERIES", "kp_estimated", short, RN.KEY_KP)
+        self.assertIsInstance(refused, R.Insufficient)
+        self.assertIs(noaa_post("R04_NOREGION_SERIES", "kp_estimated", short, RN.KEY_KP), refused)
+        self.assertEqual(refused, self.fresh("R04_NOREGION_SERIES", "kp_estimated", short, RN.KEY_KP))
+        recipe_id, product_id, rows, params = TR.golden_cases()["r04_kp"]
+        changed = [dict(row) for row in rows]
+        changed[0]["Kp"] = 8.33                                                         # 첫 날(완전한 날)의 한 구간을 크게 바꿔 그 날의 최댓값이 달라지게 한다
+        first, second = noaa_post(recipe_id, product_id, rows, params["key"]), noaa_post(recipe_id, product_id, changed, params["key"])
+        self.assertIsNot(first, second)
+        self.assertEqual(second, self.fresh(recipe_id, product_id, changed, params["key"]))
+        self.assertNotEqual(first.body_markdown + first.evidence_text, second.body_markdown + second.evidence_text)
+
+    def test_the_shared_post_cannot_be_changed_by_the_one_who_receives_it(self):
+        recipe_id, product_id, rows, params = TR.golden_cases()["r06_scales"]
+        post = noaa_post(recipe_id, product_id, rows, params.get("key"))
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            post.title = "받는 쪽이 고친 제목"
+        self.assertIsInstance(post.tags, tuple)
+        self.assertIsInstance(post.facts_used, tuple)
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest import mock
 
 import _bootstrap
+from real_repo_helpers import run_checks_once
 
 sys.path.insert(0, str(_bootstrap.ROOT / "scripts"))
 import validate_repo as vr  # noqa: E402
@@ -431,7 +432,7 @@ class RealRepositoryTest(unittest.TestCase):
 
     def test_the_whole_validator_has_no_error_and_no_workflow_finding_for_the_real_repository(self):
         """검증기 전체(run_checks)가 저장소에 오류 0 이고 워크플로 권한·트리거·주입 지적(WF-1·WF-3·WF-4)이 없다 — 이 변경이 시작점의 출력(오류 0·경고는 문서·Liquid)에 지적을 더하지 않는다."""
-        findings = vr.run_checks(REAL)
+        findings = run_checks_once(REAL)                           # 진짜 저장소의 결과는 한 프로세스 안에서 한 번만 계산해 나눠 쓴다(tests/real_repo_helpers.py)
         self.assertEqual([f.line() for f in findings if f.level == "ERROR"], [])
         self.assertEqual([f.line() for f in findings if f.check in ("WF-1", "WF-3", "WF-4")], [])
 

@@ -4,9 +4,10 @@ blogger.yml 은 재사용 워크플로(on: workflow_call)이고, 채널별 래�
 GitHub Actions 를 실행할 수 없는 환경에서도 '이벤트·입력 → 래퍼의 with 식 → 공용 워크플로의 환경변수 식'을 끝에서 끝까지 평가해 러너가 받는 환경변수를 구한다.
 분리 전 blogger.yml 이 같은 이벤트·입력에서 낸 값(OLD_ENV 의 식)과 모든 조합에서 같은지는 tests/test_blogger_split.py 가 대조한다.
 """
+import copy
 import re
 
-from test_workflow_names import _Parser, load, render      # 이름 시험이 쓰는 같은 식 해석기(그 모듈이 _bootstrap 을 불러 경로를 맞춘다)
+from test_workflow_names import _Parser, load, load_shared, render      # 이름 시험이 쓰는 같은 식 해석기(그 모듈이 _bootstrap 을 불러 경로를 맞춘다)
 
 REUSABLE = "blogger.yml"
 # 레지스트리 블로그 key → 그 블로그를 부르는 채널별 래퍼 파일(레지스트리 workflow 필드와 같아야 한다 — 시험이 확인한다)
@@ -25,9 +26,10 @@ OLD_ENV = {
 }
 
 
-def call_job(wrapper):
-    """래퍼의 (잡 id, 잡) — 공용 워크플로를 부르는 잡은 정확히 하나다."""
-    jobs = load(wrapper)["jobs"]
+def call_job(wrapper, loader=load):
+    """래퍼의 (잡 id, 잡) — 공용 워크플로를 부르는 잡은 정확히 하나다. loader 는 파일을 읽는 함수다: 기본 `load`(깊은 복사본 — 받은 잡을 고쳐도 된다)이고,
+    조합마다 수백 번 부르며 꺼내 보기만 하는 계산 함수(`wrapper_with`·`callee_env`)는 읽기 전용 `load_shared` 를 넘긴다."""
+    jobs = loader(wrapper)["jobs"]
     calls = [(job_id, job) for job_id, job in jobs.items() if str(job.get("uses", "")).endswith("/blogger.yml")]
     assert len(calls) == 1, (wrapper, list(jobs))
     return calls[0]
@@ -52,7 +54,7 @@ def wrapper_with(wrapper, event, event_inputs=None):
     GitHub 문서에는 문자열 입력에 null 을 넘길 때의 동작이 없으므로 래퍼가 `|| ''` 로 빈 문자열을 직접 넘겨야 하고, 그 보장은 test_blogger_split 이
     모든 이벤트·입력 조합에서 이 값이 문자열인지로 확인한다(독립 검증 N9 — 예전에는 여기서 null 을 빈 문자열로 바꿔 그 가정을 가렸다)."""
     ctx = event_context(event, event_inputs)
-    return {name: (typed(template, ctx) if isinstance(template, str) else template) for name, template in call_job(wrapper)[1]["with"].items()}
+    return {name: (typed(template, ctx) if isinstance(template, str) else copy.deepcopy(template)) for name, template in call_job(wrapper, load_shared)[1]["with"].items()}
 
 
 def _only(items, predicate):
@@ -61,9 +63,9 @@ def _only(items, predicate):
     return found[0]
 
 
-def callee_steps():
-    """공용 워크플로에서 환경변수를 만드는 세 곳: plan 단계(id=plan)·generate 잡 env·러너 단계(pipeline.run)."""
-    jobs = load(REUSABLE)["jobs"]
+def callee_steps(loader=load):
+    """공용 워크플로에서 환경변수를 만드는 세 곳: plan 단계(id=plan)·generate 잡 env·러너 단계(pipeline.run). loader 는 `call_job` 과 같다(기본은 깊은 복사본, `callee_env` 는 읽기 전용)."""
+    jobs = loader(REUSABLE)["jobs"]
     plan_step = _only(jobs["plan"]["steps"], lambda step: step.get("id") == "plan")
     run_step = _only(jobs["generate"]["steps"], lambda step: "pipeline.run" in str(step.get("run", "")))
     return plan_step, jobs["generate"], run_step
@@ -71,7 +73,7 @@ def callee_steps():
 
 def callee_env(inputs):
     """공용 워크플로가 inputs(래퍼가 넘긴 값)에서 만드는 환경변수 — 러너·plan 단계가 받는 값."""
-    plan_step, generate, run_step = callee_steps()
+    plan_step, generate, run_step = callee_steps(load_shared)
     ctx = {"inputs": inputs}
     return {"ONLY_BLOG": render(plan_step["env"]["ONLY_BLOG"], ctx), "AUTH_CHECK_ONLY": render(plan_step["env"]["AUTH_CHECK_ONLY"], ctx),
             "DRY_RUN": render(generate["env"]["DRY_RUN"], ctx), "BLOGGER_TOPIC": render(run_step["env"]["BLOGGER_TOPIC"], ctx),

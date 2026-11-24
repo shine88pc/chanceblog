@@ -97,7 +97,7 @@ class DocRulesTest(unittest.TestCase):
 class TablesMatchCodeTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.found = S.inventory(flow.REAL)
+        cls.found = S.inventory(flow.REAL, analysis=flow.real_analysis())      # test_ai_flow 가 이미 만든 진짜 트리 분석을 나눠 쓴다(읽기만 한다)
 
     def test_the_sink_table(self):
         kinds = {"SDK 원시 호출": set(), "호출 객체 소비자": set(), "호출 객체 만들기": set()}
