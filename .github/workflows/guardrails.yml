@@ -82,7 +82,7 @@ jobs:
           fi
 
       - name: 단위 테스트
-        run: python -m unittest discover -s tests -v
+        run: python scripts/run_unit_parallel.py --weights tests/unit_test_weights.json
 
       - name: 워크플로 정적 분석 (actionlint)
         if: matrix.python-version == '3.12'
