@@ -140,7 +140,7 @@ ALLOWED = {
     "chance-shadow.yml": entry(py={"generator.py", "pipeline.quality_shadow", "pipeline.source_policy"}, uses={"actions/upload-artifact"}),      # source_policy: AF7 의 읽기 단계(레지스트리 값을 한 줄 출력 — 읽기만 한다)
     "chanceblog.yml": entry({"actions:write", "contents:write", "pull-requests:write"}, {"gh workflow run", "git commit", "git push"},
                             {"generator.py", "pipeline.draft_flow", "pipeline.notify", "pipeline.source_policy"}),      # source_policy: AF7 의 읽기 단계(읽기만 한다)
-    "guardrails.yml": entry(py={"pipeline.notify", "scripts/validate_repo.py"}),
+    "guardrails.yml": entry(py={"pipeline.notify", "scripts/run_unit_parallel.py", "scripts/validate_repo.py"}),      # run_unit_parallel: 단위 테스트를 여러 프로세스로 나눠 돌리는 읽기 전용 실행기(자식은 python -m unittest 뿐, 쓰는 것이 없다)
     "issue-edit.yml": entry({"actions:write", "contents:write", "issues:write", "pull-requests:write"},
                             {"gh issue", "gh label", "gh pr create", "gh workflow run", "git commit", "git push"}, {"pipeline.edits.runner"}),
     "merge-confirm-notice.yml": entry(py={"pipeline.auto_notice"}),      # 병합 알림 둘(2026-11-23, 확인 031): 쓰기 권한·쓰기 명령 없음 — 읽기 권한만으로 GitHub 를 읽고 텔레그램 평문 한 통(꺼진 채 병합)
