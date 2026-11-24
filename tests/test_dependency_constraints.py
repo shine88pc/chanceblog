@@ -1,0 +1,848 @@
+"""설치 버전 묶기(constraints) — 검증기 DEP-3 과 새 파일 `constraints-py310.txt`·`constraints-py312.txt`(결함 D-461–D-465, 문서 docs/DEPENDENCY_PINNING.md).
+
+요구 파일 셋(`requirements-dev/edits/pipeline.txt`)은 범위 표기(`>=2,<3`)를 그대로 두고, 워크플로의 모든 `pip install` 이 파이썬 버전별 constraints 파일로 설치 버전을 묶는다.
+이 시험은 (1) 진짜 파일 — constraints 두 파일의 모양과 요구 파일과의 짝, 워크플로 열 곳의 설치 줄, (2) 검증기 DEP-3 이 진짜 저장소에서 오류 0 이고
+(3) 진짜 파일을 임시 폴더로 복사해 한 곳씩 틀리게 하면(변이) 모두 검증기 오류로 잡히는지, (4) 범위 비교·줄 읽기·셸 줄 읽기의 작은 규칙, (5) 문서가 코드와 같은 말을 하는지를 본다.
+워크플로를 읽는 시험은 PyYAML 이 있어야 돈다(없는 환경에서는 건너뜀 — requirements-dev.txt 가 CI 에 설치한다)."""
+import re
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+import _bootstrap  # noqa: F401
+
+sys.path.insert(0, str(_bootstrap.ROOT / "scripts"))
+import validate_repo as vr  # noqa: E402
+
+try:
+    import yaml
+except ImportError:  # pragma: no cover - requirements-dev.txt 가 설치하는 의존성
+    yaml = None
+
+ROOT = Path(_bootstrap.ROOT)
+NEEDS_YAML = unittest.skipUnless(yaml is not None, "PyYAML(requirements-dev.txt)이 필요합니다(CI 에서는 항상 실행됩니다)")
+CONSTRAINT_FILES = ("constraints-py310.txt", "constraints-py312.txt")
+REQUIREMENT_FILES = ("requirements-dev.txt", "requirements-edits.txt", "requirements-pipeline.txt")
+
+# 이 시험이 독립적으로 쓰는 줄 모양(검증기의 정규식을 빌리지 않는다 — 같은 실수를 같이 하지 않게)
+PIN_LINE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*==[0-9][0-9A-Za-z.]*")
+
+
+def normalize(name):
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def text_of(rel):
+    return (ROOT / rel).read_bytes().decode("utf-8").replace("\r\n", "\n")
+
+
+def pins_of(rel):
+    """constraints 파일의 {정규화 이름: 버전} — 주석·빈 줄을 뺀 줄 전부(모양이 틀리면 이 함수가 아니라 모양 시험이 잡는다)."""
+    found = {}
+    for line in text_of(rel).split("\n"):
+        line = line.strip()
+        if line and not line.startswith("#"):
+            name, _, version = line.partition("==")
+            found[normalize(name)] = version
+    return found
+
+
+def requirement_lines(rel):
+    """요구 파일의 (이름, 범위 글) 목록 — `>=A,<B` 와 `==V` 두 모양만 이 시험이 읽는다."""
+    found = []
+    for line in text_of(rel).split("\n"):
+        line = line.split("#")[0].strip()
+        if line:
+            match = re.fullmatch(r"([A-Za-z0-9][A-Za-z0-9._-]*)(.*)", line)
+            found.append((match.group(1), match.group(2).strip()))
+    return found
+
+
+def major(version):
+    return int(version.split(".")[0])
+
+
+def one_plain_line(test, finding):
+    for text in (finding.message, finding.line()):
+        test.assertEqual(len(text.splitlines()), 1, text)
+        test.assertNotIn("::", text)
+        test.assertNotIn("##[", text)
+
+
+# ----------------------------------------------------------------------------
+# 1) 진짜 constraints 두 파일
+# ----------------------------------------------------------------------------
+class ConstraintsFilesTest(unittest.TestCase):
+    def test_both_files_exist_at_the_repository_root_next_to_the_requirement_files(self):
+        for rel in CONSTRAINT_FILES + REQUIREMENT_FILES:
+            with self.subTest(rel=rel):
+                self.assertTrue((ROOT / rel).is_file(), rel)
+
+    def test_every_line_is_a_comment_or_name_equals_exact_version_and_no_name_repeats(self):
+        for rel in CONSTRAINT_FILES:
+            with self.subTest(rel=rel):
+                names = []
+                for number, line in enumerate(text_of(rel).split("\n"), 1):
+                    stripped = line.strip()
+                    if not stripped or stripped.startswith("#"):
+                        continue
+                    self.assertIsNotNone(PIN_LINE.fullmatch(stripped), f"{rel}:{number}")
+                    self.assertNotIn(" ", stripped, f"{rel}:{number}")
+                    names.append(normalize(stripped.split("==")[0]))
+                self.assertGreaterEqual(len(names), 30, rel)               # 빈 파일로 통과하지 않게(직접 요구 + 하위 의존성 36–37개)
+                self.assertEqual(sorted(name for name in names if names.count(name) > 1), [], rel)
+
+    def test_the_header_is_comments_only_and_names_the_python_version_the_file_is_for(self):
+        for rel, dotted in (("constraints-py310.txt", "3.10"), ("constraints-py312.txt", "3.12")):
+            with self.subTest(rel=rel):
+                lines = text_of(rel).split("\n")
+                head = []
+                for line in lines:
+                    if not line.startswith("#"):
+                        break
+                    head.append(line)
+                self.assertGreaterEqual(len(head), 3, rel)
+                self.assertIn(f"파이썬 {dotted}", head[0], rel)             # 두 파일이 바뀌어 들어가는 것을 막는다
+                joined = "\n".join(head)
+                for word in ("만든 방법", f"pip install -c {rel} -r", "docs/DEPENDENCY_PINNING.md"):
+                    self.assertIn(word, joined, (rel, word))
+                self.assertRegex(joined, r"20[0-9]{2}-[0-9]{2}-[0-9]{2}")             # 만든 날짜(갱신할 때마다 바뀌므로 값은 못박지 않는다)
+                self.assertRegex(joined, r"전체 시험 [0-9,]+개")                       # 통과한 전체 시험 개수
+
+    def test_the_files_have_no_secret_like_text_personal_text_or_web_addresses(self):
+        for rel in CONSTRAINT_FILES:
+            text = text_of(rel)
+            self.assertNotIn("://", text, rel)                              # 웹 주소 없음(패키지 이름 httpx·httpcore 의 'http' 는 주소가 아니다)
+            self.assertNotIn("~", text, rel)
+            self.assertNotIn("{{", text, rel)
+
+    def test_every_requirement_package_is_pinned_in_both_files_inside_the_requirement_range(self):
+        for requirement in REQUIREMENT_FILES:
+            for name, spec in requirement_lines(requirement):
+                for constraints in CONSTRAINT_FILES:
+                    with self.subTest(requirement=requirement, name=name, constraints=constraints):
+                        pinned = pins_of(constraints).get(normalize(name))
+                        exact = re.fullmatch(r"==([0-9][0-9.]*)", spec)
+                        if exact and pinned is None:
+                            continue                                        # 요구 파일이 이미 `==` 로 고정한 줄(actionlint-py)은 목록에 없어도 된다
+                        self.assertIsNotNone(pinned, f"{name} 이(가) {constraints} 에 없다")
+                        if exact:
+                            self.assertEqual(pinned, exact.group(1))
+                            continue
+                        window = re.fullmatch(r">=([0-9]+),<([0-9]+)", spec)
+                        self.assertIsNotNone(window, f"{requirement}: {name}{spec} — 이 시험이 읽는 범위 모양(>=A,<B)이 아니다")
+                        self.assertTrue(int(window.group(1)) <= major(pinned) < int(window.group(2)), f"{name}=={pinned} 가 {spec} 밖")
+
+    def test_the_direct_requirement_names_are_the_same_in_both_files(self):
+        direct = {normalize(name) for requirement in REQUIREMENT_FILES for name, spec in requirement_lines(requirement) if not spec.startswith("==")}
+        self.assertGreaterEqual(len(direct), 4)
+        for constraints in CONSTRAINT_FILES:
+            self.assertEqual(sorted(direct - set(pins_of(constraints))), [], constraints)
+        self.assertEqual(sorted(direct & set(pins_of("constraints-py310.txt"))), sorted(direct & set(pins_of("constraints-py312.txt"))))
+
+    def test_the_two_python_versions_keep_their_own_file(self):
+        """파이썬 3.10 은 3.11 이상 전용인 google-genai 2.34.0·websockets 17.4 를 받지 못해 파일이 둘이다 — 3.10 용에 그 둘이 들어가면 설치가 깨진다(AP7 조사)."""
+        ten = pins_of("constraints-py310.txt")
+        self.assertNotEqual(ten["google-genai"], "2.34.0")
+        self.assertNotEqual(ten["websockets"], "17.4")
+
+    def test_the_merge_policy_treats_both_files_as_dependency_files_only_the_operator_merges(self):
+        from pipeline import merge_policy as mp
+        declared = dict.fromkeys(mp.DECLARED_REQUIRED, False)
+        for rel in CONSTRAINT_FILES + REQUIREMENT_FILES:
+            with self.subTest(rel=rel):
+                result = mp.classify_change("blog", [rel], "", declared)
+                self.assertEqual(result.tier, "operator_only")
+                self.assertIn("dependencies", result.categories)
+
+    def test_the_site_cleanup_test_lists_both_files_as_deliberately_exposed(self):
+        """새 루트 파일은 사이트로 내보낼지·뺄지 정해야 한다(tests/test_site_cleanup.py). `_config.yml` 은 광고 표면이라 이 변경 밖이어서 일부러 열어 두는 목록(STATIC_EXPOSED)에 있다."""
+        cleanup = text_of("tests/test_site_cleanup.py")
+        start = cleanup.index("STATIC_EXPOSED = {")
+        block = cleanup[start:cleanup.index("}", start)]
+        for rel in CONSTRAINT_FILES:
+            self.assertIn(f'"{rel}"', block, rel)
+        self.assertIn('"README.md"', block)
+
+
+# ----------------------------------------------------------------------------
+# 2) 진짜 워크플로 열 곳의 설치 줄 — 요구 파일 값은 그대로, `-c` 만 더해졌다
+# ----------------------------------------------------------------------------
+# (워크플로, job, setup-python 의 python-version, 설치 줄의 pip install 뒤 글자 전체)
+INSTALL_LINES = (
+    ("blogger.yml", "generate", "3.12", "-c constraints-py312.txt -r requirements-pipeline.txt"),
+    ("naver.yml", "generate", "3.12", "-c constraints-py312.txt -r requirements-pipeline.txt"),
+    ("tistory.yml", "generate", "3.12", "-c constraints-py312.txt -r requirements-pipeline.txt"),
+    ("issue-edit.yml", "edit", "3.12", "-c constraints-py312.txt -r requirements-edits.txt"),
+    ("pr-scope-check.yml", "scope", "3.12", "-c constraints-py312.txt -r requirements-edits.txt"),
+    ("sync-issue-form.yml", "sync", "3.12", "-c constraints-py312.txt -r requirements-edits.txt"),
+    ("chanceblog.yml", "build", "3.10", '-c constraints-py310.txt "google-genai>=2,<3"'),
+    ("chance-fix-images.yml", "build", "3.10", '-c constraints-py310.txt "google-genai>=2,<3"'),
+    ("chance-shadow.yml", "shadow", "3.10", '-c constraints-py310.txt "google-genai>=2,<3"'),
+)
+
+
+def load_workflow(name):
+    return yaml.safe_load((ROOT / ".github" / "workflows" / name).read_bytes().decode("utf-8"))
+
+
+@NEEDS_YAML
+class WorkflowInstallLinesTest(unittest.TestCase):
+    def install_runs(self, workflow, job):
+        """job 의 pip install 줄(`--upgrade pip` 줄은 뺀다)을 run 안의 글 그대로 모은다."""
+        found = []
+        for step in load_workflow(workflow)["jobs"][job]["steps"]:
+            for line in str(step.get("run", "")).split("\n"):
+                text = line.strip()
+                if re.search(r"\bpip3? install\b", text) and "--upgrade pip" not in text:
+                    found.append(text)
+        return found
+
+    def python_of(self, workflow, job):
+        versions = [step["with"]["python-version"] for step in load_workflow(workflow)["jobs"][job]["steps"] if str(step.get("uses", "")).startswith("actions/setup-python@")]
+        self.assertEqual(len(versions), 1, (workflow, job))
+        return versions[0]
+
+    def test_nine_install_lines_carry_the_constraints_file_of_their_python(self):
+        for workflow, job, python, tail in INSTALL_LINES:
+            with self.subTest(workflow=workflow):
+                self.assertEqual(self.python_of(workflow, job), python)
+                lines = self.install_runs(workflow, job)
+                self.assertEqual(len(lines), 1, (workflow, lines))
+                self.assertRegex(lines[0], r"^(?:python -m )?pip install " + re.escape(tail) + r"$")
+                self.assertIn("constraints-py" + python.replace(".", ""), lines[0])      # 3.10 ↔ py310, 3.12 ↔ py312
+
+    def test_the_upgrade_pip_lines_were_left_alone(self):
+        """`pip install --upgrade pip` 은 이 변경 밖이다 — -c 도 붙지 않았다."""
+        for workflow, job, _python, _tail in INSTALL_LINES:
+            for step in load_workflow(workflow)["jobs"][job]["steps"]:
+                for line in str(step.get("run", "")).split("\n"):
+                    if "--upgrade pip" in line:
+                        with self.subTest(workflow=workflow):
+                            self.assertEqual(line.strip(), "python -m pip install --upgrade pip")
+
+    def test_the_chance_workflows_install_the_same_way(self):
+        lines = {workflow: self.install_runs(workflow, job) for workflow, job, _python, _tail in INSTALL_LINES if workflow.startswith("chance")}
+        self.assertEqual(len(lines), 3)
+        self.assertEqual(len({tuple(value) for value in lines.values()}), 1)
+
+    def test_the_guardrails_matrix_picks_the_file_of_each_python_with_an_env_variable_and_no_expression_in_run(self):
+        job = load_workflow("guardrails.yml")["jobs"]["validate"]
+        self.assertEqual(job["strategy"]["matrix"]["python-version"], ["3.10", "3.12"])
+        install = next(step for step in job["steps"] if step.get("name") == "검증 도구 설치")
+        self.assertEqual(install["env"], {"CONSTRAINTS": "constraints-py${{ matrix.python-version == '3.10' && '310' || '312' }}.txt"})
+        self.assertEqual(install["run"], 'python -m pip install -c "$CONSTRAINTS" -r requirements-dev.txt')
+        self.assertNotIn("${{", install["run"])                        # 식은 env 안에만 둔다(검증기 WF-4)
+        self.assertEqual(sorted(install), ["env", "name", "run"])      # 이 단계에 다른 키(if·permissions·uses)를 얹지 않았다
+        python = {"versions": job["strategy"]["matrix"]["python-version"], "key": "python-version"}
+        targets, why = vr._dep3_constraint_targets("$CONSTRAINTS", install["env"], python)
+        self.assertIsNone(why)
+        self.assertEqual(targets, {"3.10": "constraints-py310.txt", "3.12": "constraints-py312.txt"})
+
+    def test_no_workflow_installs_anything_without_a_constraints_file(self):
+        """모든 워크플로의 모든 run 의 pip install 이 (pip 자신만 올리는 줄을 빼고) -c 를 가진다 — 검증기와 따로 글자로 센다."""
+        checked = 0
+        for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+            for job in (yaml.safe_load(path.read_bytes().decode("utf-8")).get("jobs") or {}).values():
+                for step in job.get("steps") or []:
+                    for line in str(step.get("run", "")).split("\n"):
+                        if re.search(r"\bpip3? install\b", line) and "--upgrade pip" not in line:
+                            checked += 1
+                            self.assertRegex(line, r"\s(?:-c|--constraint)[ =]", f"{path.name}: {line.strip()}")
+        self.assertGreaterEqual(checked, 10)
+
+
+# ----------------------------------------------------------------------------
+# 3) DEP-3 — 진짜 저장소는 오류 0, 진짜 파일을 한 곳씩 틀리게 하면 모두 오류
+# ----------------------------------------------------------------------------
+class Dep3RealRepositoryTest(unittest.TestCase):
+    def test_the_real_repository_has_no_dep3_findings(self):
+        self.assertEqual([finding.line() for finding in vr.check_dependency_constraints(ROOT, vr.list_files(ROOT))], [])
+
+    def test_the_rule_is_one_of_the_checks_run_checks_calls(self):
+        """등록 확인: 진짜 저장소 전체를 돌리면 느리므로(그 오류 0 은 test_validate_repo.RealRepoTest 가 본다) 소스에서 부르는 줄만 확인하고, 실제로 도는지는 아래 임시 폴더 시험이 본다."""
+        source = text_of("scripts/validate_repo.py")
+        body = source[source.index("def run_checks("):source.index("def main(")]
+        self.assertIn("    findings += check_dependency_constraints(root, files)\n", body)
+        self.assertLess(body.index("check_dependencies(root, files)"), body.index("check_dependency_constraints(root, files)"))     # DEP-1 바로 뒤
+
+    def test_dep1_does_not_read_the_quoted_constraints_variable_as_an_unpinned_package(self):
+        findings = vr.check_dependencies(ROOT, vr.list_files(ROOT))
+        self.assertEqual([finding.line() for finding in findings], [])
+
+
+def copy_sources():
+    """임시 복사본에 넣을 진짜 파일의 ({요구 파일 셋·constraints 둘}, {워크플로 전부}) — 각각 {경로: 줄 끝을 LF 로 통일한 바이트}. 한 번만 읽는다(저장소 전체 목록을 매번 읽으면 느리다)."""
+    names = sorted(path.relative_to(ROOT).as_posix() for path in (ROOT / ".github" / "workflows").glob("*") if path.suffix.lower() in (".yml", ".yaml"))
+    read = lambda rel: (ROOT / rel).read_bytes().replace(b"\r\n", b"\n")      # noqa: E731
+    return {rel: read(rel) for rel in list(REQUIREMENT_FILES) + list(CONSTRAINT_FILES)}, {rel: read(rel) for rel in names}
+
+
+FILE_SOURCES, WORKFLOW_SOURCES = copy_sources()
+
+
+class TmpCase(unittest.TestCase):
+    def setUp(self):
+        """새 임시 폴더에 요구 파일 셋·constraints 둘만 복사한다(워크플로는 `fresh` 로 필요한 것만 — DEP-3 은 있는 워크플로를 모두 읽으므로 적게 둘수록 빠르다)."""
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        for rel, data in FILE_SOURCES.items():
+            self.write_bytes(rel, data)
+
+    def fresh(self, *workflows):
+        """처음부터 다시: 새 임시 폴더에 요구 파일 셋·constraints 둘과 지정한 워크플로(파일 이름)를 복사한다. 이름 대신 `*` 하나면 워크플로 전부."""
+        self.setUp()
+        wanted = sorted(WORKFLOW_SOURCES) if workflows == ("*",) else [f".github/workflows/{name}" for name in workflows]
+        for rel in wanted:
+            self.write_bytes(rel, WORKFLOW_SOURCES[rel])
+
+    def write_bytes(self, rel, data):
+        path = self.root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+
+    def edit(self, rel, old, new, count=1):
+        """파일에서 옛 글이 정확히 `count` 번 나올 때만 바꾼다(진짜 파일의 모양이 변하면 이 변이 시험이 소리 내어 실패한다)."""
+        path = self.root / rel
+        text = path.read_bytes().decode("utf-8")
+        self.assertEqual(text.count(old), count, f"{rel}: 옛 글 {old!r} 가 {text.count(old)} 번 나온다")
+        path.write_bytes(text.replace(old, new).encode("utf-8"))
+
+    def write(self, rel, text):
+        self.write_bytes(rel, text.encode("utf-8"))
+
+    def listing(self):
+        return sorted(path.relative_to(self.root).as_posix() for path in self.root.rglob("*") if path.is_file())
+
+    def found(self):
+        return vr.check_dependency_constraints(self.root, self.listing())
+
+    def assert_caught(self, path, needle, found=None):
+        found = self.found() if found is None else found
+        hits = [item for item in found if item.check == "DEP-3" and item.level == "ERROR" and item.path.split(":")[0] == path and needle in item.message]
+        self.assertTrue(hits, f"{path}: {needle!r} 를 말하는 DEP-3 오류가 없다 — 있는 것: {[item.line() for item in found]}")
+        for item in found:
+            one_plain_line(self, item)
+        return hits
+
+
+@NEEDS_YAML
+class Dep3WorkflowMutationTest(TmpCase):
+    def test_the_untouched_copy_is_clean_so_every_red_below_comes_from_its_own_mutation(self):
+        self.fresh("*")
+        self.assertGreaterEqual(len(WORKFLOW_SOURCES), 20)                          # 워크플로 전부를 복사했다(빈 복사본으로 통과하지 않게)
+        self.assertEqual([item.line() for item in self.found()], [])
+
+    # ① -c 가 없다
+    def test_removing_the_constraints_option_from_each_of_the_ten_install_lines_is_caught(self):
+        for workflow, _job, _python, tail in INSTALL_LINES:
+            with self.subTest(workflow=workflow):
+                self.fresh(workflow)
+                rel = f".github/workflows/{workflow}"
+                option = re.match(r"-c (constraints-py[0-9]+\.txt) ", tail).group(1)
+                self.edit(rel, f"-c {option} ", "")
+                self.assert_caught(rel, "-c 가 없습니다")
+        self.fresh("guardrails.yml")
+        self.edit(".github/workflows/guardrails.yml", 'python -m pip install -c "$CONSTRAINTS" -r requirements-dev.txt', "python -m pip install -r requirements-dev.txt")
+        self.assert_caught(".github/workflows/guardrails.yml", "-c 가 없습니다")
+
+    # ② 잘못된 파이썬 번호
+    def test_a_constraints_file_of_the_wrong_python_is_caught(self):
+        for workflow, wrong in (("blogger.yml", "constraints-py310.txt"), ("issue-edit.yml", "constraints-py310.txt"), ("chanceblog.yml", "constraints-py312.txt"), ("chance-shadow.yml", "constraints-py312.txt")):
+            with self.subTest(workflow=workflow):
+                self.fresh(workflow)
+                rel = f".github/workflows/{workflow}"
+                right = "constraints-py312.txt" if wrong == "constraints-py310.txt" else "constraints-py310.txt"
+                self.edit(rel, f"-c {right}", f"-c {wrong}")
+                self.assert_caught(rel, f"{right} 여야 합니다")
+
+    def test_the_guardrails_matrix_must_pick_the_right_file_for_each_python(self):
+        rel = ".github/workflows/guardrails.yml"
+        self.fresh("guardrails.yml")
+        swapped = "constraints-py${{ matrix.python-version == '3.10' && '312' || '310' }}.txt"
+        self.edit(rel, "constraints-py${{ matrix.python-version == '3.10' && '310' || '312' }}.txt", swapped)
+        found = self.found()
+        self.assert_caught(rel, "파이썬 3.10 칸의 -c 가 constraints-py312.txt", found)
+        self.assert_caught(rel, "파이썬 3.12 칸의 -c 가 constraints-py310.txt", found)
+
+    def test_a_literal_file_in_the_matrix_job_is_wrong_for_one_of_the_two_pythons(self):
+        rel = ".github/workflows/guardrails.yml"
+        self.fresh("guardrails.yml")
+        self.edit(rel, '-c "$CONSTRAINTS"', "-c constraints-py312.txt")
+        self.assert_caught(rel, "파이썬 3.10 칸의 -c 가 constraints-py312.txt")
+
+    def test_a_matrix_expression_over_another_matrix_key_is_not_trusted(self):
+        rel = ".github/workflows/guardrails.yml"
+        self.fresh("guardrails.yml")
+        self.edit(rel, "matrix.python-version == '3.10' && '310'", "matrix.os == 'x' && '310'")
+        self.assert_caught(rel, "matrix 키와 다릅니다")
+
+    def test_an_expression_shape_the_validator_does_not_read_is_an_error_not_a_pass(self):
+        rel = ".github/workflows/guardrails.yml"
+        self.fresh("guardrails.yml")
+        self.edit(rel, "matrix.python-version == '3.10' && '310' || '312'", "matrix.python-version != '3.10' && '312' || '310'")
+        self.assert_caught(rel, "지원하지 않는 모양")
+
+    def test_the_variable_must_be_defined_in_an_env_the_step_can_see(self):
+        rel = ".github/workflows/guardrails.yml"
+        self.fresh("guardrails.yml")
+        self.edit(rel, '-c "$CONSTRAINTS"', '-c "$NOPE"')
+        self.assert_caught(rel, "env 에 없습니다")
+
+    def test_an_env_defined_at_job_or_workflow_level_is_read_too_and_the_step_value_wins(self):
+        rel = ".github/workflows/blogger.yml"
+        self.fresh("blogger.yml")
+        self.edit(rel, "-c constraints-py312.txt -r requirements-pipeline.txt", '-c "$FILE" -r requirements-pipeline.txt')
+        self.assert_caught(rel, "env 에 없습니다")                                  # 어디에도 정의가 없다
+        self.edit(rel, "\npermissions:\n  contents: read\n", "\nenv:\n  FILE: constraints-py312.txt\npermissions:\n  contents: read\n")
+        self.assertEqual([item.line() for item in self.found()], [])               # 워크플로 env
+        self.edit(rel, "      DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}\n", "      DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}\n      FILE: constraints-py310.txt\n")
+        self.assert_caught(rel, "constraints-py312.txt 여야 합니다")              # job env 가 워크플로 env 를 덮어써 틀린 번호가 됐다
+        self.edit(rel, "      - name: 의존성 설치\n        run: |\n", "      - name: 의존성 설치\n        env:\n          FILE: constraints-py312.txt\n        run: |\n")
+        self.assertEqual([item.line() for item in self.found()], [])               # 단계 env 가 job env 를 덮어써 다시 맞다
+
+    def test_the_file_named_by_c_must_exist(self):
+        rel = ".github/workflows/blogger.yml"
+        self.fresh("blogger.yml")
+        (self.root / "constraints-py312.txt").unlink()
+        self.assert_caught(rel, "constraints-py312.txt 가 저장소에 없습니다")
+
+    def test_only_the_upgrade_pip_line_having_the_option_does_not_count(self):
+        """-c 가 `--upgrade pip` 줄에만 있고 요구 파일을 설치하는 줄에는 없다."""
+        rel = ".github/workflows/blogger.yml"
+        self.fresh("blogger.yml")
+        self.edit(rel, "          python -m pip install --upgrade pip\n          python -m pip install -c constraints-py312.txt -r requirements-pipeline.txt\n",
+                  "          python -m pip install -c constraints-py312.txt --upgrade pip\n          python -m pip install -r requirements-pipeline.txt\n")
+        self.assert_caught(rel, "-c 가 없습니다")
+
+    def test_a_package_install_on_the_upgrade_line_needs_the_option_too(self):
+        rel = ".github/workflows/blogger.yml"
+        self.fresh("blogger.yml")
+        self.edit(rel, "          python -m pip install --upgrade pip\n", "          python -m pip install --upgrade pip wheel\n")
+        self.assert_caught(rel, "-c 가 없습니다")
+
+    def test_the_pip_only_install_lines_need_no_option(self):
+        rel = ".github/workflows/blogger.yml"
+        self.fresh("blogger.yml")
+        self.edit(rel, "          python -m pip install --upgrade pip\n", "          python -m pip install --upgrade pip\n          python -m pip install -U \"pip>=24\"\n")
+        self.assertEqual([item.line() for item in self.found()], [])
+
+    # 단계가 쓰는 파이썬을 알 수 없는 모양
+    def test_a_job_without_setup_python_cannot_be_matched_to_a_constraints_file(self):
+        rel = ".github/workflows/issue-edit.yml"
+        self.fresh("issue-edit.yml")
+        text = (self.root / rel).read_bytes().decode("utf-8")
+        start = text.index("      - uses: actions/setup-python@v6")
+        end = text.index("\n\n", start) + 2
+        self.edit(rel, text[start:end], "")
+        self.assert_caught(rel, "파이썬을 알 수 없어")
+
+    def test_an_unquoted_python_version_is_not_read(self):
+        rel = ".github/workflows/issue-edit.yml"
+        self.fresh("issue-edit.yml")
+        self.edit(rel, "python-version: '3.12'", "python-version: 3.12")
+        self.assert_caught(rel, "따옴표")
+
+    def test_a_python_version_from_somewhere_other_than_a_literal_or_a_matrix_list_is_not_read(self):
+        rel = ".github/workflows/issue-edit.yml"
+        self.fresh("issue-edit.yml")
+        self.edit(rel, "python-version: '3.12'", "python-version: ${{ vars.PY }}")
+        self.assert_caught(rel, "파이썬을 알 수 없어")
+
+    def test_a_matrix_python_list_with_an_unquoted_number_is_not_read(self):
+        rel = ".github/workflows/guardrails.yml"
+        self.fresh("guardrails.yml")
+        self.edit(rel, "python-version: ['3.10', '3.12']", "python-version: [3.10, '3.12']")
+        self.assert_caught(rel, "따옴표")
+
+    def test_a_python_without_a_constraints_file_is_caught_when_a_matrix_adds_it(self):
+        rel = ".github/workflows/guardrails.yml"
+        self.fresh("guardrails.yml")
+        self.edit(rel, "python-version: ['3.10', '3.12']", "python-version: ['3.10', '3.11', '3.12']")
+        found = self.found()
+        self.assert_caught(rel, "파이썬 3.11 칸의 -c 가 constraints-py312.txt", found)       # 식은 3.10 이 아니면 312 로 읽힌다 — 3.11 은 틀린 파일이다
+
+    def test_the_pip_install_input_of_setup_python_would_bypass_the_rule_so_it_is_refused(self):
+        rel = ".github/workflows/issue-edit.yml"
+        self.fresh("issue-edit.yml")
+        self.edit(rel, "python-version: '3.12'", "python-version: '3.12'\n          pip-install: -r requirements-edits.txt")
+        self.assert_caught(rel, "pip-install")
+
+    # 읽지 못하는 설치 모양은 통과가 아니라 오류
+    def test_installs_hidden_in_a_nested_shell_or_eval_are_errors(self):
+        rel = ".github/workflows/issue-edit.yml"
+        for hidden in ('bash -c "python -m pip install -r requirements-edits.txt"', 'eval "pip install pyyaml"', "xargs pip install < list.txt", "uv pip install pyyaml"):
+            with self.subTest(hidden=hidden):
+                self.fresh("issue-edit.yml")
+                self.edit(rel, "python -m pip install -c constraints-py312.txt -r requirements-edits.txt", hidden)
+                self.assert_caught(rel, "읽지 못하는 모양")
+
+    def test_message_text_that_only_mentions_pip_install_is_not_an_install(self):
+        rel = ".github/workflows/issue-edit.yml"
+        self.fresh("issue-edit.yml")
+        self.edit(rel, "python -m pip install -c constraints-py312.txt -r requirements-edits.txt",
+                  'python -m pip install -c constraints-py312.txt -r requirements-edits.txt\n          echo "pip install failed? check the log"\n          git commit -m "docs: pip install note" --allow-empty')
+        self.assertEqual([item.line() for item in self.found()], [])
+
+    def test_editable_and_missing_requirement_installs_are_errors(self):
+        rel = ".github/workflows/issue-edit.yml"
+        self.fresh("issue-edit.yml")
+        self.edit(rel, "-c constraints-py312.txt -r requirements-edits.txt", "-c constraints-py312.txt -e .")
+        self.assert_caught(rel, "-e")
+        self.fresh("issue-edit.yml")
+        self.edit(rel, "-r requirements-edits.txt", "-r requirements-nope.txt")
+        self.assert_caught(rel, "requirements-nope.txt 이 저장소에 없습니다")
+
+    def test_an_inline_package_must_be_in_the_constraints_of_its_python_inside_its_range(self):
+        rel = ".github/workflows/chanceblog.yml"
+        self.fresh("chanceblog.yml")
+        self.edit(rel, '"google-genai>=2,<3"', '"google-genai>=3,<4"')
+        self.assert_caught(rel, "범위")
+        self.fresh("chanceblog.yml")
+        self.edit(rel, '"google-genai>=2,<3"', '"rich>=13,<14"')
+        self.assert_caught(rel, "rich")
+
+    def test_accepted_shapes_of_the_option(self):
+        rel = ".github/workflows/issue-edit.yml"
+        old = "python -m pip install -c constraints-py312.txt -r requirements-edits.txt"
+        for text in ('python -m pip install -c "constraints-py312.txt" -r requirements-edits.txt', "python -m pip install --constraint=constraints-py312.txt -r requirements-edits.txt",
+                     "python -m pip install -cconstraints-py312.txt -r requirements-edits.txt", "python -m pip install -r requirements-edits.txt -c constraints-py312.txt",
+                     "python -m pip install -c ./constraints-py312.txt --requirement=requirements-edits.txt", "python3 -m pip install -c constraints-py312.txt -r requirements-edits.txt",
+                     "pip3 install -c constraints-py312.txt -r requirements-edits.txt", "python -m pip install -c constraints-py312.txt -r requirements-edits.txt 2>&1 | tail -3",
+                     "python -m pip install \\\n            -c constraints-py312.txt \\\n            -r requirements-edits.txt",
+                     "if true; then python -m pip install -c constraints-py312.txt -r requirements-edits.txt; fi"):
+            with self.subTest(text=text):
+                self.fresh("issue-edit.yml")
+                self.edit(rel, old, text)
+                self.assertEqual([item.line() for item in self.found()], [])
+        self.fresh("issue-edit.yml")
+        self.edit(rel, old, "python -m pip install \\\n            -r requirements-edits.txt")
+        self.assert_caught(rel, "-c 가 없습니다")
+
+    def test_a_duplicate_key_workflow_is_left_to_wf0_without_crashing(self):
+        rel = ".github/workflows/issue-edit.yml"
+        self.fresh("issue-edit.yml")
+        self.edit(rel, "permissions:\n  contents: read\n", "permissions:\n  contents: read\npermissions:\n  contents: read\n")
+        self.assertEqual([item.line() for item in self.found() if item.path == rel], [])
+
+    def test_the_rule_is_registered_in_run_checks(self):
+        rel = ".github/workflows/blogger.yml"
+        self.fresh("blogger.yml")
+        self.edit(rel, "-c constraints-py312.txt ", "")
+        self.assertIn(("DEP-3", "ERROR"), [(item.check, item.level) for item in vr.run_checks(self.root)])
+
+
+class Dep3ConstraintsFileMutationTest(TmpCase):
+    """constraints 파일과 요구 파일의 변이 — 워크플로를 읽지 않으니 PyYAML 이 없어도 돈다."""
+
+    def test_the_untouched_copy_is_clean(self):
+        self.assertEqual([item.line() for item in self.found()], [])
+
+    def test_a_range_mixed_into_a_constraints_line_is_caught(self):
+        for operator in (">=", "<=", "~=", "!=", ">", "<"):
+            with self.subTest(operator=operator):
+                self.setUp()
+                self.edit("constraints-py312.txt", "protobuf==7.36.2", f"protobuf{operator}7.36.2")
+                hits = self.assert_caught("constraints-py312.txt", "범위 표기는 쓸 수 없습니다")
+                self.assertRegex(hits[0].path, r"^constraints-py312\.txt:[0-9]+$")          # 줄 번호까지 가리킨다
+
+    def test_other_line_shapes_are_each_caught(self):
+        for line, needle in (("-e git+host/x#egg=x", "옵션 줄"), ("--hash=sha256:abc", "옵션 줄"), ("-r requirements-dev.txt", "옵션 줄"), ("x @ file:///tmp/x.whl", "주소(URL)"),
+                             ("==1.0", "이름이 비어"), ("pyyaml[extra]==6.0.4", "extras"), ("pyyaml==6.0.4; python_version<'3.11'", "환경 표식"), ("pyyaml==6.*", "꼴이 아닙니다"),
+                             ("pyyaml==6.0.4+local1", "버전을 읽을 수 없습니다"), ("pyyaml", "꼴이 아닙니다"), ("pyyaml 6.0.4", "꼴이 아닙니다"), ("pyyaml===6.0.4", "범위 표기")):
+            with self.subTest(line=line):
+                self.setUp()
+                self.write("constraints-py312.txt", text_of("constraints-py312.txt") + line + "\n")
+                self.assert_caught("constraints-py312.txt", needle)
+
+    def test_an_unreadable_exact_version_is_caught(self):
+        self.edit("constraints-py312.txt", "protobuf==7.36.2", "protobuf==7.x")
+        self.assert_caught("constraints-py312.txt", "버전을 읽을 수 없습니다")
+
+    def test_a_requirement_package_missing_from_the_constraints_is_caught_for_that_file_only(self):
+        self.edit("constraints-py312.txt", "google-genai==2.34.0\n", "")
+        found = self.found()
+        self.assert_caught("requirements-edits.txt", "constraints-py312.txt 에 없습니다", found)
+        self.assert_caught("requirements-pipeline.txt", "constraints-py312.txt 에 없습니다", found)
+        self.assertEqual([item.path for item in found if "constraints-py310.txt" in item.message], [])
+
+    def test_every_direct_requirement_missing_is_caught(self):
+        for pinned_as, required_as in (("PyYAML", "pyyaml"), ("google-genai", "google-genai"), ("google-auth", "google-auth"), ("google-api-python-client", "google-api-python-client")):
+            with self.subTest(name=required_as):
+                self.setUp()
+                path = self.root / "constraints-py310.txt"
+                before = path.read_bytes().decode("utf-8").split("\n")
+                lines = [line for line in before if not line.startswith(pinned_as + "==")]
+                self.assertEqual(len(lines), len(before) - 1)
+                path.write_bytes("\n".join(lines).encode("utf-8"))
+                self.assertTrue([item for item in self.found() if item.level == "ERROR" and f"`{required_as}`" in item.message and "constraints-py310.txt 에 없습니다" in item.message])
+
+    def test_a_version_outside_the_requirement_range_is_caught(self):
+        for old, new, needle in (("PyYAML==6.0.4", "PyYAML==7.0.0", "PyYAML"), ("google-genai==2.34.0", "google-genai==3.0.0", "google-genai"), ("google-genai==2.34.0", "google-genai==1.99.0", "google-genai"),
+                                 ("google-auth==2.63.1", "google-auth==3.0.0rc1", "google-auth"), ("google-api-python-client==2.202.0", "google-api-python-client==3.1", "google-api-python-client")):
+            with self.subTest(new=new):
+                self.setUp()
+                self.edit("constraints-py312.txt", old, new)
+                hits = [item for item in self.found() if item.level == "ERROR" and needle in item.message and "밖입니다" in item.message]
+                self.assertTrue(hits, new)
+
+    def test_the_exact_pin_in_a_requirement_file_needs_no_constraints_line_but_a_wrong_one_is_caught(self):
+        self.assertNotIn("actionlint-py", text_of("constraints-py312.txt"))                 # 요구 파일이 이미 `==` 로 고정 — 목록에 없어도 통과(위 깨끗한 복사본)
+        self.write("constraints-py312.txt", text_of("constraints-py312.txt") + "actionlint-py==1.7.12.25\n")
+        self.assertEqual([item.line() for item in self.found()], [])                       # 있고 같은 값이면 통과
+        self.edit("constraints-py312.txt", "actionlint-py==1.7.12.25", "actionlint-py==1.7.13.0")
+        self.assert_caught("requirements-dev.txt", "밖입니다")                              # 있는데 다른 값이면 pip 가 풀지 못하는 충돌 — 오류
+
+    def test_a_duplicate_name_is_caught_whatever_its_spelling(self):
+        for extra in ("pyyaml==6.0.4", "PyYAML==6.0.4", "py-yaml==1.0", "Google_Genai==2.34.0", "google.genai==2.34.0"):
+            with self.subTest(extra=extra):
+                self.setUp()
+                self.write("constraints-py312.txt", text_of("constraints-py312.txt") + extra + "\n")
+                found = self.found()
+                if normalize(extra.split("==")[0]) in pins_of("constraints-py312.txt"):
+                    self.assert_caught("constraints-py312.txt", "두 번 있습니다", found)
+                else:
+                    self.assertEqual([item for item in found if "두 번" in item.message], [])          # py-yaml 은 다른 패키지다
+
+    def test_a_new_requirement_file_with_a_package_nobody_pinned_is_caught_for_both_pythons(self):
+        self.write("requirements-extra.txt", "rich>=13,<14\n")
+        found = self.found()
+        self.assert_caught("requirements-extra.txt", "constraints-py310.txt 에 없습니다", found)
+        self.assert_caught("requirements-extra.txt", "constraints-py312.txt 에 없습니다", found)
+
+    def test_requirement_lines_the_validator_cannot_read_are_errors_not_passes(self):
+        for line, needle in (("-r other.txt", "옵션 줄"), ("pyyaml>=6,<7; python_version>'3'", "환경 표식"), ("pyyaml @ file:///x", "주소"), ("pyyaml>>6", "범위")):
+            with self.subTest(line=line):
+                self.setUp()
+                self.write("requirements-extra.txt", line + "\n")
+                self.assert_caught("requirements-extra.txt", needle)
+
+    def test_without_pyyaml_the_workflow_part_is_skipped_but_the_file_parts_still_run(self):
+        self.fresh("blogger.yml")
+        self.edit(".github/workflows/blogger.yml", "-c constraints-py312.txt ", "")
+        self.edit("constraints-py312.txt", "protobuf==7.36.2", "protobuf>=7.36.2")
+        with mock.patch.object(vr, "yaml", None):
+            found = self.found()
+        self.assertEqual([item.path.split(":")[0] for item in found], ["constraints-py312.txt"])      # blogger.yml 의 빠진 -c 는 PyYAML 이 있어야 읽힌다(WF-0 이 그 경고를 낸다)
+
+    def test_a_workflow_free_repository_without_constraints_or_requirements_is_silent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "x.py").write_text("x = 1\n", encoding="utf-8")
+            self.assertEqual(vr.check_dependency_constraints(Path(tmp), vr.list_files(Path(tmp))), [])
+
+    def test_hostile_text_in_the_files_cannot_forge_a_workflow_command_or_a_second_line(self):
+        self.write("constraints-py312.txt", text_of("constraints-py312.txt") + "::error::boom\n")
+        self.write("requirements-extra.txt", "::warning::x" + chr(10) + "pyyaml>=6,<7\n")
+        found = self.found()
+        self.assertTrue(found)
+        for item in found:
+            one_plain_line(self, item)
+
+
+# ----------------------------------------------------------------------------
+# 4) 작은 규칙: 범위 비교·줄 읽기·셸 줄 읽기
+# ----------------------------------------------------------------------------
+class RangeComparisonTest(unittest.TestCase):
+    def test_inside_and_outside_the_range(self):
+        for version, spec, expected in (
+                ("2.34.0", ">=2,<3", True), ("2.0.0", ">=2,<3", True), ("2", ">=2.0,<3", True), ("1.9.9", ">=2,<3", False), ("3.0", ">=2,<3", False), ("3.0.1", ">=2,<3", False),
+                ("6.0.4", ">=6,<7", True), ("7.0.0", ">=6,<7", False), ("6.0.4", "", True), ("2.202.0", ">=2,<3", True),
+                ("1.7.12.25", "==1.7.12.25", True), ("1.7.12.26", "==1.7.12.25", False), ("1.7.12", "==1.7.12.0", True),
+                ("2.5", "==2.*", True), ("3.0", "==2.*", False), ("2.5", "!=2.*", False), ("3.0", "!=2.*", True), ("2.0.5", "==2.0.*", True), ("2.1", "==2.0.*", False),
+                ("2.1", "~=2.1", True), ("2.9", "~=2.1", True), ("3.0", "~=2.1", False), ("2.1.5", "~=2.1.3", True), ("2.2", "~=2.1.3", False), ("2.0", "~=2.1", False),
+                ("2.0", ">2", False), ("2.0.1", ">2", True), ("2.0.post1", ">2", False), ("2.0.post1", ">=2", True),
+                ("3.0rc1", ">=2,<3", False), ("3.0a1", "<3", False), ("2.9rc1", "<3", True), ("2.0rc1", ">=2", False), ("2.0rc1", ">=2rc1", True), ("3.0rc1", "<3rc2", True),
+                ("1.0.dev1", "<1.0", False), ("1.0.dev1", "<1.0a1", True), ("1.0", ">1.0.dev1", True),
+                ("2.0", "<=2", True), ("2.0.1", "<=2", False), ("1!1.0", ">=1", True), ("1.0", ">=1!0.1", False)):
+            with self.subTest(version=version, spec=spec):
+                self.assertIs(vr._dep3_allowed(version, spec), expected)
+
+    def test_what_it_cannot_read_is_none_not_a_pass(self):
+        for version, spec in (("1.0", "===1.0"), ("1.0+local", ">=1"), ("1.x", ">=1"), ("1.0", ">=x"), ("1.0", ">=1;<2"), ("1.0", "(>=1)"), ("1.0", ">=1 <2"), ("1.0", "~=1"), ("1.0", "<*"), ("1.0", ">=1.*")):
+            with self.subTest(version=version, spec=spec):
+                self.assertIsNone(vr._dep3_allowed(version, spec))
+
+    def test_exact_pin_detection(self):
+        for spec, expected in (("==1.7.12.25", True), (" == 1.0 ", True), ("==2.*", False), (">=2,<3", False), ("", False), ("==1.0,!=1.1", False), ("===1.0", False), ("==x", False)):
+            with self.subTest(spec=spec):
+                self.assertIs(vr._dep3_exact_pin(spec), expected)
+
+    def test_names_compare_the_way_pip_does(self):
+        for one, other in (("PyYAML", "pyyaml"), ("pyasn1_modules", "pyasn1-modules"), ("Google.Auth", "google-auth"), ("typing__extensions", "typing-extensions")):
+            self.assertEqual(vr._dep3_name(one), vr._dep3_name(other))
+        self.assertNotEqual(vr._dep3_name("py-yaml"), vr._dep3_name("pyyaml"))
+
+
+class LineReadingTest(unittest.TestCase):
+    def test_requirement_lines(self):
+        for line, expected in (("google-genai>=2,<3", ("google-genai", ">=2,<3")), ("pyyaml>=6,<7  ", ("pyyaml", ">=6,<7")), ("actionlint-py==1.7.12.25", ("actionlint-py", "==1.7.12.25")),
+                               ("loose", ("loose", "")), ("pkg[extra]>=1", ("pkg", ">=1")), ("Pkg_X >= 1 , < 2", ("Pkg_X", ">= 1 , < 2")), ("pip", ("pip", ""))):
+            with self.subTest(line=line):
+                self.assertEqual(vr._dep3_requirement(line), expected)
+        for line in ("-r x.txt", "a; python_version<'3'", "a @ file:///x", "./local", "a>>1", "=1", "a" * 500):
+            with self.subTest(line=line[:30]):
+                self.assertIsInstance(vr._dep3_requirement(line), str)
+
+    def test_constraints_text_comments_blank_lines_and_inline_comments(self):
+        pins, problems = vr._dep3_read_constraints("# head\n\nPyYAML==6.0.4   # why\n  anyio==4.16.0\nx==1.0 #y\n")
+        self.assertEqual(problems, [])
+        self.assertEqual({key: value[1] for key, value in pins.items()}, {"pyyaml": "6.0.4", "anyio": "4.16.0", "x": "1.0"})
+        self.assertEqual(pins["pyyaml"][2], 3)                                              # 줄 번호
+        pins, problems = vr._dep3_read_constraints("a==1\nA==2\nb_c==1\nb-c==1\n")
+        self.assertEqual([number for number, _ in problems], [2, 4])
+
+    def test_a_very_long_line_is_refused_before_any_regex_runs_on_it(self):
+        pins, problems = vr._dep3_read_constraints("a==" + "1" * 100000 + "\n")
+        self.assertEqual((pins, len(problems)), ({}, 1))
+        self.assertLess(len(problems[0][1]), 200)
+
+
+class ShellReadingTest(unittest.TestCase):
+    def installs(self, run):
+        found, unreadable = vr._dep3_pip_installs(run)
+        return [(item["constraints"], item["requirements"], item["editable"], item["specs"]) for item in found], unreadable
+
+    def test_shapes_that_are_installs(self):
+        for run, expected in (
+                ("python -m pip install --upgrade pip", ([], [], [], ["pip"])),
+                ("python -m pip install -c a.txt -r b.txt", (["a.txt"], ["b.txt"], [], [])),
+                ('pip install -c a.txt "google-genai>=2,<3"', (["a.txt"], [], [], ["google-genai>=2,<3"])),
+                ("pip3 install --no-cache-dir -q -r b.txt", ([], ["b.txt"], [], [])),
+                ("FOO=1 python3.12 -X utf8 -m pip install x", ([], [], [], ["x"])),
+                ("py -m pip install x==1", ([], [], [], ["x==1"])),
+                ("/usr/bin/pip install x", ([], [], [], ["x"])),
+                ("pip install --index-url mirror.invalid --constraint c.txt -r b.txt", (["c.txt"], ["b.txt"], [], [])),
+                ("pip install -e . -c c.txt", (["c.txt"], [], ["."], [])),
+                ("pip --cache-dir /tmp/x install y", ([], [], [], ["y"])),
+                ("pip install -r b.txt 2>&1 | tail -3", ([], ["b.txt"], [], [])),
+                ("pip install -r b.txt > out.txt", ([], ["b.txt"], [], [])),
+                ("x=$(pip install -r req.txt)", ([], ["req.txt"], [], [])),
+                ("a && pip install -r r.txt || true", ([], ["r.txt"], [], [])),
+                ("if true; then pip install x; fi", ([], [], [], ["x"])),
+                ("pip install \\\n   -c c.txt \\\n   -r r.txt", (["c.txt"], ["r.txt"], [], [])),
+                ("echo hi\npip install -r r.txt\necho done", ([], ["r.txt"], [], []))):
+            with self.subTest(run=run):
+                found, unreadable = self.installs(run)
+                self.assertEqual((found, unreadable), ([expected], []))
+
+    def test_shapes_that_are_not_installs(self):
+        for run in ("# pip install x", 'echo "pip install failed"', "python -m pipeline.run --blog \"$BLOG_KEY\"", "python -m pipeline.plan --count", "pip --version", "python -m pip list", "pip uninstall x",
+                    'git commit -m "docs: pip install note"', "gh issue comment 1 --body 'pip install x'", "pytest tests/test_pipeline.py", "python scripts/validate_repo.py", "echo pip install x"):
+            with self.subTest(run=run):
+                self.assertEqual(self.installs(run), ([], []))
+
+    def test_shapes_that_hide_an_install_are_reported_unreadable(self):
+        for run in ('bash -c "pip install x"', "sh -c 'python -m pip install -r r.txt'", 'eval "pip install x"', "xargs pip install", "sudo pip install x", "uv pip install x", "time sudo pip install x",
+                    "nohup pip install x &"):
+            with self.subTest(run=run):
+                found, unreadable = self.installs(run)
+                self.assertEqual(found, [], run)
+                self.assertEqual(len(unreadable), 1, run)
+
+    def test_a_line_with_an_unclosed_quote_is_reported_only_when_it_mentions_pip(self):
+        self.assertEqual(self.installs("echo \"it's open\n"), ([], []))
+        found, unreadable = self.installs("echo 'pip install x")
+        self.assertEqual(found, [])
+        self.assertEqual(len(unreadable), 1)
+
+    def test_a_quoted_string_across_lines_is_read_until_it_closes(self):
+        found, unreadable = self.installs('echo "first line\nsecond line"\npip install -r r.txt\n')
+        self.assertEqual((found, unreadable), ([([], ["r.txt"], [], [])], []))
+
+
+class PythonVersionTest(unittest.TestCase):
+    def job(self, python, matrix=None):
+        job = {"steps": [{"uses": "actions/setup-python@v6", "with": {"python-version": python}}]}
+        if matrix is not None:
+            job["strategy"] = {"matrix": matrix}
+        return job, job["steps"][0]
+
+    def test_literal_and_matrix_lists(self):
+        job, step = self.job("3.12")
+        self.assertEqual(vr._dep3_setup_python(job, step), ({"versions": ["3.12"], "key": None}, None))
+        job, step = self.job("${{ matrix.python-version }}", {"python-version": ["3.10", "3.12"]})
+        self.assertEqual(vr._dep3_setup_python(job, step), ({"versions": ["3.10", "3.12"], "key": "python-version"}, None))
+        job, step = self.job("${{matrix.py}}", {"py": ["3.10"], "include": [{"py": "3.12", "os": "x"}, {"os": "y"}]})
+        self.assertEqual(vr._dep3_setup_python(job, step)[0], {"versions": ["3.10", "3.12"], "key": "py"})
+
+    def test_everything_else_is_refused_with_a_reason(self):
+        for python, matrix in ((3.12, None), (3.1, None), ("3.x", None), ("3", None), ("${{ matrix.python-version }}", None), ("${{ matrix.python-version }}", {"python-version": "${{ fromJSON(x) }}"}),
+                               ("${{ matrix.python-version }}", {"python-version": [3.10, "3.12"]}), ("${{ vars.PY }}", {"python-version": ["3.12"]}), ("", None), (None, None)):
+            with self.subTest(python=python):
+                job, step = self.job(python, matrix)
+                found, why = vr._dep3_setup_python(job, step)
+                self.assertIsNone(found)
+                self.assertTrue(why)
+
+
+class ConstraintTargetTest(unittest.TestCase):
+    PYTHON = {"versions": ["3.10", "3.12"], "key": "python-version"}
+    LITERAL = {"versions": ["3.12"], "key": None}
+    TERNARY = "constraints-py${{ matrix.python-version == '3.10' && '310' || '312' }}.txt"
+
+    def test_the_readable_shapes(self):
+        self.assertEqual(vr._dep3_constraint_targets("constraints-py312.txt", {}, self.LITERAL), ({"3.12": "constraints-py312.txt"}, None))
+        self.assertEqual(vr._dep3_constraint_targets("./constraints-py312.txt", {}, self.LITERAL)[0], {"3.12": "constraints-py312.txt"})
+        self.assertEqual(vr._dep3_constraint_targets("$F", {"F": "constraints-py312.txt"}, self.LITERAL)[0], {"3.12": "constraints-py312.txt"})
+        self.assertEqual(vr._dep3_constraint_targets("${F}", {"F": "constraints-py312.txt"}, self.LITERAL)[0], {"3.12": "constraints-py312.txt"})
+        self.assertEqual(vr._dep3_constraint_targets("$F", {"F": self.TERNARY}, self.PYTHON)[0], {"3.10": "constraints-py310.txt", "3.12": "constraints-py312.txt"})
+
+    def test_everything_else_is_refused_with_a_reason(self):
+        for token, env, python in (("$NOPE", {}, self.LITERAL), ("$F", {"F": 5}, self.LITERAL), ("other.txt", {}, self.LITERAL), ("dir/constraints-py312.txt", {}, self.LITERAL), ("$(echo x)", {}, self.LITERAL),
+                                   ("${F:-x}", {"F": "constraints-py312.txt"}, self.LITERAL), ("$F", {"F": self.TERNARY}, self.LITERAL), ("$F", {"F": self.TERNARY.replace("==", "!=")}, self.PYTHON),
+                                   ("$F", {"F": "constraints-py${{ github.ref }}.txt"}, self.PYTHON), ("", {}, self.LITERAL), ("-", {}, self.LITERAL), ("constraints-py312.txt.bak", {}, self.LITERAL),
+                                   ("$F", {"F": "constraints-py312.txt $X"}, self.LITERAL)):
+            with self.subTest(token=token):
+                found, why = vr._dep3_constraint_targets(token, env, python)
+                self.assertIsNone(found)
+                self.assertTrue(why)
+
+
+class Dep1Test(TmpCase):
+    def test_quotes_do_not_change_what_dep1_sees(self):
+        self.write(".github/workflows/w.yml", 'jobs:\n  j:\n    steps:\n      - run: |\n          pip install -c "$CONSTRAINTS" -r "requirements-x.txt" \'good>=1,<2\' "bad" \'also_bad\'\n')
+        self.write("requirements-x.txt", "pinned==1.0\n")
+        messages = " ".join(item.message for item in vr.check_dependencies(self.root, vr.list_files(self.root)))
+        self.assertNotIn("CONSTRAINTS", messages)
+        self.assertNotIn("requirements-x", messages)
+        self.assertNotIn("good", messages)
+        self.assertIn("bad", messages)                          # 따옴표 친 범위 없는 패키지는 옛 규칙처럼 여전히 경고
+        self.assertIn("also_bad", messages)
+        self.assertEqual({item.check for item in vr.check_dependencies(self.root, vr.list_files(self.root))}, {"DEP-1"})
+
+
+# ----------------------------------------------------------------------------
+# 5) 문서가 코드와 같은 말을 한다
+# ----------------------------------------------------------------------------
+class DocsTest(unittest.TestCase):
+    def test_the_guide_line_r4_mentions_constraints_and_the_new_document(self):
+        guide = text_of("docs/ENGINEERING_GUIDE.md")
+        row = next(line for line in guide.split("\n") if line.startswith("| R4 |"))
+        for word in ("버전 범위를 고정하고", "constraints-py310.txt", "constraints-py312.txt", "DEPENDENCY_PINNING.md", "DEP-3"):
+            self.assertIn(word, row)
+
+    def test_the_new_document_covers_the_procedure_the_rule_and_the_limits(self):
+        doc = text_of("docs/DEPENDENCY_PINNING.md")
+        for word in ("constraints-py310.txt", "constraints-py312.txt", "DEP-3", "-c constraints-py312.txt -r requirements-pipeline.txt", "CONSTRAINTS", "pip check", "번호 있는 확인", "월 1회",
+                     "requirements-dev.txt", "requirements-edits.txt", "requirements-pipeline.txt", "actionlint-py", "한계", "되돌리", "PYTHONUTF8"):
+            self.assertIn(word, doc, word)
+        for forbidden in ("{{", "{%", "~", "http://", "https://"):
+            self.assertNotIn(forbidden, doc, forbidden)
+
+    def test_the_new_defect_rows_are_there_once_each_and_in_number_order(self):
+        register = text_of("docs/DEFECT_REGISTER.md")
+        for number in range(461, 466):
+            rows = [line for line in register.split("\n") if line.startswith(f"| **D-{number}** |")]
+            self.assertEqual(len(rows), 1, number)
+            for forbidden in ("{{", "~", "http://", "https://"):
+                self.assertNotIn(forbidden, rows[0], (number, forbidden))
+        defects = re.findall(r"^\| \*\*(D-\d+)\*\* \|", register, re.M)
+        positions = [defects.index(f"D-{number}") for number in range(461, 466)]
+        self.assertEqual(positions, list(range(positions[0], positions[0] + 5)))            # 다섯 행이 번호 순서로 이어져 있다(뒤에 다른 묶음의 행이 붙어도 된다)
+
+
+if __name__ == "__main__":
+    unittest.main()

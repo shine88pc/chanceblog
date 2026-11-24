@@ -15,6 +15,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 from dataclasses import asdict, dataclass
@@ -1877,7 +1878,8 @@ def _unpinned(tokens):
     skip = {"pip", "setuptools", "wheel"}
     out = []
     for tok in tokens:
-        if tok.startswith("-") or tok.startswith(("./", ".", "$")) or tok in skip:
+        tok = tok.strip("\"'")     # 따옴표는 뜻을 바꾸지 않는다 — `-c "$CONSTRAINTS"` 의 값이 패키지로 읽혀 경고가 늘지 않게(DEP-3, D-461)
+        if not tok or tok.startswith("-") or tok.startswith(("./", ".", "$")) or tok in skip:
             continue
         if tok.endswith((".txt", ".whl")) or "/" in tok:
             continue
@@ -1899,6 +1901,530 @@ def check_dependencies(root, files):
             bad = _unpinned([ln.split("#")[0].strip() for ln in (read_text(root, rel) or "").splitlines() if ln.split("#")[0].strip()])
             if bad:
                 out.append(warn("DEP-1", f"버전 범위 없는 항목: {', '.join(bad)} (D-10)", rel))
+    return out
+
+
+# ----------------------------------------------------------------------------
+# DEP-3 설치 버전 묶기(constraints) — 요구 파일의 범위 표기는 그대로 두고, 워크플로의 모든 `pip install` 이 파이썬 버전별 constraints 파일(`constraints-py310.txt`·`constraints-py312.txt`)로
+# 설치 버전을 묶는다(G-A5, 결함 D-461). 범위만 두면 설치할 때마다 범위 안 최신이 깔려, 예약 실행이 어느 날 갑자기 다른 버전으로 돈다. 규칙은 넷이다.
+#   ① 요구 파일(`-r`)이나 패키지 이름을 설치하는 `pip install` 은 `-c constraints-pyNN.txt` 가 있어야 한다(`pip` 자신만 올리는 줄은 제외). 따옴표 친 값과 단계·job·워크플로 env 의 `"$CONSTRAINTS"` 꼴도 읽는다.
+#   ② 그 파일 번호가 단계가 쓰는 파이썬(같은 job 에서 앞선 `actions/setup-python` 의 python-version — 글자 하나 또는 matrix 목록)과 같고(3.10 ↔ py310, 3.12 ↔ py312) 파일이 저장소에 있어야 한다.
+#   ③ constraints 파일의 줄은 `이름==버전` 뿐이고(범위·주소·`-e`·옵션·빈 이름·extras·환경 표식 없음) 같은 이름(대소문자와 `-_.` 를 가리지 않는다)이 둘이 아니다.
+#   ④ 요구 파일(루트의 `requirements*.txt` 와 설치 줄이 `-r` 로 가리키는 것)의 모든 패키지 이름이 각 constraints 파일에 있고 그 버전이 요구 파일의 범위 안이다 — 요구 파일에서 이미 `==` 로 고정한 줄은 목록에 없어도 된다.
+# WF 규칙처럼 '새 모양만 허용' 한다: 읽지 못하는 모양(bash -c 로 감싼 설치·eval·읽을 수 없는 변수·지원하지 않는 식·setup-python 의 pip-install 입력)은 통과가 아니라 오류다. 한계는 docs/DEPENDENCY_PINNING.md.
+# ----------------------------------------------------------------------------
+_DEP3_NAME = r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?"
+_DEP3_PIN_LINE = re.compile(r"(" + _DEP3_NAME + r")==([0-9][0-9A-Za-z.+!_-]*)")
+_DEP3_REQUIREMENT = re.compile(r"(" + _DEP3_NAME + r")\s*(?:\[[^\]]*\])?\s*(.*)")
+_DEP3_CONSTRAINT_FILE = re.compile(r"constraints[^/]*\.txt")
+_DEP3_PYTHON_CONSTRAINTS = re.compile(r"constraints-py[0-9]+\.txt")
+_DEP3_REQUIREMENT_FILE = re.compile(r"requirements[^/]*\.txt")
+_DEP3_PYTHON = re.compile(r"3\.[0-9]+")
+_DEP3_VERSION = re.compile(r"(?:([0-9]+)!)?([0-9]+(?:\.[0-9]+)*)(?:(a|b|rc)([0-9]+))?(?:\.post([0-9]+))?(?:\.dev([0-9]+))?")
+_DEP3_CLAUSE = re.compile(r"\s*(===|==|!=|~=|<=|>=|<|>)\s*([^\s,;]+)\s*")
+_DEP3_TERNARY = re.compile(r"constraints-py\$\{\{\s*matrix\.([A-Za-z_][\w-]*)\s*==\s*'([^']*)'\s*&&\s*'([0-9]+)'\s*\|\|\s*'([0-9]+)'\s*\}\}\.txt")
+_DEP3_VARIABLE = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)|\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+_DEP3_MATRIX_REF = re.compile(r"\$\{\{\s*matrix\.([A-Za-z_][\w-]*)\s*\}\}")
+_DEP3_COMMENT = re.compile(r"(^|\s)#.*")
+_DEP3_MAX_LINE = 400
+_DEP3_PRE_RANK = {"a": 0, "b": 1, "rc": 2}
+
+
+def _dep3_name(name):
+    """패키지 이름의 비교용 모양(PEP 503): 소문자, `-`·`_`·`.` 연속은 `-` 하나."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _dep3_version(text):
+    """`1.2.3`·`2.0rc1`·`1.0.post2`·`1.0.dev3` 꼴의 버전을 비교할 수 있는 값으로 읽는다. 지역 버전(`+…`)·와일드카드·그 밖의 꼴은 None(이 검증기가 판단하지 않으므로 오류로 알린다)."""
+    found = _DEP3_VERSION.fullmatch(str(text).strip().lower())
+    if found is None:
+        return None
+    epoch, release, pre_tag, pre_number, post, dev = found.groups()
+    parts = tuple(int(part) for part in release.split("."))
+    trimmed = list(parts)
+    while trimmed and trimmed[-1] == 0:
+        trimmed.pop()
+    return {"epoch": int(epoch or 0), "parts": parts, "release": tuple(trimmed),
+            "pre": None if pre_tag is None else (_DEP3_PRE_RANK[pre_tag], int(pre_number)),
+            "post": None if post is None else int(post), "dev": None if dev is None else int(dev)}
+
+
+def _dep3_key(version):
+    """버전의 순서 키(PEP 440): 개발 < 사전(a < b < rc) < 최종 < 사후. 끝의 0 은 같은 값으로 본다(`2` 와 `2.0.0`)."""
+    pre = version["pre"]
+    if pre is None:
+        pre = (-1, 0) if version["post"] is None and version["dev"] is not None else (3, 0)
+    return (version["epoch"], version["release"], pre, -1 if version["post"] is None else version["post"],
+            (1, 0) if version["dev"] is None else (0, version["dev"]))
+
+
+def _dep3_padded(parts, size):
+    return tuple(parts[:size]) + (0,) * max(0, size - len(parts))
+
+
+def _dep3_clauses(spec):
+    """요구 파일의 범위 글(`>=2,<3`)을 [(연산자, 값)] 으로 읽는다. 비어 있으면 [](제한 없음), 읽지 못하면 None."""
+    text = spec.strip()
+    if not text:
+        return []
+    clauses = []
+    for piece in text.split(","):
+        found = _DEP3_CLAUSE.fullmatch(piece)
+        if found is None:
+            return None
+        operand = found.group(2)
+        if _dep3_version(operand[:-2] if operand.endswith(".*") else operand) is None:
+            return None                                          # 값이 버전 꼴이 아니다(`>=x`·`>>6`·`<*`)
+        clauses.append((found.group(1), operand))
+    return clauses
+
+
+def _dep3_clause_allows(version, operator, operand):
+    """버전 하나가 범위 조각 하나(`>=2`·`<3`·`==6.0.4`·`~=2.1`·`==2.*`)에 드는가. 읽지 못하면 None. `<V` 는 V 의 사전 릴리스를, `>V` 는 V 의 사후 릴리스를 받지 않는다(PEP 440)."""
+    if operator == "===":
+        return None
+    wildcard = operand.endswith(".*")
+    target = _dep3_version(operand[:-2] if wildcard else operand)
+    if target is None:
+        return None
+    if wildcard:
+        if operator not in ("==", "!="):
+            return None
+        size = len(target["parts"])
+        same = version["epoch"] == target["epoch"] and _dep3_padded(version["parts"], size) == target["parts"]
+        return same if operator == "==" else not same
+    mine, theirs = _dep3_key(version), _dep3_key(target)
+    same_base = version["epoch"] == target["epoch"] and version["release"] == target["release"]
+    if operator == "==":
+        return mine == theirs
+    if operator == "!=":
+        return mine != theirs
+    if operator == ">=":
+        return mine >= theirs
+    if operator == "<=":
+        return mine <= theirs
+    if operator == ">":
+        return mine > theirs and not (same_base and target["post"] is None and version["post"] is not None)
+    if operator == "<":
+        return mine < theirs and not (same_base and target["pre"] is None and target["dev"] is None and (version["pre"] is not None or version["dev"] is not None))
+    if len(target["parts"]) < 2:        # `~=`: `~=2.1.3` 은 `>=2.1.3` 이고 `==2.1.*`
+        return None
+    size = len(target["parts"]) - 1
+    return mine >= theirs and version["epoch"] == target["epoch"] and _dep3_padded(version["parts"], size) == target["parts"][:size]
+
+
+def _dep3_allowed(version_text, spec):
+    """고정 버전이 요구 파일의 범위 글에 드는가: True·False, 버전이나 범위를 읽지 못하면 None."""
+    version, clauses = _dep3_version(version_text), _dep3_clauses(spec)
+    if version is None or clauses is None:
+        return None
+    for operator, operand in clauses:
+        verdict = _dep3_clause_allows(version, operator, operand)
+        if verdict is None:
+            return None
+        if not verdict:
+            return False
+    return True
+
+
+def _dep3_exact_pin(spec):
+    """범위 글이 정확한 버전 하나(`==1.7.12.25`)뿐인가 — 요구 파일이 이미 고정한 줄."""
+    clauses = _dep3_clauses(spec)
+    return bool(clauses) and len(clauses) == 1 and clauses[0][0] == "==" and not clauses[0][1].endswith(".*") and _dep3_version(clauses[0][1]) is not None
+
+
+def _dep3_line_hint(line):
+    """constraints 줄이 `이름==버전` 꼴이 아닐 때의 문구 — 어느 모양이 틀렸는지 알려 준다."""
+    if line.startswith("-"):
+        hint = "옵션 줄(`-e`·`-r`·`-c`·`--hash` 등)은 쓸 수 없습니다"
+    elif "://" in line or "@" in line:
+        hint = "주소(URL)로 지정한 줄은 쓸 수 없습니다"
+    elif line.startswith("=="):
+        hint = "패키지 이름이 비어 있습니다"
+    elif "[" in line:
+        hint = "extras(`이름[…]`)는 쓸 수 없습니다"
+    elif ";" in line:
+        hint = "환경 표식(`;`)은 쓸 수 없습니다"
+    elif re.search(r"[<>~!]|===", line):
+        hint = "범위 표기는 쓸 수 없습니다 — 정확한 버전 하나(`이름==버전`)만 씁니다"
+    else:
+        hint = "`이름==버전` 꼴이 아닙니다"
+    return f"`{_shown(line)}`: {hint}"
+
+
+def _dep3_read_constraints(text):
+    """constraints 글 → ({비교용 이름: (표시 이름, 버전, 줄 번호)}, [(줄 번호, 문제 문구)]). 줄은 `이름==버전` 뿐이다(③)."""
+    pins, problems = {}, []
+    for number, raw in enumerate(text.lstrip(chr(0xFEFF)).splitlines(), 1):        # 맨 앞 BOM 은 건너뛴다(pip 도 받는다)
+        line = _DEP3_COMMENT.sub("", raw).strip()
+        if not line:
+            continue
+        found = _DEP3_PIN_LINE.fullmatch(line) if len(line) <= _DEP3_MAX_LINE else None
+        if found is None:
+            problems.append((number, _dep3_line_hint(line)))
+            continue
+        name, version = found.groups()
+        if _dep3_version(version) is None:
+            problems.append((number, f"`{_shown(line)}`: 버전을 읽을 수 없습니다(지역 버전·와일드카드 등은 쓸 수 없습니다)"))
+            continue
+        key = _dep3_name(name)
+        if key in pins:
+            problems.append((number, f"같은 패키지가 두 번 있습니다: `{_shown(name)}` 는 {pins[key][2]}줄에도 있습니다(대소문자와 `-_.` 는 같은 이름으로 봅니다)"))
+            continue
+        pins[key] = (name, version, number)
+    return pins, problems
+
+
+def _dep3_requirement(text):
+    """요구 한 줄(`google-genai>=2,<3`) → (이름, 범위 글). 옵션·주소·환경 표식·읽을 수 없는 꼴은 문제 문구(글자)로 돌려준다."""
+    line = text.strip()
+    if len(line) > _DEP3_MAX_LINE:
+        return "줄이 너무 깁니다"
+    if line.startswith("-"):
+        return "옵션 줄은 이 검증기가 읽지 못합니다 — 패키지 줄만 쓰세요"
+    if ";" in line:
+        return "환경 표식(`;`)은 이 검증기가 읽지 못합니다"
+    if "://" in line or "@" in line or "/" in line or "\\" in line:
+        return "주소·경로로 지정한 요구는 이 검증기가 읽지 못합니다"
+    found = _DEP3_REQUIREMENT.fullmatch(line)
+    if found is None:
+        return "`이름` 으로 시작하는 요구 줄이 아닙니다"
+    if _dep3_clauses(found.group(2)) is None:
+        return f"범위 `{_shown(found.group(2))}` 를 읽을 수 없습니다"
+    return found.group(1), found.group(2).strip()
+
+
+def _dep3_is_pip(spec):
+    """설치 대상 글이 pip 자신(`pip`·`pip>=24`)인가 — `pip install --upgrade pip` 줄은 -c 가 필요 없다."""
+    parsed = _dep3_requirement(spec)
+    return isinstance(parsed, tuple) and _dep3_name(parsed[0]) == "pip"
+
+
+def _dep3_read_requirements(text):
+    """요구 파일 글 → ([(줄 번호, 비교용 이름, 표시 이름, 범위 글)], [(줄 번호, 문제 문구)])."""
+    entries, problems = [], []
+    for number, raw in enumerate(text.lstrip(chr(0xFEFF)).splitlines(), 1):
+        line = _DEP3_COMMENT.sub("", raw).strip()
+        if not line:
+            continue
+        parsed = _dep3_requirement(line)
+        if isinstance(parsed, str):
+            problems.append((number, f"`{_shown(line)}`: {parsed}"))
+        else:
+            entries.append((number, _dep3_name(parsed[0]), parsed[0], parsed[1]))
+    return entries, problems
+
+
+def _dep3_cover(name_key, name, spec, pins, constraint_rel, where):
+    """요구 패키지 하나가 constraints 에 있고 범위 안인가(④) → 문제 문구 또는 None. 요구 파일이 이미 `==` 로 고정한 줄은 목록에 없어도 된다."""
+    pin = pins.get(name_key)
+    if pin is None:
+        if _dep3_exact_pin(spec):
+            return None
+        return (f"{where}: 요구 패키지 `{_shown(name)}` 가 {constraint_rel} 에 없습니다 — 설치 줄이 이 목록으로 버전을 묶는데 이 패키지만 범위 안 최신으로 풀립니다")
+    verdict = _dep3_allowed(pin[1], spec)
+    if verdict is None:
+        return f"{where}: `{_shown(name)}{_shown(spec)}` 의 범위나 {constraint_rel} 의 버전 `{_shown(pin[1])}` 을 읽을 수 없습니다"
+    if not verdict:
+        return (f"{where}: {constraint_rel} 의 `{_shown(pin[0])}=={_shown(pin[1])}` 이 요구 파일의 범위 `{_shown(name)}{_shown(spec)}` 밖입니다 — 목록을 다시 만들거나 범위를 맞추세요")
+    return None
+
+
+def _dep3_tokens(line):
+    lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    return list(lexer)
+
+
+_DEP3_OPERATOR = re.compile(r"[();&|<>]+")
+_DEP3_KEYWORDS = frozenset({"if", "then", "else", "elif", "do", "while", "until", "!", "{", "}", "time"})
+_DEP3_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=.*", re.S)
+_DEP3_PIP_PROGRAM = re.compile(r"pip3?(?:\.[0-9]+)?(?:\.exe)?")
+_DEP3_PYTHON_PROGRAM = re.compile(r"(?:python3?(?:\.[0-9]+)?|py)(?:\.exe)?")
+_DEP3_HIDDEN_PIP = re.compile(r"(?<![\w./-])pip3?(?:\.[0-9]+)?(?:\.exe)?\s+(?:\S+\s+)*?install\b")
+_DEP3_MESSAGE_PROGRAMS = frozenset({"echo", "printf", "git", "gh"})
+_DEP3_PIP_COMMANDS = frozenset({"install", "download", "uninstall", "freeze", "list", "show", "check", "config", "search", "wheel", "hash", "cache", "index", "inspect", "debug", "help", "completion"})
+_DEP3_VALUE_OPTIONS = frozenset({"-t", "--target", "-i", "--index-url", "--extra-index-url", "-f", "--find-links", "--root", "--prefix", "--src", "--cert", "--client-cert", "--proxy", "--timeout",
+                                 "--retries", "--cache-dir", "--log", "--exists-action", "--trusted-host", "--platform", "--python-version", "--implementation", "--abi", "--only-binary",
+                                 "--no-binary", "--global-option", "--install-option", "-C", "--config-settings", "--upgrade-strategy", "--progress-bar", "--report",
+                                 "--root-user-action", "--use-feature", "--use-deprecated", "--build-constraint", "--group", "--python", "--keyring-provider"})
+_DEP3_SHORT_OR_LONG = (("-c", "--constraint", "constraints"), ("-r", "--requirement", "requirements"), ("-e", "--editable", "editable"))
+
+
+def _dep3_install_args(args):
+    """`pip install` 뒤의 인자 → {constraints: [-c 값], requirements: [-r 값], editable: [-e 값], specs: [패키지 글]}. 값 없는 옵션(`--upgrade`·`-q` …)은 건너뛴다."""
+    found = {"constraints": [], "requirements": [], "editable": [], "specs": []}
+    index = 0
+    while index < len(args):
+        token = args[index]
+        step = 1
+        for short, long, key in _DEP3_SHORT_OR_LONG:
+            if token in (short, long):
+                found[key].append(args[index + 1] if index + 1 < len(args) else "")
+                step = 2
+                break
+            if token.startswith(long + "="):
+                found[key].append(token.split("=", 1)[1])
+                break
+            if token.startswith(short) and len(token) > 2 and not token.startswith("--"):
+                found[key].append(token[2:])
+                break
+        else:
+            if token in _DEP3_VALUE_OPTIONS:
+                step = 2
+            elif not token.startswith("-"):
+                found["specs"].append(token)
+        index += step
+    return found
+
+
+def _dep3_pip_installs(run):
+    """run 글에서 `pip install` 을 모두 찾는다 → ([{'text': 설치 인자를 접은 글, 'constraints': …, 'requirements': …, 'editable': …, 'specs': …}], [읽지 못한 모양 문구]).
+
+    줄 이음(`\\` 줄 끝)을 잇고 `;`·`&&`·`||`·`|`·`&`·괄호·줄바꿈에서 명령을 끊어, 맨 앞 낱말이 pip·pip3·`python -m pip` 인 명령만 설치로 읽는다.
+    그 밖의 명령 안에 `pip install` 글이 들어 있으면(bash -c "…"·eval·xargs·sudo·uv 등) 읽을 수 없는 모양으로 알린다 — 통과시키지 않는다(echo·printf·git·gh 의 안내문은 제외)."""
+    installs, unreadable = [], []
+    lines = re.sub(r"\\\r?\n", " ", run).split("\n")
+    index = 0
+    while index < len(lines):
+        chunk, span, tokens = lines[index], 1, None
+        while tokens is None:
+            try:
+                tokens = _dep3_tokens(chunk)
+            except ValueError:                      # 따옴표가 줄을 넘는 글은 닫힐 때까지 다음 줄을 이어 읽는다(최대 30줄)
+                if index + span >= len(lines) or span >= 30:
+                    break
+                chunk, span = chunk + "\n" + lines[index + span], span + 1
+        if tokens is None:
+            if re.search(r"\bpip3?\b", lines[index]):
+                unreadable.append(f"따옴표가 닫히지 않아 읽지 못한 줄에 pip 가 있습니다: `{_shown(lines[index].strip())}`")
+            index += 1
+            continue
+        index += span
+        segments, current, skip_target = [], [], False
+        for token in tokens:
+            if skip_target:
+                skip_target = False
+                continue
+            if _DEP3_OPERATOR.fullmatch(token):
+                if "<" in token or ">" in token:           # 리디렉션: 뒤의 대상 하나(와 `2>&1` 의 앞 숫자)를 버린다
+                    skip_target = True
+                    if current and current[-1].isdigit():
+                        current.pop()
+                elif current:
+                    segments.append(current)
+                    current = []
+                continue
+            current.append(token)
+        if current:
+            segments.append(current)
+        for segment in segments:
+            words = list(segment)
+            while words and (words[0] in _DEP3_KEYWORDS or _DEP3_ASSIGNMENT.fullmatch(words[0])):
+                words.pop(0)
+            if not words:
+                continue
+            program = words[0].rsplit("/", 1)[-1]
+            args = None
+            if _DEP3_PIP_PROGRAM.fullmatch(program):
+                args = words[1:]
+            elif _DEP3_PYTHON_PROGRAM.fullmatch(program) and "-m" in words[1:]:
+                at = words.index("-m", 1)
+                if at + 1 < len(words) and words[at + 1] in ("pip", "pip3"):
+                    args = words[at + 2:]
+            if args is not None:
+                subcommand = next((word for word in args if word in _DEP3_PIP_COMMANDS), None)
+                if subcommand == "install":
+                    rest = args[args.index("install") + 1:]
+                    found = _dep3_install_args(rest)
+                    found["text"] = " ".join(rest)
+                    installs.append(found)
+                continue
+            if program not in _DEP3_MESSAGE_PROGRAMS and _DEP3_HIDDEN_PIP.search(" ".join(words)):
+                unreadable.append(f"`{_shown(' '.join(words))}` 안에 pip install 이 들어 있습니다 — 이 검증기가 읽지 못하는 모양입니다(bash -c·eval·xargs·sudo·uv 등)")
+    return installs, unreadable
+
+
+def _dep3_matrix_values(job, key):
+    """job 의 matrix 에서 `key` 의 값 목록(기본 목록 + include 항목). 고정 목록이 아니면 None."""
+    strategy = job.get("strategy")
+    matrix = strategy.get("matrix") if isinstance(strategy, dict) else None
+    if not isinstance(matrix, dict):
+        return None
+    base = matrix.get(key)
+    values = []
+    if isinstance(base, list):
+        values.extend(base)
+    elif base is not None:
+        return None
+    include = matrix.get("include")
+    for entry in include if isinstance(include, list) else ():
+        if isinstance(entry, dict) and key in entry:
+            values.append(entry[key])
+    return values or None
+
+
+def _dep3_setup_python(job, step):
+    """`actions/setup-python` 단계가 정하는 파이썬 → ({'versions': ['3.12', …], 'key': matrix 키 또는 None}, None) 또는 (None, 이유)."""
+    with_ = step.get("with") if isinstance(step.get("with"), dict) else {}
+    if "pip-install" in with_:
+        return None, "setup-python 의 pip-install 입력은 쓰지 않습니다 — -c 가 붙은 run 단계로 설치하세요"
+    value = with_.get("python-version")
+    if isinstance(value, str) and _DEP3_PYTHON.fullmatch(value.strip()):
+        return {"versions": [value.strip()], "key": None}, None
+    found = _DEP3_MATRIX_REF.fullmatch(value.strip()) if isinstance(value, str) else None
+    if found is None:
+        return None, "setup-python 의 python-version 이 따옴표로 감싼 글자 하나(예: '3.12')나 matrix 목록 참조가 아닙니다(따옴표 없는 3.10 은 YAML 이 숫자 3.1 로 읽습니다)"
+    values = _dep3_matrix_values(job, found.group(1))
+    if not values:
+        return None, f"matrix.{_shown(found.group(1))} 가 고정된 목록이 아니라 파이썬 버전을 읽을 수 없습니다"
+    if any(not (isinstance(item, str) and _DEP3_PYTHON.fullmatch(item.strip())) for item in values):
+        return None, "matrix 의 파이썬 버전은 따옴표로 감싼 글자여야 합니다(따옴표 없는 3.10 은 YAML 이 숫자 3.1 로 읽습니다)"
+    return {"versions": list(dict.fromkeys(item.strip() for item in values)), "key": found.group(1)}, None
+
+
+def _dep3_file_for(version):
+    return "constraints-py" + version.replace(".", "") + ".txt"
+
+
+def _dep3_constraint_targets(token, env, python):
+    """`-c` 값 하나를 읽어 {파이썬 버전: constraints 파일 이름} 으로. 읽지 못하면 (None, 이유).
+    허용 모양: ① 파일 이름 글자 그대로 ② 단계·job·워크플로 env 의 변수 하나(`$이름`·`${이름}`)로, 값이 ①이거나
+    ③ `constraints-py` + 식(matrix 키 == '3.10' 이면 '310' 아니면 '312') + `.txt` 인 것."""
+    text = token.strip()
+    found = _DEP3_VARIABLE.fullmatch(text)
+    if found is not None:
+        name = found.group(1) or found.group(2)
+        if name not in env:
+            return None, f"변수 {_shown(name)} 가 이 단계·job·워크플로의 env 에 없습니다"
+        if not isinstance(env[name], str):
+            return None, f"env 의 {_shown(name)} 값이 글자가 아닙니다"
+        text = env[name].strip()
+    if text.startswith("./"):
+        text = text[2:]
+    if "$" in text and _DEP3_TERNARY.fullmatch(text) is None:
+        return None, f"`{_shown(text)}` 는 지원하지 않는 모양입니다"
+    ternary = _DEP3_TERNARY.fullmatch(text)
+    if ternary is not None:
+        key, when, yes, no = ternary.groups()
+        if python["key"] != key:
+            return None, f"식이 읽는 matrix.{_shown(key)} 가 setup-python 의 python-version 이 따르는 matrix 키와 다릅니다"
+        return {version: f"constraints-py{yes if version == when else no}.txt" for version in python["versions"]}, None
+    if _DEP3_PYTHON_CONSTRAINTS.fullmatch(text) is None:
+        return None, f"`{_shown(text)}` 는 constraints-py숫자.txt 꼴의 파일 이름이 아닙니다"
+    return {version: text for version in python["versions"]}, None
+
+
+def _dep3_env(data, job, step):
+    """단계에서 보이는 env({정확한 이름: 값}) — 워크플로 → job → 단계 순으로 덮어쓴다(안쪽이 이긴다)."""
+    merged = {}
+    for scope in (data, job, step):
+        merged.update(_env_values(scope))
+    return merged
+
+
+def _dep3_workflow(rel, data, files, pins_by_file, referenced):
+    """워크플로 한 개의 모든 `pip install` 을 ①②로 본다. 가리키는 요구 파일 경로는 referenced 에 모은다."""
+    out = []
+    jobs = data.get("jobs")
+    for job_id, job in jobs.items() if isinstance(jobs, dict) else ():
+        steps = job.get("steps") if isinstance(job, dict) else None
+        if not isinstance(steps, list):
+            continue
+        python, why = None, "앞에 actions/setup-python 단계가 없습니다"
+        for number, step in enumerate(steps, 1):
+            if not isinstance(step, dict):
+                continue
+            uses = step.get("uses")
+            if isinstance(uses, str) and uses.split("@", 1)[0].strip().lower() == "actions/setup-python":
+                python, why = _dep3_setup_python(job, step)
+                continue
+            if not isinstance(step.get("run"), str):
+                continue
+            label = f"job {_shown(job_id)} 단계 {_shown(step.get('name') or number)}"
+            installs, unreadable = _dep3_pip_installs(step["run"])
+            out.extend(err("DEP-3", f"{label}: {problem}", rel) for problem in unreadable)
+            env = _dep3_env(data, job, step)
+            for install in installs:
+                named = [spec for spec in install["specs"] if not _dep3_is_pip(spec)]
+                if not (named or install["requirements"] or install["editable"]):
+                    continue                                         # `pip install --upgrade pip` — pip 자신만 올리는 줄은 제외
+                shown = f"pip install {_shown(install['text'])}"
+                if not install["constraints"]:
+                    wanted = " 또는 ".join(_dep3_file_for(version) for version in python["versions"]) if python else "constraints-py숫자.txt"
+                    out.append(err("DEP-3", f"{label}: `{shown}` 에 -c 가 없습니다 — 요구 파일의 범위만으로는 설치할 때마다 범위 안 최신이 깔려 예약 실행이 어느 날 갑자기 다른 버전으로 돕니다. "
+                                            f"이 단계가 쓰는 파이썬의 {wanted} 를 `-c` 로 주세요", rel))
+                    continue
+                if python is None:
+                    out.append(err("DEP-3", f"{label}: `{shown}` 가 쓰는 파이썬을 알 수 없어 -c 파일 번호를 맞춰 볼 수 없습니다 — {why}", rel))
+                    continue
+                targets = {}
+                for token in install["constraints"]:
+                    found, reason = _dep3_constraint_targets(token, env, python)
+                    if found is None:
+                        out.append(err("DEP-3", f"{label}: -c 의 값 `{_shown(token)}` 를 읽을 수 없습니다 — {reason}. 허용 모양: constraints-py숫자.txt 글자 그대로, 또는 env 변수 하나를 \"$이름\" 으로 가리키고 "
+                                                "그 값이 파일 이름 글자이거나 constraints-py 뒤에 matrix 식(== '3.10' && '310' || '312')이 오고 .txt 로 끝나는 것", rel))
+                        continue
+                    for version, name in found.items():
+                        targets.setdefault(version, []).append(name)
+                for version, names in targets.items():
+                    for name in names:
+                        if name != _dep3_file_for(version):
+                            out.append(err("DEP-3", f"{label}: 파이썬 {_shown(version)} 칸의 -c 가 {_shown(name)} 인데 {_dep3_file_for(version)} 여야 합니다(3.10 은 constraints-py310.txt, 3.12 는 constraints-py312.txt)", rel))
+                        elif name not in files:
+                            out.append(err("DEP-3", f"{label}: -c 가 가리키는 {_shown(name)} 가 저장소에 없습니다", rel))
+                for path in install["requirements"]:
+                    clean = path[2:] if path.startswith("./") else path
+                    if "$" in clean or not clean:
+                        out.append(err("DEP-3", f"{label}: -r 의 값 `{_shown(path)}` 를 읽을 수 없습니다(변수·빈 값 금지)", rel))
+                    elif clean not in files:
+                        out.append(err("DEP-3", f"{label}: -r 이 가리키는 요구 파일 {_shown(clean)} 이 저장소에 없습니다", rel))
+                    else:
+                        referenced.add(clean)
+                if install["editable"]:
+                    out.append(err("DEP-3", f"{label}: `-e` 설치는 이 검증기가 의존성을 읽지 못합니다 — requirements 파일로 풀어 쓰세요", rel))
+                for spec in named:
+                    parsed = _dep3_requirement(spec)
+                    if isinstance(parsed, str):
+                        out.append(err("DEP-3", f"{label}: 설치 대상 `{_shown(spec)}` 을 읽을 수 없습니다 — {parsed}", rel))
+                        continue
+                    for version in python["versions"]:
+                        pins = pins_by_file.get(_dep3_file_for(version))
+                        problem = _dep3_cover(_dep3_name(parsed[0]), parsed[0], parsed[1], pins, _dep3_file_for(version), f"{label}") if pins is not None else None
+                        if problem:
+                            out.append(err("DEP-3", problem, rel))
+    return out
+
+
+def check_dependency_constraints(root, files):
+    """DEP-3(위 설명): 설치 줄의 `-c`(①②)·constraints 파일의 모양(③)·요구 파일과의 짝(④). PyYAML 이 없으면 워크플로 읽기(①②)는 건너뛴다 — WF-0 이 그 경고를 이미 낸다."""
+    out = []
+    pins_by_file = {}
+    for rel in files:
+        if _DEP3_CONSTRAINT_FILE.fullmatch(rel):
+            pins, problems = _dep3_read_constraints(read_text(root, rel) or "")
+            pins_by_file[rel] = pins
+            out.extend(err("DEP-3", problem, f"{rel}:{number}") for number, problem in problems)
+    referenced = set()
+    if yaml is not None:
+        known = set(files)
+        for rel in _workflow_files(files):
+            try:
+                data = _load_yaml(read_text(root, rel) or "")
+            except yaml.YAMLError:
+                continue                                            # WF-0 몫
+            if isinstance(data, dict):
+                out.extend(_dep3_workflow(rel, data, known, pins_by_file, referenced))
+    python_pins = {rel: pins for rel, pins in pins_by_file.items() if _DEP3_PYTHON_CONSTRAINTS.fullmatch(rel)}
+    for rel in sorted({name for name in files if _DEP3_REQUIREMENT_FILE.fullmatch(name)} | referenced):
+        entries, problems = _dep3_read_requirements(read_text(root, rel) or "")
+        out.extend(err("DEP-3", problem, f"{rel}:{number}") for number, problem in problems)
+        for constraint_rel, pins in sorted(python_pins.items()):
+            for number, key, name, spec in entries:
+                problem = _dep3_cover(key, name, spec, pins, constraint_rel, f"{rel}:{number}")
+                if problem:
+                    out.append(err("DEP-3", problem, rel))
     return out
 
 
@@ -2035,6 +2561,7 @@ def run_checks(root, base=None):
     findings += check_liquid_in_docs(root, files)
     findings += check_exposure(root, files)
     findings += check_dependencies(root, files)
+    findings += check_dependency_constraints(root, files)
     findings += check_ad_surface(root, base)
     return findings
 
