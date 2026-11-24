@@ -5,7 +5,7 @@
 `resume_lock: true` 를 적으면 켜지고(켜는 것은 별도 T3 변경이다), 키가 없거나 false 면 이 모듈은 아무것도 바꾸지 않는다(꺼짐 = 이전과 같은 동작).
 
 켜졌을 때 코드가 강제하는 것(전수조사 표와 각 경로의 잠금 방법은 docs/PUBLISH_PATHS.md)
-  1. 레지스트리 규칙 L1–L8(아래 RULES)을 어기는 설정은 검증이 거절한다 — pipeline.registry.validate_registry 가 `lock_errors` 를 부르므로
+  1. 레지스트리 규칙 L1–L10(아래 RULES)을 어기는 설정은 검증이 거절한다 — pipeline.registry.validate_registry 가 `lock_errors` 를 부르므로
      `python -m pipeline.registry`·pipeline.plan·pipeline.run·검증기 REG-1 이 같은 규칙을 읽는다.
   2. 실행 시작 가드 `guard_start`(generator.py 의 main() 앞부분 한 줄)가 규칙 위반이면 글을 만들지 않고 `::error::` 로 끝낸다. 같은 가드가
      ① 기존 글 이미지 교체(main 직접 커밋)를 막고 ② 하루 상한(1편)을 정기 실행·수동 실행 모두에 코드로 강제하며(지금은 정기 실행이 슬롯 2개로만 하루 편수를
@@ -49,6 +49,9 @@ MAX_OPEN_DRAFTS = 3                       # 잠금이 켜졌을 때 chance.limit
 MAX_POSTS_PER_WEEK = 2                    # 잠금이 켜졌을 때 chance.limits.max_posts_per_week 의 천장(Chance 의 일주일 상한 — 운영자 조건 '재개 시 주 1–2편')
 WEEK_WINDOW_DAYS = 7                      # 주간 상한을 세는 창: 오늘을 포함해 굴러가는 7일(KST 날짜 기준 — 오늘과 그 6일 전까지). 달력 주(월–일)가 아니다
 LANGUAGE_CODES = ("ko", "en")             # chance.languages 에 쓸 수 있는 값(정확히 이 둘 — 시험이 못박는다)
+REQUIRED_QUALITY_GATE = "hold"            # L9: 잠금이 켜졌을 때 chance.quality_gate 의 값(최소 품질 Gate 켜짐 — 재개 조건 3). 적지 않으면 off 로 읽힌다
+REQUIRED_CONTENT_SOURCE = "facts"         # L10: 잠금이 켜졌을 때 chance.content_source 의 값(계산이 값을 더하는 글만·AI 미사용 — 재개 조건 4). 적지 않으면 feed 로 읽힌다
+REQUIRED_LANGUAGES = ("ko",)              # L10: content_source 가 facts 일 때 chance.languages 의 값(국문 단독 — 재개 조건 4). 적지 않으면 ko·en 한 쌍으로 읽힌다
 # SHADOW_RUN(읽기 전용 그림자 실행) 값 집합 — GATE 의 pipeline/shadow_run·generator 와 같은 집합이어야 한다(docs/PUBLISH_PATHS.md §4-2 한 곳에 적고 시험이 견준다).
 # 대소문자·앞뒤 공백은 무시한다. 켜짐 집합이면 그림자 실행, 꺼짐 집합이면 일반 실행, 그 밖의 값은 잠금이 켜져 있을 때 이 가드가 실행을 거절한다(종료 2).
 SHADOW_ON_VALUES = ("1", "true", "yes", "on", "enabled")
@@ -80,6 +83,8 @@ RULES = (
     ("L6", "chance.languages 가 있으면 ko 를 포함하고 ko·en 만 겹침 없이 든 목록이다"),
     ("L7", "Chance 밖의 모든 블로그의 limits.max_posts_per_day 도 1 이다"),
     ("L8", "chance.limits.max_posts_per_week(주간 상한 — 굴러가는 7일에 만드는 글 수)가 있어야 하고 1 이상 2 이하 정수다(잠금이 꺼져 있어도 값이 있으면 1 이상 정수여야 한다). Chance 밖의 블로그에는 주간 상한을 강제하지 않는다"),
+    ("L9", "chance.quality_gate 는 hold 여야 한다(적지 않으면 off 로 읽혀 거절 — 재개 조건 3: 새 글은 최소 품질 Gate 를 지난다)"),
+    ("L10", "chance.content_source 는 facts 여야 하고(적지 않으면 feed 로 읽혀 거절) 그때 chance.languages 는 ['ko'] 여야 한다(국문 단독 — 재개 조건 4: 계산이 값을 더하는 글만·AI 미사용)"),
 )
 
 # 레지스트리 키 규칙(잠금이 꺼져 있어도 적용 — 잠금 키가 아예 없는 지금의 레지스트리는 항상 통과한다)
@@ -236,6 +241,18 @@ def _rule_errors(reg):
             if not ok:
                 errors.append(_msg("L6", "chance.languages 가 올바르지 않습니다 — ko 를 포함하고 ko·en 만 겹침 없이 담은 목록이어야 합니다(['ko'] 또는 ['ko', 'en']; 지금 %s)."
                                    % _shown(languages)))
+        # L9·L10(재개 조건 3·4): 값은 런타임이 읽는 것과 같게 읽는다 — 항목에 적힌 값, 없으면 defaults, 그것도 없으면 코드 기본값(quality_gate off · content_source feed · languages ko·en).
+        gate = chance["quality_gate"] if "quality_gate" in chance else _defaults(reg).get("quality_gate", "off")
+        if gate != REQUIRED_QUALITY_GATE:
+            errors.append(_msg("L9", "chance.quality_gate 는 %s 여야 합니다(지금 %s%s). 잠금이 켜져 있으면 새 글은 최소 품질 Gate 를 지나야 합니다(재개 조건 3)."
+                               % (REQUIRED_QUALITY_GATE, _shown(gate), "" if "quality_gate" in chance or "quality_gate" in _defaults(reg) else ", 적지 않으면 off 로 읽힙니다")))
+        source = chance["content_source"] if "content_source" in chance else _defaults(reg).get("content_source", "feed")
+        if source != REQUIRED_CONTENT_SOURCE:
+            errors.append(_msg("L10", "chance.content_source 는 %s 여야 합니다(지금 %s%s). 잠금이 켜져 있으면 계산이 값을 더하는 글만 만들고 AI 를 쓰지 않습니다(재개 조건 4)."
+                               % (REQUIRED_CONTENT_SOURCE, _shown(source), "" if "content_source" in chance or "content_source" in _defaults(reg) else ", 적지 않으면 feed 로 읽힙니다")))
+        elif languages != list(REQUIRED_LANGUAGES):
+            errors.append(_msg("L10", "chance.content_source 가 %s 일 때 chance.languages 는 %s 여야 합니다(국문 단독 — 재개 조건 4; 지금 %s%s)."
+                               % (REQUIRED_CONTENT_SOURCE, list(REQUIRED_LANGUAGES), _shown(languages), "" if languages is not None else ", 적지 않으면 ko·en 한 쌍으로 읽힙니다")))
     for raw in _blogs(reg):
         if raw.get("key") == CHANCE_KEY:
             continue

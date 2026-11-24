@@ -108,7 +108,10 @@ class ChanceWorkflowDefaultsTest(unittest.TestCase):
         self.assertEqual(exprs["chanceblog.yml"].replace(clause, ""), exprs["chance-fix-images.yml"])
         for wf in CHANCE_WORKFLOWS:
             self.assertIn("secrets.GEMINI_API_KEY", exprs[wf])                 # 검증기 REG-3(시크릿 연결) 이 보는 글자
-            self.assertEqual(generator_step(wf)["env"]["UNSPLASH_ACCESS_KEY"], "${{ secrets.UNSPLASH_ACCESS_KEY }}")
+        # BP3(D-430): 쓰지 않는 Unsplash 키도 글 작성 워크플로에서는 글감 방식이 feed 일 때만 싣는다(같은 닫힌 쪽 조건 — 식을 평가해 보는 시험은 test_unsplash_key_feed_only).
+        # 이미지 교체 워크플로는 키를 쓰므로 식이 그대로다.
+        self.assertEqual(generator_step("chance-fix-images.yml")["env"]["UNSPLASH_ACCESS_KEY"], "${{ secrets.UNSPLASH_ACCESS_KEY }}")
+        self.assertEqual(generator_step("chanceblog.yml")["env"]["UNSPLASH_ACCESS_KEY"], "${{ steps.source.outputs.content_source == 'feed' && secrets.UNSPLASH_ACCESS_KEY || '' }}")
 
     def test_the_dry_run_switch_itself_is_unchanged(self):
         for wf in CHANCE_WORKFLOWS:

@@ -460,7 +460,7 @@ def validate_registry(reg, root=None):
         return ["레지스트리 최상위는 객체여야 합니다."]
     if reg.get("schema_version") != 1:
         errors.append("schema_version은 1이어야 합니다.")
-    errors.extend(publish_lock.registry_errors(reg))   # 제한 재개 잠금(resume_lock): 켜져 있을 때만 규칙 L1–L8 을 적용한다(꺼져 있으면 값 모양 검사뿐 — pipeline/publish_lock.py)
+    errors.extend(publish_lock.registry_errors(reg))   # 제한 재개 잠금(resume_lock): 켜져 있을 때만 규칙 L1–L10 을 적용한다(꺼져 있으면 값 모양 검사뿐 — pipeline/publish_lock.py)
     defaults_limits = reg["defaults"].get("limits") if isinstance(reg.get("defaults"), dict) else None
     problem = _weekly_limit_error(defaults_limits, "defaults")   # 물려받는 쪽도 따로 본다: 모든 블로그가 값을 직접 적어 덮어써도, 블로그 목록이 잘못돼 아래에서 일찍 끝나도 defaults 의 잘못된 값은 걸린다
     if problem:

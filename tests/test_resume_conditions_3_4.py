@@ -1,7 +1,7 @@
 """재개 조건 3·4(품질 관문·AI 미사용·국문 단독)의 레지스트리 현재 값을 한 곳에서 못박는다(BP-S1-2, 결함 D-413). 네트워크 없이 돈다.
 
-왜: 제한 재개 잠금(pipeline/publish_lock.py)은 L1–L8 로 승인 PR 흐름·하루 1편·열린 초안 상한·주간 상한·언어 형식·다른 블로그 모드를 코드로 지키지만, 재개 조건 3(최소 품질 Gate)과 4(계산이 값을 더하는 글만·AI 미사용·국문 단독)는 지키지 않는다
-(감사 BP-S1-2 의 재현: quality_gate 키를 지우거나 content_source 를 feed 로 바꾸거나 languages 에 en 을 더해도 잠금 오류 0·레지스트리 검증 오류 0). 규칙으로 막는 일(L9·L10)은 운영자 승인(T3)이 필요하므로 규칙은 더하지 않고, 대신 이 시험이 현재 값을 못박는다 —
+왜: 제한 재개 잠금(pipeline/publish_lock.py)은 L1–L8 로 승인 PR 흐름·하루 1편·열린 초안 상한·주간 상한·언어 형식·다른 블로그 모드를 코드로 지켰고, 감사 BP-S1-2 때는 재개 조건 3(최소 품질 Gate)과 4(계산이 값을 더하는 글만·AI 미사용·국문 단독)를 지키지 않았다 — 지금은 규칙 L9·L10(BP3, 결함 D-429)이 지킨다
+(BP3 이전, 감사 BP-S1-2 의 재현: quality_gate 키를 지우거나 content_source 를 feed 로 바꾸거나 languages 에 en 을 더해도 잠금 오류 0·레지스트리 검증 오류 0). 규칙 L9·L10(운영자 승인 — 확인 032 보기 ①)이 같은 값을 코드로 지키고, 이 시험은 규칙과 겹쳐 현재 값을 따로 못박는다 —
 그 값이 병합된 설정 한 줄로 바뀌면 CI 가 빨개져 운영자가 병합 부탁 알림에서 알아본다.
 
 이 시험이 빨개지면: 시험을 고치기 전에 운영자가 발행 정지 해제 점검표(docs/OPS_INBOX.md §10-11 끝의 '해제 점검표 본체')를 보고 의도한 변경인지부터 확인한다. 의도한 변경이면 이 파일의 EXPECTED 값과 점검표의 같은 줄을 한 변경으로 함께 고친다.
@@ -66,26 +66,29 @@ class ResumeConditions34ValuesTest(unittest.TestCase):
         for name in EXPECTED:
             self.assertIn(name, entry, f"{name} 키가 레지스트리에서 사라졌습니다. {FIX_HINT}")
 
-    def test_the_resume_lock_does_not_pin_these_values_and_the_checklist_says_so(self):
-        """잠금(publish_lock)이 이 값을 지키지 않는다는 사실과 점검표의 위치가 점검표 문서에 적혀 있다(규칙 L9·L10 은 T3 제안으로만 둔다)."""
+    def test_the_resume_lock_rules_l9_l10_pin_these_values_and_the_checklist_says_so(self):
+        """잠금(publish_lock)의 규칙 L9·L10 이 이 값을 지킨다는 사실과 값을 못박는 시험의 위치가 점검표 문서에 적혀 있다(BP3 — 이전에는 '잠금이 보증하지 않는다'였고 규칙은 T3 제안이었다)."""
         text = (ROOT / "docs" / "OPS_INBOX.md").read_text(encoding="utf-8")
         section = checklist_body(text)
         for needle in ("`chance.quality_gate`", "`hold`", "`chance.content_source`", "`facts`", "`chance.source_policy`", "`allowlist`", "`chance.languages`", '`["ko"]`',
-                       "잠금이 보증하지 않", "tests/test_resume_conditions_3_4.py", "운영자만", "`PIPELINE_PAUSE`"):
+                       "잠금 규칙 L9", "잠금 규칙 L10", "tests/test_resume_conditions_3_4.py", "운영자만", "`PIPELINE_PAUSE`"):
             self.assertIn(needle, section, needle)
+        self.assertNotIn("잠금이 보증하지 않", section)                       # 옛 말(규칙이 없던 때)이 되살아나면 빨강
+        self.assertNotIn("더하지 않았습니다", section)
         self.assertNotIn(chr(126), section)                                  # 문서 규칙: ASCII 물결표 금지(숫자 범위는 en dash)
         self.assertIsNone(re.search(r"https?://", section))             # 문서 규칙: 링크 금지
 
-    def test_each_row_of_the_four_values_says_the_lock_does_not_pin_it(self):
-        """H2·H3·H4 행(품질 관문·AI 미사용·국문 단독)마다 '잠금이 보증하지 않는다' 와 값을 못박는 시험이 적혀 있다 — 한 행의 말이 바뀌어도 다른 행의 같은 말에 가려지지 않게 행마다 본다."""
+    def test_each_row_of_the_four_values_names_the_lock_rule_that_pins_it(self):
+        """H2·H3·H4 행(품질 관문·AI 미사용·국문 단독)마다 그 값을 지키는 잠금 규칙(L9·L10)과 값을 못박는 시험이 적혀 있다 — 한 행의 말이 바뀌어도 다른 행의 같은 말에 가려지지 않게 행마다 본다."""
         text = (ROOT / "docs" / "OPS_INBOX.md").read_text(encoding="utf-8")
         rows = {line.split("|")[1].strip().split(" ")[0]: line for line in checklist_body(text).splitlines() if line.startswith("| H")}
         self.assertEqual(sorted(rows, key=lambda key: int(key[1:])), [f"H{n}" for n in range(1, 11)])
-        for key, value_name in (("H2", "`chance.quality_gate`"), ("H3", "`chance.content_source`"), ("H4", "`chance.languages`")):
+        for key, value_name, rule in (("H2", "`chance.quality_gate`", "잠금 규칙 L9 가 지킨다"), ("H3", "`chance.content_source`", "잠금 규칙 L10 이 지킨다"), ("H4", "`chance.languages`", "잠금 규칙 L10 이 지킨다")):
             with self.subTest(row=key):
                 self.assertIn(value_name, rows[key])
-                self.assertIn("잠금이 보증하지 않", rows[key])
-                self.assertTrue("tests/test_resume_conditions_3_4.py" in rows[key] or "같은 시험이 못박습니다" in rows[key], rows[key])
+                self.assertIn(rule, rows[key])
+                self.assertNotIn("잠금이 보증하지 않", rows[key])
+                self.assertTrue("tests/test_resume_conditions_3_4.py" in rows[key] or "같은 시험도" in rows[key], rows[key])
         self.assertEqual(rows["H3"].count("`chance."), 2)               # content_source 와 source_policy 를 한 행에서 같이 본다
         self.assertIn("`chance.source_policy`", rows["H3"])
         self.assertNotIn("잠금이 보증하지 않", rows["H1"])               # 1·2 는 코드가 지킨다(L1–L8) — 보증한다고 적는다

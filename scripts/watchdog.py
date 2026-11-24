@@ -5,7 +5,8 @@
 
 필요 환경변수: GITHUB_TOKEN, GITHUB_REPOSITORY  (권한: contents:read, actions:read, pull-requests:read, issues:write)
 옵션: WATCHDOG_DRY_RUN=1 이면 이슈를 만들지 않고 결과만 출력한다. 토큰이 없어도 dry-run 으로 동작한다.
-      PIPELINE_PAUSE=true 이면 알림을 만들지 않는다(운영자가 일부러 멈춘 동안의 소음 방지).
+      PIPELINE_PAUSE=true 이면(켜짐 1·true·yes·on) 알림을 만들지 않는다(운영자가 일부러 멈춘 동안의 소음 방지). 값을 알 수 없으면(오타 등 — 다른 실행은 정지로 읽는다)
+      일부러 멈춘 것으로 보지 않고 점검을 이어 가며 `[Watchdog] 공통: PAUSE_UNKNOWN`(심각) 알림을 하나 더한다(BP3, 결함 D-432 — 받은 값은 어디에도 싣지 않는다).
 
 알림 방식: (블로그, 코드)마다 이슈 하나를 유지한다. 저장소 소유자에게 담당자 지정과 @멘션을 붙이고,
 열려 있는 동안 본문을 최신 내용으로 갱신하며, 심각 건은 며칠이 지나도 풀리지 않으면 코멘트로 다시 알린다.
@@ -47,6 +48,12 @@ RENOTIFY_HOURS = 48          # 심각 건이 이만큼 지나도 열려 있으�
 MAX_NEW_ISSUES_PER_RUN = 5   # 한 번에 이슈가 쏟아지는 것을 막는다(나머지는 다음 실행에서)
 PAGE_SIZE = 100              # 열린 이슈·PR 목록은 한 쪽 100건씩 읽는다(L7, D-361 — 예전에는 한 쪽만 읽어 이슈는 50건·PR 은 100건 뒤가 경고 없이 잘렸다)
 MAX_PAGES = 5                # 최대 5쪽(500건)까지 읽고, 가득 차 있으면 더 있을 수 있어 ::warning:: 을 남긴다
+PAUSE_FINDING_BLOG = "공통"          # 블로그가 아닌 공통 항목 — 약관 점검 기한 알림과 같은 자리(terms_deadline.FINDING_BLOG)
+PAUSE_FINDING_CODE = "PAUSE_UNKNOWN"
+# 발행 정지 변수의 값을 알 수 없을 때의 알림 문장(고정 문장 — 받은 값은 싣지 않는다: 값이 여러 줄이거나 '::' 로 시작해도 워크플로 명령이 되지 않고, 비밀이 잘못 들어갔어도 새지 않는다)
+PAUSE_FINDING_MESSAGE = ("저장소 변수 PIPELINE_PAUSE 의 값을 알 수 없어(켜짐은 1·true·yes·on, 꺼짐은 0·false·no·off 또는 비움) 모든 발행 실행이 안전한 쪽인 정지로 읽고 멈춰 있습니다 — 오타일 수 있습니다. "
+                         "일부러 멈춘 것이면 값을 true 로 고치고, 다시 발행하려면 변수를 지우거나 false 로 바꾸세요. 지우거나 false 로 바꾸면 다음 점검에서 이 알림이 자동으로 닫힙니다"
+                         "(true 로 고치면 일부러 멈춘 상태로 읽혀 워치독이 조용해지므로 이 알림은 직접 닫으세요).")
 PAGES_WORKFLOW = "pages.yml"
 PAGES_BRANCH = "main"        # 다른 ref 에서 workflow_dispatch 로 돌린 성공 실행은 '사이트 배포됨'이 아니다
 _NOTIFIED_RX = re.compile(r"<!--\s*watchdog:notified=(\S+?)\s*-->")
@@ -349,6 +356,14 @@ def terms_findings(root, now):
     return found
 
 
+def pause_findings(environ):
+    """발행 정지 변수의 값을 알 수 없을 때(오타 등 — pipeline/pause.py 가 정지로 읽는 값) 공통 알림 하나(심각). 알려진 켜짐·꺼짐 값이거나 변수가 없으면 아무것도 더하지 않는다.
+    일부러 멈춘 것(켜짐 값)은 main() 이 알림 없이 끝내므로 여기까지 오지 않는다 — 알 수 없는 값만 '일부러 멈춘 것' 으로 보지 않고 알린다(BP2 보고서 ⑦ b, BP3). 문장은 고정이고 받은 값은 싣지 않는다."""
+    if not pause.is_unrecognized(environ):
+        return []
+    return [Finding(PAUSE_FINDING_BLOG, PAUSE_FINDING_CODE, "critical", PAUSE_FINDING_MESSAGE)]
+
+
 def collect(reg, root, now, client=None):
     """(문제 목록, 블로그별 현황). 현황은 실행 요약 표에 쓴다(마지막 글 시각, 최근 7일 글 수)."""
     findings, stats = [], []
@@ -462,20 +477,22 @@ def main():
     if errors:
         print("[오류] 레지스트리 검증 실패:\n  - " + "\n  - ".join(_oneline(e) for e in errors))
         return 1
-    if pause.is_paused(os.environ):      # 알 수 없는 값(오타 등)도 정지로 읽는다(fail closed, pipeline/pause.py) — 다른 실행과 같은 판정
+    state = pause.state(os.environ)      # 켜짐·꺼짐·알 수 없음 — 읽는 곳은 pipeline/pause.py 하나(다른 실행과 같은 판정)
+    if state == pause.ON:      # 켜짐 값(일부러 멈춤)은 소음 방지로 알림을 만들지 않는다 — 알려진 값의 동작·문장은 이전과 같다
         print("[일시정지] PIPELINE_PAUSE 가 켜져 있어 점검 알림을 만들지 않습니다.")
-        unknown = pause.is_unrecognized(os.environ)
-        if unknown:
-            print(pause.error_line())
-        _write_summary("### 워치독 점검 결과\n- **일시정지** — "
-                       + ("저장소 변수 PIPELINE_PAUSE 의 값을 알 수 없어 정지로 읽었고 알림을 만들지 않았습니다." if unknown else "저장소 변수 PIPELINE_PAUSE 가 켜져 있어 알림을 만들지 않았습니다."))
+        _write_summary("### 워치독 점검 결과\n- **일시정지** — 저장소 변수 PIPELINE_PAUSE 가 켜져 있어 알림을 만들지 않았습니다.")
         return 0
+    if state == pause.UNKNOWN:      # 알 수 없는 값(오타 등): 다른 실행은 정지로 읽지만 일부러 멈춘 것인지 알 수 없다 — 조용히 있지 않고 점검을 이어 가며 알림(PAUSE_UNKNOWN)을 더한다. 받은 값은 싣지 않는다
+        print(pause.error_line())
+        _write_summary("### 워치독 점검 결과 — 발행 정지 변수\n- **경고** 저장소 변수 PIPELINE_PAUSE 의 값을 알 수 없어 다른 실행은 정지로 읽고 있습니다(오타일 수 있습니다) — "
+                       "일부러 멈춘 것으로 보지 않고 점검을 이어 가며 알림을 만듭니다.")
     token, repo = os.environ.get("GITHUB_TOKEN"), os.environ.get("GITHUB_REPOSITORY")
     dry = os.environ.get("WATCHDOG_DRY_RUN", "").lower() in ("1", "true", "yes") or not (token and repo)
     client = GitHubClient(token, repo) if token and repo else None
     owner = os.environ.get("GITHUB_REPOSITORY_OWNER") or (repo.split("/")[0] if repo and "/" in repo else None)
     now = datetime.now(timezone.utc)
     findings, stats = collect(reg, ROOT, now, client)
+    findings = list(findings) + pause_findings(os.environ)      # 값을 알 수 없는 정지 변수는 알림 하나를 더한다(알려진 값이거나 변수가 없으면 비어 있다)
     for f in findings:
         # 메시지에는 이력에서 인용한 텍스트가 들어갈 수 있다 — 접지 않으면 둘째 줄이 '::' 로 시작해 워크플로 명령이 된다.
         print(f"- {f.severity.upper():<8} {f.title} — {_oneline(f.message)}")

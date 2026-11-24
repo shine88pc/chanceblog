@@ -3,7 +3,7 @@
 배경: 정지 변수 `PIPELINE_PAUSE` 의 값이 켜짐(1·true·yes·on)도 꺼짐(0·false·no·off·비움)도 아니면 이제 모든 읽는 곳이 정지로 읽는다(BP-S1-3, D-412 — 오타 하나로 킬 스위치가 조용히 꺼지던 것을 닫았다).
 그러면 반대로 '오타로 걸린 정지'를 운영자가 알아볼 길이 필요하다: 이 모음의 '자동 발행이 멈춰 있습니다 — 해제 방법'(pause) 항목은 일부러 켠 정지와 같은 글이었고, 값이 틀렸다는 사실은
 각 실행의 ::error:: 줄과 실행 요약에만 있었다. 이제 알 수 없는 값일 때만 확인 항목(check — 알림 없음) 하나가 더 붙는다: "변수 PIPELINE_PAUSE 의 값을 알 수 없어 정지로 읽고 있습니다 — 값을 고치거나 지우세요".
-지키는 것: ① 받은 값은 어디에도 싣지 않는다 ② 정지의 방향·기존 항목(pause·pause:planned·pause:long·pause:resume_approval·pause:unset)·알림 개수는 그대로다(워치독은 일부러 조용하다)
+지키는 것: ① 받은 값은 어디에도 싣지 않는다 ② 정지의 방향·기존 항목(pause·pause:planned·pause:long·pause:resume_approval·pause:unset)·알림 개수는 그대로다(이 모음 쪽은 — 워치독은 BP3 부터 알 수 없는 값을 따로 알린다, D-432)
 ③ 알 수 없는 값이 아닐 때(기본값)는 예전과 글자 하나 다르지 않다 ④ 이 모음은 변수를 바꾸지 않는다.
 """
 import dataclasses
@@ -227,7 +227,7 @@ class RunTest(unittest.TestCase):
 class DocsTest(unittest.TestCase):
     def test_the_guide_and_the_register_describe_the_item(self):
         guide = (_bootstrap.ROOT / "docs" / "OPS_INBOX.md").read_text(encoding="utf-8")
-        for word in ("`pause:unknown`", TITLE, "알 수 없는 값", "받은 값은 싣지 않", "워치독은 일부러 조용"):
+        for word in ("`pause:unknown`", TITLE, "알 수 없는 값", "받은 값은 싣지 않", "워치독은 알 수 없는 값을 알립니다", "`[Watchdog] 공통: PAUSE_UNKNOWN`"):
             self.assertIn(word, guide, word)
         register = (_bootstrap.ROOT / "docs" / "DEFECT_REGISTER.md").read_text(encoding="utf-8")
         self.assertIn("| **D-423** |", register)

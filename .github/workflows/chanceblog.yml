@@ -82,7 +82,7 @@ jobs:
           # (generator.py 는 키가 없으면 연습 실행을 스텁으로 돌린다). 정기 실행과 글을 실제로 게시하는 수동 실행은 feed 일 때 키를 넘긴다.
           # 새 조건(읽기 단계 출력 == 'feed')은 기존 조건의 괄호 밖에 && 로 잇는다 — 괄호 안에 붙이면 && 가 || 보다 먼저 묶여 facts 실행에도 키가 샌다(docs/AI_FLOW.md §12 3항).
           GEMINI_API_KEY: ${{ (github.event_name != 'workflow_dispatch' || !inputs.dry_run || inputs.real_ai) && steps.source.outputs.content_source == 'feed' && secrets.GEMINI_API_KEY || '' }}
-          UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
+          UNSPLASH_ACCESS_KEY: ${{ steps.source.outputs.content_source == 'feed' && secrets.UNSPLASH_ACCESS_KEY || '' }}
           EVENT_NAME: ${{ github.event_name }}
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '1' || '0' }}
           # 킬 스위치: 저장소 Settings > Variables 에 PIPELINE_PAUSE=true 를 넣으면 글 생성을 멈춘다(blogger.yml 과 같은 변수)

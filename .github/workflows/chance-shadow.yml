@@ -82,7 +82,7 @@ jobs:
       - name: 그림자 실행 — 후보 글 만들기(저장소에 쓰지 않음)
         env:
           GEMINI_API_KEY: ${{ steps.source.outputs.content_source == 'feed' && secrets.GEMINI_API_KEY || '' }}
-          UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
+          UNSPLASH_ACCESS_KEY: ${{ steps.source.outputs.content_source == 'feed' && secrets.UNSPLASH_ACCESS_KEY || '' }}
           EVENT_NAME: ${{ github.event_name }}
           PIPELINE_PAUSE: ${{ vars.PIPELINE_PAUSE }}
           SHADOW_RUN: '1'

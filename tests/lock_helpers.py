@@ -1,7 +1,8 @@
 """제한 재개 잠금(pipeline/publish_lock.py) 시험 공용 도구: 잠금 규칙을 모두 지키는 레지스트리 사본, 규칙을 하나씩 어기는 변형, 임시 레지스트리 파일.
 
 이 도구가 만드는 '잠금 켬' 레지스트리는 운영자가 나중에 승인해 켤 때(별도 T3 변경) 바뀔 값들과 같다: resume_lock true · chance.publish_flow pr · chance.limits
-max_posts_per_day 1 · max_open_drafts 3 · max_posts_per_week 2(주간 상한 — 규칙 L8). 진짜 pipeline/blogs.json 은 이 시험이 바꾸지 않는다(사본만 만든다). 네트워크·실제 시크릿 없이 돈다.
+max_posts_per_day 1 · max_open_drafts 3 · max_posts_per_week 2(주간 상한 — 규칙 L8)에 재개 조건 3·4 의 값(규칙 L9·L10 — quality_gate hold · content_source facts · source_policy allowlist ·
+languages 국문 단독)을 더한 것이다. 진짜 pipeline/blogs.json 은 이 시험이 바꾸지 않는다(사본만 만든다). 네트워크·실제 시크릿 없이 돈다.
 """
 import copy
 import json
@@ -106,6 +107,7 @@ def lock_ready(reg=None):
     chance = blog_of(reg, CHANCE)
     chance["publish_flow"] = "pr"
     chance["limits"] = {"max_posts_per_day": 1, "max_open_drafts": 3, "max_posts_per_week": 2}
+    chance.update(quality_gate="hold", content_source="facts", source_policy="allowlist", languages=["ko"])      # 재개 조건 3·4(규칙 L9·L10 — 이미 진짜 레지스트리의 값) + facts 가 요구하는 allowlist(레지스트리 검증)
     return reg
 
 
@@ -174,6 +176,18 @@ VIOLATIONS = {
     "L8": [("주간 상한이 없음", lambda r: drop_limit(r, CHANCE, "max_posts_per_week")),
            ("주간 상한이 3", lambda r: set_limit(r, CHANCE, max_posts_per_week=3)),
            ("주간 상한이 14", lambda r: set_limit(r, CHANCE, max_posts_per_week=14))],
+    # L9·L10(재개 조건 3·4)은 값의 모양이 아니라 '정확히 이 값' 규칙이다 — 적지 않은 것(기본값 off·feed)과 비슷하지만 다른 값(대소문자·참/거짓)도 거절한다.
+    "L9": [("quality_gate 가 off", lambda r: set_in(r, CHANCE, quality_gate="off")),
+           ("quality_gate 를 적지 않음", lambda r: blog_of(r, CHANCE).pop("quality_gate")),
+           ("quality_gate 의 대문자 HOLD", lambda r: set_in(r, CHANCE, quality_gate="HOLD")),
+           ("quality_gate 가 참/거짓", lambda r: set_in(r, CHANCE, quality_gate=True))],
+    "L10": [("content_source 가 feed", lambda r: set_in(r, CHANCE, content_source="feed")),
+            ("content_source 를 적지 않음", lambda r: blog_of(r, CHANCE).pop("content_source")),
+            ("content_source 의 대문자 Facts", lambda r: set_in(r, CHANCE, content_source="Facts")),
+            ("content_source 가 숫자", lambda r: set_in(r, CHANCE, content_source=1)),
+            ("facts 인데 languages 가 ko·en 한 쌍", lambda r: set_in(r, CHANCE, languages=["ko", "en"])),
+            ("facts 인데 languages 순서만 바꾼 한 쌍", lambda r: set_in(r, CHANCE, languages=["en", "ko"])),
+            ("facts 인데 languages 를 적지 않음", lambda r: blog_of(r, CHANCE).pop("languages"))],
 }
 # 잠금 키를 잘못 적는 변형(검증 지적 1): 잠금 키가 없으면 잠금이 꺼진 것이라, 이름 오타·위치 오류가 켠 줄 알았는데 꺼진 채로 통과하던 길이다. 켠 레지스트리(lock_ready)에도,
 # 지금의 레지스트리(today_registry — 키 없음)에도 적용한다(후자는 '이제 잠금을 적어 넣으려다 오타를 낸' 경우).
@@ -215,7 +229,8 @@ DEEP_PLACES = [("defaults", "limits"), ("defaults", "llm"), ("defaults", "health
                ("blogger_macat", "limits"), ("naver_life_tips", "secrets"), ("defaults", "llm", "nested"), ("chance", "state", "a", "b")]
 # 변형 하나가 함께 어기는 다른 규칙(시험이 둘 다 나와야 한다고 확인한다)
 EXTRA = {("L1", "publish_flow 가 direct"): ("L3",), ("L1", "publish_flow 를 적지 않음"): ("L3",), ("L1", "publish_flow 가 모르는 값"): ("L3",),
-         ("L3", "auto 인데 publish_flow 가 direct"): ("L1",), ("L3", "auto 인데 publish_flow 가 없음"): ("L1",)}
+         ("L3", "auto 인데 publish_flow 가 direct"): ("L1",), ("L3", "auto 인데 publish_flow 가 없음"): ("L1",),
+         **{("L6", label): ("L10",) for label in ("languages 에 ko 가 없음", "languages 가 겹침", "languages 에 모르는 언어", "languages 가 문자열", "languages 가 빈 목록", "languages 에 ja")}}
 
 
 def write_registry(folder, reg, name="blogs.json"):

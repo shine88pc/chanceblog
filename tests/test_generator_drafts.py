@@ -16,7 +16,7 @@ import generator as g
 from chance_credit_helpers import fake_pool_photo
 from draft_helpers import REAL_PUBLISH_FLOW, HermeticGit
 from lock_helpers import guard_off, pre_flip
-from pipeline import draft_flow, drafts
+from pipeline import draft_flow, drafts, registry, source_policy
 from test_generator_slots import at, candidate, long_post, run_captured
 
 ROOT = _bootstrap.ROOT
@@ -69,6 +69,12 @@ def run_tick(clone, now, flow="pr", event="schedule", dry=False, feed=None, gemi
                mock.patch.object(drafts, "chance_flow", return_value=flow)]
     if not guarded:
         patches.append(guard_off())
+    else:
+        # 가드를 거치는 시험(test_publish_lock*)이 읽는 켠 레지스트리는 제한 재개 잠금의 규칙 L9·L10 을 지키는 값(콘텐츠 출처 facts·허용 목록·국문 단독·Gate hold)이다. 그런데 이 함수가 돌리는 것은
+        # 피드 경로(위의 가짜 소스·가짜 Gemini)라서 생성기 쪽 값 읽기만 피드 값(콘텐츠 출처 feed·옛 정책·Gate 꺼짐·국문 영문 한 쌍)으로 고정한다 — 가드가 읽는 레지스트리 파일은 그대로이므로
+        # 가드의 판정(규칙·하루·열린 초안·주간 상한)은 켠 값 그대로 본다. facts 경로 시험은 test_fact_*·test_generator_facts* 가 따로 맡는다.
+        patches += [mock.patch.object(source_policy, "chance_content_source", return_value="feed"), mock.patch.object(source_policy, "chance_source_policy", return_value="legacy"),
+                    mock.patch.object(registry, "chance_settings", return_value=registry.ChanceSettings("off", ("ko", "en")))]
     if remote_exists != "real":
         patches.append(mock.patch.object(draft_flow, "remote_branch_exists", return_value=remote_exists))
     with contextlib.ExitStack() as stack, chdir(clone):
