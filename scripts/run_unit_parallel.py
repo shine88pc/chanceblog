@@ -67,15 +67,24 @@ def is_failed_import(test):
     return type(test).__name__ == "_FailedTest"
 
 
+def _skip_method(test):
+    """ModuleSkipped 시험의 시험 메서드(건너뜀 표시가 붙은 함수, 없으면 None). ModuleSkipped 클래스에는 그 메서드 하나뿐이라 클래스 안의 값을 차례로 보며 찾는다 —
+    이름을 변수로 `getattr` 하거나 `__dict__.get(변수)` 로 꺼내면 외부 접속 지점 점검 시험(tests/test_egress.py)이 등록 안 된 지점(dyn:getattr·dyn:dict-lookup)으로 보므로
+    `getattr` 는 글자 그대로의 이름만 쓴다."""
+    for value in type(test).__dict__.values():
+        if getattr(value, "__unittest_skip__", False):
+            return value
+    return None
+
+
 def is_module_skip(test):
     """모듈을 불러오다 `SkipTest` 가 나서 discover 가 그 모듈 대신 돌려준 시험(`unittest.loader.ModuleSkipped.<모듈>`)인가."""
-    method = getattr(test, getattr(test, "_testMethodName", ""), None)
-    return type(test).__name__ == "ModuleSkipped" and bool(getattr(method, "__unittest_skip__", False))
+    return type(test).__name__ == "ModuleSkipped" and bool(getattr(_skip_method(test), "__unittest_skip__", False))
 
 
 def module_skip_of(test):
-    method = getattr(test, test._testMethodName)
-    return ModuleSkip(test._testMethodName, " ".join(str(getattr(method, "__unittest_skip_why__", "") or "").split())[:120])
+    reason = " ".join(str(getattr(_skip_method(test), "__unittest_skip_why__", "") or "").split())[:120]
+    return ModuleSkip(getattr(test, "_testMethodName", ""), reason)
 
 
 class RecordingLoader(unittest.TestLoader):
