@@ -1,5 +1,5 @@
 {
- "_설명": "모듈별 예상 초(진짜 CI 3.10 칸, 2026-11-24 잰 표). 표 밖 모듈은 나머지 초를 시험 개수 비율로 나눈 어림값이고 test_run_unit_parallel 은 따로 어림한 값(7초). AI 병합 정책 모듈 이름이 든 시험 모듈 둘은 이름 글자를 막는 시험 때문에 적지 않았다(중앙값을 받는다). 표에 없는 새 모듈은 이 값들의 중앙값으로 나눈다. 만드는 법과 갱신법은 설계 문서 참고",
+ "_설명": "모듈별 예상 초(진짜 CI 3.10 칸, 2026-11-24 잰 표). 표 밖 모듈은 나머지 초를 시험 개수 비율로 나눈 어림값이고 test_run_unit_parallel 은 따로 어림한 값(12.0초 — 재작업 뒤 시험 108개를 이 PC 에서 잰 값에서 어림했고 리눅스에서는 재지 못했다. 진짜 CI 로그의 test_run_unit_parallel 줄로 갱신한다). AI 병합 정책 모듈 이름이 든 시험 모듈 둘은 이름 글자를 막는 시험 때문에 적지 않았다(중앙값을 받는다). 표에 없는 새 모듈은 이 값들의 중앙값으로 나눈다. 만드는 법과 갱신법은 설계 문서 참고",
  "test_agent_docs": 0.5,
  "test_ai_flow": 27.5,
  "test_ai_flow_consumers": 0.6,
@@ -149,7 +149,7 @@
  "test_resume_conditions_3_4": 0.1,
  "test_resume_step_docs": 0.4,
  "test_run": 1.2,
- "test_run_unit_parallel": 7.0,
+ "test_run_unit_parallel": 12.0,
  "test_s2c0_docs": 0.2,
  "test_s2c1_docs": 0.3,
  "test_s2c_value_rule": 0.4,
