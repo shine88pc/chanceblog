@@ -221,8 +221,10 @@ class PlanAndRunTest(unittest.TestCase):
             self.assertNotIn("|| true", script, platform)
             self.assertEqual(commit["env"], {"BLOG_KEY": "${{ matrix.key }}", "HISTORY_FILE": "${{ matrix.history }}", "CONTENT_DIR": "${{ matrix.content_dir }}"})
             install = next(s for s in steps if s.get("name") == "의존성 설치")
-            self.assertIn("pip install -r requirements-pipeline.txt", install["run"], platform)
+            self.assertIn("pip install -c constraints-py312.txt -r requirements-pipeline.txt", install["run"], platform)      # 요구 파일은 범위 그대로, 설치 버전은 파이썬 3.12 용 constraints 로 묶는다(DEP-3)
             self.assertEqual(install["run"].count("pip install"), 2, platform)                # pip 업그레이드와 요구 파일 하나뿐
+            self.assertEqual([line.strip() for line in install["run"].strip().splitlines()],
+                             ["python -m pip install --upgrade pip", "python -m pip install -c constraints-py312.txt -r requirements-pipeline.txt"], platform)      # 이 두 줄뿐(다른 줄·다른 -c 가 끼지 않는다)
 
     def test_the_job_and_step_names_are_korean_and_have_no_prefix(self):
         for platform in BOTH:
