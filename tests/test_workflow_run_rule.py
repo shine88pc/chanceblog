@@ -235,13 +235,13 @@ class AllowListTest(unittest.TestCase):
     def test_the_allow_list_is_exactly_the_two_merge_notice_workflows(self):
         self.assertEqual(sorted(vr.WORKFLOW_RUN_ALLOWED), sorted(BOTH))
         self.assertEqual((vr.MERGE_READY_WORKFLOW, vr.MERGE_CONFIRM_WORKFLOW), (READY, CONFIRM))
-        self.assertEqual(vr.WORKFLOW_RUN_ALLOWED[READY]["workflows"], [READY_NAME])
-        self.assertEqual(vr.WORKFLOW_RUN_ALLOWED[CONFIRM]["workflows"], ["[공통] 저장소 규칙·테스트 자동 검사"])
+        self.assertEqual(vr.WORKFLOW_RUN_ALLOWED[READY]["workflows"], ["*병합 부탁 PR 자동 만들기"])             # 이름이 아니라 GitHub 필터 패턴(결함 D-428)
+        self.assertEqual(vr.WORKFLOW_RUN_ALLOWED[CONFIRM]["workflows"], ["*저장소 규칙·테스트 자동 검사"])
         self.assertEqual(vr.WORKFLOW_RUN_ALLOWED[CONFIRM]["branches"], ["main"])
         for rel, spec in vr.WORKFLOW_RUN_ALLOWED.items():
             self.assertEqual(spec["send"], SEND_CMD, rel)                                         # 발송 job 의 명령은 두 파일이 같다
             self.assertTrue(spec["decide"].startswith("python -m pipeline.auto_notice merge-"), rel)
-            self.assertEqual(set(spec), {"workflows", "branches", "decide", "send"}, rel)
+            self.assertEqual(set(spec), {"workflows", "target_file", "branches", "decide", "send"}, rel)
         self.assertEqual(vr.WORKFLOW_RUN_ALLOWED[READY]["decide"], DECIDE_CMDS[READY])
         self.assertEqual(vr.WORKFLOW_RUN_ALLOWED[CONFIRM]["decide"], DECIDE_CMDS[CONFIRM])
         self.assertEqual((vr.DECIDE_JOB, vr.SEND_JOB), ("decide", "send"))
@@ -276,8 +276,8 @@ class AllowListTest(unittest.TestCase):
         `run_checks` 에는 따로 등록하지 않는다 — 같은 오류가 두 번 나오지 않게(`check_workflow_run_workflows` 는 시험·도구가 따로 부르는 같은 규칙의 입구다)."""
         source = (ROOT / "scripts" / "validate_repo.py").read_text(encoding="utf-8").replace("\r\n", "\n")
         body = source[source.index("def check_workflows(root, files):"):source.index("TELEGRAM_SECRETS = (")]
-        self.assertEqual(body.count("_workflow_run_findings(rel, data)"), 1)
-        self.assertIn('        if "workflow_run" in triggers:\n            out.extend(_workflow_run_findings(rel, data))', body)
+        self.assertEqual(body.count("_workflow_run_findings(rel, data, names)"), 1)
+        self.assertIn('        if "workflow_run" in triggers:\n            out.extend(_workflow_run_findings(rel, data, names))', body)
         self.assertLess(body.index('"pull_request_target" in triggers'), body.index('"workflow_run" in triggers'))
         self.assertEqual(source.count("findings += check_workflow_run_workflows(root, files)"), 0)
         self.assertEqual(source.count("findings += check_workflows(root, files)"), 1)
@@ -431,7 +431,7 @@ class MutationTest(unittest.TestCase):
 class ProbeShapesTest(unittest.TestCase):
     """감사 BA-S1-4 의 탐침 A·B 를 `workflow_run` 워크플로로 바꾼 가짜들 — 예전 검증기는 모두 0건이었다(`env` 를 거친 식·`script:` 입력). 다른 트리거에서의 같은 모양은 WF-4 확장(다른 묶음)의 몫이다."""
 
-    HEAD = 'name: "[공통] x"\non:\n  workflow_run:\n    workflows: ["[공통] 병합 부탁 PR 자동 만들기"]\n    types: [completed]\n    branches: [main]\npermissions:\n  contents: read\n'
+    HEAD = 'name: "[공통] x"\non:\n  workflow_run:\n    workflows: ["*병합 부탁 PR 자동 만들기"]\n    types: [completed]\n    branches: [main]\npermissions:\n  contents: read\n'
     JOB = "jobs:\n  j:\n    name: 가\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    steps:\n"
 
     def test_a_env_indirection_in_a_workflow_run_workflow(self):
@@ -544,7 +544,7 @@ class GenericRulesTest(unittest.TestCase):
         head = ProbeShapesTest.HEAD
         job = ProbeShapesTest.JOB
         cases = {
-            "on is not a table": (head.replace("on:\n  workflow_run:\n    workflows: [\"[공통] 병합 부탁 PR 자동 만들기\"]\n    types: [completed]\n    branches: [main]\n", "on: workflow_run\n") + job + "      - run: echo hi\n",
+            "on is not a table": (head.replace("on:\n  workflow_run:\n    workflows: [\"*병합 부탁 PR 자동 만들기\"]\n    types: [completed]\n    branches: [main]\n", "on: workflow_run\n") + job + "      - run: echo hi\n",
                                   "on.workflow_run 은 types·workflows·branches 를 가진 표여야 합니다"),
             "types missing": (head.replace("    types: [completed]\n", "") + job + "      - run: echo hi\n", "types 는 정확히 [completed]"),
             "branches missing": (head.replace("    branches: [main]\n", "") + job + "      - run: echo hi\n", "가지 필터 `branches`"),
@@ -552,9 +552,9 @@ class GenericRulesTest(unittest.TestCase):
             "branches not strings": (head.replace("branches: [main]", "branches: [1]") + job + "      - run: echo hi\n", "가지 필터 `branches`"),
             "branches blank string": (head.replace("branches: [main]", "branches: [' ']") + job + "      - run: echo hi\n", "가지 필터 `branches`"),
             "branches-ignore": (head.replace("branches: [main]", "branches: [main]\n    branches-ignore: [x]") + job + "      - run: echo hi\n", "branches-ignore"),
-            "workflows missing": (head.replace("    workflows: [\"[공통] 병합 부탁 PR 자동 만들기\"]\n", "") + job + "      - run: echo hi\n", "workflows 는 따라 도는 워크플로 이름"),
-            "workflows empty": (head.replace("workflows: [\"[공통] 병합 부탁 PR 자동 만들기\"]", "workflows: []") + job + "      - run: echo hi\n", "workflows 는 따라 도는 워크플로 이름"),
-            "workflows not strings": (head.replace("workflows: [\"[공통] 병합 부탁 PR 자동 만들기\"]", "workflows: [3]") + job + "      - run: echo hi\n", "workflows 는 따라 도는 워크플로 이름"),
+            "workflows missing": (head.replace("    workflows: [\"*병합 부탁 PR 자동 만들기\"]\n", "") + job + "      - run: echo hi\n", "workflows 는 따라 도는 워크플로 이름"),
+            "workflows empty": (head.replace("workflows: [\"*병합 부탁 PR 자동 만들기\"]", "workflows: []") + job + "      - run: echo hi\n", "workflows 는 따라 도는 워크플로 이름"),
+            "workflows not strings": (head.replace("workflows: [\"*병합 부탁 PR 자동 만들기\"]", "workflows: [3]") + job + "      - run: echo hi\n", "workflows 는 따라 도는 워크플로 이름"),
             "jobs not a table": (head + "jobs: x\n", "jobs 는 job 표여야 합니다"),
             "jobs empty": (head + "jobs: {}\n", "jobs 는 job 표여야 합니다"),
             "a job that is not a table": (head + "jobs:\n  a: x\n", "jobs 는 job 표여야 합니다"),
@@ -585,10 +585,14 @@ class LimitsOfTheRuleTest(unittest.TestCase):
         step_of(data, "decide", 2)["if"] = "github.event.workflow_run.head_branch != 'x'"
         self.assertEqual(check({READY: dump(data)}), [])
 
-    def test_the_rule_reads_the_target_names_only_from_its_own_table(self):
-        """따라 도는 워크플로 이름이 그 파일의 실제 `name` 과 같은지는 이 규칙이 아니라 tests/test_merge_notice_workflows.py 가 대조한다(이 규칙은 자기 표와만 견준다)."""
-        self.assertEqual(vr.WORKFLOW_RUN_ALLOWED[READY]["workflows"], [yaml.safe_load(real(".github/workflows/auto-pr.yml"))["name"]])
-        self.assertEqual(vr.WORKFLOW_RUN_ALLOWED[CONFIRM]["workflows"], [yaml.safe_load(real(".github/workflows/guardrails.yml"))["name"]])
+    def test_the_rule_reads_the_pattern_from_its_own_table_and_checks_it_against_the_real_names(self):
+        """따라 도는 워크플로 패턴은 이 규칙의 표(`WORKFLOW_RUN_ALLOWED`)에서 읽고, 그 패턴이 저장소의 진짜 `name` 중 정확히 `target_file` 파일 하나에만 맞는지는 이 규칙이 직접 본다(결함 D-428 —
+        처음에는 이름 글자 그대로를 표에 두고 시험만 대조했는데 GitHub 가 그 칸을 패턴으로 읽는다는 것을 놓쳤다). 진짜 이름과의 글자 대조는 tests/test_merge_notice_workflows.py 가 따로 한다."""
+        for rel, target_rel in ((READY, ".github/workflows/auto-pr.yml"), (CONFIRM, ".github/workflows/guardrails.yml")):
+            spec = vr.WORKFLOW_RUN_ALLOWED[rel]
+            self.assertEqual(spec["target_file"], target_rel)
+            real_name = yaml.safe_load(real(target_rel))["name"]
+            self.assertTrue(all(vr.workflow_name_matches(item, real_name) for item in spec["workflows"]), rel)
 
     def test_the_decide_step_env_names_are_not_pinned_by_the_rule(self):
         """판정 단계 env 의 이름 집합은 이 규칙이 고정하지 않는다(알려진 한계 — 판정 job 에는 시크릿이 없고 tests/test_merge_notice_workflows.py 가 정확한 집합을 고정한다)."""

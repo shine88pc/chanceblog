@@ -628,6 +628,7 @@ def check_workflows(root, files):
     workflows = _workflow_files(files)
     if workflows and yaml is None:
         return [warn("WF-0", "PyYAML 이 없어 워크플로 보안 검사를 건너뜁니다 (pip install pyyaml)")]
+    names = _workflow_name_map(root, workflows)       # WF-16 의 이름 패턴이 맞는 워크플로를 세는 데 쓴다(D-428)
     for rel in workflows:
         text = read_text(root, rel) or ""
         try:
@@ -648,7 +649,7 @@ def check_workflows(root, files):
             out.append(err("WF-3", "pull_request_target 은 금지입니다(포크 코드 + 시크릿 노출 위험) (G-A3)", rel))
         out += _trigger_findings(rel, triggers)
         if "workflow_run" in triggers:
-            out.extend(_workflow_run_findings(rel, data))           # WF-16: 허용 목록 + 모양(아래 정의, G-A13)
+            out.extend(_workflow_run_findings(rel, data, names))    # WF-16: 허용 목록 + 모양(아래 정의, G-A13)
         jobs = data.get("jobs") or {}
         if not isinstance(jobs, dict):
             out.append(err("WF-0", "jobs 가 객체(job 이름: 내용)가 아닙니다", rel))
@@ -1257,14 +1258,17 @@ MERGE_CONFIRM_WORKFLOW = ".github/workflows/merge-confirm-notice.yml"
 _AUTO_NOTICE_RUN = "python -m pipeline.auto_notice "
 # `workflow_run` 을 쓸 수 있는 워크플로는 이 둘뿐이다(운영자 확인 031 의 보기 2 로 승인 — docs/SECURITY_GUARDRAILS.md G-A13·G-A14). 값: 따라 도는 워크플로 이름·가지 필터·
 # 판정 단계(맨 끝 앞의 run 단계)와 발송 단계(맨 끝, 텔레그램 시크릿이 있는 유일한 단계)의 run 명령 — 단계 위치별로 글자 그대로여야 한다.
+# **`workflows` 는 이름이 아니라 GitHub 필터 패턴이다**(결함 D-428, 2026-11-24): 이름을 글자 그대로 적었더니(`[공통] …`) `[]` 가 '영문·숫자만 든 글자 묶음' 으로 읽혀 GitHub 가 트리거를 못 읽고
+# 시작 단계에서 거절했다(startup_failure — 병합 뒤 워크플로가 끝날 때마다 빨간 실행이 쌓였다). 그래서 값은 `*` 앞붙이 패턴이고 `target_file` 은 그 패턴이 저장소 안에서 **정확히 이것 하나에만** 맞아야 하는 워크플로 파일이다.
 WORKFLOW_RUN_ALLOWED = {
-    MERGE_READY_WORKFLOW: {"workflows": ["[공통] 병합 부탁 PR 자동 만들기"],
+    MERGE_READY_WORKFLOW: {"workflows": ["*병합 부탁 PR 자동 만들기"], "target_file": ".github/workflows/auto-pr.yml",
                            "branches": ["ai/claude/M[0-9][0-9][0-9]-*", "ai/claude/M[0-9][0-9][0-9][0-9]-*"],
                            "decide": _AUTO_NOTICE_RUN + "merge-ready", "send": _AUTO_NOTICE_RUN + "send"},
-    MERGE_CONFIRM_WORKFLOW: {"workflows": ["[공통] 저장소 규칙·테스트 자동 검사"],
+    MERGE_CONFIRM_WORKFLOW: {"workflows": ["*저장소 규칙·테스트 자동 검사"], "target_file": ".github/workflows/guardrails.yml",
                              "branches": ["main"],
                              "decide": _AUTO_NOTICE_RUN + "merge-confirm", "send": _AUTO_NOTICE_RUN + "send"},
 }
+_WORKFLOW_NAME_PATTERN_SPECIAL = frozenset("[]?+\\!")     # 필터 패턴의 특수 글자 — 이 저장소의 workflow_run.workflows 는 글자 그대로의 글자와 `*` 한 개만 쓴다
 _WORKFLOW_RUN_ACTIONS = frozenset({"actions/checkout", "actions/setup-python"})          # 외부 액션은 이 저장소의 다른 워크플로가 이미 쓰는 두 가지뿐(github-script 같은 `script:` 입력이 있는 액션은 없다)
 _WORKFLOW_RUN_REFS = frozenset({"${{ github.event.repository.default_branch }}", "main"})  # 체크아웃 ref — 기본 가지뿐(가지·PR 머리의 값이 아니다)
 _WORKFLOW_RUN_CHECKOUT_WITH = frozenset({"ref", "persist-credentials", "fetch-depth"})
@@ -1283,6 +1287,47 @@ _WORKFLOW_RUN_JOB_KEYS = {DECIDE_JOB: frozenset({"name", "runs-on", "timeout-min
 _WORKFLOW_RUN_STEP_KEYS = frozenset({"name", "id", "uses", "with", "env", "run", "if"})      # 허용 목록의 파일이 단계에 가질 수 있는 키 전부(shell·working-directory·continue-on-error 같은 것은 없다)
 
 
+def workflow_name_pattern_problem(pattern):
+    """`on.workflow_run.workflows` 항목 하나의 모양 문제 문구 또는 None(결함 D-428).
+
+    GitHub 는 이 칸을 **이름이 아니라 필터 패턴**으로 읽는다(공식 문서 '필터 패턴 요약'의 문구 — 경로·가지·태그·**워크플로 이름** 필터가 같은 문법이라고 적혀 있고 실제로 거절된 사건과 임시 가지 실험이 받친다. 병합 뒤 첫 관측이 마지막 확인): `*`·`**`·`?`·`+`·`[]`·`!` 가 특수 글자이고 `[]` 는 영문·숫자만 든
+    글자 묶음이다. 이름 앞의 `[공통] ` 을 그대로 적으면 '[공통]' 이 한글 묶음이라 시작 단계에서 `Encountered an issue parsing workflow trigger(s)`(startup_failure)로 거절된다 — 병합 알림 둘이 병합된 날부터
+    워크플로가 끝날 때마다 빨간 실행이 쌓였다. 그래서 이 저장소는 글자 그대로의 글자와 `*` 한 개(앞붙이·뒤붙이)만 허용한다."""
+    if not isinstance(pattern, str) or not pattern.strip():
+        return "비어 있는 항목입니다"
+    if pattern != pattern.strip():
+        return "앞뒤 공백이 있습니다 — 이름과 맞지 않거나 패턴이 엉뚱하게 읽힐 수 있습니다"
+    special = sorted({ch for ch in pattern if ch in _WORKFLOW_NAME_PATTERN_SPECIAL})
+    if special:
+        return (f"필터 패턴의 특수 글자({' '.join(special)})가 있습니다 — GitHub 는 이 칸을 패턴으로 읽어 `[]` 에는 영문·숫자만 허용하고 `[공통]` 같은 이름은 시작 단계에서 거절합니다(D-428). "
+                "이름 앞부분은 `*저장소 규칙·테스트 자동 검사` 처럼 `*` 앞붙이로 받으세요")
+    if pattern.count("*") > 1:
+        return "`*` 는 한 개까지만 씁니다(패턴이 넓어져 다른 워크플로까지 깨울 수 있습니다)"
+    if pattern.replace("*", "") == "":
+        return "`*` 만 있는 패턴은 저장소의 모든 워크플로에 맞습니다 — 글자 그대로의 부분을 함께 적으세요"
+    return None
+
+
+def workflow_name_matches(pattern, name):
+    """`workflow_name_pattern_problem` 이 통과시키는 모양의 패턴(글자 그대로 + `*` 한 개)이 워크플로 이름에 맞는지 — GitHub 와 같게 `*` 는 `/` 를 뺀 아무 글자 0개 이상."""
+    return re.fullmatch("[^/]*".join(re.escape(part) for part in pattern.split("*")), name) is not None
+
+
+def _workflow_name_map(root, rel_paths):
+    """{워크플로 파일 경로: name 글} — workflow_run 패턴이 저장소 안에서 어느 워크플로에 맞는지 세는 데 쓴다. 읽지 못하거나 name 이 글이 아닌 파일은 뺀다."""
+    names = {}
+    if yaml is None:
+        return names
+    for rel in rel_paths:
+        try:
+            data = _load_yaml(read_text(root, rel) or "")
+        except yaml.YAMLError:
+            continue
+        if isinstance(data, dict) and isinstance(data.get("name"), str):
+            names[rel] = data["name"]
+    return names
+
+
 def _squash(value):
     """식·조건 비교용: 문자열이면 공백을 하나로 접는다(YAML 줄 나눔·들여쓰기 차이를 무시), 아니면 그대로."""
     return " ".join(value.split()) if isinstance(value, str) else value
@@ -1295,7 +1340,7 @@ def _step_kind(step):
     return "run" if isinstance(step.get("run"), str) else "?"
 
 
-def _workflow_run_problems(data, spec):
+def _workflow_run_problems(data, spec, names=None):
     """`on: workflow_run` 워크플로가 지킬 것의 위반 문구 목록(WF-16). spec 이 있으면(허용 목록에 있는 파일) 따라 도는 워크플로·가지 필터·run 명령·job 구조가 정해진 값과 같아야 하고, 없으면 그 짝 맞추기는
     건너뛴다(허용 목록 밖 파일은 호출한 쪽이 따로 오류를 낸다 — 아래 모양 규칙은 모든 workflow_run 워크플로에 같다).
 
@@ -1324,10 +1369,23 @@ def _workflow_run_problems(data, spec):
         problems.append("workflow_run 에는 가지 필터 `branches`(비어 있지 않은 목록)가 있어야 하고 `branches-ignore` 는 쓰지 않습니다 — 필터가 없으면 모든 가지의 실행이 이 워크플로를 깨웁니다")
     workflows = config.get("workflows")
     if not (isinstance(workflows, list) and workflows and all(isinstance(item, str) and item.strip() for item in workflows)):
-        problems.append("workflow_run 의 workflows 는 따라 도는 워크플로 이름의 비어 있지 않은 목록이어야 합니다")
+        problems.append("workflow_run 의 workflows 는 따라 도는 워크플로 이름 패턴의 비어 있지 않은 목록이어야 합니다")
+    else:
+        for item in workflows:                                                  # D-428: 이 칸은 필터 패턴이다 — `[공통] …` 처럼 대괄호가 든 이름은 GitHub 가 시작 단계에서 거절한다
+            problem = workflow_name_pattern_problem(item)
+            if problem:
+                problems.append(f"workflow_run 의 workflows 항목 {_shown(item)}: {problem}")
     if spec is not None:
         if workflows != spec["workflows"]:
             problems.append(f"따라 도는 워크플로(workflows)는 정확히 {spec['workflows']} 여야 합니다(지금 {_shown(workflows)})")
+        target = spec.get("target_file")
+        if names and target in names and isinstance(workflows, list):            # 패턴이 저장소 안에서 정확히 의도한 워크플로 하나에만 맞는지(너무 넓으면 다른 워크플로가, 안 맞으면 알림이 영영 안 깨어난다)
+            valid = [item for item in workflows if isinstance(item, str) and workflow_name_pattern_problem(item) is None]
+            matched = sorted(path for path, name in names.items() if any(workflow_name_matches(item, name) for item in valid))
+            if matched != [target]:
+                shown = ", ".join(_shown(Path(path).name) for path in matched[:6]) + (f" 외 {len(matched) - 6}개" if len(matched) > 6 else "")
+                problems.append(f"workflows 패턴이 맞는 워크플로는 정확히 {target} 하나여야 합니다(지금 {shown or '없음'}) — "
+                                "안 맞으면 알림 워크플로가 영영 안 깨어나고 너무 넓으면 다른 워크플로의 끝에도 깨어납니다")
         if branches != spec["branches"]:
             problems.append(f"가지 필터(branches)는 정확히 {spec['branches']} 여야 합니다(지금 {_shown(branches)})")
     permissions = data.get("permissions")
@@ -1436,7 +1494,7 @@ def _workflow_run_problems(data, spec):
     return problems
 
 
-def _workflow_run_findings(rel, data):
+def _workflow_run_findings(rel, data, names=None):
     """파일 하나(파싱한 data)의 WF-16 결과 목록 — 허용 목록에 없으면 그 오류 하나, 그리고 모양 위반마다 하나. check_workflows 의 파일 반복과 check_workflow_run_workflows 가 함께 쓴다."""
     spec = WORKFLOW_RUN_ALLOWED.get(rel)
     found = []
@@ -1444,7 +1502,7 @@ def _workflow_run_findings(rel, data):
         allowed = ", ".join(sorted(Path(item).name for item in WORKFLOW_RUN_ALLOWED))
         found.append(err("WF-16", f"허용 목록에 없는 workflow_run 워크플로입니다 — 이 트리거는 가지·PR 의 글이 시크릿을 쥔 기본 가지의 파일로 들어오는 길이라 {allowed} 둘에만 허용합니다. "
                                 "새로 필요하면 운영자 승인(T3)을 받아 허용 목록(scripts/validate_repo.py 의 WORKFLOW_RUN_ALLOWED)과 규칙(docs/SECURITY_GUARDRAILS.md G-A13)을 함께 고칩니다", rel))
-    found.extend(err("WF-16", message, rel) for message in _workflow_run_problems(data, spec))
+    found.extend(err("WF-16", message, rel) for message in _workflow_run_problems(data, spec, names))
     return found
 
 
@@ -1455,6 +1513,7 @@ def check_workflow_run_workflows(root, files):
     if yaml is None:
         return []  # PyYAML 이 없다는 경고는 WF-0(check_workflows)이 이미 낸다
     out = []
+    names = _workflow_name_map(root, _workflow_files(files))
     for rel in _workflow_files(files):
         try:
             data = _load_yaml(read_text(root, rel) or "")
@@ -1462,7 +1521,7 @@ def check_workflow_run_workflows(root, files):
             continue  # WF-0
         if not isinstance(data, dict) or "workflow_run" not in _triggers(data):
             continue
-        out.extend(_workflow_run_findings(rel, data))
+        out.extend(_workflow_run_findings(rel, data, names))
     return out
 
 
