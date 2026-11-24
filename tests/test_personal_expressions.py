@@ -34,11 +34,8 @@ IMAGE_TLDS = frozenset({"png", "jpg", "jpeg", "gif", "svg", "webp", "ico", "bmp"
 # 여기 적힌 파일은 허용한 종류의 값이 실제로 들어 있어야 하고(없으면 목록에서 뺀다) 허용하지 않은 종류가 늘면 빨강이다. 그 밖의 파일에는 값이 없어야 한다.
 EXEMPT_UNTIL_AP18 = {
     "인수인계/도구/work/commit_as_author.py": ("이름", "메일"),     # 도구의 고정 작성자(상수 원본)
-    "인수인계/도구/work/mk_merge_branch.py": ("이름", "메일"),
-    "인수인계/도구/work/scratch/mk_lane_merge.py": ("이름", "메일"),
-    "인수인계/도구/work/scratch/mk_lane_merge_desktop.py": ("이름", "메일"),
     "tests/test_handoff_tools.py": ("이름",),                      # 고정 작성자를 기대하는 시험(도구와 한 쌍) — 이름만, 메일은 안 된다
-    "_config.yml": ("메일",),                                      # 공개 사이트 연락처(F078 후보 — 광고 표면·공개 설정이라 이번 승인 밖) — 그것도 email 키 한 줄에만
+    "_config.yml": ("메일",),                                      # 공개 사이트 연락처(F078 후보 — 확인 032 ① 의 #13 에 들지만 광고 표면과 맞닿은 공개 설정이라 보여 줄 주소를 운영자가 정한 뒤 따로 병합) — 그것도 email 키 한 줄에만
 }
 CONFIG = "_config.yml"
 

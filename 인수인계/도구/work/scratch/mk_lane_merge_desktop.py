@@ -10,6 +10,7 @@
 푸시·병합 부탁은 하지 않는다 — 병합 가지는 독립 검증이 끝난 뒤에만 만들고, 그 뒤 절차는 인수인계/도구/README.md 의 '병합 부탁 보내기'를 따른다.
 """
 import os
+import re as _re
 import subprocess
 import sys
 from pathlib import Path
@@ -20,8 +21,9 @@ REPO = str(WORK / "cd_repo")
 COMMIT_TOOL = str(WORK / "commit_as_author.py")
 WT_PREFIX = "cd_wt_"
 
-ENV = dict(os.environ, GIT_AUTHOR_NAME="강병수", GIT_AUTHOR_EMAIL="shine88pc@gmail.com",
-           GIT_COMMITTER_NAME="강병수", GIT_COMMITTER_EMAIL="shine88pc@gmail.com")
+_AUTHOR = (Path(__file__).resolve().parent.parent / "commit_as_author.py").read_text(encoding="utf-8")     # 고정 작성자는 commit_as_author.py 의 상수 하나만 쓴다(확인 032 승인 — 이 도구에 개인 값을 따로 두지 않는다)
+_NAME, _MAIL = (_re.search("GIT_AUTHOR_" + _key + '="([^"]+)"', _AUTHOR).group(1) for _key in ("NAME", "EMAIL"))
+ENV = dict(os.environ, GIT_AUTHOR_NAME=_NAME, GIT_AUTHOR_EMAIL=_MAIL, GIT_COMMITTER_NAME=_NAME, GIT_COMMITTER_EMAIL=_MAIL)
 
 
 def git(*args, cwd=REPO, check=True):
