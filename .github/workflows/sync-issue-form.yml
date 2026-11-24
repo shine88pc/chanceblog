@@ -35,7 +35,7 @@ jobs:
           python-version: '3.12'
 
       - name: 의존성 설치
-        run: python -m pip install -r requirements-edits.txt
+        run: python -m pip install -c constraints-py312.txt -r requirements-edits.txt
 
       - name: pages.json 과 이슈 양식 동기화
         run: |
