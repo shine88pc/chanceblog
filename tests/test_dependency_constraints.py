@@ -1081,6 +1081,7 @@ class DocsTest(unittest.TestCase):
         row = next(line for line in guide.split("\n") if line.startswith("| R4 |"))
         for word in ("버전 범위를 고정하고", "constraints-py310.txt", "constraints-py312.txt", "DEPENDENCY_PINNING.md", "DEP-3"):
             self.assertIn(word, row)
+        self.assertIn("**DEP-1**·**DEP-3**", next(line for line in guide.split("\n") if line.startswith("| W5 |")))      # 패키지 버전 규칙의 강제 칸도 DEP-3 을 말한다(독립 검증 Q 의 N6)
 
     def test_the_new_document_covers_the_procedure_the_rule_and_the_limits(self):
         doc = text_of("docs/DEPENDENCY_PINNING.md")
@@ -1100,6 +1101,41 @@ class DocsTest(unittest.TestCase):
         defects = re.findall(r"^\| \*\*(D-\d+)\*\* \|", register, re.M)
         positions = [defects.index(f"D-{number}") for number in range(461, 466)]
         self.assertEqual(positions, list(range(positions[0], positions[0] + 5)))            # 다섯 행이 번호 순서로 이어져 있다(뒤에 다른 묶음의 행이 붙어도 된다)
+
+    def test_the_rework_defect_rows_are_there_once_each_after_the_first_five_and_in_number_order(self):
+        """재작업(독립 검증 S·Q 의 지적)의 결함 행 D-481–D-484 — 한 번씩, 처음 다섯 행 뒤에, 번호 순서로(사이에 다른 묶음의 행이 끼어도 된다)."""
+        register = text_of("docs/DEFECT_REGISTER.md")
+        for number in range(481, 485):
+            rows = [line for line in register.split("\n") if line.startswith(f"| **D-{number}** |")]
+            self.assertEqual(len(rows), 1, number)
+            for forbidden in ("{{", "~", "http://", "https://"):
+                self.assertNotIn(forbidden, rows[0], (number, forbidden))
+        defects = re.findall(r"^\| \*\*(D-\d+)\*\* \|", register, re.M)
+        positions = [defects.index(f"D-{number}") for number in list(range(461, 466)) + list(range(481, 485))]
+        self.assertEqual(positions, sorted(positions))
+
+    def test_the_first_defect_row_says_the_linux_check_is_done_and_names_what_stays_outside(self):
+        """D-461 이 끝난 일(리눅스 러너 점검)을 남은 일로 적지 않고, 상태 단어를 D-10 의 '해결' 과 같게 풀어 쓴다(독립 검증 S 의 R4·Q 의 R3)."""
+        register = text_of("docs/DEFECT_REGISTER.md")
+        row = next(line for line in register.split("\n") if line.startswith("| **D-461** |"))
+        self.assertIn("| **해결**(범위 안 고정; `pip` 자신·`actionlint-py`·해시 고정은 이 변경 밖) |", row)
+        self.assertIn("임시 가지 검증은 끝났다", row)
+        self.assertIn("완료(2026-11-24", row)
+        self.assertIn("linux_check_result.md", row)
+        for stale in ("**남은 것**: 병합 전", "| **완화** |"):
+            self.assertNotIn(stale, row)
+
+    def test_the_limits_paragraph_names_the_shapes_that_pass_without_an_error(self):
+        """§3 의 한계에 '오류도 없이 지나가는 모양'(안전 검증 S 의 R2 a–f, 시험 검증 Q 의 N7)이 말로 적혀 있고 색인 옵션 거절은 승인 밖이라 두지 않았다고 밝힌다."""
+        doc = text_of("docs/DEPENDENCY_PINNING.md")
+        self.assertIn("오류도 없이 지나가는 모양", doc)
+        paragraph = doc[doc.index("오류도 없이 지나가는 모양"):doc.index("## 4.")]
+        for word in ("명령 이름을 변수로", "$PIP install", "sudo python -mpip", "명령 치환", "CONSTRAINTS=/dev/null", "--index-url", "--extra-index-url", "--find-links", "pip config set", "PIP_INDEX_URL",
+                     "pipx install", "shell:", "승인 범위 밖"):
+            self.assertIn(word, paragraph, word)
+        self.assertIn("(a)", paragraph)
+        self.assertIn("(g)", paragraph)
+        self.assertIn("`-mpip` 처럼 붙여 쓴 것도", doc)                      # 코드가 읽는 모양은 규칙 설명에 적혀 있다
 
 
 if __name__ == "__main__":

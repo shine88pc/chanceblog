@@ -49,7 +49,7 @@
 | W2 | 신뢰할 수 없는 값은 **`env:`로 받아 `"$VAR"`로 쓴다**(`run:`에 GitHub 표현식(달러 기호+이중 중괄호)을 직접 보간 금지 — env·단계 출력·job 출력·matrix 를 거친 값과 `actions/github-script` 의 `script` 입력도 같다: 신뢰할 수 없는 값이 거쳐 온 것으로 알 수 있으면 오류, 출처를 알 수 없으면 경고 — 맵을 통째로 읽는 `toJSON(env)`·`env.*` 도 오염된 항목이 있으면 오류·없어도 경고. 한계: 지역 복합 액션 파일과 그리로 넘기는 `with` 값·2단 이상의 job 사슬·이벤트 파일을 읽는 단계는 입력을 받은 것으로 세지 못한다) | **WF-4** |
 | W3 | 모든 job에 `timeout-minutes`, 스케줄 워크플로에 `concurrency` | **WF-7·WF-8** |
 | W4 | `\|\| true`, `continue-on-error`로 실패를 숨기지 않는다. 필요한 재시도는 명시적 루프로. **예외는 알림 단계 하나**: run 이 정확히 `python -m pipeline.notify <이벤트> [--commit …]` 한 줄이고 `timeout-minutes` 가 있는 단계는 `continue-on-error: true` 를 써도 된다(알림은 보조라 게시 실행을 실패시키면 안 되고, 알림 명령이 스스로 `::warning::` 으로 실패를 드러낸다) | **WF-6**(예외 조건 포함) |
-| W5 | 외부 액션은 SHA 고정, 패키지는 버전 범위 | **WF-5**·**DEP-1** |
+| W5 | 외부 액션은 SHA 고정, 패키지는 버전 범위 | **WF-5**·**DEP-1**·**DEP-3** |
 | W6 | 커밋을 push하는 워크플로가 사이트를 바꾼다면 **배포를 dispatch**한다. 예외: Chance 승인 흐름(`publish_flow: pr`)은 글을 main 이 아니라 초안 브랜치로 push 하고, 사람이 PR 을 병합할 때 생기는 push 이벤트가 배포를 실행하므로 dispatch 하지 않는다([`ARCHITECTURE.md`](./ARCHITECTURE.md) §4-4). 직접 게시 경로(commit·`gh workflow run pages.yml`)는 그대로다 | **WF-10** |
 | W7 | `schedule.cron`은 레지스트리와 같게. 수동 실행 입력(`dry_run`, `publish`(off·draft·publish 3택, 기본 draft), 대상 블로그·주제)을 제공한다 | **REG-2** |
 | W8 | 시크릿은 `secrets[...]` → `env`로만. `echo` 금지. 텔레그램 시크릿(`TELEGRAM_BOT_TOKEN`·`TELEGRAM_CHAT_ID`)은 **단계의 `env`에 같은 이름으로**만 두고 `run`·`with`·`if`·job/워크플로 `env`에는 쓰지 않는다 | **WF-9**·**REG-3**·**WF-13** |
