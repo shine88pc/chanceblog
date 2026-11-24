@@ -41,6 +41,9 @@ MUST_EXCLUDE = {
 # 뺄 때는 `_config.yml` exclude 에 더하고 MUST_EXCLUDE 로 옮긴다. 이 시험은 '뺐거나 여기 있거나' 둘 다 통과시킨다.
 STATIC_EXPOSED = {
     "README.md",
+    # 파이썬 버전별 설치 버전 고정 목록(constraints — 검증기 DEP-3, docs/DEPENDENCY_PINNING.md): 요구 파일 옆의 루트 파일이다. 사이트에서 빼려면 `_config.yml` 의 exclude 가 필요한데
+    # 그 파일은 광고 표면(레지스트리 protected_paths)이고 exclude 목록은 병합 정책의 SITE_INTERNAL_ENTRIES 와 짝이라 이 변경 밖이다 — 그래서 일부러 열어 둔 파일로 적는다(운영자에게 알림).
+    "constraints-py310.txt", "constraints-py312.txt",
 }
 AD_SCRIPT = ('<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6035749437698387"\n'
              '     crossorigin="anonymous"></script>')

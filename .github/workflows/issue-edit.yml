@@ -71,7 +71,7 @@ jobs:
       - name: 의존성 설치
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements-edits.txt
+          python -m pip install -c constraints-py312.txt -r requirements-edits.txt
 
       # 이슈 양식의 라벨은 저장소에 이미 있어야 적용된다. 없으면 만든다(있으면 갱신).
       - name: 처리 경로 라벨 보장

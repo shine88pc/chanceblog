@@ -52,7 +52,7 @@ jobs:
       - name: 의존성 설치
         run: |
           python -m pip install --upgrade pip
-          pip install "google-genai>=2,<3"
+          pip install -c constraints-py310.txt "google-genai>=2,<3"
 
       - name: 기존 글 이미지 교체 실행
         env:

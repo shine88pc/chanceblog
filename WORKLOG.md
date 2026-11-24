@@ -7,6 +7,34 @@
 
 ---
 
+## [2026-11-24] Claude – AP7I: 의존성 설치 버전 묶기 구현(확인 034 ① 승인) — 파이썬별 constraints 파일 둘·설치 줄 10곳의 -c·검증기 새 규칙 DEP-3·시험 105개·문서 (T3, 결함 D-461–D-465·D-481–D-484)
+
+**작업자**: Claude (구현자 하위 에이전트가 WIP 커밋 여섯으로 구현하고, 독립 확인 둘(안전 S·시험 Q)의 권고를 새 구현자가 WIP 커밋 열한 개(7–17)로 반영했다. 독립 확인은 구현자와 다른 AI 둘(안전 렌즈 S·시험 렌즈 Q)이 했고 재작업분(델타)도 같은 두 렌즈가 다시 확인했다. 병합 가지는 총괄이 한 커밋으로 합쳤고 안전 장치 문서 네 곳의 문장은 총괄이 맞췄다)
+**대상**: 새 파일 `constraints-py310.txt`(버전 줄 37)·`constraints-py312.txt`(버전 줄 36), 워크플로 열 파일의 설치 줄(`.github/workflows/` 의 `blogger.yml`·`naver.yml`·`tistory.yml`·`issue-edit.yml`·`pr-scope-check.yml`·`sync-issue-form.yml`·`chanceblog.yml`·`chance-fix-images.yml`·`chance-shadow.yml`·`guardrails.yml` — 설치 줄과 guardrails 의 환경 변수 한 칸만), `scripts/validate_repo.py`(새 규칙 DEP-3·DEP-1 따옴표 한 줄), 새 시험 `tests/test_dependency_constraints.py`·바꾼 기존 시험 `tests/test_package_workflows.py`·`tests/test_site_cleanup.py`, 문서 `docs/DEPENDENCY_PINNING.md`(새)·`docs/ENGINEERING_GUIDE.md` R4 한 줄·`docs/DEFECT_REGISTER.md`·`docs/SECURITY_GUARDRAILS.md`·`docs/ARCHITECTURE.md`
+**등급**: T3 — `.github/workflows/` 와 검증기를 건드린다(확인 034 보기 ① 승인 범위: 변경안 A 한 건과 병합 전 임시 가지 검증 한 번 — 운영자 이슈 #258, 2026-11-24). 요구 파일 셋(`requirements-dev.txt`·`requirements-edits.txt`·`requirements-pipeline.txt`)은 한 글자도 바꾸지 않았고(blob 해시 같음) 워크플로의 권한·시크릿·트리거·`if`·`uses`·다른 줄도 그대로다.
+**목적**: 운영자 11-24 채팅 지시(AP7)에 따라 요구 파일의 범위 지정은 유지하고, 격리 환경에서 범위 그대로 설치해 전체 시험(10,463개)을 통과한 실제 버전만 파이썬별 constraints 파일로 묶는다. 같은 범위 안에서도 예약 실행이 어느 날 갑자기 다른 버전을 받는 일을 막고, 파이썬 3.10 과 3.12 가 이미 서로 다른 google-genai(2.33.0·2.34.0)를 푸는 사실을 코드에 못박는다.
+
+### 변경 사항
+- **constraints 파일 둘**: `이름==버전` 줄만(주석 네 줄 + 버전 줄). 버전 줄은 총괄이 11-24 격리 설치로 얻고 GitHub 리눅스 러너(파이썬 3.10.22·3.12.16)에서 같은 버전으로 설치됨을 임시 가지에서 확인한 목록과 순서까지 같다. 쓰는 법은 `pip install -c constraints-py312.txt -r requirements-….txt`.
+- **설치 줄 열 곳**: 요구 파일을 설치하는 줄과 인라인 `google-genai` 설치 줄에 그 파이썬용 `-c` 만 더했다(3.12: blogger·naver·tistory·issue-edit·pr-scope-check·sync-issue-form, 3.10: chanceblog·chance-fix-images·chance-shadow, 3.10·3.12 매트릭스: guardrails 는 단계 환경 변수 `CONSTRAINTS` 의 식으로 번호를 고르고 `run:` 안에는 식을 끼우지 않는다). 새 `-c` 조각만 되돌리면 YAML 이 기준과 같다는 것을 구현자가 확인했다.
+- **검증기 새 규칙 DEP-3(오류)**: 워크플로의 모든 `pip install` 줄이 요구 파일·패키지를 설치하면서 그 단계의 파이썬 번호에 맞는 `-c` 를 갖는지, constraints 파일이 `이름==버전` 한 줄씩이고 이름이 중복되지 않는지, 요구 파일의 모든 직접 요구가 목록에 있고 버전이 요구 범위(PEP 440 비교를 직접 구현) 안인지 본다. 읽지 못하는 모양은 통과가 아니라 오류다. DEP-1(경고)은 따옴표 친 `"$CONSTRAINTS"` 를 범위 없는 패키지로 읽어 경고가 3 → 4 가 되는 것을 막으려 바깥 따옴표를 벗기고 읽는 한 줄만 고쳤다(따옴표 친 진짜 패키지 이름은 여전히 경고).
+- **시험**: 새 모듈 `tests/test_dependency_constraints.py` 105개(구현자 104개 + 병합 가지에서 총괄이 더한 안전 장치 문서 문장 시험 1개: 데이터·실제 저장소·워크플로 설치 줄·DEP-3 변이·DEP-1 따옴표·갱신 절차 문서). 기존 시험 둘은 강화만: `test_package_workflows`(네이버·티스토리 설치 단계 단언을 부분 글에서 새 줄 전체로), `test_site_cleanup`(맨 위 파일 분류 시험이 새 파일 둘을 '일부러 그대로 여는 정적 파일'로 받도록 허용 목록에 이름 두 개 — 단언은 한 줄도 안 바뀜).
+- **문서**: `docs/DEPENDENCY_PINNING.md`(새 — 만드는 법·갱신 절차(월 1회와 보안 공지 때, 외부 접속은 번호 있는 확인 뒤)·검증 방법), `docs/ENGINEERING_GUIDE.md` R4 한 줄, 결함 D-461–D-465 다섯 행. 총괄이 병합 가지에서 맞춘 곳: `docs/SECURITY_GUARDRAILS.md` G-A5 행과 6장 규칙 매핑표의 DEP-3 행, `docs/DEFECT_REGISTER.md` D-10 행(요구 파일 정확 버전은 constraints 로 묶음 — 상태 '해결'), `docs/ARCHITECTURE.md` 의 정적 공개 예외 문장.
+
+### 검증 증거
+- 구현자(1차): 새 모듈 77개 3.12(PyYAML)·3.10 통과, 건드린 파일을 글자 그대로 읽는 117개 모듈을 3.12(PyYAML)에서 돌려 시험 6,375개 중 1건이 빨강이었고(병합 정책 모듈의 이름을 정책 파일 밖에서 부르지 못하게 지키는 기존 시험 — 새 시험 한 개를 빼서 고침) 고친 뒤 통과, 핵심 24개 모듈 3.10 통과(1,071개), 검증기 오류 0·경고 3(PyYAML 없는 이 PC 시스템 3.12 는 수정 전과 같은 4). 새 시험은 고치기 전 사본에서 모두 빨강. 코드 변이 29개·데이터 변이 29개가 모두 잡히고, 무작위 입력 6만 개(셸 줄 조각·따옴표·백슬래시·NUL·BOM 등)에서 예외 0.
+- 독립 확인 1차(병합 가지 f2f9174 기준): 안전 렌즈 S pass(필수 0·권고 4·참고 8)·시험 렌즈 Q pass(필수 0·권고 4·참고 14). 권고는 재작업(WIP 7–17)으로 모두 닫았다 — pip 하위 명령 읽기의 틈(값을 받는 전역 옵션의 값이 하위 명령 낱말이면 `-c` 없는 설치를 놓침·붙여 쓴 `-mpip`·옵션 줄임말, D-481)·숨은 설치 읽기와 앞머리 대입 건너뛰기를 제곱 시간에서 선형 시간으로(D-482)·한계 문단(D-483)·시험 공백 여덟(D-484)·D-461 정정. 재작업 뒤 새 모듈 104개가 3.12(PyYAML)·3.10·PyYAML 없는 3.12 에서 통과(PyYAML 없는 쪽은 워크플로를 읽는 36개 건너뜀)하고, 변이 121개 중 118개가 잡혔다(남은 둘은 동치와 의도된 정상 갱신). 새 규칙은 더하지 않았다(색인 옵션 거절은 승인 밖이라 후속 T3 제안). **재작업분의 독립 확인(구현 머리 4133d81 기준 델타)**: 안전 S pass(필수 0·권고 2·참고 8) — 권고 W1(pip 의 `--log` 별칭 `--log-file`·`--local-log` 를 값 옵션으로 못 읽어 `-c` 없는 설치가 통과)은 WIP 17 로 닫았고(진짜 pip 파서에서 값 옵션을 읽어 견주는 시험 추가), 권고 W2(낱말 하나가 아주 긴 줄에서 표준 shlex 가 제곱 시간 — 이번 델타가 만든 것이 아님, 96만 자에 CPU 17–22초라 10분 제한 안)는 알려 둔 한계다 — 시험 Q pass(필수 0·권고 3·참고 6) — 시험 틈 셋(겹치는 줄임말 판정·숨은 설치 오류 문구의 `_shown`·`pip3.12 install`·`python -m pip3`·`pip download` 모양)은 후속 작은 시험 보강으로 둔다.
+- 리눅스 러너(총괄, 임시 가지 한 번 — 점검 뒤 가지 삭제): 같은 줄로 파이썬 3.10.22·3.12.16 에서 요구 파일 셋과 인라인 설치가 모두 설치되고 설치 버전이 목록과 같으며 `pip check` 통과, 접속 없는 SDK 호출 모양 점검 통과(`audit6/improve/ap7/linux_check_result.md`). 이 병합 가지의 검사(CI)가 새 설치 줄과 `actionlint` 를 처음으로 실제 러너에서 돌린다.
+- 독립 확인과 합친 나무 확인 결과는 이 병합의 병합 요청 글에 적는다.
+
+### 남은 이슈 / 다음 AI 주의
+- **새 루트 파일 둘이 사이트에 정적 파일로 공개된다**(공개 저장소에 이미 있는 패키지 이름·버전뿐). `_config.yml` 은 광고 표면이라 이 변경에서 만지지 않고 `tests/test_site_cleanup.py` 의 허용 목록에 적었다. 사이트에서 빼려면 별도 T3 가 필요하다(`_config.yml` exclude 와 병합 정책의 SITE_INTERNAL_ENTRIES 와 시험 상수 이동). `.github/CODEOWNERS` 에도 `/requirements*.txt` 만 있고 constraints 는 없다(한 줄, 별도 T3).
+- `requirements-pipeline.txt` 3행 주석('파이썬 3.10/3.12 모두에서 같은 버전으로 풀리는 것을 확인함')은 이번 실측(3.10 은 google-genai 2.33.0, 3.12 는 2.34.0)과 어긋난 옛 문장이다 — 요구 파일 불변 지시라 고치지 않았다(병합 뒤 별도 변경).
+- `actionlint-py==1.7.12.25` 와 `pip install --upgrade pip` 는 이번 묶음 밖이다(확인 032 #9 와 함께 다룬다). pip 는 요구·제약 파일을 시스템 인코딩으로 읽으므로 한글 윈도에서 로컬로 `-c` 를 쓸 때는 `PYTHONUTF8=1` 을 둔다(리눅스 러너는 영향 없음).
+- 다른 갈래가 요구 파일에 패키지를 더하거나 워크플로에 `pip install` 을 더하면 DEP-3 이 오류를 낸다 — 두 constraints 목록에도 더하고 `-c` 를 붙인다(`docs/DEPENDENCY_PINNING.md`). `pr-scope-check.yml`·`issue-edit.yml` 은 기본 가지를 체크아웃해 설치하므로 constraints 파일이 main 에 들어간 뒤에야 맞는다(이 병합이 들어가는 순간부터).
+
+---
+
 ## [2026-11-24] Claude – AP11 보고: 검사(CI) 속도 측정 6회 기록과 병렬 시험 실행기 변경안의 근거, 확인 035 ③('프로그램 완성' = 앱 v1.0 까지) 문서 반영 (T0 — 문서만)
 
 **작업자**: Claude (총괄이 직접 — 문서만이라 구현 하위 에이전트 없음)
