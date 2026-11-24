@@ -17,6 +17,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import types
 import unittest
@@ -141,9 +142,10 @@ class WaitTest(unittest.TestCase):
         # 부모 시험이 필요한 일(진행 줄 찍기·앞 묶음 넘기기·오류 뒤 정리)을 마치고 신호 파일을 만들 때까지 기다린다 — 시계에 기대지 않는다. 신호가 안 오면 25초 뒤 스스로 실패한다.
         # 설명 문장(docstring)을 일부러 쓰지 않는다: 그러면 시험 이름 줄이 시작하자마자 한 줄로 읽혀 '아직 읽은 시험 줄 없음' 이 시간에 따라 달라진다 — 없으면 이름 줄은 끝나야 읽힌다.
         go = Path(os.environ["FAKE_GO_FILE"])
-        deadline = time.monotonic() + 25
+        deadline = time.monotonic() + float(os.environ.get("FAKE_WAIT_SECONDS", "25"))
         while not go.exists():
             if time.monotonic() > deadline:
+                Path(str(go) + ".timeout").write_text("timed out")                      # 끝내진 것이 아니라 시간이 다 되어 스스로 끝났다는 표시
                 self.fail("the go file never appeared")
             time.sleep(0.02)
 '''
@@ -244,7 +246,7 @@ from pathlib import Path
 class HoldsPipeTest(unittest.TestCase):
     def test_leaves_a_grandchild_that_holds_the_output_pipe(self):
         """시험이 끝난 뒤에도 표준 출력·오류를 물려받아 붙들고 남는 손자 프로세스를 만든다(PID 를 파일에 적어 부모 시험이 치운다)."""
-        grandchild = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        grandchild = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])
         Path(os.environ["FAKE_PID_FILE"]).write_text(str(grandchild.pid))
 '''
 EXTRA_MATCHING = '''import unittest
@@ -1444,7 +1446,8 @@ class FinishedLogicTest(unittest.TestCase):
 
 
 class PipeHeldOpenTest(unittest.TestCase):
-    """실제 손자 프로세스가 출력 줄기를 붙들고 남는 장면(검증 Q 장면 S07): 실행기는 말미(GRACE) 안에 끝난다 — 손자가 60초를 자도 기다리지 않는다."""
+    """실제 손자 프로세스가 출력 줄기를 붙들고 남는 장면(검증 Q 장면 S07): 실행기는 말미(GRACE)가 지나면 그 손자를 더는 기다리지 않고 끝난다.
+    시계에 기대지 않는다: 손자는 10분을 자므로(이 시험이 끝낼 때까지 살아 있다) 실행기가 손자를 기다린다면 이 시험이 150초 뒤 '멈춤' 으로 판정하고 손자를 끝내 풀어 준다."""
 
     def test_a_grandchild_that_holds_the_output_pipe_does_not_stall_the_run(self):
         root = make_root(dict(FAKE_FILES, **{"test_fake_holds.py": HOLDS_PIPE}))
@@ -1458,15 +1461,26 @@ class PipeHeldOpenTest(unittest.TestCase):
 
         self.addCleanup(shutil.rmtree, root, True)
         self.addCleanup(kill_grandchild)
-        with mock.patch.dict(os.environ, {"FAKE_PID_FILE": str(pid_file)}), mock.patch.object(rup.Child, "GRACE", 1.0), mock.patch.object(rup.Child, "JOIN_SECONDS", 1.0):
+        outcome = {}
+
+        def run():
             began = time.monotonic()
-            code, out = run_main("--root", str(root), "-j", "5")
-            elapsed = time.monotonic() - began
-        self.assertEqual(code, 0, out)
-        self.assertIn("시험 id 대조: 처음 모은 10개 = 실제로 돈 10개", out)
+            outcome["code"], outcome["out"] = run_main("--root", str(root), "-j", "5")
+            outcome["elapsed"] = time.monotonic() - began
+
+        with mock.patch.dict(os.environ, {"FAKE_PID_FILE": str(pid_file)}), mock.patch.object(rup.Child, "GRACE", 1.0), mock.patch.object(rup.Child, "JOIN_SECONDS", 1.0):
+            worker = threading.Thread(target=run, daemon=True)
+            worker.start()
+            worker.join(150)
+            hung = worker.is_alive()
+            if hung:                                                        # 실행기가 손자를 기다리고 있다 — 손자를 끝내 줄기를 풀어 주고 실패로 판정한다
+                kill_grandchild()
+                worker.join(60)
+        self.assertFalse(hung, "손자가 줄기를 붙들고 있는 동안 실행기가 멈췄다(말미가 지나도 넘어가지 않았다)")
+        self.assertEqual(outcome.get("code"), 0, outcome.get("out"))
+        self.assertIn("시험 id 대조: 처음 모은 10개 = 실제로 돈 10개", outcome["out"])
         self.assertTrue(pid_file.exists(), "손자가 실제로 만들어졌다")
-        self.assertGreaterEqual(elapsed, 1.0, "손자가 줄기를 붙들고 있었다 — 말미(1초)를 기다렸다(이 시험의 전제를 스스로 확인한다)")
-        self.assertLess(elapsed, 40, "손자는 60초를 자지만 실행기는 말미가 지나면 넘어간다")
+        self.assertGreaterEqual(outcome["elapsed"], 1.0, "손자가 줄기를 붙들고 있었다 — 말미(1초)를 기다렸다(이 시험의 전제를 스스로 확인한다)")
 
 
 class FlushTest(unittest.TestCase):
@@ -1505,13 +1519,11 @@ class CleanupTest(unittest.TestCase):
         def boom(index, result):
             raise RuntimeError("the hand-over callback failed")
 
-        never = root / "never.signal"                                         # 만들지 않는다 — 기다리는 시험은 25초 뒤에야 스스로 끝난다
-        with mock.patch.dict(os.environ, {"FAKE_GO_FILE": str(never)}):
-            began = time.monotonic()
+        never = root / "never.signal"                                         # 만들지 않는다 — 기다리는 시험은 100초 뒤에야 스스로 끝난다(시계 시험이 아니다: 끝내졌다면 그 표시를 남기지 못한다)
+        with mock.patch.dict(os.environ, {"FAKE_GO_FILE": str(never), "FAKE_WAIT_SECONDS": "100"}):
             with self.assertRaises(RuntimeError):
                 rup.run_plan([["test_fake_gamma"], ["test_fake_wait"]], root, Path(root, "tests").resolve(), labels, heartbeat=0, out=lambda text: None, on_ready=boom)
-            elapsed = time.monotonic() - began
-        self.assertLess(elapsed, 18, "남은 자식을 끝내고 나왔다(안 끝냈다면 기다리는 시험이 스스로 실패하는 25초를 기다린다)")
+        self.assertFalse(Path(str(never) + ".timeout").exists(), "기다리던 자식은 끝내졌다 — 안 끝냈다면 run_plan 이 그 자식이 시간이 다 되어 스스로 끝나기를 기다렸다가 이 표시가 남는다")
 
 
 class ImportOrderTest(unittest.TestCase):
