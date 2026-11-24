@@ -316,7 +316,7 @@ class ArchitectureAndGuideTest(unittest.TestCase):
     def test_nothing_forbidden_was_touched(self):
         """지시서의 '하지 말 것' 파일(ai-request.yml·operator-reply.yml·양식·`_posts`·광고 표면·generator.py·blogs.json)의 내용은 바뀌지 않았다 — 모양 시험이 이미 고정한 값들을 다시 확인한다."""
         self.assertEqual(load("ai-request.yml")["on"], {"push": {"branches": ["ai/claude/**"]}})
-        self.assertEqual(load("operator-reply.yml")["on"], {"issues": {"types": ["opened"]}})
+        self.assertEqual(load("operator-reply.yml")["on"], {"issues": {"types": ["opened", "edited"]}})        # edited: 이 작업(텔레그램 수신)이 아니라 확인 032 ①(2026-11-24, 결함 D-437)로 더해진 접수 뒤 고침 알림 — 승인 규칙·접수는 그대로
         self.assertEqual(ol.REPLY_TITLE_PREFIX, "[답변] ")
         self.assertEqual(ol.TASK_TITLE_PREFIX, "[요청] ")
         self.assertEqual(vr.check_operator_forms(ROOT, [vr.ANSWER_FORM, vr.TASK_FORM, vr.ISSUE_CONFIG]), [])

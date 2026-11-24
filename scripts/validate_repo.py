@@ -1085,9 +1085,9 @@ def _operator_workflow_problems(data, kind):
     reply = kind == "reply"
     triggers, permissions = _triggers(data), data.get("permissions")
     if reply:
-        if set(triggers) != {"issues"} or triggers.get("issues") != {"types": ["opened"]}:
-            problems.append(f"트리거는 `issues: types: [opened]` 하나뿐이어야 합니다(지금 {_shown(sorted(map(str, triggers)))}) — pull_request_target·issue_comment·workflow_run·수정·라벨 이벤트로 "
-                            "넓히면 낯선 사람이 시크릿에 닿거나 같은 이슈를 여러 번 처리하게 됩니다")
+        if set(triggers) != {"issues"} or triggers.get("issues") != {"types": ["opened", "edited"]}:
+            problems.append(f"트리거는 `issues: types: [opened, edited]` 둘뿐이어야 합니다(지금 {_shown(sorted(map(str, triggers)))}) — `edited` 는 접수가 아니라 폰 알림 한 통만 보내는 길이고(확인 032 ①), "
+                            "pull_request_target·issue_comment·workflow_run·다시 열림·라벨·삭제·옮김 같은 다른 이벤트로 넓히면 낯선 사람이 시크릿에 닿거나 같은 이슈를 여러 번 처리하게 됩니다")
         wanted_permissions = {"contents": "read", "issues": "write"}
     else:
         if set(triggers) != {"push"} or triggers.get("push") != {"branches": ["ai/claude/**"]}:

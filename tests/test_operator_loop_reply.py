@@ -694,7 +694,7 @@ class AckCliTest(unittest.TestCase):
 
     def test_events_that_are_not_a_newly_opened_issue_do_nothing(self):
         line = "운영자 응답 접수: 이 실행은 새로 열린 이슈 이벤트가 아니어서 아무것도 하지 않습니다"
-        for action in ("edited", "closed", "reopened", "labeled", "deleted", ""):
+        for action in ("closed", "reopened", "labeled", "deleted", "transferred", "Edited", ""):          # `edited` 는 확인 032 ① 로 폰 알림 한 통을 보낸다(tests/test_operator_reply_edited.py) — 대소문자가 다른 것은 여전히 아무것도 하지 않는다
             self.assert_nothing_done(*self.ack(issue_event(action=action)), line)
         for event_name in ("push", "issue_comment", "pull_request_target", "workflow_dispatch", ""):
             self.assert_nothing_done(*self.ack(issue_event(), event_name=event_name), line)

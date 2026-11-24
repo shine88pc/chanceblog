@@ -5,6 +5,7 @@
 저장소에 요청 파일(`인수인계/요청함/R-001_짧은-영문-설명.md`)을 `ai/claude/**` 브랜치로 push 하고, push 로 도는 워크플로(`[공통] AI 요청 텔레그램 알림`)가 그 파일의 제목·요약을
 운영자 휴대폰 텔레그램으로 보낸다. 운영자는 GitHub 의 New issue 메뉴에서 양식(`[답변]` 결정·확인에 답하기, `[요청]` 새 일 맡기기)으로 답하고, 이슈가 열리면 워크플로
 (`[공통] 운영자 응답 접수`)가 접수 확인(이슈 코멘트 + 텔레그램)을 보낸다. AI 세션은 그 이슈를 공개 REST 로 감시해 이어서 진행한다.
+접수는 이슈를 열 때 한 번뿐이다. 접수 뒤에 그 이슈의 제목·본문이 고쳐지면(`edited`, 확인 032 ①·결함 D-437) 접수·승인은 하지 않고 '고쳐졌습니다' 폰 알림 한 통만 보낸다(run_edited — 코멘트·라벨·GitHub 읽기와 쓰기가 없다).
 설명: docs/ARCHITECTURE.md §4-6 / 운영자용 안내: 인수인계/운영자_요청함_사용법.md / 규칙: docs/SECURITY_GUARDRAILS.md G-S9(응답 이슈 신뢰)·G-C13(푸시 알림 워크플로)
 
 원칙
@@ -26,6 +27,7 @@
 명령 줄: python -m pipeline.operator_loop <requests | ack>   (외부 값을 인자로 받지 않는다 — 값은 환경변수·git·이벤트 JSON 파일에서만 읽는다)
   requests  환경변수 BEFORE_SHA·AFTER_SHA·DEFAULT_BRANCH(워크플로가 env 로 넘김)·GITHUB_REF_NAME(러너)·TELEGRAM_BOT_TOKEN·TELEGRAM_CHAT_ID
   ack       환경변수 GITHUB_EVENT_PATH·GITHUB_EVENT_NAME·GITHUB_REPOSITORY·GITHUB_REPOSITORY_OWNER(러너)·GITHUB_TOKEN·TELEGRAM_BOT_TOKEN·TELEGRAM_CHAT_ID
+            (고쳐진 이슈 이벤트는 GITHUB_TOKEN 을 쓰지 않는다 — GitHub 에 아무 요청도 가지 않는다)
 """
 import argparse
 import http.client
@@ -1085,6 +1087,78 @@ def earlier_answer(api, number, target, owner, out):
 # ---- 응답 접수(ack) ------------------------------------------------------------------------------------
 ACK_WARNING ="::warning::운영자 응답 접수 중 일부를 하지 못했습니다. 이유는 바로 앞 로그 줄에 있습니다(이슈는 그대로이고 AI 가 읽습니다)."
 
+# 접수 뒤에 고쳐진 이슈 알림(확인 032 ①, 운영자 승인 이슈 #254, 결함 D-437): 소유자가 연 `[답변]`·`[요청]` 이슈의 제목·본문이 접수 뒤에 고쳐지면(예: `선택 안 함` → 승인 보기) 접수 코멘트(봇)는 열렸을 때의 값으로
+# 남은 채 본문만 바뀐다(docs/SECURITY_GUARDRAILS.md G-S9a). 이때는 **접수도 승인도 하지 않고 폰 알림 한 통만** 보낸다 — 코멘트·라벨·GitHub 읽기와 쓰기가 전혀 없고(AI 가 이슈를 읽을 때 접수 코멘트와 견주는 규칙은 그대로다),
+# 알림 글은 이슈 번호와 고정 문장뿐이다(notify.format_issue_edited — 이슈의 제목·본문·선택·작성자·고친 계정 이름을 싣지 않는다). 새 승인 길·새 쓰기 길·시크릿 노출 길이 아니다.
+EDIT_ACTION = "edited"
+EDIT_LOG_PREFIX = "운영자 응답 접수(고쳐짐): "
+EDIT_REFUSAL_LINES = {
+    "no_owner": "알리지 않음: 저장소 소유자를 알 수 없습니다",
+    "not_owner": "알리지 않음: 저장소 소유자 계정이 올린 이슈가 아닙니다(텔레그램 없음)",
+    "not_owner_association": "알리지 않음: 작성자 권한이 소유자(OWNER)가 아닙니다(텔레그램 없음)",
+    "not_form": "알리지 않음: 제목이 [답변]·[요청] 양식 이슈가 아닙니다",
+}
+EDIT_TEXT_KEYS = ("title", "body")          # 이슈에서 고칠 수 있는 글 — 이벤트의 changes 에는 이 두 칸의 **이전** 글(`from`)만 온다
+
+
+def edit_changed(event, issue):
+    """고쳐진 글이 실제로 있는가. 거짓은 **같은 글로 다시 저장했다고 확실할 때만**이다: 이벤트의 `changes` 가 사전이고 비어 있지 않고 제목·본문 칸만 있고 칸마다 이전 글(`from`)이 지금 글과 같을 때.
+    그 밖에는(changes 가 없거나 사전이 아님·비었음·모르는 칸·이전 글이 없거나 글이 아님·글이 다름) 참이다 — 놓치는 쪽보다 한 번 더 알리는 쪽이 낫다. 비어 있는 본문(null)은 빈 글로 본다.
+    비교는 글자 그대로다(줄 끝만 달라져도 고쳐진 것이다)."""
+    changes = event.get("changes") if isinstance(event, dict) else None
+    if not isinstance(changes, dict) or not changes or set(changes) - set(EDIT_TEXT_KEYS):
+        return True
+    for key, entry in changes.items():
+        if not (isinstance(entry, dict) and "from" in entry):
+            return True
+        before, now = entry["from"], issue.get(key)
+        before, now = "" if before is None else before, "" if now is None else now
+        if not isinstance(before, str) or not isinstance(now, str) or before != now:
+            return True
+    return False
+
+
+def editor_is_owner(event, owner):
+    """이벤트의 고친 계정(`sender.login`)이 저장소 소유자인가: 계정 이름 모양이고 ASCII 영문 대소문자만 무시하고 같을 때만 참(`ſhine88pc` 같은 닮은 글자는 거짓). 칸이 없거나 모양이 다르면 거짓(알 수 없음).
+    거르는 조건이 아니라 알림 문장을 가르는 값이다 — 소유자가 아닌 계정이 고쳤거나 알 수 없으면 더 분명히 알린다."""
+    sender = event.get("sender") if isinstance(event, dict) else None
+    login = sender.get("login") if isinstance(sender, dict) else None
+    return isinstance(login, str) and _LOGIN_RE.fullmatch(login) is not None and login.lower() == str(owner or "").lower()
+
+
+def run_edited(event, environ, notifier, out):
+    """접수 뒤에 고쳐진(`edited`) 이슈 한 개에 폰 알림 한 통을 보낸다. 종료 코드는 항상 0. 접수 코멘트·라벨·승인·GitHub 읽기와 쓰기가 전혀 없다(그래서 GITHUB_TOKEN 도 쓰지 않는다).
+    거르기(이 순서): ① 접수와 같은 신뢰 판정(parse_reply — 이슈 작성자 login 이 저장소 소유자이고 author_association 이 OWNER, 제목이 `[답변]`·`[요청]`)을 통과한 이슈만 ② 이슈 번호가 양의 정수
+    ③ 제목·본문이 실제로 달라진 편집만(edit_changed — 같은 글로 다시 저장한 것은 알리지 않는다). 소유자 이슈를 소유자가 아닌 계정이 고친 경우도 알린다(알림 문장이 달라질 뿐 — 이 알림이 가장 잡아야 할 경우다).
+    이슈의 글(제목·본문·`changes` 의 이전 글·계정 이름)은 폰·로그·요약 어디에도 싣지 않는다. 한 실행은 한 통만 보낸다."""
+    issue = event.get("issue")
+    issue = issue if isinstance(issue, dict) else {}
+    user = issue.get("user") if isinstance(issue.get("user"), dict) else {}
+    owner = _owner_of(environ)
+    result = parse_reply(issue.get("title"), issue.get("body"), user.get("login"), issue.get("author_association"), owner)
+    if isinstance(result, Refusal) and result.code in EDIT_REFUSAL_LINES:
+        out(EDIT_LOG_PREFIX + EDIT_REFUSAL_LINES[result.code])
+        return 0
+    number = issue.get("number")
+    if isinstance(number, bool) or not isinstance(number, int) or number < 1:
+        out(EDIT_LOG_PREFIX + "이슈 번호를 읽지 못해 아무것도 하지 않습니다")
+        return 0
+    if not edit_changed(event, issue):
+        out(EDIT_LOG_PREFIX + "제목·본문이 그대로라 알리지 않습니다(같은 글로 다시 저장)")
+        return 0
+    if not notifier.enabled:
+        out(notify.SKIP_LINE)
+        return 0
+    kind = notify.EDITED_TASK if str(issue.get("title") or "").startswith(TASK_TITLE_PREFIX.rstrip()) else notify.EDITED_ANSWER
+    sent = notifier.notify_issue_edited(number, kind, editor_is_owner(event, owner), buttons=[("이슈 열기", f"{notify.REPO_URL}/issues/{number}")])
+    if not sent.sent:
+        out(notifier.scrub(f"{EDIT_LOG_PREFIX}텔레그램 알림을 보내지 못했습니다 — {notify.describe(sent)}"))
+        out(ACK_WARNING)
+        return 0
+    out(EDIT_LOG_PREFIX + "텔레그램으로 고쳐졌다는 알림을 보냈습니다")
+    notify.write_summary(environ, "### 운영자 응답 접수\n\n" + f"- 이슈 #{number}: 고쳐졌다는 알림을 보냈습니다(접수·승인이 아니고 코멘트·라벨은 없습니다)", out)
+    return 0
+
 
 def read_event(environ):
     """GITHUB_EVENT_PATH 의 이벤트 JSON 을 읽는다(러너가 주는 파일). 없거나 크거나 JSON 이 아니면 None."""
@@ -1116,11 +1190,15 @@ def _owner_of(environ):
 
 
 def run_ack(environ, notifier, root, out, api=None, sleep=time.sleep):
-    """열린 이슈 한 개를 접수한다. 종료 코드는 항상 0. 소유자가 아니면 아무것도 하지 않는다(로그 한 줄). 순서: 판정 → 라벨 → 코멘트(한 번) → 텔레그램(이번에 코멘트를 새로 단 때만)."""
+    """열린 이슈 한 개를 접수한다. 종료 코드는 항상 0. 소유자가 아니면 아무것도 하지 않는다(로그 한 줄). 순서: 판정 → 라벨 → 코멘트(한 번) → 텔레그램(이번에 코멘트를 새로 단 때만).
+    접수 뒤에 고쳐진(`edited`) 이슈는 접수하지 않고 run_edited 가 폰 알림 한 통만 보낸다(승인으로 읽지 않는다). 그 밖의 이벤트(다른 이름·다른 종류)는 아무것도 하지 않는다."""
     event = read_event(environ)
-    if event is None or environ.get("GITHUB_EVENT_NAME") != "issues" or event.get("action") != "opened":
+    action = event.get("action") if event is not None else None
+    if event is None or environ.get("GITHUB_EVENT_NAME") != "issues" or action not in ("opened", EDIT_ACTION):
         out("운영자 응답 접수: 이 실행은 새로 열린 이슈 이벤트가 아니어서 아무것도 하지 않습니다")
         return 0
+    if action == EDIT_ACTION:
+        return run_edited(event, environ, notifier, out)
     issue = event.get("issue")
     issue = issue if isinstance(issue, dict) else {}
     number = issue.get("number")
@@ -1217,7 +1295,7 @@ def build_parser():
     parser = _Parser(prog="python -m pipeline.operator_loop", description="운영자 요청함(AI 의 요청 알림·응답 이슈 접수)")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("requests", help="push 한 커밋이 새로 더한 요청 파일(인수인계/요청함/)을 텔레그램으로 알린다")
-    sub.add_parser("ack", help="새로 열린 응답·요청 이슈(소유자만)를 접수 확인한다(이슈 코멘트·라벨·텔레그램)")
+    sub.add_parser("ack", help="새로 열린 응답·요청 이슈(소유자만)를 접수 확인한다(이슈 코멘트·라벨·텔레그램). 접수 뒤 고쳐진 이슈는 접수하지 않고 텔레그램 알림 한 통만 보낸다")
     return parser
 
 

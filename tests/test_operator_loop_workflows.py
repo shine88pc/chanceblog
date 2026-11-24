@@ -260,7 +260,7 @@ class OperatorReplyWorkflowTest(unittest.TestCase):
     EXPECTED = {
         "name": "[공통] 운영자 응답 접수",
         "run-name": "[공통] 운영자 응답 접수 · 이슈 #${{ github.event.issue.number }}",
-        "on": {"issues": {"types": ["opened"]}},
+        "on": {"issues": {"types": ["opened", "edited"]}},          # edited: 확인 032 ①(2026-11-24, 결함 D-437) — 접수 뒤 고쳐진 이슈에 폰 알림 한 통(코드가 이벤트 종류로 가른다, tests/test_operator_reply_edited.py)
         "permissions": {"contents": "read", "issues": "write"},
         "concurrency": {"group": "operator-reply-${{ github.event.issue.number }}", "cancel-in-progress": False},
         "jobs": {"ack": {"name": "응답 이슈 접수", "if": CONDITION, "runs-on": "ubuntu-latest", "timeout-minutes": 5, "steps": [
@@ -273,11 +273,13 @@ class OperatorReplyWorkflowTest(unittest.TestCase):
     def test_the_workflow_is_exactly_this(self):
         self.assertEqual(load("operator-reply.yml"), self.EXPECTED)
 
-    def test_only_a_newly_opened_issue_triggers_it(self):
+    def test_only_an_opened_or_edited_issue_triggers_it(self):
         on = load("operator-reply.yml")["on"]
-        self.assertEqual(on, {"issues": {"types": ["opened"]}})
+        self.assertEqual(on, {"issues": {"types": ["opened", "edited"]}})
         for event in ("issue_comment", "pull_request", "pull_request_target", "workflow_run", "push", "workflow_dispatch", "schedule"):
             self.assertNotIn(event, on)
+        for kind in ("reopened", "closed", "labeled", "unlabeled", "deleted", "transferred", "assigned", "pinned"):
+            self.assertNotIn(kind, on["issues"]["types"], kind)             # 다시 열림·라벨·삭제 같은 종류는 받지 않는다(같은 이슈를 여러 번 처리하게 된다)
 
     def test_the_job_runs_only_for_an_issue_the_owner_opened(self):
         condition = job_condition("operator-reply.yml", "ack")
@@ -629,7 +631,8 @@ class WorkflowRuleTest(unittest.TestCase):
     }
 
     REPLY_MUTATIONS = {
-        "수정 이벤트": (OPERATOR_REPLY, "types: [opened]", "types: [opened, edited]"),
+        "다른 종류를 더함": (OPERATOR_REPLY, "types: [opened, edited]", "types: [opened, edited, labeled]"),          # 옛 변이 '수정 이벤트 더함' 의 자리 — 승인된 트리거(opened·edited)에 더 얹는 것을 잡는다
+        "edited 를 뺌": (OPERATOR_REPLY, "types: [opened, edited]", "types: [opened]"),                                # 승인된 모양이 아니다(확인 032 ① 의 알림 길이 사라진다)
         "issue_comment": (OPERATOR_REPLY, "permissions:\n  contents: read\n  issues: write\n", "  issue_comment:\n    types: [created]\n\npermissions:\n  contents: read\n  issues: write\n"),
         "pull_request_target": (OPERATOR_REPLY, "permissions:\n  contents: read\n  issues: write\n", "  pull_request_target:\n    types: [opened]\n\npermissions:\n  contents: read\n  issues: write\n"),
         "workflow_run": (OPERATOR_REPLY, "permissions:\n  contents: read\n  issues: write\n", "  workflow_run:\n    workflows: ['x']\n\npermissions:\n  contents: read\n  issues: write\n"),

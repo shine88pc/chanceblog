@@ -145,8 +145,10 @@ class PullRequestScreenTest(unittest.TestCase):
         self.assertEqual(job["permissions"], {"contents": "read", "pull-requests": "write", "issues": "read"})
         self.assertEqual((job["runs-on"], job["timeout-minutes"]), ("ubuntu-latest", 10))
         self.assertEqual(job["env"], {"GH_TOKEN": "${{ secrets.GITHUB_TOKEN }}", "PR_NUMBER": "${{ github.event.pull_request.number || inputs.pr_number }}"})
-        self.assertEqual(job["steps"][0]["uses"], "actions/checkout@v6")
-        self.assertEqual(job["steps"][0]["with"], {"ref": "${{ github.event.repository.default_branch }}", "fetch-depth": 0})      # 검증 도구는 기본 브랜치 코드로(PR 쪽 코드를 실행하지 않는다)
+        self.assertEqual(job["steps"][0]["name"], "PR 번호 형식 검사")                              # 첫 단계는 수동 입력 pr_number 의 형식 검사다(확인 032 ②, 결함 D-438 — tests/test_pr_scope_number_check.py)
+        self.assertNotIn("uses", job["steps"][0])
+        self.assertEqual(job["steps"][1]["uses"], "actions/checkout@v6")
+        self.assertEqual(job["steps"][1]["with"], {"ref": "${{ github.event.repository.default_branch }}", "fetch-depth": 0})      # 검증 도구는 기본 브랜치 코드로(PR 쪽 코드를 실행하지 않는다)
         condition = " ".join(str(job["if"]).split())
         self.assertEqual(condition, "github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && !startsWith(github.head_ref, 'ai/claude/'))")
         self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", condition)      # 같은 저장소의 브랜치에서 온 PR 만(포크 코드·시크릿 노출 방지)는 그대로
