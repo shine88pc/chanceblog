@@ -9,7 +9,7 @@ CI 의 `python -m unittest discover -s tests -v` 는 시험 모듈 약 200개를
  2. 모듈을 N개 묶음으로 나눈다. 무거운 모듈부터 가장 가벼운 묶음에 넣고(같은 입력이면 늘 같은 나누기), 한 모듈의 시험은 쪼개지 않는다(클래스·모듈 준비가 깨지지 않게).
     무게는 `--weights`(모듈→초 JSON)의 값, 표에 없는 새 모듈은 표 값의 중앙값, 표가 없으면 시험 개수다. `--serial` 로 적은 모듈은 늘 같은 묶음(같은 프로세스)에서 돈다.
  3. 묶음마다 자식 프로세스 `python -m unittest -v 모듈…`(시험 폴더는 PYTHONPATH 맨 앞 — `discover` 가 import 경로 맨 앞에 넣는 것과 같다)를 띄워 병렬로 돌리고,
-    출력은 자식별로 모아 끝난 뒤 묶음 순서대로 `===== 묶음 i/N =====` 머리글과 함께 한 덩어리씩 찍는다(도는 동안은 몇 초마다 진행 줄만 찍는다).
+    출력은 자식별로 모아 두었다가 묶음이 끝나는 대로(앞 묶음이 다 찍힌 뒤에) `===== 묶음 i/N =====` 머리글과 함께 한 덩어리씩 번호 순서로 찍는다(도는 동안은 몇 초마다 진행 줄만 찍는다).
  4. 끝나면 자식 출력의 시험 줄에서 **실제로 돈 시험 이름의 모음**을 읽어 처음에 모은 것과 **정확히 같은지**(빠짐·중복·개수 합) 확인한다. 묶음 나누기 자체(모든 모듈이 정확히 한 묶음)도
     돌리기 전에 한 번, 돌린 뒤에 한 번 더 본다. 하나라도 어긋나면 시험이 모두 통과했어도 실패다. 건너뜀(skip)은 지금과 똑같이 합쳐 센다.
 
@@ -311,8 +311,11 @@ class Child:
             self.proc.kill()
 
 
-def run_plan(plan, root, tests_dir, labels, heartbeat=HEARTBEAT_SECONDS, out=None):
-    """묶음마다 자식 프로세스를 띄워 모두 끝날 때까지 기다린다. ChildResult 목록(묶음 순서)을 돌려준다."""
+def run_plan(plan, root, tests_dir, labels, heartbeat=HEARTBEAT_SECONDS, out=None, on_ready=None):
+    """묶음마다 자식 프로세스를 띄워 모두 끝날 때까지 기다린다. ChildResult 목록(묶음 순서)을 돌려준다.
+
+    on_ready(번호, 결과) 는 묶음이 끝나는 대로 번호 순서로 부른다(앞 묶음이 아직 도는 동안 끝난 묶음은 기다렸다가 앞 묶음 다음에) — 한 묶음이 멈춰도 그 앞 묶음들의 출력은 이미 로그에 있다.
+    """
     out = out or emit
     children = []
     try:
@@ -321,12 +324,16 @@ def run_plan(plan, root, tests_dir, labels, heartbeat=HEARTBEAT_SECONDS, out=Non
         began = time.monotonic()
         running = list(children)
         next_beat = began + heartbeat
+        ready = 0
         while running:
             time.sleep(0.1)
             for child in list(running):
                 if child.finished():
                     running.remove(child)
                     out(f"[진행 {time.monotonic() - began:.0f}초] 묶음 {child.index}/{len(plan)} 끝 — 종료 코드 {child.proc.returncode}, 시험 {child.count}개 시작, {child.seconds:.1f}초")
+            while on_ready is not None and ready < len(children) and children[ready] not in running:
+                on_ready(ready, children[ready].result())
+                ready += 1
             if running and heartbeat > 0 and time.monotonic() >= next_beat:
                 next_beat += heartbeat
                 parts = [f"묶음 {child.index}: " + (f"{child.count}개째 {child.last[:60]}" if child.count else "첫 시험 도는 중") for child in running]
@@ -408,8 +415,6 @@ def verify_run(tests, plan, results):
         problems.append(f"전체 대조: 처음 모은 시험 중 {sum(missing_all.values())}개가 실제로 돌지 않았습니다 — {_preview(missing_all, label_ids)}")
     if extra_all:
         problems.append(f"전체 대조: 처음 모은 것보다 {sum(extra_all.values())}개가 더(중복) 돌았습니다 — {_preview(extra_all, label_ids)}")
-    if executed_total != expected_total:
-        problems.append(f"전체 대조: 처음 모은 시험 {expected_total}개와 실제로 돈 시험 {executed_total}개의 개수가 다릅니다")
     if ran_total != expected_total:
         problems.append(f"전체 대조: 자식 요약의 시험 수 합 {ran_total} 이 처음 모은 {expected_total} 과 다릅니다")
     return Verdict(problems, failed_bins, expected_total, executed_total, ran_total, counts, reports, failures)
@@ -439,7 +444,7 @@ def module_seconds(tests, plan, results):
             owner = next((module for module in owners[label] if module in modules), owners[label][0])
             seconds[owner] += max(end - previous_end, 0.0)
             previous_end = end
-    return {module: round(value, 1) for module, value in sorted(seconds.items())}
+    return {module: max(round(value, 1), 0.1) for module, value in sorted(seconds.items())}          # 0 이하는 --weights 가 받지 않으므로 바닥을 0.1 로
 
 
 # ---------------------------------------------------------------------------
@@ -464,11 +469,11 @@ def format_plan(plan, loads, tests, how):
     return lines
 
 
-def format_block(number, total, report, planned_load, lines):
+def format_block(number, total, modules, expected, planned_load, result):
     head = [f"===== 묶음 {number}/{total} =====",
-            f"모듈 {len(report.modules)}개 · 시험 {report.expected}개 · 예상 무게 {planned_load:.1f} · 실제 {report.seconds:.1f}초 · 종료 코드 {report.returncode}",
-            f"같은 일을 직접 하려면: {repro_command(report.modules)}"]
-    return head + [text for _, text in lines] + [f"----- 묶음 {number}/{total} 끝 -----"]
+            f"모듈 {len(modules)}개 · 시험 {expected}개 · 예상 무게 {planned_load:.1f} · 실제 {result.seconds:.1f}초 · 종료 코드 {result.returncode}",
+            f"같은 일을 직접 하려면: {repro_command(modules)}"]
+    return head + [text for _, text in result.lines] + [f"----- 묶음 {number}/{total} 끝 -----"]
 
 
 def format_summary(verdict, seconds, loads=(), partial=False):
@@ -547,6 +552,9 @@ def main(argv=None):
     os.chdir(str(root))                                    # CI 처럼 저장소 루트에서(시험 모듈이 불릴 때 상대 경로를 읽는 것까지 같다)
     try:
         return _run(args, jobs, root)
+    except KeyboardInterrupt:                              # run_plan 의 finally 가 자식을 이미 모두 끝냈다
+        emit("중단됨: 시험이 다 끝나지 않았으므로 통과로 세지 않습니다(종료 코드 130)")
+        return 130
     finally:
         os.chdir(old_cwd)
 
@@ -608,13 +616,16 @@ def _run(args, jobs, root):
         emit("--plan-only: 나누기만 보였고 시험은 돌리지 않았습니다")
         return 0
     labels = {label: test_id for items in with_tests.values() for label, test_id in items}
+
+    def show(index, result):                               # 자식 출력은 묶음이 끝나는 대로(번호 순서로) 찍는다 — 대조보다 먼저라서 대조 코드가 예기치 않게 죽어도 로그는 남는다
+        modules = plan[index]
+        for line in format_block(index + 1, len(plan), modules, sum(len(with_tests[module]) for module in modules), loads[index], result):
+            emit(line)
+
     began = time.monotonic()
-    results = run_plan(plan, root, tests_dir, labels, heartbeat=args.heartbeat)
+    results = run_plan(plan, root, tests_dir, labels, heartbeat=args.heartbeat, on_ready=show)
     seconds = time.monotonic() - began
     verdict = verify_run(with_tests, plan, results)
-    for report, result, load in zip(verdict.reports, results, loads):
-        for line in format_block(report.index, len(plan), report, load, result.lines):
-            emit(line)
     for line in format_summary(verdict, seconds, loads, partial=bool(args.only)):
         emit(line)
     if args.timings_out:

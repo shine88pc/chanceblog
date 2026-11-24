@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from collections import Counter
 from pathlib import Path
@@ -190,7 +191,6 @@ def run_main(*args):
 # 1. 출력 읽기
 # ----------------------------------------------------------------------------
 LABELS = {"test_a (mod.A.test_a)": "mod.A.test_a", "test_b (mod.A.test_b)": "mod.A.test_b", "test_old (mod.B)": "mod.B.test_old"}
-SUMMARY_OK = ["", "-" * 70, "Ran 3 tests in 0.004s", "", "OK"]
 
 
 class ParseTest(unittest.TestCase):
@@ -280,6 +280,14 @@ class WeightsTest(unittest.TestCase):
         self.assertEqual(unknown, ["new"])
         self.assertEqual(weights, {"a": 1.0, "b": 9.0, "c": 4.0, "new": 6.5})            # 표 값 1·4·9·100 의 중앙값 6.5(표에만 있는 모듈 'gone' 도 중앙값에 든다)
 
+    def test_the_shipped_table_does_not_spell_out_the_name_of_the_ai_merge_rule_module(self):
+        """AI 병합 정책 모듈의 이름 글자가 저장소 파일에 그대로 있으면 NotWiredTest(tests 의 정책 문서 시험, '아무도 이 모듈을 부르지 않는다')가 빨개진다.
+        그래서 그 이름이 든 시험 모듈 둘은 표에 적지 않았다(표에 없는 모듈은 중앙값을 받으니 시험은 빠지지 않는다). 표를 다시 만들 때 그 둘을 넣지 않는다."""
+        text = WEIGHTS.read_text(encoding="utf-8")
+        self.assertNotIn("merge_" + "policy", text)
+        table, _ = rup.load_weights(WEIGHTS)
+        self.assertGreater(len(table), 150)
+
     def test_the_shipped_table_is_valid_and_names_test_modules(self):
         table, reason = rup.load_weights(WEIGHTS)
         self.assertIsNone(reason)
@@ -317,7 +325,8 @@ class PlanTest(unittest.TestCase):
         self.assertEqual([spread(WEIGHTS_ALPHA, 4) for _ in range(3)], [reference] * 3)
 
     def test_the_heaviest_modules_start_in_different_bins_and_the_load_is_balanced(self):
-        weights = {"huge1": 40.0, "huge2": 35.0, "huge3": 30.0, "huge4": 25.0, **{"small%02d" % number: 1.0 for number in range(40)}}
+        weights = {"huge1": 40.0, "huge2": 35.0, "huge3": 30.0, "huge4": 25.0}
+        weights.update({"small%02d" % number: 1.0 for number in range(40)})
         plan, loads = spread(weights, 4)
         owners = [next(number for number, modules in enumerate(plan) if heavy in modules) for heavy in ("huge1", "huge2", "huge3", "huge4")]
         self.assertEqual(sorted(owners), [0, 1, 2, 3], "무거운 넷은 서로 다른 묶음에서 먼저 시작한다")
@@ -548,6 +557,31 @@ class SerialAndPlanOnlyTest(unittest.TestCase):
             self.assertEqual(rup.default_jobs(), 1)
 
 
+class TimingsTest(unittest.TestCase):
+    """--timings-out 의 재료: 출력 줄 도착 시각으로 모듈별 초를 어림한다(새 가중치 표를 만들 때 쓴다)."""
+
+    TESTS = {"mod_a": [("a1 (mod_a.A.a1)", "mod_a.A.a1"), ("a2 (mod_a.A.a2)", "mod_a.A.a2")], "mod_b": [("b1 (mod_b.B.b1)", "mod_b.B.b1")]}
+
+    def test_seconds_go_to_the_module_of_the_test_that_just_ended(self):
+        lines = [(1.0, "a1 (mod_a.A.a1) ... ok"), (3.0, "a2 (mod_a.A.a2) ... ok"),
+                 (3.5, "b1 (mod_b.B.b1)"), (4.0, "설명 줄 ... noise"), (9.0, "ok")]               # 설명이 있는 시험: 이름 줄은 시작에, 결과 줄은 끝에 도착한다
+        results = [rup.ChildResult(1, ["mod_a", "mod_b"], 0, lines, 9.0)]
+        self.assertEqual(rup.module_seconds(self.TESTS, [["mod_a", "mod_b"]], results), {"mod_a": 2.0, "mod_b": 6.0})      # 첫 시험(불러오는 시간이 섞임)은 0
+
+    def test_an_empty_output_gives_an_empty_table(self):
+        self.assertEqual(rup.module_seconds(self.TESTS, [["mod_a"]], [rup.ChildResult(1, ["mod_a"], 0, [], 0.0)]), {})
+
+    def test_the_command_line_writes_a_table_that_can_be_used_as_weights(self):
+        root = make_root()
+        self.addCleanup(shutil.rmtree, root, True)
+        out_file = root / "timings.json"
+        code, out = run_main("--root", str(root), "-j", "2", "--only", "test_fake_gamma", "test_fake_delta", "--timings-out", str(out_file))
+        self.assertEqual(code, 0, out)
+        table, reason = rup.load_weights(out_file)                                            # 그대로 --weights 에 쓸 수 있는 모양(0 이하 값이 없다)
+        self.assertIsNone(reason)
+        self.assertTrue(set(table) <= {"test_fake_gamma", "test_fake_delta"} and table, table)
+
+
 class FailureReportTest(unittest.TestCase):
     def test_a_failing_test_fails_the_run_but_every_test_still_runs_and_is_listed_in_the_recap(self):
         files = dict(FAKE_FILES, **{"test_fake_failing.py": FAILING})
@@ -578,6 +612,17 @@ class FailureReportTest(unittest.TestCase):
         self.assertIn("FAILED (불러오기 실패=1)", out)
         self.assertNotIn("===== 묶음", out)
         self.assertEqual(list(run_dir.iterdir()), [], "불러오기에 실패하면 나머지 시험도 돌리지 않고 끝낸다(조용히 빼지 않는다)")
+
+    def test_the_child_output_is_printed_before_the_comparison_so_a_crash_in_it_keeps_the_log(self):
+        root = make_root()
+        self.addCleanup(shutil.rmtree, root, True)
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer), mock.patch.object(rup, "verify_run", side_effect=RuntimeError("대조 중 예기치 않은 오류")), self.assertRaises(RuntimeError):
+            rup.main(["--heartbeat", "0", "--root", str(root), "-j", "2"])
+        out = buffer.getvalue()
+        self.assertIn("===== 묶음 1/2 =====", out)
+        self.assertIn("Ran ", out)                                                  # 자식의 요약까지 이미 찍혀 있다(예외는 숨기지 않고 그대로 올라가 종료 코드는 0 이 아니다)
+        self.assertNotIn("병렬 실행 요약", out)
 
     def test_a_plan_that_fails_the_plan_check_runs_nothing(self):
         """나누기 함수가 틀린 나누기(빈 묶음)를 내도 돌리기 전에 나누기 검사가 막는다 — 시험은 하나도 돌지 않고 실패."""
@@ -627,6 +672,21 @@ class HeartbeatTest(unittest.TestCase):
         self.assertTrue(any(line.startswith("[진행") and "묶음 1:" in line for line in lines), lines)
         self.assertTrue(any("묶음 2/2 끝" in line for line in lines), lines)
         self.assertEqual(rup.verify_run(tests, plan, results).problems, [])
+
+    def test_a_finished_bin_is_handed_over_as_soon_as_the_bins_before_it_are_done_and_always_in_order(self):
+        root = make_root({"test_fake_slow.py": SLOW, "test_fake_gamma.py": GAMMA, "fake_support.py": SUPPORT})
+        self.addCleanup(shutil.rmtree, root, True)
+        collected = rup.collect_tests(root)
+        labels = {label: test_id for items in collected.tests.values() for label, test_id in items}
+        tests_dir = Path(root, "tests").resolve()
+        for plan, early in ((([["test_fake_gamma"], ["test_fake_slow"]]), True), (([["test_fake_slow"], ["test_fake_gamma"]]), False)):
+            with self.subTest(plan=plan):
+                stamps = []
+                began = time.monotonic()
+                rup.run_plan(plan, root, tests_dir, labels, heartbeat=0, out=lambda text: None, on_ready=lambda index, result: stamps.append((index, time.monotonic() - began)))
+                self.assertEqual([index for index, _ in stamps], [0, 1], "묶음 번호 순서로 넘어온다")
+                if early:
+                    self.assertLess(stamps[0][1] + 0.3, stamps[1][1], stamps)           # 빠른 첫 묶음은 느린 둘째 묶음이 끝나기 전에 이미 넘어왔다(한 묶음이 멈춰도 앞 묶음의 출력은 로그에 있다)
 
     def test_a_bin_without_modules_is_refused_because_unittest_would_then_search_the_current_folder(self):
         with self.assertRaises(ValueError):
@@ -802,6 +862,7 @@ class RealMutationTest(unittest.TestCase):
         text = " | ".join(verdict.problems)
         self.assertIn("전체 대조: 처음 모은 시험 중 3개가 실제로 돌지 않았습니다", text)          # alpha 의 세 줄
         self.assertIn("전체 대조: 처음 모은 것보다 2개가 더(중복) 돌았습니다", text)             # beta 의 두 줄이 한 번 더
+        self.assertIn("전체 대조: 자식 요약의 시험 수 합 8 이 처음 모은 9 과 다릅니다", text)         # 각 자식은 시킨 대로 돌았으니 묶음별 요약은 맞고, 합만 모자란다
         self.assertFalse(any(problem.startswith("묶음 ") for problem in verdict.problems), "묶음별 대조는 거짓말한 계획을 믿으므로 통과한다")
         full = rup.verify_run(tests, plan, results)                                  # 나누기 검사까지 켜면 계획의 거짓말도 직접 짚는다
         self.assertTrue(any("모듈 test_fake_beta 이(가) 2개 묶음에 들어 있습니다" in problem for problem in full.problems), full.problems)
