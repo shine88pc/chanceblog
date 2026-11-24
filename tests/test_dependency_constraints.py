@@ -116,12 +116,16 @@ class ConstraintsFilesTest(unittest.TestCase):
                 self.assertRegex(joined, r"20[0-9]{2}-[0-9]{2}-[0-9]{2}")             # 만든 날짜(갱신할 때마다 바뀌므로 값은 못박지 않는다)
                 self.assertRegex(joined, r"전체 시험 [0-9,]+개")                       # 통과한 전체 시험 개수
 
-    def test_the_files_have_no_secret_like_text_personal_text_or_web_addresses(self):
+    def test_the_files_have_no_web_addresses_tildes_braces_or_secret_or_personal_looking_text(self):
+        """(이름을 본 것에 맞췄다 — 독립 검증 Q 의 N11: 옛 이름은 비밀·개인 정보를 본다고 했지만 주소·물결표·이중 중괄호만 봤다. 지금은 메일·계정 이름 꼴(@)·윈도 경로(백슬래시)·키처럼 긴 글자 덩어리도 본다.)"""
         for rel in CONSTRAINT_FILES:
             text = text_of(rel)
             self.assertNotIn("://", text, rel)                              # 웹 주소 없음(패키지 이름 httpx·httpcore 의 'http' 는 주소가 아니다)
             self.assertNotIn("~", text, rel)
             self.assertNotIn("{{", text, rel)
+            self.assertNotIn("@", text, rel)
+            self.assertNotIn(chr(92), text, rel)
+            self.assertIsNone(re.search(r"[A-Za-z0-9+/=_-]{32,}", text), rel)
 
     def test_every_requirement_package_is_pinned_in_both_files_inside_the_requirement_range(self):
         for requirement in REQUIREMENT_FILES:
@@ -495,6 +499,38 @@ class Dep3WorkflowMutationTest(TmpCase):
                 self.edit(rel, text, text.replace(" install ", " install -c constraints-py312.txt ", 1))
                 self.assertEqual([item.line() for item in self.found()], [])        # -c 를 붙이면 같은 모양이 통과한다 — 모양 자체를 거절하는 것이 아니다
 
+    HEAD = ("name: w\non: push\njobs:\n  j:\n    runs-on: ubuntu-latest\n    steps:\n"
+            "      - uses: actions/setup-python@v6\n        with:\n          python-version: '3.12'\n")
+
+    def test_hostile_step_and_job_names_cannot_forge_a_workflow_command_in_an_error(self):
+        """오류 문구의 단계 이름·job 이름도 저장소 글이다 — 줄바꿈·`::` 를 넣어도 한 줄이고 명령으로 읽히지 않는다(독립 검증 Q 의 살아남은 변이 Q18)."""
+        self.fresh()
+        self.write(".github/workflows/w.yml",
+                   'name: w\non: push\njobs:\n  "j\\n::error::job":\n    runs-on: ubuntu-latest\n    steps:\n'
+                   "      - uses: actions/setup-python@v6\n        with:\n          python-version: '3.12'\n"
+                   '      - name: "a\\n::error::step"\n        run: python -m pip install -r requirements-edits.txt\n')
+        found = self.found()
+        hits = self.assert_caught(".github/workflows/w.yml", "-c 가 없습니다", found)          # 모든 오류가 한 줄·`::` 없음은 assert_caught 가 본다
+        self.assertIn("error", hits[0].message)                                                   # 이름의 글자는 남고(무력화만 됨)
+
+    def test_the_nearest_setup_python_before_the_install_decides_the_python(self):
+        """한 job 에 setup-python 이 둘이면 설치 줄 바로 앞의 것이 파이썬이다(독립 검증 Q 의 살아남은 변이 Q28)."""
+        head = self.HEAD.replace("python-version: '3.12'", "python-version: '3.10'") + "      - uses: actions/setup-python@v6\n        with:\n          python-version: '3.12'\n"
+        self.fresh()
+        self.write(".github/workflows/w.yml", head + "      - run: python -m pip install -c constraints-py312.txt -r requirements-edits.txt\n")
+        self.assertEqual([item.line() for item in self.found()], [])
+        self.write(".github/workflows/w.yml", head + "      - run: python -m pip install -c constraints-py310.txt -r requirements-edits.txt\n")
+        self.assert_caught(".github/workflows/w.yml", "constraints-py312.txt 여야 합니다")
+
+    def test_a_requirement_file_with_any_name_that_an_install_line_points_to_is_checked_too(self):
+        """설치 줄이 -r 로 가리킨 파일은 이름이 requirements*.txt 가 아니어도 ④ 의 대상이다(독립 검증 Q 의 살아남은 변이 Q29)."""
+        self.fresh()
+        self.write("deps.txt", "rich>=13,<14\n")
+        self.write(".github/workflows/w.yml", self.HEAD + "      - run: python -m pip install -c constraints-py312.txt -r deps.txt\n")
+        found = self.found()
+        self.assert_caught("deps.txt", "constraints-py310.txt 에 없습니다", found)
+        self.assert_caught("deps.txt", "constraints-py312.txt 에 없습니다", found)
+
     def test_message_text_that_only_mentions_pip_install_is_not_an_install(self):
         rel = ".github/workflows/issue-edit.yml"
         self.fresh("issue-edit.yml")
@@ -628,6 +664,33 @@ class Dep3ConstraintsFileMutationTest(TmpCase):
         self.assert_caught("requirements-extra.txt", "constraints-py310.txt 에 없습니다", found)
         self.assert_caught("requirements-extra.txt", "constraints-py312.txt 에 없습니다", found)
 
+    def test_a_single_lower_bound_requirement_nobody_pinned_is_caught(self):
+        """상한 없는 하한 하나(`rich>=13`)는 정확한 고정이 아니다 — 목록에 없으면 오류다(새 의존성을 더하고 목록을 잊는 가장 흔한 실수. 독립 검증 Q 의 살아남은 변이 Q25)."""
+        for line in ("rich>=13", "   rich >= 13", "rich<=13", "rich~=13.0", "rich!=13"):
+            with self.subTest(line=line):
+                self.setUp()
+                self.write("requirements-extra.txt", line + "\n")
+                found = self.found()
+                self.assert_caught("requirements-extra.txt", "constraints-py310.txt 에 없습니다", found)
+                self.assert_caught("requirements-extra.txt", "constraints-py312.txt 에 없습니다", found)
+
+    def test_a_requirement_range_the_validator_cannot_compare_is_an_error_not_a_pass(self):
+        """요구 파일의 범위를 비교하지 못하면(`===`·`>=6.*`·`~=6`) 통과가 아니라 오류다(살아남은 변이 Q23)."""
+        for line in ("pyyaml===6.0.4", "pyyaml>=6.*", "pyyaml~=6"):
+            with self.subTest(line=line):
+                self.setUp()
+                self.write("requirements-extra.txt", line + "\n")
+                self.assert_caught("requirements-extra.txt", "읽을 수 없습니다")
+
+    def test_a_very_long_package_name_is_cut_in_the_message(self):
+        """파일에서 온 긴 이름은 오류 문구에 40자까지만 실린다(살아남은 변이 Q17 — 이름 정규식은 `::` 를 못 넣어 이 줄임만 남는 자리)."""
+        name = "a" * 300
+        self.write("requirements-extra.txt", name + ">=1,<2\n")
+        hits = self.assert_caught("requirements-extra.txt", "constraints-py310.txt 에 없습니다")
+        for hit in hits:
+            self.assertNotIn(name, hit.message)
+            self.assertLess(len(hit.message), 300)
+
     def test_requirement_lines_the_validator_cannot_read_are_errors_not_passes(self):
         for line, needle in (("-r other.txt", "옵션 줄"), ("pyyaml>=6,<7; python_version>'3'", "환경 표식"), ("pyyaml @ file:///x", "주소"), ("pyyaml>>6", "범위")):
             with self.subTest(line=line):
@@ -671,7 +734,9 @@ class RangeComparisonTest(unittest.TestCase):
                 ("2.0", ">2", False), ("2.0.1", ">2", True), ("2.0.post1", ">2", False), ("2.0.post1", ">=2", True),
                 ("3.0rc1", ">=2,<3", False), ("3.0a1", "<3", False), ("2.9rc1", "<3", True), ("2.0rc1", ">=2", False), ("2.0rc1", ">=2rc1", True), ("3.0rc1", "<3rc2", True),
                 ("1.0.dev1", "<1.0", False), ("1.0.dev1", "<1.0a1", True), ("1.0", ">1.0.dev1", True),
-                ("2.0", "<=2", True), ("2.0.1", "<=2", False), ("1!1.0", ">=1", True), ("1.0", ">=1!0.1", False)):
+                ("2.0", "<=2", True), ("2.0.1", "<=2", False), ("1!1.0", ">=1", True), ("1.0", ">=1!0.1", False),
+                ("1.5", "!=1.5", False), ("1.6", "!=1.5", True), ("1.5.0", "!=1.5", False),                       # `!=` 는 같은 버전만 거절한다
+                ("2", "==2.0.*", True), ("2", "!=2.0.*", False), ("2.0", "==2.0.0.*", True), ("2.0.5", "==2.0.0.*", False)):   # 와일드카드 접두 비교는 짧은 버전을 0 으로 채워 견준다
             with self.subTest(version=version, spec=spec):
                 self.assertIs(vr._dep3_allowed(version, spec), expected)
 
@@ -681,7 +746,8 @@ class RangeComparisonTest(unittest.TestCase):
                 self.assertIsNone(vr._dep3_allowed(version, spec))
 
     def test_exact_pin_detection(self):
-        for spec, expected in (("==1.7.12.25", True), (" == 1.0 ", True), ("==2.*", False), (">=2,<3", False), ("", False), ("==1.0,!=1.1", False), ("===1.0", False), ("==x", False)):
+        for spec, expected in (("==1.7.12.25", True), (" == 1.0 ", True), ("==2.*", False), (">=2,<3", False), ("", False), ("==1.0,!=1.1", False), ("===1.0", False), ("==x", False),
+                               (">=2", False), ("   >=2", False), ("<=2", False), ("~=2.1", False), ("!=2", False)):          # 조각이 하나여도 `==` 가 아니면 고정이 아니다
             with self.subTest(spec=spec):
                 self.assertIs(vr._dep3_exact_pin(spec), expected)
 
