@@ -99,7 +99,7 @@
 
 | ID | 규칙 | 강제 |
 |----|------|------|
-| G-O1 | 킬 스위치: 저장소 Variables에 `PIPELINE_PAUSE=true`, 또는 레지스트리 `mode: "off"` | 자동: 런타임 |
+| G-O1 | 킬 스위치: 저장소 Variables에 `PIPELINE_PAUSE=true`(전체 정지 — **멈추려면 `true`, `off` 는 재개로 읽힌다**), 또는 레지스트리 `mode: "off"`(한 블로그만 — Blogger 영문·한글·네이버·티스토리에 맞는다. **Chance 에는 맞지 않는다**: Chance 는 `PIPELINE_PAUSE` 만이 멈춤 수단이고 생성기는 `mode` 를 읽지 않으며, 승인 흐름(`publish_flow: pr`)에서 `mode` 를 `off` 로 바꾸면 조용히 멈추지 않고 매 실행이 빨강으로 끝난다 — 감사 BP-S2 N1·N5, 결함 D-469) | 자동: 런타임 |
 | G-O2 | 조용한 실패 금지. 인프라 실패는 종료 코드 1 → Actions 실패 메일, 장기 정체·연속 실패는 워치독 이슈 | 자동: **WF-6**, `pipeline/health.py`, `watchdog.yml` |
 | G-O3 | 롤백 가능성: 모든 변경은 `git revert`로 되돌릴 수 있게 작게 커밋한다. 공개된 글 삭제는 T3 | 정책 |
 | G-O4 | 감사 가능성: 커밋 메시지에 AI 이름·대상, `WORKLOG.md`에 검증 증거, 이력 파일에 모든 실행 결과 | 정책 / 자동: 이력 |
