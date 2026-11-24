@@ -10,7 +10,7 @@ CI 의 `python -m unittest discover -s tests -v` 는 시험 모듈 약 200개를
     무게는 `--weights`(모듈→초 JSON)의 값, 표에 없는 새 모듈은 표 값의 중앙값, 표가 없으면 시험 개수다. `--serial` 로 적은 모듈은 늘 같은 묶음(같은 프로세스)에서 돈다.
  3. 묶음마다 자식 프로세스 `python -m unittest -v 모듈…`(시험 폴더는 PYTHONPATH 맨 앞 — `discover` 가 import 경로 맨 앞에 넣는 것과 같다)를 띄워 병렬로 돌리고,
     출력은 자식별로 모아 두었다가 묶음이 끝나는 대로(앞 묶음이 다 찍힌 뒤에) `===== 묶음 i/N =====` 머리글과 함께 한 덩어리씩 번호 순서로 찍는다(도는 동안은 몇 초마다 진행 줄만 찍는다).
- 4. 끝나면 자식 출력의 시험 줄에서 **실제로 돈 시험 이름의 모음**을 읽어 처음에 모은 것과 **정확히 같은지**(빠짐·중복·개수 합) 확인한다. 묶음 나누기 자체(모든 모듈이 정확히 한 묶음)도
+ 4. 끝나면 자식 출력의 시험 줄에서 **실제로 돈 시험 이름의 모음**을 읽어 처음에 모은 것과 **정확히 같은지**(빠짐·중복·개수 합) 확인한다(시험 줄 이름과 시험 id 가 일대일인 것은 돌리기 전에 확인한다). 묶음 나누기 자체(모든 모듈이 정확히 한 묶음)도
     돌리기 전에 한 번, 돌린 뒤에 한 번 더 본다. 하나라도 어긋나면 시험이 모두 통과했어도 실패다. 건너뜀(skip)은 지금과 똑같이 합쳐 센다.
 
 사용: python scripts/run_unit_parallel.py [-j N] [--weights 파일] [--serial 모듈 …] [--plan-only] [--only 모듈 …]   (--only 는 실험용 부분 실행이고 CI 는 쓰지 않는다)
@@ -578,6 +578,14 @@ def _run(args, jobs, root):
     total = sum(len(items) for items in with_tests.values())
     if total == 0:
         emit("실패: 모은 시험이 하나도 없습니다(시험 폴더·파일 이름 패턴을 확인하세요) — 조용히 통과하지 않습니다")
+        return 1
+    ids_of_label = collections.defaultdict(set)
+    for items in with_tests.values():
+        for label, test_id in items:
+            ids_of_label[label].add(test_id)
+    clash = sorted(label for label, ids in ids_of_label.items() if len(ids) > 1)
+    if clash:                                              # 대조는 시험 줄 이름으로 하므로 이름과 id 가 일대일이어야 한다(보통의 TestCase 는 늘 그렇다 — __str__ 을 바꾼 시험이 이름을 겹치게 하면 여기서 멈춘다)
+        emit(f"실패: 서로 다른 시험 id 가 같은 시험 줄 이름을 찍습니다 — 줄 이름으로 돈 시험을 가릴 수 없어 아무것도 돌리지 않습니다: {', '.join(clash[:5])}")
         return 1
     if args.only:                                          # 부분 실행 — 실험·일부만 돌릴 때. 대조도 고른 모듈에 대해 한다(CI 는 이 인자를 쓰지 않는다)
         wanted = sorted({name[:-3] if name.endswith(".py") else name for group in args.only for name in group})

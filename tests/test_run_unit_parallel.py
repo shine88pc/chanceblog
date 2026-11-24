@@ -112,6 +112,21 @@ class FailingTest(unittest.TestCase):
     def test_fine(self):
         mark(self)
 '''
+CLASH = '''import unittest
+
+from fake_support import mark
+
+
+class SameNameCase(unittest.TestCase):
+    def __str__(self):
+        return "every test prints this same name"
+
+    def test_first(self):
+        mark(self)
+
+    def test_second(self):
+        mark(self)
+'''
 SLOW = '''import time
 import unittest
 
@@ -637,6 +652,18 @@ class FailureReportTest(unittest.TestCase):
         self.assertIn("묶음 2 이(가) 비어 있습니다", out)
         self.assertIn("모듈 test_fake_gamma 이(가) 어느 묶음에도 없습니다", out)
         self.assertEqual(list(run_dir.iterdir()), [], "나누기 검사에 걸리면 어떤 시험도 돌리지 않는다")
+
+    def test_two_tests_that_print_the_same_line_name_stop_the_run_because_the_comparison_could_not_tell_them_apart(self):
+        root = make_root(dict(FAKE_FILES, **{"test_fake_clash.py": CLASH}))
+        self.addCleanup(shutil.rmtree, root, True)
+        run_dir = Path(tempfile.mkdtemp(prefix="rup_run_"))
+        self.addCleanup(shutil.rmtree, run_dir, True)
+        with mock.patch.dict(os.environ, {"FAKE_RUN_DIR": str(run_dir)}):
+            code, out = run_main("--root", str(root), "-j", "2")
+        self.assertEqual(code, 1, out)
+        self.assertIn("서로 다른 시험 id 가 같은 시험 줄 이름을 찍습니다", out)
+        self.assertIn("every test prints this same name", out)
+        self.assertEqual(list(run_dir.iterdir()), [], "대조할 수 없으면 아무것도 돌리지 않는다")
 
     def test_no_tests_at_all_is_a_failure_not_a_quiet_pass(self):
         root = make_root({"fake_support.py": SUPPORT})
