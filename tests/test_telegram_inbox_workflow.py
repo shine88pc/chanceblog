@@ -13,6 +13,7 @@ from pathlib import Path
 import yaml
 
 import _bootstrap
+from real_repo_helpers import run_checks_once
 from test_workflow_names import context, load, render
 
 ROOT = _bootstrap.ROOT
@@ -354,7 +355,7 @@ class ValidatorRuleTest(unittest.TestCase):
         self.assertEqual([vr.AI_REQUEST_WORKFLOW, vr.OPERATOR_REPLY_WORKFLOW], [".github/workflows/ai-request.yml", ".github/workflows/operator-reply.yml"])
 
     def test_the_whole_validator_has_no_errors_on_the_repository(self):
-        errors = [f.line() for f in vr.run_checks(ROOT) if f.level == "ERROR"]
+        errors = [f.line() for f in run_checks_once(ROOT) if f.level == "ERROR"]       # 진짜 저장소의 결과는 한 프로세스 안에서 한 번만 계산해 나눠 쓴다(tests/real_repo_helpers.py)
         self.assertEqual(errors, [])
 
     def test_run_checks_calls_the_new_rule(self):

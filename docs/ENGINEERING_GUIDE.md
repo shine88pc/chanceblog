@@ -73,6 +73,7 @@
 4. **실제 비밀처럼 보이는 리터럴을 소스에 쓰지 않는다.** 테스트에서는 런타임에 문자열을 조합한다(검증기 SEC-2 회피용 `allow` 표시에 기대지 않는다).
 5. **테스트가 실제로 실패하는지 확인**한다. 고친 코드를 잠시 되돌렸을 때 테스트가 깨지지 않으면 그 테스트는 쓸모가 없다.
 6. 임시 저장소는 `tests/test_run.py`의 `make_root()`를 쓴다(레지스트리·프로필·프롬프트를 복사하고, 레지스트리의 각 블로그 `workflow` 파일(`chanceblog.yml`·`blogger-en.yml`·`blogger-ko.yml`)은 그 블로그의 채널 라벨로 만든 `name` 한 줄짜리 스텁 — 레지스트리 검증이 채널 접두사를 읽는다 — 나머지는 빈 파일). 한글 Blogger(`blogger_kcyoon`)까지 함께 돌리는 시험은 `tests/blogger_ko_helpers.py`의 `make_pair_root()`·`KoreanRunBase`를 쓰고(영문·한글 이력이 따로 만들어진다), 워크플로 표현식을 이벤트·입력별로 평가하는 도구는 `tests/blogger_workflow_helpers.py`(`wrapper_with`·`end_to_end_env`·`old_env`)다.
+7. **느린 시험을 만들지 않는다 — 같은 계산을 되풀이하지 말고 나눠 쓴다.** 검사(CI)는 단위 테스트를 파이썬 3.10·3.12 두 칸에서 job 당 10분 제한 안에 끝내야 하고 시험 본문 합계가 이미 그 제한에 가까웠다. 진짜 저장소 트리에 검증기 전체를 돌린 결과는 시험마다 다시 계산하지 말고 `tests/real_repo_helpers.py` 의 `run_checks_once` 로 한 프로세스 안에서 한 번만 계산해 나눠 쓴다(임시 사본·변이 사본에는 쓰지 않는다 — 변이가 잡히는지가 요점이라 나누면 안 된다). 같은 입력의 읽기·파싱·조립 결과(워크플로 YAML 읽기 `test_workflow_names.load_shared`·변이를 다시 쓴 글 `test_workflow_run_rule.dump`·같은 시드의 글 `test_space_gate.noaa_post`·소스 분석 `ai_flow_scan.analysis_for`)도 열쇠를 입력의 내용으로 해서 한 번만 만든다. 나눠 쓰는 값은 바뀌지 않는 값(튜플·frozen 객체·문자열)이거나 받을 때마다 복사본이어야 하고, 도우미마다 '새로 계산한 값과 같다'와 '받는 쪽이 고쳐도 새지 않는다' 시험을 둔다. 시험 수·단언·무작위 표본 수·시드·허용 범위를 줄여 속도를 내지 않는다(느린 시험은 먼저 `python -X utf8 -m cProfile` 로 시험 쪽 되풀이를 찾는다).
 
 ### 자주 하는 확장 작업
 

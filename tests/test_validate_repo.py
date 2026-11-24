@@ -14,6 +14,7 @@ from unittest import mock
 
 import _bootstrap  # noqa: F401
 from edits_helpers import make_edit_root
+from real_repo_helpers import run_checks_once
 from test_run import make_root
 
 sys.path.insert(0, str(_bootstrap.ROOT / "scripts"))
@@ -56,7 +57,7 @@ class TmpCase(unittest.TestCase):
 
 class RealRepoTest(unittest.TestCase):
     def test_repository_has_no_guardrail_errors(self):
-        errors = [f.line() for f in vr.run_checks(REAL) if f.level == "ERROR"]
+        errors = [f.line() for f in run_checks_once(REAL) if f.level == "ERROR"]       # 진짜 저장소의 결과는 한 프로세스 안에서 한 번만 계산해 나눠 쓴다(tests/real_repo_helpers.py)
         self.assertEqual(errors, [])
 
 

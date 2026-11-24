@@ -72,12 +72,18 @@ FACT_BRANCH = src(
 DEF_FACT = "def synthetic_fact_entry(records, facts, today, source):\n"
 
 
-def fire(sources, config=CFG):
-    return S.check(sources, config)
+def fire(sources, config=CFG, analysis=None):
+    return S.check(sources, config, analysis)
 
 
-def fired(sources, config=CFG):
-    return {violation.rule.split()[0] for violation in fire(sources, config)}
+def fired(sources, config=CFG, analysis=None):
+    return {violation.rule.split()[0] for violation in fire(sources, config, analysis)}
+
+
+def real_analysis():
+    """진짜 트리 소스의 분석 — 읽기만 하는 시험들(등록 대조·설정만 바꿔 28번 부르는 '항목을 빼면 위반이 생긴다')이 프로세스 안에서 한 번만 만든 것을 나눠 쓴다.
+    순수 함수 성질·시간 한계·변이 장면을 보는 시험은 이것을 쓰지 않고 매번 새로 분석한다(`S.check(sources)` 직접 호출)."""
+    return S.analysis_for(REAL)
 
 
 def scene(patch=None, fact_branch=False):
@@ -228,11 +234,11 @@ CASES_BY_ID = {case[0]: case[3] for case in CASES}
 
 class RealTreeTest(unittest.TestCase):
     def test_the_real_tree_has_no_violations(self):
-        found = fire(REAL)
+        found = fire(REAL, CFG, real_analysis())
         self.assertEqual(found, [], "\n".join(f"[{v.rule}] {v.where}:{v.line} {v.message}" for v in found[:20]))
 
     def test_the_fact_modules_are_in_this_tree_so_the_import_rule_is_live(self):
-        analysis = S.Analysis(REAL)
+        analysis = real_analysis()
         fact = {m for m in analysis.scans if m in CFG.fact_modules or any(m.startswith(prefix) for prefix in CFG.fact_prefixes)}
         self.assertEqual(len(fact), len(S.FACT_MODULE_NAMES), sorted(fact))
 
@@ -259,7 +265,7 @@ class RegistryMatchesCodeTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.found = S.inventory(REAL)
+        cls.found = S.inventory(REAL, analysis=real_analysis())
 
     def test_ai_primitives(self):
         self.assertEqual(self.found["primitives"], set(CFG.ai_primitives))
@@ -290,7 +296,7 @@ class RegistryMatchesCodeTest(unittest.TestCase):
             self.assertTrue(len(reason) >= 10, key)
 
     def test_every_registered_site_names_a_file_that_exists_and_a_function_that_exists(self):
-        analysis = S.Analysis(REAL)
+        analysis = real_analysis()
         existing = {(scan.rel, qual) for scan in analysis.scans.values() for qual in scan.funcs}
         for table in (CFG.ai_primitives, CFG.llm_consumers, CFG.llm_factory_callers, *CFG.ai_call_sites.values(), CFG.posts_readers, CFG.unfiltered_sites, CFG.human_callers):
             for key in table:
@@ -305,17 +311,18 @@ class RegistryMatchesCodeTest(unittest.TestCase):
         cases = [("ai_primitives", key, "AF2") for key in CFG.ai_primitives] + [("llm_consumers", key, "AF3") for key in CFG.llm_consumers] + \
                 [("llm_factory_callers", key, "AF3") for key in CFG.llm_factory_callers] + [("posts_readers", key, "AF6") for key in CFG.posts_readers] + \
                 [("unfiltered_sites", key, "AF6") for key in CFG.unfiltered_sites] + [("human_callers", key, "AF6") for key in CFG.human_callers]
+        analysis = real_analysis()          # 소스는 그대로이고 설정만 바뀌므로 분석은 모든 항목에서 같다(28번 다시 분석하지 않는다)
         for field, key, rule in cases:
             with self.subTest(field=field, key=key):
                 table = dict(getattr(CFG, field))
                 del table[key]
-                self.assertIn(rule, fired(REAL, dataclasses.replace(CFG, **{field: table})))
+                self.assertIn(rule, fired(REAL, dataclasses.replace(CFG, **{field: table}), analysis))
         for name, sites in CFG.ai_call_sites.items():
             for key in sites:
                 with self.subTest(call=name, key=key):
                     trimmed = {n: dict(s) for n, s in CFG.ai_call_sites.items()}
                     del trimmed[name][key]
-                    self.assertIn("AF5", fired(REAL, dataclasses.replace(CFG, ai_call_sites=trimmed)))
+                    self.assertIn("AF5", fired(REAL, dataclasses.replace(CFG, ai_call_sites=trimmed), analysis))
 
 
 class BaselineTest(unittest.TestCase):
@@ -529,6 +536,94 @@ class PromptFilesTest(unittest.TestCase):
         for text in ("출처 provenance 는 머리말 키다\n", "provenance_note: x\n", "# provenance: facts 를 설명하는 줄이 아니다\n"):
             with self.subTest(text=text):
                 self.assertIsNone(self.MARKER_LINE.search(text))
+
+
+class SharedAnalysisTest(unittest.TestCase):
+    """속도를 위해 진짜 트리의 분석을 나눠 쓰는 도우미(`S.analysis_for`·`check(…, analysis)`·`inventory(…, analysis)`)가 새로 분석한 것과 같은 결과를 내고, 쓰는 쪽이 분석을 바꾸지 못하며,
+    소스 글자가 하나라도 다르면 따로 만든다는 것을 못박는다(나눠 쓰는 분석은 읽기만 한다)."""
+
+    TINY = {"pipeline/a.py": "import json\n\n\ndef f(x):\n    return json.dumps(x)\n", "pipeline/b.py": "from pipeline import a\n\n\ndef g(x):\n    return a.f(x)\n"}
+
+    @staticmethod
+    def state(analysis):
+        return (sorted((key, sorted(value)) for key, value in analysis.edges.items()), sorted((key, sorted(value)) for key, value in analysis.reverse.items()), sorted(analysis.direct),
+                sorted(analysis.capable), sorted(analysis.imports_graph.items()), sorted(analysis.scans), analysis.errors)
+
+    def test_a_shared_analysis_equals_a_fresh_one_and_gives_the_same_check_and_inventory(self):
+        for sources, config, shared in ((REAL, CFG, real_analysis()), (self.TINY, CFG, None)):
+            fresh = S.Analysis(sources)
+            shared = shared or S.analysis_for(sources)
+            self.assertEqual(self.state(shared), self.state(fresh))
+            self.assertEqual(S.check(sources, config, shared), S.check(sources, config, fresh))
+            self.assertEqual(S.inventory(sources, config, shared), S.inventory(sources, config, fresh))
+        self.assertEqual(S.check(self.TINY, CFG, S.analysis_for(self.TINY)), S.check(self.TINY, CFG))                  # 분석을 안 주는 옛 호출과도 같다
+        self.assertEqual(S.inventory(self.TINY, CFG, S.analysis_for(self.TINY)), S.inventory(self.TINY, CFG))
+
+    def test_check_and_inventory_only_read_the_analysis(self):
+        analysis = S.Analysis(self.TINY)
+        before = self.state(analysis)
+        for config in (CFG, FACT_CFG, dataclasses.replace(CFG, ai_primitives={}), dataclasses.replace(CFG, llm_consumers={})):
+            S.check(self.TINY, config, analysis)
+            S.inventory(self.TINY, config, analysis)
+        self.assertEqual(self.state(analysis), before)
+
+    def test_check_and_inventory_refuse_an_analysis_built_from_other_sources(self):
+        """넘겨받은 분석이 같은 소스로 만든 것이 아니면 조용히 틀린 결과가 나온다 — 분석에 단 열쇠(sources_key)로 거절한다. 같은 내용의 다른 사전으로 만든 분석은 받는다."""
+        other = dict(self.TINY, **{"pipeline/b.py": self.TINY["pipeline/b.py"] + "\nvalue = 1\n"})
+        for wrong in (S.Analysis(other), S.Analysis({}), real_analysis()):
+            with self.assertRaises(ValueError):
+                S.check(self.TINY, CFG, wrong)
+            with self.assertRaises(ValueError):
+                S.inventory(self.TINY, CFG, wrong)
+        with self.assertRaises(ValueError):
+            S.check(REAL, CFG, S.Analysis(self.TINY))
+        self.assertEqual(S.check(self.TINY, CFG, S.Analysis(dict(self.TINY))), S.check(self.TINY, CFG))
+        self.assertEqual(S.inventory(self.TINY, CFG, S.Analysis(dict(self.TINY))), S.inventory(self.TINY, CFG))
+
+    def test_the_resolve_memo_gives_the_uncached_answer_for_every_call_and_every_key_of_the_real_tree(self):
+        """`_resolved` 메모의 열쇠(모듈·이름·전체 이름)가 모자라면(예: 모듈 이름을 빼면) 임포트가 다른 두 모듈의 같은 호출이 한 답을 나눠 쓰다 틀린다 — 진짜 트리의 모든 호출을
+        메모를 거친 답과 처음부터 푼 답(`_resolve_uncached`)으로 견주고, 메모에 든 모든 열쇠도 견준다."""
+        analysis = real_analysis()
+        checked = 0
+        for scan in analysis.scans.values():
+            for info in scan.funcs.values():
+                for name, full, _line, _flag in info.calls:
+                    targets, fuzzy = analysis._resolve_uncached(scan, name, full)
+                    if analysis._resolve(scan, name, full) != (tuple(targets), fuzzy):
+                        self.fail(f"{scan.module} {name} {full}: 메모가 처음부터 푼 답과 다르다")
+                    checked += 1
+        self.assertGreater(checked, 10000)
+        self.assertGreater(len(analysis._resolved), 1000)
+        for (module, name, full), found in analysis._resolved.items():
+            targets, fuzzy = analysis._resolve_uncached(analysis.scans[module], name, full)
+            self.assertEqual(found, (tuple(targets), fuzzy), (module, name, full))
+
+    def test_the_same_call_text_in_two_modules_with_different_imports_resolves_to_each_modules_own_target(self):
+        sources = {"pipeline/m1.py": "def f():\n    return 1\n", "pipeline/m2.py": "def f():\n    return 2\n",
+                   "pipeline/a.py": "from pipeline import m1 as x\n\n\ndef go():\n    return x.f()\n",
+                   "pipeline/b.py": "from pipeline import m2 as x\n\n\ndef go():\n    return x.f()\n"}
+        analysis = S.Analysis(sources)
+        self.assertEqual(sorted(target for target, _fuzzy in analysis.edges[("pipeline.a", "go")]), [("pipeline.m1", "f")])
+        self.assertEqual(sorted(target for target, _fuzzy in analysis.edges[("pipeline.b", "go")]), [("pipeline.m2", "f")])
+
+    def test_the_scans_do_not_keep_the_syntax_trees_alive(self):
+        """스캔 캐시가 구문 트리를 쥐고 있으면(트리 수백 개) 쓰레기 수거가 시험마다 그 트리를 훑는다 — 스캔 결과는 트리를 다시 읽지 않으므로 쥐지 않는다(결과는 위 시험이 새 분석과 같음을 보인다)."""
+        analysis = S.Analysis(self.TINY)
+        self.assertEqual(sorted(analysis.scans), ["pipeline.a", "pipeline.b"])
+        for scan in analysis.scans.values():
+            self.assertIsNone(scan.tree)
+            self.assertTrue(scan.funcs and scan.import_records is not None)
+
+    def test_the_sharing_is_keyed_by_the_whole_content(self):
+        with mock.patch.dict(S._SHARED_ANALYSES, clear=True):
+            first = S.analysis_for(self.TINY)
+            self.assertIs(S.analysis_for(dict(self.TINY)), first)                                                       # 내용이 같으면 같은 분석
+            changed = dict(self.TINY, **{"pipeline/b.py": self.TINY["pipeline/b.py"] + "\nvalue = 1\n"})
+            self.assertIsNot(S.analysis_for(changed), first)                                                            # 글자가 하나라도 다르면 따로
+            self.assertIsNot(S.analysis_for({**self.TINY, "pipeline/c.py": "x = 1\n"}), first)
+            self.assertIsNot(S.analysis_for({"pipeline/a.py": self.TINY["pipeline/a.py"]}), first)
+            self.assertIs(S.analysis_for(self.TINY), first)                                                             # 다른 열쇠를 만들어도 첫 분석은 그대로다
+            self.assertEqual(self.state(S.analysis_for(changed)), self.state(S.Analysis(changed)))
 
 
 class OtherLanesSafetyTest(unittest.TestCase):

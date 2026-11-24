@@ -34,12 +34,42 @@ def real(rel):
     return (ROOT / rel).read_text(encoding="utf-8").replace("\r\n", "\n")
 
 
+_PARSED = {}
+_DUMPED = {}
+
+
 def real_data(rel):
-    return yaml.safe_load(real(rel))
+    """진짜 워크플로 파일을 읽은 데이터. 같은 글은 한 번만 읽고 부를 때마다 깊은 복사본을 준다 — 변이 시험이 받은 데이터를 고쳐도 다음 호출로 새지 않는다."""
+    text = real(rel)
+    parsed = _PARSED.get(text)
+    if parsed is None:
+        parsed = _PARSED[text] = yaml.safe_load(text)
+    return copy.deepcopy(parsed)
+
+
+def shares_containers(data):
+    """데이터 안에 같은 목록·표 객체가 두 곳에 들어 있는가 — 그러면 `safe_dump` 가 앵커(`&id001`)를 내서 표시 글(`repr`)만으로는 다시 쓴 글이 정해지지 않는다."""
+    seen, stack = set(), [data]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, (dict, list)):
+            if id(item) in seen:
+                return True
+            seen.add(id(item))
+            stack.extend(item.values() if isinstance(item, dict) else item)
+    return False
 
 
 def dump(data):
-    return yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=1_000_000)
+    """워크플로 데이터를 글로 다시 쓴다. 표시 글(`repr`)이 같은 구조는 한 번만 다시 쓰고 나눠 쓴다 — 변이 목록 시험 여럿(이 모듈과 test_merge_notice_workflows)이 같은 변이를 되풀이해 다시 쓰던 것이다.
+    돌려주는 것은 바뀌지 않는 문자열이라 나눠 써도 새지 않고, 데이터를 고친 뒤에는 표시 글이 달라져 새로 쓴다(값 종류까지 구분한다: 1·True·'1' 이 서로 다르다). 같은 객체가 두 곳에 든 구조는 나누지 않고 매번 쓴다."""
+    if shares_containers(data):
+        return yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=1_000_000)
+    key = repr(data)
+    text = _DUMPED.get(key)
+    if text is None:
+        text = _DUMPED[key] = yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=1_000_000)
+    return text
 
 
 def check(files):
@@ -599,6 +629,61 @@ class LimitsOfTheRuleTest(unittest.TestCase):
         data = real_data(CONFIRM)
         step_of(data, "decide", 2)["env"]["PYTHONPATH"] = "/tmp/x"
         self.assertEqual(check({CONFIRM: dump(data)}), [])
+
+
+def fresh_dump(data):
+    return yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=1_000_000)
+
+
+class SharedHelpersTest(unittest.TestCase):
+    """속도를 위해 나눠 쓰는 `real_data`(읽은 데이터)와 `dump`(다시 쓴 글)가 매번 새로 읽고 쓴 것과 같은 값을 내고, 받는 쪽이 고쳐도 다음 호출로 새지 않는다."""
+
+    def test_the_shared_dump_equals_a_fresh_dump_for_the_real_files_and_every_catalog_mutation(self):
+        """두 진짜 워크플로 파일과 변이 목록 전체(파일마다 200개 넘게)에서 나눠 쓰는 dump 가 매번 새로 쓴 글과 같다(표본이 아니라 전수)."""
+        count = 0
+        for rel in BOTH:
+            samples = [("원본", real_data(rel))]
+            for label, fn, _needle in catalog(rel):
+                mutated = real_data(rel)
+                fn(mutated)
+                samples.append((label, mutated))
+            for label, data in samples:
+                fresh = fresh_dump(data)
+                self.assertEqual(dump(data), fresh, (rel, label))
+                self.assertEqual(dump(copy.deepcopy(data)), fresh, (rel, label))               # 같은 구조의 다른 객체도 같은 글
+                self.assertEqual(dump(data), fresh, (rel, label))                              # 나눠 쓰는 값(둘째 호출)도 같다
+                count += 1
+        self.assertGreaterEqual(count, 2 * 201)
+
+    def test_the_dump_key_tells_apart_value_kinds_a_changed_structure_and_shared_objects(self):
+        self.assertNotEqual(dump({"a": 1}), dump({"a": True}))
+        self.assertNotEqual(dump({"a": 1}), dump({"a": "1"}))
+        self.assertNotEqual(dump({"a": 1.0}), dump({"a": 1}))
+        data = {"a": [1, 2]}
+        first = dump(data)
+        data["a"].append(3)                                                   # 데이터를 고치면 표시 글이 달라져 새로 쓴다
+        self.assertNotEqual(dump(data), first)
+        self.assertEqual(dump(data), fresh_dump(data))
+        part = [1, 2]
+        aliased, separate = {"x": part, "y": part}, {"x": [1, 2], "y": [1, 2]}      # 같은 객체가 두 곳에 있으면 앵커가 생겨 글이 다르다 — 표시 글은 같아도 나누지 않는다
+        self.assertTrue(shares_containers(aliased))
+        self.assertFalse(shares_containers(separate))
+        self.assertEqual(dump(separate), fresh_dump(separate))
+        self.assertEqual(dump(aliased), fresh_dump(aliased))
+        self.assertNotEqual(dump(aliased), dump(separate))
+        self.assertEqual(dump(separate), fresh_dump(separate))
+
+    def test_real_data_hands_out_a_fresh_copy_every_time(self):
+        first = real_data(READY)
+        want = copy.deepcopy(first)
+        first["jobs"]["decide"]["name"] = "받는 쪽이 고친 이름"
+        first["permissions"]["contents"] = "write"
+        first["extra"] = 1
+        again = real_data(READY)
+        self.assertEqual(again, want)
+        self.assertEqual(again, yaml.safe_load(real(READY)))                 # 새로 읽은 것과도 같다
+        again["jobs"].clear()
+        self.assertEqual(real_data(READY), want)
 
 
 if __name__ == "__main__":
