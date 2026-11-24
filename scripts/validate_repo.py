@@ -1981,7 +1981,7 @@ def _dep3_clauses(spec):
 
 
 def _dep3_clause_allows(version, operator, operand):
-    """버전 하나가 범위 조각 하나(`>=2`·`<3`·`==6.0.4`·`~=2.1`·`==2.*`)에 드는가. 읽지 못하면 None. `<V` 는 V 의 사전 릴리스를, `>V` 는 V 의 사후 릴리스를 받지 않는다(PEP 440)."""
+    """버전 하나가 범위 조각 하나(`>=2`·`<3`·`==6.0.4`·호환 릴리스 `2.1` 이상 `2.*`·`==2.*`)에 드는가. 읽지 못하면 None. `<V` 는 V 의 사전 릴리스를, `>V` 는 V 의 사후 릴리스를 받지 않는다(PEP 440)."""
     if operator == "===":
         return None
     wildcard = operand.endswith(".*")
@@ -2008,7 +2008,7 @@ def _dep3_clause_allows(version, operator, operand):
         return mine > theirs and not (same_base and target["post"] is None and version["post"] is not None)
     if operator == "<":
         return mine < theirs and not (same_base and target["pre"] is None and target["dev"] is None and (version["pre"] is not None or version["dev"] is not None))
-    if len(target["parts"]) < 2:        # `~=`: `~=2.1.3` 은 `>=2.1.3` 이고 `==2.1.*`
+    if len(target["parts"]) < 2:        # 호환 릴리스 연산자: 2.1.3 은 `>=2.1.3` 이고 `==2.1.*`
         return None
     size = len(target["parts"]) - 1
     return mine >= theirs and version["epoch"] == target["epoch"] and _dep3_padded(version["parts"], size) == target["parts"][:size]
