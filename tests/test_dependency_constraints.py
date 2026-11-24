@@ -685,7 +685,7 @@ class Dep3ConstraintsFileMutationTest(TmpCase):
                 self.assert_caught("requirements-extra.txt", "constraints-py312.txt 에 없습니다", found)
 
     def test_a_requirement_range_the_validator_cannot_compare_is_an_error_not_a_pass(self):
-        """요구 파일의 범위를 비교하지 못하면(`===`·`>=6.*`·`~=6`) 통과가 아니라 오류다(살아남은 변이 Q23)."""
+        """요구 파일의 범위를 비교하지 못하면(임의 일치 연산자·와일드카드가 붙은 하한·한 칸짜리 호환 릴리스) 통과가 아니라 오류다(살아남은 변이 Q23)."""
         for line in ("pyyaml===6.0.4", "pyyaml>=6.*", "pyyaml~=6"):
             with self.subTest(line=line):
                 self.setUp()
