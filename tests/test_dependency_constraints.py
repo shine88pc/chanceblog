@@ -491,6 +491,7 @@ class Dep3WorkflowMutationTest(TmpCase):
         old = "python -m pip install -c constraints-py312.txt -r requirements-edits.txt"
         for text in ("python -m pip --cache-dir cache install -r requirements-edits.txt", "python -m pip --log list install -r requirements-edits.txt", "pip --cache-dir cache install -r requirements-edits.txt",
                      "python -m pip --proxy check install -r requirements-edits.txt", "pip --python show install -r requirements-edits.txt", "python -m pip --cache-dir cache --log list install -r requirements-edits.txt",
+                     "python -m pip --cache cache install -r requirements-edits.txt", "pip --lo list --pro check install -r requirements-edits.txt",
                      "python -mpip install -r requirements-edits.txt", "python3 -X utf8 -mpip install -r requirements-edits.txt"):
             with self.subTest(text=text):
                 self.fresh("issue-edit.yml")
@@ -829,6 +830,7 @@ class ShellReadingTest(unittest.TestCase):
                 ("pip --proxy install install -r b.txt", ([], ["b.txt"], [], [])),
                 ("pip -q --no-input --isolated install x", ([], [], [], ["x"])),
                 ("pip --some-new-option value install -r b.txt", ([], ["b.txt"], [], [])),           # 목록에 없는 값 옵션: 낯선 낱말 뒤의 install 도 설치로 읽는다
+                ("pip install --resume-retries 3 -r b.txt", ([], ["b.txt"], [], [])),                  # install 뒤의 값 옵션 값(3)은 패키지가 아니다
                 ("pip --log install foo install -r b.txt", ([], ["b.txt"], [], [])),                  # 보수적으로 읽을 때도 앞의 install(값 옵션의 값)이 아니라 낯선 낱말 뒤의 install 이다
                 # 붙여 쓴 -mpip(안전 검증 S 의 R2 b)
                 ("python -mpip install -c a.txt -r b.txt", (["a.txt"], ["b.txt"], [], [])),
@@ -866,10 +868,28 @@ class ShellReadingTest(unittest.TestCase):
                         wrong.append(f"{prefix} {option} {word} list: 설치가 아닌데 {found}")
         self.assertEqual(wrong, [])
 
+    # pip(optparse)는 겹치지 않는 앞부분도 그 옵션으로 받아 준다 — 일반 옵션 중 값을 받는 것의 줄임말(pip 23 에서 `pip --cac cache --version` 이 통과함을 이 PC 에서 확인)
+    ABBREVIATED_VALUE_OPTIONS = ("--cache", "--cache-d", "--lo", "--pro", "--time", "--ret", "--exists", "--trusted", "--client", "--pyth", "--keyr", "--use-f", "--use-d", "--resume")
+
+    def test_an_abbreviated_global_option_takes_its_value_too(self):
+        wrong = []
+        for option in self.ABBREVIATED_VALUE_OPTIONS:
+            for word in ("cache", "list", "check", "install", "help"):
+                found, unreadable = self.installs(f"pip {option} {word} install -r b.txt")
+                if found != [([], ["b.txt"], [], [])] or unreadable:
+                    wrong.append(f"pip {option} {word} install: 설치 {found}")
+        self.assertEqual(wrong, [])
+        for run in ("pip --vers", "pip --no-in install x", "pip --no cache list", "pip --cache=cache list", "pip --c cache list"):         # 줄임말이 플래그이거나 겹치면(pip 가 오류로 끝내는 모양) 값을 받는 것으로 읽지 않는다
+            found, unreadable = self.installs(run)
+            self.assertEqual(unreadable, [], run)
+        self.assertEqual(self.installs("pip --no-in install x")[0], [([], [], [], ["x"])])
+        self.assertEqual(self.installs("pip --cache=cache install -r b.txt")[0], [([], ["b.txt"], [], [])])
+
     def test_the_position_of_the_subcommand(self):
         for args, expected in ((["install", "x"], 0), (["--cache-dir", "cache", "install"], 2), (["-q", "-q", "list"], 2), (["--version"], None), ([], None), (["--log"], None),
                                (["--cache-dir=cache", "install"], 1), (["x", "install"], 1), (["list", "install"], 0), (["--log", "install", "list"], 2), (["--cache-dir", "cache"], None),
-                               (["frobnicate", "list", "install"], 2), (["--log", "install", "foo", "install"], 3)):
+                               (["frobnicate", "list", "install"], 2), (["--log", "install", "foo", "install"], 3),
+                               (["--cache", "cache", "install"], 2), (["--lo", "list", "install"], 2), (["--vers", "install"], 1), (["--cache=cache", "list"], 1)):
             with self.subTest(args=args):
                 self.assertEqual(vr._dep3_pip_subcommand(args), expected)
 
@@ -1158,6 +1178,7 @@ class DocsTest(unittest.TestCase):
         self.assertIn("(a)", paragraph)
         self.assertIn("(g)", paragraph)
         self.assertIn("`-mpip` 처럼 붙여 쓴 것도", doc)                      # 코드가 읽는 모양은 규칙 설명에 적혀 있다
+        self.assertIn("줄임말 `--cache cache` 도", doc)
 
 
 if __name__ == "__main__":

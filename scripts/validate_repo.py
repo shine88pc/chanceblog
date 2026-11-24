@@ -2154,6 +2154,11 @@ _DEP3_VALUE_OPTIONS = frozenset({"-t", "--target", "-i", "--index-url", "--extra
                                  "--no-binary", "--global-option", "--install-option", "-C", "--config-settings", "--upgrade-strategy", "--progress-bar", "--report",
                                  "--root-user-action", "--use-feature", "--use-deprecated", "--build-constraint", "--group", "--python", "--keyring-provider", "--resume-retries"})
 _DEP3_SHORT_OR_LONG = (("-c", "--constraint", "constraints"), ("-r", "--requirement", "requirements"), ("-e", "--editable", "editable"))
+# pip 가 하위 명령 앞에 받는 일반 옵션(긴 이름) — pip(optparse)는 다른 것과 겹치지 않는 앞부분(`--cache` → `--cache-dir`)도 그 옵션으로 받아 준다(결함 D-481).
+_DEP3_GENERAL_VALUE_OPTIONS = ("--python", "--log", "--keyring-provider", "--proxy", "--retries", "--timeout", "--exists-action", "--trusted-host", "--cert", "--client-cert", "--cache-dir", "--use-feature",
+                               "--use-deprecated", "--resume-retries")
+_DEP3_GENERAL_FLAGS = ("--help", "--debug", "--isolated", "--require-virtualenv", "--require-venv", "--verbose", "--version", "--quiet", "--no-input", "--no-cache-dir", "--disable-pip-version-check",
+                       "--no-color", "--no-python-version-warning")
 
 
 def _dep3_install_args(args):
@@ -2194,13 +2199,23 @@ def _dep3_hides_pip_install(text):
     return False
 
 
+def _dep3_takes_value(option):
+    """하위 명령 앞의 옵션 하나가 다음 낱말을 값으로 받는가 — 값 옵션 목록의 이름이거나, 일반 옵션 중 값 옵션 하나만 가리키는 줄임말(`--cache`·`--lo`)이다. 값을 붙여 쓴 `--cache-dir=cache` 는 낱말 하나라 아니다."""
+    if option in _DEP3_VALUE_OPTIONS:
+        return True
+    if option.startswith("--") and len(option) > 2 and "=" not in option:
+        names = [name for name in _DEP3_GENERAL_VALUE_OPTIONS + _DEP3_GENERAL_FLAGS if name.startswith(option)]
+        return len(names) == 1 and names[0] in _DEP3_GENERAL_VALUE_OPTIONS
+    return False
+
+
 def _dep3_pip_subcommand(args):
-    """pip 인자 목록에서 하위 명령이 있는 자리(인덱스), 없으면 None. pip 자신의 읽기와 같게 `-` 로 시작하는 옵션은 건너뛰고, 값을 받는 옵션(`--cache-dir cache`·`--log list`)은 값까지 건너뛴 뒤
+    """pip 인자 목록에서 하위 명령이 있는 자리(인덱스), 없으면 None. pip 자신의 읽기와 같게 `-` 로 시작하는 옵션은 건너뛰고, 값을 받는 옵션(`--cache-dir cache`·`--log list`, 줄임말 `--cache cache` 도)은 값까지 건너뛴 뒤
     처음 나오는 낱말이 하위 명령이다(그 값이 `cache`·`list` 같은 하위 명령 낱말이어도 하위 명령이 아니다 — 결함 D-481). 그 낱말이 pip 의 하위 명령 목록에 없고(목록에 없는 값 옵션의 값일 수 있다)
     뒤에 `install` 이 있으면 그 `install` 을 하위 명령으로 본다 — 설치를 놓치느니 설치로 읽는다."""
     index = 0
     while index < len(args) and args[index].startswith("-"):
-        index += 2 if args[index] in _DEP3_VALUE_OPTIONS else 1
+        index += 2 if _dep3_takes_value(args[index]) else 1
     if index >= len(args):
         return None
     if args[index] not in _DEP3_PIP_COMMANDS and "install" in args[index + 1:]:
