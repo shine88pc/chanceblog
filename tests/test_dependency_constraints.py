@@ -60,8 +60,10 @@ def requirement_lines(rel):
     return found
 
 
-def major(version):
-    return int(version.split(".")[0])
+def dotted(version):
+    """`2.34.0` → (2, 34, 0) — 뒤를 0 으로 채워 길이가 다른 버전(`2` 와 `2.0.0`)도 비교할 수 있게."""
+    numbers = [int(part) for part in version.split(".")]
+    return tuple(numbers + [0] * (8 - len(numbers)))
 
 
 def one_plain_line(test, finding):
@@ -131,9 +133,11 @@ class ConstraintsFilesTest(unittest.TestCase):
                         if exact:
                             self.assertEqual(pinned, exact.group(1))
                             continue
-                        window = re.fullmatch(r">=([0-9]+),<([0-9]+)", spec)
-                        self.assertIsNotNone(window, f"{requirement}: {name}{spec} — 이 시험이 읽는 범위 모양(>=A,<B)이 아니다")
-                        self.assertTrue(int(window.group(1)) <= major(pinned) < int(window.group(2)), f"{name}=={pinned} 가 {spec} 밖")
+                        window = re.fullmatch(r">=([0-9][0-9.]*),<([0-9][0-9.]*)", spec)
+                        if window is None:              # 이 시험이 따로 읽는 모양(>=A,<B)이 아니면 검증기의 비교로 본다(새 요구가 다른 모양이어도 이 시험이 막지 않게)
+                            self.assertIs(vr._dep3_allowed(pinned, spec), True, f"{name}=={pinned} 가 {spec} 밖")
+                            continue
+                        self.assertTrue(dotted(window.group(1)) <= dotted(pinned) < dotted(window.group(2)), f"{name}=={pinned} 가 {spec} 밖")
 
     def test_the_direct_requirement_names_are_the_same_in_both_files(self):
         direct = {normalize(name) for requirement in REQUIREMENT_FILES for name, spec in requirement_lines(requirement) if not spec.startswith("==")}
@@ -148,17 +152,10 @@ class ConstraintsFilesTest(unittest.TestCase):
         self.assertNotEqual(ten["google-genai"], "2.34.0")
         self.assertNotEqual(ten["websockets"], "17.4")
 
-    def test_the_merge_policy_treats_both_files_as_dependency_files_only_the_operator_merges(self):
-        from pipeline import merge_policy as mp
-        declared = dict.fromkeys(mp.DECLARED_REQUIRED, False)
-        for rel in CONSTRAINT_FILES + REQUIREMENT_FILES:
-            with self.subTest(rel=rel):
-                result = mp.classify_change("blog", [rel], "", declared)
-                self.assertEqual(result.tier, "operator_only")
-                self.assertIn("dependencies", result.categories)
-
     def test_the_site_cleanup_test_lists_both_files_as_deliberately_exposed(self):
-        """새 루트 파일은 사이트로 내보낼지·뺄지 정해야 한다(tests/test_site_cleanup.py). `_config.yml` 은 광고 표면이라 이 변경 밖이어서 일부러 열어 두는 목록(STATIC_EXPOSED)에 있다."""
+        """새 루트 파일은 사이트로 내보낼지·뺄지 정해야 한다(tests/test_site_cleanup.py). `_config.yml` 은 광고 표면이라 이 변경 밖이어서 일부러 열어 두는 목록(STATIC_EXPOSED)에 있다.
+        (그 파일들이 AI 병합 대상이 아닌 의존성 파일로 분류되는 것은 병합 정책 문서 시험의 '사이트로 내보내는 모든 파일은 운영자 전용' 시험이 이미 모든 루트 파일에 대해 본다 —
+        그 시험이 정책 모듈의 이름을 다른 파일이 부르지 못하게 지키므로 이 모듈은 그 이름을 쓰지 않는다.)"""
         cleanup = text_of("tests/test_site_cleanup.py")
         start = cleanup.index("STATIC_EXPOSED = {")
         block = cleanup[start:cleanup.index("}", start)]
