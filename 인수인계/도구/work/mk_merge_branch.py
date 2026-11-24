@@ -1,14 +1,17 @@
 """한 커밋 병합 브랜치를 만든다 — 트리는 원본 커밋의 것, 부모는 지정한 ref 하나, 메시지는 파일에서(작업 폴더를 건드리지 않는 `git commit-tree`).
 사용: python -X utf8 mk_merge_branch.py <저장소 경로> <트리 원본 커밋> <부모 ref> <커밋 메시지 파일> <새 로컬 브랜치 이름>
-작성자·커미터는 강병수 <shine88pc@gmail.com> (한글 환경 변수는 셸이 아니라 파이썬으로 넘긴다). 같은 이름의 브랜치가 이미 있으면 실패한다(되감기 금지 — 새 이름 -2, -3).
+작성자·커미터는 같은 폴더 commit_as_author.py 의 고정 작성자 상수에서 읽는다(한글 환경 변수는 셸이 아니라 파이썬으로 넘긴다). 같은 이름의 브랜치가 이미 있으면 실패한다(되감기 금지 — 새 이름 -2, -3).
 끝에 만든 커밋·트리·부모와 변경 요약을 보여 준다."""
 import os
+import re as _re
 import subprocess
 import sys
+from pathlib import Path as _Path
 
 repo, src, parent, msgfile, branch = sys.argv[1:6]
-env = dict(os.environ, GIT_AUTHOR_NAME="강병수", GIT_AUTHOR_EMAIL="shine88pc@gmail.com",
-           GIT_COMMITTER_NAME="강병수", GIT_COMMITTER_EMAIL="shine88pc@gmail.com")
+_AUTHOR = (_Path(__file__).resolve().parent / "commit_as_author.py").read_text(encoding="utf-8")     # 고정 작성자는 commit_as_author.py 의 상수 하나만 쓴다(확인 032 승인 — 이 도구에 개인 값을 따로 두지 않는다)
+_NAME, _MAIL = (_re.search("GIT_AUTHOR_" + _key + '="([^"]+)"', _AUTHOR).group(1) for _key in ("NAME", "EMAIL"))
+env = dict(os.environ, GIT_AUTHOR_NAME=_NAME, GIT_AUTHOR_EMAIL=_MAIL, GIT_COMMITTER_NAME=_NAME, GIT_COMMITTER_EMAIL=_MAIL)
 
 
 def git(*args, use_env=None):

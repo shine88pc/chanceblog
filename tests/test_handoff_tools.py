@@ -2736,6 +2736,46 @@ class MigrationCopiesTest(unittest.TestCase):
                 self.assertEqual({module.ENV["GIT_AUTHOR_NAME"], module.ENV["GIT_COMMITTER_NAME"]}, {name}, tool)
                 self.assertEqual({module.ENV["GIT_AUTHOR_EMAIL"], module.ENV["GIT_COMMITTER_EMAIL"]}, {mail}, tool)
 
+    def test_the_other_three_merge_tools_read_the_fixed_author_from_commit_as_author_too(self):
+        """확인 032 승인 #13 — mk_merge_branch.py·mk_lane_merge.py·mk_lane_merge_desktop.py 도 작성자 이름·메일을 직접 두지 않고 commit_as_author.py 의 상수 하나에서 읽는다."""
+        author = read(WORK / "commit_as_author.py")
+        name, mail = (re.search("GIT_AUTHOR_" + key + '="([^"]+)"', author).group(1) for key in ("NAME", "EMAIL"))
+        for key in ("NAME", "EMAIL"):
+            self.assertEqual(len(re.findall("GIT_AUTHOR_" + key + '="([^"]+)"', author)), 1, key)          # 정규식이 맞는 줄은 정확히 하나 — 앞쪽에 같은 모양의 예시 줄이 생겨도 조용히 그 값을 읽지 않게
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            work = Path(tmp) / "W"
+            (work / "scratch").mkdir(parents=True)
+            shutil.copy2(WORK / "commit_as_author.py", work / "commit_as_author.py")
+            for rel, attr in (("mk_merge_branch.py", "env"), ("scratch/mk_lane_merge.py", "ENV"), ("scratch/mk_lane_merge_desktop.py", "ENV")):
+                source = read(WORK / rel)
+                self.assertNotIn(name, source, rel)                                               # 이름·메일 값이 사본에 없다
+                self.assertNotIn(mail, source, rel)
+                self.assertIn("commit_as_author.py", source, rel)
+                shutil.copy2(WORK / rel, work / rel)
+                if attr == "env":                                                                 # mk_merge_branch.py 는 불러오면 곧바로 일을 하는 스크립트라 신원을 정하는 머리 부분만 실행한다
+                    start = source.index("env = dict(")
+                    head = source[:start] + source[start:].split("\n", 1)[0] + "\n"
+                    namespace = {"__file__": str(work / rel), "__name__": "head_only"}
+                    with mock.patch.object(sys, "argv", ["tool", "r", "s", "p", "m", "b"]):
+                        exec(compile(head, str(work / rel), "exec"), namespace)
+                    env = namespace["env"]
+                else:
+                    module = load_tool(work / rel)
+                    env = getattr(module, attr)
+                self.assertEqual({env["GIT_AUTHOR_NAME"], env["GIT_COMMITTER_NAME"]}, {name}, rel)
+                self.assertEqual({env["GIT_AUTHOR_EMAIL"], env["GIT_COMMITTER_EMAIL"]}, {mail}, rel)
+
+    def test_a_tool_without_the_author_file_next_to_it_fails_loudly_and_never_commits_as_someone_else(self):
+        """작성자 상수 파일이 곁에 없으면(도구만 따로 복사한 경우) 조용히 다른 신원으로 커밋하지 않고 읽는 곳에서 바로 실패한다."""
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            for rel in ("mk_merge_branch.py", "scratch/mk_lane_merge.py", "scratch/mk_lane_merge_desktop.py"):
+                lonely = Path(tmp) / rel.replace("/", "_").replace(".py", "")
+                (lonely / "scratch").mkdir(parents=True, exist_ok=True)
+                shutil.copy2(WORK / rel, lonely / rel)                                            # 작성자 파일은 일부러 곁에 두지 않는다
+                with mock.patch.object(sys, "argv", ["tool", "r", "s", "p", "m", "b"]):
+                    with self.assertRaises(FileNotFoundError, msg=rel):
+                        load_tool(lonely / rel)
+
 class StageScriptsTest(unittest.TestCase):
     """tools_stage.py·memcopy_stage.py — 옛 PC 판을 고쳐 넣은 스테이징 도구: 계정 이름이 든 경로·낱말 목록을 코드에 두지 않고 인자·환경 변수로 받으며,
     가린 사본만 만들고, 금지 글이 남으면 쓰지 않고 멈춘다(종료 코드 1)."""
