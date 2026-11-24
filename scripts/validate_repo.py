@@ -2142,7 +2142,11 @@ _DEP3_KEYWORDS = frozenset({"if", "then", "else", "elif", "do", "while", "until"
 _DEP3_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=.*", re.S)
 _DEP3_PIP_PROGRAM = re.compile(r"pip3?(?:\.[0-9]+)?(?:\.exe)?")
 _DEP3_PYTHON_PROGRAM = re.compile(r"(?:python3?(?:\.[0-9]+)?|py)(?:\.exe)?")
-_DEP3_HIDDEN_PIP = re.compile(r"(?<![\w./-])pip3?(?:\.[0-9]+)?(?:\.exe)?\s+(?:\S+\s+)*?install\b")
+# 숨은 설치 읽기(결함 D-482): 옛 정규식 `pip` 낱말 뒤에 아무 낱말이나 건너뛰고 `install` 이 오는 꼴은 `pip` 낱말마다 끝까지 되짚어 글 길이의 제곱 시간이었다(`pip` 1만 6천 개에 14초).
+# 같은 판정을 낱말 한 번 훑기로 한다 — `pip`·`pip3`·`pip3.12`·`pip.exe` 로 끝나는 낱말(그 앞 글자가 낱말 문자·`.`·`/`·`-` 가 아닌 것)이 나온 뒤에 `install` 로 시작하고 낱말 경계로 끝나는 낱말이 따라오는가.
+_DEP3_WORD = re.compile(r"\S+")
+_DEP3_PIP_TAIL = re.compile(r"(?<![\w./-])pip3?(?:\.[0-9]+)?(?:\.exe)?\Z")
+_DEP3_INSTALL_WORD = re.compile(r"install(?!\w)")
 _DEP3_MESSAGE_PROGRAMS = frozenset({"echo", "printf", "git", "gh"})
 _DEP3_PIP_COMMANDS = frozenset({"install", "download", "uninstall", "freeze", "list", "show", "check", "config", "search", "wheel", "hash", "cache", "index", "inspect", "debug", "help", "completion"})
 _DEP3_VALUE_OPTIONS = frozenset({"-t", "--target", "-i", "--index-url", "--extra-index-url", "-f", "--find-links", "--root", "--prefix", "--src", "--cert", "--client-cert", "--proxy", "--timeout",
@@ -2179,6 +2183,17 @@ def _dep3_install_args(args):
     return found
 
 
+def _dep3_hides_pip_install(text):
+    """합친 글 안에 `pip install` 이 숨어 있는가 — `pip` 계열 낱말 뒤에 `install` 낱말이 따라오는가(사이에 다른 낱말이 몇 개든). 낱말을 한 번만 훑는다(글 길이에 비례)."""
+    seen_pip = False
+    for word in _DEP3_WORD.findall(text):
+        if seen_pip and _DEP3_INSTALL_WORD.match(word):
+            return True
+        if not seen_pip and _DEP3_PIP_TAIL.search(word):
+            seen_pip = True
+    return False
+
+
 def _dep3_pip_subcommand(args):
     """pip 인자 목록에서 하위 명령이 있는 자리(인덱스), 없으면 None. pip 자신의 읽기와 같게 `-` 로 시작하는 옵션은 건너뛰고, 값을 받는 옵션(`--cache-dir cache`·`--log list`)은 값까지 건너뛴 뒤
     처음 나오는 낱말이 하위 명령이다(그 값이 `cache`·`list` 같은 하위 명령 낱말이어도 하위 명령이 아니다 — 결함 D-481). 그 낱말이 pip 의 하위 명령 목록에 없고(목록에 없는 값 옵션의 값일 수 있다)
@@ -2191,6 +2206,14 @@ def _dep3_pip_subcommand(args):
     if args[index] not in _DEP3_PIP_COMMANDS and "install" in args[index + 1:]:
         return args.index("install", index + 1)
     return index
+
+
+def _dep3_command_words(segment):
+    """명령 조각에서 앞머리의 NAME=값 대입과 셸 낱말(if·then·`{` 등)을 건너뛴 낱말 목록. 앞에서 하나씩 빼지 않고 자리만 센다 — 빼면 글 길이의 제곱 시간이다(결함 D-482)."""
+    lead = 0
+    while lead < len(segment) and (segment[lead] in _DEP3_KEYWORDS or _DEP3_ASSIGNMENT.fullmatch(segment[lead])):
+        lead += 1
+    return segment[lead:]
 
 
 def _dep3_python_pip_args(words):
@@ -2244,9 +2267,7 @@ def _dep3_pip_installs(run):
         if current:
             segments.append(current)
         for segment in segments:
-            words = list(segment)
-            while words and (words[0] in _DEP3_KEYWORDS or _DEP3_ASSIGNMENT.fullmatch(words[0])):
-                words.pop(0)
+            words = _dep3_command_words(segment)
             if not words:
                 continue
             program = words[0].rsplit("/", 1)[-1]
@@ -2263,7 +2284,7 @@ def _dep3_pip_installs(run):
                     found["text"] = " ".join(rest)
                     installs.append(found)
                 continue
-            if program not in _DEP3_MESSAGE_PROGRAMS and _DEP3_HIDDEN_PIP.search(" ".join(words)):
+            if program not in _DEP3_MESSAGE_PROGRAMS and _dep3_hides_pip_install(" ".join(words)):
                 unreadable.append(f"`{_shown(' '.join(words))}` 안에 pip install 이 들어 있습니다 — 이 검증기가 읽지 못하는 모양입니다(bash -c·eval·xargs·sudo·uv 등)")
     return installs, unreadable
 

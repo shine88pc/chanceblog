@@ -4,9 +4,12 @@
 이 시험은 (1) 진짜 파일 — constraints 두 파일의 모양과 요구 파일과의 짝, 워크플로 열 곳의 설치 줄, (2) 검증기 DEP-3 이 진짜 저장소에서 오류 0 이고
 (3) 진짜 파일을 임시 폴더로 복사해 한 곳씩 틀리게 하면(변이) 모두 검증기 오류로 잡히는지, (4) 범위 비교·줄 읽기·셸 줄 읽기의 작은 규칙, (5) 문서가 코드와 같은 말을 하는지를 본다.
 워크플로를 읽는 시험은 PyYAML 이 있어야 돈다(없는 환경에서는 건너뜀 — requirements-dev.txt 가 CI 에 설치한다)."""
+import itertools
+import random
 import re
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -801,6 +804,12 @@ class ShellReadingTest(unittest.TestCase):
             with self.subTest(words=words):
                 self.assertEqual(vr._dep3_python_pip_args(words), expected)
 
+    def test_the_leading_words_of_a_command_are_skipped_by_position(self):
+        for segment, expected in ((["a=1", "b=2", "pip", "install"], ["pip", "install"]), (["if", "pip", "install"], ["pip", "install"]), (["then", "A=1", "{", "pip"], ["pip"]),
+                                  (["pip", "a=1"], ["pip", "a=1"]), (["a=1"], []), ([], []), (["!", "time", "x=", "python"], ["python"])):
+            with self.subTest(segment=segment):
+                self.assertEqual(vr._dep3_command_words(segment), expected)
+
     def test_shapes_that_hide_an_install_are_reported_unreadable(self):
         for run in ('bash -c "pip install x"', "sh -c 'python -m pip install -r r.txt'", 'eval "pip install x"', "xargs pip install", "sudo pip install x", "uv pip install x", "time sudo pip install x",
                     "nohup pip install x &"):
@@ -818,6 +827,120 @@ class ShellReadingTest(unittest.TestCase):
     def test_a_quoted_string_across_lines_is_read_until_it_closes(self):
         found, unreadable = self.installs('echo "first line\nsecond line"\npip install -r r.txt\n')
         self.assertEqual((found, unreadable), ([([], ["r.txt"], [], [])], []))
+
+
+# ----------------------------------------------------------------------------
+# 숨은 설치 읽기와 병적 입력 — 옛 정규식(글 길이의 제곱 시간)과 같은 판정을 선형 시간으로(결함 D-482, 안전 검증 S 의 R3)
+# ----------------------------------------------------------------------------
+# 옛 구현의 글자 그대로의 사본 — 판정의 기준이다(낱말 경계를 뜻하는 백슬래시 b 는 글자를 이어 붙여 만든다)
+OLD_HIDDEN_PIP = re.compile(r"(?<![\w./-])pip3?(?:\.[0-9]+)?(?:\.exe)?\s+(?:\S+\s+)*?install" + chr(92) + "b")
+FRAGMENTS = ("pip", "pip3", "pip3.12", "pip.exe", "pip3.12.exe", "pip.", "pip3x", "pip.12.34", "mypip", "-pip", "/pip", "./pip", "_pip", ":pip", "(pip", "'pip", "=pip", "PIP", "python", "-m", "-mpip",
+             "install", "installs", "install-x", "install.", "install_x", "install:pip", "installed", "uninstall", "-install", chr(0xE9) + "install", "install" + chr(0xE9), "x", "-r", "a.txt", "$(", ")", ";")
+SEPARATORS = (" ", " ", "  ", "\t", "\n", chr(0xA0), chr(0x2028), chr(0x1F), chr(0x85), chr(0x3000), "", "")          # 빈 글자 = 붙여 쓰기, 나머지는 정규식 \s 가 공백으로 읽는 글자들
+
+
+def best_seconds(function, value, runs=3, limit=1.0):
+    """함수를 value 에 돌려 가장 빠른 한 번의 초를 돌려준다(부하로 흔들리는 값을 줄인다). 한 번이 limit 초를 넘으면 더 돌리지 않는다(제곱 시간 코드를 오래 돌리지 않으려고)."""
+    best = None
+    for _ in range(runs):
+        started = time.perf_counter()
+        function(value)
+        took = time.perf_counter() - started
+        best = took if best is None else min(best, took)
+        if took > limit:
+            break
+    return best
+
+
+class HiddenInstallScanTest(unittest.TestCase):
+    def test_known_shapes(self):
+        for text, expected in (
+                ("pip install", True), ("x pip install y", True), ("pip   install", True), ("pip a b c install", True), ("(pip install", True), ('"pip install', True), ("=pip install", True),
+                ("pip3 install", True), ("pip3.12 install", True), ("pip.exe install", True), ("pip3.12.exe install", True), ("pip pip install", True), ("pip install-x", True), ("pip install.", True),
+                ("pip" + chr(0xA0) + "install", True), ("pip\ninstall", True), ("install:pip install", True), ("sudo pip3 -q install x", True),
+                ("PIP install", False), ("mypip install", False), ("./pip install", False), ("/usr/bin/pip install", False), ("-pip install", False), ("_pip install", False), ("pip.install", False),
+                ("pip installs", False), ("pip install_x", False), ("pip uninstall", False), ("pip", False), ("install pip", False), ("pip;", False), ("", False), ("pip3x install", False),
+                ("pip.12.34 install", False), ("pip " + chr(0xE9) + "install", False), ("pip install" + chr(0xE9), False)):
+            with self.subTest(text=text):
+                self.assertIs(vr._dep3_hides_pip_install(text), expected)
+
+    def test_same_verdict_as_the_old_regex_on_every_short_combination(self):
+        pieces = ("pip", "install", " ", "-", "x", ".exe")
+        checked = trues = 0
+        for length in range(7):
+            for combo in itertools.product(pieces, repeat=length):
+                text = "".join(combo)
+                expected = OLD_HIDDEN_PIP.search(text) is not None
+                if vr._dep3_hides_pip_install(text) is not expected:
+                    self.fail(f"옛 정규식과 판정이 다르다: {text!r} (옛 {expected})")
+                checked += 1
+                trues += expected
+        self.assertEqual(checked, sum(len(pieces) ** length for length in range(7)))
+        self.assertGreater(trues, 200)                           # 참인 글도 많이 본다(모두 거짓이면 이 시험은 아무것도 못 본다)
+        self.assertLess(trues, checked - 1000)
+
+    def test_same_verdict_as_the_old_regex_on_random_texts(self):
+        rng = random.Random(20261124)
+        trues = 0
+        for _ in range(30000):
+            pieces = []
+            for _ in range(rng.randint(0, 9)):
+                pieces.append(rng.choice(FRAGMENTS))
+                pieces.append(rng.choice(SEPARATORS))
+            text = "".join(pieces)
+            expected = OLD_HIDDEN_PIP.search(text) is not None
+            if vr._dep3_hides_pip_install(text) is not expected:
+                self.fail(f"옛 정규식과 판정이 다르다: {text!r} (옛 {expected})")
+            trues += expected
+        self.assertGreater(trues, 1000)
+        self.assertLess(trues, 29000)
+
+    def test_the_old_shape_still_reports_hidden_installs_through_the_reader(self):
+        """읽는 쪽(_dep3_pip_installs)에서도 같다: 다른 명령 안의 pip install 은 읽지 못한 설치로 알리고, 안내문 명령은 면제한다."""
+        for run, hidden in (('bash -c "pip install x"', 1), ("sudo pip3 install x", 1), ("xargs pip install", 1), ("uv pip install x", 1), ("env PIP=1 pip install x", 1),
+                            ("echo pip install x", 0), ('git commit -m "pip install x"', 0), ("grep pip install-notes.txt", 1), ("grep pipe install", 0), ("mypip install x", 0)):
+            with self.subTest(run=run):
+                found, unreadable = vr._dep3_pip_installs(run)
+                self.assertEqual((found, len(unreadable)), ([], hidden))
+
+
+class PathologicalInputTest(unittest.TestCase):
+    """긴 반복 입력도 글 길이에 비례해 읽는다(결함 D-482). 옛 구현: `pip` 낱말 1만 6천 개에 14초(길이가 두 배면 네 배), 앞머리 대입 16만 개에 3초."""
+    SHAPES = (("pip 만 반복", lambda tokens: "foo " + "pip " * tokens),
+              ("pip 와 낱말 교대", lambda tokens: "foo " + "pip x " * (tokens // 2)),
+              ("pip 꼴 세 가지 섞기", lambda tokens: "foo " + "pip3.12 pip.exe pip " * (tokens // 3)),
+              ("끝에 install 닮은 낱말", lambda tokens: "foo " + "pip " * tokens + "installx"),
+              ("줄마다 반복", lambda tokens: "\n".join("foo pip pip" for _ in range(tokens // 2))))
+
+    def test_sixteen_thousand_words_are_read_in_under_a_second(self):
+        for label, make in self.SHAPES:
+            with self.subTest(label=label):
+                self.assertLess(best_seconds(vr._dep3_pip_installs, make(16000), runs=2), 1.0)
+
+    def test_eight_times_the_input_takes_about_eight_times_as_long(self):
+        for label, make in self.SHAPES[:2]:
+            with self.subTest(label=label):
+                small = best_seconds(vr._dep3_pip_installs, make(8000))
+                self.assertLess(small, 1.0)
+                large = best_seconds(vr._dep3_pip_installs, make(64000), runs=2)
+                self.assertLess(large, 24 * max(small, 0.01), (small, large))               # 선형이면 8배 안팎, 제곱이면 64배
+
+    def test_the_scan_alone_handles_a_very_long_text(self):
+        self.assertLess(best_seconds(vr._dep3_hides_pip_install, "foo " + "pip x " * 100000, runs=2, limit=2.0), 2.0)
+        self.assertFalse(vr._dep3_hides_pip_install("foo " + "pip x " * 100000))
+        self.assertTrue(vr._dep3_hides_pip_install("foo " + "pip x " * 100000 + "install"))
+
+    def test_hundreds_of_thousands_of_leading_assignments_are_skipped_by_position(self):
+        self.assertLess(best_seconds(vr._dep3_command_words, ["a=1"] * 200000 + ["pip", "install", "x"], runs=2, limit=2.0), 2.0)
+        self.assertEqual(vr._dep3_command_words(["if"] * 200000 + ["pip", "install", "x"]), ["pip", "install", "x"])
+
+    def test_leading_assignments_in_a_real_command_line_take_linear_time(self):
+        small = best_seconds(vr._dep3_pip_installs, "a=1 " * 20000 + "pip install -r b.txt")
+        self.assertLess(small, 2.0)
+        large = best_seconds(vr._dep3_pip_installs, "a=1 " * 160000 + "pip install -r b.txt", runs=2, limit=6.0)
+        self.assertLess(large, 20 * max(small, 0.02), (small, large))                   # 선형이면 8배 안팎(낱말 쪼개기), 앞에서 하나씩 빼면 40배
+        found, unreadable = vr._dep3_pip_installs("a=1 " * 20 + "pip install -r b.txt")
+        self.assertEqual(([item["requirements"] for item in found], unreadable), ([["b.txt"]], []))
 
 
 class PythonVersionTest(unittest.TestCase):
