@@ -19,6 +19,8 @@ Actions 단계 로그 원문은 로그인이 있어야 읽히지만, 실행 목�
 접수 대조(독립 감사 BA-S1-3, 결함 D-408): 접수는 이슈를 '열 때' 한 번만 한다 — 소유자가 연 `[답변]` 이슈의 본문이 나중에 고쳐지면 새 접수(코멘트·승인)는 없고 고쳐졌다는 폰 알림 한 통만 간다(확인 032 ①, 결함 D-437 — 승인이 아니다). 그래서 `issue` 는 제목이
       `[답변]`·`[요청]` 인 이슈에서 '접수 코멘트(봇)가 되풀이한 대상번호·선택'과 '지금 본문을 접수 코드와 같은 함수(operator_loop.parse_reply)로 읽은 값'을 견줘 같음·다름을 보이고, 다르면 경고한다.
       갱신 시각(updated_at)은 코멘트·라벨 변경도 세므로 편집 여부는 이 대조로 본다(편집 시각 lastEditedAt 은 로그인이 필요한 GraphQL 에만 있다).
+      접수 코멘트 자체가 고쳐지는 길(독립 감사 BA-S2 R1, 결함 D-466): 쓰기 권한자는 봇 코멘트의 글도 REST 로 고칠 수 있다(작성자 login 은 그대로). 접수 코드는 접수 코멘트를 한 번 만들고 다시 고치지 않으므로
+      접수 코멘트의 `updated_at` 이 `created_at` 과 다르면 값이 같아 보여도 새 상태 `ack_edited`(승인 아님 — 번호 있는 decision 요청으로 다시 묻는다)로 읽는다.
 """
 import argparse
 import datetime
@@ -94,7 +96,10 @@ def parse_time(value):
 
 def kst(value, fmt="%m-%d %H:%M:%S"):
     moment = parse_time(value)
-    return moment.astimezone(KST).strftime(fmt) if moment else "-"
+    try:
+        return moment.astimezone(KST).strftime(fmt) if moment else "-"
+    except (OverflowError, ValueError, OSError):                     # 9999 년 끝처럼 한국 시각으로 옮기면 범위를 넘는 값 — 읽는 도구가 죽지 않게 `-`
+        return "-"
 
 
 def seconds_between(start, end):
@@ -275,7 +280,7 @@ SHAPE_ERROR_VALUE = "양식 모양 오류(접수하지 못함)"
 FORM_PREFIXES = (loop.REPLY_TITLE_PREFIX.rstrip(), loop.TASK_TITLE_PREFIX.rstrip())          # `[답변]`·`[요청]` — 접수 대상 이슈의 제목 머리(접수 코드와 같은 값)
 NOT_OWNER_CODES = ("no_owner", "not_owner", "not_owner_association")
 # 본문 앞에 한 번 더 내는 기계가 읽는 한 줄 `접수대조=<낱말>` 의 낱말(status → 낱말). 읽는 쪽은 표지 없는 도구 줄과 이 줄만 믿는다 — 본문·코멘트의 줄에는 BODY_MARK 가 붙어 이 모양이 될 수 없다.
-MACHINE_WORDS = {"same": "same", "differs": "differs", "no_ack": "no_ack", "ack_unreadable": "unreadable", "not_owner": "not_owner"}
+MACHINE_WORDS = {"same": "same", "differs": "differs", "no_ack": "no_ack", "ack_unreadable": "unreadable", "not_owner": "not_owner", "ack_edited": "ack_edited"}
 
 
 def ack_head(text):
@@ -325,10 +330,21 @@ def find_ack(comments):
     return None
 
 
+def ack_was_edited(comment):
+    """접수 코멘트가 만들어진 뒤 고쳐졌는가(독립 감사 BA-S2 R1): 코멘트의 `updated_at` 이 `created_at` 과 다르면 True. 접수 코드는 접수 코멘트를 POST 로 한 번 만들고 다시 고치지 않으므로
+    정상 접수 코멘트는 두 시각이 글자까지 같다. 두 시각 중 하나라도 없거나 글이 아니거나 비어 있으면 같은지 알 수 없으므로 고쳐진 것으로 본다(닫힌 쪽 — 값을 믿지 않고 다시 묻는 쪽으로만 틀린다).
+    코멘트에 반응(이모지)을 달면 `updated_at` 이 바뀌는지는 확인하지 못했다 — 바뀐다면 다시 묻는 쪽이라 안전한 방향으로만 틀린다."""
+    created, updated = comment.get("created_at"), comment.get("updated_at")
+    if not (isinstance(created, str) and isinstance(updated, str) and created and updated):
+        return True
+    return created != updated
+
+
 def ack_check(issue, comments, owner):
     """`[답변]`·`[요청]` 제목 이슈의 접수 대조 → {status, ack, current, lines}. 제목이 양식 이슈가 아니면 None.
     status: same(접수 코멘트가 되풀이한 값 = 지금 본문을 읽은 값) · differs(다름 — 본문이 접수 뒤에 바뀐 것) · no_ack(접수 코멘트 없음) · ack_unreadable(접수 코멘트의 값을 읽지 못함) ·
-    not_owner(소유자가 올린 이슈가 아님 — 접수·승인 대상이 아니다). 승인으로 읽어도 되는 것은 same 뿐이다(그 요청 파일과 대조는 따로 한다)."""
+    ack_edited(접수 코멘트 자체가 접수 뒤에 고쳐짐 — 값이 같아 보여도 믿지 않는다) · not_owner(소유자가 올린 이슈가 아님 — 접수·승인 대상이 아니다). 승인으로 읽어도 되는 것은 same 뿐이다(그 요청 파일과 대조는 따로 한다).
+    판정 순서: not_owner → no_ack → ack_edited → ack_unreadable → same·differs(고쳐진 코멘트는 읽을 수 있든 없든 먼저 고쳐진 것으로 알린다). ack_edited 는 코멘트에서 읽은 값을 싣지 않는다(ack 는 None — ack_unreadable 처럼)."""
     title = str(issue.get("title") or "")
     if not title.startswith(FORM_PREFIXES):
         return None
@@ -342,6 +358,10 @@ def ack_check(issue, comments, owner):
         return {"status": "no_ack", "ack": None, "current": current_value(result),
                 "lines": ["  접수 대조: 접수 코멘트(봇)가 없습니다 — 아직 접수 전이거나 접수되지 않은 이슈입니다. 승인으로 읽지 않습니다(접수 코멘트가 되풀이한 값과 지금 본문이 같을 때만 승인)."]}
     acked, now = ack_value(ack_head(ack.get("body"))), current_value(result)
+    if ack_was_edited(ack):
+        return {"status": "ack_edited", "ack": None, "current": now,        # 고쳐진 코멘트에서 읽은 값은 싣지 않는다(ack_unreadable 처럼 None) — 상태를 안 보고 ack 와 current 를 견주는 소비자가 위조된 값을 같음으로 읽지 못하게(독립 검증 BFIX1-S N3)
+                "lines": [f"  ⚠ 접수 대조: 접수 코멘트(봇)가 접수 뒤에 고쳐졌습니다(만든 {kst(ack.get('created_at'))} · 고친 {kst(ack.get('updated_at'))}) — 코멘트의 값을 믿을 수 없어 "
+                          "본문과 값이 같아 보여도 승인으로 읽지 말고 운영자에게 번호 있는 확인 요청으로 다시 묻습니다."]}
     if acked is None:
         return {"status": "ack_unreadable", "ack": None, "current": now,
                 "lines": ["  ⚠ 접수 대조: 접수 코멘트의 값을 읽지 못했습니다(형식이 다릅니다). 승인으로 읽지 말고 운영자에게 번호 있는 확인 요청으로 다시 묻습니다."]}
@@ -366,7 +386,9 @@ def cmd_issue(client, args):
         lines.append("접수대조=" + MACHINE_WORDS[check["status"]])        # 본문 앞의 기계가 읽는 한 줄 — 본문·코멘트 줄은 `| ` 표지가 붙어 이 모양이 될 수 없다
     lines += _body_lines(issue.get("body"))
     for number, comment in enumerate(comments, 1):
-        lines.append(f"  [코멘트 {number}] {safe((comment.get('user') or {}).get('login'), 30)}({safe(comment.get('author_association'), 14)}) {kst(comment.get('created_at'))}")
+        updated = comment.get("updated_at")
+        edited = f" · 고침 {kst(updated)}" if updated and updated != comment.get("created_at") else ""          # 고쳐진 코멘트는 고친 시각을 보인다(`updated_at` 이 없으면 아무것도 붙이지 않는다)
+        lines.append(f"  [코멘트 {number}] {safe((comment.get('user') or {}).get('login'), 30)}({safe(comment.get('author_association'), 14)}) {kst(comment.get('created_at'))}{edited}")
         lines += _body_lines(comment.get("body"), "    ")
     return lines, {"issue": issue, "comments": comments, "ack_check": {key: check[key] for key in ("status", "ack", "current")} if check else None}
 

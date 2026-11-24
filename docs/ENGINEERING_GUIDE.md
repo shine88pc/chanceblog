@@ -165,7 +165,7 @@ WORKLOG 항목에 복사해서 체크한다.
 | 상황 | 방법 |
 |------|------|
 | 코드·워크플로 회귀 | `git revert <sha>` 후 push |
-| 블로그 한 곳을 멈춤 | `blogs.json`의 `mode: "off"` (T3 아님, 안전 방향) |
+| 블로그 한 곳을 멈춤 | `blogs.json`의 `mode: "off"` — Blogger·네이버·티스토리에만 맞고 **Chance 는 제외**(Chance 는 `PIPELINE_PAUSE` 만 멈춤 수단이고 `mode: off` 는 검증이 거절해 매 실행 빨강) (T3 아님, 안전 방향) |
 | 전체를 멈춤 | 저장소 Settings → Variables에 `PIPELINE_PAUSE=true` |
 | 워크플로 하나를 멈춤 | Actions 탭 → 해당 워크플로 Disable |
 | 잘못 게시된 글 | [`SECURITY_GUARDRAILS.md`](./SECURITY_GUARDRAILS.md) §4-B |

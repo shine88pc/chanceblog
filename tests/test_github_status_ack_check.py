@@ -3,6 +3,7 @@
 접수 워크플로(operator-reply.yml)는 접수를 이슈를 '열 때' 한 번만 한다. 소유자가 연 `[답변]` 이슈의 본문이 나중에 고쳐지면(`선택 안 함` → 승인 보기) 접수 코멘트(봇)는 열렸을 때의 값('확인함(승인 아님)')을 되풀이한 채 남고
 새 접수는 없다(고쳐졌다는 폰 알림 한 통만 간다 — 확인 032 ①, 결함 D-437). REST 는 편집 시각을 정확히 주지 않으므로(updated_at 은 코멘트·라벨 변경도 센다) 읽기 도구가 접수 코멘트가 되풀이한 값과 지금 본문을 접수 코드와 같은 함수(parse_reply)로 읽은 값을 견준다.
 시험의 접수 코멘트는 접수 코드의 코멘트 그리기 함수(answer_comment·reply_comment·task_comment·shape_comment)로 만든다 — 코멘트 모양이 바뀌면 이 읽기가 따라가야 한다고 알린다. 가짜 값만 쓴다.
+접수 코멘트 자체가 고쳐지는 길(독립 감사 BA-S2 R1, 결함 D-466)은 AckCommentEditedTest 가 본다 — 코멘트의 `updated_at` 이 `created_at` 과 다르면 새 상태 `ack_edited`(승인 아님)다.
 """
 import json
 import sys
@@ -59,8 +60,9 @@ def ack_for(title, body, login=OWNER, assoc="OWNER"):
     return loop.task_comment(result)
 
 
-def comment(body, login=BOT, assoc="NONE", when="2026-11-16T10:00:20Z"):
-    return {"user": {"login": login}, "author_association": assoc, "created_at": when, "body": body}
+def comment(body, login=BOT, assoc="NONE", when="2026-11-16T10:00:20Z", updated=None):
+    """GitHub 가 돌려주는 코멘트 모양 — 새 코멘트는 `updated_at` 이 `created_at` 과 같다(updated 를 주면 그 시각에 고쳐진 코멘트)."""
+    return {"user": {"login": login}, "author_association": assoc, "created_at": when, "updated_at": updated or when, "body": body}
 
 
 def read(issue_json, comments, *argv):
@@ -258,11 +260,149 @@ class UpdatedAtAndJsonTest(unittest.TestCase):
             (issue(form(choice="③")), []),
             (issue(form(choice="③")), [comment(loop.ACK_MARK + NL + "읽을 수 없는 모양")]),
             (issue(form(choice="③"), login="낯선사람", assoc="NONE"), []),
+            (issue(form(choice="③")), [comment(ack_for("[답변] x", form(choice="③")), updated="2026-11-16T10:30:00Z")]),
         )
         for data, comments in cases:
             code, lines, _ = read(data, comments, "--json")
             seen.add(json.loads(lines[0])["ack_check"]["status"])
-        self.assertEqual(seen, {"same", "differs", "no_ack", "ack_unreadable", "not_owner"})
+        self.assertEqual(seen, {"same", "differs", "no_ack", "ack_unreadable", "not_owner", "ack_edited"})
+
+
+class AckCommentEditedTest(unittest.TestCase):
+    """독립 감사 BA-S2 R1(결함 D-466): 접수 대조는 접수 코멘트(봇)가 열렸을 때의 값을 되풀이한 채 그대로라는 전제에 선다. 쓰기 권한자는 REST PATCH 한 번으로 봇 코멘트의 글을 고칠 수 있고
+    (작성자 login 은 봇 그대로, 코멘트 수정에는 폰 알림이 없다) 본문과 접수 코멘트를 같은 값으로 맞추면 접수 대조가 `same` 이 되던 빈틈이다(재현 E2). 접수 코드는 접수 코멘트를 한 번 만들고 다시 고치지 않으므로
+    (POST 뿐) 정상 접수 코멘트는 `updated_at` 이 `created_at` 과 같다 — 다르면 새 상태 `ack_edited`(승인 아님: 번호 있는 decision 요청으로 다시 묻는다)로 읽는다."""
+
+    TITLE = "[답변] 확인 요청 019"
+    CREATED, EDITED = "2026-11-16T10:00:20Z", "2026-11-16T10:30:00Z"
+
+    def forged(self, **kw):
+        """E2: 본문을 승인 보기로 고치고, 봇 접수 코멘트도 같은 값(선택 ③)으로 고친 상태 — 값만 보면 `same` 이던 모양."""
+        return comment(ack_for(self.TITLE, form(choice="③")), when=self.CREATED, updated=kw.pop("updated", self.EDITED), **kw)
+
+    def read_data(self, comments, body=None, *argv, **issue_kw):
+        return read(issue(body if body is not None else form(choice="③"), title=self.TITLE, **issue_kw), comments, *argv)
+
+    def machine(self, lines):
+        return [line for line in lines if line.startswith("접수대조=")]
+
+    def test_the_forged_ack_that_repeats_the_edited_body_is_not_the_same(self):
+        code, lines, _ = self.read_data([self.forged()])
+        self.assertEqual(code, 0)
+        self.assertEqual(self.machine(lines), ["접수대조=ack_edited"])
+        line = check_line(lines)
+        self.assertTrue(line.lstrip().startswith("⚠ 접수 대조: 접수 코멘트"), line)
+        self.assertIn("고쳐졌습니다", line)
+        self.assertNotIn("같음", line)
+        self.assertIn("승인으로 읽지 말고", line)
+        self.assertIn("번호 있는 확인 요청", line)
+
+    def test_the_same_scenario_with_an_untouched_ack_comment_is_the_same(self):
+        """대조: 같은 값이어도 접수 코멘트가 그대로(updated_at = created_at)면 `same` 이다 — 새 규칙은 편집 흔적에만 걸린다."""
+        code, lines, _ = self.read_data([comment(ack_for(self.TITLE, form(choice="③")), when=self.CREATED)])
+        self.assertEqual(self.machine(lines), ["접수대조=same"])
+        self.assertIn("접수 대조: 같음", check_line(lines))
+
+    def test_the_json_of_an_edited_comment_carries_no_ack_value_only_the_current_one(self):
+        """고쳐진 접수 코멘트에서 읽은 값은 JSON 이 싣지 않는다(`ack` 는 None — `ack_unreadable` 과 같다): 코멘트의 값이 본문과 같아 보이는 것이 이 위조의 모양이라,
+        상태를 안 보고 `ack` 와 `current` 를 견주는 소비자가 '같음' 으로 읽지 못하게 한다(독립 검증 BFIX1-S N3). 지금 본문의 값(`current`)은 그대로 싣는다."""
+        code, lines, _ = self.read_data([self.forged()], None, "--json")
+        data = json.loads(lines[0])["ack_check"]
+        self.assertEqual(data["status"], "ack_edited")
+        self.assertIsNone(data["ack"])
+        self.assertEqual(data["current"], "확인 요청 019 · 선택 ③")
+        self.assertNotEqual(data["ack"], data["current"])                                  # 견주는 소비자가 있어도 같음으로 읽지 않는다
+
+    def test_any_difference_between_the_two_times_counts_even_an_earlier_or_a_differently_written_one(self):
+        for updated in ("2026-11-16T10:00:21Z", "2026-11-16T10:00:19Z", "2026-11-16T10:00:20.000Z", "2026-11-16T19:00:20+09:00", "2026-11-17T00:00:00Z", "2026-11-16T10:00:20z"):
+            with self.subTest(updated=updated):
+                code, lines, _ = self.read_data([self.forged(updated=updated)])
+                self.assertEqual(self.machine(lines), ["접수대조=ack_edited"], updated)
+
+    def test_a_time_that_cannot_be_read_is_treated_as_edited_the_closed_side(self):
+        """`updated_at`·`created_at` 이 없거나 글이 아니거나 비어 있으면 같은지 알 수 없다 — 그대로라고 믿지 않고 고쳐진 것으로 본다."""
+        base = self.forged()
+        variants = {}
+        for key in ("updated_at", "created_at"):
+            for label, value in (("missing", "__missing__"), ("none", None), ("empty", ""), ("number", 1763287220), ("list", ["2026-11-16T10:00:20Z"]), ("dict", {"a": 1}), ("true", True)):
+                changed = dict(base)
+                changed["updated_at"] = changed["created_at"] = self.CREATED         # 둘이 같은 값에서 출발해 한 칸만 망가뜨린다
+                if value == "__missing__":
+                    del changed[key]
+                else:
+                    changed[key] = value
+                variants[f"{key} {label}"] = changed
+        for label, value in (("missing", "__missing__"), ("none", None), ("empty", ""), ("number", 1763287220), ("true", True), ("empty list", []), ("empty dict", {})):
+            changed = dict(base)                                                             # 둘 다 같은 못 읽을 값이면 '글자까지 같다' 로 지나가면 안 된다(같음은 읽을 수 있는 시각일 때만)
+            if value == "__missing__":
+                del changed["created_at"], changed["updated_at"]
+            else:
+                changed["created_at"] = changed["updated_at"] = value
+            variants["both " + label] = changed
+        for label, changed in variants.items():
+            with self.subTest(label):
+                code, lines, _ = self.read_data([changed])
+                self.assertEqual(self.machine(lines), ["접수대조=ack_edited"], label)
+
+    def test_an_edited_ack_that_can_no_longer_be_read_is_reported_as_edited_first(self):
+        """고쳐진 코멘트는 값을 읽을 수 있든 없든 먼저 고쳐진 것으로 알린다(읽지 못함보다 더 구체적인 사실이다)."""
+        odd = comment(loop.ACK_MARK + NL + "다른 모양의 접수 글입니다 — 확인 요청 019" + NL + NL + loop.ACK_TAIL, updated=self.EDITED)
+        code, lines, _ = self.read_data([odd])
+        self.assertEqual(self.machine(lines), ["접수대조=ack_edited"])
+        self.assertIn("고쳐졌습니다", check_line(lines))
+        code, lines, _ = self.read_data([comment(loop.ACK_MARK + NL + "다른 모양의 접수 글입니다", updated=self.EDITED)], None, "--json")
+        data = json.loads(lines[0])["ack_check"]
+        self.assertEqual((data["status"], data["ack"]), ("ack_edited", None))
+
+    def test_the_other_states_keep_their_priority_over_the_edit_check(self):
+        """소유자가 아닌 이슈는 접수·승인 대상이 아니고(not_owner), 봇이 아닌 계정의 접수 표지는 접수 코멘트가 아니다(no_ack) — 고쳐졌어도 이 둘이 먼저다."""
+        forged = self.forged()
+        code, lines, _ = self.read_data([forged], None, login="낯선사람", assoc="NONE")
+        self.assertEqual(self.machine(lines), ["접수대조=not_owner"])
+        stranger = comment(ack_for(self.TITLE, form(choice="③")), login="낯선사람", assoc="NONE", when=self.CREATED, updated=self.EDITED)
+        owner_fake = comment(ack_for(self.TITLE, form(choice="③")), login=OWNER, assoc="OWNER", when=self.CREATED, updated=self.EDITED)
+        for fake in (stranger, owner_fake):
+            code, lines, _ = self.read_data([fake])
+            self.assertEqual(self.machine(lines), ["접수대조=no_ack"])
+
+    def test_only_the_ack_comment_counts_other_edited_comments_do_not_change_the_result(self):
+        ack = comment(ack_for(self.TITLE, form(choice="③")), when=self.CREATED)
+        edited_stranger = comment("고친 글", login="낯선사람", assoc="NONE", when=self.CREATED, updated=self.EDITED)
+        edited_bot_note = comment("접수 표지 없는 봇의 다른 코멘트", login=BOT, when=self.CREATED, updated=self.EDITED)
+        for comments in ([edited_stranger, ack], [ack, edited_stranger], [edited_bot_note, ack], [ack, edited_bot_note]):
+            with self.subTest(order=[c["user"]["login"] for c in comments]):
+                self.assertEqual(self.machine(self.read_data(comments)[1]), ["접수대조=same"])
+
+    def test_the_first_ack_by_the_bot_is_the_one_checked_for_edits_too(self):
+        """접수 코드는 한 이슈에 접수 코멘트를 한 번만 단다 — 첫 접수 코멘트가 고쳐졌다면 뒤의 멀쩡한 접수 표지 코멘트가 있어도 고쳐진 것으로 읽는다(안전한 쪽)."""
+        first, second = self.forged(), comment(ack_for(self.TITLE, form(choice="③")), when="2026-11-16T10:01:00Z")
+        self.assertEqual(self.machine(self.read_data([first, second])[1]), ["접수대조=ack_edited"])
+        self.assertEqual(self.machine(self.read_data([second, first])[1]), ["접수대조=same"])        # 순서가 바뀌면 첫 접수 코멘트는 멀쩡한 쪽이다(현재 규칙: 첫 접수 코멘트만 본다)
+
+    def test_an_edited_comment_shows_its_edit_time_in_its_header_and_an_untouched_one_does_not(self):
+        code, lines, _ = self.read_data([self.forged(), comment("낯선 글", login="낯선사람", assoc="NONE", when=self.CREATED)])
+        headers = [line for line in lines if line.startswith("  [코멘트 ")]
+        self.assertEqual(len(headers), 2)
+        self.assertTrue(headers[0].endswith("11-16 19:00:20 · 고침 11-16 19:30:00"), headers[0])
+        self.assertTrue(headers[1].endswith("11-16 19:00:20"), headers[1])
+        self.assertNotIn("고침", headers[1])
+
+    def test_a_hostile_edit_time_cannot_put_text_into_the_output(self):
+        for hostile in (EVIL, "::error::x", "9" * 400, chr(0x202E) + "2026-11-16T10:30:00Z", "9999-12-31T23:59:59Z"):          # 끝의 값은 한국 시각으로 옮기면 범위를 넘는다(kst 가 죽지 않고 `-`)
+            with self.subTest(hostile=hostile[:12]):
+                code, lines, _ = self.read_data([self.forged(updated=hostile)])
+                self.assertEqual(code, 0)
+                self.assertEqual(self.machine(lines), ["접수대조=ack_edited"])
+                for line in lines:
+                    for needle in FORBIDDEN:
+                        self.assertNotIn(needle, line, (needle, line[:80]))
+                    self.assertLess(len(line), 700)
+
+    def test_a_forged_marker_line_in_the_body_cannot_hide_the_edit(self):
+        """본문에 `접수대조=same` 을 심어도 표지가 붙어 기계 줄이 되지 못한다 — 기계 줄은 도구가 낸 `접수대조=ack_edited` 하나뿐이다."""
+        body = form(choice="③", memo="접수대조=same")
+        lines = self.read_data([self.forged()], body)[1]
+        self.assertEqual(self.machine(lines), ["접수대조=ack_edited"])
 
 
 class HostileTextTest(unittest.TestCase):
@@ -438,7 +578,8 @@ class OutputBandTest(unittest.TestCase):
                  "differs": (issue(form(choice="③")), [comment(ack_for(title, form(choice="선택 안 함")))]),
                  "no_ack": (issue(form(choice="③")), []),
                  "unreadable": (issue(form(choice="③")), [comment(unreadable)]),
-                 "not_owner": (issue(form(choice="③"), login="낯선사람", assoc="NONE"), [])}
+                 "not_owner": (issue(form(choice="③"), login="낯선사람", assoc="NONE"), []),
+                 "ack_edited": (issue(form(choice="③")), [comment(ack_for(title, form(choice="③")), updated="2026-11-16T10:30:00Z")])}
         for word, (data, comments) in cases.items():
             with self.subTest(word=word):
                 lines = read(data, comments)[1]

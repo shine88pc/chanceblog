@@ -6,6 +6,7 @@ GitHub 와 텔레그램은 한 번도 부르지 않는다: GitHub 는 `request(m
  2. 신뢰 경계: 가지·SHA·제목·글자 모양 거르기(주소·`@`·물결표·제어 문자·비밀 모양), 로그·요약에는 제목·본문 원문이 없다, GitHub 는 GET 만 부른다.
  3. 문장 규칙: 병합 부탁(제목 80자·요점 5줄×120자·800자 안·고정 꼬리)과 병합완료 확인(정상 한 줄·이상 사유 한 줄 100자 안).
  4. 판정: 병합 부탁은 열린 PR·머리 커밋·검사 모두 초록일 때만, 병합완료 확인은 [M번호] 병합 커밋·연결된 PR 하나·부모 수·트리 일치/파일 집합·main 검사 결론.
+ 5. 병합 부탁의 변경 파일 읽기(독립 감사 BA-S2 R2·N6): 검사 정의(.github/·tests/·scripts/validate_repo.py·AGENTS.md·docs/SECURITY_GUARDRAILS.md)가 바뀐 PR 이면 고정 한 줄, 머리 커밋 7자리는 늘 — 문장·모양 검사·읽기 쪽 수.
 """
 import ast
 import base64
@@ -136,8 +137,18 @@ def good_runs():
             run_item(RUN_ID, ".github/workflows/auto-pr.yml", status="in_progress", conclusion=None)]       # 이 실행을 일으킨 자동 PR 실행(목록에는 아직 진행 중으로 보일 수 있다)
 
 
-def ready_routes(prs=None, runs=None):
-    return {"/pulls": [pr_item()] if prs is None else prs, "/actions/runs": {"workflow_runs": good_runs() if runs is None else runs}}
+DEFAULT_FILES = ("docs/ARCHITECTURE.md", "pipeline/auto_notice.py")             # 검사 정의가 아닌 평범한 변경 파일 둘
+
+
+def ready_routes(prs=None, runs=None, files=None):
+    """병합 부탁 판정이 읽는 경로 표: PR 목록·검사 실행 목록·PR 마다 변경 파일 목록(files — 파일 이름 목록이나 항목 목록, 기본은 DEFAULT_FILES)."""
+    prs = [pr_item()] if prs is None else prs
+    routes = {"/pulls": prs, "/actions/runs": {"workflow_runs": good_runs() if runs is None else runs}}
+    for pr in prs if isinstance(prs, list) else ():
+        number = pr.get("number") if isinstance(pr, dict) else None
+        if isinstance(number, int) and not isinstance(number, bool):
+            routes[f"/pulls/{number}/files"] = file_items(DEFAULT_FILES if files is None else files)
+    return routes
 
 
 def ready_env(**over):
@@ -152,8 +163,8 @@ def confirm_env(**over):
 
 
 def file_items(files):
-    """파일 이름 목록 → GitHub `files` 항목 목록. 항목이 (이름, blob 해시) 쌍이면 `sha` 도 싣는다(이름만이면 blob 해시가 없는 응답 모양)."""
-    return [({"filename": item[0], "sha": item[1]} if isinstance(item, tuple) else {"filename": item}) for item in files]
+    """파일 이름 목록 → GitHub `files` 항목 목록. 항목이 (이름, blob 해시) 쌍이면 `sha` 도 싣는다(이름만이면 blob 해시가 없는 응답 모양). 항목이 사전이면 그대로 둔다(previous_filename 같은 칸이 있는 응답 모양)."""
+    return [(dict(item) if isinstance(item, dict) else {"filename": item[0], "sha": item[1]} if isinstance(item, tuple) else {"filename": item}) for item in files]
 
 
 def commit_obj(sha=SHA, message="[M105] 병합 알림 자동화 — 워크플로 둘과 파이썬 보조 [대상: 공통] (#248)\n\n본문", parents=(OTHER_SHA,), tree=TREE, files=("a.py", "b.md")):
@@ -507,22 +518,28 @@ class CleanAndPointsTest(unittest.TestCase):
 # 문장
 # ----------------------------------------------------------------------------
 TAIL = "병합은 Pull requests 에서 제목 맨 앞이 [M105] 인 PR 하나만 하세요. 알림이 없는 열린 PR 은 아직 병합하지 마세요."
+HEADLINE = "머리 커밋 aaaaaaa — 병합 전에 PR 화면의 해시와 같은지 보세요"           # SHA("a" * 39 + "1")의 앞 7자리
+DEFINITION = "⚠ 검사 정의가 바뀐 PR — 초록은 스스로 증명한 값입니다"
 
 
 class ComposeReadyTest(unittest.TestCase):
     def test_the_message_has_the_fixed_shape(self):
-        text = an.compose_ready(NUMBER, TITLE, BODY)
+        text = an.compose_ready(NUMBER, TITLE, BODY, SHA)
         self.assertEqual(text, "[M105] 병합 부탁 — 병합 알림 자동화 — 워크플로 둘과 파이썬 보조 [대상: 공통]\n\n"
                                "- 앞서 병합된 묶음의 다음 단계다. 변경 등급 T3 — 켬 상태는 off 로 낸다.\n"
                                "- 워크플로 둘: 병합 부탁 알림과 병합완료 확인 알림을 자동으로 보낸다.\n"
-                               "- 시험: 새 시험을 더했다\n\n검사: 초록\n\n" + TAIL)
+                               "- 시험: 새 시험을 더했다\n\n검사: 초록\n" + HEADLINE + "\n\n" + TAIL)
         self.assertEqual(an.message_problem(text), "")
         self.assertEqual(an.ready_tail(NUMBER), TAIL)
+        flagged = an.compose_ready(NUMBER, TITLE, BODY, SHA, True)
+        self.assertEqual(flagged, text.replace("검사: 초록\n", "검사: 초록\n" + DEFINITION + "\n"))       # 검사 정의가 바뀐 PR 이면 검사 줄 바로 다음에 고정 한 줄이 더해질 뿐이다
+        self.assertEqual(an.message_problem(flagged), "")
+        self.assertEqual(an.compose_ready(NUMBER, TITLE, BODY, SHA, False), text)                              # 기본값은 '바뀌지 않음'
 
     def test_the_title_part_is_cut_at_80_characters(self):
         rest80, rest81 = "가" * 80, "가" * 81
-        first80 = an.compose_ready(NUMBER, f"[M105] {rest80}", "").split("\n")[0]
-        first81 = an.compose_ready(NUMBER, f"[M105] {rest81}", "").split("\n")[0]
+        first80 = an.compose_ready(NUMBER, f"[M105] {rest80}", "", SHA).split("\n")[0]
+        first81 = an.compose_ready(NUMBER, f"[M105] {rest81}", "", SHA).split("\n")[0]
         self.assertEqual(first80, "[M105] 병합 부탁 — " + rest80)
         self.assertEqual(first81, "[M105] 병합 부탁 — " + "가" * 79 + chr(0x2026))
 
@@ -536,27 +553,27 @@ class ComposeReadyTest(unittest.TestCase):
             with self.subTest(hex(ord(char))):
                 self.assertEqual(an.line_problem(an.clean_inline(title[len("[M105] "):])), "")                   # 전제: 접은 뒤의 글은 깨끗해 보인다
                 with self.assertRaises(an.Skip) as caught:
-                    an.compose_ready(NUMBER, title, BODY)
+                    an.compose_ready(NUMBER, title, BODY, SHA)
                 self.assertEqual(caught.exception.code, "title_problem")
         for char in (chr(0xA0), chr(0x2003), chr(0x3000)):
             with self.subTest(hex(ord(char))):
-                self.assertEqual(an.compose_ready(NUMBER, "[M105] 가" + char + "나", "").split("\n")[0], "[M105] 병합 부탁 — 가 나")
+                self.assertEqual(an.compose_ready(NUMBER, "[M105] 가" + char + "나", "", SHA).split("\n")[0], "[M105] 병합 부탁 — 가 나")
 
     def test_without_a_body_there_are_no_bullets_and_the_message_is_still_valid(self):
         for body in (None, "", "\n\n", "Co-authored-by: x\n"):
             with self.subTest(repr(body)):
-                text = an.compose_ready(NUMBER, TITLE, body)
+                text = an.compose_ready(NUMBER, TITLE, body, SHA)
                 self.assertNotIn("\n- ", text)
                 self.assertEqual(an.message_problem(text), "")
-                self.assertEqual(text.split("\n")[1:], ["", "검사: 초록", "", TAIL])
+                self.assertEqual(text.split("\n")[1:], ["", "검사: 초록", HEADLINE, "", TAIL])
 
     def test_the_whole_message_fits_in_800_characters_and_points_are_dropped_from_the_end(self):
         body = "\n".join(f"- 줄{index} " + "나" * 200 for index in range(1, 6))
         long_title = "[M105] " + "다" * 150
-        full = an.compose_ready(NUMBER, "[M105] 짧은 제목", body)
+        full = an.compose_ready(NUMBER, "[M105] 짧은 제목", body, SHA)
         self.assertLessEqual(len(full), an.MESSAGE_LIMIT)
         self.assertEqual(an.message_problem(full), "")
-        crowded = an.compose_ready(NUMBER, long_title[:200], body)
+        crowded = an.compose_ready(NUMBER, long_title[:200], body, SHA)
         self.assertLessEqual(len(crowded), an.MESSAGE_LIMIT)
         kept = [line for line in crowded.split("\n") if line.startswith("- ")]
         self.assertEqual(kept, [line for line in full.split("\n") if line.startswith("- ")][:len(kept)])      # 남는 줄은 항상 앞쪽 줄이다
@@ -568,11 +585,11 @@ class ComposeReadyTest(unittest.TestCase):
         points = ["가" * 50, "나" * 60, "다" * 70, "라" * 80]
         body = "\n".join("- " + point for point in points)
         for kept in (1, 2, 3, 4):
-            exact = len(an._ready_text(head, points[:kept], NUMBER))
+            exact = len(an._ready_text(head, points[:kept], NUMBER, SHA))
             for limit, expected in ((exact, kept), (exact - 1, kept - 1), (exact + 1, kept)):
                 with self.subTest(kept=kept, limit=limit):
                     with mock.patch.object(an, "MESSAGE_LIMIT", limit):
-                        text = an.compose_ready(NUMBER, "[M105] 제목", body)
+                        text = an.compose_ready(NUMBER, "[M105] 제목", body, SHA)
                         self.assertEqual(len([line for line in text.split("\n") if line.startswith("- ")]), expected)
                         self.assertLessEqual(len(text), limit)
                         self.assertEqual(an.message_problem(text), "")
@@ -580,9 +597,9 @@ class ComposeReadyTest(unittest.TestCase):
     def test_five_full_length_points_under_the_real_limit(self):
         """실제 상한(800자)에서 제목 80자 + 요점 5줄(줄당 120자)은 정확히 계산한 대로 들어가거나(들어가면 5줄) 마지막 줄부터 빠진다."""
         body = "\n".join("- " + chr(0xAC00 + index) * 120 for index in range(5))
-        text = an.compose_ready(NUMBER, "[M105] " + "제" * 80, body)
+        text = an.compose_ready(NUMBER, "[M105] " + "제" * 80, body, SHA)
         points = [line for line in text.split("\n") if line.startswith("- ")]
-        full = len(an._ready_text(text.split("\n")[0], [chr(0xAC00 + index) * 120 for index in range(5)], NUMBER))
+        full = len(an._ready_text(text.split("\n")[0], [chr(0xAC00 + index) * 120 for index in range(5)], NUMBER, SHA))
         self.assertEqual(len(points), 5 if full <= an.MESSAGE_LIMIT else 4)
         self.assertLessEqual(len(text), an.MESSAGE_LIMIT)
 
@@ -592,7 +609,7 @@ class ComposeReadyTest(unittest.TestCase):
         for label, title in bad.items():
             with self.subTest(label):
                 with self.assertRaises(an.Skip) as caught:
-                    an.compose_ready(NUMBER, title, BODY)
+                    an.compose_ready(NUMBER, title, BODY, SHA)
                 self.assertEqual(caught.exception.code, "title_problem")
 
     def test_a_shape_made_by_cutting_the_title_stops_the_message_too(self):
@@ -605,42 +622,42 @@ class ComposeReadyTest(unittest.TestCase):
                 self.assertEqual(an.line_problem(rest), "")                                           # 전제: 자르기 전 제목 전체에는 그 모양이 없다(영문 꼬리가 24자·16자를 넘는다)
                 self.assertNotEqual(an.line_problem(an.shorten(rest, an.READY_TITLE_LIMIT)), "")      # 전제: 자른 뒤에는 그 모양이 된다
                 with self.assertRaises(an.Skip) as caught:
-                    an.compose_ready(NUMBER, title, BODY)
+                    an.compose_ready(NUMBER, title, BODY, SHA)
                 self.assertEqual(caught.exception.code, "title_problem")
         ok = "[M105] " + "가" * 50 + "node" + DOT + "js 로 정리"                                           # 대조: 자르지 않아도 되는 정상 제목
-        self.assertEqual(an.message_problem(an.compose_ready(NUMBER, ok, BODY)), "")
+        self.assertEqual(an.message_problem(an.compose_ready(NUMBER, ok, BODY, SHA)), "")
 
     def test_a_title_of_200_characters_is_allowed_and_201_is_not(self):
-        self.assertEqual(an.message_problem(an.compose_ready(NUMBER, "[M105] " + "가" * 193, "")), "")
+        self.assertEqual(an.message_problem(an.compose_ready(NUMBER, "[M105] " + "가" * 193, "", SHA)), "")
         with self.assertRaises(an.Skip):
-            an.compose_ready(NUMBER, "[M105] " + "가" * 194, "")
+            an.compose_ready(NUMBER, "[M105] " + "가" * 194, "", SHA)
 
     def test_a_title_must_start_with_the_same_number(self):
         for title in ("그냥 제목", "[M106] 다른 번호", "[M105]붙어 있음", "[m105] 소문자", " [M105] 앞 공백", "[M0105] 네 자리 앞 0", "[M1050] 다른 번호", "[R-105] 요청 번호", None, 5):
             with self.subTest(str(title)):
                 with self.assertRaises(an.Skip) as caught:
-                    an.compose_ready(NUMBER, title, BODY)
+                    an.compose_ready(NUMBER, title, BODY, SHA)
                 self.assertEqual(caught.exception.code, "title_shape")
 
     def test_a_number_that_is_not_a_merge_notice_number_is_refused(self):
         for number in ("M000", "M0105", "M10", "P105", "105", "m105", "M12345", "", None):
             with self.subTest(str(number)):
                 with self.assertRaises(an.Skip):
-                    an.compose_ready(number, f"[{number}] 제목", BODY)
+                    an.compose_ready(number, f"[{number}] 제목", BODY, SHA)
 
     def test_tildes_in_the_title_become_en_dashes_and_never_reach_the_message(self):
-        text = an.compose_ready(NUMBER, "[M105] 약 10" + TILDE + "20개 " + chr(0xFF5E), "- 본문 " + TILDE + " 줄")
+        text = an.compose_ready(NUMBER, "[M105] 약 10" + TILDE + "20개 " + chr(0xFF5E), "- 본문 " + TILDE + " 줄", SHA)
         self.assertNotIn(TILDE, text)
         self.assertNotIn(chr(0xFF5E), text)
         self.assertIn("10" + chr(0x2013) + "20개", text)
 
     def test_markdown_and_backticks_are_stripped_from_the_title(self):
-        text = an.compose_ready(NUMBER, "[M105] **굵게** `코드` 제목", "")
+        text = an.compose_ready(NUMBER, "[M105] **굵게** `코드` 제목", "", SHA)
         self.assertEqual(text.split("\n")[0], "[M105] 병합 부탁 — 굵게 코드 제목")
 
     def test_a_body_with_bad_lines_still_gives_a_valid_message(self):
         body = "- " + SCHEME + "evil.example\n- 담당 " + AT + "a\n- 좋은 줄\n- 비밀 " + nh.TOKEN
-        text = an.compose_ready(NUMBER, TITLE, body)
+        text = an.compose_ready(NUMBER, TITLE, body, SHA)
         self.assertEqual(an.message_problem(text), "")
         self.assertIn("- 좋은 줄", text)
         for needle in ("evil", AT, nh.TOKEN):
@@ -701,7 +718,7 @@ class ComposeConfirmTest(unittest.TestCase):
 
 class MessageProblemTest(unittest.TestCase):
     def test_valid_messages_pass(self):
-        for text in (an.compose_ready(NUMBER, TITLE, BODY), an.compose_ready("M1234", "[M1234] 제목", ""), an.compose_confirm(NUMBER, []), an.compose_confirm(NUMBER, [an.REASON_BASE]),
+        for text in (an.compose_ready(NUMBER, TITLE, BODY, SHA), an.compose_ready("M1234", "[M1234] 제목", "", SHA), an.compose_confirm(NUMBER, []), an.compose_confirm(NUMBER, [an.REASON_BASE]),
                      an.compose_confirm(NUMBER, [], [an.NOTE_TWO_PARENTS]), an.compose_confirm(NUMBER, [], [an.NOTE_NO_CONTENT]), an.compose_confirm(NUMBER, [], list(an.CONFIRM_NOTES)),
                      an.compose_confirm(NUMBER, [an.REASON_FILES.format(2, 3), an.REASON_NUMBER, an.REASON_MERGE_COMMIT])):
             self.assertEqual(an.message_problem(text), "", text)
@@ -735,7 +752,7 @@ class MessageProblemTest(unittest.TestCase):
 
     def test_the_ready_message_is_rechecked_for_the_title_length_markup_and_spacing(self):
         """병합 부탁은 제목 부분 80자 상한·요점 줄의 백틱·`**`·정리되지 않은 공백도 발송 job 이 다시 거른다(compose 만 지키던 규칙)."""
-        good = an.compose_ready(NUMBER, TITLE, BODY)
+        good = an.compose_ready(NUMBER, TITLE, BODY, SHA)
         self.assertEqual(an.message_problem(good), "")
         head = "[M105] 병합 부탁 — "
         lines = good.split("\n")
@@ -749,7 +766,7 @@ class MessageProblemTest(unittest.TestCase):
                 self.assertNotEqual(an.message_problem(text), "", label)
 
     def test_every_broken_variant_is_refused(self):
-        ready = an.compose_ready(NUMBER, TITLE, BODY)
+        ready = an.compose_ready(NUMBER, TITLE, BODY, SHA)
         lines = ready.split("\n")
         broken = {
             "empty": "", "blank": "  \n ", "none": None, "number": 5,
@@ -757,7 +774,7 @@ class MessageProblemTest(unittest.TestCase):
             "trailing newline": ready + "\n",
             "leading newline": "\n" + ready,
             "wrong first line dash": ready.replace("병합 부탁 — ", "병합 부탁 - ", 1),
-            "no first line text": "[M105] 병합 부탁 — \n\n검사: 초록\n\n" + TAIL,
+            "no first line text": "[M105] 병합 부탁 — \n\n검사: 초록\n" + HEADLINE + "\n\n" + TAIL,
             "other label": ready.replace("병합 부탁", "병합 요청", 1),
             "bad number": ready.replace("[M105]", "[M000]", 1),
             "leading zero number": ready.replace("[M105]", "[M0105]", 1).replace("[M105] 인", "[M0105] 인"),
@@ -801,14 +818,25 @@ class MessageProblemTest(unittest.TestCase):
         self.assertEqual(an.message_problem("가" * 800), "shape")                 # 글자 수는 한도 안 — 모양이 틀려 거절
         self.assertEqual(an.message_problem("가\n" * 401), "too_long")             # 802자
         self.assertEqual(an.message_problem("가\n" * 400), "shape")                # 800자 — 길이는 한도 안, 모양이 틀려 거절
-        longest = an.compose_ready("M1234", "[M1234] " + "가" * 80, "\n".join("- " + "나" * 120 for _ in range(5)))
-        self.assertEqual(len(longest), an.MESSAGE_LIMIT)
-        self.assertEqual(longest.count("\n- "), 5)
-        self.assertEqual(an.message_problem(longest), "")
+        points = "\n".join("- " + "나" * 120 for _ in range(5))
+        for flagged in (False, True):
+            longest = an.compose_ready("M1234", "[M1234] " + "가" * 80, points, SHA, flagged)
+            self.assertLessEqual(len(longest), an.MESSAGE_LIMIT)
+            self.assertEqual(an.message_problem(longest), "")                                       # 만들 수 있는 가장 긴 문장도 상한 안이라 too_long 은 모양이 맞는 문장을 거절하지 않는다
+            self.assertEqual(longest.count("\n- "), 4)                                              # 머리 커밋 줄(·검사 정의 변경 줄)이 800자 안에서 자리를 차지해 다섯째 요점이 먼저 빠진다
+            head = longest.split("\n")[0]
+            five = an._ready_text(head, ["나" * 120] * 5, "M1234", SHA, flagged)
+            self.assertGreater(len(five), an.MESSAGE_LIMIT)
+            self.assertEqual(an.message_problem(five), "too_long")                                  # 요점 다섯 줄을 다 넣은 문장은 코드가 만들지 않는 모양이라 상한에서 거절된다
+            exact = [length for length in range(1, 121) if len(an._ready_text(head, ["나" * 120] * 4 + ["다" * length], "M1234", SHA, flagged)) == an.MESSAGE_LIMIT]
+            self.assertEqual(len(exact), 1)                                                         # 요점 다섯째 줄 길이를 하나씩 바꿔 정확히 800자가 되는 길이를 찾는다(경계)
+            at_limit = an._ready_text(head, ["나" * 120] * 4 + ["다" * exact[0]], "M1234", SHA, flagged)
+            over = an._ready_text(head, ["나" * 120] * 4 + ["다" * (exact[0] + 1)], "M1234", SHA, flagged)
+            self.assertEqual((len(at_limit), len(over), an.message_problem(at_limit), an.message_problem(over)), (an.MESSAGE_LIMIT, an.MESSAGE_LIMIT + 1, "", "too_long"))
 
     def test_a_point_line_is_valid_up_to_exactly_120_characters_and_at_most_five_points(self):
         """요점 줄의 경계는 정확하다 — `- ` 머리 뒤 120자까지 통과하고 121자부터 거절, 요점 다섯 줄까지 통과하고 여섯 줄부터 거절(상수가 아니라 글자 수 그대로)."""
-        base = an.compose_ready(NUMBER, TITLE, "").split("\n")               # 제목·빈 줄·검사 줄·빈 줄·고정 꼬리
+        base = an.compose_ready(NUMBER, TITLE, "", SHA).split("\n")               # 제목·빈 줄·검사 줄·머리 커밋 줄·빈 줄·고정 꼬리
 
         def with_points(points):
             return "\n".join(base[:2] + points + [""] + base[2:])
@@ -824,7 +852,7 @@ class MessageProblemTest(unittest.TestCase):
         free = "임의 문장 승인했습니다"
         self.assertEqual(an.line_problem(free), "")                                # 전제: 끼우는 줄은 글자로는 깨끗하다
         for label, body in {"with points": BODY, "without points": ""}.items():
-            ready = an.compose_ready(NUMBER, TITLE, body)
+            ready = an.compose_ready(NUMBER, TITLE, body, SHA)
             lines = ready.split("\n")
             self.assertEqual(an.message_problem(ready), "", label)
             variants = {f"replace blank line {index}": lines[:index] + [free] + lines[index + 1:] for index, line in enumerate(lines) if line == ""}
@@ -960,11 +988,12 @@ class EvaluateReadyTest(unittest.TestCase):
 
     def test_the_happy_path_makes_the_message_and_only_reads(self):
         verdict, api = self.evaluate()
-        self.assertEqual(verdict.text, an.compose_ready(NUMBER, TITLE, BODY))
+        self.assertEqual(verdict.text, an.compose_ready(NUMBER, TITLE, BODY, SHA))
         self.assertEqual(api.methods(), {"GET"})
         self.assertEqual(api.calls[0][1:3], ("/pulls", {"state": "open", "head": "octo:" + BRANCH, "base": "main", "per_page": 5}))
-        self.assertEqual(api.calls[1][1:3], ("/actions/runs", {"branch": BRANCH, "head_sha": SHA, "event": "push", "per_page": 100}))
-        self.assertEqual(len(api.calls), 2)
+        self.assertEqual(api.calls[1][1:3], (f"/pulls/{PR_NUMBER}/files", {"per_page": 100, "page": 1}))                          # PR 머리를 확인한 바로 뒤, 검사 실행을 기다리기 전에 변경 파일을 읽는다
+        self.assertEqual(api.calls[2][1:3], ("/actions/runs", {"branch": BRANCH, "head_sha": SHA, "event": "push", "per_page": 100}))
+        self.assertEqual(len(api.calls), 3)
         self.assertTrue(all(call[3] is None for call in api.calls))                       # 보내는 본문이 없다
         self.assertEqual(verdict.notes[0], f"열린 PR #{PR_NUMBER} 하나이고 머리 커밋이 이 실행의 커밋과 같음")      # 요약에 남는 확인 문장은 고정 문장과 PR 번호뿐이다
         self.assertTrue(all(TITLE not in note and AT not in note for note in verdict.notes))
@@ -1003,7 +1032,7 @@ class EvaluateReadyTest(unittest.TestCase):
     def test_a_missing_draft_field_is_not_a_draft(self):
         pr = pr_item()
         del pr["draft"]
-        self.assertEqual(self.evaluate(ready_routes(prs=[pr]))[0].text, an.compose_ready(NUMBER, TITLE, BODY))
+        self.assertEqual(self.evaluate(ready_routes(prs=[pr]))[0].text, an.compose_ready(NUMBER, TITLE, BODY, SHA))
 
     def test_the_title_rules_apply_to_the_pull_request_title(self):
         self.assertEqual(self.skipped(ready_routes(prs=[pr_item(title="제목")])), "title_shape")
@@ -1027,7 +1056,7 @@ class EvaluateReadyTest(unittest.TestCase):
     def test_unfinished_checks_are_waited_for_at_most_three_more_times(self):
         pending = {"workflow_runs": good_runs() + [run_item(90, ".github/workflows/ai-request.yml", status="in_progress", conclusion=None)]}
         sleeps = []
-        api = FakeApi({"/pulls": [pr_item()], "/actions/runs": pending})
+        api = FakeApi({**ready_routes(), "/actions/runs": pending})
         with self.assertRaises(an.Skip) as caught:
             an.evaluate_ready(an.read_inputs(ready_env(), an.READY), an.Reader(api), sleeps.append)
         self.assertEqual(caught.exception.code, "checks_pending")
@@ -1039,14 +1068,14 @@ class EvaluateReadyTest(unittest.TestCase):
         done = {"workflow_runs": good_runs()}
         pending = {"workflow_runs": good_runs() + [run_item(90, ".github/workflows/ai-request.yml", status="queued", conclusion=None)]}
         sleeps = []
-        api = FakeApi({"/pulls": [pr_item()], "/actions/runs": Seq(pending, pending, done)})
+        api = FakeApi({**ready_routes(), "/actions/runs": Seq(pending, pending, done)})
         verdict = an.evaluate_ready(an.read_inputs(ready_env(), an.READY), an.Reader(api), sleeps.append)
-        self.assertEqual(verdict.text, an.compose_ready(NUMBER, TITLE, BODY))
+        self.assertEqual(verdict.text, an.compose_ready(NUMBER, TITLE, BODY, SHA))
         self.assertEqual(sleeps, [20, 20])
 
     def test_a_failure_while_waiting_stops_at_once(self):
         sleeps = []
-        api = FakeApi({"/pulls": [pr_item()], "/actions/runs": Seq({"workflow_runs": good_runs() + [run_item(90, status="in_progress", conclusion=None)]},
+        api = FakeApi({**ready_routes(), "/actions/runs": Seq({"workflow_runs": good_runs() + [run_item(90, status="in_progress", conclusion=None)]},
                                                                     {"workflow_runs": good_runs() + [run_item(90, conclusion="failure")]})})
         with self.assertRaises(an.Skip) as caught:
             an.evaluate_ready(an.read_inputs(ready_env(), an.READY), an.Reader(api), sleeps.append)
@@ -1054,18 +1083,336 @@ class EvaluateReadyTest(unittest.TestCase):
 
     def test_unreadable_answers_are_errors_not_notices(self):
         self.assertEqual(self.skipped({"/pulls": ol.GitHubError("HTTP 500", 500), "/actions/runs": {"workflow_runs": []}}), "api_error")
-        self.assertEqual(self.skipped({"/pulls": [pr_item()], "/actions/runs": ol.GitHubError("연결 오류(OSError)")}), "api_error")
-        self.assertEqual(self.skipped({"/pulls": [pr_item()]}), "api_error")                      # 없는 경로는 404 → 읽기 실패
+        self.assertEqual(self.skipped({**ready_routes(), "/actions/runs": ol.GitHubError("연결 오류(OSError)")}), "api_error")
+        self.assertEqual(self.skipped({"/pulls": [pr_item()], f"/pulls/{PR_NUMBER}/files": file_items(DEFAULT_FILES)}), "api_error")      # 없는 경로는 404 → 읽기 실패
+        no_files = ready_routes()
+        del no_files[f"/pulls/{PR_NUMBER}/files"]
+        self.assertEqual(self.skipped(no_files), "api_error")                                    # 변경 파일 목록을 못 읽으면(404) 알리지 않는다
+        self.assertEqual(self.skipped({**ready_routes(), f"/pulls/{PR_NUMBER}/files": ol.GitHubError("HTTP 500", 500)}), "api_error")
+
+    def test_an_empty_list_of_changed_files_is_not_read_as_no_definition_change(self):
+        """독립 시험 검증 Q: 읽기는 성공했는데 변경 파일이 0건이면 '검사 정의가 바뀐 PR: 아니오' 로 읽어 보내지 않는다 — 바뀐 파일 없는 열린 PR 은 모양이 이상하므로 알리지 않는다(api_shape, 닫힌 쪽)."""
+        self.assertEqual(self.skipped(ready_routes(files=[])), "api_shape")
+        verdict, _ = self.evaluate(ready_routes(files=["docs/a.md"]))                         # 대조: 파일이 하나라도 있으면 알린다
+        self.assertEqual(verdict.text, an.compose_ready(NUMBER, TITLE, BODY, SHA))
 
     def test_wrongly_shaped_answers_are_shape_problems(self):
         shapes = [({"/pulls": {"x": 1}, "/actions/runs": {}}, "api_shape"), ({"/pulls": None, "/actions/runs": {}}, "api_shape"), ({"/pulls": ["x"], "/actions/runs": {}}, "api_shape"),
                   ({"/pulls": [{"number": PR_NUMBER}], "/actions/runs": {}}, "api_shape"), ({"/pulls": [pr_item(number="x")], "/actions/runs": {}}, "api_shape"),
                   ({"/pulls": [pr_item(number=0)], "/actions/runs": {}}, "api_shape"), ({"/pulls": [pr_item(number=True)], "/actions/runs": {}}, "api_shape"),
-                  ({"/pulls": [pr_item(head=None)], "/actions/runs": {}}, "api_shape"), ({"/pulls": [pr_item()], "/actions/runs": []}, "api_shape"),
-                  ({"/pulls": [pr_item()], "/actions/runs": {"workflow_runs": "x"}}, "api_shape"), ({"/pulls": [pr_item()], "/actions/runs": {"workflow_runs": [5]}}, "api_shape")]
+                  ({"/pulls": [pr_item(head=None)], "/actions/runs": {}}, "api_shape"), ({**ready_routes(), "/actions/runs": []}, "api_shape"),
+                  ({**ready_routes(), "/actions/runs": {"workflow_runs": "x"}}, "api_shape"), ({**ready_routes(), "/actions/runs": {"workflow_runs": [5]}}, "api_shape"),
+                  ({**ready_routes(), f"/pulls/{PR_NUMBER}/files": {"x": 1}}, "api_shape"), ({**ready_routes(), f"/pulls/{PR_NUMBER}/files": None}, "api_shape"),
+                  ({**ready_routes(), f"/pulls/{PR_NUMBER}/files": [5]}, "api_shape"), ({**ready_routes(), f"/pulls/{PR_NUMBER}/files": [{"sha": "x"}]}, "api_shape"),
+                  ({**ready_routes(), f"/pulls/{PR_NUMBER}/files": [{"filename": ""}]}, "api_shape"), ({**ready_routes(), f"/pulls/{PR_NUMBER}/files": [{"filename": 5}]}, "api_shape")]
         for routes, code in shapes:
             with self.subTest(str(routes)[:60]):
                 self.assertEqual(self.skipped(routes), code)
+
+
+# ----------------------------------------------------------------------------
+# 검사 정의가 바뀐 PR 표시와 머리 커밋 7자리(독립 감사 BA-S2 R2·N6, 결함 D-467)
+# ----------------------------------------------------------------------------
+def many_files(count, prefix="docs/f"):
+    return [f"{prefix}{index:03d}.md" for index in range(count)]
+
+
+class CheckDefinitionPathsTest(unittest.TestCase):
+    """touches_check_definition: 검사 정의는 `.github/`·`tests/` 아래와 `scripts/validate_repo.py`·`AGENTS.md`·`docs/SECURITY_GUARDRAILS.md` 뿐이다 — 이 경로가 바뀐 PR 의 초록은 바뀐 규칙으로 낸 값이다
+    (push 로 도는 검사는 push 한 커밋의 파일 그대로 돈다). 비슷하게 생긴 이름은 검사 정의가 아니다(경로는 글자 그대로 견준다)."""
+
+    DEFINITION_PATHS = (".github/workflows/guardrails.yml", ".github/workflows/merge-ready-notice.yml", ".github/ISSUE_TEMPLATE/ai-task.yml", ".github/CODEOWNERS", "scripts/validate_repo.py",
+                        "tests/test_auto_notice.py", "tests/sub/helper.py", "tests/__init__.py", "tests/_bootstrap.py", "AGENTS.md", "docs/SECURITY_GUARDRAILS.md")
+    PLAIN_PATHS = ("docs/ARCHITECTURE.md", "pipeline/auto_notice.py", "scripts/github_status.py", "scripts/validate_repo.pyc", "scripts/validate_repo.py.bak", "scripts/validate_repo_helpers.py",
+                   "scripts/sub/validate_repo.py", "xtests/a.py", "mytests/a.py", "tests", ".github", ".githubx/a.yml", "a/.github/b.yml", "a/tests/b.py", "AGENTS.md.bak", "docs/AGENTS.md",
+                   "sub/AGENTS.md", "docs/SECURITY_GUARDRAILS.md.old", "docs/security_guardrails.md", "docs/SECURITY_GUARDRAILS.txt", "Tests/a.py", "TESTS/a.py", "WORKLOG.md", "README.md",
+                   "인수인계/작업내용.md")
+
+    def test_the_lists_are_exactly_these_and_nothing_else(self):
+        self.assertEqual(an.CHECK_DEFINITION_FILES, ("scripts/validate_repo.py", "AGENTS.md", "docs/SECURITY_GUARDRAILS.md"))
+        self.assertEqual(an.CHECK_DEFINITION_DIRS, (".github/", "tests/"))
+
+    def test_every_definition_path_is_found_alone_and_among_plain_ones(self):
+        for path in self.DEFINITION_PATHS:
+            with self.subTest(path):
+                self.assertTrue(an.touches_check_definition({path}))
+                self.assertTrue(an.touches_check_definition({path, *self.PLAIN_PATHS}))
+                self.assertTrue(an.touches_check_definition([path]))                                   # 목록·집합·튜플 어느 것이든
+
+    def test_lookalikes_and_plain_paths_are_not_definitions_alone_or_together(self):
+        for path in self.PLAIN_PATHS:
+            with self.subTest(path):
+                self.assertFalse(an.touches_check_definition({path}))
+        self.assertFalse(an.touches_check_definition(set(self.PLAIN_PATHS)))
+        self.assertFalse(an.touches_check_definition(set()))
+        self.assertFalse(an.touches_check_definition([]))
+
+
+class ReadPrPathsTest(unittest.TestCase):
+    """read_pr_paths: 병합완료 확인과 같은 `GET /pulls/{번호}/files`(100개씩·세 쪽까지). 다 읽었다고 말할 수 없으면 Skip, 이름을 바꾼 파일은 옛 이름도 센다."""
+
+    PATH = f"/pulls/{PR_NUMBER}/files"
+
+    def read(self, routes):
+        api = FakeApi(routes)
+        return an.read_pr_paths(an.Reader(api), PR_NUMBER), api
+
+    def pages(self, *page_files):
+        return {(self.PATH, number): file_items(files) for number, files in enumerate(page_files, 1)}
+
+    def skipped(self, routes):
+        with self.assertRaises(an.Skip) as caught:
+            self.read(routes)
+        return caught.exception.code
+
+    def test_a_short_listing_is_read_with_one_request(self):
+        paths, api = self.read({self.PATH: file_items(["a.md", "b/c.py"])})
+        self.assertEqual(paths, {"a.md", "b/c.py"})
+        self.assertEqual([(call[0], call[1], call[2], call[3]) for call in api.calls], [("GET", self.PATH, {"per_page": 100, "page": 1}, None)])
+
+    def test_an_empty_listing_is_an_empty_set_and_a_single_request(self):
+        paths, api = self.read({self.PATH: []})
+        self.assertEqual((paths, len(api.calls)), (set(), 1))
+
+    def test_a_renamed_file_counts_with_both_names_and_so_does_a_removed_one(self):
+        entries = [{"filename": "docs/x.md", "previous_filename": "tests/test_x.py", "status": "renamed"}, {"filename": "tests/test_y.py", "status": "removed"},
+                   {"filename": "a.md", "previous_filename": 5}, {"filename": "b.md", "previous_filename": ""}, {"filename": "c.md", "previous_filename": None}]
+        paths, _ = self.read({self.PATH: entries})
+        self.assertEqual(paths, {"docs/x.md", "tests/test_x.py", "tests/test_y.py", "a.md", "b.md", "c.md"})
+        self.assertTrue(an.touches_check_definition(paths))
+        moved_out, _ = self.read({self.PATH: [{"filename": "docs/x.md", "previous_filename": "tests/test_x.py"}]})
+        self.assertTrue(an.touches_check_definition(moved_out))                                       # 시험을 tests/ 밖으로 옮겨 지우는 길도 검사 정의 변경이다
+        self.assertFalse(an.touches_check_definition({"docs/x.md"}))                                  # 옛 이름을 안 보면 보이지 않던 것(대조)
+
+    def test_full_pages_are_followed_until_a_short_one_with_each_page_number_asked_once(self):
+        first, second, third = many_files(100, "a/"), many_files(100, "b/"), many_files(5, "c/")
+        paths, api = self.read(self.pages(first, second, third))
+        self.assertEqual(paths, set(first) | set(second) | set(third))
+        self.assertEqual([call[2]["page"] for call in api.calls], [1, 2, 3])
+        self.assertTrue(all(call[1] == self.PATH and call[2]["per_page"] == 100 for call in api.calls))
+
+    def test_exactly_three_full_pages_are_complete_only_if_the_next_page_is_empty(self):
+        first, second, third = many_files(100, "a/"), many_files(100, "b/"), many_files(100, "c/")
+        paths, api = self.read(self.pages(first, second, third, []))
+        self.assertEqual((len(paths), [call[2]["page"] for call in api.calls]), (300, [1, 2, 3, 4]))
+        self.assertEqual(self.skipped(self.pages(first, second, third, ["d/one.md"])), "too_large")      # 300개를 넘는 PR — 다 읽었다고 말할 수 없다
+        self.assertEqual(self.skipped(self.pages(first, second, third, many_files(100, "d/"))), "too_large")
+
+    def test_a_definition_file_on_the_last_page_is_still_found(self):
+        first, second = many_files(100, "a/"), many_files(100, "b/")
+        third = many_files(99, "c/") + ["tests/test_late.py"]
+        paths, _ = self.read(self.pages(first, second, third, []))
+        self.assertTrue(an.touches_check_definition(paths))
+        self.assertFalse(an.touches_check_definition(self.read(self.pages(first, second, many_files(100, "c/"), []))[0]))
+
+    def test_the_request_count_is_bounded_even_for_an_endless_listing(self):
+        endless = {self.PATH: file_items(many_files(100))}                          # 쪽 번호와 상관없이 늘 가득 찬 응답
+        api = FakeApi(endless)
+        with self.assertRaises(an.Skip) as caught:
+            an.read_pr_paths(an.Reader(api), PR_NUMBER)
+        self.assertEqual((caught.exception.code, len(api.calls)), ("too_large", an.FILE_PAGES_MAX + 1))
+
+    def test_wrong_shapes_and_failed_reads_are_skips_not_crashes(self):
+        for label, value, code in (("not a list", {"x": 1}, "api_shape"), ("none", None, "api_shape"), ("number item", [5], "api_shape"), ("no filename", [{"sha": "x"}], "api_shape"),
+                                   ("empty filename", [{"filename": ""}], "api_shape"), ("number filename", [{"filename": 5}], "api_shape"), ("string", "x", "api_shape"),
+                                   ("http error", ol.GitHubError("HTTP 500", 500), "api_error")):
+            with self.subTest(label):
+                self.assertEqual(self.skipped({self.PATH: value}), code)
+        self.assertEqual(self.skipped({}), "api_error")                             # 없는 경로는 404 → 읽기 실패
+
+
+class ReadyDefinitionLineTest(unittest.TestCase):
+    """evaluate_ready: 변경 파일에 검사 정의가 있으면 문장에 DEFINITION 한 줄이 붙고, 머리 커밋 7자리는 늘 붙는다. 변경 파일은 PR 머리를 확인한 바로 뒤·검사 실행을 기다리기 전에 읽는다."""
+
+    def evaluate(self, files=None, **env):
+        api = FakeApi(ready_routes(files=files))
+        verdict = an.evaluate_ready(an.read_inputs(ready_env(**env), an.READY), an.Reader(api), no_sleep)
+        return verdict, api
+
+    def test_plain_files_give_the_head_line_and_no_definition_line(self):
+        verdict, _ = self.evaluate()
+        lines = verdict.text.split("\n")
+        self.assertIn(HEADLINE, lines)
+        self.assertNotIn(DEFINITION, lines)
+        self.assertEqual(verdict.text, an.compose_ready(NUMBER, TITLE, BODY, SHA, False))
+        self.assertEqual(an.message_problem(verdict.text), "")
+
+    def test_each_definition_file_adds_exactly_one_definition_line_right_after_the_check_line(self):
+        for path in CheckDefinitionPathsTest.DEFINITION_PATHS:
+            with self.subTest(path):
+                verdict, _ = self.evaluate(["docs/ARCHITECTURE.md", path])
+                lines = verdict.text.split("\n")
+                self.assertEqual(lines.count(DEFINITION), 1)
+                self.assertEqual(lines[lines.index("검사: 초록") + 1], DEFINITION)
+                self.assertEqual(lines[lines.index(DEFINITION) + 1], HEADLINE)                       # 검사 줄 → 정의 변경 줄 → 머리 커밋 줄
+                self.assertEqual(verdict.text, an.compose_ready(NUMBER, TITLE, BODY, SHA, True))
+                self.assertEqual(an.message_problem(verdict.text), "")
+
+    def test_a_file_moved_out_of_the_tests_folder_is_flagged_through_its_old_name(self):
+        verdict, _ = self.evaluate([{"filename": "docs/x.md", "previous_filename": "tests/test_x.py", "status": "renamed"}])
+        self.assertIn(DEFINITION, verdict.text.split("\n"))
+
+    def test_the_summary_notes_say_whether_the_definition_changed_with_fixed_sentences_only(self):
+        plain, _ = self.evaluate()
+        flagged, _ = self.evaluate([".github/workflows/guardrails.yml"])
+        self.assertEqual(plain.notes[2], "PR 의 변경 파일을 읽음 — 검사 정의가 바뀐 PR: 아니오")
+        self.assertEqual(flagged.notes[2], "PR 의 변경 파일을 읽음 — 검사 정의가 바뀐 PR: 예(문장에 경고 한 줄)")
+        for note in plain.notes + flagged.notes:
+            self.assertNotIn("guardrails", note)                                                     # 파일 이름은 요약에 싣지 않는다(고정 문장과 번호·정수만)
+            self.assertNotIn(TITLE, note)
+
+    def test_the_files_are_read_right_after_the_pull_request_and_before_the_checks(self):
+        _, api = self.evaluate()
+        self.assertEqual(api.paths(), ["/pulls", f"/pulls/{PR_NUMBER}/files", "/actions/runs"])
+        self.assertEqual(api.methods(), {"GET"})
+
+    def test_the_files_are_not_read_when_the_pull_request_is_not_usable(self):
+        for label, routes in {"no pr": ready_routes(prs=[]), "two prs": ready_routes(prs=[pr_item(), pr_item(number=249)]), "closed": ready_routes(prs=[pr_item(state="closed")]),
+                              "other head": ready_routes(prs=[pr_item(head={"ref": BRANCH, "sha": OTHER_SHA, "repo": {"full_name": REPO}})]), "draft": ready_routes(prs=[pr_item(draft=True)])}.items():
+            with self.subTest(label):
+                api = FakeApi(routes)
+                with self.assertRaises(an.Skip):
+                    an.evaluate_ready(an.read_inputs(ready_env(), an.READY), an.Reader(api), no_sleep)
+                self.assertEqual(api.paths(), ["/pulls"])
+
+    def test_a_listing_that_cannot_be_read_to_the_end_sends_nothing(self):
+        routes = ready_routes()
+        routes[f"/pulls/{PR_NUMBER}/files"] = file_items(many_files(100))
+        api = FakeApi(routes)
+        with self.assertRaises(an.Skip) as caught:
+            an.evaluate_ready(an.read_inputs(ready_env(), an.READY), an.Reader(api), no_sleep)
+        self.assertEqual(caught.exception.code, "too_large")
+        self.assertNotIn("/actions/runs", api.paths())                                               # 검사 실행도 보지 않고 끝난다
+        self.assertIn("too_large", an.REASONS)
+
+    def test_the_head_line_carries_the_first_seven_characters_of_the_run_commit(self):
+        other = "0123456789abcdef0123456789abcdef01234567"
+        head = {"ref": BRANCH, "sha": other, "repo": {"full_name": REPO}}
+        api = FakeApi(ready_routes(prs=[pr_item(head=head)]))
+        verdict = an.evaluate_ready(an.read_inputs(ready_env(NOTICE_RUN_SHA=other), an.READY), an.Reader(api), no_sleep)
+        self.assertIn("머리 커밋 0123456 — 병합 전에 PR 화면의 해시와 같은지 보세요", verdict.text.split("\n"))
+        self.assertNotIn("0123456789", verdict.text)                                                 # 7자리만 — 전체 해시는 싣지 않는다
+        self.assertEqual(an.message_problem(verdict.text), "")
+
+    def test_the_budget_counts_the_definition_line_too(self):
+        """검사 정의 변경 줄도 800자 안에 든다: 그 줄이 없을 때 정확히 800자인 요점 다섯 줄은, 그 줄이 있으면 다섯째 요점이 빠져 800자 안에 든다(글자 수 계산이 그 줄을 빼먹으면 800자를 넘겨 발송 단계가 거절한다)."""
+        title = "[M1234] " + "가" * 80
+        head = "[M1234] 병합 부탁 — " + "가" * 80
+        base = ["나" * 120 for _ in range(4)]
+        fits = [length for length in range(1, 121) if len(an._ready_text(head, base + ["다" * length], "M1234", SHA, False)) == an.MESSAGE_LIMIT]
+        self.assertEqual(len(fits), 1)
+        body = "\n".join("- " + point for point in base + ["다" * fits[0]])
+        plain = an.compose_ready("M1234", title, body, SHA, False)
+        flagged = an.compose_ready("M1234", title, body, SHA, True)
+        self.assertEqual((len(plain), plain.count("\n- ")), (an.MESSAGE_LIMIT, 5))                 # 경고 줄이 없으면 다섯 줄이 정확히 800자
+        self.assertLessEqual(len(flagged), an.MESSAGE_LIMIT)
+        self.assertEqual(flagged.count("\n- "), 4)                                                  # 경고 줄이 있으면 다섯째 요점이 빠진다
+        self.assertEqual((an.message_problem(plain), an.message_problem(flagged)), ("", ""))
+
+    def test_compose_ready_refuses_a_commit_that_is_not_a_full_lowercase_hash(self):
+        for sha in (None, 5, "", "a" * 39, "a" * 41, "A" * 40, "g" * 40, "a" * 39 + "\n", " " + "a" * 39, ["a" * 40]):
+            with self.subTest(repr(sha)):
+                with self.assertRaises(an.Skip) as caught:
+                    an.compose_ready(NUMBER, TITLE, BODY, sha)
+                self.assertEqual(caught.exception.code, "input_shape")
+
+    def test_the_head_line_is_the_first_seven_characters_whatever_the_hash(self):
+        for sha, seven in (("0" * 40, "0000000"), ("f" * 40, "fffffff"), ("0123456789abcdef" * 2 + "01234567", "0123456"), ("abcdef0" + "1" * 33, "abcdef0")):
+            with self.subTest(seven):
+                self.assertEqual(an.head_line(sha), f"머리 커밋 {seven} — 병합 전에 PR 화면의 해시와 같은지 보세요")
+                self.assertIn(an.head_line(sha), an.compose_ready(NUMBER, TITLE, BODY, sha).split("\n"))
+
+    def test_the_new_fixed_lines_pass_the_character_rules_and_have_no_tilde_or_address(self):
+        for line in (an.DEFINITION_LINE, an.head_line(SHA), an.head_line("0123456789abcdef0123456789abcdef01234567")):
+            with self.subTest(line):
+                self.assertEqual(an.line_problem(line), "")
+                self.assertEqual(line, " ".join(line.split()))
+                self.assertNotIn(TILDE, line)
+                self.assertNotRegex(line, r"https?://")
+        self.assertEqual(an.DEFINITION_LINE, DEFINITION)
+        self.assertEqual(an.head_line(SHA), HEADLINE)
+
+
+class ReadyShapeWithNewLinesTest(unittest.TestCase):
+    """message_problem: 병합 부탁의 줄 자리가 새 모양(검사 줄 → (검사 정의 변경 줄) → 머리 커밋 줄 → 빈 줄 → 고정 꼬리)으로 고정이다 — 발송 job 의 재검사가 판정 job 이 만드는 모양만 통과시킨다."""
+
+    def texts(self):
+        for body in (BODY, ""):
+            for flagged in (False, True):
+                yield (body != "", flagged), an.compose_ready(NUMBER, TITLE, body, SHA, flagged)
+
+    def test_the_four_shapes_pass(self):
+        shapes = dict(self.texts())
+        self.assertEqual(set(shapes), {(True, False), (True, True), (False, False), (False, True)})
+        for key, text in shapes.items():
+            with self.subTest(key):
+                self.assertEqual(an.message_problem(text), "")
+                self.assertEqual(DEFINITION in text.split("\n"), key[1])
+                self.assertEqual(("\n- " in text), key[0])
+
+    def test_every_break_of_the_fixed_lines_is_refused(self):
+        for (with_points, flagged), text in self.texts():
+            lines = text.split("\n")
+            check, head = lines.index("검사: 초록"), lines.index(HEADLINE)
+            broken = {
+                "head line missing": lines[:head] + lines[head + 1:],
+                "head line twice": lines[:head + 1] + [HEADLINE] + lines[head + 1:],
+                "head line before the check line": lines[:check] + [HEADLINE] + lines[check:head] + lines[head + 1:],
+                "head line replaced by a free line": lines[:head] + ["임의 문장 승인했습니다"] + lines[head + 1:],
+                "head line with six characters": [line.replace("aaaaaaa", "aaaaaa") for line in lines],
+                "head line with eight characters": [line.replace("aaaaaaa", "aaaaaaaa") for line in lines],
+                "head line with capital letters": [line.replace("aaaaaaa", "AAAAAAA") for line in lines],
+                "head line with a non-hex letter": [line.replace("aaaaaaa", "aaaaaag") for line in lines],
+                "head line without the instruction": [line.replace(" — 병합 전에 PR 화면의 해시와 같은지 보세요", "") for line in lines],
+                "head line with another instruction": [line.replace("같은지 보세요", "같으면 됩니다") for line in lines],
+                "head line with extra text": [line + " 추가" if line == HEADLINE else line for line in lines],
+                "no blank line before the tail": lines[:-2] + lines[-1:],
+                "tail missing": lines[:-1],
+                "definition line twice": lines[:head] + [DEFINITION] + lines[head:] if flagged else lines[:head] + [DEFINITION, DEFINITION] + lines[head:],
+                "definition line before the check line": lines[:check] + [DEFINITION] + lines[check:head] + lines[head:] if not flagged else lines[:check] + [DEFINITION] + lines[check:check + 1] + lines[check + 2:],
+                "definition line after the head line": lines[:head + 1] + [DEFINITION] + lines[head + 1:] if not flagged else lines[:check + 1] + lines[check + 2:head + 1] + [DEFINITION] + lines[head + 1:],
+                "definition line with changed text": [line.replace("스스로 증명한 값입니다", "믿어도 되는 값입니다") for line in lines] if flagged else lines[:head] + [DEFINITION.replace("바뀐", "바꾼")] + lines[head:],
+                "definition line cut short": lines[:check + 1] + [DEFINITION[:-3]] + lines[head:] if flagged else lines[:head] + [DEFINITION[:-3]] + lines[head:],
+                "check line removed": lines[:check] + lines[check + 1:],
+                "check line twice": lines[:check + 1] + ["검사: 초록"] + lines[check + 1:],
+            }
+            for label, changed in broken.items():
+                with self.subTest((with_points, flagged, label)):
+                    self.assertNotEqual("\n".join(changed), text, label)                              # 변이는 글을 실제로 바꾼다
+                    self.assertNotEqual(an.message_problem("\n".join(changed)), "", label)
+
+    def test_a_blank_line_that_the_code_never_writes_is_refused_even_without_points(self):
+        """요점이 없을 때 제목 뒤 빈 줄이 둘이면(코드가 만들지 않는 모양) 거절한다 — 옛 검사는 이 빈 줄 하나를 놓쳤다."""
+        text = an.compose_ready(NUMBER, TITLE, "", SHA)
+        lines = text.split("\n")
+        self.assertEqual(lines[:2], [lines[0], ""])
+        self.assertEqual(an.message_problem("\n".join(lines[:2] + [""] + lines[2:])), "shape")
+        with_points = an.compose_ready(NUMBER, TITLE, BODY, SHA).split("\n")
+        self.assertEqual(an.message_problem("\n".join(with_points[:2] + [""] + with_points[2:])), "shape")        # 요점 앞에 빈 줄 하나 더
+        index = with_points.index("검사: 초록")
+        self.assertEqual(an.message_problem("\n".join(with_points[:index] + [""] + with_points[index:])), "shape")  # 검사 줄 앞에 빈 줄 하나 더
+
+    def test_points_must_still_start_with_a_dash_and_stay_within_five_lines_of_120_characters(self):
+        for flagged in (False, True):
+            base = an.compose_ready(NUMBER, TITLE, "", SHA, flagged).split("\n")
+
+            def with_points(points):
+                return "\n".join(base[:2] + points + [""] + base[2:])
+            self.assertEqual(an.message_problem(with_points(["- 가"] * 5)), "")
+            self.assertEqual(an.message_problem(with_points(["- 가"] * 6)), "shape")
+            self.assertEqual(an.message_problem(with_points(["- " + "가" * 120])), "")
+            self.assertEqual(an.message_problem(with_points(["- " + "가" * 121])), "shape")
+            self.assertEqual(an.message_problem(with_points(["줄 하나"])), "shape")
+            self.assertEqual(an.message_problem(with_points([DEFINITION])), "shape")                  # 점 자리에 정의 변경 줄을 넣어도 안 된다
+
+    def test_the_other_character_rules_still_reach_the_new_lines(self):
+        """모든 줄이 line_problem 과 공백 정리를 거친다 — 새 고정 줄도 예외가 아니다(주소·멘션·물결표·제어 문자·두 칸 공백이 섞이면 거절)."""
+        text = an.compose_ready(NUMBER, TITLE, BODY, SHA, True)
+        for label, changed in {"mention in the definition line": text.replace("PR — 초록", "PR " + AT + "누구 — 초록"), "address in the head line": text.replace("보세요", SCHEME + "evil.example 보세요"),
+                               "tilde in the head line": text.replace("보세요", TILDE + " 보세요"), "double space in the definition line": text.replace("바뀐 PR", "바뀐  PR"),
+                               "control in the head line": text.replace("해시와", "해시\x01와"), "zero width in the definition line": text.replace("정의가", "정" + chr(0x200B) + "의가")}.items():
+            with self.subTest(label):
+                self.assertNotEqual(an.message_problem(changed), "", label)
 
 
 # ----------------------------------------------------------------------------
@@ -1411,7 +1758,7 @@ class StepTest(unittest.TestCase):
         self.mode("dry")
         code, api = self.decide()
         self.assertEqual(code, 0)
-        text = an.compose_ready(NUMBER, TITLE, BODY)
+        text = an.compose_ready(NUMBER, TITLE, BODY, SHA)
         summary = self.text(self.summary)
         self.assertIn(text, summary)
         self.assertIn("```text", summary)
@@ -1443,7 +1790,7 @@ class StepTest(unittest.TestCase):
         self.mode("on")
         code, api = self.decide()
         self.assertEqual(code, 0)
-        text = an.compose_ready(NUMBER, TITLE, BODY)
+        text = an.compose_ready(NUMBER, TITLE, BODY, SHA)
         encoded = an.encode_message(text)
         self.assertEqual(self.text(self.output), f"send=yes\nmessage={encoded}\n")
         self.assertIsNotNone(re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", encoded))
@@ -1595,7 +1942,7 @@ class StepTest(unittest.TestCase):
                 self.mode(mode)
                 self.out.clear()
                 self.summary.write_text("", encoding="utf-8")
-                env = self.send_env(an.compose_ready(NUMBER, TITLE, BODY), TELEGRAM_BOT_TOKEN=nh.TOKEN, TELEGRAM_CHAT_ID=nh.CHAT)
+                env = self.send_env(an.compose_ready(NUMBER, TITLE, BODY, SHA), TELEGRAM_BOT_TOKEN=nh.TOKEN, TELEGRAM_CHAT_ID=nh.CHAT)
                 self.assertEqual(self.send(env, Boom()), 0)
                 self.assertNotIn("TELEGRAM_BOT_TOKEN", env.reads)
                 self.assertNotIn("TELEGRAM_CHAT_ID", env.reads)
@@ -1607,7 +1954,7 @@ class StepTest(unittest.TestCase):
 
     def test_send_sends_the_checked_message_as_plain_text_once(self):
         self.mode("on")
-        text = an.compose_ready(NUMBER, TITLE, BODY)
+        text = an.compose_ready(NUMBER, TITLE, BODY, SHA)
         notifier, net = self.make_notifier()
         self.assertEqual(self.send(self.send_env(text), notifier), 0)
         self.assertEqual(net.calls, 1)
@@ -1633,7 +1980,7 @@ class StepTest(unittest.TestCase):
 
     def test_send_checks_the_message_again_and_refuses_what_decide_would_not_make(self):
         self.mode("on")
-        good = an.compose_ready(NUMBER, TITLE, BODY)
+        good = an.compose_ready(NUMBER, TITLE, BODY, SHA)
         ok, bad = "[M105] 병합완료 확인 - 정상", "[M105] 병합완료 확인 - 이상"
         broken = {"extra line": good + "\n추가", "mention": good.replace("시험:", "시험: " + AT + "x"), "address": good.replace("시험:", "시험: " + SCHEME + "x.example"),
                   "secret": good.replace("시험:", "시험: " + nh.TOKEN), "plain": "그냥 글", "empty": "", "too long": good + "가" * 900, "tilde": good.replace("시험:", "시험: " + TILDE),
@@ -1686,7 +2033,7 @@ class StepTest(unittest.TestCase):
         net = nh.FakeNet(nh.http_error(401, "Unauthorized"))
         clock = nh.Clock()
         notifier = notify.Notifier(dict(nh.ENV), opener=net, sleep=clock.sleep, clock=clock.clock, budget=notify.Budget())
-        self.assertEqual(self.send(self.send_env(an.compose_ready(NUMBER, TITLE, BODY)), notifier), 0)
+        self.assertEqual(self.send(self.send_env(an.compose_ready(NUMBER, TITLE, BODY, SHA)), notifier), 0)
         self.assertEqual(len(self.out), 2)
         self.assertTrue(self.out[0].startswith("병합 알림 자동: 텔레그램으로 보내지 못했습니다 — "))                    # 이유 한 줄(notify.describe — 시크릿 없음) 다음에 경고
         self.assertTrue(self.out[1].startswith("::warning::병합 알림 자동: 텔레그램 전송에 실패했습니다."))
@@ -1697,7 +2044,7 @@ class StepTest(unittest.TestCase):
     def test_without_the_secrets_the_send_is_a_warning_not_a_crash(self):
         self.mode("on")
         notifier = notify.Notifier({}, opener=nh.FakeNet(), budget=notify.Budget())
-        self.assertEqual(self.send(self.send_env(an.compose_ready(NUMBER, TITLE, BODY)), notifier), 0)
+        self.assertEqual(self.send(self.send_env(an.compose_ready(NUMBER, TITLE, BODY, SHA)), notifier), 0)
         self.assertTrue(any(line.startswith("::warning::") for line in self.out))
 
     def test_the_send_step_builds_the_real_notifier_from_the_environment_when_none_is_given(self):
@@ -1744,7 +2091,7 @@ class TransportTest(unittest.TestCase):
     """AN1-S-4·S-13: 두 job 사이로 가는 문장은 base64 한 줄이다 — 줄 바꿈·따옴표·`::` 명령 머리·식이 끼어들 수 없고, 풀 때 모양과 크기를 엄격히 본다."""
 
     def test_the_encoded_value_is_one_line_of_the_safe_alphabet_for_every_kind_of_text(self):
-        texts = ["[M105] 병합완료 확인 - 정상", an.compose_ready(NUMBER, TITLE, BODY), "한 줄\n두 줄\n\n네 줄", "따옴표 \" ' 와 ::error::x 와 ${{ secrets.X }} 와 %0A 와 \\n 와 `백틱`", "\x00\x1b[31m", "😀" * 50, "a"]
+        texts = ["[M105] 병합완료 확인 - 정상", an.compose_ready(NUMBER, TITLE, BODY, SHA), "한 줄\n두 줄\n\n네 줄", "따옴표 \" ' 와 ::error::x 와 ${{ secrets.X }} 와 %0A 와 \\n 와 `백틱`", "\x00\x1b[31m", "😀" * 50, "a"]
         for text in texts:
             with self.subTest(text[:12]):
                 value = an.encode_message(text)
@@ -1948,11 +2295,12 @@ class RealClientGlueTest(unittest.TestCase):
             found.append((request.get_method(), parts.path, urllib.parse.parse_qs(parts.query)))
         return found
 
-    def test_the_ready_path_sends_two_get_requests_with_the_expected_questions_and_the_read_token_only(self):
+    def test_the_ready_path_sends_three_get_requests_with_the_expected_questions_and_the_read_token_only(self):
         code, out, files, spy = self.run_real(an.READY, ready_env(), ready_routes())
         self.assertEqual(code, 0)
         self.assertEqual(self.requests_of(spy), [
             ("GET", f"/repos/{REPO}/pulls", {"state": ["open"], "head": ["octo:" + BRANCH], "base": ["main"], "per_page": ["5"]}),
+            ("GET", f"/repos/{REPO}/pulls/{PR_NUMBER}/files", {"per_page": ["100"], "page": ["1"]}),
             ("GET", f"/repos/{REPO}/actions/runs", {"branch": [BRANCH], "head_sha": [SHA], "event": ["push"], "per_page": ["100"]})])
         for request in spy.requests:
             self.assertTrue(request.full_url.startswith(ol.API_ROOT + "/repos/" + REPO + "/"))
@@ -2000,7 +2348,7 @@ class RealClientGlueTest(unittest.TestCase):
 
     def test_dry_reads_with_the_real_client_but_leaves_no_output_and_off_never_calls_it(self):
         code, out, files, spy = self.run_real(an.READY, ready_env(), ready_routes(), mode="dry")
-        self.assertEqual((code, len(spy.requests)), (0, 2))
+        self.assertEqual((code, len(spy.requests)), (0, 3))
         self.assertIsNone(files["output.txt"])
         self.assertIn("보낼 문장", files["summary.md"])
         code, out, files, spy = self.run_real(an.READY, ready_env(), ready_routes(), mode="off")
