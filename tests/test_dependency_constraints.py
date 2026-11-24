@@ -477,6 +477,21 @@ class Dep3WorkflowMutationTest(TmpCase):
                 self.edit(rel, "python -m pip install -c constraints-py312.txt -r requirements-edits.txt", hidden)
                 self.assert_caught(rel, "읽지 못하는 모양")
 
+    # 값을 받는 전역 옵션이 install 앞에 오는 모양(결함 D-481)과 붙여 쓴 -mpip — 진짜 워크플로의 설치 줄을 바꿔서
+    def test_global_pip_options_before_install_do_not_hide_the_install(self):
+        """`pip --cache-dir cache install …` 처럼 값을 받는 전역 옵션이 install 앞에 오면 그 값(`cache`·`list` 같은 하위 명령 낱말)이 하위 명령으로 읽혀 설치를 놓쳤다(안전 검증 S 의 R1)."""
+        rel = ".github/workflows/issue-edit.yml"
+        old = "python -m pip install -c constraints-py312.txt -r requirements-edits.txt"
+        for text in ("python -m pip --cache-dir cache install -r requirements-edits.txt", "python -m pip --log list install -r requirements-edits.txt", "pip --cache-dir cache install -r requirements-edits.txt",
+                     "python -m pip --proxy check install -r requirements-edits.txt", "pip --python show install -r requirements-edits.txt", "python -m pip --cache-dir cache --log list install -r requirements-edits.txt",
+                     "python -mpip install -r requirements-edits.txt", "python3 -X utf8 -mpip install -r requirements-edits.txt"):
+            with self.subTest(text=text):
+                self.fresh("issue-edit.yml")
+                self.edit(rel, old, text)
+                self.assert_caught(rel, "-c 가 없습니다")
+                self.edit(rel, text, text.replace(" install ", " install -c constraints-py312.txt ", 1))
+                self.assertEqual([item.line() for item in self.found()], [])        # -c 를 붙이면 같은 모양이 통과한다 — 모양 자체를 거절하는 것이 아니다
+
     def test_message_text_that_only_mentions_pip_install_is_not_an_install(self):
         rel = ".github/workflows/issue-edit.yml"
         self.fresh("issue-edit.yml")
@@ -727,16 +742,64 @@ class ShellReadingTest(unittest.TestCase):
                 ("a && pip install -r r.txt || true", ([], ["r.txt"], [], [])),
                 ("if true; then pip install x; fi", ([], [], [], ["x"])),
                 ("pip install \\\n   -c c.txt \\\n   -r r.txt", (["c.txt"], ["r.txt"], [], [])),
-                ("echo hi\npip install -r r.txt\necho done", ([], ["r.txt"], [], []))):
+                ("echo hi\npip install -r r.txt\necho done", ([], ["r.txt"], [], [])),
+                # 값을 받는 전역 옵션이 install 앞에 온다(결함 D-481 — 옵션의 값이 하위 명령 낱말이어도 뒤의 install 을 놓치지 않는다)
+                ("pip --cache-dir cache install -r b.txt", ([], ["b.txt"], [], [])),
+                ("python -m pip --cache-dir cache install -r b.txt", ([], ["b.txt"], [], [])),
+                ("pip --log list install -r b.txt", ([], ["b.txt"], [], [])),
+                ("pip --cache-dir=cache install -r b.txt", ([], ["b.txt"], [], [])),
+                ("pip --proxy install install -r b.txt", ([], ["b.txt"], [], [])),
+                ("pip -q --no-input --isolated install x", ([], [], [], ["x"])),
+                ("pip --some-new-option value install -r b.txt", ([], ["b.txt"], [], [])),           # 목록에 없는 값 옵션: 낯선 낱말 뒤의 install 도 설치로 읽는다
+                # 붙여 쓴 -mpip(안전 검증 S 의 R2 b)
+                ("python -mpip install -c a.txt -r b.txt", (["a.txt"], ["b.txt"], [], [])),
+                ("python3.12 -X utf8 -mpip install x", ([], [], [], ["x"])),
+                ("FOO=1 python -mpip3 install x", ([], [], [], ["x"]))):
             with self.subTest(run=run):
                 found, unreadable = self.installs(run)
                 self.assertEqual((found, unreadable), ([expected], []))
 
     def test_shapes_that_are_not_installs(self):
         for run in ("# pip install x", 'echo "pip install failed"', "python -m pipeline.run --blog \"$BLOG_KEY\"", "python -m pipeline.plan --count", "pip --version", "python -m pip list", "pip uninstall x",
-                    'git commit -m "docs: pip install note"', "gh issue comment 1 --body 'pip install x'", "pytest tests/test_pipeline.py", "python scripts/validate_repo.py", "echo pip install x"):
+                    'git commit -m "docs: pip install note"', "gh issue comment 1 --body 'pip install x'", "pytest tests/test_pipeline.py", "python scripts/validate_repo.py", "echo pip install x",
+                    # 진짜 하위 명령이 install 이 아니면 그 앞뒤 낱말에 install 이 있어도 설치가 아니다(값 옵션의 값·도움말·다른 명령의 인자)
+                    "pip --cache-dir cache list", "pip --log install list", "pip help install", "pip show install", "pip --proxy cache check", "pip uninstall install",
+                    "python -m pip --version", "python -mpip list", "python -mpip --version", "pip --cache-dir", "pip --log", "python -m venv pip"):
             with self.subTest(run=run):
                 self.assertEqual(self.installs(run), ([], []))
+
+    # pip 가 하위 명령 앞에 받는 일반 옵션 중 값을 받는 것(pip 설명서의 일반 옵션) — 검증기의 목록을 빌리지 않는다. 그리고 pip 의 하위 명령 낱말 전부.
+    GLOBAL_VALUE_OPTIONS = ("--cache-dir", "--log", "--proxy", "--timeout", "--retries", "--exists-action", "--trusted-host", "--cert", "--client-cert", "--python", "--keyring-provider",
+                            "--use-feature", "--use-deprecated", "--resume-retries")
+    PIP_COMMAND_WORDS = ("install", "download", "uninstall", "freeze", "inspect", "list", "show", "check", "config", "search", "cache", "index", "wheel", "hash", "completion", "debug", "help", "lock")
+
+    def test_the_value_of_a_global_option_is_never_the_subcommand(self):
+        """값을 받는 전역 옵션의 값이 pip 하위 명령 낱말이어도 그 뒤의 진짜 하위 명령을 읽는다 — 모든 값 옵션 × 모든 하위 명령 낱말 × 두 호출 꼴(결함 D-481, 안전 검증 S 의 R1)."""
+        wrong = []
+        for option in self.GLOBAL_VALUE_OPTIONS:
+            for word in self.PIP_COMMAND_WORDS:
+                for prefix in ("pip", "python -m pip", "python -mpip"):
+                    found, unreadable = self.installs(f"{prefix} {option} {word} install -r b.txt")
+                    if found != [([], ["b.txt"], [], [])] or unreadable:
+                        wrong.append(f"{prefix} {option} {word} install: 설치 {found}")
+                    found, unreadable = self.installs(f"{prefix} {option} {word} list")
+                    if found or unreadable:
+                        wrong.append(f"{prefix} {option} {word} list: 설치가 아닌데 {found}")
+        self.assertEqual(wrong, [])
+
+    def test_the_position_of_the_subcommand(self):
+        for args, expected in ((["install", "x"], 0), (["--cache-dir", "cache", "install"], 2), (["-q", "-q", "list"], 2), (["--version"], None), ([], None), (["--log"], None),
+                               (["--cache-dir=cache", "install"], 1), (["x", "install"], 1), (["list", "install"], 0), (["--log", "install", "list"], 2), (["--cache-dir", "cache"], None),
+                               (["frobnicate", "list", "install"], 2)):
+            with self.subTest(args=args):
+                self.assertEqual(vr._dep3_pip_subcommand(args), expected)
+
+    def test_python_dash_m_pip_in_both_spellings(self):
+        for words, expected in ((["python", "-m", "pip", "install", "x"], ["install", "x"]), (["python", "-mpip", "install", "x"], ["install", "x"]), (["python3.12", "-X", "utf8", "-mpip3", "list"], ["list"]),
+                                (["py", "-3.12", "-m", "pip", "list"], ["list"]), (["python", "-m", "venv", "pip"], None), (["python", "script.py"], None), (["python", "-m"], None), (["python"], None),
+                                (["python", "-mpipx", "install", "x"], None), (["python", "-mpip"], [])):
+            with self.subTest(words=words):
+                self.assertEqual(vr._dep3_python_pip_args(words), expected)
 
     def test_shapes_that_hide_an_install_are_reported_unreadable(self):
         for run in ('bash -c "pip install x"', "sh -c 'python -m pip install -r r.txt'", 'eval "pip install x"', "xargs pip install", "sudo pip install x", "uv pip install x", "time sudo pip install x",

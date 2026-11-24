@@ -2148,7 +2148,7 @@ _DEP3_PIP_COMMANDS = frozenset({"install", "download", "uninstall", "freeze", "l
 _DEP3_VALUE_OPTIONS = frozenset({"-t", "--target", "-i", "--index-url", "--extra-index-url", "-f", "--find-links", "--root", "--prefix", "--src", "--cert", "--client-cert", "--proxy", "--timeout",
                                  "--retries", "--cache-dir", "--log", "--exists-action", "--trusted-host", "--platform", "--python-version", "--implementation", "--abi", "--only-binary",
                                  "--no-binary", "--global-option", "--install-option", "-C", "--config-settings", "--upgrade-strategy", "--progress-bar", "--report",
-                                 "--root-user-action", "--use-feature", "--use-deprecated", "--build-constraint", "--group", "--python", "--keyring-provider"})
+                                 "--root-user-action", "--use-feature", "--use-deprecated", "--build-constraint", "--group", "--python", "--keyring-provider", "--resume-retries"})
 _DEP3_SHORT_OR_LONG = (("-c", "--constraint", "constraints"), ("-r", "--requirement", "requirements"), ("-e", "--editable", "editable"))
 
 
@@ -2177,6 +2177,30 @@ def _dep3_install_args(args):
                 found["specs"].append(token)
         index += step
     return found
+
+
+def _dep3_pip_subcommand(args):
+    """pip 인자 목록에서 하위 명령이 있는 자리(인덱스), 없으면 None. pip 자신의 읽기와 같게 `-` 로 시작하는 옵션은 건너뛰고, 값을 받는 옵션(`--cache-dir cache`·`--log list`)은 값까지 건너뛴 뒤
+    처음 나오는 낱말이 하위 명령이다(그 값이 `cache`·`list` 같은 하위 명령 낱말이어도 하위 명령이 아니다 — 결함 D-481). 그 낱말이 pip 의 하위 명령 목록에 없고(목록에 없는 값 옵션의 값일 수 있다)
+    뒤에 `install` 이 있으면 그 `install` 을 하위 명령으로 본다 — 설치를 놓치느니 설치로 읽는다."""
+    index = 0
+    while index < len(args) and args[index].startswith("-"):
+        index += 2 if args[index] in _DEP3_VALUE_OPTIONS else 1
+    if index >= len(args):
+        return None
+    if args[index] not in _DEP3_PIP_COMMANDS and "install" in args[index + 1:]:
+        return args.index("install", index + 1)
+    return index
+
+
+def _dep3_python_pip_args(words):
+    """`python … -m pip …` 의 pip 인자 목록(`-m` 과 붙여 쓴 `-mpip` 도 같다). pip 를 부르는 꼴이 아니면 None."""
+    for at in range(1, len(words)):
+        if words[at] == "-m":
+            return words[at + 2:] if at + 1 < len(words) and words[at + 1] in ("pip", "pip3") else None
+        if words[at] in ("-mpip", "-mpip3"):
+            return words[at + 1:]
+    return None
 
 
 def _dep3_pip_installs(run):
@@ -2229,14 +2253,12 @@ def _dep3_pip_installs(run):
             args = None
             if _DEP3_PIP_PROGRAM.fullmatch(program):
                 args = words[1:]
-            elif _DEP3_PYTHON_PROGRAM.fullmatch(program) and "-m" in words[1:]:
-                at = words.index("-m", 1)
-                if at + 1 < len(words) and words[at + 1] in ("pip", "pip3"):
-                    args = words[at + 2:]
+            elif _DEP3_PYTHON_PROGRAM.fullmatch(program):
+                args = _dep3_python_pip_args(words)
             if args is not None:
-                subcommand = next((word for word in args if word in _DEP3_PIP_COMMANDS), None)
-                if subcommand == "install":
-                    rest = args[args.index("install") + 1:]
+                at = _dep3_pip_subcommand(args)
+                if at is not None and args[at] == "install":
+                    rest = args[at + 1:]
                     found = _dep3_install_args(rest)
                     found["text"] = " ".join(rest)
                     installs.append(found)
