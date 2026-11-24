@@ -1,7 +1,7 @@
 """읽기 도구(scripts/github_status.py)의 이슈 편집 감지 — 갱신 시각과 '접수 대조'(독립 감사 BA-S1-3, 결함 D-408). 네트워크 없이 가짜 opener 로만 돈다.
 
-접수 워크플로(operator-reply.yml)는 이슈를 '열 때' 한 번만 돈다. 소유자가 연 `[답변]` 이슈의 본문이 나중에 고쳐지면(`선택 안 함` → 승인 보기) 접수 코멘트(봇)는 열렸을 때의 값('확인함(승인 아님)')을 되풀이한 채 남고
-새 접수도 폰 알림도 없다. REST 는 편집 시각을 정확히 주지 않으므로(updated_at 은 코멘트·라벨 변경도 센다) 읽기 도구가 접수 코멘트가 되풀이한 값과 지금 본문을 접수 코드와 같은 함수(parse_reply)로 읽은 값을 견준다.
+접수 워크플로(operator-reply.yml)는 접수를 이슈를 '열 때' 한 번만 한다. 소유자가 연 `[답변]` 이슈의 본문이 나중에 고쳐지면(`선택 안 함` → 승인 보기) 접수 코멘트(봇)는 열렸을 때의 값('확인함(승인 아님)')을 되풀이한 채 남고
+새 접수는 없다(고쳐졌다는 폰 알림 한 통만 간다 — 확인 032 ①, 결함 D-437). REST 는 편집 시각을 정확히 주지 않으므로(updated_at 은 코멘트·라벨 변경도 센다) 읽기 도구가 접수 코멘트가 되풀이한 값과 지금 본문을 접수 코드와 같은 함수(parse_reply)로 읽은 값을 견준다.
 시험의 접수 코멘트는 접수 코드의 코멘트 그리기 함수(answer_comment·reply_comment·task_comment·shape_comment)로 만든다 — 코멘트 모양이 바뀌면 이 읽기가 따라가야 한다고 알린다. 가짜 값만 쓴다.
 """
 import json
@@ -125,7 +125,7 @@ class EditAfterAckTest(unittest.TestCase):
         self.assertIn("양식 모양 오류", line)
 
     def test_an_ack_that_reported_a_shape_error_and_a_body_fixed_afterwards_is_flagged(self):
-        """접수 때는 양식 오류로 처리하지 못했는데 나중에 본문이 올바른 승인 양식으로 고쳐졌다 — 새 접수도 폰 알림도 없는 편집이다."""
+        """접수 때는 양식 오류로 처리하지 못했는데 나중에 본문이 올바른 승인 양식으로 고쳐졌다 — 새 접수가 없는 편집이다(폰에는 고쳐졌다는 알림 한 통만 간다)."""
         line = check_line(self.run_case("선택만 있는 글", form(choice="③")))
         self.assertTrue(line.lstrip().startswith("⚠ 접수 대조: 다름"), line)
         self.assertIn("양식 모양 오류(접수하지 못함)", line)

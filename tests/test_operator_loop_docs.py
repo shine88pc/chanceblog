@@ -394,8 +394,8 @@ class OtherDocsAgreeTest(unittest.TestCase):
         section = section[:section.index("\n## ", 5)] if "\n## " in section[5:] else section
         self.assertIn("`push` + `branches: ['ai/claude/**']`", section)
         self.assertEqual(load("ai-request.yml")["on"], {"push": {"branches": ["ai/claude/**"]}})
-        self.assertIn("`issues: [opened]`", section)
-        self.assertEqual(load("operator-reply.yml")["on"], {"issues": {"types": ["opened"]}})
+        self.assertIn("`issues: [opened, edited]`", section)                                      # edited: 확인 032 ①(결함 D-437) — 접수 없이 폰 알림 한 통
+        self.assertEqual(load("operator-reply.yml")["on"], {"issues": {"types": ["opened", "edited"]}})
         self.assertIn("경로 필터 없음", section)
         for path in (".github/workflows/ai-request.yml", ".github/workflows/operator-reply.yml", "pipeline/operator_loop.py"):
             self.assertIn(path, section, path)
@@ -584,12 +584,14 @@ class OtherDocsAgreeTest(unittest.TestCase):
     def test_the_edit_after_the_ack_limit_and_its_compensating_rule_are_in_the_four_places_the_ai_reads(self):
         """독립 감사 BA-S1-3(결함 D-408): 접수 알림이 휴대폰에 가므로 위조를 알아챈다는 G-S9 ③ 의 약속은 이슈를 '여는' 때에만 걸린다 — 한계와 보완 통제(접수 코멘트가 되풀이한 값과 지금 본문이 같을 때만 승인)가
         규칙 문서의 보충 행 G-S9a(G-S9 행은 해시로 못박혀 있어 고치지 않는다 — 시험 test_telegram_inbox_docs)와 AI 가 읽는 세 곳(AGENTS.md·AGENT_RUNBOOK J2·요청함 README)에 모두 적혀 있다.
-        `edited` 트리거는 제안일 뿐이다(워크플로의 트리거는 WF-14 와 시험이 따로 못박는다)."""
+        `edited` 트리거는 처음에는 제안일 뿐이었다 — 2026-11-24 확인 032 ①(운영자 승인, 결함 D-437)로 접수 워크플로가 `edited` 도 받아 '고쳐졌습니다' 폰 알림 한 통을 보낸다(접수·승인은 아니다).
+        그래서 옛 한계 문장('트리거를 `opened` 하나로 못박고 있어 … 제안만')은 정정됐고 이 시험은 그 자리에 새 사실(`issues: opened·edited` 둘)을 못박는다(tests/test_operator_reply_edited.py 가 문장별로 더 본다)."""
         security = rel_text("docs/SECURITY_GUARDRAILS.md")
         row = next(line for line in security.splitlines() if line.startswith("| G-S9a |"))
         for needle in ("이슈를 '여는' 때에만 성립한다", "나중에 고쳐지면", "접수 코멘트(봇)가 되풀이한 대상번호·선택과 지금 본문을 읽은 값이 같을 때만 승인으로 읽고",
-                       "scripts/github_status.py issue", "`updated_at`", "`edited`", "트리거를 `opened` 하나로 못박고 있어", "G-S9 행은 해시로 못박혀 있어"):
+                       "scripts/github_status.py issue", "`updated_at`", "`edited`", "`issues: opened·edited` 둘", "G-S9 행은 해시로 못박혀 있어"):
             self.assertIn(needle, row, needle)
+        self.assertNotIn("트리거를 `opened` 하나로 못박고 있어", row)                                          # 옛 한계 문장은 정정됐다
         self.assertLess(row.index("위조 이슈가 열려도"), row.index("이슈를 '여는' 때에만 성립한다"))          # 약속을 먼저 옮겨 적고 그 한계를 말한다
         self.assertEqual(len([line for line in security.splitlines() if line.startswith("| G-S9a |")]), 1)
         self.assertLess(security.index("\n| G-S9 |"), security.index("\n| G-S9a |"))                         # 보충 행은 G-S9 바로 뒤쪽에 있다

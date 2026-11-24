@@ -42,6 +42,16 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
     steps:
+      # 번호는 신뢰할 수 없는 입력이다(수동 실행의 문자열). 다른 단계가 쓰기 전에 형식부터 확인한다 — 앞자리 0 도 거부한다. 맞지 않으면 이 단계에서 실패하고 이후 단계는 돌지 않는다.
+      # 이 정규식은 issue-edit.yml 의 첫 단계와 같다(pipeline/edits/runner.py 의 ISSUE_NUMBER_PATTERN 과 같아야 한다 — 시험이 대조, 확인 032 ②·결함 D-438). 실패 문구에는 입력 값을 되풀이하지 않는다.
+      - name: PR 번호 형식 검사
+        run: |
+          set -euo pipefail
+          if [[ ! "$PR_NUMBER" =~ ^[1-9][0-9]{0,8}$ ]]; then
+            echo "PR 번호는 1–999999999 의 숫자여야 합니다(앞자리 0 불가)." >&2
+            exit 1
+          fi
+
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.repository.default_branch }}

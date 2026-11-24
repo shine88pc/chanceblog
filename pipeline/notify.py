@@ -2,7 +2,7 @@
 
 운영자가 GitHub 화면을 열지 않아도 '새 글이 올라갔다', 'Blogger 초안이 올라와 게시를 기다린다', '확인할 일이 생겼다'를 휴대폰 알림으로 받게 하는 알림 계층이다.
 운영자용 설명서: .github/editorial/TELEGRAM_SETUP.md / 구조·실패 격리: docs/ARCHITECTURE.md §4-5 / 토큰 취급 규칙: docs/SECURITY_GUARDRAILS.md G-C12
-운영자 요청함(AI 의 요청 알림 notify_ai_request·응답 이슈 접수 확인 notify_reply_received·notify_task_received)의 호출 자리는 pipeline/operator_loop.py — docs/ARCHITECTURE.md §4-6
+운영자 요청함(AI 의 요청 알림 notify_ai_request·응답 이슈 접수 확인 notify_reply_received·notify_task_received·접수 뒤 고쳐진 이슈 알림 notify_issue_edited)의 호출 자리는 pipeline/operator_loop.py — docs/ARCHITECTURE.md §4-6
 
 설정: 환경변수 TELEGRAM_BOT_TOKEN·TELEGRAM_CHAT_ID(GitHub Secrets → 단계의 env). 둘 중 하나라도 비면 **비활성**이다 — 아무것도 보내지 않고 성공으로 끝난다.
 
@@ -686,6 +686,13 @@ class Notifier:
         except Exception as exc:  # noqa: BLE001
             return self._result(False, False, None, INTERNAL_ERROR, type(exc).__name__)
 
+    def notify_issue_edited(self, issue_number, kind, by_owner, buttons=None):
+        """접수 뒤에 고쳐진 소유자 이슈(양식 `[답변]`·`[요청]`)의 알림 한 통(평문, 확인 032 ①·결함 D-437). 값은 코드가 검증한 것(이슈 번호·종류·소유자 계정이 고쳤는지)뿐이고 글은 고정 문장이다."""
+        try:
+            return self.send_message(format_issue_edited(issue_number, kind, by_owner), buttons=buttons)
+        except Exception as exc:  # noqa: BLE001
+            return self._result(False, False, None, INTERNAL_ERROR, type(exc).__name__)
+
 
 # ---- 메시지 모양(순수 함수: 네트워크 없이 시험한다) ------------------------------------
 def format_chance_published(posts, run_info):
@@ -1068,6 +1075,27 @@ def format_answer_error(issue_number, reason):
     return f"{WARN_MARK} 답변을 접수하지 못했습니다(이슈 #{_positive_int(issue_number, 'issue_number')}) — {word}. 새 이슈로 다시 올려 주세요."
 
 
+# 접수 뒤에 고쳐진 소유자 이슈의 알림(확인 032 ①, 결함 D-437): 문장은 모두 고정이다(이슈의 제목·본문·대상번호·선택·작성자·고친 계정 이름은 싣지 않는다).
+EDITED_ANSWER, EDITED_TASK = "answer", "task"                     # `[답변]` · `[요청]`
+EDITED_KINDS = (EDITED_ANSWER, EDITED_TASK)
+EDITED_HEADS = {EDITED_ANSWER: "답변이 고쳐졌습니다", EDITED_TASK: "새 일 요청이 고쳐졌습니다"}
+EDITED_BY_OWNER = "소유자 계정이 고쳤습니다."
+EDITED_BY_OTHER = "소유자 계정이 아닌 계정이 고쳤거나 알 수 없습니다. 본인이 고친 것이 아니면 알려 주세요."
+EDITED_TAILS = {EDITED_ANSWER: "접수 때의 대상번호·선택과 달라졌을 수 있어 AI 가 다시 대조하며, 달라졌으면 승인으로 읽지 않습니다.",
+                EDITED_TASK: "접수 때의 내용과 달라졌을 수 있어 AI 가 다시 읽습니다. 이 양식은 승인이 아닙니다."}
+
+
+def format_issue_edited(issue_number, kind, by_owner):
+    """접수 뒤에 소유자 이슈가 고쳐졌다는 폰 알림의 평문(확인 032 ①, 결함 D-437): `⚠️ 답변이 고쳐졌습니다(이슈 #145) — 소유자 계정이 고쳤습니다. 접수 때의 대상번호·선택과 달라졌을 수 있어 AI 가 다시 대조하며,
+    달라졌으면 승인으로 읽지 않습니다.` kind: `answer`(양식 `[답변]`)·`task`(양식 `[요청]` — `⚠️ 새 일 요청이 고쳐졌습니다(이슈 #145) — … 이 양식은 승인이 아닙니다.`). by_owner 가 거짓이면(고친 계정이 소유자가 아니거나
+    알 수 없음) '소유자 계정이 아닌 계정이 고쳤거나 알 수 없습니다. 본인이 고친 것이 아니면 알려 주세요.' 로 더 분명히 알린다.
+    싣는 값은 이슈 번호(양의 정수)와 고정 문장뿐이다 — 외부 글(이슈 제목·본문·작성자·고친 계정)은 어느 것도 믿지 않고 싣지 않는다. 종류·번호가 어긋나면 ValueError."""
+    if kind not in EDITED_KINDS:
+        raise ValueError("kind")
+    number = _positive_int(issue_number, "issue_number")
+    return f"{WARN_MARK} {EDITED_HEADS[kind]}(이슈 #{number}) — {EDITED_BY_OWNER if by_owner else EDITED_BY_OTHER} {EDITED_TAILS[kind]}"
+
+
 # ---- 모듈 수준 함수(작업 지시의 공개 이름) ------------------------------------------------
 def send_message(text, parse_mode=None, buttons=None, silent=False, notifier=None):
     return (notifier or Notifier()).send_message(text, parse_mode=parse_mode, buttons=buttons, silent=silent)
@@ -1121,6 +1149,10 @@ def notify_answer_received(target, choice_no, issue_number, replaced=None, butto
 
 def notify_answer_error(issue_number, reason, buttons=None, notifier=None):
     return (notifier or Notifier()).notify_answer_error(issue_number, reason, buttons=buttons)
+
+
+def notify_issue_edited(issue_number, kind, by_owner, buttons=None, notifier=None):
+    return (notifier or Notifier()).notify_issue_edited(issue_number, kind, by_owner, buttons=buttons)
 
 
 def describe(result):
