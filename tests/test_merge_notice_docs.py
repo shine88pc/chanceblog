@@ -319,5 +319,44 @@ class ModuleAndWorkflowTextTest(unittest.TestCase):
         self.assertIn("WF-16", vr._workflow_run_problems.__doc__)
 
 
+class DefinitionLineDocsTest(unittest.TestCase):
+    """독립 감사 BA-S2 R2·N6(결함 D-467): 병합 부탁 문장의 새 두 줄(검사 정의가 바뀐 PR 의 경고·머리 커밋 7자리)과 변경 파일 읽기가 구조 절·런북·운영자 사용법에 적혀 있고, 적힌 글이 코드의 상수와 같다."""
+
+    def test_the_architecture_section_describes_the_new_lines_with_the_exact_constants(self):
+        section_text = section(doc("docs/ARCHITECTURE.md"), "## 4-6-4.")
+        for needle in ("**병합 부탁 문장의 검사 정의 표시와 머리 커밋**", "결함 D-467", "`GET /pulls/{번호}/files`", "병합완료 확인과 같은 읽기", "`.github/` 는 바뀌지 않았다", "옛 이름까지 센다",
+                       "`CHECK_DEFINITION_FILES`", "`CHECK_DEFINITION_DIRS`", "`too_large`", "머리 커밋 줄을 운영자가 견주는 것으로"):
+            self.assertIn(needle, section_text, needle)
+        self.assertIn(f"`{an.DEFINITION_LINE}`", section_text)
+        self.assertIn(an.HEAD_LINE.format("a1b2c3d"), section_text)
+        for path in an.CHECK_DEFINITION_FILES + an.CHECK_DEFINITION_DIRS:
+            self.assertIn(f"`{path}`", section_text, path)
+
+    def test_the_runbook_and_the_operator_guide_say_the_same_marking_for_request_files_and_for_the_operator(self):
+        runbook = doc("docs/AGENT_RUNBOOK.md")
+        start = runbook.index("   - **검사 정의가 바뀐 병합 가지**")
+        item = runbook[start:runbook.index("\n", start)]
+        for needle in ("결함 D-467", "`verify` 칸에도", "머리 커밋 7자리", "120자 이하", f"`{an.DEFINITION_LINE}`"):
+            self.assertIn(needle, item, needle)
+        for path in an.CHECK_DEFINITION_FILES + an.CHECK_DEFINITION_DIRS:
+            self.assertIn(f"`{path}`", item, path)
+        self.assertLessEqual(len("독립 검증 통과 · 검사 4칸 초록 · 머리 a1b2c3d · " + an.DEFINITION_LINE), 120)         # 예로 든 verify 한 줄이 칸 상한 안이다
+        guide = doc("인수인계/운영자_요청함_사용법.md")
+        paragraph = guide[guide.index("**검사 정의가 바뀐 병합 부탁에는 경고 한 줄이 붙습니다**"):]
+        paragraph = paragraph[:paragraph.index("\n")]
+        for needle in (f"`{an.DEFINITION_LINE}`", "머리 커밋 a1b2c3d", "PR 화면의 해시와 같은지", "AI 가 요청 파일로 보내는 병합 부탁에도 같은 표기"):
+            self.assertIn(needle, paragraph, needle)
+
+    def test_the_new_text_has_no_tilde_no_double_braces_and_no_address(self):
+        """이 변경이 새로 쓴 글만 본다(문서 전체에는 옛 글의 물결표가 있을 수 있다)."""
+        architecture, runbook, guide = doc("docs/ARCHITECTURE.md"), doc("docs/AGENT_RUNBOOK.md"), doc("인수인계/운영자_요청함_사용법.md")
+        starts = (architecture.index("**병합 부탁 문장의 검사 정의 표시와 머리 커밋**"), runbook.index("   - **검사 정의가 바뀐 병합 가지**"), guide.index("**검사 정의가 바뀐 병합 부탁에는 경고 한 줄이 붙습니다**"))
+        for label, text, start in (("ARCHITECTURE", architecture, starts[0]), ("RUNBOOK", runbook, starts[1]), ("사용법", guide, starts[2])):
+            new = text[start:text.index("\n", start)]
+            self.assertNotIn(TILDE, new, label)
+            self.assertNotIn("{" + "{", new, label)
+            self.assertNotRegex(new, r"https?://")
+
+
 if __name__ == "__main__":
     unittest.main()

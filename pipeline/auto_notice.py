@@ -13,6 +13,8 @@
 
 명령 줄: python -m pipeline.auto_notice <merge-ready | merge-confirm | send>   (값은 명령 줄이 아니라 환경변수로만 받는다)
   merge-ready    워크플로 `workflow_run`(병합 부탁 PR 자동 만들기가 끝남)의 값으로 '열린 PR 이 있고 머리 커밋이 같고 검사가 모두 초록' 일 때 병합 부탁 문장을 만든다(판정 job).
+                 PR 의 변경 파일도 읽어(GET — 병합완료 확인과 같은 읽기 권한) 검사 정의(.github/·scripts/validate_repo.py·tests/·AGENTS.md·docs/SECURITY_GUARDRAILS.md)가 바뀐 PR 이면
+                 문장에 고정 한 줄을 싣고, 머리 커밋 7자리는 늘 싣는다(독립 감사 BA-S2 R2·N6, 결함 D-467).
   merge-confirm  워크플로 `workflow_run`(main 의 가드레일 검사가 끝남)의 값으로 `[M번호]` 병합 커밋을 확인해 정상·이상 문장을 만든다(판정 job).
   send           판정 job 이 넘긴 문장(base64 한 줄)을 풀어 다시 검사한 뒤 텔레그램으로 보낸다(발송 job — 시크릿은 이 job 의 env 에만 있다. off·dry 에서는 이 job 이 시작도 하지 않는다).
   환경변수: GITHUB_REPOSITORY·GITHUB_STEP_SUMMARY·GITHUB_OUTPUT(러너), GITHUB_TOKEN(읽기 권한), NOTICE_RUN_ID·NOTICE_RUN_BRANCH·NOTICE_RUN_SHA·NOTICE_RUN_EVENT·
@@ -110,6 +112,12 @@ _QUOTE_MARK_RE = re.compile(r"^>+\s*")
 TITLE_SEPARATOR = " — "
 READY_LABEL = "병합 부탁"
 CHECK_LINE = "검사: 초록"
+DEFINITION_LINE = "⚠ 검사 정의가 바뀐 PR — 초록은 스스로 증명한 값입니다"      # 같은 PR 이 검사 정의를 바꾸면 그 PR 의 초록은 바뀐 규칙으로 낸 값이다(독립 감사 BA-S2 R2)
+HEAD_LINE = "머리 커밋 {} — 병합 전에 PR 화면의 해시와 같은지 보세요"          # 알림 시점의 머리 커밋 7자리(N6): 운영자가 병합을 누르는 때의 머리와 같은지 PR 화면에서 본다
+HEAD_LENGTH = 7
+# 검사 정의 — 이 경로가 바뀐 PR 의 초록은 '스스로 증명한 값'이다: push 로 도는 검사는 push 한 커밋의 파일 그대로 돈다(guardrails.yml 머리말·G-A11). 목록을 넓히려면 이 상수 두 개만 고친다.
+CHECK_DEFINITION_FILES = ("scripts/validate_repo.py", "AGENTS.md", "docs/SECURITY_GUARDRAILS.md")
+CHECK_DEFINITION_DIRS = (".github/", "tests/")
 CONFIRM_OK, CONFIRM_BAD = "정상", "이상"
 
 # 병합완료 확인 문장의 둘째 줄부터에 들어갈 수 있는 글은 이 목록뿐이다 — 문장을 만드는 쪽(evaluate_confirm·compose_confirm)과 발송 job 의 모양 검사(message_problem)가 같은 상수를 쓴다.
@@ -132,6 +140,7 @@ def _template_regex(template, *slots):
     return "".join(piece + (slots[index] if index < len(slots) else "") for index, piece in enumerate(pieces))
 
 
+HEAD_LINE_RE = re.compile(_template_regex(HEAD_LINE, "[0-9a-f]{%d}" % HEAD_LENGTH))
 _CONCLUSION_SLOT = "(?:" + "|".join(re.escape(word) for word in sorted(CONCLUSION_WORDS | {UNKNOWN_CONCLUSION})) + ")"
 _COUNT_SLOT = r"[0-9]{1,6}"
 _REASON_RE = re.compile("(?:" + "|".join([
@@ -270,17 +279,23 @@ def ready_tail(number):
     return f"병합은 Pull requests 에서 제목 맨 앞이 [{number}] 인 PR 하나만 하세요. 알림이 없는 열린 PR 은 아직 병합하지 마세요."
 
 
-def _ready_text(head, points, number):
+def head_line(sha):
+    """머리 커밋 줄 — 40자리 소문자 16진수 커밋의 앞 7자리(PR 화면이 보여 주는 짧은 해시와 같다)."""
+    return HEAD_LINE.format(sha[:HEAD_LENGTH])
+
+
+def _ready_text(head, points, number, sha, definition_changed=False):
     sections = [head]
     if points:
         sections.append("\n".join("- " + point for point in points))
-    sections.extend([CHECK_LINE, ready_tail(number)])
+    sections.extend(["\n".join([CHECK_LINE] + ([DEFINITION_LINE] if definition_changed else []) + [head_line(sha)]), ready_tail(number)])
     return "\n\n".join(sections)
 
 
-def compose_ready(number, title, body):
-    """병합 부탁 문장: 제목 줄 `[M번호] 병합 부탁 — <PR 제목에서 `[M번호] ` 뺀 것(80자)>`, 요점 줄(최대 5줄·줄당 120자 — 전체 800자 안에서 앞쪽부터), `검사: 초록`, 고정 꼬리.
-    번호는 알림 번호 모양(notify.notice_type 이 병합 요청)이고 title 은 그 번호로 시작해야 한다 — 아니면 Skip. 보낼 수 없는 글자가 제목에 있으면 Skip(title_problem)."""
+def compose_ready(number, title, body, sha, definition_changed=False):
+    """병합 부탁 문장: 제목 줄 `[M번호] 병합 부탁 — <PR 제목에서 `[M번호] ` 뺀 것(80자)>`, 요점 줄(최대 5줄·줄당 120자 — 전체 800자 안에서 앞쪽부터), `검사: 초록` 다음에 (검사 정의가 바뀐 PR 이면)
+    DEFINITION_LINE 과 머리 커밋 줄(sha 의 앞 7자리 — 늘 싣는다), 고정 꼬리. 새 고정 줄도 800자 안에 든다: 모자라면 요점 줄을 뒤에서부터 뺀다.
+    번호는 알림 번호 모양(notify.notice_type 이 병합 요청)이고 title 은 그 번호로 시작해야 한다 — 아니면 Skip. 보낼 수 없는 글자가 제목에 있으면 Skip(title_problem). sha 는 40자리 소문자 16진수여야 한다(아니면 Skip input_shape)."""
     if notify.notice_type(number) != notify.NOTICE_MERGE:
         raise Skip("title_shape")
     found = TITLE_HEAD_RE.match(title if isinstance(title, str) else "")
@@ -294,13 +309,15 @@ def compose_ready(number, title, body):
     shown = shorten(rest, READY_TITLE_LIMIT)
     if line_problem(shown):                                  # 자르다가 새로 생긴 모양(꼬리가 끊겨 도메인·비밀 꼴이 되는 것)도 거른다 — 요점 줄과 같은 '거른 뒤 자른 뒤에도 한 번 더'
         raise Skip("title_problem")
+    if not isinstance(sha, str) or SHA_RE.fullmatch(sha) is None:
+        raise Skip("input_shape")
     head = f"[{number}] {READY_LABEL}{TITLE_SEPARATOR}{shown}"
     chosen = []
     for point in point_lines(body):
-        if len(_ready_text(head, chosen + [point], number)) > MESSAGE_LIMIT:
+        if len(_ready_text(head, chosen + [point], number, sha, definition_changed)) > MESSAGE_LIMIT:
             break
         chosen.append(point)
-    return _ready_text(head, chosen, number)
+    return _ready_text(head, chosen, number, sha, definition_changed)
 
 
 def compose_confirm(number, problems, extra=()):
@@ -321,8 +338,8 @@ def message_problem(text):
     """보낼 문장이 '이 모듈이 만드는 문장과 같은 모양' 인가 — 맞으면 빈 문자열, 아니면 이유 코드. 판정 job 이 만든 직후와 발송 job 이 보내기 직전에 같은 함수를 부른다(발송 job 의 재검사가
     판정 job 의 버그·변조를 막는 유일한 관문이라, 글자 규칙뿐 아니라 문장 모양을 코드가 만드는 것에 맞춘다).
     글자: 비지 않음·800자 이하·백틱·`**` 없음·모든 줄이 line_problem 통과(빈 줄 제외)·모든 줄의 공백이 하나로 정리돼 있음. 모양: 첫 줄이 정해진 두 모양 중 하나(번호는 병합 요청 번호)이고
-    병합 부탁은 제목 부분 80자 이하·`검사: 초록` 한 줄과 고정 꼬리가 맨 끝·요점 줄은 `- ` 로 시작해 5줄·120자 이하, 병합완료 확인은 정상이면 둘째 줄부터 CONFIRM_NOTES 의 고정 글을 이 순서로
-    없거나 하나·둘, 이상이면 둘째 줄이 REASON_* 고정 사유(+ 선택으로 ` (외 N건)`) 한 줄뿐."""
+    병합 부탁은 제목 부분 80자 이하·`검사: 초록` 줄 다음에 (있으면) DEFINITION_LINE·머리 커밋 줄(소문자 16진수 7자리)·빈 줄·고정 꼬리가 맨 끝·요점 줄은 `- ` 로 시작해 5줄·120자 이하,
+    병합완료 확인은 정상이면 둘째 줄부터 CONFIRM_NOTES 의 고정 글을 이 순서로 없거나 하나·둘, 이상이면 둘째 줄이 REASON_* 고정 사유(+ 선택으로 ` (외 N건)`) 한 줄뿐."""
     if not isinstance(text, str) or not text.strip():
         return "empty"
     if len(text) > MESSAGE_LIMIT:
@@ -341,10 +358,18 @@ def message_problem(text):
         return "shape"
     number = found.group(1)
     if ready:
-        # 구조: 제목 / 빈 줄 / (요점 줄들) / 빈 줄 / 검사 줄 / 빈 줄 / 고정 꼬리 — 요점이 없으면 앞의 빈 줄이 하나뿐이다
-        if len(lines) < 5 or lines[1] != "" or lines[-4] != "" or lines[-3] != CHECK_LINE or lines[-2] != "" or lines[-1] != ready_tail(number):
+        # 구조: 제목 / 빈 줄 / (요점 줄들 / 빈 줄) / 검사 줄 / (검사 정의 변경 줄) / 머리 커밋 줄 / 빈 줄 / 고정 꼬리 — 요점이 없으면 요점 줄들과 그 뒤 빈 줄이 통째로 없다
+        if len(lines) < 6 or lines[1] != "" or lines[-2] != "" or lines[-1] != ready_tail(number) or HEAD_LINE_RE.fullmatch(lines[-3]) is None:
             return "shape"
-        points = lines[2:-4]
+        middle = lines[2:-3]
+        if middle and middle[-1] == DEFINITION_LINE:
+            middle = middle[:-1]
+        if not middle or middle[-1] != CHECK_LINE:
+            return "shape"
+        middle = middle[:-1]
+        if middle and (len(middle) < 2 or middle[-1] != ""):
+            return "shape"
+        points = middle[:-1]
         if len(points) > POINT_LINES or not all(line.startswith("- ") and len(line) <= POINT_LIMIT + 2 for line in points):
             return "shape"
         return ""
@@ -443,7 +468,8 @@ def runs_state(runs, run_id):
 def evaluate_ready(inputs, reader, sleep=time.sleep):
     """병합 부탁: 이 가지의 열린 PR 이 하나이고(머리 커밋 = 이 실행의 커밋·작성 가지·대상 = 기본 가지·같은 저장소·초안 아님·제목이 가지 번호로 시작) 그 커밋의 push 검사가 모두 끝나 초록일 때만
     문장을 만든다. 아니면 Skip. 끝나지 않은 검사만 남았으면 CHECK_WAIT 초 간격으로 CHECK_RETRIES 번 더 본다.
-    PR 은 이벤트의 `workflow_run.pull_requests` 배열(포크·일부 이벤트에서 비어 오는 값)에 기대지 않고 `GET /pulls?head=소유자:가지` 로 찾는다 — `pull_requests[0]` 으로 단순화하지 말 것(G-A14)."""
+    PR 은 이벤트의 `workflow_run.pull_requests` 배열(포크·일부 이벤트에서 비어 오는 값)에 기대지 않고 `GET /pulls?head=소유자:가지` 로 찾는다 — `pull_requests[0]` 으로 단순화하지 말 것(G-A14).
+    PR 의 변경 파일은 PR 머리를 확인한 바로 뒤, 검사 실행을 기다리기 전에 읽는다(같은 머리의 파일 목록이 되게) — 검사 정의가 바뀐 PR 이면 문장에 DEFINITION_LINE 이 붙는다(독립 감사 BA-S2 R2)."""
     if inputs.conclusion != "success":
         raise Skip("run_not_success")
     number = BRANCH_RE.fullmatch(inputs.branch).group(1)
@@ -464,7 +490,9 @@ def evaluate_ready(inputs, reader, sleep=time.sleep):
         raise Skip("pr_mismatch")
     if pr.get("draft") is True:
         raise Skip("pr_draft")
-    text = compose_ready(number, _text(pr.get("title")), pr.get("body"))
+    paths = read_pr_paths(reader, count)
+    definition_changed = touches_check_definition(paths)
+    text = compose_ready(number, _text(pr.get("title")), pr.get("body"), inputs.sha, definition_changed)
     for attempt in range(CHECK_RETRIES + 1):
         listing = _need(_obj(reader.get("/actions/runs", branch=inputs.branch, head_sha=inputs.sha, event="push", per_page=PER_PAGE)))
         state = runs_state(_need(_list(listing.get("workflow_runs"))), inputs.run_id)
@@ -473,7 +501,8 @@ def evaluate_ready(inputs, reader, sleep=time.sleep):
         sleep(CHECK_WAIT)
     if state != "ok":
         raise Skip({"pending": "checks_pending", "failed": "checks_failed", "missing": "checks_missing"}[state])
-    return Verdict(text, [f"열린 PR #{count} 하나이고 머리 커밋이 이 실행의 커밋과 같음", "이 커밋의 push 검사가 모두 끝나 초록(가드레일 포함)"])
+    return Verdict(text, [f"열린 PR #{count} 하나이고 머리 커밋이 이 실행의 커밋과 같음", "이 커밋의 push 검사가 모두 끝나 초록(가드레일 포함)",
+                          "PR 의 변경 파일을 읽음 — 검사 정의가 바뀐 PR: " + ("예(문장에 경고 한 줄)" if definition_changed else "아니오")])
 
 
 def _tree(commit, shape_code="api_shape"):
@@ -497,6 +526,38 @@ def _blobs(entries):
         blob = _text(item.get("sha"))
         found[name] = blob if SHA_RE.fullmatch(blob) else None
     return found
+
+
+def _touched(entries):
+    """변경 파일 목록(`files`) → 건드린 경로의 집합. 이름을 바꾼 파일은 새 이름과 옛 이름(`previous_filename`) 둘 다 넣는다(`tests/` 밖으로 옮겨 시험을 지우는 길을 막는다).
+    항목 모양이 틀리면 Skip(api_shape) — 모양 검사는 병합완료 확인과 같은 `_blobs` 가 한다."""
+    names = set(_blobs(entries))
+    for entry in entries:
+        previous = _text(entry.get("previous_filename"))
+        if previous:
+            names.add(previous)
+    return names
+
+
+def read_pr_paths(reader, number):
+    """PR 이 건드린 경로의 집합 — `GET /pulls/{번호}/files` 를 100개씩 FILE_PAGES_MAX(3)쪽까지 읽는다(병합완료 확인과 같은 읽기·같은 읽기 권한). 셋째 쪽까지 가득 차 있으면 다음 쪽을 한 번 더 보고
+    거기에도 항목이 있으면 300개를 넘는 PR 이라 다 읽었다고 말할 수 없으므로 Skip(too_large) — 검사 정의가 바뀐 PR 인지 모르는 채 병합 부탁을 보내지 않는다."""
+    paths = set()
+    for page in range(1, FILE_PAGES_MAX + 2):
+        entries = _need(_list(reader.get(f"/pulls/{number}/files", per_page=PER_PAGE, page=page)))
+        if page > FILE_PAGES_MAX:
+            if entries:
+                raise Skip("too_large")
+            break
+        paths |= _touched(entries)
+        if len(entries) < PER_PAGE:
+            break
+    return paths
+
+
+def touches_check_definition(paths):
+    """바뀐 경로에 검사 정의(CHECK_DEFINITION_FILES 의 파일·CHECK_DEFINITION_DIRS 아래의 것)가 하나라도 있는가."""
+    return any(path in CHECK_DEFINITION_FILES or path.startswith(CHECK_DEFINITION_DIRS) for path in paths)
 
 
 def _confirm_words(conclusion):
