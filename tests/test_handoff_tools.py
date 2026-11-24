@@ -1,9 +1,9 @@
 """HANDOFF2 — 저장소 `인수인계/도구/` 로 옮긴 도구 사본의 시험(정적·존재·순수 함수·끝에서 끝까지).
 
 배경: 새 PC·새 세션이 첫 보고·병합 부탁·병합완료 확인·CI 확인·감시를 하려면 필요한 도구가 저장소에 최신으로 있어야 한다(운영자 이슈 #198 의 후속). 이 시험은 옮긴 도구가
-(1) 이 PC 의 사용자 이름·사용자 폴더·고정 작업 폴더·실제 키·광고 번호가 없는 일반형인지(정적),
+(1) 이 PC 의 사용자 이름·사용자 폴더·고정 작업 폴더·실제 키·광고 번호가 없는 일반형인지(정적 — 2026-11-23 MIG1 이 옮긴 이 PC 현행판 사본 가운데 옛 PC 의 작업 폴더 이름을 상수로 쓰는 13개는 `W_PATH_COPIES` 에 이름을 올려 '고정 작업 폴더' 한 가지 모양만 허용하고 나머지 모양은 그대로 막는다),
 (2) 안내 문서·복사 목록·감시 프롬프트가 말하는 파일이 실제로 저장소에 있는지(존재),
-(3) 순수 함수와 가짜 응답으로 약속대로 도는지(`merge_guard` 는 판정만 하고 푸시·병합이 없다, `watch_issues` 는 5분 주기이고 한도가 바닥나면 쉰다, `resume_check` 는 비밀·경로를 찍지 않는다 …),
+(3) 순수 함수와 가짜 응답으로 약속대로 도는지(`merge_guard` 는 판정만 하고 푸시·병합이 없다, `watch_issues` 는 10분 주기(한 주기에 이슈·이슈 코멘트 두 번 읽어 시간당 12회)이고 한도가 바닥나면 쉰다, `resume_check` 는 비밀·경로를 찍지 않는다 …),
 (4) 복사본이 작업 폴더 W 안에서 실제 git 으로 끝까지 도는지(푸시하지 않는다)를 못박는다.
 네트워크·실제 GitHub·텔레그램은 쓰지 않는다(가짜 응답 — 진짜 git 은 임시 폴더의 로컬 저장소뿐). 다른 묶음의 결정 번호·요청 번호·전체 최댓값은 못박지 않는다.
 """
@@ -130,6 +130,11 @@ NOT_IN_REPO = {
     "insert_resume_entry.py": "처음 PC 의 Claude 기억 폴더 전용이라 옮기지 않았다",
     "fill_final_guide.py": "처음 PC 의 Claude 기억 폴더 전용이라 옮기지 않았다",
     "verify_pause.py": "일회성 도구라 옮기지 않았다(읽기 함수는 check_notify.py 가 품음)",
+    "push_qtci.py": "앱 Qt 시험 임시 가지를 push 하는 도구 — 이 폴더의 시험이 '도구는 git push 를 하지 않는다' 를 못박아 옮기지 않았다(README 9-4)",
+    "qtci_wait.sh": "push_qtci.py 의 짝 — qtci_status.py 가 저장소 밖이라 옮기지 않았다(README 9-4)",
+    "qtci_web.py": "push_qtci.py 의 짝 — 임시 워크플로가 저장소 밖이라 옮기지 않았다(README 9-4)",
+    "qtci_status.py": "옛 PC 의 W/scratch 에만 있는 Qt 시험 상태 읽기 도구 — 저장소에 없다(README 9-4)",
+    "qtci_read.py": "옛 PC 의 W/scratch 에만 있는 Qt 시험 결과 읽기 도구 — 저장소에 없다(README 9-4)",
 }
 
 # ---- 정적 검사의 금지 모양 -----------------------------------------------------------------
@@ -152,6 +157,15 @@ FORBIDDEN_STRICT = {
 FORBIDDEN_DOCS = {key: value for key, value in FORBIDDEN_STRICT.items() if key != "처음 PC 의 개발 도구 폴더"}     # 안내 문서·지시서는 처음 PC 의 개발 도구 폴더를 '처음 PC 의 것'으로 말할 수 있다
 EMAIL_RX = re.compile("[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:[.][A-Za-z0-9-]+)+")
 
+# 2026-11-23 MIG1 — 이 PC 의 현행판을 그대로 옮긴 사본 가운데 옛 PC 의 작업 폴더 W 이름을 상수·사용 예로 쓰는 도구. 그 한 가지 모양('고정 작업 폴더')만 파일별로 허용하고
+# 나머지 모든 금지 모양(계정 이름·사용자 폴더·키·광고 번호 …)은 이 파일들에도 그대로 막는다. 목록은 실제로 그 글이 든 파일만 담는다(아래 시험이 확인 — 없으면 목록에서 뺀다).
+# 새 도구가 고정 작업 폴더를 쓰려면 이름을 여기에 더하고 README 9-2 표에 바꿀 곳을 적어야 한다(README 시험이 확인).
+W_PATH_KEY = "고정 작업 폴더"
+W_PATH_COPIES = frozenset({"build_blog_merge.py", "ci_wip_status.py", "combine_lanes_desktop.py", "keep_both.py", "lanes.py", "mkverify.py", "pc_load.py", "prepush_check.sh",
+                           "qt_lock.py", "rehearse.py", "run_modules.py", "squash_onto.py", "watch_all.sh"})
+# 개인 메일이 아닌 가짜 주소 — 파일별로 허용하고 그 주소가 실제로 들어 있어야 한다(고정 작성자 메일 말고 STRICT_FILES·DOC_FILES 에 있어도 되는 메일은 이것뿐).
+NON_PERSONAL_MAILS = {"rehearse.py": {"x" + "@" + "example.invalid"}}
+
 
 def problems(text, forbidden):
     return [name for name, rx in forbidden.items() if rx.search(text)]
@@ -162,7 +176,8 @@ class StaticHygieneTest(unittest.TestCase):
     def test_the_moved_tools_forms_and_prompt_are_general_and_clean(self):
         self.assertGreaterEqual(len(STRICT_FILES), 30)                                   # 훑는 파일 목록이 비어 거짓 통과하지 않는다
         for path in STRICT_FILES:
-            self.assertEqual(problems(read(path), FORBIDDEN_STRICT), [], path.name)
+            allowed = {W_PATH_KEY} if path.name in W_PATH_COPIES else set()                   # 옛 PC 의 W 이름을 상수로 쓰는 현행판 사본은 그 한 가지 모양만 허용
+            self.assertEqual([name for name in problems(read(path), FORBIDDEN_STRICT) if name not in allowed], [], path.name)
 
     def test_the_guides_and_briefs_are_clean_too(self):
         self.assertIn(README, DOC_FILES)
@@ -173,7 +188,20 @@ class StaticHygieneTest(unittest.TestCase):
         allowed = set(EMAIL_RX.findall(read(WORK / "commit_as_author.py")))
         self.assertEqual(len(allowed), 1, allowed)
         for path in STRICT_FILES + DOC_FILES:
-            self.assertLessEqual(set(EMAIL_RX.findall(read(path))), allowed, path.name)
+            self.assertLessEqual(set(EMAIL_RX.findall(read(path))), allowed | NON_PERSONAL_MAILS.get(path.name, set()), path.name)
+
+    def test_the_work_folder_and_fake_mail_exemptions_are_real_and_nothing_else_is_exempt(self):
+        by_name = {path.name: path for path in STRICT_FILES + DOC_FILES}
+        for name, mails in NON_PERSONAL_MAILS.items():
+            self.assertLessEqual(mails, set(EMAIL_RX.findall(read(by_name[name]))), name)                  # 목록은 실제로 그 주소가 든 파일만 담는다
+        for name in sorted(W_PATH_COPIES):
+            self.assertIn(W_PATH_KEY, problems(read(by_name[name]), FORBIDDEN_STRICT), name)               # 목록은 실제로 그 글이 든 파일만 담는다
+        for path in STRICT_FILES:
+            if path.name not in W_PATH_COPIES:
+                self.assertNotIn(W_PATH_KEY, problems(read(path), FORBIDDEN_STRICT), path.name)            # 목록 밖의 파일은 그대로 막힌다
+        self.assertEqual(len(W_PATH_COPIES), 13)
+        for path in DOC_FILES:
+            self.assertNotIn(W_PATH_KEY, problems(read(path), FORBIDDEN_DOCS), path.name)                  # 안내 문서는 목록 없이 그대로 막힌다
 
     def test_the_scanner_itself_catches_known_bad_samples_and_passes_clean_text(self):
         user = "SDI" + "_USER"
@@ -227,6 +255,8 @@ class InventoryAndExistenceTest(unittest.TestCase):
             self.assertIn("scratch/" + name, targets, name)
         for name in EXPECTED_FORMS | EXPECTED_WORK:
             self.assertIn(name, targets, name)
+        self.assertIn("audit6/improve/LANE_RULES.md", targets)                                 # 갈래 지시서가 가리키는 공통 규칙(2026-11-23)
+        self.assertEqual([t for t in targets if t.startswith("audit6/")], ["audit6/improve/LANE_RULES.md"])
 
     def test_the_readme_names_only_files_that_exist_or_are_listed_as_not_in_the_repository(self):
         text = read(README)
@@ -519,7 +549,7 @@ class MergeGuardTest(unittest.TestCase):
         self.assertTrue(all(call[0] in READ_ONLY_GIT for call in fake.calls))
 
 
-# ==== 5. watch_issues — 5분 주기, 한도가 바닥나면 쉰다 =========================================
+# ==== 5. watch_issues — 10분 주기(이슈·이슈 코멘트 두 곳), 한도가 바닥나면 쉰다 =============================
 def issue(number, login="someone", labels=(), title="제목", pull_request=False, created_at="2026-11-15T01:02:03Z"):
     item = {"number": number, "title": title, "user": {"login": login}, "labels": [{"name": name} for name in labels], "created_at": created_at}
     if pull_request:
@@ -555,10 +585,17 @@ class WatchIssuesTest(unittest.TestCase):
     def setUp(self):
         self.wi = load_tool(SCRATCH / "watch_issues.py")
 
-    def run_watch(self, steps):
-        sleeps, queue = [], list(steps)
+    def run_watch(self, steps, comment_steps=()):
+        sleeps, queue, c_queue = [], list(steps), list(comment_steps)
 
-        def fake_fetch(etag):
+        def fake_fetch(etag, url=None):
+            if url == self.wi.COMMENTS_URL:                                                       # 이슈 코멘트 목록 조회(2026-11-17 추가) — 단계가 없으면 '변경 없음'
+                if not c_queue:
+                    return etag, None
+                step = c_queue.pop(0)
+                if isinstance(step, BaseException):
+                    raise step
+                return step
             if not queue:
                 raise Stop()
             step = queue.pop(0)
@@ -617,7 +654,7 @@ class WatchIssuesTest(unittest.TestCase):
             with self.assertRaises(urllib.error.HTTPError):
                 wi.fetch("etag-9")
 
-    def test_the_loop_prints_only_new_operator_issues_and_waits_five_minutes_between_reads(self):
+    def test_the_loop_prints_only_new_operator_issues_and_waits_ten_minutes_between_reads(self):
         out, sleeps = self.run_watch([
             ("e1", [issue(10), issue(9)]),
             ("e2", [issue(12, login="stranger"), issue(11, labels=["텔레그램수신"], login="bot"), issue(10)]),
@@ -627,8 +664,8 @@ class WatchIssuesTest(unittest.TestCase):
         self.assertEqual(lines[0], "이슈 감시 시작: 지금 최신 이슈 #10 (이후에 생기는 운영자 관련 이슈를 알립니다)")
         self.assertEqual(len(lines), 2, lines)
         self.assertTrue(lines[1].startswith("[새 이슈] #11 "))
-        self.assertEqual(sleeps, [300, 300, 300])
-        self.assertEqual(self.wi.INTERVAL, 300)
+        self.assertEqual(sleeps, [600, 600, 600])
+        self.assertEqual(self.wi.INTERVAL, 600)
 
     def test_when_the_rate_limit_is_spent_it_rests_until_the_reset_time_between_one_and_fifteen_minutes(self):
         for header, expected in ((str(self.NOW + 500), 500), (str(self.NOW + 5000), 900), (str(self.NOW + 5), 60), (None, 60), ("not-a-number", 300)):
@@ -644,16 +681,124 @@ class WatchIssuesTest(unittest.TestCase):
         self.assertEqual(lines[0], "이슈 감시: 첫 조회 실패(URLError) — 다시 시도합니다")
         self.assertEqual(lines[1], "이슈 감시 시작: 지금 최신 이슈 #5 (이후에 생기는 운영자 관련 이슈를 알립니다)")
         self.assertEqual(len(lines), 2, lines)                                                # 실패 알림은 한 번뿐
-        self.assertEqual(sleeps, [300, 300, 300, 300])
+        self.assertEqual(sleeps, [600, 600, 600, 600])
+
+    LIFETIME_STOP_AFTER = 20                                                                   # 가짜 쉼이 이만큼 넘게 불리면 끝 조건이 깨진 것 — 멈추지 않고 실패하게 한다
+    LIFETIME_READS_MAX = 60                                                                    # 가짜 읽기가 이만큼 넘게 불려도 마찬가지(정상 실행의 읽기는 3주기×2곳=6번 안팎)
+
+    def lifetime_run(self, fetch):
+        """자기 종료 시험 공용: 가짜 시계(쉬면 그만큼 흐름)로 main() 이 **스스로 돌아오는지** 본다. 끝 조건이 깨져 반복이 이어지면 Stop 으로 끊고 실패시킨다(무한 루프·메모리 폭증 방지)."""
+        clock, sleeps = [self.NOW], []
+
+        def fake_sleep(seconds):
+            sleeps.append(seconds)
+            clock[0] += seconds
+            if len(sleeps) > self.LIFETIME_STOP_AFTER:
+                raise Stop()
+
+        fake_time = types.SimpleNamespace(time=lambda: clock[0], sleep=fake_sleep)
+        out = io.StringIO()
+        reads = [0]
+
+        def counted_fetch(etag, url=None):
+            reads[0] += 1
+            if reads[0] > self.LIFETIME_READS_MAX:
+                raise Stop()                                                                  # 쉬지 않고 계속 읽는 회귀(쉼 호출이 없어 쉼 횟수 가드가 못 잡는 모양)도 멈추지 않고 실패하게
+            return fetch(clock, etag, url)
+
+        with mock.patch.object(self.wi, "fetch", side_effect=counted_fetch), mock.patch.object(self.wi, "time", fake_time), contextlib.redirect_stdout(out):
+            try:
+                self.wi.main()
+            except Stop:
+                self.fail("끝 시각이 지나도 반복한다 — 자기 종료가 깨졌다(쉼 %d번·읽기 %d번 넘게)" % (self.LIFETIME_STOP_AFTER, self.LIFETIME_READS_MAX))
+        return out.getvalue(), sleeps
+
+    def test_the_loop_ends_by_itself_after_the_lifetime_so_it_cannot_become_an_orphan(self):
+        """Monitor 를 다시 걸 때마다 이 프로세스가 고아로 남아 19개가 비인증 한도를 갉아먹은 사고(2026-11-23) 뒤 — 약 29분 뒤 스스로 끝난다(마지막 쉼은 남은 시간만큼으로 줄인다)."""
+        out, sleeps = self.lifetime_run(lambda clock, etag, url: (etag, None))
+        self.assertEqual(self.wi.LIFETIME, 1750)
+        self.assertEqual(sleeps, [600, 600, 550])
+        self.assertEqual(sum(sleeps), self.wi.LIFETIME)
+        self.assertEqual(out, "")                                                                 # 끝 줄을 내지 않는다(Monitor 가 깨어나는 알림을 늘리지 않는다)
+
+    def test_a_long_rest_for_the_issue_read_limit_is_cut_to_the_time_that_is_left(self):
+        header = {"X-RateLimit-Reset": str(self.NOW + 5000)}                                       # 한 번에 900초(상한)씩 쉬려 한다
+
+        def fetch(clock, etag, url):
+            raise http_error(429, header)
+
+        out, sleeps = self.lifetime_run(fetch)
+        self.assertEqual(sleeps, [900, 850])                                                       # 둘째 쉼은 남은 850초로 줄어 끝에 맞는다
+        self.assertEqual(out, "")
+
+    def test_a_long_rest_for_the_comment_read_limit_is_cut_to_the_time_that_is_left_too(self):
+        header = {"X-RateLimit-Reset": str(self.NOW + 5000)}
+
+        def fetch(clock, etag, url):
+            if url == self.wi.COMMENTS_URL:
+                raise http_error(429, header)
+            return etag, None                                                                      # 이슈 목록은 '변경 없음'
+
+        out, sleeps = self.lifetime_run(fetch)
+        self.assertEqual(sleeps, [900, 850])                                                       # 코멘트 쪽 쉼도 같은 규칙(끝 시각을 넘기지 않는다)
+        self.assertEqual(out, "")
+
+    def test_a_read_that_runs_past_the_end_time_never_asks_for_a_negative_rest(self):
+        """읽는 데 오래 걸려 끝 시각을 넘긴 뒤의 쉼은 0 이다 — 음수로 부르면 실제 time.sleep 이 ValueError 로 프로세스를 죽인다."""
+        def fetch(clock, etag, url):
+            clock[0] += 2000                                                                       # 읽기가 끝 시각(1750초)을 넘겨 걸렸다
+            return etag, None
+
+        out, sleeps = self.lifetime_run(fetch)
+        self.assertTrue(sleeps and min(sleeps) >= 0, sleeps)
+        self.assertEqual(sleeps, [0])
 
     def test_the_documented_numbers_match_the_code(self):
         row = table_row(read(README), "watch_issues.py")
-        for needle in ("300초(5분)", "시간당 12회", "304", "시간당 60회 한도에 센다", "2026-11-15 실측", "한도가 바닥나면(403·429)", "최소 60초·최대 15분", "스스로 끝나지 않는다"):
+        for needle in ("600초(10분)", "이슈 코멘트", "시간당 12회", "304", "시간당 60회 한도에 센다", "2026-11-15 실측", "한도가 바닥나면(403·429)", "최소 60초·최대 15분", "1750초(약 29분) 뒤 스스로 끝난다"):
             self.assertIn(needle, row, needle)
         source = read(SCRATCH / "watch_issues.py")
         self.assertIn("max(60, min(900,", source)
         self.assertIn("2026-11-15 실측", source)
-        self.assertEqual(3600 // self.wi.INTERVAL, 12)
+        self.assertEqual(3600 // self.wi.INTERVAL * 2, 12)                                    # 한 주기에 두 번(이슈·코멘트) 읽어 시간당 12회
+        self.assertEqual(source.count("fetch("), 3)                                            # 정의 하나와 호출 둘 — 읽는 곳이 늘면 이 숫자와 README 를 함께 고친다
+
+
+    def test_the_loop_also_announces_new_operator_comments_without_the_body(self):
+        wi = self.wi
+
+        def comment(number, login, issue_no):
+            return {"id": number, "user": {"login": login}, "issue_url": f"https://api.invalid/repos/o/r/issues/{issue_no}", "created_at": "2026-11-17T01:02:03Z", "body": "CANARY_COMMENT_BODY"}
+
+        out, sleeps = self.run_watch(
+            [("e1", [issue(5)]), ("e2", None), ("e3", None)],
+            [("c1", [comment(100, wi.OPERATOR, 7)]), ("c2", [comment(102, "stranger", 8), comment(101, wi.OPERATOR, 7), comment(100, wi.OPERATOR, 7)]), ("c2", None)])
+        lines = out.splitlines()
+        self.assertEqual(len(lines), 2, lines)                                                # 시작 한 줄 + 운영자 새 코멘트 한 줄(첫 읽기의 것·낯선 사람의 것은 알리지 않는다)
+        self.assertTrue(lines[1].startswith(f"[새 코멘트] #7 | 작성 {wi.OPERATOR} | "), lines[1])
+        self.assertIn("본문은 싣지 않음", lines[1])
+        self.assertNotIn("CANARY", out)                                                       # 본문은 싣지 않는다
+        self.assertEqual(sleeps, [600, 600, 600])
+
+    def test_a_spent_rate_limit_on_the_comment_read_rests_like_the_issue_read(self):
+        out, sleeps = self.run_watch([("e1", [issue(5)])], [http_error(429, {"X-RateLimit-Reset": str(self.NOW + 500)})])
+        self.assertEqual(sleeps, [500])
+        self.assertEqual(len(out.splitlines()), 1, out)                                       # 시작 줄뿐 — 쉬는 동안 알림 글을 찍지 않는다
+
+    def test_fetch_reads_the_comment_list_with_the_same_etag_rule_and_no_credentials(self):
+        wi = self.wi
+        seen = []
+
+        def fake_urlopen(req, timeout=None):
+            seen.append(req)
+            return FakeResponse(b"[]", "etag-c")
+
+        with mock.patch.object(wi.urllib.request, "urlopen", fake_urlopen):
+            self.assertEqual(wi.fetch("etag-0", wi.COMMENTS_URL), ("etag-c", []))
+        headers = {key.lower(): value for key, value in seen[0].header_items()}
+        self.assertEqual(headers["if-none-match"], "etag-0")
+        self.assertNotIn("authorization", headers)
+        self.assertTrue(seen[0].full_url.startswith("https://api.github.com/repos/") and "/issues/comments" in seen[0].full_url)
 
 
 # ==== 6. resume_check — 비밀·경로를 찍지 않는다 ===============================================
@@ -1138,6 +1283,7 @@ class SetupWorkspaceTest(unittest.TestCase):
             for source, rel in self.setup.plan_copy():
                 self.assertEqual((target / rel).read_bytes(), source.read_bytes(), rel.as_posix())
             self.assertTrue((target / "scratch" / "watch_heads2.sh").is_file())
+            self.assertTrue((target / "audit6" / "improve" / "LANE_RULES.md").is_file())
             self.assertEqual((target / "cron_status_prompt_v3.txt").read_bytes(), PROMPT_V3.read_bytes())
             self.assertTrue((target / "merge_request_template_v2.md").is_file() and (target / "progress_draft_template.md").is_file())
             (target / "scratch" / "merge_guard.py").write_text("낡은 사본\n", encoding="utf-8")
@@ -2530,6 +2676,182 @@ class EgressReasonsAreTruthfulTest(unittest.TestCase):
         prompt = read(PROMPT_V3)
         for name in ("web_runs.py", "run_times.py", "wait_ci.py"):
             self.assertIn(name, prompt, name)                                                    # 문구가 말하는 '크론 프롬프트가 부르는 도구' 가 실제로 프롬프트에 있다
+
+
+# ==== 16. 이 PC 현행판 도구 사본(2026-11-23 MIG1) — 복사 목록·README 9절·스테이징 도구 ==============================
+MIG1_NEW_ROOT = {"lowprio.py", "qt_lock.py"}
+MIG1_NEW_DOCS = {"agent_common_rules.md", "operator_delegation_rules.md"}
+MIG1_NEW_SCRATCH = {"badge_wait.sh", "build_blog_merge.py", "ci_main.py", "ci_wip_status.py", "combine_lanes_desktop.py", "jk_read.py", "keep_both.py", "lanes.py", "main_runs_wait.sh",
+                    "mkverify.py", "note.sh", "pc_load.py", "prepush_check.sh", "rehearse.py", "run_modules.py", "squash_onto.py", "tools_stage.py", "memcopy_stage.py", "watch_all.sh"}
+MIG1_NOT_COPIED = {"push_qtci.py", "qtci_wait.sh", "qtci_web.py"}
+
+
+class MigrationCopiesTest(unittest.TestCase):
+    def test_the_new_copies_are_in_the_repository_and_the_qt_runner_trio_is_not(self):
+        self.assertLessEqual(MIG1_NEW_ROOT, {path.name for path in WORK.glob("*.py")})
+        self.assertLessEqual(MIG1_NEW_DOCS, {path.name for path in WORK.glob("*.md")})
+        self.assertLessEqual(MIG1_NEW_SCRATCH, {path.name for path in SCRATCH.iterdir() if path.is_file()})
+        self.assertTrue((WORK / "audit6" / "improve" / "LANE_RULES.md").is_file())
+        present = {path.name for path in TOOLS.rglob("*") if path.is_file()}
+        self.assertEqual(MIG1_NOT_COPIED & present, set())                                    # 시험이 '도구는 git push 를 하지 않는다' 를 못박아 옮기지 않았다
+
+    def test_no_copied_tool_has_a_git_push_and_the_lane_merge_tools_added_here_never_push(self):
+        for name in sorted(MIG1_NEW_ROOT | (MIG1_NEW_SCRATCH - {"badge_wait.sh", "main_runs_wait.sh", "note.sh", "prepush_check.sh", "watch_all.sh"})):
+            path = WORK / name if name in MIG1_NEW_ROOT else SCRATCH / name
+            pushes = [node.lineno for node in ast.walk(ast.parse(read(path))) if isinstance(node, ast.Constant) and node.value == "push"]
+            self.assertEqual(pushes, [], name)
+        for name in ("badge_wait.sh", "main_runs_wait.sh", "note.sh", "prepush_check.sh", "watch_all.sh"):
+            body = re.sub(r"(?m)^\s*#.*$", "", read(SCRATCH / name))
+            self.assertIsNone(re.search(r"git\s+(?:-\S+\s+)*push", body), name)
+
+    def test_the_readme_nine_section_names_every_new_tool_every_work_folder_copy_and_why_the_qt_trio_is_missing(self):
+        s9 = section(read(README), 9)
+        for name in sorted(MIG1_NEW_ROOT | MIG1_NEW_SCRATCH | MIG1_NEW_DOCS | W_PATH_COPIES | MIG1_NOT_COPIED | {"LANE_RULES.md"}):
+            self.assertIn(name, s9, name)
+        for needle in ("`W_PATH_COPIES`", "git push 를 하지 않는다", "`qt-ci-tmp.yml`", "번호 있는 확인 요청", "STAGE_FORBID", "`mk_merge_branch.py` 는 `scratch/` 가 아니라 W 바로 아래",
+                       "`INTERVAL = 600`", "저장소 판을 유지", "환경 4개 × 조각 3개 = 작업 12개"):
+            self.assertIn(needle, s9 + read(README), needle)
+
+    def test_every_new_tool_has_a_row_or_mention_in_the_tables_of_sections_two_and_three(self):
+        text = read(README)
+        for name in sorted((MIG1_NEW_ROOT | MIG1_NEW_SCRATCH) - {"keep_both.py"}):
+            self.assertIn("`" + name + "`", text, name)
+        self.assertIn("`lowprio.py`", table_row(text, "lowprio.py"))
+        self.assertIn("낮은 우선순위", table_row(text, "lowprio.py"))
+        self.assertIn("종료 코드 75", table_row(text, "qt_lock.py"))
+
+    def test_the_three_merge_tools_read_the_fixed_author_from_commit_as_author_and_carry_none_themselves(self):
+        author = read(WORK / "commit_as_author.py")
+        name, mail = (re.search("GIT_AUTHOR_" + key + '="([^"]+)"', author).group(1) for key in ("NAME", "EMAIL"))
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            work = Path(tmp) / "W"
+            (work / "scratch").mkdir(parents=True)
+            shutil.copy2(WORK / "commit_as_author.py", work / "commit_as_author.py")
+            for tool in ("build_blog_merge.py", "combine_lanes_desktop.py", "squash_onto.py"):
+                source = read(SCRATCH / tool)
+                self.assertNotIn(name, source, tool)                                          # 이름·메일 값이 사본에 없다
+                self.assertNotIn(mail, source, tool)
+                shutil.copy2(SCRATCH / tool, work / "scratch" / tool)
+                module = load_tool(work / "scratch" / tool)
+                self.assertEqual({module.ENV["GIT_AUTHOR_NAME"], module.ENV["GIT_COMMITTER_NAME"]}, {name}, tool)
+                self.assertEqual({module.ENV["GIT_AUTHOR_EMAIL"], module.ENV["GIT_COMMITTER_EMAIL"]}, {mail}, tool)
+
+class StageScriptsTest(unittest.TestCase):
+    """tools_stage.py·memcopy_stage.py — 옛 PC 판을 고쳐 넣은 스테이징 도구: 계정 이름이 든 경로·낱말 목록을 코드에 두지 않고 인자·환경 변수로 받으며,
+    가린 사본만 만들고, 금지 글이 남으면 쓰지 않고 멈춘다(종료 코드 1)."""
+
+    def copy_into_work_folder(self, tmp, name):
+        scratch = Path(tmp) / "W" / "scratch"
+        scratch.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(SCRATCH / name, scratch / name)
+        return scratch / name
+
+    def test_memcopy_clean_masks_session_numbers_and_user_folder_paths(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            mod = load_tool(self.copy_into_work_folder(tmp, "memcopy_stage.py"))
+            fake_home = "C:" + chr(47) + "Users" + chr(47) + "someone"
+            text, sessions = mod.clean("---\n  originSessionId: abc-123\n---\n폴더 `" + fake_home + "/Desktop/x` 안\n")
+            self.assertEqual(sessions, 1)
+            self.assertIn("originSessionId: (세션 번호)", text)
+            self.assertIn("`<사용자 폴더>/Desktop/x`", text)
+            self.assertNotIn("someone", text)
+
+    def test_memcopy_writes_clean_files_and_refuses_files_with_forbidden_words_mails_or_tokens(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            script = self.copy_into_work_folder(tmp, "memcopy_stage.py")
+            mod = load_tool(script)
+            src = Path(tmp) / "memory"
+            src.mkdir()
+            (src / "good.md").write_text("---\noriginSessionId: s-1\n---\n운영자 지시 한 줄\n", encoding="utf-8")
+            (src / "word.md").write_text("회사 ACMEWORD 이름이 남음\n", encoding="utf-8")
+            (src / "mail.md").write_text("연락 " + "x" + "@" + "example.com 입니다\n", encoding="utf-8")
+            (src / "token.md").write_text("키 " + "gh" + "p_" + "CANARY" + "\n", encoding="utf-8")
+            mod.OUT.mkdir(parents=True)
+            for name in ("word.md", "mail.md", "token.md"):
+                (mod.OUT / name).write_text("앞선 실행이 쓴 옛 사본\n", encoding="utf-8")        # 같은 이름의 앞선 사본이 남아 쓰이면 안 된다
+            with mock.patch.dict(os.environ, {"STAGE_FORBID": "ACMEWORD"}):
+                code, out, _err = capture(mod.main, [str(src), "good.md", "word.md", "mail.md", "token.md"])
+            self.assertEqual(code, 1)
+            self.assertTrue((mod.OUT / "good.md").is_file())
+            self.assertIn("(세션 번호)", (mod.OUT / "good.md").read_text(encoding="utf-8"))
+            for name in ("word.md", "mail.md", "token.md"):
+                self.assertFalse((mod.OUT / name).exists(), name)                              # 금지 글이 남은 파일은 쓰지 않고 앞선 사본도 지운다
+            self.assertEqual(out.count("[실패]"), 3)
+            self.assertNotIn("ACMEWORD", out)                                                  # 실패 글에 금지 낱말 값을 싣지 않는다
+            self.assertEqual(mod.OUT.resolve(), (Path(tmp) / "W" / "scratch" / "memcopy_stage").resolve())
+
+    def test_memcopy_without_arguments_prints_the_usage_and_changes_nothing(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            mod = load_tool(self.copy_into_work_folder(tmp, "memcopy_stage.py"))
+            code, out, _err = capture(mod.main, [])
+            self.assertEqual(code, 2)
+            self.assertIn("사용:", out)
+            self.assertFalse(mod.OUT.exists())
+
+    def test_tools_stage_copies_masks_python_paths_and_stops_on_forbidden_text(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            script = self.copy_into_work_folder(tmp, "tools_stage.py")
+            mod = load_tool(script)
+            work = Path(tmp) / "W"
+            fake_python = "C:" + chr(47) + "Users" + chr(47) + "someone" + chr(47) + "AppData" + chr(47) + "Local" + chr(47) + "Programs" + chr(47) + "Python" + chr(47) + "Python312" + chr(47) + "python.exe"
+            (work / "a.py").write_text("PY = '" + fake_python + "'\n", encoding="utf-8")
+            (work / "r.md").write_text("규칙 한 줄\n", encoding="utf-8")
+            (work / "scratch" / "s.sh").write_text("echo ok\n# 메일 " + "o" + "ther" + "@" + "example.com 은 허용 목록 밖\n", encoding="utf-8")
+            (work / "commit_as_author.py").write_text('GIT_AUTHOR_EMAIL="' + "a" + "@" + 'example.com"\n', encoding="utf-8")
+            with mock.patch.object(mod, "ROOT_TOOLS", ["a.py"]), mock.patch.object(mod, "RULE_DOCS", [("r.md", "r.md")]), mock.patch.object(mod, "SCRATCH_TOOLS", ["s.sh"]):
+                code, out, _err = capture(mod.main)
+            self.assertEqual(code, 1)                                                            # s.sh 에 허용 목록 밖 메일 모양이 남았다
+            self.assertIn("금지 글 남은 파일 1개", out)
+            self.assertIn("금지 글 1곳", out)
+            self.assertNotIn("other", out.replace("work/", ""))                                  # 값을 싣지 않고 곳 수만 적는다
+            staged = (work / "scratch" / "mig1_stage" / "인수인계" / "도구" / "work")
+            self.assertEqual((staged / "a.py").read_text(encoding="utf-8"), "PY = 'py -3.12'\n")
+            self.assertTrue((staged / "r.md").is_file())
+            self.assertFalse((staged / "scratch" / "s.sh").exists())                             # 금지 글이 남은 파일은 사본을 쓰지 않는다
+            (work / "scratch" / "s.sh").write_text("echo ok\n", encoding="utf-8")
+            with mock.patch.object(mod, "ROOT_TOOLS", ["a.py"]), mock.patch.object(mod, "RULE_DOCS", [("r.md", "r.md")]), mock.patch.object(mod, "SCRATCH_TOOLS", ["s.sh"]):
+                code, out, _err = capture(mod.main)
+            self.assertEqual(code, 0, out)
+            self.assertIn("금지 글 남은 파일 0개", out)
+
+    def test_tools_stage_removes_an_earlier_copy_of_a_file_that_now_fails(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            mod = load_tool(self.copy_into_work_folder(tmp, "tools_stage.py"))
+            source = Path(tmp) / "W" / "s.sh"
+            source.write_text("# 메일 " + "o" + "ther" + "@" + "example.com 은 허용 목록 밖\n", encoding="utf-8")
+            rx, allowed = mod.forbidden(set())
+            stale = mod.OUT / "scratch" / "s.sh"
+            stale.parent.mkdir(parents=True)
+            stale.write_text("앞선 실행이 쓴 옛 사본\n", encoding="utf-8")
+            bad = []
+            mod.stage(source, "scratch/s.sh", bad, rx, allowed)
+            self.assertEqual([rel for rel, _hits in bad], ["scratch/s.sh"])
+            self.assertFalse(stale.exists())                                                     # 옛 사본이 남아 쓰이지 않는다
+
+    def test_both_stage_scripts_warn_on_stderr_when_stage_forbid_is_empty_and_keep_their_exit_codes(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            memcopy = load_tool(self.copy_into_work_folder(tmp, "memcopy_stage.py"))
+            tools = load_tool(self.copy_into_work_folder(tmp, "tools_stage.py"))
+            src = Path(tmp) / "memory"
+            src.mkdir()
+            (src / "good.md").write_text("운영자 지시 한 줄\n", encoding="utf-8")
+            (Path(tmp) / "W" / "a.py").write_text("X = 1\n", encoding="utf-8")
+            for value, warned in (("", True), ("ACMEWORD", False)):
+                with mock.patch.dict(os.environ, {"STAGE_FORBID": value}):
+                    code, _out, err = capture(memcopy.main, [str(src), "good.md"])
+                self.assertEqual(code, 0, value)                                                 # 종료 코드는 그대로 — 경고만 더한다
+                self.assertEqual("STAGE_FORBID" in err and "경고" in err, warned, value)
+                with mock.patch.dict(os.environ, {"STAGE_FORBID": value}), mock.patch.object(tools, "ROOT_TOOLS", ["a.py"]), \
+                        mock.patch.object(tools, "RULE_DOCS", []), mock.patch.object(tools, "SCRATCH_TOOLS", []):
+                    code, _out, err = capture(tools.main)
+                self.assertEqual(code, 0, value)
+                self.assertEqual("STAGE_FORBID" in err and "경고" in err, warned, value)
+
+    def test_the_stage_scripts_derive_the_work_folder_from_their_own_location(self):
+        for name in ("tools_stage.py", "memcopy_stage.py"):
+            source = read(SCRATCH / name)
+            self.assertIn("Path(__file__).resolve().parent.parent", source, name)
+            self.assertEqual(problems(source, FORBIDDEN_STRICT), [], name)                       # 고정 작업 폴더·계정 이름·사용자 폴더가 코드에 없다
 
 
 if __name__ == "__main__":

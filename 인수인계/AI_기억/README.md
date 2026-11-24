@@ -4,7 +4,7 @@
 > **정본이 아닙니다.** 저장소의 규칙 문서(`AGENTS.md`·`docs/AGENT_RUNBOOK.md`·`docs/SECURITY_GUARDRAILS.md`)와 `인수인계/작업내용.md`·실제 저장소 상태가 이 사본과 다르면 **그쪽이 이깁니다**(옛 기억은 쓴 시점의 사실입니다).
 
 ## 쓰는 법
-1. 새 세션은 아래 **A 표**(상시 지시·정책)를 처음에 한 번 훑고, **B 표**(요구서 요약·명세)는 해당 일이 닿을 때 해당 파일만 엽니다.
+1. 새 세션은 아래 **A 표**(상시 지시·정책)와 **A-2 표**(2026-11-16 이후의 상시 지시 — 2026-11-23 사본)를 처음에 한 번 훑고, **B 표**(요구서 요약·명세)는 해당 일이 닿을 때 해당 파일만 엽니다.
 2. 새 세션에 자체 메모리 기능이 있으면 필요한 것을 옮겨 두어도 됩니다(안 옮겨도 이 폴더가 있으니 됩니다).
 3. 파일 안의 `S`·`scratchpad`·`KCY` 는 **옛 PC 의 작업 폴더**를 뜻합니다 — 새 PC 에서는 `W`([`인수인계/도구/README.md`](../도구/README.md) §1)에 해당합니다. `(옛 PC …)` 로 바뀐 곳은 옛 경로였습니다.
 4. 이 폴더의 파일은 **고치지 않는 기록 사본**입니다. 새로 알게 된 규칙은 정본 문서(`docs/AGENT_RUNBOOK.md`·`인수인계/작업내용.md`)에 씁니다.
@@ -33,6 +33,23 @@
 | [feedback-no-popup-windows.md](./feedback-no-popup-windows.md) | 화면(창) 확인은 꼭 필요한 검증에만·한 번에 하나 |
 | [pr-flow-github-blocked.md](./pr-flow-github-blocked.md) | 내장 브라우저가 GitHub 를 막을 때의 PR 흐름 |
 
+## A-2. 2026-11-16 이후 새로 쌓인 상시 지시 — 2026-11-23 사본
+
+위 A 표는 2026-11-04 사본이고 이 표의 10개는 그 뒤(2026-11-16–24)에 쌓인 운영자 상시 지시·정책·운영 교훈의 사본입니다(2026-11-24 에 `lane-lessons-2026-11-23.md` 한 개를 더하고 `operator-merges-on-pr-open.md`·`pc-shared-moderate-performance.md` 를 새로 고침 — 같은 방식으로 가린 사본. 2026-11-23 새 PC 이어받기 보강 MIG1 이 옛 PC 의 AI 기억 폴더에서 개인 정보를 가려 옮김 — 윈도 계정 이름·메일·세션 번호·회사 계정 세부는 일반 말로 바꿨고, ASCII 물결표 두 곳은 en dash 로, 확인 021 로 없앤 옛 답변 양식의 메뉴 이름 한 곳은 풀어 쓴 말로, 계정 사용량 비율 수치 둘은 '한도의 상당 부분' 으로, 운영자가 삭제한 공개 사진 가지의 이름과 커밋 해시 셋은 말로 고침 — 시험이 옛 메뉴 이름이 새로 생기는 것을 막는다). 이 표의 파일 안 `C:/work/ai` 는 옛 PC 의 작업 폴더 W 의 이름이고 `scratch/…` 는 W 아래 도구입니다(도구 README 9-2). 정본이 아니고 정본은 `인수인계/작업내용.md` §0-2 와 `docs/AGENT_RUNBOOK.md` §8 입니다.
+
+| 파일 | 한 줄 |
+|---|---|
+| [approval-answers-need-valid-form.md](./approval-answers-need-valid-form.md) | 확인 요청 답은 새 양식(대상번호+선택)·채팅 번호 답만 승인 — 이슈에 접수 봇의 거절 답글이 있으면 승인이 아님(2026-11-16 확인 019·020 사건: 승인으로 읽기 전에 봇 답글 확인) |
+| [blog-slots-limit-on-hold.md](./blog-slots-limit-on-hold.md) | 블로그 연결 수 한도(확인 025)는 운영자가 ④ 보류 — 다시 묻지 않고 기다림, 설계서는 보관 |
+| [low-ai-cost-operations.md](./low-ai-cost-operations.md) | AI 사용량 점검 결론과 확인 031(R-463)·운영자 채팅 승인(새 알림 워크플로 둘)·경제 모드는 '완료된 시점부터'(운영자 말 — 사본 안의 '운영자가 확인한 뒤' 는 쓴 시점의 읽기) — `docs/AGENT_RUNBOOK.md` §8 의 근거 |
+| [operator-merges-on-pr-open.md](./operator-merges-on-pr-open.md) | 운영자는 `[M###]` PR 이 열리면 병합 부탁 알림 전에도 몇 분 안에 병합하기도 한다(M070·M084) — 알림에 다가올 M 번호를 쓰지 말고 CI 초록 직후 부탁을 보낸다 |
+| [operator-reports-via-messages-not-chat.md](./operator-reports-via-messages-not-chat.md) | 알릴 것은 세션 채팅이 아니라 텔레그램 알림(요청 파일)으로(2026-11-16 23시 지시) |
+| [operator-wants-fewer-confirmations.md](./operator-wants-fewer-confirmations.md) | 요청은 '방향'이고 세부·기본값은 추천안으로 알아서 진행, 번호 있는 확인은 방향 이탈·대규모·T3 일 때만(2026-11-16 22:59 지시) |
+| [parallel-wave-2026-11-22.md](./parallel-wave-2026-11-22.md) | 11-22 13갈래 병렬 구현(5일 공백 만회) — 갈래·절차·heavy 잠금·크론 만료, 이어받는 세션이 먼저 볼 것 |
+| [pc-shared-moderate-performance.md](./pc-shared-moderate-performance.md) | 공용 PC 탄력 운영(2026-11-23) — 낮엔 중간, 저녁엔 더, `scratch/pc_load.py` 로 권고 에이전트 수 확인(개인 PC 에서의 값은 미정) |
+| [photo-analysis-local-only-directive.md](./photo-analysis-local-only-directive.md) | 사진 분석 로컬 한정 지시(2026-11-16) — 확인 018 = 사진은 PC 밖으로 안 나감, 글자 읽기(OCR)는 이 PC 안에서만, 다운로드·설치·병합·비용은 별도 승인, 확인 026–030 의 승인 범위 |
+| [lane-lessons-2026-11-23.md](./lane-lessons-2026-11-23.md) | 병렬 갈래 운영 교훈(2026-11-23) — 앱 CI 의 ubuntu 칸 함정·작업 기록 이중 중괄호 금지·합친 나무 검증·보고서 쓰기 거절·전체 시험의 무거운 잠금·Monitor 를 다시 걸 때 감시 프로세스 고아가 한도를 갉아먹은 사고 |
+
 ## B. 일이 닿을 때 읽을 것 — 요구서 요약·명세·분석
 
 | 파일 | 한 줄 |
@@ -54,3 +71,4 @@
 
 ## 빠진 것
 옛 PC 의 매시간 이어가기 로그(`resume-after-reboot` 등 수백 KB)·세션 상태·PPTX 작업 환경(이 저장소와 무관)은 옮기지 않았습니다. 현재 상태는 `인수인계/작업내용.md` 의 §0-A 카드와 §0-1, 도구는 [`인수인계/도구/README.md`](../도구/README.md) 입니다.
+2026-11-23 의 A-2 표 사본에도 일부러 넣지 않은 것이 있습니다 — 블로그·앱 프로젝트와 무관한 개인 업무 기억 둘과, 11-15 이관 때의 옛 인수 스냅샷(그 뒤 상태가 작업내용·요청 가지에 다 있어 낡았습니다)입니다. 개인 정보(윈도 계정 이름·메일·세션 번호·회사 계정 세부)가 든 곳은 일반 말로 바꿔 옮겼습니다.
