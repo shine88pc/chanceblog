@@ -47,7 +47,7 @@ UNSPLASH_KEY = clean_secret(os.environ.get("UNSPLASH_ACCESS_KEY"))  # 끝 줄바
 
 
 def _flag(name):
-    return os.environ.get(name, "0").strip().lower() in {"1", "true", "yes"}
+    return os.environ.get(name, "0").strip().lower() in pause.ON_VALUES      # 켜짐 값은 정지 변수·Blogger 러너·초안 올리기와 같은 한 곳의 집합이다(1·true·yes·on — 감사 BP-S2 N4)
 
 
 DRY_RUN = _flag("DRY_RUN")

@@ -68,7 +68,7 @@ REASONS_SHOWN = 600    # 로그·요약에 보여 줄 게이트 탈락 사유 �
 # publish_failed 는 글 ID(post_id)가 남은 것만 센다(_counts_toward_cap): 올리다 실패했어도 글이 이미 만들어졌을 수 있다
 # package_issued(초안 패키지 이슈를 만듦, 티스토리·네이버)도 한 건이다: 이슈를 닫기 전까지 운영자의 손을 기다리는 초안이다.
 COUNTED_STATUSES = {"posted", "draft", "draft_uploaded", "generated_unpublished", "package_issued"}
-_TRUE = {"1", "true", "yes", "on"}
+_TRUE = set(pause.ON_VALUES)      # 켜짐 값은 정지 변수·생성기·초안 올리기와 같은 한 곳의 집합이다(감사 BP-S2 N4)
 # BLOGGER_PUBLISH·--publish 값 → 정책. on=즉시 게시, draft=Blogger 초안함 업로드, off=저장소 파일에만 저장, auto=레지스트리 mode 를 따름
 _POLICY_VALUES = {"": "auto", "auto": "auto", "draft": "draft",
                   "on": "on", "1": "on", "true": "on", "yes": "on", "publish": "on",
