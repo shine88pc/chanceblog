@@ -602,6 +602,21 @@ class OtherDocsAgreeTest(unittest.TestCase):
             for word in ("접수 코멘트(봇)가 되풀이한 대상번호·선택과 지금 본문을 읽은 값이 같을 때만", "접수 대조", "결함 D-408"):
                 self.assertIn(word, text, (rel, word))
 
+    def test_the_edited_ack_comment_rule_is_in_the_security_row_the_runbook_and_the_readme(self):
+        """독립 감사 BA-S2 R1(결함 D-466): 접수 코멘트 자체가 고쳐진 경우(`updated_at` ≠ `created_at`)의 규칙 — 새 상태 `ack_edited`·값이 같아 보여도 승인이 아님·다시 묻기·반응 미확인의 안전한 방향 — 이
+        규칙 행 G-S9a 와 AI 가 읽는 두 곳(런북 J2 7번·요청함 README 7번 아래 줄)에 적혀 있다. G-S9 행과 AGENTS.md 8번 줄은 해시로 못박혀 있어 이 변경이 건드리지 않았다."""
+        row = next(line for line in rel_text("docs/SECURITY_GUARDRAILS.md").splitlines() if line.startswith("| G-S9a |"))
+        for needle in ("**접수 코멘트 자체가 고쳐진 경우**", "결함 D-466", "`updated_at` 이 `created_at` 과 다르면", "`ack_edited`", "`접수대조=ack_edited`", "값이 같아 보여도 승인이 아니며", "번호 있는 `decision` 요청으로 다시 묻는다",
+                       "반응(이모지)", "안전한 방향으로만 틀린다"):
+            self.assertIn(needle, row, needle)
+        for rel in ("docs/AGENT_RUNBOOK.md", "인수인계/요청함/README.md"):
+            text = rel_text(rel)
+            start = text.index("7. **열린 뒤에 고쳐진 이슈**")
+            following = text[start:].split("\n", 2)[1]                                   # 7번 줄 바로 다음 줄
+            self.assertTrue(following.startswith("   - 접수 코멘트(봇) 자체가 고쳐졌으면(`접수대조=ack_edited`"), (rel, following[:60]))
+            for needle in ("`updated_at` 이 `created_at` 과 다름", "결함 D-466", "승인이 아니고", "`decision` 요청"):
+                self.assertIn(needle, following, (rel, needle))
+
     def test_the_forgery_and_known_limit_sentences_of_the_status_tool_output_are_in_the_security_row_and_the_runbook(self):
         """검증자 S 의 V2·V7·V8(결함 D-408): 본문·코멘트 줄의 `| ` 표지와 기계가 읽는 한 줄 `접수대조=…`, '같음도 승인이 아니다', '쓰기 권한자는 같은 login 의 워크플로로 봇 코멘트도 만들 수 있다' 가
         규칙 행(G-S9a)과 런북 J2 7번에 적혀 있다."""

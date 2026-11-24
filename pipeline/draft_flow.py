@@ -73,7 +73,7 @@ class GitError(RuntimeError):
 
 
 def truthy(value):
-    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+    return str(value or "").strip().lower() in pause.ON_VALUES      # 켜짐 값은 정지 변수·생성기·Blogger 러너와 같은 한 곳의 집합이다(감사 BP-S2 N4)
 
 
 class Git:

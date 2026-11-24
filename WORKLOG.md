@@ -7,6 +7,32 @@
 
 ---
 
+## [2026-11-24] Claude – BFIX1: 2차 독립 감사 지적 중 AI 가 직접 고칠 수 있는 것 — 운영자 답 접수 코멘트가 고쳐지면 승인으로 읽지 않기(ack_edited)·병합 부탁 알림에 '검사 정의가 바뀐 PR' 표시와 머리 커밋 7자리·닫힌 쪽 워크플로 줄 시험·정지 안내 문서 정정·연습 실행 스위치 켜짐 값 한 집합 (T2, 결함 D-466–D-473)
+
+**작업자**: Claude (구현자 하위 에이전트 한 명이 WIP 커밋 다섯으로 구현했고, 독립 확인은 구현자와 다른 AI 둘(안전 렌즈 S·시험 렌즈 Q)이 했다. 병합 가지는 총괄이 한 커밋으로 합쳤다)
+**대상**: `scripts/github_status.py`(읽기 도구의 접수 대조 새 상태 `ack_edited`)·`pipeline/auto_notice.py`(병합 부탁 알림 판정: 변경 파일 읽기·검사 정의 변경 표시·머리 커밋 7자리·글자 수 예산)·`generator.py`·`pipeline/run.py`·`pipeline/draft_flow.py`(연습 실행·이미지 교체 스위치 켜짐 값을 `pipeline/pause.py` 의 `ON_VALUES` 한 집합으로), 시험 새 모듈 셋(`tests/test_fail_closed_workflow_lines.py`·`tests/test_pause_docs_accuracy.py`·`tests/test_dry_run_values.py`)과 바뀐 기존 시험(`tests/test_auto_notice.py`·`tests/test_github_status_ack_check.py` 등 — 강화만), 문서(`docs/SECURITY_GUARDRAILS.md`·`docs/AGENT_RUNBOOK.md`·`docs/ACTIONS_GUIDE.md`·`docs/PUBLISH_PATHS.md`·`docs/ARCHITECTURE.md`·`docs/DEFECT_REGISTER.md`·`인수인계/운영자_요청함_사용법.md`·요청함 README 등)
+**등급**: T2 — 제품 코드와 시험·문서. `.github/`·검증기 `scripts/validate_repo.py`·레지스트리 값·`AGENTS.md`·`pipeline/auto_notice.json`·광고 표면·의존성·시크릿은 한 글자도 바꾸지 않았고, 병합 부탁 알림은 켜짐 상태가 꺼짐 그대로라 병합 직후 동작은 같다.
+**목적**: 11-24 2차 독립 감사(BA·BP)가 지적한 것 중 운영자 승인 없이 AI 가 고칠 수 있는 항목을 닫는다. 운영자의 승인 답은 접수 코멘트와 대조해 읽는데 그 코멘트가 나중에 고쳐질 수 있는 틈, 병합 부탁 알림이 '검사가 초록' 이라고만 알려 검사 정의 자체를 바꾼 PR 도 같은 초록으로 보이는 틈, 정지·킬 스위치 안내 문서가 코드의 사실과 어긋난 곳을 바로잡는다.
+
+### 변경 사항
+- **접수 코멘트 편집 감지(BA R1, D-466)**: 접수 코멘트의 `updated_at` 이 `created_at` 과 다르거나 없거나 글이 아니면 새 상태 `ack_edited`(승인 아님 — 번호 있는 확인 요청으로 다시 묻는다)로 읽는다. 판정 순서는 소유자 아님 → 접수 없음 → `ack_edited` → 읽을 수 없음 → 같음·다름. 기계 줄 `접수대조=ack_edited`·경고 줄·JSON 상태 이름을 더했고 `kst()` 가 범위 밖 시각에도 죽지 않게 했다.
+- **병합 부탁 알림의 '검사 정의 변경' 표시와 머리 커밋(BA R2·N6, D-467)**: 병합 부탁 판정이 PR 변경 파일을 읽어(병합완료 확인과 같은 읽기 전용 `GET /pulls/{n}/files`, 100개씩 3쪽, 3쪽이 가득 차면 4쪽을 봐 더 있으면 알리지 않음) `.github/`·`tests/`·`scripts/validate_repo.py`·`AGENTS.md`·`docs/SECURITY_GUARDRAILS.md` 가 있으면 `검사: 초록` 다음 줄에 '검사 정의가 바뀐 PR — 초록은 스스로 증명한 값입니다' 를 싣고, 모든 병합 부탁에 '머리 커밋 7자리 — 병합 전에 PR 화면의 해시와 같은지 보세요' 를 싣는다(이름 바꾼 파일은 옛 이름도 센다). 알림 글자 수 예산(800자)은 새 줄 자리를 고정해 지킨다.
+- **닫힌 쪽 워크플로 줄 시험(BP R3, D-468)**: 새 시험이 `watchdog.yml` 의 정지 변수 전달 줄과 `chanceblog.yml`·`chance-shadow.yml` 의 '콘텐츠 출처 확인' 단계의 실패 시 닫힘 모양(`set -euo pipefail`·`||` 없음·`continue-on-error` 없음)을 글자 그대로 못박는다. 워크플로 파일은 안 고쳤다.
+- **정지·킬 스위치 안내 정정(BP N1·N2·N3·N5, BA N9, D-469–D-472)**: `mode: off` 는 Blogger·네이버·티스토리에만 맞고 Chance 는 `PIPELINE_PAUSE` 만 멈춤 수단이라는 점, 멈추려면 `true` 이고 `off` 는 재개라는 점, 모르는 최상위 키가 실행도 멈추는 점, 네이버·티스토리 초안 패키지 워크플로의 정지 변수, 정지 알림 이슈를 `true` 로 고쳐도 자동으로 닫히지 않는다는 점을 문서에 바로잡고 코드 사실을 읽는 시험(13개)으로 지킨다.
+- **연습 실행 스위치 켜짐 값(BP N4, D-473)**: `generator.py` 의 `DRY_RUN` 읽기·`pipeline/run.py` 의 `_TRUE`·`pipeline/draft_flow.py` 의 `truthy` 가 `pause.ON_VALUES`(1·true·yes·on) 한 집합을 쓴다 — `DRY_RUN=on` 이 연습으로 읽혀 글을 안 올리는 쪽으로만 달라진다. 쓰는 쪽 스위치 `FIX_IMAGES`(기존 글의 이미지를 직접 커밋으로 바꿈)는 옛 켜짐 값(1·true·yes)을 그대로 둔다(독립 안전 검증 S 의 지적으로 `_flag` 에 켜짐 값 집합 인자를 더함) — 쓰기 방향 스위치는 넓히지 않았고 새 게시 길은 열리지 않는다.
+
+### 검증 증거
+- 구현자: 손댄 시험 모듈 7개가 3.12(PyYAML)·3.10 에서 305 → 377개, PyYAML 없는 3.12 에서 215 → 283개 통과, 영향 모듈 82개의 시험 4,069개 통과(실패·오류 0), 변이 101개를 모두 시험이 잡음(처음 놓친 둘은 시험을 보강해 잡음, 원복 sha256 같음), 검증기 오류 0·경고 3. 못 끝낸 큰 모듈(`test_validate_repo`·`test_guardrails_precheck`·`test_auto_pr_workflow` 등 열 개)은 이 PC 포화로 못 돌렸고 검사(CI) 와 독립 확인이 맡았다.
+- 독립 확인(구현 머리 0fc74fb 기준): 안전 렌즈 S **pass**(필수 0·권고 4·참고 8)·시험 렌즈 Q **pass**(필수 0·권고 2·참고 8; 시험 id 사라진 것은 의도한 이름 바뀜 하나뿐·바꾼 기존 시험에서 약해진 단언 0·새 변이 80개 중 76개 잡힘·문서를 읽는 28개 모듈 통과). 권고는 구현자의 WIP 6(머리 9b22e3d, 15개 파일 +100/−24)으로 반영했다 — 롤백 표 한 줄에 'Chance 는 제외'·`FIX_IMAGES` 는 옛 켜짐 값 유지·'요청 도구가 표기를 자동으로 안 붙인다' 를 운영자 문서에 정직하게·JSON 의 `ack_edited` 에서 ack=None·변경 파일이 0건이면 알림 건너뜀·`test_operator_loop_docs` 의 AGENTS.md 못박기 두 줄 삭제. WIP 6 의 코드 세 곳(`generator.py`·`pipeline/auto_notice.py`·`scripts/github_status.py`)은 총괄이 직접 읽어 요청한 대로임을 확인했다.
+- 합친 나무: 제가 [M120] 병합 뒤 새 main 위에서 바뀐 시험 모듈과 문서를 읽는 시험, 방금 병합된 의존성 고정 시험 모듈까지 11개 모듈 769개를 돌려 모두 통과했고(접속 시도 0건) 검증기는 오류 0·경고 3입니다. 검사(CI)는 병합 부탁 글에 적는다.
+
+### 남은 이슈 / 다음 AI 주의
+- 병합 부탁 알림 코드는 켜짐 상태가 꺼짐이라 이 병합으로 알림이 달라지지 않는다. 켜는 날의 첫 관측에서 요약의 세 번째 확인 줄과 새 두 줄(검사 정의 변경·머리 커밋)을 볼 것. 접수 코멘트에 이모지 반응이 달리면 `updated_at` 이 바뀌어 정상 승인도 `ack_edited` 로 읽을 수 있는데 안전한 쪽이며 실제 응답으로 첫 관측이 필요하다.
+- 이 병합은 `tests/` 와 `docs/SECURITY_GUARDRAILS.md` 를 바꾸므로 새 규칙으로는 '검사 정의가 바뀐 PR' 이다. 병합 요청 글의 `verify` 칸에 그 표시와 머리 커밋 7자리를 쓴다.
+- 이 갈래 밖의 T3 제안(검증기 사각·환경 시크릿·`cancel-in-progress` main 제외·`blogger-ko.yml` 머리 주석 등)은 묶어 따로 확인 요청으로 올린다. `[Watchdog]` 이슈를 AI 가 닫는 수단은 정하지 않았다(런북 J2 4번이 이슈 쓰기를 금지).
+
+---
+
 ## [2026-11-24] Claude – AP7I: 의존성 설치 버전 묶기 구현(확인 034 ① 승인) — 파이썬별 constraints 파일 둘·설치 줄 10곳의 -c·검증기 새 규칙 DEP-3·시험 105개·문서 (T3, 결함 D-461–D-465·D-481–D-484)
 
 **작업자**: Claude (구현자 하위 에이전트가 WIP 커밋 여섯으로 구현하고, 독립 확인 둘(안전 S·시험 Q)의 권고를 새 구현자가 WIP 커밋 열한 개(7–17)로 반영했다. 독립 확인은 구현자와 다른 AI 둘(안전 렌즈 S·시험 렌즈 Q)이 했고 재작업분(델타)도 같은 두 렌즈가 다시 확인했다. 병합 가지는 총괄이 한 커밋으로 합쳤고 안전 장치 문서 네 곳의 문장은 총괄이 맞췄다)
