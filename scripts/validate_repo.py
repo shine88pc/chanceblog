@@ -2155,8 +2155,8 @@ _DEP3_VALUE_OPTIONS = frozenset({"-t", "--target", "-i", "--index-url", "--extra
                                  "--root-user-action", "--use-feature", "--use-deprecated", "--build-constraint", "--group", "--python", "--keyring-provider", "--resume-retries"})
 _DEP3_SHORT_OR_LONG = (("-c", "--constraint", "constraints"), ("-r", "--requirement", "requirements"), ("-e", "--editable", "editable"))
 # pip 가 하위 명령 앞에 받는 일반 옵션(긴 이름) — pip(optparse)는 다른 것과 겹치지 않는 앞부분(`--cache` → `--cache-dir`)도 그 옵션으로 받아 준다(결함 D-481).
-_DEP3_GENERAL_VALUE_OPTIONS = ("--python", "--log", "--keyring-provider", "--proxy", "--retries", "--timeout", "--exists-action", "--trusted-host", "--cert", "--client-cert", "--cache-dir", "--use-feature",
-                               "--use-deprecated", "--resume-retries")
+_DEP3_GENERAL_VALUE_OPTIONS = ("--python", "--log", "--log-file", "--local-log", "--keyring-provider", "--proxy", "--retries", "--timeout", "--default-timeout", "--exists-action", "--trusted-host", "--cert",
+                               "--client-cert", "--cache-dir", "--use-feature", "--use-deprecated", "--resume-retries")
 _DEP3_GENERAL_FLAGS = ("--help", "--debug", "--isolated", "--require-virtualenv", "--require-venv", "--verbose", "--version", "--quiet", "--no-input", "--no-cache-dir", "--disable-pip-version-check",
                        "--no-color", "--no-python-version-warning")
 
@@ -2201,8 +2201,10 @@ def _dep3_hides_pip_install(text):
 
 def _dep3_takes_value(option):
     """하위 명령 앞의 옵션 하나가 다음 낱말을 값으로 받는가 — 값 옵션 목록의 이름이거나, 일반 옵션 중 값 옵션 하나만 가리키는 줄임말(`--cache`·`--lo`)이다. 값을 붙여 쓴 `--cache-dir=cache` 는 낱말 하나라 아니다."""
-    if option in _DEP3_VALUE_OPTIONS:
+    if option in _DEP3_VALUE_OPTIONS or option in _DEP3_GENERAL_VALUE_OPTIONS:
         return True
+    if option in _DEP3_GENERAL_FLAGS:
+        return False
     if option.startswith("--") and len(option) > 2 and "=" not in option:
         names = [name for name in _DEP3_GENERAL_VALUE_OPTIONS + _DEP3_GENERAL_FLAGS if name.startswith(option)]
         return len(names) == 1 and names[0] in _DEP3_GENERAL_VALUE_OPTIONS

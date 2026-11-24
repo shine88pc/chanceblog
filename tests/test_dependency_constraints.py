@@ -492,7 +492,7 @@ class Dep3WorkflowMutationTest(TmpCase):
         old = "python -m pip install -c constraints-py312.txt -r requirements-edits.txt"
         for text in ("python -m pip --cache-dir cache install -r requirements-edits.txt", "python -m pip --log list install -r requirements-edits.txt", "pip --cache-dir cache install -r requirements-edits.txt",
                      "python -m pip --proxy check install -r requirements-edits.txt", "pip --python show install -r requirements-edits.txt", "python -m pip --cache-dir cache --log list install -r requirements-edits.txt",
-                     "python -m pip --cache cache install -r requirements-edits.txt", "pip --lo list --pro check install -r requirements-edits.txt",
+                     "python -m pip --cache cache install -r requirements-edits.txt", "pip --log-f list --pro check install -r requirements-edits.txt",
                      "python -mpip install -r requirements-edits.txt", "python3 -X utf8 -mpip install -r requirements-edits.txt"):
             with self.subTest(text=text):
                 self.fresh("issue-edit.yml")
@@ -851,8 +851,8 @@ class ShellReadingTest(unittest.TestCase):
                 self.assertEqual(self.installs(run), ([], []))
 
     # pip 가 하위 명령 앞에 받는 일반 옵션 중 값을 받는 것(pip 설명서의 일반 옵션) — 검증기의 목록을 빌리지 않는다. 그리고 pip 의 하위 명령 낱말 전부.
-    GLOBAL_VALUE_OPTIONS = ("--cache-dir", "--log", "--proxy", "--timeout", "--retries", "--exists-action", "--trusted-host", "--cert", "--client-cert", "--python", "--keyring-provider",
-                            "--use-feature", "--use-deprecated", "--resume-retries")
+    GLOBAL_VALUE_OPTIONS = ("--cache-dir", "--log", "--log-file", "--local-log", "--proxy", "--timeout", "--default-timeout", "--retries", "--exists-action", "--trusted-host", "--cert", "--client-cert",
+                            "--python", "--keyring-provider", "--use-feature", "--use-deprecated", "--resume-retries")
     PIP_COMMAND_WORDS = ("install", "download", "uninstall", "freeze", "inspect", "list", "show", "check", "config", "search", "cache", "index", "wheel", "hash", "completion", "debug", "help", "lock")
 
     def test_the_value_of_a_global_option_is_never_the_subcommand(self):
@@ -870,7 +870,20 @@ class ShellReadingTest(unittest.TestCase):
         self.assertEqual(wrong, [])
 
     # pip(optparse)는 겹치지 않는 앞부분도 그 옵션으로 받아 준다 — 일반 옵션 중 값을 받는 것의 줄임말(pip 23 에서 `pip --cac cache --version` 이 통과함을 이 PC 에서 확인)
-    ABBREVIATED_VALUE_OPTIONS = ("--cache", "--cache-d", "--lo", "--pro", "--time", "--ret", "--exists", "--trusted", "--client", "--pyth", "--keyr", "--use-f", "--use-d", "--resume")
+    ABBREVIATED_VALUE_OPTIONS = ("--cache", "--cache-d", "--log-f", "--loc", "--local-l", "--pro", "--time", "--defa", "--ret", "--exists", "--trusted", "--client", "--pyth", "--keyr", "--use-f", "--use-d", "--resume")
+
+    def test_every_value_option_of_the_real_pip_parser_is_read_as_taking_a_value(self):
+        """진짜 pip 의 옵션 파서(접속 없음)에서 읽은 전역 옵션 이름 전부(별칭 포함)를 검증기가 값 옵션·플래그로 맞게 읽는다 —손 목록에 별칭이 빠지면(--log-file·--local-log·--default-timeout) 여기서 걸린다. pip 를 못 읽는 환경에서는 건너뛰고 위의 고정 표가 대신 지킨다."""
+        try:
+            from pip._internal.cli.main_parser import create_main_parser
+            parser = create_main_parser()
+            options = list(parser.option_list) + [option for group in parser.option_groups for option in group.option_list]
+            takes = {name: option.takes_value() for option in options for name in option._long_opts}
+        except Exception as error:  # pip 가 없거나 내부 구조가 다르다
+            self.skipTest("pip 의 옵션 파서를 못 읽음: %s" % type(error).__name__)
+        self.assertIn("--cache-dir", takes)
+        wrong = [(name, value) for name, value in takes.items() if vr._dep3_takes_value(name) != value]
+        self.assertEqual(wrong, [], "진짜 pip 파서와 다르게 읽는 옵션(이름, 값을 받는가) — 줄임말은 pip 판마다 겹침이 달라 위 고정 표가 지킨다")
 
     def test_an_abbreviated_global_option_takes_its_value_too(self):
         wrong = []
@@ -890,7 +903,7 @@ class ShellReadingTest(unittest.TestCase):
         for args, expected in ((["install", "x"], 0), (["--cache-dir", "cache", "install"], 2), (["-q", "-q", "list"], 2), (["--version"], None), ([], None), (["--log"], None),
                                (["--cache-dir=cache", "install"], 1), (["x", "install"], 1), (["list", "install"], 0), (["--log", "install", "list"], 2), (["--cache-dir", "cache"], None),
                                (["frobnicate", "list", "install"], 2), (["--log", "install", "foo", "install"], 3),
-                               (["--cache", "cache", "install"], 2), (["--lo", "list", "install"], 2), (["--vers", "install"], 1), (["--cache=cache", "list"], 1)):
+                               (["--cache", "cache", "install"], 2), (["--log-f", "list", "install"], 2), (["--local-log", "list", "install"], 2), (["--default-timeout", "list", "install"], 2), (["--lo", "list", "install"], 1), (["--vers", "install"], 1), (["--cache=cache", "list"], 1)):
             with self.subTest(args=args):
                 self.assertEqual(vr._dep3_pip_subcommand(args), expected)
 
