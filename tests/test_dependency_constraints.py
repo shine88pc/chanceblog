@@ -531,6 +531,15 @@ class Dep3WorkflowMutationTest(TmpCase):
         self.assert_caught("deps.txt", "constraints-py310.txt 에 없습니다", found)
         self.assert_caught("deps.txt", "constraints-py312.txt 에 없습니다", found)
 
+    def test_the_two_workflow_level_limits_the_document_names_really_pass(self):
+        """§3 '오류도 없이 지나가는 모양' 의 (d) 같은 단계의 스크립트 안에서 -c 변수를 다시 대입하기, (g) bash 가 아닌 shell 안의 pip — 문서가 거짓이 되지 않게 묶는다(막는 변경이 생기면 시험과 문단을 함께 고친다)."""
+        self.fresh()
+        self.write(".github/workflows/w.yml", self.HEAD + "      - env:\n          CONSTRAINTS: constraints-py312.txt\n        run: |\n          CONSTRAINTS=/dev/null\n"
+                                                      '          python -m pip install -c "$CONSTRAINTS" -r requirements-edits.txt\n')
+        self.assertEqual([item.line() for item in self.found()], [])
+        self.write(".github/workflows/w.yml", self.HEAD + "      - shell: python\n        run: |\n          import subprocess\n          subprocess.run(['pip', 'install', '-r', 'requirements-edits.txt'])\n")
+        self.assertEqual([item.line() for item in self.found()], [])
+
     def test_message_text_that_only_mentions_pip_install_is_not_an_install(self):
         rel = ".github/workflows/issue-edit.yml"
         self.fresh("issue-edit.yml")
@@ -820,6 +829,7 @@ class ShellReadingTest(unittest.TestCase):
                 ("pip --proxy install install -r b.txt", ([], ["b.txt"], [], [])),
                 ("pip -q --no-input --isolated install x", ([], [], [], ["x"])),
                 ("pip --some-new-option value install -r b.txt", ([], ["b.txt"], [], [])),           # 목록에 없는 값 옵션: 낯선 낱말 뒤의 install 도 설치로 읽는다
+                ("pip --log install foo install -r b.txt", ([], ["b.txt"], [], [])),                  # 보수적으로 읽을 때도 앞의 install(값 옵션의 값)이 아니라 낯선 낱말 뒤의 install 이다
                 # 붙여 쓴 -mpip(안전 검증 S 의 R2 b)
                 ("python -mpip install -c a.txt -r b.txt", (["a.txt"], ["b.txt"], [], [])),
                 ("python3.12 -X utf8 -mpip install x", ([], [], [], ["x"])),
@@ -859,7 +869,7 @@ class ShellReadingTest(unittest.TestCase):
     def test_the_position_of_the_subcommand(self):
         for args, expected in ((["install", "x"], 0), (["--cache-dir", "cache", "install"], 2), (["-q", "-q", "list"], 2), (["--version"], None), ([], None), (["--log"], None),
                                (["--cache-dir=cache", "install"], 1), (["x", "install"], 1), (["list", "install"], 0), (["--log", "install", "list"], 2), (["--cache-dir", "cache"], None),
-                               (["frobnicate", "list", "install"], 2)):
+                               (["frobnicate", "list", "install"], 2), (["--log", "install", "foo", "install"], 3)):
             with self.subTest(args=args):
                 self.assertEqual(vr._dep3_pip_subcommand(args), expected)
 
@@ -878,11 +888,23 @@ class ShellReadingTest(unittest.TestCase):
 
     def test_shapes_that_hide_an_install_are_reported_unreadable(self):
         for run in ('bash -c "pip install x"', "sh -c 'python -m pip install -r r.txt'", 'eval "pip install x"', "xargs pip install", "sudo pip install x", "uv pip install x", "time sudo pip install x",
-                    "nohup pip install x &"):
+                    "nohup pip install x &", '"$PYTHON" -m pip install -r r.txt', 'export X="$(pip install -r r.txt)"', "`pip install -r r.txt`", "pipx run pip install x"):
             with self.subTest(run=run):
                 found, unreadable = self.installs(run)
                 self.assertEqual(found, [], run)
                 self.assertEqual(len(unreadable), 1, run)
+
+    def test_the_shapes_the_document_lists_as_passing_without_an_error_really_do(self):
+        """docs/DEPENDENCY_PINNING.md §3 '오류도 없이 지나가는 모양' 이 말하는 모양(a·b·c·e·f)이 정말 아무 설치로도 오류로도 읽히지 않는다 — 문서가 거짓이 되지 않게 묶는다.
+        이 모양을 막는 변경이 생기면 이 시험과 그 문단을 함께 고친다(색인 옵션을 거절하는 규칙은 승인 범위 밖이라 두지 않았다)."""
+        for run in ("PIP=pip; $PIP install -r r.txt", 'PIP="python -m pip"; ${PIP} install -r r.txt', "sudo python -mpip install -r r.txt", 'echo "$(python -m pip install -r r.txt)"',
+                    'x="$(python -m pip install -r r.txt)"', "pipx install ruff", "python -m pip config set global.extra-index-url mirror.invalid"):
+            with self.subTest(run=run):
+                self.assertEqual(self.installs(run), ([], []))
+        found, unreadable = self.installs("PIP_INDEX_URL=mirror.invalid python -m pip install --extra-index-url mirror.invalid -f mirror.invalid -c c.txt -r r.txt")
+        self.assertEqual((found, unreadable), ([(["c.txt"], ["r.txt"], [], [])], []))              # 색인을 바꾸는 줄도 -c 만 맞으면 그대로 읽힌다
+        found, unreadable = self.installs('x=$(python -m pip install -r r.txt)')
+        self.assertEqual((found, unreadable), ([([], ["r.txt"], [], [])], []))                    # 따옴표 없는 명령 치환 안의 설치는 보통 설치 줄처럼 읽힌다(문서가 그렇게 말한다)
 
     def test_a_line_with_an_unclosed_quote_is_reported_only_when_it_mentions_pip(self):
         self.assertEqual(self.installs("echo \"it's open\n"), ([], []))
