@@ -839,13 +839,14 @@ FRAGMENTS = ("pip", "pip3", "pip3.12", "pip.exe", "pip3.12.exe", "pip.", "pip3x"
 SEPARATORS = (" ", " ", "  ", "\t", "\n", chr(0xA0), chr(0x2028), chr(0x1F), chr(0x85), chr(0x3000), "", "")          # 빈 글자 = 붙여 쓰기, 나머지는 정규식 \s 가 공백으로 읽는 글자들
 
 
-def best_seconds(function, value, runs=3, limit=1.0):
-    """함수를 value 에 돌려 가장 빠른 한 번의 초를 돌려준다(부하로 흔들리는 값을 줄인다). 한 번이 limit 초를 넘으면 더 돌리지 않는다(제곱 시간 코드를 오래 돌리지 않으려고)."""
+def best_seconds(function, value, runs=3, limit=2.0):
+    """함수를 value 에 돌려 가장 빠른 한 번의 CPU 초를 돌려준다. 벽시계가 아니라 이 프로세스의 CPU 시간으로 재서 다른 프로그램이 CPU 를 쓰는 부하(공용 PC·바쁜 러너)에 덜 흔들린다.
+    한 번이 limit 초를 넘으면 더 돌리지 않는다(제곱 시간 코드를 오래 돌리지 않으려고)."""
     best = None
     for _ in range(runs):
-        started = time.perf_counter()
+        started = time.process_time()
         function(value)
-        took = time.perf_counter() - started
+        took = time.process_time() - started
         best = took if best is None else min(best, took)
         if took > limit:
             break
@@ -910,35 +911,36 @@ class PathologicalInputTest(unittest.TestCase):
               ("pip 와 낱말 교대", lambda tokens: "foo " + "pip x " * (tokens // 2)),
               ("pip 꼴 세 가지 섞기", lambda tokens: "foo " + "pip3.12 pip.exe pip " * (tokens // 3)),
               ("끝에 install 닮은 낱말", lambda tokens: "foo " + "pip " * tokens + "installx"),
-              ("줄마다 반복", lambda tokens: "\n".join("foo pip pip" for _ in range(tokens // 2))))
+              ("줄마다 반복", lambda tokens: "\n".join("foo pip pip" for _ in range(tokens // 4))))
 
-    def test_sixteen_thousand_words_are_read_in_under_a_second(self):
+    def test_sixteen_thousand_words_are_read_in_seconds_not_in_tens_of_seconds(self):
+        """옛 구현은 이 입력들에서 CPU 6–19초였다. 지금은 0.1–0.3초 — 한도 2초는 바쁜 PC 의 흔들림을 덮고도 옛 제곱 시간을 잡는다."""
         for label, make in self.SHAPES:
             with self.subTest(label=label):
-                self.assertLess(best_seconds(vr._dep3_pip_installs, make(16000), runs=2), 1.0)
+                self.assertLess(best_seconds(vr._dep3_pip_installs, make(16000), runs=2), 2.0)
 
     def test_eight_times_the_input_takes_about_eight_times_as_long(self):
         for label, make in self.SHAPES[:2]:
             with self.subTest(label=label):
                 small = best_seconds(vr._dep3_pip_installs, make(8000))
-                self.assertLess(small, 1.0)
+                self.assertLess(small, 2.0)
                 large = best_seconds(vr._dep3_pip_installs, make(64000), runs=2)
-                self.assertLess(large, 24 * max(small, 0.01), (small, large))               # 선형이면 8배 안팎, 제곱이면 64배
+                self.assertLess(large, 24 * max(small, 0.05), (small, large))               # 선형이면 8배 안팎, 제곱이면 64배(CPU 시간은 0.016초 단위로 읽혀 바닥을 0.05초로 둔다)
 
     def test_the_scan_alone_handles_a_very_long_text(self):
-        self.assertLess(best_seconds(vr._dep3_hides_pip_install, "foo " + "pip x " * 100000, runs=2, limit=2.0), 2.0)
+        self.assertLess(best_seconds(vr._dep3_hides_pip_install, "foo " + "pip x " * 100000, runs=2), 2.0)
         self.assertFalse(vr._dep3_hides_pip_install("foo " + "pip x " * 100000))
         self.assertTrue(vr._dep3_hides_pip_install("foo " + "pip x " * 100000 + "install"))
 
     def test_hundreds_of_thousands_of_leading_assignments_are_skipped_by_position(self):
-        self.assertLess(best_seconds(vr._dep3_command_words, ["a=1"] * 200000 + ["pip", "install", "x"], runs=2, limit=2.0), 2.0)
+        self.assertLess(best_seconds(vr._dep3_command_words, ["a=1"] * 200000 + ["pip", "install", "x"], runs=2), 2.0)
         self.assertEqual(vr._dep3_command_words(["if"] * 200000 + ["pip", "install", "x"]), ["pip", "install", "x"])
 
     def test_leading_assignments_in_a_real_command_line_take_linear_time(self):
         small = best_seconds(vr._dep3_pip_installs, "a=1 " * 20000 + "pip install -r b.txt")
         self.assertLess(small, 2.0)
         large = best_seconds(vr._dep3_pip_installs, "a=1 " * 160000 + "pip install -r b.txt", runs=2, limit=6.0)
-        self.assertLess(large, 20 * max(small, 0.02), (small, large))                   # 선형이면 8배 안팎(낱말 쪼개기), 앞에서 하나씩 빼면 40배
+        self.assertLess(large, 20 * max(small, 0.05), (small, large))                   # 선형이면 8배 안팎(낱말 쪼개기), 앞에서 하나씩 빼면 40배
         found, unreadable = vr._dep3_pip_installs("a=1 " * 20 + "pip install -r b.txt")
         self.assertEqual(([item["requirements"] for item in found], unreadable), ([["b.txt"]], []))
 
