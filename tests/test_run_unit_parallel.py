@@ -29,7 +29,7 @@ sys.path.insert(0, str(_bootstrap.ROOT / "scripts"))
 import run_unit_parallel as rup  # noqa: E402
 
 RUNNER = _bootstrap.ROOT / "scripts" / "run_unit_parallel.py"
-WEIGHTS = _bootstrap.ROOT / "scripts" / "unit_test_weights.json"
+WEIGHTS = _bootstrap.ROOT / "tests" / "unit_test_weights.json"
 GUARDRAILS = _bootstrap.ROOT / ".github" / "workflows" / "guardrails.yml"
 
 SUPPORT = '''import os
