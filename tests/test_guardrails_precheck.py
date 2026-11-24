@@ -310,7 +310,9 @@ class TriggerShapeTest(unittest.TestCase):
         steps = self.data["jobs"]["validate"]["steps"]
         names = [step.get("name") or step["uses"] for step in steps]
         self.assertEqual(names[2:], ["검증 도구 설치", "저장소 가드레일 검증", "단위 테스트", "워크플로 정적 분석 (actionlint)"])
-        self.assertEqual(steps[4]["run"], "python -m unittest discover -s tests -v")
+        self.assertEqual(steps[4]["run"], "python scripts/run_unit_parallel.py --weights scripts/unit_test_weights.json")      # 병렬 실행기(시험 id 를 처음 모은 것과 대조해 빠뜨리지 않는다 — tests/test_run_unit_parallel.py). 옛 줄: python -m unittest discover -s tests -v
+        for needed in ("scripts/run_unit_parallel.py", "scripts/unit_test_weights.json"):
+            self.assertTrue((_bootstrap.ROOT / needed).is_file(), needed)                                                        # 부르는 파일이 실제로 있다(없으면 단위 테스트 단계가 시험 없이 빨강)
         self.assertEqual((steps[5]["run"], steps[5]["if"]), ("actionlint", "matrix.python-version == '3.12'"))
         for step in steps:
             self.assertNotIn("continue-on-error", step, step.get("name"))

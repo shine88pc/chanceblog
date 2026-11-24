@@ -10,6 +10,7 @@
 | 검증 도구 설치 | `python -m pip install -r requirements-dev.txt` |
 | 저장소 가드레일 검증 | `python scripts/validate_repo.py` (경고도 실패로: `--strict`) |
 | 단위 테스트 | `python -m unittest discover -s tests` |
+| 단위 테스트(CI 와 같은 병렬 실행) | `python scripts/run_unit_parallel.py --weights scripts/unit_test_weights.json` — 시험 모듈을 여러 프로세스로 나눠 돌리고, 돈 시험이 처음 모은 시험과 정확히 같은지 대조한다(`--plan-only` 나누기만 보기, `--only 모듈…` 일부만, `-j N` 프로세스 수) |
 | 워크플로 정적 분석 | `actionlint` |
 | 레지스트리 검증·요약 | `python -m pipeline.registry` |
 | 블로그 드라이런 | `python -m pipeline.run --blog blogger_macat --dry-run` |
