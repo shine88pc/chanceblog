@@ -66,7 +66,7 @@ Dependabot 알림은 저장소 설정이라 운영자 몫입니다. 보안 공�
 - (d) `actionlint-py==1.7.12.25` 는 이 변경 밖입니다 — 미리 만든 설치 파일이 없어 검사 칸이 매번 소스에서 설치하며 그때 실행 파일을 외부에서 받습니다. 소스 설치의 빌드 도구에 `-c` 가 닿는지는 확인하지 못했습니다(미확인). 확인 032 의 설치 고정·해시 항목과 함께 다룹니다.
 - (e) 시험이 가짜 SDK 를 써서 통과가 실제 SDK 호환을 보장하지는 않습니다 — 접속 없는 호출 모양 점검이 보완합니다.
 - (f) **사이트 공개**: 목록 파일 둘은 저장소 맨 위에 있어 사이트의 정적 파일로 그대로 열립니다(`tests/test_site_cleanup.py` 의 `STATIC_EXPOSED`). 내용은 공개 패키지 이름과 버전뿐입니다. 사이트에서 빼려면 `_config.yml` 의 exclude 를 바꿔야 하는데 그 파일은 광고 표면이라 운영자 승인(T3)과 병합 정책의 내부 항목 목록 변경이 같이 필요합니다.
-- 코드 소유자 지정(`.github/CODEOWNERS`)에는 요구 파일(`/requirements*.txt`)만 있고 목록 파일은 없습니다 — 같은 방식으로 한 줄을 더하는 것은 별도 변경(T3)으로 제안합니다.
+- 코드 소유자 지정(`.github/CODEOWNERS`)에는 요구 파일(`/requirements*.txt`)과 목록 파일(`/constraints*.txt`) 줄이 둘 다 있습니다(목록 파일 줄은 확인 040 의 승인으로 더했습니다).
 - **되돌리기**: 설치 줄 10곳의 `-c`·새 파일 둘·검증기 DEP-3 과 시험을 한 커밋으로 되돌리면 지금까지와 같습니다(데이터 이관 없음).
 
 관련: [`ENGINEERING_GUIDE.md`](./ENGINEERING_GUIDE.md) R4·W5, [`SECURITY_GUARDRAILS.md`](./SECURITY_GUARDRAILS.md) G-A5, [`DEFECT_REGISTER.md`](./DEFECT_REGISTER.md) D-10 과 D-461–D-465.
