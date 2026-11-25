@@ -130,7 +130,7 @@
  "test_pr_scope_number_check": 10.7,
  "test_profile_en": 0.7,
  "test_profile_ko_ai": 0.8,
- "test_profile_regex_bounds": 3.7,
+ "test_profile_regex_bounds": 18.0,
  "test_profiles_naver": 0.5,
  "test_prompt_grounding": 0.3,
  "test_provenance": 4.5,
