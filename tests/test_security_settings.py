@@ -377,7 +377,7 @@ class CodeownersTest(unittest.TestCase):
     OWNER = "@shine88pc"
     # 자동화·보안 경계(T2, docs/CHARTER.md §5). 하나라도 빠지면 실패한다(광고 표면은 아래에서 레지스트리와 대조한다).
     REQUIRED = ["/.github/", "/.github/editorial/edit-spec.yml", "/pipeline/", "/scripts/", "/generator.py",
-                "/blogger_generator.py", "/requirements*.txt", "/tests/", "/AGENTS.md", "/CLAUDE.md", "/GEMINI.md",
+                "/blogger_generator.py", "/requirements*.txt", "/constraints*.txt", "/tests/", "/AGENTS.md", "/CLAUDE.md", "/GEMINI.md",
                 "/.gitignore", "/docs/SECURITY_GUARDRAILS.md", "/docs/CHARTER.md", "/posts.json", "/feed.xml"]
 
     def rules(self):

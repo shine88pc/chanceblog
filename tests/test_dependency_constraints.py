@@ -160,6 +160,15 @@ class ConstraintsFilesTest(unittest.TestCase):
         self.assertNotEqual(ten["google-genai"], "2.34.0")
         self.assertNotEqual(ten["websockets"], "17.4")
 
+    def test_the_pipeline_requirement_header_says_versions_differ_by_python_and_points_to_the_pinning_doc(self):
+        """확인 040 ① 묶음 ④: requirements-pipeline.txt 의 머리 주석은 '3.10/3.12 모두에서 같은 버전으로 풀린다' 는 옛 문장(AP7 실측에서 google-genai 가 파이썬마다 달랐다 — 결함 D-10 행)이 아니라
+        '범위 안에서 파이썬별로 다른 버전이 풀릴 수 있어 파이썬별 constraints 파일로 묶는다' 를 말하고 docs/DEPENDENCY_PINNING.md 를 가리킨다. 패키지 줄·범위는 이 시험이 보지 않는다(위의 짝 시험들이 본다)."""
+        header = "\n".join(line for line in text_of("requirements-pipeline.txt").split("\n") if line.startswith("#"))
+        self.assertNotIn("같은 버전으로 풀리는 것을 확인함", header)
+        for needle in ("파이썬별로 다른 버전이 풀릴 수 있어", "constraints", "docs/DEPENDENCY_PINNING.md"):
+            self.assertIn(needle, header, needle)
+        self.assertTrue((ROOT / "docs" / "DEPENDENCY_PINNING.md").is_file())
+
     def test_the_site_cleanup_test_lists_both_files_as_deliberately_exposed(self):
         """새 루트 파일은 사이트로 내보낼지·뺄지 정해야 한다(tests/test_site_cleanup.py). `_config.yml` 은 광고 표면이라 이 변경 밖이어서 일부러 열어 두는 목록(STATIC_EXPOSED)에 있다.
         (그 파일들이 AI 병합 대상이 아닌 의존성 파일로 분류되는 것은 병합 정책 문서 시험의 '사이트로 내보내는 모든 파일은 운영자 전용' 시험이 이미 모든 루트 파일에 대해 본다 —

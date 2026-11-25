@@ -222,6 +222,10 @@ class WrapperTest(unittest.TestCase):
             self.assertIn("with:", text)
         self.assertIn("mode: off", (WORKFLOWS / "blogger-ko.yml").read_text(encoding="utf-8"))
         self.assertIn("BLOGGER_KO_*", (WORKFLOWS / "blogger-ko.yml").read_text(encoding="utf-8"))
+        korean = (WORKFLOWS / "blogger-ko.yml").read_text(encoding="utf-8")
+        self.assertIn("mode: draft", korean)                                  # 확인 040 ① 묶음 ④: 머리 주석은 지금의 사실(레지스트리에서 draft — 정기 실행이 글을 초안함에 올린다)을 말한다
+        self.assertIn("Blogger 초안함에 올린다", korean)
+        self.assertNotIn("지금은 레지스트리에서 mode: off", korean)             # 꺼져 있다는 옛 문장은 되돌아오지 않는다(위의 'mode: off' 는 끄는 법 설명이다)
 
     def test_files_are_utf8_without_bom_and_end_with_a_newline(self):
         for name in ("blogger.yml", "blogger-en.yml", "blogger-ko.yml"):

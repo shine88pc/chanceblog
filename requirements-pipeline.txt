@@ -1,6 +1,6 @@
 # 파이프라인 실행(GitHub Actions: blogger.yml)에 필요한 패키지. 범위로 고정하고,
 # 첫 성공 실행 이후 정확한 버전으로 좁히는 것은 docs/DEFECT_REGISTER.md D-10 참고.
-# (Python 3.10/3.12 모두에서 같은 버전으로 풀리는 것을 확인함)
+# (범위 안에서 파이썬별로 다른 버전이 풀릴 수 있어 파이썬별 constraints 파일로 설치 버전을 묶는다 — docs/DEPENDENCY_PINNING.md)
 google-genai>=2,<3
 google-auth>=2,<3
 google-api-python-client>=2,<3
