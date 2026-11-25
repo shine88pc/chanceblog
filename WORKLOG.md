@@ -7,6 +7,32 @@
 
 ---
 
+## [2026-11-25] Claude – DOC4: 확인 040 ① 넷째 묶음 — 승인 채널 보충에 '접수 코멘트가 고쳐졌으면 승인이 아니다' 한 구절·`blogger-ko.yml` 6행 주석·`requirements-pipeline.txt` 3행 주석·`CODEOWNERS` 의 `/constraints*.txt` 한 줄 (T3)
+
+**작업자**: Claude (구현자 하위 에이전트 한 명이 WIP 커밋 넷으로 구현했고, 독립 확인은 구현자와 다른 AI 둘(안전 렌즈 S·시험 렌즈 Q)이 했다. 병합 가지는 총괄이 한 커밋으로 합쳤다)
+**대상**: `AGENTS.md` 36행(승인 채널 보충 끝에 한 구절)·`.github/workflows/blogger-ko.yml` 6행(주석 한 줄)·`requirements-pipeline.txt` 3행(주석 한 줄)·`.github/CODEOWNERS`(`/constraints*.txt` 한 줄), 시험: `tests/test_operator_loop_docs.py`·`tests/test_blogger_split.py`·`tests/test_dependency_constraints.py`·`tests/test_security_settings.py`
+**등급**: T3 — `.github/` 두 파일과 `AGENTS.md`(운영자 승인: 확인 040 ①, 이슈 #271). 워크플로의 비주석 줄·요구 파일의 패키지 줄·`AGENTS.md` 8번 줄과 G-S9 행·CODEOWNERS 의 기존 줄은 한 글자도 바뀌지 않았다.
+**목적**: 독립 감사가 남긴 문장·주석의 어긋남을 바로잡는다 — 접수 코멘트가 접수 뒤에 고쳐진 경우(`접수대조=ack_edited`, [M121] 로 병합된 읽기 도구의 판정)를 승인 규칙 문단이 말하게 하고, 이미 낡은 두 주석(블로그 정기 실행의 mode 설명·요구 파일의 설치 버전 설명)을 지금의 사실로 고치며, 제약 파일도 CODEOWNERS 검토 대상에 넣는다.
+
+### 변경 사항
+- **AGENTS.md 36행**: '승인 채널 보충' 끝의 값 대조 규칙 문장 뒤에 한 구절 — 접수 코멘트가 접수 뒤에 고쳐졌으면(`접수대조=ack_edited`) 값이 같아 보여도 승인이 아니고 번호 있는 확인 요청으로 다시 묻는다. 더 엄격한 쪽의 추가뿐이다(8번 줄·G-S9 행은 해시로 못박은 문장이라 그대로).
+- **`blogger-ko.yml` 6행**: 주석 한 줄만 교체 — mode 는 레지스트리(`pipeline/blogs.json`)가 정하고 지금은 draft 라 정기 실행이 글을 만들면 Blogger 초안함에 올린다(공개 게시는 안 함), `mode: off` 로 바꾸면 정기·수동 실행이 '대상 0개'로 끝난다(인증 점검만 실행은 그때도 점검). 비주석 59줄·YAML 파싱 결과·줄 수 71 은 불변(`docs/AI_FLOW.md` 가 `blogger-ko.yml:64` 를 줄 번호로 인용하므로 한 줄로만 교체).
+- **`requirements-pipeline.txt` 3행**: 주석 한 줄만 교체 — 범위 안에서 파이썬별로 다른 버전이 풀릴 수 있어 파이썬별 constraints 파일로 설치 버전을 묶는다(`docs/DEPENDENCY_PINNING.md`). 패키지 3줄·범위 불변.
+- **`.github/CODEOWNERS`**: `/requirements*.txt` 줄 바로 아래 `/constraints*.txt` 한 줄(같은 소유자) — 제약 파일 둘(`constraints-py310.txt`·`constraints-py312.txt`)이 이 줄에 맞는다. 보호를 늘리는 방향이다.
+- **시험(추가만)**: 새 시험 둘(`test_operator_loop_docs` 의 승인 문단 구절·`test_dependency_constraints` 의 머리 주석), `test_blogger_split` 에 단언 3줄, `test_security_settings` 필수 경로 목록에 항목 하나. 기존 시험을 지우거나 약하게 한 곳은 없다.
+
+### 검증 증거
+- 구현자: 항목별 영향권 시험(3.12 14·15·5·3 모듈, 3.10 일부)과 최종 합동(3.12 43모듈 + 검증기 시험의 진짜 저장소 12묶음 2,466개 통과·실패 0, 3.10 17개 항목 651개 통과), 진짜 저장소 검증기 `validate_repo.py` 오류 0·경고 3(기존과 같음), 변이 22개 모두 잡힘(원복 sha256 같음). 느린 모듈(`test_guardrails_precheck` 등)은 이 PC 포화로 못 돌렸고 검사(CI)가 돌린다.
+- 독립 확인(구현 머리 a426e0d 기준): 안전 렌즈 S **pass**(필수 0·권고 2·참고 6) — 범위 8개 파일(+33/−4)·`AGENTS.md` 8번 줄과 G-S9 행 불변·새 구절은 더 엄격한 쪽의 추가(읽기 도구 `ack_edited` 판정과 같은 말)·`blogger-ko.yml` 비주석 59줄의 sha256 과 YAML 파싱 결과 같음·CODEOWNERS 는 같은 소유자 한 줄이라 보호만 늘림·검증기 `validate_repo.py` 기준·머리 모두 오류 0·경고 3. 시험 렌즈 Q **pass**(필수 0·권고 3·참고 8) — 시험 id 사라진 것 0·바꾼 기존 시험 약화 0·새 변이도 시험이 잡음. 권고는 후속으로 기록한다: 새 구절 시험이 새 예외 문장이 끼어드는 것을 못 막는 점·`blogger-ko.yml` 단언이 글자를 못박을 뿐 레지스트리와 대조하지 않는 점·구현자 보고서의 '저장소 객체가 CRLF' 설명이 틀린 점(저장소 객체는 LF 이고 이 PC 작업 사본만 CRLF — 병합 가지는 LF 그대로).
+- 합친 나무: @@STAT@@ — 구현 가지 머리(a426e0d)와 이 병합 가지의 차이는 WORKLOG.md 의 이 항목 하나뿐
+
+### 남은 이슈 / 다음 AI 주의
+- `.github/` 두 파일과 `AGENTS.md` 가 바뀌므로 병합 부탁 글의 `verify` 칸에 '검사 정의가 바뀐 PR' 표시와 머리 커밋 7자리를 쓴다.
+- 이 묶음 밖에서 낡은 문장이 남아 있다(시험이 못박은 곳 없음): `docs/DEPENDENCY_PINNING.md` 68행('CODEOWNERS 에 목록 파일은 없다' — 이 병합 뒤 낡음)·`docs/ARCHITECTURE.md` 59·906행('지금 mode: off')·`docs/ACTIONS_GUIDE.md` 43행(정지 표기)·29행과 613행(시크릿 등록 모순)·`docs/OPS_INBOX.md` 247행·`docs/SESSION_START.md` 145행·`.github/editorial/BLOGGER_PROMPT_KO_AI.md` 7행(T3). docs 쪽은 다음에 AI 가 정정하고 `.github` 쪽은 다음 T3 묶음에 넣는다.
+- `blogger-ko.yml` 6행의 '지금은 draft' 는 레지스트리 값이 바뀌면 낡는다(주석이 '레지스트리가 정본' 이라고 적고 있다). 시험이 레지스트리와 대조하지는 않는다.
+
+---
+
 ## [2026-11-24] Claude – CI2: 단위 테스트 병렬 실행기 — 검사(CI)의 단위 테스트 단계를 시험 모듈 네 묶음 병렬로 돌려 칸 시간을 줄이고, 빠뜨림은 시험 id 대조로 막기 (T3, 확인 039 ① 승인, 결함 D-456–D-458·D-476–D-480)
 
 **작업자**: Claude (구현자 하위 에이전트가 시제품을 WIP 커밋 여섯으로 만들었고, 1차 독립 확인(안전 S·시험 Q)의 지적을 새 구현자가 WIP 커밋 다섯(7–11)으로 반영했으며, 2차 독립 확인은 구현자·1차 검증자와 다른 AI 둘이 했다. 병합 가지는 총괄이 한 커밋으로 합쳤다)

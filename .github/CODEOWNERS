@@ -16,6 +16,7 @@
 /generator.py                     @shine88pc
 /blogger_generator.py             @shine88pc
 /requirements*.txt                @shine88pc
+/constraints*.txt                 @shine88pc
 /tests/                           @shine88pc
 /AGENTS.md                        @shine88pc
 /CLAUDE.md                        @shine88pc
