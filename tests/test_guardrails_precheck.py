@@ -296,7 +296,7 @@ class TriggerShapeTest(unittest.TestCase):
 
     def test_permissions_concurrency_and_history_depth_are_unchanged(self):
         self.assertEqual(self.data["permissions"], {"contents": "read"})
-        self.assertEqual(self.data["concurrency"], {"group": "guardrails-${{ github.ref }}", "cancel-in-progress": True})
+        self.assertEqual(self.data["concurrency"], {"group": "guardrails-${{ github.ref }}", "cancel-in-progress": "${{ github.ref != 'refs/heads/main' }}"})       # main 에서는 취소하지 않는다(확인 040 ① 묶음 ②, 결함 D-496) — 옛 값은 true
         for name, job in self.data["jobs"].items():
             self.assertNotIn("permissions", job, name)                                            # 잡이 더 넓은 권한을 달라고 하지 않는다
         checkout = self.data["jobs"]["validate"]["steps"][0]
@@ -304,6 +304,47 @@ class TriggerShapeTest(unittest.TestCase):
         self.assertEqual(self.data["jobs"]["validate"]["strategy"]["matrix"]["python-version"], ["3.10", "3.12"])
         self.assertEqual(self.data["jobs"]["validate"]["timeout-minutes"], 10)
         self.assertIs(self.data["jobs"]["validate"]["strategy"]["fail-fast"], False)
+
+    def test_a_run_on_main_is_never_cancelled_by_the_next_push_and_every_other_branch_still_is(self):
+        """감사 BA-S2 N7(운영자 확인 040 ① 묶음 ②, 결함 D-496): 운영자의 병합이 main 에 연달아 오면 앞선 병합 커밋의 실행 중인 검사가 취소돼 실패 알림(alert)이 없고 다음 실행은 앞선 병합 범위의 광고 표면 검사(AD-1)를
+        건너뛰었다(독립 검증 S 의 R4 — 봇이 `GITHUB_TOKEN` 으로 올리는 글 커밋은 push 이벤트를 만들지 않아 원인이 아니다). `cancel-in-progress` 가 '가지가 main 이 아닐 때만 참' 이라 main 은 줄을 서서 차례로 돌고
+        다른 가지는 옛 그대로 새 push 가 앞선 실행을 취소한다."""
+        expression = "${{ github.ref != 'refs/heads/main' }}"
+        block = "concurrency:\n  group: guardrails-${{ github.ref }}\n  cancel-in-progress: " + expression + "\n"
+        self.assertEqual(self.text.replace("\r\n", "\n").count(block), 1)                      # 글자 그대로 한 곳 — 동시 실행 설정의 줄 하나만 바뀌었다
+        self.assertEqual(self.data["concurrency"]["cancel-in-progress"], expression)
+        match = re.fullmatch(r"\$\{\{ github\.ref != '([^']*)' \}\}", self.data["concurrency"]["cancel-in-progress"])
+        self.assertIsNotNone(match)
+        main_ref = match.group(1)
+        self.assertEqual(main_ref, "refs/heads/main")
+        for ref, cancels in (("refs/heads/main", False), ("refs/heads/ai/claude/M123-x", True), ("refs/heads/ai/claude/NO-MERGE-x", True), ("refs/heads/mainx", True),
+                             ("refs/heads/feature/main", True), ("refs/tags/v1", True), ("refs/heads/ai/draft/2026-11-03-s1", True)):
+            self.assertEqual(ref != main_ref, cancels, ref)                                     # 식의 뜻을 파이썬 `!=` 로 계산한 근사다 — GitHub 식의 문자열 비교는 대소문자를 가리지 않으니 이름만 대소문자가 다른 가지는 실제로는 취소되지 않는 안전한 쪽이다(독립 검증 S 의 N9)
+        self.assertIn("github.ref == '" + main_ref + "'", self.data["jobs"]["alert"]["if"])     # 실패 알림 잡이 보는 main 과 같은 글자다
+
+    def test_the_actions_guide_and_the_defect_register_say_that_main_is_not_cancelled_and_name_the_limit(self):
+        guide = (_bootstrap.ROOT / "docs" / "ACTIONS_GUIDE.md").read_bytes().decode("utf-8").replace("\r\n", "\n")
+        section = guide[guide.index("### 6-9."):guide.index("### 6-10.")]
+        bullet = next(line for line in section.split("\n") if line.startswith("- **취소 범위"))
+        # 독립 검증 S 의 R4 로 문장을 바로잡았다: 동기는 '봇의 글 커밋' 이 아니라 '연달아 오는 사람 push'(봇이 GITHUB_TOKEN 으로 올린 커밋은 push 이벤트를 만들지 않는다), 약속은 '검사가 끝까지 돈다' 가 아니라
+        # '실행 중인 검사가 취소되지 않는다', 한계에 main 의 수동 실행이 같은 그룹을 쓴다는 한 줄. 옛 문구가 되살아나지 않게 막는 글(아래 forbidden)도 함께 못박는다.
+        for needle in ("main 이 아닌 가지에만", "main 에서는 실행 중인 검사를 취소하지 않고", "D-496", "연달아 오는 사람 push", "운영자의 병합이 여러 건", "`GITHUB_TOKEN`", "push 이벤트를 만들지 않으므로", "대기 중",
+                       "`workflow_dispatch`", "`guardrails-refs/heads/main`", "시험 병합도 광고 표면 기준도 없는", "확인하지 못했습니다"):
+            self.assertIn(needle, bullet, needle)
+        for stale in ("병합 직후 봇의 글 커밋", "끝까지 돌아", "빠지지 않습니다", "글 커밋이 연달아"):
+            self.assertNotIn(stale, bullet, stale)
+        register = (_bootstrap.ROOT / "docs" / "DEFECT_REGISTER.md").read_bytes().decode("utf-8").replace("\r\n", "\n")
+        rows = [line for line in register.split("\n") if line.startswith("| **D-496** |")]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].replace("\\|", "").count("|"), 7)
+        for needle in ("cancel-in-progress", "guardrails.yml", "N7", "tests/test_guardrails_precheck.py", "대기 중인", "첫 관측", "연달아", "`GITHUB_TOKEN`", "push 이벤트를 만들지 않아", "독립 검증 S 의 R4",
+                       "`workflow_dispatch`", "`guardrails-refs/heads/main`", "실행 중인 검사가 취소되지 않는 것"):
+            self.assertIn(needle, rows[0], needle)
+        for stale in ("병합 직후 봇의 글 커밋", "병합 직후 글 커밋"):
+            self.assertNotIn(stale, rows[0], stale)
+        for forbidden in ("{{", "~", "http://", "https://"):
+            self.assertNotIn(forbidden, rows[0], forbidden)
+            self.assertNotIn(forbidden, bullet, forbidden)
 
     def test_the_checks_themselves_are_not_weakened(self):
         """같은 검증·단위 테스트·actionlint 가 그대로 있고 숨기는 장치가 없다(건너뛴 초록·continue-on-error·|| true 금지)."""

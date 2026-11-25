@@ -939,13 +939,16 @@ class ShellReadingTest(unittest.TestCase):
 
     def test_the_shapes_the_document_lists_as_passing_without_an_error_really_do(self):
         """docs/DEPENDENCY_PINNING.md §3 '오류도 없이 지나가는 모양' 이 말하는 모양(a·b·c·e·f)이 정말 아무 설치로도 오류로도 읽히지 않는다 — 문서가 거짓이 되지 않게 묶는다.
-        이 모양을 막는 변경이 생기면 이 시험과 그 문단을 함께 고친다(색인 옵션을 거절하는 규칙은 승인 범위 밖이라 두지 않았다)."""
+        이 모양을 막는 변경이 생기면 이 시험과 그 문단을 함께 고친다. 설치 줄의 색인 옵션(`--index-url` 류)은 운영자 확인 040 ① 로 오류가 됐다 — 그 거절은 `tests/test_dependency_sources.py` 가 지키고,
+        여기서는 읽기 도구(`_dep3_pip_installs`)가 그런 줄을 여전히 설치로 읽어 -c·-r 값을 내는지와 환경 변수·`pip config set` 처럼 아직 지나가는 길만 본다."""
         for run in ("PIP=pip; $PIP install -r r.txt", 'PIP="python -m pip"; ${PIP} install -r r.txt', "sudo python -mpip install -r r.txt", 'echo "$(python -m pip install -r r.txt)"',
                     'x="$(python -m pip install -r r.txt)"', "pipx install ruff", "python -m pip config set global.extra-index-url mirror.invalid"):
             with self.subTest(run=run):
                 self.assertEqual(self.installs(run), ([], []))
         found, unreadable = self.installs("PIP_INDEX_URL=mirror.invalid python -m pip install --extra-index-url mirror.invalid -f mirror.invalid -c c.txt -r r.txt")
-        self.assertEqual((found, unreadable), ([(["c.txt"], ["r.txt"], [], [])], []))              # 색인을 바꾸는 줄도 -c 만 맞으면 그대로 읽힌다
+        self.assertEqual((found, unreadable), ([(["c.txt"], ["r.txt"], [], [])], []))              # 색인을 바꾸는 줄도 설치로 읽혀 -c·-r 값이 나온다(읽기 쪽은 그대로)
+        self.assertEqual(vr._dep3_pip_installs("PIP_INDEX_URL=mirror.invalid python -m pip install --extra-index-url mirror.invalid -f mirror.invalid -c c.txt -r r.txt")[0][0]["sources"],
+                         ["--extra-index-url", "-f"])                                              # 그리고 그 옵션 낱말은 `sources` 로 따로 읽혀 DEP-3 오류가 된다(환경 변수 줄머리는 아직 읽지 않는다)
         found, unreadable = self.installs('x=$(python -m pip install -r r.txt)')
         self.assertEqual((found, unreadable), ([([], ["r.txt"], [], [])], []))                    # 따옴표 없는 명령 치환 안의 설치는 보통 설치 줄처럼 읽힌다(문서가 그렇게 말한다)
 
@@ -1206,7 +1209,8 @@ class DocsTest(unittest.TestCase):
             self.assertNotIn(stale, row)
 
     def test_the_limits_paragraph_names_the_shapes_that_pass_without_an_error(self):
-        """§3 의 한계에 '오류도 없이 지나가는 모양'(안전 검증 S 의 R2 a–f, 시험 검증 Q 의 N7)이 말로 적혀 있고 색인 옵션 거절은 승인 밖이라 두지 않았다고 밝힌다."""
+        """§3 의 한계에 '오류도 없이 지나가는 모양'(안전 검증 S 의 R2 a–f, 시험 검증 Q 의 N7)이 말로 적혀 있다. 설치 줄의 색인 옵션은 이제 오류라고 적고(운영자 확인 040 ①), 환경 변수·설정 파일로
+        색인을 바꾸는 길까지 거절하는 규칙은 승인 범위 밖이라 두지 않았다고 밝힌다."""
         doc = text_of("docs/DEPENDENCY_PINNING.md")
         self.assertIn("오류도 없이 지나가는 모양", doc)
         paragraph = doc[doc.index("오류도 없이 지나가는 모양"):doc.index("## 4.")]
@@ -1215,6 +1219,8 @@ class DocsTest(unittest.TestCase):
             self.assertIn(word, paragraph, word)
         self.assertIn("(a)", paragraph)
         self.assertIn("(g)", paragraph)
+        for word in ("이제 오류", "PIP_EXTRA_INDEX_URL", "PIP_FIND_LINKS", "PIP_TRUSTED_HOST", "설정 파일", "pip download"):          # 막은 것과 아직 못 막는 것을 둘 다 말한다(확인 040 ①)
+            self.assertIn(word, paragraph, word)
         self.assertIn("`-mpip` 처럼 붙여 쓴 것도", doc)                      # 코드가 읽는 모양은 규칙 설명에 적혀 있다
         self.assertIn("줄임말 `--cache cache` 도", doc)
 

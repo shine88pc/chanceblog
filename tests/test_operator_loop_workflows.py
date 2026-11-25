@@ -628,6 +628,14 @@ class WorkflowRuleTest(unittest.TestCase):
         "제한 시간": (AI_REQUEST, "timeout-minutes: 5", "timeout-minutes: 60"),
         "자체 러너": (AI_REQUEST, "runs-on: ubuntu-latest", "runs-on: self-hosted"),
         "job 둘": (AI_REQUEST, "\njobs:\n  notify:\n", "\njobs:\n  other:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n  notify:\n"),
+        # setup-python 의 with 는 python-version 뿐이다(감사 BA-S2 N1 — 변이 H1·A1 꼴)
+        "setup-python 에 pip-install": (AI_REQUEST, "          python-version: '3.12'\n", "          python-version: '3.12'\n          pip-install: evil-package\n"),
+        "setup-python 에 cache": (AI_REQUEST, "          python-version: '3.12'\n", "          python-version: '3.12'\n          cache: pip\n"),
+        "setup-python 에 token": (AI_REQUEST, "          python-version: '3.12'\n", "          python-version: '3.12'\n          token: ${{ secrets.GITHUB_TOKEN }}\n"),
+        "setup-python 의 with 가 글자": (AI_REQUEST, "        with:\n          python-version: '3.12'\n", "        with: x\n"),
+        # 시험 렌즈 Q 의 Q37: 키를 깎아 견주면 공백이 붙은 `python-version` 이 통과했다 — 키는 글자 그대로 `python-version` 이어야 한다
+        "setup-python 의 키 앞 공백": (AI_REQUEST, "          python-version: '3.12'\n", "          ' python-version': '3.12'\n"),
+        "setup-python 의 키 뒤 공백": (AI_REQUEST, "          python-version: '3.12'\n", "          'python-version ': '3.12'\n"),
     }
 
     REPLY_MUTATIONS = {
@@ -659,6 +667,13 @@ class WorkflowRuleTest(unittest.TestCase):
         "job env": (OPERATOR_REPLY, "    timeout-minutes: 5\n", "    timeout-minutes: 5\n    env:\n      X: '1'\n"),
         "다른 워크플로 호출": (OPERATOR_REPLY, "    runs-on: ubuntu-latest\n", "    uses: ./.github/workflows/other.yml\n    runs-on: ubuntu-latest\n"),
         "제한 시간 없음": (OPERATOR_REPLY, "    timeout-minutes: 5\n", ""),
+        # setup-python 의 with 는 python-version 뿐이다(감사 BA-S2 N1 — 변이 A1·A1b·A12 꼴)
+        "setup-python 에 pip-install": (OPERATOR_REPLY, "          python-version: '3.12'\n", "          python-version: '3.12'\n          pip-install: evil-package\n"),
+        "setup-python 에 cache": (OPERATOR_REPLY, "          python-version: '3.12'\n", "          python-version: '3.12'\n          cache: pip\n"),
+        "setup-python 에 token": (OPERATOR_REPLY, "          python-version: '3.12'\n", "          python-version: '3.12'\n          token: ${{ secrets.GITHUB_TOKEN }}\n"),
+        "setup-python 의 with 가 글자": (OPERATOR_REPLY, "        with:\n          python-version: '3.12'\n", "        with: x\n"),
+        "setup-python 의 키 앞 공백": (OPERATOR_REPLY, "          python-version: '3.12'\n", "          ' python-version': '3.12'\n"),
+        "setup-python 의 키 뒤 공백": (OPERATOR_REPLY, "          python-version: '3.12'\n", "          'python-version ': '3.12'\n"),
     }
 
     def test_every_mutation_of_the_push_workflow_is_caught(self):
@@ -674,6 +689,48 @@ class WorkflowRuleTest(unittest.TestCase):
                 found = self.errors(lambda texts: swap(texts, rel, old, new))
                 self.assertTrue(found, f"WF-14 가 잡지 못했다: {label}")
                 self.assertTrue(all(f.check == "WF-14" and f.level == "ERROR" and f.path == rel for f in found), [f.line() for f in found])
+
+    SETUP_PYTHON_KEYS = ("pip-install", "cache", "token", "architecture", "cache-dependency-path", "check-latest", "allow-prereleases", "python-version-file", "update-environment", "freethreaded")
+
+    def test_setup_python_may_only_carry_the_python_version_in_both_workflows(self):
+        """감사 BA-S2 N1(변이 A1·A1b·A12·H1): 시크릿 단계 앞에서 도는 setup-python 의 with 에 python-version 말고 무엇이 있어도 WF-14 오류다 — 파일 전체를 못박는 시험만이 아니라 검증기 혼자 잡는다."""
+        old = "          python-version: '3.12'\n"
+        for rel in (AI_REQUEST, OPERATOR_REPLY):
+            for key in self.SETUP_PYTHON_KEYS:
+                with self.subTest(rel=rel, key=key):
+                    found = self.errors(lambda texts: swap(texts, rel, old, old + f"          {key}: x\n"))
+                    self.assertEqual([(f.check, f.level, f.path) for f in found], [("WF-14", "ERROR", rel)], [f.line() for f in found])
+                    self.assertIn("python-version 뿐", found[0].message)
+
+    def test_a_setup_python_with_only_the_python_version_or_no_with_at_all_stays_fine(self):
+        for rel in (AI_REQUEST, OPERATOR_REPLY):
+            with self.subTest(rel=rel, shape="version only"):
+                self.assertEqual(self.errors(lambda texts: swap(texts, rel, "python-version: '3.12'", "python-version: '3.10'")), [])      # 값은 이 규칙이 보지 않는다(키만)
+            with self.subTest(rel=rel, shape="no with"):
+                self.assertEqual(self.errors(lambda texts: swap(texts, rel, "        with:\n          python-version: '3.12'\n", "")), [])
+            with self.subTest(rel=rel, shape="empty with"):
+                self.assertEqual(self.errors(lambda texts: swap(texts, rel, "        with:\n          python-version: '3.12'\n", "        with: {}\n")), [])
+
+    def test_the_setup_python_with_reader_on_its_own(self):
+        for step, bad in (({}, False), ({"with": None}, False), ({"with": {}}, False), ({"with": {"python-version": "3.12"}}, False), ({"with": {"python-version": 3.12}}, False),
+                          ({"with": {"python-version": "3.12", "cache": "pip"}}, True), ({"with": {"pip-install": "x"}}, True), ({"with": {"token": "x"}}, True), ({"with": {"Python-Version": "3.12"}}, True),
+                          ({"with": "x"}, True), ({"with": ["python-version"]}, True), ({"with": 5}, True), ({"with": {1: "x"}}, True),
+                          ({"with": {" python-version": "3.12"}}, True), ({"with": {"python-version ": "3.12"}}, True), ({"with": {"python-version\n": "3.12"}}, True), ({"with": {"\tpython-version": "3.12"}}, True)):
+            with self.subTest(step=step):
+                self.assertEqual(vr._setup_python_with_problem(step), bad)
+
+    def test_every_real_setup_python_step_carries_only_the_python_version_so_the_rule_rejects_nothing_new(self):
+        """허용표를 현재 사실 그대로 적었다 — 진짜 워크플로의 setup-python 단계는 모두 with 가 python-version 하나다(그래서 새 지적 0)."""
+        seen = 0
+        for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+            data = yaml.safe_load(path.read_bytes().decode("utf-8"))
+            for job in (data.get("jobs") or {}).values():
+                for step in job.get("steps") or []:
+                    if str(step.get("uses", "")).startswith("actions/setup-python@"):
+                        seen += 1
+                        self.assertFalse(vr._setup_python_with_problem(step), path.name)
+                        self.assertEqual(sorted(step.get("with") or {}), ["python-version"], path.name)
+        self.assertGreaterEqual(seen, 20)
 
     def test_the_two_workflows_are_judged_independently(self):
         rel, old, new = self.REQUEST_MUTATIONS["쓰기 권한"]

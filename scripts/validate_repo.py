@@ -202,6 +202,51 @@ _USES_RX = re.compile(r"^([\w.\-]+)/([\w./\-]+)@(.+)$")
 _SHA_RX = re.compile(r"^[0-9a-f]{40}$")
 
 
+def _step_uses_findings(rel, uses):
+    """단계 `uses` 한 줄의 WF-5 결과(워크플로 단계와 지역 복합 액션의 단계가 함께 쓴다, 독립 감사 BA-S2 R3-①). ① `docker://` 이미지를 부르는 단계는 쓰지 않는다(오류 — 옛 검사는 이 모양을 아예
+    면제했다. 태그는 바꿔칠 수 있고 이미지 안의 코드가 이 저장소의 권한·시크릿으로 돈다) ② `./경로` 는 이 저장소 안의 액션이라 통과한다(복합 액션 파일은 `check_composite_actions` 가 따로 읽는다)
+    ③ `소유자/저장소[/경로]@참조` 는 `actions/`·`github/` 가 아니면 40자리 커밋 SHA 로 고정해야 한다 ④ 그 어느 모양도 아니면 읽지 못한 것이라 통과가 아니라 오류다(옛 검사는 조용히 지나갔다).
+    ⑤ 값의 앞뒤에 공백·줄바꿈(탭·NBSP·유니코드 공백 포함)이 붙어 있으면 SHA 를 40자리 커밋으로 읽을 수 없으므로 읽지 못한 것이라 오류다(독립 검증 S 의 R5 — 앞뒤 공백을 깎고 비교하면 SHA 로 고정한 외부 액션 뒤의 공백이
+    기준의 오류를 지웠다. `docker://`·`./` 판정만 깎은 글로 한다).
+    글자가 아닌 값은 GitHub 가 거절하는 모양이라 여기서는 건너뛴다."""
+    if not isinstance(uses, str):
+        return []
+    text = uses.strip()
+    if text.lower().startswith("docker://"):
+        return [err("WF-5", f"docker:// 이미지를 부르는 단계({_shown(uses)})는 쓰지 않습니다 — 태그는 바꿔칠 수 있고 이미지 안의 코드가 이 저장소의 권한·시크릿으로 돕니다(다이제스트로 고정해도 이 저장소는 쓰지 않습니다) (G-A4)", rel)]
+    if text != uses:
+        return [err("WF-5", f"uses `{_shown(uses)}` 의 앞뒤에 공백·줄바꿈이 붙어 있어 모양을 읽지 못했습니다 — 값은 앞뒤 공백 없이 적어야 합니다(공백이 붙은 SHA 는 커밋 SHA 로 읽을 수 없습니다. 읽지 못하는 모양은 통과가 아니라 오류입니다) (G-A4)", rel)]
+    if text.startswith("./"):
+        return []
+    found = _USES_RX.match(text)
+    if found is None:
+        return [err("WF-5", f"uses `{_shown(uses)}` 의 모양을 읽지 못했습니다 — `소유자/저장소@커밋SHA`·`actions/…@버전`·`./지역 경로` 중 하나여야 합니다(읽지 못하는 모양은 통과가 아니라 오류입니다) (G-A4)", rel)]
+    if found.group(1) not in FIRST_PARTY_OWNERS and not _SHA_RX.match(found.group(3)):
+        return [err("WF-5", f"외부 액션 {uses} 는 커밋 SHA 로 고정해야 합니다 (G-A4)", rel)]
+    return []
+
+
+def _job_image_findings(rel, job_name, job):
+    """job 의 `container`·`services` 이미지(WF-5, 독립 검증 S 의 R2). `docker://` 단계를 막는 것과 같은 이유·같은 강도로 **항상 오류**다: 컨테이너 이미지는 태그를 바꿔칠 수 있고 job 의 모든 단계가 시크릿 환경 변수와
+    함께 그 이미지 안에서 돌며, services 이미지도 같은 job 에서 네트워크로 붙은 채 돈다. 이 저장소는 둘 다 쓰지 않는다(지금 0 개) — 다이제스트로 고정해도 오류이고, 이미지를 쓰려면 이 검증기를 고치는 변경을 운영자가 검토한다.
+    `container` 는 글자·표(image 가 없거나 글자가 아니어도) 어느 모양이든, `services` 는 표 안의 서비스 하나하나가 오류이고 표가 아니면 읽지 못한 모양이라 오류다. `container: null`·`services: {}` 처럼 비어 있으면 쓰지 않는 것이다."""
+    out = []
+    container = job.get("container")
+    if container is not None:
+        image = container.get("image") if isinstance(container, dict) else container
+        out.append(err("WF-5", f"job {_shown(job_name)} 의 container({_shown(image) if image is not None else '이미지 없음'})는 쓰지 않습니다 — 컨테이너 이미지는 태그를 바꿔칠 수 있고 job 의 모든 단계가 시크릿 환경 변수와 함께 "
+                               "그 이미지 안에서 돕니다(다이제스트로 고정해도 이 저장소는 쓰지 않습니다. 이미지를 쓰려면 검증기를 고치는 변경을 운영자가 검토합니다) (G-A4)", rel))
+    services = job.get("services")
+    if isinstance(services, dict):
+        for name, service in services.items():
+            image = service.get("image") if isinstance(service, dict) else service
+            out.append(err("WF-5", f"job {_shown(job_name)} 의 services.{_shown(name)} 이미지({_shown(image) if image is not None else '이미지 없음'})는 쓰지 않습니다 — 서비스 컨테이너 이미지도 태그를 바꿔칠 수 있고 "
+                                   "같은 job 의 단계와 네트워크로 붙어 돕니다(다이제스트로 고정해도 이 저장소는 쓰지 않습니다. 이미지를 쓰려면 검증기를 고치는 변경을 운영자가 검토합니다) (G-A4)", rel))
+    elif services is not None:
+        out.append(err("WF-5", f"job {_shown(job_name)} 의 services 가 표(서비스 이름: 내용)가 아닙니다 — 읽지 못하는 모양은 통과가 아니라 오류입니다 (G-A4)", rel))
+    return out
+
+
 def _workflow_files(files):
     # 확장자는 대소문자를 가리지 않는다(`x.YML` 도 워크플로 후보 — GitHub 가 받는지 이 검증기는 모르므로 모두 검사해 우회 길을 두지 않는다. 폴더 `.github/workflows` 는 정확히)
     return [f for f in files if re.match(r"^\.github/workflows/[^/]+\.(?i:ya?ml)$", f)]
@@ -501,6 +546,75 @@ def _sink_findings(rel, data, job, step):
     return out
 
 
+# WF-4 의 신뢰 못 할 칸 확장(감사 BA-S2 R3-④·탐침 §1b, 확인 040 ①): 위의 run·script 는 식 치환이 셸·스크립트 **글자**로 들어가는 곳이다. 같은 식 치환이 **설정 칸**에 들어가는 곳이 더 있다 —
+# 단계의 `shell`·`working-directory`(와 `defaults.run` 의 같은 이름 두 칸), job 의 `runs-on`·`container`(image·options·env 등)·`services`, `actions/checkout` 의 `with.ref`·`with.repository`.
+# 이 칸에 이슈·PR 글이나 가지 이름이 들어가면 실행할 셸·작업 폴더·실행 환경(러너·컨테이너)·내려받을 코드가 바뀐다. run·script 와 같게 읽는다: 신뢰할 수 없는 값을 직접 보간하면 오류, 값이 거쳐 오는 길
+# (env·단계 출력·job 출력·matrix)은 같은 판정(오류 또는 경고), inputs 직접 보간은 경고(설계 그대로). 지금 저장소의 진짜 워크플로는 이 칸에 글자 그대로의 값과 기본 가지·커밋 해시를 읽는 식만 쓴다.
+_CONFIG_SINK_WORDS = {"shell": "shell", "working-directory": "working-directory", "checkout-ref": "actions/checkout 의 with.ref", "checkout-repository": "actions/checkout 의 with.repository",
+                      "runs-on": "runs-on", "container": "container", "services": "services", "defaults": "defaults.run 의 shell·working-directory"}
+
+
+def _config_sink_texts(step):
+    """단계의 설정 칸 글 → [(칸 열쇠, 글)] — `shell`·`working-directory`(글자일 때)와 `actions/checkout` 단계의 `with.ref`·`with.repository`(글자일 때)."""
+    found = [(key, step[key]) for key in ("shell", "working-directory") if isinstance(step.get(key), str)]
+    uses = step.get("uses")
+    with_ = step.get("with") if isinstance(step.get("with"), dict) else {}
+    if isinstance(uses, str) and uses.split("@", 1)[0].strip().lower() == "actions/checkout":
+        found += [("checkout-" + key, with_[key]) for key in ("ref", "repository") if isinstance(with_.get(key), str)]
+    return found
+
+
+def _scope_config_texts(scope):
+    """job(또는 워크플로 `defaults` 한 칸짜리 표)의 설정 칸 글 → [(칸 열쇠, 글)] — `runs-on`·`container`·`services` 안의 모든 글자 값과 `defaults.run` 의 `shell`·`working-directory`."""
+    found = []
+    for key in ("runs-on", "container", "services"):
+        found += [(key, value) for _path, value in _walk_strings(scope.get(key))]
+    defaults = scope.get("defaults")
+    run = defaults.get("run") if isinstance(defaults, dict) else None
+    if isinstance(run, dict):
+        found += [("defaults", run[key]) for key in ("shell", "working-directory") if isinstance(run.get(key), str)]
+    return found
+
+
+def _config_sink(rel, data, job, step, where, text):
+    """설정 칸 한 곳(`where` 는 _CONFIG_SINK_WORDS 의 열쇠)의 WF-4 결과."""
+    out = []
+    label = _CONFIG_SINK_WORDS[where]
+    untrusted = _untrusted_expression(text)
+    if untrusted:
+        out.append(err("WF-4", f"{label} 안에서 신뢰할 수 없는 입력을 직접 보간합니다 — 이 칸에는 신뢰할 수 없는 값을 넣지 말고 고정 값을 쓰세요 (G-A2): {untrusted[:60]}", rel))
+    if _INPUT_EXPR.search(text):
+        out.append(warn("WF-4", f"{label} 안에서 inputs 를 직접 보간합니다 — 고정 값을 쓰는 편이 안전합니다 (G-A2)", rel))
+    for kind, name in _context_refs(text):
+        level = _classify_ref(kind, name, data, job, step)
+        if level is None:
+            continue
+        shown = _ref_label(kind, name)
+        hint = _REF_HINT[kind]
+        if level == "error":
+            out.append(err("WF-4", f"{label} 안에서 신뢰할 수 없는 입력이 거쳐 오는 {hint} `{_shown(shown)}` 를 식 치환(달러 기호와 이중 중괄호)으로 직접 보간합니다 — "
+                                   "이 칸에는 신뢰할 수 없는 값이 거쳐 온 것을 넣지 말고 고정 값을 쓰세요 (G-A2)", rel))
+        else:
+            out.append(warn("WF-4", f"{label} 안에서 {hint} `{_shown(shown)}` 를 식 치환으로 직접 보간합니다 — 값의 출처를 알 수 없습니다(고정 값이 아닙니다). 고정 값을 쓰는 편이 안전합니다 (G-A2)", rel))
+    return out
+
+
+def _step_config_findings(rel, data, job, step):
+    """단계 하나의 설정 칸(shell·working-directory·체크아웃 ref·repository) WF-4 결과."""
+    out = []
+    for where, text in _config_sink_texts(step):
+        out += _config_sink(rel, data, job, step, where, text)
+    return out
+
+
+def _scope_config_findings(rel, data, scope, job):
+    """job 하나(또는 워크플로 `defaults`)의 설정 칸(runs-on·container·services·defaults.run) WF-4 결과. job 은 값이 거쳐 오는 길(env·matrix …)을 따라갈 때 쓰는 job 이다."""
+    out = []
+    for where, text in _scope_config_texts(scope):
+        out += _config_sink(rel, data, job, {}, where, text)
+    return out
+
+
 # 쓰기 권한 허용 표(WF-1 의 한 갈래): 워크플로가 어느 범위(`*` = 최상위, 그 밖 = job 이름)에 어떤 `write` 권한을 두는지 지금 파일 기준으로 적었다. 표에 없는 쓰기 권한이 생기면(새 워크플로·새 job·더 넓은 범위·권한 추가) 오류다 —
 # 새 워크플로가 들어오거나 권한을 늘리면 이 표를 함께 고친다(운영자가 직접 병합하는 변경). `permissions: write-all` 은 어디서든 오류다. 읽기 권한은 표에 없다.
 _CHANCE_WORKFLOW = "chance" + "blog.yml"        # Chance 블로그의 워크플로 파일 이름 — 이어 붙여 적었다(새 줄에서 실제 블로그 이름 글자를 찾는 금지어 점검에 걸리지 않게)
@@ -566,6 +680,114 @@ def check_workflow_write_permissions(root, files):
             elif extra:
                 out.append(err("WF-1", f"{'최상위' if scope == '*' else 'job ' + _shown(scope)} 의 쓰기 권한 {one_line(', '.join(extra), 120)} 가 허용 표(WORKFLOW_WRITE_PERMISSIONS)에 없습니다 — "
                                        "새 워크플로·새 job·더 넓은 범위·권한 추가는 이 표를 함께 고치는 변경을 운영자가 직접 병합합니다 (G-A1)", rel))
+    return out
+
+
+# ----------------------------------------------------------------------------
+# WF-17 시크릿 허용표 (독립 감사 BA-S2 R3-③, 운영자 확인 040 ① 승인)
+# ----------------------------------------------------------------------------
+# 지금까지 시크릿 규칙은 텔레그램 두 이름(WF-13)과 몇몇 워크플로의 모양(WF-14·15·16)뿐이었다. 그래서 새 워크플로가 이슈·PR·push 트리거에서 Gemini·Blogger 시크릿을 외부로 내보내거나 `toJSON(secrets)` 로
+# 모든 시크릿을 환경 변수에 담아도 검증기는 말이 없었다(감사 변이 L2·L3·L4·L9·L11 — 명부 시험 둘만 새 파일마다 빨개져 눈에 띄었다). 그래서 쓰기 권한 허용 표(`WORKFLOW_WRITE_PERMISSIONS`)와 같은 방식으로
+# **워크플로 파일마다 쓸 수 있는 시크릿 이름의 허용 표**를 둔다. 표에 없는 `secrets.이름` 사용·`toJSON(secrets)` 처럼 이름 없이 시크릿을 통째로 읽는 식·`secrets[식]` 동적 색인·`secrets: inherit` 는 오류다.
+# 표는 지금 진짜 워크플로가 `${{ }}` 식 안에서 실제로 쓰는 것을 그대로 적었다(새로 거절하는 곳 0 — `description` 같은 글에 적힌 `secrets.이름` 은 식이 아니라 쓰임이 아니다). 이름은 GitHub 처럼
+# 대소문자를 가리지 않고 대문자로 적는다. 새 시크릿을 쓰는 워크플로를 더하거나 쓰는 시크릿을 늘릴 때는 이 표를 함께 고치는 변경을 운영자가 직접 병합한다(검증기는 안전 장치 파일이라 AI 병합 대상이 아니다).
+# `${{ github.token }}` 은 `secrets` 컨텍스트가 아니라 이 규칙 밖이다 — 표에 적는 `GITHUB_TOKEN`(`secrets.GITHUB_TOKEN`)과 같은 값이고, 토큰의 쓰기 범위는 WF-1 의 쓰기 권한 허용 표가 파일별로 묶는다(독립 검증 S 의 N1).
+WORKFLOW_SECRET_USE = {
+    "ai-request.yml": ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"),
+    "blogger-en.yml": ("BLOGGER_BLOG_ID", "BLOGGER_CLIENT_ID", "BLOGGER_CLIENT_SECRET", "BLOGGER_REFRESH_TOKEN", "GEMINI_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "UNSPLASH_ACCESS_KEY"),
+    "blogger-ko.yml": ("BLOGGER_KO_BLOG_ID", "BLOGGER_KO_CLIENT_ID", "BLOGGER_KO_CLIENT_SECRET", "BLOGGER_KO_REFRESH_TOKEN", "GEMINI_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "UNSPLASH_ACCESS_KEY"),
+    "blogger.yml": ("PIPELINE_SECRET_BLOG_ID", "PIPELINE_SECRET_CLIENT_ID", "PIPELINE_SECRET_CLIENT_SECRET", "PIPELINE_SECRET_LLM_API_KEY", "PIPELINE_SECRET_REFRESH_TOKEN", "PIPELINE_SECRET_UNSPLASH_KEY",
+                    "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"),
+    "chance-fix-images.yml": ("GEMINI_API_KEY", "GITHUB_TOKEN", "UNSPLASH_ACCESS_KEY"),
+    "chance-shadow.yml": ("GEMINI_API_KEY", "UNSPLASH_ACCESS_KEY"),
+    _CHANCE_WORKFLOW: ("GEMINI_API_KEY", "GITHUB_TOKEN", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "UNSPLASH_ACCESS_KEY"),
+    "guardrails.yml": ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"),
+    "issue-edit.yml": ("GEMINI_API_KEY", "GITHUB_TOKEN", "UNSPLASH_ACCESS_KEY"),
+    "merge-confirm-notice.yml": ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"),
+    "merge-ready-notice.yml": ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"),
+    "naver.yml": ("GITHUB_TOKEN",),
+    "operator-reply.yml": ("GITHUB_TOKEN", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"),
+    "ops-inbox.yml": ("GITHUB_TOKEN", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"),
+    "pr-scope-check.yml": ("GITHUB_TOKEN",),
+    "telegram-inbox.yml": ("GITHUB_TOKEN", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"),
+    "telegram-test.yml": ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"),
+    "tistory.yml": ("GITHUB_TOKEN",),
+    "watchdog.yml": ("GITHUB_TOKEN",),
+}
+# 동적 색인(`secrets[식]`) 허용: 워크플로 파일 → 허용하는 색인 식 전체(공백을 모두 지우고 소문자로 맞춘 글 — 식 본문이 이것과 정확히 같아야 한다). 지금은 블로그마다 시크릿 이름이 다른 초안 패키지 둘뿐이고, 색인에 쓰는
+# `matrix.secret_llm_api_key` 는 레지스트리가 정한 이름(Gemini 키 이름만 허용 — G-S7·REG-1)이 실행 계획 job 을 거쳐 오는 값이다.
+WORKFLOW_SECRET_INDEX = {
+    "naver.yml": ("secrets[matrix.secret_llm_api_key]",),
+    "tistory.yml": ("secrets[matrix.secret_llm_api_key]",),
+}
+_SECRET_NAMED = re.compile(r"(?<![\w.\-])secrets\.([\w\-]+)")
+_SECRET_INDEXED = re.compile(r"(?<![\w.\-])secrets\[")
+_SECRET_WHOLE = re.compile(r"(?<![\w.\-])secrets(?:\.\*|(?![\w.\[\-]))")       # 이름 없이 시크릿 통째(`toJSON(secrets)`·`format('{0}', secrets)`·`secrets.*`)
+
+
+def _secret_uses(text, raw=False):
+    """글 안의 시크릿 읽기 → [(종류, 값)]. 종류: `name`(값 = 대문자 이름)·`index`(값 = 접은 식 본문 전체)·`whole`(값 = ''). `${{ … }}` 식 안만 읽는다 — `raw` 이면(job·단계의 `if` 는 식 표기 없이도
+    식이다) 글 전체도 식 본문으로 읽는다. `['이름']` 글자 색인은 점 표기와 같고(`_expression_names`), 글자 리터럴 안의 `secrets` 는 쓰임이 아니다."""
+    bodies = [body for _block, body in _expression_blocks(text)]
+    if raw:
+        bodies.append(text)
+    found = []
+    for body in bodies:
+        names = _expression_names(body)
+        found += [("name", hit.group(1).upper()) for hit in _SECRET_NAMED.finditer(names)]
+        if _SECRET_INDEXED.search(names):
+            found.append(("index", re.sub(r"\s+", "", names)))              # 공백은 식의 뜻을 바꾸지 않는다 — 표의 식과 견줄 때는 공백을 모두 지운다(글자 리터럴은 이미 비었다)
+        if _SECRET_WHOLE.search(names):
+            found.append(("whole", ""))
+    return found
+
+
+def _is_condition_path(path):
+    """`jobs.<id>.if` 또는 `jobs.<id>.steps.<n>.if` 자리인가(`if` 값은 식 표기 없이도 식이다)."""
+    return path[:1] == ("jobs",) and path[-1:] == ("if",) and (len(path) == 3 or (len(path) == 5 and path[2] == "steps"))
+
+
+def check_workflow_secret_use(root, files):
+    """WF-17(위 설명): 워크플로 파일마다 `WORKFLOW_SECRET_USE` 에 적힌 시크릿만 쓸 수 있다. 표에 없는 이름·`toJSON(secrets)` 같은 통째 읽기·표에 없는 동적 색인(`WORKFLOW_SECRET_INDEX` 에 적힌 식 그대로여야
+    한다)·job 의 `secrets: inherit` 는 오류다. 같은 위반은 파일마다 한 번만 낸다(처음 나온 자리). PyYAML 이 없으면 건너뛴다 — WF-0 이 그 경고를 이미 낸다.
+    `${{ github.token }}` 은 `secrets` 컨텍스트가 아니라 이 규칙 밖이다 — 표에 적는 `GITHUB_TOKEN`(`secrets.GITHUB_TOKEN`)과 같은 값이고, 토큰의 쓰기 범위는 WF-1 의 쓰기 권한 허용 표(`WORKFLOW_WRITE_PERMISSIONS`)가
+    파일별로 묶는다(독립 검증 S 의 N1)."""
+    if yaml is None:
+        return []
+    out = []
+    for rel in _workflow_files(files):
+        try:
+            data = _load_yaml(read_text(root, rel) or "")
+        except yaml.YAMLError:
+            continue        # WF-0
+        if not isinstance(data, dict):
+            continue        # WF-0
+        file_name = Path(rel).name
+        allowed = {item.upper() for item in WORKFLOW_SECRET_USE.get(file_name, ())}
+        allowed_index = set(WORKFLOW_SECRET_INDEX.get(file_name, ()))
+        reported = set()
+        for path, value in _walk_strings(data):
+            for kind, detail in _secret_uses(value, raw=_is_condition_path(path)):
+                if (kind, detail) in reported:
+                    continue
+                where = one_line(".".join(str(part) for part in path), 100)
+                if kind == "name" and detail not in allowed:
+                    out.append(err("WF-17", f"시크릿 `{detail}` 은 이 워크플로 파일({_shown(file_name)})의 허용표(WORKFLOW_SECRET_USE)에 없습니다({where}) — 새 시크릿을 쓰는 워크플로를 더하거나 "
+                                            "쓰는 시크릿을 늘릴 때는 허용표를 함께 고치는 변경을 운영자가 직접 병합합니다 (G-S2)", rel))
+                elif kind == "index" and detail not in allowed_index:
+                    out.append(err("WF-17", f"시크릿을 동적 색인(`secrets[…]`)으로 읽는 곳이 허용표(WORKFLOW_SECRET_INDEX)에 없습니다({where}) — 읽을 이름이 정해지지 않은 읽기는 어떤 시크릿이든 "
+                                            "꺼낼 수 있어 표에 적은 식 그대로인 것만 허용합니다 (G-S2)", rel))
+                elif kind == "whole":
+                    out.append(err("WF-17", f"시크릿 전체를 한꺼번에 읽는 식(`toJSON(secrets)` 처럼 이름 없이 `secrets` 를 통째로 쓰는 것)이 있습니다({where}) — 모든 시크릿이 한 값에 담겨 환경 변수·로그·"
+                                            "외부 전송으로 샐 수 있어 쓰지 않습니다 (G-S2)", rel))
+                else:
+                    continue
+                reported.add((kind, detail))
+        jobs = data.get("jobs")
+        for job_id, job in jobs.items() if isinstance(jobs, dict) else ():
+            secrets = job.get("secrets") if isinstance(job, dict) else None
+            if isinstance(secrets, str) and secrets.strip().lower() == "inherit":
+                out.append(err("WF-17", f"job {_shown(job_id)} 의 secrets 가 inherit 입니다 — 부르는 워크플로의 모든 시크릿이 이름 없이 넘어갑니다. 필요한 시크릿만 이름으로 적으세요 (G-S8)", rel))
     return out
 
 
@@ -659,34 +881,109 @@ def check_workflows(root, files):
         has_concurrency = "concurrency" in data or any(isinstance(j, dict) and "concurrency" in j for j in jobs.values())
         if scheduled and not has_concurrency:
             out.append(warn("WF-8", "schedule 워크플로에 concurrency 가 없어 실행이 겹칠 수 있습니다", rel))
+        out += _scope_config_findings(rel, data, {"defaults": data.get("defaults")}, {})
         for job_name, job in jobs.items():
             if not isinstance(job, dict):
                 continue
+            if "uses" in job and not _is_local_reusable_call(job):
+                # WF-5 확장(감사 BA-S2 R3-①, 변이 D13·L6·L7·L8): 재사용 워크플로를 다른 저장소에서 부르는 줄은 옛 검사가 단계의 `uses` 만 봐서 지나갔다. 이 저장소는 지역 호출(래퍼 둘)뿐이라
+                # SHA 로 고정한 외부 호출도 오류로 둔다(더 엄격한 쪽 — 필요해지면 운영자 승인으로 규칙을 넓힌다).
+                out.append(err("WF-5", f"job {_shown(job_name)} 의 uses `{_shown(job.get('uses'))}` 는 이 저장소의 재사용 워크플로(./.github/workflows/ 아래 파일)가 아닙니다 — 다른 저장소의 재사용 워크플로는 "
+                                       "그 저장소의 코드가 이 저장소의 권한·시크릿으로 도는 길이라 쓰지 않습니다(SHA 로 고정해도 같습니다) (G-A4)", rel))
+            out += _job_image_findings(rel, job_name, job)
             if "timeout-minutes" not in job and "uses" not in job:
                 out.append(warn("WF-7", f"job '{job_name}' 에 timeout-minutes 가 없습니다", rel))
+            out += _scope_config_findings(rel, data, job, job)
             for step in job.get("steps") or []:
                 if not isinstance(step, dict):
                     continue
                 run = step.get("run")
                 if isinstance(run, str):
-                    untrusted = _untrusted_expression(run)
-                    if untrusted:
-                        out.append(err("WF-4", f"run 안에서 신뢰할 수 없는 입력을 직접 보간합니다 — env 로 넘기세요 (G-A2): "
-                                               f"{untrusted[:60]}", rel))
-                    if _INPUT_EXPR.search(run):
-                        out.append(warn("WF-4", "run 안에서 inputs 를 직접 보간합니다 — env 로 넘기는 편이 안전합니다 (G-A2)", rel))
+                    out += _run_direct_findings(rel, run)
                     if re.search(r"\|\|\s*true\b", run):
                         out.append(warn("WF-6", "'|| true' 로 오류를 숨기고 있습니다 (G-O2: 조용한 실패 금지)", rel))
                     if re.search(r"echo\b[^\n]*\$\{\{\s*secrets\.", run):
                         out.append(err("WF-9", "시크릿을 echo 로 출력합니다 (G-S3)", rel))
                 out += _sink_findings(rel, data, job, step)
+                out += _step_config_findings(rel, data, job, step)
                 if step.get("continue-on-error") is True and not _is_alert_step(step):
                     out.append(warn("WF-6", "continue-on-error: true 로 실패를 숨기고 있습니다 (G-O2)", rel))
-                uses = step.get("uses")
-                if isinstance(uses, str) and not uses.startswith("./") and not uses.startswith("docker://"):
-                    m = _USES_RX.match(uses)
-                    if m and m.group(1) not in FIRST_PARTY_OWNERS and not _SHA_RX.match(m.group(3)):
-                        out.append(err("WF-5", f"외부 액션 {uses} 는 커밋 SHA 로 고정해야 합니다 (G-A4)", rel))
+                out += _step_uses_findings(rel, step.get("uses"))
+    return out
+
+
+def _run_direct_findings(rel, run):
+    """`run` 글 안의 식 치환 직접 보간(WF-4): 신뢰할 수 없는 입력은 오류, 워크플로 입력(inputs)은 경고(설계 그대로 — env 로 넘기는 편이 안전하다는 안내). 워크플로 단계와 복합 액션 단계가 함께 쓴다."""
+    out = []
+    untrusted = _untrusted_expression(run)
+    if untrusted:
+        out.append(err("WF-4", f"run 안에서 신뢰할 수 없는 입력을 직접 보간합니다 — env 로 넘기세요 (G-A2): {untrusted[:60]}", rel))
+    if _INPUT_EXPR.search(run):
+        out.append(warn("WF-4", "run 안에서 inputs 를 직접 보간합니다 — env 로 넘기는 편이 안전합니다 (G-A2)", rel))
+    return out
+
+
+# 복합 액션 파일(감사 BA-S2 R3-②, 변이 L1): `uses: ./경로` 로 부르는 지역 액션의 정의 파일. 이 검증기는 워크플로 파일만 읽어서, 복합 액션 안의 `run` 에 신뢰할 수 없는 식을 끼우거나 SHA 없는 외부 액션을
+# 넣어도 오류 0 이었다. 이름이 `action.yml`·`action.yaml` 인 파일(대소문자 무시)은 저장소 어디에 있든 읽는다 — 지역 액션은 `.github/actions/` 밖에도 둘 수 있기 때문이다. 지금 저장소에는 없어 '예방 규칙' 이다.
+# 뺄 것은 **워크플로 폴더 바로 아래** 의 같은 이름 파일 하나뿐이다(그것은 워크플로 파일이다). 워크플로 폴더의 하위 폴더(`.github/workflows/sub/action.yml`)는 워크플로가 아니라 `uses: ./.github/workflows/sub` 로 부를 수 있는
+# 지역 액션이라 읽는다(독립 검증 S 의 R1 — 폴더 접두사로 통째로 빼면 그 모양이 WF-4·WF-5 어느 쪽에도 읽히지 않았다).
+_ACTION_FILE = re.compile(r"(?:.*/)?action\.ya?ml", re.IGNORECASE)
+_WORKFLOW_FOLDER_FILE = re.compile(r"\.github/workflows/[^/]+")
+
+
+def _composite_action_files(files):
+    """저장소 안의 지역 액션 정의 파일 목록. 워크플로 폴더(`.github/workflows/`) **바로 아래** 의 같은 이름 파일은 워크플로이므로 뺀다 — 그 하위 폴더의 파일은 지역 액션이라 읽는다."""
+    return [rel for rel in files if _ACTION_FILE.fullmatch(rel) and not _WORKFLOW_FOLDER_FILE.fullmatch(rel)]
+
+
+def _composite_action_findings(rel, data):
+    """파싱한 지역 액션 파일 하나의 결과 목록. `runs.using` 이 composite 면 단계마다 워크플로 단계와 같은 WF-4(run 직접 보간·script·env·단계 출력 길)와 WF-5(`uses`)를 보고, docker 면 image 가
+    `docker://` 인 것을 오류로 보며, node 계열은 자바스크립트 코드라 읽지 않는다(한계). 읽지 못하는 모양은 통과가 아니라 WF-0 오류다."""
+    runs = data.get("runs")
+    if not isinstance(runs, dict):
+        return [err("WF-0", "복합 액션 파일에 runs 가 없거나 표가 아닙니다 — 읽지 못하는 액션 정의는 통과가 아니라 오류입니다", rel)]
+    using = str(runs.get("using", "")).strip().lower()
+    if using == "composite":
+        steps = runs.get("steps")
+        if not isinstance(steps, list):
+            return [err("WF-0", "복합 액션의 runs.steps 가 단계 목록이 아닙니다", rel)]
+        out = []
+        job = {"steps": steps}
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            if isinstance(step.get("run"), str):
+                out += _run_direct_findings(rel, step["run"])
+            out += _sink_findings(rel, {}, job, step)
+            out += _step_config_findings(rel, {}, job, step)
+            out += _step_uses_findings(rel, step.get("uses"))
+        return out
+    if using == "docker":
+        image = runs.get("image")
+        if isinstance(image, str) and image.strip().lower().startswith("docker://"):
+            return [err("WF-5", f"docker 액션의 image `{_shown(image)}` 는 docker:// 이미지입니다 — 이미지는 태그를 바꿔칠 수 있고 그 안의 코드가 이 저장소의 권한으로 돕니다"
+                                "(저장소의 Dockerfile 로 짓는 것은 코드가 저장소 안에 있어 이 규칙이 보지 않습니다) (G-A4)", rel)]
+        return []
+    if using.startswith("node"):
+        return []
+    return [err("WF-0", f"복합 액션의 runs.using `{_shown(runs.get('using'))}` 를 읽지 못했습니다 — composite·docker·node 계열만 읽습니다", rel)]
+
+
+def check_composite_actions(root, files):
+    """WF-4·WF-5 를 지역 액션 파일(`action.yml`·`action.yaml`)에도 적용한다(위 설명). 워크플로 검사와 같은 규칙이고 결과 자리(path)는 액션 파일이다. PyYAML 이 없으면 건너뛴다 — WF-0 이 그 경고를 이미 낸다."""
+    if yaml is None:
+        return []
+    out = []
+    for rel in _composite_action_files(files):
+        try:
+            data = _load_yaml(read_text(root, rel) or "")
+        except yaml.YAMLError as exc:
+            out.append(err("WF-0", f"YAML 문법 오류: {one_line(str(exc).splitlines()[0] if str(exc).strip() else '알 수 없음', 120)}", rel))
+            continue
+        if not isinstance(data, dict):
+            out.append(err("WF-0", "복합 액션 파일 최상위가 객체가 아닙니다", rel))
+            continue
+        out.extend(_composite_action_findings(rel, data))
     return out
 
 
@@ -733,7 +1030,7 @@ def check_telegram_secrets(root, files):
     `jobs.<잡>.secrets: inherit` 는 시크릿을 이름 없이 모두 넘기므로(텔레그램 시크릿 포함) 오류다 — 필요한 것만 이름으로 적는다.
 
     한계(문서에도 적었다): 이름이 **글자로** 나오는 곳만 본다 — `toJSON(secrets)`·`secrets[format(…)]` 처럼 이름 없이 시크릿을 쓰는 길과,
-    외부 `uses:` 단계의 env 는 못 잡는다."""
+    외부 `uses:` 단계의 env 는 못 잡는다. 이름 없이 시크릿을 쓰는 길은 이 규칙이 아니라 WF-17(`check_workflow_secret_use`)이 잡는다(독립 검증 S 의 N5)."""
     if yaml is None:
         return []  # PyYAML 이 없다는 경고는 WF-0(check_workflows)이 이미 낸다
     out = []
@@ -1076,6 +1373,15 @@ def _shown(value):
     return one_line(str(value)[:40])
 
 
+def _setup_python_with_problem(step):
+    """setup-python 단계의 `with` 가 `python-version` 하나만 가진 표(또는 없음)가 아니면 True(감사 BA-S2 N1, 변이 A1·A1b·A12·H1). 지금 저장소의 모든 setup-python 단계는 `python-version` 뿐이다.
+    `pip-install`(패키지 설치)·`cache`(캐시 복원)·`token`·`cache-dependency-path` 같은 입력은 시크릿이 있는 단계 앞에서 코드가 돌 길을 연다. 표가 아닌 값(`with: x`)도 거절한다. WF-15·WF-16 은 같은 제한을 각자 이미 한다."""
+    with_ = step.get("with")
+    if with_ is None:
+        return False
+    return not isinstance(with_, dict) or bool({str(key) for key in with_} - {"python-version"})
+
+
 def _operator_workflow_problems(data, kind):
     """작업 H 의 두 워크플로(kind: request·reply)가 정해진 모양인지(WF-14). 문제 문구 목록을 돌려준다.
 
@@ -1134,8 +1440,9 @@ def _operator_workflow_problems(data, kind):
         problems.append("첫 단계는 actions/checkout 이어야 하고 with 는 persist-credentials: false"
                         + ("" if reply else "·fetch-depth: 0") + " 뿐이어야 합니다"
                         + (" — ref·repository·token 을 바꾸면 기본 브랜치가 아닌 코드(이슈 글에서 온 값)를 내려받을 수 있습니다" if reply else ""))
-    if not str(python.get("uses", "")).startswith("actions/setup-python@") or "run" in python or "env" in python:
-        problems.append("둘째 단계는 actions/setup-python 이어야 합니다")
+    if (not str(python.get("uses", "")).startswith("actions/setup-python@") or "run" in python or "env" in python
+            or _setup_python_with_problem(python)):
+        problems.append("둘째 단계는 actions/setup-python 이어야 하고 with 는 python-version 뿐이어야 합니다 — pip-install·cache·token 같은 입력은 시크릿이 있는 단계 앞에서 패키지를 내려받거나 캐시를 되살리는 길입니다")
     wanted_run = f"python -m pipeline.operator_loop {'ack' if reply else 'requests'}"
     wanted_env = _OPERATOR_REPLY_ENV if reply else _AI_REQUEST_ENV
     env = run.get("env") if isinstance(run.get("env"), dict) else {}
@@ -2161,6 +2468,42 @@ _DEP3_GENERAL_FLAGS = ("--help", "--debug", "--isolated", "--require-virtualenv"
                        "--no-color", "--no-python-version-warning")
 
 
+# 설치 줄이 패키지를 받아 오는 곳을 바꾸는 옵션 거절(의존성 고정 [M120] 의 독립 검증이 제안한 후속, 운영자 확인 040 ① 승인, 결함 D-495): 버전을 `-c` 로 정확히 묶어도 `--index-url`·`--extra-index-url`·
+# `-f`(`--find-links`)·`--trusted-host` 로 다른 색인·링크 목록·신뢰 호스트를 가리키면 같은 이름·버전을 다른 곳에서 받는 길이 열려 묶음이 무의미하다. `pip install` 줄(`install` 앞의 전역 옵션 위치 포함 —
+# `--trusted-host` 는 pip 의 전역 옵션이다)에 그 옵션이 있으면 오류다. 위의 값 옵션 목록(`_DEP3_VALUE_OPTIONS`·`_DEP3_GENERAL_*` — 진짜 pip 파서와 견주는 시험이 지킨다)은 건드리지 않고 그 위에 얹었다.
+# pip(optparse)는 ① 겹치지 않는 앞부분(`--extra-index` → `--extra-index-url`)도 그 옵션으로 받아 주고 ② 짧은 옵션의 값을 붙여 쓰는 것(`-ihttps…`)과 ③ 짧은 옵션을 합쳐 쓰는 것(`-qi 주소` — 앞 글자가 값 없는
+# 옵션이면 다음 글자가 옵션이다)도 받아 주므로 그 모양을 모두 읽는다. 겹쳐서 pip 가 오류로 끝내는 줄임말(`--e`)은 안전한 쪽으로 오류로 읽는다. 환경 변수(`PIP_INDEX_URL` 등)·pip 설정 파일·`pip config set`·
+# `pip download`·`pip wheel` 줄은 이 읽기의 밖이다(docs/DEPENDENCY_PINNING.md §3).
+_DEP3_SOURCE_LONG = ("--index-url", "--pypi-url", "--extra-index-url", "--find-links", "--trusted-host")       # `--pypi-url` 은 pip 가 `--index-url` 과 같은 옵션으로 받아 주는 옛 별칭이다(pip 22·23 의 옵션 파서에서 확인)
+_DEP3_SOURCE_SHORT = frozenset("if")                      # 짧은 옵션 `-i`(--index-url)·`-f`(--find-links)
+_DEP3_SHORT_VALUE_LETTERS = frozenset("ceritfCb")         # 값을 받는 짧은 옵션 글자(-c -e -r -t -i -f -C -b) — 합쳐 쓴 짧은 옵션은 이 글자를 만나면 나머지가 그 옵션의 값이다(`-rfoo-i`)
+_DEP3_VCS_PREFIX = re.compile(r"(?:git|hg|svn|bzr)\+", re.IGNORECASE)
+
+
+def _dep3_source_options(args):
+    """pip 인자 낱말 목록(`install` 앞의 전역 옵션과 뒤의 인자 모두)에서 패키지를 받아 오는 곳을 바꾸는 옵션 낱말을 찾아 나온 차례대로 돌려준다. 긴 옵션은 `=` 앞의 이름이 `--index-url`·`--extra-index-url`·
+    `--find-links`·`--trusted-host` 의 앞부분(세 글자 이상)이면 그 옵션이고, 짧은 옵션은 `-i`·`-f`(붙여 쓴 값·합쳐 쓴 짧은 옵션 포함)다."""
+    found = []
+    for token in args:
+        if token.startswith("--"):
+            name = token.split("=", 1)[0]
+            if len(name) > 2 and any(option.startswith(name) for option in _DEP3_SOURCE_LONG):
+                found.append(name)
+        elif len(token) > 1 and token[0] == "-":
+            for letter in token[1:]:
+                if letter in _DEP3_SOURCE_SHORT:
+                    found.append("-" + letter)
+                    break
+                if letter in _DEP3_SHORT_VALUE_LETTERS:
+                    break
+    return found
+
+
+def _dep3_source_spec(spec):
+    """설치 대상 글이 기본 색인의 이름·버전이 아니라 주소·VCS·직접 참조로 지정한 것인가: `://` 가 있거나(http·https·file·ssh …), `git+`·`hg+`·`svn+`·`bzr+` 로 시작하거나, `@`(`이름@주소` 직접 참조)가 있다."""
+    return "://" in spec or "@" in spec or _DEP3_VCS_PREFIX.match(spec) is not None
+
+
 def _dep3_install_args(args):
     """`pip install` 뒤의 인자 → {constraints: [-c 값], requirements: [-r 값], editable: [-e 값], specs: [패키지 글]}. 값 없는 옵션(`--upgrade`·`-q` …)은 건너뛴다."""
     found = {"constraints": [], "requirements": [], "editable": [], "specs": []}
@@ -2243,14 +2586,37 @@ def _dep3_python_pip_args(words):
     return None
 
 
+# 셸이 파이프·here-string 으로 받은 글을 실행하는 줄(독립 검증 S 의 R3): `bash <<< "pip install …"`·`echo '…' | bash`·`printf '…' | sh` 는 설치 줄이 따옴표 글 안에 있어 아래 읽기가 보지 못했다(`<<<` 의 대상 낱말은 버려지고
+# `echo`·`printf` 의 인자는 보지 않는 예외였다). 입력을 받는 셸 줄(`<<<` 가 붙었거나 앞 명령의 파이프 출력을 받는 줄)은 그 입력에 pip install 이 있든 없든 읽지 못한 모양이라 오류다 — 어떤 글이든 셸에 먹일 수 있어서다.
+# 명령 자리의 셸 이름은 앞에 붙은 감싸는 명령(`sudo`·`env`·`exec`·`timeout 30`·`nice -n 5`·`xargs -I{}` 등)과 그 옵션·숫자·NAME=값 을 건너뛰고 찾는다.
+_DEP3_SHELL = re.compile(r"(?:ba|z|da|a|k|mk|c|tc|rba)?sh(?:\.exe)?|fish")
+_DEP3_SHELL_WRAPPERS = frozenset({"sudo", "doas", "env", "exec", "command", "builtin", "nohup", "time", "nice", "ionice", "timeout", "stdbuf", "setsid", "busybox", "xargs"})
+_DEP3_NUMBER = re.compile(r"[0-9]+(?:\.[0-9]+)?[smhd]?")
+
+
+def _dep3_is_shell_command(words):
+    """명령 낱말 목록이 셸(`sh`·`bash`·`zsh`·`dash`·`ash`·`ksh`·`mksh`·`csh`·`tcsh`·`rbash`·`fish`, `.exe`·경로 허용)을 부르는 줄인가 — 맨 앞의 감싸는 명령·옵션·숫자·NAME=값 은 건너뛰고 처음 만나는 다른 낱말이
+    셸 이름이면 참이다(`grep bash` 처럼 셸 이름이 다른 명령의 인자인 줄은 거짓)."""
+    for word in words:
+        name = word.rsplit("/", 1)[-1]
+        if _DEP3_SHELL.fullmatch(name):
+            return True
+        if name in _DEP3_SHELL_WRAPPERS or name.startswith("-") or _DEP3_ASSIGNMENT.fullmatch(word) or _DEP3_NUMBER.fullmatch(name):
+            continue
+        return False
+    return False
+
+
 def _dep3_pip_installs(run):
     """run 글에서 `pip install` 을 모두 찾는다 → ([{'text': 설치 인자를 접은 글, 'constraints': …, 'requirements': …, 'editable': …, 'specs': …}], [읽지 못한 모양 문구]).
 
     줄 이음(`\\` 줄 끝)을 잇고 `;`·`&&`·`||`·`|`·`&`·괄호·줄바꿈에서 명령을 끊어, 맨 앞 낱말이 pip·pip3·`python -m pip` 인 명령만 설치로 읽는다.
-    그 밖의 명령 안에 `pip install` 글이 들어 있으면(bash -c "…"·eval·xargs·sudo·uv 등) 읽을 수 없는 모양으로 알린다 — 통과시키지 않는다(echo·printf·git·gh 의 안내문은 제외)."""
+    그 밖의 명령 안에 `pip install` 글이 들어 있으면(bash -c "…"·eval·xargs·sudo·uv 등) 읽을 수 없는 모양으로 알린다 — 통과시키지 않는다(echo·printf·git·gh 의 안내문은 제외).
+    `<<<` 뒤의 here-string 글은 버리지 않고 그 명령의 인자처럼 읽으며, 셸이 `<<<` 나 앞 명령의 파이프 출력을 입력으로 받는 줄은 입력이 무엇이든 읽지 못한 모양으로 알린다(독립 검증 S 의 R3)."""
     installs, unreadable = [], []
     lines = re.sub(r"\\\r?\n", " ", run).split("\n")
     index = 0
+    carry_pipe = False                              # 앞 줄이 파이프(`|`)로 끝났다 — 다음 줄의 첫 명령이 그 출력을 입력으로 받는다(주석·빈 줄은 이음을 끊지 않는다)
     while index < len(lines):
         chunk, span, tokens = lines[index], 1, None
         while tokens is None:
@@ -2264,30 +2630,46 @@ def _dep3_pip_installs(run):
             if re.search(r"\bpip3?\b", lines[index]):
                 unreadable.append(f"따옴표가 닫히지 않아 읽지 못한 줄에 pip 가 있습니다: `{_shown(lines[index].strip())}`")
             index += 1
+            carry_pipe = False
             continue
         index += span
-        segments, current, skip_target = [], [], False
+        segments, current, skip_target, read_here = [], [], False, False
+        feeds, here, piped = [], [], carry_pipe     # 조각마다 (앞 명령의 파이프 출력을 입력으로 받는가, `<<<` here-string 글 목록)
         for token in tokens:
             if skip_target:
                 skip_target = False
+                if read_here:
+                    here.append(token)              # `<<< 글` 의 글은 버리지 않고 그 명령의 입력으로 모은다
+                    read_here = False
                 continue
             if _DEP3_OPERATOR.fullmatch(token):
-                if "<" in token or ">" in token:           # 리디렉션: 뒤의 대상 하나(와 `2>&1` 의 앞 숫자)를 버린다
+                if "<" in token or ">" in token:           # 리디렉션: 뒤의 대상 하나(와 `2>&1` 의 앞 숫자)를 버린다 — 다만 `<<<` 의 대상은 here-string 글이라 모은다
                     skip_target = True
+                    read_here = token == "<<<"
                     if current and current[-1].isdigit():
                         current.pop()
-                elif current:
-                    segments.append(current)
-                    current = []
+                else:
+                    if current:
+                        segments.append(current)
+                        feeds.append((piped, here))
+                        current, here = [], []
+                    piped = token in ("|", "|&")           # 파이프 바로 다음 명령은 앞 명령의 출력을 입력으로 받는다(`||`·`&&`·`;` 는 아니다)
                 continue
             current.append(token)
         if current:
             segments.append(current)
-        for segment in segments:
+            feeds.append((piped, here))
+        if tokens:
+            carry_pipe = tokens[-1] in ("|", "|&")
+        for segment, (piped_in, here_texts) in zip(segments, feeds):
             words = _dep3_command_words(segment)
             if not words:
                 continue
             program = words[0].rsplit("/", 1)[-1]
+            if (piped_in or here_texts) and _dep3_is_shell_command(words):
+                unreadable.append(f"`{_shown(' '.join(words))}` 는 파이프나 here-string(`<<<`)으로 받은 글을 셸이 실행하는 줄입니다 — 그 글에 pip install 이 숨어 있어도 이 검증기는 읽지 못하는 모양입니다"
+                                  "(`echo '…' | bash`·`bash <<< '…'` 등)")
+                continue
             args = None
             if _DEP3_PIP_PROGRAM.fullmatch(program):
                 args = words[1:]
@@ -2299,9 +2681,10 @@ def _dep3_pip_installs(run):
                     rest = args[at + 1:]
                     found = _dep3_install_args(rest)
                     found["text"] = " ".join(rest)
+                    found["sources"] = _dep3_source_options(args)       # 패키지를 받아 오는 곳을 바꾸는 옵션(`install` 앞의 전역 위치 포함)
                     installs.append(found)
                 continue
-            if program not in _DEP3_MESSAGE_PROGRAMS and _dep3_hides_pip_install(" ".join(words)):
+            if program not in _DEP3_MESSAGE_PROGRAMS and _dep3_hides_pip_install(" ".join(words + here_texts)):
                 unreadable.append(f"`{_shown(' '.join(words))}` 안에 pip install 이 들어 있습니다 — 이 검증기가 읽지 못하는 모양입니다(bash -c·eval·xargs·sudo·uv 등)")
     return installs, unreadable
 
@@ -2407,8 +2790,18 @@ def _dep3_workflow(rel, data, files, pins_by_file, referenced):
             out.extend(err("DEP-3", f"{label}: {problem}", rel) for problem in unreadable)
             env = _dep3_env(data, job, step)
             for install in installs:
-                named = [spec for spec in install["specs"] if not _dep3_is_pip(spec)]
-                if not (named or install["requirements"] or install["editable"]):
+                # 받아 오는 곳을 바꾸는 옵션·주소로 지정한 요구·`-e` 는 `pip` 자신만 올리는 줄을 포함해 모든 설치 줄의 오류다(아래 `continue` 보다 앞 — pip 자신이 다른 곳에서 오면 그 뒤의 설치를 믿을 수 없다)
+                for option in install["sources"]:
+                    out.append(err("DEP-3", f"{label}: 설치 줄의 `{_shown(option)}` 는 패키지를 받아 오는 곳(색인·링크 목록·신뢰 호스트)을 바꿉니다 — 버전을 -c 로 정확히 묶어도 다른 곳에서 같은 이름·버전을 받는 길이 열려 있으면 "
+                                            "묶음이 무의미해서 쓰지 않습니다. 이 저장소는 기본 색인에서만 받습니다 (G-A5)", rel))
+                for spec in install["specs"]:
+                    if _dep3_source_spec(spec):
+                        out.append(err("DEP-3", f"{label}: 설치 대상 `{_shown(spec)}` 은 주소·VCS·직접 참조(`@`)로 지정한 요구입니다 — 이름과 버전으로 기본 색인에서만 설치합니다 (G-A5)", rel))
+                if install["editable"]:
+                    out.append(err("DEP-3", f"{label}: `-e` 설치는 이 검증기가 의존성을 읽지 못합니다 — requirements 파일로 풀어 쓰세요", rel))
+                named = [spec for spec in install["specs"] if not _dep3_is_pip(spec) and not _dep3_source_spec(spec)]
+                sourced = any(_dep3_source_spec(spec) for spec in install["specs"])      # 주소·VCS 로 지정한 요구도 무언가를 설치하는 줄이다 — 같은 줄의 -c 검사를 가리지 않는다(독립 검증 S 의 N6)
+                if not (named or install["requirements"] or install["editable"] or sourced):
                     continue                                         # `pip install --upgrade pip` — pip 자신만 올리는 줄은 제외
                 shown = f"pip install {_shown(install['text'])}"
                 if not install["constraints"]:
@@ -2442,8 +2835,6 @@ def _dep3_workflow(rel, data, files, pins_by_file, referenced):
                         out.append(err("DEP-3", f"{label}: -r 이 가리키는 요구 파일 {_shown(clean)} 이 저장소에 없습니다", rel))
                     else:
                         referenced.add(clean)
-                if install["editable"]:
-                    out.append(err("DEP-3", f"{label}: `-e` 설치는 이 검증기가 의존성을 읽지 못합니다 — requirements 파일로 풀어 쓰세요", rel))
                 for spec in named:
                     parsed = _dep3_requirement(spec)
                     if isinstance(parsed, str):
@@ -2601,7 +2992,9 @@ def run_checks(root, base=None):
     findings += check_forbidden_files(files)
     findings += check_secret_patterns(root, files)
     findings += check_workflows(root, files)
+    findings += check_composite_actions(root, files)
     findings += check_workflow_write_permissions(root, files)
+    findings += check_workflow_secret_use(root, files)
     findings += check_telegram_secrets(root, files)
     findings += check_workflow_names(root, files)
     findings += check_workflow_prefixes(root, files)

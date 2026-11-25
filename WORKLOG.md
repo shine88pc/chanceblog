@@ -7,6 +7,37 @@
 
 ---
 
+## [2026-11-25] Claude – VAL1: 확인 040 ① 첫째 묶음 — 검증기(`scripts/validate_repo.py`)가 놓치던 워크플로 모양 막기 일곱 항목(재사용 워크플로·`docker://` 단계·복합 액션 파일·시크릿 허용표 WF-17·WF-4 신뢰 못 할 칸 확장·WF-14 setup-python `with` 제한·DEP-3 색인/주소 옵션 거절)과 `guardrails.yml` 검사 취소 한 줄 (T3)
+
+**작업자**: Claude (구현자 하위 에이전트 한 명이 WIP 커밋 11개로 구현했고, 독립 확인은 구현자와 다른 AI 둘(안전 렌즈 S·시험 렌즈 Q)이 했다. 병합 가지는 총괄이 한 커밋으로 합쳤다)
+**대상**: `scripts/validate_repo.py`(+353줄) · `.github/workflows/guardrails.yml`(`cancel-in-progress` 한 줄) · 시험: 새 모듈 셋(`tests/test_validate_wf_shapes.py`·`tests/test_validate_secret_table.py`·`tests/test_dependency_sources.py`)과 강화한 기존 시험 셋(`tests/test_guardrails_precheck.py`·`tests/test_dependency_constraints.py`·`tests/test_operator_loop_workflows.py`)·`tests/unit_test_weights.json` 새 모듈 3행 · 문서: `docs/SECURITY_GUARDRAILS.md`(G-A2·G-A4·G-S2·§6 WF 행들·새 WF-17 행)·`docs/ENGINEERING_GUIDE.md`(W2·확장 작업 행)·`docs/DEPENDENCY_PINNING.md`(§3)·`docs/ACTIONS_GUIDE.md`(§6-9)·`docs/DEFECT_REGISTER.md`(D-490–D-496)
+**등급**: T3 — 보안 통제(검증기)와 `.github/workflows/guardrails.yml` 한 줄(운영자 승인: 확인 040 ①, 이슈 #271). **모든 새 규칙은 '더 엄격한 쪽'이고 지금 저장소의 진짜 워크플로·문서를 하나도 새로 거절하지 않는다** — 진짜 저장소에서 검증기 결과는 오류 0·경고 3(기존 세 줄 그대로)이다.
+**목적**: 11-24 2차 독립 감사(BA-S2)가 보여 준 — 기존 검증기를 통과하면서 안전 장치를 약하게 만드는 워크플로·설치 줄 모양들을 막는다. 검사 취소 한 줄은 main 에서 병합 직후의 검사가 뒤따르는 푸시로 취소되지 않게 한다.
+
+### 변경 사항
+- **항목 1 (D-490, WF-5 확장)**: `jobs.<id>.uses`(재사용 워크플로)가 이 저장소의 `./.github/workflows/` 아래 파일이 아니면 SHA 로 고정돼 있어도 오류. `docker://` 단계(대소문자 무시)도 오류. `@` 가 없는 `uses` 같은 읽지 못하는 모양은 통과가 아니라 오류. 재작업에서 더해진 것: job 의 `container`·`services` 안 이미지는 다이제스트로 고정해도 모두 오류(이미지 안의 코드가 시크릿 env 와 함께 job 의 모든 단계를 돌리므로 `docker://` 와 같은 이유 — 이미지를 쓰려면 검증기를 고치는 운영자 검토 변경이 필요), 단계 `uses` 의 앞뒤 공백·줄바꿈은 읽지 못한 모양 오류(공백이 붙은 SHA 고정 외부 액션이 기준의 오류를 잃지 않도록).
+- **항목 2 (D-491)**: 이름이 `action.yml`/`action.yaml`(대소문자 무시, 어느 폴더든, `.github/workflows/` **바로 아래 파일만 제외** — 그 아래 하위 폴더의 복합 액션은 `uses: ./.github/workflows/<폴더>` 로 부를 수 있어 포함)인 파일을 읽어 composite 면 단계마다 WF-4·WF-5 를 적용하고, docker 액션의 `docker://` image 는 오류, 읽지 못하면 WF-0 오류. 지금 저장소에는 복합 액션이 없어 예방 규칙이다.
+- **항목 3 (D-492, 새 규칙 WF-17)**: 검증기 상수 `WORKFLOW_SECRET_USE`(워크플로 19행)와 `WORKFLOW_SECRET_INDEX`(naver·tistory 의 동적 색인 한 식씩)가 '워크플로 × 쓸 수 있는 시크릿 이름' 허용표다. 표에 없는 시크릿 이름·`toJSON(secrets)` 류 통째 읽기·표 밖의 동적 색인·`secrets: inherit` 는 오류. 표는 진짜 워크플로가 실제로 쓰는 것을 그대로 적었다. **새 시크릿을 쓰는 워크플로를 더할 때는 허용표를 같이 고친다(운영자 검토).**
+- **항목 4 (D-493, WF-4 확장)**: 신뢰 못 할 입력(PR 제목·이슈 글·가지 이름 등)이 직접 보간되는 칸을 `run`·`script` 에서 단계의 `shell`·`working-directory`, `defaults.run` 두 칸, job 의 `runs-on`·`container`·`services`, `actions/checkout` 의 `with.ref`·`with.repository` 로 넓혔다. 직접 보간은 오류, `inputs` 는 경고(설계 그대로), env·단계 출력·job 출력·matrix 를 거친 길은 `run` 과 같은 판정.
+- **항목 5 (D-494, WF-14)**: 두 운영자 루프 워크플로의 setup-python `with` 는 키가 `python-version` 하나뿐이어야 한다(다른 키는 오류).
+- **항목 6 (D-495, DEP-3 확장)**: `pip install` 줄의 `--index-url`(별칭 `--pypi-url` 포함)·`-i`·`--extra-index-url`·`-f`·`--find-links`·`--trusted-host` 거절(줄임말·붙여 쓴 값·합친 짧은 옵션·`install` 앞 전역 위치·`pip` 자신만 올리는 줄 포함)과 주소·VCS·`이름@주소` 직접 참조·`-e` 오류. 값을 받는 전역 옵션 목록 로직은 건드리지 않고 그 위에 얹었다. 재작업에서 더해진 것: 셸(sh·bash·zsh·dash·ash·ksh·mksh·csh·tcsh·rbash·fish, 경로·`.exe`·sudo·env·timeout·nice·exec·xargs 앞붙임 포함)이 `<<<` 나 파이프 출력을 입력으로 받는 줄은 입력이 무엇이든 '읽지 못한 모양' 오류(진짜 저장소 `run` 에는 이런 줄 0개); 설치 대상이 전부 주소·VCS 인 줄도 같은 줄의 `-c` 오류를 함께 낸다. 이 규칙이 못 막는 모양(코드는 이름·감싸는 명령 목록으로 판정)은 `docs/DEPENDENCY_PINNING.md` §3 (h) 에 한계로 적었다: `| (bash)`·`| { …; bash; }`·`tee >(bash)`·`while read` 루프·목록 밖 감싸는 명령(`flock`·`su -c`·`ssh` 등)·목록 밖 셸(`pwsh` 등)·`$SHELL`·`sh -c "$(curl …)"`·감싸는 명령의 값 낀 옵션·해석기 코드 안의 pip.
+- **항목 7 (D-496)**: `guardrails.yml` 의 `cancel-in-progress` 를 `github.ref != 'refs/heads/main'` 식으로 — main 에서는 취소하지 않고 다른 가지·풀 리퀘스트에서는 이전처럼 취소한다. 줄 서 있는 실행은 더 새 실행으로 대체될 수 있는 GitHub 의 알려진 동작이 남는다(한계로 `docs/ACTIONS_GUIDE.md` 에 적음 — 병합 뒤 첫 관측으로 확인). 이 줄을 못박는 `tests/test_guardrails_precheck.py` 의 핀을 새 식으로 강화(식의 뜻을 가지 일곱 개로 계산하는 시험 포함).
+- **시험**: 새 모듈 셋(`test_validate_wf_shapes` 68·`test_validate_secret_table` 33·`test_dependency_sources` 47)과 기존 모듈 강화 — 기준 대비 +154개(10,959 → 11,113, 3.12·3.10 같음, 사라진 id 0), 시험은 고치기 전 코드(e39f0e2)에서 빨강이었다(항목별 3–25건). 구현자 변이 142개(1차 81 + 재작업 61) 모두 잡힘(원복 sha256 같음). 진짜 pip 파서 시험은 새 pip 가 별칭을 더해 구조가 달라지면 거짓 빨강 대신 경고 후 건너뛰고, 검증기가 아는 오래된 철자를 놓치면 여전히 빨강(`PipDriftToleranceTest`; pip 22.0.4·23.2.1·26.2.2 에서 통과). 이번 변경의 문서 줄(WF-17·확장 행·D-490–D-496 등)은 한 줄씩 읽는 시험이 지킨다.
+
+### 검증 증거
+- 구현자: 영향 모듈을 3.12(PyYAML 있음)·3.10·3.12(PyYAML 없음) 세 모양에서 돌림, 진짜 저장소 검증기 `validate_repo.py` 오류 0·경고 3·3·4(PyYAML 없는 모양은 워크플로 검사 건너뜀 경고 1 추가 — 기존과 같음), 기준 대비 사라진 시험 id 0.
+- 독립 확인(구현 머리 c86ab46 기준): 구현 머리 bfdad2b 기준 — 1차(머리 c86ab46): 안전 S **통과**(필수 0·권고 5·참고 10)·시험 Q **통과**(필수 0·권고 5·참고 11) → 권고 반영(재작업: 복합 액션 하위 폴더·container/services 이미지·셸 입력 줄·취소 문서·uses 공백·시험 보강·pip 내성) → 변경분 재확인: 안전 **통과**(필수 0·권고 1·참고 8)·시험 **통과**(필수 0·권고 4·참고 8). 병합 가지에서 `docs/DEPENDENCY_PINNING.md` §3 (h) 에 '셸 입력 줄 판정은 이름·감싸는 명령 목록이라 못 잡는 모양이 있다' 한 문장을 더했다(안전 재확인 권고).
+- 합친 나무: 현재 main(2b0d92c, [M130] 포함) 위에 충돌은 결함 대장 한 곳뿐(양쪽 행을 모두 남겨 번호 순서 D-484, D-490–D-496, D-497, D-498); 검증기 `validate_repo.py` 오류 0·경고 3(3.12 PyYAML·3.10); 새 모듈 셋(68·33·47)·`test_guardrails_precheck`·`test_operator_loop_workflows`·`test_dependency_constraints`·`test_batch2_integration`(번호 중복)·`test_run_unit_parallel`(가중치 표)·검증기·자동 PR 워크플로 시험 등이 3.12 에서, 새 모듈 셋과 의존성·번호·가중치 시험이 3.10 에서 통과.
+
+### 남은 이슈 / 다음 AI 주의
+- `.github/workflows/guardrails.yml` 이 바뀌고 검증기 규칙이 바뀌므로 병합 부탁 글의 `verify` 칸에 '검사 정의가 바뀐 PR' 표시와 머리 커밋 7자리를 쓴다.
+- **다른 갈래와 합친 뒤 검증기를 다시 돌린다**: 새 워크플로나 새 시크릿 사용은 WF-17 이 오류로 알려 주므로 `WORKFLOW_SECRET_USE` 행을 운영자 검토로 같이 고친다. 새 `pip install` 줄에 색인·주소 옵션이나 `-e`·`git+` 가 있으면 DEP-3 이, 다른 저장소의 재사용 워크플로나 `docker://` 단계는 WF-5 가 오류로 알린다.
+- 한계(문서에 적음): WF-17 은 파일 단위다(같은 파일 안 어느 단계가 쓰는지는 WF-13–16 과 시험이 지킨다). DEP-3 은 설치 줄의 옵션 낱말만 본다 — 환경 변수 `PIP_*`·pip 설정 파일·`pip config set`·`pip download`/`pip wheel`·`--cert`·`--proxy`·`--install-option` 은 대상이 아니다. 복합 액션은 이름이 `action.yml`/`action.yaml` 인 파일을 어디서든 읽는다(node 액션의 자바스크립트·docker 액션이 짓는 파일은 안 읽음). setup-python `with` 제한은 운영자 루프 두 워크플로에만 걸린다.
+- 운영자에게 물을 후속(기본값으로 진행해 둠, 급하지 않음): ① setup-python `with` 제한을 모든 워크플로로 넓힐지(새 워크플로가 `cache: pip` 를 못 쓰게 됨) ② DEP-3 을 환경 변수·설정 파일·`pip download` 까지 넓힐지 ③ 다른 저장소 재사용 워크플로를 SHA 고정이어도 오류로 둔 더 엄격한 선택 확정 ④ naver·tistory 의 동적 색인 한 식 허용을 계속할지 ⑤ 셸이 파이프·here-string 입력을 받는 줄을 pip 가 있든 없든 모두 오류로 둔 것(`curl … | bash` 류도 오류, 지금 저장소 0줄)을 유지할지 ⑥ 진짜 pip 파서 시험이 새 pip 별칭에는 알림 겸 빨강 대신 경고 후 건너뛰는 완화를 확정할지(알던 옵션을 놓치면 빨강; 새 별칭을 놓친 경우의 알림은 경고뿐이라는 약화를 문서에 적을 것).
+- 병합 뒤 첫 관측: `guardrails` 실행이 main 푸시에서 취소되지 않는지(연달아 병합 때), 풀 리퀘스트에서는 이전처럼 취소되는지.
+
+---
+
 ## [2026-11-25] Claude – RGX1: 확인 040 ① 셋째 묶음 — 한국어 프로필 정규식의 자릿수 상한·점 뒤 경계를 걷어 옛 금지 판정으로 되돌리고(D-497), 면제 취소 패턴 둘의 제곱 시간을 닫는다(D-498) (T3)
 
 **작업자**: Claude (구현자 하위 에이전트가 WIP 커밋 11개로 구현·재작업했고, 독립 확인은 구현자와 다른 AI 둘(1차: 안전 렌즈 S·시험 렌즈 Q, 재작업분: 겸임 한 명)이 했다. 병합 가지는 총괄이 한 커밋으로 합쳤다)
