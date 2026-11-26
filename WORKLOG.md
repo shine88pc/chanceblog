@@ -7,6 +7,30 @@
 
 ---
 
+## [2026-11-26] Claude – DOCCHANCE: 작업 폴더 이름을 chanceblog 에서 Chance 로 — 새 세션 시작 안내(clone 폴더)·에이전트 공통 규칙 사본의 폴더 이름 (문서만)
+
+**작업자**: Claude (총괄이 문서만 직접 고쳤고 구현자 하위 에이전트는 없다. 독립 확인은 총괄과 다른 AI 하나가 안전·시험 겸임으로 했다 — 작은 갈래 겸임 승인: 확인 037 ① d. 병합 가지는 총괄이 만들었다.)
+**대상**: `docs/SESSION_START.md`·`인수인계/도구/work/agent_common_rules.md` 두 문서의 세 줄(코드·시험·워크플로·`.github`·광고 표면 0줄). 두 문서는 `pipeline/merge_policy.py` 의 안전 장치 범주라 운영자 병합 전용이다.
+**등급**: T0 — 문서만(운영자 채팅 요청 2026-11-26: '작업 폴더 이름을 chance 로 고치고 병합 요청 해줘').
+**목적**: 운영자가 2026-11-26 에 작업 폴더를 `KCY\Chance` 로 옮기고 이름을 정했는데 새 세션 시작 안내가 아직 clone 폴더를 `chanceblog` 라고 말해, 새 PC·새 세션이 옛 이름으로 폴더를 만들게 된다. 문서의 폴더 이름을 맞춘다(저장소 이름과 주소는 그대로 `chanceblog`).
+
+### 변경 사항
+- **`docs/SESSION_START.md`**: 시작 안내문(15줄)의 clone 폴더 이름을 `Chance` 로 바꾸고 '이 작업 폴더 자체가 이미 그 저장소의 clone 이면 새로 clone 하지 말고 그대로 써줘' 한 문장을 더했다(`Chance\Chance` 중첩 clone 방지). clone 명령(34줄)의 끝 인자를 `Chance` 로 바꾸고 '폴더 이름 `Chance` 는 2026-11-26 부터이고 저장소 이름은 그대로 `chanceblog`' 한 문장을 더했다.
+- **`인수인계/도구/work/agent_common_rules.md`**: 전략 요약 경로(24줄)의 `KCY\chanceblog\…` 를 `KCY\Chance\…` 로(이 PC 작업 폴더 사본 `agent_common_rules.md` 와 같게).
+- 일부러 안 고친 것: `인수인계/AI_기억/dev-environment-notes.md`(옛 PC 의 '고치지 않는 기록 사본' — `인수인계/AI_기억/README.md` 3·4·6번 규칙, 날짜도 옛 PC 기준이라 독립 확인이 되돌리라고 지적)·지난 기록(`docs/analysis/…`·`HANDLER.md` 의 `KCY/chanceblog`)·앱 설계 문서의 '연결한 chanceblog 폴더'(앱이 사용자가 연결한 블로그 폴더를 가리키는 제품 설정 설명)·저장소 이름과 주소.
+
+### 검증 증거
+- 총괄: `scripts/validate_repo.py`(3.10, PyYAML 있음) 오류 0·경고 3(기존과 같음), 문서를 읽는 시험 네 모듈(`test_personal_expressions`·`test_merge_policy`·`test_handoff_tools`·`test_workflow_names`) 573개 통과(건너뜀 1, 3.10).
+- 독립 확인(구현 머리 `9b69316` 기준): 1차 fix_required(필수 1·권고 1·참고 3) → 반영(WIP 2) → 같은 확인자의 2차 pass(필수 0·권고 0·참고 2 — 기록 사본 파일이 기준과 바이트 같음·변경은 두 파일 +3/−3·검증기와 두 시험 모듈 재현 통과)
+- 합친 나무: main 대비 변경 3개 파일(+27/−3)
+
+### 남은 이슈 / 다음 AI 주의
+- 이 PC 의 작업 폴더 사본(`C:/work/ai/agent_common_rules.md`)은 11-26 에 이미 고쳤다.
+- 블로그 저장소 이름과 주소(`shine88pc/chanceblog`)는 그대로다 — 세션 화면 우측 상단 환경 칸의 'chanceblog' 라벨은 git 원격 저장소 이름에서 나오며(폴더 이름과 무관) 저장소 이름을 바꾸는 일은 블로그 주소·광고·워크플로가 얽혀 별도 승인 사안이다.
+- `인수인계/AI_기억/dev-environment-notes.md` 의 `KCY/chanceblog` 는 옛 PC 기록이라 그대로 두었다 — 이 PC 의 현재 이름은 `docs/SESSION_START.md` 34줄이 말한다.
+
+---
+
 ## [2026-11-25] Claude – DOCFIX: 문서의 낡은 문장 열일곱 줄 정정 — Blogger 영문·한글은 레지스트리 mode: draft(운영 경로의 초안 현황 칸은 숫자·0·조회 실패, 발행 정지 변수 단서), 코드 소유자 지정에 목록 파일 줄이 있음, 시크릿 '등록하지 마세요' 모순 (T0 문서만)
 
 **작업자**: Claude (총괄이 문서만 직접 고쳤고 구현자 하위 에이전트는 없다. 독립 확인은 총괄과 다른 AI 하나가 안전·시험 겸임으로 세 번 했다 — 작은 갈래 겸임 승인: 확인 037 ① d. 병합 가지는 총괄이 한 커밋으로 합쳤다)
