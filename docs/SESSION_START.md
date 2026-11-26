@@ -12,7 +12,7 @@
 **시작 문구**
 
 ```text
-저장소 https://github.com/shine88pc/chanceblog 를 이 작업 폴더 아래 chanceblog 폴더로 clone해서 시작해줘(이미 있으면 git pull).
+저장소 https://github.com/shine88pc/chanceblog 를 이 작업 폴더 아래 Chance 폴더로 clone해서 시작해줘(이미 있으면 git pull. 이 작업 폴더 자체가 이미 그 저장소의 clone 이면 — `git remote -v` 의 주소가 같으면 — 새로 clone 하지 말고 그대로 써줘).
 읽는 순서: ① 인수인계/작업내용.md(작업 현황 단일 문서) 맨 위 §0-A 30초 카드 → §0-1 이어가기 순서(`### 0-2.` 제목 줄 앞까지만 먼저) → 필요할 때 나머지 절 ② WORKLOG.md 최신 항목 3–5개 ③ docs/SESSION_START.md §2·§4·§6 (규칙은 AGENTS.md, 구조·콘텐츠 규칙은 필요할 때 HANDLER.md·AI_COLLAB.md).
 그다음 ① 열린 PR·브랜치·최근 GitHub Actions 실행 상태를 확인해 지금 상태를 10줄 이내로 보고하고 ② 작업내용 §0-3 '진행 중인 일' 표와 §3 의 다음 행동에서 이어서 할 일을 제안해줘.
 사용자 승인이 필요한 일(비밀·계정·광고 표면·비용·삭제·정책·톤)은 채팅에 묻지 말고 번호 있는 텔레그램 확인 요청으로 물어봐(운영자는 세션 채팅을 읽지 못하고 답은 소유자 이슈로 받는다).
@@ -31,7 +31,7 @@ AI 는 `인수인계/작업내용.md` 맨 위 §0-A 30초 카드 → §0-1 → �
 
 ### 2-1. 작업 환경 만들기 (Windows 회사 PC 기준 — 2026-11-04 값, 새 PC·개인 PC 는 2-4 와 §8)
 
-- clone: `git clone https://github.com/shine88pc/chanceblog.git chanceblog` (공개 저장소라 읽기는 로그인이 필요 없습니다).
+- clone: `git clone https://github.com/shine88pc/chanceblog.git Chance` (공개 저장소라 읽기는 로그인이 필요 없습니다). 폴더 이름 `Chance` 는 2026-11-26 부터이고 저장소 이름은 그대로 `chanceblog` 입니다.
 - 작성자 설정은 **clone 안에서만**(저장소 로컬 설정), **사람이 만든** 기존 커밋의 작성자와 같게 둡니다 — 최신 커밋이 봇(`🤖 자동 포스팅…`)일 수 있으니 `git log -8 --format="%an <%ae> %s"` 로 사람 커밋을 찾습니다(최근 AI 요청·문서 커밋은 `이름 <메일>` 모양). 전역 git 설정은 건드리지 않습니다.
 - 시스템 `core.autocrlf=true`는 **끄지 않습니다.** 작업 사본이 CRLF로 보이는 것은 정상이고, 끄면 모든 파일이 수정된 것으로 보입니다.
 - 한글 커밋 메시지는 UTF-8 파일에 써서 `git commit -F 파일`로 넘깁니다(셸 인자로 넘기면 인코딩이 깨질 수 있습니다).
